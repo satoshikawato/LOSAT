@@ -2426,6 +2426,15 @@ fn blastp_xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind>
     }
 }
 
+/// Whether the block search takes this XML2 / JSON document: outfmt 15 and 16 only. Outfmt 13 and
+/// 14 (`Files13`, `Files14`) write side files and a master file; they join by widening this match
+/// together with the checks of the side files' names and of their opening, which the block
+/// search does not make. No NCBI counterpart: chooses LOSAT's path.
+fn x_xml2_kind_takes_blocks(kind: crate::report::blast_xml2::Xml2Kind) -> bool {
+    use crate::report::blast_xml2::Xml2Kind;
+    matches!(kind, Xml2Kind::Single15 | Xml2Kind::Single16)
+}
+
 // NCBI blast_args.cpp:2657-2660; tabular.cpp:1100-1108:
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) { x_PrintField(*iter); }
 // Validate the CLI specification before loading any input sequences.
@@ -6094,8 +6103,8 @@ fn search(
     // the framing state handed from block to block, `Xml2Carry`); otherwise the search of
     // all queries below. With `-db` the blocks are searched only when no definition line of the
     // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, or
-    // `x_titles_read_allow_blocks` for outfmt 8, 9, 12, 5, 15 and 16 (and for 15 and 16 the taxids,
-    // `x_taxids_allow_blocks`), read
+    // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, `x_titles_taxids_allow_blocks` for 15
+    // and 16 (the titles and the taxids in one pass), read
     // in the block search's pool before the first block), and with outfmt 0 and `-subject` only
     // when no subject's title is refused where the report shows it
     // (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the database, the
@@ -6146,10 +6155,10 @@ fn search(
                         database::x_titles_read_allow_blocks(database, pool)
                     }
                     // Outfmt 15 and 16 also read each subject's taxid and the taxonomy
-                    // database's name of it (`x_taxids_allow_blocks`).
+                    // database's name of it, in the same pass over the headers
+                    // (`x_titles_taxids_allow_blocks`).
                     (Some(database), XBlockReport::Xml2) => {
-                        database::x_titles_read_allow_blocks(database, pool)
-                            && database::x_taxids_allow_blocks(database, pool)
+                        database::x_titles_taxids_allow_blocks(database, pool)
                     }
                     (Some(database), _) => {
                         database::x_titles_allow_blocks(database, x_pairwise, pool)
@@ -6477,10 +6486,11 @@ fn x_query_block_plan(
         {
             XBlockReport::Xml
         }
-        // Outfmt 15 and 16 (`blastp_xml2_kind`; 13 and 14, which write side files, are not here).
+        // Outfmt 15 and 16 only (`x_xml2_kind_takes_blocks`; 13 and 14 write side files).
         Err(_)
             if super::x_query_blocks::x_bp_qblock_xml2()
-                && blastp_xml2_kind(outputs.formats[0].outfmt).is_some() =>
+                && blastp_xml2_kind(outputs.formats[0].outfmt)
+                    .is_some_and(x_xml2_kind_takes_blocks) =>
         {
             XBlockReport::Xml2
         }
@@ -11467,6 +11477,25 @@ fn run_resolved_in_pool(
 mod tests {
     use super::*;
     use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): only the documents on the output stream (outfmt 15 and 16)
+    // get a block plan; the ones with side files (13 and 14) never do, whatever `blastp_xml2_kind`
+    // reads for them, so that a later widening of that function cannot admit them unchecked.
+    #[test]
+    fn xml2_block_plan_admits_only_outfmt_15_and_16() {
+        use crate::report::blast_xml2::Xml2Kind;
+        assert!(x_xml2_kind_takes_blocks(Xml2Kind::Single15));
+        assert!(x_xml2_kind_takes_blocks(Xml2Kind::Single16));
+        assert!(!x_xml2_kind_takes_blocks(Xml2Kind::Files13));
+        assert!(!x_xml2_kind_takes_blocks(Xml2Kind::Files14));
+        for (outfmt, taken) in [("15", true), ("16", true), ("13", false), ("14", false)] {
+            assert_eq!(
+                blastp_xml2_kind(outfmt).is_some_and(x_xml2_kind_takes_blocks),
+                taken,
+                "outfmt {outfmt}"
+            );
+        }
+    }
 
     // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): a stored residue reads as the letter that
     // `ListedSubjects::read_titles` writes into its record (`ncbistdaa_to_ascii`), for every code

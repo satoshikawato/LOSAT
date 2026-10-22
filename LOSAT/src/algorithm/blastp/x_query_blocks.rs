@@ -158,14 +158,16 @@
 //!   the last block's, as for outfmt 5. The refusals before the first byte are those of outfmt 5
 //!   (the same `x_block_xml_run_allowed` and `x_block_xml_subjects_allowed`, and with `-db`
 //!   `x_titles_read_allow_blocks`) and the taxid and taxonomy database ones of the two formats
-//!   (`database::x_taxids_allow_blocks`: every sequence's taxid reads; if `taxdb.bti` is found the
-//!   taxonomy database opens and every taxid of the database names with a text that can be
+//!   (`database::x_titles_taxids_allow_blocks`, which makes both checks in one pass over the
+//!   headers: every sequence's taxid reads, and no set of taxids is built where `taxdb.bti` is not
+//!   found; if `taxdb.bti` is found the taxonomy database opens and every taxid of the database names with a text that can be
 //!   written). The taxonomy database's messages on standard error are written at the first `Hit`
 //!   that needs them (`TaxdbNotes`): the run's `TaxdbRun` (the database opened once, the (volume,
 //!   taxid) lookups already made) lives on the `-db` database, so a block writes the messages
 //!   that no block before it wrote, at the `Hit` that first needs them, which is the place in
-//!   the search of all queries. Outfmt 13 and 14 (side files and a master file) are one more arm of
-//!   the plan and the checks of the side files' names; they are not taken here.
+//!   the search of all queries. Outfmt 13 and 14 (side files and a master file) are excluded by
+//!   the plan arm (`Some(Single15 | Single16)` only); they join by widening that match and adding
+//!   the checks of the side files' names and of the files' opening, which are not made here.
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
 //! ```c++
 //!         if (results.HasAlignments()) {
@@ -418,9 +420,10 @@ pub(crate) enum XBlockReport {
     Seqalign,
     /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
     Xml,
-    /// Outfmt 15 and 16 (LOSAT_X_BPQBLOCKXML2). The seam of outfmt 13 and 14: one more arm of
-    /// the plan (`blastp_xml2_kind`) and of the driver's checks (the side files' names and the
-    /// master file), the framing state already moves from block to block (`Xml2Carry`).
+    /// Outfmt 15 and 16 (LOSAT_X_BPQBLOCKXML2). Outfmt 13 and 14 are excluded by the plan arm
+    /// (`Single15 | Single16` only); they join by widening that match and adding the driver's
+    /// checks (the side files' names, their opening, the master file). The framing state
+    /// already moves from block to block (`Xml2Carry`).
     Xml2,
 }
 

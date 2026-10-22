@@ -1238,17 +1238,84 @@ pub(super) fn x_titles_read_allow_blocks(
 // own, opened here apart from the run's so that the run's open messages stay for the report) opens
 // and names every taxid of the database with a name that can be written. This is conservative,
 // since the report reads the taxids of the subjects with hits only.
+// The titles and the taxids are read in one pass over the headers (`SeqDb::visit_deflines_taxids`,
+// one read per `HEADER_RANGE_SEQS` sequences, as `x_titles_read_allow_blocks` reads them), and
+// where no `taxdb.bti` is found no set of taxids is built: only that every taxid decodes matters.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): whether the taxid of every sequence of the database reads and
-/// the taxonomy database, if `taxdb.bti` is found, opens and gives every taxid a name that the
-/// XML2 stream can write (or none). Read in `pool`; a failure is `false`. It writes nothing and
-/// changes no state of the run.
-pub(super) fn x_taxids_allow_blocks(
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): `x_titles_read_allow_blocks` and `x_taxids_allow_blocks`
+/// in one pass over the headers: whether every sequence of the database has one definition line
+/// that reads and holds no byte outside ' ' ..= '~', its taxid reads, and the taxonomy database,
+/// if `taxdb.bti` is found, opens and gives every taxid a name that the XML2 stream can write (or
+/// none). Read in `pool`; a failure is `false`. It writes nothing and changes no state of the
+/// run. With `LOSAT_X_DBIDXREAD=0` the two checks run one after the other, one sequence at a time.
+pub(super) fn x_titles_taxids_allow_blocks(
     database: &BlastpDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
     use std::collections::BTreeSet;
     let db = &database.db;
+    if crate::seqdb::x_dbidxread() == crate::seqdb::XDbIdxRead::Off {
+        return x_titles_read_allow_blocks(database, pool) && x_taxids_allow_blocks(database, pool);
+    }
+    // The taxids of the database, kept only where the taxonomy database is asked.
+    let keep = db.taxdb_found();
+    let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
+    let visit_range = |range: &BlockRange| -> Option<BTreeSet<i32>> {
+        let mut taxids = BTreeSet::new();
+        let readable = db.visit_deflines_taxids(*range, |_ordinal, deflines| match deflines {
+            // The taxid `read_reported_taxids` takes of a sequence: its first definition
+            // line's.
+            Ok(deflines) if deflines.len() == 1 && deflines[0].replaced_title_bytes == 0 => {
+                if keep {
+                    taxids.insert(deflines[0].taxid);
+                }
+                true
+            }
+            _ => false,
+        });
+        readable.then_some(taxids)
+    };
+    let merge = |mut one: BTreeSet<i32>, other: BTreeSet<i32>| -> BTreeSet<i32> {
+        one.extend(other);
+        one
+    };
+    let collect = || -> Option<BTreeSet<i32>> {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if pool.enabled() {
+            return pool.install(|| {
+                ranges
+                    .par_iter()
+                    .map(visit_range)
+                    .try_fold(BTreeSet::new, |one, other| Some(merge(one, other?)))
+                    .try_reduce(BTreeSet::new, |one, other| Some(merge(one, other)))
+            });
+        }
+        let _ = pool;
+        let mut taxids = BTreeSet::new();
+        for range in &ranges {
+            taxids = merge(taxids, visit_range(range)?);
+        }
+        Some(taxids)
+    };
+    match collect() {
+        Some(taxids) => x_taxdb_names_allow_blocks(database, &taxids),
+        None => false,
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): whether every sequence's taxid reads and the taxonomy
+/// database, if `taxdb.bti` is found, opens and names every taxid with a name the XML2 stream can
+/// write. One sequence at a time (`LOSAT_X_DBIDXREAD=0`); see `x_titles_taxids_allow_blocks`.
+fn x_taxids_allow_blocks(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> bool {
+    use std::collections::BTreeSet;
+    let db = &database.db;
+    let keep = db.taxdb_found();
     // The taxid `read_reported_taxids` takes of a sequence: its first definition line's.
     let taxid_of = |ordinal: u32| -> std::result::Result<i32, SeqDbError> {
         Ok(db.defline_taxids(ordinal)?.first().copied().unwrap_or(0))
@@ -1265,7 +1332,10 @@ pub(super) fn x_taxids_allow_blocks(
                     .into_par_iter()
                     .with_min_len(4096)
                     .try_fold(BTreeSet::new, |mut taxids, ordinal| {
-                        taxids.insert(taxid_of(ordinal).ok()?);
+                        let taxid = taxid_of(ordinal).ok()?;
+                        if keep {
+                            taxids.insert(taxid);
+                        }
                         Some(taxids)
                     })
                     .try_reduce(BTreeSet::new, |mut one, other| {
@@ -1277,16 +1347,27 @@ pub(super) fn x_taxids_allow_blocks(
         let _ = pool;
         let mut taxids = BTreeSet::new();
         for ordinal in 0..count {
-            taxids.insert(taxid_of(ordinal).ok()?);
+            let taxid = taxid_of(ordinal).ok()?;
+            if keep {
+                taxids.insert(taxid);
+            }
         }
         Some(taxids)
     };
-    let taxids = collect();
-    let Some(taxids) = taxids else {
-        return false;
-    };
-    // `read_reported_taxids` asks the taxonomy database only for a taxid other than 0, and only
-    // when `taxdb.bti` resolves.
+    match collect() {
+        Some(taxids) => x_taxdb_names_allow_blocks(database, &taxids),
+        None => false,
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the taxonomy database half of the check: `taxids` are the
+/// database's taxids (empty where `taxdb.bti` is not found). `read_reported_taxids` asks the
+/// taxonomy database only for a taxid other than 0, and only when `taxdb.bti` resolves.
+fn x_taxdb_names_allow_blocks(
+    database: &BlastpDatabase,
+    taxids: &std::collections::BTreeSet<i32>,
+) -> bool {
+    let db = &database.db;
     if taxids.iter().all(|&taxid| taxid == 0) || !db.taxdb_found() {
         return true;
     }
@@ -2557,6 +2638,58 @@ mod tests {
             .collect();
         renamed.sort();
         assert_eq!(renamed, [(0, 0), (2, 2)]);
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the one pass over the headers (`SeqDb::visit_deflines_taxids`)
+    // gives the answer of the two checks it replaces (`x_titles_read_allow_blocks`, then
+    // `x_taxids_allow_blocks` one sequence at a time), for a database whose headers read, one with
+    // taxids, an alias of volumes, and one whose header file is missing, at one thread and in a pool.
+    #[test]
+    fn titles_and_taxids_in_one_pass_give_the_answers_of_the_two_checks() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let paja = manifest_dir.join("tests/db_search/paja_taxid");
+        let dir = std::env::temp_dir().join(format!(
+            "losat-db-qblock-onepass-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        for ext in ["pin", "psq"] {
+            std::fs::copy(paja.with_extension(ext), dir.join(format!("nohdr.{ext}"))).unwrap();
+        }
+        let mut databases = vec![
+            (open("prot_v4"), true),
+            (open("prot_mv"), true),
+            (
+                BlastpDatabase::open(paja.to_str().unwrap(), &ApplicationSettings::default())
+                    .unwrap(),
+                true,
+            ),
+        ];
+        // A database whose header file is missing: the search of all queries reports NCBI's error.
+        if let Ok(missing) = BlastpDatabase::open(
+            dir.join("nohdr").to_str().unwrap(),
+            &ApplicationSettings::default(),
+        ) {
+            databases.push((missing, false));
+        }
+        for (database, readable) in &databases {
+            for threads in [1, 4] {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    let two = x_titles_read_allow_blocks(database, pool)
+                        && x_taxids_allow_blocks(database, pool);
+                    assert_eq!(two, *readable);
+                    assert_eq!(
+                        x_titles_taxids_allow_blocks(database, pool),
+                        two,
+                        "threads {threads}"
+                    );
+                    Ok(())
+                })
+                .unwrap();
+            }
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search of `-db` runs only when every definition

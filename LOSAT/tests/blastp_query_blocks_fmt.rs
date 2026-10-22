@@ -1255,26 +1255,54 @@ fn taxonomy_names_for_outfmt_15_and_16_keep_the_bytes_and_the_refusals() {
     let subject = [OsStr::new("-db"), db.as_os_str()];
     let extra = ["-max_target_seqs", "2", "-max_hsps", "1", "-evalue", "0.1"];
     let taxdb = |variant: &str| manifest_dir.join("tests/seqdb").join(variant);
+    // The conservative fallback: the same queries without BDT62609.1, the one query that hits
+    // BDT63547.1 (taxid 9606), so that no subject with hits carries 9606.
+    let dir = std::env::temp_dir().join(format!("losat-bpqblockxml2-tax-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let text = std::fs::read_to_string(&query).unwrap();
+    let mut kept = String::new();
+    let mut skipping = false;
+    for line in text.split_inclusive('\n') {
+        if line.starts_with('>') {
+            skipping = line.starts_with(">BDT62609.1 ");
+        }
+        if !skipping {
+            kept.push_str(line);
+        }
+    }
+    let query_without_9606 = write_file(&dir, "q_without_9606.faa", &kept);
+    assert!(kept.len() < text.len() && kept.matches('>').count() == 29);
     // (taxonomy database variant, whether the search of all queries completes, whether it writes
-    // to standard error)
+    // to standard error, whether the queries are the reduced ones)
     let cases = [
-        (None, true, false),
-        (Some("taxdb/good"), true, false),
+        (None, true, false, false),
+        (Some("taxdb/good"), true, false, false),
         // 9606's scientific name has UTF-8 bytes: refused, before the first byte.
-        (Some("taxdb/high_bytes_utf8"), false, false),
+        (Some("taxdb/high_bytes_utf8"), false, false, false),
         // An empty `taxdb.btd`: refused.
-        (Some("taxdb/btd_empty"), false, false),
+        (Some("taxdb/btd_empty"), false, false, false),
         // Messages only: the magic number (once, at the first `Hit`), and 10090's offset past the
         // end of the file (the volume's lookup once for the whole run, each `Hit`'s lookup).
-        (Some("taxdb/bad_magic"), true, true),
-        (Some("taxdb_xml2/last_10090_past_end"), true, true),
+        (Some("taxdb/bad_magic"), true, true, false),
+        (Some("taxdb_xml2/last_10090_past_end"), true, true, false),
+        // 9606's name cannot be written, but no subject with hits has it: the search of all
+        // queries completes. The block search checks every taxid of the database, so it is not
+        // taken (the check is conservative; a narrowing of it to the subjects with hits would
+        // need the hits of the blocks to come first).
+        (Some("taxdb/high_bytes_utf8"), true, false, true),
     ];
     for spec in ["15", "16"] {
         let mut fmt = outfmt(spec).to_vec();
         fmt.extend(extra.map(OsString::from));
-        for threads in THREADS {
-            for (variant, completes, messages) in cases {
-                let what = format!("outfmt {spec}, taxdb {variant:?}, threads {threads}");
+        for threads in [1, 2, 4] {
+            for (variant, completes, messages, reduced) in cases {
+                let query = if reduced { &query_without_9606 } else { &query };
+                // The block search is taken where the search of all queries completes and the
+                // conservative check passes.
+                let blocks = completes && !reduced;
+                let what = format!(
+                    "outfmt {spec}, taxdb {variant:?}, reduced {reduced}, threads {threads}"
+                );
                 let mut vars: Vec<(&str, String)> = Vec::new();
                 if let Some(variant) = variant {
                     vars.push(("BLASTDB", taxdb(variant).to_str().unwrap().to_string()));
@@ -1283,7 +1311,7 @@ fn taxonomy_names_for_outfmt_15_and_16_keep_the_bytes_and_the_refusals() {
                     let mut all: Vec<(&str, &str)> =
                         vars.iter().map(|(n, v)| (*n, v.as_str())).collect();
                     all.extend_from_slice(extra_vars);
-                    blastp(&query, &subject, threads, &all, &os(&fmt))
+                    blastp(query, &subject, threads, &all, &os(&fmt))
                 };
                 let reference = run_with(&[SWITCH_OFF]);
                 assert_eq!(reference.success, completes, "{what}: {}", reference.stderr);
@@ -1301,8 +1329,8 @@ fn taxonomy_names_for_outfmt_15_and_16_keep_the_bytes_and_the_refusals() {
                     );
                 }
                 let run = run_with(&[("LOSAT_X_BPQBLOCK", "1")]);
-                assert_same_outcome(&run, &reference, completes, &what);
-                if completes {
+                assert_same_outcome(&run, &reference, blocks, &what);
+                if blocks {
                     let run = run_with(&[("LOSAT_X_BPQBLOCK", "1"), XML2_OFF]);
                     assert_same_outcome(&run, &reference, false, &format!("{what}, switch off"));
                     // The shadow's second search starts the taxonomy database over, so that it
@@ -1320,6 +1348,7 @@ fn taxonomy_names_for_outfmt_15_and_16_keep_the_bytes_and_the_refusals() {
             }
         }
     }
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // Queries of a batch that NCBI did not search (every query in it is invalid): outfmt 15 and 16

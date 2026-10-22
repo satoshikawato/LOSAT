@@ -9099,11 +9099,16 @@ fn write_reports_untimed(
     // the batches before an NCBI error).
     let mut own_sams: Vec<Option<crate::report::sam::SamDocument>> = Vec::new();
     let mut sam_targets: Vec<Option<SamTarget<'_>>> = Vec::new();
+    // No SAM format: no target is made (the vectors stay empty and are never indexed).
+    let has_sam = output_formats
+        .iter()
+        .any(|format| format.sam_spec().is_some());
     match written.sam.take() {
         Some(document) => sam_targets.push(Some(SamTarget {
             document,
             finish: epilog,
         })),
+        None if !has_sam => {}
         None => {
             own_sams.extend(output_formats.iter().map(|format| {
                 format

@@ -307,6 +307,22 @@ impl SamDocument {
             }
             Ok(())
         })();
+        // A huge query (a chromosome against a chromosome) renders its records here before they
+        // are copied into the body: its buffers do not keep that capacity for the rest of the run.
+        const KEEP_BYTES: usize = 4 << 20;
+        const KEEP_ROWS: usize = 1 << 16;
+        if scratch.buf.capacity() > KEEP_BYTES {
+            scratch.buf.clear();
+            scratch.buf.shrink_to(KEEP_BYTES / 4);
+        }
+        if scratch.letters.capacity() > KEEP_BYTES {
+            scratch.letters.clear();
+            scratch.letters.shrink_to(KEEP_BYTES / 4);
+        }
+        if scratch.rows.capacity() > KEEP_ROWS {
+            scratch.rows.clear();
+            scratch.rows.shrink_to(KEEP_ROWS / 4);
+        }
         self.scratch = scratch;
         result
     }

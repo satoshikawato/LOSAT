@@ -52,7 +52,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 ENGINE = REPO / "LOSAT"
-sys.path.insert(0, str(ENGINE / "tests"))
+# Appended, so that the helper modules of LOSAT/tests never shadow the standard library.
+sys.path.append(str(ENGINE / "tests"))
 # The one rule of the SAM rows (outfmt 17): the CL tag of the @PG line is not compared.
 from db_search_fixtures import is_sam_outfmt, strip_sam_cl  # noqa: E402
 MANIFEST = ENGINE / "tests/outfmt0_manifest.tsv"

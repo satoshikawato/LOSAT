@@ -128,8 +128,22 @@ impl Inputs {
         })
     }
 
-    /// The CLI output file and standard error of one single-format run.
+    /// The CLI output file and standard error of one single-format run, with a SAM document's
+    /// CL tag removed (`without_sam_cl`).
     fn cli(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
+        let (bytes, stderr) = self.cli_raw(outfmt, extra);
+        // A SAM document of the CLI shows its command line in the @PG line, which `run_local`
+        // has not: the one rule of the SAM rows removes the tag (`without_sam_cl`).
+        let bytes = if outfmt.split_whitespace().next() == Some("17") {
+            without_sam_cl(&bytes)
+        } else {
+            bytes
+        };
+        (bytes, stderr)
+    }
+
+    /// The CLI output file and standard error of one single-format run, as written.
+    fn cli_raw(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
         let out = self.query.0.with_extension(format!("cli{outfmt}.out"));
         let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("blastn")
@@ -148,14 +162,53 @@ impl Inputs {
         assert!(output.status.success(), "CLI failed: {output:?}");
         let bytes = std::fs::read(&out).expect("CLI output");
         let _ = std::fs::remove_file(&out);
-        // A SAM document of the CLI shows its command line in the @PG line, which `run_local`
-        // has not: the one rule of the SAM rows removes the tag (`without_sam_cl`).
-        let bytes = if outfmt.split_whitespace().next() == Some("17") {
-            without_sam_cl(&bytes)
-        } else {
-            bytes
-        };
         (bytes, output.stderr)
+    }
+}
+
+/// The frozen fixtures and the oracle compare a SAM document without its CL tag (both sides), so
+/// they cannot see a CLI that drops the tag or a library that writes one: the CLI document has
+/// `CL:` with its own command line (the program path first), a `run_local` document has none.
+#[test]
+fn the_cli_writes_a_cl_tag_and_the_library_none() {
+    let inputs = Inputs::new();
+    let head: &[u8] = b"\n@PG\tID:0\tVN:2.17.0+";
+    let tag = |document: &[u8]| -> Option<String> {
+        let at = document
+            .windows(head.len())
+            .position(|window| window == head)?
+            + head.len();
+        let line = document[at..].split(|&byte| byte == b'\n').next()?;
+        line.starts_with(b"\tCL:")
+            .then(|| String::from_utf8_lossy(line).into_owned())
+    };
+    for outfmt in ["17", "17 SQ SR"] {
+        let (cli, _) = inputs.cli_raw(outfmt, &[]);
+        let line =
+            tag(&cli).unwrap_or_else(|| panic!("the CLI document of {outfmt} has no CL tag"));
+        let query = inputs.query.0.display().to_string();
+        assert!(
+            line.starts_with(&format!(
+                "\tCL:{} blastn -query {query} -subject ",
+                env!("CARGO_BIN_EXE_losat")
+            )) && line.ends_with(&format!(
+                " -outfmt {outfmt} -out {} \tPN:blastn",
+                inputs
+                    .query
+                    .0
+                    .with_extension(format!("cli{outfmt}.out"))
+                    .display()
+            )),
+            "{line}"
+        );
+        let library = inputs.run(&[outfmt], &[], false);
+        assert!(
+            tag(&library.outputs[0]).is_none()
+                && library.outputs[0]
+                    .windows(head.len() + 11)
+                    .any(|window| window == [head, b"\tPN:blastn\n"].concat()),
+            "the library document of {outfmt} has a CL tag or no @PG line"
+        );
     }
 }
 

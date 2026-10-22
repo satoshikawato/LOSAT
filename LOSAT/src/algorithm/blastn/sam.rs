@@ -163,7 +163,7 @@ impl SamLetters for BlastnSamLetters<'_> {
             }
             SamRow::Subject => match &self.subjects {
                 SubjectSource::Records(letters) => {
-                    out.extend_from_slice(&letters.upper_letters(index, from, to))
+                    out.extend_from_slice(&letters.upper_letters_uncounted(index, from, to))
                 }
                 SubjectSource::Database(read) => out.extend_from_slice(&read(index, from, to)?),
             },

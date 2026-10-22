@@ -399,14 +399,6 @@ thread_local! {
     static X_COLLECT_EVENTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
 }
 
-// No NCBI counterpart: reads the LOSAT_X_TBNEVENTS switch once; it does not change any value NCBI
-// computes.
-fn x_skip_events() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNEVENTS"))
-}
-
 // No NCBI counterpart: reads the LOSAT_X_TBNPAR / LOSAT_X_TBNPARSHADOW switches once; it does not
 // change any value NCBI computes.
 fn x_tbn_units() -> u8 {
@@ -448,7 +440,7 @@ fn x_tbn_units() -> u8 {
 //         if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
 // ```
 // Dispatch point: this is the preliminary stage of s_BlastSearchEngineCore for one subject. Switch
-// off: the original port runs (without the test-only event log if LOSAT_X_TBNEVENTS is set).
+// off: the original port runs (without the test-only event log).
 // LOSAT_X_TBNPAR: the (frame, chunk) units run independently and are merged in NCBI order
 // (x_preliminary_protein_hsps_by_unit). LOSAT_X_TBNPARSHADOW: both run and the results are asserted
 // equal.
@@ -505,10 +497,7 @@ pub(super) fn preliminary_protein_hsps_for_search(
         }
         _ => {}
     }
-    let skip = x_skip_events();
-    if skip {
-        X_COLLECT_EVENTS.with(|c| c.set(false));
-    }
+    X_COLLECT_EVENTS.with(|c| c.set(false));
     let result = x_with_search_letters(subject, |subject| {
         preliminary_protein_hsps_with_comparison_input(
             queries,
@@ -518,9 +507,7 @@ pub(super) fn preliminary_protein_hsps_for_search(
             |_, _, _| Ok(()),
         )
     });
-    if skip {
-        X_COLLECT_EVENTS.with(|c| c.set(true));
-    }
+    X_COLLECT_EVENTS.with(|c| c.set(true));
     Ok(result?.0)
 }
 
@@ -1047,8 +1034,7 @@ fn preliminary_protein_hsps_with_comparison_input(
     let mut per_frame = Vec::new();
     let mut combined = Vec::new();
     let mut events = Vec::new();
-    // EXPERIMENT (LOSAT_X_TBNEVENTS): the comparison events are only read by
-    // tests; the search itself discards them.
+    // EXPERIMENT: the comparison events are only read by tests; the search itself discards them.
     // No NCBI counterpart: the comparison events are test-only data; the collect_events checks
     // below only skip pushing them; it does not change any value NCBI computes.
     let collect_events = X_COLLECT_EVENTS.with(|c| c.get());

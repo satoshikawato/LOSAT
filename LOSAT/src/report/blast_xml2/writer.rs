@@ -28,7 +28,7 @@ use crate::report::serial::encoder::Encoder;
 use crate::report::serial::json::JsonEncoder;
 use crate::report::serial::xml::XmlEncoder;
 
-use super::framing::{NoSideFiles, SideFiles, Xml2Document, Xml2Kind};
+use super::framing::{NoSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind};
 use super::records::{Xml2Run, Xml2Target};
 
 /// `Parameters` (`s_SetBlastXMLParameters`, blastxml2_format.cpp:514-555), members in the order
@@ -386,8 +386,8 @@ impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
     }
 }
 
-/// The writer of the XML2 and JSON documents of outfmt 15 and 16 (13 and 14 from OF5c): one
-/// complete report per query, framed by `Xml2Document`.
+/// The writer of the XML2 and JSON documents of outfmt 16, 15, 14 and 13: one complete report per
+/// query, framed by `Xml2Document`.
 pub struct Xml2Writer<F: SideFiles = NoSideFiles> {
     document: Xml2Document<F>,
     params: Xml2Run,
@@ -397,10 +397,21 @@ pub struct Xml2Writer<F: SideFiles = NoSideFiles> {
 
 impl Xml2Writer<NoSideFiles> {
     /// A writer of the document `kind` for a search of `params.target`; a `-subject` search
-    /// holds the last report back one query (`Xml2Document`).
+    /// holds the last report back one query (`Xml2Document`). The unit tests make writers this
+    /// way; a run uses `for_run` or `with_document`.
+    #[cfg(test)]
     pub fn new(kind: Xml2Kind, params: Xml2Run) -> Self {
         let delayed = matches!(params.target, Xml2Target::Subjects(_));
         Self::with_document(Xml2Document::new(kind, delayed), params)
+    }
+}
+
+impl Xml2Writer<RunSideFiles> {
+    /// A writer of the document `kind` for the run with `-out` `out`: outfmt 13 and 14 write
+    /// their side files next to it and the master file to the output stream (`Xml2Document::for_run`).
+    pub fn for_run(kind: Xml2Kind, params: Xml2Run, out: Option<&std::path::Path>) -> Self {
+        let delayed = matches!(params.target, Xml2Target::Subjects(_));
+        Self::with_document(Xml2Document::for_run(kind, delayed, out), params)
     }
 }
 

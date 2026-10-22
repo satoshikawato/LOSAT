@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastOutput2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+  <report>
+    <Report>
+      <program>blastn</program>
+      <version>BLASTN 2.17.0+</version>
+      <reference>Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), &quot;A greedy algorithm for aligning DNA sequences&quot;, J Comput Biol 2000; 7(1-2):203-14.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <expect>10</expect>
+          <sc-match>1</sc-match>
+          <sc-mismatch>-2</sc-mismatch>
+          <gap-open>0</gap-open>
+          <gap-extend>0</gap-extend>
+          <filter>L;m;</filter>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>qd2 no hits</query-title>
+              <query-len>90</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>9</hsp-len>
+                  <eff-space>54351</eff-space>
+                  <kappa>0.46</kappa>
+                  <lambda>1.28</lambda>
+                  <entropy>0.85</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>

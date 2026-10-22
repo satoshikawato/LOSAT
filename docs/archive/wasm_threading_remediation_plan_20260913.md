@@ -26,11 +26,11 @@
 
 ## 2. 維持する境界と旧計画との関係
 
-- [AGENTS.md](../AGENTS.md) を最上位のリポジトリ規則とし、実装時は `verify-ncbi-parity-and-speed` に従う。NCBI はソースと比較 oracle に限定し、runtime・build・fallback に組み込まない。
+- [AGENTS.md](../../AGENTS.md) を最上位のリポジトリ規則とし、実装時は `verify-ncbi-parity-and-speed` に従う。NCBI はソースと比較 oracle に限定し、runtime・build・fallback に組み込まない。
 - コード変更には、対応する NCBI のファイル・行番号・snippet を直上コメントとして付ける。WASI/Rayon 固有の実装理由は、NCBI が定義する検索・順序・thread lifecycle と区別し、依存ソースの根拠も併記する。無関係な CPU 制限の snippet を TLS 初期化の根拠にしない。
 - 浮動小数点精度、演算順序、候補集合、HSP 構築、pruning、reduction、出力順序を維持する。出力のソート・正規化・許容誤差で不一致を合格にしない。
 - TBLASTX local subject の非既定 `db_gencode` は承認済みの挙動を維持する。例外を統計や順序の差へ広げない。
-- [PD-NCBI-PLATFORM-VARIANCE](product_decisions/PD-NCBI-PLATFORM-VARIANCE.md) の Gate A（凍結 PR 5 LOSAT bytes）と Gate B（登録済み native NCBI fingerprint）を維持する。修正で既存 Gate A に差が出た場合、原因・影響 fixture を記録し、既存認証は失敗のまま扱う。本計画は期待値や authority の自動更新を許可しない。
+- [PD-NCBI-PLATFORM-VARIANCE](../product_decisions/PD-NCBI-PLATFORM-VARIANCE.md) の Gate A（凍結 PR 5 LOSAT bytes）と Gate B（登録済み native NCBI fingerprint）を維持する。修正で既存 Gate A に差が出た場合、原因・影響 fixture を記録し、既存認証は失敗のまま扱う。本計画は期待値や authority の自動更新を許可しない。
 - `wasm32-wasip1` は serial のままとする。threaded command/reactor は `wasm32-wasip1-threads` と `wasm-threads` を使い、feature 名だけで実行能力があるとみなさない。
 - 同一 instance への API 呼び出しは直列とする。複数 caller による同時検索、新しい検索オプション、汎用 scheduler、新しい scan 分割方式は本修正に含めない。
 - [旧 current-thread 計画](blastp_wasm_current_thread_pool_plan.md) の caller 登録と N−1 worker 前提、および [旧改善計画](wasm_multithreading_improvement_plan.md) の小入力直列化・BLASTP 固有 cap は、本計画の修正方針へ置き換える対象とする。旧文書は履歴として残し、実装時に冒頭へ後継計画の案内を付ける。
@@ -357,7 +357,7 @@ NCBI source root は `/mnt/c/Users/genom/GitHub/ncbi-blast/`。Rayon は現在�
 
 ## 7. 証拠・引き渡し・完了確認
 
-各段階で [スキルの evidence template](../.agents/skills/verify-ncbi-parity-and-speed/references/evidence.md) に沿った記録を残す。最低限、入力 hash、順序付き argv、環境、source/artifact/runner hash、NCBI 版、終了コード、raw output と hash、stderr、差分、worker events、実行時間・RSS を保存する。
+各段階で [スキルの evidence template](../../.agents/skills/verify-ncbi-parity-and-speed/references/evidence.md) に沿った記録を残す。最低限、入力 hash、順序付き argv、環境、source/artifact/runner hash、NCBI 版、終了コード、raw output と hash、stderr、差分、worker events、実行時間・RSS を保存する。
 
 baseline、candidate、oracle、diagnostics、timed samples は別に識別する。生の出力と異常系の証拠も保存し、要約 JSON だけを証拠にしない。`/tmp` の証拠は必要なものを保管先へアーカイブし、アーカイブ hash と再現コマンドを記録する。保管先が失われた場合、再現可能な記述と実際に保管された証拠を区別する。
 

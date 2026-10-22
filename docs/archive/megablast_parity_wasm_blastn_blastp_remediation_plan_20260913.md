@@ -1,7 +1,7 @@
 # megablast 出力差と Wasm BLASTN・BLASTP 高速化の修正計画
 
 作成日: 2026-09-13  
-状態: ユーザー指示で現状を暫定採用・追加計測停止（2026-09-14）。全ゲート合格とは扱わない。証拠は [run-20260913-01](evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/STATUS.md) に保存。  
+状態: ユーザー指示で現状を暫定採用・追加計測停止（2026-09-14）。全ゲート合格とは扱わない。証拠は [run-20260913-01](../evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/STATUS.md) に保存。  
 計画時の HEAD: `521b0659f2b92ed8a71b6911ef685bfec539abaa`。多数の既存未コミット変更があるため、実行時の基準は HEAD だけで識別しない。
 
 ## 1. 目的と今回の到達点
@@ -20,7 +20,7 @@
 
 追加指示により、標準Wasm配布・通常検証はthreadedへ統一し、単一スレッド比較にも同じartifactのn1を使う。serialは明示指定の互換ビルド・検証とする。現在のgbdrawはAUTOやfallbackでserialを使用しているため、完全廃止はconsumer移行と別途扱う。既存serial測定、凍結された認証・release契約は保存する。この後の通常候補測定はnative n1/n8とthreaded n1/n8を主軸とし、serial性能測定は互換オプションに移す。
 
-2026-09-14の追加承認により、基準版にもある反復時のWasm linear memory増加は共通runtimeの別件として残す。今回の採用では絶対的なplateau条件を外し、既定のRSS非回帰・メモリ予算、実保持量の比較、scratch再利用の検証を維持する。元の失敗結果は保存し、すべての観測memory byte数が同一とは主張しない。承認と適用境界は [runtime-memory-scope-decision.json](evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/runtime-memory-scope-decision.json) に記録する。時間・出力・速度下限の条件は変更しない。
+2026-09-14の追加承認により、基準版にもある反復時のWasm linear memory増加は共通runtimeの別件として残す。今回の採用では絶対的なplateau条件を外し、既定のRSS非回帰・メモリ予算、実保持量の比較、scratch再利用の検証を維持する。元の失敗結果は保存し、すべての観測memory byte数が同一とは主張しない。承認と適用境界は [runtime-memory-scope-decision.json](../evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/runtime-memory-scope-decision.json) に記録する。時間・出力・速度下限の条件は変更しない。
 
 さらにユーザーからTLOSATXにも同じデータ移動削減を依頼された。BLASTPの判定を優先し、その後TBLASTXのHSP sort/link/replayを実測して、NCBIと同じ本体保持・参照操作へ改善する。TBLASTXの新しい短縮率下限は指定されていない。現在の出力・順序・遺伝暗号の契約と性能非回帰を維持し、既存の解決済みparity問題は回帰対象として扱う。
 
@@ -41,13 +41,13 @@
 | Sakai/MG1655 megablast | 6,476 行中 5 行。既存監査・製品判断に common-endpoint の source-underdetermined 分類がある | NZ と同じ原因とは扱わない。既存分類と現在の状態列を照合し、移植漏れとソースが一意に規定しない選択を分ける |
 | TBLASTX | cold Node/WASI 比較に限る TurboFan 設定を採用済み | 維持する。BLASTN・BLASTP の実績に数えず、専用メモリ許容も転用しない |
 
-根拠: [BLASTN 実験](evidence/wasm_performance_20260913/run-20260913-01/P2.md)、[BLASTP 実験](evidence/wasm_performance_20260913/run-20260913-01/P3.md)、[追加報告](evidence/wasm_performance_20260913/run-20260913-02/REPORT.md)、[megablast 監査](evidence/wasm_performance_20260913/run-20260913-01/audit-p4.md)。
+根拠: [BLASTN 実験](../evidence/wasm_performance_20260913/run-20260913-01/P2.md)、[BLASTP 実験](../evidence/wasm_performance_20260913/run-20260913-01/P3.md)、[追加報告](../evidence/wasm_performance_20260913/run-20260913-02/REPORT.md)、[megablast 監査](../evidence/wasm_performance_20260913/run-20260913-01/audit-p4.md)。
 
 実験には `ACCEPTED / REJECTED / INCONCLUSIVE`、成果目標には `NOT_STARTED / IN_PROGRESS / UNMET / BLOCKED / ACHIEVED` を使う。候補を棄却しても G-N/G-P は終了しない。次の調査対象・不足する証拠・再開条件を記録する。旧 P2/P3 の `COMPLETE` は実験終了の歴史的記録として保持し、本計画の目標達成へ引き継がない。
 
 ## 3. 守る契約
 
-- [AGENTS.md](../AGENTS.md) と [verify-ncbi-parity-and-speed](../.agents/skills/verify-ncbi-parity-and-speed/SKILL.md) を適用する。NCBI C/C++ を唯一の挙動根拠とし、変更した Rust と移植関数のテストには対応するファイル・行番号・snippet を直上に記載する。
+- [AGENTS.md](../../AGENTS.md) と [verify-ncbi-parity-and-speed](../../.agents/skills/verify-ncbi-parity-and-speed/SKILL.md) を適用する。NCBI C/C++ を唯一の挙動根拠とし、変更した Rust と移植関数のテストには対応するファイル・行番号・snippet を直上に記載する。
 - NCBI executable は比較 oracle と診断専用。runtime、build、FFI、未実装機能の fallback に使わない。参照元にない機能や tie-break を追加しない。
 - seed/candidate 集合、diagonal 状態、X-drop、HSP 構築・剪定・順序、統計・精度・丸め・書式を維持する。CBS/SEG の省略、近似 DP、独自の候補削減で高速化しない。
 - raw bytes の比較を先に行う。構造化 diff、座標による対応付け、行数、再計算スコアは診断専用であり、並べ替え・header 除去・数値正規化を合格条件にしない。
@@ -57,11 +57,11 @@
 
 ### Sakai の分類と凍結基準の扱い
 
-[PD-BLASTN-HSP-CANONICALIZATION](product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md) と [既存 footprint](../LOSAT/tests/blastn_v010_source_exceptions.tsv) は、NCBI comparator が等価と扱う異なる edit script の選択について、限定された既存分類を記録している。本計画はそれを削除・拡張せず、G-M の raw 一致を達成したことにも読み替えない。
+[PD-BLASTN-HSP-CANONICALIZATION](../product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md) と [既存 footprint](../../LOSAT/tests/blastn_v010_source_exceptions.tsv) は、NCBI comparator が等価と扱う異なる edit script の選択について、限定された既存分類を記録している。本計画はそれを削除・拡張せず、G-M の raw 一致を達成したことにも読み替えない。
 
 NCBI ソースが一意な survivor を定めておらず、既存契約のまま特定バイナリへ一致させる根拠が見つからない場合、G-M の該当部分を `BLOCKED` とする。必要なのは同じ入力状態、comparator の全比較結果、sort 前後の HSP 列、選ばれた script を結び付けた証拠である。単に原因不明、調査が長い、候補が不採用という理由では `BLOCKED` にしない。独自の gap/identity tie-break、プラットフォーム分岐、出力書き換えで解決しない。
 
-[PD-NCBI-PLATFORM-VARIANCE](product_decisions/PD-NCBI-PLATFORM-VARIANCE.md) の Gate A（凍結 PR5 の LOSAT raw bytes）と Gate B（登録済み native NCBI fingerprint）は別々に確認する。正当な修正が凍結 LOSAT 出力を変える場合も、旧 Gate A の失敗を残す。影響する case、旧・新 bytes、NCBI 根拠をまとめ、既存方針に従った新しい認証基準のレビューを別途必要とする。golden の自動更新や未知 fingerprint の自動登録は行わない。契約判断が必要になっても、影響しない G-N/G-P の作業は継続できる。
+[PD-NCBI-PLATFORM-VARIANCE](../product_decisions/PD-NCBI-PLATFORM-VARIANCE.md) の Gate A（凍結 PR5 の LOSAT raw bytes）と Gate B（登録済み native NCBI fingerprint）は別々に確認する。正当な修正が凍結 LOSAT 出力を変える場合も、旧 Gate A の失敗を残す。影響する case、旧・新 bytes、NCBI 根拠をまとめ、既存方針に従った新しい認証基準のレビューを別途必要とする。golden の自動更新や未知 fingerprint の自動登録は行わない。契約判断が必要になっても、影響しない G-N/G-P の作業は継続できる。
 
 ## 4. 実行順序と成果物
 
@@ -145,12 +145,12 @@ NCBI root は `/mnt/c/Users/genom/GitHub/ncbi-blast/`、代替は AGENTS.md の�
 
 | 境界 | NCBI の入口 | LOSAT の入口 |
 |---|---|---|
-| greedy predecessor 選択 | `c++/src/algo/blast/core/greedy_align.c:278–294`、`s_GetNextNonAffineTback` | [greedy.rs](../LOSAT/src/algorithm/blastn/alignment/greedy.rs) の `get_next_non_affine_tback` |
+| greedy predecessor 選択 | `c++/src/algo/blast/core/greedy_align.c:278–294`、`s_GetNextNonAffineTback` | [greedy.rs](../../LOSAT/src/algorithm/blastn/alignment/greedy.rs) の `get_next_non_affine_tback` |
 | 左右 extension、script 結合、gap reduction | `blast_gapalign.c:2669–2936`、`s_ReduceGaps` / `BLAST_GreedyGappedAlignment` | 同 `greedy_gapped_alignment_internal` / `reduce_gaps` |
-| common-endpoint comparator と survivor | `blast_hits.c:2268–2387,2455–2535` | [purge_endpoints.rs](../LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs)、[hsp.rs](../LOSAT/src/algorithm/blastn/hsp.rs)、preliminary 選択 |
-| containment、traceback、identity、tree 更新 | `blast_traceback.c:403–405,436–472,509–512,583–609`、`blast_itree.c` | [BLASTN run.rs](../LOSAT/src/algorithm/blastn/blast_engine/run.rs)、[gapped.rs](../LOSAT/src/algorithm/blastn/alignment/gapped.rs) |
-| protein DP / traceback | `blast_gapalign.c:374` 以降の `ALIGN_EX`、特に `531–726` | [BLASTP gapalign.rs](../LOSAT/src/algorithm/blastp/gapalign.rs) の score-only / traceback 実装 |
-| Kappa redo、SEG 条件、局所状態 | `blast_kappa.c:1414–1454,1626–1643,2942` 以降、`3493–3503`、`redo_alignment.c` | [blast_engine.rs](../LOSAT/src/algorithm/blastp/blast_engine.rs)、[kappa.rs](../LOSAT/src/algorithm/blastp/kappa.rs) |
+| common-endpoint comparator と survivor | `blast_hits.c:2268–2387,2455–2535` | [purge_endpoints.rs](../../LOSAT/src/algorithm/blastn/filtering/purge_endpoints.rs)、[hsp.rs](../../LOSAT/src/algorithm/blastn/hsp.rs)、preliminary 選択 |
+| containment、traceback、identity、tree 更新 | `blast_traceback.c:403–405,436–472,509–512,583–609`、`blast_itree.c` | [BLASTN run.rs](../../LOSAT/src/algorithm/blastn/blast_engine/run.rs)、[gapped.rs](../../LOSAT/src/algorithm/blastn/alignment/gapped.rs) |
+| protein DP / traceback | `blast_gapalign.c:374` 以降の `ALIGN_EX`、特に `531–726` | [BLASTP gapalign.rs](../../LOSAT/src/algorithm/blastp/gapalign.rs) の score-only / traceback 実装 |
+| Kappa redo、SEG 条件、局所状態 | `blast_kappa.c:1414–1454,1626–1643,2942` 以降、`3493–3503`、`redo_alignment.c` | [blast_engine.rs](../../LOSAT/src/algorithm/blastp/blast_engine.rs)、[kappa.rs](../../LOSAT/src/algorithm/blastp/kappa.rs) |
 
 ## 6. 性能候補の採用・棄却・継続条件
 
@@ -195,17 +195,17 @@ NCBI root は `/mnt/c/Users/genom/GitHub/ncbi-blast/`、代替は AGENTS.md の�
 
 | 用途 | 入口と注意 |
 |---|---|
-| 入力と検索引数 | [comparison_cases.tsv](../LOSAT/tests/comparison_cases.tsv)、[blastn_parity_manifest.tsv](../LOSAT/tests/blastn_parity_manifest.tsv)、[blastp_v010_parity_manifest.tsv](../LOSAT/tests/blastp_v010_parity_manifest.tsv)。case ID と `losat_stem` は区別する |
-| BLASTN fresh paired / diff | [compare_blastn_parity.py](../LOSAT/tests/compare_blastn_parity.py)。`--fresh-paired --paired-output-dir`、直接 diff は `--ncbi --losat --fail-on-byte-diff`。構造化判定だけで raw PASS にしない |
+| 入力と検索引数 | [comparison_cases.tsv](../../LOSAT/tests/comparison_cases.tsv)、[blastn_parity_manifest.tsv](../../LOSAT/tests/blastn_parity_manifest.tsv)、[blastp_v010_parity_manifest.tsv](../../LOSAT/tests/blastp_v010_parity_manifest.tsv)。case ID と `losat_stem` は区別する |
+| BLASTN fresh paired / diff | [compare_blastn_parity.py](../../LOSAT/tests/compare_blastn_parity.py)。`--fresh-paired --paired-output-dir`、直接 diff は `--ncbi --losat --fail-on-byte-diff`。構造化判定だけで raw PASS にしない |
 | NZ megablast の登録 | comparison catalog には存在するが現行 BLASTN parity manifest には task blastn の NZ 行だけがある。R0 で新 run 専用の manifest 行を作り、固定 release manifest を変更せず megablast の argv を明示する |
-| Wasm build | [build_wasi_artifacts.py](../LOSAT/tests/build_wasi_artifacts.py) と独立 `CARGO_TARGET_DIR`。command/reactor、serial/threaded の種類を検証する |
-| A/B benchmark | [benchmark_wasm_threading.py](../LOSAT/tests/benchmark_wasm_threading.py)。candidate/baseline artifact と runner、oracle、fresh output directory を明示し、`--case` は catalog の exact `losat_stem` を使う |
-| thread / lifecycle | [check_wasm_threading.py](../LOSAT/tests/check_wasm_threading.py)、[check_wasm_threading_regressions.py](../LOSAT/tests/check_wasm_threading_regressions.py)。既存の正式認証と focused 回帰を区別する |
-| BLASTP 書式・threads | [run_blastp_threads_comparison.sh](../LOSAT/tests/run_blastp_threads_comparison.sh)、[run_blastp_pairwise_threads_comparison.sh](../LOSAT/tests/run_blastp_pairwise_threads_comparison.sh)、[run_blastp_outfmt7_comparison.sh](../LOSAT/tests/run_blastp_outfmt7_comparison.sh)、[run_blastp_custom_fields_comparison.sh](../LOSAT/tests/run_blastp_custom_fields_comparison.sh)。実行前に既存出力の上書き先を確認する |
+| Wasm build | [build_wasi_artifacts.py](../../LOSAT/tests/build_wasi_artifacts.py) と独立 `CARGO_TARGET_DIR`。command/reactor、serial/threaded の種類を検証する |
+| A/B benchmark | [benchmark_wasm_threading.py](../../LOSAT/tests/benchmark_wasm_threading.py)。candidate/baseline artifact と runner、oracle、fresh output directory を明示し、`--case` は catalog の exact `losat_stem` を使う |
+| thread / lifecycle | [check_wasm_threading.py](../../LOSAT/tests/check_wasm_threading.py)、[check_wasm_threading_regressions.py](../../LOSAT/tests/check_wasm_threading_regressions.py)。既存の正式認証と focused 回帰を区別する |
+| BLASTP 書式・threads | [run_blastp_threads_comparison.sh](../../LOSAT/tests/run_blastp_threads_comparison.sh)、[run_blastp_pairwise_threads_comparison.sh](../../LOSAT/tests/run_blastp_pairwise_threads_comparison.sh)、[run_blastp_outfmt7_comparison.sh](../../LOSAT/tests/run_blastp_outfmt7_comparison.sh)、[run_blastp_custom_fields_comparison.sh](../../LOSAT/tests/run_blastp_custom_fields_comparison.sh)。実行前に既存出力の上書き先を確認する |
 
 主対象の `--case` は BLASTN が `MelaMJNV.PemoMJNVA.losatn.blastn` と `MjPMNV.MlPMNV.losatn.blastn`、BLASTP が `AP027078.AP027131.losatp` と `AP027132.NZ_CP006932.losatp`。表示名から FASTA 名や task を推測しない。
 
-各 run は [evidence template](../.agents/skills/verify-ncbi-parity-and-speed/references/evidence.md) を満たし、最低限、次を対応付けて保存する。
+各 run は [evidence template](../../.agents/skills/verify-ncbi-parity-and-speed/references/evidence.md) を満たし、最低限、次を対応付けて保存する。
 
 - `manifest.json`: program/task、全 argv、入力/source/artifact/runner hash、実行環境、Node 設定、固定した測定方針。
 - `parity/`: raw 出力、raw diff、構造化 diff、状態 snapshot、各差分の NCBI/Rust owner、最初の不一致。

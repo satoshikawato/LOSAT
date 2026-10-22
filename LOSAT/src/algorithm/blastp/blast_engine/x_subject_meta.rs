@@ -142,6 +142,9 @@ impl XSubjectMeta {
     /// records (a `-db` search has none), else `None`.
     pub(crate) fn x_for_block_search(records: &[FastaRecord]) -> Option<Self> {
         let mode = x_bp_subj_meta();
+        if mode != XSubjMeta::Off {
+            crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJMETA", !records.is_empty());
+        }
         (mode != XSubjMeta::Off && !records.is_empty())
             .then(|| Self::new(records, mode == XSubjMeta::Shadow))
     }

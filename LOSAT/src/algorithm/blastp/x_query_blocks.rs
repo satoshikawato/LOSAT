@@ -388,6 +388,40 @@ pub(crate) enum XBlockReport {
     Xml,
 }
 
+// No NCBI counterpart: names which switch decides a report format for `x_reach!`; it does not change
+// any value NCBI computes.
+/// The format switch that governs the report of a search whose block plan is made
+/// (`LOSAT_X_REACH`): outfmt 6 and the plan's earlier refusals have none.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum XBlockFormat {
+    /// Not known (the plan refused before it looked at the format), or outfmt 6.
+    Unknown,
+    /// Outfmt 0 and 7 (LOSAT_X_BPQBLOCKFMT).
+    Fmt,
+    /// Outfmt 8, 9 and 12 (LOSAT_X_BPQBLOCKSA).
+    Seqalign,
+    /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
+    Xml,
+}
+
+// No NCBI counterpart: records which side the block-search switches took; it does not change any
+// value NCBI computes.
+/// `LOSAT_X_REACH`: the search took the block search (`own`) or the search of all queries, for
+/// LOSAT_X_BPQBLOCK and the switch of `format`, each while it is on.
+pub(crate) fn x_reach_block_search(format: XBlockFormat, own: bool) {
+    use crate::utils::xreach::x_reach;
+    if x_bp_qblock().is_none() {
+        return;
+    }
+    x_reach!("LOSAT_X_BPQBLOCK", own);
+    match format {
+        XBlockFormat::Fmt if x_bp_qblock_fmt() > 0 => x_reach!("LOSAT_X_BPQBLOCKFMT", own),
+        XBlockFormat::Seqalign if x_bp_qblock_sa() => x_reach!("LOSAT_X_BPQBLOCKSA", own),
+        XBlockFormat::Xml if x_bp_qblock_xml() => x_reach!("LOSAT_X_BPQBLOCKXML", own),
+        _ => {}
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
 // ```c++
 //     if( incremental_output && incremental_struct->m_IterationNum == 0) {
@@ -825,6 +859,9 @@ impl<'a> XLookupFlat<'a> {
         x_for: XLookupFor,
     ) -> (Self, Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
         let mode = x_lkpflat_mode_for_pool(pool);
+        if x_bplkpflat_mode() != XLkpFlat::Off {
+            crate::utils::xreach::x_reach!("LOSAT_X_BPLKPFLAT", mode != XLkpFlat::Off);
+        }
         let spare = match x_for {
             XLookupFor::Search => x_bp_lookup_spare(pool),
             XLookupFor::QueryChunk => None,

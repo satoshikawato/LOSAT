@@ -66,7 +66,7 @@ F01 の開始時 1×3 fixture は、LOSAT 111 行に対し oracle 99 行で、�
 
 `performance-final/` に 448 記録（診断 70、warmup/timed 378）、63 条件の集計を保存した。内訳は出力・実行契約を検証した candidate 35 条件と、出力一致を確認した baseline 28 条件である。baseline の暗黙の pool 縮小は現行の実行契約に合格したとは扱わず、以前の挙動と修正費用の記録として区別する。出力が誤っている baseline の複数 subject 7 条件は測定対象から除外した。壊れた baseline reactor に対する speedup も算出していない。
 
-修正後 cold process の中央値（ms）。全条件の範囲・peak RSS・hash は [cold-performance.tsv](evidence/wasm_threading_20260913/cold-performance.tsv) に記載する。
+修正後 cold process の中央値（ms）。全条件の範囲・peak RSS・hash は [cold-performance.tsv](evidence/wasm_threading_20260913/README.md) に記載する。
 
 | fixture | native n1 | n2 | n4 | serial n1 | threaded n1 | n2 | n4 |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -88,7 +88,7 @@ compiled module の再利用は command ごとに新しい instance を作る測
 | threaded-command-compiled-module | 5.796 | 56.907 | 3.975 | 395.14 |
 | threaded-reactor-same-instance | 4.821 | 36.841 | 2.446 | 220.34 |
 
-各条件の中央値・範囲・process RSS・worker 起動時間・invocation/終了待ちは [reuse-performance.tsv](evidence/wasm_threading_20260913/reuse-performance.tsv) に保存した。worker 起動時間は host の spawn_attempt→ready の壁時計差であり、検索 worker の稼働時間ではない。
+各条件の中央値・範囲・process RSS・worker 起動時間・invocation/終了待ちは [reuse-performance.tsv](evidence/wasm_threading_20260913/README.md) に保存した。worker 起動時間は host の spawn_attempt→ready の壁時計差であり、検索 worker の稼働時間ではない。
 
 `cost-profile/` は最終 BLASTP 書式修正前のソースを複製して計測コードを加えた診断専用 build である。別の source/artifact hash と instrumentation patch を保存した。24 出力は oracle と一致した。最終 production build の速度試料には混ぜていない。
 
@@ -112,7 +112,7 @@ Cargo.lock SHA は `7a81afba8adc0fee7efe2868103dd468fe274c7e28629df4dd360725336b
 
 再現コマンドは [tests README](../LOSAT/tests/README.md) にまとめた。使用する主要 runner は `build_wasi_artifacts.py`、`check_wasm_threading.py`、`check_wasm_threading_regressions.py`、`check_tblastx_thread_thresholds.py`、`benchmark_wasm_threading.py`。固定回帰の CI は `--jobs 3`、ローカルの継続 runner は独立した 6 subprocess を併走させた。各検索の要求スレッド数は同じであり、この回帰の時間を性能比較には使わない。`--timeout-seconds` は正の値を受け取り、既定値は 3,600 秒。最初の run の 900 秒 watchdog による失敗は、記録された wall_seconds と同一の測定時間とは扱わない。再実行では artifact・凍結 FASTA・Node・host JS の同一性を別途確認する。
 
-証拠の作業場所は `/tmp/losat-wasm-remediation-20260913/`。証拠は [保管先](evidence/wasm_threading_20260913/README.md) にアーカイブ済み。[index](evidence/wasm_threading_20260913/index.json) に 7,598 members・49,960,799 bytes を記録し、全 member の hash を検証した。archive SHA-256 は `284296ec044db0d5ea4cf1be8f731a1b11cec12cf9e360bacfddfe8f5e380039`。`frozen-deferred.json` は成功 99 件の根拠と未完了 46 件の argv・環境・期待 hash を保持する。古い `/tmp/losat-wasm-thread-request/` は上書きせず hash 記録を残した。途中の `frozen-regression/` は最終 artifact へ切り替えるため 97 記録時点で中止した不完全な測定であり、最終結果には含めない。旧 run の p09 付近で native artifact が一時的に差し替わった履歴も保存し、最終 gate は新しい出力ディレクトリで最初から実行した。
+証拠の作業場所は `/tmp/losat-wasm-remediation-20260913/`。証拠は [保管先](evidence/wasm_threading_20260913/README.md) にアーカイブ済み。[index](evidence/wasm_threading_20260913/README.md) に 7,598 members・49,960,799 bytes を記録し、全 member の hash を検証した。archive SHA-256 は `284296ec044db0d5ea4cf1be8f731a1b11cec12cf9e360bacfddfe8f5e380039`。`frozen-deferred.json` は成功 99 件の根拠と未完了 46 件の argv・環境・期待 hash を保持する。古い `/tmp/losat-wasm-thread-request/` は上書きせず hash 記録を残した。途中の `frozen-regression/` は最終 artifact へ切り替えるため 97 記録時点で中止した不完全な測定であり、最終結果には含めない。旧 run の p09 付近で native artifact が一時的に差し替わった履歴も保存し、最終 gate は新しい出力ディレクトリで最初から実行した。
 
 ## 認証と引き渡しの境界
 

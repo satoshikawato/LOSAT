@@ -69,8 +69,15 @@ git switch --no-track -c <prefix>/<topic> origin/dev   # fix, feature, perf, doc
 git diff --cached --name-only -z | xargs -0 -I{} sh -c 'printf "%s\t%s\n" "$(git cat-file -s ":{}" 2>/dev/null || echo deleted)" "{}"' | sort -rn | head
 ```
 
-- Bulky run output stays under `$BUILD_ROOT`; `docs/evidence/` gets summaries, logs, scripts,
-  and hashes only.
+- Bulky run output stays under `$BUILD_ROOT`; `docs/evidence/` gets summaries, scripts, small
+  logs, and hashes only. Output of one run over 1 MiB in total or over 100 files that must be
+  kept goes to a GitHub release asset (`AGENTS.md`, "Evidence and Run Output"): a reproducible
+  tar (`tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner`, `gzip -n`) on a
+  prerelease created with `--latest=false`; download it back and compare sha256 before the
+  commit that points at it. The evidence directory keeps `README.md` (release, asset, sha256,
+  file count, bytes) and `MANIFEST.tsv` (path, bytes, sha256 per file). Creating the release
+  pushes a tag, which starts the push workflows filtered only by `paths:` (`web.yml`,
+  `benchmark-plots.yml`).
 
 ## Finish
 

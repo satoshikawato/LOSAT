@@ -38,7 +38,7 @@ LOSAT Web の段階 W4b を実行する。保守者の指示（2026-10-09、S13 
    - Taxonomy・Related Information・GenBank / Graphics のリンクは採らない（ローカルの FASTA に無い）。
 5. **見た目**：表の密度、字の大きさ、節の見出し、リンク、開閉の印を NCBI に寄せる。色は LOSAT の配色のまま（ブランドを写さない。Graphic Summary の凡例とドットプロットの色は上の 4. のとおり）。S13 の基準は保つ：1280 px で表が切れない、390 px で横に流れない、触れる対象は 24 px 以上、コントラスト、キーボード操作（W4 の判断 16〜23）。
 6. **試験**：既存の E2E（`search.spec.ts`、`results.spec.ts`、`screens.spec.ts`、計測）は test ID で動く。見出しや言葉を変えたら期待値を直し、test ID は保つ。新しい表示（Graphic Summary、subject ごとの Alignments、開閉）の E2E を 3 ブラウザ・両方のビルドで足す。HSP の対応の試験（`hsp-correspondence.test.ts`）は変えずに通す。
-7. **ゲートとレビュー**：W4 の [`run_gate.sh`](../evidence/losat_web_w4/run_gate.sh) を元に `docs/evidence/losat_web_w4b/run_gate.sh` を作り、1 回流す（計測を含む。結果画面の構成が変わるので測り直し、S13 の数値（W4 のゲート記録の「実測」）から大きく悪くならないことを確かめる）。コードレビューと画面レビュー（agent `losat-reviewer`）。画面レビューは、NCBI の参照画面と並べて対応表のとおりか、と、S13 の記録（`/home/kawato/.cache/losat-work/s13-review2-screens/`、状態 01〜18）からの退行が無いかを見る。
+7. **ゲートとレビュー**：W4 の [`run_gate.sh`](../evidence/losat_web_w4/run_gate.sh) を元に `docs/evidence/losat_web_w4b/run_gate.sh`（2026-10-22 にリリース資産へ移動：[README](../evidence/losat_web_w4b/README.md)） を作り、1 回流す（計測を含む。結果画面の構成が変わるので測り直し、S13 の数値（W4 のゲート記録の「実測」）から大きく悪くならないことを確かめる）。コードレビューと画面レビュー（agent `losat-reviewer`）。画面レビューは、NCBI の参照画面と並べて対応表のとおりか、と、S13 の記録（`/home/kawato/.cache/losat-work/s13-review2-screens/`、状態 01〜18）からの退行が無いかを見る。
 
 完了条件：対応表が参照画面の要素を漏れなく挙げ、検索画面と結果画面がそれに従うこと（画面レビューの合格）、既存と新しい E2E（3 ブラウザ、両方のビルド）と HSP の対応の試験が通ること、計測が S13 から大きく悪くならないこと。ゲート記録は `docs/evidence/losat_web_w4b/README.md`。
 

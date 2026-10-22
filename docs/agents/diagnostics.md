@@ -317,6 +317,7 @@ export LOSAT_X_BPSUBJRUN=1
 export LOSAT_X_BPUNGAP=1
 export LOSAT_X_BXBATCH=1
 export LOSAT_X_BXCHUNK=64
+export LOSAT_X_BXCHUNKFLOW=1
 export LOSAT_X_BXDIAG=1
 export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
@@ -4326,9 +4327,9 @@ Scheduling (each value computed by one thread with the original function; order 
   loop of a query batch searched as one chunk, `-db` and `-subject` alike, at two or more threads when there are more
   than `k` subjects, no diagnostic stage traces the subjects and `-window_size` plus twice the longest subject is at
   most 2^28; the chunks of a longer query are searched side by side on the pool, one chunk per thread,
-  `LOSAT_X_BXPAR`): the subjects are searched as a flow of tasks of `k`
-  consecutive subjects instead of waves of `threads x LOSAT_X_BXCHUNK` (`blastx/x_subject_flow.rs`, exactness argument
-  in its header). The other threads of the pool search tasks up to `4 x threads` ahead (`utils::xahead`, each helper
+  `LOSAT_X_BXPAR`, unless `LOSAT_X_BXCHUNKFLOW` below keeps them in order, each with the flow): the subjects
+  are searched as a flow of tasks of `k` consecutive subjects instead of waves of `threads x LOSAT_X_BXCHUNK`
+  (`blastx/x_subject_flow.rs`, exactness argument in its header). The other threads of the pool search tasks up to `4 x threads` ahead (`utils::xahead`, each helper
   on its own diagonal table) and the loop's thread takes the tasks in order, or searches one itself when no helper has
   started it, and hands the subjects to the sink in subject order with the waves' calls; a wave waits for its slowest
   worker and then for the hand-over on one thread. Above the 2^28 bound (a diagonal table of 1 GiB or more) the waves
@@ -4343,6 +4344,37 @@ Scheduling (each value computed by one thread with the original function; order 
   7.09-7.14 s, 3.887-3.896 s and 4.116-4.122 s; max RSS unchanged (226 MB, NCBI 289-297 MB). The waves' own lines
   (`LOSAT_TIMING`) at 16 threads: 563 waves, 4.27 s, of which the waves' longest tasks 4.00 s against a mean of
   2.02 s (with 1,024 subjects per task still 3.34 against 2.03 s: the work clusters in oid ranges).
+- `LOSAT_X_BXCHUNKFLOW=1` (BLASTX, speed and memory; in the strict set since 2026-10-23, in the pull request that
+  added it: on unless `=0` or `LOSAT_X_DEFAULT=0`; acts on a query batch split into chunks (one query of at least
+  19,410 letters, `blastx/split.rs`), `-db` and `-subject` alike, where `LOSAT_X_BXSUBJFLOW` would run (above) and
+  there are at least 256 subjects per thread and 2,048 subjects in all): the chunks are searched one after another
+  in the serial chunk loop of `search::search_core`, each chunk's subjects as the subject flow on the whole pool,
+  instead of side by side, one chunk per thread (`LOSAT_X_BXPAR`). A query of five chunks used five threads of
+  sixteen. Exactness: the switch only chooses between two schedules of the same chunk loop; the chunk waves hand
+  the sink every chunk, subject and chunk end in the order of the serial loop, and the flow is checked by
+  `LOSAT_X_BXSUBJFLOWSHADOW` (which now also compares every task of every chunk of a split query;
+  `tests/blastx_subject_flow.rs`). Memory: one chunk's lookup table and the pool's diagonal tables at a time,
+  instead of one of each per chunk of a wave. The rule (`x_subject_flow::chunks_in_order`, in subjects so that
+  `LOSAT_X_BXSUBJFLOW=k` does not move it): with fewer subjects per thread the flow leaves threads idle in each
+  chunk, and with fewer subjects in all each chunk's setup on the loop's thread (its lookup table, about 5 ms,
+  and the helpers' start) outweighs it at two to four threads. Measured 2026-10-23 on the workstation (16 / 8 /
+  4 / 2 / 1 physical cores of node 1 with their HT siblings idle, `--membind=1`, cores warmed 3 s before each
+  run, 3 pairs with the order alternated; every output the same bytes across arms, and for bx50k the same bytes
+  as NCBI BLAST+ 2.17.0 `-db -num_threads 1`; a probe binary that chose the schedule by a variable): bx50k
+  (fly 2L 800,001-850,000, five chunks, against the 30,802 fly proteins `-db -evalue 1e-5`) at 16 threads
+  2.44 s with the chunk waves, 0.95 s in order (NCBI `-db` 1.63 s), at 8 threads 2.45 and 1.63 s (NCBI
+  2.76 s), max RSS 71 and 34 MiB (NCBI 91-96 MiB); 1 thread unchanged (11.28 / 11.31 s); instructions the same
+  (93.0 G); 2L slices of 20-300 kb (2-30 chunks) x0.18-0.91 at 8 and 16 threads, max RSS 31-43 MiB against
+  45-182 MiB. With few subjects the waves win and the rule keeps them: stride subsets of the fly proteins with
+  512 / 1,024 / 2,048 subjects in order lost up to x1.80 at 16 threads (30 chunks x 512), x1.18 at 8 (512), and
+  x1.04 / x1.01 at 2 threads (30 chunks x 512 / 1,024); `AP027131.fasta` against the 543 proteins of
+  `AP027133.faa` (`-subject`, 68 chunks) x1.20 at 8, x1.49 at 16 threads. Under the rule no measured case is
+  slower; the subsets with 2,048 subjects at 2-8 threads x0.68-0.99, with 4,096 at 16 threads x0.51-0.97.
+  This pull request's binary against its base, 3 pairs on the same cores (whole node 1 for 32 threads): bx50k at 32 /
+  16 / 8 threads 2.45 -> 0.76 / 0.95 / 1.62 s (x0.310 / x0.388 / x0.656), max RSS 71 -> 34-36 MiB, at one thread
+  x1.004 with the same instructions; with one chunk per batch (the 10 transcripts of BX-t10 against Swiss-Prot at 8
+  and 16 threads, 1,000 short reads against Swiss-Prot at 16) x0.996-1.000; the `-subject` case above x0.988-1.002
+  (kept on the waves).
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

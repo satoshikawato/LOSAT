@@ -5,8 +5,11 @@
   indexes, the purge without per-removal shifts and the query-offset-to-context runs were already the default
   and now run unconditionally. The NCBI-literal shifting loops of the endpoint purge, the shadow comparisons,
   their `[X_SHADOW]` / `[X_STATS]` lines and counters, the four `#[cfg(test)]` mode hooks and the unit tests
-  that compared against them were deleted; the ported loops the default still takes stay (the distance loop
-  for packed subjects and traceback calls, the tree walk while tracing is on, the per-base context table for
+  that compared against them were deleted; the packed score-only greedy path
+  (`greedy_gapped_alignment_score_only` with `compressed_subject = true`, the packed-subject `rem != 4` scans
+  and the unit test that compared them) was deleted too, the greedy functions now take an unpacked subject
+  only; the ported loops the default still takes stay (the distance loop for lengths that do not fit the
+  slices, the tree walk while tracing is on, the per-base context table for
   overlapping contexts and the `LOSAT_X_CTXO1SHADOW` comparison). `tests/blastn_greedy_fuse.rs`, which only
   tested the fused loop's variables, was deleted. Outputs do not change.
 - The variables `LOSAT_X_GREEDYSPEC`, `LOSAT_X_AHEAD`, `LOSAT_X_MBDELAY` and `LOSAT_X_MBBATCH` are gone, with

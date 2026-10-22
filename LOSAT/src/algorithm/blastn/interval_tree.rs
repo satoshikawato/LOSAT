@@ -843,7 +843,7 @@ impl BlastIntervalTree {
                         //             else if (best_hsp == in_hsp)
                         //                 list_node->midptr = tmp_index;
                         // ```
-                        // The list unlink is the line above; the flag and the count only tell the grid index
+                        // The list unlink is the line above; the flag only tells the grid index
                         // that the leaf is gone.
                         self.nodes[tmp_index as usize].x_dead = true;
                     }
@@ -904,7 +904,7 @@ impl BlastIntervalTree {
                         //                 if (target_offset < midpt)
                         //                     root_node->leftptr = 0;
                         // ```
-                        // The leaf unlink is the code above; the flag and the count only tell the grid index
+                        // The leaf unlink is the code above; the flag only tells the grid index
                         // that the leaf is gone.
                         self.nodes[next_child_idx as usize].x_dead = true;
                         return false;
@@ -1009,7 +1009,7 @@ impl BlastIntervalTree {
                         //                 if (target_offset < midpt)
                         //                     root_node->leftptr = 0;
                         // ```
-                        // The leaf unlink is the code above; the flag and the count only tell the grid index
+                        // The leaf unlink is the code above; the flag only tells the grid index
                         // that the leaf is gone.
                         self.nodes[next_child_idx as usize].x_dead = true;
                         return false;

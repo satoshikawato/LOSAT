@@ -25,11 +25,11 @@
 //! `x_greedy_fused_dispatch` after its set-up: `max_score[0..xdrop_offset]` cleared, the first
 //! `s_FindFirstMismatch`, the early return, `last_seq2_off[0][diag_origin]`, `max_score[0]` and the
 //! first diagonal bounds (greedy_align.c:463-505). The call takes over the rest of the function
-//! when all of these hold: there is no edit block (score only, the preliminary stage), `rem == 4`
-//! (an unpacked subject, which the preliminary stage of megablast uses: `x_greedy_prelim.rs`), the
-//! fence was not hit by the first scan, `1 <= max_dist`, and `len1` / `len2` lie within the
-//! slices. Otherwise the ported loop runs, unchanged. Traceback, packed subjects and the affine
-//! alignment keep their paths.
+//! when all of these hold: there is no edit block (score only, the preliminary stage; the subject
+//! is always unpacked, `x_greedy_prelim.rs`), the fence was not hit by the first scan,
+//! `1 <= max_dist`, and `len1` / `len2` lie within the slices. Otherwise `x_greedy_row` runs the
+//! distance (a traceback call, or a call this module declines), and the ported loop only for
+//! lengths that do not fit the slices. The affine alignment keeps its own path.
 //!
 //! Why the result is the same. The function is the C loop statement by statement, on the same
 //! memory:
@@ -821,8 +821,8 @@ fn x_fused_on(
 ///     /* for each distance */
 ///     for (d = 1; d <= max_dist; d++) {
 /// ```
-/// The fused loop in `blast_greedy_align`, after the lines above. `None`: the ported loop runs (a
-/// case this module does not take, module doc). `Some(value)`: the call's return value; the
+/// The fused loop in `blast_greedy_align`, after the lines above. `None`: the loop of
+/// `blast_greedy_align` runs (a case this module does not take, module doc). `Some(value)`: the call's return value; the
 /// outputs, rows and `max_score` hold what the ported loop leaves.
 #[inline]
 pub(super) fn x_greedy_fused_dispatch(
@@ -839,7 +839,6 @@ pub(super) fn x_greedy_fused_dispatch(
     max_dist: i32,
     non_affine_mem: &mut GreedyNonAffineMem,
     score_only: bool,
-    rem: u8,
     fence_hit: &mut bool,
     seed: &mut GreedySeed,
     diag_lower: i32,
@@ -847,7 +846,6 @@ pub(super) fn x_greedy_fused_dispatch(
     max_score_offset: usize,
 ) -> Option<i32> {
     if !score_only
-        || rem != 4
         || *fence_hit
         || max_dist < 1
         || len1 < 0
@@ -928,7 +926,7 @@ mod tests {
     }
 
     /// `blast_greedy_align` score only (this module, in the plain build when `plain`), or with an
-    /// edit block (`traceback`: the ported loop, which this module replaces without one).
+    /// edit block (`traceback`: `x_greedy_row`, the loop this module replaces without one).
     fn call(traceback: bool, plain: bool, mem: &mut GreedyNonAffineMem, p: &Problem) -> Outcome {
         X_GREEDY_FUSE_TEST_PLAIN.with(|m| m.set(plain));
         let mut edit = GapPrelimEditBlock::new();
@@ -954,7 +952,6 @@ mod tests {
             p.max_dist,
             mem,
             traceback.then_some(&mut edit),
-            4,
             &mut fence_hit,
             &mut seed,
         );
@@ -1119,9 +1116,9 @@ mod tests {
     ///         return best_dist;
     /// ```
     /// Sequences of calls on one scratch per path, so that the cells earlier calls left matter:
-    /// the ported loop (a call with an edit block runs it), this module in the AVX2 build and in
+    /// `x_greedy_row` (a call with an edit block runs it), this module in the AVX2 build and in
     /// the plain build. After every call: the same return value, align lengths, seed and
-    /// `fence_hit`, and the same `max_score` as the ported loop; the two builds also leave the
+    /// `fence_hit`, and the same `max_score` as `x_greedy_row`; the two builds also leave the
     /// same rows.
     #[test]
     fn x_fused_greedy_matches_reference_on_call_sequences() {
@@ -1217,7 +1214,7 @@ mod tests {
     /// ```
     /// A fence inside the loop, reached by a slide that stops within eight positions (the
     /// eight-byte test), by a slide of eight or more, and with fewer than eight positions left:
-    /// 0 and `fence_hit` at once, with the `max_score`, align lengths and seed the ported loop
+    /// 0 and `fence_hit` at once, with the `max_score`, align lengths and seed `x_greedy_row`
     /// leaves, and the same rows in the plain build as in the AVX2 build, on scratch with stale
     /// cells.
     #[test]

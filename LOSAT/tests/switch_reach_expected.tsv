@@ -22,6 +22,7 @@ LOSAT_X_BPPFREE	blastp	always			Preliminary hit lists give back room; serial red
 LOSAT_X_BPQBLOCK	blastp	conditional	required	required	outfmt 6 only (other formats need FMT/SA/XML switches), >50,000 query letters, 2+ blocks, no -query_loc, no refusals
 LOSAT_X_BPQBLOCKFMT	blastp	conditional	required	required	outfmt 0 or 7 only, with BPQBLOCK rules (>50,000 letters, 2+ blocks); title checks
 LOSAT_X_BPQBLOCKSA	blastp	conditional	gap	required	outfmt 8/9/12 only, with BPQBLOCK rules (>50,000 letters, 2+ blocks); -db titles must be plain; new gap: needs outfmt 8/9/12 with a query > 50,000 letters in 2+ blocks
+LOSAT_X_BPQBLOCKWEB	blastp	conditional	gap	gap	run_local only (Web ABI v2, library): several outputs, the hit records or an observer, no -db, with BPQBLOCK rules; new and ref gap: the CI fixtures run the CLI (one output, no records); tests/run_local_blastp_blocks.rs and V-ABI blastp_fast_query_blocks cover it
 LOSAT_X_BPQBLOCKXML	blastp	conditional	gap	required	outfmt 5 only, with BPQBLOCK rules; fallback if writer would refuse; new gap: needs outfmt 5 with a query > 50,000 letters in 2+ blocks
 LOSAT_X_BPREDODBSUBJ	blastp	always			redo reads each match's subject from the database; every -db run (-subject keeps no listed copy)
 LOSAT_X_BPREDOFIT	blastp	always			Composition-based redo HSP lists allocated at exact size
@@ -73,7 +74,7 @@ LOSAT_X_NEWTONLANES8	blastp,tblastn	platform			aarch64 only, batches of 5+ probl
 LOSAT_X_PAIRLUT	tblastx	conditional	required	required	only while PAIRPAR unit path runs (gated by query size / guard); reference builder otherwise
 LOSAT_X_PAIRPAR	blastn,tblastx	conditional	required	required	2+ threads; blastn seed strips only for query block >8000 letters, hash diagonal, contiguous table, unmasked subject; tblastx unit path size-gated
 LOSAT_X_PAIRPARDISC	blastn	conditional	required	required	-task dc-megablast, 2+ threads, one subject, query block >8000 letters (diagonal hash), unmasked subject
-LOSAT_X_PAIRPARDISCARR	blastn	conditional	gap	required	-task dc-megablast, 2+ threads, one subject, query block <=8000 letters (both strands), unmasked subject; new gap: needs dc-megablast, one unmasked subject, query block <= 8000 letters, 2+ threads
+LOSAT_X_PAIRPARDISCARR	blastn	conditional	required	required	-task dc-megablast, 2+ threads, one subject, query block <=8000 letters (both strands), unmasked subject
 LOSAT_X_PAIRPARFOLD	blastn	conditional	required	gap	2+ threads, only where PAIRPAR / PAIRPARDISC strips paths run (large query block, one subject); ref gap: cannot happen: partitions() is reached only with a pool of 2+ threads (1 thread only under PAIRPARSHADOW)
 LOSAT_X_PAIRPARGATE	tblastx	conditional	required	required	reference table >=2^18 cells (translated query >~65 kb), or 2+ threads with one dominant subject, or threshold <13
 LOSAT_X_PAIRPARNA	blastn	conditional	gap	required	-task blastn-short (word 4-8 tables), 2+ threads, one subject <=5 Mb, query block >8000 letters (about 4000+ query letters); new gap: needs blastn-short, 2+ threads, one subject, query block > 8000 letters

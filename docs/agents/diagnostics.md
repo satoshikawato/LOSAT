@@ -1797,7 +1797,7 @@ Rebuilding less:
 - `LOSAT_X_BPUNGAPSENTSHADOW=1` shadow of `LOSAT_X_BPUNGAPSENT` (turns the path on): every extension of the path
   also runs the closure of `LOSAT_X_BPUNGAP`'s extension and the results (score, offsets, length,
   `right_extend`, `s_last_off`, and the early return) must be equal; any difference panics with the inputs.
-  One line at exit: `[X_SHADOW] BPUNGAPSENT compared=`.
+  One line at exit, after a blastp query block took the path: `[X_SHADOW] BPUNGAPSENT blocks= compared=`.
 - `LOSAT_X_LINKSORT=1` (TBLASTX, speed; in the strict set since 2026-10-14) the index sorts of the
   in-place HSP list path (`tblastx/x_link_sort.rs`, exactness argument in its header; it acts only where
   `LOSAT_X_HSPINPLACE` does).

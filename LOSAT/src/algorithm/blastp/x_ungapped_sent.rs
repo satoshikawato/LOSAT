@@ -70,6 +70,9 @@ pub(crate) fn on() -> bool {
 }
 
 static SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
+/// Query blocks that passed the checks in shadow mode (the summary line is printed only after
+/// one did, so that other programs' runs with the variable print nothing).
+static SHADOW_BLOCKS: AtomicU64 = AtomicU64::new(0);
 
 /// Counts one compared extension (shadow mode).
 // No NCBI counterpart: a counter.
@@ -78,12 +81,14 @@ pub(crate) fn count_shadow() {
     SHADOW_COMPARED.fetch_add(1, Ordering::Relaxed);
 }
 
-/// The summary line (printed by `main` at exit), only in shadow mode.
+/// The summary line (printed by `main` at exit), only in shadow mode and after a blastp query
+/// block passed the checks.
 // No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
 pub fn print_shadow_stats() {
-    if state().mode == 2 {
+    let blocks = SHADOW_BLOCKS.load(Ordering::Relaxed);
+    if state().mode == 2 && blocks > 0 {
         eprintln!(
-            "[X_SHADOW] BPUNGAPSENT compared={} (two-hit ungapped extensions identical)",
+            "[X_SHADOW] BPUNGAPSENT blocks={blocks} compared={} (two-hit ungapped extensions identical)",
             SHADOW_COMPARED.load(Ordering::Relaxed)
         );
     }
@@ -120,6 +125,9 @@ impl XSentQuery {
             && query.iter().fold(0u8, |a, &c| a | c) < CODES;
         if !fits {
             return None;
+        }
+        if state.mode == 2 {
+            SHADOW_BLOCKS.fetch_add(1, Ordering::Relaxed);
         }
         let mut padded = Vec::with_capacity(query.len() + 2);
         padded.push(0);

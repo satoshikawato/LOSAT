@@ -43,10 +43,18 @@ git switch --no-track -c <prefix>/<topic> origin/dev   # fix, feature, perf, doc
 
 - Rust: `RUSTUP_TOOLCHAIN=1.92.0` (or `cargo +1.92.0`) for every cargo or rustc call, including
   scripts that call cargo themselves (for example `LOSAT/tests/build_wasi_artifacts.py`).
-- Build output goes outside the worktree and is reused: `--target-dir "$BUILD_ROOT/<purpose>"`
-  with the names `native`, `test`, `wasi`, `adapter`, and `gate-<stage>` for a gate's frozen
-  build. Do not create a new target directory per attempt; each one starts cold and costs
-  gigabytes (168 such directories filled 197 GiB by 2026-10-06).
+- Build output goes outside the worktree, into one target directory per worktree:
+  `--target-dir "$BUILD_ROOT/wt-<topic>"` (the worktree's name). Native, test, Wasm, and adapter
+  builds all use it; wait for cargo's lock rather than open a second directory. Do not create a
+  target directory per attempt, check, gate, probe, or agent: each one starts cold and costs
+  gigabytes (168 filled 197 GiB by 2026-10-06; 122 filled 348 GiB by 2026-10-22). Owner,
+  2026-10-22: 「セッション１つ作るごとに数GBとか数十GBとかSSD使うの絶対よくない」.
+  For a gate's frozen build, copy the binaries (a few MB) to `$TASK_DIR/bin/`. A directory of
+  its own also keeps a worktree from receiving another worktree's binary, which a shared
+  directory can hand over (same fingerprint).
+- `~/.cargo/config.toml` on the Linux machine builds the dev and test profiles with line tables
+  only and no incremental cache (a full `cargo test --no-run`, default and `--all-features`:
+  5.0 GB -> 1.7 GB, same build time); release is unchanged. Do not override it.
 - `cargo test --all-features` needs `LOSAT_BLASTX_WORKER_LOG` set to a writable file, as in CI.
 - Logs, probes, sweeps, and captures go to `$TASK_DIR` or `$BUILD_ROOT/<task>/`, never into the
   worktree. Set `TMPDIR` to the task folder's `tmp/`; `/tmp` is wiped by a WSL restart.
@@ -75,7 +83,8 @@ git diff --cached --name-only -z | xargs -0 -I{} sh -c 'printf "%s\t%s\n" "$(git
 ## Finish
 
 - After the PR merges (or the branch is otherwise done), run `git status` in the worktree, then
-  `git worktree remove <path>` and `git branch -D <branch>`. Keep the two campaign worktrees.
+  `git worktree remove <path>`, `git branch -D <branch>`, and delete `$BUILD_ROOT/wt-<topic>`.
+  Keep the two campaign worktrees.
   Remove only worktrees you created; ask before touching another session's.
 - Delete the task's `$BUILD_ROOT/<task>/` scratch when the evidence it backs is committed.
-  Keep target directories named in an open gate record until that stage is merged.
+  Keep binaries named in an open gate record until that stage is merged.

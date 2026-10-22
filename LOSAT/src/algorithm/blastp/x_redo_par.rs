@@ -17,7 +17,7 @@
 //! in the order of the one-thread loop:
 //! 1. the matches in stream order: for each query, each position of its preliminary hit list whose
 //!    list has HSPs (the one-thread loop skips the others before any test); a job is up to four
-//!    consecutive of them of one query (one vector of `LOSAT_X_NEWTONLANES`);
+//!    consecutive of them of one query (one vector of the Newton lanes);
 //! 2. windows of consecutive jobs, each computed on the pool (one `pool.install`) and then
 //!    replayed. A window holds at most 64 jobs per thread (`LOSAT_X_BPREDOPARWINDOW` sets another
 //!    number, for tests) and at most a cap of jobs at risk per query (below), and it may end inside
@@ -30,7 +30,7 @@
 //!    (`build_redo_align_params`), which it uses for its matches one after another as the one-thread
 //!    loop uses a query's parameters for all its matches: the `Cell` they hold is set during a call
 //!    and set back to its previous value at the end of it;
-//! 4. with `LOSAT_X_NEWTONLANES`, the job prefetches the first Newton problems of its own matches
+//! 4. the job prefetches the first Newton problems of its own matches
 //!    against the heaps of its query's batch as the window's start left them
 //!    (`x_newton_lanes_prefetch_matches`, as the one-thread loop calls it for the next matches);
 //!    then each match runs `postprocess_preliminary_hits` with the arguments of the one-thread loop,
@@ -261,7 +261,7 @@ fn x_window_jobs_per_thread() -> usize {
     })
 }
 
-// No NCBI counterpart: matches per job, one vector of LOSAT_X_NEWTONLANES (four problems); it
+// No NCBI counterpart: matches per job, one vector of the Newton lanes (four problems); it
 // changes no value NCBI computes.
 /// Matches of one query per job at most.
 const X_JOB_MATCHES: usize = 4;
@@ -928,8 +928,6 @@ where
     // Built by the first job of the query that needs it; the others wait for the same value.
     let workspaces: Vec<OnceLock<BlastpKappaQueryWorkspace>> =
         queries.clone().map(|_| OnceLock::new()).collect();
-    // EXPERIMENT (LOSAT_X_NEWTONLANES): read as the one-thread loop reads it.
-    let newton_lanes = crate::core::composition_adjustment::x_newton_lanes::mode() != 0;
     // One job's results in match order, with one set of scratch; both ways of running the jobs
     // below call it.
     let run_job = |scratch: &mut XScratch, job: &Range<usize>| -> XWindowResults {
@@ -960,13 +958,13 @@ where
         //                         numQueries
         //                 )) {
         // ```
-        // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of the job's
+        // No NCBI counterpart: the Newton lanes solve the first Newton problems of the job's
         // matches, four per vector (kappa::x_newton_lanes_prefetch_matches); a result is used
         // only by a call on this thread with the same input bits. It does not change any value
         // NCBI computes. Given the heaps of the batch as the window's start left them, as the
         // one-thread loop gives its heaps, it leaves out the matches the test ends on them: those
         // not computed here.
-        if newton_lanes {
+        {
             let list = lists[q_idx]
                 .as_ref()
                 .expect("a match's query has its preliminary hit list");

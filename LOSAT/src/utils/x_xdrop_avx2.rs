@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_DPAVX2): 256-bit AVX2 kernels for the X-drop dynamic programming of
+//! EXPERIMENT: 256-bit AVX2 kernels for the X-drop dynamic programming of
 //! `xdrop_simd.rs`: 16 lanes of 16 bits and 32 lanes of 8 bits, with (`TB`) and without the
 //! traceback. x86_64 only, chosen at run time when the CPU has AVX2. They run the recurrence of
 //! NCBI `ALIGN_EX` / `Blast_SemiGappedAlign` row by row, with the value representation of the
@@ -178,11 +178,6 @@ static KSPLIT: [u8; 32] = [
     0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15, 0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9,
     11, 13, 15,
 ];
-
-/// No NCBI counterpart: LOSAT_X_DPAVX2 on (`utils/xswitch.rs`) and a CPU that runs these kernels.
-pub(super) fn switch_on() -> bool {
-    crate::utils::xswitch::on("LOSAT_X_DPAVX2") && available()
-}
 
 /// No NCBI counterpart: LOSAT_X_DPEMASK on (`utils/xswitch.rs`): the `EM` instances of `align8`
 /// (E of dropped cells stored as minus infinity, no E clearing at the row end).
@@ -1573,7 +1568,7 @@ mod tests {
     use super::super::kernel;
     use super::super::tests::{random_problem, reference, Problem, Rng};
     use super::super::x_capture::load_dir;
-    // EXPERIMENT (LOSAT_X_DPW128): the 128-bit kernels with per-row savings, compared and timed in
+    // EXPERIMENT: the 128-bit kernels with per-row savings (`x_xdrop_w128.rs`), compared and timed in
     // the replay next to the 128-bit and the 256-bit kernels.
     use super::super::x_w128 as w128;
     use super::*;

@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_GREEDYFUSE, shadow LOSAT_X_GREEDYFUSESHADOW): the loop over distances of
+//! No NCBI counterpart: the loop over distances of
 //! the score-only `BLAST_GreedyAlign` on an unpacked subject in one function, each distance in one
 //! pass over its diagonals.
 //!
@@ -25,11 +25,11 @@
 //! `x_greedy_fused_dispatch` after its set-up: `max_score[0..xdrop_offset]` cleared, the first
 //! `s_FindFirstMismatch`, the early return, `last_seq2_off[0][diag_origin]`, `max_score[0]` and the
 //! first diagonal bounds (greedy_align.c:463-505). The call takes over the rest of the function
-//! when all of these hold: the switch is on, there is no edit block (score only, the preliminary
-//! stage), `rem == 4` (an unpacked subject: `LOSAT_X_GREEDYPRELIM`, on by default), the fence was
-//! not hit by the first scan, `1 <= max_dist`, and `len1` / `len2` lie within the slices.
-//! Otherwise the ported loop runs, unchanged. Traceback, packed subjects and the affine
-//! alignment keep their paths.
+//! when all of these hold: there is no edit block (score only, the preliminary stage; the subject
+//! is always unpacked, `x_greedy_prelim.rs`), the fence was not hit by the first scan,
+//! `1 <= max_dist`, and `len1` / `len2` lie within the slices. Otherwise `x_greedy_row` runs the
+//! distance (a traceback call, or a call this module declines), and the ported loop only for
+//! lengths that do not fit the slices. The affine alignment keeps its own path.
 //!
 //! Why the result is the same. The function is the C loop statement by statement, on the same
 //! memory:
@@ -72,79 +72,23 @@
 //!   `max_dist` -> -1; a fence at the stop byte of a slide -> `fence_hit` and 0, at once (the cell
 //!   of that diagonal and the seed are not written, as in C). The outputs `seq1_align_len`,
 //!   `seq2_align_len` and the seed keep the values of their last update in every case.
-//!
-//! The variables are read once. `LOSAT_X_GREEDYFUSE` (a switch of the strict set,
-//! `utils/xswitch.rs`: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) runs this
-//! module. `LOSAT_X_GREEDYFUSESHADOW` (set to any value; not in the strict set; implies it) runs
-//! this module on copies of the rows, of `max_score` and of the outputs, then the reference
-//! (`blast_greedy_align` again, from its start, with this module off for that call), and panics
-//! unless the return value, both align lengths, the seed, `fence_hit`, both rows and `max_score`
-//! are equal; `main` prints one `[X_SHADOW] GREEDYFUSE compared=N` line.
 
 #![allow(clippy::too_many_arguments)]
 
-use super::{blast_greedy_align, x_first_mismatch, GreedyNonAffineMem, GreedySeed, FENCE_SENTRY};
+use super::{x_first_mismatch, GreedyNonAffineMem, GreedySeed, FENCE_SENTRY};
 use crate::algorithm::blastn::constants::INVALID_OFFSET;
+#[cfg(test)]
 use std::cell::Cell;
-use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(target_arch = "x86_64")]
 use std::sync::OnceLock;
 
 #[cfg(test)]
 thread_local! {
-    /// Lets a test choose the mode per call (0 off, 1 this module, 2 shadow).
-    static X_GREEDY_FUSE_TEST_MODE: Cell<Option<u8>> = const { Cell::new(None) };
     /// Lets a test run the plain build on a CPU with AVX2.
     static X_GREEDY_FUSE_TEST_PLAIN: Cell<bool> = const { Cell::new(false) };
     /// Diagonals that took `x_cell_cold` with fewer than eight positions left, and with a slide
     /// of eight or more.
     static X_GREEDY_FUSE_TEST_REST: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
-}
-
-thread_local! {
-    // No NCBI counterpart: set while the shadow runs the reference, so that the reference call
-    // does not take this module again.
-    static X_SHADOW_REFERENCE: Cell<bool> = const { Cell::new(false) };
-}
-
-// No NCBI counterpart: the number of calls the shadow compared (relaxed; it orders nothing).
-static X_SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
-
-/// No NCBI counterpart: reads LOSAT_X_GREEDYFUSE / LOSAT_X_GREEDYFUSESHADOW once.
-/// `LOSAT_X_GREEDYFUSE` is a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and
-/// it is not set. `LOSAT_X_GREEDYFUSESHADOW` is not: it counts when set to any value. 0 = the
-/// ported loop, 1 = this module, 2 = both and compare; SHADOW wins. It chooses a LOSAT code path and changes no value NCBI computes.
-fn x_greedy_fuse_mode() -> u8 {
-    #[cfg(test)]
-    if let Some(mode) = X_GREEDY_FUSE_TEST_MODE.with(Cell::get) {
-        return mode;
-    }
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_GREEDYFUSESHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_GREEDYFUSE") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-/// The summary line `main` prints at exit with LOSAT_X_GREEDYFUSESHADOW.
-// No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
-pub fn print_summary() {
-    if x_greedy_fuse_mode() != 2 {
-        return;
-    }
-    let compared = X_SHADOW_COMPARED.load(Ordering::Relaxed);
-    eprintln!(
-        "[X_SHADOW] GREEDYFUSE compared={compared} ({})",
-        if compared == 0 {
-            "nothing compared: no score-only greedy alignment on an unpacked subject ran"
-        } else {
-            "every score-only greedy alignment identical"
-        }
-    );
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:380-387
@@ -852,7 +796,7 @@ fn x_fused_on(
             && max_score.len() >= max_score_len
             && input.diag_lower == diag_origin - 1
             && input.diag_upper == diag_origin + 1,
-        "LOSAT_X_GREEDYFUSE: greedy scratch smaller than the set-up allocated"
+        "greedy scratch smaller than the set-up allocated"
     );
     let (row0, row1) = last_seq2_off.split_at_mut(1);
     let mem = XFuseMem {
@@ -877,11 +821,9 @@ fn x_fused_on(
 ///     /* for each distance */
 ///     for (d = 1; d <= max_dist; d++) {
 /// ```
-/// Dispatch point of LOSAT_X_GREEDYFUSE / LOSAT_X_GREEDYFUSESHADOW in `blast_greedy_align`, after
-/// the lines above. `None`: the ported loop runs (switch off, or a case this module does not
-/// take, module doc). `Some(value)`: the call's return value; the outputs, rows and `max_score`
-/// hold what the ported loop leaves.
-/// EXPERIMENT (LOSAT_X_GREEDYFUSE / LOSAT_X_GREEDYFUSESHADOW)
+/// The fused loop in `blast_greedy_align`, after the lines above. `None`: the loop of
+/// `blast_greedy_align` runs (a case this module does not take, module doc). `Some(value)`: the call's return value; the
+/// outputs, rows and `max_score` hold what the ported loop leaves.
 #[inline]
 pub(super) fn x_greedy_fused_dispatch(
     seq1: &[u8],
@@ -897,17 +839,13 @@ pub(super) fn x_greedy_fused_dispatch(
     max_dist: i32,
     non_affine_mem: &mut GreedyNonAffineMem,
     score_only: bool,
-    rem: u8,
     fence_hit: &mut bool,
     seed: &mut GreedySeed,
     diag_lower: i32,
     diag_upper: i32,
     max_score_offset: usize,
 ) -> Option<i32> {
-    let mode = x_greedy_fuse_mode();
-    if mode == 0
-        || !score_only
-        || rem != 4
+    if !score_only
         || *fence_hit
         || max_dist < 1
         || len1 < 0
@@ -915,9 +853,6 @@ pub(super) fn x_greedy_fused_dispatch(
         || len1 as usize > seq1.len()
         || len2 as usize > seq2.len()
     {
-        return None;
-    }
-    if mode == 2 && X_SHADOW_REFERENCE.with(Cell::get) {
         return None;
     }
     let input = XFuseInput {
@@ -934,75 +869,20 @@ pub(super) fn x_greedy_fused_dispatch(
         max_score_offset,
     };
     let mut out = XFuseOut::read(*seq1_align_len, *seq2_align_len, seed, *fence_hit);
-    if mode == 1 {
-        let result = x_fused_on(
-            reverse,
-            &input,
-            &mut non_affine_mem.last_seq2_off,
-            &mut non_affine_mem.max_score,
-            &mut out,
-        );
-        out.write(seq1_align_len, seq2_align_len, seed, fence_hit);
-        return Some(result);
-    }
-
-    // LOSAT_X_GREEDYFUSESHADOW: this module on copies of the state the set-up left ...
-    let mut rows = non_affine_mem.last_seq2_off.clone();
-    let mut max_score = non_affine_mem.max_score.clone();
-    let fused = x_fused_on(reverse, &input, &mut rows, &mut max_score, &mut out);
-    // ... and the reference: the whole call again on the scratch itself. Its set-up writes the
-    // values it wrote before this dispatch (the same inputs), so it reaches its loop from the
-    // same state.
-    X_SHADOW_REFERENCE.with(|flag| flag.set(true));
-    let reference = blast_greedy_align(
-        seq1,
-        len1,
-        seq2,
-        len2,
+    let result = x_fused_on(
         reverse,
-        xdrop_threshold,
-        match_cost,
-        mismatch_cost,
-        seq1_align_len,
-        seq2_align_len,
-        max_dist,
-        non_affine_mem,
-        None,
-        rem,
-        fence_hit,
-        seed,
+        &input,
+        &mut non_affine_mem.last_seq2_off,
+        &mut non_affine_mem.max_score,
+        &mut out,
     );
-    X_SHADOW_REFERENCE.with(|flag| flag.set(false));
-    let reference_out = XFuseOut::read(*seq1_align_len, *seq2_align_len, seed, *fence_hit);
-    assert!(
-        (fused, out) == (reference, reference_out),
-        "LOSAT_X_GREEDYFUSESHADOW: result differs (len1={len1} len2={len2} reverse={reverse} \
-         xdrop={xdrop_threshold} costs={match_cost}/{mismatch_cost} max_dist={max_dist}): fused \
-         {fused} {out:?} reference {reference} {reference_out:?}"
-    );
-    for (row, (fused_row, reference_row)) in rows
-        .iter()
-        .zip(non_affine_mem.last_seq2_off.iter())
-        .enumerate()
-    {
-        assert!(
-            fused_row == reference_row,
-            "LOSAT_X_GREEDYFUSESHADOW: row {row} differs (len1={len1} len2={len2} \
-             reverse={reverse} max_dist={max_dist})"
-        );
-    }
-    assert!(
-        max_score == non_affine_mem.max_score,
-        "LOSAT_X_GREEDYFUSESHADOW: max_score differs (len1={len1} len2={len2} reverse={reverse} \
-         max_dist={max_dist})"
-    );
-    X_SHADOW_COMPARED.fetch_add(1, Ordering::Relaxed);
-    Some(reference)
+    out.write(seq1_align_len, seq2_align_len, seed, fence_hit);
+    Some(result)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::X_GREEDY_TEST_MODE;
+    use super::super::{blast_greedy_align, GapPrelimEditBlock};
     use super::*;
 
     struct Rng(u64);
@@ -1045,18 +925,11 @@ mod tests {
         fence_hit: bool,
     }
 
-    /// `blast_greedy_align` with the LOSAT_X_GREEDYFUSE mode `fuse_mode`, the LOSAT_X_GREEDYFAST
-    /// mode `greedy_mode`, and the plain build of this module when `plain`.
-    fn call(
-        fuse_mode: u8,
-        greedy_mode: u8,
-        plain: bool,
-        mem: &mut GreedyNonAffineMem,
-        p: &Problem,
-    ) -> Outcome {
-        X_GREEDY_FUSE_TEST_MODE.with(|m| m.set(Some(fuse_mode)));
-        X_GREEDY_TEST_MODE.with(|m| m.set(Some(greedy_mode)));
+    /// `blast_greedy_align` score only (this module, in the plain build when `plain`), or with an
+    /// edit block (`traceback`: `x_greedy_row`, the loop this module replaces without one).
+    fn call(traceback: bool, plain: bool, mem: &mut GreedyNonAffineMem, p: &Problem) -> Outcome {
         X_GREEDY_FUSE_TEST_PLAIN.with(|m| m.set(plain));
+        let mut edit = GapPrelimEditBlock::new();
         // values the call overwrites
         let mut seed = GreedySeed {
             start_q: -7,
@@ -1078,13 +951,10 @@ mod tests {
             &mut seq2_align_len,
             p.max_dist,
             mem,
-            None,
-            4,
+            traceback.then_some(&mut edit),
             &mut fence_hit,
             &mut seed,
         );
-        X_GREEDY_FUSE_TEST_MODE.with(|m| m.set(None));
-        X_GREEDY_TEST_MODE.with(|m| m.set(None));
         X_GREEDY_FUSE_TEST_PLAIN.with(|m| m.set(false));
         Outcome {
             ret,
@@ -1095,18 +965,27 @@ mod tests {
         }
     }
 
-    /// The memory a call leaves: both rows and `max_score`, whole.
-    fn assert_same_memory(fused: &GreedyNonAffineMem, reference: &GreedyNonAffineMem, what: &str) {
-        for row in 0..2 {
-            assert!(
-                fused.last_seq2_off[row] == reference.last_seq2_off[row],
-                "{what}: row {row} differs"
-            );
-        }
+    /// `max_score`, whole (the rows of a traceback call are not the rows of a score-only call).
+    fn assert_same_max_score(
+        fused: &GreedyNonAffineMem,
+        reference: &GreedyNonAffineMem,
+        what: &str,
+    ) {
         assert!(
             fused.max_score == reference.max_score,
             "{what}: max_score differs"
         );
+    }
+
+    /// The memory two score-only calls leave: both rows and `max_score`, whole.
+    fn assert_same_memory(a: &GreedyNonAffineMem, b: &GreedyNonAffineMem, what: &str) {
+        for row in 0..2 {
+            assert!(
+                a.last_seq2_off[row] == b.last_seq2_off[row],
+                "{what}: row {row} differs"
+            );
+        }
+        assert_same_max_score(a, b, what);
     }
 
     /// Related sequences (60-100 % identity, substitutions and indels), ambiguity bytes in one or
@@ -1236,12 +1115,11 @@ mod tests {
     ///     if (edit_block == NULL)
     ///         return best_dist;
     /// ```
-    /// EXPERIMENT (LOSAT_X_GREEDYFUSE / LOSAT_X_GREEDYFUSESHADOW).
-    ///
     /// Sequences of calls on one scratch per path, so that the cells earlier calls left matter:
-    /// the ported loop (LOSAT_X_GREEDYFAST off), the fast rows (on), this module in the AVX2 build
-    /// and in the plain build, and the shadow. After every call: the same return value, align
-    /// lengths, seed and `fence_hit`, and the same rows and `max_score` as the ported loop.
+    /// `x_greedy_row` (a call with an edit block runs it), this module in the AVX2 build and in
+    /// the plain build. After every call: the same return value, align lengths, seed and
+    /// `fence_hit`, and the same `max_score` as `x_greedy_row`; the two builds also leave the
+    /// same rows.
     #[test]
     fn x_fused_greedy_matches_reference_on_call_sequences() {
         let histories: usize = std::env::var("LOSAT_FUZZ_CASES")
@@ -1254,13 +1132,10 @@ mod tests {
         let mut unit_costs = 0usize;
         let mut other_costs = 0usize;
         X_GREEDY_FUSE_TEST_REST.with(|n| n.set((0, 0)));
-        let compared_before = X_SHADOW_COMPARED.load(Ordering::Relaxed);
         for history in 0..histories {
             let mut reference = GreedyNonAffineMem::new();
-            let mut fast_rows = GreedyNonAffineMem::new();
             let mut fused = GreedyNonAffineMem::new();
             let mut plain = GreedyNonAffineMem::new();
-            let mut shadow = GreedyNonAffineMem::new();
             for step in 0..1 + rng.below(12) {
                 let p = problem(&mut rng);
                 let what = format!(
@@ -1275,19 +1150,18 @@ mod tests {
                     p.max_dist,
                     p.fence_in
                 );
-                let expected = call(0, 0, false, &mut reference, &p);
-                let rows = call(0, 1, false, &mut fast_rows, &p);
-                assert_eq!(rows, expected, "{what}: fast rows");
-                assert_same_memory(&fast_rows, &reference, &format!("{what}: fast rows"));
-                let got = call(1, 0, false, &mut fused, &p);
+                let expected = call(true, false, &mut reference, &p);
+                let got = call(false, false, &mut fused, &p);
                 assert_eq!(got, expected, "{what}: fused");
-                assert_same_memory(&fused, &reference, &format!("{what}: fused"));
-                let got = call(1, 0, true, &mut plain, &p);
+                assert_same_max_score(&fused, &reference, &format!("{what}: fused"));
+                let got = call(false, true, &mut plain, &p);
                 assert_eq!(got, expected, "{what}: fused, plain build");
-                assert_same_memory(&plain, &reference, &format!("{what}: fused, plain build"));
-                let got = call(2, 1, false, &mut shadow, &p);
-                assert_eq!(got, expected, "{what}: shadow");
-                assert_same_memory(&shadow, &reference, &format!("{what}: shadow"));
+                assert_same_max_score(&plain, &reference, &format!("{what}: fused, plain build"));
+                assert_same_memory(
+                    &plain,
+                    &fused,
+                    &format!("{what}: plain build and AVX2 build"),
+                );
 
                 calls += 1;
                 if p.fence_in {
@@ -1325,10 +1199,6 @@ mod tests {
         assert!(early > 0 && gated > 0, "{summary}");
         assert!(short > 1000 && long > 1000, "{summary}");
         assert!(other_costs * 5 > calls, "{summary}");
-        assert!(
-            X_SHADOW_COMPARED.load(Ordering::Relaxed) > compared_before,
-            "shadow comparisons not counted"
-        );
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:331-334,356-359,571-576
@@ -1342,12 +1212,11 @@ mod tests {
     ///             	return 0;
     ///             }
     /// ```
-    /// EXPERIMENT (LOSAT_X_GREEDYFUSE).
-    ///
     /// A fence inside the loop, reached by a slide that stops within eight positions (the
     /// eight-byte test), by a slide of eight or more, and with fewer than eight positions left:
-    /// 0 and `fence_hit` at once, with the rows, `max_score`, align lengths and seed the ported
-    /// loop leaves, on scratch with stale cells.
+    /// 0 and `fence_hit` at once, with the `max_score`, align lengths and seed `x_greedy_row`
+    /// leaves, and the same rows in the plain build as in the AVX2 build, on scratch with stale
+    /// cells.
     #[test]
     fn x_fused_greedy_fence_inside_the_loop() {
         // (length, substitution at, fence at, slides of the fence diagonal: (short, long))
@@ -1380,19 +1249,28 @@ mod tests {
                 };
                 let mut reference = GreedyNonAffineMem::new();
                 let mut fused = GreedyNonAffineMem::new();
+                let mut plain = GreedyNonAffineMem::new();
                 reference.ensure_base_capacity(48);
                 fused.ensure_base_capacity(48);
+                plain.ensure_base_capacity(48);
                 for row in 0..2 {
                     reference.last_seq2_off[row].fill(123);
                     fused.last_seq2_off[row].fill(123);
+                    plain.last_seq2_off[row].fill(123);
                 }
-                let expected = call(0, 0, false, &mut reference, &p);
+                let expected = call(true, false, &mut reference, &p);
                 assert!(expected.fence_hit && expected.ret == 0, "{expected:?}");
                 X_GREEDY_FUSE_TEST_REST.with(|n| n.set((0, 0)));
-                let got = call(1, 0, false, &mut fused, &p);
+                let got = call(false, false, &mut fused, &p);
                 let taken = X_GREEDY_FUSE_TEST_REST.with(Cell::get);
                 assert_eq!(got, expected, "len {len} fence {fence} reverse {reverse}");
-                assert_same_memory(&fused, &reference, "fence");
+                assert_same_max_score(&fused, &reference, "fence");
+                let got = call(false, true, &mut plain, &p);
+                assert_eq!(
+                    got, expected,
+                    "len {len} fence {fence} reverse {reverse}: plain"
+                );
+                assert_same_memory(&plain, &fused, "fence: plain build and AVX2 build");
                 // the slides of distance 1 before the fence: the shifted diagonals stop early
                 assert!(
                     taken.0 >= rest.0 && taken.1 == rest.1,

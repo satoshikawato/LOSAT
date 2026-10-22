@@ -289,7 +289,7 @@ where
             return Ok(Vec::new());
         }
         let range = blocks[i];
-        let block = db.read_block(range).map_err(search_read_error)?;
+        let block = super::x_read_block(db, range).map_err(search_read_error)?;
         let mut kept = Vec::new();
         for j in 0..block.len() {
             let ordinal = range.first_ordinal + j as u32;
@@ -297,6 +297,7 @@ where
                 kept.push((ordinal, result));
             }
         }
+        super::x_done_block(block);
         Ok(kept)
     };
     let window = pool

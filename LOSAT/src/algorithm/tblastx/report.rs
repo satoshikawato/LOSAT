@@ -1177,8 +1177,8 @@ pub(crate) enum TblastxOutputFormat {
     Seqalign(crate::report::serial::SerialFormat),
     /// BLAST XML (outfmt 5, `tblastx/blast_xml.rs`).
     Xml,
-    /// The XML2 and JSON documents (outfmt 16 and 15), written from the same records as
-    /// outfmt 5 (`tblastx/blast_xml.rs`).
+    /// The XML2 and JSON documents (outfmt 16, 15, 14 and 13), written from the same records as
+    /// outfmt 5 (`tblastx/blast_xml.rs`); 14 and 13 as side files with this output as the master.
     Xml2(crate::report::blast_xml2::Xml2Kind),
 }
 
@@ -1226,6 +1226,8 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
         Ok(5) => TblastxOutputFormat::Xml,
         Ok(16) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Single16),
         Ok(15) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Single15),
+        Ok(14) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Files14),
+        Ok(13) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Files13),
         _ => TblastxOutputFormat::Tabular,
     }
 }
@@ -1852,6 +1854,8 @@ mod tests {
         );
         for (outfmt, structured) in [
             ("5", true),
+            ("13", true),
+            ("14", true),
             ("15", true),
             ("16", true),
             ("0", false),

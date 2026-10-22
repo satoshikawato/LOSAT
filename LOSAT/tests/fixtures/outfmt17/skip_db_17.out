@@ -1,0 +1,5 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:480
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/micromamba/bin/blastn -query q_skip.fna -db db/snucl -query_loc 20-300 -num_threads 1 -outfmt 17 	PN:blastn
+BL_ORD_ID:0	0	Query_1	31	255	45H200M4D66M177H	*	0	0	*	*	AS:i:217	EV:f:2.74788e-116	NM:i:4	PI:f:95.11	BS:f:401.843
+BL_ORD_ID:1	16	Query_1	36	255	25H146M2I4M1I92M207H	*	0	0	*	*	AS:i:141	EV:f:4.86592e-74	NM:i:3	PI:f:87.19	BS:f:261.498

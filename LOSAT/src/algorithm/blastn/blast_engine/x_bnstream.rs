@@ -382,11 +382,18 @@ mod tests {
     // With `assist`, the threads that wait for the window run the chunks that a slow item's
     // search hands out: a pass whose first item is long and parallel (the long subject of a `-db`
     // search) ends with the other threads' help, in item order.
+    //
+    // The first chunk (run inline by the thread that searches item 0, while the other chunks wait
+    // in its deque) holds until another thread has run a chunk, so that the test does not depend
+    // on the other threads being scheduled before item 0 ends on a loaded host (CI ran it at ~50 %
+    // failures). Without the assist the other threads never take a chunk, and the deadline ends
+    // the wait so that the assertion fails instead of the test hanging.
     #[test]
     fn waiting_threads_run_a_long_items_nested_jobs_with_assist() {
         use rayon::prelude::*;
         use std::collections::HashSet;
         use std::sync::Mutex;
+        use std::time::{Duration, Instant};
         let threads = 4;
         let runners: Mutex<HashSet<usize>> = Mutex::new(HashSet::new());
         let search = |_: &mut (), i: usize| -> u64 {
@@ -398,6 +405,12 @@ mod tests {
                             .lock()
                             .unwrap()
                             .insert(rayon::current_thread_index().unwrap());
+                        if x == 0 {
+                            let deadline = Instant::now() + Duration::from_secs(30);
+                            while runners.lock().unwrap().len() < 2 && Instant::now() < deadline {
+                                std::thread::yield_now();
+                            }
+                        }
                         (0..20_000u64).fold(x as u64, |a, y| a.wrapping_mul(31).wrapping_add(y))
                     })
                     .reduce(|| 0, u64::wrapping_add)

@@ -918,7 +918,7 @@ fn a_database_title_outside_the_printable_range_leaves_the_search_of_all_queries
         let fasta = dir.join(format!("{}.faa", name.replace(' ', "_")));
         std::fs::write(&fasta, text).unwrap();
         let db = dir.join(name.replace(' ', "_"));
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("makedb")
             .arg("-in")
             .arg(&fasta)
@@ -972,7 +972,7 @@ fn a_database_name_outside_us_ascii_leaves_the_search_of_all_queries() {
     let named = dir.join("d\u{e9}");
     std::fs::create_dir_all(&named).unwrap();
     let db = named.join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
@@ -1067,7 +1067,7 @@ fn the_frozen_ncbi_rows_of_two_query_batches_are_written_by_two_blocks() {
         }
         let expected_out = std::fs::read(frozen.join(format!("{row}.out"))).unwrap();
         for threads in THREADS {
-            let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+            let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
             for (name, _) in std::env::vars_os() {
                 let text = name.to_string_lossy();
                 if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -1148,7 +1148,7 @@ fn a_punctuation_database_title_stops_outfmt_6_blocks_but_not_the_others() {
         &subjects.replacen(&defline, ">, ,", 1),
     );
     let db = dir.join("punct");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(&source)

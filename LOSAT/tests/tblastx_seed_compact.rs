@@ -4,7 +4,7 @@
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_SEEDCOMPACT`
 //! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it on, the units of
-//! unit path keep their saved init HSPs as 28-byte records, copied out of a per-thread
+//! the unit path keep their saved init HSPs as 28-byte records, copied out of a per-thread
 //! vector at their exact length; the merge expands them into the same init lists, converts each
 //! chunk's list into a list of its exact length and moves the first chunk's list into the empty
 //! frame list. Every test reads the `[X_STATS] SEEDCOMPACT` line, which is printed only while the

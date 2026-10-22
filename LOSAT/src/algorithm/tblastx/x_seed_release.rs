@@ -168,8 +168,9 @@ pub(super) struct XSeedBatch {
 impl XSeedBatch {
     // No NCBI counterpart: whether the reference frame loop can run for this batch is read
     // from the unit path before it moves into its holder (dispatch point 2 of PAIRPAR in
-    // run_impl.rs: the loop runs zero times exactly when the unit path exists). One batch is counted once, whatever the number of holders; the release of
-    // the unit path is counted only for a batch that has one.
+    // run_impl.rs: the loop runs zero times exactly when the unit path exists). One batch is
+    // counted once, whatever the number of holders; the release of the unit path is counted only
+    // for a batch that has one.
     /// The holders of a batch of `subjects` subjects.
     pub(super) fn new(
         lookup: BlastAaLookupTable,

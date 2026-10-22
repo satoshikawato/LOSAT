@@ -20,8 +20,8 @@ use crate::blastinput::seq_range::{
     QueryInput, RangeRole, SequenceRange,
 };
 
-// EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the seed stage of a subject as units of
-// (subject frame, chunk, query context) on the search pool; a child module of this file so that
+// EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the seed stage of a subject as units
+// of (subject frame, chunk, query context) on the search pool; a child module of this file so that
 // it uses the chunk helpers below unchanged (see tblastx/x_pair_par.rs).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-516
@@ -4160,9 +4160,9 @@ fn search_query_batch(
         }
         // Dispatch point 4 of the seed release (per subject): the frame loop below
         // indexes the worker's diagonal table through a raw pointer with `diag_mask`. A worker
-        // of a batch that the unit path takes has a table of zero cells, and the worker that ended the batch's last lookup stage has
-        // dropped its table. The loop must then run zero times; anything else stops the run
-        // here.
+        // of a batch that the unit path takes has a table of zero cells, and the worker that ended
+        // the batch's last lookup stage has dropped its table. The loop must then run zero times;
+        // anything else stops the run here.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
         // ```c
@@ -4763,8 +4763,8 @@ fn search_query_batch(
             };
 
             // EXPERIMENT (SEEDBUCKET, graduated on 2026-10-22: no variable): `scan_chunk_plain`
-            // above is the reference loop, untouched.  This variant appends the hits of every scan call to
-            // per-diagonal-range buckets and runs the same per-hit body (the macro
+            // above is the reference loop, untouched.  This variant appends the hits of every scan
+            // call to per-diagonal-range buckets and runs the same per-hit body (the macro
             // below, a copy of the loop body of `scan_chunk_plain`) bucket by bucket,
             // then puts the saved HSPs back into scan order.  See `x_seed_bucket`.
             //

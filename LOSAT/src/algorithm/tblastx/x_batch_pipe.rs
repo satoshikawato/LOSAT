@@ -31,9 +31,9 @@
 //! 2. The loop searches a batch itself when it reaches it, unless the batch before already
 //!    started it. A batch starts the next one at its *seed-stage end*: when the last of its
 //!    subjects has ended its seed stage (`XSeedEnd`, at dispatch point 5 of `process_subject`,
-//!    where the seed release (`x_seed_release.rs`) has freed the batch's lookup and unit tables), if the admission
-//!    rule lets it. That search is a job of the loop's scope (`rayon::in_place_scope`) and runs
-//!    on the pool like any other.
+//!    where the seed release (`x_seed_release.rs`) has freed the batch's lookup and unit tables),
+//!    if the admission rule lets it. That search is a job of the loop's scope
+//!    (`rayon::in_place_scope`) and runs on the pool like any other.
 //! 3. The loop takes a started batch's result from its slot. Until the slot is filled the loop's
 //!    thread runs the pool's jobs (`rayon::yield_now`), and sleeps 50 us when there is none, so
 //!    no thread waits for a condition outside rayon's latches and no job waits at all (plan v4

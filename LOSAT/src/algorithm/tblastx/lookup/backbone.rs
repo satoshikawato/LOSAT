@@ -187,19 +187,16 @@ impl BlastAaLookupTable {
     }
 }
 
-// The per-cell chains of a thin backbone are
-// carved from a few large blocks owned by the backbone instead of being one
-// `malloc`/`realloc`/`free` each.
+// The per-cell chains of a thin backbone are carved from a few large blocks owned by the backbone
+// instead of being one `malloc`/`realloc`/`free` each.
 //
-// A lookup table for one query chunk makes tens of thousands of chains that
-// start at 8 `Int4` and double as they fill, and frees them all when the
-// final backbone has been written. Under WebAssembly threads the allocator
-// has one lock for all threads, and two threads building lookup tables spend
-// more time waiting for it than allocating. The arena hands out blocks of the
-// same sizes with the same contents (zeroed where `calloc`/`Vec::resize` zero
-// them) and reuses the block a chain leaves when it doubles, so every chain
-// holds exactly the integers a `Vec` chain held; only where the block lives
-// changes. Everything is released when the backbone is dropped.
+// A lookup table for one query chunk makes tens of thousands of chains that start at 8 `Int4` and
+// double as they fill, and frees them all when the final backbone has been written. Under
+// WebAssembly threads the allocator has one lock for all threads, and two threads building lookup
+// tables spend more time waiting for it than allocating. The arena hands out blocks of the same
+// sizes with the same contents (zeroed where `calloc`/`Vec::resize` zero them) and reuses the
+// block a chain leaves when it doubles, so every chain holds exactly the integers a `Vec` chain
+// held; only where the block lives changes. Everything is released when the backbone is dropped.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:48-72
 // ```c
@@ -231,7 +228,7 @@ impl BlastAaLookupTable {
 // ```
 // NCBI frees each chain when it has been copied into the final backbone. The arena frees all its
 // blocks together when the backbone is dropped. Reuse of memory only.
-
+//
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:52,67
 // ```c
 // chain = (Int4 *) malloc(chain_size * sizeof(Int4));

@@ -55,7 +55,8 @@
 //! code runs the same statements on a hit in the same way; only the order across diagonals
 //! (which cell is visited next) differs. Within one diagonal the hits arrive in scan order, so
 //! each cell goes through the same states and starts the same extensions. This is by
-//! construction (integer operations only); `tests/tblastx_seed_bucket.rs` compares real runs with NCBI's output.
+//! construction (integer operations only); `tests/tblastx_seed_bucket.rs` compares real runs with
+//! NCBI's output.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-309
 //! ```c
@@ -119,18 +120,6 @@ pub(crate) fn min_cells() -> usize {
     })
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
-// ```c
-// while (scan_range[1] <= scan_range[2]) {
-// ...
-//     for (i = 0; i < hits; ++i) {
-//         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-//         diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
-// Dispatch point: chooses between the scan-order loop (the port of the C loop above) and the
-// bucketed order, by table size.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
 // ```c
 // while (scan_range[1] <= scan_range[2]) {

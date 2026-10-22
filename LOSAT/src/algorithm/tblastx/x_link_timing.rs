@@ -35,14 +35,15 @@
 //!
 //! # How a call learns that it is timed
 //!
-//! The linking function has callers that are not a search's (unit tests), so its arguments stay as they are. The batch function sets a flag of the calling
-//! thread immediately before each of its two calls (`XLinkTimer::arm`), naming the call and the
-//! batch's counters; `LinkLap::start`, the first statement of `link_in_place`, takes the flag;
-//! the batch function clears it after the call (`XLinkTimer::disarm`) in case the call took
-//! another body. Nothing between `arm` and `LinkLap::start` hands the thread to other work. The
-//! pool can give the thread another subject while it waits for its own groups, but only after the
-//! flag was taken, and that subject's calls arm, take and clear the flag before the thread comes
-//! back, so each call adds to the counters it was armed with.
+//! The linking function has callers that are not a search's (unit tests), so its arguments stay as
+//! they are. The batch function sets a flag of the calling thread immediately before each of its
+//! two calls (`XLinkTimer::arm`), naming the call and the batch's counters; `LinkLap::start`, the
+//! first statement of `link_in_place`, takes the flag; the batch function clears it after the call
+//! (`XLinkTimer::disarm`) in case the call took another body. Nothing between `arm` and
+//! `LinkLap::start` hands the thread to other work. The pool can give the thread another subject
+//! while it waits for its own groups, but only after the flag was taken, and that subject's calls
+//! arm, take and clear the flag before the thread comes back, so each call adds to the counters it
+//! was armed with.
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -69,14 +70,14 @@ pub(super) enum LinkStage {
     Reset,
     /// The sort of the list by reverse position (`sort_in_place`, `rev_compare_hsps_tbx`).
     Sort,
-    /// The cut of the sorted list into its groups (`groups_off_the_end`).
+    /// The cut of the sorted list into its groups as sub-slices (`group_starts`, `group_slices`).
     Groups,
     /// The per-group linking, serial or on the pool, with the results back in group order.
     Kernels,
-    /// The linked groups put back into one list (`assemble`).
+    /// The assembly: empty, the linked groups already lie in group order inside the one list.
     Assemble,
-    /// The two final sorts of the list's indices (`rev_compare_hsps_transl`, then
-    /// `fwd_compare_hsps_transl`).
+    /// The single final sort of the list's indices (`x_link_sort::final_sort`, the order of
+    /// `rev_compare_hsps_transl` then `fwd_compare_hsps_transl`).
     FinalSorts,
     /// The walk of the chains in the sorted order and the move of the records into it.
     Replay,

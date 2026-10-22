@@ -214,8 +214,9 @@ fn unmap(stderr: &str) -> (bool, [u64; 3]) {
 // tables and record vectors got the mapped capacity, and where it does not, none. The units save
 // too few records here for a copy of 128 KiB, which the unit tests and the larger searches of the
 // entry in diagnostics.md reach. `LOSAT_X_DEFAULT=0` turns the switch off (no line, the same
-// report), and `LOSAT_X_DEFAULT=0` with the switch set maps the tables of the unit path at four threads where it acts (the record vector of `LOSAT_X_SEEDCOMPACT`, which
-// is then off, does not exist).
+// report), and `LOSAT_X_DEFAULT=0` with the switch set maps the tables of the unit path at four
+// threads where it acts (the record vector of `LOSAT_X_SEEDCOMPACT`, which is then off, does not
+// exist).
 #[test]
 fn where_the_rule_holds_the_blocks_are_mapped_and_the_report_is_the_same() {
     let inputs = rule_holds("holds");

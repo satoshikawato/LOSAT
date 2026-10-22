@@ -1,5 +1,5 @@
-//! The order of the TBLASTX two-hit stage (`src/algorithm/tblastx/x_seed_bucket.rs`) on a whole search, against the output of NCBI
-//! BLAST+ 2.17.0.
+//! The order of the TBLASTX two-hit stage (`src/algorithm/tblastx/x_seed_bucket.rs`) on a whole
+//! search, against the output of NCBI BLAST+ 2.17.0.
 //!
 //! The bucketed order runs by default where TBLASTX is in its scan loop with a diagonal table of
 //! at least 2^21 cells. The searches of the fixture suites do not get there (the unit path takes

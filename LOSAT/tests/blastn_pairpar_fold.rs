@@ -22,9 +22,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and
-/// LOSAT_X_MBLUTONCE on 2026-10-18 (perf/bn-memory-rules), each `0`, the default before, unless the search sets it: every search here
-/// runs as it was written, with the switches off that it does not name (the default runs in
-/// `default_bundle.rs`).
+/// LOSAT_X_MBLUTONCE on 2026-10-18 (perf/bn-memory-rules), each `0`, the default before, unless the
+/// search sets it: every search here runs as it was written, with the switches off that it does not
+/// name (the default runs in `default_bundle.rs`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),

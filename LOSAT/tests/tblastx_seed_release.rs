@@ -167,9 +167,10 @@ impl Drop for TempFasta {
 // word_params = BlastInitialWordParametersFree(word_params);
 // s_BlastCoreAuxStructFree(aux_struct);
 // ```
-// The search of the fixture pair with `LOSAT_X_PAIRPARGATE=0` (the helper's default) runs on the unit path: one batch, its unit path released when the
-// units of the only subject have run, its lookup table (a stub) by the only seed stage, and no worker ever holds a diagonal
-// table. The report is NCBI's.
+// The search of the fixture pair with `LOSAT_X_PAIRPARGATE=0` (the helper's default) runs on the
+// unit path: one batch, its unit path released when the units of the only subject have run, its
+// lookup table (a stub) by the only seed stage, and no worker ever holds a diagonal table. The
+// report is NCBI's.
 #[test]
 fn the_unit_path_releases_the_tables_and_holds_no_worker_table() {
     let expected = ncbi_report();
@@ -220,7 +221,8 @@ fn the_frame_loop_releases_the_tables_and_its_worker_table() {
 // last record that ends, and every report equals the report of the same layout on the frame
 // loop at one thread (see the file header for why this comparison is against LOSAT). The frame-loop
 // runs take no unit (`units=0`) at either thread count: the total is 2,470 bases and the longest
-// subject 882, so the cost rule holds up to three threads.
+// subject 882, so the cost rule holds up to four threads (2 * 882 * 4 = 7,056 <= 3 * 2,470 =
+// 7,410).
 #[test]
 fn several_subjects_with_a_short_one_give_one_report_on_every_path() {
     let first = fasta_sequence(&fixture("short_hsp.subject.fna"));

@@ -801,9 +801,10 @@ pub(super) fn plan(table_size: usize, pv_array_bts: usize, parts: usize) -> (usi
 ///          mb_lt->hashtable[ecode] = index;
 /// ```
 /// Fills the tables as the word loop of `build_mb_lookup` does, with `parts` workers on the
-/// search pool (or one after another, `in_pool == false`, where the unit tests run it without a pool).
-/// Returns what the fill did (the read-once fill of LOSAT_X_MBLUTONCE or not). `resident`: `hashtable` is a kept table whose pages are mapped
-/// (LOSAT_X_MBLUTKEEP), on which the read-once fill skips its prefault round.
+/// search pool (or one after another, `in_pool == false`, where the unit tests run it without a
+/// pool). Returns what the fill did (the read-once fill of LOSAT_X_MBLUTONCE or not). `resident`:
+/// `hashtable` is a kept table whose pages are mapped (LOSAT_X_MBLUTKEEP), on which the read-once
+/// fill skips its prefault round.
 pub(super) fn fill(
     parts: usize,
     words: &Words<'_>,
@@ -815,8 +816,8 @@ pub(super) fn fill(
 }
 
 /// No NCBI counterpart: `fill` with LOSAT_X_MBLUTONCE given as `once` (the tests take each).
-/// `timed`: a build of the search, whose read-once phases LOSAT_TIMING's `[TIMING] x_mb_lookup_once` line counts. `resident`:
-/// as `fill`'s.
+/// `timed`: a build of the search, whose read-once phases LOSAT_TIMING's `[TIMING]
+/// x_mb_lookup_once` line counts. `resident`: as `fill`'s.
 fn fill_mode(
     once: bool,
     timed: bool,

@@ -34,9 +34,9 @@
 //! NCBI sorts with the C library's `qsort`, which is not stable: where its comparator returns 0
 //! the order is the library's. LOSAT's defined behaviour is the stable sorts of its reference
 //! forms (`sort_linked_hsp_references` in `linking.rs`, and the index sort of the in-place path),
-//! which the fixtures compare with NCBI's reports. This file reproduces the index order of those stable
-//! sorts and changes no comparator. No NCBI counterpart for a parallel sort or for one sort in
-//! place of two: both are other ways to compute the same order.
+//! which the fixtures compare with NCBI's reports. This file reproduces the index order of those
+//! stable sorts and changes no comparator. No NCBI counterpart for a parallel sort or for one sort
+//! in place of two: both are other ways to compute the same order.
 //!
 //! # Why the index order is today's
 //!
@@ -366,8 +366,8 @@ pub(super) fn sort_indices(
 //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_FwdCompareHSPsTransl);
 // ```
-// The two final sorts of `x_hsp_inplace::replay_in_place_counted`: one stable sort with `s_FwdCompareHSPsTransl`, ties by `s_RevCompareHSPsTransl` (module doc,
-// item 1).
+// The two final sorts of `x_hsp_inplace::replay_in_place_counted`: one stable sort with
+// `s_FwdCompareHSPsTransl`, ties by `s_RevCompareHSPsTransl` (module doc, item 1).
 /// Sorts `order` into the order of today's two final sorts over `records`.
 pub(super) fn final_sort(order: &mut [usize], records: &[UngappedHit], site: Site) {
     final_sort_as(

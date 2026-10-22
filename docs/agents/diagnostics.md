@@ -873,10 +873,10 @@ Same values, faster computation:
   checks `[X_STATS] PAIRPAR units=0`. With `LOSAT_X_STATS=1` the line
   `[X_STATS] SEEDBUCKET bucketed_scans=... flushes=...` tells how many scans ran in the bucketed
   order (`LOSAT/tests/tblastx_seed_bucket.rs` uses it). The shadow (HSP lists and the whole
-  diagonal table compared with the scan-order loop on every chunk) was run on every platform before
-  the graduation and went with the variable. BLASTX keeps the scan-order loop: an opt-in bucketed
-  order for BLASTX (blastx_ap 8.4 -> 8.7 s, no gain measured) and its shadow were removed, and
-  SEEDBUCKET acts on TBLASTX only.
+  diagonal table compared with the scan-order loop on every chunk) went with the variable. BLASTX
+  keeps the scan-order loop: an opt-in
+  bucketed order for BLASTX (blastx_ap 8.4 -> 8.7 s, no gain measured) and its shadow were
+  removed, and SEEDBUCKET acts on TBLASTX only.
 
 Rebuilding less:
 
@@ -967,7 +967,7 @@ Rebuilding less:
   (per-thread memo of the last subject, byte-equal input; `blastx/x_seg_memo.rs`). Shadow:
   `LOSAT_X_BXSEGMEMOSHADOW=1` (the masker also runs on every call). Strict-set candidate (S-C, round 5).
 - HSPINPLACE (graduated 2026-10-22, in the set since 2026-10-12; no variable, no `LOSAT_X_HSPINPLACESHADOW`;
-  always on) (TBLASTX, memory) the HSP list of a subject is sorted, cut into linking groups, put together
+  always on) (TBLASTX, memory) the HSP list of a subject is sorted, linked as sub-slices
   and replayed into NCBI's output order without a second whole copy alive (`tblastx/x_hsp_inplace.rs`,
   exactness argument in its header). The index sorts of `sort_ungapped_hits_by_index_replay` (score order,
   link order) move the records inside the list, cycle by cycle, after the index sort; the linking call links
@@ -1842,8 +1842,10 @@ Rebuilding less:
 - `LOSAT_X_TBXKMERGESHADOW=1` shadow of `LOSAT_X_TBXKMERGE` (turns the path on): the units return unsorted
   lists, the merge runs the statements of the switch off on a copy and the switch's merge on the lists
   (sorting them first), and every field of every HSP must be equal; the first difference stops the run.
-  One line at exit: `[X_SHADOW] TBXKMERGE subjects_compared= hsps_compared=`. The unit tests of
-  `x_pair_par.rs` compare the subject's list with the reference frame loop's.
+  One line at exit: `[X_SHADOW] TBXKMERGE subjects_compared= hsps_compared=`. The unit test
+  `compact_check` in `x_pair_par.rs` compares the k-merge with the plain merge (both are the unit path);
+  unit path against frame loop is checked only through the frozen NCBI bytes at 1 thread (frame loop)
+  and 4 threads (units).
 - `LOSAT_X_TBXPIPE=1` (TBLASTX, speed; in the strict set since 2026-10-19, on by default; acts only with
   two or more threads in a native build and two or more query batches, and
   not with debugging output (`LOSAT_DEBUG*`, `LOSAT_TRACE_HSP`, `LOSAT_DIAGNOSTICS`,
@@ -2176,9 +2178,11 @@ Rebuilding less:
   list, without its copy). No value, order or sort changes. With the switch off the statements of the unit
   path run as before, after one read of the mode per subject (`x_hit` and the unit scan are generic over
   the list they save into and compiled once for each). It acts only where the unit path runs (the
-  scan loop is untouched). There is no shadow variable of its own: the unit tests of `x_pair_par.rs`
-  compare the unit path's `combined_ungapped_hits`, made from the compact lists, with the reference
-  loop's. `LOSAT_X_STATS=1` prints, whenever the
+  scan loop is untouched). There is no shadow variable of its own: the unit test `compact_check` in
+  `x_pair_par.rs` compares the unit path's `combined_ungapped_hits`, made from the compact lists, with
+  the one made from the full lists (both are the unit path), and the per-unit hits with
+  `masked_reference`; unit path against frame loop is checked only through the frozen NCBI bytes at
+  1 thread (frame loop) and 4 threads (units). `LOSAT_X_STATS=1` prints, whenever the
   switch is on, `[X_STATS] SEEDCOMPACT subjects= units= records= bytes_saved=` (subjects and units merged
   from compact lists, records expanded, and records x (size of `InitHSP` - 28): the bytes the unit
   outputs no longer request; all 0 where no unit path runs). `LOSAT/tests/tblastx_seed_compact.rs` reads
@@ -3864,7 +3868,8 @@ Scheduling (each value computed by one thread with the original function; order 
   prints one `x_pairpar` line. The shadow (`LOSAT_X_PAIRPARSHADOW=1`: the unit path and the reference
   loop for every subject, the subject's combined HSP list compared field by field, one `[X_SHADOW]
   PAIRPAR` summary line) went with the variable; the unit tests of `x_pair_par.rs` still compare the
-  unit lists with the reference loop's. The tests that need the frame loop reach it at one thread
+  per-unit hits with `masked_reference`, and unit path against frame loop is checked only through the
+  frozen NCBI bytes at 1 thread (frame loop) and 4 threads (units). The tests that need the frame loop reach it at one thread
   with `LOSAT_X_PAIRPARGATE=1` (the cost rule), with several subjects without a dominant one, or with
   `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1`, and assert `units=0`.
 - `LOSAT_X_TBXBAND=1` (TBLASTX, speed; in the strict set from the pull request that added it,
@@ -3886,8 +3891,8 @@ Scheduling (each value computed by one thread with the original function; order 
   masked unit tables; next entry): a memory rule (`x_band_fits`), since a
   unit's diagonal table has a cell for every raw diagonal of its query group and subject chunk, one
   table per thread, against the reference's one table of 2^k cells per subject in flight.
-  `LOSAT_X_STATS=1` adds `band=` (such batches the units took) to the `[X_STATS] PAIRPAR` line;
-  the `[X_SHADOW] PAIRPAR` line of the shadow carries the same count. `tests/tblastx_band.rs` runs a
+  `LOSAT_X_STATS=1` adds `band=` (such batches the units took) to the `[X_STATS] PAIRPAR` line.
+  `tests/tblastx_band.rs` runs a
   band batch through the binary. Measured (workstation node 1, 16 or 8 booked cores or one, each
   run after a 3 s warm-up of its cores, alternating order, medians of 3 runs unless noted, every
   report equal across arms), against `=0`: Sakai 1 Mb x MG1655 1 Mb at 1 thread 27.27 -> 18.59 s

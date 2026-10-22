@@ -44,7 +44,7 @@
 //! `hp_frame_number[frame_index]`), each linked in place, and the array is read back in chain
 //! order: the slices are closer to NCBI than the cut Vecs. NCBI has no second array of the HSPs.
 //!
-//! # Why the list after the per-group linking is the reference's (each point checked against the code)
+//! # Why the list after the per-group linking is the reference's (each point checked)
 //!
 //! 1. The slices are the reference's groups (same test, same order). The reference body starts
 //!    a group at a record whose `translated_context_group` or sign of `s_frame` differs from the
@@ -112,16 +112,16 @@
 //!
 //! # Memory
 //!
-//! In the cut form, at the end of the kernels the linked groups (one Vec each, exactly sized) and the new
-//! list of capacity n are alive together while the list is filled. Here the one list stays,
+//! In the cut form, at the end of the kernels the linked groups (one Vec each, exactly sized) and
+//! the new list of capacity n are alive together while the list is filled. Here the one list stays,
 //! and the only allocation of the group step is the vector of `starts.len() + 1` slices.
 //!
 //! Measured once on 2026-10-13 (one binary; a loaded machine). massif, AP027131 x AP027133
 //! (genetic code 4, one thread), heap requested: with the cut the peak is 107.3 MiB in the
 //! first linking call (the new list 49.1 MiB and the linked groups 36.8 + 12.3 MiB); with the
 //! slices the linking call reaches 77.3 MiB at most and the peak of the search is 102.4 MiB at
-//! the end of the seed stage, as with the cut. Max RSS (medians of three alternating runs): that pair 110 ->
-//! 111 MiB at one thread and 162 -> 163 at eight (its RSS peak is in the seed stage);
+//! the end of the seed stage, as with the cut. Max RSS (medians of three alternating runs): that
+//! pair 110 -> 111 MiB at one thread and 162 -> 163 at eight (its RSS peak is in the seed stage);
 //! NZ_CP006932 against itself (516,395 HSPs in the first linking call) 142 -> 132 MiB at one
 //! thread and 242 -> 222 at eight. `groups` of the first linking call 0.011 -> 0.002 s and
 //! `assemble` 0.010 -> 0.000 s (the pair, one thread).
@@ -217,8 +217,8 @@ pub(super) struct Call<'a> {
 //    hp_frame_start[cur_frame] = H;
 // ```
 // NCBI's groups are sublists of the sorted array: `hp_frame_start[k]` and `hp_frame_number[k]`.
-// The runs between the starts of `group_starts`, split off the end as `groups_off_the_end` cuts
-// them (module doc, item 1), as views of the list.
+// The runs between the starts of `group_starts`, as views of the list: disjoint sub-slices of the
+// one sorted list, not copies (module doc, item 1).
 /// The groups of `hits` (maximal runs of one `translated_context_group` and one sign of
 /// `s_frame`, whose starts after the first are `starts`) as disjoint sub-slices, in list order.
 fn group_slices<'h>(hits: &'h mut [UngappedHit], starts: &[usize]) -> Vec<&'h mut [UngappedHit]> {
@@ -249,8 +249,8 @@ fn group_slices<'h>(hits: &'h mut [UngappedHit], starts: &[usize]) -> Vec<&'h mu
 //    hp_frame_start[frame_index]->prev = hp_start;
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
-// One group through the reference's per-group function with the reference's arguments, on its records where they
-// lie (module doc, item 2): the reference body's per-group call, on a slice.
+// One group through the reference's per-group function with the reference's arguments, on its
+// records where they lie (module doc, item 2): the reference body's per-group call, on a slice.
 /// Links one group in place.
 fn link_one_slice(group: &mut [UngappedHit], args: &GroupArgs<'_>, pool: &mut BufferPools) {
     if args.use_legacy {
@@ -400,8 +400,8 @@ pub(super) fn link_groups(
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
 // `link_groups` with the two variables that choose the literal port and size the scratch given
-// (the tests run both ways). The statements of the reference's group step in their order, with the cut
-// replaced by the slices and the assembly by nothing.
+// (the tests run both ways). The statements of the reference's group step in their order, with the
+// cut replaced by the slices and the assembly by nothing.
 /// `link_groups` with `legacy_linking_requested()` and `link_shadow_enabled()` given.
 fn link_groups_as(
     mut hits: Vec<UngappedHit>,
@@ -410,8 +410,8 @@ fn link_groups_as(
     use_legacy: bool,
     fast_shadow: bool,
 ) -> (Vec<UngappedHit>, usize) {
-    // As `groups_off_the_end`: the list may arrive with spare capacity (it was grown by
-    // `extend`); give it back first.
+    // The list may arrive with spare capacity (it was grown by `extend`); give it back first, so
+    // the slices below and the replay at the end work on a list of exactly its length.
     hits.shrink_to_fit();
     let total_hits = hits.len(); // NCBI: hsp_list->hspcnt
     let starts = group_starts(&hits);
@@ -900,7 +900,8 @@ mod tests {
     //    hp_start->next = hp_frame_start[frame_index];
     // ```
     // The edges: an empty list (no group, no kernel), one HSP, one group of many HSPs with the
-    // pool allowed, and a list that arrives with spare capacity (given back, as the reference's cut does).
+    // pool allowed, and a list that arrives with spare capacity (given back, as the reference's cut
+    // does).
     #[test]
     fn empty_single_and_one_group_lists() {
         let (params, contexts) = two_query_contexts();

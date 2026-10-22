@@ -15,7 +15,9 @@
   megablast one-hit strips and pool lookup fill all run by their rules without a variable. The rules stay
   (`LOSAT_X_PAIRPARGATE`'s cost rule, the gates and guard of the unit path, the 2^21-cell minimum of the
   bucketed order with `LOSAT_X_SEEDBUCKET_MIN_CELLS`, the pool and query-block rules of the strips) and so do
-  their fallbacks, the reference frame loop, `scan_chunk_plain`, `build_groups` and the serial table fill. The
+  their fallbacks: for TBLASTX the reference frame loop, `scan_chunk_plain` and `build_groups`, for blastn
+  the queued fill `x_fill_mb_queued` and the reference seed scan. The serial table fill without a pool stays
+  as the harness of the unit tests that compare live fills. The
   shadow comparisons, the `[X_SHADOW] PAIRPAR`, `PAIRLUT`, `SEEDBUCKET`, `TBXUNITMASK` and `MBLUTONCE` lines
   and the `[X_PAIRPARSHADOW] blastn:` line, the one-hit stash path of the blastn strips, and the tests that
   existed only for the variables were deleted. `LOSAT_X_DEFAULT=0` no longer turns these paths off: the

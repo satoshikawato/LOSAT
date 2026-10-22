@@ -117,6 +117,18 @@ fn in_place_stats(stderr: &str) -> Option<[u64; 3]> {
     )
 }
 
+/// `[X_STATS] PAIRPAR`: units. At one thread the cost rule sends the fixture pair to the reference
+/// frame loop (`units=0`), at four threads it runs its units.
+fn check_path(stderr: &str, threads: u32, what: &str) {
+    let [units] = counters(stderr, "[X_STATS] PAIRPAR ", ["units"])
+        .unwrap_or_else(|| panic!("{what}: no [X_STATS] PAIRPAR line:\n{stderr}"));
+    if threads == 1 {
+        assert_eq!(units, 0, "{what}: the frame loop:\n{stderr}");
+    } else {
+        assert!(units > 0, "{what}: the unit path:\n{stderr}");
+    }
+}
+
 /// The checks every run shares: the stats line is there, the subject's two
 /// linking calls went through the path, every group of the in-place path was linked as a slice
 /// (the groups of the `HSPINPLACE` line of the same run), no call went back to the cut, and the
@@ -124,6 +136,7 @@ fn in_place_stats(stderr: &str) -> Option<[u64; 3]> {
 fn check_stats(stderr: &str, threads: u32, what: &str) -> (u64, u64) {
     let [linkings, groups, parallel_linkings, legacy_fallbacks] =
         stats(stderr).unwrap_or_else(|| panic!("{what}: no [X_STATS] LINKSLICES line:\n{stderr}"));
+    check_path(stderr, threads, what);
     assert_eq!(linkings, 2, "{what}:\n{stderr}");
     assert!(groups >= linkings, "{what}:\n{stderr}");
     assert_eq!(legacy_fallbacks, 0, "{what}:\n{stderr}");
@@ -150,7 +163,7 @@ fn check_stats(stderr: &str, threads: u32, what: &str) -> (u64, u64) {
 // The default search: the report is NCBI's, both linking calls link their groups as slices, and
 // the numbers are the same with one thread and four.
 #[test]
-fn the_switch_gives_ncbis_report_with_the_groups_linked_as_slices() {
+fn the_default_search_gives_ncbis_report_with_the_groups_linked_as_slices() {
     let expected = ncbi_report();
     let mut seen = Vec::new();
     for threads in THREADS {

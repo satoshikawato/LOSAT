@@ -41,7 +41,8 @@ pub(crate) mod x_mb_lut_keep;
 
 /// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): with
 /// LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the megablast table builds; then the
-/// `[X_SHADOW] MBLUTKEEP` line (LOSAT_X_MBLUTKEEPSHADOW) and, with LOSAT_TIMING, the `[TIMING] x_mb_lut_keep` line (`x_mb_lut_keep::print_summary`).
+/// `[X_SHADOW] MBLUTKEEP` line (LOSAT_X_MBLUTKEEPSHADOW) and, with LOSAT_TIMING, the `[TIMING]
+/// x_mb_lut_keep` line (`x_mb_lut_keep::print_summary`).
 pub fn x_mb_lookup_print_summary() {
     x_mb_lookup_par::print_summary();
     x_mb_lut_keep::print_summary();

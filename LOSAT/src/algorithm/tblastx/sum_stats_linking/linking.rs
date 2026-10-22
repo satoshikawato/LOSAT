@@ -34,8 +34,9 @@ use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_re
 
 use super::params::LinkingParams;
 
-// The HSP list sorted, grouped, put together and replayed without a second whole copy alive; a child module of this file so that it
-// uses the comparators, per-group functions and replay below unchanged (see tblastx/x_hsp_inplace.rs).
+// The HSP list sorted, linked as sub-slices and replayed without a second whole copy alive; a
+// child module of this file so that it uses the comparators, per-group functions and replay below
+// unchanged (see tblastx/x_hsp_inplace.rs).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-480
 // ```c
@@ -68,10 +69,9 @@ pub use x_hsp_inplace::print_summary as x_hsp_inplace_print_summary;
 mod x_link_sort;
 pub use x_link_sort::print_summary as x_link_sort_print_summary;
 
-// The groups of the
-// linking call of `x_hsp_inplace` linked as disjoint sub-slices of the one sorted list instead of
-// Vecs cut off it and put together again; a child module of this file so that it calls the
-// per-group functions below unchanged (see tblastx/x_link_slices.rs).
+// The groups of the linking call of `x_hsp_inplace` linked as disjoint sub-slices of the one
+// sorted list instead of Vecs cut off it and put together again; a child module of this file so
+// that it calls the per-group functions below unchanged (see tblastx/x_link_slices.rs).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
 // ```c

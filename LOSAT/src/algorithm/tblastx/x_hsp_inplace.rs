@@ -1,6 +1,6 @@
-//! The TBLASTX HSP list is sorted, cut into linking groups, put together again and replayed into
-//! NCBI's output order without a second whole copy of the list alive. Only where the records lie changes; every comparison,
-//! every per-group linking call and every value written is the reference's.
+//! The TBLASTX HSP list is sorted, linked as sub-slices and replayed into NCBI's output order
+//! without a second whole copy of the list alive. Only where the records lie changes; every
+//! comparison, every per-group linking call and every value written is the reference's.
 //!
 //! This file is a child module of `sum_stats_linking/linking.rs` (declared there with `#[path]`,
 //! as `lookup/x_lut_direct.rs` is for `backbone.rs`), so it uses that file's comparators,
@@ -500,11 +500,13 @@ pub(super) struct GroupArgs<'a> {
 // for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
 //    hsp_list->hsp_array[index] = H->hsp;
 // ```
-// The two final sorts on indices instead of references, the walk of `replay_ncbi_output_list`
-// with `results[order[i]]` for its `sorted_hits[i]`, and the records moved into the replayed
-// order when it holds every record exactly once (module doc, item 5).
-/// The result of the reference's two final sorts and `replay_ncbi_output_list` for a list of at
-/// least two HSPs, without a second list unless the replay leaves a record out or repeats one.
+// The reference's two final sorts as one composite sort on indices (`x_link_sort::final_sort`),
+// the walk of `replay_ncbi_output_list` with `results[order[i]]` for its `sorted_hits[i]`, and
+// the records moved into the replayed order when it holds every record exactly once (module
+// doc, item 5).
+/// The result of the reference's two final sorts (one composite sort here) and
+/// `replay_ncbi_output_list` for a list of at least two HSPs, without a second list unless the
+/// replay leaves a record out or repeats one.
 fn replay_in_place(
     results: Vec<UngappedHit>,
     lap: &mut LinkLap,
@@ -847,8 +849,6 @@ pub(super) fn linking_dispatch(
 mod tests {
     use super::super::tests::{fast_test_contexts, fast_test_cutoffs, mock_hit};
     use super::*;
-    use crate::algorithm::tblastx::blast_gapalign::score_compare_ungapped_hits_ncbi;
-    use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_replay;
 
     /// xorshift64, for reproducible random lists (as in the linking fuzz test).
     struct Rng(u64);

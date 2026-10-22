@@ -140,8 +140,11 @@
 //! as 28-byte records, NCBI's own record shape, copied out of a per-thread vector at their exact
 //! length; the merge expands them into today's `InitHSP`s, converts each chunk's list into a list
 //! of its exact length and moves the first chunk's list into the empty frame list. The section
-//! above `XUnitHsp` gives the exactness argument; The unit tests compare
-//! the result with the reference loop's.
+//! above `XUnitHsp` gives the exactness argument. The unit test `compact_check` compares, on the
+//! unit path, the compact records' expansion with the full lists and the merge of the compact
+//! records with the merge of the full lists (both sides are the unit path); the per-unit hits are
+//! compared with `masked_reference`. The unit path against the frame loop is checked only through
+//! the frozen NCBI bytes, at 1 thread (frame loop) and 4 threads (units).
 //!
 //! `LOSAT_X_SEEDUNMAP` (in the strict set: on unless `LOSAT_X_SEEDUNMAP` is `0`, or
 //! `LOSAT_X_DEFAULT=0` and it is not set; it acts on Linux with glibc only, where transparent huge
@@ -1576,8 +1579,9 @@ enum XHit {
 //    frame list the chunk list's elements in their order, which is what the empty-list branch of
 //    `merge_tblastx_subject_chunk_hits` computes (`combined.append(&mut incoming)`).
 // d. So the sort, conversion, offset adjustment, chunk merge and frame append and sort get today's
-//    inputs and run today's statements: `combined_ungapped_hits` is today's list. The unit tests
-//    compare it with the reference loop's.
+//    inputs and run today's statements: `combined_ungapped_hits` is today's list. The unit test
+//    `compact_check` compares the compact merge with the full-list merge (both are the unit path);
+//    unit path against frame loop is checked through the frozen NCBI bytes at 1 and 4 threads.
 // ---------------------------------------------------------------------------------------------
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:142-147

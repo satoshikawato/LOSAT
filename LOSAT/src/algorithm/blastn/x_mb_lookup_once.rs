@@ -121,10 +121,10 @@
 //! feature, or on wasm32 without `wasm-threads`, the loop runs; with `wasm-threads` the scopes run
 //! on the search pool, which this module never builds (memory losat-wasm-threads-main-only).
 //!
-//! Timing: with LOSAT_TIMING `[TIMING] x_mb_lookup_build` counts `once=<n>` (the builds this fill made) and
-//! `[TIMING] x_mb_lookup_once: fills= chunks= read_wall= read_max= read_sum= read_late= update_...
-//! last_... prefault_... arena= prefault_rounds= prefault_touches=` gives, per phase summed over
-//! the chunks of the search's fills: the calling worker's wall time from before
+//! Timing: with LOSAT_TIMING `[TIMING] x_mb_lookup_build` counts `once=<n>` (the builds this fill
+//! made) and `[TIMING] x_mb_lookup_once: fills= chunks= read_wall= read_max= read_sum= read_late=
+//! update_... last_... prefault_... arena= prefault_rounds= prefault_touches=` gives, per phase
+//! summed over the chunks of the search's fills: the calling worker's wall time from before
 //! the phase's first job to the return of its last, the longest job, the jobs' summed time and the
 //! latest start of a job; `read` is the scope of A (with C of the chunk before), `update` that of B,
 //! `last` the scope that links the last chunk and flushes the copies and `prefault` the prefault
@@ -926,9 +926,9 @@ pub(super) struct OnceStats {
 /// ```
 /// Fills the tables as the word loop of `build_mb_lookup` does (with its re-threading for
 /// `ascending_cells`), each query position read once, with `parts` workers on the search pool (or
-/// one after another, `in_pool == false`, where the unit tests run it without a pool); the module documentation
-/// gives the phases and why every element of the four arrays is the loop's. `timed`: a build of
-/// the search (LOSAT_TIMING's `[TIMING] x_mb_lookup_once` counts it). `hashtable`
+/// one after another, `in_pool == false`, where the unit tests run it without a pool); the module
+/// documentation gives the phases and why every element of the four arrays is the loop's. `timed`:
+/// a build of the search (LOSAT_TIMING's `[TIMING] x_mb_lookup_once` counts it). `hashtable`
 /// must be zeroed (as `build_mb_lookup` allocates it, NCBI's `calloc`): the loop's
 /// empty cells, and the premise of the prefault round (LOSAT_X_MBLUTPREFAULT). `resident`: a table
 /// kept by LOSAT_X_MBLUTKEEP and zeroed, whose pages are mapped: no prefault round

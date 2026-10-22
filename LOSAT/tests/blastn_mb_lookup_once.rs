@@ -3,21 +3,23 @@
 //!
 //! The switch is in the strict set since 2026-10-18 (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
 //! and it is not set). Where PAIRPAR (which has no variable) fills the contiguous megablast table
-//! on a pool of two threads or more it chooses between two LOSAT code paths with the same tables: each
-//! worker reads every word (`x_mb_lookup_par.rs`), or each position is read once and each word
+//! on a pool of two threads or more it chooses between two LOSAT code paths with the same tables:
+//! each worker reads every word (`x_mb_lookup_par.rs`), or each position is read once and each word
 //! applied by the owner of its cell. So the property under test is that the report does not depend
 //! on it, and that the read-once fill really runs where the switch says: with `LOSAT_TIMING`,
 //! `[TIMING] x_mb_lookup_build` counts `once=` builds equal to its `parallel=` builds (more than
 //! 0) at 4 threads with the switch, also with `LOSAT_X_DEFAULT=0` (which does not turn the pool
 //! fill off), with `[TIMING] x_mb_lookup_once` giving as many fills, and so without the variable
-//! (the default); 0 with `LOSAT_X_MBLUTONCE=0` and at one thread (no pool). That the bytes equal NCBI's is the business of the blastn fixtures.
+//! (the default); 0 with `LOSAT_X_MBLUTONCE=0` and at one thread (no pool). That the bytes equal
+//! NCBI's is the business of the blastn fixtures.
 //!
 //! The prefault round of the read-once fill (`LOSAT_X_MBLUTPREFAULT`, in the strict set since
 //! 2026-10-19) runs where the first chunk has at least 8 positions per 1,024 cells of the table:
 //! here megablast of LC738868 (306 kb, a table of 4^12 cells: at least 131,072 positions, on 16,384
 //! pages, 16,385 where the table starts inside a page) at 8 threads (chunks of 262,144 positions),
 //! counted by `prefault_rounds=` / `prefault_touches=` of `[TIMING] x_mb_lookup_once`; not at 2
-//! threads (65,536 positions), nor with `LOSAT_X_MBLUTPREFAULT=0`; the report is the same either way.
+//! threads (65,536 positions), nor with `LOSAT_X_MBLUTPREFAULT=0`; the report is the same either
+//! way.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

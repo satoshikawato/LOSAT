@@ -16,17 +16,17 @@
 //! (`process_offset_pairs`: its first retrieve for megablast, blastn and dc-megablast, whose
 //! tables have a word extension or a template; its second for blastn-short, whose table has
 //! none); at four threads with one subject the strips folds (PAIRPAR, which has no
-//! variable, for megablast and blastn; `LOSAT_X_PAIRPARDISC` for dc-megablast when it is set), and with
-//! many subjects the reference fold on every worker, whose hash offset moves on from subject to
-//! subject.
+//! variable, for megablast and blastn; `LOSAT_X_PAIRPARDISC` for dc-megablast when it is set), and
+//! with many subjects the reference fold on every worker, whose hash offset moves on from subject
+//! to subject.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and on
-/// 2026-10-18 `LOSAT_X_MBLUTONCE` (perf/bn-memory-rules), each `0`, the default before, unless the search sets it: every search
-/// here runs as it was written, with the switches off that it does not name (the default runs in
-/// `default_bundle.rs`).
+/// 2026-10-18 `LOSAT_X_MBLUTONCE` (perf/bn-memory-rules), each `0`, the default before, unless the
+/// search sets it: every search here runs as it was written, with the switches off that it does not
+/// name (the default runs in `default_bundle.rs`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),

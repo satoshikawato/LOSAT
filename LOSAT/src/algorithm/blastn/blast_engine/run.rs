@@ -142,9 +142,9 @@ use crate::utils::dust::MaskedInterval;
 //
 //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
 // ```
-// EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the one-hit seed stage of one subject chunk scanned in strips
-// by the pool threads and folded in scan order by the owner (a child module, so that it uses
-// the private types and kernels of this file without changing them).
+// EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the one-hit seed stage of one subject
+// chunk scanned in strips by the pool threads and folded in scan order by the owner (a child
+// module, so that it uses the private types and kernels of this file without changing them).
 #[path = "x_pair_seed.rs"]
 mod x_pair_seed;
 

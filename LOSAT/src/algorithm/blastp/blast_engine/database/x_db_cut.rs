@@ -301,6 +301,7 @@ where
 {
     let db = &database.db;
     let block_bytes = x_db_cut_block_bytes(database, pool);
+    crate::utils::xreach::x_reach!("LOSAT_X_BPDBCUT", block_bytes != BLOCK_BYTES);
     let shadow = mode == XDbCut::Shadow;
     if shadow
         && !(preliminary_hit_lists.iter().all(Option::is_none)

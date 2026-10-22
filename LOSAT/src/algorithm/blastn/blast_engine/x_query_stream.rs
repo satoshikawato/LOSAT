@@ -250,10 +250,15 @@ impl Opening {
         reports_streamed: bool,
         rule: Rule,
     ) -> Opening {
-        let off = |off| Opening {
-            mode,
-            off: Some(off),
-            again: None,
+        let off = |off| {
+            if mode != 0 {
+                crate::utils::xreach::x_reach!("LOSAT_X_QSTREAM", false);
+            }
+            Opening {
+                mode,
+                off: Some(off),
+                again: None,
+            }
         };
         if mode == 0 {
             return off(Off::NotSet);
@@ -280,11 +285,14 @@ impl Opening {
             return off(Off::Io);
         };
         match file.try_clone() {
-            Ok(again) => Opening {
-                mode,
-                off: None,
-                again: Some((again, start)),
-            },
+            Ok(again) => {
+                crate::utils::xreach::x_reach!("LOSAT_X_QSTREAM", true);
+                Opening {
+                    mode,
+                    off: None,
+                    again: Some((again, start)),
+                }
+            }
             Err(_) => off(Off::Io),
         }
     }

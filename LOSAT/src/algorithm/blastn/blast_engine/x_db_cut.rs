@@ -311,6 +311,7 @@ where
 {
     let db = &database.db;
     let block_bytes = x_db_cut_block_bytes(db, pool, parallel);
+    crate::utils::xreach::x_reach!("LOSAT_X_BNDBCUT", block_bytes != BLOCK_BYTES);
     let one_thread_error = |error| {
         if block_bytes == BLOCK_BYTES {
             error

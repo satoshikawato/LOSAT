@@ -27,7 +27,7 @@ use std::path::Path;
 // ```
 pub(super) fn options() -> ResolvedOptions {
     let cli: crate::cli::Cli = crate::cli::try_parse_from([
-        "LOSAT",
+        "losat",
         "blastx",
         "-query",
         "unused.fna",

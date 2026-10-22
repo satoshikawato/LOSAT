@@ -73,10 +73,10 @@ pub(super) fn chosen(
     subjects: Subjects<'_>,
 ) -> Option<usize> {
     let k = subjects_per_task()?;
-    if diagnostics || !pool.enabled() || pool.threads() < 2 || subjects.len() <= k {
-        return None;
-    }
-    offsets_stay_below_2_30(options.window_size, subjects.longest_length()).then_some(k)
+    let own = !(diagnostics || !pool.enabled() || pool.threads() < 2 || subjects.len() <= k)
+        && offsets_stay_below_2_30(options.window_size, subjects.longest_length());
+    crate::utils::xreach::x_reach!("LOSAT_X_BXSUBJFLOW", own);
+    own.then_some(k)
 }
 
 /// No NCBI counterpart: whether `-window_size` plus twice the longest subject is at most 2^28,

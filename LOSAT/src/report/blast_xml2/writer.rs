@@ -405,6 +405,11 @@ impl Xml2Writer<NoSideFiles> {
 }
 
 impl<F: SideFiles> Xml2Writer<F> {
+    /// Writes the document's start to `out` now (`Xml2Document::start`).
+    pub fn start(&mut self, out: &mut Vec<u8>) {
+        self.document.start(out);
+    }
+
     pub fn with_document(document: Xml2Document<F>, params: Xml2Run) -> Self {
         Self {
             document,

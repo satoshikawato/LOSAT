@@ -129,6 +129,10 @@ fn switch_on() -> bool {
 /// thread, at most one per bucket), or `None` when the switch is off or the pool has one
 /// thread (the owner folds).
 pub(super) fn partitions(threads: usize) -> Option<usize> {
+    if switch_on() {
+        // A stage on a pool has two threads or more; one thread only in the PAIRPARSHADOW runs.
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARFOLD", threads >= 2);
+    }
     (switch_on() && threads >= 2).then(|| threads.min(DIAGHASH_NUM_BUCKETS))
 }
 

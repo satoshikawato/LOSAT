@@ -21,7 +21,7 @@ use LOSAT::api::local_blast::{run_local_tblastn, FormatOutput, OutputSink, Repor
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 7] = ["0", "6", "7", "8", "9", "12", "5"];
+const FORMATS: [&str; 9] = ["0", "6", "7", "8", "9", "12", "5", "15", "16"];
 /// The formats of the saved NCBI outputs (`docs/evidence/tlosan_stage_g/`).
 const SAVED_FORMATS: [&str; 3] = ["0", "6", "7"];
 
@@ -31,7 +31,7 @@ fn repository(path: &str) -> PathBuf {
 
 /// Parses the TBLASTN options. `query` and `subject` are display names only.
 fn tblastn_args(query: &str, subject: &str, extra: &[&str]) -> TblastnArgs {
-    let mut argv = vec!["LOSAT", "tblastn", "-query", query, "-subject", subject];
+    let mut argv = vec!["losat", "tblastn", "-query", query, "-subject", subject];
     argv.extend_from_slice(extra);
     let cli: Cli = try_parse_from(argv).expect("tblastn argv");
     match cli.command {
@@ -215,7 +215,7 @@ impl Drop for Inputs {
 /// The CLI output file and standard error of one single-format run.
 fn cli(inputs: &Inputs, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
     let out = inputs.query.with_extension(format!("cli{outfmt}.out"));
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("tblastn")
         .arg("-query")
         .arg(&inputs.query)
@@ -283,9 +283,9 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9 and 12 write no
-            // query result warnings, so their CLI runs equal `run_local` with that format alone.
-            if matches!(*outfmt, "5" | "8" | "9" | "12") {
+            // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9, 12, 15 and 16 write
+            // no query result warnings, so their CLI runs equal `run_local` with that format alone.
+            if matches!(*outfmt, "5" | "8" | "9" | "12" | "15" | "16") {
                 // (The `-max_target_seqs 1` warning of the arguments stays.)
                 assert!(
                     !String::from_utf8_lossy(&cli_stderr).contains("Query_3"),
@@ -373,6 +373,75 @@ fn unsupported_formats_fail_before_searching() {
     }
 }
 
+// NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
+// `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
+// so formats that need different hit list sizes are refused before anything is written
+// (`blastinput/report_counts.rs`), while formats of one hit list size still share a run.
+#[test]
+fn formats_needing_different_hit_list_sizes_are_refused() {
+    let inputs = Inputs::new();
+    let queries = queries(&inputs.query);
+    let subjects = subjects(&inputs.subject);
+    let (query_name, subject_name) = inputs.names();
+    let attempt = |formats: &[&str], extra: &[&str]| {
+        let mut sinks: Vec<Vec<u8>> = formats.iter().map(|_| Vec::new()).collect();
+        let mut diagnostics = Vec::new();
+        let mut outputs = ReportOutputs {
+            formats: formats
+                .iter()
+                .zip(sinks.iter_mut())
+                .map(|(outfmt, sink)| FormatOutput {
+                    outfmt,
+                    sink: OutputSink::Writer(sink),
+                })
+                .collect(),
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        let result = run_local_tblastn(
+            tblastn_args(&query_name, &subject_name, extra),
+            &queries,
+            &subjects,
+            &mut outputs,
+        );
+        drop(outputs);
+        (result, sinks, diagnostics)
+    };
+    for (formats, extra) in [
+        (&["0", "6"][..], &["-num_descriptions", "3"][..]),
+        (&["6", "0"][..], &["-num_descriptions", "3"][..]),
+        (&["0", "6"][..], &["-num_alignments", "3"][..]),
+        (
+            &["0", "6", "7"][..],
+            &["-num_descriptions", "3", "-num_alignments", "2"][..],
+        ),
+    ] {
+        let (result, sinks, _) = attempt(formats, extra);
+        let error = format!("{:#}", result.expect_err("different hit list sizes"));
+        assert!(
+            error.contains("need different hit list sizes"),
+            "{formats:?} {extra:?}: {error}"
+        );
+        // The option warnings of the first format may precede the refusal (BLASTP's
+        // `check_options`, as the CLI writes a warning before an options error), so the
+        // diagnostics are not checked; no report bytes are written.
+        assert!(
+            sinks.iter().all(Vec::is_empty),
+            "{formats:?} {extra:?}: nothing is written"
+        );
+    }
+    // The same formats without these options, or with one hit list size, run together.
+    for extra in [&[][..], &["-max_target_seqs", "3"][..]] {
+        let (result, sinks, _) = attempt(&["0", "6"], extra);
+        result.unwrap_or_else(|error| panic!("{extra:?}: {error:#}"));
+        assert!(
+            !sinks[0].is_empty(),
+            "{extra:?}: outfmt 0 writes its header"
+        );
+    }
+}
+
 // NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
 // 4066 (`NStr::HtmlDecode`): NCBI reads past the end of the title `, ,` (and crashes when
 // such a subject has hits) and decodes `&amp;` in outfmt 0; the tabular formats print
@@ -421,9 +490,9 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
             );
             drop(outputs);
             // BLAST XML: NCBI crashes on the punctuation-only title of a subject with hits
-            // (outfmt 0 and 5 alike), so LOSAT refuses it and writes nothing.
-            if outfmt == "5" && defline == ", ," {
-                let error = result.expect_err("outfmt 5 refuses the punctuation title");
+            // (outfmt 0, 5, 15 and 16 alike), so LOSAT refuses it and writes nothing.
+            if matches!(outfmt, "5" | "15" | "16") && defline == ", ," {
+                let error = result.expect_err("outfmt 5, 15 and 16 refuse the punctuation title");
                 assert!(error.to_string().contains("crashes on"), "{error}");
                 assert!(report.is_empty(), "nothing is written");
                 continue;
@@ -440,7 +509,7 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
 
 /// One CLI run: the exit code, standard output and standard error.
 fn cli_run(query: &Path, subject: &Path, extra: &[&str]) -> (Option<i32>, Vec<u8>, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("tblastn")
         .arg("-query")
         .arg(query)

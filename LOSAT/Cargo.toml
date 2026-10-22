@@ -21,6 +21,11 @@ exclude = [
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+# The command is `losat` (`losat.exe`, `losat.wasm`); the package and the library crate stay `LOSAT`.
+[[bin]]
+name = "losat"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0"
 bio = "1.6"

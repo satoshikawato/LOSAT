@@ -524,6 +524,58 @@ fn defaults_and_task_overrides_remain_distinct() {
     assert!(parse("blastn", &words).is_err(), "{words:?}");
 }
 
+// NCBI blast_args.cpp:2665-2685: -num_descriptions and -num_alignments are integers of 0 or
+// more (`CArgAllowValuesGreaterThanOrEqual(0)`), which NCBI reads with the sign and
+// hexadecimal forms; blast_args.cpp:2732-2738: -max_target_seqs excludes both.
+#[test]
+fn num_descriptions_and_num_alignments_are_integers_of_zero_or_more() {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        for key in ["-num_descriptions", "-num_alignments"] {
+            for value in ["0", "5", "+5", "0x10", "2147483647"] {
+                parse(program, &["-outfmt", "6", key, value])
+                    .unwrap_or_else(|error| panic!("{program} {key} {value}: {error}"));
+            }
+            for value in ["-1", "abc", "1e1", "2147483648", ""] {
+                assert!(
+                    parse(program, &["-outfmt", "6", key, value]).is_err(),
+                    "{program} {key} {value}"
+                );
+            }
+            // The exclusion is NCBI's `SetDependency(eExcludes)`.
+            let error = parse(program, &["-max_target_seqs", "5", key, "5"])
+                .err()
+                .unwrap_or_else(|| panic!("{program} -max_target_seqs with {key}"));
+            assert_eq!(error.exit_code(), 2, "{program} {key}");
+        }
+        parse(
+            program,
+            &[
+                "-num_descriptions",
+                "3",
+                "-num_alignments",
+                "2",
+                "-outfmt",
+                "0",
+            ],
+        )
+        .unwrap();
+        parse(program, &["-max_target_seqs", "5"]).unwrap();
+    }
+    let Commands::Blastp(args) = parse(
+        "blastp",
+        &["-num_descriptions", "0x10", "-num_alignments", "+5"],
+    )
+    .unwrap()
+    .command
+    else {
+        unreachable!("blastp")
+    };
+    assert_eq!(
+        (args.num_descriptions, args.num_alignments),
+        (Some(16), Some(5))
+    );
+}
+
 #[test]
 fn numeric_values_are_validated_before_io() {
     for program in ["blastn", "blastp", "tblastx"] {
@@ -663,7 +715,6 @@ fn numeric_values_are_validated_before_io() {
     // NCBI's other blastn tasks and options are rejected explicitly (AGENTS.md rule 2).
     for extra in [
         &["-task", "rmblastn"][..],
-        &["-strand", "plus"],
         &["-ungapped"],
         &["-h"],
         &["-version"],
@@ -677,6 +728,34 @@ fn numeric_values_are_validated_before_io() {
         );
     }
     assert!(parse("blastn", &["-outfmt", "6", "-task", "BLASTN"]).is_err());
+    // `-strand` is NCBI's (blast_args.cpp:1953-1955): plus, minus and both are accepted, any
+    // other value is a clap error (LOSAT's rule for argument errors, rc 2).
+    for (value, want) in [("plus", "plus"), ("minus", "minus"), ("both", "both")] {
+        let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-strand", value])
+            .unwrap()
+            .command
+        else {
+            unreachable!("blastn")
+        };
+        assert_eq!(args.strand, want);
+    }
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6"]).unwrap().command else {
+        unreachable!("blastn")
+    };
+    assert_eq!(args.strand, "both");
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-strand=minus"])
+        .unwrap()
+        .command
+    else {
+        unreachable!("blastn")
+    };
+    assert_eq!(args.strand, "minus");
+    for value in ["foo", "PLUS", "Both", "", "1"] {
+        assert!(
+            parse("blastn", &["-outfmt", "6", "-strand", value]).is_err(),
+            "{value:?}"
+        );
+    }
     // NCBI blast_input_aux.hpp:79-87 (CDirEntry::GetName, ncbifile.cpp:298-312,358-363,
     // 465-472): the name after the trailing separators are removed.
     let dotted = format!("{}/.", "o".repeat(256));
@@ -872,7 +951,6 @@ const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 const CUSTOM: &[&str] = &["blastp", "blastx"];
 const NO_CUSTOM: &[&str] = &["blastn", "tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
-const NOT_BLASTP_BLASTN: &[&str] = &["blastx", "tblastn", "tblastx"];
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
     "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
@@ -950,7 +1028,7 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "18", None, UNSUPPORTED),
         (ALL, "20", None, UNSUPPORTED),
         // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c), 5 in
-        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in BLASTP and BLASTN (OF5a), NCBI dropping a custom specification
+        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in every program (BLASTP and BLASTN: OF5a; BLASTX, TBLASTN and TBLASTX: OF5b), NCBI dropping a custom specification
         // (blast_args.cpp:2844-2851); the others not yet.
         (ALL, "8", None, Writes(AsnText)),
         (ALL, "12", None, Writes(JsonSeqalign)),
@@ -963,11 +1041,9 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "11", None, UNSUPPORTED),
         (ALL, "13", Some("o.json"), UNSUPPORTED),
         (ALL, "14", Some("o.xml"), UNSUPPORTED),
-        (&["blastp", "blastn"], "15", None, Writes(JsonS)),
-        (&["blastp", "blastn"], "16", None, Writes(Xml2S)),
-        (&["blastp", "blastn"], " 16 std", None, Writes(Xml2S)),
-        (NOT_BLASTP_BLASTN, "15", None, UNSUPPORTED),
-        (NOT_BLASTP_BLASTN, "16", None, UNSUPPORTED),
+        (ALL, "15", None, Writes(JsonS)),
+        (ALL, "16", None, Writes(Xml2S)),
+        (ALL, " 16 std", None, Writes(Xml2S)),
         (&["blastn"], "17", None, UNSUPPORTED),
         (&["blastn"], "17 qseqid", None, UNSUPPORTED),
     ]

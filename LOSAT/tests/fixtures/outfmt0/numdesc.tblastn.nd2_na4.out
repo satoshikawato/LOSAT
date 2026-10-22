@@ -1,0 +1,145 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2e_many_subject.fna).
+           300 sequences; 180,000 total letters
+
+
+
+Query= q1
+
+Length=200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+n91                                                                   124     5e-38
+n16                                                                   111     6e-33
+
+
+> n91
+Length=600
+
+ Score = 124 bits (311),  Expect = 5e-38, Method: Compositional matrix adjust.
+ Identities = 158/200 (79%), Positives = 164/200 (82%), Gaps = 0/200 (0%)
+ Frame = +1
+
+Query  1    MEVSDNDDDYMSISSGDNDDEVKDTILNNNKddrddvdddddddddsdiefdidTFKSAI  60
+            MEVSDNDDDYM ISS DNDDEVK TILNNNKDD  DV DDDDDDDD+DI FDIDTFKSAI
+Sbjct  1    MEVSDNDDDYMGISSVDNDDEVKVTILNNNKDDYSDVIDDDDDDDDADIMFDIDTFKSAI  180
+
+Query  61   LMSKNTYIIDKKssssslspsssssllllpssssssslsslsssaiplqtpssssslpsp  120
+            LM+K+TY IDKKSSS+S +  SS SLLLL SSS SSSLSSLSS AI LQTP SS SLPSP
+Sbjct  181  LMTKHTYKIDKKSSSASYTKYSSLSLLLLISSSKSSSLSSLSSGAINLQTPKSSPSLPSP  360
+
+Query  121  slpsssslpspsmsTINKIhhhhhhhhhhhhQPLLITNPRIVVDEIMKEEKKTISDGEYF  180
+            S  SSS LP PSM T NKIHHHHHHH H H+QPLLITNPRIVVDEIMKE KK I DGEYF
+Sbjct  361  SENSSSCLPLPSMITENKIHHHHHHHTHGHYQPLLITNPRIVVDEIMKEYKKGIVDGEYF  540
+
+Query  181  LYCTSAKSSSNQHLEILNTF  200
+              C SA  SSNQ LEI NTF
+Sbjct  541  GACRSAHWSSNQFLEIYNTF  600
+
+
+> n16
+Length=600
+
+ Score = 111 bits (277),  Expect = 6e-33, Method: Compositional matrix adjust.
+ Identities = 162/200 (81%), Positives = 164/200 (82%), Gaps = 0/200 (0%)
+ Frame = +1
+
+Query  1    MEVSDNDDDYMSISSGDNDDEVKDTILNNNKddrddvdddddddddsdiefdidTFKSAI  60
+            MEV D+DDDY SISSGDN DEV DTILNNNKD+RDDV DDDDDDDDSDIEFDID FK AI
+Sbjct  1    MEVDDHDDDYNSISSGDNLDEVYDTILNNNKDERDDVLDDDDDDDDSDIEFDIDYFKYAI  180
+
+Query  61   LMSKNTYIIDKKssssslspsssssllllpssssssslsslsssaiplqtpssssslpsp  120
+            LMSKNTYI D KSSSSSLSPSSSSSLLLLPS S SSSLSSLSSSA PLQTPS S SLPSP
+Sbjct  181  LMSKNTYINDIKSSSSSLSPSSSSSLLLLPSKSQSSSLSSLSSSAKPLQTPSHSVSLPSP  360
+
+Query  121  slpsssslpspsmsTINKIhhhhhhhhhhhhQPLLITNPRIVVDEIMKEEKKTISDGEYF  180
+            S PS S  P PSMST N I HHHHHH  HH QPLLIT  RIVVDEIMKEEK T  DGEY 
+Sbjct  361  SRPSVSRYPEPSMSTWNNILHHHHHHSSHHAQPLLITGVRIVVDEIMKEEKDTRWDGEYL  540
+
+Query  181  LYCTSAKSSSNQHLEILNTF  200
+              CTSAK  SNQHLEILN F
+Sbjct  541  EICTSAKCCSNQHLEILNIF  600
+
+
+> n28
+Length=600
+
+ Score = 110 bits (276),  Expect = 8e-33, Method: Compositional matrix adjust.
+ Identities = 154/200 (77%), Positives = 159/200 (80%), Gaps = 0/200 (0%)
+ Frame = +1
+
+Query  1    MEVSDNDDDYMSISSGDNDDEVKDTILNNNKddrddvdddddddddsdiefdidTFKSAI  60
+            MEV D DDDYMSIS GDNDD VK T  NNNK DRDD  D  D DD SDIEFDI  FKS I
+Sbjct  1    MEVDDFDDDYMSISMGDNDDYVKHTYQNNNKHDRDDEWDWIDIDDHSDIEFDITFFKSFI  180
+
+Query  61   LMSKNTYIIDKKssssslspsssssllllpssssssslsslsssaiplqtpssssslpsp  120
+            LMSKN YI DKKSSSSSLSPS  S  LLLPSSSS SSL SLSS+AI L TPSSS+SLPS 
+Sbjct  181  LMSKNVYIPDKKSSSSSLSPSFMSQGLLLPSSSSWSSLPSLSSTAIILSTPSSSTSLPSY  360
+
+Query  121  slpsssslpspsmsTINKIhhhhhhhhhhhhQPLLITNPRIVVDEIMKEEKKTISDGEYF  180
+            +LPS+SS PSP MSTINKIHH HHHHH HHHQPLLIT PRIV DEI KEEKKTI D E  
+Sbjct  361  TLPSTSSWPSPIMSTINKIHHQHHHHHLHHHQPLLITMPRIVSDEIQKEEKKTIFDAECC  540
+
+Query  181  LYCTSAKSSSNQHLEILNTF  200
+            L CT AKSSSNQHLEIL+TF
+Sbjct  541  LACTQAKSSSNQHLEILDTF  600
+
+
+> n149
+Length=600
+
+ Score = 110 bits (274),  Expect = 2e-32, Method: Compositional matrix adjust.
+ Identities = 147/200 (74%), Positives = 156/200 (78%), Gaps = 0/200 (0%)
+ Frame = +1
+
+Query  1    MEVSDNDDDYMSISSGDNDDEVKDTILNNNKddrddvdddddddddsdiefdidTFKSAI  60
+            ME SD DDDYMS +S  ND  VK T  N NKDDRDDVDDD DDDDDSDIEFDI TF  A 
+Sbjct  1    MEPSDWDDDYMSPTSSQNDQPVKKTYNNWNKDDRDDVDDDGDDDDDSDIEFDIHTFSHAQ  180
+
+Query  61   LMSKNTYIIDKKssssslspsssssllllpssssssslsslsssaiplqtpssssslpsp  120
+             MSKNTYII KK SSSS SPSSSSS L LPSS +SSSLSS+SS A PL TPS++ SL  P
+Sbjct  181  FMSKNTYIICKKFSSSSCSPSSSSSPLCLPSSCTSSSLSSISSWARPLLTPSAAPSLMWP  360
+
+Query  121  slpsssslpspsmsTINKIhhhhhhhhhhhhQPLLITNPRIVVDEIMKEEKKTISDGEYF  180
+            +L SSS+LPSPSMSTINKI+ + HH  H  HQPLLI NPRIVVDEIMKEEKK I DGEY 
+Sbjct  361  ALGSSSALPSPSMSTINKINCYRHHIPHSVHQPLLIVNPRIVVDEIMKEEKKCIVDGEYR  540
+
+Query  181  LYCTSAKSSSNQHLEILNTF  200
+            L   S KSSSNQHLEILNTF
+Sbjct  541  LGIQSEKSSSNQHLEILNTF  600
+
+
+
+Lambda      K        H        a         alpha
+   0.310    0.129    0.344    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 6049200
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2e_many_subject.fna).
+    Posted date:  Unknown
+  Number of letters in database: 180,000
+  Number of sequences in database:  300
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

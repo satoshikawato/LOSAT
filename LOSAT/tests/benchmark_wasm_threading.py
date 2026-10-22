@@ -136,10 +136,10 @@ def run_benchmark(args, out):
     for version, directory, runners in [('baseline', args.baseline_dir, args.baseline_runners), ('candidate', args.candidate_dir, args.candidate_runners)]:
         for kind in args.kinds:
             if kind == 'native':
-                prefix = [str((directory / 'native-command/release/LOSAT').resolve())]
+                prefix = [str((directory / 'native-command/release/losat').resolve())]
             else:
                 target = 'wasm32-wasip1' + ('-threads' if kind == 'threaded' else '')
-                artifact = (args.artifacts / f'losat-{kind}-command.wasm') if version == 'candidate' else directory / f'{kind}-command' / target / 'release/LOSAT.wasm'
+                artifact = (args.artifacts / f'losat-{kind}-command.wasm') if version == 'candidate' else directory / f'{kind}-command' / target / 'release/losat.wasm'
                 runner = runners / ('run_losat_wasi_threads.js' if kind == 'threaded' else 'run_losat_wasi.js')
                 prefix = [*nodes[version], str(runner.resolve()), str(artifact.resolve())]
             prefixes[(version, kind)] = prefix
@@ -282,7 +282,7 @@ def run_benchmark(args, out):
                     if not jobs: continue
                     jobs_path=directory/'jobs.json'; jobs_path.write_text(json.dumps(jobs,indent=2)+'\n')
                     target='wasm32-wasip1' + ('-threads' if base_kind=='threaded' else '')
-                    artifact = (args.artifacts/f'losat-{kind}.wasm') if version=='candidate' else args.baseline_dir/kind/target/'release/LOSAT.wasm'
+                    artifact = (args.artifacts/f'losat-{kind}.wasm') if version=='candidate' else args.baseline_dir/kind/target/'release/losat.wasm'
                     command=[*nodes[version],str(TESTS/'benchmark_wasi_reuse.js'),str(artifact.resolve()),kind,mode,str(jobs_path),'-out','{output}']
                     result=execute(command, ROOT, directory/'process', env, args.reuse_timeout)
                     # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:178-188

@@ -67,7 +67,11 @@ fn one_query() -> &'static PathBuf {
     FILE.get_or_init(|| {
         let text = std::fs::read_to_string(fixture("MeenMJNV.faa")).expect("query fixture");
         let second = text[1..].find("\n>").map_or(text.len(), |at| at + 2);
-        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("blastp_redo_par");
+        // One directory per process: nextest runs each test in a process of its own, and a
+        // process that wrote these files again while another one's search read them cut its input.
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join("blastp_redo_par")
+            .join(std::process::id().to_string());
         std::fs::create_dir_all(&dir).expect("work directory");
         let file = dir.join("one_query.faa");
         std::fs::write(&file, &text[..second]).expect("query file");

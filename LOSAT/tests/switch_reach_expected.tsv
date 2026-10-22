@@ -6,6 +6,7 @@ LOSAT_X_BNDBSTREAM	blastn	conditional	required	required	-db only, 2+ threads; me
 LOSAT_X_BNFEWSUBJ	blastn	conditional	gap	required	-subject, 2+ threads, longest work unit a large share of letters (per-task thresholds); no -lcase_masking, never -db; new gap: needs -subject with 2+ subjects at 2+ threads, one subject holding most letters, query block > 8000
 LOSAT_X_BNSTORE	blastn	conditional	required	required	-subject without -subject_loc; letters kept for subject ranges or bytes without ncbi4na code
 LOSAT_X_BNSTREAM	blastn	conditional	required	required	-subject only, 2+ threads (1 thread hands over at once); -db has own drivers
+LOSAT_X_BNUNGAPCOUNT	blastn	always			Exact ungapped extension with step counts worked out first
 LOSAT_X_BPCLUT	blastp	conditional	required	required	-task blastp-fast only; exact blastp builds no compressed table
 LOSAT_X_BPCOMPOREUSE	blastp	always			Subject composition kept in SEG cache entry, reused by redo
 LOSAT_X_BPDBCUT	blastp	conditional	required	required	-db only, 2+ threads; DB below 4 x threads MiB (Swiss-Prot keeps 1 MiB blocks)

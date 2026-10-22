@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The counted loops of the exact ungapped extension (`LOSAT_X_BNUNGAPCOUNT`,
 //! `src/algorithm/blastn/x_ungap_count.rs`) on whole searches.
 //!
@@ -130,9 +131,10 @@ fn the_report_does_not_depend_on_the_counted_loops() {
     }
 }
 
-// `LOSAT_X_DEFAULT=0` with the variable set to a value other than 0 runs the counted loops. The
-// shadow (set to any value, not in the set; it implies the switch) compares the two loops on
-// every call, prints its summary line with a count above 0, and does not change the report.
+// `LOSAT_X_DEFAULT=0` with the variable set to 1 (the counted loops again) gives the default
+// report. The shadow (set to any value, not in the set; it implies the switch) compares the two
+// loops on every call, prints its summary line with a count above 0, and does not change the
+// report.
 #[test]
 fn the_shadow_compares_the_two_loops_and_the_report_is_unchanged() {
     let dir = TestDir::new("shadow");

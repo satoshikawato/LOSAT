@@ -856,7 +856,9 @@ Same values, faster computation:
   `min(q_off, s_off)` to the left, `min(q_avail, s_avail)` to the right, the C loop conditions on
   `(s, base)` written as those counts (`blastn/x_ungap_count.rs`, argument in its header). The same
   steps, tests and results; the ported loops also tested the query offset against both ends (never true
-  within the counts) and bounds-checked the matrix cell, and their two-part loop condition mispredicted.
+  within the counts) and bounds-checked the matrix cell, and their two-part loop condition on `(s, base)`
+  cost 0.8 branch misses a call more than the counts (premise probe on bs24: NCBI's loop shape without the
+  extra tests kept the misses, the counted loops dropped them).
   R8 (`LOSAT_X_CTXFAST` / `CTXO1` era): 167 cycles, 574 instructions and 3.10 branch misses a call
   against NCBI's 135 / 497 / 2.56. Shadow: `LOSAT_X_BNUNGAPCOUNTSHADOW=1` (implies the switch) runs
   both loops on every call and stops on the first difference; at exit `[X_SHADOW] BNUNGAPCOUNT

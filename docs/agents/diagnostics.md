@@ -693,26 +693,29 @@ Same values, faster computation:
 - GREEDYFAST (graduated 2026-10-22; no variable, no `LOSAT_X_GREEDYSHADOW`, no `X_GREEDY_TEST_MODE`
   hook; always on) megablast greedy alignment, one distance in three passes of 256 cells, match
   extension 8 bases at a time, on an unpacked subject (`x_greedy_row` in `blastn/alignment/greedy.rs`).
-  The ported distance loop stays for a packed subject (`rem != 4`, e.g. the packed call that
-  `x_greedy_prelim` keeps as its fallback) and for lengths that do not fit the slices.
+  `x_greedy_row` runs every traceback call and the score-only calls the fused loop (GREEDYFUSE) declines;
+  the ported distance loop stays only for lengths that do not fit the slices (no production call passes
+  them). The greedy functions take an unpacked subject only; the packed-subject scans (`rem != 4`) were
+  deleted at graduation.
 - GREEDYPRELIM (graduated 2026-10-22; no variable, no `LOSAT_X_GREEDYPRELIMSHADOW`, no counters;
   always on) the preliminary (score-only) megablast greedy alignment reads a one-byte-per-base copy
   of the packed ncbi2na subject (the NCBI-resolved codes) with `compressed_subject = false` instead
   of the packed bytes: the same comparisons, bounds and results
   (`algorithm/blastn/alignment/x_greedy_prelim.rs`), with the fast rows. Memory: one byte per subject
   base while the subject is searched (made on the first chunk with ungapped hits, shared by its chunks
-  and threads). The packed call (`x_subject = None`) stays as the path for a search without the copy;
-  the unit test compares the two forms.
+  and threads). A score-only greedy call always runs on the copy: the packed score-only call
+  (`greedy_gapped_alignment_score_only`, `compressed_subject = true`), its re-export and the unit test that
+  compared the two forms were deleted at graduation (D2 review; nothing the default runs reached them).
 - GREEDYFUSE (graduated 2026-10-22, in the set since 2026-10-14; no variable, no
   `LOSAT_X_GREEDYFUSESHADOW`; always on) the score-only megablast greedy alignment on an unpacked
   subject (the preliminary stage): the whole
   loop over distances of `BLAST_GreedyAlign` in one function, one pass over the diagonals of a
   distance, eight bases per slide step, the same cells of the two rolling rows and of `max_score`
   written in the C order (`algorithm/blastn/alignment/x_greedy_fused.rs`, exactness argument in
-  its module doc). It replaces the per-distance `x_greedy_row` there; traceback, packed
-  subjects and the affine alignment keep their paths (the ported loop). x86_64 with AVX2/BMI runs a
-  build with `tzcnt`/`lzcnt`, other CPUs and targets the plain build of the same code. The unit tests
-  compare it with the ported loop (a call with an edit block) and the two builds with each other.
+  its module doc). It replaces the per-distance `x_greedy_row` there; a traceback call (an edit block)
+  and a call it declines run `x_greedy_row`, and the affine alignment keeps its own path. x86_64 with
+  AVX2/BMI runs a build with `tzcnt`/`lzcnt`, other CPUs and targets the plain build of the same code. The
+  unit tests compare it with `x_greedy_row` (a call with an edit block) and the two builds with each other.
 - COMPFAST, NEWTONEXACT (graduated 2026-10-22; no variables, no `LOSAT_X_COMPSHADOW`, no
   `LOSAT_X_NEWTONEXACTSHADOW`) composition adjustment (Newton). COMPFAST: the loops of the Newton
   iteration reordered with the same element operations in the same order (`step_bound`,

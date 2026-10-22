@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_DPW128): 128-bit kernels for the X-drop dynamic programming of
+//! EXPERIMENT: 128-bit kernels for the X-drop dynamic programming of
 //! `xdrop_simd.rs` with the per-row savings of the 256-bit kernels (`x_xdrop_avx2.rs`): 8 lanes
 //! of 16 bits and 16 lanes of 8 bits, with (`TB`) and without the traceback. Written once over
 //! the 128-bit `arch` layer of `xdrop_simd.rs`, so the same code is built for x86_64 (SSE4.1 and
@@ -439,13 +439,8 @@ static LANE_MASK8: [u8; 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
-/// No NCBI counterpart: LOSAT_X_DPW128 on (`utils/xswitch.rs`) and a CPU that runs these kernels
-/// (SSE4.1 on x86_64, as the 128-bit kernels; always on wasm32 simd128 and aarch64).
-pub(super) fn switch_on() -> bool {
-    crate::utils::xswitch::on("LOSAT_X_DPW128") && available()
-}
-
-/// No NCBI counterpart: the 128-bit kernels' CPU check (LOSAT_X_DPNOAVX selects the SSE4.1 build).
+/// No NCBI counterpart: the 128-bit kernels' CPU check (LOSAT_X_DPNOAVX selects the SSE4.1 build):
+/// SSE4.1 on x86_64, always true on wasm32 simd128 and aarch64.
 pub(super) fn available() -> bool {
     #[cfg(target_arch = "x86_64")]
     {

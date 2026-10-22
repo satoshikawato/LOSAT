@@ -12,7 +12,7 @@
 //! With the switch on, `ListedSubjects::x_list` keeps the ordinal ids and the lengths of the listed
 //! subjects (read from the index: the estimate of `LOSAT_X_BPREDOLPT`, `x_job_costs`, reads the
 //! lengths before a window's matches are redone). Every redo path (the one-thread loop, the two
-//! query-parallel paths and `x_redo_par.rs`) and the first Newton problems of `LOSAT_X_NEWTONLANES`
+//! query-parallel paths and `x_redo_par.rs`) and the first Newton problems of the Newton lanes
 //! read a match's subject with `SeqDb::read_sequence` (`XRedoSubjects::read`): the stored residues
 //! that the copy holds, so the redo computes the same values. Each read is dropped after its match:
 //! the first Newton problems read a match ahead of its redo, and the redo reads it again (keeping

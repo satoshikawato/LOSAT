@@ -228,6 +228,15 @@ pub(super) fn insert<const PT: bool, const LEAN: bool, const MEMO: bool>(
     }
 }
 
+/// No NCBI counterpart (scheduling only): a partition's state during a stage, on cache lines of
+/// its own. The participants poll every partition's lock (`try_lock`) while one of them folds
+/// into it; without the alignment the lock word and the first fields shared a line with the
+/// fields the folding thread writes, or with the neighbouring partition's, as the size of
+/// `PartState` placed them (DiagHashTable's memo of LOSAT_X_DIAGLV2 made DQ n16 x1.028 slower
+/// with both switches off: memory-ordering machine clears x1.37, same instructions).
+#[repr(align(128))]
+struct OwnLines<T>(T);
+
 /// The fold state of one partition (its allocations kept in the subject scratch between
 /// stages; its contents set by `rebuild` at the start of every stage).
 pub(super) struct PartState {
@@ -457,7 +466,11 @@ where
     rebuild(scratch, hash, parts);
     let occ0 = hash.occupancy;
 
-    let states: Vec<Mutex<PartState>> = scratch.parts.drain(..).map(Mutex::new).collect();
+    let states: Vec<Mutex<OwnLines<PartState>>> = scratch
+        .parts
+        .drain(..)
+        .map(|st| Mutex::new(OwnLines(st)))
+        .collect();
     let spare = Mutex::new(std::mem::take(&mut scratch.spare));
     let raw_spare = Mutex::new(std::mem::take(&mut scratch.raw));
     let part_next: Vec<AtomicUsize> = (0..parts).map(|_| AtomicUsize::new(0)).collect();
@@ -540,9 +553,10 @@ where
                 if i >= n || !ready[i].load(Ordering::Acquire) {
                     continue;
                 }
-                let Ok(mut st) = states[p].try_lock() else {
+                let Ok(mut guard) = states[p].try_lock() else {
                     continue;
                 };
+                let st = &mut guard.0;
                 let i = st.next;
                 if i >= n || !ready[i].load(Ordering::Acquire) {
                     continue;
@@ -553,7 +567,7 @@ where
                     st.out.strip = i as u64;
                     let t0 = timed.then(std::time::Instant::now);
                     let pause0 = st.scan_pause_ns;
-                    fold(&mut st, &strip.seeds[a..b], &strip.pos[a..b]);
+                    fold(st, &strip.seeds[a..b], &strip.pos[a..b]);
                     if let Some(t0) = t0 {
                         st.fold_ns += t0.elapsed().as_nanos() as u64;
                     }
@@ -564,7 +578,7 @@ where
                 drop(strip);
                 st.next = i + 1;
                 part_next[p].store(i + 1, Ordering::Release);
-                drop(st);
+                drop(guard);
                 progress.fetch_add(1, Ordering::Relaxed);
                 if done[i].fetch_add(1, Ordering::AcqRel) + 1 == parts {
                     if let Some(buf) = lock(&slots[i]).take() {
@@ -636,7 +650,7 @@ where
 
     let mut states: Vec<PartState> = states
         .into_iter()
-        .map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner))
+        .map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner).0)
         .collect();
     let t_merge = timed.then(std::time::Instant::now);
     let mut stats = PartStats {

@@ -239,7 +239,7 @@ fn child(
 /// The CLI output file and standard error of one single-format run with `vars`.
 fn cli(inputs: &Inputs, outfmt: &str, threads: u32, vars: &[(&str, &str)]) -> (Vec<u8>, Vec<u8>) {
     let out = temp_path(&format!("qblockweb_cli_{}_{threads}.out", outfmt.len()));
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     clean_env(&mut command, vars);
     let output = command
         .arg("blastp")

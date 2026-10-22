@@ -2968,7 +2968,7 @@ Scheduling (each value computed by one thread with the original function; order 
   of its cells lies below the bound and at or below the bucket's bound (the bound invariant), and unless
   the cell the retrieve's walk returns gives the seed's decisions (the `last_hit` test, then with two hits
   the window test) of no cell (the bound's sufficiency); one `[X_SHADOW] DIAGLV retrieves= skipped=
-  verified= decisions= cells= identical` line on stderr at the end of the search (`cells`: skipped
+  verified= decisions= cells= memo= memofound= identical` line (`memo=`, `memofound=`: `LOSAT_X_DIAGLV2`) on stderr at the end of the search (`cells`: skipped
   retrieves whose walk found the diagonal's cell). `LOSAT_X_PAIRPARSHADOW` and `LOSAT_X_PAIRPARDISCSHADOW`
   compare the bounds of the two tables too.
   Measured on the workstation (alternating pairs, node 1 CPUs 32-47, `LOSAT_X_PAIRPARDISC=1` in the dc-megablast
@@ -2999,8 +2999,8 @@ Scheduling (each value computed by one thread with the original function; order 
   argument). The insert is unchanged apart from the memo, so the table and the hit list are the reference's
   (`blastn/blast_engine/x_diag_lv.rs`, (iv) to (vi) in its header). The table clear, `copy_hash`, the stage copy
   and the merge of `LOSAT_X_PAIRPARFOLD` keep the memo with the chains. It acts in every caller of the bounded
-  retrieve on such a table: the reference fold (`process_offset_pairs`, 1 thread) and the strips fold of
-  `LOSAT_X_PAIRPARDISC`. One-hit tables (megablast, blastn, blastn-short) keep no memo. With the switch off the
+  retrieve on such a table: the reference fold (`process_offset_pairs`: one thread, and every worker with many
+  subjects) and the strips fold of `LOSAT_X_PAIRPARDISC`. One-hit tables (megablast, blastn, blastn-short) keep no memo. With the switch off the
   memo is empty, and an insert and a retrieve each test the length of an empty vector.
   Shadow: `LOSAT_X_DIAGLVSHADOW=1` also checks every memo answer: the bucket's walk must find the latest insert's
   values in the first cell of its diagonal and every other cell at or below `other`, and the retrieve's walk must
@@ -3008,17 +3008,20 @@ Scheduling (each value computed by one thread with the original function; order 
   `[X_SHADOW] DIAGLV` line counts the answers (`memo=`) and those for the latest insert's diagonal (`memofound=`).
   Tests: the unit tests of `x_diag_lv.rs` (`the_memo_makes_the_decisions_of_retrieve`,
   `the_shadow_panics_on_a_memo_that_misses_a_cell`), the dc strips stage test of `x_pair_seed_disc.rs` (the memo
-  on 1 to 8 threads and 2 to 16 partitions), `LOSAT/tests/blastn_diag_lv.rs`.
+  on 1 to 8 threads and 2 to 16 partitions), the partition tests of `x_pair_seed_part.rs`,
+  `LOSAT/tests/blastn_diag_lv.rs` (`the_memo_and_the_lean_folds_give_the_same_report`: dc-megablast at 1 and 4
+  threads with each switch, the memo answering under the shadow; megablast keeps no memo).
   EVIDENCE (filled after the workstation A/B).
 - `LOSAT_X_FOLDLEAN=1` (in the strict set since 2026-10-22 (perf/dc-fold-lean, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set)
   blastn dc-megablast, the strips folds of `LOSAT_X_PAIRPARDISC` (`fold_two_hit`, diagonal hash) and
   `LOSAT_X_PAIRPARDISCARR` (`fold_two_hit_array`, diagonal array): each fold runs a second instance (a const
-  parameter, so the instance of the switch off is the previous code) that takes `s_TypeOfWord`'s first statement
-  itself (`if (word_length == lut_word_length) return 1;`, always so for a discontiguous word: no call, no
+  parameter, so the instance of the switch off is the previous code) that takes `s_TypeOfWord`'s early return
+  itself (na_ungapped.c:531 `if (word_length == lut_word_length) return 1;`, always so for a discontiguous word: no call, no
   arguments, the offsets unchanged and nothing extended) and inlines the diagonal-hash insert
   (`DiagHashTable::insert_inl`, the statements of `insert`). Same statements in the same order. The reference
-  fold (`process_offset_pairs`, 1 thread) is not changed.
-  Tests: the dc strips stage tests of `x_pair_seed_disc.rs` (both instances on a table with bounds and memo).
+  fold (`process_offset_pairs`) is not changed.
+  Tests: the dc strips stage tests of `x_pair_seed_disc.rs` (both instances on a table with bounds and memo),
+  `LOSAT/tests/blastn_diag_lv.rs` (`the_memo_and_the_lean_folds_give_the_same_report`).
   EVIDENCE (filled after the workstation A/B).
 - `LOSAT_X_PAIRPARFOLD=1` (in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) blastn, where the strips paths of `LOSAT_X_PAIRPAR` (one-hit fold: megablast, blastn) and
   `LOSAT_X_PAIRPARDISC` (two-hit fold: dc-megablast) run, on a pool of 2+ threads: the diagonal-hash fold

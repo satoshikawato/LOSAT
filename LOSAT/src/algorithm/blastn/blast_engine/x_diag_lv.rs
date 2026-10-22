@@ -144,7 +144,8 @@
 //! blastn-short), `-subject` and `-db`, when the query block is longer than 8000 letters (the
 //! diagonal hash; a shorter block uses the diagonal array, which this does not touch). No other
 //! program has a `DiagHashTable` (BLASTP, BLASTX, TBLASTN and TBLASTX keep diagonal arrays of
-//! their own). The Web reactors receive no environment, so the switch is never on there.
+//! their own). The Web reactors receive no environment, so they run the default set: this switch
+//! and LOSAT_X_DIAGLV2 (below) are on there.
 //!
 //! With the switch off the table has no bounds (`max_level` empty), `insert` does one length
 //! test of the empty vector, the clear fills an empty vector, and the callers call `retrieve`.
@@ -451,7 +452,9 @@ impl DiagHashTable {
             return None;
         }
         // EXPERIMENT (LOSAT_X_DIAGLV2, module comment (iv)-(vi)): every cell but the latest
-        // insert's lies below the bound; answer from the memo without the walk.
+        // insert's lies below the bound; answer from the memo without the walk. (`insert` keeps
+        // the memo only on a table with bounds.)
+        debug_assert!(self.x_last.is_empty() || self.x_lv_on());
         if let Some(last) = self.x_last.get(bucket) {
             if last.other < bound {
                 let found =
@@ -503,6 +506,13 @@ impl DiagHashTable {
                 );
             }
             index = cell.next;
+        }
+        // (iv): a bucket with cells has had an insert since the clear, and its cell
+        if first && self.backbone[bucket] != 0 {
+            print_line("DIFFERENT");
+            panic!(
+                "LOSAT_X_DIAGLV2 (shadow): bucket {bucket} has no cell of the memo's diagonal, which breaks the memo {last:?}"
+            );
         }
         let walked = self.retrieve(diag);
         let same = if found.is_some() {
@@ -915,6 +925,10 @@ mod tests {
                 }
                 index = cell.next;
             }
+            assert!(
+                !first || h.backbone[bucket] == 0,
+                "{at}: bucket {bucket} has no cell of the memo's diagonal ({last:?})"
+            );
         }
     }
 

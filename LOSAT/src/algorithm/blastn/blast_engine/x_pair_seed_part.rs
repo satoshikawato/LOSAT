@@ -910,10 +910,12 @@ mod tests {
         u32,
         i32,
         Vec<i32>,
+        Vec<super::super::super::x_diag_lv::LvLast>,
     );
 
     /// Everything of a table a later seed or the shadow can read: the heads, the cells up to
-    /// the occupancy, the occupancy, the capacity, the offset and the level bounds.
+    /// the occupancy, the occupancy, the capacity, the offset, the level bounds and the memo
+    /// (LOSAT_X_DIAGLV2).
     fn hash_state(h: &DiagHashTable) -> HashState {
         assert_eq!(
             h.chain.len(),
@@ -930,6 +932,7 @@ mod tests {
             h.capacity,
             h.offset,
             h.max_level.clone(),
+            h.x_last.clone(),
         )
     }
 
@@ -1205,6 +1208,8 @@ mod tests {
                     let mut reference_hash = DiagHashTable::new(16);
                     if levels {
                         reference_hash.x_lv_start(false);
+                        // and the memo (LOSAT_X_DIAGLV2), whatever the environment says
+                        reference_hash.x_lv2_start();
                     }
                     let mut hash = copy_hash(&reference_hash);
                     let mut scratch = PartScratch::default();

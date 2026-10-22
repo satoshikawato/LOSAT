@@ -1031,9 +1031,11 @@ impl DiagHashTable {
         self.insert_inl(diag, level, hit_len, hit_saved, s_off, window_size)
     }
 
-    /// `insert` inlined into its caller (EXPERIMENT LOSAT_X_FOLDLEAN, the strips fold of
-    /// dc-megablast `x_pair_seed_disc.rs` `fold_two_hit`; `insert` is this call). The same
-    /// statements.
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:396-449
+    /// (`s_BlastDiagHashInsert`, quoted above `insert`).
+    /// The body of `insert`, inlined into its caller (EXPERIMENT LOSAT_X_FOLDLEAN, the strips
+    /// fold of dc-megablast `x_pair_seed_disc.rs` `fold_two_hit`; `insert` is this call). The
+    /// same statements.
     #[inline(always)]
     fn insert_inl(
         &mut self,

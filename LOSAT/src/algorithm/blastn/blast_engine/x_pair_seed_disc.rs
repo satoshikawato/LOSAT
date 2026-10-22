@@ -119,7 +119,7 @@ fn arr_switches() -> (bool, bool) {
 /// No NCBI counterpart: reads LOSAT_X_FOLDLEAN once (a strict-set switch since 2026-10-22: on
 /// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set). With it the strips folds
 /// (`fold_two_hit`, `fold_two_hit_array`) run their `LEAN` instances: no call of
-/// `type_of_word` where its first statement returns (`word_length == lut_word_length`, always
+/// `type_of_word` where it returns at once (`word_length == lut_word_length`, always
 /// so in the scope: a discontiguous word has no word extension), and the diagonal-hash insert
 /// inlined (`DiagHashTable::insert_inl`). The same statements in the same order, so it does not
 /// change any value NCBI computes.
@@ -336,7 +336,7 @@ fn scan_strip_disc(x: &Inputs<'_>, disc: &DiscTemplates, job: &StripJob, out: &m
 /// buckets the inserts change, and the time of the ungapped extensions (instead of the shared
 /// LOSAT_TIMING counters); without it `out` and `pos` are not read.
 ///
-/// With `LEAN` (LOSAT_X_FOLDLEAN, `lean_on`) the fold takes `type_of_word`'s first statement
+/// With `LEAN` (LOSAT_X_FOLDLEAN, `lean_on`) the fold takes `type_of_word`'s early return
 /// itself (NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:531
 /// `if (word_length == lut_word_length) return 1;`, with `*extended = 0` and the offsets
 /// unchanged) when the word lengths are equal, and inlines the insert (`insert_inl`).
@@ -355,7 +355,7 @@ fn fold_two_hit<const PT: bool, const LEAN: bool>(
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let word_length = two_stage.word_length();
-    // EXPERIMENT (LOSAT_X_FOLDLEAN): `type_of_word` returns at its first statement.
+    // EXPERIMENT (LOSAT_X_FOLDLEAN): `type_of_word` returns at its early return (na_ungapped.c:531).
     let x_tow = LEAN && word_length == lut_word_length;
     let s_len = x.s_len;
     let search_seq_packed = x.search_seq_packed;
@@ -1071,7 +1071,7 @@ pub(super) fn run(
 /// `hit_len_array` as a byte) instead of the diagonal hash. The owner folds the strips in scan
 /// order, so the array and the hit list are the reference's whatever the number of threads.
 ///
-/// With `LEAN` (LOSAT_X_FOLDLEAN) it takes `type_of_word`'s first statement itself as
+/// With `LEAN` (LOSAT_X_FOLDLEAN) it takes `type_of_word`'s early return itself as
 /// `fold_two_hit` does.
 fn fold_two_hit_array<const LEAN: bool>(
     x: &Inputs<'_>,
@@ -1085,7 +1085,7 @@ fn fold_two_hit_array<const LEAN: bool>(
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let word_length = two_stage.word_length();
-    // EXPERIMENT (LOSAT_X_FOLDLEAN): `type_of_word` returns at its first statement.
+    // EXPERIMENT (LOSAT_X_FOLDLEAN): `type_of_word` returns at its early return (na_ungapped.c:531).
     let x_tow = LEAN && word_length == lut_word_length;
     let s_len = x.s_len;
     let search_seq_packed = x.search_seq_packed;
@@ -2263,6 +2263,8 @@ mod tests {
                             let mut h = new_hash();
                             if levels {
                                 h.x_lv_start(false);
+                                // and the memo (LOSAT_X_DIAGLV2), whatever the environment says
+                                h.x_lv2_start();
                             }
                             h
                         };

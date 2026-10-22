@@ -59,7 +59,7 @@ NCBI source authority, NCBI reference comments and the parity gates.
 3. **Subject retention.** For LOSAT Web, the engine may keep registered subjects and a
    warm Wasm instance between runs. This supersedes, for LOSAT Web only, the constraint
    "do not mix a persistent worker pool or a mutable cross-search cache" in
-   [`docs/wasm_remaining_work_implementation_plan_20260915.md`](../wasm_remaining_work_implementation_plan_20260915.md)
+   [`docs/archive/wasm_remaining_work_implementation_plan_20260915.md`](../archive/wasm_remaining_work_implementation_plan_20260915.md)
    (line 86), which was written for that plan's performance experiments. The condition
    is that every output of consecutive runs is byte-identical to a fresh CLI run with
    the same argv and input.

@@ -314,7 +314,6 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
             assert!(counter(&stats, "packed_plans") >= 6, "{options:?}: {stats}");
             assert_eq!(counter(&stats, "letters_made"), 0, "{options:?}: {stats}");
         }
-        assert_eq!(counter(&stats, "resolved_made"), 0, "{options:?}");
     }
 }
 
@@ -325,10 +324,11 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
 // (the packing thread), `-lcase_masking` with an interval that holds lower-case letters, an
 // interval without letters in one record (the warning of an empty subject), and an interval that
 // starts past the ends (the error, its exit code and the messages before it).
-// `LOSAT_X_DEFAULT=0` turns the switch off; with it set as well (the reference loops) the subjects
-// are still held packed and the report is the same.
+// `LOSAT_X_DEFAULT=0` turns the switch off; with it set as well the subjects are still held packed
+// and the report is the same.
 #[test]
-fn a_subject_range_is_cut_and_held_packed_and_the_reference_loops_read_the_packed_subjects() {
+fn a_subject_range_is_cut_and_held_packed_and_the_default_off_still_translates_the_packed_subjects()
+{
     let (ten, _, subjects) = inputs();
     let long = long_subjects(subjects);
     for ranged in [
@@ -356,7 +356,6 @@ fn a_subject_range_is_cut_and_held_packed_and_the_reference_loops_read_the_packe
         assert!(report == expected, "{ranged:?}");
         assert_eq!(store_messages, messages, "{ranged:?}");
         assert_eq!(counter(&stats, "subjects"), 4, "{ranged:?}: {stats}");
-        assert_eq!(counter(&stats, "resolved_made"), 0, "{ranged:?}: {stats}");
         if ranged.contains(&"-lcase_masking") {
             // the stage reads the letters of the subject with lower-case letters in its interval
             assert!(counter(&stats, "letters_made") >= 1, "{ranged:?}: {stats}");
@@ -408,7 +407,7 @@ fn a_subject_range_is_cut_and_held_packed_and_the_reference_loops_read_the_packe
     assert!(report == expected);
     assert_eq!(store_messages, messages);
     assert_eq!(counter(&stats, "subjects"), 8);
-    // the reference loops read letters: the resolved bases of the packed subjects
-    assert!(counter(&stats, "resolved_made") >= 7, "{stats}");
-    assert_eq!(counter(&stats, "packed_plans"), 0, "{stats}");
+    // the preliminary stage (the unit path, which `LOSAT_X_DEFAULT=0` no longer turns off)
+    // translates the packed bases of the subjects
+    assert!(counter(&stats, "packed_plans") >= 6, "{stats}");
 }

@@ -4,11 +4,11 @@
 
 状態: **実装済み・統合版を採用（2026-09-15、ユーザー指示「じゃあいいじゃん。採用」）。測定は最初の3組で終了。**
 
-採用記録: [ADOPTION.md](evidence/wasm_four_program_20260915/README.md)（アーカイブ内の `run-01/ADOPTION.md`）。統合版の時間基準は39/45条件、RSS基準は45/45条件で合格。速度低下を含む結果を確認したうえで採用し、未実施の測定や既存課題は記録を維持する。
+採用記録: [ADOPTION.md](../evidence/wasm_four_program_20260915/README.md)（アーカイブ内の `run-01/ADOPTION.md`）。統合版の時間基準は39/45条件、RSS基準は45/45条件で合格。速度低下を含む結果を確認したうえで採用し、未実施の測定や既存課題は記録を維持する。
 
 最終変更: 追加測定を中止し、body/reuse/TurboFan等は未実施として記録する。以下の5組の記述は当初計画であり、今回の最終集計には3組を用いる。
 
-実装記録: [2026-09-15 run-01](evidence/wasm_four_program_20260915/README.md)（アーカイブ内の `run-01/REPORT.md`）。以下の計画作成時の記述と、今回の検証結果は区別する。
+実装記録: [2026-09-15 run-01](../evidence/wasm_four_program_20260915/README.md)（アーカイブ内の `run-01/REPORT.md`）。以下の計画作成時の記述と、今回の検証結果は区別する。
 
 ## 1. 目的と優先順位
 
@@ -38,7 +38,7 @@ NCBI BLASTの検索結果を保ち、LOSATの重複計算、コピー、割り�
 
 過去の不採用候補をそのまま復活させない。BLASTNの固定DP band変更・batch32、BLASTPのSEG cache・単純な行push変更・行列dispatch・関数境界変更、TBLASTXのループ抽出・不要field除去には不採用または不確定の記録がある。再調査には、新しいprofileや異なる変更点を明記する。
 
-根拠: [直近の統合報告](evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/REPORT.md)、[調査履歴](evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/performance-investigation.md)、[現在のthread契約](wasm_total_threads_20260914.md)。履歴内の途中経過より、統合報告と現行ソースを優先する。
+根拠: [直近の統合報告](../evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/REPORT.md)、[調査履歴](../evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/performance-investigation.md)、[現在のthread契約](wasm_total_threads_20260914.md)。履歴内の途中経過より、統合報告と現行ソースを優先する。
 
 ## 3. 共通の開始条件・計測・採用条件
 
@@ -84,17 +84,17 @@ NCBI BLASTの検索結果を保ち、LOSATの重複計算、コピー、割り�
 
 ### parityと既存課題の境界
 
-- 現行[AGENTS.md](../AGENTS.md)のPR5 Gate Aと登録済みNCBI platform fingerprintのGate Bを維持する。platform-local NCBI値で凍結expectedを更新しない。
+- 現行[AGENTS.md](../../AGENTS.md)のPR5 Gate Aと登録済みNCBI platform fingerprintのGate Bを維持する。platform-local NCBI値で凍結expectedを更新しない。
 - megablastの修正済み挙動と凍結Sakai契約との差は、現行sourceの比較と正式release認証を分けて記録する。baseline一致だけでNCBI互換を宣言しない。
 - TBLASTXの非既定local-subject `db_gencode`だけは既存例外に従う。code 4回帰では対応するNCBI DB oracleを使い、それ以外の差を許容しない。
-- 既存のTBLASTX reuse時間の失敗と[reactor memory課題](wasm_reactor_memory_followup_20260914.md)は維持する。新候補について固定回数のbaseline/candidate比較で追加悪化を確認する。観測期間を伸ばし続けて合格にしない。
+- 既存のTBLASTX reuse時間の失敗と[reactor memory課題](../wasm_reactor_memory_followup_20260914.md)は維持する。新候補について固定回数のbaseline/candidate比較で追加悪化を確認する。観測期間を伸ばし続けて合格にしない。
 - 全コード変更に実在NCBI sourceのpath・行番号・snippetを付ける。pruning・ordering・浮動小数点変更とrelease向け主張は、採用前に`ncbi_parity_auditor`の独立read-only確認を受ける。
 
 ## 4. megablast実装計画
 
 ### M0: コピーが実際に発生する範囲を確認
 
-対象: [greedy.rs](../LOSAT/src/algorithm/blastn/alignment/greedy.rs)の`blast_greedy_align`、`NonAffineGreedyRow`、`GreedyNonAffineMem`。
+対象: [greedy.rs](../../LOSAT/src/algorithm/blastn/alignment/greedy.rs)の`blast_greedy_align`、`NonAffineGreedyRow`、`GreedyNonAffineMem`。
 
 非アフィン経路ではbase行・pool行の`to_vec()`と、終了時の`persist()`による書き戻しがある。主fixtureで各経路の呼出数、行数、確保数、コピーbytes、最大pool長、再試行数を測る。非ゼロgapのaffine経路へ効果を一般化しない。
 
@@ -121,7 +121,7 @@ NCBI owner: `core/greedy_align.c`の`s_FindFirstMismatch`（約313–375行）�
 
 ### N0: DP経路と費用を固定する
 
-対象: [blastn run.rs](../LOSAT/src/algorithm/blastn/blast_engine/run.rs)、[extension.rs](../LOSAT/src/algorithm/blastn/extension.rs)、[alignment/gapped.rs](../LOSAT/src/algorithm/blastn/alignment/gapped.rs)。
+対象: [blastn run.rs](../../LOSAT/src/algorithm/blastn/blast_engine/run.rs)、[extension.rs](../../LOSAT/src/algorithm/blastn/extension.rs)、[alignment/gapped.rs](../../LOSAT/src/algorithm/blastn/alignment/gapped.rs)。
 
 NCBI `api/blast_nucl_options.cpp:176–183`がscore-only DPとtraceback DPを選ぶ。preliminaryとfinal tracebackは必要な別段階として維持する。prepare呼出数、batch数、allocation数、先行DP数と実際に採用したDP数、cell数、順序付き包含判定時間を測る。
 
@@ -158,7 +158,7 @@ N1〜N3後もDPが支配する場合は、生成Wasmで残るチェック・load
 
 ### X0: リンク本体の費用を分ける
 
-対象: [sum_stats_linking/linking.rs](../LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs)。preliminaryと再評価後の両linkingを別計測し、group別にhelper訪問数、再DP回数、木のupdate/rebuild回数・伝播深さを数える。更新前後で値が同じ親ノード数も数える。
+対象: [sum_stats_linking/linking.rs](../../LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs)。preliminaryと再評価後の両linkingを別計測し、group別にhelper訪問数、再DP回数、木のupdate/rebuild回数・伝播深さを数える。更新前後で値が同じ親ノード数も数える。
 
 既存診断ではソートよりリンク全体の費用が大きかったが、その値を現在の速度として使わない。両linkingのNCBI ownerは`core/blast_engine.c:871,1517`。片方を削除する案は対象外。
 
@@ -189,7 +189,7 @@ NCBI owner: `core/link_hsps.c:659–768,827–895`。訪問helper indexの列、
 
 ### P0: 二つのKappa経路を分ける
 
-対象: [blastp/blast_engine.rs](../LOSAT/src/algorithm/blastp/blast_engine.rs)、[kappa.rs](../LOSAT/src/algorithm/blastp/kappa.rs)、[gapalign.rs](../LOSAT/src/algorithm/blastp/gapalign.rs)、`core/composition_adjustment/`。
+対象: [blastp/blast_engine.rs](../../LOSAT/src/algorithm/blastp/blast_engine.rs)、[kappa.rs](../../LOSAT/src/algorithm/blastp/kappa.rs)、[gapalign.rs](../../LOSAT/src/algorithm/blastp/gapalign.rs)、`core/composition_adjustment/`。
 
 - 多query: queryごとのredoでscratchを再利用している。行列の不変部分、preliminary初期化、DPが候補。
 - 単一query＋複数match: matchごとにquery準備とscratchを生成し、全matchを先行redoしてから順序付き早期終了判定をする。別の計測fixtureを用意する。
@@ -259,7 +259,7 @@ P1〜P4を評価してもDPが支配するなら、既存の行単位書き込�
 
 最終確認範囲はNative/serial Wasm/threaded Wasm、n1/n2/n4/n8のraw、outfmt 0/6/7の影響範囲、同一reactorでの反復とthread数変更。ブラウザでは通常設定の実consumerでcold/反復、serial/threaded、cancel→次回成功、worker終了、memory budgetを確認する。共有runtimeを変更する必要が出た場合は独立した候補に分け、既存scheduler/API ownerを維持する。
 
-成果物は新しいrun directoryにbaseline/candidateのhash、argv、raw出力、差分、全sample、診断counter、適用外・失敗・未実行の一覧、採用理由を保存する。[既存evidence template](../.agents/skills/verify-ncbi-parity-and-speed/references/evidence.md)を利用する。最後に4対象ごとに「削れた処理」「全体時間」「Nativeとの差」「残る制約」を報告する。
+成果物は新しいrun directoryにbaseline/candidateのhash、argv、raw出力、差分、全sample、診断counter、適用外・失敗・未実行の一覧、採用理由を保存する。[既存evidence template](../../.agents/skills/verify-ncbi-parity-and-speed/references/evidence.md)を利用する。最後に4対象ごとに「削れた処理」「全体時間」「Nativeとの差」「残る制約」を報告する。
 
 ## 9. この計画作成時の検証
 

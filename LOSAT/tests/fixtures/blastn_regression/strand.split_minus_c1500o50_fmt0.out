@@ -1,0 +1,2602 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fixtures/blastn_regression/inputs/s60k.fa).
+           1 sequences; 59,980 total letters
+
+
+
+Query= mq00 len1250
+
+Length=1250
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    26.5    0.76 
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 26.5 bits (28),  Expect = 0.76
+ Identities = 14/14 (100%), Gaps = 0/14 (0%)
+ Strand=Plus/Minus
+
+Query  1220   GGATGCTGCGCGTC  1233
+              ||||||||||||||
+Sbjct  47088  GGATGCTGCGCGTC  47075
+
+
+ Score = 25.6 bits (27),  Expect = 2.7
+ Identities = 15/16 (94%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  743    AAATGGCGATGGCCTG  758
+              |||||||||||| |||
+Sbjct  57212  AAATGGCGATGGACTG  57197
+
+
+ Score = 24.7 bits (26),  Expect = 2.7
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  1142   GCAAATTAATTTG  1154
+              |||||||||||||
+Sbjct  24118  GCAAATTAATTTG  24106
+
+
+ Score = 23.8 bits (25),  Expect = 9.2
+ Identities = 14/15 (93%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  1071   GAAAAAGCAATGAAC  1085
+              ||| |||||||||||
+Sbjct  39262  GAACAAGCAATGAAC  39248
+
+
+ Score = 23.8 bits (25),  Expect = 9.2
+ Identities = 14/15 (93%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  884    CCCACTAAACCGTAA  898
+              |||||||||||| ||
+Sbjct  54715  CCCACTAAACCGGAA  54701
+
+
+ Score = 22.9 bits (24),  Expect = 9.2
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  415   TTGATGCTGGCG  426
+             ||||||||||||
+Sbjct  8037  TTGATGCTGGCG  8026
+
+
+ Score = 22.9 bits (24),  Expect = 9.2
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  1219   AGGATGCTGCGC  1230
+              ||||||||||||
+Sbjct  41998  AGGATGCTGCGC  41987
+
+
+ Score = 22.9 bits (24),  Expect = 9.2
+ Identities = 15/17 (88%), Gaps = 0/17 (0%)
+ Strand=Plus/Minus
+
+Query  1069   CAGAAAAAGCAATGAAC  1085
+              ||||||||||| | |||
+Sbjct  58696  CAGAAAAAGCACTTAAC  58680
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 73750800
+
+
+Query= mq01 len159
+
+Length=159
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    21.1    3.7  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 21.1 bits (22),  Expect = 3.7
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  132   TATCGCGGTTT  142
+             |||||||||||
+Sbjct  8152  TATCGCGGTTT  8142
+
+
+ Score = 21.1 bits (22),  Expect = 3.7
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  46     ATATCAACAAA  56
+              |||||||||||
+Sbjct  25166  ATATCAACAAA  25156
+
+
+ Score = 21.1 bits (22),  Expect = 3.7
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  53     CAAACGTCTGA  63
+              |||||||||||
+Sbjct  50766  CAAACGTCTGA  50756
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 8514746
+
+
+Query= mq02 len77
+
+Length=77
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    22.9    0.46 
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 22.9 bits (24),  Expect = 0.46
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  54     TACCGCGCCAGT  65
+              ||||||||||||
+Sbjct  47001  TACCGCGCCAGT  46990
+
+
+ Score = 21.1 bits (22),  Expect = 1.6
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  50     CTTTTACCGCG  60
+              |||||||||||
+Sbjct  51742  CTTTTACCGCG  51732
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 3657804
+
+
+Query= mq03 len1438
+
+Length=1438
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    24.7    3.1  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 24.7 bits (26),  Expect = 3.1
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  516    CTTTACCTTCGCC  528
+              |||||||||||||
+Sbjct  20676  CTTTACCTTCGCC  20664
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 85023280
+
+
+Query= mq04 len1682
+
+Length=1682
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    25.6    3.6  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 25.6 bits (27),  Expect = 3.6
+ Identities = 15/16 (94%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  1623   CAGTCCATCGCCATTT  1638
+              ||| ||||||||||||
+Sbjct  23719  CAGGCCATCGCCATTT  23704
+
+
+ Score = 24.7 bits (26),  Expect = 3.6
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  341    GCACAAATGTACG  353
+              |||||||||||||
+Sbjct  32292  GCACAAATGTACG  32280
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 99653520
+
+
+Query= mq05 len15
+
+Length=15
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    24.7    0.006
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 24.7 bits (26),  Expect = 0.006
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  1      CAGCGGACTCCAC  13
+              |||||||||||||
+Sbjct  44272  CAGCGGACTCCAC  44260
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 179904
+
+
+Query= mq06 len24
+
+Length=24
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 659637
+
+
+Query= mq07 len19
+
+Length=19
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    35.6    7e-06
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 35.6 bits (38),  Expect = 7e-06
+ Identities = 19/19 (100%), Gaps = 0/19 (0%)
+ Strand=Plus/Minus
+
+Query  1      CCGTACATTTGTGCGACGG  19
+              |||||||||||||||||||
+Sbjct  55929  CCGTACATTTGTGCGACGG  55911
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 359802
+
+
+Query= mq08 len524
+
+Length=524
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    26.5    0.31 
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 26.5 bits (28),  Expect = 0.31
+ Identities = 14/14 (100%), Gaps = 0/14 (0%)
+ Strand=Plus/Minus
+
+Query  72     GCAAATTAATTTGC  85
+              ||||||||||||||
+Sbjct  24118  GCAAATTAATTTGC  24105
+
+
+ Score = 26.5 bits (28),  Expect = 0.31
+ Identities = 14/14 (100%), Gaps = 0/14 (0%)
+ Strand=Plus/Minus
+
+Query  150    GGATGCTGCGCGTC  163
+              ||||||||||||||
+Sbjct  47088  GGATGCTGCGCGTC  47075
+
+
+ Score = 23.8 bits (25),  Expect = 3.8
+ Identities = 14/15 (93%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  1      GAAAAAGCAATGAAC  15
+              ||| |||||||||||
+Sbjct  39262  GAACAAGCAATGAAC  39248
+
+
+ Score = 22.9 bits (24),  Expect = 3.8
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  257    ACCAGAAAGCGC  268
+              ||||||||||||
+Sbjct  30300  ACCAGAAAGCGC  30289
+
+
+ Score = 22.9 bits (24),  Expect = 3.8
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  175    CAGCGCGGCAGC  186
+              ||||||||||||
+Sbjct  30932  CAGCGCGGCAGC  30921
+
+
+ Score = 22.9 bits (24),  Expect = 3.8
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  506    TTGGCAAAATCA  517
+              ||||||||||||
+Sbjct  35548  TTGGCAAAATCA  35537
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 30340772
+
+
+Query= mq09 len2669
+
+Length=2669
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    4516    0.0  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 4516 bits (5007),  Expect = 0.0
+ Identities = 2614/2673 (98%), Gaps = 11/2673 (0%)
+ Strand=Plus/Minus
+
+Query  1      CTGAACTCACTGGTGGGGATTGTGCTCTTTGTTTCTATTTTATGGTTTAAACAAGGTATG  60
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  34112  CTGAACTCACTGGTGGGGATTGTGCTCTTTGTTTCTATTTTATGGTTTAAACAAGGTATG  34053
+
+Query  61     GCGGGGTTTGGCGAACTGGTGTCCAGCGTGCGCTGGTGGACACTTATACCTGGCTTGCTG  120
+              |||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||
+Sbjct  34052  GCGGGGTTTGGCGAACTGGTGTCCAGCGTGCGCTGGTGGACATTTATACCTGGCTTGCTG  33993
+
+Query  121    GGATCGTTTTTTGTCTTCGCCTGTATCAGCGGATATCAGAATGTGGGAGCGGCGACAACT  180
+              ||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||
+Sbjct  33992  GGATCGTTTTTTGTCTTCGCCAGTATCAGCGGATATCAGAATGTGGGAGCGGCGACAACT  33933
+
+Query  181    ATTGCAGTACTGGTCGCCAGCCAGCTGATTGGCGGTCTGGTTCTGGATATTTTCCGCAGT  240
+              |||||||||||||||||||| ||||||| |||||||||||||||| |||| |||||||||
+Sbjct  33932  ATTGCAGTACTGGTCGCCAGGCAGCTGAGTGGCGGTCTGGTTCTGTATATCTTCCGCAGT  33873
+
+Query  241    CATGGCGTACCACTACGGGCGTTGTTCGGCCCAATTTGTGGCGCAATTTTACTTGTGGTT  300
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  33872  CATGGCGTACCACTACGGGCGTTGTTCGGCCCAATTTGTGGCGCAATTTTACTTGTGGTT  33813
+
+Query  301    GGCGCCTGGTTGGGAGCCAGACGCTCATTTTAACCACAGGATGGTGCCGCCTTTGGTTAA  360
+              |||||||||| || ||||||||||||||||||| || |||||||||||||||||||||||
+Sbjct  33812  GGCGCCTGGTAGGTAGCCAGACGCTCATTTTAATCAAAGGATGGTGCCGCCTTTGGTTAA  33753
+
+Query  361    CTGTTCATGGCGCGCTTCCATATCTTCTTTATGCTTGCGACCGTGATGAGCAATAGCGGT  420
+              ||||||||||||||||||||| |||||||||||||| |||||||||||||||||||||||
+Sbjct  33752  CTGTTCATGGCGCGCTTCCATTTCTTCTTTATGCTTCCGACCGTGATGAGCAATAGCGGT  33693
+
+Query  421    GCGCAAACGCTGCTGCTGGGTGTAGCGATCTTCCCGACTTAACTCCGCGTCATCGCTCAG  480
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  33692  GCGCAAACGCTGCTGCTGGGTGTAGCGATCTTCCCGACTTAACTCCGCGTCATCGCTCAG  33633
+
+Query  481    GGCGATTAATAATTCGTTCATATGGGCAATGACGCTCTCTTCAATCGCGGCATCCACGCG  540
+              | |||||||||||| |||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  33632  GACGATTAATAATTTGTTCATATGGGCAATGACGCTCTCTTCAATCGCGGCATCCACGCG  33573
+
+Query  541    CGCGATGACTTCATCCAGATGCGACATACTTTCTCCTTAGCCACTTTTGAAATTTATCGA  600
+              |||||||||||||||||||||| ||||||||||||||||||||||| |||||||||||||
+Sbjct  33572  CGCGATGACTTCATCCAGATGCCACATACTTTCTCCTTAGCCACTTGTGAAATTTATCGA  33513
+
+Query  601    TTCATCCAAATGATATAAGTCTGCGTGGTGCCGTCAAGCCAGTGAGTAAGATTTAAAACA  660
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  33512  TTCATCCAAATGATATAAGTCTGCGTGGTGCCGTCAAGCCAGTGAGTAAGATTTAAAACA  33453
+
+Query  661    GTAAAAACAACAGCGCCACCGGGAAACTCTTCGGCCATGTTGCCCCCACCAGAAAGGCGC  720
+              || |||||||||||||||||||||||||| |||||||||||||||||||||||| |||||
+Sbjct  33452  GTGAAAACAACAGCGCCACCGGGAAACTCATCGGCCATGTTGCCCCCACCAGAAGGGCGC  33393
+
+Query  721    TTAAGAAACGGATGCGTTTCTTATCGTGAGAAAGAAACCAAGTGATAAGAAATGCGATTG  780
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  33392  TTAAGAAACGGATGCGTTTCTTATCGTGAGAAAGAAACCAAGTGATAAGAAATGCGATTG  33333
+
+Query  781    CTGCCATAACCGCATaaaaaaaaaGCATGTGTTGATAGAGAGACAT-GTACGGGCGTCCA  839
+              |||||||||||||||||||||| ||||||||||||||||||||||| |||||||||||||
+Sbjct  33332  CTGCCATAACCGCATAAAAAAACAGCATGTGTTGATAGAGAGACATGGTACGGGCGTCCA  33273
+
+Query  840    GCCAGATGAATAAAACGCGCGCAAATATGCGTCATTTTTTGACGTGCATCAAGTTTTTTA  899
+              |||| |||||||||||||||||||||||| ||||||||||||||||||||||||||||||
+Sbjct  33272  GCCACATGAATAAAACGCGCGCAAATATG-GTCATTTTTTGACGTGCATCAAGTTTTTTA  33214
+
+Query  900    ACCGGTTTGAGAGAAAAACATCAAACAGCAACTTGCCCTTATCCATCTTCAGAATGAGTA  959
+              |||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  33213  ACCGGTTTGAGAAAAAAACATCAAACAGCAACTTGCCCTTATCCATCTTCAGAATGAGTA  33154
+
+Query  960    TTATTGCGGATTTTCTTAACCCGTACGATACACATAGGGGCAATGATAAAAGGTGGCAAA  1019
+              |||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||
+Sbjct  33153  TTATTGCGGATTTTCTTAACCCGTACTATACACATAGGGGCAATGATAAAAGGTGGCAAA  33094
+
+Query  1020   AATGAATGTTTCCAGTAGAACTGTAGTACTGATAAATGTCTTTGCTGCTGTTAGTTTGTT  1079
+              |||||||||||||||||||||| |||||||||||||||||||||||| |||| |||||||
+Sbjct  33093  AATGAATGTTTCCAGTAGAACTCTAGTACTGATAAATGTCTTTGCTGTTGTTGGTTTGTT  33034
+
+Query  1080   TACTCTTATCTCTATGAGATTTGGCTGGTTTATTTGATGTAGTGATTTTGCACGCAGCAC  1139
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  33033  TACTCTTATCTCTATGAGATTTGGCTGGTTTATTTGATGTAGTGATTTTGCACGCAGCAC  32974
+
+Query  1140   GTACTGTCAGAGAAATCAGTGCTCTGACAGTACGCAAGATCATCTCATACTCTTACGATC  1199
+              ||  ||||||||||||||||||||||||||||||||||||||||||||||||| ||||||
+Sbjct  32973  GT-TTGTCAGAGAAATCAGTGCTCTGACAGTACGCAAGATCATCTCATACTCTCACGATC  32915
+
+Query  1200   TGCAATATTATCCTTAATGTTTAACCATGACGTGGCGGACGACGGTGTAATCCTCCAGCC  1259
+              |||||||||||||||| | ||||||||||||||||||||||||||||| |||||||||||
+Sbjct  32914  TGCAATATTATCCTTATTCTTTAACCATGACGTGGCGGACGACGGTGT-ATCCTCCAGCC  32856
+
+Query  1260   CATAAAGTGACATTTCCTTGCCGTAACCAGAAAGTTTCTGCCCACCGTGCGGCATTTCAC  1319
+              ||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  32855  CATAAAGTGACATATCCTTGCCGTAACCAGAAAGTTTCTGCCCACCGTGCGGCATTTCAC  32796
+
+Query  1320   TTACCAGCATGAAATGGGTATTGACCCAGGTACAACCATATTGCAGCCGTGCACTGACGC  1379
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  32795  TTACCAGCATGAAATGGGTATTGACCCAGGTACAACCATATTGCAGCCGTGCACTGACGC  32736
+
+Query  1380   GATGCGCCCTGCCCACATCTTTCGTCCATACCGAAGATGCAAGTCCGTACTGGCTGTCAT  1439
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  32735  GATGCGCCCTGCCCACATCTTTCGTCCATACCGAAGATGCAAGTCCGTACTGGCTGTCAT  32676
+
+Query  1440   TCGCCCACTTTACCACCTGTTCT-TCGTTGTCGAAGAGCGTAACACTCACTACTGGACCA  1498
+              ||||||| ||||||||||||||| ||||||||||||||||||||||||||||||||||||
+Sbjct  32675  TCGCCCAGTTTACCACCTGTTCTGTCGTTGTCGAAGAGCGTAACACTCACTACTGGACCA  32616
+
+Query  1499   AATACCTCTTCTTGCACGATGGCATCGTCCTGTAATGCGCCAGCCAGCAGCGTCGGCGCA  1558
+              |||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  32615  AATACCTCTTTTTGCACGATGGCATCGTCCTGTAATGCGCCAGCCAGCAGCGTCGGCGCA  32556
+
+Query  1559   TAGTAATAGCCATTACCCTTGCGCTTTTCACCGCCAGTGATCACTTTGATGTGCCCTGTC  1618
+              ||||||||||||| |||||||||||||||||||||||||||||| |||||||||||||||
+Sbjct  32555  TAGTAATAGCCATCACCCTTGCGCTTTTCACCGCCAGTGATCAC-TTGATGTGCCCTGTC  32497
+
+Query  1619   GCTTTCGCCTCTTCTACTGCCTTGCTGACGCGTTCGAGATGCGCCAGCGAGCTTAAAGGT  1678
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  32496  GCTTTCGCCTCTTCTACTGCCTTGCTGACGCGTTCGAGATGCGCCAGCGAGCTTAAAGGT  32437
+
+Query  1679   CCAAGCTCCGTAGACTCGTCATCCGGCGCACCAGATTTTAACGTTGCCACTGCAGCACCG  1738
+               |||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  32436  TCAAGCTCCGTAGACCCGTCATCCGGCGCACCAGATTTTAACGTTGCCACTGCAGCACCG  32377
+
+Query  1739   AGTTTTTCCACCAGCGTATCGTAAATGCC-TTTTTGCGCGTAGATCCGACAAGCCACAGT  1797
+              ||||||||||||||||||||||||||||| |||||| |||||||||||||||||||||||
+Sbjct  32376  AGTTTTTCCACCAGCGTATCGTAAATGCCTTTTTTGGGCGTAGATCCGACAAGCCACAGT  32317
+
+Query  1798   ACAATCCTGTCCGGCATTGTAATAGC-CAAATGTACGTACACCTTCGACCACTGCTTCAA  1856
+              |||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||
+Sbjct  32316  ACAATCCTGTCCGGCATTGTAATAGCACAAATGTACGTACACCTTCGACCACTGCTTCAA  32257
+
+Query  1857   TATCCGCATCATCAAAAACAATCACTGGCGCTTTGCCACCAAGTTCCATATGAGTACGCT  1916
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  32256  TATCCGCATCATCAAAAACAATCACTGGCGCTTTGCCACCAAGTTCCATATGAGTACGCT  32197
+
+Query  1917   TAATGGAGGGCGCGGTATGGCTGATGATGTGCTCGCCGGTGGCGAGAGAGCCCGTCAGCG  1976
+              ||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||
+Sbjct  32196  TAATGGAGGGCGCGGTATGGCTGATGATGTGCTCGCCGGTGGCGATAGAGCCCGTCAGCG  32137
+
+Query  1977   ACACCATCCGCACTTTGGGATGACCGGTCAGCGGATCGCCCACCGTTTTGTCTCTGCCAA  2036
+              |||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||
+Sbjct  32136  ACACCATCCGCACTTTGGGATGACCGGTCAGCGGATCGCCCACCGTTTTGCCTCTGCCAA  32077
+
+Query  2037   ACAGTACGTTAATCACGCCTGCCGGGAAGATATCTTTCGCCAGCTCTGCCAACTTCAACG  2096
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  32076  ACAGTACGTTAATCACGCCTGCCGGGAAGATATCTTTCGCCAGCTCTGCCAACTTCAACG  32017
+
+Query  2097   CGGTCAGCGGGGTAATTTCTGATGGTTTAAGCACTACGCAGTTCCCTGCCGCCAGCGCCG  2156
+              ||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  32016  CGGTCAGCGGGGT-ATTTCTGATGGTTTAAGCACTACGCAGTTCCCTGCCGCCAGCGCCG  31958
+
+Query  2157   GAGCCAGTTTCCACGCTGCCATCATCAGCGGATAATTCCACGGGGCGATAGAAGCCACGA  2216
+              ||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||
+Sbjct  31957  GAGCCAGTTTCCACGCTGCCATCATCAGCGGATAATTCCACGGTGCGATAGAAGCCACGA  31898
+
+Query  2217   CCCCCAACGGATCGCGACGGATCATCGAAGTATGACCTTAAAGATATTCACCTGCCGCCA  2276
+              ||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||
+Sbjct  31897  CCCCCAACGGATCGCGACGGATCATCGAAGTATGACCTTCAAGATATTCACCTGCCGCCA  31838
+
+Query  2277   GACCATTCAGACAGCGCGCCGCACCCGCGAAAAAGCGAAAAACAACGACAATCGCCCGGA  2336
+              |||||||||| |||||||||||||||||||||||||||||||| |||||||||||| |||
+Sbjct  31837  GACCATTCAGGCAGCGCGCCGCACCCGCGAAAAAGCGAAAAAC-ACGACAATCGCCGGGA  31779
+
+Query  2337   TTTCATCATTGAACGCACTATGCAGCGGTTTGCCACAATTACGGGACTCCAGTTCGGTAA  2396
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||
+Sbjct  31778  TTTCATCATTGAACGCACTATGCAGCGGTTTGCCACAATTACGGGACTCCAGTTCGGCAA  31719
+
+Query  2397   AAACCTGACCATTTTCTTCGATAACATCAGCCAGTTTCAGCAGACATTCCGCACGCACTT  2456
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  31718  AAACCTGACCATTTTCTTCGATAACATCAGCCAGTTTCAGCAGACATTCCGCACGCACTT  31659
+
+Query  2457   TCGGCGTGGTTTGCCCCCATTCGGCAAATGCTGCATCTGCCGCGCGCACAGCAGCATCGA  2516
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  31658  TCGGCGTGGTTTGCCCCCATTCGGCAAATGCTGCATCTGCCGCGCGCACAGCAGCATCGA  31599
+
+Query  2517   CCTGCTCTGCGGATGCCTCGGCAATCTCCAGTAAAACGTCCCCCGTTGCCGGATTATAGA  2576
+              ||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||
+Sbjct  31598  CCTGCTCTGCGGATGCCTCGGCAATCTCCAGTAAAACGTCCCCCGTTGCCGCATTATAGA  31539
+
+Query  2577   CAGGCTGTTTTTCCCCTTCGCCGCAAACCAGTTCCCCGTTAATCAGTAACTTATGTTGCA  2636
+              |||||||||||||||||||||||| ||||||||| |||||||||||||||||||||||||
+Sbjct  31538  CAGGCTGTTTTTCCCCTTCGCCGCTAACCAGTTCTCCGTTAATCAGTAACTTATGTTGCA  31479
+
+Query  2637   TAGCATATACCTGTATCAGTGGTTATTGACCAT  2669
+              |||||||| |||||||||||||||| |||||||
+Sbjct  31478  TAGCATAT-CCTGTATCAGTGGTTAATGACCAT  31447
+
+
+ Score = 28.3 bits (30),  Expect = 0.47
+ Identities = 15/15 (100%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  1638   CCTTGCTGACGCGTT  1652
+              |||||||||||||||
+Sbjct  13967  CCTTGCTGACGCGTT  13953
+
+
+ Score = 27.4 bits (29),  Expect = 1.6
+ Identities = 19/21 (90%), Gaps = 2/21 (10%)
+ Strand=Plus/Minus
+
+Query  141    CTGTATCAGCGGATATCAGAA  161
+              |||||  ||||||||||||||
+Sbjct  46356  CTGTA--AGCGGATATCAGAA  46338
+
+
+ Score = 24.7 bits (26),  Expect = 5.7
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  1741  TTTTTCCACCAGC  1753
+             |||||||||||||
+Sbjct  1488  TTTTTCCACCAGC  1476
+
+
+ Score = 24.7 bits (26),  Expect = 5.7
+ Identities = 16/18 (89%), Gaps = 0/18 (0%)
+ Strand=Plus/Minus
+
+Query  1756  ATCGTAAATGCCTTTTTG  1773
+             ||| ||||||||||| ||
+Sbjct  6779  ATCATAAATGCCTTTCTG  6762
+
+
+ Score = 24.7 bits (26),  Expect = 5.7
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  1658   TGCGCCAGCGAGC  1670
+              |||||||||||||
+Sbjct  26289  TGCGCCAGCGAGC  26277
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 158771432
+
+
+Query= mq10 len444
+
+Length=444
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    24.7    0.92 
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 24.7 bits (26),  Expect = 0.92
+ Identities = 22/27 (81%), Gaps = 2/27 (7%)
+ Strand=Plus/Minus
+
+Query  61     GCATTATGAACACTTCGGTGGCTCTGA  87
+              |||||||||||| ||  ||||  ||||
+Sbjct  40960  GCATTATGAACAATT--GTGGTGCTGA  40936
+
+
+ Score = 22.9 bits (24),  Expect = 3.2
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  216  TACTCCGCCGGT  227
+            ||||||||||||
+Sbjct  887  TACTCCGCCGGT  876
+
+
+ Score = 22.9 bits (24),  Expect = 3.2
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  179    TAAAACGAAAAA  190
+              ||||||||||||
+Sbjct  27232  TAAAACGAAAAA  27221
+
+
+ Score = 22.9 bits (24),  Expect = 3.2
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  375    AAATCCCCACCG  386
+              ||||||||||||
+Sbjct  46315  AAATCCCCACCG  46304
+
+
+ Score = 22.9 bits (24),  Expect = 3.2
+ Identities = 15/17 (88%), Gaps = 0/17 (0%)
+ Strand=Plus/Minus
+
+Query  294    AACGGCACAAAAATTCA  310
+              ||||||||||| | |||
+Sbjct  51264  AACGGCACAAATAGTCA  51248
+
+
+ Score = 22.9 bits (24),  Expect = 3.2
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  410    TACGCCGGATAT  421
+              ||||||||||||
+Sbjct  55597  TACGCCGGATAT  55586
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 25543812
+
+
+Query= mq11 len44
+
+Length=44
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    68.0    6e-15
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 68.0 bits (74),  Expect = 6e-15
+ Identities = 42/44 (95%), Gaps = 1/44 (2%)
+ Strand=Plus/Minus
+
+Query  1      GCGCCTGGCAACACCGCGCATTAACTTGTCCGAATTACTGACCG  44
+              |||||||||||||||||||| |||||||||||||| ||||||||
+Sbjct  38792  GCGCCTGGCAACACCGCGCA-TAACTTGTCCGAATCACTGACCG  38750
+
+
+ Score = 21.1 bits (22),  Expect = 0.76
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  13     ACCGCGCATTA  23
+              |||||||||||
+Sbjct  27426  ACCGCGCATTA  27416
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1738985
+
+
+Query= mq12 len501
+
+Length=501
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    24.7    1.0  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 24.7 bits (26),  Expect = 1.0
+ Identities = 16/18 (89%), Gaps = 0/18 (0%)
+ Strand=Plus/Minus
+
+Query  230    CGCAGCCGGACGGCCACA  247
+              || |||||||||||| ||
+Sbjct  28840  CGGAGCCGGACGGCCCCA  28823
+
+
+ Score = 22.9 bits (24),  Expect = 3.6
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  398  CGCCGTACCGGG  409
+            ||||||||||||
+Sbjct  136  CGCCGTACCGGG  125
+
+
+ Score = 22.9 bits (24),  Expect = 3.6
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  50     CGGTGGGGATTT  61
+              ||||||||||||
+Sbjct  45929  CGGTGGGGATTT  45918
+
+
+ Score = 22.9 bits (24),  Expect = 3.6
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  277    CCGGATATCCGG  288
+              ||||||||||||
+Sbjct  46540  CCGGATATCCGG  46529
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 28961646
+
+
+Query= mq13 len4528
+
+Length=4528
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    30.1    0.23 
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 30.1 bits (32),  Expect = 0.23
+ Identities = 16/16 (100%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  4444   GCGGGCCATCCACCAG  4459
+              ||||||||||||||||
+Sbjct  44971  GCGGGCCATCCACCAG  44956
+
+
+ Score = 28.3 bits (30),  Expect = 0.80
+ Identities = 18/20 (90%), Gaps = 0/20 (0%)
+ Strand=Plus/Minus
+
+Query  2777   CAGTGAAATCAGTGCGCTGA  2796
+              ||| ||||||||||| ||||
+Sbjct  32967  CAGAGAAATCAGTGCTCTGA  32948
+
+
+ Score = 28.3 bits (30),  Expect = 0.80
+ Identities = 15/15 (100%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  1202   TTACTGACGAAGGTG  1216
+              |||||||||||||||
+Sbjct  40334  TTACTGACGAAGGTG  40320
+
+
+ Score = 26.5 bits (28),  Expect = 2.8
+ Identities = 14/14 (100%), Gaps = 0/14 (0%)
+ Strand=Plus/Minus
+
+Query  1578   CCATAAATGTTATC  1591
+              ||||||||||||||
+Sbjct  10778  CCATAAATGTTATC  10765
+
+
+ Score = 26.5 bits (28),  Expect = 2.8
+ Identities = 29/39 (74%), Gaps = 0/39 (0%)
+ Strand=Plus/Minus
+
+Query  173    AATATTATCTGGCATGATGGTGTTTTAGTAGAAACCAGA  211
+              |||||||||||||  | || | || |||    |||||||
+Sbjct  20202  AATATTATCTGGCTGGGTGATTTTATAGGCACAACCAGA  20164
+
+
+ Score = 25.6 bits (27),  Expect = 9.7
+ Identities = 15/16 (94%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  2745   CGCAAAATCTCCGCCG  2760
+              |||| |||||||||||
+Sbjct  13383  CGCAGAATCTCCGCCG  13368
+
+
+ Score = 24.7 bits (26),  Expect = 9.7
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  3641   GGATGTTCGCCAG  3653
+              |||||||||||||
+Sbjct  29956  GGATGTTCGCCAG  29944
+
+
+ Score = 24.7 bits (26),  Expect = 9.7
+ Identities = 16/18 (89%), Gaps = 0/18 (0%)
+ Strand=Plus/Minus
+
+Query  4081   CGACCGTTTTCACCAGTT  4098
+              ||| ||||||||||| ||
+Sbjct  40127  CGAACGTTTTCACCACTT  40110
+
+
+ Score = 24.7 bits (26),  Expect = 9.7
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  1344   TTATGTTATTGCC  1356
+              |||||||||||||
+Sbjct  41048  TTATGTTATTGCC  41036
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 270235213
+
+
+Query= mq14 len30
+
+Length=30
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    22.9    0.12 
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 22.9 bits (24),  Expect = 0.12
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  2      TGGCGAAAATGC  13
+              ||||||||||||
+Sbjct  53981  TGGCGAAAATGC  53970
+
+
+ Score = 21.1 bits (22),  Expect = 0.42
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  2      TGGCGAAAATG  12
+              |||||||||||
+Sbjct  40845  TGGCGAAAATG  40835
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 959456
+
+
+Query= mq15 len501
+
+Length=501
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    26.5    0.30 
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 26.5 bits (28),  Expect = 0.30
+ Identities = 14/14 (100%), Gaps = 0/14 (0%)
+ Strand=Plus/Minus
+
+Query  119    CCATAAATGTTATC  132
+              ||||||||||||||
+Sbjct  10778  CCATAAATGTTATC  10765
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 28961646
+
+
+Query= mq16 len583
+
+Length=583
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    28.3    0.100
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 28.3 bits (30),  Expect = 0.100
+ Identities = 15/15 (100%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  154   CACCTTCGTCAGTAA  168
+             |||||||||||||||
+Sbjct  4569  CACCTTCGTCAGTAA  4555
+
+
+ Score = 25.6 bits (27),  Expect = 1.2
+ Identities = 18/21 (86%), Gaps = 0/21 (0%)
+ Strand=Plus/Minus
+
+Query  377    AATCGAACGCCATCAGCACAA  397
+              ||||||||||| ||  |||||
+Sbjct  22525  AATCGAACGCCTTCCCCACAA  22505
+
+
+ Score = 24.7 bits (26),  Expect = 1.2
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  496   CGCAGGCGCATCT  508
+             |||||||||||||
+Sbjct  8049  CGCAGGCGCATCT  8037
+
+
+ Score = 23.8 bits (25),  Expect = 4.2
+ Identities = 19/22 (86%), Gaps = 1/22 (5%)
+ Strand=Plus/Minus
+
+Query  141    GCCGCATGC-GGCACACCTTCG  161
+              || || ||| ||||||||||||
+Sbjct  27478  GCGGCTTGCAGGCACACCTTCG  27457
+
+
+ Score = 22.9 bits (24),  Expect = 4.2
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  369   GTTCGGGTAATC  380
+             ||||||||||||
+Sbjct  1582  GTTCGGGTAATC  1571
+
+
+ Score = 22.9 bits (24),  Expect = 4.2
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  162    TCAGTAATCAAA  173
+              ||||||||||||
+Sbjct  12775  TCAGTAATCAAA  12764
+
+
+ Score = 22.9 bits (24),  Expect = 4.2
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  489    CGCTTTACGCAG  500
+              ||||||||||||
+Sbjct  39309  CGCTTTACGCAG  39298
+
+
+ Score = 22.9 bits (24),  Expect = 4.2
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  150    GGCACACCTTCG  161
+              ||||||||||||
+Sbjct  46217  GGCACACCTTCG  46206
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 33818004
+
+
+Query= mq17 len58
+
+Length=58
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    21.1    1.1  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 21.1 bits (22),  Expect = 1.1
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  48     AATATTCATAA  58
+              |||||||||||
+Sbjct  43590  AATATTCATAA  43580
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 2578495
+
+
+Query= mq18 len1676
+
+Length=1676
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    2648    0.0  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 2648 bits (2936),  Expect = 0.0
+ Identities = 1604/1680 (95%), Gaps = 11/1680 (1%)
+ Strand=Plus/Minus
+
+Query  1      TCACTGTATTTCCCTTTCTGATATAAA-CCACGAAAGATATTAACTTCTTGTCTAGCTGG  59
+              ||||||||||||||| ||||||||||| ||||||||||||||||||||||||||||||||
+Sbjct  50374  TCACTGTATTTCCCTGTCTGATATAAATCCACGAAAGATATTAACTTCTTGTCTAGCTGG  50315
+
+Query  60     CTCTATGTCCACTGGAGAACAACCATACAATAAACATAAAACTAAAAATATAAATTTTTT  119
+              |||||||||||||||||||||||||||||||||| ||||||||||||||||| |||||||
+Sbjct  50314  CTCTATGTCCACTGGAGAACAACCATACAATAAAAATAAAACTAAAAATATATATTTTTT  50255
+
+Query  120    CATATTTCCTCCTG-TTAATTGACCCAGCATTCTTGCAACGTTCGACAAGCCAGAGTCAT  178
+              |||||||||||||| |||||||||||||||||||||| |||||  |||||||||||||||
+Sbjct  50254  CATATTTCCTCCTGGTTAATTGACCCAGCATTCTTGCCACGTTT-ACAAGCCAGAGTCAT  50196
+
+Query  179    AACTGAAGCGTCAACACCTGCACCCATACCAACAGATTCTGTCGATGATTCTGGATTATC  238
+              |||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||
+Sbjct  50195  AACTGAAGCGTCAACACCTGCACCGATACCAACAGATTCTGTCGATGATTCTGGATTATC  50136
+
+Query  239    AACATCCACTACATCAGTATACGCAAGATGCCCCCCAACTCCGCCGCCAACCGTTACACC  298
+              |||||||||||||| ||||||||||| |||||||||||||||||||||||||||||||||
+Sbjct  50135  AACATCCACTACATAAGTATACGCAAAATGCCCCCCAACTCCGCCGCCAACCGTTACACC  50076
+
+Query  299    TACTGAATTGCTGACTCCCGATGGAGGTAAAGCCTTGGTCTCAGAATATGTGATAGCCGC  358
+               |||||||||||||||||||||| |||||||| |||||||||||||||||||||||||||
+Sbjct  50075  -ACTGAATTGCTGACTCCCGATGTAGGTAAAGACTTGGTCTCAGAATATGTGATAGCCGC  50017
+
+Query  359    AATTATCCCACCACCAATTCCTGCATGTCCGCATGCAGTAGCATAAATACAAATAGCAAA  418
+              | |||||||||||||||||||||||||||||||| | |||||||||||||||||| || |
+Sbjct  50016  ATTTATCCCACCACCAATTCCTGCATGTCCGCATCCTGTAGCATAAATACAAATATCAGA  49957
+
+Query  419    TAACATTTCACCTTTCTTTTTAGCAAACGCAACGCCAAGTCCTGCATGACCACCTATTGA  478
+              |||||||||||||||||||||||||||||||||||||||||||||| ||||||||| |||
+Sbjct  49956  TAACATTTCACCTTTCTTTTTAGCAAACGCAACGCCAAGTCCTGCAAGACCACCTAATGA  49897
+
+Query  479    TATTTGATCTCCACTGCCAGTAATATCAATTGATGATGTTCCATATGATTCATCATGTCA  538
+              |||| ||||||||||||||||||||||||||||||||||||||||||| |||||||| ||
+Sbjct  49896  TATTAGATCTCCACTGCCAGTAATATCAATTGATGATGTTCCATATGAATCATCATGCCA  49837
+
+Query  539    AACATCATATAATAATTGATATAAATTATACAAACCAAAAGGATCCATCCTTATTATCGT  598
+              ||||||||||||||||||||||||||||| |||||| |||||||||||||||||||||| 
+Sbjct  49836  AACATCATATAATAATTGATATAAATTAT-CAAACCCAAAGGATCCATCCTTATTATCG-  49779
+
+Query  599    ATTCGGTGGGTAATTATACAGATTCCATCCCCCTGCCAGCCCAATGAGGTTTTGTGTAAT  658
+              |||| ||||||||||| ||||||| |||||||| |||||||||||| ||| |||||||||
+Sbjct  49778  ATTCAGTGGGTAATTACACAGATTGCATCCCCCCGCCAGCCCAATGGGGTCTTGTGTAAT  49719
+
+Query  659    ATACCTCCCCTGTAGCGGGTCATAGTACCGGTTCCGGTTATAGTACAGCCCTCATTCCTC  718
+              ||||||||||||| |||||||| | ||||||||||||||||||||||||||| |||| ||
+Sbjct  49718  ATACCTCCCCTGTTGCGGGTCACATTACCGGTTCCGGTTATAGTACAGCCCTGATTCATC  49659
+
+Query  719    ATCATGCTGGTGCCCCGGCAGACGGTATGGCTGGGGCAGGTAATACGGTATCTCTTCATT  778
+              ||||||||| |||||||||||||||||||||||| |||||||||||||  ||||||||||
+Sbjct  49658  ATCATGCTGCTGCCCCGGCAGACGGTATGGCTGGTGCAGGTAATACGGGTTCTCTTCATT  49599
+
+Query  779    AAGCTGGTTGCCCCATTCATCATACTCCCCGCGCCACGCCGTATTGCCGCCTTCCCTGAT  838
+              |||||||||||||||||||||||||||||||||||||||||| |  ||| |||| |||||
+Sbjct  49598  AAGCTGGTTGCCCCATTCATCATACTCCCCGCGCCACGCCGTTTGTCCGTCTTCGCTGAT  49539
+
+Query  839    GAGCGCCAGCGGCAGGCCCCGGTGGTCGCAGTGGGAAAAATGAACTTTTCGCGCCGGTGT  898
+              |||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||
+Sbjct  49538  GAGCGCCAGCGGCAGGCCCCGGTGGTCGCAGTGGTAAAAATGAACTTTTCGCGCCGGTGT  49479
+
+Query  899    GTATTCCGGCTCCACCTGTCTGGCCAGTTGCTCCACCGTCAGCCCGCAATGCGCCAGCCA  958
+              |||||||||||||||||||||||||||||||||||||||||||||||| ||||| |||||
+Sbjct  49478  GTATTCCGGCTCCACCTGTCTGGCCAGTTGCTCCACCGTCAGCCCGCACTGCGCAAGCCA  49419
+
+Query  959    CGCCCGACTTTCACTGCTCACGCGGTCTGTCCGGATTTCTTCCTCCAGCCTGTCCAGCAG  1018
+              |||||| |||||||||||||||||||||| ||||| ||||||||||||||| ||||||||
+Sbjct  49418  CGCCCGGCTTTCACTGCTCACGCGGTCTGCCCGGAGTTCTTCCTCCAGCCTCTCCAGCAG  49359
+
+Query  1019   CCGAACCAGTTCAGCCGGGAACACCACGCCGTGGCCGTTCTCGCTCCCTTCCTGCTGGAG  1078
+              ||| |||||||||||||||||| ||||||||||||||||||| |||||||||||||||||
+Sbjct  49358  CCGCACCAGTTCAGCCGGGAACGCCACGCCGTGGCCGTTCTCACTCCCTTCCTGCTGGAG  49299
+
+Query  1079   CGTCTCTGCCAGGCTGCGCCGCTCCGCTTTTTCCCGCTCGCCGTTC-TCTGTCTCGACCC  1137
+              |||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||
+Sbjct  49298  CGTCTCTGCCAGGCTGCGCCGCTCCGCTTTTTCCCGCTCGCCGTTCGTCTGTCTCGACCC  49239
+
+Query  1138   GGATGAGCGGCGTGAAGCTTCCCGGCTCATATACCGTCTGGATACGTGTGGT-GTGAGTC  1196
+              |||||||||||||||||||||||||||| ||||||||||||||||||||||| || ||||
+Sbjct  49238  GGATGAGCGGCGTGAAGCTTCCCGGCTCGTATACCGTCTGGATACGTGTGGTGGTCAGTC  49179
+
+Query  1197   TGCACCGTCGTCAGCCTGTCTCCGTACCAGCCATACCACGTCACCTCCGGTTTACGCGAC  1256
+              ||||||||||||||||||||||||| ||| ||||||||||||||||||||||||||||||
+Sbjct  49178  TGCACCGTCGTCAGCCTGTCTCCGTCCCAACCATACCACGTCACCTCCGGTTTACGCGAC  49119
+
+Query  1257   AGCGACATCCACCCCGTCAGGTCACGCTCCCGCCGCTAGACCCGTTTTCCCATTCGCCGT  1316
+              |||||||||||||||||||||||||||||||||||| ||||||| |||| ||||||||||
+Sbjct  49118  AGCGACATCCACCCCGTCAGGTCACGCTCCCGCCGCCAGACCCG-TTTCGCATTCGCCGT  49060
+
+Query  1317   CCCAGCGGGTCGTAGAGGTAGCGGCTCTCGACCTGTCGCTCGCCATGCTGTATCCGCGTG  1376
+              ||||||||||||||||||||||||||||||||| || |||||||||||||||||||||||
+Sbjct  49059  CCCAGCGGGTCGTAGAGGTAGCGGCTCTCGACCAGTGGCTCGCCATGCTGTATCCGCGTG  49000
+
+Query  1377   TAGAACACCAGGCGGTGCTGGCTGTCGTAGTGGTAGTGGTGGGTCCGCTCGTCGTCCGTC  1436
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  48999  TAGAACACCAGGCGGTGCTGGCTGTCGTAGTGGTAGTGGTGGGTCCGCTCGTCGTCCGTC  48940
+
+Query  1437   CGTATCACACCCGTCGGGATACGGTCCGTCTTCTCCGTCAGCCTGCCGTATTCACCGTGT  1496
+              ||||||||||||| |||||| ||||||||||||||||||||||||||||||||| |||||
+Sbjct  48939  CGTATCACACCCGCCGGGATGCGGTCCGTCTTCTCCGTCAGCCTGCCGTATTCATCGTGT  48880
+
+Query  1497   CGGTAGACATAGTGCGCATCCTCCGCGATGCGGTTATCCGGCCACGCCGTGAGCGTGCTG  1556
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  48879  CGGTAGACATAGTGCGCATCCTCCGCGATGCGGTTATCCGGCCACGCCGTGAGCGTGCTG  48820
+
+Query  1557   TCCGGGTGTAGCTTCGGGTCCGGCAGCCGGTTTCCCGCCGGGTCGGTCGCATACGGGATG  1616
+              |||||| |||||| |||||||||||||||||| |||||||||||||||||||||||||||
+Sbjct  48819  TCCGGG-GTAGCTCCGGGTCCGGCAGCCGGTTCCCCGCCGGGTCGGTCGCATACGGGATG  48761
+
+Query  1617   CGGATATCCAGGTCTGATGCAAGGGTGCGAACGCTCTCCAGCCTGCCCGTGGCACTGTAG  1676
+              ||| ||||||||||||||||||||||||| ||||||||||||||||||||||||||||||
+Sbjct  48760  CGG-TATCCAGGTCTGATGCAAGGGTGCGCACGCTCTCCAGCCTGCCCGTGGCACTGTAG  48702
+
+
+ Score = 27.4 bits (29),  Expect = 1.0
+ Identities = 24/29 (83%), Gaps = 1/29 (3%)
+ Strand=Plus/Minus
+
+Query  114   TTTTTTCATATTTCCTCC-TGTTAATTGA  141
+             |||||||||||  ||||| |||| || ||
+Sbjct  9334  TTTTTTCATATAACCTCCATGTTTATCGA  9306
+
+
+ Score = 24.7 bits (26),  Expect = 3.6
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  1186  TGGTGTGAGTCTG  1198
+             |||||||||||||
+Sbjct  4340  TGGTGTGAGTCTG  4328
+
+
+ Score = 24.7 bits (26),  Expect = 3.6
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  946    AATGCGCCAGCCA  958
+              |||||||||||||
+Sbjct  32582  AATGCGCCAGCCA  32570
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 99293760
+
+
+Query= mq19 len12
+
+Length=12
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 179913
+
+
+Query= mq20 len687
+
+Length=687
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    1167    0.0  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 1167 bits (1293),  Expect = 0.0
+ Identities = 673/688 (98%), Gaps = 2/688 (0%)
+ Strand=Plus/Minus
+
+Query  1      GATTTATGACTGTAAAAAAGCATTTAACAGCAATACGTTAGAGGCGACGCTCAAAGGTAC  60
+              ||||| |||||||||||||||||||||||||||||| ||| |||||||||||||||||||
+Sbjct  25682  GATTTCTGACTGTAAAAAAGCATTTAACAGCAATACCTTATAGGCGACGCTCAAAGGTAC  25623
+
+Query  61     TTCAATAAAGTGATCATGACTATTTAATGGCGAAGGTAAAGGGATAAGCTCGTAATCTTC  120
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||
+Sbjct  25622  TTCAATAAAGTGATCATGACTATTTAATGGCGAAGGTAAAGGGATAAGCTCGTTATCTTC  25563
+
+Query  121    AAAATAAAAATCAAATGCGGTCAGTAAAGCATCTTTTGCCGCTTCCATCGCTTCAGCGAC  180
+              |||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||
+Sbjct  25562  AAAATAAAAATCAAATGCGGTCAGGAAAGCATCTTTTGCCGCTTCCATCGCTTCAGCGAC  25503
+
+Query  181    AGTTTCGCCCTGCGTCAACGCTTCAGGGATATCCACAAAAGAAACCATATAACCGCCTTC  240
+              ||||||||||||||||||||  ||||||||||||||||||||||||||||||||||||||
+Sbjct  25502  AGTTTCGCCCTGCGTCAACGAGTCAGGGATATCCACAAAAGAAACCATATAACCGCCTTC  25443
+
+Query  241    CGGCGCGGGTGTAAGAGTGACGGGATAACGCATAATTTCGACTGTCTCTCGCATGTCATT  300
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  25442  CGGCGCGGGTGTAAGAGTGACGGGATAACGCATAATTTCGACTGTCTCTCGCATGTCATT  25383
+
+Query  301    AACCTTTTTAATTGGCGATTAACTCAAACCGAGTTGTTTCAGGATTGCTTTACGCAATGG  360
+              |||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||
+Sbjct  25382  AACCTTTTTAATTGGCGATTAACTCAAACCGACTTGTTTCAGGATTGCTTTACGCAATGG  25323
+
+Query  361    TTCTTTAATCTCATCGCAGGGGTGACGCGGCATGACACTGCGCCTCCCATGAAACCTGAG  420
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  25322  TTCTTTAATCTCATCGCAGGGGTGACGCGGCATGACACTGCGCCTCCCATGAAACCTGAG  25263
+
+Query  421    TTTCAAATGGTTGCTGCCATTCGCTACATCGACGCCCTGAGATTCGAGCCAACGTCTGAA  480
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  25262  TTTCAAATGGTTGCTGCCATTCGCTACATCGACGCCCTGAGATTCGAGCCAACGTCTGAA  25203
+
+Query  481    CTCGCTCTGTTTCACATCGCCTCCCTGCGGCTGAGTATATCAACAAAGT-AAACATTAGT  539
+              |||||| ||||||||||| |||||||||| ||||||||||||||||||| ||||||||||
+Sbjct  25202  CTCGCTTTGTTTCACATCTCCTCCCTGCGTCTGAGTATATCAACAAAGTCAAACATTAGT  25143
+
+Query  540    GTTTACCTCCGTGTGTAATTTGCTCGAAAATAGCACTAAATCGCCGCAACGGCAGAATGC  599
+              |||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  25142  GTTTACCTCCGTGT-TAATTTGCTCGAAAATAGCACTAAATCGCCGCAACGGCAGAATGC  25084
+
+Query  600    AATGCAAAATCAGGAAGGAAGATTCAAGAATTTCTTTGCGCTAATTTGCAAAACTGAATA  659
+              ||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||
+Sbjct  25083  AATGCAAAATCAGGAAGGAAGATTCCAGAATTTCTTTGCGCTAATTTGCAAAACTGAATA  25024
+
+Query  660    ATAACCTCAAGAAACGATCGGCATCATA  687
+              |||||| |||||||||||||||||||||
+Sbjct  25023  ATAACCACAAGAAACGATCGGCATCATA  24996
+
+
+ Score = 25.6 bits (27),  Expect = 1.4
+ Identities = 15/16 (94%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  4     TTATGACTGTAAAAAA  19
+             ||||||||||||| ||
+Sbjct  7321  TTATGACTGTAAATAA  7306
+
+
+ Score = 22.9 bits (24),  Expect = 5.0
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  588   ACGGCAGAATGC  599
+             ||||||||||||
+Sbjct  6336  ACGGCAGAATGC  6325
+
+
+ Score = 22.9 bits (24),  Expect = 5.0
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  505    CTGCGGCTGAGT  516
+              ||||||||||||
+Sbjct  28165  CTGCGGCTGAGT  28154
+
+
+ Score = 22.9 bits (24),  Expect = 5.0
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  26     AACAGCAATACG  37
+              ||||||||||||
+Sbjct  29189  AACAGCAATACG  29178
+
+
+ Score = 22.9 bits (24),  Expect = 5.0
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  652    ACTGAATAATAA  663
+              ||||||||||||
+Sbjct  42795  ACTGAATAATAA  42784
+
+
+ Score = 22.9 bits (24),  Expect = 5.0
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  268    ACGCATAATTTC  279
+              ||||||||||||
+Sbjct  51936  ACGCATAATTTC  51925
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 40053948
+
+
+Query= mq21 len58
+
+Length=58
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    101     1e-24
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 101 bits (111),  Expect = 1e-24
+ Identities = 57/58 (98%), Gaps = 0/58 (0%)
+ Strand=Plus/Minus
+
+Query  1      GGAAGTCCACAATCACCTCCTGACCCACACGCGGTATCGCCAGGTTGTCAAAGCCGGT  58
+              ||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||
+Sbjct  45175  GGAAGTCCACAATCACCTCCTGACCCACACGCGGTATCGCCAGGTTGCCAAAGCCGGT  45118
+
+
+ Score = 22.9 bits (24),  Expect = 0.32
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  18     TCCTGACCCACA  29
+              ||||||||||||
+Sbjct  36639  TCCTGACCCACA  36628
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 2578495
+
+
+Query= mq22 len2038
+
+Length=2038
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    25.6    4.3  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 25.6 bits (27),  Expect = 4.3
+ Identities = 15/16 (94%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  204   CTGGTGGATGGCCCGC  219
+             |||||||||||| |||
+Sbjct  7813  CTGGTGGATGGCACGC  7798
+
+
+ Score = 24.7 bits (26),  Expect = 4.3
+ Identities = 16/18 (89%), Gaps = 0/18 (0%)
+ Strand=Plus/Minus
+
+Query  1735   CGCAGCCGGACGGCCACA  1752
+              || |||||||||||| ||
+Sbjct  28840  CGGAGCCGGACGGCCCCA  28823
+
+
+ Score = 24.7 bits (26),  Expect = 4.3
+ Identities = 22/27 (81%), Gaps = 2/27 (7%)
+ Strand=Plus/Minus
+
+Query  853    GCATTATGAACACTTCGGTGGCTCTGA  879
+              |||||||||||| ||  ||||  ||||
+Sbjct  40960  GCATTATGAACAATT--GTGGTGCTGA  40936
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 120999280
+
+
+Query= mq23 len72
+
+Length=72
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    117     2e-29
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 117 bits (129),  Expect = 2e-29
+ Identities = 69/72 (96%), Gaps = 0/72 (0%)
+ Strand=Plus/Minus
+
+Query  1      ATGCCGAGTGATGTCCGCAGTGCCGTGGGTAATTCTCCCGAACTACGCAGACGCTGCAAG  60
+              |||||||||| |||| ||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  18833  ATGCCGAGTGCTGTCTGCAGTGCCGTGGGTAATTCTCCCGAACTACGCAGACGCTGCAAG  18774
+
+Query  61     ATCACCGGTTCA  72
+              | ||||||||||
+Sbjct  18773  AGCACCGGTTCA  18762
+
+
+ Score = 21.1 bits (22),  Expect = 1.5
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  29     GTAATTCTCCC  39
+              |||||||||||
+Sbjct  19684  GTAATTCTCCC  19674
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 3357984
+
+
+Query= mq24 len2649
+
+Length=2649
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    30.1    0.13 
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 30.1 bits (32),  Expect = 0.13
+ Identities = 16/16 (100%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  46     AAAAATATATATTTTT  61
+              ||||||||||||||||
+Sbjct  50271  AAAAATATATATTTTT  50256
+
+
+ Score = 28.3 bits (30),  Expect = 0.46
+ Identities = 15/15 (100%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  1480   TATTGCAGAGAAGAT  1494
+              |||||||||||||||
+Sbjct  10012  TATTGCAGAGAAGAT  9998
+
+
+ Score = 26.5 bits (28),  Expect = 1.6
+ Identities = 17/19 (89%), Gaps = 0/19 (0%)
+ Strand=Plus/Minus
+
+Query  1963  ATTTTCAGGGATACGGCAC  1981
+             ||||||||||||  |||||
+Sbjct  1942  ATTTTCAGGGATCGGGCAC  1924
+
+
+ Score = 26.5 bits (28),  Expect = 1.6
+ Identities = 14/14 (100%), Gaps = 0/14 (0%)
+ Strand=Plus/Minus
+
+Query  1176   TATCCTGTATCAGT  1189
+              ||||||||||||||
+Sbjct  31473  TATCCTGTATCAGT  31460
+
+
+ Score = 25.6 bits (27),  Expect = 5.7
+ Identities = 15/16 (94%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  492    ATGACTTTTTCATGAA  507
+              ||||||||||||| ||
+Sbjct  41907  ATGACTTTTTCATAAA  41892
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 157572252
+
+
+Query= mq25 len866
+
+Length=866
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    25.6    1.8  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 25.6 bits (27),  Expect = 1.8
+ Identities = 15/16 (94%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  67     TGGAGCAGGAGTTGAT  82
+              |||| |||||||||||
+Sbjct  53027  TGGACCAGGAGTTGAT  53012
+
+
+ Score = 24.7 bits (26),  Expect = 1.8
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  421   AAATCGCTAATGG  433
+             |||||||||||||
+Sbjct  3317  AAATCGCTAATGG  3305
+
+
+ Score = 24.7 bits (26),  Expect = 1.8
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  156    TTGCCCGCAAACC  168
+              |||||||||||||
+Sbjct  34730  TTGCCCGCAAACC  34718
+
+
+ Score = 24.7 bits (26),  Expect = 1.8
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  739    GCCAGGTTTGGCA  751
+              |||||||||||||
+Sbjct  39559  GCCAGGTTTGGCA  39547
+
+
+ Score = 22.9 bits (24),  Expect = 6.4
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  61     TAAATTTGGAGC  72
+              ||||||||||||
+Sbjct  34304  TAAATTTGGAGC  34293
+
+
+ Score = 22.9 bits (24),  Expect = 6.4
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  751    AGGTCAGCCACT  762
+              ||||||||||||
+Sbjct  48452  AGGTCAGCCACT  48441
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 50786967
+
+
+Query= mq26 len1858
+
+Length=1858
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    30.1    0.093
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 30.1 bits (32),  Expect = 0.093
+ Identities = 16/16 (100%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  375    AAAAATATATAttttt  390
+              ||||||||||||||||
+Sbjct  50271  AAAAATATATATTTTT  50256
+
+
+ Score = 28.3 bits (30),  Expect = 0.33
+ Identities = 15/15 (100%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  1809   TATTGCAGAGAAGAT  1823
+              |||||||||||||||
+Sbjct  10012  TATTGCAGAGAAGAT  9998
+
+
+ Score = 28.3 bits (30),  Expect = 0.33
+ Identities = 21/25 (84%), Gaps = 0/25 (0%)
+ Strand=Plus/Minus
+
+Query  301    TTGACGCTTCAGTTATGACTCTGGC  325
+              ||||||||||||   ||| ||||||
+Sbjct  59096  TTGACGCTTCAGAAGTGATTCTGGC  59072
+
+
+ Score = 26.5 bits (28),  Expect = 1.1
+ Identities = 14/14 (100%), Gaps = 0/14 (0%)
+ Strand=Plus/Minus
+
+Query  1505   TATCCTGTATCAGT  1518
+              ||||||||||||||
+Sbjct  31473  TATCCTGTATCAGT  31460
+
+
+ Score = 25.6 bits (27),  Expect = 4.0
+ Identities = 15/16 (94%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  821    ATGACTTTTTCATGAA  836
+              ||||||||||||| ||
+Sbjct  41907  ATGACTTTTTCATAAA  41892
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 110206480
+
+
+Query= mq27 len252
+
+Length=252
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    24.7    0.51 
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 24.7 bits (26),  Expect = 0.51
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  186    CATTGATGGACAA  198
+              |||||||||||||
+Sbjct  59231  CATTGATGGACAA  59219
+
+
+ Score = 21.1 bits (22),  Expect = 6.2
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  128    CCGGTGCAATA  138
+              |||||||||||
+Sbjct  57048  CCGGTGCAATA  57038
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 14091305
+
+
+Query= mq28 len176
+
+Length=176
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    22.9    1.2  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 22.9 bits (24),  Expect = 1.2
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  125    ACGCCAGACCAG  136
+              ||||||||||||
+Sbjct  31020  ACGCCAGACCAG  31009
+
+
+ Score = 21.1 bits (22),  Expect = 4.2
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  157    CGGTGTTGTTT  167
+              |||||||||||
+Sbjct  55147  CGGTGTTGTTT  55137
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 9534117
+
+
+Query= mq29 len261
+
+Length=261
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    407     4e-116
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 407 bits (451),  Expect = 4e-116
+ Identities = 249/262 (95%), Gaps = 2/262 (1%)
+ Strand=Plus/Minus
+
+Query  1      GCGCGAGATTGCGGGAAGCATGTCATGGTCGCCGGGATCGAATCGCAAAATCACGCCTCG  60
+              ||||||||||||||||||||||||||||||| ||||||||||||||| ||||| ||||||
+Sbjct  34422  GCGCGAGATTGCGGGAAGCATGTCATGGTCGTCGGGATCGAATCGCAGAATCAGGCCTCG  34363
+
+Query  61     TTGCATCTGCACCAGTCGCTGGGATTTGTCGTCACCGCACAAATGCCGCAGGTGGGCACT  120
+               |||||||| |||||||||||||||||||||||||||||||||||||||||||||| |||
+Sbjct  34362  CTGCATCTG-ACCAGTCGCTGGGATTTGTCGTCACCGCACAAATGCCGCAGGTGGGAACT  34304
+
+Query  121    AAATTTGG-GCGCTGGCTGGATCTGACATTTATGCAGTTGCAACTCGACGAACGCAGTGA  179
+              |||||||| ||||||||||||||||||||||||||||||||||||||||||||||| |||
+Sbjct  34303  AAATTTGGAGCGCTGGCTGGATCTGACATTTATGCAGTTGCAACTCGACGAACGCACTGA  34244
+
+Query  180    ACCGGACGCGAGTGGATGAATCAGTCGCTCACCCTTGTCTTTTTGATTGCCGCCGGAATG  239
+              ||||||||||| | ||||||| ||||||||||||||| ||||||||||||||||||||| 
+Sbjct  34243  ACCGGACGCGATTAGATGAATGAGTCGCTCACCCTTGCCTTTTTGATTGCCGCCGGAATT  34184
+
+Query  240    GGTCTGGTAGTCCAGAACTCGC  261
+              ||||||||||||||||||||||
+Sbjct  34183  GGTCTGGTAGTCCAGAACTCGC  34162
+
+
+ Score = 26.5 bits (28),  Expect = 0.15
+ Identities = 22/26 (85%), Gaps = 1/26 (4%)
+ Strand=Plus/Minus
+
+Query  236    AATGGGTCTGGTAGTCC-AGAACTCG  260
+              || ||||||||||| || |||| |||
+Sbjct  47716  AACGGGTCTGGTAGCCCGAGAAGTCG  47691
+
+
+ Score = 25.6 bits (27),  Expect = 0.53
+ Identities = 18/21 (86%), Gaps = 0/21 (0%)
+ Strand=Plus/Minus
+
+Query  155    AGTTGCAACTCGACGAACGCA  175
+              ||||||  | |||||||||||
+Sbjct  37806  AGTTGCGTCGCGACGAACGCA  37786
+
+
+ Score = 24.7 bits (26),  Expect = 0.53
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  129    GCGCTGGCTGGAT  141
+              |||||||||||||
+Sbjct  21856  GCGCTGGCTGGAT  21844
+
+
+ Score = 22.9 bits (24),  Expect = 1.8
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  67     CTGCACCAGTCG  78
+              ||||||||||||
+Sbjct  40439  CTGCACCAGTCG  40428
+
+
+ Score = 22.0 bits (23),  Expect = 6.4
+ Identities = 13/14 (93%), Gaps = 0/14 (0%)
+ Strand=Plus/Minus
+
+Query  177    TGAACCGGACGCGA  190
+              || |||||||||||
+Sbjct  58116  TGGACCGGACGCGA  58103
+
+
+ Score = 21.1 bits (22),  Expect = 6.4
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  194    GATGAATCAGT  204
+              |||||||||||
+Sbjct  16948  GATGAATCAGT  16938
+
+
+ Score = 21.1 bits (22),  Expect = 6.4
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  105    GCCGCAGGTGG  115
+              |||||||||||
+Sbjct  38855  GCCGCAGGTGG  38845
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 14630972
+
+
+Query= mq30 len50
+
+Length=50
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    83.3    3e-19
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 83.3 bits (91),  Expect = 3e-19
+ Identities = 49/50 (98%), Gaps = 1/50 (2%)
+ Strand=Plus/Minus
+
+Query  1      ATACCTGCCGGATATTTTTATTTGTATTAATATTAATTGCATCTCCAACT  50
+              |||||| |||||||||||||||||||||||||||||||||||||||||||
+Sbjct  43041  ATACCT-CCGGATATTTTTATTTGTATTAATATTAATTGCATCTCCAACT  42993
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 2098775
+
+
+Query= mq31 len45
+
+Length=45
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    77.9    1e-17
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 77.9 bits (85),  Expect = 1e-17
+ Identities = 44/45 (98%), Gaps = 0/45 (0%)
+ Strand=Plus/Minus
+
+Query  1      CAGTTCGTAGCGGATCCGATTCATTTCGTCTAATTGACGTTTCCC  45
+              ||||||||||||||||||||| |||||||||||||||||||||||
+Sbjct  36431  CAGTTCGTAGCGGATCCGATTGATTTCGTCTAATTGACGTTTCCC  36387
+
+
+ Score = 21.1 bits (22),  Expect = 0.79
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  32    AATTGACGTTT  42
+             |||||||||||
+Sbjct  4159  AATTGACGTTT  4149
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1798950
+
+
+Query= mq32 len47
+
+Length=47
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1918880
+
+
+Query= mq33 len67
+
+Length=67
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    22.9    0.39 
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 22.9 bits (24),  Expect = 0.39
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  55   ATGCCGATATGG  66
+            ||||||||||||
+Sbjct  938  ATGCCGATATGG  927
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 3118180
+
+
+Query= mq34 len148
+
+Length=148
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    21.1    3.4  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 21.1 bits (22),  Expect = 3.4
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  117    AGCGCCAGCGG  127
+              |||||||||||
+Sbjct  49537  AGCGCCAGCGG  49527
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 7855153
+
+
+Query= mq35 len5768
+
+Length=5768
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    46.4    4e-06
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 46.4 bits (50),  Expect = 4e-06
+ Identities = 30/32 (94%), Gaps = 1/32 (3%)
+ Strand=Plus/Minus
+
+Query  3371   TGCCGGATGCGGCGTAAACGCCTTATCCGGCA  3402
+              ||||||||||||||| ||||||||| ||||||
+Sbjct  24726  TGCCGGATGCGGCGT-AACGCCTTACCCGGCA  24696
+
+
+ Score = 28.3 bits (30),  Expect = 1.0
+ Identities = 15/15 (100%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  818    TATTGCAGAGAAGAT  832
+              |||||||||||||||
+Sbjct  10012  TATTGCAGAGAAGAT  9998
+
+
+ Score = 28.3 bits (30),  Expect = 1.0
+ Identities = 15/15 (100%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  4000   AATACGATAACCATC  4014
+              |||||||||||||||
+Sbjct  16005  AATACGATAACCATC  15991
+
+
+ Score = 27.4 bits (29),  Expect = 3.5
+ Identities = 19/22 (86%), Gaps = 0/22 (0%)
+ Strand=Plus/Minus
+
+Query  3500  CCAGAAATGGTGACTTTTTCCG  3521
+             ||| |||  |||||||||||||
+Sbjct  1208  CCATAAACAGTGACTTTTTCCG  1187
+
+
+ Score = 26.5 bits (28),  Expect = 3.5
+ Identities = 17/19 (89%), Gaps = 0/19 (0%)
+ Strand=Plus/Minus
+
+Query  1301  ATTTTCAGGGATACGGCAC  1319
+             ||||||||||||  |||||
+Sbjct  1942  ATTTTCAGGGATCGGGCAC  1924
+
+
+ Score = 26.5 bits (28),  Expect = 3.5
+ Identities = 14/14 (100%), Gaps = 0/14 (0%)
+ Strand=Plus/Minus
+
+Query  514    TATCCTGTATCAGT  527
+              ||||||||||||||
+Sbjct  31473  TATCCTGTATCAGT  31460
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 344518668
+
+
+Query= mq36 len939
+
+Length=939
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    23.8    6.9  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 23.8 bits (25),  Expect = 6.9
+ Identities = 14/15 (93%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  693    CACGCCAGCATCCAG  707
+              ||||||||||| |||
+Sbjct  12087  CACGCCAGCATTCAG  12073
+
+
+ Score = 23.8 bits (25),  Expect = 6.9
+ Identities = 14/15 (93%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  631    TCATCGCCGTTACCC  645
+              |||||||||||| ||
+Sbjct  24490  TCATCGCCGTTAACC  24476
+
+
+ Score = 23.8 bits (25),  Expect = 6.9
+ Identities = 14/15 (93%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  532    AAACCACGCCCGGCT  546
+              || ||||||||||||
+Sbjct  49424  AAGCCACGCCCGGCT  49410
+
+
+ Score = 22.9 bits (24),  Expect = 6.9
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  286    GCCAGTTCAGCG  297
+              ||||||||||||
+Sbjct  21916  GCCAGTTCAGCG  21905
+
+
+ Score = 22.9 bits (24),  Expect = 6.9
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  705    CAGCGACAGTTT  716
+              ||||||||||||
+Sbjct  25509  CAGCGACAGTTT  25498
+
+
+ Score = 22.9 bits (24),  Expect = 6.9
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  361    ACAATTTCATCA  372
+              ||||||||||||
+Sbjct  26415  ACAATTTCATCA  26404
+
+
+ Score = 22.9 bits (24),  Expect = 6.9
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  457    GATGGTTTTAAA  468
+              ||||||||||||
+Sbjct  31043  GATGGTTTTAAA  31032
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 55164120
+
+
+Query= mq37 len1125
+
+Length=1125
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    26.5    0.68 
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 26.5 bits (28),  Expect = 0.68
+ Identities = 14/14 (100%), Gaps = 0/14 (0%)
+ Strand=Plus/Minus
+
+Query  146    CAGCACCGCCTGGT  159
+              ||||||||||||||
+Sbjct  28219  CAGCACCGCCTGGT  28206
+
+
+ Score = 25.6 bits (27),  Expect = 2.4
+ Identities = 15/16 (94%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  575    AGCCGGGCGTGGCTTG  590
+              |||||||||||| |||
+Sbjct  37562  AGCCGGGCGTGGTTTG  37547
+
+
+ Score = 24.7 bits (26),  Expect = 2.4
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  763    TAATGAAGAGAAC  775
+              |||||||||||||
+Sbjct  17517  TAATGAAGAGAAC  17505
+
+
+ Score = 22.9 bits (24),  Expect = 8.3
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  308    TGGTATGGCTGG  319
+              ||||||||||||
+Sbjct  21519  TGGTATGGCTGG  21508
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 66316866
+
+
+Query= mq38 len950
+
+Length=950
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    1619    0.0  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 1619 bits (1795),  Expect = 0.0
+ Identities = 933/950 (98%), Gaps = 5/950 (1%)
+ Strand=Plus/Minus
+
+Query  1      CATGGGGCGTCGATTCGCTTATTGCACCGGGTGCCATCTGAATCGAGAAGTGTTCAAAGC  60
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  22425  CATGGGGCGTCGATTCGCTTATTGCACCGGGTGCCATCTGAATCGAGAAGTGTTCAAAGC  22366
+
+Query  61     AGAGTTGTGGATCATAAGGAAACAGCGAAATGATCACCATCGCCTGCTGTTGTGGATCAT  120
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  22365  AGAGTTGTGGATCATAAGGAAACAGCGAAATGATCACCATCGCCTGCTGTTGTGGATCAT  22306
+
+Query  121    AAACTGAAGGCGTAGCGGACTGTGGCGGAGAAATAAATGTCGA-AAATGGCACGTTCAAC  179
+              |||||||||||||||||||||||| |||||||||||||||||| ||||||||||||||||
+Sbjct  22305  AAACTGAAGGCGTAGCGGACTGTGTCGGAGAAATAAATGTCGACAAATGGCACGTTCAAC  22246
+
+Query  180    CCAGTGGCAATTTTCCATAATGTCGCGACCGTCGGGCTGGACTCATTACGCTCAATCTGT  239
+              |||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||
+Sbjct  22245  CCAGTGGCAATTTTCCATAATGTCGCGACCGTCGGGCTGGCCTCATTACGCTCAATCTGT  22186
+
+Query  240    CCTAACATTGCTTTAGAAACGCCCGTCGCTTCTGCCAGTCGCGAAAGACTCCAGCCGCGC  299
+              |||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||
+Sbjct  22185  CCTAACATTGCTTTAGAAACGCCCGTCGTTTCTGCCAGTCGCGAAAGACTCCAGCCGCGC  22126
+
+Query  300    TGCTGACGTAGTTGTTTAAGTGTGGTGGATAAAAAGCGAGCGAGATTTTCCATGCGACTC  359
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  22125  TGCTGACGTAGTTGTTTAAGTGTGGTGGATAAAAAGCGAGCGAGATTTTCCATGCGACTC  22066
+
+Query  360    CTCCGGCAAAACGGAAGTTTATCACTTGTGCGTTATAACGGACAAATGCTACGGTGCCTG  419
+              |||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||
+Sbjct  22065  CTCCGGCAAAACGGAAGTTTATCACTTGTGCGTTATAACGGACAAATGCTACCGTGCCTG  22006
+
+Query  420    TACGCTATAACGCACGAGGTGACTATGCGTCTGTTTTCTGTTCCTCCACCCACGCTACTG  479
+              |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||
+Sbjct  22005  TACGCTATAACGCACGAGGTGA-TATGCGTCTGTTTTCTGTTCCTCCACCCACGCTACTG  21947
+
+Query  480    GCGGGGTTTCTGGCGGTATTAATTGGCTACGCCAGTTCAGCGGCAATAATCTGGCAAGCA  539
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||
+Sbjct  21946  GCGGGGTTTCTGGCGGTATTAATTGGCTACGCCAGTTCAGCGGCAATAATCTGGCAAACA  21887
+
+Query  540    GCGATTGTCGCCGGAGCCACCACTGCACAAATCTCTGGCTGGATGACGGCGCTGGGGCTG  599
+              |||||||||||||||| |||||||| ||||| | |||||||||||||| |||||||||||
+Sbjct  21886  GCGATTGTCGCCGGAGACACCACTG-ACAAAGCGCTGGCTGGATGACGACGCTGGGGCTG  21828
+
+Query  600    GCAATGGGCGTCAGTACGCTGACTCTGACATTATGGTATCGCGTACCTGTTCTCACCGCA  659
+              |||||||||||||||||||||||||||||| |||||||||||||||||||||||||| ||
+Sbjct  21827  GCAATGGGCGTCAGTACGCTGACTCTGACACTATGGTATCGCGTACCTGTTCTCACCTCA  21768
+
+Query  660    TGGTCAACGCCTGGCGCGGCTTTGTTGGTCACCGGATTGCAGGGACTAACACTTAACGAA  719
+              |||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||
+Sbjct  21767  TGGTCAACGCCTGGCGCGGCTTTGTTGGTCACCGGATTGCAGGG-CTAACACTTAACGAA  21709
+
+Query  720    GCCATCGGCGTTTTTATTGTCACCAACGCGTTAATAGTCCTCTGCGGCATAACGGGACTC  779
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  21708  GCCATCGGCGTTTTTATTGTCACCAACGCGTTAATAGTCCTCTGCGGCATAACGGGACTC  21649
+
+Query  780    TTTGCTCGTCTGATGCGCATTATTCCGCACTCGCTTGCGGCAGCAATGCTTGCCGGGATT  839
+              |||||||||||| |||||||||||||||||||||| ||||||||||||||||||||||||
+Sbjct  21648  TTTGCTCGTCTG-TGCGCATTATTCCGCACTCGCTCGCGGCAGCAATGCTTGCCGGGATT  21590
+
+Query  840    TTATTACGCTTTGGTTTACAGGCGTTTGCCAGTCTGGACGGTCAATTTACGTTGTGTGGA  899
+              ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  21589  TTATTACGCTTTGGTTTACAGGCGTTTGCCAGTCTGGACGGTCAATTTACGTTGTGTGGA  21530
+
+Query  900    AGTATGTTGCTGGTATGGCTGGCAACCAAGGCCGTTGCGCCGCGCTATGC  949
+              ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  21529  AGTATGTTGCTGGTATGGCTGGCAACCAAGGCCGTTGCGCCGCGCTATGC  21480
+
+
+ Score = 27.4 bits (29),  Expect = 0.57
+ Identities = 16/17 (94%), Gaps = 0/17 (0%)
+ Strand=Plus/Minus
+
+Query  724    TCGGCGTTTTTATTGTC  740
+              ||||| |||||||||||
+Sbjct  26125  TCGGCATTTTTATTGTC  26109
+
+
+ Score = 27.4 bits (29),  Expect = 0.57
+ Identities = 16/17 (94%), Gaps = 0/17 (0%)
+ Strand=Plus/Minus
+
+Query  491    GGCGGTATTAATTGGCT  507
+              |||||||||||| ||||
+Sbjct  27891  GGCGGTATTAATCGGCT  27875
+
+
+ Score = 24.7 bits (26),  Expect = 2.0
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  292    AGCCGCGCTGCTG  304
+              |||||||||||||
+Sbjct  48070  AGCCGCGCTGCTG  48058
+
+
+ Score = 24.7 bits (26),  Expect = 2.0
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  357    CTCCTCCGGCAAA  369
+              |||||||||||||
+Sbjct  59787  CTCCTCCGGCAAA  59775
+
+
+ Score = 22.9 bits (24),  Expect = 7.0
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  81     AACAGCGAAATG  92
+              ||||||||||||
+Sbjct  30973  AACAGCGAAATG  30962
+
+
+ Score = 22.9 bits (24),  Expect = 7.0
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  574    CTGGCTGGATGA  585
+              ||||||||||||
+Sbjct  58248  CTGGCTGGATGA  58237
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 55823691
+
+
+Query= mq39 len785
+
+Length=785
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    25.6    1.7  
+
+
+> s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 25.6 bits (27),  Expect = 1.7
+ Identities = 15/16 (94%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  354    ATGACTTTTTCATGAA  369
+              ||||||||||||| ||
+Sbjct  41907  ATGACTTTTTCATAAA  41892
+
+
+ Score = 22.9 bits (24),  Expect = 5.8
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  226    AGAGGTTTTTGT  237
+              ||||||||||||
+Sbjct  23901  AGAGGTTTTTGT  23890
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 45930126
+
+
+  Database: User specified sequence set (Input:
+tests/fixtures/blastn_regression/inputs/s60k.fa).
+    Posted date:  Unknown
+  Number of letters in database: 59,980
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

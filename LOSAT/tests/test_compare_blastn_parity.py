@@ -160,6 +160,28 @@ class CompareBlastnParityTests(unittest.TestCase):
         self.assertFalse(result["ncbi_only"])
         self.assertFalse(result["losat_only"])
 
+    # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
+    # ```c++
+    #         arg_desc.AddDefaultKey(kArgStrand, "strand",
+    #                      "Query strand(s) to search against database/subject",
+    #                                CArgDescriptions::eString, kDfltArgStrand);
+    # ```
+    # NCBI gets the strand of every row; LOSAT gets a one-strand row's strand and, for `both`
+    # (its default), the command it always had (frozen in the S02 baseline).
+    def test_both_commands_pass_the_strand_of_the_row(self) -> None:
+        for strand in ("both", "plus", "minus"):
+            row = manifest_row()
+            row["strand"] = strand
+            ncbi = comparison.build_ncbi_command(row, "blastn", "ncbi.out")
+            losat = comparison.build_losat_command(row, Path("LOSAT"), "losat.out")
+            self.assertEqual(ncbi[ncbi.index("-strand") + 1], strand, ncbi)
+            self.assertEqual(ncbi.count("-strand"), 1, ncbi)
+            if strand == "both":
+                self.assertNotIn("-strand", losat)
+            else:
+                self.assertEqual(losat[losat.index("-strand") + 1], strand, losat)
+                self.assertEqual(losat.count("-strand"), 1, losat)
+
     # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
     # The fake executable only records the already-defined NCBI CLI boundary;
     # it is not an alternate BLAST implementation or an external dependency.

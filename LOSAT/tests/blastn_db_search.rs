@@ -23,7 +23,7 @@ fn fasta(name: &str) -> PathBuf {
 /// --all-features`, as in CI) needs that file name as soon as a search has more than one
 /// thread, and it selects nothing.
 fn losat() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
@@ -43,7 +43,7 @@ fn temp_dir(tag: &str) -> PathBuf {
 }
 
 /// The subject set (seven genomes without ambiguity codes, 2.1 Mb) as one FASTA file, and
-/// its database made by `LOSAT makedb`.
+/// its database made by `losat makedb`.
 fn subject_set(dir: &Path) -> (PathBuf, String) {
     let set = dir.join("set.fna");
     let mut bytes = Vec::new();
@@ -60,7 +60,7 @@ fn subject_set(dir: &Path) -> (PathBuf, String) {
         .arg(&set)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",

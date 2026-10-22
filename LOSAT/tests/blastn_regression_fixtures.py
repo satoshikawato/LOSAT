@@ -10,7 +10,7 @@ batch, IUPAC ambiguity, lowercase masking and non-default scores.
   (deterministic; the files are committed, so later runs never regenerate them).
 - freeze --oracle BLASTN: runs NCBI BLAST+ (comparison oracle only) from LOSAT/ and
   writes <case>.out, <case>.err and the hash columns of manifest.tsv.
-- check --losat LOSAT: runs `LOSAT blastn <argv> <losat_extra>` from LOSAT/ and
+- check --losat LOSAT: runs `losat blastn <argv> <losat_extra>` from LOSAT/ and
   compares stdout, stderr and the exit status with the frozen files.
 
 A case may set environment variables (`env`, space-separated KEY=VALUE) for both
@@ -415,6 +415,23 @@ _CASES = [
     # probe inputs, not made by `generate`), also with a query split at 20000.
     ("culling.abricate_cl1", f"{AB} -culling_limit 1 -outfmt 6", ""),
     ("culling.abricate_cl1_c20000", f"{AB} -culling_limit 1 -outfmt 6", "", "CHUNK_SIZE=20000"),
+    # O2a (blastn -strand): a query split into chunks searches one strand's contexts in every chunk;
+    # DUST of -strand minus is that of the reverse complement; an invalid query warns once.
+    # strand_dust_*.fa (a query whose low-complexity region lies on one strand only) and
+    # strand_mixed_query.fa (all-N and empty records around strand_query.fasta) are copied from the
+    # O2a probe inputs, not made by `generate`.
+    ("strand.split_plus_c2000", f"{B} -task blastn -strand plus -outfmt 6", "", "CHUNK_SIZE=2000"),
+    ("strand.split_minus_c2000", f"{B} -task blastn -strand minus -outfmt 6", "", "CHUNK_SIZE=2000"),
+    ("strand.split_minus_c1500o50_fmt0", f"{B} -task blastn -strand minus -outfmt 0", "",
+     "CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=50"),
+    ("strand.dust_blastn_minus_fmt0", f"-query {I}/strand_dust_query.fa -subject {I}/strand_dust_subject.fa"
+                                      " -task blastn -strand minus -outfmt 0", ""),
+    ("strand.dust_megablast_minus_fmt0", f"-query {I}/strand_dust_query.fa -subject {I}/strand_dust_subject.fa"
+                                         " -strand minus -outfmt 0", ""),
+    ("strand.invalid_mixed_minus_fmt0", f"-query {I}/strand_mixed_query.fa -subject {O}/strand_subject.fasta"
+                                        " -task blastn -strand minus -outfmt 0", ""),
+    ("strand.lcase_qloc_plus_fmt0", f"-query {I}/strand_dust_query.fa -subject {I}/strand_dust_subject.fa"
+                                    " -task blastn -strand plus -lcase_masking -query_loc 20-700 -outfmt 0", ""),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 
@@ -585,8 +602,9 @@ def sha256(data: bytes) -> str:
 
 def clean_env(case_env: str = "") -> dict[str, str]:
     # LOSAT_X_DEFAULT is kept (LOSAT/src/utils/xswitch.rs): with 0 the fixtures run on the reference paths.
+    # LOSAT_X_REACH is kept (LOSAT/src/utils/xreach.rs): it records the switch paths and changes no output.
     env = {key: value for key, value in os.environ.items()
-           if key == "LOSAT_X_DEFAULT"
+           if key in ("LOSAT_X_DEFAULT", "LOSAT_X_REACH")
            or (key not in REPORT_ENV and not key.startswith(("LOSAT_", "RAYON_")))}
     for item in shlex.split(case_env):
         key, _, value = item.partition("=")
@@ -621,7 +639,7 @@ def command_freeze(args) -> int:
         print(f"{case_id}\texit {result.returncode}\t{result.stdout.count(b'\n')} lines\t{len(result.stderr)} stderr bytes", flush=True)
     with open(MANIFEST, "w", newline="") as handle:
         handle.write(f"# Frozen BLASTN outputs of {version} (comparison oracle only; see blastn_regression_fixtures.py).\n")
-        handle.write("# Run from LOSAT/: env <env> blastn <argv> (LOSAT: LOSAT blastn <argv> <losat_extra>). Written by `freeze`; do not edit.\n")
+        handle.write("# Run from LOSAT/: env <env> blastn <argv> (LOSAT: losat blastn <argv> <losat_extra>). Written by `freeze`; do not edit.\n")
         writer = csv.DictWriter(handle, fieldnames=FIELDS, delimiter="\t", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)

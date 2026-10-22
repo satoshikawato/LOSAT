@@ -1453,14 +1453,23 @@ pub(super) fn run(
     ) || x.subject_masked
         || !x.one_subject_owner
     {
+        if !shadow {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+        }
         return false;
     }
     let threads = match pool_threads() {
         Some(threads) => threads,
         // the shadow also runs without a pool (strips on this thread)
         None if shadow => 1,
-        None => return false,
+        None => {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+            return false;
+        }
     };
+    if !shadow {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", true);
+    }
     let timing = if shadow { None } else { x.timing };
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
     let t_start = timed.then(std::time::Instant::now);
@@ -1944,7 +1953,7 @@ mod tests {
                     masks: masks[c].clone(),
                 })
                 .collect();
-            let index = QueryContextIndex::new(&contexts);
+            let index = QueryContextIndex::new(&contexts, false);
             let score_matrix = build_blastna_matrix(1, -2);
             let nucl_score_table = build_nucl_score_table(1, -2);
             let seq_ranges = [(0i32, s_len as i32)];

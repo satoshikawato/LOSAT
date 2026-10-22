@@ -29,14 +29,14 @@ jobs:
         with:
           workspaces: LOSAT -> target
       - name: Build release binary
-        run: cd LOSAT && cargo build --release --locked --bin LOSAT
+        run: cd LOSAT && cargo build --release --locked --bin losat
       - name: Link the frozen input paths
         run: |
           sudo mkdir -p /mnt/c/Users/genom/GitHub
           sudo ln -sfn "$GITHUB_WORKSPACE" /mnt/c/Users/genom/GitHub/LOSAT
       - name: All output hashes, frozen hashes and outfmt 0 fixtures
         run: |
-          python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/LOSAT \
+          python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/losat \
             --out .tmp/full-regressions --programs all --all-cases
       - uses: actions/upload-artifact@v4
         if: always()

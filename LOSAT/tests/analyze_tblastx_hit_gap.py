@@ -4,7 +4,7 @@ Quantify BLAST+ vs LOSAT TBLASTX output differences ("fewer hits" debugging).
 
 Input files:
   - BLAST+ tblastx outfmt 6/7 (tab-separated; comment lines start with '#')
-  - LOSAT tblastx output with the same 12 columns (tab-separated; may have no '#')
+  - losat tblastx output with the same 12 columns (tab-separated; may have no '#')
 
 Outputs:
   - Prints overall hit counts and distribution deltas
@@ -141,7 +141,7 @@ def main() -> None:
     ap.add_argument(
         "--losat",
         default="./losat_out/NZ_CP006932.NZ_CP006932.tlosatx.n1.out",
-        help="LOSAT tblastx output (tab-separated, same 12 columns)",
+        help="losat tblastx output (tab-separated, same 12 columns)",
     )
     ap.add_argument(
         "--identity-step",

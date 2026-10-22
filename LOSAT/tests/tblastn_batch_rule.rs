@@ -47,7 +47,7 @@ fn tblastn(threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
 fn tblastn_query(query: &Path, threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
     const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
     let fasta = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy();
         if name_text.starts_with("LOSAT_") && name_text != WORKER_LOG {

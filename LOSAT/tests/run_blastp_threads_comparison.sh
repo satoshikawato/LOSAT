@@ -23,7 +23,7 @@ set -uo pipefail
 # }
 # ```
 
-LOSAT_BIN="${LOSAT_BIN:-../target/debug/LOSAT}"
+LOSAT_BIN="${LOSAT_BIN:-../target/debug/losat}"
 case "$(uname -s 2>/dev/null || true)" in
     MINGW*|MSYS*|CYGWIN*)
         if [ -x "${LOSAT_BIN}.exe" ]; then

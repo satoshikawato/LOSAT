@@ -17,7 +17,7 @@
 
 ## 1. 達成条件と範囲
 
-公開コマンドは既存 CLI と同じ `LOSAT tblastn -query proteins.faa -subject genome.fna`。
+公開コマンドは既存 CLI と同じ `losat tblastn -query proteins.faa -subject genome.fna`。
 タンパク質クエリを、探索時に六つの読み枠へ翻訳した塩基配列に照合する。
 v0.2.0 の完了条件は次のすべてとする。
 

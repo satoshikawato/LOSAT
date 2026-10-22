@@ -63,11 +63,19 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
                 "{key} is not accepted: a run writes every output format of the program"
             ));
         }
+        if matches!(
+            key,
+            "-num_descriptions" | "--num_descriptions" | "-num_alignments" | "--num_alignments"
+        ) {
+            return Err(format!(
+                "{key} is not supported by LOSAT Web: one Web search writes -outfmt 0, 6 and 7, for which NCBI derives different hit list sizes from -num_descriptions and -num_alignments"
+            ));
+        }
     }
     // The formats come from `Program::formats`, and every program accepts the CLI's
     // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
     // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
-    let argv = std::iter::once("LOSAT").chain(words.iter().copied());
+    let argv = std::iter::once("losat").chain(words.iter().copied());
     let cli: Cli =
         LOSAT::cli::try_parse_from(argv).map_err(|error| LOSAT::cli::render_message(&error))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
@@ -383,11 +391,36 @@ mod tests {
             let error = parse(&["blastp", "-query", "q", "-subject", "s", owned, "6"]).unwrap_err();
             assert!(error.contains("is not accepted"), "{owned}: {error}");
         }
+        // -num_descriptions and -num_alignments give the formats 0, 6 and 7 different hit
+        // list sizes in NCBI, and a Web search writes all three from one search.
+        for program in ["blastp", "tblastn", "blastn", "tblastx"] {
+            for option in ["-num_descriptions", "-num_alignments", "-num_alignments=3"] {
+                let words = [program, "-query", "q", "-subject", "s", option, "3"];
+                for error in [parse(&words).unwrap_err(), validate(&words).unwrap_err()] {
+                    assert!(
+                        error.contains("is not supported by LOSAT Web")
+                            && error.contains("-outfmt 0, 6 and 7"),
+                        "{program} {option}: {error}"
+                    );
+                }
+            }
+            // The same command line without them, and with -max_target_seqs, is accepted.
+            let words = [
+                program,
+                "-query",
+                "q",
+                "-subject",
+                "s",
+                "-max_target_seqs",
+                "3",
+            ];
+            assert!(parse(&words).is_ok(), "{program}");
+        }
         assert!(parse(&["blastx", "-query", "q", "-subject", "s"]).is_err());
         // An unknown program and a parser error are the CLI's messages.
         for words in [&["nosuch"][..], &["tblastx", "-query", "q"][..]] {
             let cli = LOSAT::cli::try_parse_from::<Cli, _, _>(
-                std::iter::once("LOSAT").chain(words.iter().copied()),
+                std::iter::once("losat").chain(words.iter().copied()),
             )
             .map(|_| ())
             .map_err(|error| LOSAT::cli::render_message(&error));
@@ -494,7 +527,7 @@ mod tests {
             ][..],
         ] {
             let cli = LOSAT::cli::try_parse_from::<Cli, _, _>(
-                ["LOSAT"].into_iter().chain(words.iter().copied()),
+                ["losat"].into_iter().chain(words.iter().copied()),
             )
             .unwrap_err();
             assert_eq!(

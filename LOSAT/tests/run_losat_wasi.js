@@ -13,7 +13,7 @@ const { prepareArtifact } = require("./wasi_artifact");
 // WASI preview1; it does not rewrite output or implement BLAST behavior.
 const wasmPath = process.argv[2];
 if (!wasmPath) {
-  console.error("usage: node tests/run_losat_wasi.js <LOSAT.wasm> [args...]");
+  console.error("usage: node tests/run_losat_wasi.js <losat.wasm> [args...]");
   process.exit(2);
 }
 

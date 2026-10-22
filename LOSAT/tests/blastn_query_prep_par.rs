@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The batch preparation of blastn on the search pool (`LOSAT_X_QPREPPAR`,
 //! `src/algorithm/blastn/blast_engine/x_query_prep_par.rs`) on whole searches.
 //!
@@ -140,7 +141,7 @@ fn blastn(
     threads: u32,
     switches: &[(&str, &str)],
 ) -> (Vec<u8>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -298,8 +299,9 @@ fn lowercase_masking_and_dust_parameters() {
 }
 
 // `-dust no` and other scores (other ungapped Karlin blocks): the same bytes with the switch and
-// the shadow. (There is no single-strand case: LOSAT BLASTN rejects `-strand`, cli.rs, so both
-// contexts of every query always exist.)
+// the shadow. (There is no single-strand case: `-strand plus` and `minus` build their buffer
+// serially, `build_strand_query_blastna_buffer`, whatever the switch says; its unit tests are in
+// `blast_engine/run.rs`, the whole searches in `tests/blastn_strand.rs`.)
 #[test]
 fn dust_no_and_other_scores() {
     let queries = Queries::new();

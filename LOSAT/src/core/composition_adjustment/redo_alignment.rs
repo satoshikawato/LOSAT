@@ -2891,10 +2891,14 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
     // `Blast_AdjustScores` calls; a result is used only by a call with the same input bits, and a kept
     // range only by the `get_range` call with the same window, HSP index and flags. It does not change
     // any value NCBI computes.
-    let x_lanes_on = super::x_newton_lanes::mode() != 0
+    let x_lanes_tblastn = super::x_newton_lanes::mode() != 0
         && params.subject_is_translated
-        && !params.query_is_translated
+        && !params.query_is_translated;
+    let x_lanes_on = x_lanes_tblastn
         && params.compo_adjust_mode != BlastCompoAdjustMode::NoCompositionBasedStats;
+    if x_lanes_tblastn {
+        crate::utils::xreach::x_reach!("LOSAT_X_NEWTONLANES", x_lanes_on);
+    }
     let mut x_next_prefetch = 0usize;
     let mut x_lane_ranges: Vec<(XLaneRangeKey, BlastRedoRangeResult)> = Vec::new();
 

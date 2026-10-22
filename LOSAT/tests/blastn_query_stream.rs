@@ -187,7 +187,7 @@ fn blastn_with_input(
     out: Option<&Path>,
     stdin: Option<&[u8]>,
 ) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -795,7 +795,7 @@ fn standard_input_and_pipes_are_read_once() {
     }
 }
 
-/// A database (`-db`, made by `LOSAT makedb` from four genomes): the off bytes, every format,
+/// A database (`-db`, made by `losat makedb` from four genomes): the off bytes, every format,
 /// the reports after the loop and per batch.
 #[test]
 fn a_database_search_gives_the_off_bytes() {
@@ -807,13 +807,13 @@ fn a_database_search_gives_the_off_bytes() {
     }
     std::fs::write(dir.path("set.fna"), set).unwrap();
     let db = dir.path("set").to_str().unwrap().to_string();
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(dir.path("set.fna"))
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(output.status.success(), "makedb");
     for (task, outfmt) in [
         ("megablast", "0"),

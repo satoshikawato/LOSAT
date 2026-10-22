@@ -3132,13 +3132,14 @@ pub(super) fn x_bn_mapped_reach(bytes: usize) {
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNMAPPED) the pool of the scratch of the hits' sort
 /// by score (`x_mapped::x_sort_by_mapped`), whose idle buffers may hold `x_sort_idle_bytes`.
 /// Without it each sort maps its scratch again and touches every page of it (Sakai x EDL933
-/// `-subject`, where the hits of one chunk are sorted at a time: x1.009-1.027 of the time with
-/// the switch off).
+/// `-subject` blastn, where the hits of one chunk are sorted at a time: x1.009-1.027 of the time
+/// with the switch off).
 static X_SORT: crate::utils::x_mapped::XPool<UngappedHit> =
     crate::utils::x_mapped::XPool::new(x_sort_idle_bytes);
 
-/// No NCBI counterpart: the built-in bound of `x_sort_idle_bytes`, in MiB: about one scratch of
-/// the hits of a 5 Mb chunk.
+/// No NCBI counterpart: the built-in bound of `x_sort_idle_bytes`, in MiB: one scratch of the
+/// largest hit lists measured (Sakai x EDL933 `-subject` blastn sorts 10 lists of 1.0-11.4 MiB;
+/// with 8 each of the 5 above 9 MiB is mapped again, x1.009 of the time).
 const X_SORT_IDLE_MIB: usize = 16;
 
 /// No NCBI counterpart: the idle bound of `X_SORT` (`LOSAT_X_SORTIDLE` MiB, a tuning variable,

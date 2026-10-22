@@ -233,8 +233,8 @@ const X_SORT_RUN_BYTES: usize = 64 << 10;
 /// more with glibc, is a mapped buffer as long as `v` from `pool` (given back after the sort):
 /// runs of `X_SORT_RUN_BYTES` sorted with `sort_by`, then merged pairwise from `v` into the
 /// buffer and back (the left run first among equal elements). A scratch of half of `v`, the left
-/// run copied out before each merge, held no less at the peak and took x1.04 the time (Sakai x
-/// EDL933 `-subject` dc-megablast at 16 threads, where one thread sorts several million hits).
+/// run copied out before each merge, held no less at the peak (Sakai x EDL933 `-subject` blastn,
+/// whose largest lists hold 11.4 MiB of hits, and the D. melanogaster genome `-db`).
 pub(crate) fn x_sort_by_mapped<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     v: &mut [T],
     mut cmp: F,

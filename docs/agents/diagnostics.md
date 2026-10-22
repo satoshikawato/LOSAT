@@ -1200,6 +1200,66 @@ Rebuilding less:
   new shape's runs are within or above the old one's (blastn against MG1655 + EDL933 378-397 / 353-383,
   dc-megablast against EDL933 449-477 / 418-460). With EDL933, blastn and dc-megablast take 2.3-4.4 times NCBI's max
   RSS (164-286 MiB) in both shapes (outside this switch); megablast stays below NCBI's.
+- `LOSAT_X_BNMAPPED=1` (BLASTN, every task, memory; in the strict set from the pull request that added it
+  (perf/bn-mapped-pool, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set;
+  acts only with 64-bit glibc (Linux) and on buffers of 1 MiB or more) the large per-subject buffers of BLASTN are
+  kept where glibc returns them to the system when they are dropped: the blocks and sequences read from a `-db`
+  (`seqdb` `x_read_block_mapped`, `x_read_sequence_mapped`), their BLASTNA letters (`blastn/blast_engine/database.rs`
+  `x_blastna`), the ungapped hits of a subject as the seed stages push them (`run.rs` `x_push_ungapped`) and the
+  scratch of their sort by score (`utils/x_mapped.rs` `x_sort_by_mapped`). Such a buffer gets a capacity above glibc's
+  largest dynamic mmap threshold (32 MiB and one page) once it needs 1 MiB, so glibc maps it; its pages beyond its
+  length are not resident until they are touched. Without it glibc raises its threshold to the size of each mapped
+  block that is freed, so after a few frees the chromosome-sized buffers of the worker threads come from their arenas,
+  and the space they leave stays resident there for that thread only: the D. melanogaster genome `-db` (arms of 23-32
+  Mb) at 16 threads had 605 MB free in the arenas at the peak (probe of the live allocations, v4-B session 11). A
+  mapped block that is freed and mapped again faults on every page (x1.04 wall at 16 threads there), so the buffers
+  that are done after every subject go to pools shared by all threads (`utils/x_mapped.rs` `XPool`), from which the
+  next buffer that must grow past 1 MiB is taken with its pages resident: the database's blocks, sequences and BLASTNA
+  letters to `X_BYTES` (idle bound `LOSAT_X_POOLIDLE`, below), the sort's scratch to `X_SORT` (`run.rs`, idle bound
+  `LOSAT_X_SORTIDLE`, below). The hits are mapped but not pooled: a thread keeps its scratch, and with it its hit
+  buffer, from one subject to the next (as NCBI keeps its `init_hitlist`), so idle hit buffers in a pool only added to
+  those in use (Sakai x EDL933 `-subject` blastn at 4 threads: max RSS 298-327 MiB with a pool of 64 MiB, 245-264
+  without, 238-261 with the switch off). The sort is a stable merge sort with the same comparator (runs of 64 KiB
+  sorted with `sort_by`, merged pairwise into the scratch and back, the left run first among equal elements), so the
+  order is that of `sort_by`; its scratch is as long as the hits (a half-size scratch, the left run copied out before
+  each merge, held no less at the peak).
+  Every pooled buffer is written before it is read (zeroed and read into, or BLASTNA letters written whole), so values
+  and order never change; it only chooses where the bytes live and when they are freed. Not mapped: the merge of the
+  folded strips (`x_pair_seed_part.rs`) and the per-query sorts of `LOSAT_X_QGROUPPAR`. With other allocators (macOS,
+  Windows, musl, Wasm) and on 32 bits (glibc's ceiling is 512 KiB there) the capacities are those of `Vec` and nothing
+  is pooled. No shadow (allocation only). Tests: the unit tests of `utils/x_mapped.rs` (capacities, the sort against
+  `sort_by` for 0-200,003 elements and runs of 4, the pools' lending and idle bound); the gate runs every BLASTN
+  fixture with `=0` as well.
+  Memory measured on the workstation (node 0, untimed, v4-MEM's `mem_run.py`: VmHWM every 50 ms; with the switch and
+  without it in the same run, rotated order; every output equal to NCBI 2.17.0's; v4-B `results/b16ab/mem8.tsv`,
+  `mem9.tsv` with the max RSS of the timed runs `ab8.tsv`, `ab9.tsv`; 5-23 runs per arm), max RSS median with /
+  without the switch (NCBI): 1,500 D. melanogaster 2L cDNAs x the D. melanogaster genome `-db`, blastn at 16 threads
+  321 / 624 MiB (372), at 8 threads 272 / 343 (336); dc-megablast at 8 threads 186 / 222 (193), at 16 threads 268 / 284
+  (191; above NCBI either way: the traceback decodes whole chromosome arms, NCBI fetches only the HSPs' ranges); the
+  Sakai genome x EDL933 `-subject` (blastn at 4 threads hit lists of 1.0-11.4 MiB, dc-megablast below 1 MiB), blastn at
+  4 threads 264 / 264, at 16 threads 585 / 586, dc-megablast at 4 threads 294 / 292, at 16 threads 686 / 697 (equal
+  within the run-to-run spread of 20-60 MiB; NCBI 177 / 164 MiB on its one `-subject` thread: the long tracebacks of
+  several threads at once, outside this switch); megablast of 100 16S x 28,036 16S `-db` at 16 threads 85 / 87 (139).
+  Time measured on the workstation (node 1; 16, 8 or 4 booked cores with their siblings idle, a 3 s warm-up before each
+  run, alternating or rotated order, against `LOSAT_X_BNMAPPED=0` with the same binary; every output identical; v4-B
+  `results/b16ab/ab8.tsv`, `ab9.tsv`), per-pair median: the D. melanogaster cells blastn at 16 threads x0.999 (12 pairs,
+  0.980-1.046), at 8 x0.992 (10), dc-megablast at 8 x1.011 (12, 0.977-1.038); Sakai x EDL933 blastn at 16 threads
+  x1.008 (16, 0.964-1.092), at 4 x0.998 (14), dc-megablast at 16 x0.996 (12), at 4 x1.008 (14, 0.988-1.016); megablast
+  of the 16S cells at 16 threads x1.000 (4). User-space instructions are equal; system time rises where buffers are
+  mapped (D. melanogaster blastn at 16 threads 2.5 -> 3.3 s, inside the same wall).
+- `LOSAT_X_POOLIDLE=<MiB>` (tuning variable of `LOSAT_X_BNMAPPED`; not in the strict set, read once when the pool
+  first takes a buffer back) the bound of the bytes that the idle buffers of `X_BYTES` (the database's blocks,
+  sequences and BLASTNA letters) may have touched, 0 to 65,536. The oldest idle buffers beyond it are freed, and a
+  buffer that alone touched more is freed at once. Unset or any other value gives 64, without a message, as the value
+  switches of `utils/xswitch.rs` give their built-in value. The output does not depend on it. D. melanogaster blastn
+  at 16 threads (above): max RSS 273 MiB with 0, 317-331 with 64, 346-367 with 256; with 0 every reuse faults again
+  (x1.04 wall).
+- `LOSAT_X_SORTIDLE=<MiB>` (tuning variable of `LOSAT_X_BNMAPPED`; not in the strict set, read once when the pool
+  first takes a scratch back) the same bound for `X_SORT`, the scratch of the ungapped hits' sort, 0 to 65,536. Unset
+  or any other value gives 16 (one scratch of the largest hit lists measured: 11.4 MiB, Sakai x EDL933 blastn),
+  without a message. The output does not depend on it. Sakai x EDL933 blastn at 4 threads (above), per-pair against
+  16: 8 x1.009 (6 of 8 pairs slower; the scratches of 9.6-11.4 MiB are mapped again at every sort), 0 x1.009-1.027,
+  for 10 MiB less max RSS (median 251 against 261 MiB); elsewhere no change in memory.
 - `LOSAT_X_DBIDXREAD=1` (every program's `-db`, memory; in the strict set since 2026-10-19 (perf/db-index-pread, evidence
   at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the index file of each volume
   (`.pin` / `.nin`) stays open after the volume is opened, and the reader reads the ranges of its offset arrays that it

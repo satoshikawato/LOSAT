@@ -781,11 +781,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         &mut query_stream,
                         args.lcase_masking,
                         &|queries: &[super::input::FastaRecord], alone: bool| {
-                            crate::utils::xreach::x_reach!(
-                                "LOSAT_X_BXBATCH",
-                                !(alone || x_large(queries))
-                            );
-                            if alone || x_large(queries) {
+                            let large = alone || x_large(queries);
+                            crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !large);
+                            if large {
                                 super::runtime::x_search_internal_in_pool(
                                     queries,
                                     search_subjects,

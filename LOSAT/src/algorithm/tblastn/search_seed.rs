@@ -716,8 +716,9 @@ impl XSubjectSide {
         gencode: u8,
         mask_lowercase: bool,
     ) -> Option<Self> {
-        if on {
-            crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", batches >= Self::KEEP_FROM_BATCHES);
+        // The own side is recorded where a plan is kept or refused (KEEP_LIMIT).
+        if on && batches < Self::KEEP_FROM_BATCHES {
+            crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", false);
         }
         (on && batches >= Self::KEEP_FROM_BATCHES)
             .then(|| Self::new(subjects, gencode, mask_lowercase))

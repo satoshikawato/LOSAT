@@ -837,8 +837,9 @@ impl TblastnArgs {
                 let mut stderr = std::io::stderr();
                 let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
                 let x_store = super::x_subject_store::x_tbn_store();
-                if x_store {
-                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSTORE", subject_range.is_none());
+                // The stores' own side is recorded where they are read (x_subject_store.rs).
+                if x_store && subject_range.is_some() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSTORE", false);
                 }
                 if x_store && subject_range.is_none() {
                     super::x_subject_store::x_read_subject_stores(

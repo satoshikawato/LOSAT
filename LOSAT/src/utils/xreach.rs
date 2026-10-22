@@ -71,9 +71,10 @@ fn directory() -> Option<&'static PathBuf> {
 }
 
 /// No NCBI counterpart: records that the switch at `index` took its own path (`own_path`) or
-/// the reference path. Called through `x_reach!`.
+/// the reference path. Called through `x_reach!`. Never inlined: a decision point keeps only the
+/// call, so the code around it compiles as it did without the mark.
 #[doc(hidden)]
-#[inline]
+#[inline(never)]
 pub fn mark(index: usize, own_path: bool) {
     if directory().is_some() {
         SIDES[index].fetch_or(if own_path { NEW } else { REF }, Ordering::Relaxed);

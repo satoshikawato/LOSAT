@@ -292,11 +292,15 @@ pub(crate) fn x_word_finder_diag(
     diagonals: &mut Diagonals,
 ) -> Result<Option<Vec<InitHsp>>> {
     let Lookup::Standard(table) = lookup else {
-        crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", false);
+        if x_bxdiag_mode() != 2 {
+            crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", false);
+        }
         return Ok(None);
     };
     if options.window_size <= 0 {
-        crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", false);
+        if x_bxdiag_mode() != 2 {
+            crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", false);
+        }
         return Ok(None);
     }
     let mode = x_cell_mode();

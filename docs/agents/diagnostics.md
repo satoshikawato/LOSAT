@@ -174,6 +174,14 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   extension, `extension/two_hit.rs::x_two_hit_cells`) and `rescan` = cells / distinct subject positions
   per cell (positions past the furthest one an earlier extension of the cell reached). The statistics
   repeat every extension, so the run is slower; reports do not change.
+- `LOSAT_X_REACH=<directory>` records, at the decision points of the conditional switches of the strict set
+  (`utils/xreach.rs`, `x_reach!`), whether each took its own path or the reference path while it was on, and
+  writes `reach-<pid>-<ns>.tsv` (`switch new ref program`) into the directory at exit; output unchanged.
+  `LOSAT/tests/switch_reach_check.py` compares the folded files with `LOSAT/tests/switch_reach_expected.tsv`
+  (one row per switch of the set: class `always`, `platform` or `conditional`; for a conditional switch each
+  side `required` or `gap` with the input that would reach it). CI runs the fast regressions with it and the
+  check after them. A new switch of the set adds its row; a conditional one also marks its decision points
+  and, where cheap, adds a fixture for each side, or writes `gap` with the reason.
 - `LOSAT_STARTUP_TRACE=1` startup trace.
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.
 - `LOSAT_WASI_PRESPAWN=auto|N` (Node threaded runner; `auto` when unset since

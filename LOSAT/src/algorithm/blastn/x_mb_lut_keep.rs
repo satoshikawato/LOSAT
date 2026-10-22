@@ -123,8 +123,13 @@ impl Keep {
     /// freed. `on_pool`: the build runs on a pool of two threads or more, which writes the zeros.
     pub(super) fn take(&self, cells: usize, on_pool: bool) -> (Vec<u32>, bool, usize) {
         let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner()).take();
+        // The reference side is a kept table too small for this build (the first build of a loop
+        // has none on either path).
+        let too_small = kept.as_ref().is_some_and(|kept| kept.table.len() < cells);
         let Some(Kept { mut table, dirty }) = kept.filter(|kept| kept.table.len() >= cells) else {
-            crate::utils::xreach::x_reach!("LOSAT_X_MBLUTKEEP", false);
+            if too_small {
+                crate::utils::xreach::x_reach!("LOSAT_X_MBLUTKEEP", false);
+            }
             FRESH.fetch_add(1, Ordering::Relaxed);
             return (vec![0u32; cells], false, cells);
         };

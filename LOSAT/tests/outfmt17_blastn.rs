@@ -254,6 +254,40 @@ fn a_stored_title_that_no_hit_reads_still_streams_the_document() {
     }
 }
 
+/// NCBI's error sites that flush the document of the batches before (a reader error, a batch without
+/// queries, a batch of queries without letters) with the same database: the stream acts for it, so the
+/// document comes from `Stream::finish_sam`, and it equals NCBI's.
+#[test]
+fn the_error_sites_flush_the_document_with_a_stored_title_that_no_hit_reads() {
+    equals_frozen_in(
+        "btbad",
+        "qnucl_bad.fna",
+        "db/snucl_bt",
+        &[],
+        BATCHES,
+        1,
+        &["db"],
+    );
+    equals_frozen_in(
+        "btskip",
+        "q_skip.fna",
+        "db/snucl_bt",
+        &["-query_loc", "20-300"],
+        BATCHES,
+        3,
+        &["db"],
+    );
+    equals_frozen_in(
+        "btnolet",
+        "q_nolet.fna",
+        "db/snucl_bt",
+        &[],
+        BATCHES,
+        3,
+        &["db"],
+    );
+}
+
 /// The stored title of `sn3` is read by the second batch (`q_bt2.fna`: `qn1`, then a part of `sn3`):
 /// LOSAT refuses it there (NCBI prints its `Bad char` messages and writes the document). The first
 /// batch's records are held, not written, so nothing is on standard output; the standard error and

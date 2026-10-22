@@ -1892,11 +1892,10 @@ fn build_mb_lookup(
     //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
     //          mb_lt->hashtable[ecode] = index;
     // ```
-    // Dispatch point: NCBI applies this update to each word as soon as the word is read, as
-    // the loop in the `else` branch does (the original LOSAT loop, unchanged). With
-    // LOSAT_X_MBDELAY or LOSAT_X_MBBATCH, `x_fill_mb_queued` runs a copy of that loop that only
-    // touches the table cell earlier (a prefetch, or a read loop) and applies the same update
-    // to the same words in the same order, so the result is the same table.
+    // NCBI applies this update to each word as soon as the word is read. `x_fill_mb_queued`
+    // runs that loop with a queue that only touches the table cell earlier (a prefetch, or a
+    // read loop) and applies the same update to the same words in the same order, so the result
+    // is the same table.
     // Dispatch point of LOSAT_X_PAIRPAR (first arm): `x_mb_lookup_par::fill` applies the same
     // update to the same words, each cell's words in the same order, on the pool threads (each
     // thread owns whole blocks of cells); see x_mb_lookup_par.rs.
@@ -1925,9 +1924,9 @@ fn build_mb_lookup(
             true,
             x_resident,
         );
-    } else if let Some(x_queue) = x_mb_queue() {
+    } else {
         x_fill_mb_queued(
-            x_queue,
+            x_mb_queue(),
             queries_blastna,
             query_offsets,
             query_masks,
@@ -1948,65 +1947,6 @@ fn build_mb_lookup(
                 ambiguous_skipped: &mut ambiguous_skipped,
             },
         );
-    } else {
-        for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-            let seq = seq_blastna;
-            if seq.len() < lut_word_length {
-                continue;
-            }
-
-            let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
-            let ranges = build_unmasked_ranges(seq.len(), masks);
-            let query_offset = query_offsets[q_idx].max(0) as usize;
-
-            for (range_start, range_end) in ranges {
-                let range_len = range_end.saturating_sub(range_start);
-                if word_length > range_len {
-                    continue;
-                }
-
-                let mut current_kmer: u64 = 0;
-                let mut valid_bases = 0usize;
-
-                for pos in range_start..range_end {
-                    let base = seq[pos];
-                    if (base & BLAST2NA_MASK) != 0 {
-                        current_kmer = 0;
-                        valid_bases = 0;
-                        ambiguous_skipped += 1;
-                        continue;
-                    }
-
-                    current_kmer = ((current_kmer << 2) | base as u64) & kmer_mask;
-                    valid_bases += 1;
-                    if valid_bases < lut_word_length {
-                        continue;
-                    }
-
-                    total_positions += 1;
-
-                    if let Some(counts_filter) = db_word_counts {
-                        if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
-                            continue;
-                        }
-                    }
-
-                    let bucket = current_kmer as usize;
-                    let q_off_1 = (query_offset + (pos + 1 - lut_word_length) + 1) as u32;
-                    if hashtable[bucket] == 0 {
-                        pv_set_shift(&mut pv_array, bucket, pv_array_bts);
-                    } else {
-                        helper_array[bucket / K_COMPRESSION_FACTOR] =
-                            helper_array[bucket / K_COMPRESSION_FACTOR].saturating_add(1);
-                    }
-                    next_pos[q_off_1 as usize] = hashtable[bucket];
-                    hashtable[bucket] = q_off_1;
-                    if ascending_cells {
-                        words.push((bucket as u32, q_off_1));
-                    }
-                }
-            }
-        }
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:74-76
     // ```c
@@ -2970,24 +2910,29 @@ pub fn build_direct_lookup(
 //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
 //          mb_lt->hashtable[ecode] = index;
 // ```
-// EXPERIMENT (LOSAT_X_MBDELAY, LOSAT_X_MBBATCH[=n]): how `x_fill_mb_queued` queues the update
-// above. MBDELAY prefetches the cell of each word and applies the update sixteen words later,
-// in the same order; only where a prefetch instruction exists (without one, on Wasm, the delay
-// alone costs time). MBBATCH collects n words (64 unless given), reads their cells in one tight
-// loop (so the cache misses overlap), then applies the updates in the original order; it needs
-// no prefetch instruction. MBDELAY wins when both are set.
+// No NCBI counterpart: how `x_fill_mb_queued` queues the update above, by CPU. `Delay`
+// (x86_64, once `LOSAT_X_MBDELAY`) prefetches the cell of each word and applies the update
+// sixteen words later, in the same order; only where a prefetch instruction exists (without
+// one, on Wasm, the delay alone costs time). `Batch` (every other target, once
+// `LOSAT_X_MBBATCH`) collects `X_MB_BATCH` words, reads their cells in one tight loop (so the
+// cache misses overlap), then applies the updates in the original order; it needs no prefetch
+// instruction.
 #[derive(Clone, Copy)]
 enum XMbQueue {
     Delay,
     Batch(usize),
 }
 
-fn x_mb_queue() -> Option<XMbQueue> {
-    if cfg!(target_arch = "x86_64") && crate::utils::xswitch::on("LOSAT_X_MBDELAY") {
-        return Some(XMbQueue::Delay);
+/// The words `XMbQueue::Batch` collects before it applies them (the built-in value of the former
+/// `LOSAT_X_MBBATCH`, which graduated on 2026-10-22).
+const X_MB_BATCH: usize = 64;
+
+fn x_mb_queue() -> XMbQueue {
+    if cfg!(target_arch = "x86_64") {
+        XMbQueue::Delay
+    } else {
+        XMbQueue::Batch(X_MB_BATCH)
     }
-    let size = crate::utils::xswitch::value("LOSAT_X_MBBATCH", 2..=4096, 64)?;
-    Some(XMbQueue::Batch(size))
 }
 
 // The state `build_mb_lookup` fills, borrowed by the queued copy of its loop.
@@ -3042,11 +2987,9 @@ fn x_mb_apply(t: &mut XMbTables<'_>, ascending_cells: bool, bucket: usize, q_off
 //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
 //          mb_lt->hashtable[ecode] = index;
 // ```
-// EXPERIMENT: a copy of the word loop of `build_mb_lookup` (the same words, read in the same
-// order, with the same counters) that queues each update (`XMbQueue`) instead of applying it at
-// once. The queue is first in, first out and is drained at the end, so every word is applied
-// once, in the original order: the table is the one the original loop builds. The reference
-// loop in `build_mb_lookup` is kept as it was, so that the switch-off path is not slowed.
+// No NCBI counterpart: the word loop of `build_mb_lookup` that queues each update (`XMbQueue`)
+// instead of applying it at once. The queue is first in, first out and is drained at the end, so
+// every word is applied once, in the original order: the table is the one NCBI's loop builds.
 #[allow(clippy::too_many_arguments)]
 fn x_fill_mb_queued(
     queue: XMbQueue,

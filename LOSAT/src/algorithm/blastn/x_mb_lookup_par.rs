@@ -40,7 +40,7 @@
 //! its chain (`hashtable` and the `next_pos` links of its words), its presence bit and its
 //! counter; `longest_chain` is then computed from the same counters by the original code.
 //! The words of a worker are applied in reading order (a first-in first-out delay of 16
-//! words on x86_64, for a prefetch, as LOSAT_X_MBDELAY does). Workers write disjoint
+//! words on x86_64, for a prefetch, as `x_fill_mb_queued` does). Workers write disjoint
 //! elements, so the number of workers changes the running time only.
 //!
 //! The re-threading of `ascending_cells` (blast_lookup.c:74-76 order, see `build_mb_lookup`)

@@ -2465,9 +2465,9 @@ fn get_next_non_affine_tback(
 // (the slide length). Pass 3 applies the writes and the state updates (`diag_lower`,
 // `diag_upper`, `curr_extent`, seed, sequence ends, fence) diagonal by diagonal in the
 // order of the C loop. By construction this gives the cells, bounds and extent of the C
-// loop; LOSAT_X_GREEDYSHADOW compares them row by row. All of it is integer arithmetic.
+// loop. All of it is integer arithmetic.
 // ---------------------------------------------------------------------------
-// EXPERIMENT (LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSHADOW): one distance of
+// No NCBI counterpart: one distance of
 // `BLAST_GreedyAlign` over an uncompressed subject, with the same cell order,
 // the same writes and the same bookkeeping as the loop below, but as a small
 // leaf routine that compares eight bases per step.
@@ -2492,40 +2492,6 @@ fn get_next_non_affine_tback(
 // }
 // ```
 // ---------------------------------------------------------------------------
-
-#[cfg(test)]
-thread_local! {
-    /// Lets a test choose the mode per call (also the tests of `x_greedy_prelim`).
-    pub(super) static X_GREEDY_TEST_MODE: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) };
-}
-
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537,571-573
-/// ```c
-///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-/// ...
-///             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
-/// ```
-/// Reads the LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSHADOW switches once. The mode only
-/// chooses whether this loop of `BLAST_GreedyAlign` runs as ported (0), as the fast row
-/// (1), or as both with a comparison (2).
-/// 0 = reference loop, 1 = fast row, 2 = both and compare every row.
-fn x_greedy_mode() -> u8 {
-    #[cfg(test)]
-    if let Some(mode) = X_GREEDY_TEST_MODE.with(|mode| mode.get()) {
-        return mode;
-    }
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_GREEDYSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_GREEDYFAST") {
-            1
-        } else {
-            0
-        }
-    })
-}
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:565,578-582,596-614
 /// ```c
@@ -3183,14 +3149,11 @@ unsafe fn x_greedy_row(
 // ...
 //         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
 // ```
-// EXPERIMENT (LOSAT_X_GREEDYFUSE / LOSAT_X_GREEDYFUSESHADOW): the distance loop of the score-only
-// `BLAST_GreedyAlign` on an unpacked subject in one function, one pass per distance. A child
-// module, so that it uses the types and helpers of this file and calls `blast_greedy_align` (its
-// shadow) without changing them.
+// No NCBI counterpart: the distance loop of the score-only `BLAST_GreedyAlign` on an unpacked
+// subject in one function, one pass per distance. A child module, so that it uses the types and
+// helpers of this file without changing them.
 #[path = "x_greedy_fused.rs"]
 mod x_greedy_fused;
-// No NCBI counterpart: the summary line `main` prints at exit; it changes no value NCBI computes.
-pub use x_greedy_fused::print_summary as x_greedy_fuse_print_summary;
 
 /// Non-affine greedy alignment with optional traceback.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:379-751 (BLAST_GreedyAlign)
@@ -3320,10 +3283,9 @@ fn blast_greedy_align(
     //     if (edit_block == NULL)
     //         return best_dist;
     // ```
-    // Dispatch point of LOSAT_X_GREEDYFUSE / LOSAT_X_GREEDYFUSESHADOW: without an edit block on an
-    // unpacked subject, `x_greedy_fused` runs the loop below and returns what it returns, with
-    // the same outputs, rows and `max_score`. `None` (switch off, or another case): the loop below.
-    // EXPERIMENT (LOSAT_X_GREEDYFUSE / LOSAT_X_GREEDYFUSESHADOW)
+    // Without an edit block on an unpacked subject, `x_greedy_fused` runs the loop below and
+    // returns what it returns, with the same outputs, rows and `max_score`. `None` (another
+    // case): the loop below.
     if let Some(result) = x_greedy_fused::x_greedy_fused_dispatch(
         seq1,
         len1,
@@ -3438,17 +3400,13 @@ fn blast_greedy_align(
         // ...
         // }   /* end loop over diagonals */
         // ```
-        // Dispatch point of LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSHADOW. The `for` loop that follows
-        // the `if !x_done` below is the port of this C loop and runs when no switch is set, when
-        // `rem != 4`, or when the lengths do not fit the slices. With the switch, `x_greedy_row`
-        // does the same distance; a fence stop returns 0 as the C code does. The loop over
-        // distances `d` and everything after the diagonals (scores, convergence) is shared.
-        // EXPERIMENT (LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSHADOW)
-        let x_mode = x_greedy_mode();
+        // `x_greedy_row` does the same distance when the subject is unpacked (`rem == 4`) and the
+        // lengths fit the slices; a fence stop returns 0 as the C code does. The `for` loop that
+        // follows the `if !x_done` below is the port of this C loop and runs otherwise (a packed
+        // subject, or lengths that do not fit). The loop over distances `d` and everything after
+        // the diagonals (scores, convergence) is shared.
         let mut x_done = false;
-        let mut x_shadow: Option<(XGreedyRowState, Vec<i32>, bool)> = None;
-        if x_mode != 0
-            && rem == 4
+        if rem == 4
             && len1 >= 0
             && len2 >= 0
             && len1 as usize <= seq1.len()
@@ -3467,59 +3425,38 @@ fn blast_greedy_align(
                 seed_start_s: seed.start_s,
                 fence_hit: *fence_hit,
             };
-            if x_mode == 1 {
-                // SAFETY: both lengths were checked against the slices above.
-                let stopped = unsafe {
-                    x_greedy_row(
-                        reverse,
-                        seq1.as_ptr(),
-                        seq2.as_ptr(),
-                        len1,
-                        len2,
-                        previous,
-                        current,
-                        tmp_diag_lower,
-                        diag_origin,
-                        xdrop_score,
-                        &mut st,
-                    )
-                };
-                diag_lower = st.diag_lower;
-                diag_upper = st.diag_upper;
-                end1_reached = st.end1_reached;
-                end2_reached = st.end2_reached;
-                curr_extent = st.curr_extent;
-                curr_seq2_index = st.curr_seq2_index;
-                curr_diag = st.curr_diag;
-                longest_match_run = st.longest_match_run;
-                seed.start_q = st.seed_start_q;
-                seed.start_s = st.seed_start_s;
-                seed.match_length = longest_match_run;
-                *fence_hit = st.fence_hit;
-                if stopped {
-                    return 0;
-                }
-                x_done = true;
-            } else {
-                let mut copy = current.to_vec();
-                // SAFETY: both lengths were checked against the slices above.
-                let stopped = unsafe {
-                    x_greedy_row(
-                        reverse,
-                        seq1.as_ptr(),
-                        seq2.as_ptr(),
-                        len1,
-                        len2,
-                        previous,
-                        &mut copy,
-                        tmp_diag_lower,
-                        diag_origin,
-                        xdrop_score,
-                        &mut st,
-                    )
-                };
-                x_shadow = Some((st, copy, stopped));
+            // SAFETY: both lengths were checked against the slices above.
+            let stopped = unsafe {
+                x_greedy_row(
+                    reverse,
+                    seq1.as_ptr(),
+                    seq2.as_ptr(),
+                    len1,
+                    len2,
+                    previous,
+                    current,
+                    tmp_diag_lower,
+                    diag_origin,
+                    xdrop_score,
+                    &mut st,
+                )
+            };
+            diag_lower = st.diag_lower;
+            diag_upper = st.diag_upper;
+            end1_reached = st.end1_reached;
+            end2_reached = st.end2_reached;
+            curr_extent = st.curr_extent;
+            curr_seq2_index = st.curr_seq2_index;
+            curr_diag = st.curr_diag;
+            longest_match_run = st.longest_match_run;
+            seed.start_q = st.seed_start_q;
+            seed.start_s = st.seed_start_s;
+            seed.match_length = longest_match_run;
+            *fence_hit = st.fence_hit;
+            if stopped {
+                return 0;
             }
+            x_done = true;
         }
         if !x_done {
             for (cell_index, (previous, cell)) in
@@ -3579,49 +3516,6 @@ fn blast_greedy_align(
                 }
             }
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:574-576,589,596-614
-        // ```c
-        //             if(fence_hit && *fence_hit){
-        //                 return 0;
-        //             }
-        // ...
-        //             last_seq2_off[d][k] = seq2_index;
-        // ...
-        //             if (seq1_index + seq2_index > curr_extent) {
-        // ```
-        // LOSAT_X_GREEDYSHADOW: after the ported loop has run, the state and the row it left are
-        // compared with what the fast row left on its copy of the row. The reference loop did
-        // not return inside this distance, so the fast row must not have stopped either.
-        if let Some((st, copy, stopped)) = x_shadow {
-            // LOSAT_X_GREEDYSHADOW: the fast row must leave exactly what the
-            // reference loop left (which did not return inside this row).
-            assert!(
-                !stopped,
-                "LOSAT_X_GREEDYSHADOW: only the fast row stopped at d={d}"
-            );
-            let reference = XGreedyRowState {
-                diag_lower,
-                diag_upper,
-                end1_reached,
-                end2_reached,
-                curr_extent,
-                curr_seq2_index,
-                curr_diag,
-                longest_match_run,
-                seed_start_q: seed.start_q,
-                seed_start_s: seed.start_s,
-                fence_hit: *fence_hit,
-            };
-            assert!(
-                st == reference,
-                "LOSAT_X_GREEDYSHADOW: state differs at d={d}: fast {st:?} reference {reference:?}"
-            );
-            assert!(
-                copy[..] == current[..],
-                "LOSAT_X_GREEDYSHADOW: row differs at d={d}"
-            );
-        }
-
         curr_score = curr_extent * (match_cost / 2) - d * (match_cost + mismatch_cost);
         let prev_max = non_affine_mem.max_score[(d as usize - 1) + max_score_offset];
         if curr_score >= prev_max {
@@ -4239,7 +4133,7 @@ fn stats_from_edit_ops(
 
 /// Core greedy gapped alignment result (internal).
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2539-2569 (s_BlastGreedyGapAlignStructFill)
-// EXPERIMENT (LOSAT_X_GREEDYPRELIM): visible to `x_greedy_prelim`, which compares the values.
+// No NCBI counterpart: visible to `x_greedy_prelim`, which compares the values in its test.
 pub(super) struct GreedyGappedCore {
     pub(super) q_start: i32,
     pub(super) q_end: i32,
@@ -4253,7 +4147,7 @@ pub(super) struct GreedyGappedCore {
 
 /// Greedy gapped alignment core (with or without traceback).
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
-// EXPERIMENT (LOSAT_X_GREEDYPRELIM): visible to `x_greedy_prelim`, which calls it with
+// No NCBI counterpart: visible to `x_greedy_prelim`, which calls it with
 // `compressed_subject = false` on the one-byte copy of the packed subject.
 pub(super) fn greedy_gapped_alignment_internal(
     query: &[u8],
@@ -4725,18 +4619,14 @@ mod tests {
     /// ...
     ///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
     /// ```
-    /// The test runs the port of `BLAST_GreedyAlign` (and `BLAST_AffineGreedyAlign`) in
-    /// reference, fast and shadow mode on random inputs and compares the alignments.
-    /// EXPERIMENT (LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSPEC).
+    /// The test runs the port of `BLAST_GreedyAlign` (and `BLAST_AffineGreedyAlign`) on random
+    /// inputs and compares the alignments.
     ///
-    /// On random pairs of related sequences, with and without traceback:
-    ///   * the fast row gives the alignment of the reference loop (compared
-    ///     as a whole, and row by row in the shadow mode);
-    ///   * the reference loop gives the same alignment on a scratch that
-    ///     earlier, unrelated alignments have used as on a new one, which is
-    ///     what running tracebacks ahead of time on other scratches relies on.
+    /// On random pairs of related sequences, with and without traceback: the alignment on a
+    /// scratch that earlier, unrelated alignments have used equals the one on a new scratch,
+    /// which is what running tracebacks ahead of time on other scratches relies on.
     #[test]
-    fn x_fast_greedy_rows_match_reference_on_random_alignments() {
+    fn x_greedy_alignment_on_a_used_scratch_equals_a_new_scratch() {
         struct Rng(u64);
         impl Rng {
             fn next(&mut self) -> u64 {
@@ -4750,7 +4640,6 @@ mod tests {
             }
         }
         fn run(
-            mode: u8,
             query: &[u8],
             subject: &[u8],
             q_off: usize,
@@ -4769,7 +4658,6 @@ mod tests {
             i32,
             Option<(Vec<GapAlignOpType>, Vec<i32>)>,
         )> {
-            X_GREEDY_TEST_MODE.with(|m| m.set(Some(mode)));
             let core = greedy_gapped_alignment_internal(
                 query,
                 subject,
@@ -4785,7 +4673,6 @@ mod tests {
                 scratch,
                 traceback,
             );
-            X_GREEDY_TEST_MODE.with(|m| m.set(None));
             core.map(|c| {
                 (
                     c.q_start,
@@ -4806,8 +4693,7 @@ mod tests {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1500);
         let mut rng = Rng(0x2545_F491_4F6C_DD1D);
-        let mut used_fast = GreedyAlignScratch::new();
-        let mut used_reference = GreedyAlignScratch::new();
+        let mut used = GreedyAlignScratch::new();
         let mut aligned = 0usize;
         let mut with_gaps = 0usize;
         for case in 0..cases {
@@ -4871,7 +4757,6 @@ mod tests {
             let x_drop = 5 + rng.below(60) as i32;
             for traceback in [false, true] {
                 let reference = run(
-                    0,
                     &query,
                     &subject,
                     q_off,
@@ -4880,47 +4765,9 @@ mod tests {
                     x_drop,
                     &mut GreedyAlignScratch::new(),
                     traceback,
-                );
-                let fast = run(
-                    1,
-                    &query,
-                    &subject,
-                    q_off,
-                    s_off,
-                    scoring,
-                    x_drop,
-                    &mut used_fast,
-                    traceback,
-                );
-                assert_eq!(
-                    fast, reference,
-                    "case {case}: fast rows, traceback={traceback}"
-                );
-                let shadow = run(
-                    2,
-                    &query,
-                    &subject,
-                    q_off,
-                    s_off,
-                    scoring,
-                    x_drop,
-                    &mut GreedyAlignScratch::new(),
-                    traceback,
-                );
-                assert_eq!(
-                    shadow, reference,
-                    "case {case}: shadow, traceback={traceback}"
                 );
                 let reused = run(
-                    0,
-                    &query,
-                    &subject,
-                    q_off,
-                    s_off,
-                    scoring,
-                    x_drop,
-                    &mut used_reference,
-                    traceback,
+                    &query, &subject, q_off, s_off, scoring, x_drop, &mut used, traceback,
                 );
                 assert_eq!(
                     reused, reference,

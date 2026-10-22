@@ -1,8 +1,7 @@
-//! EXPERIMENT (LOSAT_X_GREEDYPRELIM, shadow LOSAT_X_GREEDYPRELIMSHADOW): the preliminary
-//! (score-only) greedy gapped alignment of megablast run on a one-byte-per-base copy of the
-//! packed ncbi2na subject, with `compressed_subject = false`, so that the uncompressed scans of
-//! `BLAST_GreedyAlign` serve the preliminary stage too. With `LOSAT_X_GREEDYFAST` those are the
-//! eight-bases-per-step rows (`x_greedy_row`); without it the ported loop runs on the bytes.
+//! No NCBI counterpart: the preliminary (score-only) greedy gapped alignment of megablast run on
+//! a one-byte-per-base copy of the packed ncbi2na subject, with `compressed_subject = false`, so
+//! that the uncompressed scans of `BLAST_GreedyAlign` serve the preliminary stage too. Those are
+//! the eight-bases-per-step rows (`x_greedy_row`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4019-4025
 //! ```c
@@ -65,59 +64,16 @@
 //!    G:3769), the four scans (non-affine d = 0 G:3275 and per diagonal G:3492, affine d = 0
 //!    G:3835 and per diagonal G:3969, item 1) each followed by its fence test (item 2), and the
 //!    fast-row dispatch `rem == 4` (G:3398); the fast rows give the rows of the ported loop on
-//!    `rem == 4` (test `x_fast_greedy_rows_match_reference_on_random_alignments`,
-//!    `LOSAT_X_GREEDYSHADOW`). The traceback blocks and `reduce_gaps`, which read subject bytes,
-//!    run only with `do_traceback`, which is false here.
+//!    `rem == 4` (the test of this module compares the two forms). The traceback blocks and
+//!    `reduce_gaps`, which read subject bytes, run only with `do_traceback`, which is false here.
 //! 5. Scratch. `max_dist` starts at `max(scratch.max_dist, initial)` with `initial` from
-//!    `subject_len` (the same in both forms); a larger `max_dist` only saves a retry. The shadow
-//!    runs the compressed call on its own scratch, which does not change its result either.
+//!    `subject_len` (the same in both forms); a larger `max_dist` only saves a retry.
 
 use super::greedy::{
     greedy_gapped_alignment_internal, greedy_gapped_alignment_score_only, GreedyAlignScratch,
-    GreedyGappedCore,
 };
 use crate::core::blast_encoding::COMPRESSION_RATIO;
-use std::cell::RefCell;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
-
-#[cfg(test)]
-thread_local! {
-    /// Lets a test choose the LOSAT_X_GREEDYPRELIM mode per call.
-    static X_GREEDY_PRELIM_TEST_MODE: std::cell::Cell<Option<u8>> =
-        const { std::cell::Cell::new(None) };
-}
-
-/// No NCBI counterpart: reads LOSAT_X_GREEDYPRELIM / LOSAT_X_GREEDYPRELIMSHADOW once. The mode
-/// only chooses the form of the subject the preliminary greedy alignment reads (0 = packed as
-/// ported, 1 = the one-byte copy, 2 = the copy and the packed call compared); SHADOW wins.
-pub(crate) fn x_greedy_prelim_mode() -> u8 {
-    #[cfg(test)]
-    if let Some(mode) = X_GREEDY_PRELIM_TEST_MODE.with(|mode| mode.get()) {
-        return mode;
-    }
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_GREEDYPRELIMSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_GREEDYPRELIM") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-// No NCBI counterpart: counters of the summary lines (relaxed; they do not order anything).
-static X_CALLS: AtomicU64 = AtomicU64::new(0);
-static X_SUBJECTS_UNPACKED: AtomicU64 = AtomicU64::new(0);
-static X_BYTES_UNPACKED: AtomicU64 = AtomicU64::new(0);
-static X_SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
-
-thread_local! {
-    // No NCBI counterpart: the scratch of the shadow's packed call, apart from the caller's.
-    static X_SHADOW_SCRATCH: RefCell<GreedyAlignScratch> = RefCell::new(GreedyAlignScratch::new());
-}
 
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_util.h:52-55
 /// ```c
@@ -137,7 +93,7 @@ pub(crate) fn x_unpack_ncbi2na(packed: &[u8], len: usize) -> Vec<u8> {
     let bytes = len.div_ceil(COMPRESSION_RATIO);
     assert!(
         packed.len() >= bytes,
-        "LOSAT_X_GREEDYPRELIM: packed subject shorter than its length"
+        "packed subject shorter than its length"
     );
     let mut unpacked = Vec::with_capacity(bytes * COMPRESSION_RATIO);
     for &byte in &packed[..bytes] {
@@ -157,7 +113,7 @@ pub(crate) fn x_unpack_ncbi2na(packed: &[u8], len: usize) -> Vec<u8> {
 /// ```
 /// The one-byte copy of one subject's packed sequence, made on the first chunk that reaches the
 /// gapped stage and shared by every chunk and worker of that subject. Off (`None` from
-/// `chunk`) unless LOSAT_X_GREEDYPRELIM is set and the search uses the greedy aligner.
+/// `chunk`) unless this is the preliminary stage of a search that uses the greedy aligner.
 /// No NCBI counterpart for the copy itself: NCBI reads the packed bytes.
 pub(crate) struct XPrelimSubject<'a> {
     packed_full: &'a [u8],
@@ -172,41 +128,23 @@ impl<'a> XPrelimSubject<'a> {
         Self {
             packed_full,
             len_full,
-            enabled: greedy_prelim && x_greedy_prelim_mode() != 0,
+            enabled: greedy_prelim,
             unpacked: OnceLock::new(),
         }
     }
 
     /// The copy from base `chunk_offset` (a multiple of 4) to the end of the subject: the bases
-    /// of `packed_full[chunk_offset / 4..]`. `None` when the switch is off.
+    /// of `packed_full[chunk_offset / 4..]`. `None` when the copy is off.
     pub(crate) fn chunk(&self, chunk_offset: usize) -> Option<&[u8]> {
         if !self.enabled {
             return None;
         }
         debug_assert_eq!(chunk_offset % COMPRESSION_RATIO, 0);
-        let unpacked = self.unpacked.get_or_init(|| {
-            X_SUBJECTS_UNPACKED.fetch_add(1, Ordering::Relaxed);
-            X_BYTES_UNPACKED.fetch_add(self.len_full as u64, Ordering::Relaxed);
-            x_unpack_ncbi2na(self.packed_full, self.len_full)
-        });
+        let unpacked = self
+            .unpacked
+            .get_or_init(|| x_unpack_ncbi2na(self.packed_full, self.len_full));
         unpacked.get(chunk_offset..)
     }
-}
-
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2539-2569
-/// The values `s_BlastGreedyGapAlignStructFill` takes from a score-only call (no edit script).
-type XScoreOnlyCore = (i32, i32, i32, i32, i32, i32, i32);
-
-fn x_core_values(core: &GreedyGappedCore) -> XScoreOnlyCore {
-    (
-        core.q_start,
-        core.q_end,
-        core.s_start,
-        core.s_end,
-        core.q_seed_start,
-        core.s_seed_start,
-        core.score,
-    )
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2762-2794
@@ -222,14 +160,10 @@ fn x_core_values(core: &GreedyGappedCore) -> XScoreOnlyCore {
 ///       rem = 4; /* Special value to indicate that sequence is already
 ///                   uncompressed */
 /// ```
-/// Dispatch point of LOSAT_X_GREEDYPRELIM for the preliminary greedy alignment (the call at
-/// blast_gapalign.c:4019-4025). With `x_subject = None` this is
-/// `greedy_gapped_alignment_score_only` on the packed subject, as ported. With the one-byte copy
-/// of the chunk (`XPrelimSubject::chunk`) the same alignment runs with
-/// `compressed_subject = false` on the copy (module doc: same result); with
-/// LOSAT_X_GREEDYPRELIMSHADOW the packed call also runs, on a separate scratch, and the results
-/// must be equal.
-/// EXPERIMENT (LOSAT_X_GREEDYPRELIM / LOSAT_X_GREEDYPRELIMSHADOW)
+/// The preliminary greedy alignment (the call at blast_gapalign.c:4019-4025). With the one-byte
+/// copy of the chunk (`XPrelimSubject::chunk`) the alignment runs with `compressed_subject =
+/// false` on the copy (module doc: same result). With `x_subject = None` (the search has no copy)
+/// this is `greedy_gapped_alignment_score_only` on the packed subject, as ported.
 #[allow(clippy::too_many_arguments)]
 pub fn x_greedy_gapped_alignment_score_only(
     x_subject: Option<&[u8]>,
@@ -260,7 +194,6 @@ pub fn x_greedy_gapped_alignment_score_only(
             scratch,
         );
     };
-    X_CALLS.fetch_add(1, Ordering::Relaxed);
     let core = greedy_gapped_alignment_internal(
         query,
         subject_unpacked,
@@ -276,33 +209,6 @@ pub fn x_greedy_gapped_alignment_score_only(
         scratch,
         false,
     );
-    if x_greedy_prelim_mode() == 2 {
-        let reference = X_SHADOW_SCRATCH.with(|shadow| {
-            greedy_gapped_alignment_internal(
-                query,
-                subject_packed,
-                subject_len,
-                q_off,
-                s_off,
-                reward,
-                penalty,
-                gap_open,
-                gap_extend,
-                x_drop,
-                true,
-                &mut shadow.borrow_mut(),
-                false,
-            )
-        });
-        let unpacked_values = core.as_ref().map(x_core_values);
-        let packed_values = reference.as_ref().map(x_core_values);
-        assert!(
-            unpacked_values == packed_values,
-            "LOSAT_X_GREEDYPRELIMSHADOW: score-only result differs at q_off={q_off} s_off={s_off} \
-             subject_len={subject_len}: unpacked {unpacked_values:?} packed {packed_values:?}"
-        );
-        X_SHADOW_COMPARED.fetch_add(1, Ordering::Relaxed);
-    }
     // The tail of `greedy_gapped_alignment_score_only`, unchanged.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2539-2569
     // (s_BlastGreedyGapAlignStructFill: query_start/stop, subject_start/stop, score)
@@ -321,33 +227,8 @@ pub fn x_greedy_gapped_alignment_score_only(
     ))
 }
 
-/// The summary lines at the end of a blastn search: the shadow count and, with
-/// LOSAT_X_STATS, the counters.
-// No NCBI counterpart: prints counters; it does not change any value NCBI computes.
-pub(crate) fn summary() {
-    if x_greedy_prelim_mode() == 0 {
-        return;
-    }
-    let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
-    let compared = load(&X_SHADOW_COMPARED);
-    if compared > 0 {
-        eprintln!(
-            "[X_SHADOW] GREEDYPRELIM calls_compared={compared} (score-only results identical)"
-        );
-    }
-    if std::env::var_os("LOSAT_X_STATS").is_some() {
-        eprintln!(
-            "[X_STATS] GREEDYPRELIM calls={} subjects_unpacked={} bytes_unpacked={}",
-            load(&X_CALLS),
-            load(&X_SUBJECTS_UNPACKED),
-            load(&X_BYTES_UNPACKED)
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::greedy::X_GREEDY_TEST_MODE;
     use super::*;
     use crate::core::blast_encoding::{
         encode_subject_ncbi2na_packed, iupacna_to_ncbi4na, resolve_ncbi4na_to_ncbi2na,
@@ -365,16 +246,12 @@ mod tests {
     ///                 NCBI2NA_UNPACK_BASE(seq2[(seq2_index + rem) / 4],
     ///                                      3 - (seq2_index + rem) % 4)) {
     /// ```
-    /// EXPERIMENT (LOSAT_X_GREEDYPRELIM / LOSAT_X_GREEDYPRELIMSHADOW).
-    ///
     /// On random pairs of related sequences (subjects in IUPAC text with ambiguous letters,
     /// packed as the engine packs them; queries with blastna ambiguity codes in some cases),
     /// seeds at every phase `s_off % 4` and chunks that start at a multiple of 4 after the
     /// subject start and whose slices run past the chunk length: the score-only result on the
     /// one-byte copy (`compressed_subject = false`) equals the result of the packed call as
-    /// ported, with the reference rows, the fast rows and both compared (LOSAT_X_GREEDYFAST
-    /// modes 0, 1, 2), on new and on used scratch, and with the LOSAT_X_GREEDYPRELIMSHADOW
-    /// comparison.
+    /// ported, on new and on used scratch.
     #[test]
     fn x_greedy_prelim_unpacked_matches_packed_on_random_alignments() {
         struct Rng(u64);
@@ -397,13 +274,11 @@ mod tests {
             .and_then(|v| v.parse().ok())
             .unwrap_or(600);
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
-        let mut used: Vec<GreedyAlignScratch> = (0..3).map(|_| GreedyAlignScratch::new()).collect();
-        let mut used_shadow_caller = GreedyAlignScratch::new();
+        let mut used = GreedyAlignScratch::new();
         let mut calls = 0usize;
         let mut aligned = 0usize;
         let mut phases = [0usize; 4];
         let mut long_runs = 0usize;
-        X_GREEDY_PRELIM_TEST_MODE.with(|m| m.set(Some(1)));
         for case in 0..cases {
             let core_len = 20 + rng.below(if case % 10 == 0 { 6000 } else { 600 }) as usize;
             let substitution = [0u64, 0, 2, 5, 20, 60, 150][rng.below(7) as usize]; // per mille
@@ -501,13 +376,8 @@ mod tests {
                     continue;
                 }
                 let (q_off, s_off) = candidates[rng.below(candidates.len() as u64) as usize];
-                let run = |subject: Option<&[u8]>,
-                           greedy_mode: u8,
-                           prelim_mode: u8,
-                           scratch: &mut GreedyAlignScratch| {
-                    X_GREEDY_TEST_MODE.with(|m| m.set(Some(greedy_mode)));
-                    X_GREEDY_PRELIM_TEST_MODE.with(|m| m.set(Some(prelim_mode)));
-                    let result = x_greedy_gapped_alignment_score_only(
+                let run = |subject: Option<&[u8]>, scratch: &mut GreedyAlignScratch| {
+                    x_greedy_gapped_alignment_score_only(
                         subject,
                         &query,
                         packed_chunk,
@@ -520,38 +390,17 @@ mod tests {
                         scoring.3,
                         x_drop,
                         scratch,
-                    );
-                    X_GREEDY_TEST_MODE.with(|m| m.set(None));
-                    X_GREEDY_PRELIM_TEST_MODE.with(|m| m.set(Some(1)));
-                    result
+                    )
                 };
                 // the packed call as ported
-                let reference = run(None, 0, 0, &mut GreedyAlignScratch::new());
-                for greedy_mode in 0..3u8 {
-                    let fresh = run(
-                        Some(unpacked_chunk),
-                        greedy_mode,
-                        1,
-                        &mut GreedyAlignScratch::new(),
-                    );
-                    assert_eq!(
-                        fresh, reference,
-                        "case {case}: phase {phase}, greedy mode {greedy_mode}, new scratch"
-                    );
-                    let reused = run(
-                        Some(unpacked_chunk),
-                        greedy_mode,
-                        1,
-                        &mut used[greedy_mode as usize],
-                    );
-                    assert_eq!(
-                        reused, reference,
-                        "case {case}: phase {phase}, greedy mode {greedy_mode}, used scratch"
-                    );
-                }
-                // the shadow compares with the packed call itself (and panics on a difference)
-                let shadow = run(Some(unpacked_chunk), 1, 2, &mut used_shadow_caller);
-                assert_eq!(shadow, reference, "case {case}: phase {phase}, shadow");
+                let reference = run(None, &mut GreedyAlignScratch::new());
+                let fresh = run(Some(unpacked_chunk), &mut GreedyAlignScratch::new());
+                assert_eq!(fresh, reference, "case {case}: phase {phase}, new scratch");
+                let reused = run(Some(unpacked_chunk), &mut used);
+                assert_eq!(
+                    reused, reference,
+                    "case {case}: phase {phase}, used scratch"
+                );
                 calls += 1;
                 phases[phase] += 1;
                 if let Some(result) = reference {
@@ -562,7 +411,6 @@ mod tests {
                 }
             }
         }
-        X_GREEDY_PRELIM_TEST_MODE.with(|m| m.set(None));
         // the generator must produce real alignments at every phase
         assert!(
             aligned * 2 > calls,
@@ -573,9 +421,5 @@ mod tests {
             "seeds per phase {phases:?} in {cases} cases"
         );
         assert!(long_runs * 4 > calls, "only {long_runs} long alignments");
-        assert!(
-            X_SHADOW_COMPARED.load(Ordering::Relaxed) >= calls as u64,
-            "shadow comparisons not counted"
-        );
     }
 }

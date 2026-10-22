@@ -112,7 +112,7 @@ struct IntervalNode {
     /// ```
     /// NCBI unlinks such a leaf from the tree. This flag records that fact for the grid index,
     /// which still lists the leaf; a flagged leaf is never returned as a container.
-    /// EXPERIMENT (LOSAT_X_ITREEFAST): this leaf was unlinked from the tree.
+    /// No NCBI counterpart: this leaf was unlinked from the tree.
     x_dead: bool,
 }
 
@@ -161,9 +161,9 @@ impl IntervalNode {
 // in the tree satisfy `s_HSPIsContained` for the input) and what
 // `s_IntervalTreeHasHSPEndpoint` answers (is there an HSP with the same end point), without
 // the walk. The tree stays the master copy and the predicates are the unchanged ones. The
-// argument above explains why the answers are the same; LOSAT_X_ITREESHADOW checks it.
+// argument above explains why the answers are the same.
 // ---------------------------------------------------------------------------
-// EXPERIMENT (LOSAT_X_ITREEFAST / LOSAT_X_ITREESHADOW): two side indexes that
+// No NCBI counterpart: two side indexes that
 // answer, without walking the tree, the two questions the tree is asked most
 // often and usually answers with "no".
 //
@@ -195,14 +195,8 @@ impl IntervalNode {
 // HSP that was unlinked. So both say whether some linked HSP satisfies
 // `s_HSPIsContained`. Which containing HSP is returned can differ when there
 // are several; callers only test for existence, except trace output, and the
-// index is off whenever tracing is on.
+// index is off whenever tracing is on (the walk answers then).
 // ---------------------------------------------------------------------------
-
-#[cfg(test)]
-thread_local! {
-    /// Lets a test choose the mode of the trees it creates.
-    static X_ITREE_TEST_MODE: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) };
-}
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:931-935,952
 /// ```c
@@ -213,29 +207,13 @@ thread_local! {
 /// ...
 ///     while (node->hsp == NULL) {
 /// ```
-/// Reads the LOSAT_X_ITREEFAST / LOSAT_X_ITREESHADOW switches once. The mode chooses
-/// whether the walk above (0), the side indexes (1), or both (2) answer a containment
-/// query. It is 0 whenever tracing is on, because the index may return a different
-/// container than the walk when there are several.
-/// 0 = tree only, 1 = side indexes, 2 = both and compare.
-fn x_itree_mode() -> u8 {
-    #[cfg(test)]
-    if let Some(mode) = X_ITREE_TEST_MODE.with(|mode| mode.get()) {
-        return mode;
-    }
+/// Whether the side indexes answer a containment query in place of the walk above. They are
+/// off whenever tracing is on, because the index may return a different container than the
+/// walk when there are several; the walk then answers.
+fn x_itree_on() -> bool {
     use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if super::tracing::enabled() {
-            0
-        } else if std::env::var_os("LOSAT_X_ITREESHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_ITREEFAST") {
-            1
-        } else {
-            0
-        }
-    })
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| !super::tracing::enabled())
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:822-831
@@ -362,7 +340,8 @@ const X_SALT_END: u64 = 0x9E37_79B9_7F4A_7C15;
 // (`q_min`, `s_min`) and emptied whenever the tree is emptied. It is derived from the
 // HSPs in the tree and holds nothing else.
 struct XTreeIndex {
-    mode: u8,
+    /// Whether the index is used at all (off while tracing is on).
+    on: bool,
     /// False once the tree holds an HSP this index does not describe.
     usable: bool,
     shift: u32,
@@ -378,8 +357,6 @@ struct XTreeIndex {
     entries: Vec<XCellEntry>,
     overflow: Vec<u32>,
     ends: XPointSet,
-    /// Leaves unlinked from the tree so far (for the shadow check).
-    removed: usize,
 }
 
 impl XTreeIndex {
@@ -395,10 +372,10 @@ impl XTreeIndex {
     /// ```
     /// Makes an empty index for the ranges the tree is made for.
     fn new(q_min: i32, q_max: i32, s_min: i32, s_max: i32) -> Self {
-        let mode = x_itree_mode();
+        let on = x_itree_on();
         let mut index = Self {
-            mode,
-            usable: mode != 0,
+            on,
+            usable: on,
             shift: 0,
             q_min,
             s_min,
@@ -409,7 +386,6 @@ impl XTreeIndex {
             entries: Vec::new(),
             overflow: Vec::new(),
             ends: XPointSet::new(),
-            removed: 0,
         };
         index.set_bounds(q_min, q_max, s_min, s_max);
         index
@@ -460,8 +436,7 @@ impl XTreeIndex {
         self.entries.clear();
         self.overflow.clear();
         self.ends.clear();
-        self.removed = 0;
-        self.usable = self.mode != 0;
+        self.usable = self.on;
     }
 
     /// No NCBI counterpart: maps an offset to a grid column; it does not change any value
@@ -553,7 +528,6 @@ pub struct BlastIntervalTree {
     ///     tree->s_max = s_end;
     /// ```
     /// The tree owns its side indexes; they are built from, and follow, the node array above.
-    /// EXPERIMENT (LOSAT_X_ITREEFAST)
     x: XTreeIndex,
 }
 
@@ -872,7 +846,6 @@ impl BlastIntervalTree {
                         // The list unlink is the line above; the flag and the count only tell the grid index
                         // that the leaf is gone.
                         self.nodes[tmp_index as usize].x_dead = true;
-                        self.x.removed += 1;
                     }
                     None => {}
                 }
@@ -934,7 +907,6 @@ impl BlastIntervalTree {
                         // The leaf unlink is the code above; the flag and the count only tell the grid index
                         // that the leaf is gone.
                         self.nodes[next_child_idx as usize].x_dead = true;
-                        self.x.removed += 1;
                         return false;
                     }
                     None => {}
@@ -1040,7 +1012,6 @@ impl BlastIntervalTree {
                         // The leaf unlink is the code above; the flag and the count only tell the grid index
                         // that the leaf is gone.
                         self.nodes[next_child_idx as usize].x_dead = true;
-                        self.x.removed += 1;
                         return false;
                     }
                     None => {}
@@ -1066,7 +1037,7 @@ impl BlastIntervalTree {
     /// `s_IntervalTreeHasHSPEndpoint` only acts on tree HSPs with the same start (or end)
     /// point as the input. If the point set has no such point the walk finds nothing, unlinks
     /// nothing and returns FALSE, so it is skipped. Otherwise the unchanged walk runs.
-    /// EXPERIMENT (LOSAT_X_ITREEFAST): `interval_tree_has_hsp_endpoint`,
+    /// No NCBI counterpart: `interval_tree_has_hsp_endpoint`,
     /// skipped when no HSP ever added has the input's start (or end) point.
     fn x_has_hsp_endpoint(
         &mut self,
@@ -1094,15 +1065,6 @@ impl BlastIntervalTree {
         if possible {
             return self.interval_tree_has_hsp_endpoint(in_hsp, in_q_start, which_end);
         }
-        if self.x.mode == 2 {
-            // LOSAT_X_ITREESHADOW: the walk must find nothing and unlink nothing.
-            let removed = self.x.removed;
-            let found = self.interval_tree_has_hsp_endpoint(in_hsp, in_q_start, which_end);
-            assert!(
-                !found && self.x.removed == removed,
-                "LOSAT_X_ITREESHADOW: the tree found a common endpoint the point set does not have"
-            );
-        }
         false
     }
 
@@ -1122,7 +1084,7 @@ impl BlastIntervalTree {
     /// predicate (`is_hsp_contained`). Any tree HSP that contains the input contains its
     /// start point, so it is listed in that cell. Which container is returned can differ from
     /// the walk; whether there is one does not.
-    /// EXPERIMENT (LOSAT_X_ITREEFAST): a linked tree HSP that contains `hsp`,
+    /// No NCBI counterpart: a linked tree HSP that contains `hsp`,
     /// from the grid cell of the start point of `hsp`.
     fn x_find_container(
         &self,
@@ -1205,8 +1167,8 @@ impl BlastIntervalTree {
         // ```
         // NCBI looks for common end points only in this mode. The side indexes are built for it
         // and are dropped (`usable = false`) for any other mode.
-        // EXPERIMENT (LOSAT_X_ITREEFAST): the side indexes describe trees
-        // built with eQueryAndSubject only.
+        // No NCBI counterpart: the side indexes describe trees built with eQueryAndSubject
+        // only.
         if index_method != IndexMethod::QueryAndSubject {
             self.x.usable = false;
         }
@@ -1226,8 +1188,8 @@ impl BlastIntervalTree {
             //                                          eIntervalTreeRight)) {
             //             return retval;
             // ```
-            // Dispatch point of LOSAT_X_ITREEFAST (both calls below). `x_has_hsp_endpoint` runs the
-            // ported `interval_tree_has_hsp_endpoint` unless the point set shows it cannot find
+            // `x_has_hsp_endpoint` (both calls below) runs the ported
+            // `interval_tree_has_hsp_endpoint` unless the point set shows it cannot find
             // anything.
             if self.x_has_hsp_endpoint(&hsp, query_start, IntervalDirection::Left, x_on) {
                 return; // Better HSP with same endpoint already exists
@@ -1605,23 +1567,10 @@ impl BlastIntervalTree {
         //                             node->hsp, node->leftptr,
         //                             min_diag_separation);
         // ```
-        // Dispatch point of LOSAT_X_ITREEFAST / LOSAT_X_ITREESHADOW. `containing_hsp_tree` below
-        // ports this function. The grid answers the same yes/no question (mode 1). In mode 2
-        // the walk also runs, `assert!` compares the two answers, and the walk's result is used.
-        // EXPERIMENT (LOSAT_X_ITREEFAST / LOSAT_X_ITREESHADOW)
+        // `containing_hsp_tree` below ports this function. The grid answers the same yes/no
+        // question; the walk answers where the index is off (tracing on) or was dropped.
         if self.x.usable {
-            let found = self.x_find_container(hsp, query_context_offset, min_diag_separation);
-            if self.x.mode == 1 {
-                return found;
-            }
-            let tree = self.containing_hsp_tree(hsp, query_context_offset, min_diag_separation);
-            assert!(
-                found.is_some() == tree.is_some(),
-                "LOSAT_X_ITREESHADOW: grid says contained={}, tree says contained={}",
-                found.is_some(),
-                tree.is_some()
-            );
-            return tree;
+            return self.x_find_container(hsp, query_context_offset, min_diag_separation);
         }
         self.containing_hsp_tree(hsp, query_context_offset, min_diag_separation)
     }
@@ -1640,8 +1589,7 @@ impl BlastIntervalTree {
     ///         else if (region_start > middle)
     ///             tmp_index = node->rightptr;
     /// ```
-    /// The previous body of `containing_hsp`, moved here unchanged: the port of the
-    /// walk, which runs when no switch is set.
+    /// The port of the walk, which runs where the side indexes are off or were dropped.
     /// The tree walk of `containing_hsp`.
     fn containing_hsp_tree(
         &self,
@@ -2017,14 +1965,10 @@ mod tests {
     /// ...
     ///     return s_HSPIsContained(hsp, query_start,
     /// ```
-    /// The test feeds the same random HSPs to trees that use the walk, the side indexes, and
-    /// both. It compares every containment answer and the final trees.
-    /// EXPERIMENT (LOSAT_X_ITREEFAST): three trees are fed the same random
-    /// HSPs, one walking the tree only, one using the side indexes, and one
-    /// doing both and comparing inside every call. Every containment answer
-    /// must agree, and the trees must end up with the same nodes and the same
-    /// number of unlinked HSPs. The HSPs are generated so that containment,
-    /// shared start points, shared end points and replacements all occur.
+    /// The test feeds the same random HSPs to a tree that uses the walk and a tree that uses the
+    /// side indexes. Every containment answer must agree, and the trees must end up with the
+    /// same nodes and the same number of unlinked HSPs. The HSPs are generated so that
+    /// containment, shared start points, shared end points and replacements all occur.
     #[test]
     fn x_side_indexes_agree_with_tree_walk_on_random_hsps() {
         struct Rng(u64);
@@ -2051,15 +1995,10 @@ mod tests {
             let q_len = [300i32, 5_000, 80_000, 3_000_000][trial % 4];
             let s_len = [400i32, 9_000, 120_000, 2_000_000][(trial / 4) % 4];
             let separation = [0i32, 6, 50][trial % 3];
-            let new_tree = |mode: u8| {
-                X_ITREE_TEST_MODE.with(|m| m.set(Some(mode)));
-                let tree = BlastIntervalTree::new(0, 2 * q_len + 1, 0, s_len + 1);
-                X_ITREE_TEST_MODE.with(|m| m.set(None));
-                tree
-            };
-            let mut walk = new_tree(0);
-            let mut indexed = new_tree(1);
-            let mut both = new_tree(2);
+            let mut walk = BlastIntervalTree::new(0, 2 * q_len + 1, 0, s_len + 1);
+            // The walk answers while the index is dropped (as when tracing is on).
+            walk.x.usable = false;
+            let mut indexed = BlastIntervalTree::new(0, 2 * q_len + 1, 0, s_len + 1);
             let mut added: Vec<(TreeHsp, i32)> = Vec::new();
             let count = 200 + rng.below(1500) as usize;
             for _ in 0..count {
@@ -2129,38 +2068,25 @@ mod tests {
 
                 let a = walk.contains_hsp(&hsp, context_offset, separation);
                 let b = indexed.contains_hsp(&hsp, context_offset, separation);
-                let c = both.contains_hsp(&hsp, context_offset, separation);
-                assert!(
-                    a == b && a == c,
-                    "trial {trial}: walk={a} indexed={b} both={c} for {hsp:?}"
-                );
+                assert!(a == b, "trial {trial}: walk={a} indexed={b} for {hsp:?}");
                 queries += 1;
                 contained += a as usize;
                 if !a || rng.below(4) == 0 {
                     walk.add_hsp(hsp, context_offset, IndexMethod::QueryAndSubject);
                     indexed.add_hsp(hsp, context_offset, IndexMethod::QueryAndSubject);
-                    both.add_hsp(hsp, context_offset, IndexMethod::QueryAndSubject);
                     added.push((hsp, context_offset));
                 }
             }
             assert_eq!(walk.node_count(), indexed.node_count(), "trial {trial}");
-            assert_eq!(walk.node_count(), both.node_count(), "trial {trial}");
-            assert_eq!(walk.x.removed, indexed.x.removed, "trial {trial}");
-            assert_eq!(walk.x.removed, both.x.removed, "trial {trial}");
-            assert!(
-                indexed.x.usable && both.x.usable,
-                "trial {trial}: index abandoned"
-            );
-            unlinked += walk.x.removed;
+            let dead = |tree: &BlastIntervalTree| tree.nodes.iter().filter(|n| n.x_dead).count();
+            assert_eq!(dead(&walk), dead(&indexed), "trial {trial}");
+            assert!(indexed.x.usable, "trial {trial}: index abandoned");
+            unlinked += dead(&walk);
             // every HSP ever offered, asked again of the final trees
             for &(hsp, context_offset) in &added {
                 let a = walk.contains_hsp(&hsp, context_offset, separation);
                 let b = indexed.contains_hsp(&hsp, context_offset, separation);
-                let c = both.contains_hsp(&hsp, context_offset, separation);
-                assert!(
-                    a == b && a == c,
-                    "trial {trial}: final walk={a} indexed={b} both={c}"
-                );
+                assert!(a == b, "trial {trial}: final walk={a} indexed={b}");
             }
         }
         // the generator must exercise both answers and the unlinking

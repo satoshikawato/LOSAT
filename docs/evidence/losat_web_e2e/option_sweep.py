@@ -26,6 +26,7 @@ costs (every pair of NCBI's table for the matrix, read from blast_stat.c, and pa
 outside it), word size x threshold, window, composition-based statistics (with
 `-ungapped` and `-use_sw_tback`), SEG, e-values, integer spellings, tasks, genetic codes,
 TBLASTN's intron length, X-drops, sum statistics and masking, TBLASTX's culling limit,
+`-num_descriptions` / `-num_alignments` (`counts`),
 and the spellings of `-outfmt` (which carry their own format). Exits 1 when any case is
 DIFF.
 
@@ -126,6 +127,16 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
                     ("1", "4", "5", "0x10", "010", "+5", "-1", "0", "2147483647", "1e1", "5.0", "0x")]
     sets["ints"] += [["-num_threads", value] for value in ("0", "0x1", "+1", "-1")]
     sets["ints"] += [["-max_hsps", value] for value in ("1", "2", "0", "0x2", "-1", "+1")]
+    # -num_descriptions and -num_alignments set the counts of outfmt 0 and the hit list size
+    # (blast_args.cpp:2894-2973); -max_target_seqs excludes both (blast_args.cpp:2732-2738).
+    sets["counts"] = [["-num_descriptions", value] for value in
+                      ("0", "1", "3", "5", "250", "501", "0x10", "+5", "-1", "1e1", "abc", "2147483648")]
+    sets["counts"] += [["-num_alignments", value] for value in
+                       ("0", "1", "2", "3", "5", "250", "501", "0x10", "+5", "-1", "1e1", "abc", "2147483648")]
+    sets["counts"] += [["-num_descriptions", nd, "-num_alignments", na] for nd, na in
+                       (("2", "4"), ("4", "2"), ("0", "3"), ("3", "0"), ("0", "0"), ("1", "1"), ("6", "6"))]
+    sets["counts"] += [["-max_target_seqs", "5", "-num_descriptions", "5"],
+                       ["-max_target_seqs", "5", "-num_alignments", "5"]]
     # -max_hsps and -qcov_hsp_perc filter the final HSP lists (blast_traceback.c:837-867).
     sets["filter"] = [["-qcov_hsp_perc", value] for value in
                       ("0", "10", "50", "50.5", "99", "100", "1e1", "+50", "101", "-1", "nan", "inf", "0x10", "")]

@@ -7,6 +7,7 @@ use crate::algorithm::tblastx::database::DatabaseTitles;
 use crate::algorithm::tblastx::subjects::{
     SearchSpaceOverflow, SubjectSetNumbers, Subjects, SubjectsUnreadable,
 };
+use crate::blastinput::report_counts::ReportCounts;
 use std::sync::Arc;
 
 use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
@@ -941,8 +942,9 @@ fn check_subjects_not_empty(subjects: &[FastaRecord]) -> Result<()> {
 /// TBLASTX has no cutoff score option, so an `-evalue` of 0 (or one that reads as 0) fails.
 fn check_ncbi_options(
     args: &TblastxArgs,
+    outfmts: &[i32],
     diagnostics: &mut dyn std::io::Write,
-) -> Result<Option<SequenceRange>> {
+) -> Result<(Option<SequenceRange>, ReportCounts)> {
     use crate::blastinput::app::{
         formatting_handler_check, options_error, parse_formatting_string, Program,
     };
@@ -963,14 +965,16 @@ fn check_ncbi_options(
         "TBLASTX",
     )?;
     formatting_handler_check(&parse_formatting_string(&args.outfmt)?, Program::Tblastx)?;
-    if args
-        .max_target_seqs
-        .is_some_and(|max_target_seqs| max_target_seqs < 5)
-    {
-        diagnostics.write_all(&crate::report::query_warnings::few_matches_warning(
-            "tblastx",
-        ))?;
-    }
+    // The hit list size and the counts of the pairwise report
+    // (`blastinput::report_counts`), with the handler's warnings.
+    let (counts, warnings) = crate::blastinput::report_counts::run_report_counts(
+        "tblastx",
+        outfmts,
+        args.max_target_seqs,
+        args.num_descriptions,
+        args.num_alignments,
+    )?;
+    diagnostics.write_all(&warnings)?;
     // (`threshold <= 0` is false for NaN, as in C.)
     if args.threshold <= 0.0 {
         return Err(options_error("Non-zero threshold required"));
@@ -980,12 +984,19 @@ fn check_ncbi_options(
             "Word-size must be less than 6 for protein comparison",
         ));
     }
+    // The hit saving options' check of the hit list size comes before the e-value's.
+    counts.validate()?;
     if args.evalue <= 0.0 {
         return Err(options_error(
             "expect value or cutoff score must be greater than zero",
         ));
     }
-    Ok(query_range)
+    Ok((query_range, counts))
+}
+
+/// The number of `-outfmt` of the command line (`check_ncbi_options`).
+fn cli_outfmts(args: &TblastxArgs) -> Result<[i32; 1]> {
+    Ok([crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number])
 }
 
 /// The options that LOSAT's TBLASTX rejects, where NCBI would start the search.
@@ -1026,7 +1037,7 @@ pub fn check_options(args: &TblastxArgs) -> Result<()> {
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
     }
-    check_ncbi_options(args, &mut std::io::sink())?;
+    check_ncbi_options(args, &cli_outfmts(args)?, &mut std::io::sink())?;
     check_losat_limits(args)?;
     // The host validates the argv it runs, with its `-num_threads` (docs/web/abi_v2.md).
     crate::utils::threading::validate_threads(args.num_threads)
@@ -1035,14 +1046,16 @@ pub fn check_options(args: &TblastxArgs) -> Result<()> {
 /// The part of `run` after the output is opened: the options, `Query is Empty!`, the
 /// reading of the queries and the search.
 fn search_cli(
-    args: TblastxArgs,
+    mut args: TblastxArgs,
     query_file: std::fs::File,
     subjects: &[FastaRecord],
     subject_placements: &Placements,
     outputs: &mut ReportOutputs<'_>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
-    let query_range = check_ncbi_options(&args, outputs.diagnostics)?;
+    let (query_range, counts) =
+        check_ncbi_options(&args, &cli_outfmts(&args)?, outputs.diagnostics)?;
+    args.report_counts = counts;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:113-119
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -1196,7 +1209,7 @@ pub fn run_local(
 /// `run_local`, with the checks that ABI v1 makes of its `bio` records (`v1`,
 /// `web_api::v1_tblastx::run_web_pair`).
 pub(crate) fn run_local_with(
-    args: TblastxArgs,
+    mut args: TblastxArgs,
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
@@ -1229,7 +1242,12 @@ pub(crate) fn run_local_with(
     }
     let ranged_subjects = cut_subjects(subject_records, subject_range.as_ref())?;
     check_subjects_not_empty(subject_records)?;
-    let query_range = check_ncbi_options(&args, outputs.diagnostics)?;
+    let mut outfmts = Vec::with_capacity(outputs.formats.len());
+    for format in &outputs.formats {
+        outfmts.push(crate::blastinput::app::parse_formatting_string(format.outfmt)?.number);
+    }
+    let (query_range, counts) = check_ncbi_options(&args, &outfmts, outputs.diagnostics)?;
+    args.report_counts = counts;
     let whole_subjects = Placements::default();
     let (searched_subjects, subject_placements) = match &ranged_subjects {
         Some((cut, placements)) => (cut.as_slice(), placements),
@@ -1559,7 +1577,7 @@ fn report_order(
     //     ...
     //     opt.SetHitlistSize(hitlist_size);
     // ```
-    // The hit list size is the -max_target_seqs value, or 500 when it is omitted.
+    // The hit list size is `args.report_counts.hitlist_size` (`blastinput::report_counts`).
     // NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.hpp:1320-1324
     // ```c
     // CBlastOptionsLocal::SetCullingLimit(int s)
@@ -1570,7 +1588,7 @@ fn report_order(
     // ```
     // A culling limit above 0 installs NCBI's culling writer and pipe
     // (`report::culled_hit_order`).
-    let hitlist_size = args.max_target_seqs.unwrap_or(500);
+    let hitlist_size = args.report_counts.hitlist_size;
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:313-319
     // ```c
     //     if (args.Exist(kArgQueryCovHspPerc) && args[kArgQueryCovHspPerc]) {
@@ -1919,10 +1937,10 @@ fn write_tblastx_outputs(
                         }
                     })
                     .collect();
-                let (num_descriptions, num_alignments) = match args.max_target_seqs {
-                    Some(max_target_seqs) => (max_target_seqs, max_target_seqs),
-                    None => (500, 250),
-                };
+                let (num_descriptions, num_alignments) = (
+                    args.report_counts.num_descriptions,
+                    args.report_counts.num_alignments,
+                );
                 let pairwise_report = crate::report::pairwise::TblastxPairwiseReport {
                     version: report::NCBI_TBLASTX_VERSION.to_string(),
                     database_name: database.clone(),

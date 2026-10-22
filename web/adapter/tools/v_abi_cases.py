@@ -89,6 +89,8 @@ def outfmt0_fixtures() -> list[dict]:
         argv = run_oracle.search_argv(row)
         outfmt = run_oracle.outfmt(row)
         assert argv[-2:] == ["-outfmt", outfmt], row["fixture_id"]
+        if "-num_descriptions" in argv or "-num_alignments" in argv:
+            continue  # CLI-only (LOSAT Web refuses them)
         key = (row["program"], tuple(argv[:-2]))
         search = searches.setdefault(key, {"program": row["program"], "argv": [row["program"], *argv[:-2]],
                                            "cwd": str(run_oracle.ENGINE), "cases": [], "frozen": {}})

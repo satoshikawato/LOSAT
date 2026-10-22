@@ -63,6 +63,14 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
                 "{key} is not accepted: a run writes every output format of the program"
             ));
         }
+        if matches!(
+            key,
+            "-num_descriptions" | "--num_descriptions" | "-num_alignments" | "--num_alignments"
+        ) {
+            return Err(format!(
+                "{key} is not supported by LOSAT Web: one Web search writes -outfmt 0, 6 and 7, for which NCBI derives different hit list sizes from -num_descriptions and -num_alignments"
+            ));
+        }
     }
     // The formats come from `Program::formats`, and every program accepts the CLI's
     // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
@@ -382,6 +390,31 @@ mod tests {
         for owned in ["-outfmt", "-out", "-outfmt=6"] {
             let error = parse(&["blastp", "-query", "q", "-subject", "s", owned, "6"]).unwrap_err();
             assert!(error.contains("is not accepted"), "{owned}: {error}");
+        }
+        // -num_descriptions and -num_alignments give the formats 0, 6 and 7 different hit
+        // list sizes in NCBI, and a Web search writes all three from one search.
+        for program in ["blastp", "tblastn", "blastn", "tblastx"] {
+            for option in ["-num_descriptions", "-num_alignments", "-num_alignments=3"] {
+                let words = [program, "-query", "q", "-subject", "s", option, "3"];
+                for error in [parse(&words).unwrap_err(), validate(&words).unwrap_err()] {
+                    assert!(
+                        error.contains("is not supported by LOSAT Web")
+                            && error.contains("-outfmt 0, 6 and 7"),
+                        "{program} {option}: {error}"
+                    );
+                }
+            }
+            // The same command line without them, and with -max_target_seqs, is accepted.
+            let words = [
+                program,
+                "-query",
+                "q",
+                "-subject",
+                "s",
+                "-max_target_seqs",
+                "3",
+            ];
+            assert!(parse(&words).is_ok(), "{program}");
         }
         assert!(parse(&["blastx", "-query", "q", "-subject", "s"]).is_err());
         // An unknown program and a parser error are the CLI's messages.

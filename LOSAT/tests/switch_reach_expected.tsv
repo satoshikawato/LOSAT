@@ -23,9 +23,11 @@ LOSAT_X_BPQBLOCK	blastp	conditional	required	required	outfmt 6 only (other forma
 LOSAT_X_BPQBLOCKFMT	blastp	conditional	required	required	outfmt 0 or 7 only, with BPQBLOCK rules (>50,000 letters, 2+ blocks); title checks
 LOSAT_X_BPQBLOCKSA	blastp	conditional	gap	required	outfmt 8/9/12 only, with BPQBLOCK rules (>50,000 letters, 2+ blocks); -db titles must be plain; new gap: needs outfmt 8/9/12 with a query > 50,000 letters in 2+ blocks
 LOSAT_X_BPQBLOCKXML	blastp	conditional	gap	required	outfmt 5 only, with BPQBLOCK rules; fallback if writer would refuse; new gap: needs outfmt 5 with a query > 50,000 letters in 2+ blocks
+LOSAT_X_BPREDODBSUBJ	blastp	always			redo reads each match's subject from the database; every -db run (-subject keeps no listed copy)
 LOSAT_X_BPREDOFIT	blastp	always			Composition-based redo HSP lists allocated at exact size
 LOSAT_X_BPREDOLPT	blastp	conditional	required	required	only with BPREDOPAR, more than one thread, window of 2+ jobs
 LOSAT_X_BPREDOPAR	blastp	conditional	required	required	more than one thread and at least two matches
+LOSAT_X_BPREDOWINEXPAND	blastp	always			acts wherever BPREDOPAR's windowed redo runs (its sides are BPREDOPAR's)
 LOSAT_X_BPSCANBF	blastp	always			Branch-free finding of lookup cells with hits in fused loop
 LOSAT_X_BPSEED	blastp	always			Fused two-hit seed stage: scan and diagonal test in one loop
 LOSAT_X_BPSUBJMETA	blastp	conditional	required	gap	-subject with query-block path (BPQBLOCK: >50,000 query letters, several blocks, supported outfmt); not -db; ref gap: needs blastp -db with a query > 50,000 letters, outfmt 6, 2+ blocks
@@ -50,6 +52,7 @@ LOSAT_X_COMPFAST	blastp,blastx,tblastn	always			Composition adjustment (Newton) 
 LOSAT_X_CTXFAST	blastn	always			Query-offset-to-context by binary search, no per-base table
 LOSAT_X_CTXO1	blastn	always			Constant-time context of a hit's query offset
 LOSAT_X_DBIDXREAD	blastn,blastp,blastx,tblastn,tblastx	conditional	required	required	-db searches only (not -subject)
+LOSAT_X_DCCSR	blastn	conditional	required	gap	dc-megablast one-template table as CSR when positions x 4 >= cells; ref gap: needs two templates (-template_type coding_and_optimal) or a small query
 LOSAT_X_DEKKER	blastn,blastp,blastx,tblastn,tblastx	platform			wasm32 only
 LOSAT_X_DIAGLV	blastn	conditional	required	required	only the diagonal hash (query block >8000 letters, about >4000 bases); not diagonal array, not scan_range
 LOSAT_X_DISCLUTPAR	blastn	conditional	required	required	-task dc-megablast (or megablast with template options) and a pool of 2+ threads
@@ -109,7 +112,9 @@ LOSAT_X_SEGTRIMMEMO	blastx,tblastn	always			SEG trim of candidate segment memois
 LOSAT_X_TBNBATCH	tblastn	conditional	gap	required	needs TBNSSIDE (4+ query batches) and at least one batch per thread; rule via TBNBATCHRULE; new gap: needs 4+ query batches of 20,000 residues and 4+ batches per thread
 LOSAT_X_TBNBATCHRULE	tblastn	conditional	gap	required	several query batches; full waves of threads side by side; subjects <=24 Mb or <2 per thread; new gap: needs the TBNBATCH input with batches >= threads
 LOSAT_X_TBNEVENTS	tblastn	conditional	gap	gap	acts only in the reference (non-unit) tblastn loop, i.e. when TBNPAR is off; by default the unit path runs, so effectively inactive; new gap: acts only with TBNPAR off; removed by chore/prune-dead-switches; ref gap: acts only with TBNPAR off; removed by chore/prune-dead-switches
+LOSAT_X_TBNFRAMEREUSE	tblastn	always			a dropped plan's frames are reused by the next plan of its thread (rides on TBNKEEPFEW's drops)
 LOSAT_X_TBNHITBF	tblastn	always			Branch-free too-far/overlap outcomes in two-hit loop
+LOSAT_X_TBNKEEPFEW	tblastn	conditional	required	required	4+ query batches with TBNSSIDE searched one after another: plans dropped unless they fit threads x longest plan
 LOSAT_X_TBNLINKWIN	tblastn	always			Uneven-gap linking tests only admissible candidates of a head set
 LOSAT_X_TBNOIDCHUNK	tblastn	conditional	required	required	2+ threads and several subjects
 LOSAT_X_TBNOIDNEXT	tblastn	conditional	required	required	2+ threads, several subjects, where TBNOIDCHUNK makes chunks

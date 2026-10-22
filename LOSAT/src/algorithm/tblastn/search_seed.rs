@@ -614,6 +614,24 @@ pub(super) struct XSubjectPlan {
     pub units: Vec<(usize, TranslatedChunk, Vec<(i32, i32)>)>,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:627-631
+// ```c
+//     if (program_number != eBlastTypeRpsTblastn) {
+//         if (translation_buffer) {
+//             sfree(translation_buffer);
+//         }
+//     }
+// ```
+// NCBI frees a subject's translation after the subject; a dropped plan gives its frames to the
+// next plan of the thread instead (LOSAT_X_TBNFRAMEREUSE).
+impl Drop for XSubjectPlan {
+    fn drop(&mut self) {
+        for frame in self.frames.drain(..) {
+            super::x_subject_translate::x_reuse_frame(frame.aa_seq);
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
 // ```c
 //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
@@ -646,7 +664,13 @@ pub(super) struct XSubjectPlan {
 /// kept only up to a total size, beyond which they are made per use as before.
 /// A search of fewer than `KEEP_FROM_BATCHES` batches gets no value
 /// (`for_batches`): one batch has no later reader, and two or three give the
-/// time their later readers would save for the memory of the plans.
+/// time their later readers would save for the memory of the plans. With
+/// `LOSAT_X_TBNKEEPFEW` (`keep_few`) a search of more batches that searches them
+/// one after another gets none either unless its plans hold no more than its
+/// threads could have in flight (`kept_within_threads`): many subjects are
+/// translated again for each batch, as NCBI translates them, and few long ones
+/// are kept. A search that searches batches side by side keeps them
+/// (`stage_d_pipeline::x_searched_side_by_side`).
 ///
 /// Batches can reach a subject at the same time. The cell of a subject is
 /// initialised by one of them while the others wait, so a plan is made once
@@ -694,6 +718,60 @@ impl XSubjectSide {
         *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSSIDE"))
     }
 
+    /// EXPERIMENT (LOSAT_X_TBNKEEPFEW): a switch of the strict set (`utils/xswitch.rs`), on
+    /// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it a search of
+    /// `KEEP_FROM_BATCHES` or more batches keeps its plans only when `kept_within_threads`
+    /// holds or it searches batches side by side (`stage_d_pipeline::x_searched_side_by_side`).
+    /// `LOSAT_X_TBNKEEPFEWSHADOW` (`shadow`) keeps them as with `=0`.
+    pub(super) fn keep_few() -> bool {
+        use std::sync::OnceLock;
+        static ON: OnceLock<bool> = OnceLock::new();
+        *ON.get_or_init(|| !Self::shadow() && crate::utils::xswitch::on("LOSAT_X_TBNKEEPFEW"))
+    }
+
+    /// EXPERIMENT (LOSAT_X_TBNKEEPFEWSHADOW): set (opt-in). The plans are kept as with
+    /// `LOSAT_X_TBNKEEPFEW=0`, and every read of a kept plan also makes the plan of that use, as
+    /// a search that keeps none makes it, and compares the two (`plan`); a difference stops
+    /// the search. `x_keep_few_print_summary` prints the count at exit.
+    pub(super) fn shadow() -> bool {
+        use std::sync::OnceLock;
+        static ON: OnceLock<bool> = OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNKEEPFEWSHADOW").is_some())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:627-631
+    // ```c
+    //     if (program_number != eBlastTypeRpsTblastn) {
+    //         if (translation_buffer) {
+    //             sfree(translation_buffer);
+    //         }
+    //     }
+    // ```
+    // NCBI frees each subject's translation after the subject, so a search holds the
+    // translations of the subjects its threads are on. The kept plans are held where they are no
+    // more than that.
+    /// EXPERIMENT (LOSAT_X_TBNKEEPFEW): true when the plans of subjects of these lengths hold
+    /// no more than `threads` plans of the longest one: no more than the threads of a search
+    /// that keeps none can have in flight, each on one subject. A few long subjects (one
+    /// genome, a few chromosomes) are kept, and batches searched at the same time share one
+    /// plan of each instead of making one per batch. Many subjects searched one batch after
+    /// another are not: without the plans the search held 115 MiB less on 28,036 16S subjects
+    /// (40.6 Mb) and 309 MiB less on 57,775 zebrafish cDNAs (122 Mb), with five query batches,
+    /// and took 0.980-0.994 of the time at 4, 8 and 16 threads (workstation, 2026-10-19:
+    /// translating a packed subject again, `LOSAT_X_TBNXLATESIMD`, costs less than holding its
+    /// plan; with `LOSAT_X_TBNFRAMEREUSE` 0.998 at one thread).
+    pub(super) fn kept_within_threads(
+        subject_lengths: impl IntoIterator<Item = usize>,
+        threads: usize,
+    ) -> bool {
+        let (mut total, mut longest) = (0usize, 0usize);
+        for length in subject_lengths {
+            total = total.saturating_add(length);
+            longest = longest.max(length);
+        }
+        total <= longest.saturating_mul(threads.max(1))
+    }
+
     pub(super) fn new(subjects: usize, gencode: u8, mask_lowercase: bool) -> Self {
         Self {
             gencode,
@@ -704,8 +782,9 @@ impl XSubjectSide {
     }
 
     /// The subject plans of a search of `batches` query batches, or `None`
-    /// when the search keeps none: the switch is off (`on` is `enabled()`), or
-    /// there are fewer than `KEEP_FROM_BATCHES` batches. A kept plan is read by
+    /// when the search keeps none: `on` is false (`enabled()` is off, or
+    /// `LOSAT_X_TBNKEEPFEW` keeps none, `kept_within_threads`), or there are
+    /// fewer than `KEEP_FROM_BATCHES` batches. A kept plan is read by
     /// the batches after the first one that reaches its subject. A search of
     /// fewer batches makes its plans per use and drops them after the subject,
     /// like those above `KEEP_LIMIT`.
@@ -783,31 +862,81 @@ impl XSubjectSide {
     ) -> Result<std::sync::Arc<XSubjectPlan>> {
         let mut failed = None;
         let mut own = None;
-        let kept = slot.get_or_init(|| match build() {
-            Ok(plan) if self.keep(&plan) => {
-                crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", true);
-                Some(plan)
-            }
-            Ok(plan) => {
-                // Over `KEEP_LIMIT`: the plan is made per use.
-                crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", false);
-                own = Some(plan);
-                None
-            }
-            Err(error) => {
-                failed = Some(error);
-                None
+        let mut made = false;
+        let kept = slot.get_or_init(|| {
+            made = true;
+            match build() {
+                Ok(plan) if self.keep(&plan) => {
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", true);
+                    Some(plan)
+                }
+                Ok(plan) => {
+                    // Over `KEEP_LIMIT`: the plan is made per use.
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", false);
+                    own = Some(plan);
+                    None
+                }
+                Err(error) => {
+                    failed = Some(error);
+                    None
+                }
             }
         });
         if let Some(error) = failed {
             return Err(error);
         }
         match (kept, own) {
-            (Some(plan), _) => Ok(std::sync::Arc::clone(plan)),
+            (Some(plan), _) => {
+                if !made && Self::shadow() {
+                    Self::x_compare_with_own(plan, build()?);
+                }
+                Ok(std::sync::Arc::clone(plan))
+            }
             (None, Some(plan)) => Ok(plan),
             (None, None) => build(),
         }
     }
+
+    // No NCBI counterpart: the comparison of the shadow mode; it does not change any value NCBI
+    // computes.
+    /// EXPERIMENT (LOSAT_X_TBNKEEPFEWSHADOW): stops the search when the plan made for a use
+    /// differs from the kept plan that use reads; counts the comparison otherwise.
+    fn x_compare_with_own(kept: &XSubjectPlan, own: std::sync::Arc<XSubjectPlan>) {
+        if let Some(difference) = super::x_subject_translate::x_plan_fields_difference(&own, kept) {
+            panic!(
+                "LOSAT_X_TBNKEEPFEWSHADOW: the plan made for a use differs from the kept plan of the subject: {difference}"
+            );
+        }
+        let residues: usize = kept.frames.iter().map(|frame| frame.aa_seq.len()).sum();
+        X_KEEP_SHADOW_READS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        X_KEEP_SHADOW_RESIDUES.fetch_add(residues as u64, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+// No NCBI counterpart: counters of the shadow summary; they do not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_TBNKEEPFEWSHADOW): the reads of kept plans compared with a plan made for
+/// the use, and the translated residues in them (sentinels included).
+static X_KEEP_SHADOW_READS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static X_KEEP_SHADOW_RESIDUES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+// No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNKEEPFEWSHADOW): the summary line, printed at exit when the shadow is
+/// set (`x_subject_translate::print_summary`).
+pub(super) fn x_keep_few_print_summary() {
+    if !XSubjectSide::shadow() {
+        return;
+    }
+    let reads = X_KEEP_SHADOW_READS.load(std::sync::atomic::Ordering::Relaxed);
+    eprintln!(
+        "[X_SHADOW] TBNKEEPFEW kept_plan_reads_compared={reads} residues_compared={} ({})",
+        X_KEEP_SHADOW_RESIDUES.load(std::sync::atomic::Ordering::Relaxed),
+        if reads == 0 {
+            "nothing compared: no kept plan was read again"
+        } else {
+            "frames and units identical"
+        }
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
@@ -2274,6 +2403,37 @@ mod tests {
             .map(|unit| (unit.0, &unit.2))
             .eq(kept.units.iter().map(|unit| (unit.0, &unit.2))));
         assert!(!first.units.is_empty());
+    }
+
+    // No NCBI counterpart: test of when LOSAT_X_TBNKEEPFEW keeps the plans; it does not change any
+    // value NCBI computes.
+    // The plans are kept when they hold no more than `threads` plans of the longest subject: one
+    // subject at every thread count, a few long ones at enough threads, many short ones never.
+    #[test]
+    fn x_subject_plans_are_kept_within_the_threads() {
+        fn within(lengths: impl IntoIterator<Item = usize>, threads: usize) -> bool {
+            XSubjectSide::kept_within_threads(lengths, threads)
+        }
+        assert!(within([4_700_000usize], 1));
+        assert!(within([4_700_000usize], 32));
+        assert!(!within([3_000usize, 3_000], 1));
+        assert!(within([3_000usize, 3_000], 2));
+        assert!(within([3_000usize, 2_999, 1], 2));
+        assert!(!within([3_000usize, 3_000, 1], 2));
+        // Three fly chromosomes (76.9 Mb): kept at 3 or more threads (three times the longest,
+        // 28.1 Mb, is 84.3 Mb), not at 1 or 2.
+        let fly = [23_513_712usize, 25_286_936, 28_110_227];
+        assert!(!within(fly, 1));
+        assert!(!within(fly, 2));
+        assert!(within(fly, 3));
+        assert!(within(fly, 16));
+        // 28,036 16S records of about 1,450 bases: never at the thread counts of a search.
+        assert!(!within(std::iter::repeat_n(1_450usize, 28_036), 32));
+        assert!(!within(std::iter::repeat_n(1_450usize, 28_036), 1_024));
+        // No subjects keep nothing; no threads count as one.
+        assert!(within(std::iter::empty::<usize>(), 1));
+        assert!(!within([3_000usize, 3_000], 0));
+        assert!(within([usize::MAX, 1], 2));
     }
 
     // No NCBI counterpart: test of the size limit of the plan cache; it does not change any value

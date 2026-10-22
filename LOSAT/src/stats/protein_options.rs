@@ -358,6 +358,8 @@ pub struct ProteinOptionsCheck<'a> {
     pub word_size: i32,
     /// Whether the compressed-alphabet lookup table is used (`eCompressedAaLookupTable`).
     pub compressed_lookup: bool,
+    /// The hit list size (`hit_options->hitlist_size`).
+    pub hitlist_size: usize,
     pub evalue: f64,
 }
 
@@ -488,6 +490,19 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
         return Err(options_error(
             "Compressed alphabet lookup table requires word size 5, 6 or 7",
         ));
+    }
+    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1511-1517 (the hit saving
+    // check of the hit list size, before the e-value's)
+    // ```c
+    // 	if (options->hitlist_size < 1)
+    // 	{
+    // 		Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+    //                          "No hits are being saved");
+    // 		return BLASTERR_OPTION_VALUE_INVALID;
+    // 	}
+    // ```
+    if check.hitlist_size < 1 {
+        return Err(options_error("No hits are being saved"));
     }
     // NCBI reference: c++/src/algo/blast/core/blast_options.c:1518-1521 (the hit
     // saving check; LOSAT's blastp and tblastn have no cutoff score option)

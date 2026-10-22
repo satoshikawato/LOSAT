@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp's parallel `-subject` loop in runs of subjects with `LOSAT_X_BPSUBJRUN`
 //! (`src/algorithm/blastp/blast_engine/x_subject_runs.rs`) on whole searches.
 //!

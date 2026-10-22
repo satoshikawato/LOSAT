@@ -382,7 +382,6 @@ fn is_unported_blastp_arg(name: &str) -> bool {
         name,
         "best_hit_overhang"
             | "best_hit_score_edge"
-            | "culling_limit"
             | "db_hard_mask"
             | "db_soft_mask"
             | "entrez_query"

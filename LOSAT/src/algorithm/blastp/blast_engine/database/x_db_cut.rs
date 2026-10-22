@@ -77,8 +77,9 @@ use crate::utils::threading::SearchPool;
 
 use super::{
     read_search_block, search_blocks_of, BlastpDatabase, BlastpHitList, BlastpSubjectRef,
-    BlastpSubjectResult, BlastpSubjectScratch, XPrelimHsp, BLOCK_BYTES,
+    BlastpSubjectResult, BlastpSubjectScratch, PrelimSink, XPrelimHsp, BLOCK_BYTES,
 };
+use super::super::PrelimCollector;
 
 /// EXPERIMENT (LOSAT_X_BPDBCUT): the mode the variables select.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -283,7 +284,7 @@ fn x_compare_lists<H: std::fmt::Debug>(
 /// table, and the round's results are merged in ordinal order (module header). No floating-point
 /// operation changes order.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn x_search_blocks_cut<S, K>(
+pub(super) fn x_search_blocks_cut<S, K, P>(
     mode: XDbCut,
     database: &BlastpDatabase,
     pool: &SearchPool<'_>,
@@ -291,22 +292,27 @@ pub(super) fn x_search_blocks_cut<S, K>(
     blocks_per_thread: usize,
     new_scratch: &S,
     process_subject: &K,
-    preliminary_hit_lists: &mut [Option<BlastpHitList>],
-    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    prelim_hitlist_size: usize,
+    sink: &mut P,
 ) -> Result<()>
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
+    P: PrelimSink,
 {
     let db = &database.db;
     let block_bytes = x_db_cut_block_bytes(database, pool);
-    let shadow = mode == XDbCut::Shadow;
-    if shadow
-        && !(preliminary_hit_lists.iter().all(Option::is_none)
-            && x_compact_hit_lists.iter().all(Option::is_none))
-    {
-        x_shadow_difference("the hit lists are not empty before the search".to_string());
+    // The shadow mode compares the hit lists of two searches. A sink without hit lists (the
+    // culling writer, which makes its lists at the end) is searched once, without the
+    // comparison.
+    let shadow = mode == XDbCut::Shadow && sink.x_lists().is_some();
+    if shadow {
+        if let Some((preliminary_hit_lists, x_compact_hit_lists, _)) = sink.x_lists() {
+            if !(preliminary_hit_lists.iter().all(Option::is_none)
+                && x_compact_hit_lists.iter().all(Option::is_none))
+            {
+                x_shadow_difference("the hit lists are not empty before the search".to_string());
+            }
+        }
     }
     let result = search_blocks_of(
         database,
@@ -316,9 +322,7 @@ where
         blocks_per_thread,
         new_scratch,
         process_subject,
-        preliminary_hit_lists,
-        x_compact_hit_lists,
-        prelim_hitlist_size,
+        sink,
     )
     .map_err(|error| {
         if block_bytes == BLOCK_BYTES {
@@ -330,6 +334,9 @@ where
     if !shadow {
         return result;
     }
+    let (preliminary_hit_lists, x_compact_hit_lists, prelim_hitlist_size) = sink
+        .x_lists()
+        .expect("the shadow mode is on only for a sink with hit lists");
     let mut expected_lists: Vec<Option<BlastpHitList>> = std::iter::repeat_with(|| None)
         .take(preliminary_hit_lists.len())
         .collect();
@@ -345,9 +352,11 @@ where
         blocks_per_thread,
         new_scratch,
         process_subject,
-        &mut expected_lists,
-        &mut expected_compact,
-        prelim_hitlist_size,
+        &mut PrelimCollector {
+            preliminary_hit_lists: &mut expected_lists,
+            x_compact_hit_lists: &mut expected_compact,
+            prelim_hitlist_size,
+        },
     );
     let compared = match (&result, &expected) {
         (Ok(()), Ok(())) => {

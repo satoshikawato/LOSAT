@@ -528,6 +528,7 @@ fn parse_blastp_args(
         max_target_seqs: None,
         max_hsps_per_subject: None,
         qcov_hsp_perc: None,
+        culling_limit: 0,
         ungapped: false,
         window_size: None,
         matrix: None,

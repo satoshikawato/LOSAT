@@ -43,8 +43,8 @@ use crate::stats::{compute_length_adjustment_ncbi, KarlinParams};
 use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
 
 use super::{
-    ncbistdaa_to_ascii, update_blastp_preliminary_hit_lists, BlastpHitList, BlastpSubjectRef,
-    BlastpSubjectResult, BlastpSubjectScratch, EncodedProtein, XPrelimHsp,
+    ncbistdaa_to_ascii, BlastpHitList, BlastpSubjectRef,
+    BlastpSubjectResult, BlastpSubjectScratch, EncodedProtein, PrelimSink, XPrelimHsp,
 };
 
 // EXPERIMENT (LOSAT_X_BPDBCUT / LOSAT_X_BPDBCUTSHADOW): the blocks of the preliminary stage cut by
@@ -440,19 +440,18 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
 /// database size and the thread count, and a failed search returns the one-thread order's
 /// error (`database/x_db_cut.rs`, exactness argument in its header).
 #[allow(clippy::too_many_arguments)]
-pub(super) fn search_blocks<S, K>(
+pub(super) fn search_blocks<S, K, P>(
     database: &BlastpDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
     window: i32,
     new_scratch: &S,
     process_subject: &K,
-    preliminary_hit_lists: &mut [Option<BlastpHitList>],
-    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    prelim_hitlist_size: usize,
+    sink: &mut P,
 ) -> Result<()>
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
+    P: PrelimSink,
 {
     #[cfg(all(
         feature = "parallel",
@@ -480,9 +479,7 @@ where
                 blocks_per_thread,
                 new_scratch,
                 process_subject,
-                preliminary_hit_lists,
-                x_compact_hit_lists,
-                prelim_hitlist_size,
+                sink,
             );
         }
     }
@@ -494,9 +491,7 @@ where
         blocks_per_thread,
         new_scratch,
         process_subject,
-        preliminary_hit_lists,
-        x_compact_hit_lists,
-        prelim_hitlist_size,
+        sink,
     )
 }
 
@@ -513,7 +508,7 @@ pub(super) fn x_bp_db_cut_print_summary() {
 /// `search_blocks` with blocks of at most `block_bytes` and rounds of `blocks_per_thread`
 /// blocks per thread.
 #[allow(clippy::too_many_arguments)]
-fn search_blocks_of<S, K>(
+fn search_blocks_of<S, K, P>(
     database: &BlastpDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
     window: i32,
@@ -521,13 +516,12 @@ fn search_blocks_of<S, K>(
     blocks_per_thread: usize,
     new_scratch: &S,
     process_subject: &K,
-    preliminary_hit_lists: &mut [Option<BlastpHitList>],
-    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    prelim_hitlist_size: usize,
+    sink: &mut P,
 ) -> Result<()>
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
+    P: PrelimSink,
 {
     let db = &database.db;
     #[cfg(all(
@@ -601,12 +595,7 @@ where
             // updates is the one-thread order.
             for block_results in found {
                 for mut subject_result in block_results? {
-                    update_blastp_preliminary_hit_lists(
-                        preliminary_hit_lists,
-                        x_compact_hit_lists,
-                        &mut subject_result,
-                        prelim_hitlist_size,
-                    );
+                    sink.add(&mut subject_result);
                 }
             }
         }
@@ -630,12 +619,7 @@ where
                 block_subject(&block, i),
                 &mut subject_result,
             );
-            update_blastp_preliminary_hit_lists(
-                preliminary_hit_lists,
-                x_compact_hit_lists,
-                &mut subject_result,
-                prelim_hitlist_size,
-            );
+            sink.add(&mut subject_result);
         }
         next_ordinal = range.end_ordinal();
     }
@@ -1546,9 +1530,11 @@ mod tests {
                 2,
                 &|| BlastpSubjectScratch::new(16, 64, window, 21),
                 &recording_kernel(window, &seen),
-                &mut hit_lists,
-                &mut [],
-                500,
+                &mut crate::algorithm::blastp::blast_engine::PrelimCollector {
+                    preliminary_hit_lists: &mut hit_lists,
+                    x_compact_hit_lists: &mut [],
+                    prelim_hitlist_size: 500,
+                },
             )
         })
         .unwrap();
@@ -1685,9 +1671,11 @@ mod tests {
                         blocks_per_thread,
                         &new_scratch,
                         &kernel,
-                        &mut hit_lists,
-                        &mut compact,
-                        500,
+                        &mut crate::algorithm::blastp::blast_engine::PrelimCollector {
+                            preliminary_hit_lists: &mut hit_lists,
+                            x_compact_hit_lists: &mut compact,
+                            prelim_hitlist_size: 500,
+                        },
                     ),
                     Err(block_bytes) => search_blocks_of(
                         database,
@@ -1697,9 +1685,11 @@ mod tests {
                         blocks_per_thread,
                         &new_scratch,
                         &kernel,
-                        &mut hit_lists,
-                        &mut compact,
-                        500,
+                        &mut crate::algorithm::blastp::blast_engine::PrelimCollector {
+                            preliminary_hit_lists: &mut hit_lists,
+                            x_compact_hit_lists: &mut compact,
+                            prelim_hitlist_size: 500,
+                        },
                     ),
                 }
             })?;

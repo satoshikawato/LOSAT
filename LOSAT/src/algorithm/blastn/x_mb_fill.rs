@@ -1,6 +1,7 @@
 //! EXPERIMENT (LOSAT_X_MBFILL, shadow LOSAT_X_MBFILLSHADOW): the one-thread word loop of
 //! `build_mb_lookup` (the contiguous megablast table and the two-stage table of blastn) with the
-//! words read by a run-based loop and the update queued as `x_fill_mb_queued`'s `Delay` does.
+//! words read run by run and the update of each applied `X_DELAY` words after a prefetch of its
+//! cell, as `x_fill_mb_queued`'s `Delay` queue does.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1032-1091
 //! ```c
@@ -54,6 +55,13 @@
 //! - fewer than 2^32 words, since `next_pos` has at most `u32::MAX` elements, so a helper counter
 //!   stays below 2^32 and `+ 1` equals `x_mb_apply`'s `saturating_add(1)`.
 //!
+//! Why it is faster. The queued loop counted the unambiguous bases of every position, carried the
+//! database-count test and the bound checks of every index, and kept the queue's state in memory:
+//! about 87 instructions a word (line R, R10). Here the loop over a run is a function of its own
+//! (`run_words`), so the tables, the queue position and the code stay in registers; the presence
+//! bit comes from a table, so the only shift by a variable count (`pv_array_bts`) keeps `cl`; the
+//! queue is 64 words deep (32 was 1 % slower, 16 the old depth).
+//!
 //! The variables are read once. `LOSAT_X_MBFILL` (a switch of the strict set,
 //! `utils/xswitch.rs`: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) runs this
 //! module. `LOSAT_X_MBFILLSHADOW` (set to any value; not in the strict set; implies it) runs this
@@ -62,14 +70,16 @@
 
 use super::x_mb_lookup_par::Words;
 use super::{
-    build_unmasked_ranges, x_fill_mb_queued, x_mb_apply, x_mb_queue, XMbTables, BLAST2NA_MASK,
-    PV_ARRAY_MASK,
+    build_unmasked_ranges, x_fill_mb_queued, x_mb_queue, XMbTables, BLAST2NA_MASK, PV_ARRAY_MASK,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// `kCompressionFactor` (2048), the number of cells that share one helper counter, as a shift.
 const K_COMPRESSION_FACTOR_SHIFT: usize = 11;
+
+/// The words between the prefetch of a word's cell and its update.
+const X_DELAY: usize = 64;
 
 // No NCBI counterpart: the number of builds the shadow compared (relaxed; it orders nothing).
 static X_SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
@@ -87,20 +97,6 @@ fn mode() -> u8 {
         } else {
             0
         }
-    })
-}
-
-/// PROBE (not for merge): the loop shape, LOSAT_X_MBFILLARM. 1 = the word loop of
-/// `x_fill_mb_queued` with a closure and a delay of 32; 2 = the run loop, delay 32; 3 = the run
-/// loop, delay 32, update without the branch on the old head; 4 = the run loop, delay 64;
-/// 5 = the run loop, delay 64, without the branch.
-fn arm() -> u8 {
-    static ARM: OnceLock<u8> = OnceLock::new();
-    *ARM.get_or_init(|| {
-        std::env::var("LOSAT_X_MBFILLARM")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(2)
     })
 }
 
@@ -137,33 +133,20 @@ pub(super) fn fill(
     if !taken {
         return false;
     }
-    let (n_words, ambiguous) = fill_arm(arm(), words, t);
+    // SAFETY: `in_range(words, t)` holds.
+    let (n_words, ambiguous) = unsafe {
+        if words.ascending_cells {
+            fill_runs::<true>(words, t)
+        } else {
+            fill_runs::<false>(words, t)
+        }
+    };
     *t.total_positions += n_words;
     *t.ambiguous_skipped += ambiguous;
     if mode == 2 {
         shadow_check(words, t);
     }
     true
-}
-
-/// PROBE: the fill of arm `arm` (see `arm`); returns the number of words and of ambiguous bases.
-/// `in_range(words, t)` must hold.
-fn fill_arm(arm: u8, words: &Words<'_>, t: &mut XMbTables<'_>) -> (usize, usize) {
-    // SAFETY (every arm): the caller checked `in_range(words, t)`.
-    unsafe {
-        match (arm, words.ascending_cells) {
-            (1, false) => fill_delay::<32, false>(words, t),
-            (1, true) => fill_delay::<32, true>(words, t),
-            (3, false) => fill_runs::<32, true, false>(words, t),
-            (3, true) => fill_runs::<32, true, true>(words, t),
-            (4, false) => fill_runs::<64, false, false>(words, t),
-            (4, true) => fill_runs::<64, false, true>(words, t),
-            (5, false) => fill_runs::<64, true, false>(words, t),
-            (5, true) => fill_runs::<64, true, true>(words, t),
-            (_, false) => fill_runs::<32, false, false>(words, t),
-            (_, true) => fill_runs::<32, false, true>(words, t),
-        }
-    }
 }
 
 /// The bounds the loop relies on (module documentation).
@@ -215,27 +198,20 @@ impl Raw {
         }
     }
 
-    /// The update of one word (`x_mb_apply` with the indexes `in_range` checked). `BF`: the
-    /// presence bit and the helper counter are always written, with 0 where the C branch skips
-    /// them. `cells`: the words in the order applied (`ASC`).
+    /// The update of one word (`x_mb_apply` with the indexes `in_range` checked); `cells`: the
+    /// words in the order applied (`ASC`).
     /// SAFETY: `in_range` held for the tables of `self`, and `bucket` / `q_off_1` are a word.
     #[inline(always)]
-    unsafe fn apply<const BF: bool, const ASC: bool>(
+    unsafe fn apply<const ASC: bool>(
         self,
         cells: &mut Vec<(u32, u32)>,
         bucket: usize,
         q_off_1: u32,
     ) {
-        let bit = X_PV_BIT[bucket & PV_ARRAY_MASK];
         unsafe {
             let old = *self.hashtable.add(bucket);
-            if BF {
-                let empty = (old == 0) as u32;
-                *self.pv_array.add(bucket >> self.pv_array_bts) |= bit & empty.wrapping_neg();
-                let h = self.helper_array.add(bucket >> K_COMPRESSION_FACTOR_SHIFT);
-                *h = (*h).wrapping_add(empty ^ 1);
-            } else if old == 0 {
-                *self.pv_array.add(bucket >> self.pv_array_bts) |= bit;
+            if old == 0 {
+                *self.pv_array.add(bucket >> self.pv_array_bts) |= X_PV_BIT[bucket & PV_ARRAY_MASK];
             } else {
                 let h = self.helper_array.add(bucket >> K_COMPRESSION_FACTOR_SHIFT);
                 *h = (*h).wrapping_add(1);
@@ -249,59 +225,21 @@ impl Raw {
     }
 }
 
-/// The last `D` words read, each applied when it leaves (`n` words entered so far).
-struct Queue<const D: usize> {
-    ring: [(u32, u32); D],
+/// The last `X_DELAY` words read, each applied when it leaves (`n` words entered so far).
+struct Queue {
+    ring: [(u32, u32); X_DELAY],
     n: usize,
 }
 
-/// PROBE (arm 1): the word loop of `x_fill_mb_queued` with the update of each word applied `D`
-/// words later, after a prefetch of its cell. Returns the number of words and of ambiguous bases.
-#[inline(never)]
-fn fill_delay<const D: usize, const ASC: bool>(
-    words: &Words<'_>,
-    t: &mut XMbTables<'_>,
-) -> (usize, usize) {
-    let mut ring = [(0u32, 0u32); D];
-    let mut n = 0usize;
-    let mut queue = |t: &mut XMbTables<'_>, bucket: usize, q_off_1: u32| {
-        #[cfg(target_arch = "x86_64")]
-        // SAFETY: `bucket` < table size (masked code); a prefetch does not fault.
-        unsafe {
-            core::arch::x86_64::_mm_prefetch(
-                t.hashtable.as_ptr().wrapping_add(bucket) as *const i8,
-                core::arch::x86_64::_MM_HINT_T0,
-            );
-        }
-        let slot = n % D;
-        if n >= D {
-            let (b, q) = ring[slot];
-            x_mb_apply(t, ASC, b as usize, q);
-        }
-        ring[slot] = (bucket as u32, q_off_1);
-        n += 1;
-    };
-    let counts = for_each_word_loop(words, |bucket, q_off_1| queue(t, bucket, q_off_1));
-    for k in n - n.min(D)..n {
-        let (b, q) = ring[k % D];
-        x_mb_apply(t, ASC, b as usize, q);
-    }
-    counts
-}
-
 /// The fill: the words of `build_mb_lookup` in its order, read run by run (module documentation),
-/// each update applied `D` words later, after a prefetch of its cell. Returns the number of words
-/// and of ambiguous bases.
+/// each update applied `X_DELAY` words later. Returns the number of words and of ambiguous bases.
 /// SAFETY: `in_range(words, t)` holds.
 #[inline(never)]
-unsafe fn fill_runs<const D: usize, const BF: bool, const ASC: bool>(
-    words: &Words<'_>,
-    t: &mut XMbTables<'_>,
-) -> (usize, usize) {
+unsafe fn fill_runs<const ASC: bool>(words: &Words<'_>, t: &mut XMbTables<'_>) -> (usize, usize) {
     let raw = Raw::new(t);
     let cells = &mut *t.words;
     let mut queue = Queue {
-        ring: [(0u32, 0u32); D],
+        ring: [(0u32, 0u32); X_DELAY],
         n: 0,
     };
     let lut_word_length = words.lut_word_length;
@@ -346,7 +284,7 @@ unsafe fn fill_runs<const D: usize, const BF: bool, const ASC: bool>(
                 let first = i;
                 // SAFETY: `in_range` holds; the words are those of `words`.
                 i = unsafe {
-                    run_words::<D, BF, ASC>(
+                    run_words::<ASC>(
                         s,
                         i,
                         code,
@@ -366,10 +304,10 @@ unsafe fn fill_runs<const D: usize, const BF: bool, const ASC: bool>(
             }
         }
     }
-    for k in queue.n - queue.n.min(D)..queue.n {
-        let (b, q) = queue.ring[k % D];
+    for k in queue.n - queue.n.min(X_DELAY)..queue.n {
+        let (b, q) = queue.ring[k % X_DELAY];
         // SAFETY: as above.
-        unsafe { raw.apply::<BF, ASC>(cells, b as usize, q) };
+        unsafe { raw.apply::<ASC>(cells, b as usize, q) };
     }
     (n_words, ambiguous)
 }
@@ -380,20 +318,20 @@ unsafe fn fill_runs<const D: usize, const BF: bool, const ASC: bool>(
 /// SAFETY: `in_range` held for the tables of `raw`; the words are words of the fill.
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
-unsafe fn run_words<const D: usize, const BF: bool, const ASC: bool>(
+unsafe fn run_words<const ASC: bool>(
     s: &[u8],
     mut i: usize,
     mut code: u64,
     kmer_mask: u64,
     index_base: usize,
-    queue: &mut Queue<D>,
+    queue: &mut Queue,
     raw: Raw,
     cells: &mut Vec<(u32, u32)>,
 ) -> usize {
     let mut ring = queue.ring;
     let mut n = queue.n;
     // until the queue is full no word leaves it
-    while n < D {
+    while n < X_DELAY {
         let Some(&base) = s.get(i) else {
             break;
         };
@@ -406,17 +344,17 @@ unsafe fn run_words<const D: usize, const BF: bool, const ASC: bool>(
         n += 1;
         i += 1;
     }
-    if n >= D {
+    if n >= X_DELAY {
         while let Some(&base) = s.get(i) {
             if (base & BLAST2NA_MASK) != 0 {
                 break;
             }
             code = ((code << 2) | base as u64) & kmer_mask;
             x_prefetch(raw.hashtable, code as usize);
-            let slot = n % D;
+            let slot = n % X_DELAY;
             let (b, q) = ring[slot];
             // SAFETY: `(b, q)` is a word of the fill.
-            unsafe { raw.apply::<BF, ASC>(cells, b as usize, q) };
+            unsafe { raw.apply::<ASC>(cells, b as usize, q) };
             ring[slot] = (code as u32, index_base.wrapping_add(i) as u32);
             n += 1;
             i += 1;
@@ -440,51 +378,6 @@ fn x_prefetch(hashtable: *mut u32, bucket: usize) {
     }
     #[cfg(not(target_arch = "x86_64"))]
     let _ = (hashtable, bucket);
-}
-
-/// PROBE (arm 1): the word loop of `x_fill_mb_queued` without the database word counts.
-#[inline(always)]
-fn for_each_word_loop(words: &Words<'_>, mut f: impl FnMut(usize, u32)) -> (usize, usize) {
-    let lut_word_length = words.lut_word_length;
-    let (mut n_words, mut ambiguous) = (0usize, 0usize);
-    for (q_idx, seq) in words.queries_blastna.iter().enumerate() {
-        if seq.len() < lut_word_length {
-            continue;
-        }
-        let masks = words
-            .query_masks
-            .get(q_idx)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[]);
-        let query_offset = words.query_offsets[q_idx].max(0) as usize;
-        for (range_start, range_end) in build_unmasked_ranges(seq.len(), masks) {
-            if words.word_length > range_end.saturating_sub(range_start) {
-                continue;
-            }
-            let mut current_kmer: u64 = 0;
-            let mut valid_bases = 0usize;
-            for pos in range_start..range_end {
-                let base = seq[pos];
-                if (base & BLAST2NA_MASK) != 0 {
-                    current_kmer = 0;
-                    valid_bases = 0;
-                    ambiguous += 1;
-                    continue;
-                }
-                current_kmer = ((current_kmer << 2) | base as u64) & words.kmer_mask;
-                valid_bases += 1;
-                if valid_bases < lut_word_length {
-                    continue;
-                }
-                n_words += 1;
-                f(
-                    current_kmer as usize,
-                    (query_offset + (pos + 1 - lut_word_length) + 1) as u32,
-                );
-            }
-        }
-    }
-    (n_words, ambiguous)
 }
 
 /// LOSAT_X_MBFILLSHADOW: builds the arrays again with `x_fill_mb_queued` on fresh tables and
@@ -595,11 +488,11 @@ mod tests {
         b
     }
 
-    /// Every arm and both cell orders build the arrays and counters of `x_fill_mb_queued` on random
-    /// queries (ambiguity codes, masks, several queries, `lut_word_length` 4..12) and on long
-    /// repeats (long chains, helper counts).
+    /// Both cell orders build the arrays and counters of `x_fill_mb_queued` on random queries
+    /// (ambiguity codes, masks, several queries, `lut_word_length` 4..12, runs shorter and longer
+    /// than the queue) and on long repeats (long chains, helper counts).
     #[test]
-    fn every_arm_builds_the_queued_loops_arrays() {
+    fn the_run_loop_builds_the_queued_loops_arrays() {
         let mut rng = Lcg(0x4D42_F111);
         for case in 0..60 {
             let (queries, offsets, masks, word_length, lut_word_length) = if case % 6 == 5 {
@@ -641,18 +534,20 @@ mod tests {
                     )
                 });
                 assert!(reference.total_positions > 0 || queries.iter().all(|q| q.len() < 40));
-                for arm in 1..=5 {
-                    let got = build(&words, |t| {
-                        assert!(in_range(&words, t));
-                        let (n, a) = fill_arm(arm, &words, t);
-                        *t.total_positions += n;
-                        *t.ambiguous_skipped += a;
-                    });
-                    assert!(
-                        got == reference,
-                        "case {case} arm {arm} ascending {ascending_cells}"
-                    );
-                }
+                let got = build(&words, |t| {
+                    assert!(in_range(&words, t));
+                    // SAFETY: checked above.
+                    let (n, a) = unsafe {
+                        if ascending_cells {
+                            fill_runs::<true>(&words, t)
+                        } else {
+                            fill_runs::<false>(&words, t)
+                        }
+                    };
+                    *t.total_positions += n;
+                    *t.ambiguous_skipped += a;
+                });
+                assert!(got == reference, "case {case} ascending {ascending_cells}");
             }
         }
     }

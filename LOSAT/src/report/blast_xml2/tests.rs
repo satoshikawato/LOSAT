@@ -313,6 +313,46 @@ fn a_delayed_document_writes_one_report_late_and_drops_the_last_on_a_failure() {
     assert_eq!(out, b"{\n\"BlastOutput2\": [\n{1}\n,\n{2}\n,\n{3}\n]\n}\n");
 }
 
+#[test]
+fn a_run_written_by_several_documents_in_turn_has_the_bytes_of_one() {
+    // The BLASTP block search writes a run's reports with a document per block, handing the
+    // framing state (the count, the start, the held report of a `-subject` run) on.
+    for kind in [Xml2Kind::Single16, Xml2Kind::Single15] {
+        for delayed in [false, true] {
+            let reports: Vec<Vec<u8>> = (1..=5)
+                .map(|n| format!("\n<BlastOutput2>{n}</BlastOutput2>\n").into_bytes())
+                .collect();
+            let mut whole = Xml2Document::new(kind, delayed);
+            let mut expected = Vec::new();
+            for report in &reports {
+                whole.report(&mut report.clone(), &mut expected).unwrap();
+            }
+            whole.epilog(&mut expected).unwrap();
+            for blocks in [vec![1, 4], vec![2, 2, 1], vec![1, 1, 1, 1, 1]] {
+                let mut out = Vec::new();
+                let mut carry = Xml2Carry::default();
+                let mut next = 0;
+                for (index, size) in blocks.iter().enumerate() {
+                    let mut doc = Xml2Document::new(kind, delayed);
+                    doc.resume(carry);
+                    for report in &reports[next..next + size] {
+                        doc.report(&mut report.clone(), &mut out).unwrap();
+                    }
+                    next += size;
+                    if index + 1 == blocks.len() {
+                        doc.epilog(&mut out).unwrap();
+                    }
+                    carry = doc.take_carry();
+                }
+                assert_eq!(
+                    out, expected,
+                    "{kind:?} delayed {delayed} blocks {blocks:?}"
+                );
+            }
+        }
+    }
+}
+
 fn one_hsp(hits_title: &'static [u8], target: Xml2Target, taxid: i32, kind: Xml2Kind) -> String {
     one_hsp_named(
         hits_title,

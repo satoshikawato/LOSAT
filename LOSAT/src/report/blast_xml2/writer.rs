@@ -413,6 +413,12 @@ impl<F: SideFiles> Xml2Writer<F> {
             report: Vec::new(),
         }
     }
+
+    /// The framing of the writer's document, for a run whose reports are written by several
+    /// writers in turn (`Xml2Document::take_carry` and `resume`).
+    pub fn document_mut(&mut self) -> &mut Xml2Document<F> {
+        &mut self.document
+    }
 }
 
 impl<F: SideFiles> StructuredXml for Xml2Writer<F> {

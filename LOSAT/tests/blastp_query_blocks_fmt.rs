@@ -1,6 +1,7 @@
 //! The blastp search in blocks of whole query batches (`LOSAT_X_BPQBLOCK`) for outfmt 0 and 7
-//! with `LOSAT_X_BPQBLOCKFMT`, outfmt 8, 9 and 12 with `LOSAT_X_BPQBLOCKSA`, and outfmt 5 with
-//! `LOSAT_X_BPQBLOCKXML` (`src/algorithm/blastp/x_query_blocks.rs`) on whole searches.
+//! with `LOSAT_X_BPQBLOCKFMT`, outfmt 8, 9 and 12 with `LOSAT_X_BPQBLOCKSA`, outfmt 5 with
+//! `LOSAT_X_BPQBLOCKXML`, and outfmt 15 and 16 with `LOSAT_X_BPQBLOCKXML2`
+//! (`src/algorithm/blastp/x_query_blocks.rs`) on whole searches.
 //!
 //! The switches are in the strict set (`src/utils/xswitch.rs`): on by default, off with `0` or
 //! with `LOSAT_X_DEFAULT=0` and the variable not set. With them on, a search whose one report is
@@ -44,11 +45,13 @@ const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_BPQBLOCKFMTSHADOW", "1");
 const SA_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKSA", "0");
 const XML_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKXML", "0");
+const XML2_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKXML2", "0");
 
 /// The family switch of an outfmt of the Seq-annot and XML reports, set to `0`.
 fn family_off(spec: &str) -> (&'static str, &'static str) {
     match spec {
         "5" => XML_OFF,
+        "15" | "16" => XML2_OFF,
         "8" | "9" | "12" => SA_OFF,
         _ => FMT_OFF,
     }
@@ -85,10 +88,16 @@ fn blastp(
             || text == "BATCH_SIZE"
             || text == "CHUNK_SIZE"
             || text == "OVERLAP_CHUNK_SIZE"
+            || text.starts_with("NCBI")
+            || text == "BLASTDB"
         {
             command.env_remove(name);
         }
     }
+    // No `~/.ncbirc` names a taxonomy database or a BLASTDB (outfmt 15 and 16 look for one).
+    let home = std::env::temp_dir().join(format!("losat-bpqblockfmt-home-{}", std::process::id()));
+    std::fs::create_dir_all(&home).expect("empty home");
+    command.env("HOME", &home).env("USERPROFILE", &home);
     if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
         command.env(
             "LOSAT_BLASTX_WORKER_LOG",
@@ -100,7 +109,11 @@ fn blastp(
         .arg("-query")
         .arg(query)
         .args(subject)
-        .args(["-evalue", "0.001"])
+        .args(if extra.contains(&OsStr::new("-evalue")) {
+            [].as_slice()
+        } else {
+            ["-evalue", "0.001"].as_slice()
+        })
         .args(["-num_threads", &threads.to_string()])
         .args(extra)
         .env("LOSAT_TIMING", "1")
@@ -323,7 +336,7 @@ fn the_default_writes_outfmt_0_and_7_in_blocks() {
 // compared as bytes), and with the family's switch at `0` these formats take the search of all
 // queries.
 #[test]
-fn outfmt_5_8_9_12_blocks_write_the_report_of_the_search_of_all_queries() {
+fn outfmt_5_8_9_12_15_16_blocks_write_the_report_of_the_search_of_all_queries() {
     let query = fixture("MeenMJNV.faa");
     let fasta = fixture("MejoMJNV.faa");
     let db = subject_database("sareports");
@@ -331,7 +344,7 @@ fn outfmt_5_8_9_12_blocks_write_the_report_of_the_search_of_all_queries() {
         [OsStr::new("-subject"), fasta.as_os_str()],
         [OsStr::new("-db"), db.as_os_str()],
     ] {
-        for spec in ["5", "8", "9", "12"] {
+        for spec in ["5", "8", "9", "12", "15", "16"] {
             let fmt = outfmt(spec);
             for (threads, letters) in [(1, "1"), (2, "1"), (4, "20000")] {
                 let what = format!("{:?} outfmt {spec} threads {threads}", subject[0]);
@@ -373,14 +386,15 @@ fn outfmt_5_8_9_12_blocks_write_the_report_of_the_search_of_all_queries() {
 // letters (two blocks); `LOSAT_X_DEFAULT=0` searches all queries together, and with the variables
 // set (`LOSAT_X_BPQBLOCK` and the family's switch) the blocks are back.
 #[test]
-fn the_default_writes_outfmt_5_8_9_12_in_blocks() {
+fn the_default_writes_outfmt_5_8_9_12_15_16_in_blocks() {
     let query = fixture("MeenMJNV.faa");
     let fasta = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), fasta.as_os_str()];
-    for spec in ["5", "8", "9", "12"] {
+    for spec in ["5", "8", "9", "12", "15", "16"] {
         let fmt = outfmt(spec);
         let family = match spec {
             "5" => ("LOSAT_X_BPQBLOCKXML", "1"),
+            "15" | "16" => ("LOSAT_X_BPQBLOCKXML2", "1"),
             _ => ("LOSAT_X_BPQBLOCKSA", "1"),
         };
         let reference = blastp(&query, &subject, 4, &[BATCH, SWITCH_OFF], &os(&fmt));
@@ -449,7 +463,7 @@ fn query_warnings_keep_their_place_before_each_report() {
     let query = write_file(&dir, "queries.faa", &text);
     let fasta = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), fasta.as_os_str()];
-    for spec in ["0", "7", "6", "5", "8", "12"] {
+    for spec in ["0", "7", "6", "5", "8", "12", "15", "16"] {
         let fmt = outfmt(spec);
         for threads in THREADS {
             let what = format!("outfmt {spec} threads {threads}");
@@ -458,7 +472,7 @@ fn query_warnings_keep_their_place_before_each_report() {
             // Iteration_message of the query; the Seq-annot formats (8, 12) write none, so there
             // the equality below only shows that the blocks add none.
             match spec {
-                "5" => {
+                "5" | "15" | "16" => {
                     let report = String::from_utf8_lossy(&reference.stdout);
                     assert!(
                         report.contains("O characters replaced")
@@ -575,7 +589,7 @@ fn the_out_file_and_the_shadow() {
         [OsStr::new("-subject"), fasta.as_os_str()],
         [OsStr::new("-db"), db.as_os_str()],
     ] {
-        for spec in ["0", "6", "7", "5", "8", "9", "12"] {
+        for spec in ["0", "6", "7", "5", "8", "9", "12", "15", "16"] {
             let fmt = outfmt(spec);
             let what = format!("{:?} outfmt {spec}", subject[0]);
             let reference = blastp(&query, &subject, 4, &[BATCH, SWITCH_OFF], &os(&fmt));
@@ -706,16 +720,20 @@ fn queries_without_hits_at_the_edges_of_blocks() {
         [OsStr::new("-subject"), fasta.as_os_str()],
         [OsStr::new("-db"), db.as_os_str()],
     ] {
-        for spec in ["5", "8", "9", "12"] {
+        for spec in ["5", "8", "9", "12", "15", "16"] {
             let fmt = outfmt(spec);
             for threads in THREADS {
                 let what = format!("{:?} outfmt {spec} threads {threads}", subject[0]);
                 let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
                 assert!(reference.success, "{what}: {}", reference.stderr);
-                if spec == "5" {
+                if matches!(spec, "5" | "15" | "16") {
                     let xml = String::from_utf8_lossy(&reference.stdout);
                     assert!(xml.contains("No hits found"), "{what}: no-hit Iterations");
-                    assert!(xml.contains("<Hit>"), "{what}: hits too");
+                    // The element of a hit in XML (5, 16) and JSON (15).
+                    assert!(
+                        xml.contains("<Hit>") || xml.contains("\"description\""),
+                        "{what}: hits too"
+                    );
                 }
                 let run = blastp(
                     &query,
@@ -760,24 +778,26 @@ fn xml_names_that_ncbi_cannot_write_leave_the_search_of_all_queries() {
     );
     let cafe_query = write_file(&dir, "queries_cafe.faa", &records.concat());
     for threads in THREADS {
-        let fmt = outfmt("5");
-        let what = format!("a query title, outfmt 5, threads {threads}");
-        let reference = blastp(
-            &cafe_query,
-            &subject,
-            threads,
-            &[BATCH, SWITCH_OFF],
-            &os(&fmt),
-        );
-        assert!(!reference.success && reference.stdout.is_empty(), "{what}");
-        let run = blastp(
-            &cafe_query,
-            &subject,
-            threads,
-            &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
-            &os(&fmt),
-        );
-        assert_same_outcome(&run, &reference, false, &what);
+        for spec in ["5", "15", "16"] {
+            let fmt = outfmt(spec);
+            let what = format!("a query title, outfmt {spec}, threads {threads}");
+            let reference = blastp(
+                &cafe_query,
+                &subject,
+                threads,
+                &[BATCH, SWITCH_OFF],
+                &os(&fmt),
+            );
+            assert!(!reference.success && reference.stdout.is_empty(), "{what}");
+            let run = blastp(
+                &cafe_query,
+                &subject,
+                threads,
+                &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+                &os(&fmt),
+            );
+            assert_same_outcome(&run, &reference, false, &what);
+        }
         for spec in ["8", "9", "12"] {
             let fmt = outfmt(spec);
             let what = format!("a query title, outfmt {spec}, threads {threads}");
@@ -834,28 +854,30 @@ fn xml_names_that_ncbi_cannot_write_leave_the_search_of_all_queries() {
     ] {
         let subject = [OsStr::new("-subject"), file.as_os_str()];
         for threads in THREADS {
-            let fmt = outfmt("5");
-            let what = format!("{name}, outfmt 5, threads {threads}");
-            let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
-            assert_eq!(
-                reference.success, xml_succeeds,
-                "{what}: {}",
-                reference.stderr
-            );
-            if !xml_succeeds {
-                assert!(
-                    reference.stdout.is_empty(),
-                    "{what}: no byte before the refusal"
+            for spec in ["5", "15", "16"] {
+                let fmt = outfmt(spec);
+                let what = format!("{name}, outfmt {spec}, threads {threads}");
+                let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
+                assert_eq!(
+                    reference.success, xml_succeeds,
+                    "{what}: {}",
+                    reference.stderr
                 );
+                if !xml_succeeds {
+                    assert!(
+                        reference.stdout.is_empty(),
+                        "{what}: no byte before the refusal"
+                    );
+                }
+                let run = blastp(
+                    &query,
+                    &subject,
+                    threads,
+                    &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+                    &os(&fmt),
+                );
+                assert_same_outcome(&run, &reference, false, &what);
             }
-            let run = blastp(
-                &query,
-                &subject,
-                threads,
-                &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
-                &os(&fmt),
-            );
-            assert_same_outcome(&run, &reference, false, &what);
             for spec in ["8", "9", "12"] {
                 let fmt = outfmt(spec);
                 let what = format!("{name}, outfmt {spec}, threads {threads}");
@@ -942,7 +964,7 @@ fn a_database_title_outside_the_printable_range_leaves_the_search_of_all_queries
         latin[at + 3] = 0xe9;
         std::fs::write(&header, latin).unwrap();
         let subject = [OsStr::new("-db"), db.as_os_str()];
-        for spec in ["5", "8"] {
+        for spec in ["5", "8", "15", "16"] {
             let fmt = outfmt(spec);
             for threads in THREADS {
                 let what = format!("{name}, outfmt {spec}, threads {threads}");
@@ -993,26 +1015,28 @@ fn a_database_name_outside_us_ascii_leaves_the_search_of_all_queries() {
     let plain = subject_database("ascii");
     let plain_subject = [OsStr::new("-db"), plain.as_os_str()];
     for threads in THREADS {
-        let fmt = outfmt("5");
-        let what = format!("an ASCII database name, outfmt 5, threads {threads}");
-        let reference = blastp(
-            &query,
-            &plain_subject,
-            threads,
-            &[BATCH, SWITCH_OFF],
-            &os(&fmt),
-        );
-        let run = blastp(
-            &query,
-            &plain_subject,
-            threads,
-            &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
-            &os(&fmt),
-        );
-        assert_same(&run, &reference, true, &what);
+        for spec in ["5", "15", "16"] {
+            let fmt = outfmt(spec);
+            let what = format!("an ASCII database name, outfmt {spec}, threads {threads}");
+            let reference = blastp(
+                &query,
+                &plain_subject,
+                threads,
+                &[BATCH, SWITCH_OFF],
+                &os(&fmt),
+            );
+            let run = blastp(
+                &query,
+                &plain_subject,
+                threads,
+                &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+                &os(&fmt),
+            );
+            assert_same(&run, &reference, true, &what);
+        }
     }
     std::fs::remove_dir_all(plain.parent().unwrap()).unwrap();
-    for spec in ["5", "8"] {
+    for spec in ["5", "8", "15", "16"] {
         let fmt = outfmt(spec);
         for threads in THREADS {
             let what = format!("outfmt {spec} threads {threads}");
@@ -1024,7 +1048,7 @@ fn a_database_name_outside_us_ascii_leaves_the_search_of_all_queries() {
                 &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
                 &os(&fmt),
             );
-            if spec == "5" {
+            if spec != "8" {
                 assert!(!reference.success && reference.stdout.is_empty(), "{what}");
                 assert_same_outcome(&run, &reference, false, &what);
             } else {
@@ -1035,7 +1059,9 @@ fn a_database_name_outside_us_ascii_leaves_the_search_of_all_queries() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// The four NCBI-frozen rows `db.sa.bpqb.{5,8,9,12}` (`tests/db_search_manifest.tsv`): their 30
+// The eight NCBI-frozen rows `db.sa.bpqb.{5,8,9,12,15,16}`, `db.sa.bpqb.taxdb.16` and
+// `db.sa.bpqb.taxdb.lastoff.15` (`tests/db_search_manifest.tsv`; the last two have a taxonomy
+// database on `BLASTDB`): their 30
 // queries have 11,940 letters, which is one block at the default `LOSAT_X_BPQBLOCK` (the fixture
 // script drops `LOSAT_*`, so CI's db_search check never leaves the search of all queries for
 // them). With `LOSAT_X_BPQBLOCK=1` the block search runs two searches (one per NCBI batch) and
@@ -1072,21 +1098,36 @@ fn the_frozen_ncbi_rows_of_two_query_batches_are_written_by_two_blocks() {
                 let text = name.to_string_lossy();
                 if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
                     || text == "BATCH_SIZE"
+                    || text.starts_with("NCBI")
+                    || text.starts_with("BLAST")
                 {
                     command.env_remove(name);
                 }
             }
+            // No `~/.ncbirc` names a taxonomy database or a BLASTDB.
+            let home =
+                std::env::temp_dir().join(format!("losat-bpqblockfmt-home-{}", std::process::id()));
+            std::fs::create_dir_all(&home).unwrap();
+            command.env("HOME", &home).env("USERPROFILE", &home);
             if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
                 command.env(
                     "LOSAT_BLASTX_WORKER_LOG",
                     std::env::temp_dir().join("losat-bpqblockfmt-worker.log"),
                 );
             }
+            // A `BLASTDB=DIR` token is the environment variable of the run (a `taxdb.bti`'s
+            // directory, relative to LOSAT/, where the run starts), not an argument.
+            let (variables, arguments): (Vec<&str>, Vec<&str>) = cells[extra]
+                .split_whitespace()
+                .partition(|token| token.starts_with("BLASTDB="));
+            for variable in variables {
+                command.env("BLASTDB", variable.trim_start_matches("BLASTDB="));
+            }
             let output = command
                 .current_dir(env!("CARGO_MANIFEST_DIR"))
                 .arg("blastp")
                 .args(["-db", cells[db], "-query", cells[query]])
-                .args(cells[extra].split_whitespace())
+                .args(arguments)
                 .args(["-outfmt", cells[format]])
                 .args(["-num_threads", &threads.to_string()])
                 .env("LOSAT_TIMING", "1")
@@ -1113,7 +1154,7 @@ fn the_frozen_ncbi_rows_of_two_query_batches_are_written_by_two_blocks() {
         }
         rows += 1;
     }
-    assert_eq!(rows, 4);
+    assert_eq!(rows, 8);
 }
 
 // `-db` with a stored title of punctuation (`, ,`) on a subject with hits: outfmt 6 cannot make the
@@ -1180,7 +1221,7 @@ fn a_punctuation_database_title_stops_outfmt_6_blocks_but_not_the_others() {
             &os(&fmt),
         );
         assert_same_outcome(&run, &reference, false, &what);
-        for spec in ["5", "8", "9", "12"] {
+        for spec in ["5", "8", "9", "12", "15", "16"] {
             let fmt = outfmt(spec);
             let what = format!("outfmt {spec}, threads {threads}");
             let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
@@ -1195,5 +1236,149 @@ fn a_punctuation_database_title_stops_outfmt_6_blocks_but_not_the_others() {
             assert_same(&run, &reference, true, &what);
         }
     }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// Outfmt 15 and 16 with `-db` taxids (`tests/db_search/paja_taxid`: taxid 10090 in every definition
+// line but BDT63547.1's 9606, a subject that only the second NCBI query batch of `bpqb_q.faa` hits)
+// and a taxonomy database on `BLASTDB`. The taxonomy database's refusals come before the first byte
+// in the search of all queries, so a name NCBI cannot write for 9606 (which a later block would
+// refuse after the first block's bytes) and an unreadable `taxdb.btd` leave the block search; its
+// messages on standard error (the open, the volume's lookup once per taxid, each `Hit`'s lookup) are
+// written by the blocks as by the search of all queries, at the `Hit` that first needs them.
+#[test]
+fn taxonomy_names_for_outfmt_15_and_16_keep_the_bytes_and_the_refusals() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let query = manifest_dir.join("tests/db_search/bpqb_q.faa");
+    let db = manifest_dir.join("tests/db_search/paja_taxid");
+    let subject = [OsStr::new("-db"), db.as_os_str()];
+    let extra = ["-max_target_seqs", "2", "-max_hsps", "1", "-evalue", "0.1"];
+    let taxdb = |variant: &str| manifest_dir.join("tests/seqdb").join(variant);
+    // (taxonomy database variant, whether the search of all queries completes, whether it writes
+    // to standard error)
+    let cases = [
+        (None, true, false),
+        (Some("taxdb/good"), true, false),
+        // 9606's scientific name has UTF-8 bytes: refused, before the first byte.
+        (Some("taxdb/high_bytes_utf8"), false, false),
+        // An empty `taxdb.btd`: refused.
+        (Some("taxdb/btd_empty"), false, false),
+        // Messages only: the magic number (once, at the first `Hit`), and 10090's offset past the
+        // end of the file (the volume's lookup once for the whole run, each `Hit`'s lookup).
+        (Some("taxdb/bad_magic"), true, true),
+        (Some("taxdb_xml2/last_10090_past_end"), true, true),
+    ];
+    for spec in ["15", "16"] {
+        let mut fmt = outfmt(spec).to_vec();
+        fmt.extend(extra.map(OsString::from));
+        for threads in THREADS {
+            for (variant, completes, messages) in cases {
+                let what = format!("outfmt {spec}, taxdb {variant:?}, threads {threads}");
+                let mut vars: Vec<(&str, String)> = Vec::new();
+                if let Some(variant) = variant {
+                    vars.push(("BLASTDB", taxdb(variant).to_str().unwrap().to_string()));
+                }
+                let run_with = |extra_vars: &[(&str, &str)]| {
+                    let mut all: Vec<(&str, &str)> =
+                        vars.iter().map(|(n, v)| (*n, v.as_str())).collect();
+                    all.extend_from_slice(extra_vars);
+                    blastp(&query, &subject, threads, &all, &os(&fmt))
+                };
+                let reference = run_with(&[SWITCH_OFF]);
+                assert_eq!(reference.success, completes, "{what}: {}", reference.stderr);
+                // (LOSAT writes NCBI's "Examining 5 or more matches" line for `-max_target_seqs 2`.)
+                assert_eq!(
+                    reference.stderr.lines().count() > 1,
+                    messages || !completes,
+                    "{what}: {}",
+                    reference.stderr
+                );
+                if !completes {
+                    assert!(
+                        reference.stdout.is_empty(),
+                        "{what}: no byte before the refusal"
+                    );
+                }
+                let run = run_with(&[("LOSAT_X_BPQBLOCK", "1")]);
+                assert_same_outcome(&run, &reference, completes, &what);
+                if completes {
+                    let run = run_with(&[("LOSAT_X_BPQBLOCK", "1"), XML2_OFF]);
+                    assert_same_outcome(&run, &reference, false, &format!("{what}, switch off"));
+                    // The shadow's second search starts the taxonomy database over, so that it
+                    // writes the open and lookup messages the blocks wrote.
+                    let run = run_with(&[("LOSAT_X_BPQBLOCK", "1"), SHADOW]);
+                    assert!(run.success, "{what} shadow: {}", run.stderr);
+                    assert!(run.stdout == reference.stdout, "{what} shadow: stdout");
+                    assert_eq!(run.shadow.len(), 1, "{what} shadow: {:?}", run.shadow);
+                    assert!(
+                        run.shadow[0].ends_with(" identical"),
+                        "{what}: {}",
+                        run.shadow[0]
+                    );
+                }
+            }
+        }
+    }
+}
+
+// Queries of a batch that NCBI did not search (every query in it is invalid): outfmt 15 and 16
+// write them with no `query-masking` and a message that ends with "No hits found" (a property of
+// the query's batch, and a block holds whole batches; outfmt 5 is compared too). Eight all-X records between
+// real ones fill whole batches of 3,000 letters, so they sit in blocks of their own and in a later
+// block than the first query; `-seg yes` gives the real queries a mask to list.
+#[test]
+fn queries_of_an_unsearched_batch_are_written_by_the_block_that_holds_them() {
+    let dir = std::env::temp_dir().join(format!("losat-bpqblockfmt-unsrch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let real = std::fs::read_to_string(fixture("MeenMJNV.faa")).unwrap();
+    let real: Vec<&str> = real
+        .split('>')
+        .filter(|record| !record.is_empty())
+        .collect();
+    let mut text = String::new();
+    for record in &real[..6] {
+        text.push('>');
+        text.push_str(record);
+    }
+    for index in 0..8 {
+        text.push_str(&format!(">allx{index} all X\n{}\n", "X".repeat(450)));
+    }
+    for record in &real[6..12] {
+        text.push('>');
+        text.push_str(record);
+    }
+    let query = write_file(&dir, "queries.faa", &text);
+    let fasta = fixture("MejoMJNV.faa");
+    let db = subject_database("unsearched");
+    for subject in [
+        [OsStr::new("-subject"), fasta.as_os_str()],
+        [OsStr::new("-db"), db.as_os_str()],
+    ] {
+        for spec in ["5", "15", "16"] {
+            let mut fmt = outfmt(spec).to_vec();
+            fmt.extend(["-seg", "yes"].map(OsString::from));
+            for threads in THREADS {
+                let what = format!("{:?} outfmt {spec} threads {threads}", subject[0]);
+                let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
+                assert!(reference.success, "{what}: {}", reference.stderr);
+                let report = String::from_utf8_lossy(&reference.stdout);
+                // (Outfmt 5 lists no masks.)
+                assert_eq!(
+                    report.contains("query-masking") || report.contains("query_masking"),
+                    spec != "5",
+                    "{what}: the searched queries list a mask"
+                );
+                let run = blastp(
+                    &query,
+                    &subject,
+                    threads,
+                    &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+                    &os(&fmt),
+                );
+                assert_same(&run, &reference, true, &what);
+            }
+        }
+    }
+    std::fs::remove_dir_all(db.parent().unwrap()).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -145,6 +145,27 @@
 //!   only a subject with hits), and with `-db` the definition lines as for outfmt 8
 //!   (`database::x_titles_read_allow_blocks`). Otherwise the search of all queries refuses where
 //!   it does today; the file sink is not created before then.
+//! - outfmt 15 and 16 (LOSAT_X_BPQBLOCKXML2, strict set, `x_bp_qblock_xml2`; BLAST JSON and XML2):
+//!   NCBI writes one complete document per query (`x_PrintXML2Report`), `PrintProlog` the start of the
+//!   whole document and `PrintEpilog` its end; JSON joins the documents with `,\n`; a `-subject`
+//!   run (`m_IsBl2Seq`) holds each document until the next arrives and writes the last in
+//!   `PrintEpilog`. Nothing else in a document depends on another query: the values are those of
+//!   outfmt 5's records (run values fixed, the query's statistics, messages and masks its own;
+//!   the `searched` flag of the query's batch, a batch property, and blocks are whole batches).
+//!   The framing state that outlives a report (the count of documents written, whether the start
+//!   was written, the held document) moves from block to block (`Xml2Carry`, taken from a block's
+//!   document and put into the next block's, `BlastpReports::x_xml2_carry`); the epilog flag is
+//!   the last block's, as for outfmt 5. The refusals before the first byte are those of outfmt 5
+//!   (the same `x_block_xml_run_allowed` and `x_block_xml_subjects_allowed`, and with `-db`
+//!   `x_titles_read_allow_blocks`) and the taxid and taxonomy database ones of the two formats
+//!   (`database::x_taxids_allow_blocks`: every sequence's taxid reads; if `taxdb.bti` is found the
+//!   taxonomy database opens and every taxid of the database names with a text that can be
+//!   written). The taxonomy database's messages on standard error are written at the first `Hit`
+//!   that needs them (`TaxdbNotes`): the run's `TaxdbRun` (the database opened once, the (volume,
+//!   taxid) lookups already made) lives on the `-db` database, so a block writes the messages
+//!   that no block before it wrote, at the `Hit` that first needs them, which is the place in
+//!   the search of all queries. Outfmt 13 and 14 (side files and a master file) are one more arm of
+//!   the plan and the checks of the side files' names; they are not taken here.
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
 //! ```c++
 //!         if (results.HasAlignments()) {
@@ -372,6 +393,17 @@ pub(crate) fn x_bp_qblock_xml() -> bool {
     })
 }
 
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): whether the block search also takes one XML2 or JSON report
+/// (outfmt 15 or 16; 13 and 14 join with the side files' check). Acts only with `LOSAT_X_BPQBLOCK`.
+pub(crate) fn x_bp_qblock_xml2() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var_os("LOSAT_X_BPQBLOCKFMTSHADOW").is_some()
+            || crate::utils::xswitch::on("LOSAT_X_BPQBLOCKXML2")
+    })
+}
+
 // No NCBI counterpart: the reports the block search writes; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): which report the block search writes, which the driver's checks
@@ -386,6 +418,18 @@ pub(crate) enum XBlockReport {
     Seqalign,
     /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
     Xml,
+    /// Outfmt 15 and 16 (LOSAT_X_BPQBLOCKXML2). The seam of outfmt 13 and 14: one more arm of
+    /// the plan (`blastp_xml2_kind`) and of the driver's checks (the side files' names and the
+    /// master file), the framing state already moves from block to block (`Xml2Carry`).
+    Xml2,
+}
+
+impl XBlockReport {
+    /// Whether the report is a BLAST XML document of outfmt 5, 15 or 16, whose names the writer
+    /// refuses before its first byte.
+    pub(crate) fn is_xml(self) -> bool {
+        matches!(self, XBlockReport::Xml | XBlockReport::Xml2)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733

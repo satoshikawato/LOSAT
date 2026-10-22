@@ -132,6 +132,12 @@ impl BlastpDatabase {
         })
     }
 
+    /// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): starts the run's taxonomy database over, for the
+    /// shadow's second search (`TaxdbRun::x_reset`).
+    pub(super) fn x_reset_taxdb(&self) {
+        self.taxdb.x_reset();
+    }
+
     /// The `-db` value as NCBI keeps it.
     pub(super) fn name(&self) -> &str {
         &self.name
@@ -1165,6 +1171,88 @@ pub(super) fn x_titles_read_allow_blocks(
     }
     let _ = pool;
     (0..db.num_seqs()).all(allowed)
+}
+
+// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the block search of outfmt 15 and 16. Besides what outfmt 5
+// reads (`x_titles_read_allow_blocks`) they read, for each subject with hits, the Blast-def-line
+// taxid (`SeqDb::defline_taxids`, a decode apart from the titles') and, when `taxdb.bti` is on the
+// search path, the taxonomy database (`shared::read_reported_taxids`): its opening, the lookup of
+// the taxid, and a scientific name that NCBI's stream can write (`names::check_text`). The search
+// of all queries makes those refusals before its first byte; a block would make them after the
+// earlier blocks' bytes. So the block search is taken only where none can fail for any subject
+// of the database: every sequence's taxid reads, and the taxonomy database (a database of its
+// own, opened here apart from the run's so that the run's open messages stay for the report) opens
+// and names every taxid of the database with a name that can be written. This is conservative,
+// since the report reads the taxids of the subjects with hits only.
+// No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): whether the taxid of every sequence of the database reads and
+/// the taxonomy database, if `taxdb.bti` is found, opens and gives every taxid a name that the
+/// XML2 stream can write (or none). Read in `pool`; a failure is `false`. It writes nothing and
+/// changes no state of the run.
+pub(super) fn x_taxids_allow_blocks(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> bool {
+    use std::collections::BTreeSet;
+    let db = &database.db;
+    // The taxid `read_reported_taxids` takes of a sequence: its first definition line's.
+    let taxid_of = |ordinal: u32| -> std::result::Result<i32, SeqDbError> {
+        Ok(db.defline_taxids(ordinal)?.first().copied().unwrap_or(0))
+    };
+    let count = db.num_seqs();
+    let collect = || -> Option<BTreeSet<i32>> {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if pool.enabled() {
+            return pool.install(|| {
+                (0..count)
+                    .into_par_iter()
+                    .with_min_len(4096)
+                    .try_fold(BTreeSet::new, |mut taxids, ordinal| {
+                        taxids.insert(taxid_of(ordinal).ok()?);
+                        Some(taxids)
+                    })
+                    .try_reduce(BTreeSet::new, |mut one, other| {
+                        one.extend(other);
+                        Some(one)
+                    })
+            });
+        }
+        let _ = pool;
+        let mut taxids = BTreeSet::new();
+        for ordinal in 0..count {
+            taxids.insert(taxid_of(ordinal).ok()?);
+        }
+        Some(taxids)
+    };
+    let taxids = collect();
+    let Some(taxids) = taxids else {
+        return false;
+    };
+    // `read_reported_taxids` asks the taxonomy database only for a taxid other than 0, and only
+    // when `taxdb.bti` resolves.
+    if taxids.iter().all(|&taxid| taxid == 0) || !db.taxdb_found() {
+        return true;
+    }
+    let Some(search_path) = db.search_path() else {
+        return true;
+    };
+    let taxdb = crate::seqdb::taxdb::LazyTaxDb::new(search_path.clone());
+    if taxdb.open().is_err() {
+        return false;
+    }
+    taxids.iter().filter(|&&taxid| taxid != 0).all(|&taxid| {
+        let mut messages = Vec::new();
+        match taxdb.names(taxid, &mut messages) {
+            Ok(Some(names)) => {
+                crate::report::blast_xml::names::check_text(&names.scientific_name).is_ok()
+            }
+            Ok(None) => true,
+            Err(_) => false,
+        }
+    })
 }
 
 #[cfg(test)]

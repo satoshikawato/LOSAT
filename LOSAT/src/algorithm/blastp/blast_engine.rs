@@ -6035,6 +6035,7 @@ fn search(
             v1_titles: v1.is_some(),
             x_prolog: true,
             x_queries_before: 0,
+            x_xml2_carry: None,
         };
         let result = run_resolved_in_pool(
             args,
@@ -6059,13 +6060,15 @@ fn search(
     // format 6, or with LOSAT_X_BPQBLOCKFMT outfmt 0 or 7 (the outfmt 0 prolog with the first
     // block, the epilog and outfmt 7's count of the queries with the last), with
     // LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with LOSAT_X_BPQBLOCKXML outfmt 5 (the header with the
-    // first block, the end with the last); otherwise the search of
+    // first block, the end with the last), with LOSAT_X_BPQBLOCKXML2 outfmt 15 or 16 (as outfmt 5,
+    // the framing state handed from block to block, `Xml2Carry`); otherwise the search of
     // all queries below. With `-db` the blocks are searched only when no definition line of the
     // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, or
-    // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, read
+    // `x_titles_read_allow_blocks` for outfmt 8, 9, 12, 5, 15 and 16 (and for 15 and 16 the taxids,
+    // `x_taxids_allow_blocks`), read
     // in the block search's pool before the first block), and with outfmt 0 and `-subject` only
     // when no subject's title is refused where the report shows it
-    // (`x_block_shown_titles_allowed`), with outfmt 5 only when the names of the database, the
+    // (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the database, the
     // queries and the subjects can be written (`x_query_blocks.rs` `x_block_xml_*_allowed`);
     // otherwise the search of all queries below.
     if let Some((x_kind, blocks)) = x_query_block_plan(
@@ -6085,7 +6088,8 @@ fn search(
             ..
         } = &mut *outputs;
         let outfmt = formats[0].outfmt;
-        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT, LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the report the
+        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT, LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML,
+        // LOSAT_X_BPQBLOCKXML2): the report the
         // blocks write, whose titles are checked below.
         let x_pairwise = x_kind == super::x_query_blocks::XBlockReport::Pairwise;
         // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): copies of what the blocks write, compared below
@@ -6111,13 +6115,19 @@ fn search(
                     (Some(database), XBlockReport::Seqalign | XBlockReport::Xml) => {
                         database::x_titles_read_allow_blocks(database, pool)
                     }
+                    // Outfmt 15 and 16 also read each subject's taxid and the taxonomy
+                    // database's name of it (`x_taxids_allow_blocks`).
+                    (Some(database), XBlockReport::Xml2) => {
+                        database::x_titles_read_allow_blocks(database, pool)
+                            && database::x_taxids_allow_blocks(database, pool)
+                    }
                     (Some(database), _) => {
                         database::x_titles_allow_blocks(database, x_pairwise, pool)
                     }
                     (None, XBlockReport::Pairwise) => {
                         x_block_shown_titles_allowed(&subjects.records, v1.is_some(), pool)
                     }
-                    (None, XBlockReport::Xml) => {
+                    (None, XBlockReport::Xml | XBlockReport::Xml2) => {
                         super::x_query_blocks::x_block_xml_subjects_allowed(&subjects.records, pool)
                     }
                     (None, _) => true,
@@ -6125,9 +6135,10 @@ fn search(
                 if !titles_allowed {
                     return Ok(None);
                 }
-                // EXPERIMENT (LOSAT_X_BPQBLOCKXML): the XML report's refusals of the database
-                // name and of the queries' names, which it makes before its first byte.
-                if x_kind == XBlockReport::Xml
+                // EXPERIMENT (LOSAT_X_BPQBLOCKXML, LOSAT_X_BPQBLOCKXML2): the XML report's refusals
+                // of the database name and of the queries' names, which it makes before its first
+                // byte.
+                if x_kind.is_xml()
                     && !super::x_query_blocks::x_block_xml_run_allowed(
                         database.map_or("", |database| database.name()),
                         query_records,
@@ -6145,6 +6156,10 @@ fn search(
                     x_bp_encode_block_subjects(&subjects.records, args.num_threads, pool)?;
                 crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
                 let pool = &pool.x_with_ext(&x_subjects);
+                // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state that the blocks of an
+                // outfmt 15 or 16 run hand on.
+                let x_xml2_carry =
+                    std::sync::Mutex::new(crate::report::blast_xml2::Xml2Carry::default());
                 let mut sink = super::x_query_blocks::XBlockSink::new(&mut formats[0].sink);
                 let mut x_output = super::x_query_blocks::XCopyWriter {
                     inner: &mut sink,
@@ -6194,6 +6209,8 @@ fn search(
                                 v1_titles: v1.is_some(),
                                 x_prolog: index == 0,
                                 x_queries_before: block.start,
+                                x_xml2_carry: (x_kind == XBlockReport::Xml2)
+                                    .then_some(&x_xml2_carry),
                             },
                             x_block,
                         )
@@ -6220,6 +6237,11 @@ fn search(
                     hits: None,
                     observer: None,
                 };
+                // The taxonomy database's open and lookup messages (outfmt 15 and 16) belong to the
+                // first search of a run: the blocks wrote them, so the second starts them over.
+                if let Some(database) = subject_source.database() {
+                    database.x_reset_taxdb();
+                }
                 crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
                     search_batches(
                         args.clone(),
@@ -6356,7 +6378,7 @@ fn x_bp_encode_block_subjects(
 // queries. The block search is taken only where the blocks' reports written one after the other
 // are the report of the search of all queries: one output, tabular format 6 (or with
 // LOSAT_X_BPQBLOCKFMT outfmt 0 or 7, with LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with
-// LOSAT_X_BPQBLOCKXML outfmt 5, `x_query_blocks.rs`; the kind of report is returned with the
+// LOSAT_X_BPQBLOCKXML outfmt 5, LOSAT_X_BPQBLOCKXML2 outfmt 15 and 16, `x_query_blocks.rs`; the kind of report is returned with the
 // blocks), no `-query_loc` (every record is
 // searched whole), every batch read, more than one block, no subject whose tabular ID the
 // reference path rejects before it writes any row (`tabular_subject_ids`, for outfmt 6 and 7;
@@ -6397,7 +6419,8 @@ fn x_query_block_plan(
         return None;
     }
     // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): outfmt 0 and 7 too. EXPERIMENT (LOSAT_X_BPQBLOCKSA,
-    // LOSAT_X_BPQBLOCKXML): outfmt 8, 9, 12 and 5, which `OutputFormat::parse` does not know.
+    // LOSAT_X_BPQBLOCKXML, LOSAT_X_BPQBLOCKXML2): outfmt 8, 9, 12, 5, 15 and 16, which
+    // `OutputFormat::parse` does not know.
     let kind = match OutputFormat::parse(outputs.formats[0].outfmt) {
         Ok((OutputFormat::Tabular, _)) => XBlockReport::Tabular,
         Ok((OutputFormat::TabularWithComments, _))
@@ -6423,6 +6446,13 @@ fn x_query_block_plan(
                 && blastp_is_xml(outputs.formats[0].outfmt) =>
         {
             XBlockReport::Xml
+        }
+        // Outfmt 15 and 16 (`blastp_xml2_kind`; 13 and 14, which write side files, are not here).
+        Err(_)
+            if super::x_query_blocks::x_bp_qblock_xml2()
+                && blastp_xml2_kind(outputs.formats[0].outfmt).is_some() =>
+        {
+            XBlockReport::Xml2
         }
         _ => return None,
     };
@@ -6872,6 +6902,10 @@ struct BlastpReports<'a> {
     /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): the queries of the blocks before this one, which outfmt
     /// 7's last line counts with this call's (0 outside the block search).
     x_queries_before: usize,
+    /// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state of an outfmt 15 or 16 run that the
+    /// blocks hand on (the count of reports, the start of the document, a `-subject` run's held
+    /// report; `None` outside the block search).
+    x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
 }
 
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
@@ -7013,6 +7047,7 @@ fn search_split_query_batches(
                     v1_titles: false,
                     x_prolog,
                     x_queries_before: 0,
+                    x_xml2_carry: None,
                 },
                 x_lookup_ahead::XAheadBlock::none(),
             )?;
@@ -11021,14 +11056,26 @@ fn run_resolved_in_pool(
                             query_gencode: None,
                             db_gencode: None,
                         };
+                        let mut document = crate::report::blast_xml2::Xml2Writer::new(kind, params);
+                        // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): a block continues the document
+                        // of the blocks before it and hands its state on.
+                        if let Some(carry) = reports.x_xml2_carry {
+                            document
+                                .document_mut()
+                                .resume(std::mem::take(&mut *carry.lock().expect("the carry")));
+                        }
                         super::blast_xml::write_blastp_xml(
                             &xml,
-                            &mut crate::report::blast_xml2::Xml2Writer::new(kind, params),
+                            &mut document,
                             &hit_lists,
                             &mut xml_rows,
                             &mut writer,
                             warnings.as_mut(),
                         )?;
+                        if let Some(carry) = reports.x_xml2_carry {
+                            *carry.lock().expect("the carry") =
+                                document.document_mut().take_carry();
+                        }
                     }
                 }
                 // Flushed when written, as the other reports are.

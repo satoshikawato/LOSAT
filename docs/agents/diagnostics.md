@@ -230,8 +230,8 @@ their variables mean
   vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPLUT` declines in
   diagnostics mode; `BPQBLOCK` takes the block path only for one `-outfmt 6` report (with
   `BPQBLOCKFMT`, one outfmt 0, 6 or 7 report; with `BPQBLOCKSA`, one outfmt 8, 9 or 12 report; with
-  `BPQBLOCKXML`, one outfmt 5 report) with more than one block (see its entry), and
-  `BPQBLOCKFMT`, `BPQBLOCKSA` and `BPQBLOCKXML` act only with `BPQBLOCK`; `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
+  `BPQBLOCKXML`, one outfmt 5 report; with `BPQBLOCKXML2`, one outfmt 15 or 16 report) with more than one block (see its entry), and
+  `BPQBLOCKFMT`, `BPQBLOCKSA`, `BPQBLOCKXML` and `BPQBLOCKXML2` act only with `BPQBLOCK`; `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
   `TBXNEXT` only in TBLASTX's parallel subject loop (2 or more threads, several subjects; native
   builds and the threaded Wasm module); `BPCLUT` acts on `blastp -task blastp-fast` only, and `BPLKPFLAT` only where the search's pool
   builds the flat table of `BPCLUT` (`BPCLUT` on, 2 or more threads), so with `BPCLUT=0` it changes
@@ -286,6 +286,7 @@ export LOSAT_X_BPQBLOCK=50000
 export LOSAT_X_BPQBLOCKFMT=1
 export LOSAT_X_BPQBLOCKSA=1
 export LOSAT_X_BPQBLOCKXML=1
+export LOSAT_X_BPQBLOCKXML2=1
 export LOSAT_X_BPREDOFIT=1
 export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
@@ -1855,7 +1856,7 @@ Rebuilding less:
   batch at a time. Both lookup tables take it: the default one, and the compressed one of `-task blastp-fast`
   (word size 5), whose table each block builds for its own batches and tests for NCBI's overflow banks with
   them. Taken only where a block's report is its rows: one output in tabular format 6 (with
-  `LOSAT_X_BPQBLOCKFMT`, below, also outfmt 0 or 7; `LOSAT_X_BPQBLOCKSA` outfmt 8, 9 or 12; `LOSAT_X_BPQBLOCKXML` outfmt 5), no `-query_loc`, every batch read, more than one block, no subject whose tabular ID the reference path rejects, and none of the
+  `LOSAT_X_BPQBLOCKFMT`, below, also outfmt 0 or 7; `LOSAT_X_BPQBLOCKSA` outfmt 8, 9 or 12; `LOSAT_X_BPQBLOCKXML` outfmt 5; `LOSAT_X_BPQBLOCKXML2` outfmt 15 or 16), no `-query_loc`, every batch read, more than one block, no subject whose tabular ID the reference path rejects, and none of the
   reference path's other refusals that come before its rows (a `-window_size` whose diagonal table with all
   queries passes 2^30, a query split that LOSAT rejects, or with the compressed table a query batch whose
   offsets add more than four times NCBI's overflow cells, about 859 million words, counted before the search);
@@ -1922,8 +1923,32 @@ Rebuilding less:
   identical; off = `LOSAT_X_BPQBLOCKXML=0`. ws (2026-10-21, same job): max RSS at 1 / 16 threads on 32.8 / 49.8 MiB,
   off 212.9 / 350.6, NCBI 101.0 / 146.7; wall on/off x0.83 at 1 thread, x0.65 at 16; outputs equal NCBI's
   -num_threads 1. The -subject cost of the names check was not measured.
-- `LOSAT_X_BPQBLOCKFMTSHADOW=1` shadow of the block search (turns `LOSAT_X_BPQBLOCKFMT`, `LOSAT_X_BPQBLOCKSA` and
-  `LOSAT_X_BPQBLOCKXML` on; any format the
+- `LOSAT_X_BPQBLOCKXML2=1` (BLASTP, speed and memory; in the strict set from the pull request that added it,
+  on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search of `LOSAT_X_BPQBLOCK` also for one outfmt 15
+  (BLAST JSON) or 16 (BLAST XML2) report (`blastp/x_query_blocks.rs`, exactness argument in its header): each
+  block writes its queries' reports before the next block is searched. NCBI writes one complete document per
+  query; the document's start comes with the first report, the end once (a `-subject` run holds each report
+  until the next arrives, and the last until the end), JSON joins the reports with `,\n`. What the framing keeps
+  from one report to the next (the count of reports written, whether the start was written, the held report of
+  a `-subject` run) moves from block to block (`report::blast_xml2::Xml2Carry`,
+  `BlastpReports::x_xml2_carry`). The name checks of `LOSAT_X_BPQBLOCKXML` apply as they are (database name, every
+  query's definition line and message id, every `-subject` record's names, with `-db` the definition lines as for
+  `LOSAT_X_BPQBLOCKSA`). Outfmt 15 and 16 also read, for each subject with hits, the Blast-def-line taxid and,
+  when `taxdb.bti` is on the search path, the taxonomy database (its opening, the lookup, a scientific name
+  that NCBI's stream can write), and refuse before the first byte; so with `-db` the blocks are searched only
+  when the taxid of every sequence reads and the taxonomy database, if found, opens and names every taxid of the
+  database with a name that can be written (`database::x_taxids_allow_blocks`, checked in the search pool before
+  the first block, with a taxonomy database opened apart from the run's: the run's open and lookup messages
+  stay for the report, which writes them at the first `Hit` that needs them, in the block that has it).
+  Fallbacks to the search of all queries (memory as before): those of `LOSAT_X_BPQBLOCKXML`, and a `-db`
+  sequence whose taxid does not read, a taxonomy database that does not open, or a taxid of the database whose
+  name cannot be written, reported or not. Outfmt 13 and 14 (side files and a master file) are not taken.
+  Reports identical; off = `LOSAT_X_BPQBLOCKXML2=0`. Local (WSL, 3000 x 6,600-protein Species6 `-db`, 3 interleaved
+  rounds, `/usr/bin/time -v`, machine load 20-70): max RSS at 1 / 4 threads on 25.7 / 37.6 MiB (outfmt 15), 25.8 / 38.5
+  (16), off 219.7 / 259.9 and 219.4 / 259.5, outfmt 6 25.2 / 40.1; user time on/off x0.87 (15) at 1 thread; outputs
+  identical on/off. ws numbers (NCBI 2.17.0 in the same job): TBD (v4-MEM).
+- `LOSAT_X_BPQBLOCKFMTSHADOW=1` shadow of the block search (turns `LOSAT_X_BPQBLOCKFMT`, `LOSAT_X_BPQBLOCKSA`,
+  `LOSAT_X_BPQBLOCKXML` and `LOSAT_X_BPQBLOCKXML2` on; any format the
   block search takes): keeps a copy of the bytes the blocks write to the output and to standard error, then
   searches all queries again and writes their report and warnings into memory; a difference prints
   `[X_SHADOW] BPQBLOCKFMT output|stderr DIFFERENT at byte N ...` and stops the run. One line after the

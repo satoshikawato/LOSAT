@@ -11,7 +11,7 @@ pub mod framing;
 pub mod records;
 pub mod writer;
 
-pub use framing::{NoSideFiles, SideFiles, Xml2Document, Xml2Kind};
+pub use framing::{NoSideFiles, SideFiles, Xml2Carry, Xml2Document, Xml2Kind};
 pub use records::{Xml2Run, Xml2Target};
 pub use writer::Xml2Writer;
 

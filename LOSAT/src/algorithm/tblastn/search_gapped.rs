@@ -2033,7 +2033,7 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
     Ok(
         full_translation_traceback_with_matrix_and_events_with_mask_mode_owned(
             query,
-            subject,
+            SubjectNt::Letters(subject),
             db_gencode,
             &ordered,
             matrix,
@@ -2065,7 +2065,7 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
 // visiting input HSPs becomes the posttraceback statistical subject length.
 pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_owned(
     query: &[u8],
-    subject: &[u8],
+    subject: SubjectNt<'_>,
     db_gencode: u8,
     gapped: &[GappedHsp],
     matrix: ScoringMatrix,
@@ -2125,7 +2125,7 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
     let ordered = gapped.to_vec();
     let query_length = i32::try_from(query.len())?;
     let subject_limit = i32::try_from(subject.len() / 3)? + 1;
-    let mut target = TargetTranslation::new(subject, &code);
+    let mut target = TargetTranslation::of(subject, &code);
     for pass in 0..2 {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:294,425-433: initialized from raw subject
         // length, then overwritten by each positive translated_length.
@@ -2363,7 +2363,7 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
         if pass == 1 {
             bail!("NCBI full-subject TBLASTN traceback reached a fence");
         }
-        target = TargetTranslation::new(subject, &code);
+        target = TargetTranslation::of(subject, &code);
     }
     unreachable!("NCBI traceback retries at most once")
 }

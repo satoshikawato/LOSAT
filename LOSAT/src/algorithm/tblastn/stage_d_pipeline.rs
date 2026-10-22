@@ -2851,10 +2851,11 @@ fn finish_local_mode0_no_sum_stats(
                 .collect::<Vec<_>>()
         })
         .collect();
-    // The letters of the subject in hand (made from its packed form with LOSAT_X_TBNSTORE).
-    let mut x_letters = Vec::new();
     for (context, oid, preliminary) in preliminary_lists {
-        let subject = subjects.letters(oid, &mut x_letters);
+        // The subject as the readers of windows take it: the record's letters, or (EXPERIMENT,
+        // LOSAT_X_TBNSTORE) its store, whose windows the translations make when they read them
+        // (`TargetTranslation`), so the subject's whole letters are never made.
+        let subject = subjects.nt(oid);
         let input: Vec<_> = preliminary.hsps.iter().map(|linked| linked.hsp).collect();
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536:
         // traceback uses the selected scoring matrix and gap costs.
@@ -2934,7 +2935,7 @@ fn finish_local_mode0_no_sum_stats(
         if post.hsps.is_empty() {
             continue;
         }
-        let mut target = TargetTranslation::new(subject, code);
+        let mut target = TargetTranslation::of(subject, code);
         let mut owned: Vec<Option<TracebackOwnedHsp>> = traced.into_iter().map(Some).collect();
         let payloads = post
             .hsps

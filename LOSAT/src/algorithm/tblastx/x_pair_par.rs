@@ -626,7 +626,11 @@ fn tbx_prefetch_min_kib() -> Option<usize> {
 /// Whether the units whose tables have `table_bytes` prefetch at the switch's value `min_kib`: one
 /// of them has at least `min_kib` KiB.
 fn x_prefetch_units(min_kib: Option<usize>, mut table_bytes: impl Iterator<Item = usize>) -> bool {
-    min_kib.is_some_and(|kib| table_bytes.any(|bytes| bytes / 1024 >= kib))
+    let prefetch = min_kib.is_some_and(|kib| table_bytes.any(|bytes| bytes / 1024 >= kib));
+    if min_kib.is_some() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXPREFETCH", prefetch);
+    }
+    prefetch
 }
 
 // No NCBI counterpart: LOSAT_TIMING read once; it does not change any value NCBI computes.
@@ -938,19 +942,30 @@ pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
     // EXPERIMENT (LOSAT_X_TBXBAND): with the switch the first guard is not applied (module doc
     // item 3) where the subject chunks fit the reference table (`x_band_fits`), or, with
     // LOSAT_X_TBXUNITMASK, where the units' tables are masked or small (`x_band_masked`).
-    if !((g.band && (x_band_fits(longest_subject_chunk, g.diag_array_size) || x_band_masked(g)))
+    let band_takes =
+        g.band && (x_band_fits(longest_subject_chunk, g.diag_array_size) || x_band_masked(g));
+    let first_guard = band_takes
         || guard(
             max_context_len,
             longest_subject_chunk,
             g.query_length,
             g.diag_array_size,
-        ))
-        || !last_hit_fits(longest_subject_chunk, g.query_length, g.diag_array_size)
-    {
+        );
+    // The old guard rejects, and the switch's memory rule does not take the batch: the reference
+    // loop. The batches the switch takes are marked in `prepare` (`band`).
+    if g.band && !first_guard {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXBAND", false);
+    }
+    if !first_guard || !last_hit_fits(longest_subject_chunk, g.query_length, g.diag_array_size) {
         return XDecision::Guard;
     }
-    if m == 1 && g.cost_gate && !units_gain(g) {
-        return XDecision::Cost;
+    if m == 1 && g.cost_gate {
+        let gain = units_gain(g);
+        // The gate's rule sends a batch without gain to the reference loop (false).
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARGATE", gain);
+        if !gain {
+            return XDecision::Cost;
+        }
     }
     XDecision::Units
 }
@@ -1129,6 +1144,9 @@ pub(super) fn lut_build(e: XLutEarly<'_>) -> Option<XLutBatch> {
     let t0 = timing().then(Instant::now);
     let built = lut_direct(&e, lm == 2);
     add_ns(&NS_LUT_DIRECT, t0);
+    if lm == 1 {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRLUT", built.is_some());
+    }
     match &built {
         Some(batch) => {
             LUT_BATCHES.fetch_add(1, AtomicOrdering::Relaxed);
@@ -1547,6 +1565,9 @@ fn x_records_for(
     records: &mut Vec<XUnitHsp>,
 ) -> bool {
     let mapped = x_unit_mapped(scratch.unmap, span, unit.chunk.length);
+    if scratch.unmap {
+        crate::utils::xreach::x_reach!("LOSAT_X_SEEDUNMAP", mapped);
+    }
     if mapped && records.capacity() * std::mem::size_of::<XUnitHsp>() < X_MAPPED_BYTES {
         *records = Vec::with_capacity(x_mapped_len::<XUnitHsp>(0));
         SU_RECORDS.fetch_add(1, AtomicOrdering::Relaxed);
@@ -1941,6 +1962,23 @@ impl XPairPar {
             }
             XDecision::Off | XDecision::Units => {}
         }
+        // The unit path runs for the batch (`Units`), or the switches that act only on it are left
+        // with the reference loop.
+        if decision != XDecision::Off {
+            let units = decision == XDecision::Units;
+            if m == 1 {
+                crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", units);
+            }
+            if seed_compact() {
+                crate::utils::xreach::x_reach!("LOSAT_X_SEEDCOMPACT", units);
+            }
+            if x_kmerge::mode() == 1 {
+                crate::utils::xreach::x_reach!("LOSAT_X_TBXKMERGE", units);
+            }
+            if !units {
+                x_tbx_hitbf::x_reach_not_taken();
+            }
+        }
         if decision != XDecision::Units {
             // LOSAT_X_PAIRLUT: direct groups mean that the build site decided for the unit path
             // (and, without the shadow, that the batch's table is a stub); the reference loop
@@ -1999,6 +2037,7 @@ impl XPairPar {
         };
         if band {
             BAND.fetch_add(1, AtomicOrdering::Relaxed);
+            crate::utils::xreach::x_reach!("LOSAT_X_TBXBAND", true);
         }
         // EXPERIMENT (LOSAT_X_TBXUNITMASK): the batch's rule and the groups' extents for the units'
         // masked tables; none where LOSAT_X_TBXQSLICE's rule cuts a group (module doc;
@@ -2006,8 +2045,13 @@ impl XPairPar {
         // stop the slicing.
         let mask_rule = unit_mask_kib()
             .filter(|_| {
-                sliced.is_none()
-                    && !x_tbx_qslice::rule_cuts(b.contexts, &group_starts(b.contexts), b.threads)
+                let ungrouped = sliced.is_none()
+                    && !x_tbx_qslice::rule_cuts(b.contexts, &group_starts(b.contexts), b.threads);
+                // A batch with cut groups keeps the unmasked tables.
+                if !ungrouped {
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBXUNITMASK", false);
+                }
+                ungrouped
             })
             .map(|kib| XMaskRule {
                 max_cells: x_mask_max_cells(kib, b.threads),
@@ -2136,6 +2180,12 @@ impl XPairPar {
                     .filter(|unit| self.x_unit_mask(unit, inp.window).is_some())
                     .count();
                 UM_UNITS.fetch_add(masked as u64, AtomicOrdering::Relaxed);
+                if masked > 0 {
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBXUNITMASK", true);
+                }
+                if masked < units.len() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBXUNITMASK", false);
+                }
             }
             if prefetch {
                 self.run_subject_unit_fns::<true>(&units, inp, pool)
@@ -2545,6 +2595,9 @@ impl XPairPar {
     ) -> bool {
         let span = x_unit_span(&self.groups[unit.g]);
         let mapped = x_unit_mapped(scratch.unmap, span, unit.chunk.length);
+        if scratch.unmap {
+            crate::utils::xreach::x_reach!("LOSAT_X_SEEDUNMAP", mapped);
+        }
         if mapped && records.capacity() * std::mem::size_of::<XUnitHsp>() < X_MAPPED_BYTES {
             *records = Vec::with_capacity(x_mapped_len::<XUnitHsp>(0));
             SU_RECORDS.fetch_add(1, AtomicOrdering::Relaxed);

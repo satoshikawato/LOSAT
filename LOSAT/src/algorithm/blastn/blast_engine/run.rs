@@ -6541,6 +6541,9 @@ fn read_cli_subjects(
         }
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
+    if x_bnstore() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BNSTORE", stores.is_some());
+    }
     drop(subject_source);
     // NCBI reads records without residues (and intervals without letters) without a message
     // and reports them when it sets up the search (`search`).
@@ -8134,6 +8137,9 @@ fn run_in_pool(
                     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps its megablast table from batch
                     // to batch once no slot can search a batch any more.
                     let x_keep = x_lut_keep.as_ref().filter(|_| !qbp.may_speculate());
+                    if x_lut_keep.is_some() && x_keep.is_none() {
+                        crate::utils::xreach::x_reach!("LOSAT_X_MBLUTKEEP", false);
+                    }
                     let reference = search_query_batch(
                         &args,
                         batch_records.searched(),
@@ -9400,8 +9406,10 @@ fn search_query_batch(
     // arguments only: every cell it reads from its scratch was written
     // earlier in the same call, and a larger `max_dist` left by an earlier
     // call only saves retries.
+    let x_greedy_spec =
+        requested_parallel && !config.use_dp && crate::utils::xswitch::on("LOSAT_X_GREEDYSPEC");
     let speculative_traceback = requested_parallel
-        && (config.use_dp || crate::utils::xswitch::on("LOSAT_X_GREEDYSPEC"))
+        && (config.use_dp || x_greedy_spec)
         && std::env::var_os("LOSAT_DEBUG_COORDS").is_none()
         && std::env::var_os("LOSAT_DEBUG_COORDS_START").is_none();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919
@@ -9432,6 +9440,9 @@ fn search_query_batch(
     } else {
         None
     };
+    if x_ahead_window.is_none() && crate::utils::xahead::window().is_some() {
+        crate::utils::xreach::x_reach!("LOSAT_X_AHEAD", false);
+    }
     // Read sequences
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
     // ```c
@@ -10577,6 +10588,9 @@ fn search_query_batch(
                 x_kind,
             )
         });
+    if x_few_subj::on() && subjects_parallel && subjects.prepared().is_some() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BNFEWSUBJ", x_serial_subjects);
+    }
     // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
     // TBlastThreads the_threads(GetNumberOfThreads());
     // (*thread)->Run(); (*thread)->Join(&result);
@@ -10601,6 +10615,9 @@ fn search_query_batch(
         && debug_window.is_none()
         && std::env::var_os("LOSAT_DEBUG_COORDS").is_none()
         && std::env::var_os("LOSAT_DEBUG_COORDS_START").is_none();
+    if x_qgroup_par::on() && !x_qgroup_batch {
+        crate::utils::xreach::x_reach!("LOSAT_X_QGROUPPAR", false);
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
     // ```c
     // return ((hsp->num_ident * 100.0 <
@@ -11177,6 +11194,9 @@ fn search_query_batch(
                 // cells all lie below the level bound, unless diagnostics print what they read.
                 let x_lv_ref = diag_hash.x_lv_on()
                     && !(debug_enabled || blastn_trace_enabled || debug_window.is_some());
+                if diag_hash.x_lv_on() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV", use_diag_hash && x_lv_ref);
+                }
                 if use_array_indexing {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:145-149
                     // ```c
@@ -14087,6 +14107,12 @@ fn search_query_batch(
                     }
                     _ => None,
                 };
+                if x_ahead_window.is_some() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_AHEAD", x_ahead.is_some());
+                }
+                if x_greedy_spec && x_ahead_window.is_some() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_GREEDYSPEC", x_ahead.is_some());
+                }
                 let mut x_no_helpers = Vec::new();
                 let x_helper_scratch = x_helper_scratch.unwrap_or(&mut x_no_helpers);
                 if x_ahead.is_some() {
@@ -14867,6 +14893,9 @@ fn search_query_batch(
                                 num_threads,
                                 x_kind,
                             );
+                        if !use_parallel && !subject_masked && x_strips && chunk_batch.len() > 1 {
+                            crate::utils::xreach::x_reach!("LOSAT_X_BNFEWSUBJ", x_serial_chunks);
+                        }
                         crate::utils::threading::report_stage(
                             "blastn",
                             "subject_chunks",
@@ -15170,6 +15199,9 @@ fn search_query_batch(
                             traceback_edit_script_lengths: &mut Vec<u32>,
                             traceback_alignment_lengths: &mut Vec<u32>| {
             let speculative_traceback = speculative_traceback && x_helper_scratch.is_some();
+            if x_greedy_spec {
+                crate::utils::xreach::x_reach!("LOSAT_X_GREEDYSPEC", speculative_traceback);
+            }
             if !prelim_hits.is_empty() {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:358-365
                 // ```c
@@ -15462,6 +15494,9 @@ fn search_query_batch(
                     }
                     _ => None,
                 };
+                if x_ahead_window.is_some() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_AHEAD", x_ahead.is_some());
+                }
                 let mut x_no_helpers = Vec::new();
                 let x_helper_scratch = x_helper_scratch.unwrap_or(&mut x_no_helpers);
                 if x_ahead.is_some() {
@@ -17147,6 +17182,7 @@ fn search_query_batch(
             ))]
             {
                 if x_bnstream() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BNSTREAM", true);
                     let threads = parallel_pool.threads().max(1);
                     let window = threads * X_BNSTREAM_SUBJECTS_PER_THREAD;
                     parallel_pool.install(|| {
@@ -17180,6 +17216,9 @@ fn search_query_batch(
                 unreachable!("use_parallel is false when parallel threads are disabled");
             }
         } else {
+            if x_bnstream() {
+                crate::utils::xreach::x_reach!("LOSAT_X_BNSTREAM", false);
+            }
             let mut state = new_state();
             for s_idx in 0..num_subjects {
                 if x_cancelled() {

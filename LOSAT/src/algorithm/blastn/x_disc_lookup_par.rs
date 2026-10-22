@@ -283,7 +283,11 @@ fn parts_for(on: bool) -> Option<usize> {
 /// No NCBI counterpart: dispatch test of `build_disc_mb_lookup` (the switch, or its shadow, and
 /// a search pool of two threads or more).
 pub(super) fn parts() -> Option<usize> {
-    parts_for(switches().0)
+    let parts = parts_for(switches().0);
+    if switches().0 {
+        crate::utils::xreach::x_reach!("LOSAT_X_DISCLUTPAR", parts.is_some());
+    }
+    parts
 }
 
 /// No NCBI counterpart: LOSAT_X_DISCLUTPARSHADOW is set.

@@ -795,6 +795,10 @@ impl XSubjectSide {
         gencode: u8,
         mask_lowercase: bool,
     ) -> Option<Self> {
+        // The own side is recorded where a plan is kept or refused (KEEP_LIMIT).
+        if on && batches < Self::KEEP_FROM_BATCHES {
+            crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", false);
+        }
         (on && batches >= Self::KEEP_FROM_BATCHES)
             .then(|| Self::new(subjects, gencode, mask_lowercase))
     }
@@ -862,8 +866,13 @@ impl XSubjectSide {
         let kept = slot.get_or_init(|| {
             made = true;
             match build() {
-                Ok(plan) if self.keep(&plan) => Some(plan),
+                Ok(plan) if self.keep(&plan) => {
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", true);
+                    Some(plan)
+                }
                 Ok(plan) => {
+                    // Over `KEEP_LIMIT`: the plan is made per use.
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", false);
                     own = Some(plan);
                     None
                 }

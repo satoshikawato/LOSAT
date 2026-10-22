@@ -43,7 +43,11 @@ impl Volume {
     /// are read where they are needed (`IndexFile::open`); without the switch
     /// the whole file is read and its arrays are held (`IndexFile::parse`).
     pub fn open(base: &Path, seqtype: SeqType) -> Result<Self, SeqDbError> {
-        Self::open_as(base, seqtype, super::x_dbidxread())
+        let mode = super::x_dbidxread();
+        if mode != XDbIdxRead::Off {
+            crate::utils::xreach::x_reach!("LOSAT_X_DBIDXREAD", true);
+        }
+        Self::open_as(base, seqtype, mode)
     }
 
     /// `open` with the index read as `mode` says.

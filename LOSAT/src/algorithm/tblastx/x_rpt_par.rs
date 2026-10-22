@@ -104,7 +104,12 @@ pub(crate) fn pool<'p, 'q>(pool: &'p SearchPool<'q>) -> Option<&'p SearchPool<'q
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ));
-    (PARALLEL && mode() != 0 && pool.enabled() && pool.threads() > 1).then_some(pool)
+    let m = mode();
+    let pooled = PARALLEL && m != 0 && pool.enabled() && pool.threads() > 1;
+    if m == 1 {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXRPTPAR", pooled);
+    }
+    pooled.then_some(pool)
 }
 
 /// `report::set_displayed_identities` over chunks of `hits` on `pool` (item 1).

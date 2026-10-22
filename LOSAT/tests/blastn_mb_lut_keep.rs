@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The megablast hashtable kept from batch to batch of blastn's batch loop (`LOSAT_X_MBLUTKEEP`,
 //! `src/algorithm/blastn/x_mb_lut_keep.rs`) on whole searches.
 //!
@@ -101,7 +102,7 @@ fn genomes() -> &'static Path {
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
 /// one thread, and it selects nothing. Returns the report and the standard error.
 fn blastn(task: &str, query: &Path, threads: u32, switches: &[(&str, &str)]) -> (Vec<u8>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")

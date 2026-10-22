@@ -31,7 +31,6 @@ use crate::core::composition_adjustment::redo_alignment::{
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
 
-use super::encoding::EncodedProtein;
 use super::gapalign::{
     blast_gapped_alignment_with_traceback_with_scratch, BlastpPreliminaryHsp, GapAlignScratch,
 };
@@ -2301,7 +2300,7 @@ pub(crate) fn postprocess_preliminary_hits(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn x_newton_lanes_prefetch_matches(
     local_matches: &[BlastpHspList],
-    subjects: &[EncodedProtein],
+    subjects: super::x_redo_subjects::XRedoSubjects<'_>,
     heaps: &[BlastCompoHeap],
     query_workspace: &BlastpKappaQueryWorkspace,
     composition_workspace: &BlastCompositionWorkspace,
@@ -2327,8 +2326,13 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
             .iter()
             .map(super::blast_engine::preliminary_hit_from_local_match_hsp)
             .collect();
-        let subject = &subjects[local_match.oid as usize];
-        let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
+        // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database, dropped after the match (the
+        // redo reads it again); on an error nothing is computed ahead, and the redo of the match
+        // reaches the error itself.
+        let Ok(subject) = subjects.read(local_match.oid) else {
+            continue;
+        };
+        let subject_raw = subject.residues();
         let incoming_aligns =
             build_incoming_alignment_list(&preliminary_hits, redo_align_params.score_divisor);
         let matching_seq =

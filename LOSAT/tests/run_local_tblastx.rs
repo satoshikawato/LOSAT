@@ -56,7 +56,7 @@ impl Inputs {
         let query = self.query.0.display().to_string();
         let subject = self.subject.0.display().to_string();
         let mut argv = vec![
-            "LOSAT", "tblastx", "-query", &query, "-subject", &subject, "-outfmt", "6",
+            "losat", "tblastx", "-query", &query, "-subject", &subject, "-outfmt", "6",
         ];
         argv.extend_from_slice(extra);
         let cli: Cli = try_parse_from(argv).expect("tblastx argv");
@@ -77,7 +77,7 @@ impl Inputs {
     /// The CLI output file and standard error of one single-format run.
     fn cli(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
         let out = self.query.0.with_extension(format!("cli{outfmt}.out"));
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
             .arg(&self.query.0)
@@ -235,6 +235,69 @@ fn unsupported_formats_fail_before_searching() {
     }
 }
 
+// NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
+// `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
+// so formats that need different hit list sizes are refused before anything is written
+// (`blastinput/report_counts.rs`), while formats of one hit list size still share a run.
+#[test]
+fn formats_needing_different_hit_list_sizes_are_refused() {
+    let inputs = Inputs::new();
+    let queries = queries(&inputs.query.0);
+    let subjects = subjects(&inputs.subject.0);
+    let attempt = |formats: &[&str], extra: &[&str]| {
+        let mut sinks: Vec<Vec<u8>> = formats.iter().map(|_| Vec::new()).collect();
+        let mut diagnostics = Vec::new();
+        let mut outputs = ReportOutputs {
+            formats: formats
+                .iter()
+                .zip(sinks.iter_mut())
+                .map(|(outfmt, sink)| FormatOutput {
+                    outfmt,
+                    sink: OutputSink::Writer(sink),
+                })
+                .collect(),
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        let result = run_local_tblastx(inputs.args(extra), &queries, &subjects, &mut outputs);
+        drop(outputs);
+        (result, sinks, diagnostics)
+    };
+    for (formats, extra) in [
+        (&["0", "6"][..], &["-num_descriptions", "3"][..]),
+        (&["6", "0"][..], &["-num_descriptions", "3"][..]),
+        (&["0", "6"][..], &["-num_alignments", "3"][..]),
+        (
+            &["0", "6", "7"][..],
+            &["-num_descriptions", "3", "-num_alignments", "2"][..],
+        ),
+    ] {
+        let (result, sinks, _) = attempt(formats, extra);
+        let error = format!("{:#}", result.expect_err("different hit list sizes"));
+        assert!(
+            error.contains("need different hit list sizes"),
+            "{formats:?} {extra:?}: {error}"
+        );
+        // The option warnings of the first format may precede the refusal (BLASTP's
+        // `check_options`, as the CLI writes a warning before an options error), so the
+        // diagnostics are not checked; no report bytes are written.
+        assert!(
+            sinks.iter().all(Vec::is_empty),
+            "{formats:?} {extra:?}: nothing is written"
+        );
+    }
+    // The same formats without these options, or with one hit list size, run together.
+    for extra in [&[][..], &["-max_target_seqs", "3"][..]] {
+        let (result, sinks, _) = attempt(&["0", "6"], extra);
+        result.unwrap_or_else(|error| panic!("{extra:?}: {error:#}"));
+        assert!(
+            !sinks[0].is_empty(),
+            "{extra:?}: outfmt 0 writes its header"
+        );
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:86-88
 // ```c
 //     char* batch_sz_str = getenv("BATCH_SIZE");
@@ -247,7 +310,7 @@ fn unsupported_formats_fail_before_searching() {
 fn a_batch_size_that_is_not_an_integer_is_rejected() {
     let inputs = Inputs::new();
     for value in ["abc", " ", "12x"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
             .arg(&inputs.query.0)
@@ -276,7 +339,7 @@ fn a_batch_size_that_is_not_an_integer_is_rejected() {
         (&empty_defline.0, &inputs.subject.0),
         (&inputs.query.0, &empty_defline.0),
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
             .arg(query)
@@ -325,7 +388,7 @@ fn environment_that_ncbi_cannot_convert_or_reports_otherwise_is_rejected() {
             "the environment variable BL2SEQ_LEGACY",
         ),
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
             .arg(&inputs.query.0)
@@ -361,7 +424,7 @@ fn a_standard_output_on_dev_null_is_written() {
             .write(true)
             .open("/dev/null")
             .expect("open /dev/null");
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
             .arg(&inputs.query.0)
@@ -385,7 +448,7 @@ fn cli_run(
     extra: &[&str],
     env: &[(&str, &str)],
 ) -> (Option<i32>, Vec<u8>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     command
         .arg("tblastx")
         .arg("-query")

@@ -35,7 +35,7 @@ if os.environ.get('LOSAT_WASI_THREADS_DEBUG'):
                 path.write_text(script)
                 path.chmod(0o755)
             for version in ["baseline", "candidate"]:
-                path = root / version / "native-command/release/LOSAT"
+                path = root / version / "native-command/release/losat"
                 path.parent.mkdir(parents=True)
                 code = script
                 if version == "candidate":

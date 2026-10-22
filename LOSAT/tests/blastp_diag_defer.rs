@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp's two-hit test with `LOSAT_X_BPDEFER` (`src/algorithm/blastp/x_seed_fused.rs`) on whole
 //! searches: the candidates of a lookup cell's AVX2 batches are called after the cell's last batch
 //! of eight instead of at the end of each batch.
@@ -60,7 +61,7 @@ fn blastp(
     vars: &[(&str, &str)],
     extra: &[&str],
 ) -> (Vec<u8>, Vec<DiagCounts>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")

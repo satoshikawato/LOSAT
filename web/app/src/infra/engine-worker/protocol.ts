@@ -60,6 +60,8 @@ export interface WorkerPrepare {
   readonly type: 'prepare';
   readonly generation: number;
   readonly threads: number;
+  /** The argv of the coming search (EnginePrepareHint.argv), for the warm-up. */
+  readonly argv?: readonly string[];
 }
 
 /** Test builds only (`__LOSAT_TEST_HOOKS__`): drives the run output writer of the worker. */

@@ -187,8 +187,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_MBLUTKEEP",
     "LOSAT_X_MBLUTONCE",
     "LOSAT_X_MBLUTPREFAULT",
-    "LOSAT_X_PAIRLUT",
-    "LOSAT_X_PAIRPAR",
     "LOSAT_X_PAIRPARDISC",
     "LOSAT_X_PAIRPARDISCARR",
     "LOSAT_X_PAIRPARFOLD",
@@ -201,7 +199,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_QPREPPAR",
     "LOSAT_X_QSTREAM",
     "LOSAT_X_RPTSTREAM",
-    "LOSAT_X_SEEDBUCKET",
     "LOSAT_X_SEEDCOMPACT",
     "LOSAT_X_SEEDUNMAP",
     "LOSAT_X_SEGSHARE",
@@ -259,6 +256,9 @@ pub(crate) const GRADUATED: &[&str] = &[
     "LOSAT_X_MBDELAY",
     "LOSAT_X_NEWTONLANES",
     "LOSAT_X_NEWTONLANES8",
+    "LOSAT_X_PAIRLUT",
+    "LOSAT_X_PAIRPAR",
+    "LOSAT_X_SEEDBUCKET",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that

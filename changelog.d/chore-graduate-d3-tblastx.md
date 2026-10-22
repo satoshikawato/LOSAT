@@ -9,3 +9,15 @@
   compared against them were deleted. The reference linking body that `LOSAT_DEBUG_CUTOFFS` and
   `LOSAT_DIAGNOSTICS` select stays, and so do the `[X_STATS]` lines of the paths that remain (printed whenever
   `LOSAT_X_STATS` is set). Outputs do not change.
+- The variables `LOSAT_X_PAIRPAR`, `LOSAT_X_PAIRLUT` and `LOSAT_X_SEEDBUCKET` are gone, with
+  `LOSAT_X_PAIRPARSHADOW`, `LOSAT_X_PAIRLUTSHADOW` and `LOSAT_X_SEEDBUCKETSHADOW`: the TBLASTX unit path
+  and its direct group tables, the bucketed two-hit order for large diagonal tables, and the blastn and
+  megablast one-hit strips and pool lookup fill all run by their rules without a variable. The rules stay
+  (`LOSAT_X_PAIRPARGATE`'s cost rule, the gates and guard of the unit path, the 2^21-cell minimum of the
+  bucketed order with `LOSAT_X_SEEDBUCKET_MIN_CELLS`, the pool and query-block rules of the strips) and so do
+  their fallbacks, the reference frame loop, `scan_chunk_plain`, `build_groups` and the serial table fill. The
+  shadow comparisons, the `[X_SHADOW] PAIRPAR`, `PAIRLUT`, `SEEDBUCKET`, `TBXUNITMASK` and `MBLUTONCE` lines
+  and the `[X_PAIRPARSHADOW] blastn:` line, the one-hit stash path of the blastn strips, and the tests that
+  existed only for the variables were deleted. `LOSAT_X_DEFAULT=0` no longer turns these paths off: the
+  `LOSAT_X_PAIRPARGATE` cost rule goes off with it, so every batch the gates and the guard let through takes the
+  unit path. Outputs do not change.

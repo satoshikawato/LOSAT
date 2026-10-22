@@ -55,7 +55,7 @@
 //!
 //! The batch function moves its tables into two holders (`XSeedBatch`), each an `XSeedState`
 //! with the same rule: `lookup` holds the batch's lookup table (the full table of the reference
-//! frame loop, or the stub of LOSAT_X_PAIRLUT), `units` the unit path with its group tables.
+//! frame loop, or the stub of PAIRLUT), `units` the unit path with its group tables.
 //! Every call of `process_subject` opens one stage of each (`enter`) as its first statements. It
 //! ends the units stage (`XSeedStage::end`) when the subject's units have run, before their lists
 //! are merged, and the lookup stage after the seed stage, before the first linking call; a stage
@@ -65,8 +65,8 @@
 //! out of it, which frees them unless another stage still holds them.
 //!
 //! The worker's diagonal table (`WorkerState.diag_array`) is read and written only by the
-//! reference frame loop. (a) A batch that the unit path takes without its
-//! shadow never runs that loop, so its workers are created with a table of zero cells
+//! reference frame loop. (a) A batch that the unit path takes
+//! never runs that loop, so its workers are created with a table of zero cells
 //! (`XSeedBatch::worker_table_cells`); (b) otherwise the worker whose stage end released the
 //! batch's lookup table drops its own table there (`drop_worker_table`). There is no per-subject
 //! release in the reference loop: a batch of many subjects would pay an allocation of the whole
@@ -75,9 +75,10 @@
 //! Known limits, accepted:
 //! - The gain is for the last subject of a batch (the only one of a pairwise search). While
 //!   earlier subjects are merged and linked, later ones still need the tables.
-//! - The lookup stage ends after the frame loop, which names the lookup table. With
-//!   `LOSAT_X_PAIRLUT=0` (and under its shadow) that table is the full one, not a stub, and it
-//!   stays alive through the merge of the unit lists: that path keeps the higher seed-stage peak.
+//! - The lookup stage ends after the frame loop, which names the lookup table. Where PAIRLUT's
+//!   fallback builds the groups from the full table (`lut_build` gave none for a batch that takes
+//!   the units), that table is the full one, not a stub, and it stays alive through the merge of
+//!   the unit lists: that path keeps the higher seed-stage peak.
 //!
 //! # Why the result is the same, and why there is no comparison mode
 //!
@@ -150,7 +151,7 @@ pub fn print_summary() {
 // ```
 // The tables the seed stage of a batch scans with, in two holders: `lookup` is NCBI's
 // `lookup_wrap->lut` (the full table of the reference frame loop, or the stub of
-// LOSAT_X_PAIRLUT), read by the frame loop; `units` is the unit path with its per-group tables
+// PAIRLUT), read by the frame loop; `units` is the unit path with its per-group tables
 // (x_pair_par.rs), read while the units of a subject run. Nothing after the seed stage reads
 // either, and nothing after a subject's units reads the second.
 /// The seed-stage tables of one query batch.
@@ -159,16 +160,15 @@ pub(super) struct XSeedBatch {
     pub(super) lookup: XSeedState<BlastAaLookupTable>,
     /// The unit path of the batch (`None`: the reference frame loop takes every subject).
     pub(super) units: XSeedState<Option<XPairPar>>,
-    /// The unit path takes every subject of the batch without its shadow: the reference frame
+    /// The unit path takes every subject of the batch: the reference frame
     /// loop, the only reader of a worker's diagonal table, runs for no subject.
     units_only: bool,
 }
 
 impl XSeedBatch {
     // No NCBI counterpart: whether the reference frame loop can run for this batch is read
-    // from the unit path before it moves into its holder (dispatch point 2 of LOSAT_X_PAIRPAR
-    // in run_impl.rs: the loop runs zero times exactly when the unit path exists and is not in
-    // shadow mode). One batch is counted once, whatever the number of holders; the release of
+    // from the unit path before it moves into its holder (dispatch point 2 of PAIRPAR in
+    // run_impl.rs: the loop runs zero times exactly when the unit path exists). One batch is counted once, whatever the number of holders; the release of
     // the unit path is counted only for a batch that has one.
     /// The holders of a batch of `subjects` subjects.
     pub(super) fn new(
@@ -176,7 +176,7 @@ impl XSeedBatch {
         pair_par: Option<XPairPar>,
         subjects: usize,
     ) -> Self {
-        let units_only = pair_par.as_ref().is_some_and(|x| !x.shadow());
+        let units_only = pair_par.is_some();
         BATCHES.fetch_add(1, AtomicOrdering::Relaxed);
         if units_only {
             BATCHES_WITHOUT_WORKER_TABLE.fetch_add(1, AtomicOrdering::Relaxed);

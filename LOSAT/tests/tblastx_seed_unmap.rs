@@ -5,7 +5,7 @@
 //! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts on Linux with glibc only, where
 //! transparent huge pages do not round mapped blocks up (THP "madvise" or "never", or disabled for
 //! the process), at two or more threads (the search pool; at one thread nothing is retained), on
-//! the units of `LOSAT_X_PAIRPAR` whose query-group span and subject chunk both have at least
+//! the units of the unit path whose query-group span and subject chunk both have at least
 //! 65,536 letters: their split's diagonal table and record vector, and a unit's copy of its records
 //! of at least 128 KiB, get a capacity glibc always maps. It changes capacities, never a value.
 //! Every test compares the report with the report of the same search with `LOSAT_X_SEEDUNMAP=0`
@@ -214,8 +214,7 @@ fn unmap(stderr: &str) -> (bool, [u64; 3]) {
 // tables and record vectors got the mapped capacity, and where it does not, none. The units save
 // too few records here for a copy of 128 KiB, which the unit tests and the larger searches of the
 // entry in diagnostics.md reach. `LOSAT_X_DEFAULT=0` turns the switch off (no line, the same
-// report), and `LOSAT_X_DEFAULT=0` with `LOSAT_X_PAIRPAR=1` and the switch set maps the tables of
-// the unit path at four threads where it acts (the record vector of `LOSAT_X_SEEDCOMPACT`, which
+// report), and `LOSAT_X_DEFAULT=0` with the switch set maps the tables of the unit path at four threads where it acts (the record vector of `LOSAT_X_SEEDCOMPACT`, which
 // is then off, does not exist).
 #[test]
 fn where_the_rule_holds_the_blocks_are_mapped_and_the_report_is_the_same() {
@@ -249,10 +248,7 @@ fn where_the_rule_holds_the_blocks_are_mapped_and_the_report_is_the_same() {
     );
 
     let what = "previous paths with the unit path and the switch, threads 4";
-    let (report, stderr) = inputs.tblastx(
-        threads,
-        &[STATS, PREVIOUS, ("LOSAT_X_PAIRPAR", "1"), SWITCH],
-    );
+    let (report, stderr) = inputs.tblastx(threads, &[STATS, PREVIOUS, SWITCH]);
     assert_eq!(report, expected, "{what}");
     let (active, [diag, records, copies]) = unmap(&stderr);
     assert_eq!(diag > 0, active, "{what}:\n{stderr}");
@@ -285,9 +281,8 @@ fn without_the_compact_lists_only_the_tables_are_mapped() {
 //                               offset_pairs, array_size, scan_range);
 // ```
 // A short query against a long subject (query-group spans of about 1,000 letters, chunks of about
-// 70,000) and the reverse, at four threads, and a search with `LOSAT_X_PAIRPAR=0` (no unit runs):
-// the line is printed (the switch is on) with zero counters, and the report is that of
-// `LOSAT_X_SEEDUNMAP=0`.
+// 70,000) and the reverse, at four threads: the line is printed (the switch is on) with zero
+// counters, and the report is that of `LOSAT_X_SEEDUNMAP=0`.
 #[test]
 fn where_the_rule_does_not_hold_nothing_is_mapped() {
     let threads = 4;
@@ -300,9 +295,4 @@ fn where_the_rule_does_not_hold_nothing_is_mapped() {
         assert!(units(&stderr) > 0, "{what}:\n{stderr}");
         assert_eq!(unmap(&stderr).1, [0, 0, 0], "{what}:\n{stderr}");
     }
-    let inputs = Inputs::new("nounits", SHORT, LONG);
-    let expected = inputs.report_without_the_switch(threads);
-    let (report, stderr) = inputs.tblastx(threads, &[STATS, ("LOSAT_X_PAIRPAR", "0")]);
-    assert_eq!(report, expected, "LOSAT_X_PAIRPAR=0");
-    assert_eq!(unmap(&stderr).1, [0, 0, 0], "LOSAT_X_PAIRPAR=0:\n{stderr}");
 }

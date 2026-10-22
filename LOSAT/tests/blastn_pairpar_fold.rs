@@ -4,15 +4,15 @@
 //!
 //! The switch is off unless set to any value (it is not in the strict set). It chooses between
 //! two LOSAT code paths with the same result: the word hits of the strips paths
-//! (`LOSAT_X_PAIRPAR`, on by default, for megablast and blastn; `LOSAT_X_PAIRPARDISC` for
+//! (PAIRPAR, which has no variable, for megablast and blastn; `LOSAT_X_PAIRPARDISC` for
 //! dc-megablast) folded into the diagonal hash by the owner thread in scan order, or by every
 //! thread of the pool, each into the buckets of its partition, with the hits and the table's
 //! cell numbers put back in the reference order. So the property under test is that the report
 //! does not depend on it: with the switch at 2, 4 and 8 threads (also with `LOSAT_X_DIAGLV`),
-//! and with the strips shadows (`LOSAT_X_PAIRPARSHADOW`, `LOSAT_X_PAIRPARDISCSHADOW`, which run
-//! the partitioned stage on copies and compare the hit list and the whole diagonal hash with
-//! the reference fold for every chunk), the searches give the bytes of the search without it at
-//! one thread. That those bytes equal NCBI's is the business of the BLASTN fixtures.
+//! and (dc-megablast) with the strips shadow `LOSAT_X_PAIRPARDISCSHADOW`, which runs the
+//! partitioned stage on copies and compares the hit list and the whole diagonal hash with the
+//! reference fold for every chunk, the searches give the bytes of the search without it at one
+//! thread. That those bytes equal NCBI's is the business of the BLASTN fixtures.
 //!
 //! The query (LC738874, 287 kb) makes a query block longer than 8000 letters, so the searches
 //! use the diagonal hash, and the one subject (LC738868) is searched by the owner of the pool,
@@ -22,8 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and
-/// LOSAT_X_MBLUTONCE on 2026-10-18 (perf/bn-memory-rules; under LOSAT_X_PAIRPARSHADOW it adds its
-/// own shadow line), each `0`, the default before, unless the search sets it: every search here
+/// LOSAT_X_MBLUTONCE on 2026-10-18 (perf/bn-memory-rules), each `0`, the default before, unless the search sets it: every search here
 /// runs as it was written, with the switches off that it does not name (the default runs in
 /// `default_bundle.rs`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
@@ -116,20 +115,17 @@ fn blastn(dir: &Path, task: &str, threads: u32, switches: &[(&str, &str)]) -> (V
     (output.stdout, stderr)
 }
 
-/// The fields of a strips shadow's line (`prefix`, the only line of `stderr` besides the
-/// lines that start with one of `others`): the chunks compared, then `fold=`, `merges=` and
-/// `partitions=`.
-fn shadow_fields(stderr: &str, prefix: &str, others: &[&str], at: &str) -> (u64, String, u64, u64) {
+/// The fields of a strips shadow's line (`prefix`, the only line of `stderr`): the chunks
+/// compared, then `fold=`, `merges=` and `partitions=`.
+fn shadow_fields(stderr: &str, prefix: &str, at: &str) -> (u64, String, u64, u64) {
     let line = stderr
         .lines()
         .find(|line| line.starts_with(prefix))
         .unwrap_or_else(|| panic!("{at}: no shadow line:\n{stderr}"));
-    for other in stderr.lines().filter(|l| *l != line) {
-        assert!(
-            others.iter().any(|o| other.starts_with(o)),
-            "{at}: unexpected standard error line: {other}"
-        );
-    }
+    assert!(
+        stderr.lines().all(|l| l == line),
+        "{at}: unexpected standard error line:\n{stderr}"
+    );
     let field = |name: &str| -> String {
         line.split_whitespace()
             .find_map(|word| word.strip_prefix(name))
@@ -152,11 +148,11 @@ fn shadow_fields(stderr: &str, prefix: &str, others: &[&str], at: &str) -> (u64,
 }
 
 /// For one task: the search without the switch at one thread, then at 2, 4 and 8 threads
-/// without the switch, with it, with it and `LOSAT_X_DIAGLV`, and with it and the strips
-/// shadow (`shadow`, whose line starts with `prefix`): the same bytes every time, nothing on
-/// standard error without the shadow, and the shadow's line says that it compared chunks
-/// folded in partitions, one per thread. `extra` goes to every run but the first.
-fn check(dir: &Path, task: &str, extra: &[(&str, &str)], shadow: (&str, &str), prefix: &str) {
+/// without the switch, with it, with it and `LOSAT_X_DIAGLV`, and, if there is one, with it and
+/// the strips shadow (`shadow`, whose line starts with `prefix`): the same bytes every time,
+/// nothing on standard error without the shadow, and the shadow's line says that it compared
+/// chunks folded in partitions, one per thread. `extra` goes to every run but the first.
+fn check(dir: &Path, task: &str, extra: &[(&str, &str)], shadow: Option<((&str, &str), &str)>) {
     let (expected, expected_stderr) = blastn(dir, task, 1, &[]);
     assert!(!expected.is_empty(), "{task}: no hits");
     assert_eq!(expected_stderr, "", "{task}");
@@ -175,6 +171,9 @@ fn check(dir: &Path, task: &str, extra: &[(&str, &str)], shadow: (&str, &str), p
             assert!(report == expected, "{at}: the report differs with {more:?}");
             assert_eq!(stderr, "", "{at} {more:?}");
         }
+        let Some((shadow, prefix)) = shadow else {
+            continue;
+        };
         let mut on = extra.to_vec();
         on.extend_from_slice(&[SWITCH, shadow]);
         let (report, stderr) = blastn(dir, task, threads, &on);
@@ -182,10 +181,7 @@ fn check(dir: &Path, task: &str, extra: &[(&str, &str)], shadow: (&str, &str), p
             report == expected,
             "{at}: the report differs with {shadow:?}"
         );
-        // (`LOSAT_X_PAIRPARSHADOW` also names the shadow of TBLASTX's own `PAIRPAR`, whose
-        // line says it compared nothing)
-        let (chunks, fold, merges, partitions) =
-            shadow_fields(&stderr, prefix, &["[X_SHADOW] PAIRPAR "], &at);
+        let (chunks, fold, merges, partitions) = shadow_fields(&stderr, prefix, &at);
         assert!(chunks > 0, "{at}: no chunk compared:\n{stderr}");
         assert_eq!(fold, "part", "{at}");
         assert_eq!(
@@ -199,25 +195,13 @@ fn check(dir: &Path, task: &str, extra: &[(&str, &str)], shadow: (&str, &str), p
 #[test]
 fn megablast_gives_the_same_report_with_the_partitioned_fold() {
     let dir = TestDir::new("megablast");
-    check(
-        &dir,
-        "megablast",
-        &[],
-        ("LOSAT_X_PAIRPARSHADOW", "1"),
-        "[X_PAIRPARSHADOW] blastn:",
-    );
+    check(&dir, "megablast", &[], None);
 }
 
 #[test]
 fn blastn_gives_the_same_report_with_the_partitioned_fold() {
     let dir = TestDir::new("blastn");
-    check(
-        &dir,
-        "blastn",
-        &[],
-        ("LOSAT_X_PAIRPARSHADOW", "1"),
-        "[X_PAIRPARSHADOW] blastn:",
-    );
+    check(&dir, "blastn", &[], None);
 }
 
 #[test]
@@ -227,13 +211,14 @@ fn dc_megablast_gives_the_same_report_with_the_partitioned_fold() {
         &dir,
         "dc-megablast",
         &[PAIRPARDISC],
-        ("LOSAT_X_PAIRPARDISCSHADOW", "1"),
-        "[X_PAIRPARDISCSHADOW] blastn:",
+        Some((
+            ("LOSAT_X_PAIRPARDISCSHADOW", "1"),
+            "[X_PAIRPARDISCSHADOW] blastn:",
+        )),
     );
 }
 
-// Without `LOSAT_X_PAIRPARDISC` dc-megablast has no strips path, so the switch changes nothing
-// and its shadow line says that no chunk was folded in partitions.
+// Without `LOSAT_X_PAIRPARDISC` dc-megablast has no strips path, so the switch changes nothing.
 #[test]
 fn dc_megablast_without_its_strips_path_is_not_taken() {
     let dir = TestDir::new("dcoff");
@@ -241,20 +226,6 @@ fn dc_megablast_without_its_strips_path_is_not_taken() {
     let (report, stderr) = blastn(&dir, "dc-megablast", 4, &[SWITCH]);
     assert!(report == expected, "the report differs");
     assert_eq!(stderr, "");
-    let (report, stderr) = blastn(
-        &dir,
-        "dc-megablast",
-        4,
-        &[SWITCH, ("LOSAT_X_PAIRPARSHADOW", "1")],
-    );
-    assert!(report == expected, "the report differs with the shadow");
-    let (_, fold, merges, _) = shadow_fields(
-        &stderr,
-        "[X_PAIRPARSHADOW] blastn:",
-        &["[X_SHADOW] PAIRPAR "],
-        "dc-megablast",
-    );
-    assert_eq!((fold.as_str(), merges), ("part", 0), "{stderr}");
 }
 
 // LOSAT_TIMING: the strips paths' `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` lines end

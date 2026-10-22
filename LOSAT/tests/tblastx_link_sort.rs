@@ -108,6 +108,22 @@ fn stats(stderr: &str) -> Option<[u64; 5]> {
     )
 }
 
+/// `[X_STATS] PAIRPAR`: units, fallback_cost. At one thread the default search takes the reference
+/// frame loop (the cost rule: `units=0 fallback_cost=1`), at four threads its units (`units>0`).
+fn check_path(stderr: &str, threads: u32, what: &str) {
+    let [units, fallback_cost] = counters(stderr, "[X_STATS] PAIRPAR ", ["units", "fallback_cost"])
+        .unwrap_or_else(|| panic!("{what}: no [X_STATS] PAIRPAR line:\n{stderr}"));
+    if threads == 1 {
+        assert_eq!(
+            (units, fallback_cost),
+            (0, 1),
+            "{what}: the frame loop:\n{stderr}"
+        );
+    } else {
+        assert!(units > 0, "{what}: the unit path:\n{stderr}");
+    }
+}
+
 /// The checks every run shares: the stats line is there, index sorts ran,
 /// none went to the pool (the lists are short), and each of the subject's two linking calls
 /// made its one final sort beside its first sort. Returns (sorts, indices).
@@ -133,13 +149,14 @@ fn check_stats(stderr: &str, what: &str) -> (u64, u64) {
 //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_FwdCompareHSPsTransl);
 // ```
-// The default search (no variable for the switch): the report is NCBI's and the subject's two
-// linking calls each sort their output order once. The counters also count the index sorts of
-// the seed stage's merge: with `LOSAT_X_TBXKMERGE=0` the unit path (four threads) makes the
-// sorts of the reference frame loop (one thread) and the counts are equal; with that switch on
-// (the default) its merge replaces some of them, so four threads make no more than one.
+// The default search: the report is NCBI's and the subject's two linking calls each sort their
+// output order once. One thread runs the reference frame loop, four threads the unit path (the
+// `[X_STATS] PAIRPAR` line tells which). The counters also count the index sorts of the seed
+// stage's merge: with `LOSAT_X_TBXKMERGE=0` the unit path (four threads) makes the sorts of the
+// reference frame loop (one thread) and the counts are equal; with that switch on (the default)
+// its merge replaces some of them, so four threads make no more than one.
 #[test]
-fn the_switch_gives_ncbis_report_with_one_final_sort_per_linking_call() {
+fn the_default_search_gives_ncbis_report_with_one_final_sort_per_linking_call() {
     let expected = ncbi_report();
     for merge in [&[][..], &[("LOSAT_X_TBXKMERGE", "0")][..]] {
         let mut seen = Vec::new();
@@ -149,6 +166,7 @@ fn the_switch_gives_ncbis_report_with_one_final_sort_per_linking_call() {
             switches.extend_from_slice(merge);
             let (report, stderr) = tblastx(threads, &switches);
             assert_eq!(report, expected, "{what}");
+            check_path(&stderr, threads, &what);
             seen.push(check_stats(&stderr, &what));
         }
         if merge.is_empty() {
@@ -159,24 +177,5 @@ fn the_switch_gives_ncbis_report_with_one_final_sort_per_linking_call() {
         } else {
             assert_eq!(seen[0], seen[1], "the sorts do not depend on the threads");
         }
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:844
-// ```c
-// if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
-// ```
-// `LOSAT_X_PAIRPAR=0` leaves the seed stage to the reference frame loop, which appends and
-// sorts the list of each subject frame through the same dispatch; the linking calls are the
-// in-place path's as before. The report is NCBI's.
-#[test]
-fn the_frame_loop_sorts_through_the_same_dispatch() {
-    let expected = ncbi_report();
-    const FRAME_LOOP: (&str, &str) = ("LOSAT_X_PAIRPAR", "0");
-    for threads in THREADS {
-        let what = format!("{FRAME_LOOP:?} threads {threads}");
-        let (report, stderr) = tblastx(threads, &[STATS, FRAME_LOOP]);
-        assert_eq!(report, expected, "{what}");
-        check_stats(&stderr, &what);
     }
 }

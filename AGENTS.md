@@ -177,7 +177,7 @@ authoritative, current guidance for agent behavior in LOSAT.
   values and the order that reach the output: work may run earlier, in another
   order or on other threads when every value and every decision the output
   depends on is the same, as in the default unit path of TBLASTX
-  (`LOSAT_X_PAIRPAR`: units of one subject searched in parallel, results put
+  (`tblastx/x_pair_par.rs`: units of one subject searched in parallel, results put
   back in scan order). Owner approval 2026-10-15.
 - Rule 9's "preserving ... Big O complexity" means not making it worse: a path
   may do less work than NCBI's, as the default incremental TBLASTX linking

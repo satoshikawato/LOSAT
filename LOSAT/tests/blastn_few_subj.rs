@@ -4,14 +4,14 @@
 //!
 //! The switch is in the strict set (on unless it is `0`). It chooses between two LOSAT shapes of
 //! the search with the same result: the subjects (or the chunks of a batch) one at a time, each
-//! with the subject scan in strips (`LOSAT_X_PAIRPAR`, `LOSAT_X_PAIRPARDISC`,
+//! with the subject scan in strips (PAIRPAR, `LOSAT_X_PAIRPARDISC`,
 //! `LOSAT_X_PAIRPARDISCARR`), or the subjects (the chunks) as tasks of the pool without strips. So
 //! the property under test is that the report does not depend on it or on the thread count: the
 //! search with the switch at 2, 3 and 4 threads gives the bytes of the search at one thread and of
-//! the search without it, and the shadows of the strips (`LOSAT_X_PAIRPARSHADOW`,
-//! `LOSAT_X_PAIRPARDISCSHADOW`, which compute the stage on copies and compare the hit list and the
-//! whole diagonal hash with the reference code for every chunk) give them too and compare the
-//! chunks. With `LOSAT_TIMING` the strips report how many chunks they took, which shows which
+//! the search without it, and for dc-megablast the shadow of the strips
+//! (`LOSAT_X_PAIRPARDISCSHADOW`, which computes the stage on copies and compares the hit list and
+//! the whole diagonal hash with the reference code for every chunk) gives them too and compares
+//! the chunks. With `LOSAT_TIMING` the strips report how many chunks they took, which shows which
 //! shape ran: the rule needs the longest unit's letters times the strips' speed-up at the thread
 //! count to be more than all the letters (two subjects of about 300 kb each: 4 threads or more; a
 //! record of 5.2 Mb, whose second chunk is short: 2 threads or more), and no lowercase mask with
@@ -29,10 +29,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const OFF: (&str, &str) = ("LOSAT_X_BNFEWSUBJ", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
-const SHADOWS: &[(&str, &str)] = &[
-    ("LOSAT_X_PAIRPARSHADOW", "1"),
-    ("LOSAT_X_PAIRPARDISCSHADOW", "1"),
-];
+const SHADOWS: &[(&str, &str)] = &[("LOSAT_X_PAIRPARDISCSHADOW", "1")];
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -175,8 +172,34 @@ fn strip_chunks(stderr: &str) -> u64 {
     .sum()
 }
 
-/// The chunks the strips' shadows compared (`seed chunks equal=N` of the two summary lines) and the
-/// merges of their partitioned folds (`merges=M`), after checking that every other line of `stderr`
+/// The chunks the strips took and the merges of their partitioned folds, summed over the
+/// `[TIMING] x_pairpar_seed:`, `x_pairpardisc_seed:` and `x_pairpardiscarr_seed:` lines of `stderr`
+/// (`chunks=N`, and `merges=M` while LOSAT_X_PAIRPARFOLD is on).
+fn timing_chunks_and_merges(stderr: &str) -> (u64, u64) {
+    let field = |line: &str, name: &str| -> Option<u64> {
+        line.split(name)
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|value| value.parse::<u64>().ok())
+    };
+    let (mut chunks, mut merges) = (0, 0);
+    for line in stderr.lines().filter(|line| {
+        [
+            "[TIMING] x_pairpar_seed: ",
+            "[TIMING] x_pairpardisc_seed: ",
+            "[TIMING] x_pairpardiscarr_seed: ",
+        ]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
+    }) {
+        chunks += field(line, " chunks=").unwrap_or_else(|| panic!("no chunks in: {line}"));
+        merges += field(line, " merges=").unwrap_or(0);
+    }
+    (chunks, merges)
+}
+
+/// The chunks the strips' shadow compared (`seed chunks equal=N` of its summary line) and the
+/// merges of its partitioned folds (`merges=M`), after checking that every other line of `stderr`
 /// is a summary line of another shadow that the same variables turn on, without a difference.
 fn shadow_chunks(stderr: &str) -> (u64, u64) {
     let field = |line: &str, name: &str| -> u64 {
@@ -188,9 +211,7 @@ fn shadow_chunks(stderr: &str) -> (u64, u64) {
     };
     let (mut chunks, mut merges, mut summaries) = (0, 0, 0);
     for line in stderr.lines() {
-        if line.starts_with("[X_PAIRPARSHADOW] blastn: ")
-            || line.starts_with("[X_PAIRPARDISCSHADOW] blastn: ")
-        {
+        if line.starts_with("[X_PAIRPARDISCSHADOW] blastn: ") {
             chunks += field(line, "seed chunks equal=");
             merges += field(line, " merges=");
             summaries += 1;
@@ -202,13 +223,16 @@ fn shadow_chunks(stderr: &str) -> (u64, u64) {
             );
         }
     }
-    assert_eq!(summaries, 2, "{stderr}");
+    assert_eq!(summaries, 1, "{stderr}");
     (chunks, merges)
 }
 
 /// For one task and one subject file: the one-thread search; the switch's searches at `threads`
 /// with the chunks the strips took (`expect_strips`: more than zero, else zero); the search
-/// without the switch at the largest count (no strips); the shadows at the largest count.
+/// without the switch at the largest count (no strips); for dc-megablast the shadow at the largest
+/// count. Every chunk the strips took went through a partitioned fold (`merges == chunks`,
+/// LOSAT_X_PAIRPARFOLD, strict set), the later ones from the diagonal hash that the chunks (and
+/// subjects) before them filled.
 fn check(subject: &Path, task: &str, threads_and_strips: &[(u32, bool)]) {
     let task_args = ["-task", task];
     let (expected, expected_stderr) = blastn(subject, &task_args, 1, &[]);
@@ -226,6 +250,10 @@ fn check(subject: &Path, task: &str, threads_and_strips: &[(u32, bool)]) {
             expect_strips,
             "{task} threads {threads}: strips took {chunks} chunks"
         );
+        if expect_strips {
+            let (chunks, merges) = timing_chunks_and_merges(&stderr);
+            assert_eq!(merges, chunks, "{task} threads {threads}: {stderr}");
+        }
     }
     let most = threads_and_strips.iter().map(|&(t, _)| t).max().unwrap();
     let (report, stderr) = blastn(subject, &task_args, most, &[OFF, TIMING]);
@@ -234,16 +262,16 @@ fn check(subject: &Path, task: &str, threads_and_strips: &[(u32, bool)]) {
         "{task} threads {most}: the report differs with {OFF:?}"
     );
     assert_eq!(strip_chunks(&stderr), 0, "{task} threads {most} {OFF:?}");
+    if task != "dc-megablast" {
+        return;
+    }
     let (report, stderr) = blastn(subject, &task_args, most, SHADOWS);
     assert!(
         report == expected,
-        "{task} threads {most}: the report differs with the shadows"
+        "{task} threads {most}: the report differs with the shadow"
     );
     let (chunks, merges) = shadow_chunks(&stderr);
     assert!(chunks > 0, "{task}: {stderr}");
-    // LOSAT_X_PAIRPARFOLD (strict set) splits each chunk's fold over the pool: every chunk the
-    // shadows compared went through a partitioned fold, the later ones from the diagonal hash that
-    // the chunks (and subjects) before them filled.
     assert_eq!(merges, chunks, "{task}: {stderr}");
 }
 
@@ -357,8 +385,8 @@ fn a_long_subject_and_another_take_both_shapes() {
     let subject = subject_file(&[("long", long), ("LC738869", second), ("LC738868", first)]);
     for task in ["dc-megablast", "megablast"] {
         check(&subject, task, &[(4, true)]);
-        let (_, stderr) = blastn(&subject, &["-task", task], 4, SHADOWS);
-        let (chunks, merges) = shadow_chunks(&stderr);
+        let (_, stderr) = blastn(&subject, &["-task", task], 4, &[TIMING]);
+        let (chunks, merges) = timing_chunks_and_merges(&stderr);
         assert_eq!((chunks, merges), (4, 4), "{task}: {stderr}");
     }
 }

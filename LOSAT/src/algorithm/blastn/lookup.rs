@@ -13,7 +13,8 @@ use crate::utils::dust::MaskedInterval;
 //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
 //          mb_lt->hashtable[ecode] = index;
 // ```
-// EXPERIMENT (LOSAT_X_PAIRPAR): the megablast table filled by the pool threads.
+// EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the megablast table filled by the
+// pool threads.
 #[path = "x_mb_lookup_par.rs"]
 pub(crate) mod x_mb_lookup_par;
 
@@ -38,10 +39,9 @@ mod x_mb_lookup_once;
 #[path = "x_mb_lut_keep.rs"]
 pub(crate) mod x_mb_lut_keep;
 
-/// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): the
-/// `[X_SHADOW] MBLUTONCE` line (LOSAT_X_MBLUTONCE with LOSAT_X_PAIRPARSHADOW) and, with
-/// LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the megablast table builds; then the `[X_SHADOW] MBLUTKEEP` line (LOSAT_X_MBLUTKEEPSHADOW) and,
-/// with LOSAT_TIMING, the `[TIMING] x_mb_lut_keep` line (`x_mb_lut_keep::print_summary`).
+/// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): with
+/// LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the megablast table builds; then the
+/// `[X_SHADOW] MBLUTKEEP` line (LOSAT_X_MBLUTKEEPSHADOW) and, with LOSAT_TIMING, the `[TIMING] x_mb_lut_keep` line (`x_mb_lut_keep::print_summary`).
 pub fn x_mb_lookup_print_summary() {
     x_mb_lookup_par::print_summary();
     x_mb_lut_keep::print_summary();
@@ -1895,7 +1895,7 @@ fn build_mb_lookup(
     // runs that loop with a queue that only touches the table cell earlier (a prefetch, or a
     // read loop) and applies the same update to the same words in the same order, so the result
     // is the same table.
-    // Dispatch point of LOSAT_X_PAIRPAR (first arm): `x_mb_lookup_par::fill` applies the same
+    // Dispatch point of PAIRPAR (first arm): `x_mb_lookup_par::fill` applies the same
     // update to the same words, each cell's words in the same order, on the pool threads (each
     // thread owns whole blocks of cells); see x_mb_lookup_par.rs.
     x_clock.fill();
@@ -1991,33 +1991,6 @@ fn build_mb_lookup(
     }
     // No NCBI counterpart: the end of the `[TIMING] x_mb_lookup_build` interval.
     x_clock.record(x_on_pool.is_some(), x_filled);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1104-1106
-    // ```c
-    //    longest_chain = 2;
-    //    for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-    //        longest_chain = MAX(longest_chain, helper_array[index]);
-    // ```
-    // Dispatch point of LOSAT_X_PAIRPARSHADOW: the tables above are built again by the
-    // partitioned fill of LOSAT_X_PAIRPAR and compared element by element.
-    if x_mb_lookup_par::shadow() && db_word_counts.is_none() && !debug_mode {
-        x_mb_lookup_par::shadow_check(
-            &x_mb_lookup_par::Words {
-                queries_blastna,
-                query_offsets,
-                query_masks,
-                word_length,
-                lut_word_length,
-                kmer_mask,
-                ascending_cells,
-            },
-            pv_array_bts,
-            &hashtable[..table_size],
-            &next_pos,
-            &pv_array,
-            &helper_array,
-            longest_chain,
-        );
-    }
     // Dispatch point of LOSAT_X_MBLUTKEEPSHADOW: a build on a kept table is made again on a fresh
     // table (the same build without the keep) and the arrays are compared.
     if x_resident && x_mb_lut_keep::shadow() {

@@ -159,7 +159,6 @@ use rayon::prelude::*;
 ))]
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::OnceLock;
 
 // No NCBI counterpart: counters for LOSAT_X_STATS; they do not change any value NCBI computes.
 static LINKINGS: AtomicU64 = AtomicU64::new(0);

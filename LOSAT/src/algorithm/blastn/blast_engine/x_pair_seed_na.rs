@@ -6,7 +6,7 @@
 //! order (by the owner, or split by diagonal-hash bucket over the pool with
 //! LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`). The scheduling (`plan_strips`, `run_strips`,
 //! `part::seed_stage_part`) and the scan kernels (`scan_kernel`) are those of
-//! `LOSAT_X_PAIRPAR` in the parent module.
+//! PAIRPAR in the parent module.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
 //! ```c

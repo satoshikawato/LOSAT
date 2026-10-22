@@ -4,7 +4,7 @@
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_SEEDCOMPACT`
 //! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it on, the units of
-//! `LOSAT_X_PAIRPAR` keep their saved init HSPs as 28-byte records, copied out of a per-thread
+//! unit path keep their saved init HSPs as 28-byte records, copied out of a per-thread
 //! vector at their exact length; the merge expands them into the same init lists, converts each
 //! chunk's list into a list of its exact length and moves the first chunk's list into the empty
 //! frame list. Every test reads the `[X_STATS] SEEDCOMPACT` line, which is printed only while the
@@ -194,8 +194,8 @@ fn the_switch_keeps_compact_lists_and_gives_ncbis_report() {
 //     BLAST_SaveInitialHit(ungapped_hsps, q_off, s_off, ungapped_data);
 // ```
 // `LOSAT_X_SEEDCOMPACT=0` and `LOSAT_X_DEFAULT=0` turn the switch off: no SEEDCOMPACT line, the
-// same report. `LOSAT_X_DEFAULT=0` with `LOSAT_X_PAIRPAR=1` and `LOSAT_X_SEEDCOMPACT=1` is the run
-// the variable gave before the switch joined the set: the compact lists are made.
+// same report. `LOSAT_X_DEFAULT=0` with `LOSAT_X_SEEDCOMPACT=1` is the run the variable gave
+// before the switch joined the set: the compact lists are made.
 #[test]
 fn the_switch_follows_its_variable_and_the_global_one() {
     let expected = ncbi_report();
@@ -211,42 +211,9 @@ fn the_switch_follows_its_variable_and_the_global_one() {
             );
         }
         let what = format!("previous paths with the switch set, threads {threads}");
-        let (report, stderr) = pair(
-            threads,
-            &[STATS, PREVIOUS, ("LOSAT_X_PAIRPAR", "1"), SWITCH],
-        );
+        let (report, stderr) = pair(threads, &[STATS, PREVIOUS, SWITCH]);
         assert_eq!(report, expected, "{what}");
         assert_compact_ran(&stderr, 1, &what);
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:844
-// ```c
-// if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
-// ```
-// The switch with the variables of the paths around it: `LOSAT_X_PAIRPARSHADOW=1` runs the unit
-// path (on the compact lists) and the reference frame loop and compares the subject's combined
-// list, every field; `LOSAT_X_PAIRLUT=0` builds the full table and filters the groups out of it. The report is NCBI's
-// in every run and the compact path ran.
-#[test]
-fn the_switch_with_the_shadow_and_the_neighbouring_switches() {
-    let expected = ncbi_report();
-    for other in [("LOSAT_X_PAIRPARSHADOW", "1"), ("LOSAT_X_PAIRLUT", "0")] {
-        for threads in THREADS {
-            let what = format!("{other:?} threads {threads}");
-            let (report, stderr) = pair(threads, &[STATS, other]);
-            assert_eq!(report, expected, "{what}");
-            assert_compact_ran(&stderr, 1, &what);
-            if other.0 == "LOSAT_X_PAIRPARSHADOW" {
-                let [subjects_compared, hsps_compared] = fields(
-                    &stderr,
-                    "[X_SHADOW] PAIRPAR ",
-                    ["subjects_compared", "hsps_compared"],
-                );
-                assert_eq!(subjects_compared, 1, "{what}:\n{stderr}");
-                assert!(hsps_compared > 0, "{what}:\n{stderr}");
-            }
-        }
     }
 }
 
@@ -256,25 +223,21 @@ fn the_switch_with_the_shadow_and_the_neighbouring_switches() {
 //     hits = scansub(lookup_wrap, subject,
 //                               offset_pairs, array_size, scan_range);
 // ```
-// `LOSAT_X_PAIRPAR=0` (the switch is on by default), and `LOSAT_X_DEFAULT=0` with the switch set,
-// leave the search to the reference frame loop: no unit runs, so no compact list is made. The
-// line is still printed (the switch is on) with zero counters, and the report is NCBI's.
+// The cost rule of `LOSAT_X_PAIRPARGATE` (set to 1 after the helper's 0) leaves the fixture pair at
+// one thread to the reference frame loop (`[X_STATS] PAIRPAR units=0`): no unit runs, so no compact
+// list is made. The line is still printed (the switch is on) with zero counters, and the report is
+// NCBI's.
 #[test]
 fn without_the_unit_path_no_compact_list_is_made() {
     let expected = ncbi_report();
-    for (no_units, switches) in [
-        (("LOSAT_X_PAIRPAR", "0"), &[STATS][..]),
-        (PREVIOUS, &[STATS, SWITCH][..]),
-    ] {
-        for threads in THREADS {
-            let what = format!("{no_units:?} threads {threads}");
-            let mut switches = switches.to_vec();
-            switches.push(no_units);
-            let (report, stderr) = pair(threads, &switches);
-            assert_eq!(report, expected, "{what}");
-            assert_eq!(compact(&stderr), [0, 0, 0, 0], "{what}:\n{stderr}");
-        }
-    }
+    let (report, stderr) = pair(1, &[STATS, ("LOSAT_X_PAIRPARGATE", "1")]);
+    assert_eq!(report, expected);
+    assert_eq!(compact(&stderr), [0, 0, 0, 0], "{stderr}");
+    assert_eq!(
+        fields(&stderr, "[X_STATS] PAIRPAR ", ["units"]),
+        [0],
+        "{stderr}"
+    );
 }
 
 /// The letters of a one-record FASTA file.

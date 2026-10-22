@@ -175,16 +175,15 @@ fn the_switch_gives_ncbis_report_with_the_groups_linked_as_slices() {
 // ```
 // The slices together with the other variables of the linking call: the literal port
 // (LOSAT_LINKING_LEGACY: its groups are linked on copies of the slices and written back, never
-// handed back to the cut), the literal port beside the default kernel (LOSAT_LINK_FAST_SHADOW),
-// and the reference frame loop (LOSAT_X_PAIRPAR=0). The report is NCBI's and the path ran in
-// every run.
+// handed back to the cut) and the literal port beside the default kernel
+// (LOSAT_LINK_FAST_SHADOW). Threads 1 and 4 cover the reference frame loop and the unit path. The
+// report is NCBI's and the path ran in every run.
 #[test]
 fn the_path_with_the_other_linking_variables() {
     let expected = ncbi_report();
-    let others: [(&str, &str); 3] = [
+    let others: [(&str, &str); 2] = [
         ("LOSAT_LINKING_LEGACY", "1"),
         ("LOSAT_LINK_FAST_SHADOW", "1"),
-        ("LOSAT_X_PAIRPAR", "0"),
     ];
     for threads in THREADS {
         for other in others {

@@ -12,7 +12,8 @@
 //!             sfree(lookup->thin_backbone[i]);
 //! ```
 //! The table must be the same, so the report must be: the tests run the reference frame loop
-//! (`LOSAT_X_PAIRPAR=0`) and compare the report with the switch (the default), and with its shadow
+//! (`LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1`, whose gate sends every batch to the frame loop at any
+//! threshold and thread count) and compare the report with the switch (the default), and with its shadow
 //! (`LOSAT_X_TBXLUTSHADOW`, which builds both tables and compares them field by field), against
 //! the report with `LOSAT_X_TBXLUT=0`, at the default threshold (13), at 11 and at `+inf` (NCBI's
 //! INT_MIN: every word enters every cell it can), at one and four threads; and on the default path,
@@ -111,7 +112,7 @@ fn tblastx(
     )
 }
 
-const REFERENCE: (&str, &str) = ("LOSAT_X_PAIRPAR", "0");
+const REFERENCE: (&str, &str) = ("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS", "1");
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_TBXLUT", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBXLUTSHADOW", "1");
 

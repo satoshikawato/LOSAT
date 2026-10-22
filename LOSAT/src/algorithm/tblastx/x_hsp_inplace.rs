@@ -156,7 +156,7 @@
 use super::*;
 // Diagnostic (LOSAT_TIMING): the clock of a linking call (tblastx/x_link_timing.rs). It reads
 // the clock only in a call the batch function armed, and the linking reads nothing from it.
-use crate::algorithm::tblastx::x_link_timing::{KernelTimes, LinkLap, LinkStage};
+use crate::algorithm::tblastx::x_link_timing::{LinkLap, LinkStage};
 #[cfg(test)]
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};

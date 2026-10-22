@@ -33,7 +33,7 @@ pub(crate) use x_lut_direct::{x_tbxlut_reach_stub, x_tbxlut_shadow_tables};
 // the comparison of its shadow mode (x_lut_direct.rs); no NCBI counterpart for the re-export
 // itself.
 pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table, XAaSpares};
-// EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the direct builder of the TBLASTX unit
+// EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
 // path's group tables (x_pair_lut.rs, a child module of x_lut_direct.rs), used by
 // tblastx/x_pair_par.rs.
 //

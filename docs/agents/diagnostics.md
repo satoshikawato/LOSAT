@@ -228,7 +228,7 @@ their variables mean
   `TBNSSIDE`; `BXBATCH` needs `BXPOOL`; `AHEAD` needs `GREEDYSPEC` for megablast; `MBBATCH` runs
   where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
   in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
-  `NEWTONLANES8` acts only with `NEWTONLANES`, and only on aarch64; `TBNSTATE` and `TBNXLATE`
+  `TBNSTATE` and `TBNXLATE`
   act only with `TBNPAR`; `TBNKEEPFEW` only with `TBNSSIDE` and four or more query batches;
   `TBNBATCHRULE` only with `TBNBATCH`; `TBNOWNPOOLS` only with `TBNBATCH`
   and `TBNBATCHRULE`, natively; `TBNSCANBF` only with `TBNPAR`; `TBNXLATESIMD` only with
@@ -325,7 +325,6 @@ export LOSAT_X_BXSCAN=1
 export LOSAT_X_BXSCANBF=1
 export LOSAT_X_BXSEGMEMO=1
 export LOSAT_X_BXSUBJFLOW=1
-export LOSAT_X_COMPFAST=1
 export LOSAT_X_CTXFAST=1
 export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
@@ -354,9 +353,6 @@ export LOSAT_X_MBDELAY=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
 export LOSAT_X_MBLUTPREFAULT=1
-export LOSAT_X_NEWTONEXACT=1
-export LOSAT_X_NEWTONLANES=1
-export LOSAT_X_NEWTONLANES8=1
 export LOSAT_X_PAIRLUT=1
 export LOSAT_X_PAIRPAR=1
 export LOSAT_X_PAIRPARDISC=1
@@ -479,12 +475,10 @@ where `LOSAT_X_HSPINPLACE` does (the reference bodies have their own sorts). The
 `LOSAT_X_LINKSORTSHADOW` stays opt-in.
 
 `LOSAT_X_NEWTONLANES8` was added after the default changed, as a switch that was off unless set,
-and joined the set on 2026-10-15. On aarch64 the Newton lanes of `LOSAT_X_NEWTONLANES` (blastp and
-tblastn) solve eight problems per round instead of four. It changes only which independent
-problems share a vector, not the operations of a problem, and acts only where
-`LOSAT_X_NEWTONLANES` runs. On x86-64 and Wasm it does nothing: the lanes stay four wide there.
-`LOSAT_X_DEFAULT=0` runs no lanes (the reference Newton port), so on the arm64 runners
-platform-checks compares eight lanes with no lanes.
+and joined the set on 2026-10-15. On aarch64 the Newton lanes (blastp and tblastn) solve eight
+problems per round instead of four; it changes only which independent problems share a vector, not
+the operations of a problem. It graduated on 2026-10-22 together with `LOSAT_X_NEWTONLANES`: no
+variable; the eight lanes run on aarch64 only, the lanes stay four wide on x86-64 and Wasm.
 
 `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` were added after the default changed, as switches that
 were off unless set, and joined the set together on 2026-10-15. They cut the work tblastn does per
@@ -643,7 +637,7 @@ What runs per target:
   without AVX2.
 - aarch64: the NEON X-drop DP (`DPFAST` with `DPNEON`, and `DPW128` where the 128-bit kernel
   would run; `DPAVX2` does nothing), `MBBATCH` instead of `MBDELAY`; `DEKKER` does nothing (it
-  is compiled for wasm32 only); `NEWTONLANES8` gives the Newton lanes eight problems per round;
+  is compiled for wasm32 only); the Newton lanes take eight problems per round;
   everything else as on wasm32.
 - Any other target: no vector X-drop DP is compiled, so `DPFAST`, `DPAVX2`, `DPW128` and
   `DPNEON` do nothing (the scalar port runs), and the Newton lanes stay four wide; otherwise as
@@ -737,39 +731,41 @@ Same values, faster computation:
   `LOSAT_X_GREEDYFUSESHADOW=1` (implies the switch) runs it on copies, runs the reference call as
   well and stops on the first difference in the return value, align lengths, seed, fence flag,
   rows or `max_score`; at exit `[X_SHADOW] GREEDYFUSE compared=N`.
-- `LOSAT_X_COMPFAST=1` composition adjustment (Newton) loops reordered with the same element
-  operations in the same order. Shadow: `LOSAT_X_COMPSHADOW=1`.
-- `LOSAT_X_NEWTONEXACT=1` the Newton iteration of the composition adjustment with fixed-size
-  storage, a structured right-looking column Cholesky and AVX2, same element operations
-  (`core/composition_adjustment/x_newton_exact.rs`). Shadow: `LOSAT_X_NEWTONEXACTSHADOW=1`
-  (convergence state and the 400 values compared bitwise). `LOSAT_X_NEWTONEXACT_LEVEL=0|2`
-  (scalar | try AVX-512), `LOSAT_X_NEWTONEXACT_PROF=1` (cycle counters per phase).
-- `LOSAT_X_NEWTONLANES=1` (blastp and tblastn) Newton problems of the composition adjustment
-  solved ahead, four problems side by side (one per AVX2 lane, each lane with the operations of
-  `x_newton_exact`; `core/composition_adjustment/x_newton_lanes.rs`): blastp the first adjustment of
-  the next 16 matches of a query (serial and query-parallel redo; the single-query match-parallel
-  redo is unchanged), tblastn the adjustments of the coming windows of a match (at least 32 problems;
-  the window ranges, translation + SEG, computed ahead are handed to the redo loop). A call uses a
-  stored result only when its input (q, row and column probabilities, relative entropy) has the same
-  bits; otherwise the existing path runs. Shadow: `LOSAT_X_NEWTONLANESSHADOW=1` (every stored result
-  that is used is compared with the reference port, status and the 400 values bitwise; every kept
-  tblastn range with a fresh `get_range`). With `LOSAT_X_STATS=1` it prints
-  `[X_STATS] NEWTONLANES prefetched= hits= misses= unused= ...` (no `xstats` feature needed).
-  Strict-set candidate (S-F, round 5).
-- `LOSAT_X_NEWTONLANES8=1` (aarch64 only; in the strict set since 2026-10-15) the Newton lanes of
-  `LOSAT_X_NEWTONLANES` solve eight problems per round instead of four (`F8`, four 128-bit NEON
-  operations per value) in batches of five or more problems; once the queue is empty and at most
-  four lanes hold a problem, those problems move to four lanes (bit copies of the values kept
-  between rounds) and finish there. Each problem keeps its operation sequence, so the results are
-  the same bits (`x_newton_lanes.rs`, module header). It only widens the lanes: with
-  `LOSAT_X_NEWTONLANES` off it does nothing, and `LOSAT_X_NEWTONLANES8=0` runs four lanes. On other
-  targets it is ignored: on x86-64 the two 256-bit operations per value gained nothing (0 to 3 %
-  slower on blastp / tblastn), and Wasm is not measured. Measured 2026-10-15 on the GitHub runners,
-  bench5's blastp_wssv / tblastn_small at one thread, wall relative to four lanes: Linux arm64
-  (Neoverse-N2) 0.981 / 0.959, macOS arm64 0.974 / 0.893 (macOS rounds are noisy); on Neoverse-N2
-  `LOSAT_X_NEWTONLANES=0` gave 0.967 / 0.941. Shadow: `LOSAT_X_NEWTONLANESSHADOW=1` compares the
-  eight-lane results too. With `LOSAT_X_STATS=1` it adds
-  `[X_STATS] NEWTONLANES8 batches8= rounds8= tail_rounds=` (rounds on eight lanes and after the move).
+- COMPFAST, NEWTONEXACT (graduated 2026-10-22; no variables, no `LOSAT_X_COMPSHADOW`, no
+  `LOSAT_X_NEWTONEXACTSHADOW`) composition adjustment (Newton). COMPFAST: the loops of the Newton
+  iteration reordered with the same element operations in the same order (`step_bound`,
+  `ScaledSymmetricProductA`, `MultiplyByA`, `MultiplyByAtranspose`, the divisions of `Dinv`, the
+  column-major Cholesky factor and forward solve). NEWTONEXACT: the iteration with fixed-size storage, a
+  structured right-looking column Cholesky and AVX2, same element operations
+  (`core/composition_adjustment/x_newton_exact.rs`). Both always run. The line-by-line ports stay where
+  the default still takes them: `optimize_target_frequencies_reference` for a problem without the
+  relative-entropy constraint (the unconstrained matrix-adjust rule) or with another alphabet size, and
+  `step_bound_reference`, `scaled_symmetric_product_a_reference`, `factor_ltriang_pos_def` and
+  `solve_ltriang_pos_def` for a vector or matrix larger than the fast form's fixed size. The original-order
+  `MultiplyByA` / `MultiplyByAtranspose` loops and the bitwise shadow comparisons were deleted. The unit tests
+  compare the exact module and the lanes with the port bitwise. `LOSAT_X_NEWTONEXACT_LEVEL=0|2` (scalar | try
+  AVX-512) and `LOSAT_X_NEWTONEXACT_PROF=1` (cycle counters per phase) are separate variables and stay.
+- NEWTONLANES, NEWTONLANES8 (graduated 2026-10-22; no variables, no `LOSAT_X_NEWTONLANESSHADOW`; class
+  conditional / platform, the names stay in `GRADUATED` as the keys of `x_reach!`) Newton problems of the
+  composition adjustment solved ahead, four problems side by side (one per AVX2 lane, each lane with the
+  operations of `x_newton_exact`; `core/composition_adjustment/x_newton_lanes.rs`): blastp the first
+  adjustment of the next 16 matches of a query (serial and query-parallel redo; the single-query
+  match-parallel redo solves none), tblastn the adjustments of the coming windows of a match (at least 32
+  problems; the window ranges, translation + SEG, computed ahead are handed to the redo loop). A call uses a
+  stored result only when its input (q, row and column probabilities, relative entropy) has the same bits;
+  otherwise the exact module runs. NEWTONLANES8 (aarch64 only; in the strict set from 2026-10-15 to
+  2026-10-22): batches of five or more problems use eight lanes (`F8`, four 128-bit NEON operations per
+  value); once the queue is empty and at most four lanes hold a problem, those problems move to four lanes
+  (bit copies of the values kept between rounds) and finish there. Each problem keeps its operation
+  sequence, so the results are the same bits (`x_newton_lanes.rs`, module header). On other targets the
+  lanes stay four wide: on x86-64 the two 256-bit operations per value gained nothing (0 to 3 % slower on
+  blastp / tblastn), and Wasm is not measured. Measured 2026-10-15 on the GitHub runners, bench5's
+  blastp_wssv / tblastn_small at one thread, wall relative to four lanes: Linux arm64 (Neoverse-N2)
+  0.981 / 0.959, macOS arm64 0.974 / 0.893 (macOS rounds are noisy); on Neoverse-N2 no lanes gave
+  0.967 / 0.941. With `LOSAT_X_STATS=1` it prints
+  `[X_STATS] NEWTONLANES prefetched= hits= misses= unused= ...` and, on aarch64,
+  `[X_STATS] NEWTONLANES8 batches8= rounds8= tail_rounds=` (rounds on eight lanes and after the move; no
+  `xstats` feature needed). Strict-set candidate (S-F, round 5).
 - SEGFAST, SEGMEMO (graduated 2026-10-22; no variable, no `LOSAT_X_SEGSHADOW`) SEG window as a residue
   histogram updated in O(1), entropy memoised per state vector. Always run (`SegMasker::mask_sequence`)
   for a window of at most 15 letters and the 20-letter alphabet (`x_fast_applies`); other settings run
@@ -1284,7 +1280,7 @@ Rebuilding less:
   redo (`blastp/x_redo_subjects.rs`, `blastp/blast_engine/database/x_redo_db_subjects.rs`). Without it
   `ListedSubjects::read` copies the residues of every subject of the preliminary hit lists, which the redo and the
   reports read. With it `ListedSubjects::x_list` keeps their ordinal ids and lengths (from the index; the estimate of
-  `LOSAT_X_BPREDOLPT` reads the lengths), every redo path and the first Newton problems of `LOSAT_X_NEWTONLANES` read a
+  `LOSAT_X_BPREDOLPT` reads the lengths), every redo path and the first Newton problems of the Newton lanes read a
   match's stored residues with `SeqDb::read_sequence` and drop them after the match (the Newton problems read ahead of
   the redo and the redo reads again: keeping the reads ahead for the redo raised the maximum resident set; the
   one-thread loop reads after the early termination test, as NCBI, and after the Newton problems; the parallel paths
@@ -1358,7 +1354,7 @@ Rebuilding less:
   (`LOSAT_X_BPREDOPARWINDOW` below), so at most 4 x 64 x threads redone results are held before their
   replay. A job builds its query's workspace once per window (`OnceLock`; a query that spans windows has it
   built again from the same inputs, a small cost that grows with the query's length) and its own
-  parameters, prefetches the first Newton problems of its own matches with `LOSAT_X_NEWTONLANES` (one vector
+  parameters, prefetches the first Newton problems of its own matches with the Newton lanes (one vector
   of four, against the heaps as the window's start left them), and redoes its matches with per-worker
   scratch and the search's `LOSAT_X_SEGSHARE` store. A
   query's preliminary list is released after the replay of the window that holds its last match, as the
@@ -1385,7 +1381,7 @@ Rebuilding less:
   and traces of the redo count the `wasted` matches as well (`[TIMING] x_bpredofit: lists= hsps=`, the
   kappa range counters, `LOSAT_DEBUG_BLASTP_TRACE_HSP` lines), and `[X_STATS] NEWTONLANES` counts the
   prefetches of the jobs (four matches each, the one-thread loop prefetches 16 ahead). With
-  `LOSAT_X_NEWTONLANES8` (aarch64) a job's prefetch of at most four problems never fills eight lanes.
+  the eight lanes (aarch64) a job's prefetch of at most four problems never fills eight lanes.
   Reason: the query-level redo waits for the largest query of a search (in the blocks of the human x yeast
   blastp-fast job with `LOSAT_X_BPQBLOCK=20000`, 33 % of a block's redo work at the median, 54 % at p90).
   Default ON since 2026-10-17 (perf/perfmb-default-bundle; workstation (2x Xeon Gold 6338, 16 physical cores of one

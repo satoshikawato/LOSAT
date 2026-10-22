@@ -1,25 +1,16 @@
-//! The eight Newton lanes (`LOSAT_X_NEWTONLANES8`,
-//! `src/core/composition_adjustment/x_newton_lanes.rs`) on whole blastp and tblastn searches.
+//! The eight Newton lanes (`src/core/composition_adjustment/x_newton_lanes.rs`) on whole blastp and
+//! tblastn searches.
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is
-//! `0`, or `LOSAT_X_DEFAULT=0` and its variable is not set. It acts on aarch64 only, and only
-//! where the Newton lanes of `LOSAT_X_NEWTONLANES` (also in the set) run; on other targets it is
-//! not read and the lanes stay four wide. It chooses how many independent problems share a
-//! vector, so the property under test is that the report does not depend on it: the default run
-//! (eight lanes on aarch64), `LOSAT_X_NEWTONLANES8=0` (four lanes) and `LOSAT_X_DEFAULT=0` (no
-//! lanes) give the same bytes, and the shadow, which compares every stored result that is used
-//! with the reference port, does not change them. The `[X_STATS] NEWTONLANES8` line shows that
-//! the default run takes eight-lane batches on aarch64 and none elsewhere. On x86-64 the default
-//! and `LOSAT_X_NEWTONLANES8=0` run the same path, so these tests mean most on the arm64 runners
+//! The lanes have no variable since `LOSAT_X_NEWTONLANES` and `LOSAT_X_NEWTONLANES8` graduated
+//! (2026-10-22). On aarch64 batches of five or more problems share eight lanes; on other targets
+//! the lanes stay four wide. The `[X_STATS] NEWTONLANES8` line shows that a default run takes
+//! eight-lane batches on aarch64 and none elsewhere, so this test means most on the arm64 runners
 //! of platform-checks. That the bytes equal NCBI's is the business of the fixture suites.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const SWITCH_OFF: (&str, &str) = ("LOSAT_X_NEWTONLANES8", "0");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_NEWTONLANESSHADOW", "1");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -76,7 +67,7 @@ impl Drop for Queries {
 }
 
 /// One search (`-outfmt 6` on standard output) with the given variables as its only `LOSAT_*`
-/// variables that choose a code path. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
+/// variables. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
 /// soon as a search has more than one thread, and it selects nothing; without the caller's value
 /// a file of the tests is named. `BATCH_SIZE`, `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` are the
@@ -134,78 +125,28 @@ fn counter(stderr: &str, prefix: &str, key: &str) -> Option<u64> {
     Some(value.parse().expect("a counter"))
 }
 
-// The default search (eight lanes on aarch64, four elsewhere), `LOSAT_X_NEWTONLANES8=0` (four
-// lanes) and `LOSAT_X_DEFAULT=0` (no lanes) give the same report, and none prints a line on
-// standard error.
-#[test]
-fn the_report_does_not_depend_on_the_lane_width() {
-    for case in CASES {
-        let queries = Queries::new(case, "width");
-        for threads in [1, 4] {
-            let (default, default_stderr) = search(case, &queries, threads, &[]);
-            assert!(!default.is_empty(), "{case:?} threads {threads}: no hits");
-            assert_eq!(default_stderr, "", "{case:?} threads {threads}");
-            for off in [SWITCH_OFF, DEFAULT_OFF] {
-                let (report, stderr) = search(case, &queries, threads, &[off]);
-                assert_eq!(report, default, "{case:?} {off:?} threads {threads}");
-                assert_eq!(stderr, "", "{case:?} {off:?} threads {threads}");
-            }
-        }
-    }
-}
-
 // With `LOSAT_X_STATS=1` the lanes report their batches. The default run takes eight-lane
-// batches on aarch64 and prints no `NEWTONLANES8` line elsewhere; `LOSAT_X_NEWTONLANES8=0` runs
-// four lanes only. `LOSAT_X_DEFAULT=0` with both lane variables set to a value other than 0 is the
-// run those variables gave before the switch joined the set. The report is the same in every run.
+// batches on aarch64 and prints no `NEWTONLANES8` line elsewhere. The report is the same with
+// and without the report of the counters.
 #[test]
 fn the_default_takes_eight_lane_batches_on_aarch64_only() {
     const LANES: &str = "[X_STATS] NEWTONLANES ";
     const LANES8: &str = "[X_STATS] NEWTONLANES8 ";
-    let before = [
-        DEFAULT_OFF,
-        ("LOSAT_X_NEWTONLANES", "1"),
-        ("LOSAT_X_NEWTONLANES8", "1"),
-        STATS,
-    ];
     for case in CASES {
         let queries = Queries::new(case, "stats");
-        let (expected, _) = search(case, &queries, 1, &[]);
-        for (vars, eight) in [
-            (&[STATS][..], cfg!(target_arch = "aarch64")),
-            (&[SWITCH_OFF, STATS][..], false),
-            (&before[..], cfg!(target_arch = "aarch64")),
-        ] {
-            let (report, stderr) = search(case, &queries, 1, vars);
-            assert_eq!(report, expected, "{case:?} {vars:?}");
-            let batches = counter(&stderr, LANES, "batches")
-                .unwrap_or_else(|| panic!("{case:?} {vars:?}: no lanes line:\n{stderr}"));
-            assert!(batches > 0, "{case:?} {vars:?}: {stderr}");
-            let batches8 = counter(&stderr, LANES8, "batches8");
-            if eight {
-                assert!(
-                    batches8.is_some_and(|n| n > 0),
-                    "{case:?} {vars:?}: {stderr}"
-                );
-            } else {
-                assert_eq!(batches8, None, "{case:?} {vars:?}: {stderr}");
-            }
-        }
-    }
-}
-
-// The shadow (set to any value, not in the set) compares every stored result that is used with
-// the reference port, eight-lane results included on aarch64, prints its summary line, and
-// does not change the report.
-#[test]
-fn the_shadow_compares_the_lane_results_and_the_report_is_unchanged() {
-    for case in CASES {
-        let queries = Queries::new(case, "shadow");
-        let (expected, _) = search(case, &queries, 1, &[]);
-        let (report, stderr) = search(case, &queries, 1, &[SHADOW]);
+        let (expected, expected_stderr) = search(case, &queries, 1, &[]);
+        assert!(!expected.is_empty(), "{case:?}: no hits");
+        assert_eq!(expected_stderr, "", "{case:?}");
+        let (report, stderr) = search(case, &queries, 1, &[STATS]);
         assert_eq!(report, expected, "{case:?}");
-        let compared = counter(&stderr, "[X_SHADOW] NEWTONLANES ", "calls_compared")
-            .unwrap_or_else(|| panic!("{case:?}: no summary line:\n{stderr}"));
-        assert!(compared > 0, "{case:?}: {stderr}");
+        let batches = counter(&stderr, LANES, "batches")
+            .unwrap_or_else(|| panic!("{case:?}: no lanes line:\n{stderr}"));
+        assert!(batches > 0, "{case:?}: {stderr}");
+        let batches8 = counter(&stderr, LANES8, "batches8");
+        if cfg!(target_arch = "aarch64") {
+            assert!(batches8.is_some_and(|n| n > 0), "{case:?}: {stderr}");
+        } else {
+            assert_eq!(batches8, None, "{case:?}: {stderr}");
+        }
     }
 }

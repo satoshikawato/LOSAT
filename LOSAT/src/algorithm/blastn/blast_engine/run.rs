@@ -87,10 +87,10 @@ use super::super::hsp::{
     BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
-use super::super::lookup::x_mb_lut_keep;
 use super::super::lookup::{
     build_unmasked_ranges, encode_reverse_complement_blastna_into, DiscTemplates,
 };
+use super::super::lookup::{x_dc_csr, x_mb_lut_keep};
 use super::super::pairwise::{pairwise_hits, shown_query_masks, DisplayMasks};
 use super::super::query_split::{
     calculate_num_chunks, restrict_masks, split_query_batch, QueryChunk, SplitSizes,
@@ -12643,14 +12643,91 @@ fn search_query_batch(
                         //                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
                         //     }
                         // ```
-                        scan_subject_disc_words_with_ranges(
-                            search_seq_packed,
-                            s_len,
-                            disc,
-                            &subject_seq_ranges,
-                            subject_masked,
-                            |s_off, s_range, index, index2| on_word(s_off, s_range, index, index2),
-                        );
+                        // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains; its
+                        // words go through `x_on_word_csr`, `on_word`'s statements for one template
+                        // with the cell's run (the chain's offsets in the chain's order) instead of
+                        // the chain walk, in the same order, each `RING` words late through the ring
+                        // that prefetches their cells' offsets and runs (`lookup::x_dc_csr`). `on_word`
+                        // keeps its two callers, so its code is the one without the switch.
+                        if let Some(csr) = disc.x_csr() {
+                            let mut x_on_word_csr = |(kmer_start, s_range, index): (
+                                usize,
+                                usize,
+                                u64,
+                            )| {
+                                if debug_enabled {
+                                    dbg_total_s_positions += 1;
+                                }
+                                let run: &[u32] = if two_stage.has_hits(index) {
+                                    csr.run(index as usize)
+                                } else {
+                                    &[]
+                                };
+                                if (debug_mode || blastn_debug) && run.len() > 1000 {
+                                    eprintln!(
+                                        "[WARN] Large matches_slice: len={} for kmer at position {}",
+                                        run.len(),
+                                        kmer_start
+                                    );
+                                }
+                                if offset_pairs_len >= OFFSET_ARRAY_SIZE {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
+                                }
+                                for &q_off_1 in run {
+                                    if debug_enabled {
+                                        dbg_seeds_found += 1;
+                                    }
+                                    offset_pairs[offset_pairs_len] = OffsetPair {
+                                        q_off: q_off_1 as usize - 1,
+                                        s_off: kmer_start,
+                                        s_range,
+                                    };
+                                    offset_pairs_len += 1;
+                                }
+                                if offset_pairs_len >= offset_array_size {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
+                                }
+                            };
+                            let mut ring: x_dc_csr::Ring<'_, (usize, usize, u64)> =
+                                x_dc_csr::Ring::new(csr);
+                            scan_subject_disc_words_with_ranges(
+                                search_seq_packed,
+                                s_len,
+                                disc,
+                                &subject_seq_ranges,
+                                subject_masked,
+                                |s_off, s_range, index, index2| {
+                                    debug_assert!(index2.is_none());
+                                    ring.push(
+                                        (s_off, s_range, index),
+                                        |w| w.2 as usize,
+                                        &mut x_on_word_csr,
+                                    )
+                                },
+                            );
+                            ring.flush(&mut x_on_word_csr);
+                        } else {
+                            scan_subject_disc_words_with_ranges(
+                                search_seq_packed,
+                                s_len,
+                                disc,
+                                &subject_seq_ranges,
+                                subject_masked,
+                                |s_off, s_range, index, index2| {
+                                    on_word(s_off, s_range, index, index2)
+                                },
+                            );
+                        }
                     } else {
                         let mb_scan_kind =
                             select_mb_scan_kind(lut_word_length, scan_step, subject_masked);

@@ -1921,6 +1921,33 @@ mod tests {
 
     type HashState = (Vec<u32>, Vec<(i32, i32, bool, i32, u32)>, u32, u32, i32);
 
+    /// `seed_stage_of` in the instance of `lean` (LOSAT_X_FOLDLEAN) and of the table's memo
+    /// (LOSAT_X_DIAGLV2), whatever the environment says (`seed_stage` reads the switch).
+    fn stage_of(
+        lean: bool,
+        x: &Inputs<'_>,
+        disc: &DiscTemplates,
+        threads: usize,
+        hash: &mut DiagHashTable,
+        hits: &mut Vec<UngappedHit>,
+        fold_part: Option<part::FoldPart<'_>>,
+    ) -> StageStats {
+        match (lean, !hash.x_last.is_empty()) {
+            (false, false) => {
+                seed_stage_of::<false, false>(x, disc, threads, hash, hits, None, false, fold_part)
+            }
+            (false, true) => {
+                seed_stage_of::<false, true>(x, disc, threads, hash, hits, None, false, fold_part)
+            }
+            (true, false) => {
+                seed_stage_of::<true, false>(x, disc, threads, hash, hits, None, false, fold_part)
+            }
+            (true, true) => {
+                seed_stage_of::<true, true>(x, disc, threads, hash, hits, None, false, fold_part)
+            }
+        }
+    }
+
     /// `fold_two_hit` without partitions in the instance of `lean` (LOSAT_X_FOLDLEAN) and of
     /// the table's memo (LOSAT_X_DIAGLV2), as `seed_stage` picks it.
     #[allow(clippy::too_many_arguments)]
@@ -2350,9 +2377,10 @@ mod tests {
                         }
                     }
                     // LOSAT_X_DIAGLV2 (`x_diag_lv.rs`) and LOSAT_X_FOLDLEAN: on a table with
-                    // level bounds and the memo (and with the shadow, which checks every
-                    // answer), the serial fold's two instances answer retrieves from the memo and
-                    // give the hits and the table of the fold on a table with neither.
+                    // level bounds, with and without the memo (and with the shadow, which checks
+                    // every answer), the serial fold's four instances (`LEAN` x `MEMO`) give the
+                    // hits and the table of the fold on a table with neither; with the memo it
+                    // answers retrieves, without it never.
                     let mut plain_hash = new_hash();
                     plain_hash.max_level = Vec::new();
                     plain_hash.x_last = Vec::new();
@@ -2368,47 +2396,56 @@ mod tests {
                     );
                     assert_eq!(plain_hits.iter().map(key).collect::<Vec<_>>(), serial_keys);
                     assert_eq!(hash_state(&plain_hash), hash_state(&serial_hash));
-                    for shadow in [false, true] {
-                        for lean in [false, true] {
-                            let mut h = new_hash();
-                            h.x_lv_start(shadow);
+                    for (shadow, lean, memo) in (0..8).map(|k| (k & 4 != 0, k & 2 != 0, k & 1 != 0))
+                    {
+                        let mut h = new_hash();
+                        h.x_lv_start(shadow);
+                        if memo {
                             h.x_lv2_start();
-                            let mut hits = Vec::new();
-                            let before = super::super::super::x_diag_lv::test_memos();
-                            fold_serial(
-                                lean,
-                                &x,
-                                &seeds,
-                                &mut h,
-                                &mut hits,
-                                &mut pause,
-                                &mut FoldCounts::default(),
-                            );
-                            let memos = super::super::super::x_diag_lv::test_memos() - before;
-                            let at = format!("case {case_no} shadow {shadow} lean {lean}");
-                            assert!(memos > 0, "{at}: the memo never answered");
-                            assert_eq!(
-                                hits.iter().map(key).collect::<Vec<_>>(),
-                                serial_keys,
-                                "{at}"
-                            );
-                            assert_eq!(hash_state(&h), hash_state(&plain_hash), "{at}");
+                        } else {
+                            h.x_last = Vec::new();
                         }
+                        let mut hits = Vec::new();
+                        let before = super::super::super::x_diag_lv::test_memos();
+                        fold_serial(
+                            lean,
+                            &x,
+                            &seeds,
+                            &mut h,
+                            &mut hits,
+                            &mut pause,
+                            &mut FoldCounts::default(),
+                        );
+                        let memos = super::super::super::x_diag_lv::test_memos() - before;
+                        let at = format!("case {case_no} shadow {shadow} lean {lean} memo {memo}");
+                        assert_eq!(memos > 0, memo, "{at}: memo answers {memos}");
+                        assert_eq!(
+                            hits.iter().map(key).collect::<Vec<_>>(),
+                            serial_keys,
+                            "{at}"
+                        );
+                        assert_eq!(hash_state(&h), hash_state(&plain_hash), "{at}");
                     }
                     // LOSAT_X_PAIRPARFOLD (`x_pair_seed_part.rs`): the two-hit fold split into
-                    // 2, 3, 7, 8 and 16 partitions on 1..8 threads, on tables with and without
-                    // level bounds, for two chunks in a row on one scratch (the second with the
-                    // hash offset moved on): the hits and the table of the serial fold.
+                    // 2, 3, 7, 8 and 16 partitions on 1..8 threads, on tables without level
+                    // bounds, with bounds, and with bounds and the memo (LOSAT_X_DIAGLV2), in the
+                    // stage's instances with and without LOSAT_X_FOLDLEAN (`stage_of`, alternating
+                    // over the configurations), for two chunks in a row on one scratch (the second
+                    // with the hash offset moved on): the hits and the table of the serial fold.
                     let x2 = Inputs {
                         diag_offset: diag_offset + c.s_len as isize + window_size as isize,
                         ..x
                     };
-                    for levels in [false, true] {
+                    for (levels, memo) in [(false, false), (true, false), (true, true)] {
+                        // whatever the environment says
                         let new_table = || {
                             let mut h = new_hash();
+                            h.max_level = Vec::new();
+                            h.x_last = Vec::new();
                             if levels {
                                 h.x_lv_start(false);
-                                // and the memo (LOSAT_X_DIAGLV2), whatever the environment says
+                            }
+                            if memo {
                                 h.x_lv2_start();
                             }
                             h
@@ -2434,7 +2471,7 @@ mod tests {
                                 expected_hash.x_last.clone(),
                             ));
                         }
-                        for (threads, parts) in [
+                        for (k, (threads, parts)) in [
                             (1usize, 2usize),
                             (2, 2),
                             (3, 3),
@@ -2443,7 +2480,11 @@ mod tests {
                             (5, 16),
                             (8, 8),
                             (8, 16),
-                        ] {
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        {
+                            let lean = k % 2 == 1;
                             let pool = rayon::ThreadPoolBuilder::new()
                                 .num_threads(threads)
                                 .build()
@@ -2453,18 +2494,17 @@ mod tests {
                                 let mut scratch = PartScratch::default();
                                 for (chunk, xc) in [&x, &x2].into_iter().enumerate() {
                                     let at = format!(
-                                        "case {case_no} threads {threads} parts {parts} levels {levels} chunk {chunk}"
+                                        "case {case_no} threads {threads} parts {parts} levels {levels} memo {memo} lean {lean} chunk {chunk}"
                                     );
                                     hash.offset = xc.diag_offset as i32;
                                     let mut hits = Vec::new();
-                                    let stats = seed_stage(
+                                    let stats = stage_of(
+                                        lean,
                                         xc,
                                         disc,
                                         threads,
                                         &mut hash,
                                         &mut hits,
-                                        None,
-                                        false,
                                         Some(part::FoldPart {
                                             scratch: &mut scratch,
                                             parts,

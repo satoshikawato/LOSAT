@@ -1035,8 +1035,9 @@ impl DiagHashTable {
     /// (`s_BlastDiagHashInsert`, quoted above `insert`).
     /// `insert` without the memo of LOSAT_X_DIAGLV2, for a table that has none: the strips fold of
     /// dc-megablast (`x_pair_seed_disc.rs` `fold_two_hit`) in its instance with LOSAT_X_FOLDLEAN
-    /// and LOSAT_X_DIAGLV2 off, and the one-hit strips folds (`x_pair_seed.rs` `fold`,
-    /// `x_pair_seed_na.rs` `fold_na`), which are then the code before those switches.
+    /// off on a table without the memo (LOSAT_X_DIAGLV2 or LOSAT_X_DIAGLV off), and the one-hit
+    /// strips folds (`x_pair_seed.rs` `fold`, `x_pair_seed_na.rs` `fold_na`), which are then the
+    /// code before those switches.
     #[inline(never)]
     pub(super) fn insert_plain(
         &mut self,

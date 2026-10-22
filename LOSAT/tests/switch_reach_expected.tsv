@@ -67,7 +67,7 @@ LOSAT_X_DUSTRING	blastn	always			DUST window kept in a ring buffer
 LOSAT_X_ENVCACHE	blastn	always			Debug env variables read once instead of per extension
 LOSAT_X_ERFABSORB	blastn,blastp,blastx,tblastn,tblastx	always			Spouge ErfC returns 2.0 below -6 without ErfImpl
 LOSAT_X_ERFMEMO	blastn,blastp,blastx,tblastn,tblastx	always			Spouge ErfC memoised per thread
-LOSAT_X_FOLDLEAN	blastn	conditional	required	required	the dc-megablast strips folds (PAIRPARDISC / PAIRPARDISCARR stages: 2+ threads, one unmasked subject); ref = the reference fold where those stages do not run
+LOSAT_X_FOLDLEAN	blastn	conditional	required	required	the dc-megablast strips folds (PAIRPARDISC / PAIRPARDISCARR stages: 2+ threads, one unmasked subject); ref = the reference fold where those stages do not run; recorded only at their decision points (nothing while both are off)
 LOSAT_X_GREEDYFAST	blastn	always			Greedy alignment: one distance in three passes, 8 bases at a time
 LOSAT_X_GREEDYFUSE	blastn	always			Score-only greedy alignment as one fused loop over distances
 LOSAT_X_GREEDYPRELIM	blastn	always			Score-only greedy prelim reads one-byte-per-base subject copy

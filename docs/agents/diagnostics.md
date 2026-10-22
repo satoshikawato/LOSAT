@@ -3132,8 +3132,12 @@ Scheduling (each value computed by one thread with the original function; order 
   (`blastn/blast_engine/x_diag_lv.rs`, (iv) to (vi) in its header). The table clear, `copy_hash`, the stage copy
   and the merge of `LOSAT_X_PAIRPARFOLD` keep the memo with the chains. It acts in every caller of the bounded
   retrieve on such a table: the reference fold (`process_offset_pairs`: one thread, and every worker with many
-  subjects) and the strips fold of `LOSAT_X_PAIRPARDISC`. One-hit tables (megablast, blastn, blastn-short) keep no memo. With the switch off the
-  memo is empty, and an insert and a retrieve each test the length of an empty vector.
+  subjects) and the strips fold of `LOSAT_X_PAIRPARDISC`. One-hit tables (megablast, blastn, blastn-short) keep no memo. The
+  strips folds run an instance per state of the table's memo (`MEMO`, with `LOSAT_X_FOLDLEAN`'s `LEAN`: see there): without it
+  (the switch off, or `LOSAT_X_DIAGLV` off) the retrieve and the insert have no memo test (`retrieve_below::<false>`,
+  `DiagHashTable::insert_plain`, the code before the switch), and the one-hit strips folds (`LOSAT_X_PAIRPAR`,
+  `LOSAT_X_PAIRPARNA`) always take those. The reference fold (`process_offset_pairs`) tests the length of the memo at each
+  insert and at each retrieve the bound does not skip, on every table, one-hit tables included, the switch on or off.
   Shadow: `LOSAT_X_DIAGLVSHADOW=1` also checks every memo answer: the bucket's walk must find the latest insert's
   values in the first cell of its diagonal and every other cell at or below `other`, and the retrieve's walk must
   return the memo's cell for that diagonal, or for another diagonal a cell with the decisions of no cell; the
@@ -3146,8 +3150,11 @@ Scheduling (each value computed by one thread with the original function; order 
   EVIDENCE (filled after the workstation A/B).
 - `LOSAT_X_FOLDLEAN=1` (in the strict set since 2026-10-22 (perf/dc-fold-lean, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set)
   blastn dc-megablast, the strips folds of `LOSAT_X_PAIRPARDISC` (`fold_two_hit`, diagonal hash) and
-  `LOSAT_X_PAIRPARDISCARR` (`fold_two_hit_array`, diagonal array): each fold runs a second instance (a const
-  parameter, so the instance of the switch off is the previous code) that takes `s_TypeOfWord`'s early return
+  `LOSAT_X_PAIRPARDISCARR` (`fold_two_hit_array`, diagonal array): the stage runs one instance per state of the
+  switch (`LEAN`) and of the table's memo (`MEMO`, `LOSAT_X_DIAGLV2`), `seed_stage_of::<LEAN, MEMO>` /
+  `seed_stage_array_of::<LEAN>`, so with the switch off on a table without the memo it is the code before the two
+  switches (the same instructions: only the field offsets of the table, which gained the memo, differ). The `LEAN`
+  instance takes `s_TypeOfWord`'s early return
   itself (na_ungapped.c:531 `if (word_length == lut_word_length) return 1;`, always so for a discontiguous word: no call, no
   arguments, the offsets unchanged and nothing extended) and inlines the diagonal-hash insert
   (`DiagHashTable::insert_inl`, the statements of `insert`). Same statements in the same order. The reference

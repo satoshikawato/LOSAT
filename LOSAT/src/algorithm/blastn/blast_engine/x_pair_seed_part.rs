@@ -185,7 +185,8 @@ impl PartOut {
 /// ```
 /// A fold's insert (`DiagHashTable::insert`; with `LEAN`, LOSAT_X_FOLDLEAN, the same statements
 /// inlined, `insert_inl`). Without `MEMO` the table has no memo (LOSAT_X_DIAGLV2) and the insert
-/// is `insert_plain`, the statements before that switch. With partitions (`PT`) it also records
+/// does not test for one: `insert_plain`, the statements before that switch (with `LEAN` inlined,
+/// `insert_inl::<false>`). With partitions (`PT`) it also records
 /// the diagonal's bucket and, when the insert appended a cell, the seed's key with the cell's
 /// number in the partition's table.
 #[allow(clippy::too_many_arguments)]
@@ -1214,10 +1215,13 @@ mod tests {
                 for levels in [false, true] {
                     case += 1;
                     let window = [12, 40, 5000][case % 3];
+                    // the bounds (LOSAT_X_DIAGLV) and the memo (LOSAT_X_DIAGLV2) as `levels` says,
+                    // whatever the environment says
                     let mut reference_hash = DiagHashTable::new(16);
+                    reference_hash.max_level = Vec::new();
+                    reference_hash.x_last = Vec::new();
                     if levels {
                         reference_hash.x_lv_start(false);
-                        // and the memo (LOSAT_X_DIAGLV2), whatever the environment says
                         reference_hash.x_lv2_start();
                     }
                     let mut hash = copy_hash(&reference_hash);

@@ -1,7 +1,8 @@
 //! The level bounds of the diagonal hash (`LOSAT_X_DIAGLV`,
 //! `src/algorithm/blastn/blast_engine/x_diag_lv.rs`) on whole searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set). It chooses between
+//! The switch is in the strict set since 2026-10-17; these searches run with it `0` unless they
+//! set it (`PREVIOUS_DEFAULT`). It chooses between
 //! two LOSAT code paths with the same result: a seed's retrieve of its diagonal walks the chain
 //! of the diagonal's bucket, or returns "no cell" without the walk when every cell of the
 //! bucket lies below the seed's level bound. So the property under test is that the report does
@@ -141,8 +142,9 @@ fn blastn(
 }
 
 /// The counters of the shadow's line (`[X_SHADOW] DIAGLV retrieves= skipped= verified=
-/// decisions= cells= memo= memofound= identical`), which must be the only line of `stderr` unless `others`
-/// lines start with one of the other prefixes: the retrieves and the skipped ones, after
+/// decisions= cells= memo= memofound= identical`), which must be the only line of `stderr`
+/// unless `others` lines start with one of the other prefixes: the retrieves and the skipped
+/// ones, after
 /// checking that every skipped walk passed both checks (its bucket's levels and its
 /// decisions).
 fn shadow_counts(stderr: &str, others: &[&str], at: &str) -> (u64, u64) {
@@ -228,20 +230,26 @@ fn the_strips_shadows_compare_the_tables_with_the_level_bounds() {
     let dir = TestDir::new("strips");
     let query = fasta("LC738874.fasta");
     let subject = fasta("LC738868.fasta");
-    for (task, strips_shadow, prefix) in [
+    // (dc-megablast with the memo, LOSAT_X_DIAGLV2, and the lean folds, LOSAT_X_FOLDLEAN: the
+    // strips shadow also compares the memo of every chunk's table)
+    for (task, strips_shadow, prefix, more) in [
         (
             "megablast",
             ("LOSAT_X_PAIRPARSHADOW", "1"),
             "[X_PAIRPARSHADOW] blastn:",
+            &[][..],
         ),
         (
             "dc-megablast",
             ("LOSAT_X_PAIRPARDISCSHADOW", "1"),
             "[X_PAIRPARDISCSHADOW] blastn:",
+            &[("LOSAT_X_DIAGLV2", "1"), ("LOSAT_X_FOLDLEAN", "1")][..],
         ),
     ] {
         let (expected, _) = blastn(&dir, &query, &subject, task, 1, &[]);
-        let (report, stderr) = blastn(&dir, &query, &subject, task, 4, &[SHADOW, strips_shadow]);
+        let mut on = vec![SHADOW, strips_shadow];
+        on.extend_from_slice(more);
+        let (report, stderr) = blastn(&dir, &query, &subject, task, 4, &on);
         assert!(report == expected, "{task}: the report differs");
         let at = format!("{task} with {strips_shadow:?}");
         // (`LOSAT_X_PAIRPARSHADOW` also names the shadow of TBLASTX's own `PAIRPAR`, whose
@@ -277,9 +285,10 @@ fn memo_counts(stderr: &str, at: &str) -> (u64, u64) {
 // The memo of the latest insert (`LOSAT_X_DIAGLV2`, with the level bounds) and the lean
 // instances of the dc-megablast strips folds (`LOSAT_X_FOLDLEAN`): dc-megablast at one thread
 // (the reference fold) and at four (the strips fold of `LOSAT_X_PAIRPARDISC`) gives the bytes of
-// the search with neither, each switch alone and both; with the shadow, which checks every
-// answer of the memo, the memo answers, also for the latest insert's diagonal. megablast keeps no
-// memo (a one-hit table).
+// the search with neither, each switch alone and both, at four threads also with the fold split
+// over partitions (`LOSAT_X_PAIRPARFOLD`); with the shadow, which checks every answer of the memo,
+// the memo answers, also for the latest insert's diagonal. megablast keeps no memo (a one-hit
+// table).
 #[test]
 fn the_memo_and_the_lean_folds_give_the_same_report() {
     let dir = TestDir::new("memo");
@@ -291,14 +300,25 @@ fn the_memo_and_the_lean_folds_give_the_same_report() {
     assert_eq!(expected_stderr, "", "{task}");
     const MEMO: (&str, &str) = ("LOSAT_X_DIAGLV2", "1");
     const LEAN: (&str, &str) = ("LOSAT_X_FOLDLEAN", "1");
+    const FOLD: (&str, &str) = ("LOSAT_X_PAIRPARFOLD", "1");
     for threads in [1, 4] {
-        for arm in [vec![SWITCH, MEMO], vec![LEAN], vec![SWITCH, MEMO, LEAN]] {
-            let mut on = arm.clone();
-            on.push(PAIRPARDISC);
-            let at = format!("{task} {on:?} threads {threads}");
-            let (report, stderr) = blastn(&dir, &query, &subject, task, threads, &on);
-            assert!(report == expected, "{at}: the report differs");
-            assert_eq!(stderr, "", "{at}");
+        let folds: &[bool] = if threads > 1 {
+            &[false, true]
+        } else {
+            &[false]
+        };
+        for &fold in folds {
+            for arm in [vec![SWITCH, MEMO], vec![LEAN], vec![SWITCH, MEMO, LEAN]] {
+                let mut on = arm.clone();
+                on.push(PAIRPARDISC);
+                if fold {
+                    on.push(FOLD);
+                }
+                let at = format!("{task} {on:?} threads {threads}");
+                let (report, stderr) = blastn(&dir, &query, &subject, task, threads, &on);
+                assert!(report == expected, "{at}: the report differs");
+                assert_eq!(stderr, "", "{at}");
+            }
         }
         let on = [SHADOW, MEMO, LEAN, PAIRPARDISC];
         let at = format!("{task} {on:?} threads {threads}");

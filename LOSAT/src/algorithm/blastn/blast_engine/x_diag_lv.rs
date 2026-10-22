@@ -189,8 +189,12 @@
 //!
 //! One-hit tables (megablast, blastn, blastn-short: window 0) keep no memo: their inserts would
 //! pay for it where no measured fold gains (the memo is a dc-megablast measurement, line R
-//! REPORT_R12 §2.3). With the switch off, or LOSAT_X_DIAGLV off, `x_last` is empty and the
-//! retrieve and the insert each make one more length test of it. The shadow (LOSAT_X_DIAGLVSHADOW)
+//! REPORT_R12 §2.3). With the switch off, or LOSAT_X_DIAGLV off, `x_last` is empty. The strips
+//! folds then run instances without the memo (`MEMO` false: `retrieve_below::<false>` and
+//! `DiagHashTable::insert_plain`, the code before the switch), and so do the one-hit strips folds
+//! always; the reference fold (`process_offset_pairs`) calls `retrieve_below::<true>` and
+//! `insert`, which make one more length test of `x_last` on every table without a memo, one-hit
+//! tables included, whether the switch is on or off. The shadow (LOSAT_X_DIAGLVSHADOW)
 //! checks every answer: the bucket's walk must give (iv) (the first cell of the latest insert's
 //! diagonal holds its values) and (v) (every other cell at or below `other`), and the walk of the
 //! retrieve must return what the memo returned for that diagonal, or for any other diagonal a
@@ -236,7 +240,7 @@ static DECISIONS: AtomicU64 = AtomicU64::new(0);
 static CELLS: AtomicU64 = AtomicU64::new(0);
 // No NCBI counterpart (LOSAT_X_DIAGLV2): the memo's answers that the shadow checked, and of those
 // the ones for the latest insert's diagonal.
-static MEMO: AtomicU64 = AtomicU64::new(0);
+static MEMO_ANSWERS: AtomicU64 = AtomicU64::new(0);
 static MEMO_FOUND: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
@@ -456,8 +460,8 @@ impl DiagHashTable {
         }
         // EXPERIMENT (LOSAT_X_DIAGLV2, module comment (iv)-(vi)): every cell but the latest
         // insert's lies below the bound; answer from the memo without the walk. (`insert` keeps
-        // the memo only on a table with bounds.) Without `MEMO` (an instance of the strips fold of
-        // dc-megablast for a table without the memo) there is no test.
+        // the memo only on a table with bounds.) Without `MEMO` (the strips folds on a table
+        // without the memo: dc-megablast's instance and the one-hit folds) there is no test.
         debug_assert!(self.x_last.is_empty() || self.x_lv_on());
         debug_assert!(MEMO || self.x_last.is_empty());
         if MEMO {
@@ -533,7 +537,7 @@ impl DiagHashTable {
                 "LOSAT_X_DIAGLV2 (shadow): diagonal {diag} at s_off_pos {s_off_pos} ({seeds:?}): the memo {last:?} answers {found:?}, the walk {walked:?}"
             );
         }
-        MEMO.fetch_add(1, Ordering::Relaxed);
+        MEMO_ANSWERS.fetch_add(1, Ordering::Relaxed);
         if found.is_some() {
             MEMO_FOUND.fetch_add(1, Ordering::Relaxed);
         }
@@ -631,7 +635,7 @@ fn print_line(verdict: &str) {
         VERIFIED.load(Ordering::Relaxed),
         DECISIONS.load(Ordering::Relaxed),
         CELLS.load(Ordering::Relaxed),
-        MEMO.load(Ordering::Relaxed),
+        MEMO_ANSWERS.load(Ordering::Relaxed),
         MEMO_FOUND.load(Ordering::Relaxed)
     );
 }

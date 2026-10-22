@@ -179,12 +179,13 @@ impl PartOut {
 ///                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
 ///                           hit_ready, s_off_pos, window_size + Delta + 1);
 /// ```
-/// A fold's insert (`DiagHashTable::insert`). With partitions (`PT`) it also records the
-/// diagonal's bucket and, when the insert appended a cell, the seed's key with the cell's
-/// number in the partition's table.
+/// A fold's insert (`DiagHashTable::insert`; with `LEAN`, LOSAT_X_FOLDLEAN, the same statements
+/// inlined, `insert_inl`). With partitions (`PT`) it also records the diagonal's bucket and,
+/// when the insert appended a cell, the seed's key with the cell's number in the partition's
+/// table.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub(super) fn insert<const PT: bool>(
+pub(super) fn insert<const PT: bool, const LEAN: bool>(
     hash: &mut DiagHashTable,
     out: &mut PartOut,
     key: u64,
@@ -197,7 +198,11 @@ pub(super) fn insert<const PT: bool>(
 ) {
     if PT {
         let occupancy = hash.occupancy;
-        hash.insert(diag, level, hit_len, hit_saved, s_off, window_size);
+        if LEAN {
+            hash.insert_inl(diag, level, hit_len, hit_saved, s_off, window_size);
+        } else {
+            hash.insert(diag, level, hit_len, hit_saved, s_off, window_size);
+        }
         let bucket = bucket_of_diag(diag);
         if !out.touched[bucket] {
             out.touched[bucket] = true;
@@ -206,6 +211,8 @@ pub(super) fn insert<const PT: bool>(
         if hash.occupancy != occupancy {
             out.appends.push((key, occupancy));
         }
+    } else if LEAN {
+        hash.insert_inl(diag, level, hit_len, hit_saved, s_off, window_size);
     } else {
         hash.insert(diag, level, hit_len, hit_saved, s_off, window_size);
     }
@@ -242,6 +249,7 @@ impl PartState {
                 window: 0,
                 max_level: Vec::new(),
                 x_lv_shadow: false,
+                x_last: Vec::new(),
             },
             hits: Vec::new(),
             out: PartOut {
@@ -703,6 +711,7 @@ fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize) {
         t.window = hash.window;
         t.max_level.clone_from(&hash.max_level);
         t.x_lv_shadow = hash.x_lv_shadow;
+        t.x_last.clone_from(&hash.x_last);
     }
 }
 
@@ -809,6 +818,10 @@ fn merge(
             }
             if levels {
                 hash.max_level[b] = t.max_level[b];
+            }
+            // EXPERIMENT (LOSAT_X_DIAGLV2): the bucket's memo is its partition's.
+            if let Some(last) = hash.x_last.get_mut(b) {
+                *last = t.x_last[b];
             }
         }
     }
@@ -1055,7 +1068,7 @@ mod tests {
                     if op.pass {
                         st.hits.push(hit_of(index));
                         st.out.hit_keys.push(key);
-                        insert::<true>(
+                        insert::<true, false>(
                             &mut st.hash,
                             &mut st.out,
                             key,
@@ -1067,7 +1080,7 @@ mod tests {
                             window,
                         );
                     } else {
-                        insert::<true>(
+                        insert::<true, false>(
                             &mut st.hash,
                             &mut st.out,
                             key,
@@ -1488,6 +1501,16 @@ mod tests {
         for h in [&mut hash, &mut reference_hash] {
             for cell in &mut h.chain[1..occupancy as usize] {
                 cell.level = i32::MAX / 2;
+            }
+            // the bounds (LOSAT_X_DIAGLV) and the memo (LOSAT_X_DIAGLV2) describe the cells the
+            // inserts wrote; made again from the changed cells
+            if h.x_lv_on() {
+                let shadow = h.x_lv_shadow;
+                let memo = !h.x_last.is_empty();
+                h.x_lv_start(shadow);
+                if memo {
+                    h.x_lv2_start();
+                }
             }
         }
         let expected = reference(&mut reference_hash, &more, 2000, 40);

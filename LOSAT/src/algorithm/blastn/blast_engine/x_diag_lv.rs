@@ -153,6 +153,48 @@
 //! bucket and checks (i) for each cell against the bound, then makes the walk of the retrieve and
 //! checks (ii), that the decisions the fold takes from the cell it returns (the `last_hit` test,
 //! then with two hits the window test) are those from no cell.
+//!
+//! EXPERIMENT (LOSAT_X_DIAGLV2, a strict-set switch since 2026-10-22; its shadow is
+//! LOSAT_X_DIAGLVSHADOW): a retrieve that the bound does not skip is answered without the walk
+//! when every cell of the bucket but the one the latest insert wrote lies below the bound. A
+//! two-hit table (window above 0, dc-megablast) with level bounds keeps, per bucket, the latest
+//! insert's `(diag, level, hit_len, hit_saved)` and `other`, an upper bound of the levels of the
+//! bucket's other cells (`DiagHashTable::x_last`, `LvLast`). Where `other` is below the seed's
+//! bound, the retrieve returns the latest insert's values for its diagonal and no cell for any
+//! other diagonal.
+//!
+//! Why the output is the same:
+//! - (iv) The latest insert's cell is the first cell of its diagonal in the bucket's chain, with
+//!   the insert's values. `insert` walks the chain from its head and stops at the first cell of
+//!   its diagonal or at the first stale cell, whichever comes first, and writes its values there
+//!   (a take-over gives the stale cell the diagonal, and no cell before it has that diagonal), or
+//!   appends a cell at the head. Only an insert of the same bucket changes a cell of the bucket
+//!   or links a cell into its chain, and there is none after the latest; the growth of the chain
+//!   and the merge of `LOSAT_X_PAIRPARFOLD` (which renumbers cells but keeps each chain's order)
+//!   change neither. So the walk of the retrieve for that diagonal returns the latest insert's
+//!   values, which the memo returns.
+//! - (v) `other` is at least the level of every other cell of the bucket. Every insert first
+//!   raises `other` to the level of the previous latest insert and then becomes the latest; a
+//!   cell that the latest insert did not write was written by an earlier insert (whose level
+//!   `other` took) or holds what it held before the bucket's first insert, which is nothing
+//!   after the table was made or cleared (`LvLast::EMPTY`, `other = i32::MIN`); the tests'
+//!   tables made from cells start at `LvLast::UNKNOWN` (`other = i32::MAX`), which never
+//!   answers. `copy_hash`, the stage copies of `LOSAT_X_PAIRPARFOLD` (`rebuild`) and its merge
+//!   (per changed bucket, from the partition that owns it) copy the memo with the chains.
+//! - (vi) For any other diagonal, the cell the walk would return is not the latest insert's, so
+//!   by (v) its level is below the bound, and by (ii) it makes the decisions of no cell. The
+//!   retrieve's other values are read by no decision ((ii), last item). `insert` is not changed
+//!   beyond keeping the memo, so the table is the reference's cell for cell.
+//!
+//! One-hit tables (megablast, blastn, blastn-short: window 0) keep no memo: their inserts would
+//! pay for it where no measured fold gains (the memo is a dc-megablast measurement, line R
+//! REPORT_R12 §2.3). With the switch off, or LOSAT_X_DIAGLV off, `x_last` is empty and the
+//! retrieve and the insert each make one more length test of it. The shadow (LOSAT_X_DIAGLVSHADOW)
+//! checks every answer: the bucket's walk must give (iv) (the first cell of the latest insert's
+//! diagonal holds its values) and (v) (every other cell at or below `other`), and the walk of the
+//! retrieve must return what the memo returned for that diagonal, or for any other diagonal a
+//! cell with the decisions of no cell; the summary line counts the answers (`memo=`) and those
+//! for the latest insert's diagonal (`memofound=`).
 
 use super::{DiagHashTable, DIAGHASH_NUM_BUCKETS};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -191,11 +233,17 @@ static SKIPPED: AtomicU64 = AtomicU64::new(0);
 static VERIFIED: AtomicU64 = AtomicU64::new(0);
 static DECISIONS: AtomicU64 = AtomicU64::new(0);
 static CELLS: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart (LOSAT_X_DIAGLV2): the memo's answers that the shadow checked, and of those
+// the ones for the latest insert's diagonal.
+static MEMO: AtomicU64 = AtomicU64::new(0);
+static MEMO_FOUND: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
 thread_local! {
     // The walks this thread skipped (tests only: a fold's skips, counted on its thread).
     static TEST_SKIPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    // The memo's answers on this thread (tests only, LOSAT_X_DIAGLV2).
+    static TEST_MEMOS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// No NCBI counterpart: the bounds and the shadow flag of a new table (`DiagHashTable::new`):
@@ -205,6 +253,61 @@ pub(super) fn new_levels() -> (Vec<i32>, bool) {
         Mode::Off => (Vec::new(), false),
         Mode::On => (vec![i32::MIN; DIAGHASH_NUM_BUCKETS], false),
         Mode::Shadow => (vec![i32::MIN; DIAGHASH_NUM_BUCKETS], true),
+    }
+}
+
+/// No NCBI counterpart (LOSAT_X_DIAGLV2, module comment): the latest insert of one bucket and an
+/// upper bound of the levels of the bucket's other cells.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct LvLast {
+    pub(super) diag: i32,
+    pub(super) level: i32,
+    pub(super) hit_len: i32,
+    pub(super) other: i32,
+    pub(super) hit_saved: bool,
+}
+
+impl LvLast {
+    /// A bucket with no cell: no insert yet (its `level` raises `other` to `i32::MIN` only).
+    pub(super) const EMPTY: LvLast = LvLast {
+        diag: 0,
+        level: i32::MIN,
+        hit_len: 0,
+        other: i32::MIN,
+        hit_saved: false,
+    };
+    /// Tests only: a bucket whose cells were not made by inserts that the memo saw; never
+    /// answers (`other` is never below a bound).
+    #[cfg(test)]
+    pub(super) const UNKNOWN: LvLast = LvLast {
+        other: i32::MAX,
+        ..LvLast::EMPTY
+    };
+
+    /// The insert of `(diag, level, hit_len, hit_saved)` into this bucket becomes the latest;
+    /// the previous latest is one of the other cells now (module comment, (v)).
+    #[inline(always)]
+    pub(super) fn note(&mut self, diag: i32, level: i32, hit_len: i32, hit_saved: bool) {
+        self.other = self.other.max(self.level);
+        self.diag = diag;
+        self.level = level;
+        self.hit_len = hit_len;
+        self.hit_saved = hit_saved;
+    }
+}
+
+/// No NCBI counterpart: the memo of a new table (`DiagHashTable::new`, window `window`): one
+/// `LvLast::EMPTY` per bucket while LOSAT_X_DIAGLV and LOSAT_X_DIAGLV2 (a strict-set switch: on
+/// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; read once) are on and the table
+/// takes two hits, nothing otherwise. The switch does not change any value NCBI computes.
+pub(super) fn new_last(window: i32) -> Vec<LvLast> {
+    static ON: OnceLock<bool> = OnceLock::new();
+    let on =
+        *ON.get_or_init(|| mode() != Mode::Off && crate::utils::xswitch::on("LOSAT_X_DIAGLV2"));
+    if on && window > 0 {
+        vec![LvLast::EMPTY; DIAGHASH_NUM_BUCKETS]
+    } else {
+        Vec::new()
     }
 }
 
@@ -347,7 +450,76 @@ impl DiagHashTable {
             TEST_SKIPS.with(|skips| skips.set(skips.get() + 1));
             return None;
         }
+        // EXPERIMENT (LOSAT_X_DIAGLV2, module comment (iv)-(vi)): every cell but the latest
+        // insert's lies below the bound; answer from the memo without the walk.
+        if let Some(last) = self.x_last.get(bucket) {
+            if last.other < bound {
+                let found =
+                    (last.diag == diag).then_some((last.level, last.hit_len, last.hit_saved));
+                if self.x_lv_shadow {
+                    self.x_lv2_verify(diag, bucket, seeds, s_off_pos, found);
+                }
+                #[cfg(test)]
+                TEST_MEMOS.with(|memos| memos.set(memos.get() + 1));
+                return found;
+            }
+        }
         self.retrieve(diag)
+    }
+
+    /// No NCBI counterpart: LOSAT_X_DIAGLVSHADOW for one answer of the memo (LOSAT_X_DIAGLV2).
+    /// The bucket's walk must find the latest insert's values in the first cell of its diagonal
+    /// ((iv)) and every other cell at or below `other` ((v)); the retrieve's walk must return
+    /// the memo's answer for the latest insert's diagonal, and for any other diagonal a cell with
+    /// the decisions of no cell ((vi)). Anything else prints the summary line with `DIFFERENT`
+    /// and panics.
+    #[cold]
+    #[inline(never)]
+    fn x_lv2_verify(
+        &self,
+        diag: i32,
+        bucket: usize,
+        seeds: &LvSeeds,
+        s_off_pos: usize,
+        found: Option<(i32, i32, bool)>,
+    ) {
+        let last = self.x_last[bucket];
+        let mut first = true;
+        let mut index = self.backbone[bucket];
+        while index != 0 {
+            let cell = &self.chain[index as usize];
+            let ok = if first && cell.diag == last.diag {
+                first = false;
+                (cell.level, cell.hit_len, cell.hit_saved)
+                    == (last.level, last.hit_len, last.hit_saved)
+            } else {
+                cell.level <= last.other
+            };
+            if !ok {
+                print_line("DIFFERENT");
+                panic!(
+                    "LOSAT_X_DIAGLV2 (shadow): bucket {bucket} cell {index} (diagonal {}, level {}) breaks the memo {last:?}",
+                    cell.diag, cell.level
+                );
+            }
+            index = cell.next;
+        }
+        let walked = self.retrieve(diag);
+        let same = if found.is_some() {
+            walked == found
+        } else {
+            seeds.decisions(walked, s_off_pos) == seeds.decisions(None, s_off_pos)
+        };
+        if !same {
+            print_line("DIFFERENT");
+            panic!(
+                "LOSAT_X_DIAGLV2 (shadow): diagonal {diag} at s_off_pos {s_off_pos} ({seeds:?}): the memo {last:?} answers {found:?}, the walk {walked:?}"
+            );
+        }
+        MEMO.fetch_add(1, Ordering::Relaxed);
+        if found.is_some() {
+            MEMO_FOUND.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// No NCBI counterpart: LOSAT_X_DIAGLVSHADOW for one retrieve. A skipped walk is walked
@@ -415,17 +587,35 @@ impl DiagHashTable {
         }
         self.x_lv_shadow = shadow;
     }
+
+    /// Tests only: a memo (LOSAT_X_DIAGLV2) for a table with bounds, `LvLast::EMPTY` for a
+    /// bucket without cells and `LvLast::UNKNOWN` (never answers) for one with cells.
+    #[cfg(test)]
+    pub(super) fn x_lv2_start(&mut self) {
+        assert!(self.x_lv_on());
+        self.x_last = (0..self.num_buckets)
+            .map(|bucket| {
+                if self.backbone[bucket] == 0 {
+                    LvLast::EMPTY
+                } else {
+                    LvLast::UNKNOWN
+                }
+            })
+            .collect();
+    }
 }
 
 /// No NCBI counterpart: the shadow's line, `identical` at the end of a search.
 fn print_line(verdict: &str) {
     eprintln!(
-        "[X_SHADOW] DIAGLV retrieves={} skipped={} verified={} decisions={} cells={} {verdict}",
+        "[X_SHADOW] DIAGLV retrieves={} skipped={} verified={} decisions={} cells={} memo={} memofound={} {verdict}",
         RETRIEVES.load(Ordering::Relaxed),
         SKIPPED.load(Ordering::Relaxed),
         VERIFIED.load(Ordering::Relaxed),
         DECISIONS.load(Ordering::Relaxed),
-        CELLS.load(Ordering::Relaxed)
+        CELLS.load(Ordering::Relaxed),
+        MEMO.load(Ordering::Relaxed),
+        MEMO_FOUND.load(Ordering::Relaxed)
     );
 }
 
@@ -441,6 +631,12 @@ pub(super) fn summary() {
 #[cfg(test)]
 pub(super) fn test_skips() -> u64 {
     TEST_SKIPS.with(|skips| skips.get())
+}
+
+/// Tests only: the retrieves the memo (LOSAT_X_DIAGLV2) answered on this thread so far.
+#[cfg(test)]
+pub(super) fn test_memos() -> u64 {
+    TEST_MEMOS.with(|memos| memos.get())
 }
 
 #[cfg(test)]
@@ -471,6 +667,7 @@ mod tests {
         let mut h = DiagHashTable::new(window);
         h.max_level = Vec::new();
         h.x_lv_shadow = false;
+        h.x_last = Vec::new();
         if levels {
             h.x_lv_start(shadow);
         }
@@ -693,6 +890,146 @@ mod tests {
         }
     }
 
+    /// LOSAT_X_DIAGLV2 (iv) and (v): in every bucket the first cell of the latest insert's
+    /// diagonal holds the latest insert's values and every other cell lies at or below `other`.
+    fn check_memo(h: &DiagHashTable, at: &str) {
+        for bucket in 0..h.num_buckets {
+            let last = h.x_last[bucket];
+            let mut first = true;
+            let mut index = h.backbone[bucket];
+            while index != 0 {
+                let cell = &h.chain[index as usize];
+                if first && cell.diag == last.diag {
+                    first = false;
+                    assert_eq!(
+                        (cell.level, cell.hit_len, cell.hit_saved),
+                        (last.level, last.hit_len, last.hit_saved),
+                        "{at}: bucket {bucket} cell {index}"
+                    );
+                } else {
+                    assert!(
+                        cell.level <= last.other,
+                        "{at}: bucket {bucket} cell {index} level {} above {last:?}",
+                        cell.level
+                    );
+                }
+                index = cell.next;
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:368-381,396-450
+    // ```c
+    //     while (index) {
+    //         if (table->chain[index].diag == diag) {
+    // ...
+    //             if ( s_off - table->chain[index].level > window_size) {
+    // ```
+    // LOSAT_X_DIAGLV2: tables filled as the dc-megablast fold fills them (seeds in rising
+    // order, an insert after every probe; diagonals d + 512 k share a bucket, so cells are
+    // matched, taken over and appended), with offset advances between "subjects" and clears at
+    // INT4_MAX / 4, at the template lengths of dc-megablast and `scan_range` 0 and 2: the memo
+    // holds (iv) and (v), the table is the table without a memo, a memo answer for the latest
+    // insert's diagonal is the walk's cell, every answer makes the decisions of the walk, and the
+    // memo answers (also for the latest insert's diagonal) where the bound does not skip.
+    #[test]
+    fn the_memo_makes_the_decisions_of_retrieve() {
+        let mut rng = Lcg(0x1A57_D1A6);
+        let configs: [(usize, usize); 4] = [(16, 0), (18, 0), (21, 0), (11, 2)];
+        for (case, &(word_length, scan_range)) in configs.iter().enumerate() {
+            for shadow in [false, true] {
+                let window_size = 40usize;
+                let window = window_size as i32;
+                let diag_hash_window =
+                    diag_hash_insert_window(window_size, scan_range, word_length);
+                let seeds = LvSeeds::new(true, word_length, window_size);
+                let mut h = table(window, true, shadow);
+                h.x_lv2_start();
+                let mut plain = table(window, false, false);
+                let base = rng.below(2000) as i32 - 1000;
+                let diags: Vec<i32> = (0..2400)
+                    .map(|k| {
+                        if k < 48 {
+                            base + 512 * (k % 16) + (k / 16) * 7
+                        } else {
+                            rng.below(20_000) as i32 - 10_000
+                        }
+                    })
+                    .collect();
+                let (mut hl_on, mut hl_off) = (Vec::<DiagStruct>::new(), Vec::<DiagStruct>::new());
+                let (mut ln_on, mut ln_off) = (Vec::<u8>::new(), Vec::<u8>::new());
+                let (mut dt_on, mut dt_off) = (window, window);
+                let (mut memos, mut memo_found, mut clears) = (0u64, 0u64, 0u64);
+                let mut s = h.offset as usize;
+                for step in 0..30_000 {
+                    if rng.below(1000) == 0 {
+                        // the next subject; sometimes past INT4_MAX / 4 (the clear)
+                        let len = if rng.below(3) == 0 {
+                            (i32::MAX / 4) as usize
+                        } else {
+                            rng.below(5000) as usize
+                        };
+                        let cleared = h.offset >= i32::MAX / 4;
+                        advance_diag_table_offset(
+                            &mut dt_on, window, len, false, &mut hl_on, &mut ln_on, &mut h,
+                        );
+                        advance_diag_table_offset(
+                            &mut dt_off,
+                            window,
+                            len,
+                            false,
+                            &mut hl_off,
+                            &mut ln_off,
+                            &mut plain,
+                        );
+                        if cleared {
+                            clears += 1;
+                            assert!(h.x_last.iter().all(|&l| l == LvLast::EMPTY));
+                        }
+                        s = h.offset as usize;
+                    }
+                    s += rng.below(3) as usize;
+                    let diag = diags[rng.below(diags.len() as u64) as usize];
+                    let full = plain.retrieve(diag);
+                    assert_eq!(h.retrieve(diag), full, "case {case} step {step}");
+                    let before = test_memos();
+                    let fast = h.retrieve_below(diag, &seeds, s);
+                    if test_memos() > before {
+                        memos += 1;
+                        if fast.is_some() {
+                            memo_found += 1;
+                            assert_eq!(fast, full, "case {case} step {step}: the memo's cell");
+                        }
+                    }
+                    assert_eq!(
+                        seeds.decisions(fast, s),
+                        seeds.decisions(full, s),
+                        "case {case} step {step} diag {diag} s_off_pos {s}: {fast:?} {full:?}"
+                    );
+                    let reach = if rng.below(4) == 0 { 300 } else { 3 };
+                    let level = (s + word_length + rng.below(reach) as usize) as i32;
+                    let saved = rng.below(3) == 0;
+                    let hit_len = if saved { 0 } else { word_length as i32 };
+                    h.insert(diag, level, hit_len, saved, s as i32, diag_hash_window);
+                    plain.insert(diag, level, hit_len, saved, s as i32, diag_hash_window);
+                    if step % 97 == 0 {
+                        check_memo(&h, &format!("case {case} step {step}"));
+                        assert_eq!(
+                            hash_state(&h),
+                            hash_state(&plain),
+                            "case {case} step {step}"
+                        );
+                    }
+                }
+                assert!(clears > 0, "case {case}: no clear");
+                assert!(
+                    memos > 1000 && memo_found > 100,
+                    "case {case}: too few memo answers ({memos}, {memo_found} for the latest insert)"
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_bound_is_the_smallest_limit_and_none_where_the_argument_fails() {
         // one hit: s_off_pos + 1
@@ -839,6 +1176,21 @@ mod tests {
         h.max_level[bucket_of(7)] = 100;
         // one hit at 199: the seed's bound is 200
         let _ = h.retrieve_below(7 + 512, &LvSeeds::new(false, 28, 0), 199);
+    }
+
+    // LOSAT_X_DIAGLV2's shadow: a memo whose `other` lies wrong about an older cell of the
+    // bucket (a cell at 980 above `other` 900) is caught on the first answer.
+    #[test]
+    #[should_panic(expected = "breaks the memo")]
+    fn the_shadow_panics_on_a_memo_that_misses_a_cell() {
+        let mut h = table(40, true, true);
+        h.x_lv2_start();
+        h.insert(7, 980, 0, true, 960, 41);
+        // same bucket; at 1000 the cell at 980 is not stale (1000 - 980 <= 41): appended
+        h.insert(7 + 512, 1500, 0, true, 1000, 41);
+        h.x_last[bucket_of(7)].other = 900;
+        // two hits, template 18, at 1000: the bound is 978, above `other`, below max_level
+        let _ = h.retrieve_below(7, &LvSeeds::new(true, 18, 40), 1000);
     }
 
     // The shadow's check of (ii): with a one-hit bound one too high (`s_off_pos + 2`), a cell

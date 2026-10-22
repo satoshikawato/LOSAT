@@ -843,6 +843,9 @@ fn advance_diag_table_offset(
         // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): every chain is empty now. No NCBI
         // counterpart (empty while the switch is off).
         diag_hash.max_level.fill(i32::MIN);
+        // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): no bucket has an insert now. No NCBI
+        // counterpart (empty while the switch is off).
+        diag_hash.x_last.fill(x_diag_lv::LvLast::EMPTY);
     } else {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:180-181
         // ```c
@@ -911,6 +914,10 @@ struct DiagHashTable {
     // and false while the switch is off. No NCBI counterpart.
     max_level: Vec<i32>,
     x_lv_shadow: bool,
+    // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): per bucket, the latest insert and an upper
+    // bound of the levels of the bucket's other cells. Empty unless the switch and
+    // LOSAT_X_DIAGLV are on and the table takes two hits. No NCBI counterpart.
+    x_last: Vec<x_diag_lv::LvLast>,
 }
 
 impl DiagHashTable {
@@ -940,6 +947,8 @@ impl DiagHashTable {
             window,
             max_level,
             x_lv_shadow,
+            // EXPERIMENT (LOSAT_X_DIAGLV2): the memo when the switch is on.
+            x_last: x_diag_lv::new_last(window),
         }
     }
 
@@ -1019,6 +1028,22 @@ impl DiagHashTable {
         s_off: i32,
         window_size: i32,
     ) -> bool {
+        self.insert_inl(diag, level, hit_len, hit_saved, s_off, window_size)
+    }
+
+    /// `insert` inlined into its caller (EXPERIMENT LOSAT_X_FOLDLEAN, the strips fold of
+    /// dc-megablast `x_pair_seed_disc.rs` `fold_two_hit`; `insert` is this call). The same
+    /// statements.
+    #[inline(always)]
+    fn insert_inl(
+        &mut self,
+        diag: i32,
+        level: i32,
+        hit_len: i32,
+        hit_saved: bool,
+        s_off: i32,
+        window_size: i32,
+    ) -> bool {
         let bucket =
             ((diag as u32).wrapping_mul(0x9E370001) % DIAGHASH_NUM_BUCKETS as u32) as usize;
         // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): this insert writes `level` into one cell
@@ -1027,6 +1052,12 @@ impl DiagHashTable {
         if let Some(max_level) = self.max_level.get_mut(bucket) {
             if *max_level < level {
                 *max_level = level;
+            }
+            // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): this insert is the bucket's latest.
+            // No NCBI counterpart; with the switch off `x_last` is empty and this is one length
+            // test.
+            if let Some(last) = self.x_last.get_mut(bucket) {
+                last.note(diag, level, hit_len, hit_saved);
             }
         }
         let mut index = self.backbone[bucket];

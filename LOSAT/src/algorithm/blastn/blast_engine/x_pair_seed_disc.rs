@@ -117,6 +117,18 @@ fn arr_switches() -> (bool, bool) {
     })
 }
 
+/// No NCBI counterpart: reads LOSAT_X_FOLDLEAN once (a strict-set switch since 2026-10-22: on
+/// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set). With it the strips folds
+/// (`fold_two_hit`, `fold_two_hit_array`) run their `LEAN` instances: no call of
+/// `type_of_word` where its first statement returns (`word_length == lut_word_length`, always
+/// so in the scope: a discontiguous word has no word extension), and the diagonal-hash insert
+/// inlined (`DiagHashTable::insert_inl`). The same statements in the same order, so it does not
+/// change any value NCBI computes.
+fn lean_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_FOLDLEAN"))
+}
+
 /// No NCBI counterpart (scheduling only): strips per thread of a chunk's scan, and strips
 /// per thread that the helpers may scan past the one the owner folds. The owner's fold is
 /// the slower side here (dc-megablast reaches the diagonal hash with most pairs), so the
@@ -376,8 +388,13 @@ fn scan_strip_disc_csr(
 /// (`out.strip`, `pos[k]`) of every pushed hit and of every insert that appends a cell, the
 /// buckets the inserts change, and the time of the ungapped extensions (instead of the shared
 /// LOSAT_TIMING counters); without it `out` and `pos` are not read.
+///
+/// With `LEAN` (LOSAT_X_FOLDLEAN, `lean_on`) the fold takes `type_of_word`'s first statement
+/// itself (NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:531
+/// `if (word_length == lut_word_length) return 1;`, with `*extended = 0` and the offsets
+/// unchanged) when the word lengths are equal, and inlines the insert (`insert_inl`).
 #[allow(clippy::too_many_arguments)]
-fn fold_two_hit<const PT: bool>(
+fn fold_two_hit<const PT: bool, const LEAN: bool>(
     x: &Inputs<'_>,
     seeds: &[Seed],
     diag_hash: &mut DiagHashTable,
@@ -391,6 +408,8 @@ fn fold_two_hit<const PT: bool>(
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let word_length = two_stage.word_length();
+    // EXPERIMENT (LOSAT_X_FOLDLEAN): `type_of_word` returns at its first statement.
+    let x_tow = LEAN && word_length == lut_word_length;
     let s_len = x.s_len;
     let search_seq_packed = x.search_seq_packed;
     let diag_offset = x.diag_offset;
@@ -508,17 +527,21 @@ fn fold_two_hit<const PT: bool>(
         let s_end_pos_i32 = s_end_pos as i32;
         let window_end = last_hit + window_size as i32;
         if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
-            let (word_type, extended, q_off_adj, s_off_adj) = type_of_word(
-                q_off,
-                s_off,
-                !query_mask.is_empty(),
-                q_context_end,
-                s_range,
-                word_length,
-                lut_word_length,
-                true, // check_double = TRUE
-                &mut is_seed_masked,
-            );
+            let (word_type, extended, q_off_adj, s_off_adj) = if x_tow {
+                (1, 0, q_off, s_off)
+            } else {
+                type_of_word(
+                    q_off,
+                    s_off,
+                    !query_mask.is_empty(),
+                    q_context_end,
+                    s_range,
+                    word_length,
+                    lut_word_length,
+                    true, // check_double = TRUE
+                    &mut is_seed_masked,
+                )
+            };
             q_off = q_off_adj;
             s_off = s_off_adj;
 
@@ -621,17 +644,21 @@ fn fold_two_hit<const PT: bool>(
             //         s_end_pos += extended;
             //     }
             // ```
-            let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
-                q_off,
-                s_off,
-                !query_mask.is_empty(),
-                q_context_end,
-                s_range,
-                word_length,
-                lut_word_length,
-                false, // check_double = FALSE (not in two-hit block)
-                &mut is_seed_masked,
-            );
+            let (wt, ext, q_off_adj, s_off_adj) = if x_tow {
+                (1, 0, q_off, s_off)
+            } else {
+                type_of_word(
+                    q_off,
+                    s_off,
+                    !query_mask.is_empty(),
+                    q_context_end,
+                    s_range,
+                    word_length,
+                    lut_word_length,
+                    false, // check_double = FALSE (not in two-hit block)
+                    &mut is_seed_masked,
+                )
+            };
             if wt == 0 {
                 continue;
             }
@@ -650,7 +677,7 @@ fn fold_two_hit<const PT: bool>(
         //                           hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
         if !hit_ready {
-            part::insert::<PT>(
+            part::insert::<PT, LEAN>(
                 diag_hash,
                 out,
                 x_key,
@@ -747,7 +774,7 @@ fn fold_two_hit<const PT: bool>(
         // ```
         if !(off_found || ungapped_score >= cutoff_score) {
             hit_ready = false;
-            part::insert::<PT>(
+            part::insert::<PT, LEAN>(
                 diag_hash,
                 out,
                 x_key,
@@ -814,7 +841,7 @@ fn fold_two_hit<const PT: bool>(
         //                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                           hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT>(
+        part::insert::<PT, LEAN>(
             diag_hash,
             out,
             x_key,
@@ -873,17 +900,32 @@ fn seed_stage(
                 scan_pause_ns,
                 ..
             } = st;
-            fold_two_hit::<true>(
-                x,
-                seeds,
-                hash,
-                hits,
-                timing,
-                scan_pause_ns,
-                counts,
-                out,
-                pos,
-            );
+            // EXPERIMENT (LOSAT_X_FOLDLEAN): the `LEAN` instance, the same statements.
+            if lean_on() {
+                fold_two_hit::<true, true>(
+                    x,
+                    seeds,
+                    hash,
+                    hits,
+                    timing,
+                    scan_pause_ns,
+                    counts,
+                    out,
+                    pos,
+                );
+            } else {
+                fold_two_hit::<true, false>(
+                    x,
+                    seeds,
+                    hash,
+                    hits,
+                    timing,
+                    scan_pause_ns,
+                    counts,
+                    out,
+                    pos,
+                );
+            }
         };
         let r = part::seed_stage_part(
             jobs.len(),
@@ -918,17 +960,32 @@ fn seed_stage(
         &produce,
         |_, seeds| {
             let t0 = timed.then(std::time::Instant::now);
-            fold_two_hit::<false>(
-                x,
-                seeds,
-                hash,
-                hits,
-                timing,
-                scan_pause_ns,
-                counts,
-                &mut part::PartOut::default(),
-                &[],
-            );
+            // EXPERIMENT (LOSAT_X_FOLDLEAN): the `LEAN` instance, the same statements.
+            if lean_on() {
+                fold_two_hit::<false, true>(
+                    x,
+                    seeds,
+                    hash,
+                    hits,
+                    timing,
+                    scan_pause_ns,
+                    counts,
+                    &mut part::PartOut::default(),
+                    &[],
+                );
+            } else {
+                fold_two_hit::<false, false>(
+                    x,
+                    seeds,
+                    hash,
+                    hits,
+                    timing,
+                    scan_pause_ns,
+                    counts,
+                    &mut part::PartOut::default(),
+                    &[],
+                );
+            }
             if let Some(t0) = t0 {
                 *fold_ns += t0.elapsed().as_nanos() as u64;
             }
@@ -1066,7 +1123,10 @@ pub(super) fn run(
 /// against `diag_array_size`, `last_hit` and `flag` in `hit_level_array`, the length in
 /// `hit_len_array` as a byte) instead of the diagonal hash. The owner folds the strips in scan
 /// order, so the array and the hit list are the reference's whatever the number of threads.
-fn fold_two_hit_array(
+///
+/// With `LEAN` (LOSAT_X_FOLDLEAN) it takes `type_of_word`'s first statement itself as
+/// `fold_two_hit` does.
+fn fold_two_hit_array<const LEAN: bool>(
     x: &Inputs<'_>,
     seeds: &[Seed],
     arr: &mut DiagArray<'_>,
@@ -1078,6 +1138,8 @@ fn fold_two_hit_array(
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let word_length = two_stage.word_length();
+    // EXPERIMENT (LOSAT_X_FOLDLEAN): `type_of_word` returns at its first statement.
+    let x_tow = LEAN && word_length == lut_word_length;
     let s_len = x.s_len;
     let search_seq_packed = x.search_seq_packed;
     let diag_offset = x.diag_offset;
@@ -1177,17 +1239,21 @@ fn fold_two_hit_array(
         let s_end_pos_i32 = s_end_pos as i32;
         let window_end = last_hit + window_size as i32;
         if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
-            let (word_type, extended, q_off_adj, s_off_adj) = type_of_word(
-                q_off,
-                s_off,
-                !query_mask.is_empty(),
-                q_context_end,
-                s_range,
-                word_length,
-                lut_word_length,
-                true, // check_double = TRUE
-                &mut is_seed_masked,
-            );
+            let (word_type, extended, q_off_adj, s_off_adj) = if x_tow {
+                (1, 0, q_off, s_off)
+            } else {
+                type_of_word(
+                    q_off,
+                    s_off,
+                    !query_mask.is_empty(),
+                    q_context_end,
+                    s_range,
+                    word_length,
+                    lut_word_length,
+                    true, // check_double = TRUE
+                    &mut is_seed_masked,
+                )
+            };
             q_off = q_off_adj;
             s_off = s_off_adj;
 
@@ -1304,17 +1370,21 @@ fn fold_two_hit_array(
             //         s_end_pos += extended;
             //     }
             // ```
-            let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
-                q_off,
-                s_off,
-                !query_mask.is_empty(),
-                q_context_end,
-                s_range,
-                word_length,
-                lut_word_length,
-                false, // check_double = FALSE (not in two-hit block)
-                &mut is_seed_masked,
-            );
+            let (wt, ext, q_off_adj, s_off_adj) = if x_tow {
+                (1, 0, q_off, s_off)
+            } else {
+                type_of_word(
+                    q_off,
+                    s_off,
+                    !query_mask.is_empty(),
+                    q_context_end,
+                    s_range,
+                    word_length,
+                    lut_word_length,
+                    false, // check_double = FALSE (not in two-hit block)
+                    &mut is_seed_masked,
+                )
+            };
             if wt == 0 {
                 continue;
             }
@@ -1534,7 +1604,12 @@ fn seed_stage_array(
         &produce,
         |_, seeds| {
             let t0 = timed.then(std::time::Instant::now);
-            fold_two_hit_array(x, seeds, arr, hits, timing, scan_pause_ns, counts);
+            // EXPERIMENT (LOSAT_X_FOLDLEAN): the `LEAN` instance, the same statements.
+            if lean_on() {
+                fold_two_hit_array::<true>(x, seeds, arr, hits, timing, scan_pause_ns, counts);
+            } else {
+                fold_two_hit_array::<false>(x, seeds, arr, hits, timing, scan_pause_ns, counts);
+            }
             if let Some(t0) = t0 {
                 *fold_ns += t0.elapsed().as_nanos() as u64;
             }
@@ -2037,7 +2112,7 @@ mod tests {
                     let mut serial_hits = Vec::new();
                     let mut counts = FoldCounts::default();
                     let mut pause = 0u64;
-                    fold_two_hit::<false>(
+                    fold_two_hit::<false, false>(
                         &x,
                         &seeds,
                         &mut serial_hash,
@@ -2119,7 +2194,7 @@ mod tests {
                         let mut lv_hash = new_lv_hash();
                         let mut lv_hits = Vec::new();
                         let before = super::super::super::x_diag_lv::test_skips();
-                        fold_two_hit::<false>(
+                        fold_two_hit::<false, false>(
                             &x,
                             &seeds,
                             &mut lv_hash,
@@ -2164,6 +2239,70 @@ mod tests {
                             assert_eq!(max_level, lv_hash.max_level, "{at}");
                         }
                     }
+                    // LOSAT_X_DIAGLV2 (`x_diag_lv.rs`) and LOSAT_X_FOLDLEAN: on a table with
+                    // level bounds and the memo (and with the shadow, which checks every
+                    // answer), the serial fold's two instances answer retrieves from the memo and
+                    // give the hits and the table of the fold on a table with neither.
+                    let mut plain_hash = new_hash();
+                    plain_hash.max_level = Vec::new();
+                    plain_hash.x_last = Vec::new();
+                    let mut plain_hits = Vec::new();
+                    fold_two_hit::<false, false>(
+                        &x,
+                        &seeds,
+                        &mut plain_hash,
+                        &mut plain_hits,
+                        None,
+                        &mut pause,
+                        &mut FoldCounts::default(),
+                        &mut part::PartOut::default(),
+                        &[],
+                    );
+                    assert_eq!(plain_hits.iter().map(key).collect::<Vec<_>>(), serial_keys);
+                    assert_eq!(hash_state(&plain_hash), hash_state(&serial_hash));
+                    for shadow in [false, true] {
+                        for lean in [false, true] {
+                            let mut h = new_hash();
+                            h.x_lv_start(shadow);
+                            h.x_lv2_start();
+                            let mut hits = Vec::new();
+                            let before = super::super::super::x_diag_lv::test_memos();
+                            if lean {
+                                fold_two_hit::<false, true>(
+                                    &x,
+                                    &seeds,
+                                    &mut h,
+                                    &mut hits,
+                                    None,
+                                    &mut pause,
+                                    &mut FoldCounts::default(),
+                                    &mut part::PartOut::default(),
+                                    &[],
+                                );
+                            } else {
+                                fold_two_hit::<false, false>(
+                                    &x,
+                                    &seeds,
+                                    &mut h,
+                                    &mut hits,
+                                    None,
+                                    &mut pause,
+                                    &mut FoldCounts::default(),
+                                    &mut part::PartOut::default(),
+                                    &[],
+                                );
+                            }
+                            let memos = super::super::super::x_diag_lv::test_memos() - before;
+                            let at = format!("case {case_no} shadow {shadow} lean {lean}");
+                            assert!(memos > 0, "{at}: the memo never answered");
+                            assert_eq!(
+                                hits.iter().map(key).collect::<Vec<_>>(),
+                                serial_keys,
+                                "{at}"
+                            );
+                            assert_eq!(hash_state(&h), hash_state(&plain_hash), "{at}");
+                        }
+                    }
                     // LOSAT_X_PAIRPARFOLD (`x_pair_seed_part.rs`): the two-hit fold split into
                     // 2, 3, 7, 8 and 16 partitions on 1..8 threads, on tables with and without
                     // level bounds, for two chunks in a row on one scratch (the second with the
@@ -2185,7 +2324,7 @@ mod tests {
                         for xc in [&x, &x2] {
                             expected_hash.offset = xc.diag_offset as i32;
                             let mut hits = Vec::new();
-                            fold_two_hit::<false>(
+                            fold_two_hit::<false, false>(
                                 xc,
                                 &seeds,
                                 &mut expected_hash,
@@ -2200,6 +2339,7 @@ mod tests {
                                 hits.iter().map(key).collect::<Vec<_>>(),
                                 hash_state(&expected_hash),
                                 expected_hash.max_level.clone(),
+                                expected_hash.x_last.clone(),
                             ));
                         }
                         for (threads, parts) in [
@@ -2239,7 +2379,7 @@ mod tests {
                                         }),
                                     );
                                     assert_eq!(stats.counts.seeds, seeds.len() as u64, "{at}");
-                                    let (keys, state, max_level) = &expected[chunk];
+                                    let (keys, state, max_level, x_last) = &expected[chunk];
                                     assert_eq!(
                                         &hits.iter().map(key).collect::<Vec<_>>(),
                                         keys,
@@ -2247,6 +2387,7 @@ mod tests {
                                     );
                                     assert_eq!(&hash_state(&hash), state, "{at}");
                                     assert_eq!(&hash.max_level, max_level, "{at}");
+                                    assert_eq!(&hash.x_last, x_last, "{at}");
                                 }
                             });
                         }
@@ -2340,7 +2481,7 @@ mod tests {
                     let mut serial_hits = Vec::new();
                     let mut counts = FoldCounts::default();
                     let mut pause = 0u64;
-                    fold_two_hit_array(
+                    fold_two_hit_array::<false>(
                         &x,
                         &seeds,
                         &mut DiagArray {

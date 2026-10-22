@@ -9,7 +9,6 @@ cd LOSAT && cargo build --release
 cd LOSAT && cargo test
 cd LOSAT/tests && bash run_comparison.sh
 cd LOSAT/tests && bash run_all_tests.sh
-bash compare_tblastx_results.sh
 bash tests/compare_self_tblastx.sh
 bash tests/compare_long_sequences_debug.sh
 ```

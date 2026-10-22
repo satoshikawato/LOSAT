@@ -2,7 +2,7 @@
 //! subject scan and the diagonal test in one loop, and the hits of one lookup cell tested in AVX2
 //! batches of eight.
 //!
-//! The reference (`word_finder_plain`, and LOSAT_X_BXSCAN's `x_word_finder_direct`) has the
+//! The reference (`word_finder`, and LOSAT_X_BXSCAN's `x_word_finder_direct`) has the
 //! scanner copy every word hit into the offset-pair buffer and then reads the buffer back for the
 //! two-hit test (NCBI's `s_BlastAaScanSubject` and `s_BlastAaWordFinder_TwoHit`). With the switch,
 //! blastp's fused scan (`blastp::x_seed_fused::x_scan_two_hit_with`: LOSAT_X_BPSEED's loop with
@@ -24,8 +24,7 @@
 //! reference's binary search.
 //!
 //! Where it acts: the two-hit stage (`-window_size` above 0) with the standard lookup table
-//! (`-word_size 3`, the default), when nothing traces the seeds and the diagonal order is the
-//! reference's (LOSAT_X_SEEDBUCKET mode 0); elsewhere the reference runs. `LOSAT_X_BXDIAG` is a
+//! (`-word_size 3`, the default), when nothing traces the seeds; elsewhere the reference runs. `LOSAT_X_BXDIAG` is a
 //! switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. When it
 //! is not set (or empty) it acts only where the cell test is the AVX2 batch (an x86-64 CPU with
 //! AVX2), the cell test it was timed with; set to a value, it runs on any CPU. The cell test is the
@@ -329,7 +328,7 @@ pub(crate) fn x_word_finder_diag(
         offset: diagonals.offset,
         window: diagonals.window,
     };
-    let reference = word_finder_plain(
+    let reference = word_finder(
         batch,
         parameters,
         options,
@@ -432,7 +431,7 @@ fn x_word_finder_fused(
     let word = options.word_size;
     let offset = diagonals.offset;
     let mask = diagonals.entries.len() as i32 - 1;
-    // Lookup::scan's set-up, with length = subject.len() - 1 as word_finder_plain passes it; the
+    // Lookup::scan's set-up, with length = subject.len() - 1 as word_finder passes it; the
     // fused scan runs from 0 to max(length - word length, 0), the reference's range with a
     // two-hit window.
     let length = subject.len().saturating_sub(1);
@@ -543,7 +542,7 @@ fn x_word_finder_fused(
             },
         )
     });
-    // The rest of word_finder_plain, unchanged.
+    // The rest of word_finder, unchanged.
     diagonals.finish_subject(length)?;
     hits.sort_by(|a, b| {
         b.score
@@ -674,7 +673,7 @@ mod tests {
         start(&mut fused);
         let (mut hits, mut counts) = (0, [0u64; 3]);
         for (i, subject) in subjects.iter().enumerate() {
-            let expected = word_finder_plain(
+            let expected = word_finder(
                 batch,
                 params,
                 options,

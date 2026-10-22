@@ -105,8 +105,8 @@ use super::x_prelim_compact::{
     x_shadow_compare, XPrelimCompact, XPrelimHsp,
 };
 use crate::core::blast_hits::reap_by_query_coverage;
-// No NCBI counterpart: matches per LOSAT_X_NEWTONLANES prefetch in the BLASTP redo loops; it does
-// not change any value NCBI computes.
+// No NCBI counterpart: matches per Newton lanes prefetch in the BLASTP redo loops; it does not
+// change any value NCBI computes.
 const X_NEWTON_LANES_MATCHES: usize = 16;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:142-154
 // ```c
@@ -9667,14 +9667,6 @@ fn run_resolved_in_pool(
         })
     };
 
-    // EXPERIMENT (LOSAT_X_NEWTONLANES): the serial and the query-parallel redo loops below solve
-    // the first Newton problems of the next `X_NEWTON_LANES_MATCHES` matches ahead.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3449-3449
-    // ```c
-    //         for (b = 0; b < numMatches; ++b) {
-    // ```
-    // No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
-    let x_newton_lanes_on = crate::core::composition_adjustment::x_newton_lanes::mode() != 0;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-260,274-276
     // ```c++
     //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -9918,21 +9910,20 @@ fn run_resolved_in_pool(
         (use_parallel_kappa_match_redo, use_parallel_kappa_redo)
     };
 
-    // EXPERIMENT (LOSAT_X_SEGSHARE, LOSAT_X_NEWTONLANES): the query-parallel redo and the windows of
-    // `x_redo_par` share the masked ranges; the match-parallel redo shares none and solves no
-    // Newton problems ahead, and the one-thread loop shares none.
+    // EXPERIMENT (LOSAT_X_SEGSHARE): the query-parallel redo and the windows of `x_redo_par` share
+    // the masked ranges; the match-parallel redo shares none, and the one-thread loop shares none.
+    // The serial and the query-parallel redo loops solve the first Newton problems of the next
+    // `X_NEWTON_LANES_MATCHES` matches ahead (Newton lanes); the match-parallel redo solves none.
     if crate::algorithm::blastp::kappa::x_seg_share() != 0 {
         crate::utils::xreach::x_reach!(
             "LOSAT_X_SEGSHARE",
             x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
         );
     }
-    if x_newton_lanes_on {
-        crate::utils::xreach::x_reach!(
-            "LOSAT_X_NEWTONLANES",
-            x_redo_par_run || !use_parallel_kappa_match_redo
-        );
-    }
+    crate::utils::xreach::x_reach!(
+        "LOSAT_X_NEWTONLANES",
+        x_redo_par_run || !use_parallel_kappa_match_redo
+    );
     if x_redo_par_run {
         #[cfg(all(
             feature = "parallel",
@@ -10198,7 +10189,7 @@ fn run_resolved_in_pool(
             //   the test and the heap insertions are replayed in stream order after the parallel
             //   loop, when the heaps of the other queries of the batch are complete.
             //
-            // A heap that no match has reached, for the LOSAT_X_NEWTONLANES prefetch: the
+            // A heap that no match has reached, for the Newton lanes prefetch: the
             // prefetch leaves out the matches that the test ends for the heaps it is given, and
             // a query that does not test its own heap redoes every match.
             let x_untouched_heap = BlastCompoHeap::new(args.max_target_seqs, PSI_INCLUSION_ETHRESH);
@@ -10246,7 +10237,7 @@ fn run_resolved_in_pool(
                         // last_hsplist_index = hit_list->hsplist_count - 1;
                         // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
                         // ```
-                        // No NCBI counterpart: position of the next LOSAT_X_NEWTONLANES prefetch.
+                        // No NCBI counterpart: position of the next Newton lanes prefetch.
                         let mut x_next_prefetch = 0usize;
                         for (match_position, local_match) in preliminary_hit_list
                             .hsplist_array
@@ -10285,11 +10276,11 @@ fn run_resolved_in_pool(
                             {
                                 continue;
                             }
-                            // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of this
+                            // No NCBI counterpart: the Newton lanes solve the first Newton problems of this
                             // and the next matches ahead, four per vector (kappa::x_newton_lanes_prefetch_matches);
                             // a result is used only by a call with the same input bits. It does not change any value
                             // NCBI computes.
-                            if x_newton_lanes_on && match_position >= x_next_prefetch {
+                            if match_position >= x_next_prefetch {
                                 x_next_prefetch = match_position + X_NEWTON_LANES_MATCHES;
                                 x_newton_lanes_prefetch_matches(
                                     &preliminary_hit_list.hsplist_array[match_position
@@ -10511,7 +10502,7 @@ fn run_resolved_in_pool(
             // HSPList. Use the sorted preliminary hitlist directly instead of
             // draining an unordered map, so `localMatch->best_evalue` and the
             // admission order match NCBI.
-            // No NCBI counterpart: position of the next LOSAT_X_NEWTONLANES prefetch.
+            // No NCBI counterpart: position of the next Newton lanes prefetch.
             let mut x_next_prefetch = 0usize;
             for (x_match_position, local_match) in preliminary_hit_list
                 .hsplist_array
@@ -10562,11 +10553,11 @@ fn run_resolved_in_pool(
                 //                         numQueries
                 //                 )) {
                 // ```
-                // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of this
+                // No NCBI counterpart: the Newton lanes solve the first Newton problems of this
                 // and the next matches ahead, four per vector (kappa::x_newton_lanes_prefetch_matches);
                 // a result is used only by a call with the same input bits. It does not change any value
                 // NCBI computes.
-                if x_newton_lanes_on && x_match_position >= x_next_prefetch {
+                if x_match_position >= x_next_prefetch {
                     x_next_prefetch = x_match_position + X_NEWTON_LANES_MATCHES;
                     x_newton_lanes_prefetch_matches(
                         &preliminary_hit_list.hsplist_array[x_match_position

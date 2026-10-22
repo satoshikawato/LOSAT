@@ -127,8 +127,8 @@ static HPM16: [i16; 8] = [-1, 0, 0, 0, 0, 0, 0, 0];
 /// Lane 0 of 8-bit lanes.
 static HPM8: [u8; 16] = [255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-/// No NCBI counterpart: LOSAT_X_DPNEON2 set (any value; not in the strict set, off unless set).
-/// `neon_on` in `xdrop_simd.rs` lets it turn the NEON kernels on as LOSAT_X_DPNEON does.
+/// No NCBI counterpart: LOSAT_X_DPNEON2 set (any value; not in the strict set, off unless set):
+/// the two-register kernels run first on aarch64 (`x_extra_switches` in `xdrop_simd.rs`).
 pub(super) fn switch_on() -> bool {
     std::env::var_os("LOSAT_X_DPNEON2").is_some()
 }

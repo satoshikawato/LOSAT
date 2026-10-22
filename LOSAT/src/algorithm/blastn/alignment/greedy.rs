@@ -680,8 +680,7 @@ fn format_gap_prelim_edit_block_for_trace(block: &GapPrelimEditBlock) -> String 
 }
 
 fn debug_greedy_traceback_enabled(q_off: usize, s_off: usize) -> bool {
-    // No NCBI counterpart: debug print switch (LOSAT_DEBUG_COORDS, read once with
-    // LOSAT_X_ENVCACHE); it does not change any value NCBI computes.
+    // No NCBI counterpart: debug print switch (LOSAT_DEBUG_COORDS, read once); it does not change any value NCBI computes.
     let debug_all = crate::utils::xenv::debug_coords_is_some();
     let Some(filter) = crate::utils::xenv::debug_coords_start() else {
         return debug_all;

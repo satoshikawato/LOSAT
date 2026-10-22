@@ -1,12 +1,11 @@
-//! The order of the TBLASTX two-hit stage (`LOSAT_X_SEEDBUCKET`,
-//! `src/algorithm/tblastx/x_seed_bucket.rs`) on a whole search, against the output of NCBI
-//! BLAST+ 2.17.0.
+//! The order of the TBLASTX two-hit stage (`src/algorithm/tblastx/x_seed_bucket.rs`) on a whole
+//! search, against the output of NCBI BLAST+ 2.17.0.
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): the bucketed order runs by default
-//! where TBLASTX is in its scan loop with a diagonal table of at least 2^21 cells. The searches
-//! of the fixture suites do not get there (the unit path of `LOSAT_X_PAIRPAR` takes them, and
-//! their tables are smaller), so these tests bring a small search there: `LOSAT_X_PAIRPAR=0` for
-//! the scan loop, `LOSAT_X_SEEDBUCKET_MIN_CELLS=0` for any table size, and
+//! The bucketed order runs by default where TBLASTX is in its scan loop with a diagonal table of
+//! at least 2^21 cells. The searches of the fixture suites do not get there (the unit path takes
+//! them, and their tables are smaller), so these tests bring a small search there: one thread
+//! with the cost rule of `LOSAT_X_PAIRPARGATE` for the scan loop (`[X_STATS] PAIRPAR units=0
+//! fallback_cost=1`), `LOSAT_X_SEEDBUCKET_MIN_CELLS=0` for any table size, and
 //! `LOSAT_X_SEEDBUCKET_CELLS=256` with `LOSAT_X_SEEDBUCKET_BUDGET=64` for several buckets and
 //! several flushes per scan. Every test reads the `[X_STATS] SEEDBUCKET` line to check which
 //! order ran, not only that the output is equal.
@@ -34,9 +33,9 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 /// The variables that bring the fixture search to the scan loop with several buckets and
-/// several flushes per scan, and print the counters. None of them names the switch itself.
-const SCAN_LOOP: [(&str, &str); 5] = [
-    ("LOSAT_X_PAIRPAR", "0"),
+/// several flushes per scan, and print the counters. The run is at one thread (the default), where
+/// the cost rule leaves the fixture search to the scan loop.
+const SCAN_LOOP: [(&str, &str); 4] = [
     ("LOSAT_X_SEEDBUCKET_MIN_CELLS", "0"),
     ("LOSAT_X_SEEDBUCKET_CELLS", "256"),
     ("LOSAT_X_SEEDBUCKET_BUDGET", "64"),
@@ -74,6 +73,22 @@ fn ncbi_report() -> Vec<u8> {
     std::fs::read(fixture("short_hsp.ncbi_2.17.0.fmt6.out")).expect("NCBI output")
 }
 
+/// The counters `units` and `fallback_cost` of the `[X_STATS] PAIRPAR` line.
+fn pair_par(stderr: &str) -> [u64; 2] {
+    let line = stderr
+        .lines()
+        .find(|line| line.starts_with("[X_STATS] PAIRPAR "))
+        .unwrap_or_else(|| panic!("no [X_STATS] PAIRPAR line:\n{stderr}"));
+    ["units", "fallback_cost"].map(|name| {
+        let key = format!("{name}=");
+        line.split_whitespace()
+            .find_map(|field| field.strip_prefix(key.as_str()))
+            .unwrap_or_else(|| panic!("no {name} in {line}"))
+            .parse()
+            .expect("counter")
+    })
+}
+
 /// One counter of the `[X_STATS] SEEDBUCKET` line.
 fn counter(stderr: &str, name: &str) -> u64 {
     let key = format!("{name}=");
@@ -96,12 +111,13 @@ fn counter(stderr: &str, name: &str) -> u64 {
 // ...
 //     diag_coord = (query_offset - subject_offset) & diag_mask;
 // ```
-// With no variable for the switch the scans run in the bucketed order, more than one flush in
-// at least one of them, and the report is NCBI's.
+// By default (a table of at least the minimum cells) the scans run in the bucketed order, more than
+// one flush in at least one of them, and the report is NCBI's. The scan loop ran, not the units.
 #[test]
 fn the_bucketed_order_runs_by_default_and_matches_ncbi() {
     let (report, stderr) = tblastx(&[]);
     assert_eq!(report, ncbi_report(), "default");
+    assert_eq!(pair_par(&stderr), [0, 1], "the scan loop:\n{stderr}");
     let scans = counter(&stderr, "bucketed_scans");
     assert!(scans > 0, "the bucketed order did not run:\n{stderr}");
     assert!(
@@ -118,22 +134,17 @@ fn the_bucketed_order_runs_by_default_and_matches_ncbi() {
 // ...
 //     diag_coord = (query_offset - subject_offset) & diag_mask;
 // ```
-// `LOSAT_X_SEEDBUCKET=0` and `LOSAT_X_DEFAULT=0` each leave the scans to the port of this loop
-// (scan order), and `LOSAT_X_SEEDBUCKET=1` under `LOSAT_X_DEFAULT=0` runs the bucketed order as
-// it did before the switch joined the set. The report is NCBI's in each case.
+// A table below the minimum cells (2^21, the default of `LOSAT_X_SEEDBUCKET_MIN_CELLS`; a later
+// variable overrides `SCAN_LOOP`'s 0) keeps the scan order: no bucketed scan, the report is NCBI's.
 #[test]
-fn the_switch_follows_its_variable_and_the_global_one() {
-    let expected = ncbi_report();
-    for off in [("LOSAT_X_SEEDBUCKET", "0"), ("LOSAT_X_DEFAULT", "0")] {
-        let (report, stderr) = tblastx(&[off]);
-        assert_eq!(report, expected, "{off:?}");
-        assert_eq!(counter(&stderr, "bucketed_scans"), 0, "{off:?}:\n{stderr}");
-    }
-    let as_before = [("LOSAT_X_DEFAULT", "0"), ("LOSAT_X_SEEDBUCKET", "1")];
-    let (report, stderr) = tblastx(&as_before);
-    assert_eq!(report, expected, "{as_before:?}");
-    assert!(
-        counter(&stderr, "bucketed_scans") > 0,
-        "{as_before:?}:\n{stderr}"
+fn a_table_below_the_threshold_keeps_the_scan_order() {
+    let below = ("LOSAT_X_SEEDBUCKET_MIN_CELLS", "2097152");
+    let (report, stderr) = tblastx(&[below]);
+    assert_eq!(report, ncbi_report(), "{below:?}");
+    assert_eq!(pair_par(&stderr), [0, 1], "the scan loop:\n{stderr}");
+    assert_eq!(
+        counter(&stderr, "bucketed_scans"),
+        0,
+        "{below:?}:\n{stderr}"
     );
 }

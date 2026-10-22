@@ -1,4 +1,4 @@
-//! `LOSAT_X_PAIRPARGATE` on whole runs of the binary: the unit path of `LOSAT_X_PAIRPAR` runs only
+//! `LOSAT_X_PAIRPARGATE` on whole runs of the binary: the unit path (`x_pair_par.rs`) runs only
 //! for a batch where it is expected to be faster than the reference frame loop
 //! (`units_gain` in `src/algorithm/tblastx/x_pair_par.rs`): a reference diagonal table of 2^18
 //! cells or more, or several threads and one subject with more than one and a half thread's share

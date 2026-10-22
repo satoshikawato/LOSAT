@@ -1052,7 +1052,6 @@ mod tests {
                 .collect();
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts),
-                shadow: false,
                 stub: false,
                 sliced: None,
                 mask_rule: None,
@@ -1214,7 +1213,6 @@ mod tests {
         let x_dropoff_per_context = vec![16; contexts.len()];
         let pp = XPairPar {
             groups: build_groups(&lookup, &contexts),
-            shadow: false,
             stub: false,
             sliced: None,
             mask_rule: None,

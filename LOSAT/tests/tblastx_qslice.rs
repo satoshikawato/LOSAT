@@ -37,8 +37,6 @@ const SHADOW: (&str, &str) = ("LOSAT_X_TBXQSLICESHADOW", "1");
 const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 /// Today's `InitHSP` lists instead of the compact records (`run_unit_sliced`).
 const FULL_LISTS: (&str, &str) = ("LOSAT_X_SEEDCOMPACT", "0");
-/// The reference table builder: the slices filtered out of the batch's full table.
-const FILTERED: (&str, &str) = ("LOSAT_X_PAIRLUT", "0");
 /// The batched extensions on every unit of 2 Ki letters or more.
 const BATCHED: (&str, &str) = ("LOSAT_X_TBXEXTBATCH", "2");
 /// The prefetch on every table of 2 KiB or more.
@@ -170,7 +168,6 @@ fn sliced_units_give_the_same_report() {
         for switches in [
             &[SLICES][..],
             &[SLICES, FULL_LISTS][..],
-            &[SLICES, FILTERED][..],
             &[SLICES, BATCHED][..],
             &[SLICES, PREFETCH][..],
             &[][..],

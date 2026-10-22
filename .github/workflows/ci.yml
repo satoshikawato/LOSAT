@@ -71,9 +71,14 @@ jobs:
           # assertions and overflow checks.
           CARGO_PROFILE_TEST_OPT_LEVEL: '1'
       # The performance switches are on by default (LOSAT/src/utils/xswitch.rs), so the run
-      # above tests the new paths. This one keeps the reference paths under test.
+      # above tests the new paths. This one keeps the reference paths under test. It leaves out
+      # the test files marked "CI reference step: skipped": each of their runs sets its own
+      # LOSAT_* variables, so it would repeat the run above (LOSAT/tests/reference_step_targets.sh).
       - name: cargo test on the reference paths (LOSAT_X_DEFAULT=0)
-        run: cd LOSAT && cargo test --all-features
+        run: |
+          cd LOSAT
+          targets=$(bash tests/reference_step_targets.sh)
+          cargo test --all-features $targets
         env:
           LOSAT_X_DEFAULT: '0'
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker-reference.log
@@ -107,12 +112,12 @@ jobs:
           workspaces: LOSAT -> target
       - name: Build release binary
         if: steps.select.outputs.programs != 'none'
-        run: cd LOSAT && cargo build --release --locked --bin LOSAT
+        run: cd LOSAT && cargo build --release --locked --bin losat
       # FMA instructions and references to fma only where mul_add is (docs/agents/diagnostics.md,
       # "Floating-point contract").
       - name: Floating-point contract (release binary)
         if: steps.select.outputs.programs != 'none'
-        run: python3 LOSAT/tests/check_fp_contract.py binary --losat LOSAT/target/release/LOSAT
+        run: python3 LOSAT/tests/check_fp_contract.py binary --losat LOSAT/target/release/losat
       # Frozen outfmt 0/7 bytes print the input paths of the runs that froze them
       # (TLOSAN Stage G); capture_outputs.py checks the bytes behind each path.
       - name: Link the frozen input paths
@@ -123,7 +128,7 @@ jobs:
       - name: Output hashes, frozen hashes and outfmt 0 fixtures
         if: steps.select.outputs.programs != 'none'
         run: |
-          python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/LOSAT \
+          python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/losat \
             --out .tmp/fast-regressions --programs "${{ steps.select.outputs.programs }}"
       # The same checks with the performance switches off (LOSAT/src/utils/xswitch.rs): the
       # reference paths must keep giving the frozen bytes.
@@ -132,7 +137,7 @@ jobs:
         env:
           LOSAT_X_DEFAULT: '0'
         run: |
-          python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/LOSAT \
+          python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/losat \
             --out .tmp/fast-regressions-reference --programs "${{ steps.select.outputs.programs }}"
       - uses: actions/upload-artifact@v4
         if: always() && steps.select.outputs.programs != 'none'

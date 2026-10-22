@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp's parallel `-subject` loop in runs of subjects with `LOSAT_X_BPSUBJRUN`
 //! (`src/algorithm/blastp/blast_engine/x_subject_runs.rs`) on whole searches.
 //!
@@ -77,7 +78,7 @@ fn blastp(
     extra: &[&str],
     outfmt: &str,
 ) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -341,13 +342,13 @@ fn a_subject_without_letters_inside_a_run_gives_the_reports_without_the_switch()
     let _ = std::fs::remove_file(&path);
 }
 
-/// A protein database of the subject proteome, made with `LOSAT makedb` in a directory of the
+/// A protein database of the subject proteome, made with `losat makedb` in a directory of the
 /// test; returns the database name.
 fn subject_database() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("losat-bpsubjrun-db-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let name = dir.join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(subject_file())
@@ -355,7 +356,7 @@ fn subject_database() -> PathBuf {
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",

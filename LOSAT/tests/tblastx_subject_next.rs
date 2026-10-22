@@ -17,7 +17,7 @@
 //! one-thread search on the previous paths (`LOSAT_X_DEFAULT=0`), on a set laid out as
 //! a genome database is (two long records first, then many short ones), with ambiguity codes in
 //! the long records (N blocks, single IUPAC codes, one of them in a run across a translation
-//! window), through `-subject` and through a database of the same records (`LOSAT makedb`).
+//! window), through `-subject` and through a database of the same records (`losat makedb`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -33,7 +33,7 @@ fn fasta(name: &str) -> PathBuf {
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
 /// one thread, and it selects nothing.
 fn losat(switches: &[(&str, &str)]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
@@ -113,7 +113,7 @@ fn makedb(dir: &Path, fasta_file: &Path) -> String {
         .arg(fasta_file)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",

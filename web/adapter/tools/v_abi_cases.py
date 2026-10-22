@@ -89,6 +89,8 @@ def outfmt0_fixtures() -> list[dict]:
         argv = run_oracle.search_argv(row)
         outfmt = run_oracle.outfmt(row)
         assert argv[-2:] == ["-outfmt", outfmt], row["fixture_id"]
+        if "-num_descriptions" in argv or "-num_alignments" in argv:
+            continue  # CLI-only (LOSAT Web refuses them)
         key = (row["program"], tuple(argv[:-2]))
         search = searches.setdefault(key, {"program": row["program"], "argv": [row["program"], *argv[:-2]],
                                            "cwd": str(run_oracle.ENGINE), "cases": [], "frozen": {}})
@@ -168,16 +170,16 @@ def quick() -> list[dict]:
     cases = []
     blastp = capture.audit_blastp_v010.load_manifest(capture.TESTS / "blastp_v010_parity_manifest.tsv", REPO)
     for base in blastp[:2]:
-        _, losat = capture.audit_blastp_v010.build_commands(base, Path("unused"), Path("LOSAT"), Path("{OUTDIR}"))
+        _, losat = capture.audit_blastp_v010.build_commands(base, Path("unused"), Path("losat"), Path("{OUTDIR}"))
         cases.append(capture.Case("blastp", base.case_id, capture.strip_binary(losat), REPO))
     for row in capture.compare_blastn_parity.read_manifest(capture.TESTS / "blastn_parity_manifest.tsv"):
         if row["case_id"].startswith(("compact.", "MjPMNV.")):
             absolute = capture.certify._blastn_command_row(REPO, row)
-            command = capture.compare_blastn_parity.build_losat_command(absolute, Path("LOSAT"), "{OUT}")
+            command = capture.compare_blastn_parity.build_losat_command(absolute, Path("losat"), "{OUT}")
             cases.append(capture.Case("blastn", row["case_id"], capture.strip_binary(command), REPO))
     tblastx = capture.audit_tblastx_v010.load_manifest(capture.TESTS / "tblastx_v010_parity_manifest.tsv", REPO)
     for case in tblastx[1:2]:
-        _, losat = capture.audit_tblastx_v010.build_commands(case, Path("unused"), Path("LOSAT"), Path("unused"), Path("{OUT}"))
+        _, losat = capture.audit_tblastx_v010.build_commands(case, Path("unused"), Path("losat"), Path("unused"), Path("{OUT}"))
         cases.append(capture.Case("tblastx", case.case_id, capture.strip_binary(losat), REPO))
     prefix = "/mnt/c/Users/genom/GitHub/LOSAT/"
     with open(REPO / "docs/evidence/tlosan_stage_g/matrix_162.jsonl") as handle:

@@ -236,7 +236,7 @@ pub(crate) struct BlastpHspList<H = BlastpHsp> {
 //    Int4 num_hits;
 // } BlastHitList;
 // ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(crate) struct BlastpHitList<H = BlastpHsp> {
     pub hsplist_count: usize,

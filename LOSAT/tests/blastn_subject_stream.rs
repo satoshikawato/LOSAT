@@ -49,7 +49,7 @@ fn blastn(
     extra: &[&str],
     switches: &[(&str, &str)],
 ) -> Vec<u8> {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);

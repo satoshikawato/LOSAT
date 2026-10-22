@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The blastp search in blocks of whole query batches with `LOSAT_X_BPQBLOCK`
 //! (`src/algorithm/blastp/x_query_blocks.rs`) on whole searches.
 //!
@@ -12,7 +13,7 @@
 //! `LOSAT_TIMING`, that the block path ran (more searches than the reference) or did not (the
 //! same number), not only that the report is equal. `BATCH_SIZE` (NCBI's query batch size) makes
 //! small batches, so that the fixture pair has many batches and blocks. The same
-//! comparisons run with `-db` on a database of the subject proteome made with `LOSAT makedb`.
+//! comparisons run with `-db` on a database of the subject proteome made with `losat makedb`.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-287
 //! ```c++
@@ -64,7 +65,7 @@ fn blastp_against(
     vars: &[(&str, &str)],
     extra: &[&str],
 ) -> (Vec<u8>, usize) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -260,13 +261,13 @@ fn the_default_searches_in_blocks_of_50000_letters() {
     std::fs::remove_dir_all(db.parent().unwrap()).unwrap();
 }
 
-/// A protein database of the subject proteome, made with `LOSAT makedb` in a directory of the
+/// A protein database of the subject proteome, made with `losat makedb` in a directory of the
 /// test (`tag` names it); returns the database name.
 fn subject_database(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("losat-bpqblock-db-{tag}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let name = dir.join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
@@ -274,7 +275,7 @@ fn subject_database(tag: &str) -> PathBuf {
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",

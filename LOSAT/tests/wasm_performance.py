@@ -178,7 +178,7 @@ def freeze(args):
             "threaded": "wasm32-wasip1-threads",
         }[kind]
         target_dir = Path(artifact["path"]).parents[1 if kind == "native" else 2]
-        build_argv = ["cargo", "build", "--locked", "--release", "--bin", "LOSAT"]
+        build_argv = ["cargo", "build", "--locked", "--release", "--bin", "losat"]
         if kind != "native":
             build_argv += ["--target", target]
             build_argv += (

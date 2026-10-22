@@ -34,7 +34,7 @@ fn fixture(name: &str) -> PathBuf {
 /// --all-features`, as in CI) needs that file name as soon as a search has more than one
 /// thread, and it selects nothing.
 fn losat() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
@@ -52,7 +52,7 @@ fn temp_dir() -> PathBuf {
 }
 
 /// The query (letters 100,000-109,000 of AP027131) and the subject set (its proteins and those
-/// of AP027132 and AP027133) as files, and the subject set's `LOSAT makedb` database.
+/// of AP027132 and AP027133) as files, and the subject set's `losat makedb` database.
 fn inputs(dir: &Path) -> (PathBuf, PathBuf, String) {
     let genome = std::fs::read_to_string(fixture("AP027131.fasta")).unwrap();
     let letters: String = genome
@@ -82,7 +82,7 @@ fn inputs(dir: &Path) -> (PathBuf, PathBuf, String) {
         .arg(&set)
         .args(["-dbtype", "prot", "-out", &db])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",

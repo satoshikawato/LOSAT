@@ -22,7 +22,7 @@ fn fasta(name: &str) -> PathBuf {
 /// --all-features`, as in CI) needs that file name as soon as a search has more than one
 /// thread, and it selects nothing.
 fn losat() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
@@ -82,7 +82,7 @@ fn inputs(dir: &Path) -> (PathBuf, PathBuf) {
     (query, set)
 }
 
-/// The database of `fasta_file` made by `LOSAT makedb` in `dir` under `name`.
+/// The database of `fasta_file` made by `losat makedb` in `dir` under `name`.
 fn makedb(dir: &Path, fasta_file: &Path, name: &str) -> String {
     let db = dir.join(name).to_str().unwrap().to_string();
     let output = losat()
@@ -91,7 +91,7 @@ fn makedb(dir: &Path, fasta_file: &Path, name: &str) -> String {
         .arg(fasta_file)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",

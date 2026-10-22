@@ -4,6 +4,7 @@ LOSAT_X_AHEAD	blastn	conditional	required	required	2+ threads (1 thread runs ref
 LOSAT_X_BNDBCUT	blastn	conditional	required	required	-db only, 2+ threads; DB below 4 x threads MiB of sequence bytes
 LOSAT_X_BNDBSTREAM	blastn	conditional	required	required	-db only, 2+ threads; memory switch (little change for few long sequences)
 LOSAT_X_BNFEWSUBJ	blastn	conditional	gap	required	-subject, 2+ threads, longest work unit a large share of letters (per-task thresholds); no -lcase_masking, never -db; new gap: needs -subject with 2+ subjects at 2+ threads, one subject holding most letters, query block > 8000
+LOSAT_X_BNMAPPED	blastn	conditional	required	required	Linux 64-bit glibc and a buffer of 1 MiB or more: a subject's ungapped hits at their sort by score, a -db sequence's BLASTNA letters at traceback (mapped; database buffers and sort scratch pooled); smaller buffers or other allocators keep Vec's capacity
 LOSAT_X_BNSTORE	blastn	conditional	required	required	-subject without -subject_loc; letters kept for subject ranges or bytes without ncbi4na code
 LOSAT_X_BNSTREAM	blastn	conditional	required	required	-subject only, 2+ threads (1 thread hands over at once); -db has own drivers
 LOSAT_X_BNUNGAPCOUNT	blastn	always			Exact ungapped extension with step counts worked out first

@@ -791,19 +791,22 @@ fn fold_two_hit<const PT: bool>(
         //                 *final_data = *ungapped_data;
         //                 BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
         // ```
-        ungapped_hits.push(UngappedHit {
-            context_idx: q_idx,
-            query_idx: ctx.query_idx,
-            query_frame: ctx.frame,
-            query_context_offset: ctx.query_offset,
-            seed_q_off: q_off - q_context_start,
-            seed_s_off: s_off,
-            qs,
-            qe,
-            ss,
-            se: ungapped_se,
-            score: ungapped_score,
-        });
+        super::super::x_push_ungapped(
+            ungapped_hits,
+            UngappedHit {
+                context_idx: q_idx,
+                query_idx: ctx.query_idx,
+                query_frame: ctx.frame,
+                query_context_offset: ctx.query_offset,
+                seed_q_off: q_off - q_context_start,
+                seed_s_off: s_off,
+                qs,
+                qe,
+                ss,
+                se: ungapped_se,
+                score: ungapped_score,
+            },
+        );
         if PT {
             out.hit_keys.push(x_key);
         }
@@ -1460,19 +1463,22 @@ fn fold_two_hit_array(
         //                 *final_data = *ungapped_data;
         //                 BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
         // ```
-        ungapped_hits.push(UngappedHit {
-            context_idx: q_idx,
-            query_idx: ctx.query_idx,
-            query_frame: ctx.frame,
-            query_context_offset: ctx.query_offset,
-            seed_q_off: q_off - q_context_start,
-            seed_s_off: s_off,
-            qs,
-            qe,
-            ss,
-            se: ungapped_se,
-            score: ungapped_score,
-        });
+        super::super::x_push_ungapped(
+            ungapped_hits,
+            UngappedHit {
+                context_idx: q_idx,
+                query_idx: ctx.query_idx,
+                query_frame: ctx.frame,
+                query_context_offset: ctx.query_offset,
+                seed_q_off: q_off - q_context_start,
+                seed_s_off: s_off,
+                qs,
+                qe,
+                ss,
+                se: ungapped_se,
+                score: ungapped_score,
+            },
+        );
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:768-772
         // ```c

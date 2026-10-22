@@ -97,6 +97,49 @@ mod x_db_stream;
 /// The IUPAC letter of a BLASTNA code.
 const BLASTNA_TO_IUPACNA: [u8; 16] = *b"ACGTRYMKWSBDHVN-";
 
+/// `SeqDb::read_block`, mapped with LOSAT_X_BNMAPPED.
+fn x_read_block(db: &SeqDb, range: BlockRange) -> Result<SequenceBlock, SeqDbError> {
+    if super::x_bn_mapped() {
+        db.x_read_block_mapped(range)
+    } else {
+        db.read_block(range)
+    }
+}
+
+/// `SeqDb::read_sequence`, mapped with LOSAT_X_BNMAPPED.
+fn x_read_sequence(db: &SeqDb, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
+    if super::x_bn_mapped() {
+        db.x_read_sequence_mapped(ordinal)
+    } else {
+        db.read_sequence(ordinal)
+    }
+}
+
+/// With LOSAT_X_BNMAPPED, gives a block read by `x_read_block` or `x_read_sequence` back to
+/// `utils::x_mapped::X_BYTES`.
+fn x_done_block(block: SequenceBlock) {
+    if super::x_bn_mapped() {
+        block.x_recycle();
+    }
+}
+
+/// With LOSAT_X_BNMAPPED, gives letters of `x_blastna` back to `utils::x_mapped::X_BYTES`.
+fn x_done_bytes(mut bytes: Vec<u8>) {
+    if super::x_bn_mapped() {
+        super::x_bn_mapped_reach(bytes.len());
+        crate::utils::x_mapped::X_BYTES.give(&mut bytes);
+    }
+}
+
+/// `SequenceBlock::nucleotide_blastna(0)`, mapped with LOSAT_X_BNMAPPED.
+fn x_blastna(block: &SequenceBlock) -> Result<Vec<u8>, SeqDbError> {
+    if super::x_bn_mapped() {
+        block.x_nucleotide_blastna_mapped(0)
+    } else {
+        block.nucleotide_blastna(0)
+    }
+}
+
 /// A reader error outside the preliminary search as the command line reports it
 /// (`algorithm::common::database::database_error`).
 fn database_error(error: SeqDbError) -> anyhow::Error {
@@ -469,7 +512,7 @@ where
             round
                 .par_iter()
                 .map_init(new_scratch, |scratch, &range| -> Result<Vec<(u32, R)>> {
-                    let block = db.read_block(range).map_err(search_read_error)?;
+                    let block = x_read_block(db, range).map_err(search_read_error)?;
                     let mut kept = Vec::new();
                     for i in 0..block.len() {
                         let ordinal = range.first_ordinal + i as u32;
@@ -477,6 +520,7 @@ where
                             kept.push((ordinal, result));
                         }
                     }
+                    x_done_block(block);
                     Ok(kept)
                 })
                 .collect()
@@ -562,13 +606,14 @@ where
     let mut scratch = new_scratch();
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
-        let block = db.read_block(range).map_err(search_read_error)?;
+        let block = x_read_block(db, range).map_err(search_read_error)?;
         for i in 0..block.len() {
             let ordinal = range.first_ordinal + i as u32;
             if let Some(result) = search(&mut scratch, ordinal, block_subject(&block, i)?) {
                 merge(ordinal, result);
             }
         }
+        x_done_block(block);
         next_ordinal = range.end_ordinal();
     }
     Ok(())
@@ -648,9 +693,9 @@ where
 {
     let db = &database.db;
     let one = |scratch: &mut T, &(ordinal, ref kept): &(u32, P)| -> Result<Option<R>> {
-        let stored = db.read_sequence(ordinal).map_err(database_error)?;
+        let stored = x_read_sequence(db, ordinal).map_err(database_error)?;
         let length = stored.nucleotide_len(0).map_err(database_error)?;
-        let blastna = stored.nucleotide_blastna(0).map_err(database_error)?;
+        let blastna = x_blastna(&stored).map_err(database_error)?;
         let subject = BlastnSubjectRef {
             length,
             packed: stored.nucleotide_packed(0),
@@ -659,7 +704,10 @@ where
             blastna: Some(&blastna[1..=length]),
             store: None,
         };
-        Ok(traceback(scratch, ordinal, subject, kept))
+        let result = traceback(scratch, ordinal, subject, kept);
+        x_done_bytes(blastna);
+        x_done_block(stored);
+        Ok(result)
     };
     #[cfg(all(
         feature = "parallel",
@@ -839,13 +887,16 @@ pub(super) fn reported_subjects(
             .with_context(|| format!("database sequence {ordinal} has no title read"))?;
         shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
         let sequence = if letters {
-            let block = database.db.read_sequence(ordinal).map_err(database_error)?;
+            let block = x_read_sequence(&database.db, ordinal).map_err(database_error)?;
             let length = block.nucleotide_len(0).map_err(database_error)?;
-            let blastna = block.nucleotide_blastna(0).map_err(database_error)?;
-            blastna[1..=length]
+            let blastna = x_blastna(&block).map_err(database_error)?;
+            let letters = blastna[1..=length]
                 .iter()
                 .map(|&code| BLASTNA_TO_IUPACNA[usize::from(code & 0xF)])
-                .collect()
+                .collect();
+            x_done_bytes(blastna);
+            x_done_block(block);
+            letters
         } else {
             Vec::new()
         };

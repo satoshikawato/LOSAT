@@ -3068,7 +3068,7 @@ fn scan_subject_disc_words_with_ranges<F>(
 /// Structure to hold ungapped hit data for batch processing
 /// NCBI reference: blast_gapalign.c - init_hsp_array is sorted by score descending
 /// before gapped extension
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct UngappedHit {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
     // ```c
@@ -3096,6 +3096,84 @@ struct UngappedHit {
     ss: usize,  // subject start in search_seq coordinates
     se: usize,  // subject end in search_seq coordinates
     score: i32, // ungapped score
+}
+
+// No NCBI counterpart: only where LOSAT keeps its buffers (no value changes).
+/// EXPERIMENT (LOSAT_X_BNMAPPED, a switch of the strict set, `utils/xswitch.rs`: on unless it is
+/// `0`, or `LOSAT_X_DEFAULT=0` and it is not set): the large per-subject buffers of BLASTN (the
+/// blocks and sequences read from a database and their BLASTNA letters, `database.rs`; the
+/// ungapped hits of a subject as the seed stages push them, `x_push_ungapped`, and the scratch of
+/// their sort by score, outside the per-query groups of `LOSAT_X_QGROUPPAR` and the merge of the
+/// folded strips, `x_pair_seed_part.rs`) are kept in buffers that glibc maps
+/// from 1 MiB on, so that they are returned when they are dropped instead of staying in the
+/// arena of the worker thread that freed them; the database's buffers and the sort's scratch go
+/// to shared pools (`utils::x_mapped::X_BYTES`, `X_SORT`) when they are done, so that the next
+/// thread that needs one takes it with its pages resident. The hits are not pooled: a thread
+/// keeps its scratch, and with it its hit buffer, from one subject to the next (as NCBI keeps its
+/// `init_hitlist`), so idle hit buffers in a pool only added to what was in use (Sakai x EDL933
+/// `-subject` blastn at 4 threads, max RSS 298-327 MiB with a pool of 64 MiB, 245-264 without,
+/// 238-261 with the switch off).
+fn x_bn_mapped() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
+}
+
+/// No NCBI counterpart: records for `LOSAT_X_REACH` whether a buffer of `bytes` takes
+/// LOSAT_X_BNMAPPED's own path (mapped, and pooled where it has a pool) or stays as `Vec` keeps
+/// it (below 1 MiB, or not glibc).
+pub(super) fn x_bn_mapped_reach(bytes: usize) {
+    crate::utils::xreach::x_reach!(
+        "LOSAT_X_BNMAPPED",
+        crate::utils::x_mapped::x_is_mapped(bytes)
+    );
+}
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNMAPPED) the pool of the scratch of the hits' sort
+/// by score (`x_mapped::x_sort_by_mapped`), whose idle buffers may hold `x_sort_idle_bytes`.
+/// Without it each sort maps its scratch again and touches every page of it (Sakai x EDL933
+/// `-subject` blastn, where the hits of one chunk are sorted at a time: x1.009-1.027 of the time
+/// with the switch off).
+static X_SORT: crate::utils::x_mapped::XPool<UngappedHit> =
+    crate::utils::x_mapped::XPool::new(x_sort_idle_bytes);
+
+/// No NCBI counterpart: the built-in bound of `x_sort_idle_bytes`, in MiB: one scratch of the
+/// largest hit lists measured (Sakai x EDL933 `-subject` blastn sorts 10 lists of 1.0-11.4 MiB;
+/// with 8 each of the 5 above 9 MiB is mapped again, x1.009 of the time).
+const X_SORT_IDLE_MIB: usize = 16;
+
+/// No NCBI counterpart: the idle bound of `X_SORT` (`LOSAT_X_SORTIDLE` MiB, a tuning variable,
+/// 0 to 65,536; built-in `X_SORT_IDLE_MIB`).
+fn x_sort_idle_bytes() -> usize {
+    static IDLE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *IDLE.get_or_init(|| crate::utils::x_mapped::x_idle_bytes("LOSAT_X_SORTIDLE", X_SORT_IDLE_MIB))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:254-268
+// ```c
+//     if (init_hitlist->total >= init_hitlist->allocated) {
+//         Int4 new_size = MAX(100, 2 * init_hitlist->allocated);
+//         ...
+//         init_hsp_array = (BlastInitHSP *)
+//             realloc(init_hitlist->init_hsp_array, sizeof(BlastInitHSP) * new_size);
+// ```
+/// `hits.push(hit)`, growing as `Vec` does; with LOSAT_X_BNMAPPED with the capacity of
+/// `x_mapped::x_reserve_mapped`.
+#[inline(always)]
+fn x_push_ungapped(hits: &mut Vec<UngappedHit>, hit: UngappedHit) {
+    if hits.len() == hits.capacity() {
+        x_grow_ungapped(hits);
+    }
+    hits.push(hit);
+}
+
+#[cold]
+#[inline(never)]
+fn x_grow_ungapped(hits: &mut Vec<UngappedHit>) {
+    if x_bn_mapped() {
+        crate::utils::x_mapped::x_reserve_mapped(hits, 1);
+    } else {
+        hits.reserve(1);
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:271-300
@@ -12658,23 +12736,26 @@ fn search_query_batch(
                                 // NCBI architecture: Collect ungapped hit for batch processing
                                 // NCBI reference: blast_gapalign.c:3824 - init_hsp_array is sorted by score DESCENDING
                                 // Gapped extension will be done later in score order with containment check
-                                ungapped_hits.push(UngappedHit {
-                                    context_idx: q_idx,
-                                    query_idx: ctx.query_idx,
-                                    query_frame: ctx.frame,
-                                    query_context_offset: ctx.query_offset,
-                                    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
-                                    // ```c
-                                    // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
-                                    // ```
-                                    seed_q_off: q_off - q_context_start,
-                                    seed_s_off: s_off,
-                                    qs,
-                                    qe,
-                                    ss,
-                                    se: ungapped_se,
-                                    score: ungapped_score,
-                                });
+                                x_push_ungapped(
+                                    ungapped_hits,
+                                    UngappedHit {
+                                        context_idx: q_idx,
+                                        query_idx: ctx.query_idx,
+                                        query_frame: ctx.frame,
+                                        query_context_offset: ctx.query_offset,
+                                        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
+                                        // ```c
+                                        // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
+                                        // ```
+                                        seed_q_off: q_off - q_context_start,
+                                        seed_s_off: s_off,
+                                        qs,
+                                        qe,
+                                        ss,
+                                        se: ungapped_se,
+                                        score: ungapped_score,
+                                    },
+                                );
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
                                 // ```c
@@ -13918,23 +13999,26 @@ fn search_query_batch(
 
                                 // NCBI architecture: Collect ungapped hit for batch processing
                                 // NCBI reference: blast_gapalign.c:3824 - init_hsp_array is sorted by score DESCENDING
-                                ungapped_hits.push(UngappedHit {
-                                    context_idx: q_idx,
-                                    query_idx: ctx.query_idx,
-                                    query_frame: ctx.frame,
-                                    query_context_offset: ctx.query_offset,
-                                    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
-                                    // ```c
-                                    // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
-                                    // ```
-                                    seed_q_off: q_off,
-                                    seed_s_off: s_off,
-                                    qs,
-                                    qe,
-                                    ss,
-                                    se: ungapped_se,
-                                    score: ungapped_score,
-                                });
+                                x_push_ungapped(
+                                    ungapped_hits,
+                                    UngappedHit {
+                                        context_idx: q_idx,
+                                        query_idx: ctx.query_idx,
+                                        query_frame: ctx.frame,
+                                        query_context_offset: ctx.query_offset,
+                                        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
+                                        // ```c
+                                        // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
+                                        // ```
+                                        seed_q_off: q_off,
+                                        seed_s_off: s_off,
+                                        qs,
+                                        qe,
+                                        ss,
+                                        se: ungapped_se,
+                                        score: ungapped_score,
+                                    },
+                                );
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
                                 // ```c
@@ -14054,6 +14138,20 @@ fn search_query_batch(
             match (&x_order, &x_counts) {
                 (Some(_), Some(counts)) => {
                     x_qgroup_par::group_in_place(ungapped_hits, |hit| hit.query_idx, counts)
+                }
+                // EXPERIMENT (LOSAT_X_BNMAPPED): `x_mapped::x_sort_by_mapped` is a stable sort
+                // with the same comparator, so the order is that of `sort_by`.
+                _ if x_bn_mapped() => {
+                    x_bn_mapped_reach(
+                        ungapped_hits
+                            .len()
+                            .saturating_mul(std::mem::size_of::<UngappedHit>()),
+                    );
+                    crate::utils::x_mapped::x_sort_by_mapped(
+                        ungapped_hits,
+                        score_compare_ungapped_hits,
+                        &X_SORT,
+                    )
                 }
                 _ => ungapped_hits.sort_by(score_compare_ungapped_hits),
             }

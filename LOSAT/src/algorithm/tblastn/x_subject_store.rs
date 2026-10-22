@@ -293,7 +293,7 @@ const X_PACK_BATCH_LETTERS: usize = 4 << 20;
 /// Subjects read packed, and the bytes their stores hold.
 static STORED_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static STORED_BYTES: AtomicU64 = AtomicU64::new(0);
-/// The times the letters of a packed subject were made.
+/// The times the whole letters of a packed subject were made (not the windows the readers make).
 static LETTERS_MADE: AtomicU64 = AtomicU64::new(0);
 /// The times the resolved bases of a packed subject were made for its preliminary stage.
 static RESOLVED_MADE: AtomicU64 = AtomicU64::new(0);

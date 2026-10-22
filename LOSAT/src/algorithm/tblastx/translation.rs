@@ -382,7 +382,7 @@ mod tests {
     use super::*;
 
     /// `translate_frame` against `generate_frames`: each frame's residues and length, and no
-    /// frame where `generate_frames` makes none, for every length up to 40 and a long sequence,
+    /// frame where `generate_frames` makes none (also frames 0 and 4), for every length up to 40 and a long sequence,
     /// with every byte the readers give (IUPAC letters, `-`, both cases), under two codes.
     #[test]
     fn translate_frame_is_the_frame_of_generate_frames() {
@@ -410,7 +410,7 @@ mod tests {
             for length in (0..=40).chain([3_001]) {
                 let seq = sequence(length);
                 let frames = generate_frames(&seq, &code);
-                for frame in [1, 2, 3, -1, -2, -3] {
+                for frame in [1, 2, 3, -1, -2, -3, 0, 4, -4] {
                     let expected = frames
                         .iter()
                         .find(|candidate| candidate.frame == frame)

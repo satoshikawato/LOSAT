@@ -1629,9 +1629,10 @@ impl<'a> TargetTranslation<'a> {
                 let window = (nucl_shift, nucl_shift + nucl_length);
                 let letters = match self.subject {
                     SubjectNt::Letters(letters) => &letters[window.0..window.1],
-                    // EXPERIMENT (LOSAT_X_TBNSTORE): a packed subject's letters of a window are made
-                    // once for the frames that read the same bases (after a fence, every frame
-                    // reads the whole subject).
+                    // A packed subject (every `-db` sequence; with EXPERIMENT LOSAT_X_TBNSTORE every
+                    // `-subject` record): the letters of a window are made once for consecutive
+                    // reads of the same bases (an HSP's frame read again, or after a fence every
+                    // frame, which reads the whole subject).
                     SubjectNt::Packed(store) => {
                         if self.window_range != Some(window) {
                             store.letters_into(window.0, window.1, &mut self.window);
@@ -1640,7 +1641,7 @@ impl<'a> TargetTranslation<'a> {
                         &self.window[..]
                     }
                 };
-                // NCBI translates only the HSP's frame (`translate_frame`).
+                // NCBI translates only the HSP's frame (blast_hits.c:1216-1218, `translate_frame`).
                 let (aa_seq, aa_len) = translate_frame(letters, frame, self.code)
                     .context("missing translated subject frame")?;
                 target.start = start_shift;
@@ -3953,7 +3954,7 @@ mod tests {
 
     // No NCBI counterpart: the translated windows of a subject held packed (EXPERIMENT,
     // LOSAT_X_TBNSTORE) are those of its letters: partial windows of both strands, one read again,
-    // windows that overlap, a window at the end of the subject and the whole subject (after a
+    // one read by the other forward frames, windows that overlap, a window at the end of the subject and the whole subject (after a
     // fence) of a forward and a reverse frame, under genetic codes 1 and 4.
     #[test]
     fn target_translation_of_a_packed_subject_is_that_of_its_letters() {
@@ -3974,8 +3975,10 @@ mod tests {
         let store =
             crate::sequence::packed_subject::PackedNucleotide::from_subject_letters(&letters)
                 .expect("letters with ncbi4na codes");
-        let requests: [(i8, i32, i32); 10] = [
+        let requests: [(i8, i32, i32); 12] = [
             (1, 10, 60),
+            (2, 10, 60),
+            (3, 10, 60),
             (-2, 500, 560),
             (-2, 500, 560),
             (1, 700, 760),

@@ -21,6 +21,11 @@
 //!   same bytes as the reference (a sentinel among them stops both, as in `x_ungapped_fast.rs`).
 //! * The word loop is unrolled for three letters (the same statements and order) and the walks
 //!   take two steps per loop.
+//! * No score wraps (a wrapped score could step over a sentinel without stopping): a block on the
+//!   path has at most `i32::MAX / 16` letters, the word and the two walks of one extension read
+//!   distinct query positions at +11 a step at most, so a score stays below `11 * (len + 3)`, and
+//!   a score is never below `best - 255` (a step costs at most 128 and the walk stops once
+//!   `best - score` reaches `dropoff <= 127`).
 //!
 //! In a replay of the closure on 4.3 million captured candidates of an OrthoFinder job (line F,
 //! `v4-F/results/s1/p2`, arm V6) every result equalled the reference's, at 204.7 instead of 264.7
@@ -37,6 +42,9 @@ const CODES: u8 = 32;
 const WORD_SIZE: usize = 3;
 /// Largest X-drop the sentinel stop is exact for (see the module comment).
 const MAX_DROPOFF: i32 = 127;
+/// Longest query block on the path: no score of a walk wraps (see the module comment).
+const MAX_BLOCK_LEN: usize = (i32::MAX / 16) as usize;
+const _: () = assert!(11 * (MAX_BLOCK_LEN as i64 + 3) < i32::MAX as i64);
 
 struct State {
     /// 0 = off, 1 = LOSAT_X_BPUNGAPSENT, 2 = LOSAT_X_BPUNGAPSENTSHADOW (both, compared).
@@ -105,7 +113,8 @@ pub(crate) struct XSentQuery {
 impl XSentQuery {
     /// `None` when the switch is off or the block is outside the path: a code >= 32, an X-drop
     /// outside `1..=127`, a word size other than 3 (`lookup_word_size` is the lookup table's,
-    /// `extension_word_size` the one the extension is called with), or a length beyond `i32`.
+    /// `extension_word_size` the one the extension is called with), or more than `i32::MAX / 16`
+    /// letters (no score wraps; module comment).
     // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
     pub(crate) fn new(
         query: &[u8],
@@ -121,7 +130,7 @@ impl XSentQuery {
         let fits = lookup_word_size == WORD_SIZE as i32
             && extension_word_size == WORD_SIZE
             && x_drops.iter().all(|d| (1..=MAX_DROPOFF).contains(d))
-            && query.len() < i32::MAX as usize
+            && query.len() <= MAX_BLOCK_LEN
             && query.iter().fold(0u8, |a, &c| a | c) < CODES;
         if !fits {
             return None;

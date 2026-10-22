@@ -1794,6 +1794,16 @@ Rebuilding less:
   loop. A block with another word size (blastp-fast, `-word_size`), an X-drop outside 1..=127 or a code
   >= 32, and a subject with a code >= 32, run the closure of `LOSAT_X_BPUNGAP`; so do `-window_size 0` and
   `LOSAT_X_BPSEED=0` (no fused loop). BLASTX keeps `LOSAT_X_BPUNGAP`.
+  Measured 2026-10-23 on the workstation (node 1, CPU 40 for one thread and CPUs 40-47 for eight, their HT siblings
+  idle, warmed 3 s before every run, arm order reversed every other round, one warm-up round + 8 rounds at one
+  thread and 2 rounds at eight, medians of the per-round ratios against dev 7cfec941, the binary before the switch;
+  every report identical between the arms and equal to NCBI BLAST+ 2.17.0's). OrthoFinder jobs of 7 species at one
+  thread (`-subject`, `-evalue 0.001`): Blast0_6 x0.880 (54.55 -> 48.05 s, 8 of 8 rounds below 1; cycles x0.880,
+  instructions x0.748), Blast6_6 x0.903 (18.33 -> 16.57 s; cycles x0.903); WSSV x PajaWSV x0.978 (cycles x0.977);
+  5,000 x 5,000 UniRef50 proteins (`-db`, `-evalue 0.001`, 8 threads) x0.897 (239.7 -> 214.9 s; cycles x0.891). In
+  Blast0_6 the extension went from 249 to 177 cycles per candidate (288 million candidates; its share of the dev
+  binary's cycles 41.5 % in `perf record`). With `=0` the instruction counts equal the binary's before the switch
+  (x1.0000-1.0002) at x0.996-0.998 of its time. Max RSS within the spread of repeated runs of one binary.
 - `LOSAT_X_BPUNGAPSENTSHADOW=1` shadow of `LOSAT_X_BPUNGAPSENT` (turns the path on): every extension of the path
   also runs the closure of `LOSAT_X_BPUNGAP`'s extension and the results (score, offsets, length,
   `right_extend`, `s_last_off`, and the early return) must be equal; any difference panics with the inputs.

@@ -5209,6 +5209,8 @@ struct BlastnReportInputs<'a> {
     ranges: &'a ReportRanges<'a>,
     /// Per query, plus strand: DUST and, with `-lcase_masking`, the input lowercase.
     query_masks: &'a [Vec<MaskedInterval>],
+    /// The DUST-only masks of every query (outfmt 11's `LCaseMask`); empty without it.
+    archive_dust: &'a [Vec<MaskedInterval>],
     lcase_masking: bool,
     /// Per query context (the plus strand of query `q` is context `2 * q`).
     query_eff_searchsp: &'a [i64],
@@ -5280,6 +5282,7 @@ struct BlastnReportInputs<'a> {
     batch_spans: &'a [std::ops::Range<usize>],
     /// Whether both strands of each query are searched (`-strand both`).
     both_strands: bool,
+    minus_strand: bool,
 }
 
 /// The per-query and run-level data of the pairwise report.
@@ -6098,9 +6101,11 @@ fn post_process_hits_and_write(
                 subject_placements: report.ranges.subjects.placements,
                 hit_lists: &hit_lists,
                 query_masks: report.query_masks,
+                dust_masks: report.archive_dust,
                 unsearched: &unsearched,
                 lcase_masking: report.lcase_masking,
                 both_strands: report.both_strands,
+                minus_strand: report.minus_strand,
                 spans: report.batch_spans,
             };
             archive::write_blastn_archives(
@@ -6470,19 +6475,7 @@ pub fn run(
             Err(error) => {
                 // NCBI reads the `-subject` file inside `Run`, after the diagnostics handler
                 // that saves the messages is set: an error archive follows the error.
-                if let Some(handle) = &archive {
-                    if let Some(lines) = archive::error_lines(&error, true) {
-                        if let Ok(out_file) = open_out_file(&args) {
-                            let mut report = cli_report_stream(out_file);
-                            let _ = crate::report::archive::write_error_archive(
-                                handle,
-                                &lines,
-                                &mut report,
-                            );
-                            let _ = std::io::Write::flush(&mut report);
-                        }
-                    }
-                }
+                write_run_error_archive(&args, archive.as_ref(), &error);
                 return Err(error);
             }
         }
@@ -6520,7 +6513,15 @@ pub fn run(
     // The output file is created here, before the options are checked, so a run that
     // stops at a check leaves an empty file; `-` is standard output.
     check_utf8_file_name(&args.query, "query", "BLASTN")?;
-    let query_file = open_input(&args.query, "query", "BLASTN")?;
+    // NCBI opens the query file inside `Run` too (`CStdCmdLineArgs` in its handler of the
+    // arguments does not): its error is saved and an error archive follows.
+    let query_file = match open_input(&args.query, "query", "BLASTN") {
+        Ok(file) => file,
+        Err(error) => {
+            write_run_error_archive(&args, archive.as_ref(), &error);
+            return Err(error);
+        }
+    };
     // The output file is opened once, as NCBI's stream (a named pipe gives one reader one
     // end of file).
     let out_file = open_out_file(&args)?;
@@ -6548,10 +6549,22 @@ pub fn run(
         )
     };
     // NCBI writes an error archive after the archives of the batches before when the
-    // application stops with one of its own errors (`PrintErrorArchive`).
-    if let (Err(error), Some(handle)) = (&result, &archive) {
-        if let Some(lines) = archive::error_lines(error, false) {
-            let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
+    // application stops with one of its own errors, and when the run ends with messages that
+    // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status:
+    // blastn_app.cpp:331-334).
+    if let Some(handle) = &archive {
+        match &result {
+            Err(error) => {
+                if let Some(lines) = archive::error_lines(error, false) {
+                    let _ =
+                        crate::report::archive::write_error_archive(handle, &lines, &mut report);
+                }
+            }
+            Ok(()) => {
+                if handle.has_messages() {
+                    let _ = crate::report::archive::write_error_archive(handle, &[], &mut report);
+                }
+            }
         }
     }
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
@@ -6585,6 +6598,27 @@ pub fn run(
 /// The subjects of `-subject` as the handler of the database arguments reads them (`run`):
 /// the searched records (their intervals with `-subject_loc`), where their letters lie in
 /// the records, and the records as read (with `-subject_loc`).
+/// The error archive of a run that stopped in `Run` with `error` before its search wrote
+/// anything, when NCBI writes one (`PrintErrorArchive`): into `-out`, or nothing when that
+/// cannot be opened (NCBI's call swallows that).
+fn write_run_error_archive(
+    args: &BlastnArgs,
+    archive: Option<&crate::report::archive::ArchiveHandle>,
+    error: &anyhow::Error,
+) {
+    let Some(handle) = archive else {
+        return;
+    };
+    let Some(lines) = archive::error_lines(error, true) else {
+        return;
+    };
+    if let Ok(out_file) = open_out_file(args) {
+        let mut report = cli_report_stream(out_file);
+        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
+        let _ = std::io::Write::flush(&mut report);
+    }
+}
+
 /// The `-out` file, created (`-`: standard output).
 fn open_out_file(args: &BlastnArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
     if let Some(path) = args.out.as_deref() {
@@ -6839,8 +6873,7 @@ fn search_cli(
         &args.query,
         &query_file,
         shared_standard_input,
-        // The archive writes each query's Bioseq from the records, which are all read.
-        x_rpt_stream::switch_on() && args.archive.is_none(),
+        x_rpt_stream::switch_on(),
         x_rule,
     );
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders)
@@ -6850,6 +6883,11 @@ fn search_cli(
         outputs
             .diagnostics
             .write_all(b"Warning: [blastn] Query is Empty!\n")?;
+        // NCBI returns from `Run` here, before its `PrintErrorArchive`: the message is not an
+        // archive's.
+        if let Some(handle) = &args.archive {
+            handle.take_messages();
+        }
         return Ok(());
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
@@ -7122,6 +7160,10 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
 /// No BLASTN search option depends on the output formats it supports (6 and 7). The
 /// `-query` and `-subject` values of `args` are used only as display names. The hit
 /// records (`ReportOutputs::hits`) are not produced yet.
+///
+/// The BLAST archive (outfmt 11) writes each record's DefLine as the reader kept it
+/// (`ReaderConfig::with_defline(true)`). Records without a kept defline get `>` and their
+/// title, which differs from NCBI for a defline with extra spaces or control bytes.
 pub fn run_local(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
@@ -9300,11 +9342,24 @@ fn write_reports_untimed(
         (None, SubjectSource::Prepared(prepared)) => prepared.letters(),
         (None, SubjectSource::Database(_)) => SubjectLetters::new(&[], None),
     };
+    // The archive's `LCaseMask` holds the DUST intervals of every query, valid or not, whether
+    // or not its batch was searched.
+    let archive_dust = if output_formats.contains(&BlastnOutputFormat::Archive) {
+        let serial = crate::utils::threading::SearchPool::x_serial();
+        super::super::coordination::apply_dust_masking(
+            args,
+            query_records,
+            x_pool.unwrap_or(&serial),
+        )
+    } else {
+        Vec::new()
+    };
     let report_inputs = BlastnReportInputs {
         queries: query_records,
         subjects: subject_letters,
         ranges,
         query_masks: results.query_masks,
+        archive_dust: &archive_dust,
         lcase_masking: args.lcase_masking,
         query_eff_searchsp: results.query_eff_searchsp,
         first_context: QueryStrand::from_option(&args.strand).first_context(),
@@ -9358,6 +9413,7 @@ fn write_reports_untimed(
         archive: args.archive.as_ref(),
         batch_spans: results.batches,
         both_strands: args.strand == "both",
+        minus_strand: QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-496
     // ```c++

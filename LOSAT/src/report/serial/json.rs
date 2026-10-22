@@ -501,8 +501,6 @@ impl Encoder for JsonEncoder<'_> {
         self.write_string(value);
     }
 
-    /// `WriteDouble2(data, DBL_DIG)` (`real::write_json_double`), which raises an error for
-    /// a NaN or an infinity.
     /// The JSON documents (outfmt 12, 13, 15) have no OCTET STRING.
     fn octets(&mut self, _value: &[u8]) {
         if self.error.is_none() {
@@ -510,6 +508,8 @@ impl Encoder for JsonEncoder<'_> {
         }
     }
 
+    /// `WriteDouble2(data, DBL_DIG)` (`real::write_json_double`), which raises an error for
+    /// a NaN or an infinity.
     fn real(&mut self, value: f64) {
         if let Err(error) = write_json_double(value, self.out) {
             if self.error.is_none() {

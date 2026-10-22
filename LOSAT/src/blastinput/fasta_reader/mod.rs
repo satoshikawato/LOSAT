@@ -160,9 +160,9 @@ pub struct FastaRecord {
     /// The reader's messages written while the record was read, in order (each one a
     /// line; NCBI writes them to standard error as it reads).
     pub warnings: Vec<u8>,
-    /// What the BLAST archive (outfmt 11) writes besides the letters; empty unless the
-    /// reader was configured to keep it (`ReaderConfig::keep_defline`).
-    pub source: RecordSource,
+    /// What the BLAST archive (outfmt 11) writes besides the letters; `None` (8 bytes, no
+    /// allocation) unless the reader was configured to keep it (`ReaderConfig::keep_defline`).
+    pub source: Option<Box<RecordSource>>,
 }
 
 /// The parts of a record that only the BLAST archive writes.
@@ -173,8 +173,7 @@ pub struct FastaRecord {
 pub struct RecordSource {
     /// The defline line as read, with its `>`, without its line end (empty when not kept).
     pub defline: Vec<u8>,
-    /// The record's letters before a cut to a range (`FastaRecord::cut`), kept only for a
-    /// record whose defline is kept.
+    /// The record's letters before a cut to a range (`FastaRecord::cut`).
     pub uncut: Option<Vec<u8>>,
 }
 
@@ -186,7 +185,7 @@ impl FastaRecord {
             title: title.to_vec(),
             sequence: sequence.to_vec(),
             warnings: Vec::new(),
-            source: RecordSource::default(),
+            source: None,
         }
     }
 
@@ -242,22 +241,35 @@ impl FastaRecord {
             title: self.title.clone(),
             sequence: self.sequence[from..to_exclusive].to_vec(),
             warnings: Vec::new(),
-            source: RecordSource {
-                defline: self.source.defline.clone(),
-                uncut: (!self.source.defline.is_empty()).then(|| {
-                    self.source
-                        .uncut
-                        .clone()
-                        .unwrap_or_else(|| self.sequence.clone())
-                }),
-            },
+            source: self.source.as_ref().map(|source| {
+                Box::new(RecordSource {
+                    defline: source.defline.clone(),
+                    uncut: Some(
+                        source
+                            .uncut
+                            .clone()
+                            .unwrap_or_else(|| self.sequence.clone()),
+                    ),
+                })
+            }),
         }
+    }
+
+    /// The defline line as read (with its `>`), when the reader kept it and the record has one.
+    pub fn archive_defline(&self) -> Option<&[u8]> {
+        self.source
+            .as_ref()
+            .map(|source| source.defline.as_slice())
+            .filter(|defline| !defline.is_empty())
     }
 
     /// The letters of the record as the archive's Bioseq holds them: the whole record
     /// even when a range cut it.
     pub fn archive_letters(&self) -> &[u8] {
-        self.source.uncut.as_deref().unwrap_or(&self.sequence)
+        self.source
+            .as_ref()
+            .and_then(|source| source.uncut.as_deref())
+            .unwrap_or(&self.sequence)
     }
 }
 

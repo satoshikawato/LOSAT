@@ -12,12 +12,14 @@
 //! the document, this module gathers what it holds from the hit lists, the query masks and
 //! the Karlin-Altschul blocks that BLASTN keeps for its other formats.
 
+use std::borrow::Cow;
 use std::io::Write;
 use std::ops::Range;
 
 use anyhow::Result;
 
 use super::args::BlastnArgs;
+use super::coordination::collect_lowercase_masks;
 use super::hsp::BlastnHitList;
 use super::pairwise::shown_query_masks;
 use super::scoring::ContextKarlin;
@@ -119,9 +121,13 @@ pub(crate) struct ArchiveCall<'a> {
     pub subject_placements: &'a Placements,
     pub hit_lists: &'a [Option<BlastnHitList>],
     pub query_masks: &'a [Vec<MaskedInterval>],
+    /// The DUST-only masks of the call's queries (plus strand, in the searched letters),
+    /// made for every query.
+    pub dust_masks: &'a [Vec<MaskedInterval>],
     pub unsearched: &'a [bool],
     pub lcase_masking: bool,
     pub both_strands: bool,
+    pub minus_strand: bool,
     /// The queries of each batch of the call, in order; empty for a call that is one batch.
     pub spans: &'a [Range<usize>],
 }
@@ -148,13 +154,15 @@ fn ka_block(params: &crate::stats::tables::KarlinParams, gapped: bool) -> KaBloc
     }
 }
 
-fn defline_of(record: &FastaRecord) -> Vec<u8> {
-    if record.source.defline.is_empty() {
-        let mut line = vec![b'>'];
-        line.extend_from_slice(&record.title);
-        line
-    } else {
-        record.source.defline.clone()
+/// The defline line of the Bioseq: the line as read, else `>` and the title.
+fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
+    match record.archive_defline() {
+        Some(defline) => Cow::Borrowed(defline),
+        None => {
+            let mut line = vec![b'>'];
+            line.extend_from_slice(&record.title);
+            Cow::Owned(line)
+        }
     }
 }
 
@@ -206,6 +214,66 @@ impl<'a> AlignSource for BlastnAligns<'a> {
     }
 }
 
+/// The intervals of a query's `LCaseMask` parameter, in record coordinates.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:110-127
+/// ```c++
+///     SetDiagFilter(eDiagFilter_Post, "!(1305.31)");
+///     CRef<CSeq_loc_Mapper> mapper = s_CreateSeqLocMapper(*query_id, seqloc,
+///                                                         scope);
+///     query_masks.Reset(mapper->Map(*query_masks));
+///
+///     const int kTopFlags = CSeq_loc::fStrand_Ignore|CSeq_loc::fMerge_All|CSeq_loc::fSort;
+///     if (orig_query_mask.NotEmpty() && !orig_query_mask->IsNull()) {
+///         CRef<CSeq_loc> tmp = orig_query_mask->Add(*query_masks,  kTopFlags, 0);
+/// ```
+/// The query vector's mask is the lower case of the whole record (`-lcase_masking`, read
+/// before any `-query_loc` cut, for both strands) merged with the DUST intervals of the
+/// searched range, which the mapper puts in the order of the query's strand. A merge
+/// sorts and joins overlapping or abutting intervals; a DUST-only mask is merged
+/// (`Merge`) in the order the mapper gave: descending for `-strand minus`. Each interval
+/// is written once for each strand of the mask (twice with a lower-case mask or both
+/// strands).
+fn lcase_mask_intervals(
+    record: &FastaRecord,
+    dust: &[MaskedInterval],
+    offset: usize,
+    lcase_masking: bool,
+    both_strands: bool,
+    minus_strand: bool,
+) -> Vec<(i32, i32)> {
+    let user: Vec<(i32, i32)> = if lcase_masking {
+        collect_lowercase_masks(record.archive_letters())
+            .iter()
+            .map(|mask| (mask.start as i32, mask.end as i32 - 1))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let user_mask = !user.is_empty();
+    let mut all = user;
+    all.extend(
+        dust.iter()
+            .map(|mask| ((mask.start + offset) as i32, (mask.end + offset) as i32 - 1)),
+    );
+    all.sort_unstable();
+    let mut merged: Vec<(i32, i32)> = Vec::with_capacity(all.len());
+    for (from, to) in all {
+        match merged.last_mut() {
+            Some(last) if from <= last.1 + 1 => last.1 = last.1.max(to),
+            _ => merged.push((from, to)),
+        }
+    }
+    if minus_strand && !user_mask {
+        merged.reverse();
+    }
+    let times = if both_strands || user_mask { 2 } else { 1 };
+    merged
+        .iter()
+        .flat_map(|&interval| std::iter::repeat_n(interval, times))
+        .collect()
+}
+
 /// Writes the archive of each batch of `call` to `writer`; `warnings` writes the warnings
 /// of a batch's queries (to the diagnostics, which saves them as the batch's messages)
 /// before its archive. `first_context(first_query)` gives the values of a batch's first
@@ -228,7 +296,7 @@ pub(crate) fn write_blastn_archives(
         gapped: true,
     };
     // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
-    let subject_deflines: Vec<Vec<u8>> = call
+    let subject_deflines: Vec<Cow<'_, [u8]>> = call
         .subject_records
         .map(|records| records.iter().map(defline_of).collect())
         .unwrap_or_default();
@@ -258,7 +326,7 @@ pub(crate) fn write_blastn_archives(
             }
         }
         let records = &call.queries[span.clone()];
-        let deflines: Vec<Vec<u8>> = records.iter().map(defline_of).collect();
+        let deflines: Vec<Cow<'_, [u8]>> = records.iter().map(defline_of).collect();
         let queries: Vec<BioseqInput<'_>> = records
             .iter()
             .zip(&deflines)
@@ -285,38 +353,17 @@ pub(crate) fn write_blastn_archives(
 
         let mut masks: Vec<MaskEntry> = Vec::new();
         let mut lcase_masks: Vec<MaskEntry> = Vec::new();
-        if searched {
-            for index in span.clone() {
-                let record = &call.queries[index];
-                let offset = call.query_placements.offset(index);
-                // The results' masks leave out a mask over the whole query (`shown_query_masks`,
-                // as the report's masks); the `LCaseMask` parameters keep every interval of
-                // the query's masks (probe `multi_err`: a query that DUST masks whole).
-                let raw: Vec<(i32, i32)> = call.query_masks[index]
-                    .iter()
-                    .map(|mask| ((mask.start + offset) as i32, (mask.end + offset) as i32 - 1))
-                    .collect();
-                if raw.is_empty() {
-                    continue;
-                }
+        for index in span.clone() {
+            let record = &call.queries[index];
+            let offset = call.query_placements.offset(index);
+            // The results' masks are those of the search, so only a searched batch has them
+            // (and leave out a mask over the whole query, `shown_query_masks`).
+            if searched {
                 let shown: Vec<(i32, i32)> =
                     shown_query_masks(&call.query_masks[index], call.query_lengths[index], offset)
                         .iter()
                         .map(|mask| (mask.start as i32, mask.end as i32 - 1))
                         .collect();
-                // Both strands' contexts record the intervals, and the lower-case masks of
-                // a `-lcase_masking` run are kept for both strands (probes `in_n_dust*`,
-                // `t_n_strandplus_lc`, `m_n_*`).
-                let has_lower_case = call.lcase_masking
-                    && record
-                        .archive_letters()
-                        .iter()
-                        .any(|letter| letter.is_ascii_lowercase());
-                let times = if call.both_strands || has_lower_case {
-                    2
-                } else {
-                    1
-                };
                 if !shown.is_empty() {
                     masks.push(MaskEntry {
                         id: record.local_id.clone(),
@@ -324,13 +371,22 @@ pub(crate) fn write_blastn_archives(
                         intervals: shown,
                     });
                 }
+            }
+            // The `LCaseMask` parameters are the masks of NCBI's query vector, which every
+            // query has, valid or not and searched or not (`x_CalculateMasks`).
+            let intervals = lcase_mask_intervals(
+                record,
+                &call.dust_masks[index],
+                offset,
+                call.lcase_masking,
+                call.both_strands,
+                call.minus_strand,
+            );
+            if !intervals.is_empty() {
                 lcase_masks.push(MaskEntry {
                     id: record.local_id.clone(),
                     frame: Frame::Plus1,
-                    intervals: raw
-                        .iter()
-                        .flat_map(|&interval| std::iter::repeat_n(interval, times))
-                        .collect(),
+                    intervals,
                 });
             }
         }
@@ -400,6 +456,8 @@ mod tests {
     ("opt_blastn_g5", &["-num_descriptions", "5", "-num_alignments", "5", "-strand", "minus"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:5"),
     ("opt_blastn_g6", &["-task", "dc-megablast", "-template_type", "coding", "-template_length", "16", "-word_size", "12"], "EvalueThreshold=cutoff:e-value:10 MBTemplateType=integer:0 MBTemplateLength=integer:16 WordSize=integer:12 WindowSize=integer:40 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("opt_blastn_g7", &["-task", "blastn-short"], "EvalueThreshold=cutoff:e-value:1000 MatchReward=integer:1 MismatchPenalty=integer:-3 WordSize=integer:7 DustFiltering=boolean:False SegFiltering=boolean:False RepeatFiltering=boolean:False MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
+    ("short_max_hsps1", &["-task", "blastn-short", "-max_hsps", "1"], "EvalueThreshold=cutoff:e-value:1000 MatchReward=integer:1 MismatchPenalty=integer:-3 WordSize=integer:7 DustFiltering=boolean:False SegFiltering=boolean:False RepeatFiltering=boolean:False MaskAtHash=boolean:True MaxHspsPerSubject=integer:1 UngappedMode=boolean:False HitlistSize=integer:500"),
+    ("short_perc_identity90", &["-task", "blastn-short", "-perc_identity", "90"], "EvalueThreshold=cutoff:e-value:1000 MatchReward=integer:1 MismatchPenalty=integer:-3 WordSize=integer:7 DustFiltering=boolean:False SegFiltering=boolean:False RepeatFiltering=boolean:False MaskAtHash=boolean:True PercentIdentity=real:90 UngappedMode=boolean:False HitlistSize=integer:500"),
     ("opt_blastn_g8", &["-task", "blastn", "-word_size", "7", "-dust", "yes"], "EvalueThreshold=cutoff:e-value:10 WordSize=integer:7 MaskAtHash=boolean:True DustFiltering=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("opt_blastn_g9", &["-task", "megablast", "-word_size", "28", "-evalue", "10", "-strand", "both", "-dust", "yes"], "EvalueThreshold=cutoff:e-value:10 WordSize=integer:28 MaskAtHash=boolean:True DustFiltering=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("optdb_blastn_g4", &["-max_target_seqs", "1", "-dust", "20 64 1", "-query_loc", "10-300", "-dbsize", "1000000"], "EvalueThreshold=cutoff:e-value:10 DbLength=big-integer:1000000 MaskAtHash=boolean:True DustFilteringLevel=integer:20 DustFilteringWindow=integer:64 DustFilteringLinker=integer:1 UngappedMode=boolean:False HitlistSize=integer:1"),
@@ -461,7 +519,64 @@ mod tests {
             );
             compared += 1;
         }
-        assert!(compared >= 25, "{compared}");
+        assert!(compared >= 27, "{compared}");
+    }
+
+    fn dust(ranges: &[(usize, usize)]) -> Vec<MaskedInterval> {
+        ranges
+            .iter()
+            .map(|&(start, end)| MaskedInterval::new(start, end))
+            .collect()
+    }
+
+    #[test]
+    fn lcase_mask_is_the_query_vector_mask() {
+        use crate::blastinput::fasta_reader::RecordSource;
+        // Lower case at 0..20 of the record, the range starts at 29: the lower case outside
+        // the range is kept, in record coordinates, once per strand.
+        let mut whole = vec![b'a'; 20];
+        whole.extend(std::iter::repeat_n(b'C', 280));
+        let mut record = FastaRecord::new("Query_1", b"q", &whole[29..]);
+        record.source = Some(Box::new(RecordSource {
+            defline: b">q".to_vec(),
+            uncut: Some(whole),
+        }));
+        assert_eq!(
+            lcase_mask_intervals(&record, &[], 29, true, true, false),
+            vec![(0, 19), (0, 19)]
+        );
+        // Without -lcase_masking there is no user mask.
+        assert!(lcase_mask_intervals(&record, &[], 29, false, true, false).is_empty());
+        // DUST intervals of the range are mapped by the range's start, merged with the lower
+        // case when they overlap or abut, and sorted.
+        assert_eq!(
+            lcase_mask_intervals(&record, &dust(&[(0, 5), (30, 40)]), 20, true, false, true),
+            vec![(0, 24), (0, 24), (50, 59), (50, 59)]
+        );
+        // A DUST-only mask: ascending once on a single strand, descending with -strand minus,
+        // twice with both strands.
+        let plain = FastaRecord::new("Query_2", b"q", &[b'A'; 100]);
+        let intervals = dust(&[(5, 10), (20, 30)]);
+        assert_eq!(
+            lcase_mask_intervals(&plain, &intervals, 0, false, false, false),
+            vec![(5, 9), (20, 29)]
+        );
+        assert_eq!(
+            lcase_mask_intervals(&plain, &intervals, 0, false, false, true),
+            vec![(20, 29), (5, 9)]
+        );
+        assert_eq!(
+            lcase_mask_intervals(&plain, &intervals, 0, false, true, false),
+            vec![(5, 9), (5, 9), (20, 29), (20, 29)]
+        );
+        // A query with lower case is ascending even with -strand minus.
+        let mut lower = vec![b'A'; 100];
+        lower[50] = b'c';
+        let lower = FastaRecord::new("Query_3", b"q", &lower);
+        assert_eq!(
+            lcase_mask_intervals(&lower, &intervals, 0, true, false, true),
+            vec![(5, 9), (5, 9), (20, 29), (20, 29), (50, 50), (50, 50)]
+        );
     }
 
     #[test]

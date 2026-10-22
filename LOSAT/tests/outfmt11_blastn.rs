@@ -6,7 +6,9 @@
 //! the first batch, then an error archive, rc 1), `ARCHIVE_FORMAT` (`bin...` in any case:
 //! ASN.1 binary; any value except `xml` that is not empty: nothing is written, rc 0), `-outfmt
 //! "11 qseqid"` (the specification is ignored), a `-subject` file that does not exist (an error
-//! archive, rc 1) and an empty query file (`Query is Empty!`, nothing written, rc 0).
+//! archive, rc 1), a `-query` file that does not exist (an error archive, rc 1, with `-subject` and with
+//! `-db`), a run that ends with messages no archive carried (an empty pipe as the query with `-max_target_seqs 1`:
+//! an error archive without an error, rc 0) and an empty query file (`Query is Empty!`, nothing written, rc 0).
 //!
 //! Frozen bytes: `tests/fixtures/outfmt11/<case>.out` and `.err`, written by NCBI's `blastn
 //! -num_threads 1 <args> -outfmt 11` run from `LOSAT/` with the case's environment
@@ -145,6 +147,14 @@ const CASES: &[Case] = &[
         env: &[],
         query: "arch_q.fna",
         subject: "does_not_exist.fa",
+        outfmt: "11",
+        rc: 1,
+    },
+    Case {
+        name: "noquery_sub",
+        env: &[],
+        query: "no_such_query.fna",
+        subject: "arch_s.fna",
         outfmt: "11",
         rc: 1,
     },
@@ -322,49 +332,62 @@ fn xml_archives_are_refused_before_the_first_byte() {
     }
 }
 
-/// A title with a byte >= 0x80 is written as `#` by NCBI, with a diagnostic per byte: LOSAT
-/// refuses it (query, `-subject` and a `-db` name) before the first byte.
+/// A title with a byte outside `0x20..=0x7E` (0x80 and above, and 0x7F) is written as `#` by
+/// NCBI, with a diagnostic per byte: LOSAT refuses it (query, `-subject` and a `-db` name)
+/// before the first byte.
 #[test]
 fn non_ascii_titles_and_database_names_are_refused() {
     let dir = std::env::temp_dir().join(format!("losat_outfmt11_title_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let plain = engine().join(input("arch_s.fna"));
-    let titled = dir.join("titled.fna");
-    std::fs::write(
-        &titled,
-        b">t caf\xc3\xa9\nACGTACGTACGTACGTACGTACGTACGTACGTACGT\n",
-    )
-    .unwrap();
     let plain = plain.to_str().unwrap();
-    let titled = titled.to_str().unwrap();
-    for (args, role) in [
-        (vec!["-query", titled, "-subject", plain], "query"),
-        (vec!["-query", plain, "-subject", titled], "subject"),
+    for (bytes, name) in [
+        (
+            &b">t caf\xc3\xa9\nACGTACGTACGTACGTACGTACGTACGTACGTACGT\n"[..],
+            "utf8",
+        ),
+        (
+            &b">t ti\x7ftle\nACGTACGTACGTACGTACGTACGTACGTACGTACGT\n"[..],
+            "del",
+        ),
     ] {
-        let mut full = args.clone();
-        full.extend_from_slice(&["-outfmt", "11"]);
-        let output = run(&[], &full, "1");
-        assert_ne!(output.status.code(), Some(0), "{role}");
-        assert!(output.stdout.is_empty(), "{role}: nothing is written");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("outside ASCII"), "{role}: {stderr}");
-        assert!(stderr.contains("-outfmt 11"), "{role}: {stderr}");
+        let titled = dir.join(format!("titled_{name}.fna"));
+        std::fs::write(&titled, bytes).unwrap();
+        let titled = titled.to_str().unwrap();
+        for (args, role) in [
+            (vec!["-query", titled, "-subject", plain], "query"),
+            (vec!["-query", plain, "-subject", titled], "subject"),
+        ] {
+            let mut full = args.clone();
+            full.extend_from_slice(&["-outfmt", "11"]);
+            let output = run(&[], &full, "1");
+            assert_ne!(output.status.code(), Some(0), "{role}");
+            assert!(output.stdout.is_empty(), "{role}: nothing is written");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains("visible ASCII"), "{name} {role}: {stderr}");
+            assert!(stderr.contains("-outfmt 11"), "{name} {role}: {stderr}");
+        }
+        // The same title is fine in outfmt 8: only the archive refuses it.
+        let output = run(
+            &[],
+            &["-query", titled, "-subject", plain, "-outfmt", "8"],
+            "1",
+        );
+        assert_eq!(output.status.code(), Some(0), "{name}");
     }
-    let output = run(
-        &[],
-        &["-query", plain, "-db", "caf\u{e9}", "-outfmt", "11"],
-        "1",
-    );
-    assert_ne!(output.status.code(), Some(0));
-    assert!(output.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("-db name"));
-    // The same title is fine in outfmt 8: only the archive refuses it.
-    let output = run(
-        &[],
-        &["-query", titled, "-subject", plain, "-outfmt", "8"],
-        "1",
-    );
-    assert_eq!(output.status.code(), Some(0));
+    for database in ["caf\u{e9}", "d\u{7f}b"] {
+        let output = run(
+            &[],
+            &["-query", plain, "-db", database, "-outfmt", "11"],
+            "1",
+        );
+        assert_ne!(output.status.code(), Some(0), "{database:?}");
+        assert!(output.stdout.is_empty(), "{database:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("-db name"),
+            "{database:?}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -439,4 +462,77 @@ fn an_archive_read_from_standard_input_equals_the_file_run() {
     let output = child.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout == frozen("env_empty", "out"));
+}
+
+/// A `-query` file that does not exist, with a database: the error archive of NCBI, rc 1.
+#[test]
+fn a_missing_query_file_gives_an_error_archive_with_a_database() {
+    for threads in ["1", "4"] {
+        let output = run(
+            &[],
+            &[
+                "-query",
+                &input("no_such_query.fna"),
+                "-db",
+                "tests/db_search/arch_snucl",
+                "-outfmt",
+                "11",
+            ],
+            threads,
+        );
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.stdout, frozen("noquery_db", "out"));
+        assert_eq!(output.stderr, frozen("noquery_db", "err"));
+    }
+}
+
+/// A query that is an empty pipe is not NCBI's `Query is Empty!` (it cannot tell): the search
+/// ends with the message of `-max_target_seqs 1` and no archive, so an error archive without an
+/// error follows (`PrintErrorArchive` when messages are left, rc 0).
+#[test]
+fn messages_left_at_the_end_make_an_error_archive() {
+    use std::io::Write;
+    use std::process::Stdio;
+    for threads in ["1", "4"] {
+        let mut command = Command::new(BIN);
+        command
+            .current_dir(engine())
+            .args(["blastn", "-query", "-", "-subject"])
+            .arg(input("arch_s.fna"))
+            .args([
+                "-outfmt",
+                "11",
+                "-max_target_seqs",
+                "1",
+                "-num_threads",
+                threads,
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        for (name, _) in std::env::vars() {
+            if name.starts_with("LOSAT_X_")
+                || matches!(
+                    name.as_str(),
+                    "ARCHIVE_FORMAT" | "BATCH_SIZE" | "CHUNK_SIZE"
+                )
+            {
+                command.env_remove(name);
+            }
+        }
+        let mut child = command.spawn().expect("run losat");
+        child.stdin.take().expect("stdin").flush().unwrap();
+        let output = child.wait_with_output().expect("wait for losat");
+        assert_eq!(output.status.code(), Some(0), "threads {threads}");
+        assert_eq!(
+            output.stdout,
+            frozen("empty_pipe_mts1", "out"),
+            "threads {threads}"
+        );
+        assert_eq!(
+            output.stderr,
+            frozen("empty_pipe_mts1", "err"),
+            "threads {threads}"
+        );
+    }
 }

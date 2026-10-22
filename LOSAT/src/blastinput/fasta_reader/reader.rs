@@ -1876,10 +1876,12 @@ impl<R: Read> FastaReader<R> {
             title: std::mem::take(&mut self.title),
             sequence,
             warnings: Vec::new(),
-            source: super::RecordSource {
-                defline: std::mem::take(&mut self.defline),
-                uncut: None,
-            },
+            source: self.config.keep_defline.then(|| {
+                Box::new(super::RecordSource {
+                    defline: std::mem::take(&mut self.defline),
+                    uncut: None,
+                })
+            }),
         })
     }
 

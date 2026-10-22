@@ -154,7 +154,7 @@ impl ArchiveHandle {
     /// request from the recorded options, `ARCHIVE_FORMAT` read once. `database` is the
     /// `-db` argument as typed (`None` for `-subject`); `label` names the program in a refusal.
     /// Refuses, before anything is written, what LOSAT cannot write: `ARCHIVE_FORMAT=xml`
-    /// (line OF8c) and a `-db` name with a byte outside ASCII.
+    /// (line OF8c) and a `-db` name with a byte outside `0x20..=0x7E`.
     pub fn for_program(
         inputs: &OptionInputs,
         database: Option<&str>,
@@ -167,9 +167,9 @@ impl ArchiveHandle {
             );
         }
         if let Some(name) = database {
-            if name.bytes().any(|byte| byte >= 0x80) {
+            if !name.bytes().all(is_visible) {
                 anyhow::bail!(
-                    "a -db name with a character outside ASCII is not supported by LOSAT's {label} with -outfmt 11"
+                    "a -db name with a character outside the visible ASCII range is not supported by LOSAT's {label} with -outfmt 11"
                 );
             }
         }
@@ -238,6 +238,11 @@ impl ArchiveHandle {
         self.with_state(|state| state.log.post(severity, line));
     }
 
+    /// Whether messages are saved since the last archive.
+    pub fn has_messages(&self) -> bool {
+        self.with_state(|state| !state.log.is_empty())
+    }
+
     /// The messages saved since the last archive.
     pub fn take_messages(&self) -> Vec<Message> {
         self.with_state(|state| state.log.take())
@@ -283,16 +288,22 @@ impl ArchiveHandle {
     }
 }
 
-/// The refusal of a title with a byte >= 0x80, which the archive's VisibleString cannot hold
-/// (NCBI writes `#` and posts a diagnostic for each byte, whose text and place LOSAT does not
-/// reproduce). `role` is `query` or `subject`.
+/// Whether `byte` is one of NCBI's visible characters (`GoodVisibleChar`: `' '` to `'~'`).
+/// NCBI writes `#` for any other byte of a VisibleString and posts a diagnostic for each,
+/// whose text and place LOSAT does not reproduce.
+fn is_visible(byte: u8) -> bool {
+    (0x20..=0x7E).contains(&byte)
+}
+
+/// The refusal of a title with a byte outside `0x20..=0x7E`, which the archive's VisibleString
+/// cannot hold (see `is_visible`). `role` is `query` or `subject`.
 pub fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> anyhow::Result<()> {
     if let Some(record) = records
         .iter()
-        .find(|record| record.title.iter().any(|&byte| byte >= 0x80))
+        .find(|record| !record.title.iter().all(|&byte| is_visible(byte)))
     {
         anyhow::bail!(
-            "the title of the {role} {} has a character outside ASCII, which is not supported by LOSAT's {label} with -outfmt 11",
+            "the title of the {role} {} has a character outside the visible ASCII range, which is not supported by LOSAT's {label} with -outfmt 11",
             record.local_id
         );
     }
@@ -303,8 +314,8 @@ pub fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> anyhow:
 /// it (`PrintErrorArchive` after its `CATCH_ALL`): the errors of the application's `Run`,
 /// i.e. NCBI's own error texts, one message per diagnostic, severity `eDiag_Error`. LOSAT's own
 /// refusals (and the argument errors raised before the application runs) write none.
-/// `subject_file` is whether the error came from reading the `-subject` file, whose
-/// "Command line argument error" NCBI raises inside `Run`.
+/// `subject_file` is whether the error came from opening the `-query` file or reading the
+/// `-subject` file, whose "Command line argument error" NCBI raises inside `Run`.
 pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Message>> {
     let native = error.downcast_ref::<crate::cli::NativeError>()?;
     const PREFIXES: [&str; 4] = [

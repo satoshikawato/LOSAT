@@ -208,6 +208,8 @@ fn task_calls(task: &str) -> Vec<Param> {
             p("DustFiltering", Boolean(false)),
             p("SegFiltering", Boolean(false)),
             p("RepeatFiltering", Boolean(false)),
+            // `ClearFilterOptions` ends with `SetMaskAtHash(false)` (api/blast_options_cxx.cpp:1022-1031).
+            p("MaskAtHash", Boolean(false)),
         ],
         "dc-megablast" => vec![
             p("MBTemplateType", Integer(0)),
@@ -228,6 +230,8 @@ fn task_calls(task: &str) -> Vec<Param> {
             p("DustFiltering", Boolean(false)),
             p("SegFiltering", Boolean(false)),
             p("RepeatFiltering", Boolean(false)),
+            // `ClearFilterOptions` ends with `SetMaskAtHash(false)` (api/blast_options_cxx.cpp:1022-1031).
+            p("MaskAtHash", Boolean(false)),
         ],
         _ => Vec::new(),
     }

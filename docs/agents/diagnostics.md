@@ -1803,7 +1803,10 @@ Rebuilding less:
   5,000 x 5,000 UniRef50 proteins (`-db`, `-evalue 0.001`, 8 threads) x0.897 (239.7 -> 214.9 s; cycles x0.891). In
   Blast0_6 the extension went from 249 to 177 cycles per candidate (288 million candidates; its share of the dev
   binary's cycles 41.5 % in `perf record`). With `=0` the instruction counts equal the binary's before the switch
-  (x1.0000-1.0002) at x0.996-0.998 of its time. Max RSS within the spread of repeated runs of one binary.
+  (x1.0000-1.0002) at x0.996-0.998 of its time. Max RSS within the spread of repeated runs of one binary. On
+  WebAssembly (LOSAT Web's serial reactor, ABI v2, under Node 26 in one process: an instance per arm, the default
+  and `=0` alternating, one warm-up search + 8 rounds, on one booked workstation core): WSSV x PajaWSV x0.984 (7 of
+  8 rounds below 1), AP027131 x AP027133 proteins x0.991 (18.96 -> 18.86 s, 6 of 8), the same output bytes.
 - `LOSAT_X_BPUNGAPSENTSHADOW=1` shadow of `LOSAT_X_BPUNGAPSENT` (turns the path on): every extension of the path
   also runs the closure of `LOSAT_X_BPUNGAP`'s extension and the results (score, offsets, length,
   `right_extend`, `s_last_off`, and the early return) must be equal; any difference panics with the inputs.

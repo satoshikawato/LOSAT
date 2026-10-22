@@ -112,7 +112,6 @@ LOSAT_X_SEGSHARE	blastp	conditional	required	required	blastp with 2+ threads
 LOSAT_X_SEGTRIMMEMO	blastx,tblastn	always			SEG trim of candidate segment memoised per thread
 LOSAT_X_TBNBATCH	tblastn	conditional	gap	required	needs TBNSSIDE (4+ query batches) and at least one batch per thread; rule via TBNBATCHRULE; new gap: needs 4+ query batches of 20,000 residues and 4+ batches per thread
 LOSAT_X_TBNBATCHRULE	tblastn	conditional	gap	gap	several query batches; full waves of threads side by side; subjects <=24 Mb or <2 per thread; new gap: needs the TBNBATCH input with batches >= threads; ref gap: needs 4+ batches at 2+ threads with plans that fit and no full wave (batches < threads, or > 24 Mb of many subjects)
-LOSAT_X_TBNEVENTS	tblastn	conditional	gap	gap	acts only in the reference (non-unit) tblastn loop, i.e. when TBNPAR is off; by default the unit path runs, so effectively inactive; new gap: acts only with TBNPAR off; removed by chore/prune-dead-switches; ref gap: acts only with TBNPAR off; removed by chore/prune-dead-switches
 LOSAT_X_TBNFRAMEREUSE	tblastn	always			a dropped plan's frames are reused by the next plan of its thread (rides on TBNKEEPFEW's drops)
 LOSAT_X_TBNHITBF	tblastn	always			Branch-free too-far/overlap outcomes in two-hit loop
 LOSAT_X_TBNKEEPFEW	tblastn	conditional	required	gap	4+ query batches with TBNSSIDE searched one after another: plans dropped unless they fit threads x longest plan; ref gap: needs 4+ batches whose plans are kept (fit threads x longest plan, or batches side by side)

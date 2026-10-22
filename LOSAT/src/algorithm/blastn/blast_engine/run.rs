@@ -63,12 +63,12 @@ use super::super::alignment::{
 // EXPERIMENT (LOSAT_X_GREEDYPRELIM): dispatch of the preliminary greedy alignment
 // (NCBI reference: blast_gapalign.c:4019-4025, BLAST_GreedyGappedAlignment with compressed_subject).
 use super::super::alignment::x_greedy_prelim;
-use super::super::args::BlastnArgs;
+use super::super::args::{BlastnArgs, QueryStrand};
 use super::super::blast_extend::DiagStruct;
 use super::super::coordination::{
     build_lookup_tables, chunk_query_masks, collect_lowercase_masks, configure_task,
-    finalize_task_config, prepare_sequence_data, query_masks, subject_metadata_from_records,
-    subject_trace_id, LookupTables, SubjectMetadata,
+    finalize_task_config, prepare_sequence_data, query_masks, reverse_mask_intervals,
+    subject_metadata_from_records, subject_trace_id, LookupTables, SubjectMetadata,
 };
 use super::super::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use super::super::extension::{
@@ -4240,17 +4240,32 @@ fn x_ctx_o1_on() -> bool {
 }
 
 impl QueryContextIndex {
-    fn new(contexts: &[QueryContext]) -> Self {
+    fn new(contexts: &[QueryContext], one_strand: bool) -> Self {
         let offsets: Vec<usize> = contexts
             .iter()
             .map(|ctx| ctx.query_offset.max(0) as usize)
             .collect();
-        let min_length = contexts
-            .iter()
-            .map(|ctx| ctx.len)
-            .filter(|&len| len > 0)
-            .min()
-            .unwrap_or(0);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:229-243
+        // ```c
+        //                 case eNa_strand_plus:
+        //                     s_QueryInfo_SetContext(query_info, ctx_index, length);
+        //                     s_QueryInfo_SetContext(query_info, ctx_index+1, 0);
+        //                     // the missing strand is present in query_info as
+        //                     // zero-lenghth context
+        //                     min_length = 0;
+        // ```
+        // With one strand searched `min_length` is 0, so `bsearch_context_info` searches all
+        // contexts (the bounds of the other case assume every context has a length).
+        let min_length = if one_strand {
+            0
+        } else {
+            contexts
+                .iter()
+                .map(|ctx| ctx.len)
+                .filter(|&len| len > 0)
+                .min()
+                .unwrap_or(0)
+        };
         let max_length = contexts.iter().map(|ctx| ctx.len).max().unwrap_or(0);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-238 (BSearchContextInfo)
         // ```c
@@ -4486,6 +4501,24 @@ fn bsearch_context_info(n: usize, index: &QueryContextIndex) -> usize {
     b
 }
 
+/// The query length that picks the diagonal container (hash above 8000 letters, array
+/// otherwise): NCBI's `query_offset + query_length` of the LAST context. With `-strand plus`
+/// the last context is the empty minus context of the last query, one past the end of the plus
+/// context, so this is the searched block's length + 1; when the last context has letters it
+/// is the searched block's length (`query_concat_length`).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:225-229
+/// ```c
+/// (query_info->contexts[query_info->last_context].query_offset +
+///  query_info->contexts[query_info->last_context].query_length) > kQueryLenForHashTable)
+///     p->container_type = eDiagHash;
+/// ```
+fn diag_container_query_length(query_contexts: &[QueryContext]) -> usize {
+    query_contexts
+        .last()
+        .map_or(0, |last| last.query_offset.max(0) as usize + last.len)
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603
 // ```c
 // int buflen = QueryInfo_GetSeqBufLen(qinfo);
@@ -4519,7 +4552,8 @@ fn build_query_blastna_buffer(
         let length = letters.len();
         // A context that is empty or does not end inside the block stays sentinels.
         // (Twin: `place` and the two encoder calls below are copied in x_query_prep_par.rs
-        // (LOSAT_X_QPREPPAR); change them there too.)
+        // (LOSAT_X_QPREPPAR) and, with the strand switches, in
+        // `build_strand_query_blastna_buffer`; change them there too.)
         let place = |offset: i32| -> Option<std::ops::Range<usize>> {
             let start = offset.max(0) as usize;
             let end = start.saturating_add(length);
@@ -4530,6 +4564,49 @@ fn build_query_blastna_buffer(
         }
         if let Some(range) = place(offsets[1]) {
             encode_reverse_complement_blastna_into(letters, &mut with_sentinels[range]);
+        }
+    }
+
+    with_sentinels
+}
+
+/// The query buffer of a search of one strand (`-strand plus` or `minus`): as
+/// `build_query_blastna_buffer`, but a context is written only when its length is above 0,
+/// with its own length (the strand that is not searched has a context of length 0 and takes no
+/// room, so it must not be written over the next query).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:71-81
+/// ```c
+///         Uint4 shift = prev_len ? prev_len + 1 : 0;
+///
+///         qinfo->contexts[index].query_offset = prev_loc + shift;
+/// ```
+fn build_strand_query_blastna_buffer(
+    query_letters: &[&[u8]],
+    context_offsets: &[i32],
+    query_concat_length: usize,
+    strand: QueryStrand,
+) -> Vec<u8> {
+    debug_assert_eq!(2 * query_letters.len(), context_offsets.len());
+    let (plus_on, minus_on) = strand.searched();
+
+    let mut with_sentinels = vec![NUCL_SENTINEL; query_concat_length + 2];
+
+    for (letters, offsets) in query_letters.iter().zip(context_offsets.chunks_exact(2)) {
+        let place = |offset: i32, length: usize| -> Option<std::ops::Range<usize>> {
+            let start = offset.max(0) as usize;
+            let end = start.saturating_add(length);
+            (start < end && end <= query_concat_length).then(|| start + 1..end + 1)
+        };
+        if plus_on {
+            if let Some(range) = place(offsets[0], letters.len()) {
+                encode_iupac_to_blastna_into(letters, &mut with_sentinels[range]);
+            }
+        }
+        if minus_on {
+            if let Some(range) = place(offsets[1], letters.len()) {
+                encode_reverse_complement_blastna_into(letters, &mut with_sentinels[range]);
+            }
         }
     }
 
@@ -4613,24 +4690,6 @@ fn compute_lookup_query_stats(
 
     // A negative estimate (every context masked) selects the smallest table, as 0 does.
     (approx_entries.max(0) as usize, max_q_off)
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1173-1178
-// ```c
-// masks->ssr->left  = query_length - 1 - masks->ssr->right;
-// masks->ssr->right = query_length - 1 - masks->ssr->left;
-// ```
-fn reverse_mask_intervals(masks: &[MaskedInterval], query_length: usize) -> Vec<MaskedInterval> {
-    let mut out: Vec<MaskedInterval> = masks
-        .iter()
-        .map(|m| {
-            let start = query_length.saturating_sub(m.end);
-            let end = query_length.saturating_sub(m.start);
-            MaskedInterval { start, end }
-        })
-        .collect();
-    out.sort_by_key(|m| m.start);
-    out
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:739-776
@@ -5152,6 +5211,9 @@ struct BlastnReportInputs<'a> {
     lcase_masking: bool,
     /// Per query context (the plus strand of query `q` is context `2 * q`).
     query_eff_searchsp: &'a [i64],
+    /// The first valid context of a query, as its offset in the query's two contexts: 1 for
+    /// `-strand minus`, else 0 (`context 2 * q + first_context`).
+    first_context: usize,
     megablast: bool,
     reward: i32,
     penalty: i32,
@@ -5162,7 +5224,8 @@ struct BlastnReportInputs<'a> {
     /// The two-hit window of the task, printed in the epilog when not 0.
     window_size: usize,
     /// Per query context (the plus strand of query `q` is context `2 * q`); `None` for
-    /// the contexts of an invalid query (not searched by NCBI).
+    /// the contexts of an invalid query (not searched by NCBI) and of the strand that
+    /// `-strand` does not search.
     context_karlin: &'a [Option<ContextKarlin>],
     /// The numbers of descriptions and alignments of the pairwise report
     /// (`BlastnArgs::report_counts`).
@@ -5223,6 +5286,12 @@ fn blastn_pairwise_report(
     subject_title: &str,
 ) -> Result<(Vec<BlastnPairwiseQuery>, BlastnPairwiseReport)> {
     let context_karlin = report.context_karlin;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_results.cpp:82-104
+    // ```c
+    //     // find the first valid context corresponding to this query
+    // ```
+    // The first valid context of a query is its minus context with `-strand minus`.
+    let first_context = report.first_context;
     let queries = report
         .queries
         .iter()
@@ -5241,7 +5310,8 @@ fn blastn_pairwise_report(
                 .queries
                 .placements
                 .length(q_idx, query.seq().len()),
-            karlin: context_karlin[2 * q_idx].map(|blocks| (blocks.ungapped, blocks.gapped)),
+            karlin: context_karlin[2 * q_idx + first_context]
+                .map(|blocks| (blocks.ungapped, blocks.gapped)),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_results.cpp:82-104
             // ```c
             //     // find the first valid context corresponding to this query
@@ -5249,8 +5319,8 @@ fn blastn_pairwise_report(
             //     m_SearchSpace = ctx->eff_searchsp;
             // ```
             // An invalid query has no valid context, and its search space stays 0.
-            effective_search_space: if context_karlin[2 * q_idx].is_some() {
-                report.query_eff_searchsp[2 * q_idx]
+            effective_search_space: if context_karlin[2 * q_idx + first_context].is_some() {
+                report.query_eff_searchsp[2 * q_idx + first_context]
             } else {
                 0
             },
@@ -5300,10 +5370,10 @@ fn blastn_xml_stats(
 ) -> Result<Vec<crate::report::blast_xml::XmlStats>> {
     (0..report.queries.len())
         .map(|q_idx| {
-            let Some(blocks) = report.context_karlin[2 * q_idx] else {
+            let Some(blocks) = report.context_karlin[2 * q_idx + report.first_context] else {
                 return Ok(crate::report::blast_xml::XmlStats::NONE);
             };
-            let eff_space = report.query_eff_searchsp[2 * q_idx];
+            let eff_space = report.query_eff_searchsp[2 * q_idx + report.first_context];
             let (length_adjustment, searched_space) = context_lengths(
                 query_lengths[q_idx] as i64,
                 report.eff_db_length,
@@ -5974,7 +6044,7 @@ fn post_process_hits_and_write(
                 .iter()
                 .enumerate()
                 .map(|(q_idx, query)| {
-                    if report.context_karlin[2 * q_idx].is_some() {
+                    if report.context_karlin[2 * q_idx + report.first_context].is_some() {
                         Vec::new()
                     } else if query.seq().is_empty() {
                         vec![NO_DATA_MESSAGE.to_string()]
@@ -6900,6 +6970,8 @@ pub fn run_local(
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
     }
+    // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
+    QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(outputs.formats.iter().map(|format| format.outfmt))?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
@@ -8306,7 +8378,15 @@ fn run_in_pool(
             let result_warnings = output_formats
                 .first()
                 .is_none_or(|format| format.writes_query_warnings());
-            for (index, karlin) in batch.context_karlin.iter().step_by(2).enumerate() {
+            // The query's first valid context (`-strand minus`: its minus context).
+            let first_context = QueryStrand::from_option(&args.strand).first_context();
+            for (index, karlin) in batch
+                .context_karlin
+                .iter()
+                .skip(first_context)
+                .step_by(2)
+                .enumerate()
+            {
                 if karlin.is_none() && result_warnings {
                     let query = &batch_records.searched()[index];
                     let ordinal = query_input.ordinal(start + index);
@@ -9020,6 +9100,7 @@ fn write_reports_untimed(
         query_masks: results.query_masks,
         lcase_masking: args.lcase_masking,
         query_eff_searchsp: results.query_eff_searchsp,
+        first_context: QueryStrand::from_option(&args.strand).first_context(),
         megablast,
         reward: config.reward,
         penalty: config.penalty,
@@ -9549,35 +9630,60 @@ fn search_query_batch(
     // ```
     // Each context starts after the context before and its sentinel; the contexts of a
     // query without letters take no room (and are invalid, `context_ungapped` below).
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:229-243
+    // ```c
+    //                 case eNa_strand_plus:
+    //                     s_QueryInfo_SetContext(query_info, ctx_index, length);
+    //                     s_QueryInfo_SetContext(query_info, ctx_index+1, 0);
+    //                     // the missing strand is present in query_info as
+    //                     // zero-lenghth context
+    //                     min_length = 0;
+    // ```
+    // `-strand` sets the strand of the query's Seq-loc: the strand that is not searched has a
+    // context of length 0 (invalid, without masks and without room in the buffer). Chosen once
+    // here; `both` keeps the plain two-strand code below.
+    let strand = QueryStrand::from_option(&args.strand);
+    let (plus_on, minus_on) = strand.searched();
     let mut query_concat_offset: usize = 0;
     let context_room = |length: usize| if length == 0 { 0 } else { length + 1 };
     for (q_idx, q_record) in seq_data.queries.iter().enumerate() {
         let seq = q_record.seq();
         let q_len = seq.len();
-        let plus_masks = seq_data.query_masks[q_idx].clone();
-        let minus_masks = reverse_mask_intervals(&plus_masks, q_len);
+        let plus_len = if plus_on { q_len } else { 0 };
+        let minus_len = if minus_on { q_len } else { 0 };
+        let plus_masks = if plus_on {
+            seq_data.query_masks[q_idx].clone()
+        } else {
+            Vec::new()
+        };
+        let minus_masks = if minus_on {
+            reverse_mask_intervals(&seq_data.query_masks[q_idx], q_len)
+        } else {
+            Vec::new()
+        };
         let plus_offset = query_concat_offset;
-        let minus_offset = plus_offset + context_room(q_len);
+        let minus_offset = plus_offset + context_room(plus_len);
 
         query_base_offsets.push(plus_offset);
         query_contexts.push(QueryContext {
             query_idx: q_idx as u32,
             frame: 1,
             query_offset: plus_offset as i32,
-            len: q_len,
+            len: plus_len,
             masks: plus_masks.clone(),
         });
         query_contexts.push(QueryContext {
             query_idx: q_idx as u32,
             frame: -1,
             query_offset: minus_offset as i32,
-            len: q_len,
+            len: minus_len,
             masks: minus_masks.clone(),
         });
 
         query_context_masks.push(plus_masks);
         query_context_masks.push(minus_masks);
-        query_concat_offset = minus_offset + context_room(q_len);
+        query_concat_offset = minus_offset + context_room(minus_len);
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:245-250
     // ```c
@@ -9599,6 +9705,7 @@ fn search_query_batch(
         (last.query_offset.max(0) as usize + length + if length == 0 { 1 } else { 2 })
             .saturating_sub(2)
     });
+    let diag_container_query_length = diag_container_query_length(&query_contexts);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:166-174
     // ```c
     // query_info->contexts[0].query_offset = 0;
@@ -9606,7 +9713,7 @@ fn search_query_batch(
     // ```
     let query_context_offsets: Vec<i32> =
         query_contexts.iter().map(|ctx| ctx.query_offset).collect();
-    let query_context_index = QueryContextIndex::new(&query_contexts);
+    let query_context_index = QueryContextIndex::new(&query_contexts, strand != QueryStrand::Both);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:498-604
     // ```c
@@ -9638,12 +9745,23 @@ fn search_query_batch(
     // Diagnostic (LOSAT_TIMING): the batch's query encoding for the common line
     // (utils/xtiming.rs). No NCBI counterpart.
     let t_encode = crate::utils::xtiming::clock();
-    let encoded_query_buffer = x_query_prep_par::query_buffer(
-        &query_letters,
-        &query_context_offsets,
-        query_concat_length,
-        parallel_pool,
-    );
+    // `-strand plus` or `minus` builds the buffer serially from the contexts that are searched
+    // (`build_strand_query_blastna_buffer`); `both` is the code of the search without the option.
+    let encoded_query_buffer = if strand == QueryStrand::Both {
+        x_query_prep_par::query_buffer(
+            &query_letters,
+            &query_context_offsets,
+            query_concat_length,
+            parallel_pool,
+        )
+    } else {
+        build_strand_query_blastna_buffer(
+            &query_letters,
+            &query_context_offsets,
+            query_concat_length,
+            strand,
+        )
+    };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
     let encoded_query_concat_blastna_with_sentinels: &[u8] = &encoded_query_buffer;
     let encoded_query_concat_blastna: &[u8] = &encoded_query_buffer[1..query_concat_length + 1];
@@ -10438,7 +10556,7 @@ fn search_query_batch(
         && subjects.prepared().is_some()
         && x_pair_seed::takes_owner_chunks(
             two_stage_lookup_ref,
-            query_concat_length <= 8000,
+            diag_container_query_length <= 8000,
             window_size,
             scan_range,
             !small_na_compressed_query.is_empty(),
@@ -10990,7 +11108,7 @@ fn search_query_batch(
             // else
             //     p->container_type = eDiagArray;
             // ```
-            let use_diag_hash = query_concat_length > 8000;
+            let use_diag_hash = diag_container_query_length > 8000;
             let use_array_indexing = !use_diag_hash;
             let diag_window = window_size as i32;
 
@@ -17377,7 +17495,11 @@ fn search_query_chunks(
             "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped (NCBI stops with a CCoreException that names its build's source files, or searches chunks with gaps between them), which is not supported by LOSAT's BLASTN"
         );
     }
-    let Some(chunks) = split_query_batch(&lengths, batching.split) else {
+    let Some(chunks) = split_query_batch(
+        &lengths,
+        batching.split,
+        QueryStrand::from_option(&args.strand),
+    ) else {
         return Ok(None);
     };
     // With an overlap close to the chunk size NCBI's setup of a chunk would split it again
@@ -17513,7 +17635,12 @@ fn merge_query_chunk(
         for list in &mut hit_list.hsplist_array {
             for hsp in &mut list.hsps {
                 let local_context = hsp.context_idx as usize;
-                let context = chunk.contexts[local_context];
+                // The chunk's HSPs are in the contexts that it searches.
+                let context = chunk.contexts[local_context].ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "internal error: an HSP of a query chunk is in a context that is not searched"
+                    )
+                })?;
                 let offset = chunk.context_offsets[local_context] as i64;
                 let query_offset = hsp.prelim_qs as i64 + offset;
                 let query_end = hsp.prelim_qe as i64 + offset;
@@ -17532,10 +17659,16 @@ fn merge_query_chunk(
                 hsp.seed_qs = gapped_start as usize;
             }
         }
-        let split_points = [
-            chunk.context_offsets[2 * local_query],
-            chunk.context_offsets[2 * local_query + 1],
-        ];
+        // A context that the chunk does not have (a strand that is not searched) keeps -1.
+        let split_point = |strand: usize| {
+            let position = 2 * local_query + strand;
+            if chunk.contexts[position].is_some() {
+                chunk.context_offsets[position]
+            } else {
+                -1
+            }
+        };
+        let split_points = [split_point(0), split_point(1)];
         merge_prelim_hit_list(
             hit_list,
             &mut merged[part.query],
@@ -17705,7 +17838,7 @@ mod tests {
                 let start = c.query_offset as usize;
                 table[start..start + c.len].fill(idx);
             }
-            let index = QueryContextIndex::new(&contexts);
+            let index = QueryContextIndex::new(&contexts, false);
             if case == 1 {
                 if let Some(o1) = &index.x_o1 {
                     assert!(o1.needs_runs() && !index.x_ranges.is_empty());
@@ -17791,6 +17924,183 @@ mod tests {
             (buffer[0], buffer[concat_len + 1]),
             (NUCL_SENTINEL, NUCL_SENTINEL)
         );
+    }
+
+    /// The contexts of `lengths` (query letters) searched on `strand`: offset and length of
+    /// each of the two contexts of a query, laid out as NCBI's `s_QueryInfo_SetContext` does.
+    fn strand_contexts(lengths: &[usize], strand: QueryStrand) -> Vec<QueryContext> {
+        let (plus_on, minus_on) = strand.searched();
+        let room = |length: usize| if length == 0 { 0 } else { length + 1 };
+        let mut contexts = Vec::new();
+        let mut at = 0usize;
+        for (q, &length) in lengths.iter().enumerate() {
+            for (frame, on) in [(1, plus_on), (-1, minus_on)] {
+                let len = if on { length } else { 0 };
+                contexts.push(QueryContext {
+                    query_idx: q as u32,
+                    frame,
+                    query_offset: at as i32,
+                    len,
+                    masks: Vec::new(),
+                });
+                at += room(len);
+            }
+        }
+        contexts
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:71-81,229-243
+    // ```c
+    //         Uint4 shift = prev_len ? prev_len + 1 : 0;
+    //     ...
+    //                     s_QueryInfo_SetContext(query_info, ctx_index+1, 0);
+    // ```
+    // The buffer of a search of one strand holds only the contexts of that strand, each
+    // followed by a sentinel, and equals the one laid out naively; queries of 10, 3, 10
+    // letters and an empty query.
+    #[test]
+    fn a_single_strand_query_buffer_holds_only_the_strand_it_searches() {
+        let queries: [&[u8]; 5] = [b"ACGTTGCAAC", b"ACN", b"", b"GGRYCCTTAA", b"T"];
+        for strand in [QueryStrand::Plus, QueryStrand::Minus] {
+            let lengths: Vec<usize> = queries.iter().map(|q| q.len()).collect();
+            let contexts = strand_contexts(&lengths, strand);
+            let offsets: Vec<i32> = contexts.iter().map(|c| c.query_offset).collect();
+            let last = contexts.last().unwrap();
+            let concat_len =
+                (last.query_offset as usize + last.len + if last.len == 0 { 1 } else { 2 })
+                    .saturating_sub(2);
+            // the naive buffer: a sentinel, then each searched context and a sentinel
+            let mut naive = vec![NUCL_SENTINEL];
+            for letters in &queries {
+                if letters.is_empty() {
+                    continue;
+                }
+                let encoded = if strand == QueryStrand::Plus {
+                    encode_iupac_to_blastna(letters)
+                } else {
+                    encode_iupac_to_blastna(&super::super::super::lookup::reverse_complement(
+                        letters,
+                    ))
+                };
+                naive.extend(encoded);
+                naive.push(NUCL_SENTINEL);
+            }
+            assert_eq!(naive.len(), concat_len + 2, "{strand:?}");
+            let buffer = build_strand_query_blastna_buffer(&queries, &offsets, concat_len, strand);
+            assert_eq!(buffer, naive, "{strand:?}");
+        }
+        // an empty query alone, and a single query, build a block of sentinels / its letters
+        let buffer = build_strand_query_blastna_buffer(&[b"AC"], &[0, 3], 2, QueryStrand::Plus);
+        assert_eq!(buffer, [NUCL_SENTINEL, 0, 1, NUCL_SENTINEL]);
+        let buffer = build_strand_query_blastna_buffer(&[b"AC"], &[0, 0], 2, QueryStrand::Minus);
+        assert_eq!(buffer, [NUCL_SENTINEL, 2, 3, NUCL_SENTINEL]);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-243
+    // ```c
+    //     while (b < e - 1) {
+    // 	m = (b + e) / 2;
+    // 	if (A->contexts[m].query_offset > n)
+    // 	    e = m;
+    // 	else
+    // 	    b = m;
+    //     }
+    //     return b;
+    // ```
+    // With one strand searched the context of every offset inside a valid context is that
+    // context, through the index (whichever form the environment chooses), the table, the
+    // runs, the constant-time form and `bsearch_context_info` (with `min_length` 0).
+    #[test]
+    fn a_single_strand_layout_maps_every_offset_to_its_context() {
+        for lengths in [
+            vec![10usize, 3, 10],
+            vec![10, 3, 0, 10, 1],
+            vec![0, 7, 7, 7],
+            vec![5000, 17, 5000, 2],
+            vec![1],
+        ] {
+            for strand in [QueryStrand::Plus, QueryStrand::Minus, QueryStrand::Both] {
+                let contexts = strand_contexts(&lengths, strand);
+                let index = QueryContextIndex::new(&contexts, strand != QueryStrand::Both);
+                let total = contexts
+                    .iter()
+                    .map(|c| c.query_offset as usize + c.len)
+                    .max()
+                    .unwrap();
+                let o1 = x_ctx_o1::CtxO1::build(&contexts, total);
+                for (idx, ctx) in contexts.iter().enumerate() {
+                    for n in ctx.query_offset as usize..ctx.query_offset as usize + ctx.len {
+                        let want = (idx, format!("{lengths:?} {strand:?} offset {n}"));
+                        assert_eq!(index.context_for_offset(n), want.0, "{}", want.1);
+                        // (With both strands NCBI's bounds of `min_length` need every query to
+                        // have letters; the one-strand layouts have `min_length` 0.)
+                        if strand != QueryStrand::Both || lengths.iter().all(|&len| len > 0) {
+                            assert_eq!(bsearch_context_info(n, &index), want.0, "{}", want.1);
+                        }
+                        if !index.direct_map.is_empty() {
+                            assert_eq!(index.direct_map[n] as usize, want.0, "{}", want.1);
+                        }
+                        if index.x_total_len > n {
+                            assert_eq!(index.x_direct(n), want.0, "{}", want.1);
+                        }
+                        if let Some(o1) = &o1 {
+                            if let Some(context) = o1.get(n) {
+                                assert_eq!(context, want.0, "{}", want.1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:225-229
+    // ```c
+    // (query_info->contexts[query_info->last_context].query_offset +
+    //  query_info->contexts[query_info->last_context].query_length) > kQueryLenForHashTable)
+    //     p->container_type = eDiagHash;
+    // ```
+    // The diagonal hash starts above 8000 on the LAST context's end: with `-strand plus` that
+    // is the empty minus context, one past the plus context, so a query of exactly 8000 letters
+    // takes the hash; with `minus` the last context is the searched one; with both strands the
+    // value is odd (two contexts and the gap between them).
+    #[test]
+    fn the_diagonal_hash_starts_at_the_end_of_the_last_context() {
+        let hash = |lengths: &[usize], strand| {
+            diag_container_query_length(&strand_contexts(lengths, strand)) > 8000
+        };
+        // plus
+        assert!(!hash(&[7999], QueryStrand::Plus));
+        assert!(hash(&[8000], QueryStrand::Plus));
+        assert!(!hash(&[4000, 3998], QueryStrand::Plus));
+        assert!(hash(&[4000, 3999], QueryStrand::Plus));
+        // minus
+        assert!(!hash(&[8000], QueryStrand::Minus));
+        assert!(hash(&[8001], QueryStrand::Minus));
+        assert!(!hash(&[4000, 3999], QueryStrand::Minus));
+        assert!(hash(&[4000, 4000], QueryStrand::Minus));
+        // both
+        assert!(!hash(&[3999], QueryStrand::Both));
+        assert!(hash(&[4000], QueryStrand::Both));
+        // The value is the searched block's length (the query buffer without its sentinels)
+        // plus 1 for `plus`, and that length otherwise.
+        for (lengths, strand, extra) in [
+            (vec![10usize, 3, 10], QueryStrand::Plus, 1),
+            (vec![10, 3, 10], QueryStrand::Minus, 0),
+            (vec![10, 3, 10], QueryStrand::Both, 0),
+        ] {
+            let contexts = strand_contexts(&lengths, strand);
+            let last = contexts.last().unwrap();
+            let concat_len =
+                (last.query_offset as usize + last.len + if last.len == 0 { 1 } else { 2 })
+                    .saturating_sub(2);
+            assert_eq!(
+                diag_container_query_length(&contexts),
+                concat_len + extra,
+                "{strand:?}"
+            );
+        }
+        assert_eq!(diag_container_query_length(&[]), 0);
     }
 
     #[test]

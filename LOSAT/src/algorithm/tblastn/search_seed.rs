@@ -1203,11 +1203,10 @@ pub(super) fn x_scan_unit(
 ) {
     let (frame_index, chunk, ranges) = &plan.subject.units[unit];
     let frame = &plan.subject.frames[*frame_index];
-    // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan on presence bytes, for a table of tblastn's shape;
-    // it writes up to X_SCAN_BYTE_SLACK entries after the capacity.
+    // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan on presence bytes, for a table of tblastn's shape
+    // (without AVX2 a sparse one); it writes up to X_SCAN_BYTE_SLACK entries after the capacity.
     let scan_byte = super::x_scan_byte::x_scan_byte();
-    let presence = (scan_byte.on() && super::x_scan_byte::fits(&plan.lookup))
-        .then(|| super::x_scan_byte::presence_bytes(&plan.lookup));
+    let presence = super::x_scan_byte::x_presence(scan_byte, &plan.lookup);
     // EXPERIMENT (LOSAT_X_TBNSCANBF): the branch-free scan writes up to X_SCAN_BF_SLACK entries
     // after the capacity.
     let scan_bf = super::x_scan_bf::x_tbn_scan_bf();

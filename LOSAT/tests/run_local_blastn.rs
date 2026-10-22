@@ -817,3 +817,48 @@ fn intervals_without_letters_are_records_without_residues() {
         "{report}"
     );
 }
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
+// ```c++
+//         arg_desc.AddDefaultKey(kArgStrand, "strand",
+//                      "Query strand(s) to search against database/subject",
+//                                CArgDescriptions::eString, kDfltArgStrand);
+// ```
+// The command line checks `-strand` at parsing; `run_local` takes the arguments as a struct, so
+// it checks the value itself: an unknown strand is an argument error and nothing is written,
+// while `plus` and `minus` search and `both` is the plain search.
+#[test]
+fn run_local_rejects_an_unknown_strand() {
+    let inputs = Inputs::new();
+    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let subjects = reader_records(
+        &inputs.subject.0,
+        ReaderConfig::subject("BLASTN", false, true),
+    );
+    for strand in ["foo", "", "PLUS", "plus "] {
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs =
+            ReportOutputs::single("6", OutputSink::Writer(&mut sink), &mut diagnostics);
+        let mut args = inputs.args(&[]);
+        args.strand = strand.to_string();
+        let result = run_local_blastn(args, &queries, &subjects, &mut outputs);
+        drop(outputs);
+        let error = result
+            .expect_err("an unknown strand is an error")
+            .to_string();
+        assert_eq!(
+            error,
+            format!(
+                "Argument \"strand\". Illegal value, expected `both', `minus', `plus':  `{strand}'"
+            )
+        );
+        assert!(sink.is_empty() && diagnostics.is_empty(), "{strand:?}");
+    }
+    let both = inputs.run(&["6"], &["-strand", "both"], false);
+    let plain = inputs.run(&["6"], &[], false);
+    assert_eq!(both.outputs, plain.outputs);
+    for strand in ["plus", "minus"] {
+        let run = inputs.run(&["6"], &["-strand", strand], false);
+        assert!(!run.outputs[0].is_empty(), "{strand}");
+    }
+}

@@ -805,6 +805,7 @@ pub(super) fn reported_subjects(
             title: stored.title.clone(),
             sequence,
             warnings: Vec::new(),
+            source: Default::default(),
         });
     }
     Ok(ReportedSubjects { ordinals, records })

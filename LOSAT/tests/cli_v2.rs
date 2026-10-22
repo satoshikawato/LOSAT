@@ -1160,7 +1160,7 @@ fn blastn_accepts_culling_limit_as_ncbi_does() {
     let limit = |words: &[&str]| -> Result<i32, String> {
         match parse("blastn", words) {
             Ok(cli) => match cli.command {
-                Commands::Blastn(args) => Ok(args.culling_limit),
+                Commands::Blastn(args) => Ok(args.culling_limit_value()),
                 _ => unreachable!("blastn"),
             },
             Err(error) => Err(LOSAT::cli::render_message(&error)),

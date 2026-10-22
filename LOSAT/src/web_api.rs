@@ -257,7 +257,7 @@ fn parse_blastn_args(
         word_size: None,
         num_threads: 1,
         evalue: Some(10.0),
-        percent_identity: 0.0,
+        percent_identity: None,
         min_hit_length: 0,
         max_target_seqs: None,
         num_descriptions: None,
@@ -282,10 +282,11 @@ fn parse_blastn_args(
         query_loc: None,
         subject_loc: None,
         subject_besthit: false,
-        culling_limit: 0,
+        culling_limit: None,
         verbose: false,
         scan_step: 0,
         outfmt: "6".to_string(),
+        archive: None,
     };
 
     let mut index = 0;

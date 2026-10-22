@@ -286,7 +286,16 @@ impl ReportFormat {
         use ReportFormat::*;
         !matches!(
             self,
-            AsnText | AsnBinary | Xml | Xml2 | Json | Xml2S | JsonS | JsonSeqalign | Sam
+            AsnText
+                | AsnBinary
+                | Xml
+                | Xml2
+                | Json
+                | Xml2S
+                | JsonS
+                | JsonSeqalign
+                | Sam
+                | ArchiveFormat
         )
     }
 }
@@ -360,7 +369,9 @@ impl Program {
             Xml => true,
             AsnText => true,
             AsnBinary => true,
-            ArchiveFormat => false,
+            // OF8a: the BLAST archive for BLASTN; the other programs follow in OF8a part 2
+            // and OF8b.
+            ArchiveFormat => self == Program::Blastn,
             JsonSeqalign => true,
             Json => false,
             Xml2 => false,
@@ -1098,7 +1109,13 @@ mod tests {
                 .filter(|&format| program.writes(format))
                 .map(ReportFormat::number)
                 .collect();
-            assert_eq!(written, [0, 5, 6, 7, 8, 9, 12, 15, 16], "{program:?}");
+            // 11 (the BLAST archive): BLASTN only so far (OF8a part 1).
+            let expected: &[i32] = if program == Program::Blastn {
+                &[0, 5, 6, 7, 8, 9, 11, 12, 15, 16]
+            } else {
+                &[0, 5, 6, 7, 8, 9, 12, 15, 16]
+            };
+            assert_eq!(written, expected, "{program:?}");
         }
         assert_eq!(
             PROGRAMS.map(Program::name),
@@ -1123,7 +1140,7 @@ mod tests {
             .filter(|format| !format.writes_query_warnings())
             .map(ReportFormat::number)
             .collect();
-        assert_eq!(silent, [5, 8, 9, 12, 13, 14, 15, 16, 17]);
+        assert_eq!(silent, [5, 8, 9, 11, 12, 13, 14, 15, 16, 17]);
     }
 
     #[test]

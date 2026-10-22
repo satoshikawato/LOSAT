@@ -38,6 +38,8 @@ pub enum BlastnOutputFormat {
     /// The XML2 / JSON documents of outfmt 16 and 15 (`report::blast_xml2`, through the same
     /// `algorithm::blastn::blast_xml`).
     Xml2(crate::report::blast_xml2::Xml2Kind),
+    /// The BLAST archive (outfmt 11; `report::archive`, through `algorithm::blastn::archive`).
+    Archive,
 }
 
 impl BlastnOutputFormat {
@@ -74,6 +76,7 @@ impl BlastnOutputFormat {
             ReportFormat::Tabular => Ok(BlastnOutputFormat::Tabular),
             ReportFormat::TabularWithComments => Ok(BlastnOutputFormat::TabularWithComments),
             ReportFormat::Xml => Ok(BlastnOutputFormat::Xml),
+            ReportFormat::ArchiveFormat => Ok(BlastnOutputFormat::Archive),
             ReportFormat::Xml2S => Ok(BlastnOutputFormat::Xml2(
                 crate::report::blast_xml2::Xml2Kind::Single16,
             )),
@@ -103,7 +106,10 @@ impl BlastnOutputFormat {
     pub(crate) fn writes_query_warnings(self) -> bool {
         !matches!(
             self,
-            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Xml | BlastnOutputFormat::Xml2(_)
+            BlastnOutputFormat::Seqalign(_)
+                | BlastnOutputFormat::Xml
+                | BlastnOutputFormat::Xml2(_)
+                | BlastnOutputFormat::Archive
         )
     }
 

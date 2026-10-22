@@ -505,6 +505,9 @@ pub(crate) struct FastaReader<R: Read> {
     title: Vec<u8>,
     /// The local ID of the record (`GenerateID`), once its defline is read.
     local_id: Option<String>,
+    /// The defline line as read, kept when the configuration asks for it
+    /// (`ReaderConfig::keep_defline`).
+    defline: Vec<u8>,
     /// Bad positions of a data line, reused.
     bad_positions: Vec<u32>,
 }
@@ -544,6 +547,7 @@ impl<R: Read> FastaReader<R> {
             titles: Vec::new(),
             title: Vec::new(),
             local_id: None,
+            defline: Vec::new(),
             bad_positions: Vec::new(),
         }
     }
@@ -931,6 +935,10 @@ impl<R: Read> FastaReader<R> {
     /// The `CFastaReader` user object with the raw defline is not output.
     fn parse_def_line(&mut self, defline: &[u8]) {
         self.titles.clear();
+        if self.config.keep_defline {
+            self.defline.clear();
+            self.defline.extend_from_slice(defline);
+        }
         let len = defline.len();
         if len > 1 && !defline[1..].iter().all(|&byte| input_space(byte)) {
             let start = 1 + defline[1..]
@@ -1868,6 +1876,10 @@ impl<R: Read> FastaReader<R> {
             title: std::mem::take(&mut self.title),
             sequence,
             warnings: Vec::new(),
+            source: super::RecordSource {
+                defline: std::mem::take(&mut self.defline),
+                uncut: None,
+            },
         })
     }
 

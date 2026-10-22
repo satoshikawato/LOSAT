@@ -63,6 +63,7 @@ use super::super::alignment::{
 // EXPERIMENT (LOSAT_X_GREEDYPRELIM): dispatch of the preliminary greedy alignment
 // (NCBI reference: blast_gapalign.c:4019-4025, BLAST_GreedyGappedAlignment with compressed_subject).
 use super::super::alignment::x_greedy_prelim;
+use super::super::archive;
 use super::super::args::{BlastnArgs, QueryStrand};
 use super::super::blast_extend::DiagStruct;
 use super::super::coordination::{
@@ -5273,6 +5274,12 @@ struct BlastnReportInputs<'a> {
     /// The database length behind the effective lengths (`-dbsize`, or the total of the
     /// subjects), for the length adjustment that BLAST XML's `Statistics_hsp-len` shows.
     eff_db_length: i64,
+    /// The run's BLAST archive (outfmt 11), and the queries of each batch of this call
+    /// (`BatchResults::batches`).
+    archive: Option<&'a crate::report::archive::ArchiveHandle>,
+    batch_spans: &'a [std::ops::Range<usize>],
+    /// Whether both strands of each query are searched (`-strand both`).
+    both_strands: bool,
 }
 
 /// The per-query and run-level data of the pairwise report.
@@ -5357,6 +5364,40 @@ fn blastn_pairwise_report(
         prolog: report.prolog,
     };
     Ok((queries, pairwise_report))
+}
+
+/// The values of the first query of a batch (`first`, an index of the call) that the archive
+/// takes (`archive::FirstContext`): the blocks and search statistics of its first valid
+/// context (`CBlastAncillaryData`, blast_results.cpp:72-115; the plus strand's, or the minus
+/// strand's with `-strand minus`), and the search space of its context 0 (the option
+/// `SplitQuery_SetEffectiveSearchSpace` sets).
+fn archive_first_context(
+    report: &BlastnReportInputs<'_>,
+    query_lengths: &[usize],
+    first: usize,
+) -> Result<archive::FirstContext> {
+    let context0_space = report.query_eff_searchsp[2 * first];
+    let Some(blocks) = report.context_karlin[2 * first + report.first_context] else {
+        return Ok(archive::FirstContext {
+            karlin: None,
+            search_space: 0,
+            length_adjustment: 0,
+            context0_space,
+        });
+    };
+    let search_space = report.query_eff_searchsp[2 * first + report.first_context];
+    let (length_adjustment, _) = context_lengths(
+        query_lengths[first] as i64,
+        report.eff_db_length,
+        report.db_num_seqs as i64,
+        &blocks.gapped,
+    )?;
+    Ok(archive::FirstContext {
+        karlin: Some(blocks),
+        search_space,
+        length_adjustment,
+        context0_space,
+    })
 }
 
 /// The `Statistics` of each query of a BLAST XML report (outfmt 5): those of its first valid
@@ -5954,7 +5995,10 @@ fn post_process_hits_and_write(
         // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
         // format.
         let mut format_warnings = (warning_lines.is_some()
-            || matches!(output_format, BlastnOutputFormat::Xml2(_)))
+            || matches!(
+                output_format,
+                BlastnOutputFormat::Xml2(_) | BlastnOutputFormat::Archive
+            ))
         .then(|| crate::report::query_warnings::QueryWarnings {
             before: warning_lines.take().unwrap_or(&[]),
             sink: &mut *outputs.diagnostics,
@@ -6020,6 +6064,45 @@ fn post_process_hits_and_write(
                 report.ranges.subjects.placements,
                 &mut writer,
                 format_warnings.as_mut(),
+            )?;
+        } else if output_format == BlastnOutputFormat::Archive {
+            // The BLAST archive (outfmt 11): one document per query batch of the call.
+            let handle = report
+                .archive
+                .expect("a BLAST archive request has its handle");
+            let subjects = match (report.database_ordinals, report.database) {
+                (Some(ordinals), Some(database)) => SubjectNames::Database {
+                    ordinals,
+                    title: &database.definition,
+                },
+                _ => SubjectNames::Records(report.subjects.records()),
+            };
+            let call = archive::ArchiveCall {
+                handle,
+                queries: report.queries,
+                query_lengths,
+                query_placements: &report.ranges.queries.placements,
+                subject_records: report.database.is_none().then(|| {
+                    report
+                        .ranges
+                        .subjects
+                        .records
+                        .unwrap_or_else(|| report.subjects.records())
+                }),
+                subjects,
+                subject_placements: report.ranges.subjects.placements,
+                hit_lists: &hit_lists,
+                query_masks: report.query_masks,
+                unsearched: &unsearched,
+                lcase_masking: report.lcase_masking,
+                both_strands: report.both_strands,
+                spans: report.batch_spans,
+            };
+            archive::write_blastn_archives(
+                &call,
+                format_warnings.as_mut(),
+                &|first| archive_first_context(report, query_lengths, first),
+                &mut writer,
             )?;
         } else if output_format.is_structured_xml() {
             // The XML2 / JSON documents of outfmt 15 and 16 take the path of outfmt 5: the same
@@ -6271,7 +6354,7 @@ fn post_process_hits_and_write(
 ///     }
 /// ```
 pub fn run(
-    args: BlastnArgs,
+    mut args: BlastnArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
@@ -6294,6 +6377,10 @@ pub fn run(
     // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
     // there too (`cli_output_formats`).
     let output_formats = cli_output_formats(&args.outfmt, args.out.as_deref())?;
+    // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot
+    // write, before anything is read or written.
+    let archive_requested = output_formats.contains(&BlastnOutputFormat::Archive);
+    args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), archive_requested)?;
     // LOSAT's thread capability is checked before any input or output, as before.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3631-3636
@@ -6357,11 +6444,49 @@ pub fn run(
     // With `-db` the handler of the database arguments only keeps the name: the database
     // is opened after every option handler has run (`search_cli`). With `-subject` it
     // reads the subjects here, before the query and the output are opened.
+    let archive = args.archive.clone();
+    let mut stderr = std::io::stderr();
+    let mut archive_tee;
+    let diagnostics: &mut (dyn std::io::Write + Send) = match &archive {
+        Some(handle) => {
+            archive_tee = crate::report::archive::DiagTee::new(&mut stderr, handle.clone());
+            &mut archive_tee
+        }
+        None => &mut stderr,
+    };
     let cli_subjects = if args.db.is_some() {
         None
     } else {
-        Some(read_cli_subjects(&args, &settings)?)
+        match read_cli_subjects(&args, &settings, &mut *diagnostics, archive.is_some()) {
+            Ok(read) => Some(read),
+            Err(error) => {
+                // NCBI reads the `-subject` file inside `Run`, after the diagnostics handler
+                // that saves the messages is set: an error archive follows the error.
+                if let Some(handle) = &archive {
+                    if let Some(lines) = archive::error_lines(&error, true) {
+                        if let Ok(out_file) = open_out_file(&args) {
+                            let mut report = cli_report_stream(out_file);
+                            let _ = crate::report::archive::write_error_archive(
+                                handle,
+                                &lines,
+                                &mut report,
+                            );
+                            let _ = std::io::Write::flush(&mut report);
+                        }
+                    }
+                }
+                return Err(error);
+            }
+        }
     };
+    if archive.is_some() {
+        if let Some(read) = &cli_subjects {
+            archive::check_titles(&read.subjects, "subject")?;
+            if let Some(full) = &read.records {
+                archive::check_titles(full, "subject")?;
+            }
+        }
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
     //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
@@ -6390,28 +6515,13 @@ pub fn run(
     let query_file = open_input(&args.query, "query", "BLASTN")?;
     // The output file is opened once, as NCBI's stream (a named pipe gives one reader one
     // end of file).
-    if let Some(path) = args.out.as_deref() {
-        check_utf8_file_name(path, "out", "BLASTN")?;
-    }
-    let out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
-        Some(path) => Some(std::io::BufWriter::new(
-            std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
-        )),
-        None => None,
-    };
+    let out_file = open_out_file(&args)?;
     let outfmt = args.outfmt.clone();
     let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
-    let mut stderr = std::io::stderr();
-    let mut report = crate::cli::ReportStream {
-        inner: match out_file {
-            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
-            None => crate::cli::report_standard_output(),
-        },
-        failed: false,
-    };
+    let mut report = cli_report_stream(out_file);
     let result = {
         let mut outputs =
-            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut stderr);
+            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut *diagnostics);
         search_cli(
             args,
             query_file,
@@ -6429,6 +6539,13 @@ pub fn run(
             settings,
         )
     };
+    // NCBI writes an error archive after the archives of the batches before when the
+    // application stops with one of its own errors (`PrintErrorArchive`).
+    if let (Err(error), Some(handle)) = (&result, &archive) {
+        if let Some(lines) = archive::error_lines(error, false) {
+            let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
+        }
+    }
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
     let flushed = std::io::Write::flush(&mut report);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
@@ -6460,6 +6577,34 @@ pub fn run(
 /// The subjects of `-subject` as the handler of the database arguments reads them (`run`):
 /// the searched records (their intervals with `-subject_loc`), where their letters lie in
 /// the records, and the records as read (with `-subject_loc`).
+/// The `-out` file, created (`-`: standard output).
+fn open_out_file(args: &BlastnArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
+    if let Some(path) = args.out.as_deref() {
+        check_utf8_file_name(path, "out", "BLASTN")?;
+    }
+    Ok(
+        match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
+            Some(path) => Some(std::io::BufWriter::new(
+                std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
+            )),
+            None => None,
+        },
+    )
+}
+
+/// The report stream of the command line: the `-out` file, or standard output.
+fn cli_report_stream(
+    out_file: Option<std::io::BufWriter<std::fs::File>>,
+) -> crate::cli::ReportStream {
+    crate::cli::ReportStream {
+        inner: match out_file {
+            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
+            None => crate::cli::report_standard_output(),
+        },
+        failed: false,
+    }
+}
+
 struct CliSubjects {
     subjects: Vec<FastaRecord>,
     placements: Placements,
@@ -6482,6 +6627,8 @@ impl CliSubjects {
 fn read_cli_subjects(
     args: &BlastnArgs,
     settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
+    diagnostics: &mut (dyn std::io::Write + Send),
+    keep_deflines: bool,
 ) -> Result<CliSubjects> {
     let Some(subject_path) = args.subject.as_deref() else {
         return Err(crate::cli::NativeError {
@@ -6521,7 +6668,7 @@ fn read_cli_subjects(
     let mut subject_source = FastaInputSource::from_argument(
         subject_path,
         subject_file,
-        ReaderConfig::subject("BLASTN", false, settings.data_loaders),
+        ReaderConfig::subject("BLASTN", false, settings.data_loaders).with_defline(keep_deflines),
     );
     // EXPERIMENT (LOSAT_X_BNSTORE): without a subject range, each record's letters are packed as
     // soon as it has been read, and the records keep none (`x_read_subject_stores`).
@@ -6529,9 +6676,9 @@ fn read_cli_subjects(
     // LOSAT_X_BNSTORE the packing of each record is in this interval too. No NCBI counterpart.
     let t_read_fasta = crate::utils::xtiming::clock();
     let (read_subjects, stores) = {
-        let mut stderr = std::io::stderr();
-        let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
-        if x_bnstore() && subject_range.is_none() {
+        let mut warn = |message: &[u8]| std::io::Write::write_all(&mut *diagnostics, message);
+        // The archive writes the subjects' letters from the records, not from a packed store.
+        if x_bnstore() && subject_range.is_none() && !keep_deflines {
             x_read_subject_stores(&mut subject_source, &mut warn)?
         } else {
             (
@@ -6684,10 +6831,12 @@ fn search_cli(
         &args.query,
         &query_file,
         shared_standard_input,
-        x_rpt_stream::switch_on(),
+        // The archive writes each query's Bioseq from the records, which are all read.
+        x_rpt_stream::switch_on() && args.archive.is_none(),
         x_rule,
     );
-    let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders);
+    let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders)
+        .with_defline(args.archive.is_some());
     let mut query_source = FastaInputSource::from_argument(&args.query, query_file, query_config);
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
@@ -6724,6 +6873,9 @@ fn search_cli(
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
+    if args.archive.is_some() {
+        archive::check_titles(&records, "query")?;
+    }
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
         QueryEnd::EofError => QueryReading::BlankLines,
@@ -6963,6 +7115,32 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
 /// `-query` and `-subject` values of `args` are used only as display names. The hit
 /// records (`ReportOutputs::hits`) are not produced yet.
 pub fn run_local(
+    mut args: BlastnArgs,
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what
+    // LOSAT cannot write, and a diagnostics stream that saves the messages.
+    let archive_requested = outputs.formats.iter().any(|format| {
+        app::parse_formatting_string(format.outfmt)
+            .is_ok_and(|choice| choice.number == app::output_format::ARCHIVE_FORMAT)
+    });
+    if archive_requested && args.db.is_none() {
+        QueryStrand::parse(&args.strand)?;
+        args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), true)?;
+        archive::check_titles(query_records, "query")?;
+        archive::check_titles(subject_records, "subject")?;
+        if let Some(handle) = args.archive.clone() {
+            return outputs.with_archive_diagnostics(handle, |view| {
+                run_local_formats(args, query_records, subject_records, view)
+            });
+        }
+    }
+    run_local_formats(args, query_records, subject_records, outputs)
+}
+
+fn run_local_formats(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
@@ -7750,6 +7928,7 @@ fn run_in_pool(
                 query_masks: &[],
                 context_karlin: &[],
                 query_eff_searchsp: &[],
+                batches: &[],
             },
             true,
             None,
@@ -7862,6 +8041,7 @@ fn run_in_pool(
         // (`lookup::x_mb_lut_keep`), freed when the loop ends.
         let x_lut_keep = x_mb_lut_keep::Keep::for_loop();
         let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(lengths.len());
+        let mut batch_spans: Vec<std::ops::Range<usize>> = Vec::new();
         let mut unsearched = Vec::with_capacity(lengths.len());
         let mut query_masks = Vec::with_capacity(lengths.len());
         let mut context_karlin = Vec::with_capacity(2 * lengths.len());
@@ -7973,6 +8153,7 @@ fn run_in_pool(
                                 query_masks: &query_masks,
                                 context_karlin: &context_karlin,
                                 query_eff_searchsp: &query_eff_searchsp,
+                                batches: &batch_spans,
                             },
                         )
                     };
@@ -8023,6 +8204,7 @@ fn run_in_pool(
                             query_masks: &query_masks,
                             context_karlin: &context_karlin,
                             query_eff_searchsp: &query_eff_searchsp,
+                            batches: &batch_spans,
                         },
                     )
                 };
@@ -8103,6 +8285,7 @@ fn run_in_pool(
                             query_masks: &query_masks,
                             context_karlin: &context_karlin,
                             query_eff_searchsp: &query_eff_searchsp,
+                            batches: &batch_spans,
                         },
                     )
                 };
@@ -8207,6 +8390,7 @@ fn run_in_pool(
                                     query_masks: &query_masks,
                                     context_karlin: &context_karlin,
                                     query_eff_searchsp: &query_eff_searchsp,
+                                    batches: &batch_spans,
                                 },
                                 false,
                                 None,
@@ -8283,7 +8467,7 @@ fn run_in_pool(
                             args.max_hsps_per_subject.unwrap_or(0),
                             args.qcov_hsp_perc.unwrap_or(0.0),
                             args.subject_besthit,
-                            args.culling_limit,
+                            args.culling_limit_value(),
                         );
                     }
                 }
@@ -8339,6 +8523,7 @@ fn run_in_pool(
                                 query_masks: &query_masks,
                                 context_karlin: &context_karlin,
                                 query_eff_searchsp: &query_eff_searchsp,
+                                batches: &batch_spans,
                             },
                         )
                     };
@@ -8367,6 +8552,7 @@ fn run_in_pool(
                     list
                 })
             }));
+            batch_spans.push(start..end);
             unsearched.extend(std::iter::repeat_n(!batch.searched, end - start));
             query_masks.extend(batch.query_masks);
             // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452
@@ -8477,6 +8663,7 @@ fn run_in_pool(
                             query_masks: &batch_masks,
                             context_karlin: &batch_karlin,
                             query_eff_searchsp: &batch_searchsp,
+                            batches: &[],
                         },
                         false,
                         written,
@@ -8526,6 +8713,7 @@ fn run_in_pool(
                     query_masks: &query_masks,
                     context_karlin: &context_karlin,
                     query_eff_searchsp: &query_eff_searchsp,
+                    batches: &batch_spans,
                 },
                 true,
                 Some(parallel_pool),
@@ -8558,6 +8746,7 @@ fn run_in_pool(
                     query_masks: &[],
                     context_karlin: &[],
                     query_eff_searchsp: &[],
+                    batches: &[],
                 },
                 true,
                 written,
@@ -8918,6 +9107,10 @@ struct BatchResults<'a> {
     query_masks: &'a [Vec<MaskedInterval>],
     context_karlin: &'a [Option<ContextKarlin>],
     query_eff_searchsp: &'a [i64],
+    /// The searched queries of each query batch of the call, in order, for the reports of
+    /// every batch written at once (the BLAST archive writes one document per batch); empty
+    /// when the call is one batch.
+    batches: &'a [std::ops::Range<usize>],
 }
 
 /// NCBI's message for a query or subject without letters.
@@ -9121,7 +9314,7 @@ fn write_reports_untimed(
         context_karlin: results.context_karlin,
         num_descriptions: args.report_counts.num_descriptions,
         num_alignments: args.report_counts.num_alignments,
-        culling_limit: args.culling_limit,
+        culling_limit: args.culling_limit_value(),
         db_num_seqs: subjects.shown.num_seqs,
         db_len_total: subjects.shown.total_letters,
         database: subjects.shown.database.as_ref(),
@@ -9154,6 +9347,9 @@ fn write_reports_untimed(
         } else {
             subjects.shown.total_letters as i64
         },
+        archive: args.archive.as_ref(),
+        batch_spans: results.batches,
+        both_strands: args.strand == "both",
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-496
     // ```c++
@@ -10624,7 +10820,7 @@ fn search_query_batch(
     //         align_length * hit_options->percent_identity) ||
     //         align_length < hit_options->min_hit_length) ;
     // ```
-    let percent_identity = args.percent_identity;
+    let percent_identity = args.percent_identity_value();
     let min_hit_length = args.min_hit_length;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1127 (BlastScoreBlkNuclMatrixCreate)
@@ -17278,22 +17474,22 @@ fn search_query_batch(
             //                  (filt_opts->culling_stage & ePrelimSearch))
             //         {
             // ```
-            SubjectSource::Prepared(_) if args.culling_limit > 0 => {
+            SubjectSource::Prepared(_) if args.culling_limit_value() > 0 => {
                 let mut writer = culling::PrelimCulling::new(
                     &query_lengths,
                     prelim_hitlist_size,
-                    args.culling_limit,
+                    args.culling_limit_value(),
                 );
                 search_subjects(None, &mut |oid, _, prelim| writer.add(oid, prelim));
                 writer.finish()
             }
-            SubjectSource::Database(database) if args.culling_limit > 0 => {
+            SubjectSource::Database(database) if args.culling_limit_value() > 0 => {
                 // The same drivers as the default arm below, with the culling writer as the
                 // sink (a second instance of `database::search_blocks`).
                 let mut writer = culling::PrelimCulling::new(
                     &query_lengths,
                     prelim_hitlist_size,
-                    args.culling_limit,
+                    args.culling_limit_value(),
                 );
                 if any_valid_context {
                     database::search_blocks(

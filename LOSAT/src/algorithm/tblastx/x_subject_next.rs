@@ -230,7 +230,14 @@ mod tests {
                     if i == 10 {
                         panic!("subject 10");
                     }
-                    std::hint::black_box(work(i + 4));
+                    // About 50 µs a subject: the other threads take subjects until the panicking
+                    // one has printed its message and unwound to `take_subjects`, and with
+                    // subjects of about 1 µs (`work(i + 4)`) they took all of them on a Windows
+                    // runner at opt-level 3 (2026-10-23). All of them now take seconds.
+                    std::hint::black_box(
+                        (0..50_000u64)
+                            .fold(i as u64, |acc, x| acc.wrapping_mul(31).wrapping_add(x)),
+                    );
                 });
             })
         }));

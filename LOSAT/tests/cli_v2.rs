@@ -1010,6 +1010,7 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "0 delim", None, INVALID_DELIMITER),
         (ALL, "abc delim", None, INVALID_DELIMITER),
         (ALL, "99 delimiter qaccver", None, INVALID_DELIMITER),
+        (ALL, "17 delim SQ", None, INVALID_DELIMITER),
         // NCBI's errors after the inputs are opened: the formats of other programs, and the
         // XInclude formats written to standard output.
         (NOT_BLASTN, "17", None, NcbiLater("SAM format is only applicable to blastn")),
@@ -1039,13 +1040,20 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "9", None, Writes(AsnBinary)),
         (ALL, " 9 std", None, Writes(AsnBinary)),
         (ALL, "11", None, UNSUPPORTED),
-        (ALL, "13", Some("o.json"), UNSUPPORTED),
-        (ALL, "14", Some("o.xml"), UNSUPPORTED),
+        // 13 and 14 (BLAST JSON and XML2 as side files and a master file at `-out`): every
+        // program (BLASTP and BLASTN: OF5c part 1; BLASTX, TBLASTN and TBLASTX: part 2).
+        (ALL, "13", Some("o.json"), Writes(Json)),
+        (ALL, "14", Some("o.xml"), Writes(Xml2)),
+        (ALL, " 14 std", Some("o"), Writes(Xml2)),
         (ALL, "15", None, Writes(JsonS)),
         (ALL, "16", None, Writes(Xml2S)),
         (ALL, " 16 std", None, Writes(Xml2S)),
-        (&["blastn"], "17", None, UNSUPPORTED),
-        (&["blastn"], "17 qseqid", None, UNSUPPORTED),
+        // SAM (OF6): BLASTN alone writes it, reading the words SQ and SR and ignoring the rest and a
+        // delimiter (`CBlast_SAM_Formatter::x_ProcessCustomSpec`).
+        (&["blastn"], "17", None, Writes(Sam)),
+        (&["blastn"], "17 qseqid", None, Writes(Sam)),
+        (&["blastn"], " 17 SQ SR ", None, Writes(Sam)),
+        (&["blastn"], "17 delim=, SQ", None, Writes(Sam)),
     ]
 };
 

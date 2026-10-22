@@ -362,11 +362,14 @@ impl Program {
             AsnBinary => true,
             ArchiveFormat => false,
             JsonSeqalign => true,
-            Json => false,
-            Xml2 => false,
+            // 13 and 14 (BLAST JSON and XML2 as side files and a master file): every program
+            // (BLASTP and BLASTN: OF5c part 1; BLASTX, TBLASTN, TBLASTX: part 2).
+            Json => true,
+            Xml2 => true,
             JsonS => true,
             Xml2S => true,
-            Sam => false,
+            // Line OF track S: SAM for BLASTN alone (OF6).
+            Sam => self == Program::Blastn,
         }
     }
 }
@@ -523,12 +526,14 @@ pub fn report_format(
             choice.number
         ),
     };
-    if choice.custom() && !program.custom_fields() {
+    // SAM reads its own words and ignores a delimiter (`CBlast_SAM_Formatter::x_ProcessCustomSpec`).
+    let is_sam = format == ReportFormat::Sam;
+    if choice.custom() && !program.custom_fields() && !is_sam {
         anyhow::bail!(
             "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {name}"
         );
     }
-    if !choice.delimiter.is_empty() {
+    if !choice.delimiter.is_empty() && !is_sam {
         anyhow::bail!(
             "a custom delimiter (delim=) in the output format is not supported by LOSAT's {name}"
         );
@@ -588,6 +593,16 @@ pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyh
 /// }
 /// ```
 pub fn xinclude_check(choice: &FormatChoice) -> anyhow::Result<()> {
+    xinclude_check_for(choice, None)
+}
+
+/// `xinclude_check` for a run with `-out` `out`: the XInclude formats written to a file are
+/// not an error (`UseXInclude` returns true and the formatter takes the file name as the base of
+/// its side files).
+pub fn xinclude_check_for(choice: &FormatChoice, out: Option<&Path>) -> anyhow::Result<()> {
+    if !out.is_none_or(|path| path.as_os_str() == "-") {
+        return Ok(());
+    }
     match choice.number {
         JSON => Err(options_error("Please provide a file name for outfmt 13.")),
         XML2 => Err(options_error("Please provide a file name for outfmt 14.")),
@@ -1089,7 +1104,10 @@ mod tests {
     // The one table of the formats LOSAT writes (`Program::writes`): 0, 6, 7, 8, 9 and 12 in
     // every program (8 and 12: line OF track S, OF3b; 9: OF3c), and 5 in every program
     // (BLASTN, BLASTP: OF4a; BLASTX, TBLASTN, TBLASTX: OF4b); 15 and 16 in BLASTP and BLASTN
-    // (OF5a), BLASTX (OF5b part 1), TBLASTN (OF5b part 2) and TBLASTX (OF5b part 3): every program.
+    // (OF5a), BLASTX (OF5b part 1), TBLASTN (OF5b part 2) and TBLASTX (OF5b part 3): every program;
+    // 13 and 14 in BLASTP and BLASTN (OF5c part 1), BLASTX, TBLASTN and TBLASTX (part 2): every
+    // program writes 0, 5 to 9 and 12 to 16.
+    // 17 (SAM) in BLASTN alone (OF6).
     #[test]
     fn every_program_writes_its_formats_only() {
         for program in PROGRAMS {
@@ -1098,7 +1116,12 @@ mod tests {
                 .filter(|&format| program.writes(format))
                 .map(ReportFormat::number)
                 .collect();
-            assert_eq!(written, [0, 5, 6, 7, 8, 9, 12, 15, 16], "{program:?}");
+            let expected: &[i32] = if program == Program::Blastn {
+                &[0, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 17]
+            } else {
+                &[0, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16]
+            };
+            assert_eq!(written, expected, "{program:?}");
         }
         assert_eq!(
             PROGRAMS.map(Program::name),
@@ -1170,10 +1193,7 @@ mod tests {
             }
             let sam = report_format(&choice(SAM), program, None);
             if program.is_sam() {
-                assert_eq!(
-                    sam.unwrap_err().to_string(),
-                    "output format 17 is not supported by LOSAT's BLASTN"
-                );
+                assert_eq!(sam.unwrap(), Some(ReportFormat::Sam));
             } else {
                 assert_eq!(sam.unwrap(), None);
             }

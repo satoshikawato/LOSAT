@@ -1,0 +1,29 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:480
+@SQ	SN:Query_3	LN:300
+@SQ	SN:Query_4	LN:480
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/micromamba/bin/blastn -query tests/fasta/outfmt0/sam_multi_q.fna -subject tests/fasta/outfmt0/sam_multi_s.fna -task blastn -outfmt 17 	PN:blastn
+Subject_7	0	Query_1	1	255	150M380H	*	0	0	*	*	AS:i:300	EV:f:1.79575e-76	NM:i:0	PI:f:100.00	BS:f:271.792
+Subject_4	0	Query_1	31	255	45H200M4D100M2I119M22H	*	0	0	*	*	AS:i:691	EV:f:0	NM:i:6	PI:f:94.03	BS:f:624.35
+Subject_1	0	Query_1	31	255	45H200M4D100M2I119M22H	*	0	0	*	*	AS:i:691	EV:f:0	NM:i:6	PI:f:94.03	BS:f:624.35
+Subject_5	0	Query_1	31	255	270M	*	0	0	*	*	AS:i:540	EV:f:1.28847e-141	NM:i:0	PI:f:100.00	BS:f:488.196
+Subject_6	0	Query_1	31	255	170M	*	0	0	*	*	AS:i:340	EV:f:2.49393e-87	NM:i:0	PI:f:100.00	BS:f:307.859
+Subject_2	16	Query_1	36	255	25H146M2I5M1I94M6D164M40H	*	0	0	*	*	AS:i:540	EV:f:1.28847e-141	NM:i:9	PI:f:88.02	BS:f:488.196
+Subject_8	0	Query_1	201	255	220M	*	0	0	*	*	AS:i:440	EV:f:1.79258e-114	NM:i:0	PI:f:100.00	BS:f:398.027
+Subject_7	0	Query_1	301	255	350H180M	*	0	0	*	*	AS:i:360	EV:f:9.29402e-93	NM:i:0	PI:f:100.00	BS:f:325.893
+Subject_4	0	Query_3	1	255	115H130M4D100M2I65M76H	*	0	0	*	*	AS:i:463	EV:f:1.17466e-120	NM:i:6	PI:f:92.88	BS:f:418.766
+Subject_1	0	Query_3	1	255	115H130M4D100M2I65M76H	*	0	0	*	*	AS:i:463	EV:f:1.17466e-120	NM:i:6	PI:f:92.88	BS:f:418.766
+Subject_5	0	Query_3	1	255	70H200M	*	0	0	*	*	AS:i:400	EV:f:7.92176e-104	NM:i:0	PI:f:100.00	BS:f:361.96
+Subject_2	16	Query_3	1	255	90H81M2I5M1I94M6D114M90H	*	0	0	*	*	AS:i:345	EV:f:1.2564e-88	NM:i:9	PI:f:85.71	BS:f:312.367
+Subject_6	0	Query_3	1	255	70H100M	*	0	0	*	*	AS:i:200	EV:f:1.53332e-49	NM:i:0	PI:f:100.00	BS:f:181.623
+Subject_7	0	Query_3	1	255	100H50M380H	*	0	0	*	*	AS:i:100	EV:f:2.13323e-22	NM:i:0	PI:f:100.00	BS:f:91.4547
+Subject_8	0	Query_3	101	255	200M20H	*	0	0	*	*	AS:i:400	EV:f:7.92176e-104	NM:i:0	PI:f:100.00	BS:f:361.96
+Subject_7	0	Query_3	201	255	350H100M80H	*	0	0	*	*	AS:i:200	EV:f:1.53332e-49	NM:i:0	PI:f:100.00	BS:f:181.623
+Subject_7	16	Query_4	1	255	180M350H	*	0	0	*	*	AS:i:360	EV:f:9.29402e-93	NM:i:0	PI:f:100.00	BS:f:325.893
+Subject_4	16	Query_4	28	255	22H119M2I100M4D200M45H	*	0	0	*	*	AS:i:691	EV:f:0	NM:i:6	PI:f:94.03	BS:f:624.35
+Subject_1	16	Query_4	28	255	22H119M2I100M4D200M45H	*	0	0	*	*	AS:i:691	EV:f:0	NM:i:6	PI:f:94.03	BS:f:624.35
+Subject_2	0	Query_4	31	255	40H164M6D94M1I5M2I146M25H	*	0	0	*	*	AS:i:540	EV:f:1.28847e-141	NM:i:9	PI:f:88.02	BS:f:488.196
+Subject_8	16	Query_4	61	255	220M	*	0	0	*	*	AS:i:440	EV:f:1.79258e-114	NM:i:0	PI:f:100.00	BS:f:398.027
+Subject_5	16	Query_4	181	255	270M	*	0	0	*	*	AS:i:540	EV:f:1.28847e-141	NM:i:0	PI:f:100.00	BS:f:488.196
+Subject_6	16	Query_4	281	255	170M	*	0	0	*	*	AS:i:340	EV:f:2.49393e-87	NM:i:0	PI:f:100.00	BS:f:307.859
+Subject_7	16	Query_4	331	255	380H150M	*	0	0	*	*	AS:i:300	EV:f:1.79575e-76	NM:i:0	PI:f:100.00	BS:f:271.792

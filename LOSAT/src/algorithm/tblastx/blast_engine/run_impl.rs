@@ -1221,7 +1221,7 @@ pub(crate) fn run_local_with(
     }
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`); `search` checks the formats again.
-    check_report_formats(outputs)?;
+    check_report_formats(outputs, None)?;
     // No NCBI counterpart: ABI v1 is frozen (plan TD-1; line OF, outfmt-20261019 DECISIONS
     // 10): it adds no format, so it refuses the Seq-annot formats (outfmt 8, 9, 12) with the
     // message that `check_report_formats` gave them before TBLASTX wrote them.
@@ -1269,13 +1269,16 @@ pub(crate) fn run_local_with(
 
 /// Each requested format as NCBI reads `-outfmt`: NCBI's errors, and a rejection of a
 /// format that LOSAT's TBLASTX does not write.
-fn check_report_formats(outputs: &ReportOutputs<'_>) -> Result<()> {
+///
+/// `out` is the run's `-out`: outfmt 13 and 14 write side files next to it, and fail on standard
+/// output (`xinclude_check_for`). `run_local` has no output file.
+fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
     use crate::blastinput::app;
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        if app::report_format(&choice, app::Program::Tblastx, None)?.is_none() {
+        if app::report_format(&choice, app::Program::Tblastx, out)?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastx)?;
-            app::xinclude_check(&choice)?;
+            app::xinclude_check_for(&choice, out)?;
         }
     }
     Ok(())
@@ -1362,7 +1365,7 @@ fn search(
     // The XInclude formats written to standard output fail after the formatter is made
     // (`check_report_formats`: `xinclude_check`), as the other format checks of each
     // requested format.
-    check_report_formats(outputs)?;
+    check_report_formats(outputs, args.out.as_deref())?;
     // LOSAT's limits come where NCBI starts the search, after its checks.
     check_losat_limits(&args)?;
     crate::blastinput::app::check_unsupported_environment("TBLASTX")?;
@@ -2040,12 +2043,14 @@ fn write_tblastx_outputs(
                 run,
                 warnings.as_mut(),
             )?,
-            // The XML2 and JSON documents (outfmt 16 and 15): the same records, written by
+            // The XML2 and JSON documents (outfmt 16 and 15, and 14 and 13 as side files next to
+            // `-out` with this output as the master file): the same records, written by
             // `Xml2Writer`.
             report::TblastxOutputFormat::Xml2(kind) => super::super::blast_xml::write_tblastx_xml(
-                &mut crate::report::blast_xml2::Xml2Writer::new(
+                &mut crate::report::blast_xml2::Xml2Writer::for_run(
                     kind,
                     super::super::blast_xml::xml2_run(run),
+                    run.args.out.as_deref(),
                 ),
                 true,
                 &mut writer,
@@ -2210,7 +2215,7 @@ fn run_in_pool(
     batch_size: u32,
     v1_titles: bool,
 ) -> Result<()> {
-    check_report_formats(outputs)?;
+    check_report_formats(outputs, args.out.as_deref())?;
     let query_records = query_runs.records;
     let input = query_runs.input;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504

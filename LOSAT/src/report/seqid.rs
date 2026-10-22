@@ -77,6 +77,28 @@ pub enum SeqId<'a> {
 }
 
 impl SeqId<'_> {
+    /// Appends the Seq-id as the SAM formatter prints it: `GetSeqIdString(true)` of the
+    /// `fSAM_PlainSeqIds` flag (the local string, or `BL_ORD_ID:<oid>` for a database
+    /// sequence). `AdjustSeqIdType` finds no accession for either id, so it keeps them.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:111-115
+    /// ```c++
+    /// string CSAM_CIGAR_Formatter::x_GetSeqIdString(const CSeq_id& id, TFlags flags) const
+    /// {
+    ///     return (flags & CSAM_Formatter::fSAM_PlainSeqIds) ?
+    ///         id.GetSeqIdString(true) : id.AsFastaString();
+    /// }
+    /// ```
+    pub fn sam_name(&self, out: &mut Vec<u8>) {
+        match *self {
+            SeqId::Local(id) => out.extend_from_slice(id.as_bytes()),
+            SeqId::BlOrdId(oid) => {
+                out.extend_from_slice(b"BL_ORD_ID:");
+                out.extend_from_slice(oid.to_string().as_bytes());
+            }
+        }
+    }
+
     /// Writes the Seq-id object (a CHOICE) through `enc`, in the member order of the ASN.1
     /// modules quoted above: `local` (variant 0) holds an Object-id `str` (variant 1);
     /// `general` (variant 10) holds a Dbtag (`db` member 0, `tag` member 1 = Object-id `id`,

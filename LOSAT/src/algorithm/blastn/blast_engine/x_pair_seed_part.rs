@@ -755,7 +755,7 @@ fn merge(
     order.sort_unstable();
     hits.reserve(order.len());
     for &(_, p, j) in order.iter() {
-        hits.push(states[p as usize].hits[j as usize].clone());
+        hits.push(states[p as usize].hits[j as usize]);
     }
 
     apps.clear();

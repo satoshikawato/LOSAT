@@ -24,7 +24,9 @@
 //! `-subject` path (`run.rs`); the opening of the database, the reader's errors and the
 //! rules for the stored titles are shared with BLASTP (`algorithm::common::database`).
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -41,7 +43,7 @@ pub(super) use crate::algorithm::common::database::{HeaderReadError, Preliminary
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::pairwise::PairwiseDatabase;
-use crate::seqdb::{BlockRange, SeqDb, SeqDbError, SeqType, SequenceBlock};
+use crate::seqdb::{BlockRange, NucleotideAmbiguity, SeqDb, SeqDbError, SeqType, SequenceBlock};
 use crate::utils::threading::SearchPool;
 
 use super::BlastnSubjectRef;
@@ -95,6 +97,49 @@ mod x_db_stream;
 /// The IUPAC letter of a BLASTNA code.
 const BLASTNA_TO_IUPACNA: [u8; 16] = *b"ACGTRYMKWSBDHVN-";
 
+/// `SeqDb::read_block`, mapped with LOSAT_X_BNMAPPED.
+fn x_read_block(db: &SeqDb, range: BlockRange) -> Result<SequenceBlock, SeqDbError> {
+    if super::x_bn_mapped() {
+        db.x_read_block_mapped(range)
+    } else {
+        db.read_block(range)
+    }
+}
+
+/// `SeqDb::read_sequence`, mapped with LOSAT_X_BNMAPPED.
+fn x_read_sequence(db: &SeqDb, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
+    if super::x_bn_mapped() {
+        db.x_read_sequence_mapped(ordinal)
+    } else {
+        db.read_sequence(ordinal)
+    }
+}
+
+/// With LOSAT_X_BNMAPPED, gives a block read by `x_read_block` or `x_read_sequence` back to
+/// `utils::x_mapped::X_BYTES`.
+fn x_done_block(block: SequenceBlock) {
+    if super::x_bn_mapped() {
+        block.x_recycle();
+    }
+}
+
+/// With LOSAT_X_BNMAPPED, gives letters of `x_blastna` back to `utils::x_mapped::X_BYTES`.
+fn x_done_bytes(mut bytes: Vec<u8>) {
+    if super::x_bn_mapped() {
+        super::x_bn_mapped_reach(bytes.len());
+        crate::utils::x_mapped::X_BYTES.give(&mut bytes);
+    }
+}
+
+/// `SequenceBlock::nucleotide_blastna(0)`, mapped with LOSAT_X_BNMAPPED.
+fn x_blastna(block: &SequenceBlock) -> Result<Vec<u8>, SeqDbError> {
+    if super::x_bn_mapped() {
+        block.x_nucleotide_blastna_mapped(0)
+    } else {
+        block.nucleotide_blastna(0)
+    }
+}
+
 /// A reader error outside the preliminary search as the command line reports it
 /// (`algorithm::common::database::database_error`).
 fn database_error(error: SeqDbError) -> anyhow::Error {
@@ -118,7 +163,54 @@ pub(super) struct BlastnDatabase {
     taxdb: shared::TaxdbRun,
 }
 
+/// The length and the ambiguity runs of the database sequences that one report call wrote
+/// letters of (`BlastnDatabase::sam_letters`), by ordinal id.
+#[derive(Default)]
+pub(super) struct SamLetterCache(RefCell<HashMap<u32, NucleotideAmbiguity>>);
+
 impl BlastnDatabase {
+    // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:185
+    // ```c++
+    //             "\tLN:" + NStr::UInt8ToString(refseq.GetBioseqLength()));
+    // ```
+    /// The length in bases of each of the database sequences `ordinals` (outfmt 17: the
+    /// Bioseq's length for `@SQ` and the clips of a record), from the index and the last byte
+    /// of each sequence's packed bases; no letters are read.
+    pub(super) fn sam_lengths(&self, ordinals: &[u32]) -> Result<Vec<usize>> {
+        ordinals
+            .iter()
+            .map(|&ordinal| self.db.nucleotide_length(ordinal).map_err(database_error))
+            .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:222-234
+    // ```c++
+    //             vect.GetSeqData(tgt_rg.GetFrom(), tgt_rg.GetToOpen(), seq_data);
+    // ```
+    /// The IUPAC letters `[from, to)` of database sequence `ordinal` (outfmt 17 with `SQ`):
+    /// only the bytes of the range are read, and the sequence's length and ambiguity runs are
+    /// read once per call and kept in `cache` (NCBI's `CSeqVector` also keeps them).
+    pub(super) fn sam_letters(
+        &self,
+        cache: &SamLetterCache,
+        ordinal: u32,
+        from: usize,
+        to: usize,
+    ) -> Result<Vec<u8>> {
+        let mut entries = cache.0.borrow_mut();
+        let ambiguity = match entries.entry(ordinal) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(
+                self.db
+                    .nucleotide_ambiguity(ordinal)
+                    .map_err(database_error)?,
+            ),
+        };
+        self.db
+            .nucleotide_iupac_range_with(ordinal, from, to, ambiguity)
+            .map_err(database_error)
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -420,7 +512,7 @@ where
             round
                 .par_iter()
                 .map_init(new_scratch, |scratch, &range| -> Result<Vec<(u32, R)>> {
-                    let block = db.read_block(range).map_err(search_read_error)?;
+                    let block = x_read_block(db, range).map_err(search_read_error)?;
                     let mut kept = Vec::new();
                     for i in 0..block.len() {
                         let ordinal = range.first_ordinal + i as u32;
@@ -428,6 +520,7 @@ where
                             kept.push((ordinal, result));
                         }
                     }
+                    x_done_block(block);
                     Ok(kept)
                 })
                 .collect()
@@ -513,13 +606,14 @@ where
     let mut scratch = new_scratch();
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
-        let block = db.read_block(range).map_err(search_read_error)?;
+        let block = x_read_block(db, range).map_err(search_read_error)?;
         for i in 0..block.len() {
             let ordinal = range.first_ordinal + i as u32;
             if let Some(result) = search(&mut scratch, ordinal, block_subject(&block, i)?) {
                 merge(ordinal, result);
             }
         }
+        x_done_block(block);
         next_ordinal = range.end_ordinal();
     }
     Ok(())
@@ -599,9 +693,9 @@ where
 {
     let db = &database.db;
     let one = |scratch: &mut T, &(ordinal, ref kept): &(u32, P)| -> Result<Option<R>> {
-        let stored = db.read_sequence(ordinal).map_err(database_error)?;
+        let stored = x_read_sequence(db, ordinal).map_err(database_error)?;
         let length = stored.nucleotide_len(0).map_err(database_error)?;
-        let blastna = stored.nucleotide_blastna(0).map_err(database_error)?;
+        let blastna = x_blastna(&stored).map_err(database_error)?;
         let subject = BlastnSubjectRef {
             length,
             packed: stored.nucleotide_packed(0),
@@ -610,7 +704,10 @@ where
             blastna: Some(&blastna[1..=length]),
             store: None,
         };
-        Ok(traceback(scratch, ordinal, subject, kept))
+        let result = traceback(scratch, ordinal, subject, kept);
+        x_done_bytes(blastna);
+        x_done_block(stored);
+        Ok(result)
     };
     #[cfg(all(
         feature = "parallel",
@@ -790,13 +887,16 @@ pub(super) fn reported_subjects(
             .with_context(|| format!("database sequence {ordinal} has no title read"))?;
         shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
         let sequence = if letters {
-            let block = database.db.read_sequence(ordinal).map_err(database_error)?;
+            let block = x_read_sequence(&database.db, ordinal).map_err(database_error)?;
             let length = block.nucleotide_len(0).map_err(database_error)?;
-            let blastna = block.nucleotide_blastna(0).map_err(database_error)?;
-            blastna[1..=length]
+            let blastna = x_blastna(&block).map_err(database_error)?;
+            let letters = blastna[1..=length]
                 .iter()
                 .map(|&code| BLASTNA_TO_IUPACNA[usize::from(code & 0xF)])
-                .collect()
+                .collect();
+            x_done_bytes(blastna);
+            x_done_block(block);
+            letters
         } else {
             Vec::new()
         };

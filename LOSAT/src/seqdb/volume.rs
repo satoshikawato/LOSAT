@@ -914,6 +914,10 @@ const NCBI4NA_TO_IUPAC: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
 /// Sentinel byte NCBI puts before and after a BLASTNA sequence.
 pub const BLASTNA_SENTINEL: u8 = 15;
 
+/// EXPERIMENT (LOSAT_X_BNTBRANGE): NCBI's `FENCE_SENTRY` (seqdbgeneral.hpp:1229, blast_util.h:364),
+/// the byte around each range of a partly decoded sequence (`x_nucleotide_blastna_ranges`).
+pub const FENCE_SENTRY: u8 = 201;
+
 /// The ambiguity runs of the ambiguity words of one sequence, in stored order
 /// (`SequenceBlock::ambiguity_runs`); the error is its message.
 fn decode_ambiguity_runs(words: &[u32]) -> Result<Vec<AmbiguityRun>, &'static str> {
@@ -1229,6 +1233,107 @@ impl SequenceBlock {
     /// `x_mapped::X_BYTES.give`). No NCBI counterpart: only where the bytes are kept.
     pub fn x_nucleotide_blastna_mapped(&self, i: usize) -> Result<Vec<u8>, SeqDbError> {
         self.nucleotide_blastna_in(i, true)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1565-1595
+    // ```c++
+    //     *buffer = x_AllocType(base_length + (sentinel ? 2 : 0), alloc_type);
+    //     char *seq = *buffer + (sentinel ? 1 : 0);
+    //
+    //     vector<Int4> ambchars;
+    // 	x_GetAmbChar(oid, ambchars);
+    //     ITERATE(CSeqDB::TSequenceRanges, riter, *(partial_ranges)) {
+    //     	int begin(riter->first);
+    //         int end(riter->second);
+    //
+    // 	    if (begin) seq[begin - 1] = (char) FENCE_SENTRY;
+    // 	    if (end < base_length) seq[end] = (char) FENCE_SENTRY;
+    // 	}
+    //     ITERATE(CSeqDB::TSequenceRanges, riter, *(partial_ranges)) {
+    //         SSeqDBSlice slice(max(0, (int)riter->first), min(base_length, (int)riter->second));
+    // 	    s_SeqDBMapNA2ToNA8(tmp, seq, slice);
+    // 	    s_SeqDBRebuildDNA_NA8(seq, ambchars, slice);
+    // 	    s_SeqDBMaskSequence(seq, masks, (char)14, slice);
+    // 	    if (sentinel){
+    // 	    	s_SeqDBMapNcbiNA8ToBlastNA8(seq, slice);
+    // 	    }
+    // 	}
+    // ```
+    // The ambiguity runs are applied in stored order, each to the ranges it overlaps, with the
+    // whole decode's tests (`nucleotide_blastna_in`), so every byte of a range is the whole
+    // decode's (NCBI's slices stop at the first run past each slice).
+    /// EXPERIMENT (LOSAT_X_BNTBRANGE): `nucleotide_blastna` of the bases of `ranges` only
+    /// (`[from, to)`, sorted and disjoint, as NCBI's partial-fetch ranges are; a range past the
+    /// end is cut there), with `FENCE_SENTRY` before and after
+    /// each range that does not reach an end of the sequence (`GetAmbigPartialSeq`): `len + 2`
+    /// bytes, zero outside the ranges. The buffer is zeroed by the allocator and, from
+    /// `x_mapped::X_MAPPED_FROM` on, mapped: its pages outside the ranges are not written, so
+    /// they are not resident.
+    pub fn x_nucleotide_blastna_ranges(
+        &self,
+        i: usize,
+        ranges: &[(usize, usize)],
+    ) -> Result<Vec<u8>, SeqDbError> {
+        debug_assert!(ranges.windows(2).all(|pair| pair[0].1 <= pair[1].0));
+        let packed = self.nucleotide_packed(i);
+        let base_length = self.nucleotide_len(i)?;
+        if base_length < 1 {
+            return Err(self.format(i, "Error: could not get sequence or range."));
+        }
+        let mut buffer = vec![0u8; crate::utils::x_mapped::x_mapped_capacity(base_length + 2, 1)];
+        buffer.truncate(base_length + 2);
+        {
+            let seq = &mut buffer[1..=base_length];
+            let ranges = ranges
+                .iter()
+                .map(|&(from, to)| (from.min(base_length), to.min(base_length)));
+            for (from, to) in ranges.clone() {
+                if from > 0 {
+                    seq[from - 1] = FENCE_SENTRY;
+                }
+                if to < base_length {
+                    seq[to] = FENCE_SENTRY;
+                }
+            }
+            for (from, to) in ranges.clone() {
+                for (position, base) in seq[from..to.max(from)].iter_mut().enumerate() {
+                    let position = from + position;
+                    let code = (packed[position >> 2] >> (6 - 2 * (position & 3))) & 3;
+                    *base = 1 << code;
+                }
+            }
+            let ranges: Vec<(usize, usize)> = ranges.filter(|r| r.0 < r.1).collect();
+            let region_end = base_length as i64;
+            for run in self.ambiguity_runs(i)? {
+                let position = i64::from(run.offset as i32);
+                let row_len = i64::from(run.length);
+                if position + row_len <= 0 {
+                    continue;
+                }
+                if position >= region_end {
+                    break;
+                }
+                let run_from = position.max(0) as usize;
+                let run_to = (position + row_len).min(region_end) as usize;
+                let first = ranges.partition_point(|r| r.1 <= run_from);
+                for &(from, to) in &ranges[first..] {
+                    if from >= run_to {
+                        break;
+                    }
+                    for at in run_from.max(from)..run_to.min(to) {
+                        seq[at] = run.ncbi4na;
+                    }
+                }
+            }
+            for &(from, to) in &ranges {
+                for base in &mut seq[from..to] {
+                    *base = NCBINA8_TO_BLASTNA8[usize::from(*base & 0xF)];
+                }
+            }
+        }
+        buffer[0] = BLASTNA_SENTINEL;
+        buffer[base_length + 1] = BLASTNA_SENTINEL;
+        Ok(buffer)
     }
 
     fn nucleotide_blastna_in(&self, i: usize, mapped: bool) -> Result<Vec<u8>, SeqDbError> {

@@ -4225,6 +4225,7 @@ pub(super) fn greedy_gapped_alignment_internal(
             &mut fwd_start_point,
         );
         if fence_hit {
+            super::x_fence::x_fence_met();
             return None;
         }
         if debug_greedy_traceback_enabled(q_off, s_off) {
@@ -4277,6 +4278,7 @@ pub(super) fn greedy_gapped_alignment_internal(
             &mut rev_start_point,
         );
         if fence_hit {
+            super::x_fence::x_fence_met();
             return None;
         }
         if debug_greedy_traceback_enabled(q_off, s_off) {

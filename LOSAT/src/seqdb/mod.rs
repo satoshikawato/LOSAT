@@ -50,7 +50,9 @@ use std::sync::OnceLock;
 
 pub use alias::SearchPath;
 pub use header::Defline;
-pub use volume::{AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, BLASTNA_SENTINEL};
+pub use volume::{
+    AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, BLASTNA_SENTINEL, FENCE_SENTRY,
+};
 
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): how the volumes read their index files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

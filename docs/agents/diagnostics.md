@@ -4135,12 +4135,14 @@ Scheduling (each value computed by one thread with the original function; order 
   Measured: (to come).
 - `LOSAT_X_BXEVALEMPTY=1` (BLASTX, speed; in the strict set from the pull request that added it, with
   `LOSAT_X_BXDBSTREAM`: on unless `=0` or `LOSAT_X_DEFAULT=0`): the gapped evaluation of a subject without
-  preliminary HSPs (`statistics::evaluate_gapped`, which the sink calls for every subject) returns at once the list
-  that both of its ways give for no input (`link_uneven`'s first lines, and its loop: no HSP, best e-value 0), without
-  the Karlin and Gumbel lookups and the two per-context vectors it built first. Most subjects of a database have no
-  HSP: on Swiss-Prot x 201 reads at one thread the evaluation was 2.1 % of the run's user cycles (`perf record`,
-  workstation). Shadow: `LOSAT_X_BXEVALEMPTYSHADOW=1` also evaluates every empty input the full way and stops at a
-  difference; at exit `[X_SHADOW] BXEVALEMPTY lists_compared=N identical` (`tests/blastx_db_stream.rs`).
+  preliminary HSPs (`statistics::evaluate_gapped`, which the sink calls for every subject, and the composition redo
+  and the traceback call for theirs) returns at once the list that both of its ways give for no input
+  (`link_uneven`'s first lines, and its loop: no HSP, best e-value 0), without the Karlin and Gumbel lookups and the
+  per-context vectors it built first. Most subjects of a database have no HSP: on Swiss-Prot x 201 reads at one
+  thread the evaluation was 2.1 % of the run's user cycles (`perf record`, workstation). Shadow:
+  `LOSAT_X_BXEVALEMPTYSHADOW=1` also evaluates every empty input the full way; at exit, after at least one
+  comparison, `[X_SHADOW] BXEVALEMPTY lists_compared=N identical` (`tests/blastx_db_stream.rs`). At a difference the
+  same line, with the lists compared before it, comes just before the panic.
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

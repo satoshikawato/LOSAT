@@ -263,7 +263,8 @@ fn the_empty_evaluation_gives_the_reports_of_the_full_one() {
                     String::from_utf8_lossy(&output.stderr).into_owned(),
                 )
             };
-            let (expected, stderr) = run(&[("LOSAT_X_BXEVALEMPTY", "0")]);
+            // The shadow of the switch that is off compares nothing and prints nothing.
+            let (expected, stderr) = run(&[("LOSAT_X_BXEVALEMPTY", "0"), shadow[0]]);
             assert!(!expected.is_empty() && stderr.is_empty(), "{stderr}");
             assert!(
                 run(&[]) == (expected.clone(), String::new()),

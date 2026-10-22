@@ -2,7 +2,7 @@
 
 Plan documents of closed lines, moved here from the `docs/` root on 2026-10-23 (slim-20261022 P2b; the
 Owner's decision of 2026-10-22: old plans move to `docs/archive/`, not deleted). The files are unchanged except
-that their relative links were rewritten for the new location. Run records under `docs/evidence/` that name the
+that their relative links and their `docs/<name>` path mentions were rewritten for the new location. Run records under `docs/evidence/` that name the
 old paths were left as they are.
 
 | Document | Line |
@@ -33,6 +33,6 @@ old paths were left as they are.
 | [losat_wasm_np_plan_20260906/](losat_wasm_np_plan_20260906/README.md) | Wasm BLASTN/BLASTP speed sessions, 2026-09-06 |
 
 Plans that an open line still follows stay at the `docs/` root: the LOSAT Web plan and its sessions, the reactor
-memory follow-up, the LOSATX (BLASTX) and TLOSAN (TBLASTN) v0.2.0 plans with their sessions (v0.2.0 is not
-released), and the user documents `cli_v2_migration.md` and `losatx_blastx_native_cli.md`. When such a line
+memory follow-up, the LOSATX (BLASTX) and TLOSAN (TBLASTN) v0.2.0 plans with their sessions and the LOSATX
+Session F checkpoint (v0.2.0 is not released), and the user documents `cli_v2_migration.md` and `losatx_blastx_native_cli.md`. When such a line
 closes, its plan moves here the same way: `git mv`, then rewrite the links to and from it.

@@ -19,7 +19,7 @@ I4を`linking.rs`へ反映した。通常Nodeのn8検索本体は、Mjeで22.224
 - C1: 独立した先頭frame groupを完了してから残りを並列処理する。スレッドpoolとgroup内の状態は維持する。初回だけ速く反復時に悪化する可能性があるため、主要入力のmodule再利用を早期の採否条件にする。
 - C2: NCBIの既存のchain選択反復を単位に、Wasmの関数入口へ戻る。反復本体、group状態、浮動小数点演算順を維持する。C1とは別の候補とし、生成コード・反復境界の全状態・Native/serial/threaded・再利用を検証する。
 - 両案とも実検索だけを実行する。人工的な検索、warm状態のcache、暗黙のthread上限は導入しない。
-- 保存先: `evidence/wasm_remaining_work_20260915/README.md`（アーカイブ内の `run-02/`）。1.20のNative比を必須条件にせず、現状からの速度改善と非回帰で採否を決める。
+- 保存先: `docs/evidence/wasm_remaining_work_20260915/README.md`（アーカイブ内の `run-02/`）。1.20のNative比を必須条件にせず、現状からの速度改善と非回帰で採否を決める。
 
 ### 第3回: n8逆転を優先する追加検証（2026-09-16）
 

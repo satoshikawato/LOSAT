@@ -4485,6 +4485,19 @@ Scheduling (each value computed by one thread with the original function; order 
   batch by the rule) cycles x1.001, instructions x1.000; cycles x0.939 and x0.922 for the first two and three
   of the 50 cDNAs, x0.963 for AP027131 x AP027133, x0.897 for the 50-kb piece and x0.883 for 201 reads x
   Swiss-Prot (wall 57.33 -> 50.10 s, x0.874); WSSV x PajaWSV (blastp) instructions x1.000.
+- `LOSAT_X_BXCROSS=1` (BLASTX, speed; an opt-in prototype (v4-A14 s2, 2026-10-23), not in the strict set: off
+  unless set to a value other than `0`; acts where `LOSAT_X_BXDIAG`'s fused loop runs an AVX2 cell test, on
+  every table it takes, in place of `LOSAT_X_BXDEFER` and its `LOSAT_X_BXDEFERMIN` rule) the cell test of
+  blastx's fused seed loop cuts its batches of eight across the cells' borders (`blastp/x_seed_fused.rs`,
+  `x_scan_cells_avx2_cross`, exactness argument in its header): the scan's call for a cell only stages the
+  cell's hits (coordinate, query offset, subject offset; three masked 8-lane loads per 24 hits), and every 1,024
+  staged hits and at the end of the subject the stage is tested in batches of eight (the lanes of
+  `LOSAT_X_BXDEFER`'s batch with a subject offset per lane, each batch's candidates called before the next
+  batch loads); a batch with two hits on one diagonal entry and the last fewer than eight hits take the
+  hit-by-hit test. Exact because the stream is the scan order and a hit's test and call touch only its own
+  entry. With `LOSAT_TIMING=1` the `blastx_diag` line names `mode=avx2-cross` (and `tables_avx2=0`). Shadow:
+  `LOSAT_X_BXDIAGSHADOW=1` compares it with the reference for every subject; `tests/blastx_diag.rs` runs it
+  with every search, the shadow and `=0`. Design and timings: v4-A14 results/p2 (DESIGN_cross.md).
 - `LOSAT_X_BXSCANBF=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's decision of that day
   (perf-si-20261012 DECISIONS 175) on the timings below: on by default, `=0` turns it off, and with
   `LOSAT_X_DEFAULT=0` it is off unless set; acts where the standard lookup table is scanned by `LOSAT_X_BXSCAN`'s

@@ -11,7 +11,7 @@ const F: &str = "tests/fasta/outfmt0";
 const D: &str = "tests/db_search";
 
 fn losat_binary() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_LOSAT") {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_losat") {
         return PathBuf::from(path);
     }
     let mut path = std::env::current_exe().expect("current test executable");
@@ -19,7 +19,7 @@ fn losat_binary() -> PathBuf {
     if path.file_name().is_some_and(|name| name == "deps") {
         path.pop();
     }
-    path.push(format!("LOSAT{}", std::env::consts::EXE_SUFFIX));
+    path.push(format!("losat{}", std::env::consts::EXE_SUFFIX));
     path
 }
 

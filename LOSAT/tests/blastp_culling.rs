@@ -32,7 +32,7 @@ fn temp_path(tag: &str) -> PathBuf {
 
 /// The binary with `env` as its only variables that choose a code path.
 fn losat(env: &[(&str, &str)]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if text.starts_with("LOSAT_")

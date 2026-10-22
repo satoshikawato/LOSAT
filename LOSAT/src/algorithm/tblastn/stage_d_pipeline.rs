@@ -6225,6 +6225,7 @@ mod tests {
             query_offsets: &[],
             subject_set: Default::default(),
             engine_positives: false,
+            culling_limit: 0,
         };
         let ranges = vec![0..1, 1..2, 2..3, 3..4];
         let searched = x_search_batches(

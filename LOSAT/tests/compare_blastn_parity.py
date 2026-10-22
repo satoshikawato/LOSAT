@@ -852,7 +852,7 @@ def main() -> int:
     parser.add_argument(
         "--losat-bin",
         type=Path,
-        default=Path("target/release/LOSAT"),
+        default=Path("target/release/losat"),
         help="LOSAT executable for --refresh-losat/--fresh-paired, relative to cwd unless absolute.",
     )
     parser.add_argument("--print-refresh-commands", action="store_true")

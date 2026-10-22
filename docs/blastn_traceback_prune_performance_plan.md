@@ -52,7 +52,7 @@ This region includes:
 
 Primary scope:
 
-- `LOSAT blastn --task blastn`
+- `losat blastn --task blastn`
 - single-thread `-n 1` first, because the supplied comparison table is
   single-threaded
 - outfmt 6/7 parity for hit order, coordinates, bit score, e-value, identity,
@@ -546,7 +546,7 @@ Validation performed:
 - `PesePMNV.MjPMNV --task blastn -n 1` remained byte-identical to the current
   LOSAT fixture.
 - `MelaMJNV.PemoMJNVA --task blastn -n 1` remained byte-identical to the
-  current LOSAT fixture in both debug `cargo run` and `target/release/LOSAT`.
+  current LOSAT fixture in both debug `cargo run` and `target/release/losat`.
 
 Current caveat:
 

@@ -69,7 +69,7 @@ CLI's wording: argv errors are the message of the engine's parser
 `: ` (as ABI v1 reports them). The adapter parses the argv exactly as the command line
 (every program accepts the CLI's default `-outfmt 0`), so an argv error of `validate`, an
 unknown program's included, is the CLI's message (session S08). Only the adapter's own
-rules give other messages: `-out` and `-outfmt` are not accepted (§7), and `blastx` is not
+rules give other messages: `-out`, `-outfmt`, `-num_descriptions` and `-num_alignments` are not accepted (§7), and `blastx` is not
 available until SX. `run` finds the handles of the argv's program before it parses the
 argv, so it reports an unknown program as `unknown program '<name>'` and `blastx` as not
 available; a host validates the argv first.
@@ -125,11 +125,13 @@ keeps.
   the handles.
 - `-out` and `-outfmt` are rejected: the adapter writes every format the program supports
   (`describe` lists them).
+- `-num_descriptions` and `-num_alignments` are rejected (all four programs, also as `--x` and `-x=v`):
+  one Web search writes outfmt 0, 6 and 7, for which NCBI derives different hit list sizes from them.
 - `-num_threads` is appended by the host. When the host falls back to the serial
   module, it passes `-num_threads 1` and records the reason (plan §4.7). The host
   validates the argv that it will run, with its `-num_threads`, so a `-num_threads` in
   the user's words is reported by `validate` (the parser rejects the repeated option).
-- Every other word is parsed by the engine's CLI parser, so options and errors behave
+- Every other word (except `-num_descriptions`, `-num_alignments` above) is parsed by the engine's CLI parser, so options and errors behave
   exactly as on the command line. LOSAT's own debug output (environment variables such
   as `LOSAT_TIMING`) goes to the module's WASI standard error, not to stream 3; stream 3
   carries the warnings that the CLI writes.
@@ -171,7 +173,7 @@ formatted from the raw values (plan §4.4).
 
 ## 9. JSON responses (stream 2)
 
-- *describe*: `{ "program", "formats": [0, 6, 7], "parameters": [{ "flag", "help", "takes_value", "default"?, "choices"? }], "query_gencodes"?, "subject_gencodes"? }`, generated from the clap definitions (without `-out`, `-outfmt` and `-num_threads`, which the adapter and the host set), the program's supported output formats and the genetic codes that the engine's parser accepts for `-query_gencode` and `-db_gencode`.
+- *describe*: `{ "program", "formats": [0, 6, 7], "parameters": [{ "flag", "help", "takes_value", "default"?, "choices"? }], "query_gencodes"?, "subject_gencodes"? }`, generated from the clap definitions (without `-out`, `-outfmt`, `-num_descriptions`, `-num_alignments` and `-num_threads`, which the adapter and the host set or refuse), the program's supported output formats and the genetic codes that the engine's parser accepts for `-query_gencode` and `-db_gencode`.
 - *register*: `{ "handle", "records": [{ "index", "id", "length" }] }`, from the records of the program's own reader (§4). `id` is the record's title up to its first space (0x20), empty when the record has no title (never NCBI's `Query_N` or `Subject_N`); bytes that are not UTF-8 become U+FFFD in the JSON only (the output streams keep the title's bytes). `length` is the number of residues the reader stores. `register` also scans the same bytes with the program's kind (1 or 2) and fails if the records, IDs, lengths or residue counts differ.
 - *scan*: `{ "records": [{ "index", "id", "header_offset", "sequence_offset", "end_offset", "length", "line_layout", "residue_counts" }] }`. Offsets are byte offsets in the scanned input and may exceed 2³²; they are encoded as JSON numbers and stay below 2⁵³. `line_layout` is `{ "kind": "uniform", "width", "eol" }` when residue `i` is at `sequence_offset + floor(i / width) * (width + eol) + i mod width`, or `{ "kind": "checkpoints", "every": 65536, "offsets": [...] }`, where `offsets[k]` is the byte offset of residue `k * 65536` and the residues are read forward from there under the kind's rules (below). `residue_counts` maps each byte value of the stored residues to its count: the bytes 0x21-0x7E as the character itself, every other byte (including the space) as `"0xNN"`.
   - Kinds 1 and 2 (session SF) give exactly the records that NCBI BLAST+'s reader returns from the bytes read as a file, with the program's flags and the data loaders on: records without residues and a first record without a defline included. The scan writes no messages. An input of white space, blank and comment lines only has no record and scans to `{"records":[]}`.

@@ -1,5 +1,5 @@
 //! Writer of NCBI BLAST databases (the version 4 volume layout that
-//! `makeblastdb -blastdb_version 4` writes) and the `LOSAT makedb` command.
+//! `makeblastdb -blastdb_version 4` writes) and the `losat makedb` command.
 //!
 //! NCBI's writer is `c++/src/objtools/blast/seqdb_writer/` (CWriteDB,
 //! CBuildDatabase) under the application `c++/src/app/blastdb/makeblastdb.cpp`.

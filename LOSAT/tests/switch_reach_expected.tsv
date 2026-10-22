@@ -68,7 +68,6 @@ LOSAT_X_HSPINPLACE	tblastx	always			HSP list sorted, linked and replayed without
 LOSAT_X_LINKSLICES	tblastx	always			Linking call links groups as sub-slices of one sorted list
 LOSAT_X_LINKSORT	tblastx	always			HSP linking index sorts once; long sorts on pool
 LOSAT_X_LUTARENA	blastp,blastx,tblastn,tblastx	always			Protein lookup-table chains carved from one arena
-LOSAT_X_LUTSPLIT	tblastn	always			Build only the half (contexts or table) a caller uses
 LOSAT_X_MBBATCH	blastn	platform			wasm/aarch64 where MBDELAY does not run
 LOSAT_X_MBDELAY	blastn	platform			x86 native (prefetch instruction); MBBATCH runs elsewhere
 LOSAT_X_MBLUTKEEP	blastn	conditional	required	required	only batch loop with several query batches, contiguous table, while no QBATCHPAR slot can run
@@ -96,24 +95,20 @@ LOSAT_X_SEEDRELEASE	tblastx	always			Seed-stage-only tables freed before last su
 LOSAT_X_SEEDUNMAP	tblastx	conditional	gap	gap	Linux glibc, 2+ threads, THP not always; unit query span and subject chunk both >=65,536 letters; new gap: host-dependent: glibc, THP not 'always', 2+ threads, unit span and chunk >= 65,536 letters; ref gap: host-dependent: a THP-'always' host never decides (this WSL); 2+ threads with small units elsewhere
 LOSAT_X_SEGSHARE	blastp	conditional	required	required	blastp with 2+ threads
 LOSAT_X_SEGTRIMMEMO	blastx,tblastn	always			SEG trim of candidate segment memoised per thread
-LOSAT_X_TBNBATCH	tblastn	conditional	gap	required	needs TBNSSIDE (4+ query batches) and at least one batch per thread; rule via TBNBATCHRULE; new gap: needs 4+ query batches of 20,000 residues and 4+ batches per thread
-LOSAT_X_TBNBATCHRULE	tblastn	conditional	gap	gap	several query batches; full waves of threads side by side; subjects <=24 Mb or <2 per thread; new gap: needs the TBNBATCH input with batches >= threads; ref gap: needs 4+ batches at 2+ threads with plans that fit and no full wave (batches < threads, or > 24 Mb of many subjects)
+LOSAT_X_TBNBATCH	tblastn	conditional	gap	required	needs 4+ query batches and at least one batch per thread; rule via TBNBATCHRULE; new gap: needs 4+ query batches of 20,000 residues and 4+ batches per thread
+LOSAT_X_TBNBATCHRULE	tblastn	conditional	gap	gap	several query batches; full waves of threads side by side; subjects <=24 Mb or <2 per thread; new gap: needs 4+ query batches with batches >= threads; ref gap: needs 4+ batches at 2+ threads with plans that fit and no full wave (batches < threads, or > 24 Mb of many subjects)
 LOSAT_X_TBNFRAMEREUSE	tblastn	always			a dropped plan's frames are reused by the next plan of its thread (rides on TBNKEEPFEW's drops)
 LOSAT_X_TBNHITBF	tblastn	always			Branch-free too-far/overlap outcomes in two-hit loop
-LOSAT_X_TBNKEEPFEW	tblastn	conditional	required	gap	4+ query batches with TBNSSIDE searched one after another: plans dropped unless they fit threads x longest plan; ref gap: needs 4+ batches whose plans are kept (fit threads x longest plan, or batches side by side)
+LOSAT_X_TBNKEEPFEW	tblastn	conditional	required	gap	4+ query batches searched one after another: plans dropped unless they fit threads x longest plan; ref gap: needs 4+ batches whose plans are kept (fit threads x longest plan, or batches side by side)
 LOSAT_X_TBNLINKWIN	tblastn	always			Uneven-gap linking tests only admissible candidates of a head set
 LOSAT_X_TBNOIDCHUNK	tblastn	conditional	required	required	2+ threads and several subjects
-LOSAT_X_TBNOIDNEXT	tblastn	conditional	required	required	2+ threads, several subjects, where TBNOIDCHUNK makes chunks
+LOSAT_X_TBNOIDNEXT	tblastn	conditional	required	required	2+ threads, several subjects, where the pool takes chunks of subjects
 LOSAT_X_TBNOIDUNITS	tblastn	conditional	required	required	2+ threads, several subjects, subject longer than chunk budget
-LOSAT_X_TBNOWNPOOLS	tblastn	conditional	gap	required	native only; <2 subjects per thread; 2..threads-1 batches (<=24 Mb) else 2..threads/2; new gap: needs < 2 subjects per thread and 2..threads-1 batches left after the waves
-LOSAT_X_TBNPAR	tblastn	always			Preliminary stage per (frame, chunk) and redo per match in parallel units
-LOSAT_X_TBNQSIDE	tblastn	always			Query SEG and lookup table once per query set
+LOSAT_X_TBNOWNPOOLS	tblastn	conditional	required	required	native only; <2 subjects per thread; 2..threads-1 batches (<=24 Mb) else 2..threads/2
 LOSAT_X_TBNSCANBF	tblastn	always			Branch-free lookup scan in blocks of 256 words (unit path)
 LOSAT_X_TBNSCANBYTE	tblastn	platform			AVX2 CPUs only (nothing elsewhere); word size 3, 5-bit letters tables
 LOSAT_X_TBNSSIDE	tblastn	conditional	gap	required	only searches of 4+ query batches (20,000 residues each); <=256 MiB of translated residues; new gap: since TBNKEEPFEW the fixtures' 4+ batch searches drop their plans; needs plans that fit threads x longest plan (e.g. one genome subject, 4+ batches)
-LOSAT_X_TBNSTATE	tblastn	always			Scan state kept per thread across subjects, diagonal offset step instead of clearing
 LOSAT_X_TBNSTORE	tblastn	conditional	required	required	-subject without -subject_loc, no -lcase_masking stage, no non-ncbi4na byte
-LOSAT_X_TBNXLATE	tblastn	always			Six subject frames read from codon tables as NCBI does
 LOSAT_X_TBNXLATESIMD	tblastn	platform			AVX2 vector loop only on x86 AVX2; packed subjects (-db, or -subject without -subject_loc)
 LOSAT_X_TBXBAND	tblastx	conditional	required	gap	only batches the old guard rejected (query/subject chunk lengths near table sizes); memory rule x_band_fits; ref gap: needs a batch the old guard rejects with a subject chunk longer than the table (short query x multi-Mb subject)
 LOSAT_X_TBXEXTBATCH	tblastx	conditional	gap	required	x86-64 only; only units with query-group span >=256 Ki letters (query ~>0.8 Mb); window >= wordsize+16; new gap: needs a query-group span >= 256 Ki letters (query ~0.8 Mb), x86-64

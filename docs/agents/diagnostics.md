@@ -309,6 +309,7 @@ export LOSAT_X_BPSEED=1
 export LOSAT_X_BPSUBJMETA=1
 export LOSAT_X_BPSUBJRUN=1
 export LOSAT_X_BPUNGAP=1
+export LOSAT_X_BPUNGAPSENT=1
 export LOSAT_X_BXBATCH=1
 export LOSAT_X_BXCHUNK=64
 export LOSAT_X_BXDIAG=1
@@ -1781,6 +1782,22 @@ Rebuilding less:
 - `LOSAT_X_BPUNGAPSHADOW=1` shadow of `LOSAT_X_BPUNGAP` (turns the path on): every extension runs both ways and
   the results (score, offsets, length, `right_extend`, `s_last_off`, and the early return) must be equal; any
   difference panics with the inputs. One line at exit: `[X_SHADOW] BPUNGAP compared=`.
+- `LOSAT_X_BPUNGAPSENT=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-23;
+  `=0` turns it off) the two-hit ungapped extension of blastp's fused seed loop for word size 3
+  (`blastp/x_ungapped_sent.rs`, exactness argument in its header): a closure of its own, with the extension
+  inlined, takes the candidates of the table of single letters. The checks `LOSAT_X_BPUNGAP` makes on every
+  call are made once: residue codes below 32 and every context's X-drop in 1..=127 for a query block, codes
+  below 32 and a sentinel at each end for a subject. The walks have no bound test: the query block is copied
+  with a sentinel added at each end (2 bytes more than the block), the subject buffer has its own, and a step
+  on a sentinel (-128 in the byte table) stops the walk at the step where the reference's bound stops it, with
+  the same best, length and stop. The word loop is unrolled for three letters and the walks take two steps a
+  loop. A block with another word size (blastp-fast, `-word_size`), an X-drop outside 1..=127 or a code
+  >= 32, and a subject with a code >= 32, run the closure of `LOSAT_X_BPUNGAP`; so do `-window_size 0` and
+  `LOSAT_X_BPSEED=0` (no fused loop). BLASTX keeps `LOSAT_X_BPUNGAP`.
+- `LOSAT_X_BPUNGAPSENTSHADOW=1` shadow of `LOSAT_X_BPUNGAPSENT` (turns the path on): every extension of the path
+  also runs the closure of `LOSAT_X_BPUNGAP`'s extension and the results (score, offsets, length,
+  `right_extend`, `s_last_off`, and the early return) must be equal; any difference panics with the inputs.
+  One line at exit: `[X_SHADOW] BPUNGAPSENT compared=`.
 - `LOSAT_X_LINKSORT=1` (TBLASTX, speed; in the strict set since 2026-10-14) the index sorts of the
   in-place HSP list path (`tblastx/x_link_sort.rs`, exactness argument in its header; it acts only where
   `LOSAT_X_HSPINPLACE` does).

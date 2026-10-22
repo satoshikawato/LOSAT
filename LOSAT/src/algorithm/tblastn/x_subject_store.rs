@@ -59,21 +59,6 @@ impl<'a> SubjectLetters<'a> {
         (0..self.count()).map(|oid| self.length(oid))
     }
 
-    /// The letters of subject `oid`: the record's own, or made in `buffer` from its store.
-    pub(super) fn letters<'b>(&self, oid: usize, buffer: &'b mut Vec<u8>) -> &'b [u8]
-    where
-        'a: 'b,
-    {
-        match self {
-            Self::Records(subjects) => subjects[oid],
-            Self::Packed(subjects) => {
-                LETTERS_MADE.fetch_add(1, Ordering::Relaxed);
-                subjects[oid].ascii_into(buffer);
-                buffer
-            }
-        }
-    }
-
     /// `f` of the letters of subject `oid`, made in a buffer that the thread keeps between
     /// subjects (a buffer above `X_KEPT_BUFFER` is freed after use, so that a thread does not keep
     /// a chromosome's letters). Re-entrant: a nested call (a pool thread that takes another
@@ -308,7 +293,7 @@ const X_PACK_BATCH_LETTERS: usize = 4 << 20;
 /// Subjects read packed, and the bytes their stores hold.
 static STORED_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static STORED_BYTES: AtomicU64 = AtomicU64::new(0);
-/// The times the letters of a packed subject were made.
+/// The times the whole letters of a packed subject were made (not the windows the readers make).
 static LETTERS_MADE: AtomicU64 = AtomicU64::new(0);
 /// The times the resolved bases of a packed subject were made for its preliminary stage.
 static RESOLVED_MADE: AtomicU64 = AtomicU64::new(0);

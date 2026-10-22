@@ -57,8 +57,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 ENGINE = REPO / "LOSAT"
-sys.path.insert(0, str(ENGINE / "tests"))
+# Appended, so that the helper modules of LOSAT/tests never shadow the standard library.
+sys.path.append(str(ENGINE / "tests"))
 import xinclude_fixtures as xinclude  # noqa: E402  (the rows of outfmt 13 and 14)
+# The one rule of the SAM rows (outfmt 17): the CL tag of the @PG line is not compared.
+from db_search_fixtures import is_sam_outfmt, strip_sam_cl  # noqa: E402
 MANIFEST = ENGINE / "tests/outfmt0_manifest.tsv"
 HASHES = ("stdout_sha256", "stdout_bytes", "stderr_sha256")
 # The columns of the old form of the manifest; the `files` columns follow them and are left out of a
@@ -222,8 +225,17 @@ def main() -> int:
             hashes.append("db_stdout_sha256")
         if args.freeze:
             row.update(observed)
-        elif defects or any(row.get(key, "") != observed[key] for key in hashes):
+        elif defects:
             differing.append(row["fixture_id"])
+        elif any(row.get(key, "") != observed[key] for key in hashes):
+            # A SAM row (outfmt 17) may differ in the CL tag of its @PG line (NCBI's argv[0] is the path
+            # of this run's binary): the frozen file and this run are compared without it.
+            frozen = ENGINE / "tests/fixtures/outfmt0" / f"{row['fixture_id']}.out"
+            same_but_cl = (is_sam_outfmt(outfmt(row)) and frozen.exists()
+                           and row.get("stderr_sha256", "") == observed["stderr_sha256"]
+                           and strip_sam_cl(run.stdout) == strip_sam_cl(frozen.read_bytes()))
+            if not same_but_cl:
+                differing.append(row["fixture_id"])
         shown = shlex.join([row["program"], *search_argv(row)])
         records.append([row["fixture_id"], f"{wall:.2f}", *(observed[key] for key in HASHES), shown])
 

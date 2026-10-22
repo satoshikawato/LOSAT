@@ -368,7 +368,8 @@ impl Program {
             Xml2 => true,
             JsonS => true,
             Xml2S => true,
-            Sam => false,
+            // Line OF track S: SAM for BLASTN alone (OF6).
+            Sam => self == Program::Blastn,
         }
     }
 }
@@ -525,12 +526,14 @@ pub fn report_format(
             choice.number
         ),
     };
-    if choice.custom() && !program.custom_fields() {
+    // SAM reads its own words and ignores a delimiter (`CBlast_SAM_Formatter::x_ProcessCustomSpec`).
+    let is_sam = format == ReportFormat::Sam;
+    if choice.custom() && !program.custom_fields() && !is_sam {
         anyhow::bail!(
             "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {name}"
         );
     }
-    if !choice.delimiter.is_empty() {
+    if !choice.delimiter.is_empty() && !is_sam {
         anyhow::bail!(
             "a custom delimiter (delim=) in the output format is not supported by LOSAT's {name}"
         );
@@ -1104,6 +1107,7 @@ mod tests {
     // (OF5a), BLASTX (OF5b part 1), TBLASTN (OF5b part 2) and TBLASTX (OF5b part 3): every program;
     // 13 and 14 in BLASTP and BLASTN (OF5c part 1), BLASTX, TBLASTN and TBLASTX (part 2): every
     // program writes 0, 5 to 9 and 12 to 16.
+    // 17 (SAM) in BLASTN alone (OF6).
     #[test]
     fn every_program_writes_its_formats_only() {
         for program in PROGRAMS {
@@ -1112,11 +1116,12 @@ mod tests {
                 .filter(|&format| program.writes(format))
                 .map(ReportFormat::number)
                 .collect();
-            assert_eq!(
-                written,
-                [0, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16],
-                "{program:?}"
-            );
+            let expected: &[i32] = if program == Program::Blastn {
+                &[0, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 17]
+            } else {
+                &[0, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16]
+            };
+            assert_eq!(written, expected, "{program:?}");
         }
         assert_eq!(
             PROGRAMS.map(Program::name),
@@ -1188,10 +1193,7 @@ mod tests {
             }
             let sam = report_format(&choice(SAM), program, None);
             if program.is_sam() {
-                assert_eq!(
-                    sam.unwrap_err().to_string(),
-                    "output format 17 is not supported by LOSAT's BLASTN"
-                );
+                assert_eq!(sam.unwrap(), Some(ReportFormat::Sam));
             } else {
                 assert_eq!(sam.unwrap(), None);
             }

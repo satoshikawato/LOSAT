@@ -274,6 +274,20 @@ writes (`Error: [blastn] ...`).
   variant `offset_last_past_end` (the last entry, 10090, has its offset past the end of `taxdb.btd`); the row
   `db.sa.bpqb.taxdb.lastoff.15` freezes NCBI's messages across the two query batches (the volume's lookup once, the `Hit`'s each time).
 
+OF6 (SAM, outfmt 17, BLASTN): the rows `db.sa.sam.*` (stems `mega`, `dc`, `tb`, `mv`, `short`, `ambrc`, `mts1`, `maxhsps1`,
+`cull1`, `qloc`, `nohit`, `b100`; suffix `.17p` = `-outfmt 17`, `.17q` = `17 SQ`, `.17r` = `17 SR`, `.17b` = `17 SQ SR`, `.5` = the
+outfmt 5 sibling that `S/scripts/check_sam_layout.py` predicts the document from) search `nslice` with `nslice_q.fna`
+(`mega`, `dc`, `tb`, `short`, the option rows and `b100`: `BATCH_SIZE=100`, one query per batch), `nucl_mv` with
+`tests/seqdb/nucl.fna` (`mv`) and `sam_ambrc` with `tests/fasta/outfmt0/sam_ambig_q.fna` (`ambrc`: ambiguity letters in
+the stored data of a minus-strand hit). `sam_ambrc` is built from `tests/fasta/outfmt0/sam_ambig_rc_s.fna` (only
+`.nhr .nin .nsq` are kept):
+
+    makeblastdb -in tests/fasta/outfmt0/sam_ambig_rc_s.fna -dbtype nucl -out tests/db_search/sam_ambrc \
+        -title "sam ambiguity letters on a minus strand" -blastdb_version 4
+
+The frozen documents are NCBI's bytes, including the `CL:` tag of the `@PG` line (the path of the NCBI binary that
+froze them); the check removes that tag from both sides (`db_search_fixtures.py strip_sam_cl`).
+
 OF5b part 1 (XML2 and JSON of BLASTX): `make_x16_blastx_inputs.py` writes the inputs (run from `LOSAT/`):
 `x16_bx_taxid_q.fna` (three nucleotide queries for `x16_taxid`: a minus frame, a plus frame, one without hits) and
 `x16_bx_taxid_q2.fna` (two queries of 10,003 bases, each its own NCBI query batch of 10,002 bases, that both hit

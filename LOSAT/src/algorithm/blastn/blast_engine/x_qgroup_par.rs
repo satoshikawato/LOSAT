@@ -22,7 +22,7 @@
 //! in one order (score order for the preliminary loop, the hit lists' order for the traceback),
 //! with one interval tree. `search_query_batch` does the same on the thread that owns the subject;
 //! with one subject (`-subject` with one record) the other threads of the pool only compute
-//! alignments ahead of that loop (LOSAT_X_AHEAD), which leaves most of them waiting: at 16 threads
+//! alignments ahead of that loop (the look-ahead of `utils/xahead.rs`), which leaves most of them waiting: at 16 threads
 //! the two loops, the purges and the sorts around them were 57 % of a blastn batch's wall
 //! (31,168 cDNAs against 3 Mb; v4-D session 8 probe).
 //!
@@ -31,12 +31,12 @@
 //! an endpoint with the new one (which rejects the new HSP or unlinks an old one) also compares
 //! only HSPs of the same context; both walks visit every node that can hold such an HSP, so the
 //! tree's shape (which depends on what else it holds) cannot change an answer, and the
-//! LOSAT_X_ITREEFAST grid gives the tree's yes / no (`interval_tree.rs`). Only the trace reads
+//! interval-tree grid gives the tree's yes / no (`interval_tree.rs`). Only the trace reads
 //! which HSP contains another, and the trace keeps the owner loop. The purges sort by context
 //! first and compare only within a context (`purge_prelim_hits_with_common_endpoints`,
 //! `purge_hsps_with_common_endpoints_ex`), the re-evaluation and the identity test read one HSP
 //! and its context's cutoff and statistics, the alignment scratch carries nothing from one call
-//! to the next that changes a result (LOSAT_X_AHEAD's helpers already compute with scratch of
+//! to the next that changes a result (the look-ahead helpers already compute with scratch of
 //! their own), and the sorts are stable. So running the loop of one query over that query's HSPs,
 //! in the relative order they have in the batch's list, with a tree of its own, gives the HSPs the
 //! batch's loop gives for that query, in the same relative order.
@@ -69,7 +69,7 @@
 //! The queries are handed out to the threads from an atomic counter, the query with the most HSPs
 //! first (the counts are known before each stage), each thread with its own tree and alignment
 //! scratch; measured on 5,000 cDNAs, that order keeps 16 threads 0.99 busy where contiguous groups
-//! of queries kept them 0.66-0.79 busy. The owner loop with LOSAT_X_AHEAD stays where a batch has
+//! of queries kept them 0.66-0.79 busy. The owner loop with the look-ahead stays where a batch has
 //! fewer than two queries with HSPs or one query holds more than a quarter of the stage's HSPs (a
 //! long genome query: the loop's helpers then do better than the queries), for a subject searched
 //! in chunks in parallel, and on the diagnostic paths (`-verbose`, LOSAT_DEBUG_BLASTN,

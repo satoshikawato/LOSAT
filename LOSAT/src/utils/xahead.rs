@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_AHEAD[=window]): an ordered loop whose expensive,
+//! No NCBI counterpart: an ordered loop whose expensive,
 //! pure step is evaluated ahead of the loop by the other threads of the
 //! search pool.
 //!
@@ -59,11 +59,10 @@
 //! still tests and adds in the NCBI order; the other threads only evaluate the
 //! alignment call for indexes the owner has not reached, which depends on the index
 //! alone. A value nobody takes is dropped. This changes which thread computes a value and
-//! when, and nothing else. Shadow mode (LOSAT_X_AHEADSHADOW) recomputes every value the
-//! owner takes and compares it.
+//! when, and nothing else.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, MutexGuard};
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919,4045-4046
 /// ```c
@@ -75,22 +74,9 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 ///          status = s_BlastDynProgNtGappedAlignment(&query_tmp, subject,
 ///                       gap_align, score_params, init_hsp);
 /// ```
-/// Reads the LOSAT_X_AHEAD switch once: the number of upcoming indexes of the loop above
-/// that may be evaluated ahead. Placement of work only.
-/// Look-ahead distance in indexes; `None` when the switch is off.
-pub(crate) fn window() -> Option<usize> {
-    static WINDOW: OnceLock<Option<usize>> = OnceLock::new();
-    *WINDOW.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_AHEAD", 2..=65_536, 16))
-}
-
-/// No NCBI counterpart: reads the switch of the shadow comparison; it does not change any
-/// value NCBI computes.
-/// `LOSAT_X_AHEADSHADOW`: the owner evaluates every value it takes once more
-/// on its own scratch and compares.
-pub(crate) fn shadow() -> bool {
-    static SHADOW: OnceLock<bool> = OnceLock::new();
-    *SHADOW.get_or_init(|| std::env::var_os("LOSAT_X_AHEADSHADOW").is_some())
-}
+/// The number of upcoming indexes of the loop above that may be evaluated ahead (the built-in
+/// value of the former `LOSAT_X_AHEAD`, which graduated on 2026-10-22). Placement of work only.
+pub(crate) const WINDOW: usize = 16;
 
 // No NCBI counterpart: the states of one slot of the look-ahead ring; the slot holds a
 // value that NCBI computes inside its loop, computed earlier.

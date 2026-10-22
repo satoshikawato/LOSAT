@@ -943,19 +943,22 @@ fn fold<const PT: bool>(
         let qe = qs + ungapped.length;
 
         // NCBI architecture: Collect ungapped hit for batch processing
-        ungapped_hits.push(UngappedHit {
-            context_idx: q_idx,
-            query_idx: ctx.query_idx,
-            query_frame: ctx.frame,
-            query_context_offset: ctx.query_offset,
-            seed_q_off: q_off - q_context_start,
-            seed_s_off: s_off,
-            qs,
-            qe,
-            ss,
-            se: ungapped_se,
-            score: ungapped_score,
-        });
+        super::x_push_ungapped(
+            ungapped_hits,
+            UngappedHit {
+                context_idx: q_idx,
+                query_idx: ctx.query_idx,
+                query_frame: ctx.frame,
+                query_context_offset: ctx.query_offset,
+                seed_q_off: q_off - q_context_start,
+                seed_s_off: s_off,
+                qs,
+                qe,
+                ss,
+                se: ungapped_se,
+                score: ungapped_score,
+            },
+        );
         if PT {
             out.hit_keys.push(x_key);
         }

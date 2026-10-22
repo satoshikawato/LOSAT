@@ -123,18 +123,23 @@ use std::sync::OnceLock;
 /// `LOSAT_X_QGROUPPAR` (BLASTN's preliminary gapped loop and traceback of a subject searched on one
 /// thread run per query on the pool, `blastn/blast_engine/x_qgroup_par.rs`) joined the set in the
 /// pull request that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_BXCHUNKFLOW` (BLASTX's chunks of a split query searched one after another, each chunk's
+/// subjects as the subject flow on the whole pool, where each chunk has enough tasks for the pool,
+/// `blastx/x_subject_flow.rs`) joined the set in the pull request that added it, after it was
+/// verified and timed with it on and off.
 /// `LOSAT_X_PAIRPARGATE` (TBLASTX's unit path only for the query batches where it is expected to
 /// be faster than the reference frame loop, `tblastx/x_pair_par.rs`) and `LOSAT_X_TBXLUT` (the
 /// reference loop's full lookup table filled in place from per-cell counts,
 /// `tblastx/lookup/x_lut_direct.rs`) were added after the change as switches that are off unless
 /// set and joined the set together once they were verified and timed with them on and off.
 pub(crate) const STRICT_SET: &[&str] = &[
-    "LOSAT_X_AHEAD",
     "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNDBSTREAM",
     "LOSAT_X_BNFEWSUBJ",
+    "LOSAT_X_BNMAPPED",
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
+    "LOSAT_X_BNUNGAPCOUNT",
     "LOSAT_X_BPCLUT",
     "LOSAT_X_BPCOMPOREUSE",
     "LOSAT_X_BPDBCUT",
@@ -166,6 +171,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPUNGAP",
     "LOSAT_X_BXBATCH",
     "LOSAT_X_BXCHUNK",
+    "LOSAT_X_BXCHUNKFLOW",
     "LOSAT_X_BXDIAG",
     "LOSAT_X_BXFLOW",
     "LOSAT_X_BXHITBF",
@@ -178,7 +184,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXSCANBF",
     "LOSAT_X_BXSEGMEMO",
     "LOSAT_X_BXSUBJFLOW",
-    "LOSAT_X_CTXFAST",
     "LOSAT_X_CTXO1",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
@@ -187,18 +192,11 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_DISCLUTPAR",
     "LOSAT_X_DPEMASK",
     "LOSAT_X_ERFABSORB",
-    "LOSAT_X_GREEDYFAST",
-    "LOSAT_X_GREEDYFUSE",
-    "LOSAT_X_GREEDYPRELIM",
-    "LOSAT_X_GREEDYSPEC",
     "LOSAT_X_HSPINPLACE",
-    "LOSAT_X_ITREEFAST",
     "LOSAT_X_LINKSLICES",
     "LOSAT_X_LINKSORT",
     "LOSAT_X_LUTARENA",
     "LOSAT_X_LUTSPLIT",
-    "LOSAT_X_MBBATCH",
-    "LOSAT_X_MBDELAY",
     "LOSAT_X_MBLUTKEEP",
     "LOSAT_X_MBLUTONCE",
     "LOSAT_X_MBLUTPREFAULT",
@@ -210,7 +208,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_PAIRPARGATE",
     "LOSAT_X_PAIRPARNA",
     "LOSAT_X_PAIRWISEPAR",
-    "LOSAT_X_PURGEFAST",
     "LOSAT_X_QBATCHPAR",
     "LOSAT_X_QDUSTPAR",
     "LOSAT_X_QGROUPPAR",
@@ -267,9 +264,13 @@ pub(crate) const STRICT_SET: &[&str] = &[
 /// `LOSAT/tests/switch_reach_expected.tsv`. An always-on switch that graduates leaves both lists:
 /// nothing chooses any more.
 pub(crate) const GRADUATED: &[&str] = &[
+    "LOSAT_X_AHEAD",
     "LOSAT_X_DPAVX2",
     "LOSAT_X_DPNEON",
     "LOSAT_X_DPW128",
+    "LOSAT_X_GREEDYSPEC",
+    "LOSAT_X_MBBATCH",
+    "LOSAT_X_MBDELAY",
     "LOSAT_X_NEWTONLANES",
     "LOSAT_X_NEWTONLANES8",
 ];

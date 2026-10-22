@@ -415,6 +415,23 @@ _CASES = [
     # probe inputs, not made by `generate`), also with a query split at 20000.
     ("culling.abricate_cl1", f"{AB} -culling_limit 1 -outfmt 6", ""),
     ("culling.abricate_cl1_c20000", f"{AB} -culling_limit 1 -outfmt 6", "", "CHUNK_SIZE=20000"),
+    # O2a (blastn -strand): a query split into chunks searches one strand's contexts in every chunk;
+    # DUST of -strand minus is that of the reverse complement; an invalid query warns once.
+    # strand_dust_*.fa (a query whose low-complexity region lies on one strand only) and
+    # strand_mixed_query.fa (all-N and empty records around strand_query.fasta) are copied from the
+    # O2a probe inputs, not made by `generate`.
+    ("strand.split_plus_c2000", f"{B} -task blastn -strand plus -outfmt 6", "", "CHUNK_SIZE=2000"),
+    ("strand.split_minus_c2000", f"{B} -task blastn -strand minus -outfmt 6", "", "CHUNK_SIZE=2000"),
+    ("strand.split_minus_c1500o50_fmt0", f"{B} -task blastn -strand minus -outfmt 0", "",
+     "CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=50"),
+    ("strand.dust_blastn_minus_fmt0", f"-query {I}/strand_dust_query.fa -subject {I}/strand_dust_subject.fa"
+                                      " -task blastn -strand minus -outfmt 0", ""),
+    ("strand.dust_megablast_minus_fmt0", f"-query {I}/strand_dust_query.fa -subject {I}/strand_dust_subject.fa"
+                                         " -strand minus -outfmt 0", ""),
+    ("strand.invalid_mixed_minus_fmt0", f"-query {I}/strand_mixed_query.fa -subject {O}/strand_subject.fasta"
+                                        " -task blastn -strand minus -outfmt 0", ""),
+    ("strand.lcase_qloc_plus_fmt0", f"-query {I}/strand_dust_query.fa -subject {I}/strand_dust_subject.fa"
+                                    " -task blastn -strand plus -lcase_masking -query_loc 20-700 -outfmt 0", ""),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 

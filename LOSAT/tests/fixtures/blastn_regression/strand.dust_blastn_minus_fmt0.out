@@ -1,0 +1,219 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fixtures/blastn_regression/inputs/strand_dust_subject.fa).
+           3 sequences; 4,060 total letters
+
+
+
+Query= dq0
+
+Length=200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ds0                                                                   280     2e-79
+
+
+> ds0
+Length=820
+
+ Score = 280 bits (310),  Expect = 2e-79
+ Identities = 178/200 (89%), Gaps = 0/200 (0%)
+ Strand=Plus/Minus
+
+Query  1    AGACCAANCCACCMccccccckncccycccccccccccnccccccamcccckcccccccg  60
+            ||||||| ||||| |||||||  ||| ||||||||||| ||||||| |||| ||||||||
+Sbjct  670  AGACCAAACCACCACCCCCCCAACCCACCCCCCCCCCCACCCCCCAACCCCACCCCCCCG  611
+
+Query  61   mccccctacckccnmkcycccnccccNgaagagaagagaagagaagagaagagaagagaa  120
+             ||||||||| ||   | ||| |||| |||||||||||||||||||||||||||||||||
+Sbjct  610  ACCCCCTACCACCAAACACCCACCCCAGAAGAGAAGAGAAGAGAAGAGAAGAGAAGAGAA  551
+
+Query  121  gagaagagaagagaagwgaagagaagagaagagaTAAACTTGGTGCGCAACCGGGKCGGG  180
+            |||||||||||||||| |||||||||||||||||||||||||||||||||||||| ||||
+Sbjct  550  GAGAAGAGAAGAGAAGAGAAGAGAAGAGAAGAGATAAACTTGGTGCGCAACCGGGACGGG  491
+
+Query  181  ASGGGYCGGGACAGMAWGGG  200
+            | ||| |||||||| | |||
+Sbjct  490  AAGGGACGGGACAGAAAGGG  471
+
+
+
+Lambda      K        H
+   0.674    0.420    0.979 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 747348
+
+
+Query= dq1
+
+Length=400
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ds1                                                                   678     0.0  
+
+
+> ds1
+Length=1220
+
+ Score = 678 bits (751),  Expect = 0.0
+ Identities = 388/400 (97%), Gaps = 0/400 (0%)
+ Strand=Plus/Minus
+
+Query  1     CGTTTTGCACAACGCCAAGTTTGAGTTGGAGGGAGGGCTCGATTGGCCAACAATTAGCCT  60
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1070  CGTTTTGCACAACGCCAAGTTTGAGTTGGAGGGAGGGCTCGATTGGCCAACAATTAGCCT  1011
+
+Query  61    AACTATCCGGGGGGATGATCGTAGGTTGAGACTcgagaacgcgagkgagngagcgtgagk  120
+             ||||||||||||||||||||||||||||||||||||||||||||| ||| ||||||||| 
+Sbjct  1010  AACTATCCGGGGGGATGATCGTAGGTTGAGACTCGAGAACGCGAGAGAGAGAGCGTGAGA  951
+
+Query  121   gagccagagagacagmacgagsmanagrgtgagcnagascgagaNNGCGAGAGGCCTTGT  180
+             ||||||||||||||| |||||  | || |||||| ||| |||||  ||||||||||||||
+Sbjct  950   GAGCCAGAGAGACAGAACGAGAAAAAGAGTGAGCAAGAACGAGAAAGCGAGAGGCCTTGT  891
+
+Query  181   TCTGACCTTCATAGCCCGCGGCAAGGGATGATAACGTCGTCAGTCTGCACAATAACGCAA  240
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  890   TCTGACCTTCATAGCCCGCGGCAAGGGATGATAACGTCGTCAGTCTGCACAATAACGCAA  831
+
+Query  241   TTACTTGACACTCGCCGGGCGATCTATATTAAAGTTGTGACCAGGGCGTTAGATTGACTC  300
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  830   TTACTTGACACTCGCCGGGCGATCTATATTAAAGTTGTGACCAGGGCGTTAGATTGACTC  771
+
+Query  301   CACCACAGTAAAGTTACACAAGAGCGATCAAGCCCTATAATGGATTCAGGACAAATAGTG  360
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  770   CACCACAGTAAAGTTACACAAGAGCGATCAAGCCCTATAATGGATTCAGGACAAATAGTG  711
+
+Query  361   GTTAGCTTGTGACCGAATCGGGTAGGTGCGTCTTATTCTC  400
+             ||||||||||||||||||||||||||||||||||||||||
+Sbjct  710   GTTAGCTTGTGACCGAATCGGGTAGGTGCGTCTTATTCTC  671
+
+
+
+Lambda      K        H
+   0.642    0.411    0.926 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1545775
+
+
+Query= dq2
+
+Length=800
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ds2                                                                   1418    0.0  
+
+
+> ds2
+Length=2020
+
+ Score = 1418 bits (1572),  Expect = 0.0
+ Identities = 793/800 (99%), Gaps = 0/800 (0%)
+ Strand=Plus/Minus
+
+Query  1     CTTGTCCAAGGCCAGGCAAATCAAGCGGAgaaacgaaacgaaacgaaacgaaacgaaacg  60
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1870  CTTGTCCAAGGCCAGGCAAATCAAGCGGAGAAACGAAACGAAACGAAACGAAACGAAACG  1811
+
+Query  61    aaacgaagagaacgaagacgaGTCTATCTGTTTGACAACAAGGGGCAACAGTATACAGCG  120
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1810  AAACGAAGAGAACGAAGACGAGTCTATCTGTTTGACAACAAGGGGCAACAGTATACAGCG  1751
+
+Query  121   GAAGGCGACAAGGAATGACTGTGTACGGGGTGAGGACTATCAtcgtcgtcgncgtcgtcg  180
+             ||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||
+Sbjct  1750  GAAGGCGACAAGGAATGACTGTGTACGGGGTGAGGACTATCATCGTCGTCGACGTCGTCG  1691
+
+Query  181   tcgtSGTMATCGTNGTCCCCCATTGCAAGATTGGCTATCGCGCGTCTTTAAAAAAGCAGT  240
+             |||| || ||||| ||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1690  TCGTAGTAATCGTAGTCCCCCATTGCAAGATTGGCTATCGCGCGTCTTTAAAAAAGCAGT  1631
+
+Query  241   TAAAGGCTCCCTACAGTGCTTTTGGAAACTCGAAAATAAGAGGCTGTAAGAAGAGCGAGT  300
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1630  TAAAGGCTCCCTACAGTGCTTTTGGAAACTCGAAAATAAGAGGCTGTAAGAAGAGCGAGT  1571
+
+Query  301   CGATTTACGGAACCGTCTCCTGGGCGAGTATTAGGTCCTTGGAGATATGTAACGAGTGTA  360
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1570  CGATTTACGGAACCGTCTCCTGGGCGAGTATTAGGTCCTTGGAGATATGTAACGAGTGTA  1511
+
+Query  361   ACCGTTTACAGGTCTCGTCATCTTTGGTTAAAGGGCACTATTGATGGGCCGCATACCCAC  420
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1510  ACCGTTTACAGGTCTCGTCATCTTTGGTTAAAGGGCACTATTGATGGGCCGCATACCCAC  1451
+
+Query  421   TCAGAAGATCCGGTTAACTAGGGGATGTGGCCCTTTGCGAGCCAAATAATGCTACGTGGA  480
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1450  TCAGAAGATCCGGTTAACTAGGGGATGTGGCCCTTTGCGAGCCAAATAATGCTACGTGGA  1391
+
+Query  481   TCCATCGGGTAATATCCTTgcagtggcagtggcagtggcagtggcagtggcagtggcagt  540
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1390  TCCATCGGGTAATATCCTTGCAGTGGCAGTGGCAGTGGCAGTGGCAGTGGCAGTGGCAGT  1331
+
+Query  541   ggcagtggcagtggcagtggcagtggcagtggcagtggcagtggAGTTCTGCGCAAGGTC  600
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1330  GGCAGTGGCAGTGGCAGTGGCAGTGGCAGTGGCAGTGGCAGTGGAGTTCTGCGCAAGGTC  1271
+
+Query  601   AACACGAATATGAGAAGACTTGCaagaagggaangtgaaagtgaaagtgaaagtgaacgt  660
+             ||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||
+Sbjct  1270  AACACGAATATGAGAAGACTTGCAAGAAGGGAAAGTGAAAGTGAAAGTGAAAGTGAACGT  1211
+
+Query  661   aaaagtgaaagtgaaagtgaaagwgaaggtgaaagtgaaagtgaaagtgaaagtgacagt  720
+             ||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||
+Sbjct  1210  AAAAGTGAAAGTGAAAGTGAAAGAGAAGGTGAAAGTGAAAGTGAAAGTGAAAGTGACAGT  1151
+
+Query  721   gaaaKCTGGTCTATAGGTAAACGCTGCCTCCCTTTAGACGCTATCGCTCGGCTACAAAGC  780
+             |||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1150  GAAAACTGGTCTATAGGTAAACGCTGCCTCCCTTTAGACGCTATCGCTCGGCTACAAAGC  1091
+
+Query  781   TAAAAAGAACACTGCGGGTC  800
+             ||||||||||||||||||||
+Sbjct  1090  TAAAAAGAACACTGCGGGTC  1071
+
+
+ Score = 22.9 bits (24),  Expect = 0.39
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  733   ATAGGTAAACGC  744
+             ||||||||||||
+Sbjct  1959  ATAGGTAAACGC  1948
+
+
+
+Lambda      K        H
+   0.636    0.409    0.916 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 3145408
+
+
+  Database: User specified sequence set (Input:
+tests/fixtures/blastn_regression/inputs/strand_dust_subject.fa).
+    Posted date:  Unknown
+  Number of letters in database: 4,060
+  Number of sequences in database:  3
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

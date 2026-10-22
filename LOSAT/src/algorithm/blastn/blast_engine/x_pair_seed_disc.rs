@@ -1893,7 +1893,7 @@ mod tests {
                 masks: masks[c].clone(),
             })
             .collect();
-        let index = QueryContextIndex::new(&contexts);
+        let index = QueryContextIndex::new(&contexts, false);
         Case {
             contexts,
             index,

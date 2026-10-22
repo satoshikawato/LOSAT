@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The branch-free two-hit test of BLASTP's per-hit seed loop (`LOSAT_X_BPHITBF`,
 //! `src/algorithm/blastp/x_seed_fused.rs`, module header) on whole searches.
 //!

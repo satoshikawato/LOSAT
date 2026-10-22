@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp `-db` reports with `LOSAT_X_BPLISTEDLEAN`
 //! (`src/algorithm/blastp/blast_engine/database/x_listed_lean.rs`) on whole searches.
 //!

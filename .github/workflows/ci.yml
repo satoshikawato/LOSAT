@@ -71,9 +71,14 @@ jobs:
           # assertions and overflow checks.
           CARGO_PROFILE_TEST_OPT_LEVEL: '1'
       # The performance switches are on by default (LOSAT/src/utils/xswitch.rs), so the run
-      # above tests the new paths. This one keeps the reference paths under test.
+      # above tests the new paths. This one keeps the reference paths under test. It leaves out
+      # the test files marked "CI reference step: skipped": each of their runs sets its own
+      # LOSAT_* variables, so it would repeat the run above (LOSAT/tests/reference_step_targets.sh).
       - name: cargo test on the reference paths (LOSAT_X_DEFAULT=0)
-        run: cd LOSAT && cargo test --all-features
+        run: |
+          cd LOSAT
+          targets=$(bash tests/reference_step_targets.sh)
+          cargo test --all-features $targets
         env:
           LOSAT_X_DEFAULT: '0'
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker-reference.log

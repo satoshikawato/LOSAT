@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp's preliminary hit lists with `LOSAT_X_BPPFREE` (`src/algorithm/blastp/x_prelim_free.rs`)
 //! on whole searches.
 //!

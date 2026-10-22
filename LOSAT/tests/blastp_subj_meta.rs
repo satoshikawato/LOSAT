@@ -123,7 +123,7 @@ fn blastp_with(
     outfmt: &str,
     extra: &[&str],
 ) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -300,9 +300,9 @@ fn the_switch_does_not_act_without_the_subject_block_search() {
     );
     let counts = counts.expect("a line at exit");
     assert!(counts.values().all(|&count| count == 0), "{counts:?}");
-    // A database made with `LOSAT makedb`; its block search reads the definition lines per block.
+    // A database made with `losat makedb`; its block search reads the definition lines per block.
     let name = dir.join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
@@ -310,7 +310,7 @@ fn the_switch_does_not_act_without_the_subject_block_search() {
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",

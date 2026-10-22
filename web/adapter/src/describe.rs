@@ -10,8 +10,16 @@ use LOSAT::cli::Cli;
 use crate::json;
 use crate::run::Program;
 
-/// Options that the adapter sets itself.
-const ADAPTER_OWNED: [&str; 3] = ["out", "outfmt", "num_threads"];
+/// Options that the adapter sets itself or refuses (`run::parse`): a Web search writes the
+/// output formats 0, 6 and 7 from one search, for which NCBI derives different hit list
+/// sizes from `-num_descriptions` and `-num_alignments`.
+const ADAPTER_OWNED: [&str; 5] = [
+    "out",
+    "outfmt",
+    "num_threads",
+    "num_descriptions",
+    "num_alignments",
+];
 
 /// Genetic codes are small integers; every accepted one is below this bound.
 const GENETIC_CODE_PROBE: u32 = 64;
@@ -107,4 +115,28 @@ pub fn describe(program: &str) -> Result<String, String> {
     }
     out.push('}');
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn options_the_adapter_owns_or_refuses_are_not_described() {
+        for program in ["blastp", "tblastn", "blastn", "tblastx"] {
+            let described = describe(program).unwrap();
+            for flag in [
+                "num_descriptions",
+                "num_alignments",
+                "outfmt",
+                "num_threads",
+            ] {
+                assert!(
+                    !described.contains(&format!("\"-{flag}\"")),
+                    "{program} lists -{flag}"
+                );
+            }
+            assert!(described.contains("\"-max_target_seqs\""), "{program}");
+        }
+    }
 }

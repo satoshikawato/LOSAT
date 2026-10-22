@@ -59,7 +59,7 @@ const THREADS: [u32; 2] = [1, 4];
 /// so the gate, in the strict set, would send them to the reference frame loop, and these tests
 /// are about the unit path.
 fn losat(switches: &[(&str, &str)]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
@@ -309,7 +309,7 @@ fn record(defline: &str, letters: &str) -> String {
 // BlastInitHitListReset(init_hitlist);
 // ```
 // A database search (the inputs of tests/tblastx_db_search.rs: the first 6 kb of MjeNMV against
-// a database of MelaMJNV and PemoMJNVA made by `LOSAT makedb`) at one and four threads: with the
+// a database of MelaMJNV and PemoMJNVA made by `losat makedb`) at one and four threads: with the
 // switch (on by default) both subjects run on the compact lists, and the report is the report of
 // the same search with `LOSAT_X_SEEDCOMPACT=0`.
 #[test]
@@ -342,7 +342,7 @@ fn a_database_search_gives_the_report_of_the_search_without_the_switch() {
         .arg(&set)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         made.status.success(),
         "makedb: {}",

@@ -2091,7 +2091,7 @@ class PlatformCertificationTests(unittest.TestCase):
             pe[60:64] = (64).to_bytes(4, "little")
             pe[64:68] = b"PE\0\0"
             pe[68:70] = (0x8664).to_bytes(2, "little")
-            pe_path = root / "LOSAT.exe"
+            pe_path = root / "losat.exe"
             pe_path.write_bytes(pe)
             self.assertEqual(platform_cert.binary_architecture(pe_path), "x86_64")
 

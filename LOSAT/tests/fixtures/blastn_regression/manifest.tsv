@@ -1,5 +1,5 @@
 # Frozen BLASTN outputs of blastn: 2.17.0+;  Package: blast 2.17.0, build Aug 11 2025 09:46:06 (comparison oracle only; see blastn_regression_fixtures.py).
-# Run from LOSAT/: env <env> blastn <argv> (LOSAT: LOSAT blastn <argv> <losat_extra>). Written by `freeze`; do not edit.
+# Run from LOSAT/: env <env> blastn <argv> (LOSAT: losat blastn <argv> <losat_extra>). Written by `freeze`; do not edit.
 case_id	argv	losat_extra	exit	stdout_sha256	stdout_bytes	stderr_sha256	env	oracle_env
 prelim.default	-query tests/fixtures/blastn_regression/inputs/q3k.fa -subject tests/fixtures/blastn_regression/inputs/s600.fa -outfmt 6		0	fac9ee742dd96a045f5ec881e71834d6f8624faaa863ddb5f07552c3b2dd7302	27099			
 prelim.task_blastn	-query tests/fixtures/blastn_regression/inputs/q3k.fa -subject tests/fixtures/blastn_regression/inputs/s600.fa -task blastn -outfmt 6		0	f291e2c7c853fa16230cb3085bfb8cc682f6d8fec3884ec4a5d824983e1eb367	28712			

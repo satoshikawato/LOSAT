@@ -524,6 +524,58 @@ fn defaults_and_task_overrides_remain_distinct() {
     assert!(parse("blastn", &words).is_err(), "{words:?}");
 }
 
+// NCBI blast_args.cpp:2665-2685: -num_descriptions and -num_alignments are integers of 0 or
+// more (`CArgAllowValuesGreaterThanOrEqual(0)`), which NCBI reads with the sign and
+// hexadecimal forms; blast_args.cpp:2732-2738: -max_target_seqs excludes both.
+#[test]
+fn num_descriptions_and_num_alignments_are_integers_of_zero_or_more() {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        for key in ["-num_descriptions", "-num_alignments"] {
+            for value in ["0", "5", "+5", "0x10", "2147483647"] {
+                parse(program, &["-outfmt", "6", key, value])
+                    .unwrap_or_else(|error| panic!("{program} {key} {value}: {error}"));
+            }
+            for value in ["-1", "abc", "1e1", "2147483648", ""] {
+                assert!(
+                    parse(program, &["-outfmt", "6", key, value]).is_err(),
+                    "{program} {key} {value}"
+                );
+            }
+            // The exclusion is NCBI's `SetDependency(eExcludes)`.
+            let error = parse(program, &["-max_target_seqs", "5", key, "5"])
+                .err()
+                .unwrap_or_else(|| panic!("{program} -max_target_seqs with {key}"));
+            assert_eq!(error.exit_code(), 2, "{program} {key}");
+        }
+        parse(
+            program,
+            &[
+                "-num_descriptions",
+                "3",
+                "-num_alignments",
+                "2",
+                "-outfmt",
+                "0",
+            ],
+        )
+        .unwrap();
+        parse(program, &["-max_target_seqs", "5"]).unwrap();
+    }
+    let Commands::Blastp(args) = parse(
+        "blastp",
+        &["-num_descriptions", "0x10", "-num_alignments", "+5"],
+    )
+    .unwrap()
+    .command
+    else {
+        unreachable!("blastp")
+    };
+    assert_eq!(
+        (args.num_descriptions, args.num_alignments),
+        (Some(16), Some(5))
+    );
+}
+
 #[test]
 fn numeric_values_are_validated_before_io() {
     for program in ["blastn", "blastp", "tblastx"] {

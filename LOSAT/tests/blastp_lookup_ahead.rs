@@ -125,7 +125,7 @@ fn blastp(
     vars: &[(&str, &str)],
     extra: &[&str],
 ) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -276,7 +276,7 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
 fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
     let dir = test_dir("db");
     let name = dir.join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
@@ -284,7 +284,7 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",

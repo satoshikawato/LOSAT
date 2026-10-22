@@ -127,7 +127,7 @@ fn tblastx_subjects() -> &'static Path {
 /// (`BATCH_SIZE` of the test's environment is dropped too; `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature needs it
 /// as soon as a search has more than one thread, and it selects nothing).
 fn losat(args: &[&str], threads: u32, switches: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG") || text == "BATCH_SIZE"
@@ -388,14 +388,14 @@ fn a_failed_write_ends_the_search_as_without_the_switch() {
     }
 }
 
-/// A protein database of MejoMJNV (LOSAT makedb), made once.
+/// A protein database of MejoMJNV (losat makedb), made once.
 fn protein_database() -> &'static Path {
     static DATABASE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DATABASE.get_or_init(|| {
         let dir = std::env::temp_dir().join(format!("losat-pairwisepar-db-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temporary directory");
         let name = dir.join("MejoMJNV");
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("makedb")
             .arg("-in")
             .arg(manifest("tests/fasta/MejoMJNV.faa"))
@@ -403,7 +403,7 @@ fn protein_database() -> &'static Path {
             .arg("-out")
             .arg(&name)
             .output()
-            .expect("run LOSAT makedb");
+            .expect("run losat makedb");
         assert!(output.status.success(), "makedb: {}", stderr(&output));
         name
     })

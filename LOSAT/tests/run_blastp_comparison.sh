@@ -20,7 +20,7 @@ set -euo pipefail
 #                        NStr::IntToString(dft_outfmt));
 # ```
 
-LOSAT_BIN="../target/debug/LOSAT"
+LOSAT_BIN="../target/debug/losat"
 REF_DIR="./blast_out/blastp"
 FASTA_DIR="./fasta"
 source ./blastp_parity_options.sh

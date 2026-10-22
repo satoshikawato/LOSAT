@@ -115,8 +115,20 @@ pub struct TblastxArgs {
     // ```
     // An omitted value keeps the default hit list size (500) but the pairwise report then
     // shows 250 alignments, so the option has no clap default.
-    #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep (default: 500)")]
+    #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep (default: 500)", conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<usize>,
+    // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
+    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
+    pub num_descriptions: Option<usize>,
+    #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
+    pub num_alignments: Option<usize>,
+    /// The hit list size and the numbers of descriptions and alignments of the pairwise
+    /// report, which `check_ncbi_options` sets from `-max_target_seqs`, `-num_descriptions`,
+    /// `-num_alignments` and the output format (`blastinput::report_counts`). Not a public
+    /// option.
+    /// Reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
+    #[arg(skip)]
+    pub report_counts: crate::blastinput::report_counts::ReportCounts,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:196-206
     // ```c
     //         arg_desc.AddOptionalKey(kArgQueryCovHspPerc, "float_value",

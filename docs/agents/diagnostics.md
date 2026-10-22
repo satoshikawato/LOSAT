@@ -220,7 +220,8 @@ their variables mean
   where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
   in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
   `NEWTONLANES8` acts only with `NEWTONLANES`, and only on aarch64; `TBNSTATE` and `TBNXLATE`
-  act only with `TBNPAR`; `TBNBATCHRULE` only with `TBNBATCH`; `TBNOWNPOOLS` only with `TBNBATCH`
+  act only with `TBNPAR`; `TBNKEEPFEW` only with `TBNSSIDE` and four or more query batches;
+  `TBNBATCHRULE` only with `TBNBATCH`; `TBNOWNPOOLS` only with `TBNBATCH`
   and `TBNBATCHRULE`, natively; `TBNSCANBF` only with `TBNPAR`; `TBNXLATESIMD` only with
   `TBNPAR` on a packed subject (`TBNSTORE`, `-db`) and with AVX2; `TBNOIDNEXT` and `TBNOIDUNITS` act
   only with `TBNOIDCHUNK`; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
@@ -372,7 +373,9 @@ export LOSAT_X_SEGTRIMMEMO=1
 export LOSAT_X_TBNBATCH=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNEVENTS=1
+export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNHITBF=1
+export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNLINKWIN=1
 export LOSAT_X_TBNOIDCHUNK=1
 export LOSAT_X_TBNOIDNEXT=1
@@ -892,11 +895,14 @@ Rebuilding less:
   search without them has 115 MiB less (max RSS 218-226 -> 103-113 MiB) and takes a median of
   1.03-1.11 of the time, on one 606 kb genome the same memory and 1.05-1.08 of the time
   (0.01-0.06 s). Four batches at 8 threads gave 1.06 on the 16S set, so the saving does not
-  start at four batches: the number is where the memory is preferred to it. `TBNBATCH` needs
+  start at four batches: the number is where the memory is preferred to it. `TBNBATCH` needed
   the kept translations, so two or three batches with at least one batch per thread are now
   searched one after another instead of side by side: 1.02-1.07 of the time on the 16S set and
   1.12-1.24 on the genome (0.04-0.09 s) with one batch per thread, 0.75-0.86 with three
-  batches on two threads.
+  batches on two threads. Since `TBNKEEPFEW` (2026-10-19) a search of four or more batches
+  keeps the translations only when they hold no more than the threads have in flight; the
+  batches are laid out as before (`TBNBATCH` reads `TBNSSIDE` and the number of batches, not
+  the kept translations).
 - `LOSAT_X_TBNBATCHRULE=1` tblastn, with `LOSAT_X_TBNBATCH` (speed; in the strict set since
   2026-10-16, on by default, `=0` turns it off; `tblastn/stage_d_pipeline.rs`
   `x_batches_side_by_side`): which query batches `TBNBATCH` searches side by side. With `=0`
@@ -3357,9 +3363,9 @@ Scheduling (each value computed by one thread with the original function; order 
   shadow).
 - `LOSAT_X_TBNPAR=1` tblastn: preliminary stage per (frame, chunk) and redo per match in
   parallel, one pool for the search. Shadow: `LOSAT_X_TBNPARSHADOW=1`.
-- `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE` and its kept translations, so four or more query
-  batches, and at least one batch per thread) tblastn query batches searched side by side,
-  appended in input order.
+- `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE` and four or more query batches, and at least one
+  batch per thread) tblastn query batches searched side by side, appended in input order.
+  The batches share the kept subject translations (`TBNKEEPFEW` keeps them for such a search).
 - `LOSAT_X_TBNOIDCHUNK=1` (in the strict set since 2026-10-13) tblastn with 2+ threads and several
   subjects: one entry into the search pool takes four chunks of subjects per thread instead of one
   subject per thread, and each chunk is one task that the pool gives to whichever thread is free;
@@ -3548,6 +3554,19 @@ Scheduling (each value computed by one thread with the original function; order 
   (`x_candidates_w3c5`, #273: cycles -6.0 % on the human and zebrafish genomes x one protein). An
   AVX2 form of the loop (`vpgatherdd` of the presence words) cut instructions by a third but was 2-7
   % slower (IPC 3.6 -> 2.3) and is not used.
+- `LOSAT_X_TBNFRAMEREUSE=1` tblastn (speed; in the strict set from the pull request that added it,
+  2026-10-19, with `TBNKEEPFEW`; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_frame_buffer`,
+  `x_reuse_frame`): a subject plan that is dropped gives its six frames to the next plan its thread
+  translates from a packed subject, which writes every residue of them without clearing them first.
+  A thread keeps at most six frames of at most 256 KiB (1.5 MiB). Before, every plan allocated and
+  zero-filled six new frames: with `TBNKEEPFEW` a search of many subjects makes a plan per subject
+  and query batch, and the allocations and zero fills were the 0.2-0.4 % that `TBNKEEPFEW` alone
+  lost at one thread and side by side. The residues do not change (`TBNXLATESHADOW` compares the
+  plans with the reference translation: 266,092 plans of 5,000 fly cDNAs and of the zebrafish
+  cDNAs at 8 threads, identical). With `TBNKEEPFEW`, against the default before (both `=0`), one
+  query batch (no plan kept either way) of 27 fly proteins against the zebrafish cDNAs (`-db`)
+  took x0.997 of the time at 1 thread (0.993-1.008, 6 pairs) and x1.000-1.004 at 8 (0.991-1.014,
+  two runs of 6 pairs); the other measured cases are in `TBNKEEPFEW`.
 - `LOSAT_X_TBNSCANBYTE=1` tblastn (speed; in the strict set from the pull request that added it,
   2026-10-21; `=0` turns it off; on by default where the CPU has AVX2, changes nothing elsewhere;
   `tblastn/x_scan_byte.rs`, exactness argument in its header): for tblastn's table (word size 3,
@@ -3604,6 +3623,37 @@ Scheduling (each value computed by one thread with the original function; order 
   every array that is not empty, so it is slow on long query sets. One line at exit, when the unit path
   filled any offset array (one per scan call, empty ones included; none with `LOSAT_X_DEFAULT=0`, which
   turns the unit path off): `[X_SHADOW] TBNHITBF arrays_compared= hits_compared= outside=`.
+- `LOSAT_X_TBNKEEPFEW=1` tblastn (memory; in the strict set from the pull request that added it,
+  2026-10-19, with `TBNFRAMEREUSE`; `=0` turns it off; `tblastn/search_seed.rs`
+  `XSubjectSide::kept_within_threads`, `tblastn/stage_d_pipeline.rs` `x_searched_side_by_side`): a
+  search of four or more query batches with `TBNSSIDE` that searches its batches one after another
+  keeps the subjects' six-frame translations (the plans) only when they hold no more than its
+  threads could have in flight, the thread count times the plan of the longest subject. One genome
+  or a few chromosomes are kept; many subjects are translated again for each batch and dropped
+  after the subject, as NCBI does (`blast_engine.c:627-631`). A search that searches batches side
+  by side (`TBNBATCH`; at most 24 Mb of subjects, or fewer than two subjects per thread) or on pools
+  of their own (`TBNOWNPOOLS`) keeps them as before: batches searched at the same time share them,
+  and the batches after the first ones read them (5,000 fly cDNAs, 7 batches at 4 threads:
+  4 side by side, then 3 one after another, took 1.004 of the time without them, 8 pairs). The
+  layout of the batches does not change. Measured with `TBNFRAMEREUSE`, the default against
+  `TBNKEEPFEW=0 TBNFRAMEREUSE=0` (the default before, same binary; workstation, 2026-10-20, node 1,
+  physical cores, booked cores warmed 3 s, arm order reversed every round, medians of 4-8 pairs;
+  the fly proteins of `dmel_b4.faa`, five batches, `-evalue 1e-5 -max_target_seqs 5`): 57,775
+  zebrafish cDNAs (122 Mb, `-db`) x1.001 at 1 thread (0.986-1.034), x0.989 at 8, `-subject` x0.990
+  at 8; 28,036 16S records (40.6 Mb, `-db`) x0.985 at 8; 7 batches (`dmel_b7.faa`) against 5,000
+  fly cDNAs (14.3 Mb) x1.000 at 2, x0.996 at 4 (both side by side, kept) and x0.998 at 8 (one
+  after another); every report the same. Peak anonymous memory (RssAnon, one run each, node 0):
+  the zebrafish cDNAs `-db` 361 -> 52 MiB at 1 thread and 390 -> 83 at 8 (NCBI BLAST+ 2.17.0 16
+  and 28; the rest is the stored database), `-subject` at 8 417 -> 108 MiB (NCBI `-subject` holds
+  every subject, about 800), the 16S set 134 -> 19 and 152 -> 38 MiB (NCBI 9 and 11), the 5,000
+  cDNAs at 8 threads 70 -> 37 MiB (NCBI 16). Before (dev 23db0a4f, `TBNSSIDE=0` against the
+  default, 38 pairs): x0.980-0.994 at 4, 8 and 16 threads on the two large sets, no pair slower.
+- `LOSAT_X_TBNKEEPFEWSHADOW=1` shadow of `LOSAT_X_TBNKEEPFEW` (any value): the plans are kept as
+  with `=0`, and every read of a kept plan also makes the plan of that use, as a search that keeps
+  none makes it; a frame or a unit that differs panics. One line at exit:
+  `[X_SHADOW] TBNKEEPFEW kept_plan_reads_compared= residues_compared=` (nothing compared below
+  four query batches, with `LOSAT_X_TBNSSIDE=0`, `LOSAT_X_TBNPAR=0` or `LOSAT_X_DEFAULT=0`, or for
+  plans beyond `KEEP_LIMIT`).
 - `LOSAT_X_TBNLINKWIN=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule of
   that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns it
   off; `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

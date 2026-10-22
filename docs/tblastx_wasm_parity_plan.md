@@ -17,8 +17,8 @@ The current release builds show matching hit counts but byte-different TBLASTX
 outfmt 6 output:
 
 ```text
-native: target/release/LOSAT
-wasm:   target/wasm32-wasip1/release/LOSAT.wasm, run through Node WASI
+native: target/release/losat
+wasm:   target/wasm32-wasip1/release/losat.wasm, run through Node WASI
 case:   tblastx -q tests/fasta/LC738874.fasta -s tests/fasta/LC738875.fasta --outfmt 6 -n 1
 hits:   native 4350, wasm 4350
 ```

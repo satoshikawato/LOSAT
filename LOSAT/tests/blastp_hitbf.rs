@@ -131,7 +131,7 @@ impl Drop for Inputs {
 /// --all-features`, as in CI) needs that file name as soon as a search has more than one thread,
 /// and it selects nothing.
 fn losat(env: &[(&str, &str)]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if text.starts_with("LOSAT_")

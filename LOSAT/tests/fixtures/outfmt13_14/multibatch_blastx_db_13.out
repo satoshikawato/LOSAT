@@ -1,0 +1,6 @@
+{
+	"BlastJSON": [
+		{"File": "multibatch_blastx_db_13.out_1.json" },
+		{"File": "multibatch_blastx_db_13.out_2.json" }
+	]
+}

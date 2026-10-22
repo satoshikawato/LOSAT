@@ -23,9 +23,9 @@
 //!             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
 //! ```
 //!
-//! The reference (`Lookup::scan` + `word_finder_plain`) allocates and zero-fills a buffer of
+//! The reference (`Lookup::scan` + `word_finder`) allocates and zero-fills a buffer of
 //! `capacity()` pairs per (chunk, subject) and copies every batch into a new `(i32, i32)` vector
-//! before the diagonal loop reads it. `x_word_finder_scan` is `word_finder_plain` with the
+//! before the diagonal loop reads it. `x_word_finder_scan` is `word_finder` with the
 //! scan loop of `Lookup::scan` inlined: the same `scan_range` state machine, the same
 //! `array_size` (`capacity()`), the scanner writing into a per-thread buffer (grown when a table
 //! needs more, never shrunk), and the diagonal statements reading the pairs in place.
@@ -34,9 +34,8 @@
 //! `scan_subject`) only write the buffer and return the number of pairs written, and only
 //! `pairs[0..hits)` is read afterwards, so stale contents beyond `hits` are never read. The
 //! pairs are visited in the same order with the same values (`u32 as i32`, as the copy did),
-//! and the diagonal statements below are those of `word_finder_plain`. The caller uses this
-//! path only when nothing traces the seeds (not in the diagnostic stages) and with the
-//! reference diagonal order (LOSAT_X_SEEDBUCKET mode 0).
+//! and the diagonal statements below are those of `word_finder`. The caller uses this
+//! path only when nothing traces the seeds (not in the diagnostic stages).
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF): with this switch (a switch of the strict set: on unless it is
 //! `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the scan of the standard lookup table is
@@ -91,7 +90,7 @@
 //! window`) is `(d2 - 2 wordsize) as u32 < 2 (window - wordsize)`, one unsigned compare. The rule
 //! also asks `1 <= wordsize < window`, a two-hit search (the one-hit search, window 0, keeps the
 //! statements). A flag-1 cell (`raw as i32 < 0`) or a candidate goes on to the statements of
-//! `word_finder_plain`, unchanged; any other hit stores `s + diag_offset` (too far; the flag stays
+//! `word_finder`, unchanged; any other hit stores `s + diag_offset` (too far; the flag stays
 //! 0) or what it read (overlap), selected without a branch. So the table holds after each hit what
 //! the statements leave there, the statements see the same table for every hit they run, and the
 //! init HSPs are the same, in the same order. (The context lookup the statements make before the
@@ -101,7 +100,7 @@
 //! `LOSAT_X_BXHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. The loop with the test is its own
 //! function (`x_word_finder_direct_bf`, never inlined), so the loop without it keeps its code. The
 //! fused loop of LOSAT_X_BXDIAG keeps its own tests. With `LOSAT_X_BXSCANSHADOW` the direct loop that
-//! runs, this one where the switch acts, is compared with `word_finder_plain` on a copy of the table
+//! runs, this one where the switch acts, is compared with `word_finder` on a copy of the table
 //! for every subject the direct loop scans, and `main` prints `[X_SHADOW] BXHITBF subjects_compared=N`
 //! at exit beside BXSCAN's line, N the subjects this loop scanned.
 
@@ -208,7 +207,7 @@ thread_local! {
 //                     diag_array[diag_coord].last_hit =
 //                         s_last_off - (wordsize - 1) + diag_offset;
 // ```
-/// EXPERIMENT (LOSAT_X_BXSCAN): `word_finder` (mode 0) without the per-call buffer and the
+/// EXPERIMENT (LOSAT_X_BXSCAN): `word_finder` without the per-call buffer and the
 /// batch copy; with the shadow switch the reference also runs on a copy of the diagonal table
 /// and the hit lists and tables are compared.
 pub(crate) fn x_word_finder_scan(
@@ -245,7 +244,7 @@ pub(crate) fn x_word_finder_scan(
             offset: diagonals.offset,
             window: diagonals.window,
         };
-        let reference = word_finder_plain(
+        let reference = word_finder(
             batch,
             parameters,
             options,
@@ -312,7 +311,7 @@ fn x_hitbf_acts(
 
 // No NCBI counterpart: chooses the instance of LOSAT's direct loop (`x_word_finder_direct_with`, which
 // ports the NCBI code); both give the reference's hits and table.
-// The direct loop: `Lookup::scan` and `word_finder_plain` in one function (`x_word_finder_direct_with`).
+// The direct loop: `Lookup::scan` and `word_finder` in one function (`x_word_finder_direct_with`).
 // EXPERIMENT (LOSAT_X_BXSCANBF): `branch_free` scans the standard table with `x_scan_one_range_bf`.
 // EXPERIMENT (LOSAT_X_BXHITBF): with `hit_bf`, where `XHitBf::fits` holds for the subject, the
 // instance with the branch-free two-hit test, `x_word_finder_direct_bf` (module header).
@@ -400,12 +399,12 @@ fn x_word_finder_direct_bf(
 //             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
 //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
 // ```
-// `Lookup::scan` (its range set-up and loop) and `word_finder_plain` (the statements per pair)
+// `Lookup::scan` (its range set-up and loop) and `word_finder` (the statements per pair)
 // in one function; the pairs are read from the scanner's buffer. EXPERIMENT (LOSAT_X_BXSCANBF):
 // `branch_free` scans the standard table with `x_scan_one_range_bf` (module header).
 // EXPERIMENT (LOSAT_X_BXHITBF): with `HIT_BF` (only where the caller found `XHitBf::fits` to hold)
 // each hit first goes through the branch-free two-hit test (`XHitBf::test`), and only a flag-1 cell
-// or a candidate reaches the statements of `word_finder_plain`.
+// or a candidate reaches the statements of `word_finder`.
 #[inline(always)]
 fn x_word_finder_direct_with<const HIT_BF: bool>(
     batch: &PreparedQueryBatch,
@@ -425,7 +424,7 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
         static ON: OnceLock<bool> = OnceLock::new();
         *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLAZYCTX"))
     };
-    // Lookup::scan's set-up, with length = subject.len() - 1 as word_finder_plain passes it.
+    // Lookup::scan's set-up, with length = subject.len() - 1 as word_finder passes it.
     let length = subject.len().saturating_sub(1);
     let window = options.window_size;
     let lookup_word = match lookup {
@@ -485,7 +484,7 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
                         continue;
                     }
                 }
-                // From here to the end of the loop body: the statements of word_finder_plain.
+                // From here to the end of the loop body: the statements of word_finder.
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,783-784
                 // ```c
                 //                 curr_context = BSearchContextInfo(query_offset, query_info);
@@ -695,7 +694,7 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
             }
         }
     });
-    // The rest of word_finder_plain, unchanged.
+    // The rest of word_finder, unchanged.
     diagonals.finish_subject(subject.len().saturating_sub(1))?;
     hits.sort_by(|a, b| {
         b.score
@@ -840,7 +839,7 @@ mod tests {
                     window > options.word_size,
                     "window={window} state={state}"
                 );
-                let plain = word_finder_plain(
+                let plain = word_finder(
                     &batch,
                     &params,
                     &options,
@@ -888,7 +887,7 @@ mod tests {
                         acts,
                         "window={window} offset={offset}"
                     );
-                    let plain = word_finder_plain(
+                    let plain = word_finder(
                         &batch,
                         &params,
                         &options,
@@ -931,7 +930,7 @@ mod tests {
             for n in [1, 2] {
                 let short = subject[..n].iter().copied().chain([0]).collect::<Vec<u8>>();
                 let mut reference = Diagonals::new(length, window).unwrap();
-                let plain = word_finder_plain(
+                let plain = word_finder(
                     &batch,
                     &params,
                     &options,
@@ -983,7 +982,7 @@ mod tests {
                 d.entries.fill(DiagStruct::clear(window));
             }
             assert!(!x_hitbf_acts(true, &options, &subject, &reference));
-            let plain = word_finder_plain(
+            let plain = word_finder(
                 &batch,
                 &params,
                 &options,
@@ -1023,7 +1022,7 @@ mod tests {
         }
     }
 
-    /// The statements of `word_finder_plain` up to the two `continue`s of a flag-0 cell
+    /// The statements of `word_finder` up to the two `continue`s of a flag-0 cell
     /// (aa_ungapped.c:519-551): the cell after a hit that is too far or overlaps, or `None` for a
     /// flag-1 cell or a candidate for the extension.
     fn two_hit_reference(

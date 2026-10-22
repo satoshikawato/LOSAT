@@ -188,7 +188,7 @@ fn erfc_ncbi(z: f64) -> f64 {
             return 2.0;
         }
     }
-    // EXPERIMENT (LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
+    // Memo (was LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
     // BLAST_SpougeEtoS (blast_stat.c:5236-5282) asks for the same arguments again
     // for every subject of the same length; keep the last results per thread.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:252-255
@@ -214,40 +214,22 @@ fn erfc_ncbi(z: f64) -> f64 {
     // NCBI calls ErfC again with the same arguments for every candidate score `b` of every
     // subject length. The memo returns the value the first call computed for the same bits of
     // `z`; ErfC reads nothing else, so this is reuse only.
-    if x_erf_memo() {
-        let key = z.to_bits();
-        return X_ERFC_MEMO.with(|memo| {
-            let mut memo = memo.borrow_mut();
-            let slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 52) as usize;
-            let (stored, value) = memo[slot];
-            if stored == key {
-                return f64::from_bits(value);
-            }
-            let result = erf_impl_ncbi(z, true);
-            // A key of all ones marks an empty slot; that argument (a NaN) is
-            // simply never stored.
-            if key != u64::MAX {
-                memo[slot] = (key, result.to_bits());
-            }
-            result
-        });
-    }
-    erf_impl_ncbi(z, true)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:252-255
-// ```c
-// double ErfC(double z)
-// {
-//     return ErfImpl(z, TRUE);
-// }
-// ```
-// No NCBI counterpart: the switch is read once per process. It chooses between calling
-// `erf_impl_ncbi` (the port of ErfC above) and reusing an earlier result of that call.
-fn x_erf_memo() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_ERFMEMO"))
+    let key = z.to_bits();
+    X_ERFC_MEMO.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        let slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 52) as usize;
+        let (stored, value) = memo[slot];
+        if stored == key {
+            return f64::from_bits(value);
+        }
+        let result = erf_impl_ncbi(z, true);
+        // A key of all ones marks an empty slot; that argument (a NaN) is
+        // simply never stored.
+        if key != u64::MAX {
+            memo[slot] = (key, result.to_bits());
+        }
+        result
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59
@@ -451,7 +433,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
 /// double-double arithmetic, and `DoubleDouble::mul` needs the rounding error of one product.
 /// `a.mul_add(b, -product)` gives it exactly; the Dekker path gives the same number
 /// (see the test `x_dekker_product_error_matches_fused_multiply_add`).
-/// EXPERIMENT (LOSAT_X_DEKKER, Wasm only): `a.mul_add(b, -product)` for
+/// Graduated 2026-10-22 (was `LOSAT_X_DEKKER`; Wasm only): `a.mul_add(b, -product)` for
 /// `product == a * b`, i.e. the exact rounding error of the product.  Where
 /// the target has no fused multiply-add instruction (Wasm without relaxed
 /// SIMD) `mul_add` is a library routine; Dekker's product (T. J. Dekker 1971,
@@ -460,14 +442,13 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
 /// the magnitude test guarantees: for 2^-900 < |product| < 2^900 and
 /// |a|, |b| < 2^900 the four partial products of the 26/27-bit halves are
 /// exact, their smallest is above 2^-1010 and nothing reaches 2^1024.
-/// Without the switch, and on every other target, this is `mul_add`.
+/// On every other target, and outside that magnitude range, this is `mul_add`.
 #[inline(always)]
 fn x_product_error(a: f64, b: f64, product: f64) -> f64 {
     #[cfg(target_arch = "wasm32")]
     {
         let size = product.abs();
-        if x_dekker()
-            && size > X_TWO_POW_M900
+        if size > X_TWO_POW_M900
             && size < X_TWO_POW_900
             && a.abs() < X_TWO_POW_900
             && b.abs() < X_TWO_POW_900
@@ -476,19 +457,6 @@ fn x_product_error(a: f64, b: f64, product: f64) -> f64 {
         }
     }
     a.mul_add(b, -product)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-// ```c
-//             result *= expl(-z * z) / z;
-// ```
-// No NCBI counterpart: the switch is read once per process (Wasm builds only). It chooses
-// between `mul_add` and Dekker's product inside the double-double emulation of that line.
-#[cfg(target_arch = "wasm32")]
-fn x_dekker() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DEKKER"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
@@ -557,9 +525,9 @@ impl DoubleDouble {
         // ```c
         //             result *= expl(-z * z) / z;
         // ```
-        // Dispatch point of LOSAT_X_DEKKER: the reference path (`mul_add`) is the double-double
-        // product that stands in for the long-double operations of this line. Only the way the
-        // product's rounding error is obtained changes, not its value.
+        // Dispatch point of the Wasm Dekker product: the reference path (`mul_add`) is the
+        // double-double product that stands in for the long-double operations of this line. Only
+        // the way the product's rounding error is obtained changes, not its value.
         let error = x_product_error(self.hi, other.hi, product)
             + self.hi * other.lo
             + self.lo * other.hi

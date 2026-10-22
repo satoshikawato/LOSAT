@@ -59,21 +59,6 @@ impl<'a> SubjectLetters<'a> {
         (0..self.count()).map(|oid| self.length(oid))
     }
 
-    /// The letters of subject `oid`: the record's own, or made in `buffer` from its store.
-    pub(super) fn letters<'b>(&self, oid: usize, buffer: &'b mut Vec<u8>) -> &'b [u8]
-    where
-        'a: 'b,
-    {
-        match self {
-            Self::Records(subjects) => subjects[oid],
-            Self::Packed(subjects) => {
-                LETTERS_MADE.fetch_add(1, Ordering::Relaxed);
-                subjects[oid].ascii_into(buffer);
-                buffer
-            }
-        }
-    }
-
     /// `f` of the letters of subject `oid`, made in a buffer that the thread keeps between
     /// subjects (a buffer above `X_KEPT_BUFFER` is freed after use, so that a thread does not keep
     /// a chromosome's letters). Re-entrant: a nested call (a pool thread that takes another
@@ -92,10 +77,9 @@ impl<'a> SubjectLetters<'a> {
     /// lower-case letters, `-lcase_masking`) it is the record's letters (`with_letters`) where it
     /// has lower-case letters. Otherwise a packed subject is given as its store: the stage
     /// translates its packed bases (the bases the letters resolve to), so a worker holds the
-    /// frames alone and neither the letters nor the resolved bases (`x_with_search_letters` makes
-    /// the bases where a stage reads letters). A database sequence (`-db`) has no lower-case
-    /// letters, so its stage always reads its stored bases, as NCBI's (no subject mask without
-    /// `-db_soft_mask`).
+    /// frames alone and neither the letters nor the resolved bases. A database sequence (`-db`)
+    /// has no lower-case letters, so its stage always reads its stored bases, as NCBI's (no
+    /// subject mask without `-db_soft_mask`).
     pub(super) fn with_search_subject<R>(
         &self,
         oid: usize,
@@ -116,19 +100,6 @@ impl<'a> SubjectLetters<'a> {
         match self {
             Self::Records(subjects) => SubjectNt::Letters(subjects[oid]),
             Self::Packed(subjects) => SubjectNt::Packed(&subjects[oid]),
-        }
-    }
-}
-
-/// `f` of the letters of a subject as a preliminary stage that reads letters takes them: the
-/// letters, or a packed subject's bases as resolved, `A`, `C`, `G` or `T` for every base. The
-/// stage resolves the letters into these same bases, which resolve to themselves.
-pub(super) fn x_with_search_letters<R>(subject: SubjectNt<'_>, f: impl FnOnce(&[u8]) -> R) -> R {
-    match subject {
-        SubjectNt::Letters(letters) => f(letters),
-        SubjectNt::Packed(store) => {
-            RESOLVED_MADE.fetch_add(1, Ordering::Relaxed);
-            with_buffer(|buffer| store.resolved_letters_into(buffer), f)
         }
     }
 }
@@ -308,10 +279,8 @@ const X_PACK_BATCH_LETTERS: usize = 4 << 20;
 /// Subjects read packed, and the bytes their stores hold.
 static STORED_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static STORED_BYTES: AtomicU64 = AtomicU64::new(0);
-/// The times the letters of a packed subject were made.
+/// The times the whole letters of a packed subject were made (not the windows the readers make).
 static LETTERS_MADE: AtomicU64 = AtomicU64::new(0);
-/// The times the resolved bases of a packed subject were made for its preliminary stage.
-static RESOLVED_MADE: AtomicU64 = AtomicU64::new(0);
 /// The subject plans translated from the packed bases.
 static PACKED_PLANS: AtomicU64 = AtomicU64::new(0);
 
@@ -322,17 +291,16 @@ pub(super) fn x_count_packed_plan() {
 }
 
 /// The summary line (printed by `main` at exit) with LOSAT_X_STATS: the subjects held packed,
-/// the bytes of their stores, the times their letters and resolved bases were made, and the
-/// plans translated from their packed bases.
+/// the bytes of their stores, the times their letters were made, and the plans translated from
+/// their packed bases.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
     if std::env::var_os("LOSAT_X_STATS").is_some() {
         eprintln!(
-            "[X_STATS] TBNSTORE subjects={} stored_bytes={} letters_made={} resolved_made={} packed_plans={}",
+            "[X_STATS] TBNSTORE subjects={} stored_bytes={} letters_made={} packed_plans={}",
             STORED_SUBJECTS.load(Ordering::Relaxed),
             STORED_BYTES.load(Ordering::Relaxed),
             LETTERS_MADE.load(Ordering::Relaxed),
-            RESOLVED_MADE.load(Ordering::Relaxed),
             PACKED_PLANS.load(Ordering::Relaxed)
         );
     }

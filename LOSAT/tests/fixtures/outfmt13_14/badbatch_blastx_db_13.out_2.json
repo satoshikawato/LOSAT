@@ -1,0 +1,365 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "db/sprot"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "q2 minus frame, padded to 10003",
+          "query_len": 10003,
+          "query_masking": [
+            {
+              "from": 2295,
+              "to": 2334
+            },
+            {
+              "from": 2538,
+              "to": 2571
+            },
+            {
+              "from": 4278,
+              "to": 4320
+            },
+            {
+              "from": 4695,
+              "to": 4734
+            },
+            {
+              "from": 5739,
+              "to": 5796
+            },
+            {
+              "from": 5946,
+              "to": 5982
+            },
+            {
+              "from": 7023,
+              "to": 7065
+            },
+            {
+              "from": 7305,
+              "to": 7353
+            },
+            {
+              "from": 7497,
+              "to": 7536
+            },
+            {
+              "from": 9192,
+              "to": 9231
+            },
+            {
+              "from": 946,
+              "to": 979
+            },
+            {
+              "from": 2794,
+              "to": 2833
+            },
+            {
+              "from": 3295,
+              "to": 3328
+            },
+            {
+              "from": 3340,
+              "to": 3376
+            },
+            {
+              "from": 4333,
+              "to": 4357
+            },
+            {
+              "from": 4702,
+              "to": 4738
+            },
+            {
+              "from": 4981,
+              "to": 5011
+            },
+            {
+              "from": 5197,
+              "to": 5221
+            },
+            {
+              "from": 6337,
+              "to": 6370
+            },
+            {
+              "from": 6460,
+              "to": 6502
+            },
+            {
+              "from": 6973,
+              "to": 7009
+            },
+            {
+              "from": 8257,
+              "to": 8290
+            },
+            {
+              "from": 8551,
+              "to": 8581
+            },
+            {
+              "from": 9895,
+              "to": 9937
+            },
+            {
+              "from": 284,
+              "to": 329
+            },
+            {
+              "from": 1295,
+              "to": 1328
+            },
+            {
+              "from": 2402,
+              "to": 2453
+            },
+            {
+              "from": 2648,
+              "to": 2681
+            },
+            {
+              "from": 3746,
+              "to": 3791
+            },
+            {
+              "from": 3803,
+              "to": 3842
+            },
+            {
+              "from": 5096,
+              "to": 5150
+            },
+            {
+              "from": 6209,
+              "to": 6236
+            },
+            {
+              "from": 6737,
+              "to": 6785
+            },
+            {
+              "from": 8300,
+              "to": 8336
+            }
+          ],
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "sp1 subject protein alpha"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 282.337,
+                  "score": 721,
+                  "evalue": 2.73727e-92,
+                  "identity": 134,
+                  "positive": 134,
+                  "query_from": 1,
+                  "query_to": 402,
+                  "query_frame": -2,
+                  "hit_from": 4,
+                  "hit_to": 137,
+                  "align_len": 134,
+                  "gaps": 0,
+                  "qseq": "EHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPWICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG",
+                  "hseq": "EHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPWICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG",
+                  "midline": "EHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPWICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 17.3198,
+                  "score": 33,
+                  "evalue": 4.40658,
+                  "identity": 8,
+                  "positive": 13,
+                  "query_from": 7617,
+                  "query_to": 7697,
+                  "query_frame": 3,
+                  "hit_from": 65,
+                  "hit_to": 91,
+                  "align_len": 27,
+                  "gaps": 0,
+                  "qseq": "LPRERYSPSNLLAAELLAPQMGPAMQK",
+                  "hseq": "IPKEQQTPGWWKTDTLHMAEMGLWMHK",
+                  "midline": "+P+E+ +P       L   +MG  M K"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 16.5494,
+                  "score": 31,
+                  "evalue": 9.2521,
+                  "identity": 7,
+                  "positive": 13,
+                  "query_from": 1952,
+                  "query_to": 2035,
+                  "query_frame": -1,
+                  "hit_from": 28,
+                  "hit_to": 55,
+                  "align_len": 28,
+                  "gaps": 0,
+                  "qseq": "PLALTYNLDK*VLPVYPSWGSLNRRKYS",
+                  "hseq": "PMAVMKGWENYCWPANMSWKVLMKYEFS",
+                  "midline": "P+A+    +    P   SW  L + ++S"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1",
+                  "accession": "1",
+                  "title": "sp2 subject protein beta, distant"
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 162.925,
+                  "score": 411,
+                  "evalue": 1.41881e-50,
+                  "identity": 90,
+                  "positive": 98,
+                  "query_from": 1,
+                  "query_to": 402,
+                  "query_frame": -2,
+                  "hit_from": 4,
+                  "hit_to": 142,
+                  "align_len": 141,
+                  "gaps": 9,
+                  "qseq": "EHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWP----ANMSWKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG",
+                  "hseq": "EHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSGIHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALRHWKINEICNFEKLKAFPYQVPMGRAANEG",
+                  "midline": "EHSVLKA     RKVMDDPKIRDGPMAVMK WE+YC+     ANMS  VLMKYEF S IHP   W CWIPK    PGW  TDTLH++EMGLWMH  P  MC MVR T  +LRHW+IN   NFEKLK   + V  GR A+EG"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 18.0902,
+                  "score": 35,
+                  "evalue": 2.75546,
+                  "identity": 11,
+                  "positive": 19,
+                  "query_from": 7614,
+                  "query_to": 7727,
+                  "query_frame": -3,
+                  "hit_from": 21,
+                  "hit_to": 68,
+                  "align_len": 48,
+                  "gaps": 10,
+                  "qseq": "DPRFESGKMT----------LLHSRSHLGGK*LRR*KVARGIPLSREW",
+                  "hseq": "DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSGIHPCNQW",
+                  "midline": "DP+   G M           +LHS +++    L + +   GI    +W"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 17.705,
+                  "score": 34,
+                  "evalue": 3.09482,
+                  "identity": 6,
+                  "positive": 6,
+                  "query_from": 5514,
+                  "query_to": 5537,
+                  "query_frame": -3,
+                  "hit_from": 113,
+                  "hit_to": 120,
+                  "align_len": 8,
+                  "gaps": 0,
+                  "qseq": "RHWTDNEI",
+                  "hseq": "RHWKINEI",
+                  "midline": "RHW  NEI"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 16.9346,
+                  "score": 32,
+                  "evalue": 5.52873,
+                  "identity": 5,
+                  "positive": 7,
+                  "query_from": 9394,
+                  "query_to": 9426,
+                  "query_frame": 1,
+                  "hit_from": 101,
+                  "hit_to": 111,
+                  "align_len": 11,
+                  "gaps": 0,
+                  "qseq": "MSHYIREFIHS",
+                  "hseq": "MCHMVRETTHA",
+                  "midline": "M H +RE  H+"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 16.9346,
+                  "score": 32,
+                  "evalue": 5.57823,
+                  "identity": 6,
+                  "positive": 7,
+                  "query_from": 5069,
+                  "query_to": 5098,
+                  "query_frame": -1,
+                  "hit_from": 4,
+                  "hit_to": 13,
+                  "align_len": 10,
+                  "gaps": 0,
+                  "qseq": "RHSIRTADQL",
+                  "hseq": "EHSVLKADQL",
+                  "midline": " HS+  ADQL"
+                },
+                {
+                  "num": 6,
+                  "bit_score": 16.1642,
+                  "score": 30,
+                  "evalue": 9.77386,
+                  "identity": 2,
+                  "positive": 8,
+                  "query_from": 2678,
+                  "query_to": 2710,
+                  "query_frame": -1,
+                  "hit_from": 34,
+                  "hit_to": 44,
+                  "align_len": 11,
+                  "gaps": 0,
+                  "qseq": "IWKTFCLTIRA",
+                  "hseq": "VWESYCFILHS",
+                  "midline": "+W+++C  + +"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 2,
+            "db_len": 279,
+            "hsp_len": 42,
+            "eff_space": 641940,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+}

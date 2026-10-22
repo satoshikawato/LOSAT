@@ -189,7 +189,7 @@ impl GeneticCode {
         if codon.len() != 3 {
             return b'X';
         }
-        // EXPERIMENT (LOSAT_X_CODONFAST): three unambiguous bases select exactly
+        // Fast path (was LOSAT_X_CODONFAST): three unambiguous bases select exactly
         // one (i, j, k) of the loops below, so the answer is that one table entry.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,394-403
         // ```c
@@ -209,13 +209,11 @@ impl GeneticCode {
         //                      index2 = index1 + k;
         //                      taa = codes[index2];
         // ```
-        // The reference path below ports this nested loop. When the switch is on and all three
+        // The path below ports this nested loop, for codons with an ambiguous base. When all three
         // bases are unambiguous, only one (i, j, k) passes the `&` tests, so the loop would end
         // with `aa = codes[i*16+j*4+k]` and the table is read once instead.
-        if x_codon_fast() {
-            if let Some(aa) = self.x_get_unambiguous(codon) {
-                return aa;
-            }
+        if let Some(aa) = self.x_get_unambiguous(codon) {
+            return aa;
         }
         let masks = [
             base_mask(codon[0]),
@@ -252,27 +250,6 @@ impl GeneticCode {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:394-403
-// ```c
-//    for (i = 0; i < 4; i++) {
-//       if (codon[0] & mapping[i]) {
-//          index0 = i * 16;
-//          for (j = 0; j < 4; j++) {
-//             if (codon[1] & mapping[j]) {
-//                index1 = index0 + (j * 4);
-//                for (k = 0; k < 4; k++) {
-//                   if (codon[2] & mapping[k]) {
-//                      index2 = index1 + k;
-//                      taa = codes[index2];
-// ```
-// No NCBI counterpart: the switch is read once per process. It chooses between the loop
-// above and a single table read that gives the same amino acid.
-fn x_codon_fast() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_CODONFAST"))
-}
-
 impl GeneticCode {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,394-403
     /// ```c
@@ -295,7 +272,7 @@ impl GeneticCode {
     /// This is the one (i, j, k) that `s_CodonToAA` reaches when every codon byte has a single
     /// bit set: `mapping[]` gives the index of that bit. Ambiguous bases return `None` and use
     /// the loop in `get`.
-    /// EXPERIMENT (LOSAT_X_CODONFAST): the amino acid of three unambiguous
+    /// Fast path of `get` (was LOSAT_X_CODONFAST): the amino acid of three unambiguous
     /// bases, `None` when a base is ambiguous or not a base.
     #[inline]
     fn x_get_unambiguous(&self, codon: &[u8]) -> Option<u8> {
@@ -306,7 +283,7 @@ impl GeneticCode {
     }
 }
 
-// EXPERIMENT (LOSAT_X_CODONFAST): position of a base in NCBI's
+// Position of a base in NCBI's
 // `mapping[4] = { 8, 2, 1, 4 }` (T, C, A, G) when `base_mask` has exactly that
 // one bit, 4 otherwise.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,395-396

@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<BlastXML2
+xmlns="http://www.ncbi.nlm.nih.gov"
+xmlns:xi="http://www.w3.org/2003/XInclude"
+xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd">
+	<xi:include href="db.sa.x16_xtaxid.good.14.out_1.xml"/>
+	<xi:include href="db.sa.x16_xtaxid.good.14.out_2.xml"/>
+	<xi:include href="db.sa.x16_xtaxid.good.14.out_3.xml"/>
+</BlastXML2>

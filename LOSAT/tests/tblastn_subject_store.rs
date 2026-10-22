@@ -14,7 +14,8 @@
 //! `LOSAT_X_TBNSTORE` on (a switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
 //! and it is not set) the reader's records keep their deflines and the letters are held packed (2 bits per base, the runs of ambiguous
 //! letters, the lower-case intervals): a subject is translated from its packed bases, and the
-//! letters of a window are made again when the redo or a report reads it.
+//! letters of a window are made again when the redo, the traceback of composition mode 0 or a
+//! report reads it.
 //! The switch must change nothing a user sees, so the tests compare the report and the messages
 //! with those of a run with `LOSAT_X_TBNSTORE=0`, and read the `[X_STATS] TBNSTORE` line to check that
 //! the subjects were held packed.
@@ -214,7 +215,7 @@ const NO_STORE: (&str, &str) = ("LOSAT_X_TBNSTORE", "0");
 // reports, the default options and `-lcase_masking` at one and three threads, another genetic
 // code, composition mode 0, and four query batches. With the switch on the eight subjects are held
 // packed and translated from their packed bases (their letters made again only where a stage
-// reads the case or composition mode 0 traces back); with it off none.
+// reads the case; the traceback of composition mode 0 reads windows); with it off none.
 #[test]
 fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
     let (ten, all, subjects) = inputs();
@@ -294,30 +295,24 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
         assert!(counter(&stats, "stored_bytes") > 0, "{options:?}");
         // the preliminary stage translates the packed bases of the six subjects long enough to
         // search unless it reads the case of a subject with lower-case letters (lower, ambiguous,
-        // runs, few_codons; then it reads the letters); the redo and the reports read windows of
-        // the packed subjects, and only the traceback of composition mode 0 reads the letters of
-        // the subjects with hits
+        // runs, few_codons; then it reads the letters); the redo, the traceback of composition
+        // mode 0 and the reports read windows of the packed subjects
         if options.contains(&"-lcase_masking") {
             assert!(counter(&stats, "letters_made") >= 4, "{options:?}: {stats}");
             assert!(counter(&stats, "packed_plans") >= 1, "{options:?}: {stats}");
         } else {
             assert!(counter(&stats, "packed_plans") >= 6, "{options:?}: {stats}");
-            if options.contains(&"-comp_based_stats") {
-                assert!(counter(&stats, "letters_made") >= 4, "{options:?}: {stats}");
-            } else {
-                assert_eq!(counter(&stats, "letters_made"), 0, "{options:?}: {stats}");
-            }
+            assert_eq!(counter(&stats, "letters_made"), 0, "{options:?}: {stats}");
         }
-        assert_eq!(counter(&stats, "resolved_made"), 0, "{options:?}");
     }
 }
 
 // No NCBI counterpart: where the switch acts. A subject range (`-subject_loc`) keeps the
 // letters (the records are cut before the search), so the switch changes nothing there and no
-// subject is held packed. `LOSAT_X_DEFAULT=0` turns the switch off; with it set as well (the
-// reference loops) the subjects are still held packed and the report is the same.
+// subject is held packed. `LOSAT_X_DEFAULT=0` turns the switch off; with it set as well the
+// subjects are still held packed and the report is the same.
 #[test]
-fn a_subject_range_keeps_the_letters_and_the_reference_loops_read_the_packed_subjects() {
+fn a_subject_range_keeps_the_letters_and_the_default_off_still_translates_the_packed_subjects() {
     let (ten, _, subjects) = inputs();
     let long = long_subjects(subjects);
     let ranged = ["-outfmt", "6", "-subject_loc", "100-5000"];
@@ -327,7 +322,6 @@ fn a_subject_range_keeps_the_letters_and_the_reference_loops_read_the_packed_sub
     assert_eq!(store_messages, messages);
     assert_eq!(counter(&stats, "subjects"), 0);
     assert_eq!(counter(&stats, "letters_made"), 0);
-    assert_eq!(counter(&stats, "resolved_made"), 0);
 
     let options = ["-outfmt", "6", "-num_threads", "1"];
     let (expected, messages, stats) = tblastn(ten, subjects, &options, &[]);
@@ -344,7 +338,7 @@ fn a_subject_range_keeps_the_letters_and_the_reference_loops_read_the_packed_sub
     assert!(report == expected);
     assert_eq!(store_messages, messages);
     assert_eq!(counter(&stats, "subjects"), 8);
-    // the reference loops read letters: the resolved bases of the packed subjects
-    assert!(counter(&stats, "resolved_made") >= 7, "{stats}");
-    assert_eq!(counter(&stats, "packed_plans"), 0, "{stats}");
+    // the preliminary stage (the unit path, which `LOSAT_X_DEFAULT=0` no longer turns off)
+    // translates the packed bases of the subjects
+    assert!(counter(&stats, "packed_plans") >= 6, "{stats}");
 }

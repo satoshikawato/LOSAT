@@ -1110,7 +1110,7 @@ fn search_cli(
     //         formatter.PrintProlog();
     // ```
     // The XInclude formats written to standard output fail after the formatter is made.
-    crate::blastinput::app::xinclude_check(choice)?;
+    crate::blastinput::app::xinclude_check_for(choice, args.out.as_deref())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-277
     // ```c++
     //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -1150,7 +1150,7 @@ fn search_cli(
 /// the subjects: the query batch size, then the formatter, which sets up the subjects and
 /// warns about each one without letters (a record without residues, or an interval that
 /// starts just past its record's end). Such a subject stays in the database statistics
-/// with no letters and is never searched (`scan_protein_words_by_chunk` skips subjects
+/// with no letters and is never searched (`x_scan_plan` skips subjects
 /// shorter than a word). Returns the query batch size.
 ///
 /// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:217-221
@@ -1550,9 +1550,9 @@ fn search(
         // sequence file failed with its error.
         let mut titles = super::database::DatabaseTitles::new();
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
-        // EXPERIMENT (LOSAT_X_TBNPAR, LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
-        // loop below searched ahead (`x_search_batches`), each with its range; `None` when
-        // the switches are off. A batch whose range does not match is searched by the loop.
+        // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
+        // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
+        // is none. A batch whose range does not match is searched by the loop.
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-291
         // ```c
         //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -1565,9 +1565,8 @@ fn search(
         //                     results = lcl_blast.Run();
         // ```
         // Dispatch point: NCBI searches the query batches one after another (one CLocalBlast per
-        // batch). With the switches on, x_search_batches searches them ahead (on one shared pool,
-        // or side by side) and returns the reports in batch order; with them off it returns None
-        // and the loop below runs as before.
+        // batch). x_search_batches searches them ahead (on one shared pool, or side by side) and
+        // returns the reports in batch order; the loop below takes them from it.
         // A database whose sequences could not be read searches its batches one by one below.
         let x_batches = match stores_error {
             Some(_) => Vec::new(),
@@ -1899,6 +1898,7 @@ fn search(
                 db_gencode: i32::from(resolved.db_gencode),
             },
             xml_taxa,
+            args.out.as_deref(),
         )?;
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
         // The failed batch's reading messages, then its error.

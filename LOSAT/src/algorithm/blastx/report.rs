@@ -1164,8 +1164,16 @@ pub fn render(
 ) -> Result<()> {
     let shown = ShownSubjects::Fasta { path: subject_path };
     write_prolog(writer, options, subjects, &shown)?;
-    let mut xml2 = super::blast_xml::xml2_kind(options.outfmt)
-        .map(|kind| super::blast_xml::xml2_writer(kind, options, subjects, &shown));
+    // The library entry has no output file: outfmt 13 and 14 are the command line's.
+    let mut xml2 = super::blast_xml::xml2_kind(options.outfmt).map(|kind| {
+        super::blast_xml::xml2_writer(
+            kind,
+            options,
+            subjects,
+            &shown,
+            Box::new(crate::report::blast_xml2::NoSideFiles),
+        )
+    });
     render_queries(
         writer,
         &mut std::io::stderr().lock(),
@@ -1204,7 +1212,7 @@ pub fn render_queries(
     shown: &ShownSubjects<'_>,
     batches: &mut [BatchResults],
     queries_before: usize,
-    xml2: Option<&mut crate::report::blast_xml2::Xml2Writer>,
+    xml2: Option<&mut super::blast_xml::RunXml2>,
 ) -> Result<()> {
     for batch in batches.iter_mut() {
         for lists in &mut batch.queries {
@@ -1814,7 +1822,7 @@ pub(crate) fn write_epilog(
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     queries: usize,
-    xml2: Option<&mut crate::report::blast_xml2::Xml2Writer>,
+    xml2: Option<&mut super::blast_xml::RunXml2>,
 ) -> Result<()> {
     if options.outfmt == 0 {
         crate::report::pairwise::write_blastx_epilog(

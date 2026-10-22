@@ -671,10 +671,18 @@ pub(crate) fn search_core(
         // BlastHSPStreamMerge. With LOSAT_X_BXPAR a wave of chunks is searched on the pool
         // (x_compute_chunk) and written to the sink in chunk order below. Each chunk is searched
         // exactly as before.
+        // Dispatch point (LOSAT_X_BXCHUNKFLOW, in the strict set): where the subject flow would
+        // run and there are enough subjects for the pool (x_subject_flow::chunks_in_order), the
+        // chunks stay in the serial chunk loop below, one after another, and the flow searches
+        // each chunk's subjects on all threads.
         let x_t = super::x_timing::lap();
         #[cfg(feature = "parallel")]
-        let x_chunks_par =
-            super::runtime::x_bx_par_rule(|| pool.enabled() && chunks.len() > 1 && !diagnostics);
+        let x_chunks_par = super::runtime::x_bx_par_rule(|| {
+            pool.enabled()
+                && chunks.len() > 1
+                && !diagnostics
+                && !x_subject_flow::chunks_in_order(pool, diagnostics, options, subjects)
+        });
         #[cfg(feature = "parallel")]
         let chunks = if x_chunks_par {
             use rayon::prelude::*;
@@ -1443,14 +1451,12 @@ fn compute_subject(
     //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
     // ```
     // Dispatch point of LOSAT_X_BXSCAN / LOSAT_X_BXSCANSHADOW and LOSAT_X_BXDIAG /
-    // LOSAT_X_BXDIAGSHADOW: when nothing traces the seeds (not the diagnostic stages) and the
-    // diagonal order is the reference one (LOSAT_X_SEEDBUCKET mode 0), the seed loop reads the
-    // scanner's per-thread buffer in place (x_seed_scan.rs), or with LOSAT_X_BXDIAG reads the
+    // LOSAT_X_BXDIAGSHADOW: when nothing traces the seeds (not the diagnostic stages), the
+    // seed loop reads the scanner's per-thread buffer in place (x_seed_scan.rs), or with LOSAT_X_BXDIAG reads the
     // lookup cells in place (x_seed_diag.rs); otherwise the reference word finder below runs.
     let initial = if !diagnostics
         && (super::seed::x_seed_scan::x_bxscan_mode() != 0
             || super::seed::x_seed_diag::x_bxdiag_mode() != 0)
-        && crate::algorithm::tblastx::x_seed_bucket::blastx_mode() == 0
     {
         super::seed::x_seed_scan::x_word_finder_scan(
             batch, params, options, &encoded, lookup, diagonals,

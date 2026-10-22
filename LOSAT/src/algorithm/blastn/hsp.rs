@@ -35,9 +35,11 @@ pub enum BlastnOutputFormat {
     Seqalign(crate::report::serial::SerialFormat),
     /// BLAST XML (outfmt 5; `report::blast_xml`, through `algorithm::blastn::blast_xml`).
     Xml,
-    /// The XML2 / JSON documents of outfmt 16 and 15 (`report::blast_xml2`, through the same
+    /// The XML2 / JSON documents of outfmt 16, 15, 14 and 13 (`report::blast_xml2`, through the same
     /// `algorithm::blastn::blast_xml`).
     Xml2(crate::report::blast_xml2::Xml2Kind),
+    /// SAM (outfmt 17; `report::sam`, through `algorithm::blastn::sam`).
+    Sam(crate::report::sam::SamSpec),
 }
 
 impl BlastnOutputFormat {
@@ -68,18 +70,26 @@ impl BlastnOutputFormat {
     ///         /// JSON seq-align
     ///         eJsonSeqalign,
     /// ```
-    pub(crate) fn of(format: ReportFormat) -> anyhow::Result<Self> {
+    ///
+    /// `spec` is the custom specification of the choice (`FormatChoice::spec`), which only
+    /// SAM reads here (`SQ`, `SR`).
+    pub(crate) fn of(format: ReportFormat, spec: &str) -> anyhow::Result<Self> {
         match format {
+            ReportFormat::Sam => Ok(BlastnOutputFormat::Sam(crate::report::sam::SamSpec::parse(
+                spec,
+            ))),
             ReportFormat::Pairwise => Ok(BlastnOutputFormat::Pairwise),
             ReportFormat::Tabular => Ok(BlastnOutputFormat::Tabular),
             ReportFormat::TabularWithComments => Ok(BlastnOutputFormat::TabularWithComments),
             ReportFormat::Xml => Ok(BlastnOutputFormat::Xml),
-            ReportFormat::Xml2S => Ok(BlastnOutputFormat::Xml2(
-                crate::report::blast_xml2::Xml2Kind::Single16,
-            )),
-            ReportFormat::JsonS => Ok(BlastnOutputFormat::Xml2(
-                crate::report::blast_xml2::Xml2Kind::Single15,
-            )),
+            // 16, 15, 14 and 13 (the last two write files next to `-out`: only the command line
+            // reaches them, `run_local` has no output file).
+            ReportFormat::Xml2S | ReportFormat::JsonS | ReportFormat::Xml2 | ReportFormat::Json => {
+                Ok(BlastnOutputFormat::Xml2(
+                    crate::report::blast_xml2::Xml2Kind::of(format)
+                        .expect("an XML2 or JSON document format"),
+                ))
+            }
             other => match crate::report::serial::SerialFormat::of(other) {
                 Some(serial) => Ok(BlastnOutputFormat::Seqalign(serial)),
                 None => anyhow::bail!(
@@ -103,8 +113,19 @@ impl BlastnOutputFormat {
     pub(crate) fn writes_query_warnings(self) -> bool {
         !matches!(
             self,
-            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Xml | BlastnOutputFormat::Xml2(_)
+            BlastnOutputFormat::Seqalign(_)
+                | BlastnOutputFormat::Xml
+                | BlastnOutputFormat::Xml2(_)
+                | BlastnOutputFormat::Sam(_)
         )
+    }
+
+    /// The SAM document of outfmt 17.
+    pub(crate) fn sam_spec(self) -> Option<crate::report::sam::SamSpec> {
+        match self {
+            BlastnOutputFormat::Sam(spec) => Some(spec),
+            _ => None,
+        }
     }
 
     /// Whether the report is a structured XML / JSON document of the queries' final hit lists:
@@ -114,7 +135,7 @@ impl BlastnOutputFormat {
         matches!(self, BlastnOutputFormat::Xml | BlastnOutputFormat::Xml2(_))
     }
 
-    /// The XML2 / JSON document of outfmt 15 and 16.
+    /// The XML2 / JSON document of outfmt 13 to 16.
     pub(crate) fn xml2_kind(self) -> Option<crate::report::blast_xml2::Xml2Kind> {
         match self {
             BlastnOutputFormat::Xml2(kind) => Some(kind),

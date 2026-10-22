@@ -20,6 +20,10 @@
 //! gives the run that those variables gave before the change. The shadow and verify switches, the
 //! counters and the tuning variables are not part of the set and keep "set to any value".
 //!
+//! A switch that graduated has no variable any more, so neither of the two variables reaches its
+//! previous path: an always-on switch lost that code, and a conditional or platform switch
+//! (`GRADUATED`) runs its fallback only where its rule sends the work.
+//!
 //! Every switch of the set gives the reference result by construction, so none of these variables
 //! changes the output.
 //!
@@ -57,15 +61,15 @@ use std::sync::OnceLock;
 /// verified with it on. `LOSAT_X_NEWTONLANES8` (eight Newton problems per round in the lanes of
 /// `LOSAT_X_NEWTONLANES`, `composition_adjustment/x_newton_lanes.rs`; it acts on aarch64 only)
 /// was added after the change as a switch that is off unless set and joined the set once it was
-/// verified on the arm64 runners with it on. `LOSAT_X_TBNSTATE` (the scan state of TBLASTN's unit
-/// path kept by a thread from one subject to the next, `tblastn/search_gapped.rs`) and
-/// `LOSAT_X_TBNXLATE` (the translated frames of a TBLASTN subject read from tables,
-/// `tblastn/x_subject_translate.rs`) were added after the change as switches that are off unless
-/// set and joined the set together once they were verified and timed with it on.
+/// verified on the arm64 runners with it on. `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` (TBLASTN's
+/// kept scan state and table translation) joined the set together the same way. Both graduated
+/// on 2026-10-22: they left `STRICT_SET` and their old code was deleted.
 /// `LOSAT_X_TBNOIDNEXT` (the threads take the next chunk of subjects when they are free,
 /// `tblastn/x_oid_flow.rs`) and `LOSAT_X_TBNOIDUNITS` (the units of a subject longer than a
 /// chunk's budget on the pool, `tblastn/stage_d_pipeline.rs`) joined the same way, together,
-/// after them.
+/// after them. `LOSAT_X_TBNOIDCHUNK`,
+/// `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`,
+/// `LOSAT_X_SEGSHARE` and `LOSAT_X_DEKKER` graduated on 2026-10-22 (see `GRADUATED`).
 /// `LOSAT_X_LINKSLICES` (the groups of the TBLASTX linking call linked as slices of its one list,
 /// `tblastx/x_link_slices.rs`) was added after the change as a switch that is off unless set and
 /// joined the set once it was verified with it on.
@@ -119,18 +123,23 @@ use std::sync::OnceLock;
 /// `LOSAT_X_QGROUPPAR` (BLASTN's preliminary gapped loop and traceback of a subject searched on one
 /// thread run per query on the pool, `blastn/blast_engine/x_qgroup_par.rs`) joined the set in the
 /// pull request that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_BXCHUNKFLOW` (BLASTX's chunks of a split query searched one after another, each chunk's
+/// subjects as the subject flow on the whole pool, where each chunk has enough tasks for the pool,
+/// `blastx/x_subject_flow.rs`) joined the set in the pull request that added it, after it was
+/// verified and timed with it on and off.
 /// `LOSAT_X_PAIRPARGATE` (TBLASTX's unit path only for the query batches where it is expected to
 /// be faster than the reference frame loop, `tblastx/x_pair_par.rs`) and `LOSAT_X_TBXLUT` (the
 /// reference loop's full lookup table filled in place from per-cell counts,
 /// `tblastx/lookup/x_lut_direct.rs`) were added after the change as switches that are off unless
 /// set and joined the set together once they were verified and timed with them on and off.
 pub(crate) const STRICT_SET: &[&str] = &[
-    "LOSAT_X_AHEAD",
     "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNDBSTREAM",
     "LOSAT_X_BNFEWSUBJ",
+    "LOSAT_X_BNMAPPED",
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
+    "LOSAT_X_BNUNGAPCOUNT",
     "LOSAT_X_BPCLUT",
     "LOSAT_X_BPCOMPOREUSE",
     "LOSAT_X_BPDBCUT",
@@ -147,6 +156,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPQBLOCK",
     "LOSAT_X_BPQBLOCKFMT",
     "LOSAT_X_BPQBLOCKSA",
+    "LOSAT_X_BPQBLOCKWEB",
     "LOSAT_X_BPQBLOCKXML",
     "LOSAT_X_BPREDODBSUBJ",
     "LOSAT_X_BPREDOFIT",
@@ -158,8 +168,10 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPSUBJMETA",
     "LOSAT_X_BPSUBJRUN",
     "LOSAT_X_BPUNGAP",
+    "LOSAT_X_BPUNGAPSENT",
     "LOSAT_X_BXBATCH",
     "LOSAT_X_BXCHUNK",
+    "LOSAT_X_BXCHUNKFLOW",
     "LOSAT_X_BXDIAG",
     "LOSAT_X_BXFLOW",
     "LOSAT_X_BXHITBF",
@@ -172,47 +184,22 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXSCANBF",
     "LOSAT_X_BXSEGMEMO",
     "LOSAT_X_BXSUBJFLOW",
-    "LOSAT_X_CODONFAST",
-    "LOSAT_X_COMPFAST",
-    "LOSAT_X_CTXFAST",
     "LOSAT_X_CTXO1",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
-    "LOSAT_X_DEKKER",
     "LOSAT_X_DIAGLV",
     "LOSAT_X_DIAGLV2",
     "LOSAT_X_DISCLUTPAR",
-    "LOSAT_X_DPAVX2",
     "LOSAT_X_DPEMASK",
-    "LOSAT_X_DPFAST",
-    "LOSAT_X_DPNEON",
-    "LOSAT_X_DPW128",
-    "LOSAT_X_DUSTFAST",
-    "LOSAT_X_DUSTRING",
-    "LOSAT_X_ENVCACHE",
     "LOSAT_X_ERFABSORB",
-    "LOSAT_X_ERFMEMO",
     "LOSAT_X_FOLDLEAN",
-    "LOSAT_X_GREEDYFAST",
-    "LOSAT_X_GREEDYFUSE",
-    "LOSAT_X_GREEDYPRELIM",
-    "LOSAT_X_GREEDYSPEC",
     "LOSAT_X_HSPINPLACE",
-    "LOSAT_X_IDEALMEMO",
-    "LOSAT_X_ITREEFAST",
-    "LOSAT_X_KARLINFAST",
     "LOSAT_X_LINKSLICES",
     "LOSAT_X_LINKSORT",
     "LOSAT_X_LUTARENA",
-    "LOSAT_X_LUTSPLIT",
-    "LOSAT_X_MBBATCH",
-    "LOSAT_X_MBDELAY",
     "LOSAT_X_MBLUTKEEP",
     "LOSAT_X_MBLUTONCE",
     "LOSAT_X_MBLUTPREFAULT",
-    "LOSAT_X_NEWTONEXACT",
-    "LOSAT_X_NEWTONLANES",
-    "LOSAT_X_NEWTONLANES8",
     "LOSAT_X_PAIRLUT",
     "LOSAT_X_PAIRPAR",
     "LOSAT_X_PAIRPARDISC",
@@ -221,7 +208,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_PAIRPARGATE",
     "LOSAT_X_PAIRPARNA",
     "LOSAT_X_PAIRWISEPAR",
-    "LOSAT_X_PURGEFAST",
     "LOSAT_X_QBATCHPAR",
     "LOSAT_X_QDUSTPAR",
     "LOSAT_X_QGROUPPAR",
@@ -232,29 +218,16 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_SEEDCOMPACT",
     "LOSAT_X_SEEDRELEASE",
     "LOSAT_X_SEEDUNMAP",
-    "LOSAT_X_SEGFAST",
-    "LOSAT_X_SEGMEMO",
-    "LOSAT_X_SEGSHARE",
     "LOSAT_X_SEGTRIMMEMO",
-    "LOSAT_X_TBNBATCH",
     "LOSAT_X_TBNBATCHRULE",
-    "LOSAT_X_TBNEVENTS",
     "LOSAT_X_TBNFRAMEREUSE",
     "LOSAT_X_TBNHITBF",
     "LOSAT_X_TBNKEEPFEW",
     "LOSAT_X_TBNLINKWIN",
-    "LOSAT_X_TBNOIDCHUNK",
-    "LOSAT_X_TBNOIDNEXT",
-    "LOSAT_X_TBNOIDUNITS",
     "LOSAT_X_TBNOWNPOOLS",
-    "LOSAT_X_TBNPAR",
-    "LOSAT_X_TBNQSIDE",
     "LOSAT_X_TBNSCANBF",
     "LOSAT_X_TBNSCANBYTE",
-    "LOSAT_X_TBNSSIDE",
-    "LOSAT_X_TBNSTATE",
     "LOSAT_X_TBNSTORE",
-    "LOSAT_X_TBNXLATE",
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXBAND",
     "LOSAT_X_TBXEXTBATCH",
@@ -271,6 +244,32 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXSCANBF",
     "LOSAT_X_TBXUNGAP",
     "LOSAT_X_TBXUNITMASK",
+];
+
+/// No NCBI counterpart: the conditional and platform switches that left the strict set when they
+/// graduated (on dev at least 7 days and in two full-set platform-checks runs with equal outputs
+/// and no failed test, 2026-10-22), sorted by name. Their variables are gone; their rules (input
+/// sizes, threads, options, memory, CPU) still choose between their own path and the fallback, so
+/// the names stay as the keys of `x_reach!` (`utils/xreach.rs`) and of the rows of
+/// `LOSAT/tests/switch_reach_expected.tsv`. An always-on switch that graduates leaves both lists:
+/// nothing chooses any more.
+pub(crate) const GRADUATED: &[&str] = &[
+    "LOSAT_X_AHEAD",
+    "LOSAT_X_DEKKER",
+    "LOSAT_X_DPAVX2",
+    "LOSAT_X_DPNEON",
+    "LOSAT_X_DPW128",
+    "LOSAT_X_GREEDYSPEC",
+    "LOSAT_X_MBBATCH",
+    "LOSAT_X_MBDELAY",
+    "LOSAT_X_NEWTONLANES",
+    "LOSAT_X_NEWTONLANES8",
+    "LOSAT_X_SEGSHARE",
+    "LOSAT_X_TBNBATCH",
+    "LOSAT_X_TBNOIDCHUNK",
+    "LOSAT_X_TBNOIDNEXT",
+    "LOSAT_X_TBNOIDUNITS",
+    "LOSAT_X_TBNSSIDE",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that
@@ -367,6 +366,13 @@ mod tests {
     fn the_strict_set_names_are_distinct_and_sorted() {
         assert!(STRICT_SET.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(STRICT_SET.iter().all(|name| name.starts_with("LOSAT_X_")));
+    }
+
+    #[test]
+    fn the_graduated_names_are_distinct_sorted_and_outside_the_set() {
+        assert!(GRADUATED.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(GRADUATED.iter().all(|name| name.starts_with("LOSAT_X_")));
+        assert!(GRADUATED.iter().all(|name| !STRICT_SET.contains(name)));
     }
 
     /// The block of `docs/agents/diagnostics.md` that writes the set as `export` lines names the

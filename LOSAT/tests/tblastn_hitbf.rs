@@ -49,7 +49,8 @@ const CLEARED: (&str, &str) = ("LOSAT_X_TBNSTATE", "0");
 /// The unit path (`LOSAT_X_DEFAULT=0` turns it off with the rest of the strict set).
 const UNIT_PATH: (&str, &str) = ("LOSAT_X_TBNPAR", "1");
 const ON: (&str, &str) = ("LOSAT_X_TBNHITBF", "1");
-/// The `[X_STATS] TBNSCANBF` line: the scan calls of the unit path, one offset array each.
+/// The `[X_STATS] TBNSCANBF` and `[X_STATS] TBNSCANBYTE` lines: the scan calls of the unit path,
+/// one offset array each.
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 /// The proteins of the query.
 const PROTEINS: usize = 40;
@@ -59,7 +60,7 @@ const PROTEINS: usize = 40;
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
 /// one thread, and it selects nothing.
 fn losat(switches: &[(&str, &str)]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
@@ -126,6 +127,21 @@ fn lines<'a>(stderr: &'a str, prefix: &str) -> Vec<&'a str> {
         .collect()
 }
 
+/// The scan calls of the unit path: those of the `[X_STATS] TBNSCANBF` line (both loops) and of
+/// the `[X_STATS] TBNSCANBYTE` line (LOSAT_X_TBNSCANBYTE), each line counted where it is printed.
+fn scan_calls(stderr: &str) -> u64 {
+    let mut calls = 0;
+    if !lines(stderr, "[X_STATS] TBNSCANBF").is_empty() {
+        calls += field(stderr, "[X_STATS] TBNSCANBF", "calls_bf")
+            + field(stderr, "[X_STATS] TBNSCANBF", "calls_ref");
+    }
+    if !lines(stderr, "[X_STATS] TBNSCANBYTE").is_empty() {
+        calls += field(stderr, "[X_STATS] TBNSCANBYTE", "calls");
+    }
+    assert!(calls > 0, "no scan line in {stderr}");
+    calls
+}
+
 /// The number after `name=` in the first line of `stderr` that starts with `prefix`.
 fn field(stderr: &str, prefix: &str, name: &str) -> u64 {
     let line = lines(stderr, prefix)
@@ -187,8 +203,7 @@ fn the_shadow_compares_every_offset_array() {
             );
             assert_eq!(
                 field(&stderr, "[X_SHADOW] TBNHITBF", "arrays_compared"),
-                field(&stderr, "[X_STATS] TBNSCANBF", "calls_bf")
-                    + field(&stderr, "[X_STATS] TBNSCANBF", "calls_ref"),
+                scan_calls(&stderr),
                 "threads {threads} {switches:?}: one offset array per scan call: {stderr}"
             );
         }

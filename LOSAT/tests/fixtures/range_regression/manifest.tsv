@@ -1,5 +1,5 @@
 # Frozen -query_loc/-subject_loc outputs of blastn: 2.17.0+;  Package: blast 2.17.0, build Aug 11 2025 09:46:06 (comparison oracle only; see range_regression_fixtures.py).
-# Run from LOSAT/: env <env> <argv> (LOSAT: LOSAT <argv> <losat_extra>). Written by `freeze`; do not edit.
+# Run from LOSAT/: env <env> <argv> (LOSAT: losat <argv> <losat_extra>). Written by `freeze`; do not edit.
 case_id	argv	losat_extra	exit	stdout_sha256	stdout_bytes	stderr_sha256	env	oracle_env
 blastn.parse_empty_range	blastn -query tests/fasta/outfmt0/e2d_n_q.fa -subject tests/fasta/outfmt0/e2d_n_s_plus.fa -query_loc 5-5 -outfmt 6		3	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	dca51db2b7e2ccea78e948d14f03f35a96c9a0bd03b4e9fd54041988747e4b83		
 blastn.parse_format	blastn -query tests/fasta/outfmt0/e2d_n_q.fa -subject tests/fasta/outfmt0/e2d_n_s_plus.fa -query_loc 10-20-30 -outfmt 6		3	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	201db2574fb4b6f7462be45e27313e2f57c3e67a36e29f74cce53a92d2743797		

@@ -48,7 +48,7 @@ const SCAN_LOOP: [(&str, &str); 5] = [
 /// environment is dropped as well: every test states the default it runs with. Returns the
 /// report and the standard error.
 fn tblastx(switches: &[(&str, &str)]) -> (Vec<u8>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") {
             command.env_remove(name);

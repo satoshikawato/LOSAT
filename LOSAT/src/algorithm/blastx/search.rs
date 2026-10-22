@@ -673,11 +673,10 @@ pub(crate) fn search_core(
         // exactly as before.
         let x_t = super::x_timing::lap();
         #[cfg(feature = "parallel")]
-        let chunks = if super::runtime::x_bx_parallel()
-            && pool.enabled()
-            && chunks.len() > 1
-            && !diagnostics
-        {
+        let x_chunks_par =
+            super::runtime::x_bx_par_rule(|| pool.enabled() && chunks.len() > 1 && !diagnostics);
+        #[cfg(feature = "parallel")]
+        let chunks = if x_chunks_par {
             use rayon::prelude::*;
             crate::utils::threading::report_stage("blastx", "query_chunks", chunks.len(), true);
             let wave = pool.threads().max(2);
@@ -915,6 +914,10 @@ pub(crate) fn search_core(
                 };
             #[cfg(not(feature = "parallel"))]
             let x_flowed = false;
+            // The flow (LOSAT_X_BXSUBJFLOW) leaves the waves, and so the chunks, nothing to do.
+            if !x_flowed && x_bx_chunk().is_some() {
+                crate::utils::xreach::x_reach!("LOSAT_X_BXCHUNK", x_chunk.is_some());
+            }
             let x_waves = if x_flowed {
                 0
             } else {

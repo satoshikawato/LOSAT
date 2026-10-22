@@ -241,7 +241,7 @@ pub fn x_bplut_print_summary() {
 }
 // EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): TBLASTX's full table built in place
 // (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export itself.
-pub(crate) use backbone::x_tbx_build_ncbi_lookup;
+pub(crate) use backbone::{x_tbx_build_ncbi_lookup, x_tbxlut_reach_stub};
 
 /// EXPERIMENT (LOSAT_X_TBXLUTSHADOW): the shadow mode's line (printed by `main` at exit).
 // No NCBI counterpart: prints a counter; it does not change any value NCBI computes.

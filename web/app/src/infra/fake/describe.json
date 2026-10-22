@@ -111,6 +111,17 @@
     ]
    },
    {
+    "flag": "-strand",
+    "help": "",
+    "takes_value": true,
+    "default": "both",
+    "choices": [
+     "both",
+     "plus",
+     "minus"
+    ]
+   },
+   {
     "flag": "-query_loc",
     "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
     "takes_value": true
@@ -129,6 +140,12 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-culling_limit",
+    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
+    "takes_value": true,
+    "default": "0"
    }
   ]
  },

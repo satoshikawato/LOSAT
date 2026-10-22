@@ -223,7 +223,11 @@ fn mask_with_probe<P: Fn() + Sync>(
     probe: &P,
 ) {
     let frame_count = masked_frame_count(query_frames);
-    if mode == 0 || !on_pool(pool, frame_count) {
+    let pooled = on_pool(pool, frame_count);
+    if mode == 1 {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXQFRAMES", pooled);
+    }
+    if mode == 0 || !pooled {
         serial(query_frames, seg);
         return;
     }

@@ -10,7 +10,7 @@
 #   ./compare_self_tblastx.sh NZ_CP006932.fna 4
 #
 # Requirements:
-#   - LOSAT must be built and in PATH or LOSAT/target/release/LOSAT
+#   - LOSAT must be built and in PATH or LOSAT/target/release/losat
 #   - NCBI BLAST+ tblastx must be installed and in PATH
 #   - Python3 for analysis script
 
@@ -53,14 +53,14 @@ echo "============================================="
 # a LOSAT fallback.
 if command -v losat &> /dev/null; then
     LOSAT_CMD="losat"
-elif command -v LOSAT &> /dev/null; then
-    LOSAT_CMD="LOSAT"
-elif [ -f "LOSAT/target/release/LOSAT" ]; then
-    LOSAT_CMD="./LOSAT/target/release/LOSAT"
+elif command -v losat &> /dev/null; then
+    LOSAT_CMD="losat"
 elif [ -f "LOSAT/target/release/losat" ]; then
     LOSAT_CMD="./LOSAT/target/release/losat"
-elif [ -f "../LOSAT/target/release/LOSAT" ]; then
-    LOSAT_CMD="../LOSAT/target/release/LOSAT"
+elif [ -f "LOSAT/target/release/losat" ]; then
+    LOSAT_CMD="./LOSAT/target/release/losat"
+elif [ -f "../LOSAT/target/release/losat" ]; then
+    LOSAT_CMD="../LOSAT/target/release/losat"
 elif [ -f "../LOSAT/target/release/losat" ]; then
     LOSAT_CMD="../LOSAT/target/release/losat"
 else

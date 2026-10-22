@@ -409,9 +409,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     // AIRR rearrangement, FASTA) before its warning. The deferred errors of `resolve` are
     // those of the composition-based statistics handler and of `Validate`, which come later.
     app::formatting_handler_check(&choice, Program::Blastx)?;
-    if args.max_target_seqs.unwrap_or(500) < 5 {
-        stderr.write_all(b"Warning: [blastx] Examining 5 or more matches is recommended\n")?;
-    }
+    // The warnings of the hit list size and of an ignored -num_descriptions
+    // (`blastinput::report_counts`).
+    stderr.write_all(&warnings_of(&args, choice.number))?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
     // ```c++
     //     catch (const blast::CInputException& e) {                               \
@@ -570,6 +570,11 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file is LOSAT's rejection, above).
     app::xinclude_check_for(&choice, args.out.as_deref())?;
+    // LOSAT_X_DBIDXREAD acts on a database's index files only; the new side is marked where a
+    // volume is opened (`seqdb::Volume::open`).
+    if database.is_none() && crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
+        crate::utils::xreach::x_reach!("LOSAT_X_DBIDXREAD", false);
+    }
     let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
     let no_reported = ReportedSubjects::default();
     let shown_run = match (&database, &pairwise_database) {
@@ -787,6 +792,21 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
             // replayed in input order; the results printed are those of the one-batch-at-a-time
             // loop above.
             #[cfg(feature = "parallel")]
+            {
+                // Without a pool of 2+ threads (LOSAT_X_BXPOOL, 2+ threads) the batches are searched
+                // one at a time; LOSAT_X_BXFLOW acts only with the queued batches.
+                let x_pooled = x_pool.is_some_and(|pool| pool.enabled());
+                if super::runtime::x_bx_batch() && !x_pooled {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", false);
+                }
+                if super::runtime::x_bx_flow() {
+                    crate::utils::xreach::x_reach!(
+                        "LOSAT_X_BXFLOW",
+                        x_pooled && super::runtime::x_bx_batch()
+                    );
+                }
+            }
+            #[cfg(feature = "parallel")]
             if let Some(pool) = x_pool.filter(|pool| super::runtime::x_bx_batch() && pool.enabled())
             {
                 use rayon::prelude::*;
@@ -825,7 +845,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         &mut query_stream,
                         args.lcase_masking,
                         &|queries: &[super::input::FastaRecord], alone: bool| {
-                            if alone || x_large(queries) {
+                            let large = alone || x_large(queries);
+                            crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !large);
+                            if large {
                                 super::runtime::x_search_internal_in_pool(
                                     queries,
                                     search_subjects,
@@ -890,6 +912,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                     // uses the pool inside, as the unbatched loop does.
                     let x_t = super::x_timing::lap();
                     let x_tail = batches.len() < pool.threads();
+                    crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !x_tail);
                     let searched = if x_tail {
                         batches
                             .iter()
@@ -1078,6 +1101,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         // Dispatch point: NCBI builds a CLocalBlast, and so its worker threads, for every batch.
         // With LOSAT_X_BXPOOL one pool is built for the whole run and every batch is searched on
         // it. Reuse of threads only.
+        if super::runtime::x_bx_pool() {
+            crate::utils::xreach::x_reach!("LOSAT_X_BXPOOL", options.num_threads > 1);
+        }
         let x_batches = if super::runtime::x_bx_pool() && options.num_threads > 1 {
             // A pool that cannot be built is the engine error it was when each
             // batch built its own.
@@ -1445,4 +1471,16 @@ fn x_flow(
         }
         parsed
     })
+}
+
+/// The formatting handler's warnings of a BLASTX run with output format `outfmt`
+/// (`ReportCounts::warnings`).
+pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
+    crate::blastinput::report_counts::report_counts(
+        outfmt,
+        args.max_target_seqs.map(|n| n as usize),
+        args.num_descriptions,
+        args.num_alignments,
+    )
+    .warnings("blastx", outfmt, args.num_descriptions.is_some())
 }

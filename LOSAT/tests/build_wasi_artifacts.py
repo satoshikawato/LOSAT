@@ -12,8 +12,8 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[2]
 CRATE = ROOT / "LOSAT"
 SPECS = {
-    "serial-command": ("wasm32-wasip1", ["--bin", "LOSAT", "--no-default-features"], []),
-    "threaded-command": ("wasm32-wasip1-threads", ["--bin", "LOSAT", "--features", "wasm-threads"], ["parallel", "wasm-threads"]),
+    "serial-command": ("wasm32-wasip1", ["--bin", "losat", "--no-default-features"], []),
+    "threaded-command": ("wasm32-wasip1-threads", ["--bin", "losat", "--features", "wasm-threads"], ["parallel", "wasm-threads"]),
     "threaded-reactor": ("wasm32-wasip1-threads", ["--lib", "--features", "wasm-threads"], ["parallel", "wasm-threads"]),
     "serial-reactor": ("wasm32-wasip1", ["--lib", "--no-default-features"], []),
 }
@@ -65,7 +65,8 @@ def main():
         for previous, expected in recorded.items():
             if digest(previous) != expected:
                 raise RuntimeError(f"build overwrote another artifact: {previous}")
-        built = target / kind / triple / "release/LOSAT.wasm"
+        # A reactor is the cdylib of the library crate `LOSAT`; a command is the `losat` binary.
+        built = target / kind / triple / "release" / ("LOSAT.wasm" if kind.endswith("reactor") else "losat.wasm")
         identity = json.loads(subprocess.check_output([args.node, str(CRATE / "tests/wasi_artifact.js"), str(built), kind], text=True))
         destination = out / f"losat-{kind}.wasm"
         shutil.copyfile(built, destination)

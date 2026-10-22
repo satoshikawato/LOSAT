@@ -32,7 +32,7 @@ fn fixture(name: &str) -> PathBuf {
 /// --all-features`, as in CI) needs that file name as soon as a search has more than one
 /// thread, and it selects nothing.
 fn losat() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
@@ -51,7 +51,7 @@ fn temp_dir(tag: &str) -> PathBuf {
     dir
 }
 
-/// The protein database of the fixture's subjects, made by `LOSAT makedb` in `dir`.
+/// The protein database of the fixture's subjects, made by `losat makedb` in `dir`.
 fn database(dir: &Path) -> PathBuf {
     let db = dir.join("s2db");
     let made = losat()

@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle): blastp's
 //! `LOSAT_X_BPREDOPAR`, `LOSAT_X_BPREDOLPT`, `LOSAT_X_BPDBCUT`, `LOSAT_X_BPSUBJMETA` and
 //! `LOSAT_X_BPLKPAHEAD`, and blastn's `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARFOLD`,
@@ -56,7 +57,7 @@ fn work_dir(label: &str) -> PathBuf {
 /// soon as a search has more than one thread, and it selects nothing. Must exit with 0; returns
 /// the report and standard error.
 fn losat(args: &[&str], vars: &[(&str, &str)]) -> (Vec<u8>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && text != "LOSAT_BLASTX_WORKER_LOG")
@@ -146,10 +147,10 @@ fn acts(args: &[&str], base: &[(&str, &str)], shadows: &[(&str, &str, &str)]) {
     }
 }
 
-/// A protein database of the subject proteome, made with `LOSAT makedb`; returns its name.
+/// A protein database of the subject proteome, made with `losat makedb`; returns its name.
 fn protein_database(label: &str) -> PathBuf {
     let name = work_dir(label).join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
@@ -157,7 +158,7 @@ fn protein_database(label: &str) -> PathBuf {
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",

@@ -57,7 +57,7 @@ impl Inputs {
         let query = self.query.0.display().to_string();
         let subject = self.subject.0.display().to_string();
         let mut argv = vec![
-            "LOSAT", "blastn", "-query", &query, "-subject", &subject, "-outfmt", "6",
+            "losat", "blastn", "-query", &query, "-subject", &subject, "-outfmt", "6",
         ];
         argv.extend_from_slice(extra);
         let cli: Cli = try_parse_from(argv).expect("blastn argv");
@@ -81,7 +81,7 @@ impl Inputs {
     /// The CLI output file and standard error of one single-format run.
     fn cli(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
         let out = self.query.0.with_extension(format!("cli{outfmt}.out"));
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("blastn")
             .arg("-query")
             .arg(&self.query.0)
@@ -128,6 +128,8 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
         &["-max_target_seqs", "1"][..],
         &["-task", "blastn"][..],
         &["-num_threads", "2"][..],
+        // The culling writer and pipe (`-culling_limit`) act on every path of the shared entry.
+        &["-culling_limit", "1"][..],
     ] {
         let together = inputs.run(&FORMATS, extra, true);
         assert_eq!(
@@ -225,6 +227,72 @@ fn unsupported_formats_fail_before_searching() {
         assert!(
             valid.is_empty() && invalid.is_empty() && diagnostics.is_empty(),
             "nothing is written when a requested format is invalid"
+        );
+    }
+}
+
+// NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
+// `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
+// so formats that need different hit list sizes are refused before anything is written
+// (`blastinput/report_counts.rs`), while formats of one hit list size still share a run.
+#[test]
+fn formats_needing_different_hit_list_sizes_are_refused() {
+    let inputs = Inputs::new();
+    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let subjects = reader_records(
+        &inputs.subject.0,
+        ReaderConfig::subject("BLASTN", false, true),
+    );
+    let attempt = |formats: &[&str], extra: &[&str]| {
+        let mut sinks: Vec<Vec<u8>> = formats.iter().map(|_| Vec::new()).collect();
+        let mut diagnostics = Vec::new();
+        let mut outputs = ReportOutputs {
+            formats: formats
+                .iter()
+                .zip(sinks.iter_mut())
+                .map(|(outfmt, sink)| FormatOutput {
+                    outfmt,
+                    sink: OutputSink::Writer(sink),
+                })
+                .collect(),
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        let result = run_local_blastn(inputs.args(extra), &queries, &subjects, &mut outputs);
+        drop(outputs);
+        (result, sinks, diagnostics)
+    };
+    for (formats, extra) in [
+        (&["0", "6"][..], &["-num_descriptions", "3"][..]),
+        (&["6", "0"][..], &["-num_descriptions", "3"][..]),
+        (&["0", "6"][..], &["-num_alignments", "3"][..]),
+        (
+            &["0", "6", "7"][..],
+            &["-num_descriptions", "3", "-num_alignments", "2"][..],
+        ),
+    ] {
+        let (result, sinks, _) = attempt(formats, extra);
+        let error = format!("{:#}", result.expect_err("different hit list sizes"));
+        assert!(
+            error.contains("need different hit list sizes"),
+            "{formats:?} {extra:?}: {error}"
+        );
+        // The option warnings of the first format may precede the refusal (BLASTP's
+        // `check_options`, as the CLI writes a warning before an options error), so the
+        // diagnostics are not checked; no report bytes are written.
+        assert!(
+            sinks.iter().all(Vec::is_empty),
+            "{formats:?} {extra:?}: nothing is written"
+        );
+    }
+    // The same formats without these options, or with one hit list size, run together.
+    for extra in [&[][..], &["-max_target_seqs", "3"][..]] {
+        let (result, sinks, _) = attempt(&["0", "6"], extra);
+        result.unwrap_or_else(|error| panic!("{extra:?}: {error:#}"));
+        assert!(
+            !sinks[0].is_empty(),
+            "{extra:?}: outfmt 0 writes its header"
         );
     }
 }
@@ -748,4 +816,49 @@ fn intervals_without_letters_are_records_without_residues() {
         report.contains("# Query: q2 short\n") && report.contains("# BLAST processed 2 queries\n"),
         "{report}"
     );
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
+// ```c++
+//         arg_desc.AddDefaultKey(kArgStrand, "strand",
+//                      "Query strand(s) to search against database/subject",
+//                                CArgDescriptions::eString, kDfltArgStrand);
+// ```
+// The command line checks `-strand` at parsing; `run_local` takes the arguments as a struct, so
+// it checks the value itself: an unknown strand is an argument error and nothing is written,
+// while `plus` and `minus` search and `both` is the plain search.
+#[test]
+fn run_local_rejects_an_unknown_strand() {
+    let inputs = Inputs::new();
+    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let subjects = reader_records(
+        &inputs.subject.0,
+        ReaderConfig::subject("BLASTN", false, true),
+    );
+    for strand in ["foo", "", "PLUS", "plus "] {
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs =
+            ReportOutputs::single("6", OutputSink::Writer(&mut sink), &mut diagnostics);
+        let mut args = inputs.args(&[]);
+        args.strand = strand.to_string();
+        let result = run_local_blastn(args, &queries, &subjects, &mut outputs);
+        drop(outputs);
+        let error = result
+            .expect_err("an unknown strand is an error")
+            .to_string();
+        assert_eq!(
+            error,
+            format!(
+                "Argument \"strand\". Illegal value, expected `both', `minus', `plus':  `{strand}'"
+            )
+        );
+        assert!(sink.is_empty() && diagnostics.is_empty(), "{strand:?}");
+    }
+    let both = inputs.run(&["6"], &["-strand", "both"], false);
+    let plain = inputs.run(&["6"], &[], false);
+    assert_eq!(both.outputs, plain.outputs);
+    for strand in ["plus", "minus"] {
+        let run = inputs.run(&["6"], &["-strand", strand], false);
+        assert!(!run.outputs[0].is_empty(), "{strand}");
+    }
 }

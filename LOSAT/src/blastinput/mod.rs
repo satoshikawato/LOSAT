@@ -25,6 +25,9 @@ pub mod input_files;
 // NCBI corelib/ncbiapp.cpp, metareg.cpp: the application layer's environment and registry.
 pub mod ncbi_environment;
 pub mod query_batch;
+// NCBI blastinput/blast_args.cpp:2894-2978: the hit list size and the numbers of descriptions
+// and alignments of a run.
+pub mod report_counts;
 // NCBI blastinput/blast_input_aux.cpp:145-179 and blast_fasta_input.cpp:433-460: the
 // `-query_loc` and `-subject_loc` ranges.
 pub mod seq_range;

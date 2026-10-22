@@ -158,7 +158,7 @@ struct Run {
 /// thread, and it selects nothing (it is set to a file of this test when the environment has
 /// none). With `out`, the report is that file's bytes (standard output must then be empty).
 fn blastn(args: &[&str], threads: u32, switches: &[(&str, &str)], out: Option<&Path>) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -490,7 +490,7 @@ fn errors_after_earlier_batches_give_the_off_bytes() {
     }
 }
 
-/// A database (`-db`, made by `LOSAT makedb` from four genomes): the off bytes, every format.
+/// A database (`-db`, made by `losat makedb` from four genomes): the off bytes, every format.
 #[test]
 fn a_database_search_gives_the_off_bytes() {
     let dir = TempDir::new("db");
@@ -501,13 +501,13 @@ fn a_database_search_gives_the_off_bytes() {
     }
     std::fs::write(dir.path("set.fna"), set).unwrap();
     let db = dir.path("set").to_str().unwrap().to_string();
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(dir.path("set.fna"))
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(output.status.success(), "makedb");
     for (task, outfmt) in [
         ("megablast", "0"),
@@ -537,7 +537,7 @@ fn a_database_search_gives_the_off_bytes() {
     }
 }
 
-/// `LOSAT makedb` of LC738868 and of a part of LC738874 (150,000-190,000, with three runs of `N`, so
+/// `losat makedb` of LC738868 and of a part of LC738874 (150,000-190,000, with three runs of `N`, so
 /// with ambiguity data) that only the queries of the last batches hit; `patch` changes the files.
 fn database(dir: &TempDir, name: &str, patch: impl FnOnce(&str)) -> String {
     let mut part = letters("LC738874.fasta")[150_000..190_000].to_vec();
@@ -550,13 +550,13 @@ fn database(dir: &TempDir, name: &str, patch: impl FnOnce(&str)) -> String {
     let fasta = dir.path(&format!("{name}.fna"));
     std::fs::write(&fasta, text).unwrap();
     let db = dir.path(name).to_str().unwrap().to_string();
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(&fasta)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(output.status.success(), "makedb");
     patch(&db);
     db

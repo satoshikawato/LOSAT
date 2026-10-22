@@ -6,7 +6,7 @@
 //! - DUST masking
 //! - Lookup table building
 
-use super::args::BlastnArgs;
+use super::args::{BlastnArgs, QueryStrand};
 use super::constants::{
     LUT_WIDTH_11_THRESHOLD_10, LUT_WIDTH_11_THRESHOLD_8, MAX_DIRECT_LOOKUP_WORD_SIZE,
     MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN,
@@ -901,6 +901,27 @@ fn merge_mask_intervals(mut intervals: Vec<MaskedInterval>) -> Vec<MaskedInterva
     merged
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1173-1178
+// ```c
+// masks->ssr->left  = query_length - 1 - masks->ssr->right;
+// masks->ssr->right = query_length - 1 - masks->ssr->left;
+// ```
+pub(crate) fn reverse_mask_intervals(
+    masks: &[MaskedInterval],
+    query_length: usize,
+) -> Vec<MaskedInterval> {
+    let mut out: Vec<MaskedInterval> = masks
+        .iter()
+        .map(|m| {
+            let start = query_length.saturating_sub(m.end);
+            let end = query_length.saturating_sub(m.start);
+            MaskedInterval { start, end }
+        })
+        .collect();
+    out.sort_by_key(|m| m.start);
+    out
+}
+
 /// Apply DUST filter to query sequences
 pub fn apply_dust_masking<R: InputRecord>(
     args: &BlastnArgs,
@@ -936,9 +957,38 @@ pub fn apply_dust_masking<R: InputRecord>(
         // (`x_query_dust_par.rs`: the mask of a query is a function of its letters and the three
         // parameters only, so the results are the serial ones); without the switch, or without a
         // pool of two or more threads, the same map runs serially.
-        let seqs: Vec<&[u8]> = queries.iter().map(|record| record.seq()).collect();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:171-180
+        // ```c
+        //         CSeqVector data(*queries.GetQuerySeqLoc(i), *queries.GetScope(i),
+        //                         CBioseq_Handle::eCoding_Iupac);
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:91-117
+        // ```c
+        //     CRef<CSeq_loc_Mapper> mapper = s_CreateSeqLocMapper(*query_id, seqloc,
+        //                                                         scope);
+        //     query_masks.Reset(mapper->Map(*query_masks));
+        // ```
+        // The vector is that of the query's Seq-loc with its strand: with `-strand minus` DUST
+        // reads the reverse complement and its intervals are mapped back to the plus strand.
+        // (The conversion to two bits reads letters other than C, G, T as A and N at random,
+        // `symdust.hpp:76-84`, so on a query with ambiguity codes the intervals differ by strand.)
+        // `plus` and `both` dust the letters as they are.
         let masks: Vec<Vec<MaskedInterval>> =
-            super::x_query_dust_par::masks(&seqs, dust_level, dust_window, dust_linker, pool);
+            if QueryStrand::from_option(&args.strand) == QueryStrand::Minus {
+                let reverse: Vec<Vec<u8>> = queries
+                    .iter()
+                    .map(|record| super::lookup::reverse_complement(record.seq()))
+                    .collect();
+                let seqs: Vec<&[u8]> = reverse.iter().map(Vec::as_slice).collect();
+                super::x_query_dust_par::masks(&seqs, dust_level, dust_window, dust_linker, pool)
+                    .into_iter()
+                    .zip(&seqs)
+                    .map(|(masks, seq)| reverse_mask_intervals(&masks, seq.len()))
+                    .collect()
+            } else {
+                let seqs: Vec<&[u8]> = queries.iter().map(|record| record.seq()).collect();
+                super::x_query_dust_par::masks(&seqs, dust_level, dust_window, dust_linker, pool)
+            };
 
         let total_masked: usize = masks
             .iter()
@@ -1261,7 +1311,7 @@ mod tests {
     // ```
     fn blastn_args(words: &[&str]) -> BlastnArgs {
         let argv = [
-            "LOSAT", "blastn", "-query", "q", "-subject", "s", "-outfmt", "6",
+            "losat", "blastn", "-query", "q", "-subject", "s", "-outfmt", "6",
         ];
         let cli: crate::cli::Cli =
             crate::cli::try_parse_from(argv.iter().chain(words)).expect("valid arguments");
@@ -1389,5 +1439,53 @@ mod tests {
         assert_eq!(subject_trace_id(b"no_space"), "no_space");
         assert_eq!(subject_trace_id(b""), "unknown");
         assert_eq!(subject_trace_id(b" leading space"), "unknown");
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:171-180,91-117
+    // ```c
+    //         CSeqVector data(*queries.GetQuerySeqLoc(i), *queries.GetScope(i),
+    //                         CBioseq_Handle::eCoding_Iupac);
+    //     ...
+    //     query_masks.Reset(mapper->Map(*query_masks));
+    // ```
+    // NCBI reference: ncbi-blast/c++/include/algo/dustmask/symdust.hpp:76-84
+    // ```c
+    //                     case 78: return (m_Random.GetRand() & 0x3);
+    //                     default: return 0;
+    // ```
+    // A query with ambiguity codes (letters other than C, G, T read as A, N at random) has
+    // other DUST intervals on its reverse complement; `-strand minus` dusts the reverse
+    // complement and maps the intervals back. The query is the first line of
+    // O2a `results/dust_asym/asym_s12_2.txt`; the intervals are the ones that file lists for the
+    // plus strand and for the mapped reverse complement (inclusive there, [start, end) here).
+    // The NCBI binary's Query rows agree with the mapped reverse complement
+    // (`results/ncbi_dustasym`).
+    #[test]
+    fn dust_of_the_minus_strand_is_that_of_the_reverse_complement() {
+        const QUERY: &str = "AGACCAANCCACCMCCCCCCCKNCCCYCCCCCCCCCCCNCCCCCCAMCCCCKCCCCCCCGMCCCCCTACCKCCNMKCYCCCNCCCCNGAAGAGAAGAGAAGAGAAGAGAAGAGAAGAGAAGAGAAGAGAAGAGAAGWGAAGAGAAGAGAAGAGATAAACTTGGTGCGCAACCGGGKCGGGASGGGYCGGGACAGMAWGGG";
+        let fasta = format!(">dq\n{QUERY}\n");
+        let records = crate::blastinput::fasta_reader::read_all(
+            &mut crate::blastinput::fasta_reader::FastaInputSource::from_bytes(
+                fasta.as_bytes(),
+                crate::blastinput::fasta_reader::ReaderConfig::query("BLASTN", false, false),
+            ),
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        let masks = |strand: &str| {
+            let args = blastn_args(&["-strand", strand]);
+            crate::utils::threading::with_search_pool(1, "blastn", |pool| {
+                Ok(apply_dust_masking(&args, &records, pool))
+            })
+            .unwrap()
+            .remove(0)
+            .into_iter()
+            .map(|mask| (mask.start, mask.end))
+            .collect::<Vec<_>>()
+        };
+        let plus = masks("plus");
+        assert_eq!(plus, [(2, 154)]);
+        assert_eq!(masks("both"), plus);
+        assert_eq!(masks("minus"), [(14, 86), (87, 154)]);
     }
 }

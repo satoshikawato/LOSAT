@@ -119,14 +119,14 @@ fn pieces(first: usize, count: usize) -> Vec<u8> {
     fasta
 }
 
-/// A nucleotide database of `pieces(first, count)` made with `LOSAT makedb` in the directory
+/// A nucleotide database of `pieces(first, count)` made with `losat makedb` in the directory
 /// `label`, with `extra` arguments (`-max_file_sz` for volumes); returns the database name.
 fn database(label: &str, first: usize, count: usize, extra: &[&str]) -> PathBuf {
     let dir = temp_dir(label);
     let input = dir.join("pieces.fna");
     std::fs::write(&input, pieces(first, count)).unwrap();
     let name = dir.join("pieces");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(&input)
@@ -135,7 +135,7 @@ fn database(label: &str, first: usize, count: usize, extra: &[&str]) -> PathBuf 
         .arg(&name)
         .args(extra)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",
@@ -178,7 +178,7 @@ fn blastn_any_exit(
     vars: &[(&str, &str)],
     outfmt: &str,
 ) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")

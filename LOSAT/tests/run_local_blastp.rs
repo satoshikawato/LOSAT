@@ -52,7 +52,7 @@ fn blastp_args(
     extra: &[&str],
 ) -> LOSAT::algorithm::blastp::BlastpArgs {
     let mut argv = vec![
-        "LOSAT".to_string(),
+        "losat".to_string(),
         "blastp".to_string(),
         "-query".to_string(),
         query.display().to_string(),
@@ -112,7 +112,7 @@ fn cli(inputs: &Inputs, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
     let out = inputs
         .query
         .with_extension(format!("cli{}.out", outfmt.len()));
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("blastp")
         .arg("-query")
         .arg(&inputs.query)
@@ -261,6 +261,76 @@ fn unsupported_formats_fail_before_searching() {
     }
 }
 
+// NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
+// `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
+// so formats that need different hit list sizes are refused before anything is written
+// (`blastinput/report_counts.rs`), while formats of one hit list size still share a run.
+#[test]
+fn formats_needing_different_hit_list_sizes_are_refused() {
+    let inputs = Inputs::new(8);
+    let queries = queries(&inputs.query);
+    let subjects = subjects(&inputs.subject);
+    let attempt = |formats: &[&str], extra: &[&str]| {
+        let mut sinks: Vec<Vec<u8>> = formats.iter().map(|_| Vec::new()).collect();
+        let mut diagnostics = Vec::new();
+        let mut outputs = ReportOutputs {
+            formats: formats
+                .iter()
+                .zip(sinks.iter_mut())
+                .map(|(outfmt, sink)| FormatOutput {
+                    outfmt,
+                    sink: OutputSink::Writer(sink),
+                })
+                .collect(),
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        let result = run_local_blastp(
+            blastp_args(&inputs.query, &inputs.subject, extra),
+            &queries,
+            &subjects,
+            "",
+            "",
+            &mut outputs,
+        );
+        drop(outputs);
+        (result, sinks, diagnostics)
+    };
+    for (formats, extra) in [
+        (&["0", "6"][..], &["-num_descriptions", "3"][..]),
+        (&["6", "0"][..], &["-num_descriptions", "3"][..]),
+        (&["0", "6"][..], &["-num_alignments", "3"][..]),
+        (
+            &["0", "6", "7"][..],
+            &["-num_descriptions", "3", "-num_alignments", "2"][..],
+        ),
+    ] {
+        let (result, sinks, _) = attempt(formats, extra);
+        let error = format!("{:#}", result.expect_err("different hit list sizes"));
+        assert!(
+            error.contains("need different hit list sizes"),
+            "{formats:?} {extra:?}: {error}"
+        );
+        // The option warnings of the first format may precede the refusal (BLASTP's
+        // `check_options`, as the CLI writes a warning before an options error), so the
+        // diagnostics are not checked; no report bytes are written.
+        assert!(
+            sinks.iter().all(Vec::is_empty),
+            "{formats:?} {extra:?}: nothing is written"
+        );
+    }
+    // The same formats without these options, or with one hit list size, run together.
+    for extra in [&[][..], &["-max_target_seqs", "3"][..]] {
+        let (result, sinks, _) = attempt(&["0", "6"], extra);
+        result.unwrap_or_else(|error| panic!("{extra:?}: {error:#}"));
+        assert!(
+            !sinks[0].is_empty(),
+            "{extra:?}: outfmt 0 writes its header"
+        );
+    }
+}
+
 /// The first `count` protein sequences of a fixture, from `start` residues on.
 fn protein_sequences(name: &str, count: usize) -> Vec<Vec<u8>> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -280,7 +350,7 @@ fn cli_run(
     extra: &[&str],
     env: &[(&str, &str)],
 ) -> (Option<i32>, Vec<u8>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     command
         .arg("blastp")
         .arg("-query")

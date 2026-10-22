@@ -129,9 +129,11 @@ def row_env(row: dict[str, str], base: dict[str, str]) -> dict[str, str]:
 
 def clean_env(base: dict[str, str], home: str) -> dict[str, str]:
     """`base` without what changes a result (NCBI*, BLAST*, LOSAT_*, `NCBI_ENV`), HOME and USERPROFILE
-    set to the empty directory `home` (`$HOME/.ncbirc` is read by both programs)."""
+    set to the empty directory `home` (`$HOME/.ncbirc` is read by both programs). LOSAT_X_REACH is kept
+    (LOSAT/src/utils/xreach.rs): it records LOSAT's switch paths and changes no output."""
     env = {k: v for k, v in base.items()
-           if not k.startswith(("NCBI", "BLAST", "LOSAT_")) and k not in NCBI_ENV}
+           if k == "LOSAT_X_REACH"
+           or (not k.startswith(("NCBI", "BLAST", "LOSAT_")) and k not in NCBI_ENV)}
     env["HOME"] = env["USERPROFILE"] = home
     return env
 

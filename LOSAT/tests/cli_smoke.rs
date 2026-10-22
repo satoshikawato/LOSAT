@@ -21,7 +21,7 @@ fn temp_path(stem: &str, extension: &str) -> PathBuf {
 }
 
 fn losat_binary() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_LOSAT") {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_losat") {
         return PathBuf::from(path);
     }
 
@@ -30,7 +30,7 @@ fn losat_binary() -> PathBuf {
     if path.file_name().is_some_and(|name| name == "deps") {
         path.pop();
     }
-    path.push(format!("LOSAT{}", std::env::consts::EXE_SUFFIX));
+    path.push(format!("losat{}", std::env::consts::EXE_SUFFIX));
     path
 }
 

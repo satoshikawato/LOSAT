@@ -26,7 +26,7 @@ use super::stage_d_linking::{
     LinkedHspList,
 };
 use super::stage_d_results::{
-    merge_query_chunk, KappaHspPayload, KappaResultHitList, KappaResultList,
+    merge_query_chunk, KappaHspPayload, KappaResultHitList, KappaResultList, PrelimCulling,
 };
 use super::stage_d_stats::{
     local_parameters_for_call, LocalParameterCall, LocalParameterOptions, LocalSubjectParameters,
@@ -81,6 +81,11 @@ pub(super) struct LocalStageDProfile<'a> {
     /// The Seq-aligns are requested (outfmt 8, 12; `ReportNeeds::seqalign`): the HSPs of a
     /// composition-adjusted match get NCBI's engine positives (`postredo_engine_positives`).
     pub engine_positives: bool,
+    /// The `-culling_limit` value (0: no culling). A positive value makes the preliminary
+    /// stage keep the HSPs of each query in NCBI's culling writer (`culling.rs`)
+    /// instead of the plain hit-list collector; the pipe after the traceback is run by the
+    /// finish of the search (`args.rs`).
+    pub culling_limit: i32,
 }
 
 /// The numbers of a database (`-db`) as NCBI's search reads them from its sequence source:
@@ -1096,6 +1101,7 @@ fn run_local_search_with_pool(
                 gumbel: gumbel.as_ref(),
                 prelim_evalue: parameters.prelim_evalue,
                 prelim_size,
+                culling_limit: profile.culling_limit,
             },
             subjects,
             pool,
@@ -2017,6 +2023,7 @@ fn split_preliminary_hitlists(
                 gumbel: inputs.gumbel,
                 prelim_evalue: setup.parameters.prelim_evalue,
                 prelim_size,
+                culling_limit: inputs.profile.culling_limit,
             },
             subjects,
             pool,
@@ -2251,6 +2258,79 @@ struct PreliminaryInputs<'a> {
     gumbel: Option<&'a BlastGumbelBlk>,
     prelim_evalue: f64,
     prelim_size: usize,
+    /// `-culling_limit` (0: none).
+    culling_limit: i32,
+}
+
+// Where the HSP lists of the subjects go as the owner of the search takes them in OID order:
+// the hit-list collector of the preliminary stage (`PreliminaryCollector`), or, with
+// `-culling_limit`, NCBI's culling writer (`PrelimCulling`). `run_preliminary_subjects` picks
+// one once per call, before the subject loop.
+trait PreliminarySink {
+    /// The list of subject `oid`: the linked HSPs of all queries and frames, in list order.
+    fn add(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()>;
+    /// The preliminary hit list of each query context.
+    fn finish(self) -> Result<Vec<Option<KappaResultHitList>>>;
+}
+
+// NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
+// Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
+// Each context owns an independently capped preliminary list.
+struct PreliminaryCollector {
+    hitlists: Vec<Option<KappaResultHitList>>,
+    prelim_size: usize,
+}
+
+impl PreliminaryCollector {
+    fn new(inputs: &PreliminaryInputs<'_>) -> Self {
+        Self {
+            hitlists: (0..inputs.queries.len()).map(|_| None).collect(),
+            prelim_size: inputs.prelim_size,
+        }
+    }
+}
+
+impl PreliminarySink for PreliminaryCollector {
+    #[inline(always)]
+    fn add(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()> {
+        for context in 0..self.hitlists.len() {
+            let hsps: Vec<_> = linked
+                .hsps
+                .iter()
+                .copied()
+                .filter(|h| h.context == context)
+                .collect();
+            if !hsps.is_empty() {
+                let best_evalue = hsps.iter().map(|h| h.evalue).reduce(f64::min).unwrap();
+                // NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
+                // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
+                // Each context owns an independently capped preliminary list.
+                let collector = self.hitlists[context]
+                    .get_or_insert(KappaResultHitList::new(self.prelim_size)?);
+                collector.update(KappaResultList {
+                    oid: i32::try_from(oid)?,
+                    hsps: LinkedHspList { hsps, best_evalue },
+                    payloads: Vec::new(),
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn finish(self) -> Result<Vec<Option<KappaResultHitList>>> {
+        Ok(self.hitlists)
+    }
+}
+
+impl PreliminarySink for PrelimCulling {
+    fn add(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()> {
+        PrelimCulling::add(self, oid, &linked.hsps)
+    }
+
+    fn finish(self) -> Result<Vec<Option<KappaResultHitList>>> {
+        PrelimCulling::finish(self)
+    }
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475,1553-1555:
@@ -2261,10 +2341,39 @@ fn run_preliminary_subjects(
     inputs: &PreliminaryInputs<'_>,
     subjects: SubjectLetters<'_>,
     pool: Option<&SearchPool<'_>>,
-    mut observer: Option<&mut StageDBoundaryTrace>,
+    observer: Option<&mut StageDBoundaryTrace>,
 ) -> Result<Vec<Option<KappaResultHitList>>> {
-    let mut preliminary_hitlists: Vec<Option<KappaResultHitList>> =
-        (0..inputs.queries.len()).map(|_| None).collect();
+    // `-culling_limit` selects NCBI's culling writer in place of the collector, once per call.
+    if inputs.culling_limit > 0 {
+        run_preliminary_subjects_into(
+            inputs,
+            subjects,
+            pool,
+            observer,
+            PrelimCulling::new(
+                inputs.query_lengths,
+                inputs.prelim_size,
+                inputs.culling_limit,
+            ),
+        )
+    } else {
+        run_preliminary_subjects_into(
+            inputs,
+            subjects,
+            pool,
+            observer,
+            PreliminaryCollector::new(inputs),
+        )
+    }
+}
+
+fn run_preliminary_subjects_into<S: PreliminarySink + Send>(
+    inputs: &PreliminaryInputs<'_>,
+    subjects: SubjectLetters<'_>,
+    pool: Option<&SearchPool<'_>>,
+    mut observer: Option<&mut StageDBoundaryTrace>,
+    mut sink: S,
+) -> Result<Vec<Option<KappaResultHitList>>> {
     // NCBI c++/src/algo/blast/core/blast_engine.c:1469-1475,872-905:
     //      status =
     //          s_BlastSearchEngineCore(program_number, query, query_info,
@@ -2562,27 +2671,7 @@ fn run_preliminary_subjects(
             // NCBI c++/src/algo/blast/core/blast_hspstream.c:289-319:
             // Query-indexed lists are consumed in
             // reverse-sorted order by BlastHSPStreamRead.
-            for context in 0..inputs.queries.len() {
-                let hsps: Vec<_> = linked
-                    .hsps
-                    .iter()
-                    .copied()
-                    .filter(|h| h.context == context)
-                    .collect();
-                if !hsps.is_empty() {
-                    let best_evalue = hsps.iter().map(|h| h.evalue).reduce(f64::min).unwrap();
-                    // NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
-                    // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
-                    // Each context owns an independently capped preliminary list.
-                    let collector = preliminary_hitlists[context]
-                        .get_or_insert(KappaResultHitList::new(inputs.prelim_size)?);
-                    collector.update(KappaResultList {
-                        oid: i32::try_from(oid)?,
-                        hsps: LinkedHspList { hsps, best_evalue },
-                        payloads: Vec::new(),
-                    })?;
-                }
-            }
+            sink.add(oid, &linked)?;
         }
         Ok(())
     };
@@ -2635,7 +2724,7 @@ fn run_preliminary_subjects(
             subjects.count(), workers, peak.load(Ordering::SeqCst), x_pool_entries, x_flow_fields
         );
     }
-    Ok(preliminary_hitlists)
+    sink.finish()
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
@@ -2928,6 +3017,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
             true,
             true,
@@ -2977,6 +3067,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
             true,
             true,
@@ -3266,6 +3357,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
             true,
             true,
@@ -3353,6 +3445,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
             true,
             true,
@@ -3509,6 +3602,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
         )
         .unwrap();
@@ -3601,6 +3695,7 @@ mod tests {
                     query_offsets: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
+                    culling_limit: 0,
                 },
             )
             .unwrap();
@@ -3784,6 +3879,7 @@ mod tests {
                     query_offsets: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
+                    culling_limit: 0,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -4010,6 +4106,7 @@ mod tests {
                     query_offsets: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
+                    culling_limit: 0,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -4219,6 +4316,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
             false,
             false,
@@ -4366,6 +4464,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
             false,
             false,
@@ -4534,6 +4633,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             };
             let mut boundary = StageDBoundaryTrace::default();
             let result = run_local_search(
@@ -4730,6 +4830,7 @@ mod tests {
                     query_offsets: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
+                    culling_limit: 0,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -4889,6 +4990,7 @@ mod tests {
                         query_offsets: &[],
                         subject_set: Default::default(),
                         engine_positives: false,
+                        culling_limit: 0,
                     },
                     true,
                     true,
@@ -5199,6 +5301,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
         )
         .unwrap();
@@ -5388,6 +5491,7 @@ mod tests {
                     query_offsets: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
+                    culling_limit: 0,
                 },
             )
             .unwrap();
@@ -5502,6 +5606,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
         )
         .unwrap();
@@ -5598,6 +5703,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
         )
         .unwrap();
@@ -5711,6 +5817,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
         )
         .unwrap();
@@ -5939,6 +6046,7 @@ mod tests {
             query_offsets: &[],
             subject_set: Default::default(),
             engine_positives: false,
+            culling_limit: 0,
         };
         let taken = x_tbn_parallel() && super::super::search_seed::XSubjectSide::enabled();
         for ranges in [

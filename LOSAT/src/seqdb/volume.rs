@@ -1215,7 +1215,7 @@ mod tests {
             runs.push(AmbiguityRun {
                 offset: at,
                 length,
-                ncbi4na: 1 + rng.next(15) as u8,
+                ncbi4na: 2 + rng.next(14) as u8,
             });
             at += length + rng.next(31) as u32;
         }

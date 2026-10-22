@@ -55,7 +55,7 @@ LOSAT_X_DBIDXREAD	blastn,blastp,blastx,tblastn,tblastx	conditional	required	requ
 LOSAT_X_DCCSR	blastn	conditional	required	required	dc-megablast one-template table as CSR when positions x 4 >= cells; ref = two templates or a small query
 LOSAT_X_DEKKER	blastn,blastp,blastx,tblastn,tblastx	platform			wasm32 only
 LOSAT_X_DIAGLV	blastn	conditional	required	required	only the diagonal hash (query block >8000 letters, about >4000 bases); not diagonal array, not scan_range
-LOSAT_X_DIAGLV2	blastn	conditional	required	required	the memo of a two-hit diagonal hash (dc-megablast, query block >8000 letters); ref = one-hit tables (megablast, blastn) and the diagonal array
+LOSAT_X_DIAGLV2	blastn	conditional	required	required	the memo of a two-hit diagonal hash in the dc-megablast strips stage (PAIRPARDISC, query block >8000 letters); ref = the reference fold (any diagonal-hash search) and a stage without the memo
 LOSAT_X_DISCLUTPAR	blastn	conditional	required	required	-task dc-megablast (or megablast with template options) and a pool of 2+ threads
 LOSAT_X_DPAVX2	blastn,blastp,blastx,tblastn,tblastx	platform			x86_64 CPU with AVX2 only; other targets use 128-bit kernel (usually on x86)
 LOSAT_X_DPEMASK	blastn,blastp,blastx,tblastn,tblastx	platform			only the 8-bit 256-bit AVX2 kernel (x86 with AVX2)

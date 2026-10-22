@@ -162,7 +162,10 @@
 //! insert's `(diag, level, hit_len, hit_saved)` and `other`, an upper bound of the levels of the
 //! bucket's other cells (`DiagHashTable::x_last`, `LvLast`). Where `other` is below the seed's
 //! bound, the retrieve returns the latest insert's values for its diagonal and no cell for any
-//! other diagonal.
+//! other diagonal. Only the strips folds of LOSAT_X_PAIRPARDISC keep and read the memo: each of
+//! their stages makes it again from the bounds at its start (`x_lv2_reset`: no latest insert,
+//! `other` the bucket's bound), so the reference fold (`process_offset_pairs`: one thread, and
+//! every worker with many subjects) runs the code before the switch and need not keep it.
 //!
 //! Why the output is the same:
 //! - (iv) The latest insert's cell is the first cell of its diagonal in the bucket's chain, with
@@ -177,8 +180,9 @@
 //! - (v) `other` is at least the level of every other cell of the bucket. Every insert first
 //!   raises `other` to the level of the previous latest insert and then becomes the latest; a
 //!   cell that the latest insert did not write was written by an earlier insert (whose level
-//!   `other` took) or holds what it held before the bucket's first insert, which is nothing
-//!   after the table was made or cleared (`LvLast::EMPTY`, `other = i32::MIN`); the tests'
+//!   `other` took) or holds what it held before the bucket's first insert of the stage, which is
+//!   at or below the bucket's bound when the stage made the memo (`x_lv2_reset`; nothing after
+//!   the table was made or cleared: `LvLast::EMPTY`, `other = i32::MIN`); the tests'
 //!   tables made from cells start at `LvLast::UNKNOWN` (`other = i32::MAX`), which never
 //!   answers. `copy_hash`, the stage copies of `LOSAT_X_PAIRPARFOLD` (`rebuild`) and its merge
 //!   (per changed bucket, from the partition that owns it) copy the memo with the chains.
@@ -189,12 +193,13 @@
 //!
 //! One-hit tables (megablast, blastn, blastn-short: window 0) keep no memo: their inserts would
 //! pay for it where no measured fold gains (the memo is a dc-megablast measurement, line R
-//! REPORT_R12 §2.3). With the switch off, or LOSAT_X_DIAGLV off, `x_last` is empty. The strips
-//! folds then run instances without the memo (`MEMO` false: `retrieve_below::<false>` and
-//! `DiagHashTable::insert_plain`, the code before the switch), and so do the one-hit strips folds
-//! always; the reference fold (`process_offset_pairs`) calls `retrieve_below::<true>` and
-//! `insert`, which make one more length test of `x_last` on every table without a memo, one-hit
-//! tables included, whether the switch is on or off. The shadow (LOSAT_X_DIAGLVSHADOW)
+//! REPORT_R12 §2.3). The reference fold does not keep it either: on many short subjects (100
+//! 16S rRNA queries against a 16S database, every worker in the reference fold) keeping and
+//! testing it cost x1.008 of the wall time where the walks it saves are one cell long
+//! (v4-A15 ab5). The reference fold, the one-hit strips folds, and with the switch off (or
+//! LOSAT_X_DIAGLV off: `x_last` empty) the dc-megablast strips folds call
+//! `retrieve_below::<false>` and `DiagHashTable::insert_plain`, the code before the switch. The
+//! shadow (LOSAT_X_DIAGLVSHADOW)
 //! checks every answer: the bucket's walk must give (iv) (the first cell of the latest insert's
 //! diagonal holds its values) and (v) (every other cell at or below `other`), and the walk of the
 //! retrieve must return what the memo returned for that diagonal, or for any other diagonal a
@@ -273,9 +278,12 @@ pub(super) struct LvLast {
 }
 
 impl LvLast {
+    /// No diagonal: `diag = s_off - q_off` with both offsets in `0..i32::MAX` is above
+    /// `i32::MIN`, so the memo of a bucket with this latest answers no cell for every diagonal.
+    pub(super) const NO_DIAG: i32 = i32::MIN;
     /// A bucket with no cell: no insert yet (its `level` raises `other` to `i32::MIN` only).
     pub(super) const EMPTY: LvLast = LvLast {
-        diag: 0,
+        diag: LvLast::NO_DIAG,
         level: i32::MIN,
         hit_len: 0,
         other: i32::MIN,
@@ -460,10 +468,10 @@ impl DiagHashTable {
         }
         // EXPERIMENT (LOSAT_X_DIAGLV2, module comment (iv)-(vi)): every cell but the latest
         // insert's lies below the bound; answer from the memo without the walk. (`insert` keeps
-        // the memo only on a table with bounds.) Without `MEMO` (the strips folds on a table
-        // without the memo: dc-megablast's instance and the one-hit folds) there is no test.
+        // the memo only on a table with bounds.) Without `MEMO` (the reference fold, the one-hit
+        // strips folds, and dc-megablast's strips fold on a table without the memo) there is no
+        // test, and the memo is not read.
         debug_assert!(self.x_last.is_empty() || self.x_lv_on());
-        debug_assert!(MEMO || self.x_last.is_empty());
         if MEMO {
             if let Some(last) = self.x_last.get(bucket) {
                 if last.other < bound {
@@ -518,8 +526,9 @@ impl DiagHashTable {
             }
             index = cell.next;
         }
-        // (iv): a bucket with cells has had an insert since the clear, and its cell
-        if first && self.backbone[bucket] != 0 {
+        // (iv): a bucket with cells has had an insert since the clear, and its cell (unless the
+        // memo was rebuilt from the bounds since, `x_lv2_reset`, and no insert came after)
+        if first && self.backbone[bucket] != 0 && last.diag != LvLast::NO_DIAG {
             print_line("DIFFERENT");
             panic!(
                 "LOSAT_X_DIAGLV2 (shadow): bucket {bucket} has no cell of the memo's diagonal, which breaks the memo {last:?}"
@@ -611,6 +620,23 @@ impl DiagHashTable {
 
     /// Tests only: a memo (LOSAT_X_DIAGLV2) for a table with bounds, `LvLast::EMPTY` for a
     /// bucket without cells and `LvLast::UNKNOWN` (never answers) for one with cells.
+    /// No NCBI counterpart (LOSAT_X_DIAGLV2): the memo of every bucket made again from the level
+    /// bounds of LOSAT_X_DIAGLV, at the start of a strips stage of dc-megablast (the only folds
+    /// that keep and read it; the reference fold may have changed the table since the last
+    /// stage): no latest insert (`LvLast::NO_DIAG`) and `other` the bucket's bound, which every
+    /// cell's level is at or below. Such a memo answers no cell where `other` lies below the
+    /// seed's bound, which is LOSAT_X_DIAGLV's skip ((i), (ii)); the stage's inserts make it
+    /// the latest-insert memo of (iv) to (vi) again.
+    pub(super) fn x_lv2_reset(&mut self) {
+        debug_assert!(self.x_lv_on() && self.x_last.len() == self.max_level.len());
+        for (last, &max_level) in self.x_last.iter_mut().zip(&self.max_level) {
+            *last = LvLast {
+                other: max_level,
+                ..LvLast::EMPTY
+            };
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn x_lv2_start(&mut self) {
         assert!(self.x_lv_on());
@@ -937,7 +963,7 @@ mod tests {
                 index = cell.next;
             }
             assert!(
-                !first || h.backbone[bucket] == 0,
+                !first || h.backbone[bucket] == 0 || last.diag == LvLast::NO_DIAG,
                 "{at}: bucket {bucket} has no cell of the memo's diagonal ({last:?})"
             );
         }

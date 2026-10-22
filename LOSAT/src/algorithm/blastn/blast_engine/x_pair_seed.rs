@@ -1589,11 +1589,8 @@ pub(super) fn shadow_check(
         h.max_level == diag_hash.max_level,
         "{name}: the level bounds of the diagonal hash (LOSAT_X_DIAGLV) differ"
     );
-    // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): and the memo.
-    assert!(
-        h.x_last == diag_hash.x_last,
-        "{name}: the memo of the diagonal hash (LOSAT_X_DIAGLV2) differs"
-    );
+    // (The memo of LOSAT_X_DIAGLV2 is not compared: the reference fold does not keep it, and a
+    // strips stage makes it again at its start; LOSAT_X_DIAGLVSHADOW checks its every answer.)
     if let Some(b) = (0..diag_hash.backbone.len()).find(|&b| diag_hash.backbone[b] != h.backbone[b])
     {
         panic!(

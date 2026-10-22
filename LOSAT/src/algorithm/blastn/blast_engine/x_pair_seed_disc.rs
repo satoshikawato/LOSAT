@@ -895,7 +895,12 @@ fn seed_stage(
     timed: bool,
     fold_part: Option<part::FoldPart<'_>>,
 ) -> StageStats {
+    // EXPERIMENT (LOSAT_X_DIAGLV2): the memo, kept by the strips folds only, made again from
+    // the bounds (the reference fold may have changed the table since the last stage).
     let memo = !hash.x_last.is_empty();
+    if memo {
+        hash.x_lv2_reset();
+    }
     match (lean_on(), memo) {
         (false, false) => {
             seed_stage_of::<false, false>(x, disc, threads, hash, hits, timing, timed, fold_part)
@@ -1072,6 +1077,9 @@ pub(super) fn run(
     if !shadow {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", true);
         reach_lean(true);
+        if super::super::x_diag_lv::lv2_on() {
+            crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV2", !diag_hash.x_last.is_empty());
+        }
     }
     let timing = if shadow { None } else { x.timing };
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
@@ -2454,6 +2462,10 @@ mod tests {
                         let mut expected = Vec::new();
                         for xc in [&x, &x2] {
                             expected_hash.offset = xc.diag_offset as i32;
+                            // as `seed_stage`: the memo made again at the stage's start
+                            if memo {
+                                expected_hash.x_lv2_reset();
+                            }
                             let mut hits = Vec::new();
                             fold_serial(
                                 false,

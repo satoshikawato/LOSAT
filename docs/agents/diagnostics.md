@@ -3130,14 +3130,16 @@ Scheduling (each value computed by one thread with the original function; order 
   diagonal (any cell it would find lies below the bound and makes the decisions of no cell, `LOSAT_X_DIAGLV`'s
   argument). The insert is unchanged apart from the memo, so the table and the hit list are the reference's
   (`blastn/blast_engine/x_diag_lv.rs`, (iv) to (vi) in its header). The table clear, `copy_hash`, the stage copy
-  and the merge of `LOSAT_X_PAIRPARFOLD` keep the memo with the chains. It acts in every caller of the bounded
-  retrieve on such a table: the reference fold (`process_offset_pairs`: one thread, and every worker with many
-  subjects) and the strips fold of `LOSAT_X_PAIRPARDISC`. One-hit tables (megablast, blastn, blastn-short) keep no memo. The
-  strips folds run an instance per state of the table's memo (`MEMO`, with `LOSAT_X_FOLDLEAN`'s `LEAN`: see there): without it
-  (the switch off, or `LOSAT_X_DIAGLV` off) the retrieve and the insert have no memo test (`retrieve_below::<false>`,
-  `DiagHashTable::insert_plain`, the code before the switch), and the one-hit strips folds (`LOSAT_X_PAIRPAR`,
-  `LOSAT_X_PAIRPARNA`) always take those. The reference fold (`process_offset_pairs`) tests the length of the memo at each
-  insert and at each retrieve the bound does not skip, on every table, one-hit tables included, the switch on or off.
+  and the merge of `LOSAT_X_PAIRPARFOLD` keep the memo with the chains. Only the strips fold of `LOSAT_X_PAIRPARDISC`
+  keeps and reads it: each stage makes it again from `LOSAT_X_DIAGLV`'s bounds at its start (`x_lv2_reset`: no latest
+  insert, `other` the bucket's bound, which answers no cell exactly where the bound skips), so the reference fold
+  (`process_offset_pairs`: one thread, and every worker with many subjects) runs the code before the switch
+  (`DiagHashTable::insert_plain`, `retrieve_below::<false>`) and may change the table between stages. (Keeping the memo
+  in the reference fold made 100 16S queries against a 16S database at 16 threads x1.008 slower, where the walks it
+  saves are one cell long.) One-hit tables (megablast, blastn, blastn-short) keep no memo, and the one-hit strips folds
+  (`LOSAT_X_PAIRPAR`, `LOSAT_X_PAIRPARNA`) take the same memo-free calls. The dc strips stage runs an instance per state
+  of the table's memo (`MEMO`, with `LOSAT_X_FOLDLEAN`'s `LEAN`: see there); with the switch off (or `LOSAT_X_DIAGLV`
+  off) it is the instance without the memo.
   Shadow: `LOSAT_X_DIAGLVSHADOW=1` also checks every memo answer: the bucket's walk must find the latest insert's
   values in the first cell of its diagonal and every other cell at or below `other`, and the retrieve's walk must
   return the memo's cell for that diagonal, or for another diagonal a cell with the decisions of no cell; the

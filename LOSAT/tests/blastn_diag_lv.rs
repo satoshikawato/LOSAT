@@ -287,8 +287,8 @@ fn memo_counts(stderr: &str, at: &str) -> (u64, u64) {
 // (the reference fold) and at four (the strips fold of `LOSAT_X_PAIRPARDISC`) gives the bytes of
 // the search with neither, each switch alone and both, at four threads also with the fold split
 // over partitions (`LOSAT_X_PAIRPARFOLD`); with the shadow, which checks every answer of the memo,
-// the memo answers, also for the latest insert's diagonal. megablast keeps no memo (a one-hit
-// table).
+// the memo answers at four threads, also for the latest insert's diagonal, and never at one (the
+// reference fold does not read it). megablast keeps no memo (a one-hit table).
 #[test]
 fn the_memo_and_the_lean_folds_give_the_same_report() {
     let dir = TestDir::new("memo");
@@ -326,7 +326,11 @@ fn the_memo_and_the_lean_folds_give_the_same_report() {
         assert!(report == expected, "{at}: the report differs");
         shadow_counts(&stderr, &[], &at);
         let (memo, found) = memo_counts(&stderr, &at);
-        assert!(memo > 0 && found > 0 && found <= memo, "{at}: {stderr}");
+        if threads == 1 {
+            assert_eq!((memo, found), (0, 0), "{at}: {stderr}");
+        } else {
+            assert!(memo > 0 && found > 0 && found <= memo, "{at}: {stderr}");
+        }
     }
     let on = [SHADOW, MEMO];
     let (_, stderr) = blastn(&dir, &query, &subject, "megablast", 1, &on);

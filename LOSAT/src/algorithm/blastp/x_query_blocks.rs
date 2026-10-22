@@ -194,6 +194,41 @@
 //!         	incremental_struct->m_IterationNum++;
 //! ```
 //!
+//! LOSAT_X_BPQBLOCKWEB (strict set, `x_bp_qblock_web`; acts only with `LOSAT_X_BPQBLOCK`, and the
+//! shadow implies it) takes a `run_local` call with several outputs, the hit records or an observer
+//! (ABI v2 of the Web build asks for outfmt 0, 6 and 7, the records and the byte ranges of each HSP
+//! in each output), when every output of several is a writer of the caller, no `-db` is searched and
+//! an observer comes with the records. Each block's call writes all the outputs, in the order asked:
+//! - each output's bytes are those of the one-output case above: what is not per query (the prolog,
+//!   the epilog, the counts of outfmt 7 and 5) is set per block for every output alike
+//!   (`BlastpReports`), each output's writer writes only to its own sink, and with several outputs
+//!   the sinks are the caller's writers, unbuffered (a stream that two outputs share would get each
+//!   block's formats in turn, so several outputs need writers; one output may also be standard
+//!   output or a file, as above). The checks of the refusals that depend on the hits are made for
+//!   every kind of report among the outputs before the first block. The warnings go with the first
+//!   output, query by query, in every block.
+//! - the final list of all queries is the blocks' lists one after the other: it is ordered by query,
+//!   then by subject, then by HSP (`hsp.rs`'s final sort), and a query's list does not depend on the
+//!   other queries (above). A record's `q_idx` is its block's first query plus its index in the
+//!   block; `s_idx` and the subject's length come from the call's one subject set (`-subject` only:
+//!   with `-db` they would rank the subjects that the call's lists name); no other field holds a
+//!   value of the whole search. The block search hands the records of all blocks to the caller's
+//!   sink once, after the last block, as the search of all queries hands its one list once (before
+//!   its reports; no caller reads the records before the reports).
+//! - an observer event's index is that of the HSP in the final list: the block's index plus the
+//!   number of HSPs of the blocks before (`XOffsetObserver`, counted from the block's records, which is
+//!   why an observer needs them); its position is read by the caller from its own writer, whose bytes
+//!   are those of the search of all queries. Each format's events come in the same order as in the
+//!   search of all queries; between formats they alternate block by block, and an observer reads
+//!   each format's events apart (the ABI orders the events within a stream only).
+//! The shadow also compares, with these, the records (`Debug` text) and each format's events with
+//! their positions in that format's bytes (`XShadowObserver`).
+//! An outfmt 15 or 16 output (LOSAT_X_BPQBLOCKXML2) does not take blocks in such a call: the
+//! document's run-level frame and `Xml2Carry` were argued and checked for a call of one output
+//! (the CLI's shape) only, so `x_query_block_plan` records `XBlockFormat::Xml2` for the reach check
+//! and then refuses the plan when the call has several outputs, hit records or an observer; the
+//! search of all queries runs, as it did before either switch (Owner-delegated 2026-10-22).
+//!
 //! `LOSAT_X_BPQBLOCK` is a value switch of the strict set (`utils/xswitch.rs`): a positive number
 //! of query letters (the block closes at the first batch end at or past it), 50,000 when it is
 //! not set or is not a positive number. `0`, or `LOSAT_X_DEFAULT=0` with the variable not set,
@@ -314,6 +349,7 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::ops::Range;
 use std::path::Path;
+use std::sync::Mutex;
 
 use super::encoding::EncodedProtein;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
@@ -321,7 +357,7 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
 };
 use crate::algorithm::tblastx::lookup::{QueryContext, XAaSpares};
 use crate::algorithm::tblastx::translation::QueryFrame;
-use crate::api::local_blast::OutputSink;
+use crate::api::local_blast::{FormatObserver, HspIndex, OutputSink};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::RangedBatch;
 use crate::utils::threading::SearchPool;
@@ -355,7 +391,8 @@ pub(crate) fn x_bp_qblock() -> Option<usize> {
 // any value; it implies the switch) once. They choose which reports the block search writes, not
 // any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): 0 = the block search only for one outfmt 6 report, 1 = for one
-/// report of outfmt 0, 6 or 7, 2 = the shadow (`x_block_shadow_compare`).
+/// report of outfmt 0, 6 or 7 (with LOSAT_X_BPQBLOCKWEB also for several reports of these and the
+/// others the block search takes), 2 = the shadow (`x_block_shadow_compare`).
 pub(crate) fn x_bp_qblock_fmt() -> u8 {
     use std::sync::OnceLock;
     static MODE: OnceLock<u8> = OnceLock::new();
@@ -407,6 +444,22 @@ pub(crate) fn x_bp_qblock_xml2() -> bool {
     })
 }
 
+// No NCBI counterpart: reads LOSAT_X_BPQBLOCKWEB (a strict-set switch: on unless `0`, or
+// `LOSAT_X_DEFAULT=0` and not set) once; the shadow (LOSAT_X_BPQBLOCKFMTSHADOW) implies it. It
+// chooses which calls the block search takes, not any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKWEB): whether the block search also takes a `run_local` call with
+/// more than one output, the hit records or an observer (ABI v2 of the Web build: outfmt 0, 6 and
+/// 7, the records and the byte ranges), each output a writer of the caller and no `-db`. Acts only
+/// with `LOSAT_X_BPQBLOCK`.
+pub(crate) fn x_bp_qblock_web() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var_os("LOSAT_X_BPQBLOCKFMTSHADOW").is_some()
+            || crate::utils::xswitch::on("LOSAT_X_BPQBLOCKWEB")
+    })
+}
+
 // No NCBI counterpart: the reports the block search writes; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): which report the block search writes, which the driver's checks
@@ -436,14 +489,14 @@ impl XBlockReport {
     }
 }
 
-// No NCBI counterpart: names which switch decides a report format for `x_reach!`; it does not change
-// any value NCBI computes.
-/// The format switch that governs the report of a search whose block plan is made
-/// (`LOSAT_X_REACH`): outfmt 6 and the plan's earlier refusals have none.
+// No NCBI counterpart: names which switches decide the block search of a call for `x_reach!`; it
+// does not change any value NCBI computes.
+/// A switch besides LOSAT_X_BPQBLOCK that governs a search whose block plan is made
+/// (`LOSAT_X_REACH`): the format switch of each output (outfmt 6 has none), and for a call of
+/// several outputs, the hit records or an observer the switch of `run_local`. The plan's refusals
+/// before it looks at a call's outputs record none.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum XBlockFormat {
-    /// Not known (the plan refused before it looked at the format), or outfmt 6.
-    Unknown,
     /// Outfmt 0 and 7 (LOSAT_X_BPQBLOCKFMT).
     Fmt,
     /// Outfmt 8, 9 and 12 (LOSAT_X_BPQBLOCKSA).
@@ -452,24 +505,29 @@ pub(crate) enum XBlockFormat {
     Xml,
     /// Outfmt 15 and 16 (LOSAT_X_BPQBLOCKXML2).
     Xml2,
+    /// Several outputs, the hit records or an observer (LOSAT_X_BPQBLOCKWEB).
+    Web,
 }
 
 // No NCBI counterpart: records which side the block-search switches took; it does not change any
 // value NCBI computes.
 /// `LOSAT_X_REACH`: the search took the block search (`own`) or the search of all queries, for
-/// LOSAT_X_BPQBLOCK and the switch of `format`, each while it is on.
-pub(crate) fn x_reach_block_search(format: XBlockFormat, own: bool) {
+/// LOSAT_X_BPQBLOCK and each switch of `formats`, each while it is on.
+pub(crate) fn x_reach_block_search(formats: &[XBlockFormat], own: bool) {
     use crate::utils::xreach::x_reach;
     if x_bp_qblock().is_none() {
         return;
     }
     x_reach!("LOSAT_X_BPQBLOCK", own);
-    match format {
-        XBlockFormat::Fmt if x_bp_qblock_fmt() > 0 => x_reach!("LOSAT_X_BPQBLOCKFMT", own),
-        XBlockFormat::Seqalign if x_bp_qblock_sa() => x_reach!("LOSAT_X_BPQBLOCKSA", own),
-        XBlockFormat::Xml if x_bp_qblock_xml() => x_reach!("LOSAT_X_BPQBLOCKXML", own),
-        XBlockFormat::Xml2 if x_bp_qblock_xml2() => x_reach!("LOSAT_X_BPQBLOCKXML2", own),
-        _ => {}
+    for format in formats {
+        match format {
+            XBlockFormat::Fmt if x_bp_qblock_fmt() > 0 => x_reach!("LOSAT_X_BPQBLOCKFMT", own),
+            XBlockFormat::Seqalign if x_bp_qblock_sa() => x_reach!("LOSAT_X_BPQBLOCKSA", own),
+            XBlockFormat::Xml if x_bp_qblock_xml() => x_reach!("LOSAT_X_BPQBLOCKXML", own),
+            XBlockFormat::Xml2 if x_bp_qblock_xml2() => x_reach!("LOSAT_X_BPQBLOCKXML2", own),
+            XBlockFormat::Web if x_bp_qblock_web() => x_reach!("LOSAT_X_BPQBLOCKWEB", own),
+            _ => {}
+        }
     }
 }
 
@@ -555,17 +613,20 @@ fn x_all_in_groups(
 // No NCBI counterpart: a copy of what LOSAT writes, for the shadow (LOSAT_X_BPQBLOCKFMTSHADOW); it
 // does not change any byte written.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): a writer that keeps a copy of the bytes it passes on
-/// when `copy` is set (the shadow), and only passes them on otherwise.
+/// when `copy` is set (the shadow), and only passes them on otherwise. The copy is shared with the
+/// shadow's observer (`XShadowObserver`), which reads its length as the position in the stream.
 pub(crate) struct XCopyWriter<'a, W: Write + ?Sized> {
     pub(crate) inner: &'a mut W,
-    pub(crate) copy: Option<Vec<u8>>,
+    pub(crate) copy: Option<&'a Mutex<Vec<u8>>>,
 }
 
 impl<W: Write + ?Sized> Write for XCopyWriter<'_, W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let written = self.inner.write(buf)?;
-        if let Some(copy) = self.copy.as_mut() {
-            copy.extend_from_slice(&buf[..written]);
+        if let Some(copy) = self.copy {
+            copy.lock()
+                .expect("the shadow's copy")
+                .extend_from_slice(&buf[..written]);
         }
         Ok(written)
     }
@@ -575,25 +636,138 @@ impl<W: Write + ?Sized> Write for XCopyWriter<'_, W> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
+// ```c
+// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+// ```
+// Every format prints from the final result set of its call; a block's call numbers the HSPs of
+// its own list from 0. No NCBI counterpart for the offset: it maps a block's numbers to those of
+// the list of all queries, the blocks' lists one after the other.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the caller's observer for one block, whose HSP indices are
+/// those of the block's list plus `base`, the number of HSPs of the blocks before; with the shadow
+/// (LOSAT_X_BPQBLOCKFMTSHADOW) each event is also recorded in `shadow`, with the index passed on.
+pub(crate) struct XOffsetObserver<'a, 's> {
+    pub(crate) inner: &'a mut (dyn FormatObserver + Send),
+    pub(crate) base: HspIndex,
+    pub(crate) shadow: Option<&'a mut XShadowObserver<'s>>,
+}
+
+impl FormatObserver for XOffsetObserver<'_, '_> {
+    fn hsp_begin(&mut self, format: usize, hsp: HspIndex) {
+        if let Some(shadow) = self.shadow.as_deref_mut() {
+            shadow.hsp_begin(format, self.base + hsp);
+        }
+        self.inner.hsp_begin(format, self.base + hsp);
+    }
+
+    fn hsp_end(&mut self, format: usize, hsp: HspIndex) {
+        if let Some(shadow) = self.shadow.as_deref_mut() {
+            shadow.hsp_end(format, self.base + hsp);
+        }
+        self.inner.hsp_end(format, self.base + hsp);
+    }
+
+    fn subject_begin(&mut self, format: usize, first_hsp: HspIndex) {
+        if let Some(shadow) = self.shadow.as_deref_mut() {
+            shadow.subject_begin(format, self.base + first_hsp);
+        }
+        self.inner.subject_begin(format, self.base + first_hsp);
+    }
+
+    fn subject_end(&mut self, format: usize, first_hsp: HspIndex) {
+        if let Some(shadow) = self.shadow.as_deref_mut() {
+            shadow.subject_end(format, self.base + first_hsp);
+        }
+        self.inner.subject_end(format, self.base + first_hsp);
+    }
+}
+
+// No NCBI counterpart: the record of the shadow (LOSAT_X_BPQBLOCKFMTSHADOW); it writes nothing.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): an observer that records, per format, each event with its
+/// HSP index and its position in the format's copy (`XCopyWriter`).
+pub(crate) struct XShadowObserver<'a> {
+    copies: &'a [Mutex<Vec<u8>>],
+    events: Vec<Vec<(u8, HspIndex, usize)>>,
+}
+
+impl<'a> XShadowObserver<'a> {
+    pub(crate) fn new(copies: &'a [Mutex<Vec<u8>>]) -> Self {
+        Self {
+            copies,
+            events: vec![Vec::new(); copies.len()],
+        }
+    }
+
+    fn record(&mut self, format: usize, event: u8, hsp: HspIndex) {
+        let position = self.copies[format].lock().expect("the shadow's copy").len();
+        self.events[format].push((event, hsp, position));
+    }
+
+    /// The number of events of all formats.
+    pub(crate) fn count(&self) -> usize {
+        self.events.iter().map(Vec::len).sum()
+    }
+
+    /// The events of each format as text, one line each: `begin`, `end`, `subject_begin` or
+    /// `subject_end`, the HSP index and the position.
+    pub(crate) fn text(&self) -> Vec<Vec<u8>> {
+        const NAMES: [&str; 4] = ["begin", "end", "subject_begin", "subject_end"];
+        self.events
+            .iter()
+            .map(|events| {
+                events
+                    .iter()
+                    .map(|&(event, hsp, position)| {
+                        format!("{} {hsp} {position}\n", NAMES[usize::from(event)])
+                    })
+                    .collect::<String>()
+                    .into_bytes()
+            })
+            .collect()
+    }
+}
+
+impl FormatObserver for XShadowObserver<'_> {
+    fn hsp_begin(&mut self, format: usize, hsp: HspIndex) {
+        self.record(format, 0, hsp);
+    }
+
+    fn hsp_end(&mut self, format: usize, hsp: HspIndex) {
+        self.record(format, 1, hsp);
+    }
+
+    fn subject_begin(&mut self, format: usize, first_hsp: HspIndex) {
+        self.record(format, 2, first_hsp);
+    }
+
+    fn subject_end(&mut self, format: usize, first_hsp: HspIndex) {
+        self.record(format, 3, first_hsp);
+    }
+}
+
 // No NCBI counterpart: the check of the shadow (LOSAT_X_BPQBLOCKFMTSHADOW); it does not change any
 // value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): compares what the block search wrote (`blocks`, its
-/// output and its warnings) with what the search of all queries wrote into memory (`reference`).
-/// On a difference it prints `[X_SHADOW] BPQBLOCKFMT ... DIFFERENT` and panics; otherwise
-/// `[X_SHADOW] BPQBLOCKFMT blocks= bytes= stderr_bytes= identical`.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): compares what the block search wrote with what the search
+/// of all queries wrote into memory, stream by stream (`(name, blocks, reference)`: each output, the
+/// warnings, and with LOSAT_X_BPQBLOCKWEB the hit records (`Debug`, one per line) and each format's
+/// observer events (`XShadowObserver::text`)). On a difference it prints
+/// `[X_SHADOW] BPQBLOCKFMT <stream> DIFFERENT ...` and panics; otherwise
+/// `[X_SHADOW] BPQBLOCKFMT blocks= formats= bytes= stderr_bytes= hits= events= identical` (`bytes` of
+/// all outputs, `hits` the records, `events` of all formats).
 pub(crate) fn x_block_shadow_compare(
     blocks: usize,
-    written: (&[u8], &[u8]),
-    reference: (&[u8], &[u8]),
+    formats: usize,
+    streams: &[(String, &[u8], &[u8])],
+    hits: usize,
+    events: usize,
 ) {
-    for (stream, block_bytes, reference_bytes) in [
-        ("output", written.0, reference.0),
-        ("stderr", written.1, reference.1),
-    ] {
+    let mut bytes = 0;
+    let mut stderr_bytes = 0;
+    for (stream, block_bytes, reference_bytes) in streams {
         if block_bytes != reference_bytes {
             let at = block_bytes
                 .iter()
-                .zip(reference_bytes)
+                .zip(reference_bytes.iter())
                 .position(|(a, b)| a != b)
                 .unwrap_or(block_bytes.len().min(reference_bytes.len()));
             eprintln!(
@@ -603,11 +777,14 @@ pub(crate) fn x_block_shadow_compare(
             );
             panic!("LOSAT_X_BPQBLOCKFMTSHADOW: the block search's {stream} differs from the search of all queries");
         }
+        if stream.starts_with("output") {
+            bytes += block_bytes.len();
+        } else if stream == "stderr" {
+            stderr_bytes += block_bytes.len();
+        }
     }
     eprintln!(
-        "[X_SHADOW] BPQBLOCKFMT blocks={blocks} bytes={} stderr_bytes={} identical",
-        written.0.len(),
-        written.1.len()
+        "[X_SHADOW] BPQBLOCKFMT blocks={blocks} formats={formats} bytes={bytes} stderr_bytes={stderr_bytes} hits={hits} events={events} identical"
     );
 }
 

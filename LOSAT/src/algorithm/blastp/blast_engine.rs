@@ -34,7 +34,7 @@ use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_si
 use crate::algorithm::tblastx::lookup::{x_bp_build_ncbi_lookup, BlastAaLookupTable, QueryContext};
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
-use crate::api::local_blast::{FormatProbe, OutputSink, ReportOutputs};
+use crate::api::local_blast::{FormatObserver, FormatProbe, HspIndex, OutputSink, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
 use crate::common::{GapEditOp, Hit};
@@ -6107,7 +6107,9 @@ fn search(
     // block, the epilog and outfmt 7's count of the queries with the last), with
     // LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with LOSAT_X_BPQBLOCKXML outfmt 5 (the header with the
     // first block, the end with the last), with LOSAT_X_BPQBLOCKXML2 outfmt 15 or 16 (as outfmt 5,
-    // the framing state handed from block to block, `Xml2Carry`); otherwise the search of
+    // the framing state handed from block to block, `Xml2Carry`; not in a call of several outputs,
+    // hit records or an observer, see `x_query_block_plan`), with LOSAT_X_BPQBLOCKWEB also several
+    // of the other reports, the hit records and an observer (`run_local`); otherwise the search of
     // all queries below. With `-db` the blocks are searched only when no definition line of the
     // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, or
     // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, `x_titles_taxids_allow_blocks` for 15
@@ -6117,7 +6119,7 @@ fn search(
     // (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the database, the
     // queries and the subjects can be written (`x_query_blocks.rs` `x_block_xml_*_allowed`);
     // otherwise the search of all queries below.
-    let mut x_format = super::x_query_blocks::XBlockFormat::Unknown;
+    let mut x_formats = Vec::new();
     let x_plan = x_query_block_plan(
         &args,
         &searched_queries,
@@ -6127,26 +6129,42 @@ fn search(
         outputs,
         batch_size,
         v1.is_some(),
-        &mut x_format,
+        &mut x_formats,
     );
     if x_plan.is_none() {
-        super::x_query_blocks::x_reach_block_search(x_format, false);
+        super::x_query_blocks::x_reach_block_search(&x_formats, false);
     }
-    if let Some((x_kind, blocks)) = x_plan {
+    if let Some((x_kinds, blocks)) = x_plan {
+        use super::x_query_blocks::{
+            XBlockReport, XBlockSink, XCopyWriter, XOffsetObserver, XShadowObserver,
+        };
         let reader_warnings = &batches.warnings;
         let ReportOutputs {
             formats,
             diagnostics,
-            ..
+            hits,
+            observer,
         } = &mut *outputs;
-        let outfmt = formats[0].outfmt;
+        // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the outputs' `-outfmt` values, in request order.
+        let outfmts: Vec<&str> = formats.iter().map(|format| format.outfmt).collect();
         // EXPERIMENT (LOSAT_X_BPQBLOCKFMT, LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML,
-        // LOSAT_X_BPQBLOCKXML2): the report the
+        // LOSAT_X_BPQBLOCKXML2): the reports the
         // blocks write, whose titles are checked below.
-        let x_pairwise = x_kind == super::x_query_blocks::XBlockReport::Pairwise;
+        let x_pairwise = x_kinds.contains(&XBlockReport::Pairwise);
         // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): copies of what the blocks write, compared below
         // with the search of all queries.
         let x_shadow = super::x_query_blocks::x_bp_qblock_fmt() == 2;
+        let output_copies: Vec<std::sync::Mutex<Vec<u8>>> =
+            outfmts.iter().map(|_| Default::default()).collect();
+        let warning_copy = std::sync::Mutex::new(Vec::new());
+        // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the hit records of all blocks, each with the index of its
+        // query among the call's queries (the block's index plus the block's first query), handed to
+        // the caller's sink once, after the last block: one call with the final list of all
+        // queries, as the search of all queries makes it.
+        let x_want_records = hits.is_some();
+        let mut x_records: Option<Vec<PairwiseHit>> = x_want_records.then(Vec::new);
+        let mut x_recorder =
+            (x_shadow && observer.is_some()).then(|| XShadowObserver::new(&output_copies));
         let searched_in_blocks =
             crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
                 // The last checks of the block search, on the pool; when one fails, nothing has
@@ -6156,13 +6174,13 @@ fn search(
                 // `database::x_titles_read_allow_blocks`), with outfmt 0 and `-subject` the
                 // subjects' titles (`x_block_shown_titles_allowed`), and with outfmt 5 the
                 // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
-                // name and queries' names (`x_block_xml_run_allowed`).
+                // name and queries' names (`x_block_xml_run_allowed`); with several outputs, the
+                // checks of every kind of report among them (LOSAT_X_BPQBLOCKWEB).
                 if !x_block_words_fit(&args, &searched_queries, &query_input, batch_size, pool) {
-                    super::x_query_blocks::x_reach_block_search(x_format, false);
-                    return Ok(None);
+                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
+                    return Ok(false);
                 }
-                use super::x_query_blocks::XBlockReport;
-                let titles_allowed = match (database, x_kind) {
+                let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
                     // Outfmt 8, 9, 12 and 5 write no tabular id: only the definition lines' reading
                     // and bytes can fail (`x_titles_read_allow_blocks`).
                     (Some(database), XBlockReport::Seqalign | XBlockReport::Xml) => {
@@ -6185,24 +6203,29 @@ fn search(
                     }
                     (None, _) => true,
                 };
-                if !titles_allowed {
-                    super::x_query_blocks::x_reach_block_search(x_format, false);
-                    return Ok(None);
+                if !x_kinds
+                    .iter()
+                    .enumerate()
+                    .filter(|&(index, x_kind)| !x_kinds[..index].contains(x_kind))
+                    .all(|(_, &x_kind)| titles_allowed(x_kind))
+                {
+                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
+                    return Ok(false);
                 }
                 // EXPERIMENT (LOSAT_X_BPQBLOCKXML, LOSAT_X_BPQBLOCKXML2): the XML report's refusals
                 // of the database name and of the queries' names, which it makes before its first
                 // byte.
-                if x_kind.is_xml()
+                if x_kinds.iter().any(|x_kind| x_kind.is_xml())
                     && !super::x_query_blocks::x_block_xml_run_allowed(
                         database.map_or("", |database| database.name()),
                         query_records,
                         pool,
                     )
                 {
-                    super::x_query_blocks::x_reach_block_search(x_format, false);
-                    return Ok(None);
+                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
+                    return Ok(false);
                 }
-                super::x_query_blocks::x_reach_block_search(x_format, true);
+                super::x_query_blocks::x_reach_block_search(&x_formats, true);
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks
                 // (`x_query_blocks::XBlockSubjects`), on the search's pool.
                 // Diagnostic (LOSAT_TIMING): the blocks' shared subject encoding for the common
@@ -6213,18 +6236,28 @@ fn search(
                 crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
                 let pool = &pool.x_with_ext(&x_subjects);
                 // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state that the blocks of an
-                // outfmt 15 or 16 run hand on.
+                // outfmt 15 or 16 run hand on (such a run has one output, `x_query_block_plan`).
                 let x_xml2_carry =
                     std::sync::Mutex::new(crate::report::blast_xml2::Xml2Carry::default());
-                let mut sink = super::x_query_blocks::XBlockSink::new(&mut formats[0].sink);
-                let mut x_output = super::x_query_blocks::XCopyWriter {
-                    inner: &mut sink,
-                    copy: x_shadow.then(Vec::new),
-                };
-                let mut x_warnings = super::x_query_blocks::XCopyWriter {
+                let mut sinks: Vec<XBlockSink<'_>> = formats
+                    .iter_mut()
+                    .map(|format| XBlockSink::new(&mut format.sink))
+                    .collect();
+                let mut x_outputs: Vec<XCopyWriter<'_, XBlockSink<'_>>> = sinks
+                    .iter_mut()
+                    .zip(&output_copies)
+                    .map(|(sink, copy)| XCopyWriter {
+                        inner: sink,
+                        copy: x_shadow.then_some(copy),
+                    })
+                    .collect();
+                let mut x_warnings = XCopyWriter {
                     inner: &mut **diagnostics,
-                    copy: x_shadow.then(Vec::new),
+                    copy: x_shadow.then_some(&warning_copy),
                 };
+                // The HSPs of the blocks before: the first index of the block's HSPs in the list
+                // of all queries.
+                let mut x_hsps_before: HspIndex = 0;
                 // EXPERIMENT (LOSAT_X_BPLKPAHEAD): each block's search builds the next block's lookup
                 // table beside it, on the pool (`blast_engine/x_lookup_ahead.rs`).
                 let mut x_ahead = x_lookup_ahead::XLookupAhead::new(&args, pool, batch_size);
@@ -6234,14 +6267,40 @@ fn search(
                         .get(index + 1)
                         .map(|next| &searched_queries[next.clone()]);
                     let block_input = seq_range::QueryInput::whole(block_queries);
+                    let records_before = x_records.as_ref().map_or(0, Vec::len);
+                    let x_first_query =
+                        u32::try_from(block.start).expect("a query index of the call fits q_idx");
+                    let mut x_collect = |found: &[PairwiseHit]| {
+                        if let Some(records) = x_records.as_mut() {
+                            records.extend(found.iter().map(|record| {
+                                let mut record = record.clone();
+                                record.hit.q_idx += x_first_query;
+                                record
+                            }));
+                        }
+                    };
+                    // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the caller's observer with the block's HSP
+                    // indices moved past the blocks before (and the shadow's record of the events).
+                    let mut x_offset = observer.as_deref_mut().map(|inner| XOffsetObserver {
+                        inner,
+                        base: x_hsps_before,
+                        shadow: x_recorder.as_mut(),
+                    });
                     let mut block_outputs = ReportOutputs {
-                        formats: vec![crate::api::local_blast::FormatOutput {
-                            outfmt,
-                            sink: OutputSink::Writer(&mut x_output),
-                        }],
+                        formats: x_outputs
+                            .iter_mut()
+                            .zip(&outfmts)
+                            .map(|(output, &outfmt)| crate::api::local_blast::FormatOutput {
+                                outfmt,
+                                sink: OutputSink::Writer(output),
+                            })
+                            .collect(),
                         diagnostics: &mut x_warnings,
-                        hits: None,
-                        observer: None,
+                        hits: x_want_records
+                            .then_some(&mut x_collect as &mut (dyn FnMut(&[PairwiseHit]) + Send)),
+                        observer: x_offset
+                            .as_mut()
+                            .map(|offset| offset as &mut (dyn FormatObserver + Send)),
                     };
                     let result = x_ahead.run_block(x_next_queries, |x_block| {
                         run_resolved_in_pool(
@@ -6265,7 +6324,8 @@ fn search(
                                 v1_titles: v1.is_some(),
                                 x_prolog: index == 0,
                                 x_queries_before: block.start,
-                                x_xml2_carry: (x_kind == XBlockReport::Xml2)
+                                x_xml2_carry: x_kinds
+                                    .contains(&XBlockReport::Xml2)
                                     .then_some(&x_xml2_carry),
                             },
                             x_block,
@@ -6274,24 +6334,56 @@ fn search(
                     // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
                     super::x_bp_redo_par_shadow_error(&result);
                     result?;
+                    drop(block_outputs);
+                    x_hsps_before += x_records.as_ref().map_or(0, Vec::len) - records_before;
                 }
-                x_output.flush()?;
-                Ok(Some((x_output.copy, x_warnings.copy)))
+                for output in &mut x_outputs {
+                    output.flush()?;
+                }
+                Ok(true)
             })?;
-        if let Some(x_copies) = searched_in_blocks {
-            // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): the search of all queries, its report and
-            // warnings written into memory, against the blocks' bytes.
-            if let (Some(written), Some(warned)) = x_copies {
-                let mut reference = Vec::new();
+        if searched_in_blocks {
+            // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the hit records of all queries, once.
+            if let (Some(sink), Some(records)) = (hits.as_mut(), x_records.as_ref()) {
+                sink(records);
+            }
+            // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): the search of all queries, its reports,
+            // warnings, hit records and observer events written into memory, against the blocks'.
+            if x_shadow {
+                let reference_copies: Vec<std::sync::Mutex<Vec<u8>>> =
+                    outfmts.iter().map(|_| Default::default()).collect();
+                let mut reference_sinks: Vec<std::io::Sink> =
+                    outfmts.iter().map(|_| std::io::sink()).collect();
+                let mut reference_writers: Vec<XCopyWriter<'_, std::io::Sink>> = reference_sinks
+                    .iter_mut()
+                    .zip(&reference_copies)
+                    .map(|(sink, copy)| XCopyWriter {
+                        inner: sink,
+                        copy: Some(copy),
+                    })
+                    .collect();
                 let mut reference_warnings = Vec::new();
+                let mut reference_records: Vec<String> = Vec::new();
+                let mut record_reference = |found: &[PairwiseHit]| {
+                    reference_records.extend(found.iter().map(|record| format!("{record:?}")));
+                };
+                let mut reference_recorder = XShadowObserver::new(&reference_copies);
                 let mut reference_outputs = ReportOutputs {
-                    formats: vec![crate::api::local_blast::FormatOutput {
-                        outfmt,
-                        sink: OutputSink::Writer(&mut reference),
-                    }],
+                    formats: reference_writers
+                        .iter_mut()
+                        .zip(&outfmts)
+                        .map(|(writer, &outfmt)| crate::api::local_blast::FormatOutput {
+                            outfmt,
+                            sink: OutputSink::Writer(writer),
+                        })
+                        .collect(),
                     diagnostics: &mut reference_warnings,
-                    hits: None,
-                    observer: None,
+                    hits: x_records.is_some().then_some(
+                        &mut record_reference as &mut (dyn FnMut(&[PairwiseHit]) + Send),
+                    ),
+                    observer: x_recorder
+                        .is_some()
+                        .then_some(&mut reference_recorder as &mut (dyn FormatObserver + Send)),
                 };
                 // The taxonomy database's open and lookup messages (outfmt 15 and 16) belong to the
                 // first search of a run: the blocks wrote them, so the second starts them over.
@@ -6309,10 +6401,65 @@ fn search(
                     )
                 })?;
                 drop(reference_outputs);
+                drop(reference_writers);
+                let block_records: Vec<String> = x_records
+                    .iter()
+                    .flatten()
+                    .map(|record| format!("{record:?}"))
+                    .collect();
+                let as_lines = |records: &[String]| {
+                    records
+                        .iter()
+                        .flat_map(|record| [record.as_bytes(), b"\n"].concat())
+                        .collect::<Vec<u8>>()
+                };
+                let (block_hits, reference_hits) =
+                    (as_lines(&block_records), as_lines(&reference_records));
+                let events = x_recorder.as_ref().map_or(0, XShadowObserver::count);
+                let block_events = x_recorder.take().map(|recorder| recorder.text());
+                let reference_events = block_events.is_some().then(|| reference_recorder.text());
+                drop(reference_recorder);
+                let written: Vec<Vec<u8>> = output_copies
+                    .into_iter()
+                    .map(|copy| copy.into_inner().expect("the shadow's copy"))
+                    .collect();
+                let reference: Vec<Vec<u8>> = reference_copies
+                    .into_iter()
+                    .map(|copy| copy.into_inner().expect("the shadow's copy"))
+                    .collect();
+                let warned = warning_copy.into_inner().expect("the shadow's copy");
+                let mut streams: Vec<(String, &[u8], &[u8])> = written
+                    .iter()
+                    .zip(&reference)
+                    .enumerate()
+                    .map(|(format, (written, reference))| {
+                        let name = if format == 0 {
+                            "output".to_string()
+                        } else {
+                            format!("output {format}")
+                        };
+                        (name, &written[..], &reference[..])
+                    })
+                    .collect();
+                streams.push(("stderr".to_string(), &warned, &reference_warnings));
+                if x_records.is_some() {
+                    streams.push(("hit records".to_string(), &block_hits, &reference_hits));
+                }
+                if let (Some(block_events), Some(reference_events)) =
+                    (block_events.as_ref(), reference_events.as_ref())
+                {
+                    for (format, (written, reference)) in
+                        block_events.iter().zip(reference_events).enumerate()
+                    {
+                        streams.push((format!("observer {format}"), written, reference));
+                    }
+                }
                 super::x_query_blocks::x_block_shadow_compare(
                     blocks.len(),
-                    (&written, &warned),
-                    (&reference, &reference_warnings),
+                    outfmts.len(),
+                    &streams,
+                    block_records.len(),
+                    events,
                 );
             }
             return Ok(());
@@ -6434,14 +6581,19 @@ fn x_bp_encode_block_subjects(
 // queries. The block search is taken only where the blocks' reports written one after the other
 // are the report of the search of all queries: one output, tabular format 6 (or with
 // LOSAT_X_BPQBLOCKFMT outfmt 0 or 7, with LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with
-// LOSAT_X_BPQBLOCKXML outfmt 5, LOSAT_X_BPQBLOCKXML2 outfmt 15 and 16, `x_query_blocks.rs`; the kind of report is returned with the
-// blocks), no `-query_loc` (every record is
+// LOSAT_X_BPQBLOCKXML outfmt 5, LOSAT_X_BPQBLOCKXML2 outfmt 15 and 16, `x_query_blocks.rs`; the
+// kind of report of each output is returned with the blocks), with LOSAT_X_BPQBLOCKWEB also several
+// outputs, the hit records and an observer (`run_local`, ABI v2 of the Web build) where every
+// output is a writer of the caller, no `-db` is searched and an observer comes with the hit
+// records (an outfmt 15 or 16 output is not taken in such a call: see the arm below), no
+// `-query_loc` (every record is
 // searched whole), every batch read, more than one block, no subject whose tabular ID the
 // reference path rejects before it writes any row (`tabular_subject_ids`, for outfmt 6 and 7;
 // with `-db`, the definition lines are checked where the blocks are searched,
 // `database::x_titles_allow_blocks` (outfmt 8, 9, 12 and 5: `x_titles_read_allow_blocks`); outfmt
 // 0's titles also there, `x_block_shown_titles_allowed`; outfmt 5's names too,
-// `x_query_blocks::x_block_xml_subjects_allowed` and `x_block_xml_run_allowed`),
+// `x_query_blocks::x_block_xml_subjects_allowed` and `x_block_xml_run_allowed`; each check where any
+// output is of its kind),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
 // (`blastp_database_search_space`, with `-db` or `-dbsize`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
@@ -6458,72 +6610,101 @@ fn x_query_block_plan(
     outputs: &ReportOutputs<'_>,
     batch_size: u32,
     v1: bool,
-    x_format: &mut super::x_query_blocks::XBlockFormat,
+    x_formats: &mut Vec<super::x_query_blocks::XBlockFormat>,
 ) -> Option<(
-    super::x_query_blocks::XBlockReport,
+    Vec<super::x_query_blocks::XBlockReport>,
     Vec<std::ops::Range<usize>>,
 )> {
     use super::x_query_blocks::{XBlockFormat, XBlockReport};
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
     if args.query_range.is_some()
-        || outputs.formats.len() != 1
-        || outputs.hits.is_some()
-        || outputs.observer.is_some()
+        || outputs.formats.is_empty()
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
         || batches.input_done != queries.len()
     {
         return None;
     }
+    // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): several outputs, the hit records or an observer. Each
+    // output of several is a writer of the caller (a sink the block search opens itself would be
+    // flushed by every block, and a stream that two outputs share would get each block's formats in
+    // turn); no `-db` (the records' `s_idx` of a database search rank the subjects that the call's
+    // lists name); an observer only with the hit records, which count the HSPs of each block for
+    // the observer's indices (`XOffsetObserver`).
+    let x_web = outputs.formats.len() > 1 || outputs.hits.is_some() || outputs.observer.is_some();
+    if x_web {
+        x_formats.push(XBlockFormat::Web);
+    }
+    if x_web
+        && (!super::x_query_blocks::x_bp_qblock_web()
+            || subject_source.database().is_some()
+            || (outputs.observer.is_some() && outputs.hits.is_none())
+            || (outputs.formats.len() > 1
+                && !outputs
+                    .formats
+                    .iter()
+                    .all(|format| matches!(format.sink, OutputSink::Writer(_)))))
+    {
+        return None;
+    }
     // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): outfmt 0 and 7 too. EXPERIMENT (LOSAT_X_BPQBLOCKSA,
     // LOSAT_X_BPQBLOCKXML, LOSAT_X_BPQBLOCKXML2): outfmt 8, 9, 12, 5, 15 and 16, which
     // `OutputFormat::parse` does not know.
-    let kind = match OutputFormat::parse(outputs.formats[0].outfmt) {
-        Ok((OutputFormat::Tabular, _)) => XBlockReport::Tabular,
+    let mut kind_of = |outfmt: &str| match OutputFormat::parse(outfmt) {
+        Ok((OutputFormat::Tabular, _)) => Some(XBlockReport::Tabular),
         Ok((OutputFormat::TabularWithComments, _))
             if super::x_query_blocks::x_bp_qblock_fmt() > 0 =>
         {
-            *x_format = XBlockFormat::Fmt;
-            XBlockReport::Tabular
+            x_formats.push(XBlockFormat::Fmt);
+            Some(XBlockReport::Tabular)
         }
         // ABI v1's outfmt 0 titles of a database are not argued here.
         Ok((OutputFormat::Pairwise, _))
             if super::x_query_blocks::x_bp_qblock_fmt() > 0
                 && !(v1 && subject_source.database().is_some()) =>
         {
-            *x_format = XBlockFormat::Fmt;
-            XBlockReport::Pairwise
+            x_formats.push(XBlockFormat::Fmt);
+            Some(XBlockReport::Pairwise)
         }
         Ok((OutputFormat::TabularWithComments | OutputFormat::Pairwise, _)) => {
-            *x_format = XBlockFormat::Fmt;
-            return None;
+            x_formats.push(XBlockFormat::Fmt);
+            None
         }
         Err(_)
             if super::x_query_blocks::x_bp_qblock_sa()
-                && blastp_seqalign_format(outputs.formats[0].outfmt).is_some() =>
+                && blastp_seqalign_format(outfmt).is_some() =>
         {
-            *x_format = XBlockFormat::Seqalign;
-            XBlockReport::Seqalign
+            x_formats.push(XBlockFormat::Seqalign);
+            Some(XBlockReport::Seqalign)
         }
-        Err(_)
-            if super::x_query_blocks::x_bp_qblock_xml()
-                && blastp_is_xml(outputs.formats[0].outfmt) =>
-        {
-            *x_format = XBlockFormat::Xml;
-            XBlockReport::Xml
+        Err(_) if super::x_query_blocks::x_bp_qblock_xml() && blastp_is_xml(outfmt) => {
+            x_formats.push(XBlockFormat::Xml);
+            Some(XBlockReport::Xml)
         }
-        // Outfmt 15 and 16 only (`x_xml2_kind_takes_blocks`; 13 and 14 write side files).
+        // Outfmt 15 and 16 only (`x_xml2_kind_takes_blocks`; 13 and 14 write side files). Only in a
+        // call of one output without hit records and observer (the CLI's shape): the run-level
+        // frame and carry of the XML2 document (`Xml2Carry`) were checked for that call only. In a
+        // call of several outputs, hit records or an observer (LOSAT_X_BPQBLOCKWEB) the format is
+        // recorded for the reach check as usual, and the plan is refused (Owner-delegated
+        // 2026-10-22).
         Err(_)
             if super::x_query_blocks::x_bp_qblock_xml2()
-                && blastp_xml2_kind(outputs.formats[0].outfmt)
-                    .is_some_and(x_xml2_kind_takes_blocks) =>
+                && blastp_xml2_kind(outfmt).is_some_and(x_xml2_kind_takes_blocks) =>
         {
-            *x_format = XBlockFormat::Xml2;
-            XBlockReport::Xml2
+            x_formats.push(XBlockFormat::Xml2);
+            (!x_web).then_some(XBlockReport::Xml2)
         }
-        _ => return None,
+        _ => None,
     };
-    let tabular = kind == XBlockReport::Tabular;
+    // Every output's format switch is recorded (`x_reach_block_search`), also after one refuses.
+    let kinds = outputs
+        .formats
+        .iter()
+        .map(|format| kind_of(format.outfmt))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .collect::<Option<Vec<_>>>()?;
+    let tabular = kinds.contains(&XBlockReport::Tabular);
     match subject_source {
         BlastpSubjectSource::Fasta(subjects) => {
             if tabular
@@ -6563,7 +6744,7 @@ fn x_query_block_plan(
     let query_batches = query_input.batches(batch_size);
     let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, block_letters)?;
     (blocks.len() > 1 && x_block_search_refuses_nothing(args, queries, &query_batches, &lengths))
-        .then_some((kind, blocks))
+        .then_some((kinds, blocks))
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): whether the search of all queries passes the checks that refuse

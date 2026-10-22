@@ -329,7 +329,7 @@ pub trait ResultsObserver {
     //              } else {
     // ```
     fn cull_compare(&mut self, _ao: usize, _a: &Hsp, _bo: usize, _b: &Hsp, _result: bool) {}
-    fn cull_delete(&mut self, _oid: usize, _hsp: &Hsp, _merit: i32) {}
+    fn cull_delete(&mut self, _oid: usize, _hsp: &Hsp, _merit: i64) {}
     fn cull_save(&mut self, _oid: usize, _hsp: &Hsp) {}
     fn cull_saved(&mut self, _result: bool) {}
     fn cull_fork(&mut self, _begin: i32, _end: i32) {}
@@ -1026,8 +1026,11 @@ impl HspStream {
     //             writer_info = BlastHSPCullingInfoNew(params);
     //         }
     // ```
+    // NCBI's sum is an `Int4` that overflows for a limit of 2147483645 or more; LOSAT adds in
+    // `i64` (NCBI parity DECISIONS 17), as `core::hspfilter_culling::CullingForest::prelim_max`.
     pub fn with_culling(lengths: Vec<i32>, limit: i32, max: usize) -> Self {
         let mut stream = Self::new(lengths.len() / 6, max);
+        let limit = i64::from(limit);
         stream.culling = Some(super::culling::Culling::new(
             lengths,
             if limit > 1 { limit + 3 } else { limit },

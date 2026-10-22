@@ -10,7 +10,7 @@ thread counts, CTOOLKIT_COMPATIBLE, empty inputs and failed writes.
 The format is that of blastn_regression_fixtures.py (whose helpers it uses): a case may
 set environment variables (`env`) for both programs, every other variable that changes
 NCBI's batches or report is unset, `oracle_env` is NCBI's configuration for an approved
-exception, and a case id ending in `.merged` runs with standard error merged into
+exception (`ORACLE_ARGV` NCBI's arguments for one that is an argument), and a case id ending in `.merged` runs with standard error merged into
 standard output (`2>&1`).
 
 - generate: writes the inputs to LOSAT/tests/fixtures/tblastx_regression/inputs/ (empty
@@ -201,8 +201,7 @@ _CASES = [
     ("cutoff.floor_evalue_1e10", f"-query {I}/cutoff_q150.fa -subject tests/fasta/LC738875.fasta"
                                  " -evalue 1e10 -outfmt 6", ""),
     # Session S08+: -culling_limit (hspfilter_culling.c: the preliminary writer with merit
-    # N+3 above 1, the hit list cut in the traceback, the pipe with merit N; Int4 merits as
-    # NCBI's binary wraps them). The inputs come from the inventory (range XC, not from
+    # N+3 above 1, the hit list cut in the traceback, the pipe with merit N). The inputs come from the inventory (range XC, not from
     # `generate`): 3-kb windows of LC738874 and LC738875 (culling_q0/s0), two queries
     # against ten subjects with identical copies, reverse complements and mutated copies
     # (culling_ties, exact ties for the hit list), and three queries against seven subjects
@@ -211,10 +210,16 @@ _CASES = [
     ("culling.cl2_fmt0", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa -culling_limit 2 -outfmt 0", ""),
     ("culling.cl5_fmt7", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa -culling_limit 5 -outfmt 7", ""),
     ("culling.hex_0x2", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa -culling_limit 0x2 -outfmt 6", ""),
-    ("culling.wrap_2147483645", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa"
-                                " -culling_limit 2147483645 -outfmt 6", ""),
-    ("culling.wrap_2147483646", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa"
-                                " -culling_limit 2147483646 -outfmt 6", ""),
+    # NCBI's N+3 and merits are Int4s that overflow from 2147483645 on (its binary: 2147483645
+    # culls nothing, 2147483646 and 2147483647 act as a limit of 1 in the preliminary stage);
+    # LOSAT's are i64 (approved exception, PD-LOSAT-NCBI-DEFECTS 1.4) and cull nothing, as
+    # 2147483644 does: the oracle of the last two runs 2147483644 (ORACLE_ARGV).
+    ("culling.near_int4_max_2147483645", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa"
+                                         " -culling_limit 2147483645 -outfmt 6", ""),
+    ("culling.near_int4_max_2147483646", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa"
+                                         " -culling_limit 2147483646 -outfmt 6", ""),
+    ("culling.near_int4_max_2147483647", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa"
+                                         " -culling_limit 2147483647 -outfmt 6", ""),
     ("culling.ties_cl1_mts3_fmt0", f"-query {I}/culling_ties_query.fa -subject {I}/culling_ties_subject.fa"
                                    " -culling_limit 1 -max_target_seqs 3 -outfmt 0", ""),
     ("culling.ties_cl2_mts3", f"-query {I}/culling_ties_query.fa -subject {I}/culling_ties_subject.fa"
@@ -227,6 +232,13 @@ _CASES = [
                                      " -culling_limit 5 -evalue 1000 -outfmt 6", ""),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
+# NCBI's arguments of the cases of an approved exception that is an argument.
+ORACLE_ARGV = {
+    "culling.near_int4_max_2147483646": f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa"
+                                        " -culling_limit 2147483644 -outfmt 6",
+    "culling.near_int4_max_2147483647": f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa"
+                                        " -culling_limit 2147483644 -outfmt 6",
+}
 
 
 def rna(source: Path, target: Path) -> None:
@@ -281,7 +293,7 @@ def command_freeze(args) -> int:
     version = subprocess.run([oracle, "-version"], capture_output=True, text=True).stdout.strip().replace("\n", "; ")
     rows = []
     for case_id, argv, extra, case_env, oracle_env in CASES:
-        result = run_case(oracle, [], case_id, argv, oracle_env or case_env)
+        result = run_case(oracle, [], case_id, ORACLE_ARGV.get(case_id, argv), oracle_env or case_env)
         (FIXTURES / f"{case_id}.out").write_bytes(result.stdout)
         err = FIXTURES / f"{case_id}.err"
         if result.stderr:

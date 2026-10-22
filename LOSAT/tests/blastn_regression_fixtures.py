@@ -17,7 +17,9 @@ A case may set environment variables (`env`, space-separated KEY=VALUE) for both
 programs; every other variable that changes NCBI's batches or report is unset. A case of
 an approved exception (docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md), where NCBI fails
 with `env`, also sets `oracle_env`: `freeze` runs NCBI with it instead, a configuration
-whose output LOSAT's result with `env` was shown to equal. A case whose id ends in
+whose output LOSAT's result with `env` was shown to equal. An approved exception that is
+an argument (an `Int4` that overflows in NCBI) has its NCBI arguments in `ORACLE_ARGV`
+instead, the nearest value that does not overflow; the manifest keeps LOSAT's. A case whose id ends in
 `.merged` runs with standard error merged into standard output (`2>&1`), which records
 the order of the warnings and the report.
 
@@ -400,10 +402,15 @@ _CASES = [
     # joined at the edges as without culling; each chunk is culled by itself).
     ("culling.split_mq_blastn_cl2_c2000", f"{B} -task blastn -culling_limit 2 -outfmt 6", "", "CHUNK_SIZE=2000"),
     ("culling.split_mq_megablast_cl1_c2000", f"{B} -culling_limit 1 -outfmt 6", "", "CHUNK_SIZE=2000"),
-    # The value is added to 3 in an Int4: 2147483645 wraps to INT_MIN and culls nothing,
-    # 2147483646 is limit 1, 0x2 is limit 2 (CArg_Int8 reads C-style bases).
-    ("culling.wrap_2147483645", f"{CT} -culling_limit 2147483645 -outfmt 6", ""),
-    ("culling.wrap_2147483646", f"{CT} -culling_limit 2147483646 -outfmt 6", ""),
+    # NCBI adds 3 to a limit above 1 in an Int4 (setup_factory.cpp:338-340), which overflows
+    # from 2147483645 on: its binary wraps 2147483645 to INT_MIN (culls nothing) and
+    # 2147483646 and 2147483647 to negative merits (a limit of 1 in the preliminary stage).
+    # LOSAT adds in i64 (approved exception, PD-LOSAT-NCBI-DEFECTS 1.4), so these limits cull
+    # nothing, as 2147483644 does: the oracle of the last two runs 2147483644 (ORACLE_ARGV).
+    # 0x2 is limit 2 (CArg_Int8 reads C-style bases).
+    ("culling.near_int4_max_2147483645", f"{CT} -culling_limit 2147483645 -outfmt 6", ""),
+    ("culling.near_int4_max_2147483646", f"{CT} -culling_limit 2147483646 -outfmt 6", ""),
+    ("culling.near_int4_max_2147483647", f"{CT} -culling_limit 2147483647 -outfmt 6", ""),
     ("culling.hex_0x2", f"{CT} -culling_limit 0x2 -outfmt 6", ""),
     # -max_target_seqs cuts the traceback hit list before the culling pipe: the preliminary cull
     # removes the other copies first, so -max_target_seqs 1 keeps the first; with 3 and limit 2
@@ -417,6 +424,11 @@ _CASES = [
     ("culling.abricate_cl1_c20000", f"{AB} -culling_limit 1 -outfmt 6", "", "CHUNK_SIZE=20000"),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
+# NCBI's arguments of the cases of an approved exception that is an argument (see above).
+ORACLE_ARGV = {
+    "culling.near_int4_max_2147483646": f"{CT} -culling_limit 2147483644 -outfmt 6",
+    "culling.near_int4_max_2147483647": f"{CT} -culling_limit 2147483644 -outfmt 6",
+}
 
 
 def genome(name: str) -> str:
@@ -607,7 +619,7 @@ def command_freeze(args) -> int:
     version = subprocess.run([oracle, "-version"], capture_output=True, text=True).stdout.strip().replace("\n", "; ")
     rows = []
     for case_id, argv, extra, case_env, oracle_env in CASES:
-        result = run_case(oracle, [], case_id, argv, oracle_env or case_env)
+        result = run_case(oracle, [], case_id, ORACLE_ARGV.get(case_id, argv), oracle_env or case_env)
         (FIXTURES / f"{case_id}.out").write_bytes(result.stdout)
         err = FIXTURES / f"{case_id}.err"
         if result.stderr:

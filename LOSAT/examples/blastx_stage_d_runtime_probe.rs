@@ -460,7 +460,7 @@ impl LOSAT::algorithm::blastx::results::ResultsObserver for Observer {
         inline_hsp(bo, &b.hsp);
         println!("\t{}", u8::from(result));
     }
-    fn cull_delete(&mut self, oid: usize, h: &LOSAT::algorithm::blastx::results::Hsp, merit: i32) {
+    fn cull_delete(&mut self, oid: usize, h: &LOSAT::algorithm::blastx::results::Hsp, merit: i64) {
         print!("B_CULL_DELETE");
         inline_hsp(oid, &h.hsp);
         println!("\t{merit}");

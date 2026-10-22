@@ -1,10 +1,11 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.3
+- Version: 1.4
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
-  (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b)
+  (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
+  1.4 2026-10-22 (exception 4, the culling limit near `INT4_MAX`, NCBI parity line O3b)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`) and the independent audits found to be
@@ -135,8 +136,27 @@ together with D8, every sum above 2^30 is rejected).
 
 Reproduced as NCBI (rule 2): the out-of-range `double` to `Int4` conversions of
 `-threshold` and the X-drops (INT_MIN, decision D4); `-max_target_seqs` of 2147483624 or
-more in BLASTP, whose preliminary hit list size wraps to 2 to 48; TBLASTX's culling limit
-plus 3 wrapping in `Int4` (decision D1).
+more in BLASTP, whose preliminary hit list size wraps to 2 to 48. TBLASTX's culling limit
+plus 3 wrapping in `Int4` (decision D1) was reproduced until version 1.4 (exception 4).
+
+## Approved exception (every program with `-culling_limit`, version 1.4)
+
+Version 1.4, decided by the maintainer on 2026-10-22 ("広い型になおしましょう", NCBI parity
+line `DECISIONS.md` 17), under the rule of 2026-10-10 that LOSAT does not reproduce a signed
+`Int4` overflow (undefined behaviour in C), as it already adds TBLASTX's chain sums in `i64`.
+
+4. **A culling limit near `INT4_MAX`.** The preliminary culling writer adds 3 to a limit
+   above 1 (`setup_factory.cpp:338-340`) and every HSP's merit counts down from it
+   (`hspfilter_culling.c:123-189`), both in `Int4`. From 2147483645 on the sum overflows:
+   NCBI 2.17.0's binary wraps it, so 2147483645 starts every merit at `INT_MIN` and culls
+   nothing, and 2147483646 and 2147483647 start negative and act as a limit of 1 in the
+   preliminary stage (the pipe after the traceback uses the limit itself and culls
+   nothing). LOSAT computes the sum and the merits in `i64` (BLASTN, BLASTX, TBLASTX and the
+   programs that add the option later), so these limits cull nothing, as 2147483644 does in
+   NCBI. Evidence: NCBI's output at 2147483644 equals its output at 2147483645 and differs at
+   2147483646 and 2147483647 (BLASTN and TBLASTX fixtures `culling.near_int4_max_*` of
+   `LOSAT/tests/{blastn,tblastx}_regression_fixtures.py`, whose oracle runs 2147483644 for
+   the last two, `ORACLE_ARGV`). Every other limit gives NCBI's bytes.
 
 ## Reproduced as NCBI (rule 2)
 

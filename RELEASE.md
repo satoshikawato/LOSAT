@@ -3,9 +3,9 @@
 This file is the short entry point for publishing LOSAT releases. The detailed
 v0.1.0 gate lives in:
 
-- [docs/v0.1.0_release_readiness_plan.md](docs/v0.1.0_release_readiness_plan.md)
+- [docs/archive/v0.1.0_release_readiness_plan.md](docs/archive/v0.1.0_release_readiness_plan.md)
 - [docs/release/v0.1.0.md](docs/release/v0.1.0.md)
-- [docs/v0.1.0_scope.md](docs/v0.1.0_scope.md)
+- [docs/archive/v0.1.0_scope.md](docs/archive/v0.1.0_scope.md)
 - [BLASTN v0.1.0 certification](docs/release/blastn_v0.1.0_certification.md)
 - [BLASTP v0.1.0 certification](docs/release/blastp_v0.1.0_certification.md)
 - [TBLASTX v0.1.0 certification](docs/release/tblastx_v0.1.0_certification.md)

@@ -3,14 +3,14 @@
 作成日: 2026-09-15  
 状態: **第3回のI4を本体へ反映済み。主要2入力で通常Nodeのn8逆転を解消し、全性能・非回帰条件、反映後の確認、独立確認を完了。**
 
-実行結果: [採用判断と最終結果](evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-01/ADOPTION.md`）、[再現用の証拠](evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-01/README.md`）。
+実行結果: [採用判断と最終結果](../evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-01/ADOPTION.md`）、[再現用の証拠](../evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-01/README.md`）。
 2026-09-16のユーザー指示により、`Wasm / Native <= 1.20`は採用条件・完了条件から外し、報告の中心にも置かない。現状から速くなることを重視し、出力一致と必要な非回帰確認で採否を判断する。以下の1.20倍への言及は当初案の記録であり、実行時の判定基準ではない。
 
 ### 第3回の実装結果（2026-09-16）
 
 I4を`linking.rs`へ反映した。通常Nodeのn8検索本体は、Mjeで22.224→10.833秒（51.25%短縮）、AP selfで37.739→17.591秒（53.39%短縮）。両入力とも候補n8が候補n1より速い。Native/serial、module再利用、同一reactor反復、実ブラウザ反復は、元の時間・メモリ非回帰基準をすべて通過した。ブラウザのMje n1反復は2.0〜2.6%増であり、その値も結果へ残した。
 
-[第3回の全結果・測定条件・残る制限](evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-03/I4-RESULTS.md`）。以下の候補経緯・当初計画は記録として保存する。
+[第3回の全結果・測定条件・残る制限](../evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-03/I4-RESULTS.md`）。以下の候補経緯・当初計画は記録として保存する。
 
 ### 第2回の追加候補（2026-09-15）
 
@@ -23,14 +23,14 @@ I4を`linking.rs`へ反映した。通常Nodeのn8検索本体は、Mjeで22.224
 
 ### 第3回: n8逆転を優先する追加検証（2026-09-16）
 
-- 環境再開時に、第2回の未反映ソースと生データを置いた`/tmp`が失われた。第2回の進捗記録を採用根拠には使わない。詳細は[復旧記録](evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-02/RECOVERY.md`）。
+- 環境再開時に、第2回の未反映ソースと生データを置いた`/tmp`が失われた。第2回の進捗記録を採用根拠には使わない。詳細は[復旧記録](../evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-02/RECOVERY.md`）。
 - I1は、既存large-gap predecessor走査を実際のWasm関数に切り出し、Nativeではインライン展開を指定する。過去C-X3との差は、現在のb0早期continueの維持、呼出し元の初期状態の全引継ぎ、Nativeインライン指定。検索候補・順序・数値演算・スケジューラは変更しない。
 - 通常設定の主要2入力について、n8／n1の固定3組を先に測定する。有望な候補だけを状態全体・Native/serial・module/reactor再利用・実ブラウザへ進める。これは仮説の選別であり、先行する速度測定だけでは採用しない。
-- ソース、実行ファイル、生データは[第3回の保存先](evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-03/README.md`）へ逐次保存する。ビルドキャッシュだけを`/tmp`に置く。
+- ソース、実行ファイル、生データは[第3回の保存先](../evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-03/README.md`）へ逐次保存する。ビルドキャッシュだけを`/tmp`に置く。
 - I1は通常Nodeのn8でMjeが22.630→12.360秒、APが40.763→21.125秒となり、両入力で候補のn1より速くなった。ただしmodule再利用の最初の固定セッションで9.681→10.311秒（+6.51%）となり、非回帰基準を超えたため採用しない。
-- I2bでは既存threaded-WASI判定の内側だけで借用sliceによる後方走査を行う。NCBIの候補・訪問順・演算順は維持し、生成コード上のアドレス再計算の削減を確認した。802ケース×3target×trace有無と、NCBI raw/thread gate 12条件が一致。最初の速度条件はI1が失敗したMje n8のmodule再利用とし、通過後に残りの採用検証へ進む。[診断と採否の状態](evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-03/DIAGNOSIS.md`）。
-- I2bはMje n8のmodule再利用を通過したが、serial比較で数値上の悪化が出た。最終sampleには外部負荷も重なり、採否には使わない。I3では関数分割をthreaded-WASIだけに限定し、serialは明示的にインライン化する。生成コードと802ケースのserial状態一致を確認済みで、性能評価は未完。[I3の条件](evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-03/I3-POLICY.md`）。
-- I3はserial固定比較で13.541→16.847秒（+24.4%）となり不採用。I4ではNative/serialの走査を元の呼出元へ戻し、共通macroで選択処理を一か所に保った。802ケース×3target×trace有無とserial raw 6条件は一致。実際の計測用Wasmも変更前の命令構造に戻ったが、定数値・memory offsetには差があり、速度の同一性は未判定。[I4の条件](evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-03/I4-POLICY.md`）。
+- I2bでは既存threaded-WASI判定の内側だけで借用sliceによる後方走査を行う。NCBIの候補・訪問順・演算順は維持し、生成コード上のアドレス再計算の削減を確認した。802ケース×3target×trace有無と、NCBI raw/thread gate 12条件が一致。最初の速度条件はI1が失敗したMje n8のmodule再利用とし、通過後に残りの採用検証へ進む。[診断と採否の状態](../evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-03/DIAGNOSIS.md`）。
+- I2bはMje n8のmodule再利用を通過したが、serial比較で数値上の悪化が出た。最終sampleには外部負荷も重なり、採否には使わない。I3では関数分割をthreaded-WASIだけに限定し、serialは明示的にインライン化する。生成コードと802ケースのserial状態一致を確認済みで、性能評価は未完。[I3の条件](../evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-03/I3-POLICY.md`）。
+- I3はserial固定比較で13.541→16.847秒（+24.4%）となり不採用。I4ではNative/serialの走査を元の呼出元へ戻し、共通macroで選択処理を一か所に保った。802ケース×3target×trace有無とserial raw 6条件は一致。実際の計測用Wasmも変更前の命令構造に戻ったが、定数値・memory offsetには差があり、速度の同一性は未判定。[I4の条件](../evidence/wasm_remaining_work_20260915/README.md)（アーカイブ内の `run-03/I4-POLICY.md`）。
 
 ## 1. 目的と起点
 
@@ -38,7 +38,7 @@ NCBI BLASTと同じ検索候補、状態更新、順序、浮動小数点演算�
 
 起点は採用済みコミット`8f23f774`と、実装開始時の作業ツリー。計画作成時にも多数の既存変更があるため、コミット番号だけでbaselineを識別しない。既存変更を保存し、ビルド入力のhashを固定する。
 
-前回の[採用判断](evidence/wasm_four_program_20260915/README.md)（アーカイブ内の `run-01/ADOPTION.md`）を維持する。前回の測定を再開したり、六つの時間基準違反を未解決の採用判断として扱ったりしない。本計画は新しいbaselineから行う別の評価である。
+前回の[採用判断](../evidence/wasm_four_program_20260915/README.md)（アーカイブ内の `run-01/ADOPTION.md`）を維持する。前回の測定を再開したり、六つの時間基準違反を未解決の採用判断として扱ったりしない。本計画は新しいbaselineから行う別の評価である。
 
 ### 既存の観測
 
@@ -50,7 +50,7 @@ NCBI BLASTと同じ検索候補、状態更新、順序、浮動小数点演算�
 | AP027280 self・TBLASTX | 26.452秒 | 16.063秒 | 39.361秒 | 63.585秒 |
 | AP027132/NZ_CP006932・BLASTP | 45.826秒 | 8.997秒 | 45.466秒 | 10.780秒 |
 
-出典: [前回の全条件・Native比](evidence/wasm_four_program_20260915/README.md)（アーカイブ内の `run-01/integrated-three-pair-results.md`）。
+出典: [前回の全条件・Native比](../evidence/wasm_four_program_20260915/README.md)（アーカイブ内の `run-01/integrated-three-pair-results.md`）。
 
 TBLASTXのn8逆転は確認済みの観測だが、原因は未確定。前回の検索本体・module再利用・TurboFan固定条件の最終計測は未実施である。通常ブラウザの速度へも一般化しない。
 

@@ -323,7 +323,7 @@ LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](ht
 ## Documentation & Verification
 
 - [TLOSAN v0.2.0 release readiness and scope](docs/release/v0.2.0.md)
-- [v0.1.0 historical release scope](docs/v0.1.0_scope.md)
+- [v0.1.0 historical release scope](docs/archive/v0.1.0_scope.md)
 - [Verification & Parity Specifications](docs/release/pure_rust_runtime_v0.1.0_certification.md)
 - [CLI Migration Details](docs/cli_v2_migration.md)
 - [Developer & Contributor Guidelines](AGENTS.md)

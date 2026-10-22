@@ -2022,16 +2022,23 @@ Rebuilding less:
   when `taxdb.bti` is on the search path, the taxonomy database (its opening, the lookup, a scientific name
   that NCBI's stream can write), and refuse before the first byte; so with `-db` the blocks are searched only
   when the taxid of every sequence reads and the taxonomy database, if found, opens and names every taxid of the
-  database with a name that can be written (`database::x_taxids_allow_blocks`, checked in the search pool before
-  the first block, with a taxonomy database opened apart from the run's: the run's open and lookup messages
-  stay for the report, which writes them at the first `Hit` that needs them, in the block that has it).
+  database with a name that can be written (`database::x_titles_taxids_allow_blocks`: the titles' check of
+  `LOSAT_X_BPQBLOCKXML` and the taxids in one ranged pass over the header file, no read per sequence, and no set of
+  taxids where no `taxdb.bti` is found; checked in the search pool before the first block, with a taxonomy database
+  opened apart from the run's: the run's open and lookup messages stay for the report, which writes them at the first
+  `Hit` that needs them, in the block that has it).
   Fallbacks to the search of all queries (memory as before): those of `LOSAT_X_BPQBLOCKXML`, and a `-db`
   sequence whose taxid does not read, a taxonomy database that does not open, or a taxid of the database whose
   name cannot be written, reported or not. Outfmt 13 and 14 (side files and a master file) are not taken.
   Reports identical; off = `LOSAT_X_BPQBLOCKXML2=0`. Local (WSL, 3000 x 6,600-protein Species6 `-db`, 3 interleaved
   rounds, `/usr/bin/time -v`, machine load 20-70): max RSS at 1 / 4 threads on 25.7 / 37.6 MiB (outfmt 15), 25.8 / 38.5
   (16), off 219.7 / 259.9 and 219.4 / 259.5, outfmt 6 25.2 / 40.1; user time on/off x0.87 (15) at 1 thread; outputs
-  identical on/off. ws numbers (NCBI 2.17.0 in the same job): TBD (v4-MEM).
+  identical on/off. ws numbers (NCBI 2.17.0 in the same job) come later, from v4-MEM (`TBD`). Cost of the pre-check
+  (WSL, machine load 37-50, so the walls are noisy; synthetic `-db` of 2 M sequences x 40 aa, taxid 0, 4 queries,
+  `BATCH_SIZE=50`, `LOSAT_X_BPQBLOCK=80` = 2 blocks, outfmt 15, median of 3 interleaved rounds): wall at 1 / 4 threads
+  2.88 / 1.01 s with blocks, 1.50 / 0.57 s with `LOSAT_X_BPQBLOCKXML2=0`, so about +1.4 s / +0.4 s per 2 M sequences
+  (about 0.7 us per sequence, user time), where the version with a read per sequence took 5.53 / 2.14 s. The shape is
+  forced (tiny queries in 2 blocks); in use a block holds 50,000 query letters or more and the search dominates.
 - `LOSAT_X_BPQBLOCKFMTSHADOW=1` shadow of the block search (turns `LOSAT_X_BPQBLOCKFMT`, `LOSAT_X_BPQBLOCKSA`,
   `LOSAT_X_BPQBLOCKXML` and `LOSAT_X_BPQBLOCKXML2` on; any format the
   block search takes): keeps a copy of the bytes the blocks write to the output and to standard error, then

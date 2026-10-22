@@ -1,4 +1,3 @@
-//! EXPERIMENT (LOSAT_X_NEWTONLANES / LOSAT_X_NEWTONLANESSHADOW):
 //! `Blast_OptimizeTargetFrequencies` for four independent problems at once,
 //! one problem per vector lane, bit for bit.
 //!
@@ -44,15 +43,14 @@
 //! and never re-associates sums; SIMD add / sub / mul / div / sqrt are
 //! IEEE-754 per element, so a lane gives the scalar result.
 //!
-//! LOSAT_X_NEWTONLANES8 (aarch64; a switch of the strict set, `utils/xswitch.rs`:
-//! on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set): eight
+//! On aarch64 (no variable; `LOSAT_X_NEWTONLANES8` graduated 2026-10-22): eight
 //! problems per round, value `k` of eight problems in one `[f64; 8]` (`F8`), so
 //! each operation is four 128-bit NEON operations on independent values.  The
 //! lane body is the same generic code; each lane still runs the operation
 //! sequence above.  When the queue is empty and at most four lanes hold a
 //! problem, those problems move to a four-lane state (bit copies of the values
-//! that persist between rounds) and finish there.  On x86-64 and Wasm the switch
-//! does nothing and the lanes stay four wide (on x86-64 the two 256-bit
+//! that persist between rounds) and finish there.  On x86-64 and Wasm the lanes
+//! stay four wide (on x86-64 the two 256-bit
 //! operations per value gave no gain; Wasm is not measured); the unit tests run
 //! the eight-lane body on every target.
 //!
@@ -72,7 +70,6 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ops::{Index, IndexMut};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:725-727
 // ```c
@@ -90,7 +87,7 @@ const LANES: usize = 4;
 const MIN_LANE_BATCH: usize = 3;
 const STORE_CAPACITY: usize = 512;
 const NO_PROBLEM: usize = usize::MAX;
-// No NCBI counterpart: the eight-lane width (LOSAT_X_NEWTONLANES8), the smallest batch that uses
+// No NCBI counterpart: the eight-lane width (aarch64), the smallest batch that uses
 // it, and the number of lanes with a problem at or below which an eight-lane batch whose queue is
 // empty moves to four lanes; they do not change any value NCBI computes.
 const LANES8: usize = 8;
@@ -98,47 +95,16 @@ const MAX_LANES: usize = LANES8;
 const MIN_LANE8_BATCH: usize = LANES + 1;
 const HAND_OVER_LANES: usize = LANES;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
-// ```c
-// int
-// Blast_OptimizeTargetFrequencies(double x[],
-// ...
-//                                 int constrain_rel_entropy,
-//                                 double relative_entropy,
-//                                 double tol,
-//                                 int maxits)
-// ```
-// No NCBI counterpart: reads LOSAT_X_NEWTONLANES and LOSAT_X_NEWTONLANESSHADOW once; it only
-// chooses whether results computed ahead are looked up; it does not change any value NCBI computes.
-/// 0 = off, 1 = `LOSAT_X_NEWTONLANES`, 2 = `LOSAT_X_NEWTONLANESSHADOW` (every
-/// result taken from the store is compared with the reference port).
-pub(crate) fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_NEWTONLANESSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_NEWTONLANES") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-// No NCBI counterpart: reads LOSAT_X_NEWTONLANES8 once (a strict-set switch: on unless it is `0`,
-// or `LOSAT_X_DEFAULT=0` and it is not set). On aarch64 it chooses how many problems share a round
-// when the lanes run; it does not turn them on. On x86-64 and Wasm it is not read and the lanes
-// stay four wide (x86-64 AVX2 measured no gain). It does not change any value NCBI computes.
+// No NCBI counterpart: on aarch64 the lanes share a round among eight problems; on x86-64 and
+// Wasm the lanes stay four wide (x86-64 AVX2 measured no gain). It does not change any value NCBI
+// computes.
 /// Whether batches of `MIN_LANE8_BATCH` or more problems use eight lanes.
 fn eight_lanes() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        cfg!(target_arch = "aarch64") && crate::utils::xswitch::on("LOSAT_X_NEWTONLANES8")
-    })
+    cfg!(target_arch = "aarch64")
 }
 
-// No NCBI counterpart: counters of the LOSAT_X_STATS / shadow report; they do not change any value
-// NCBI computes.
+// No NCBI counterpart: counters of the LOSAT_X_STATS report; they do not change any value NCBI
+// computes.
 static PREFETCHED: AtomicU64 = AtomicU64::new(0);
 static HITS: AtomicU64 = AtomicU64::new(0);
 static MISSES: AtomicU64 = AtomicU64::new(0);
@@ -148,19 +114,10 @@ static BUSY_LANE_ROUNDS: AtomicU64 = AtomicU64::new(0);
 static BATCHES8: AtomicU64 = AtomicU64::new(0);
 static ROUNDS8: AtomicU64 = AtomicU64::new(0);
 static TAIL_ROUNDS: AtomicU64 = AtomicU64::new(0);
-/// Store hits compared with the reference port (LOSAT_X_NEWTONLANESSHADOW).
-pub(crate) static SHADOWED: AtomicU64 = AtomicU64::new(0);
 
 // No NCBI counterpart: prints the counters at exit; it does not change any value NCBI computes.
 pub(crate) fn print_stats() {
-    let lanes_mode = mode();
-    if lanes_mode == 2 {
-        eprintln!(
-            "[X_SHADOW] NEWTONLANES calls_compared={} (status and all 400 target frequencies bit-identical)",
-            SHADOWED.load(Ordering::Relaxed)
-        );
-    }
-    if lanes_mode != 0 && std::env::var_os("LOSAT_X_STATS").is_some() {
+    if std::env::var_os("LOSAT_X_STATS").is_some() {
         let prefetched = PREFETCHED.load(Ordering::Relaxed);
         let hits = HITS.load(Ordering::Relaxed);
         eprintln!(
@@ -400,7 +357,7 @@ macro_rules! lane_vec {
 }
 
 // No NCBI counterpart: four problems per value (one 256-bit or two 128-bit vectors) and, for
-// LOSAT_X_NEWTONLANES8, eight; it does not change any value NCBI computes.
+// eight on aarch64; it does not change any value NCBI computes.
 lane_vec!(F4, M4, 4, 32, [0, 1, 2, 3]);
 lane_vec!(F8, M8, 8, 64, [0, 1, 2, 3, 4, 5, 6, 7]);
 
@@ -1363,7 +1320,7 @@ fn solve_lanes_plain(
 // ```
 // No NCBI counterpart: the eight-lane loop compiled with AVX2 enabled (each `F8` operation is two
 // 256-bit operations on independent values); x86-64 runs it only in the unit tests
-// (LOSAT_X_NEWTONLANES8 acts on aarch64). It does not change any value NCBI computes.
+// (the eight lanes run on aarch64). It does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn solve_lanes8_avx2(
@@ -1404,7 +1361,7 @@ fn solve_lanes8_plain(
 // ```
 // Solves every problem of the batch, each with the result of this function (`x` and the status).
 // Batches of fewer than `MIN_LANE_BATCH` problems use `x_newton_exact` (same results); with
-// LOSAT_X_NEWTONLANES8 on aarch64, batches of `MIN_LANE8_BATCH` or more use eight lanes.
+// aarch64, batches of `MIN_LANE8_BATCH` or more use eight lanes.
 /// Solves `inputs[i]` into `outputs[i]`.
 pub(crate) fn solve_batch(inputs: &[NewtonInput], outputs: &mut [NewtonOutput]) {
     let lanes8 = if eight_lanes() {
@@ -1867,7 +1824,7 @@ mod tests {
     //             /* We converged at the current iterate */
     //             break;
     // ```
-    // The eight-lane batches (LOSAT_X_NEWTONLANES8): every size 1..=21 and one of 64, with the move
+    // The eight-lane batches (aarch64): every size 1..=21 and one of 64, with the move
     // to four lanes and without it, the plain compilation, and the literal factorisation forced on one
     // lane (any of the eight) in one round; status and all 400 values compared by bits with the exact
     // module and the reference port.

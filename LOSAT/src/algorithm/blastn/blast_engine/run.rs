@@ -5268,6 +5268,9 @@ struct BlastnReportInputs<'a> {
     /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool that formats the outfmt 0 rows and text
     /// (`report::x_pairwise_par`); `None`: the serial writer.
     x_pairwise_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
+    /// `-out`: the base of the side files of outfmt 13 and 14 and of the names their master
+    /// file lists.
+    out: Option<&'a std::path::Path>,
     /// The e-value threshold of the search (BLAST XML's `Parameters_expect`).
     expect: f64,
     /// The DUST options as NCBI's filter string prints them (BLAST XML's `Parameters_filter`);
@@ -6280,7 +6283,8 @@ fn post_process_hits_and_write(
                         query_gencode: None,
                         db_gencode: None,
                     };
-                    let mut document = crate::report::blast_xml2::Xml2Writer::new(kind, params);
+                    let mut document =
+                        crate::report::blast_xml2::Xml2Writer::for_run(kind, params, report.out);
                     super::super::blast_xml::write_blastn_xml(
                         &xml,
                         &mut document,
@@ -7312,9 +7316,12 @@ fn search(
     //         formatter.PrintProlog();
     // ```
     // The XInclude formats written to standard output fail after the formatter is made (a
-    // format 13 or 14 to a file is LOSAT's rejection, `cli_output_formats`).
+    // format 13 or 14 to a file takes the file name as the base of its side files).
     for format in &outputs.formats {
-        app::xinclude_check(&app::parse_formatting_string(format.outfmt)?)?;
+        app::xinclude_check_for(
+            &app::parse_formatting_string(format.outfmt)?,
+            args.out.as_deref(),
+        )?;
     }
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
@@ -9401,6 +9408,7 @@ fn write_reports_untimed(
         queries_before: written.queries,
         subject_cache: written.subjects,
         x_pairwise_pool: x_pool.and_then(crate::report::x_pairwise_par::pool),
+        out: args.out.as_deref(),
         expect: super::super::coordination::determine_evalue(args),
         dust: args.dust.params().map(|(level, window, linker)| {
             (level as i32, window as u32 as i32, linker as u32 as i32)
@@ -19040,7 +19048,18 @@ mod tests {
         assert!(cli_output_formats("13", Some(std::path::Path::new("-")))
             .unwrap()
             .is_empty());
-        for outfmt in ["13", "17", "10"] {
+        // 13 and 14 to a file are written (OF5c part 1): the XML2 / JSON documents as files.
+        for (outfmt, kind) in [
+            ("13", crate::report::blast_xml2::Xml2Kind::Files13),
+            ("14", crate::report::blast_xml2::Xml2Kind::Files14),
+        ] {
+            assert_eq!(
+                cli_output_formats(outfmt, file).unwrap(),
+                [BlastnOutputFormat::Xml2(kind)],
+                "{outfmt}"
+            );
+        }
+        for outfmt in ["17", "10"] {
             assert_eq!(
                 cli_output_formats(outfmt, file).unwrap_err().to_string(),
                 format!("output format {outfmt} is not supported by LOSAT's BLASTN")

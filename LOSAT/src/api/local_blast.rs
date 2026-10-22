@@ -281,9 +281,13 @@ pub struct ReportOutputs<'a> {
     pub formats: Vec<FormatOutput<'a>>,
     /// Receives the warnings that the CLI writes to standard error, each once.
     pub diagnostics: &'a mut (dyn Write + Send),
-    /// Receives the final, sorted hit list with rendered alignments.
+    /// Receives the final, sorted hit list with rendered alignments, once per call. It may come
+    /// before or after the reports are written (blastp's query blocks hand it over after the
+    /// last block, `LOSAT_X_BPQBLOCKWEB`).
     pub hits: Option<&'a mut (dyn FnMut(&[PairwiseHit]) + Send)>,
-    /// Receives the row and section boundaries of each HSP in each format.
+    /// Receives the row and section boundaries of each HSP in each format. The events of one
+    /// format come in that format's write order; those of different formats may interleave in
+    /// any order (blastp's query blocks write every format block by block).
     pub observer: Option<&'a mut (dyn FormatObserver + Send)>,
 }
 

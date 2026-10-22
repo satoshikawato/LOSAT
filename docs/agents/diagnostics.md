@@ -3149,13 +3149,26 @@ Scheduling (each value computed by one thread with the original function; order 
   on 1 to 8 threads and 2 to 16 partitions), the partition tests of `x_pair_seed_part.rs`,
   `LOSAT/tests/blastn_diag_lv.rs` (`the_memo_and_the_lean_folds_give_the_same_report`: dc-megablast at 1 and 4
   threads with each switch, the memo answering under the shadow; megablast keeps no memo).
-  EVIDENCE (filled after the workstation A/B).
+  Evidence (ws, node 1 timed, dev 249c7454 against perf/dc-fold-lean, medians of pairs in rotated order; v4-A15
+  ab6 at 85bf2fd2 and many_own1 at 5181158b, which puts the partition states on cache lines of their own; both
+  switches on unless named): 31,168 dmel cDNAs against 3 Mb of dmel genome with `-subject`, 16 threads 1.843 ->
+  1.628 s (x0.883, 8 of 8 pairs; cycles:u 69.03 -> 59.99 G, instructions 166.53 -> 150.72 G; x0.881 at
+  5181158b), this switch alone x0.927, `LOSAT_X_FOLDLEAN` alone x0.957; 8 threads x0.875; 1 thread x0.998 (the
+  reference fold, no memo); the same queries against that genome as `-db`, 16 threads x0.931; 1,775 cDNAs x0.893
+  (16 threads, 60 pairs) and x0.998 (1 thread); 236 cDNAs (a small table: the memo answers 7 % of the retrieves)
+  x0.993 / x0.989 / x0.981 / x1.000 at 16 / 8 / 4 / 1 threads (300 / 150 / 80 / 60 pairs); 100 16S queries
+  against a 16S `-db` (every worker in the reference fold) x1.000 with dev's instructions; megablast and blastn
+  (no memo) x0.997-1.009 with dev's instructions. Both switches off: x0.997 (31,168 cDNAs, 16 threads, dev's
+  instructions) and x0.997 (236 cDNAs, 16 threads). Before the partition states had their own lines, 236 cDNAs
+  at 16 threads were x1.014 (both off x1.025: the same instructions, memory-ordering machine clears x1.37). Peak
+  RSS: 401-409 against 404-408 MiB (`-subject`, 16 threads).
 - `LOSAT_X_FOLDLEAN=1` (in the strict set since 2026-10-22 (perf/dc-fold-lean, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set)
   blastn dc-megablast, the strips folds of `LOSAT_X_PAIRPARDISC` (`fold_two_hit`, diagonal hash) and
   `LOSAT_X_PAIRPARDISCARR` (`fold_two_hit_array`, diagonal array): the stage runs one instance per state of the
   switch (`LEAN`) and of the table's memo (`MEMO`, `LOSAT_X_DIAGLV2`), `seed_stage_of::<LEAN, MEMO>` /
   `seed_stage_array_of::<LEAN>`, so with the switch off on a table without the memo it is the code before the two
-  switches (the same instructions: only the field offsets of the table, which gained the memo, differ). The `LEAN`
+  switches (the same instructions apart from the layout: the field offsets of the table, which gained the memo, and
+  the partition states' indexing). The `LEAN`
   instance takes `s_TypeOfWord`'s early return
   itself (na_ungapped.c:531 `if (word_length == lut_word_length) return 1;`, always so for a discontiguous word: no call, no
   arguments, the offsets unchanged and nothing extended) and inlines the diagonal-hash insert
@@ -3163,7 +3176,8 @@ Scheduling (each value computed by one thread with the original function; order 
   fold (`process_offset_pairs`) is not changed.
   Tests: the dc strips stage tests of `x_pair_seed_disc.rs` (both instances on a table with bounds and memo),
   `LOSAT/tests/blastn_diag_lv.rs` (`the_memo_and_the_lean_folds_give_the_same_report`).
-  EVIDENCE (filled after the workstation A/B).
+  Evidence: with `LOSAT_X_DIAGLV2`'s (above); this switch alone x0.957 on 31,168 cDNAs at 16 threads
+  (instructions 166.53 -> 152.44 G) and x0.983 on 236 cDNAs at 8 threads.
 - `LOSAT_X_PAIRPARFOLD=1` (in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) blastn, where the strips paths of `LOSAT_X_PAIRPAR` (one-hit fold: megablast, blastn) and
   `LOSAT_X_PAIRPARDISC` (two-hit fold: dc-megablast) run, on a pool of 2+ threads: the diagonal-hash fold
   of the chunk is split by bucket (`bucket % P`, one partition per thread) over the owner and `threads - 1`
@@ -3172,7 +3186,9 @@ Scheduling (each value computed by one thread with the original function; order 
   those strips of seeds held a quarter of its seeds; see `LOSAT_X_BNFEWSUBJ`). Each participant scans the
   next strip when it lies within `2 x threads` strips of the slowest partition, cuts its seeds by
   partition (a stable counting sort) and folds partition p of the next strip of any partition it can
-  lock, into p's own table, with the folds of the strips paths (`fold`, `fold_two_hit`, a const
+  lock (each partition's state on cache lines of its own, 128-byte aligned: the participants poll every
+  partition's lock while one of them folds into it, perf/dc-fold-lean), into p's own table, with the folds of the
+  strips paths (`fold`, `fold_two_hit`, a const
   parameter and a sink of (strip, position) keys for every pushed hit and every insert that appends a
   cell). The merge puts the hits in key order and gives every appended cell the number `occ0 + rank` of
   its key (links and heads mapped; the capacity of the reference's doublings; the bounds of

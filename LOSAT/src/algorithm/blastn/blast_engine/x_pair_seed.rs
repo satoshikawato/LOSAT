@@ -1401,6 +1401,8 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
         max_level: h.max_level.clone(),
         x_lv_shadow: h.x_lv_shadow,
         x_last: h.x_last.clone(),
+        #[cfg(debug_assertions)]
+        x_last_fresh: h.x_last_fresh,
     }
 }
 
@@ -1738,10 +1740,10 @@ mod tests {
         }
         if op.pass {
             decisions.push(2);
-            hash.insert(op.diag, op.ungapped_end, 0, true, op.s_off_pos, window);
+            hash.insert_plain(op.diag, op.ungapped_end, 0, true, op.s_off_pos, window);
         } else {
             decisions.push(1);
-            hash.insert(
+            hash.insert_plain(
                 op.diag,
                 op.s_end_pos,
                 op.s_end_pos - op.s_off_pos,
@@ -1776,7 +1778,7 @@ mod tests {
                 .collect();
             // cells left at `last_hit = -window` by a reset with a window
             for &d in diags.iter().take(3) {
-                start.insert(d, -table_window, 0, false, -table_window, window);
+                start.insert_plain(d, -table_window, 0, false, -table_window, window);
             }
             let n = 200 + rng.below(3000) as usize;
             let mut s = -20i32;

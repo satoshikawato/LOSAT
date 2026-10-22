@@ -231,7 +231,8 @@ fn the_strips_shadows_compare_the_tables_with_the_level_bounds() {
     let query = fasta("LC738874.fasta");
     let subject = fasta("LC738868.fasta");
     // (dc-megablast with the memo, LOSAT_X_DIAGLV2, and the lean folds, LOSAT_X_FOLDLEAN: the
-    // strips shadow also compares the memo of every chunk's table)
+    // strips shadow compares the hits and the tables, not the memo, which the reference fold
+    // does not keep; LOSAT_X_DIAGLVSHADOW, on in this arm, checks every memo answer)
     for (task, strips_shadow, prefix, more) in [
         (
             "megablast",

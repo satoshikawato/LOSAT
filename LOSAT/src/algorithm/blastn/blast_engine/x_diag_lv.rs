@@ -184,12 +184,14 @@
 //!   at or below the bucket's bound when the stage made the memo (`x_lv2_reset`; nothing after
 //!   the table was made or cleared: `LvLast::EMPTY`, `other = i32::MIN`); the tests'
 //!   tables made from cells start at `LvLast::UNKNOWN` (`other = i32::MAX`), which never
-//!   answers. `copy_hash`, the stage copies of `LOSAT_X_PAIRPARFOLD` (`rebuild`) and its merge
-//!   (per changed bucket, from the partition that owns it) copy the memo with the chains.
+//!   answers. The stage copies of `LOSAT_X_PAIRPARFOLD` (`rebuild`) copy the memo with the
+//!   chains. `copy_hash`, the merge (per changed bucket, from the partition that owns it) and the
+//!   clear keep it too, though no fold reads it before the next stage's reset: so that the tests
+//!   find the stage's table equal to the serial fold's, memo included.
 //! - (vi) For any other diagonal, the cell the walk would return is not the latest insert's, so
 //!   by (v) its level is below the bound, and by (ii) it makes the decisions of no cell. The
-//!   retrieve's other values are read by no decision ((ii), last item). `insert` is not changed
-//!   beyond keeping the memo, so the table is the reference's cell for cell.
+//!   retrieve's other values are read by no decision ((ii), last item). `insert_memo` is
+//!   `insert_plain` and the memo's upkeep, so the table is the reference's cell for cell.
 //!
 //! One-hit tables (megablast, blastn, blastn-short: window 0) keep no memo: their inserts would
 //! pay for it where no measured fold gains (the memo is a dc-megablast measurement, line R
@@ -198,9 +200,9 @@
 //! testing it cost x1.008 of the wall time where the walks it saves are one cell long
 //! (v4-A15 ab5). The reference fold, the one-hit strips folds, and with the switch off (or
 //! LOSAT_X_DIAGLV off: `x_last` empty) the dc-megablast strips folds call
-//! `retrieve_below::<false>` and `DiagHashTable::insert_plain`, the code before the switch. The
-//! shadow (LOSAT_X_DIAGLVSHADOW)
-//! checks every answer: the bucket's walk must give (iv) (the first cell of the latest insert's
+//! `retrieve_below::<false>` and `DiagHashTable::insert_plain`, the code before the switch.
+//! (Debug builds assert the memo's validity, `DiagHashTable::x_last_fresh`.) The shadow
+//! (LOSAT_X_DIAGLVSHADOW) checks every answer: the bucket's walk must give (iv) (the first cell of the latest insert's
 //! diagonal holds its values) and (v) (every other cell at or below `other`), and the walk of the
 //! retrieve must return what the memo returned for that diagonal, or for any other diagonal a
 //! cell with the decisions of no cell; the summary line counts the answers (`memo=`) and those
@@ -278,8 +280,11 @@ pub(super) struct LvLast {
 }
 
 impl LvLast {
-    /// No diagonal: `diag = s_off - q_off` with both offsets in `0..i32::MAX` is above
-    /// `i32::MIN`, so the memo of a bucket with this latest answers no cell for every diagonal.
+    /// No diagonal (`diag = s_off - q_off` with both offsets in `0..i32::MAX` is above
+    /// `i32::MIN`): the latest of a bucket that had no insert since the table was made, cleared or
+    /// its memo made again (`x_lv2_reset`). The output does not depend on it (such a bucket's
+    /// `other` is its bound, so its memo answers only where the bound skips); the shadow's check
+    /// of (iv) does not expect a cell for it.
     pub(super) const NO_DIAG: i32 = i32::MIN;
     /// A bucket with no cell: no insert yet (its `level` raises `other` to `i32::MIN` only).
     pub(super) const EMPTY: LvLast = LvLast {
@@ -446,7 +451,9 @@ impl DiagHashTable {
     /// `retrieve` for a seed of `seeds` at `s_off_pos`, or `None` without a walk when every cell
     /// of `diag`'s bucket has a level below the seed's bound (`max_level`). A table without
     /// bounds always walks. With LOSAT_X_DIAGLVSHADOW every skipped walk is done and checked
-    /// (`x_lv_verify`).
+    /// (`x_lv_verify`). With `MEMO` (the folds of a dc-megablast strips stage only, after the
+    /// stage's `x_lv2_reset`: the field comment of `x_last`) the memo of LOSAT_X_DIAGLV2 may
+    /// answer without the walk.
     #[inline(always)]
     pub(super) fn retrieve_below<const MEMO: bool>(
         &self,
@@ -467,12 +474,17 @@ impl DiagHashTable {
             return None;
         }
         // EXPERIMENT (LOSAT_X_DIAGLV2, module comment (iv)-(vi)): every cell but the latest
-        // insert's lies below the bound; answer from the memo without the walk. (`insert` keeps
-        // the memo only on a table with bounds.) Without `MEMO` (the reference fold, the one-hit
+        // insert's lies below the bound; answer from the memo without the walk. (`insert_memo`
+        // keeps the memo only on a table with bounds.) Without `MEMO` (the reference fold, the one-hit
         // strips folds, and dc-megablast's strips fold on a table without the memo) there is no
         // test, and the memo is not read.
         debug_assert!(self.x_last.is_empty() || self.x_lv_on());
         if MEMO {
+            #[cfg(debug_assertions)]
+            assert!(
+                self.x_last.is_empty() || self.x_last_fresh,
+                "LOSAT_X_DIAGLV2: a retrieve reads a stale memo (no x_lv2_reset since an insert without it)"
+            );
             if let Some(last) = self.x_last.get(bucket) {
                 if last.other < bound {
                     let found =
@@ -618,8 +630,6 @@ impl DiagHashTable {
         self.x_lv_shadow = shadow;
     }
 
-    /// Tests only: a memo (LOSAT_X_DIAGLV2) for a table with bounds, `LvLast::EMPTY` for a
-    /// bucket without cells and `LvLast::UNKNOWN` (never answers) for one with cells.
     /// No NCBI counterpart (LOSAT_X_DIAGLV2): the memo of every bucket made again from the level
     /// bounds of LOSAT_X_DIAGLV, at the start of a strips stage of dc-megablast (the only folds
     /// that keep and read it; the reference fold may have changed the table since the last
@@ -635,11 +645,21 @@ impl DiagHashTable {
                 ..LvLast::EMPTY
             };
         }
+        #[cfg(debug_assertions)]
+        {
+            self.x_last_fresh = true;
+        }
     }
 
+    /// Tests only: a memo (LOSAT_X_DIAGLV2) for a table with bounds, `LvLast::EMPTY` for a
+    /// bucket without cells and `LvLast::UNKNOWN` (never answers) for one with cells.
     #[cfg(test)]
     pub(super) fn x_lv2_start(&mut self) {
         assert!(self.x_lv_on());
+        #[cfg(debug_assertions)]
+        {
+            self.x_last_fresh = true;
+        }
         self.x_last = (0..self.num_buckets)
             .map(|bucket| {
                 if self.backbone[bucket] == 0 {
@@ -827,8 +847,8 @@ mod tests {
                         let hit_len = rng.below(30) as i32;
                         let saved = rng.below(2) == 0;
                         let stale = rng.below(60) as i32 - 10;
-                        on.insert(diag, level, hit_len, saved, s_off, stale);
-                        off.insert(diag, level, hit_len, saved, s_off, stale);
+                        on.insert_memo(diag, level, hit_len, saved, s_off, stale);
+                        off.insert_memo(diag, level, hit_len, saved, s_off, stale);
                     }
                 }
                 grown |= on.capacity > 256;
@@ -927,7 +947,7 @@ mod tests {
                     let level = (s + word_length + rng.below(reach) as usize) as i32;
                     let saved = rng.below(3) == 0;
                     let hit_len = if saved { 0 } else { word_length as i32 };
-                    h.insert(diag, level, hit_len, saved, s as i32, diag_hash_window);
+                    h.insert_memo(diag, level, hit_len, saved, s as i32, diag_hash_window);
                 }
                 assert!(
                     skipped * 5 > probes && found_below > 0,
@@ -979,8 +999,10 @@ mod tests {
     // LOSAT_X_DIAGLV2: tables filled as the dc-megablast fold fills them (seeds in rising
     // order, an insert after every probe; diagonals d + 512 k share a bucket, so cells are
     // matched, taken over and appended), with offset advances between "subjects" and clears at
-    // INT4_MAX / 4, at the template lengths of dc-megablast and `scan_range` 0 and 2: the memo
-    // holds (iv) and (v), the table is the table without a memo, a memo answer for the latest
+    // INT4_MAX / 4, at the template lengths of dc-megablast and `scan_range` 0 and 2, with runs
+    // of the reference fold (no memo read or kept: `retrieve_below::<false>`, `insert_plain`)
+    // between strips stages (each makes the memo again, `x_lv2_reset`): the memo holds (iv) and
+    // (v) in every stage, the table is the table without a memo, a memo answer for the latest
     // insert's diagonal is the walk's cell, every answer makes the decisions of the walk, and the
     // memo answers (also for the latest insert's diagonal) where the bound does not skip.
     #[test]
@@ -1011,8 +1033,19 @@ mod tests {
                 let (mut ln_on, mut ln_off) = (Vec::<u8>::new(), Vec::<u8>::new());
                 let (mut dt_on, mut dt_off) = (window, window);
                 let (mut memos, mut memo_found, mut clears) = (0u64, 0u64, 0u64);
+                // steps left in a run of the reference fold, and the runs and stage starts
+                let (mut reference_left, mut runs, mut resets) = (0usize, 0u64, 0u64);
                 let mut s = h.offset as usize;
                 for step in 0..30_000 {
+                    if reference_left == 0 && rng.below(700) == 0 {
+                        reference_left = 1 + rng.below(400) as usize;
+                        runs += 1;
+                    } else if reference_left == 0 && rng.below(1000) == 0 {
+                        // a stage after a stage
+                        h.x_lv2_reset();
+                        resets += 1;
+                        check_memo(&h, &format!("case {case} step {step} reset"));
+                    }
                     if rng.below(1000) == 0 {
                         // the next subject; sometimes past INT4_MAX / 4 (the clear)
                         let len = if rng.below(3) == 0 {
@@ -1044,8 +1077,14 @@ mod tests {
                     let full = plain.retrieve(diag);
                     assert_eq!(h.retrieve(diag), full, "case {case} step {step}");
                     let before = test_memos();
-                    let fast = h.retrieve_below::<true>(diag, &seeds, s);
-                    if test_memos() > before {
+                    let fast = if reference_left > 0 {
+                        h.retrieve_below::<false>(diag, &seeds, s)
+                    } else {
+                        h.retrieve_below::<true>(diag, &seeds, s)
+                    };
+                    if reference_left > 0 {
+                        assert_eq!(test_memos(), before, "case {case} step {step}: memo read");
+                    } else if test_memos() > before {
                         memos += 1;
                         if fast.is_some() {
                             memo_found += 1;
@@ -1061,10 +1100,23 @@ mod tests {
                     let level = (s + word_length + rng.below(reach) as usize) as i32;
                     let saved = rng.below(3) == 0;
                     let hit_len = if saved { 0 } else { word_length as i32 };
-                    h.insert(diag, level, hit_len, saved, s as i32, diag_hash_window);
-                    plain.insert(diag, level, hit_len, saved, s as i32, diag_hash_window);
+                    if reference_left > 0 {
+                        h.insert_plain(diag, level, hit_len, saved, s as i32, diag_hash_window);
+                        reference_left -= 1;
+                        if reference_left == 0 {
+                            // the next strips stage
+                            h.x_lv2_reset();
+                            resets += 1;
+                            check_memo(&h, &format!("case {case} step {step} reset"));
+                        }
+                    } else {
+                        h.insert_memo(diag, level, hit_len, saved, s as i32, diag_hash_window);
+                    }
+                    plain.insert_plain(diag, level, hit_len, saved, s as i32, diag_hash_window);
                     if step % 97 == 0 {
-                        check_memo(&h, &format!("case {case} step {step}"));
+                        if reference_left == 0 {
+                            check_memo(&h, &format!("case {case} step {step}"));
+                        }
                         assert_eq!(
                             hash_state(&h),
                             hash_state(&plain),
@@ -1074,11 +1126,33 @@ mod tests {
                 }
                 assert!(clears > 0, "case {case}: no clear");
                 assert!(
+                    runs > 10 && resets > runs,
+                    "case {case}: {runs} runs of the reference fold, {resets} resets"
+                );
+                assert!(
                     memos > 1000 && memo_found > 100,
                     "case {case}: too few memo answers ({memos}, {memo_found} for the latest insert)"
                 );
             }
         }
+    }
+
+    // LOSAT_X_DIAGLV2, debug builds: a read of the memo after an insert that did not keep it
+    // (the reference fold's `insert_plain`) and before a stage made it again (`x_lv2_reset`)
+    // panics; after the reset it answers.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "stale memo")]
+    fn a_memo_read_after_a_memo_free_insert_panics_in_debug_builds() {
+        let seeds = LvSeeds::new(true, 18, 40);
+        let mut h = table(40, true, false);
+        h.x_lv2_start();
+        h.insert_memo(7, 500, 0, true, 480, 41);
+        h.insert_plain(7 + 512, 490, 0, true, 470, 41);
+        h.x_lv2_reset();
+        let _ = h.retrieve_below::<true>(7, &seeds, 480);
+        h.insert_plain(7, 520, 0, true, 500, 41);
+        let _ = h.retrieve_below::<true>(7, &seeds, 480);
     }
 
     #[test]
@@ -1175,8 +1249,8 @@ mod tests {
                     let earlier = (level as usize).saturating_sub(word_length) as i32;
                     let mut on = table(window, true, true);
                     let mut off = table(window, false, false);
-                    on.insert(diag, level, hit_len, hit_saved, earlier, diag_hash_window);
-                    off.insert(diag, level, hit_len, hit_saved, earlier, diag_hash_window);
+                    on.insert_memo(diag, level, hit_len, hit_saved, earlier, diag_hash_window);
+                    off.insert_memo(diag, level, hit_len, hit_saved, earlier, diag_hash_window);
                     let full = off.retrieve(diag);
                     assert_eq!(full, Some((level, hit_len, hit_saved)), "{at}");
                     let before = test_skips();
@@ -1204,7 +1278,7 @@ mod tests {
                         let ready = walked.1;
                         let len = if ready { 0 } else { word_length as i32 };
                         for h in [&mut on, &mut off] {
-                            h.insert(
+                            h.insert_memo(
                                 diag,
                                 s_end_pos,
                                 len,
@@ -1225,7 +1299,7 @@ mod tests {
     #[should_panic(expected = "LOSAT_X_DIAGLVSHADOW")]
     fn the_shadow_panics_on_a_cell_above_the_bound() {
         let mut h = table(40, true, true);
-        h.insert(7, 500, 0, true, 480, 41);
+        h.insert_memo(7, 500, 0, true, 480, 41);
         // a bound that lies wrong about the bucket
         h.max_level[bucket_of(7)] = 100;
         // one hit at 199: the seed's bound is 200
@@ -1239,9 +1313,9 @@ mod tests {
     fn the_shadow_panics_on_a_memo_that_misses_a_cell() {
         let mut h = table(40, true, true);
         h.x_lv2_start();
-        h.insert(7, 980, 0, true, 960, 41);
+        h.insert_memo(7, 980, 0, true, 960, 41);
         // same bucket; at 1000 the cell at 980 is not stale (1000 - 980 <= 41): appended
-        h.insert(7 + 512, 1500, 0, true, 1000, 41);
+        h.insert_memo(7 + 512, 1500, 0, true, 1000, 41);
         h.x_last[bucket_of(7)].other = 900;
         // two hits, template 18, at 1000: the bound is 978, above `other`, below max_level
         let _ = h.retrieve_below::<true>(7, &LvSeeds::new(true, 18, 40), 1000);
@@ -1257,7 +1331,7 @@ mod tests {
             ..LvSeeds::new(false, 28, 0)
         };
         let mut h = table(0, true, true);
-        h.insert(7, 1001, 0, true, 980, 1);
+        h.insert_memo(7, 1001, 0, true, 980, 1);
         let _ = h.retrieve_below::<true>(7, &seeds, 1000);
     }
 
@@ -1273,7 +1347,7 @@ mod tests {
             ..right
         };
         let mut h = table(40, true, true);
-        h.insert(7, 1000 + 18 - 40, 18, false, 960, 41);
+        h.insert_memo(7, 1000 + 18 - 40, 18, false, 960, 41);
         let _ = h.retrieve_below::<true>(7, &seeds, 1000);
     }
 }

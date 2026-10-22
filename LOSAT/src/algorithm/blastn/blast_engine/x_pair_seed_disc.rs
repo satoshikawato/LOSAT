@@ -1930,7 +1930,8 @@ mod tests {
     type HashState = (Vec<u32>, Vec<(i32, i32, bool, i32, u32)>, u32, u32, i32);
 
     /// `seed_stage_of` in the instance of `lean` (LOSAT_X_FOLDLEAN) and of the table's memo
-    /// (LOSAT_X_DIAGLV2), whatever the environment says (`seed_stage` reads the switch).
+    /// (LOSAT_X_DIAGLV2), whatever the environment says (`seed_stage` reads the switch), after
+    /// the memo is made again at the stage's start as `seed_stage` does.
     fn stage_of(
         lean: bool,
         x: &Inputs<'_>,
@@ -1940,6 +1941,9 @@ mod tests {
         hits: &mut Vec<UngappedHit>,
         fold_part: Option<part::FoldPart<'_>>,
     ) -> StageStats {
+        if !hash.x_last.is_empty() {
+            hash.x_lv2_reset();
+        }
         match (lean, !hash.x_last.is_empty()) {
             (false, false) => {
                 seed_stage_of::<false, false>(x, disc, threads, hash, hits, None, false, fold_part)
@@ -2438,12 +2442,38 @@ mod tests {
                     // 2, 3, 7, 8 and 16 partitions on 1..8 threads, on tables without level
                     // bounds, with bounds, and with bounds and the memo (LOSAT_X_DIAGLV2), in the
                     // stage's instances with and without LOSAT_X_FOLDLEAN (`stage_of`, alternating
-                    // over the configurations), for two chunks in a row on one scratch (the second
-                    // with the hash offset moved on): the hits and the table of the serial fold.
+                    // over the configurations), for two stages on one scratch with a chunk that
+                    // the fold without the memo folds between them (as the reference fold does
+                    // where a subject takes it: the memo is not kept there, and the next stage
+                    // makes it again), each with the hash offset moved on: the hits and the table
+                    // of the serial fold, and with every configuration those of the table without
+                    // bounds.
                     let x2 = Inputs {
                         diag_offset: diag_offset + c.s_len as isize + window_size as isize,
                         ..x
                     };
+                    let x3 = Inputs {
+                        diag_offset: x2.diag_offset + c.s_len as isize + window_size as isize,
+                        ..x
+                    };
+                    // the chunks: (inputs, folded by a stage, else by the fold without the memo)
+                    let chunks = [(&x, true), (&x2, false), (&x3, true)];
+                    let fold_memo_free =
+                        |xc: &Inputs<'_>, hash: &mut DiagHashTable, hits: &mut Vec<UngappedHit>| {
+                            let mut pause = 0u64;
+                            fold_two_hit::<false, false, false>(
+                                xc,
+                                &seeds,
+                                hash,
+                                hits,
+                                None,
+                                &mut pause,
+                                &mut FoldCounts::default(),
+                                &mut part::PartOut::default(),
+                                &[],
+                            );
+                        };
+                    let mut plain_expected: Vec<(Vec<_>, HashState)> = Vec::new();
                     for (levels, memo) in [(false, false), (true, false), (true, true)] {
                         // whatever the environment says
                         let new_table = || {
@@ -2460,22 +2490,36 @@ mod tests {
                         };
                         let mut expected_hash = new_table();
                         let mut expected = Vec::new();
-                        for xc in [&x, &x2] {
+                        for (k, &(xc, stage)) in chunks.iter().enumerate() {
                             expected_hash.offset = xc.diag_offset as i32;
-                            // as `seed_stage`: the memo made again at the stage's start
-                            if memo {
-                                expected_hash.x_lv2_reset();
-                            }
                             let mut hits = Vec::new();
-                            fold_serial(
-                                false,
-                                xc,
-                                &seeds,
-                                &mut expected_hash,
-                                &mut hits,
-                                &mut pause,
-                                &mut FoldCounts::default(),
-                            );
+                            if stage {
+                                // as `seed_stage`: the memo made again at the stage's start
+                                if memo {
+                                    expected_hash.x_lv2_reset();
+                                }
+                                fold_serial(
+                                    false,
+                                    xc,
+                                    &seeds,
+                                    &mut expected_hash,
+                                    &mut hits,
+                                    &mut pause,
+                                    &mut FoldCounts::default(),
+                                );
+                            } else {
+                                fold_memo_free(xc, &mut expected_hash, &mut hits);
+                            }
+                            let keys = hits.iter().map(key).collect::<Vec<_>>();
+                            if levels {
+                                let (plain_keys, plain_state) = &plain_expected[k];
+                                let at =
+                                    format!("case {case_no} levels {levels} memo {memo} chunk {k}");
+                                assert_eq!(&keys, plain_keys, "{at}");
+                                assert_eq!(&hash_state(&expected_hash), plain_state, "{at}");
+                            } else {
+                                plain_expected.push((keys.clone(), hash_state(&expected_hash)));
+                            }
                             expected.push((
                                 hits.iter().map(key).collect::<Vec<_>>(),
                                 hash_state(&expected_hash),
@@ -2504,25 +2548,29 @@ mod tests {
                             pool.install(|| {
                                 let mut hash = new_table();
                                 let mut scratch = PartScratch::default();
-                                for (chunk, xc) in [&x, &x2].into_iter().enumerate() {
+                                for (chunk, &(xc, stage)) in chunks.iter().enumerate() {
                                     let at = format!(
                                         "case {case_no} threads {threads} parts {parts} levels {levels} memo {memo} lean {lean} chunk {chunk}"
                                     );
                                     hash.offset = xc.diag_offset as i32;
                                     let mut hits = Vec::new();
-                                    let stats = stage_of(
-                                        lean,
-                                        xc,
-                                        disc,
-                                        threads,
-                                        &mut hash,
-                                        &mut hits,
-                                        Some(part::FoldPart {
-                                            scratch: &mut scratch,
-                                            parts,
-                                        }),
-                                    );
-                                    assert_eq!(stats.counts.seeds, seeds.len() as u64, "{at}");
+                                    if stage {
+                                        let stats = stage_of(
+                                            lean,
+                                            xc,
+                                            disc,
+                                            threads,
+                                            &mut hash,
+                                            &mut hits,
+                                            Some(part::FoldPart {
+                                                scratch: &mut scratch,
+                                                parts,
+                                            }),
+                                        );
+                                        assert_eq!(stats.counts.seeds, seeds.len() as u64, "{at}");
+                                    } else {
+                                        fold_memo_free(xc, &mut hash, &mut hits);
+                                    }
                                     let (keys, state, max_level, x_last) = &expected[chunk];
                                     assert_eq!(
                                         &hits.iter().map(key).collect::<Vec<_>>(),

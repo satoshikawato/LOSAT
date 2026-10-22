@@ -846,6 +846,10 @@ fn advance_diag_table_offset(
         // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): no bucket has an insert now. No NCBI
         // counterpart (empty while the switch is off).
         diag_hash.x_last.fill(x_diag_lv::LvLast::EMPTY);
+        #[cfg(debug_assertions)]
+        {
+            diag_hash.x_last_fresh = true;
+        }
     } else {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:180-181
         // ```c
@@ -916,8 +920,17 @@ struct DiagHashTable {
     x_lv_shadow: bool,
     // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): per bucket, the latest insert and an upper
     // bound of the levels of the bucket's other cells. Empty unless the switch and
-    // LOSAT_X_DIAGLV are on and the table takes two hits. No NCBI counterpart.
+    // LOSAT_X_DIAGLV are on and the table takes two hits. No NCBI counterpart. It is the memo of
+    // the cells only from a dc-megablast strips stage's `x_lv2_reset` to the end of that stage
+    // (and on a new or cleared table): the inserts of the reference fold (`insert_plain`) do not
+    // keep it, so only that stage's folds may read it (`retrieve_below::<true>`) or keep it
+    // (`insert_memo`, `insert_inl::<true>`).
     x_last: Vec<x_diag_lv::LvLast>,
+    // Debug builds only (LOSAT_X_DIAGLV2): whether `x_last` is the memo of the cells (set by
+    // `new`, the clear and `x_lv2_reset`, ended by an insert that does not keep a memo the table
+    // has); the memo's reads and upkeep assert it.
+    #[cfg(debug_assertions)]
+    x_last_fresh: bool,
 }
 
 impl DiagHashTable {
@@ -949,6 +962,8 @@ impl DiagHashTable {
             x_lv_shadow,
             // EXPERIMENT (LOSAT_X_DIAGLV2): the memo when the switch is on.
             x_last: x_diag_lv::new_last(window),
+            #[cfg(debug_assertions)]
+            x_last_fresh: true,
         }
     }
 
@@ -1019,7 +1034,10 @@ impl DiagHashTable {
     // table->occupancy++;
     // return 1;
     // ```
-    fn insert(
+    // The insert of a dc-megablast strips stage with the memo of LOSAT_X_DIAGLV2 (`x_last`,
+    // valid from the stage's `x_lv2_reset`): the statements of `insert_plain` and the memo's
+    // upkeep (`insert_inl::<true>`).
+    fn insert_memo(
         &mut self,
         diag: i32,
         level: i32,
@@ -1032,8 +1050,8 @@ impl DiagHashTable {
     }
 
     /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:396-449
-    /// (`s_BlastDiagHashInsert`, quoted above `insert`).
-    /// `insert` without the memo of LOSAT_X_DIAGLV2 (the code before that switch): the reference
+    /// (`s_BlastDiagHashInsert`, quoted above `insert_memo`).
+    /// `insert_memo` without the memo of LOSAT_X_DIAGLV2 (the code before that switch): the reference
     /// fold (`process_offset_pairs`), which never reads the memo (it lives in the strips stages
     /// of dc-megablast only, rebuilt at each stage's start: `x_diag_lv.rs`), the one-hit strips
     /// folds (`x_pair_seed.rs` `fold`, `x_pair_seed_na.rs` `fold_na`), and the strips fold of
@@ -1052,8 +1070,8 @@ impl DiagHashTable {
     }
 
     /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:396-449
-    /// (`s_BlastDiagHashInsert`, quoted above `insert`).
-    /// The body of `insert` (`MEMO`) and `insert_plain`, inlined into its caller; the strips fold
+    /// (`s_BlastDiagHashInsert`, quoted above `insert_memo`).
+    /// The body of `insert_memo` (`MEMO`) and `insert_plain`, inlined into its caller; the strips fold
     /// of dc-megablast inlines it with LOSAT_X_FOLDLEAN (`x_pair_seed_disc.rs` `fold_two_hit`).
     /// The same statements. Without `MEMO` the memo (LOSAT_X_DIAGLV2) is not kept.
     #[inline(always)]
@@ -1082,6 +1100,19 @@ impl DiagHashTable {
                 if let Some(last) = self.x_last.get_mut(bucket) {
                     last.note(diag, level, hit_len, hit_saved);
                 }
+            }
+        }
+        // (Debug builds: the memo's upkeep needs the memo of the cells; an insert that does not
+        // keep a memo the table has ends it until the next stage's `x_lv2_reset`.)
+        #[cfg(debug_assertions)]
+        {
+            if MEMO {
+                assert!(
+                    self.x_last.is_empty() || self.x_last_fresh,
+                    "LOSAT_X_DIAGLV2: an insert keeps a stale memo (no x_lv2_reset since an insert without it)"
+                );
+            } else if !self.x_last.is_empty() {
+                self.x_last_fresh = false;
             }
         }
         let mut index = self.backbone[bucket];

@@ -2268,8 +2268,10 @@ fn run_in_pool(
 // "Off"). No NCBI counterpart.
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 fn x_pipe_wanted(parallel_pool: &crate::utils::threading::SearchPool<'_>) -> bool {
-    x_batch_pipe::on()
-        && x_seed_release::on()
+    if !x_batch_pipe::on() {
+        return false;
+    }
+    let wanted = x_seed_release::on()
         && parallel_pool.enabled()
         && parallel_pool.threads() > 1
         && rayon::current_thread_index().is_some()
@@ -2280,7 +2282,12 @@ fn x_pipe_wanted(parallel_pool: &crate::utils::threading::SearchPool<'_>) -> boo
         && trace_hsp_target().is_none()
         && !diagnostics_enabled()
         && !crate::utils::threading::diagnostics_enabled()
-        && !stage_dump::enabled()
+        && !stage_dump::enabled();
+    // The batches that start early are marked where they start (`XPipe::seed_ended`).
+    if !wanted {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXPIPE", false);
+    }
+    wanted
 }
 
 // EXPERIMENT (LOSAT_X_TBXPIPE): the batches `run_batch_loop` will search unless a search fails, in
@@ -3110,7 +3117,10 @@ fn search_query_batch(
     // Dispatch point (LOSAT_X_TBXLUT, off unless set): the full table of the batch from the chain
     // builder (`build_ncbi_lookup`) or filled in place from per-cell counts; the same table.
     let (lookup, contexts) = match x_pair_lut_stub {
-        Some(stub) => stub,
+        Some(stub) => {
+            crate::algorithm::tblastx::lookup::x_tbxlut_reach_stub();
+            stub
+        }
         None => crate::algorithm::tblastx::lookup::x_tbx_build_ncbi_lookup(
             &query_frames,
             crate::core::blast_util::ncbi_int4_from_double(args.threshold),
@@ -3346,7 +3356,7 @@ fn search_query_batch(
         crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
     // EXPERIMENT (LOSAT_X_TBXSCANBF): whether the reference frame loop scans this batch's table with
     // the branch-free loop (decided once per table).
-    let x_scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup);
+    let x_scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_choice(&lookup);
 
     // EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW), dispatch point 1 (per batch): the
     // gates and the exactness guards (the first one only without LOSAT_X_TBXBAND), then one lookup
@@ -3391,6 +3401,10 @@ fn search_query_batch(
         threads: parallel_pool.threads(),
         threshold: crate::core::blast_util::ncbi_int4_from_double(args.threshold),
     });
+    // The reference frame loop scans the batch's table (LOSAT_X_TBXSCANBF's choice above).
+    if x_pair_par_batch.is_none() {
+        crate::algorithm::tblastx::x_scan_bf::x_reach_scan_bf(x_scan_bf);
+    }
     // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 1 (per batch): the batch's tables move
     // into two holders, `x_seed_batch.lookup` (the lookup table) and `x_seed_batch.units` (the
     // unit path with its group tables). From here on they are reached only through the stages
@@ -6451,6 +6465,13 @@ fn search_query_batch(
     let mut single_state: Option<WorkerState> = None;
     #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
     let mut threaded_wasi_subject_hit_batches: Option<Vec<(usize, Vec<TblastxHsp>)>> = None;
+    // LOSAT_X_TBXNEXT: its loop takes the subjects of a parallel search of several subjects.
+    if x_subject_next::on() {
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_TBXNEXT",
+            use_parallel && !use_serial_scan_chunks && subjects.count() > 1
+        );
+    }
 
     #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
     if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {

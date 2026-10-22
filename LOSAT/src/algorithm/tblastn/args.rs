@@ -836,7 +836,11 @@ impl TblastnArgs {
             let (read_subject_records, x_subject_stores) = {
                 let mut stderr = std::io::stderr();
                 let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
-                if super::x_subject_store::x_tbn_store() && subject_range.is_none() {
+                let x_store = super::x_subject_store::x_tbn_store();
+                if x_store {
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSTORE", subject_range.is_none());
+                }
+                if x_store && subject_range.is_none() {
                     super::x_subject_store::x_read_subject_stores(
                         &mut subject_source,
                         &mut warn,

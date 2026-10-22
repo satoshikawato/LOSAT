@@ -41,8 +41,8 @@
 //! above `SeqDb::next_block`: NCBI's threads read the database in chunks of consecutive ordinal ids.
 //!
 //! `LOSAT_X_BXDBSTREAM` is a value switch of the strict set: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. Its value is the size of a pass's block in KiB, 1 to
-//! 1,048,576, 256 when it is not set or holds anything else. It acts for every task of BLASTX with
+//! `LOSAT_X_DEFAULT=0` and it is not set. Its value is the size of a pass's block in KiB, 2 to
+//! 1,048,576, 256 when it is not set or holds anything else (`1` among them). It acts for every task of BLASTX with
 //! `-db`.
 //!
 //! `LOSAT_X_BXDBSTREAMSHADOW=1` (shadow mode, with the switch on): `read_stores` makes the copy too,
@@ -52,7 +52,7 @@
 //! printed at exit: `[X_SHADOW] BXDBSTREAM blocks= sequences= residues= lengths= reads= identical`.
 
 use std::borrow::Cow;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use anyhow::{anyhow, Result};
@@ -72,7 +72,7 @@ const LENGTH_WINDOW: usize = 16_384;
 pub(crate) fn x_block_bytes() -> Option<u64> {
     static BYTES: OnceLock<Option<u64>> = OnceLock::new();
     *BYTES.get_or_init(|| {
-        crate::utils::xswitch::value("LOSAT_X_BXDBSTREAM", 1..=1 << 20, 256)
+        crate::utils::xswitch::value("LOSAT_X_BXDBSTREAM", 2..=1 << 20, 256)
             .map(|kib| kib as u64 * 1024)
     })
 }
@@ -115,6 +115,7 @@ impl<'a> XStreamDb<'a> {
             shadow,
         };
         if let Some(stores) = shadow {
+            X_SHADOW_OPENED.store(true, Ordering::Relaxed);
             x_shadow_assert(
                 (stores.len(), stores.total_length(), stores.max_length())
                     == (stream.count, stream.total_length, stream.longest),
@@ -389,6 +390,8 @@ impl<'a> XCursor<'a> {
     }
 }
 
+/// Whether a database was searched in shadow mode (the line is printed only then).
+static X_SHADOW_OPENED: AtomicBool = AtomicBool::new(false);
 static X_SHADOW_BLOCKS: AtomicU64 = AtomicU64::new(0);
 static X_SHADOW_SEQUENCES: AtomicU64 = AtomicU64::new(0);
 static X_SHADOW_RESIDUES: AtomicU64 = AtomicU64::new(0);
@@ -416,9 +419,9 @@ pub(crate) fn x_shadow_assert(same: bool, what: impl FnOnce() -> String) {
 }
 
 /// EXPERIMENT (LOSAT_X_BXDBSTREAMSHADOW): the shadow mode's line at exit
-/// (`x_seed_scan::print_shadow_stats`).
+/// (`x_seed_scan::print_shadow_stats`), after a search of a database.
 pub(crate) fn x_print_shadow_summary() {
-    if x_shadow() {
+    if X_SHADOW_OPENED.load(Ordering::Relaxed) {
         eprintln!("{}", x_shadow_line());
     }
 }

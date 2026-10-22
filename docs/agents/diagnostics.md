@@ -296,6 +296,7 @@ export LOSAT_X_BPSUBJRUN=1
 export LOSAT_X_BPUNGAP=1
 export LOSAT_X_BXBATCH=1
 export LOSAT_X_BXCHUNK=64
+export LOSAT_X_BXDBSTREAM=256
 export LOSAT_X_BXDIAG=1
 export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
@@ -405,7 +406,8 @@ export LOSAT_X_TBXUNITMASK=256
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
-built-in 64), `LOSAT_X_BXCHUNK` (1 or more, built-in 64), `LOSAT_X_TBXPREFETCH` (2 to
+built-in 64), `LOSAT_X_BXCHUNK` (1 or more, built-in 64), `LOSAT_X_BXDBSTREAM` (2 to
+1,048,576, built-in 256: KiB of a block of BLASTX `-db`), `LOSAT_X_TBXPREFETCH` (2 to
 4,194,304, built-in 1,536: KiB of a subject's largest unit table), `LOSAT_X_TBXEXTBATCH` (2 to
 4,194,304, built-in 256: Ki letters of a subject's largest unit query-group span), `LOSAT_X_TBXQSLICE`
 (2 to 1,073,741,824: letters of a query slice, on every group longer than that; `1` or unset: the
@@ -4114,6 +4116,22 @@ Scheduling (each value computed by one thread with the original function; order 
   7.09-7.14 s, 3.887-3.896 s and 4.116-4.122 s; max RSS unchanged (226 MB, NCBI 289-297 MB). The waves' own lines
   (`LOSAT_TIMING`) at 16 threads: 563 waves, 4.27 s, of which the waves' longest tasks 4.00 s against a mean of
   2.02 s (with 1,024 subjects per task still 3.34 against 2.03 s: the work clusters in oid ranges).
+- `LOSAT_X_BXDBSTREAM=1` or `=KiB` (BLASTX `-db`, memory; in the strict set from the pull request that added it:
+  on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, `KiB` from 2 to 1,048,576, otherwise 256): the search reads
+  the database's sequences where it searches them, a block at a time, instead of the copy of the whole database that
+  `BlastxDatabase::read_stores` makes before the first query batch (`blastx/x_db_stream.rs`, exactness argument in its
+  header). The database is checked once before the first batch with the reads and checks of the copy
+  (`x_check_stores`: the same error fails the same batch with the same text) and nothing of it is kept but the length
+  of its longest sequence. Each pass of the preliminary search over the database (a query chunk searched on one
+  thread, a chunk of `LOSAT_X_BXPAR`) reads blocks of `KiB` in ordinal order and drops each before the next; a task of
+  `LOSAT_X_BXSUBJFLOW` reads its subjects with one read per volume, a wave of the pool reads its subjects before its
+  fork. The sink reads the lengths of the subjects in its order from the index (16,384 per read) and, for `-ungapped`,
+  their residues in blocks. The composition redo (speculated and serial), the traceback of `-comp_based_stats 0` and
+  the reports' records read each subject they need with one read. Every read gives the stored bytes of the copy, so
+  every report is the same. Shadow: `LOSAT_X_BXDBSTREAMSHADOW=1` also makes the copy and compares every block, window of
+  lengths and read with it (and the check's error with the copy's), stopping at the first difference; at exit
+  `[X_SHADOW] BXDBSTREAM blocks= sequences= residues= lengths= reads= identical` (`tests/blastx_db_stream.rs`).
+  Measured: (to come).
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

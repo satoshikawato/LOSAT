@@ -4,7 +4,7 @@
 //! The properties under test are LOSAT's own: the reports are those of the search on the copy of
 //! the whole database (`LOSAT_X_BXDBSTREAM=0`) at one and four threads, for the gapped search with
 //! and without composition-based statistics and for the ungapped search, with the default blocks
-//! and with blocks of 1 KiB (a few sequences each, many blocks in every pass), on a database of
+//! and with blocks of 2 KiB (a few sequences each, many blocks in every pass), on a database of
 //! several volumes; the shadow mode (`LOSAT_X_BXDBSTREAMSHADOW=1`) finds every read identical to
 //! the copy; and a database that cannot be read fails the same batch with the same error.
 
@@ -118,7 +118,7 @@ fn the_blocks_give_the_reports_of_the_copy() {
         .count();
     assert!(volumes > 2, "{volumes} volumes");
     let copy = [("LOSAT_X_BXDBSTREAM", "0")];
-    let small = [("LOSAT_X_BXDBSTREAM", "1")];
+    let small = [("LOSAT_X_BXDBSTREAM", "2")];
     for (args, outfmt) in [
         (&["-outfmt", "6"][..], "6"),
         (&["-outfmt", "0"][..], "0"),
@@ -154,7 +154,7 @@ fn the_shadow_mode_finds_every_read_identical() {
     let query = genome_slice(&dir, 30_000);
     let db = makedb(&dir, &fasta("PemoMJNVA.faa"), "pemo", "20000");
     let shadow = [
-        ("LOSAT_X_BXDBSTREAM", "1"),
+        ("LOSAT_X_BXDBSTREAM", "2"),
         ("LOSAT_X_BXDBSTREAMSHADOW", "1"),
     ];
     // (arguments, sequences read by the passes, lengths read by the sink): the gapped search

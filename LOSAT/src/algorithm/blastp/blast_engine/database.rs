@@ -29,6 +29,7 @@ use anyhow::{bail, Context, Result};
 ))]
 use rayon::prelude::*;
 
+use crate::algorithm::blastp::x_redo_subjects::XRedoDbSubj;
 use crate::algorithm::common::database as shared;
 pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -55,10 +56,12 @@ use super::{
 ))]
 mod x_db_cut;
 mod x_listed_lean;
+mod x_redo_db_subjects;
 pub(super) use x_listed_lean::{
     x_bp_listed_lean, x_bp_listed_lean_print_summary,
     x_shadow_compare as x_listed_lean_shadow_compare, XListedLean,
 };
+pub(super) use x_redo_db_subjects::XShownResidues;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
 // ```c
@@ -663,7 +666,22 @@ pub(super) struct ListedSubjects {
     pub(super) ordinals: Vec<u32>,
     /// The sequences as stored (O stays O), between two sentinel bytes, by rank: what
     /// the composition redo reads.
+    ///
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): empty until the redo has run, and then what the reports
+    /// read (`x_read_shown`): a subject whose residues no report reads holds its length only
+    /// (`aa_seq` empty).
     pub(super) encoded: Vec<EncodedProtein>,
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): where the redo reads the subjects (`Off`: `encoded`).
+    x_mode: XRedoDbSubj,
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the number of residues of each subject, by rank (`x_list`;
+    /// empty without the switch).
+    x_lengths: Vec<u32>,
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): whether a read of the redo or of the first Newton problems
+    /// found a pyrrolysine (O), by rank (`x_list`; empty without the switch).
+    x_has_o: Vec<std::sync::atomic::AtomicBool>,
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJSHADOW): the copy that `read` makes, by rank (empty
+    /// without the shadow mode).
+    x_shadow_copy: Vec<EncodedProtein>,
 }
 
 impl ListedSubjects {
@@ -715,55 +733,17 @@ impl ListedSubjects {
         hit_lists: &mut [Option<BlastpHitList>],
         x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     ) -> Result<Self> {
-        let db = &database.db;
-        let mut ordinals: Vec<u32> =
-            hit_lists
-                .iter()
-                .flatten()
-                .flat_map(|hit_list| hit_list.hsplist_array.iter().map(|hsp_list| hsp_list.oid))
-                .chain(x_compact_hit_lists.iter().flatten().flat_map(|hit_list| {
-                    hit_list.hsplist_array.iter().map(|hsp_list| hsp_list.oid)
-                }))
-                .collect();
-        ordinals.sort_unstable();
-        ordinals.dedup();
-        let mut encoded = Vec::with_capacity(ordinals.len());
-        for &ordinal in &ordinals {
-            let stored = db.read_sequence(ordinal).map_err(database_error)?;
-            let residues = stored.protein(0);
-            // (A sequence with a gap residue or a foreign byte never reaches a hit
-            // list: `prepare_search_block` rejects its block.)
-            let mut aa_seq = Vec::with_capacity(residues.len() + 2);
-            aa_seq.push(NCBISTDAA_GAP);
-            aa_seq.extend_from_slice(residues);
-            aa_seq.push(NCBISTDAA_GAP);
-            encoded.push(EncodedProtein {
-                aa_seq,
-                aa_len: residues.len(),
-            });
-        }
-        let rank = |ordinal: u32| -> u32 {
-            ordinals
-                .binary_search(&ordinal)
-                .expect("every subject of the hit lists was listed") as u32
-        };
-        for hit_list in hit_lists.iter_mut().flatten() {
-            for hsp_list in &mut hit_list.hsplist_array {
-                hsp_list.oid = rank(hsp_list.oid);
-                for hsp in &mut hsp_list.hsps {
-                    hsp.s_idx = rank(hsp.s_idx);
-                }
-            }
-        }
-        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
-            for hsp_list in &mut hit_list.hsplist_array {
-                hsp_list.oid = rank(hsp_list.oid);
-                for hsp in &mut hsp_list.hsps {
-                    hsp.hsp.s_idx = rank(hsp.hsp.s_idx);
-                }
-            }
-        }
-        Ok(Self { ordinals, encoded })
+        let ordinals = listed_ordinals(hit_lists, x_compact_hit_lists);
+        let encoded = read_listed(database, &ordinals)?;
+        rename_to_ranks(&ordinals, hit_lists, x_compact_hit_lists);
+        Ok(Self {
+            ordinals,
+            encoded,
+            x_mode: XRedoDbSubj::Off,
+            x_lengths: Vec::new(),
+            x_has_o: Vec::new(),
+            x_shadow_copy: Vec::new(),
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
@@ -869,6 +849,80 @@ impl ListedSubjects {
             shown: ListedShown::Records(records),
             replaced_title_bytes,
         })
+    }
+}
+
+/// The ordinal ids of the subjects of `hit_lists` and `x_compact_hit_lists`, ascending, each once.
+fn listed_ordinals(
+    hit_lists: &[Option<BlastpHitList>],
+    x_compact_hit_lists: &[Option<BlastpHitList<XPrelimHsp>>],
+) -> Vec<u32> {
+    let mut ordinals: Vec<u32> = hit_lists
+        .iter()
+        .flatten()
+        .flat_map(|hit_list| hit_list.hsplist_array.iter().map(|hsp_list| hsp_list.oid))
+        .chain(
+            x_compact_hit_lists
+                .iter()
+                .flatten()
+                .flat_map(|hit_list| hit_list.hsplist_array.iter().map(|hsp_list| hsp_list.oid)),
+        )
+        .collect();
+    ordinals.sort_unstable();
+    ordinals.dedup();
+    ordinals
+}
+
+/// The sequences `ordinals` as stored, between two sentinel bytes (`ListedSubjects::encoded`).
+fn read_listed(database: &BlastpDatabase, ordinals: &[u32]) -> Result<Vec<EncodedProtein>> {
+    let mut encoded = Vec::with_capacity(ordinals.len());
+    for &ordinal in ordinals {
+        let stored = database.db.read_sequence(ordinal).map_err(database_error)?;
+        encoded.push(encoded_stored(stored.protein(0)));
+    }
+    Ok(encoded)
+}
+
+/// Stored residues between two sentinel bytes.
+fn encoded_stored(residues: &[u8]) -> EncodedProtein {
+    // (A sequence with a gap residue or a foreign byte never reaches a hit
+    // list: `prepare_search_block` rejects its block.)
+    let mut aa_seq = Vec::with_capacity(residues.len() + 2);
+    aa_seq.push(NCBISTDAA_GAP);
+    aa_seq.extend_from_slice(residues);
+    aa_seq.push(NCBISTDAA_GAP);
+    EncodedProtein {
+        aa_seq,
+        aa_len: residues.len(),
+    }
+}
+
+/// Renames the subjects of `hit_lists` and `x_compact_hit_lists` to their ranks among `ordinals`.
+fn rename_to_ranks(
+    ordinals: &[u32],
+    hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+) {
+    let rank = |ordinal: u32| -> u32 {
+        ordinals
+            .binary_search(&ordinal)
+            .expect("every subject of the hit lists was listed") as u32
+    };
+    for hit_list in hit_lists.iter_mut().flatten() {
+        for hsp_list in &mut hit_list.hsplist_array {
+            hsp_list.oid = rank(hsp_list.oid);
+            for hsp in &mut hsp_list.hsps {
+                hsp.s_idx = rank(hsp.s_idx);
+            }
+        }
+    }
+    for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+        for hsp_list in &mut hit_list.hsplist_array {
+            hsp_list.oid = rank(hsp_list.oid);
+            for hsp in &mut hsp_list.hsps {
+                hsp.hsp.s_idx = rank(hsp.hsp.s_idx);
+            }
+        }
     }
 }
 
@@ -1831,7 +1885,7 @@ mod tests {
                 .collect()
         }
 
-        /// The generated database written by `LOSAT makedb` into a new directory of the test
+        /// The generated database written by `losat makedb` into a new directory of the test
         /// (`label`), with volumes of at most `max_file_sz` bytes; returns the directory and the
         /// database name.
         fn generated_database(label: &str, max_file_sz: &str) -> (PathBuf, String) {
@@ -2041,6 +2095,111 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): `x_list` lists and renames the subjects as `read` does,
+    // with the copy's lengths and no copy; the redo reads the copy's residues by rank; after the
+    // redo `x_read_shown` keeps the residues that the reports read (p03 and p08 hold an O).
+    #[test]
+    fn listed_subjects_without_the_copy_read_the_copys_residues() {
+        let database = open("prot_mv");
+        let list = |oid: u32, raw_score: i32| BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![test_hsp(oid, raw_score), test_hsp(oid, raw_score - 1)],
+            best_evalue: 1e-5,
+        };
+        let make = || {
+            let mut first = BlastpHitList::new(10);
+            for (oid, score) in [(7, 60), (2, 55), (9, 50)] {
+                first.update(list(oid, score));
+            }
+            let mut second = BlastpHitList::new(10);
+            second.update(list(2, 70));
+            second.update(list(0, 65));
+            vec![Some(first), None, Some(second)]
+        };
+        let mut copied_lists = make();
+        let copied = ListedSubjects::read(&database, &mut copied_lists, &mut []).unwrap();
+        let mut lists = make();
+        let listed =
+            ListedSubjects::x_list(&database, &mut lists, &mut [], XRedoDbSubj::On).unwrap();
+        assert_eq!(listed.ordinals, [0, 2, 7, 9]);
+        assert_eq!(listed.ordinals, copied.ordinals);
+        assert!(listed.encoded.is_empty());
+        assert_eq!(format!("{lists:?}"), format!("{copied_lists:?}"));
+        let lengths: Vec<usize> = copied
+            .encoded
+            .iter()
+            .map(|subject| subject.aa_len)
+            .collect();
+        assert_eq!(lengths[3], 300);
+        let subjects = listed.redo_subjects(&database);
+        assert_eq!(subjects.len(), 4);
+        for (rank, &length) in lengths.iter().enumerate() {
+            assert_eq!(subjects.aa_len(rank), Some(length));
+            let read = subjects.read(rank as u32).unwrap();
+            assert_eq!(read.residues(), &copied.encoded[rank].aa_seq[1..=length]);
+        }
+        assert_eq!(subjects.aa_len(4), None);
+        // The copy's own subjects as the redo reads them.
+        let subjects = copied.redo_subjects(&database);
+        assert_eq!(subjects.len(), 4);
+        assert_eq!(subjects.aa_len(3), Some(300));
+        assert_eq!(
+            subjects.read(1).unwrap().residues(),
+            &copied.encoded[1].aa_seq[1..=lengths[1]]
+        );
+        // A final hit list of ranks 1 (p03, with an O) and 3 (without); rank 2 (p08) holds an O but
+        // is in no final list.
+        let mut final_list = BlastpHitList::new(10);
+        final_list.update(list(1, 60));
+        final_list.update(list(3, 50));
+        let final_lists = vec![None, Some(final_list)];
+        // With `WithO`, the HSPs of a query with an O (query 0 here) keep every subject's residues.
+        for (residues, query_has_o, kept) in [
+            (XShownResidues::WithO, &[][..], [false, true, false, false]),
+            (
+                XShownResidues::WithO,
+                &[false, true],
+                [false, true, false, false],
+            ),
+            (XShownResidues::WithO, &[true], [false, true, false, true]),
+            (XShownResidues::Final, &[][..], [false, true, false, true]),
+            (XShownResidues::Listed, &[][..], [true; 4]),
+        ] {
+            let mut shown =
+                ListedSubjects::x_list(&database, &mut make(), &mut [], XRedoDbSubj::On).unwrap();
+            // The redo reads the subjects of the final lists (and finds the O of p03).
+            for rank in [1, 3] {
+                shown.redo_subjects(&database).read(rank).unwrap();
+            }
+            shown
+                .x_read_shown(&database, &final_lists, residues, query_has_o)
+                .unwrap();
+            assert_eq!(shown.encoded.len(), 4, "{residues:?}");
+            for (rank, kept) in kept.into_iter().enumerate() {
+                assert_eq!(
+                    shown.encoded[rank].aa_len, lengths[rank],
+                    "{residues:?} {rank}"
+                );
+                if kept {
+                    assert_eq!(
+                        shown.encoded[rank].aa_seq, copied.encoded[rank].aa_seq,
+                        "{residues:?} {rank}"
+                    );
+                } else {
+                    assert!(shown.encoded[rank].aa_seq.is_empty(), "{residues:?} {rank}");
+                }
+            }
+        }
+        // Without the switch the copy stays as `read` made it.
+        let mut copied = copied;
+        copied
+            .x_read_shown(&database, &final_lists, XShownResidues::WithO, &[])
+            .unwrap();
+        assert_eq!(copied.encoded[2].aa_len, lengths[2]);
+        assert_eq!(copied.encoded[3].aa_seq.len(), 302);
     }
 
     // The listed subjects stand for the subject set after the preliminary stage: ranks

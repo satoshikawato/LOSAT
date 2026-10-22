@@ -87,10 +87,10 @@ use super::super::hsp::{
     BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
-use super::super::lookup::x_mb_lut_keep;
 use super::super::lookup::{
     build_unmasked_ranges, encode_reverse_complement_blastna_into, DiscTemplates,
 };
+use super::super::lookup::{x_dc_csr, x_mb_lut_keep};
 use super::super::pairwise::{pairwise_hits, shown_query_masks, DisplayMasks};
 use super::super::query_split::{
     calculate_num_chunks, restrict_masks, split_query_batch, QueryChunk, SplitSizes,
@@ -123,7 +123,7 @@ use crate::report::pairwise::{
     write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnPairwiseQuery,
     BlastnPairwiseReport, PairwiseConfig, PairwiseDatabase,
 };
-use crate::report::query_warnings::{few_matches_warning, invalid_query_warning, query_warning};
+use crate::report::query_warnings::{invalid_query_warning, query_warning};
 use crate::sequence::packed_subject::PackedNucleotide;
 use crate::stats::KarlinParams;
 // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-344,370-374
@@ -5164,7 +5164,10 @@ struct BlastnReportInputs<'a> {
     /// Per query context (the plus strand of query `q` is context `2 * q`); `None` for
     /// the contexts of an invalid query (not searched by NCBI).
     context_karlin: &'a [Option<ContextKarlin>],
-    max_target_seqs: Option<usize>,
+    /// The numbers of descriptions and alignments of the pairwise report
+    /// (`BlastnArgs::report_counts`).
+    num_descriptions: usize,
+    num_alignments: usize,
     /// `-culling_limit` (0: no culling), read when the hit lists are finished.
     culling_limit: i32,
     db_num_seqs: usize,
@@ -5263,10 +5266,7 @@ fn blastn_pairwise_report(
     //         m_NumAlignments = args[kArgMaxTargetSequences].AsInteger();
     // ```
     // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221).
-    let (num_descriptions, num_alignments) = match report.max_target_seqs {
-        Some(max_target_seqs) => (max_target_seqs, max_target_seqs),
-        None => (500, 250),
-    };
+    let (num_descriptions, num_alignments) = (report.num_descriptions, report.num_alignments);
     let pairwise_report = BlastnPairwiseReport {
         version: NCBI_BLASTN_VERSION.to_string(),
         megablast: report.megablast,
@@ -6502,7 +6502,7 @@ fn search_cli(
 ) -> Result<()> {
     args.resolve_dust()?;
     let query_range = parse_query_range(&args)?;
-    process_options(&args, outputs)?;
+    process_options(&mut args, outputs)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -6852,22 +6852,19 @@ fn parse_output_formats<'a>(
 ///     try { retval->Validate(); }
 /// ```
 /// The hit list size is the -max_target_seqs value, or 500 when it is omitted.
-fn process_options(args: &BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Result<()> {
+fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Result<()> {
     // The formatting handler comes after the query options handler (blastn_args.cpp:100-105).
+    let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
-        app::formatting_handler_check(
-            &app::parse_formatting_string(format.outfmt)?,
-            Program::Blastn,
-        )?;
+        let choice = app::parse_formatting_string(format.outfmt)?;
+        app::formatting_handler_check(&choice, Program::Blastn)?;
+        outfmts.push(choice.number);
     }
-    if args
-        .max_target_seqs
-        .is_some_and(|max_target_seqs| max_target_seqs < 5)
-    {
-        outputs
-            .diagnostics
-            .write_all(&few_matches_warning("blastn"))?;
-    }
+    // The hit list size and the counts of the pairwise report, with the formatting
+    // handler's warnings (`ExtractAlgorithmOptions`), once for the run.
+    let (counts, warnings) = crate::algorithm::blastn::scoring::report_counts_of(args, &outfmts)?;
+    args.report_counts = counts;
+    outputs.diagnostics.write_all(&warnings)?;
     check_scoring_options(args)
 }
 
@@ -6919,7 +6916,7 @@ pub fn run_local(
     check_subjects_not_empty(searched_subjects)?;
     args.resolve_dust()?;
     let query_range = parse_query_range(&args)?;
-    process_options(&args, outputs)?;
+    process_options(&mut args, outputs)?;
     search(
         args,
         SearchQueries::Records(query_records),
@@ -8198,10 +8195,7 @@ fn run_in_pool(
             // that NCBI cannot read fails this batch, after the reports of the batches before
             // and the messages of this batch's reading.
             if let SubjectSource::Database(database) = source {
-                let hitlist_size = match args.max_target_seqs {
-                    Some(max_target_seqs) if max_target_seqs > 0 => max_target_seqs,
-                    _ => args.hitlist_size,
-                };
+                let hitlist_size = args.report_counts.hitlist_size;
                 for (q_idx, hit_list) in batch_hit_lists.iter_mut().enumerate() {
                     if let Some(hit_list) = hit_list {
                         finish_query_hit_list(
@@ -9038,7 +9032,8 @@ fn write_reports_untimed(
         zero_gap_extension_formula: matches!(args.task.as_str(), "megablast" | "blastn"),
         window_size: config.window_size,
         context_karlin: results.context_karlin,
-        max_target_seqs: args.max_target_seqs,
+        num_descriptions: args.report_counts.num_descriptions,
+        num_alignments: args.report_counts.num_alignments,
         culling_limit: args.culling_limit,
         db_num_seqs: subjects.shown.num_seqs,
         db_len_total: subjects.shown.total_letters,
@@ -9101,10 +9096,7 @@ fn write_reports_untimed(
     // `User specified sequence set (Input: PATH)` for a subject set, the `-db` value for a
     // database (`ShownSubjects`).
     let subject_title = subjects.shown.name.as_str();
-    let hitlist_size = match args.max_target_seqs {
-        Some(max_target_seqs) if max_target_seqs > 0 => max_target_seqs,
-        _ => args.hitlist_size,
-    };
+    let hitlist_size = args.report_counts.hitlist_size;
     post_process_hits_and_write(
         hit_lists,
         hitlist_size,
@@ -10293,10 +10285,7 @@ fn search_query_batch(
     // m_NumDescriptions = hitlist_size;
     // m_NumAlignments = hitlist_size;
     // ```
-    let hitlist_size = match args.max_target_seqs {
-        Some(max_target_seqs) if max_target_seqs > 0 => max_target_seqs,
-        _ => args.hitlist_size,
-    };
+    let hitlist_size = args.report_counts.hitlist_size;
     // NCBI blast_args.cpp:317-318: if (... args[kArgMaxHSPsPerSubject]) {
     // opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger()); }
     // CLI omission maps to the engine's unlimited sentinel.
@@ -12654,14 +12643,91 @@ fn search_query_batch(
                         //                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
                         //     }
                         // ```
-                        scan_subject_disc_words_with_ranges(
-                            search_seq_packed,
-                            s_len,
-                            disc,
-                            &subject_seq_ranges,
-                            subject_masked,
-                            |s_off, s_range, index, index2| on_word(s_off, s_range, index, index2),
-                        );
+                        // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains; its
+                        // words go through `x_on_word_csr`, `on_word`'s statements for one template
+                        // with the cell's run (the chain's offsets in the chain's order) instead of
+                        // the chain walk, in the same order, each `RING` words late through the ring
+                        // that prefetches their cells' offsets and runs (`lookup::x_dc_csr`). `on_word`
+                        // keeps its two callers, so its code is the one without the switch.
+                        if let Some(csr) = disc.x_csr() {
+                            let mut x_on_word_csr = |(kmer_start, s_range, index): (
+                                usize,
+                                usize,
+                                u64,
+                            )| {
+                                if debug_enabled {
+                                    dbg_total_s_positions += 1;
+                                }
+                                let run: &[u32] = if two_stage.has_hits(index) {
+                                    csr.run(index as usize)
+                                } else {
+                                    &[]
+                                };
+                                if (debug_mode || blastn_debug) && run.len() > 1000 {
+                                    eprintln!(
+                                        "[WARN] Large matches_slice: len={} for kmer at position {}",
+                                        run.len(),
+                                        kmer_start
+                                    );
+                                }
+                                if offset_pairs_len >= OFFSET_ARRAY_SIZE {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
+                                }
+                                for &q_off_1 in run {
+                                    if debug_enabled {
+                                        dbg_seeds_found += 1;
+                                    }
+                                    offset_pairs[offset_pairs_len] = OffsetPair {
+                                        q_off: q_off_1 as usize - 1,
+                                        s_off: kmer_start,
+                                        s_range,
+                                    };
+                                    offset_pairs_len += 1;
+                                }
+                                if offset_pairs_len >= offset_array_size {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
+                                }
+                            };
+                            let mut ring: x_dc_csr::Ring<'_, (usize, usize, u64)> =
+                                x_dc_csr::Ring::new(csr);
+                            scan_subject_disc_words_with_ranges(
+                                search_seq_packed,
+                                s_len,
+                                disc,
+                                &subject_seq_ranges,
+                                subject_masked,
+                                |s_off, s_range, index, index2| {
+                                    debug_assert!(index2.is_none());
+                                    ring.push(
+                                        (s_off, s_range, index),
+                                        |w| w.2 as usize,
+                                        &mut x_on_word_csr,
+                                    )
+                                },
+                            );
+                            ring.flush(&mut x_on_word_csr);
+                        } else {
+                            scan_subject_disc_words_with_ranges(
+                                search_seq_packed,
+                                s_len,
+                                disc,
+                                &subject_seq_ranges,
+                                subject_masked,
+                                |s_off, s_range, index, index2| {
+                                    on_word(s_off, s_range, index, index2)
+                                },
+                            );
+                        }
                     } else {
                         let mb_scan_kind =
                             select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
@@ -18402,7 +18468,7 @@ mod tests {
             let mut sink = Vec::new();
             let mut outputs =
                 ReportOutputs::single(outfmt, OutputSink::Writer(&mut sink), &mut diagnostics);
-            let result = process_options(&args(&["-max_target_seqs", "1"]), &mut outputs);
+            let result = process_options(&mut args(&["-max_target_seqs", "1"]), &mut outputs);
             drop(outputs);
             match error {
                 Some(error) => {

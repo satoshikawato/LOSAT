@@ -54,7 +54,7 @@ const THREADS: [u32; 5] = [1, 2, 4, 8, 16];
 /// so the gate, in the strict set, would send them to the reference frame loop, and these tests
 /// are about the unit path.
 fn losat(switches: &[(&str, &str)]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);

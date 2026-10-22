@@ -2151,8 +2151,14 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         true,
     ) < 1
     {
+        if args.max_target_seqs_given {
+            bail!(
+                "a -max_target_seqs of {}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTP",
+                args.max_target_seqs
+            );
+        }
         bail!(
-            "a -max_target_seqs of {}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTP",
+            "a hit list size of {} (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTP",
             args.max_target_seqs
         );
     }
@@ -3695,9 +3701,11 @@ impl<'a> ShownSubjects<'a> {
             Self::Records(records) => records
                 .get(s_idx)
                 .map(|record| ShownLetters::Ascii(record.seq())),
-            Self::Listed { subjects, .. } => subjects
-                .get(s_idx)
-                .map(|subject| ShownLetters::Stored(&subject.aa_seq[1..=subject.aa_len])),
+            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a subject without residues has no O and no HSP with
+            // a query that has one; no report reads its letters (`ListedSubjects::x_read_shown`).
+            Self::Listed { subjects, .. } => subjects.get(s_idx).map(|subject| {
+                ShownLetters::Stored(subject.aa_seq.get(1..=subject.aa_len).unwrap_or_default())
+            }),
         }
     }
 
@@ -5865,19 +5873,41 @@ fn resolve_for_formats(
             requested.resolve()?
         });
     }
+    // The numbers of descriptions and alignments belong to the format (only the pairwise
+    // format reads them); the hit list size is the search's and must be one.
+    let counts: Vec<crate::blastinput::report_counts::ReportCounts> = resolved_formats
+        .iter()
+        .map(|resolved| crate::blastinput::report_counts::ReportCounts {
+            hitlist_size: resolved.max_target_seqs,
+            num_descriptions: resolved.num_descriptions,
+            num_alignments: resolved.num_alignments,
+        })
+        .collect();
+    let numbers: Vec<i32> = outputs
+        .formats
+        .iter()
+        .map(|format| {
+            crate::blastinput::app::parse_formatting_string(format.outfmt).map(|c| c.number)
+        })
+        .collect::<Result<_>>()?;
+    let shared = crate::blastinput::report_counts::common_report_counts(&numbers, &counts)?;
     let search_options = |resolved: &ResolvedBlastpArgs| {
         let mut options = resolved.clone();
         options.outfmt.clear();
+        options.num_descriptions = 0;
+        options.num_alignments = 0;
         format!("{options:?}")
     };
     let mut resolved_formats = resolved_formats.into_iter();
-    let first = resolved_formats
+    let mut first = resolved_formats
         .next()
         .ok_or_else(|| anyhow::anyhow!("no output format was requested"))?;
     let first_options = search_options(&first);
     if resolved_formats.any(|resolved| search_options(&resolved) != first_options) {
         bail!("the requested output formats resolve to different search options");
     }
+    first.num_descriptions = shared.num_descriptions;
+    first.num_alignments = shared.num_alignments;
     Ok(first)
 }
 
@@ -6790,8 +6820,8 @@ fn write_reports_without_queries(
                     gapped_karlin: lookup_protein_params(&args.scoring),
                     gumbel: lookup_protein_gumbel_params(&args.scoring, total_db_len as i64)
                         .context("missing NCBI gumbel parameters for supported blastp scoring")?,
-                    num_descriptions: args.max_target_seqs_given.unwrap_or(500),
-                    num_alignments: args.max_target_seqs_given.unwrap_or(250),
+                    num_descriptions: args.num_descriptions,
+                    num_alignments: args.num_alignments,
                 };
                 let config = PairwiseConfig {
                     line_length: 60,
@@ -9246,8 +9276,19 @@ fn run_resolved_in_pool(
     // and stand for the subject set in the redo; the hit lists name them by their rank
     // among the listed ordinal ids from here on (`database::ListedSubjects`). Their
     // definition lines are read after the redo (`ListedSubjects::read_titles`).
+    // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the listed subjects without a copy of their residues
+    // (`ListedSubjects::x_list`); the redo reads each match's subject from the database.
     let t_search = crate::utils::xtiming::clock();
-    let listed_subjects = match database {
+    let x_redo_db_subj = super::x_redo_subjects::x_bp_redo_db_subj();
+    let mut listed_subjects = match database {
+        Some(database) if x_redo_db_subj != super::x_redo_subjects::XRedoDbSubj::Off => {
+            Some(database::ListedSubjects::x_list(
+                database,
+                &mut preliminary_hit_lists,
+                &mut x_compact_hit_lists,
+                x_redo_db_subj,
+            )?)
+        }
         Some(database) => Some(database::ListedSubjects::read(
             database,
             &mut preliminary_hit_lists,
@@ -9255,9 +9296,11 @@ fn run_resolved_in_pool(
         )?),
         None => None,
     };
-    let subjects: &[EncodedProtein] = match listed_subjects.as_ref() {
-        Some(listed) => &listed.encoded,
-        None => &subjects,
+    // The subject set of a `-subject` search, which the reports read after the redo.
+    let subject_set: &[EncodedProtein] = &subjects;
+    let subjects = match (listed_subjects.as_ref(), database) {
+        (Some(listed), Some(database)) => listed.redo_subjects(database),
+        _ => super::x_redo_subjects::XRedoSubjects::Encoded(subject_set),
     };
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
@@ -9278,9 +9321,9 @@ fn run_resolved_in_pool(
         );
     }
     // EXPERIMENT (LOSAT_X_BPPCOMPACT): the redo reads the off path's lists. With more than one
-    // thread its parallel paths read the lists of all queries, so all are expanded here; the
-    // one-thread loop below expands each query's list when it reaches it. The shadow mode
-    // compares every list here and redoes the off path's lists.
+    // thread its parallel paths read the lists of all queries, so all are expanded here (but for
+    // LOSAT_X_BPREDOWINEXPAND below); the one-thread loop below expands each query's list when it
+    // reaches it. The shadow mode compares every list here and redoes the off path's lists.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -9291,7 +9334,23 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_compact_expand_all = false;
-    if x_prelim_compact == XPrelimCompact::Shadow || x_compact_expand_all {
+    // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): where the redo in windows (LOSAT_X_BPREDOPAR) may run,
+    // its windows expand the compact lists as they reach them (`x_redo_par.rs`); where it does not
+    // run, every list is expanded below before the other paths.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let x_win_expand = x_compact_expand_all
+        && x_prelim_compact == XPrelimCompact::On
+        && super::x_redo_par::x_bp_redo_par() == super::x_redo_par::XRedoPar::On
+        && super::x_redo_par::x_bp_redo_win_expand() != super::x_redo_par::XWinExpand::Off;
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
+    let x_win_expand = false;
+    if x_prelim_compact == XPrelimCompact::Shadow || (x_compact_expand_all && !x_win_expand) {
         x_finish_compact_lists(
             x_prelim_compact,
             &mut preliminary_hit_lists,
@@ -9611,7 +9670,15 @@ fn run_resolved_in_pool(
             args.num_threads,
             blastp_num_threads,
             subjects.len(),
-            super::x_redo_par::x_matches(&preliminary_hit_lists),
+            // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the compact lists count while not expanded.
+            super::x_redo_par::x_matches(
+                &preliminary_hit_lists,
+                if x_win_expand {
+                    &x_compact_hit_lists
+                } else {
+                    &[]
+                },
+            ),
             total_db_len,
         );
     #[cfg(all(
@@ -9637,6 +9704,15 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_redo_par_run = false;
+    // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the other paths read the expanded lists of all queries.
+    if x_win_expand && !x_redo_par_run {
+        x_finish_compact_lists(
+            x_prelim_compact,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            &x_split_queries,
+        );
+    }
     // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): the shadow's reference is the one-thread loop.
     #[cfg(all(
         feature = "parallel",
@@ -9654,11 +9730,13 @@ fn run_resolved_in_pool(
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         {
-            // The parallel paths read the expanded lists of all queries (above).
-            debug_assert!(x_compact_hit_lists.iter().all(Option::is_none));
+            // The parallel paths read the expanded lists of all queries (above), or with
+            // LOSAT_X_BPREDOWINEXPAND the windows expand the compact lists as they reach them.
+            debug_assert!(x_win_expand || x_compact_hit_lists.iter().all(Option::is_none));
             let released = super::x_redo_par::x_redo_par_run(
                 &x_redo_par_search,
                 &mut preliminary_hit_lists,
+                x_win_expand.then_some(&mut x_compact_hit_lists[..]),
                 &mut redone_matches,
                 x_prelim_free || x_prelim_compact == XPrelimCompact::On,
             )?;
@@ -9740,9 +9818,10 @@ fn run_resolved_in_pool(
                             }
 
                             let s_idx = local_match.oid;
-                            let subject = &subjects[s_idx as usize];
-                            let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
                             let redo_align_params = build_redo_align_params(q_idx)?;
+                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here.
+                            let subject = subjects.read(s_idx)?;
+                            let subject_raw = subject.residues();
                             let query_workspace = query_workspace.get_or_init(|| {
                                 build_query_workspace(
                                     query_raw,
@@ -9978,8 +10057,6 @@ fn run_resolved_in_pool(
                                 continue;
                             }
 
-                            let subject = &subjects[s_idx as usize];
-                            let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
                             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
                             // ```c
                             //                 if (BlastCompo_EarlyTermination(
@@ -9999,7 +10076,6 @@ fn run_resolved_in_pool(
                             {
                                 continue;
                             }
-
                             // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of this
                             // and the next matches ahead, four per vector (kappa::x_newton_lanes_prefetch_matches);
                             // a result is used only by a call with the same input bits. It does not change any value
@@ -10009,7 +10085,7 @@ fn run_resolved_in_pool(
                                 x_newton_lanes_prefetch_matches(
                                     &preliminary_hit_list.hsplist_array[match_position
                                         ..x_next_prefetch.min(preliminary_hit_list.hsplist_count)],
-                                    &subjects,
+                                    subjects,
                                     std::slice::from_ref(if alone_in_batch {
                                         &redone_match
                                     } else {
@@ -10021,6 +10097,20 @@ fn run_resolved_in_pool(
                                     &mut kappa_subject_range_cache,
                                 );
                             }
+                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after
+                            // the test (a query alone in its batch; the others ahead of the replay),
+                            // as NCBI reads it, and after the first Newton problems, which read it
+                            // ahead and drop it; an error is kept for the replay as the redo's own
+                            // errors are (below).
+                            let subject = match subjects.read(s_idx) {
+                                Ok(subject) => subject,
+                                Err(error) if replayed => {
+                                    kept_for_replay.push((match_position, Err(error)));
+                                    continue;
+                                }
+                                Err(error) => return Err(error),
+                            };
+                            let subject_raw = subject.residues();
                             let postprocessed = postprocess_preliminary_hits(
                                 &kappa_preliminary_hits,
                                 &query_workspace,
@@ -10239,8 +10329,6 @@ fn run_resolved_in_pool(
                     continue;
                 }
 
-                let subject = &subjects[s_idx as usize];
-                let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3525-3528
                 // ```c
                 // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
@@ -10257,7 +10345,6 @@ fn run_resolved_in_pool(
                 ) {
                     continue;
                 }
-
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
                 // ```c
                 //                 if (BlastCompo_EarlyTermination(
@@ -10275,7 +10362,7 @@ fn run_resolved_in_pool(
                     x_newton_lanes_prefetch_matches(
                         &preliminary_hit_list.hsplist_array[x_match_position
                             ..x_next_prefetch.min(preliminary_hit_list.hsplist_count)],
-                        &subjects,
+                        subjects,
                         &redone_matches[batch.clone()],
                         &query_workspace,
                         &composition_workspace,
@@ -10283,6 +10370,10 @@ fn run_resolved_in_pool(
                         &mut kappa_subject_range_cache,
                     );
                 }
+                // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after the test, as
+                // NCBI reads it, and after the first Newton problems, which read it ahead and drop it.
+                let subject = subjects.read(s_idx)?;
+                let subject_raw = subject.residues();
                 let postprocessed = postprocess_preliminary_hits(
                     &kappa_preliminary_hits,
                     &query_workspace,
@@ -10417,6 +10508,44 @@ fn run_resolved_in_pool(
         database::XListedLean::Off
     } else {
         database::x_bp_listed_lean()
+    };
+    // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues that the reports read, read from the
+    // database again after the redo (`ListedSubjects::x_read_shown`): every listed subject's for
+    // the records; where every report is tabular rows of the default fields or Seq-aligns, which
+    // read the letters only to recount the HSPs whose query or subject has an O, those of the
+    // subjects with an O and of the HSPs whose query has one; every final subject's otherwise.
+    if let (Some(listed), Some(database)) = (listed_subjects.as_mut(), database) {
+        let residues = if x_listed_lean != database::XListedLean::On {
+            database::XShownResidues::Listed
+        } else if outputs.hits.is_none()
+            && requested_formats.iter().all(|(outfmt, custom_fields)| {
+                matches!(outfmt, BlastpReport::Seqalign(_))
+                    || (outfmt.is_tabular() && custom_fields.is_none())
+            })
+        {
+            database::XShownResidues::WithO
+        } else {
+            database::XShownResidues::Final
+        };
+        // The query test of `recount_pyrrolysine_identities`.
+        let query_has_o: Vec<bool> = if residues == database::XShownResidues::WithO {
+            query_records
+                .iter()
+                .map(|record| {
+                    record
+                        .seq()
+                        .iter()
+                        .any(|letter| letter.eq_ignore_ascii_case(&b'O'))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        listed.x_read_shown(database, &hit_lists, residues, &query_has_o)?;
+    }
+    let subjects: &[EncodedProtein] = match listed_subjects.as_ref() {
+        Some(listed) => &listed.encoded,
+        None => subject_set,
     };
     let listed_titles = match (listed_subjects.as_ref(), database) {
         (Some(listed), Some(database)) => Some(match x_listed_lean {
@@ -11143,9 +11272,10 @@ fn run_resolved_in_pool(
                     gapped_karlin: gapped_params,
                     gumbel: gapped_gumbel,
                     // NCBI blast_args.cpp:2910-2927: 500 descriptions and 250 alignments,
-                    // or -max_target_seqs of each when it is given.
-                    num_descriptions: args.max_target_seqs_given.unwrap_or(500),
-                    num_alignments: args.max_target_seqs_given.unwrap_or(250),
+                    // or the -num_descriptions / -num_alignments / -max_target_seqs values
+                    // (`ReportCounts`).
+                    num_descriptions: args.num_descriptions,
+                    num_alignments: args.num_alignments,
                 };
                 let pairwise_hits = pairwise_hits
                     .as_ref()
@@ -11534,6 +11664,8 @@ mod tests {
             num_threads: 1,
             out: None,
             max_target_seqs: None,
+            num_descriptions: None,
+            num_alignments: None,
             max_hsps_per_subject: None,
             qcov_hsp_perc: None,
             ungapped: false,

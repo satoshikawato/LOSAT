@@ -35,7 +35,7 @@ fn engine(path: &str) -> PathBuf {
 /// `LOSAT_BLASTX_WORKER_LOG` as soon as a search has more than one thread; it selects nothing, so
 /// a file in the temporary directory is given when it is not set.
 fn check(case: &str, query: &str, threads: u32) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_")
             && name != "LOSAT_X_DEFAULT"

@@ -29,7 +29,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | 用語 | 意味 |
 |---|---|
 | outfmt 0 / 6 / 7 | BLAST+ の出力形式。0 はペアワイズのアラインメント表示、6 は表形式、7 は注釈行付きの表形式 |
-| LOSATN / LOSATP / LOSATX / TLOSAN / TLOSATX | LOSAT の中の各 program の実装名。順に BLASTN、BLASTP、BLASTX、TBLASTN、TBLASTX。CLI はどれも `LOSAT <program>` |
+| LOSATN / LOSATP / LOSATX / TLOSAN / TLOSATX | LOSAT の中の各 program の実装名。順に BLASTN、BLASTP、BLASTX、TBLASTN、TBLASTX。CLI はどれも `losat <program>` |
 | LOSATX 計画・TLOSAN 計画 | BLASTX と TBLASTN の v0.2.0 の実装と認証の計画（`docs/losatx_blastx_v0.2.0_plan.md`、`docs/tlosan_tblastn_v0.2.0_plan.md`） |
 | 認証済みプロファイル | NCBI との一致を記録と独立監査で確かめた、program・task・オプション・実行経路の組。記録は `docs/release/`、`docs/evidence/`、`LOSAT/tests/*manifest*.tsv` にある |
 | 凍結バイト | 認証済みプロファイルで NCBI と一致すると確かめ、SHA-256 で固定した LOSAT の出力。例：`LOSAT/tests/platform_native_v010_canonical.tsv`（`PD-NCBI-PLATFORM-VARIANCE` の Gate A）、`docs/evidence/tlosan_stage_g/` |

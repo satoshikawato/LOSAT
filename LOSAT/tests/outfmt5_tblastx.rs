@@ -36,7 +36,7 @@ fn temp_dir(stem: &str) -> PathBuf {
 }
 
 fn run_str(args: &[&str]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
             command.env_remove(name);
@@ -350,7 +350,7 @@ fn an_empty_seekable_query_input_writes_nothing() {
         &[(b"s1 subject", back_translate(PROTEIN).as_bytes())],
     );
     for threads in ["1", "4"] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
                 command.env_remove(name);
@@ -401,7 +401,7 @@ fn a_failing_batch_ends_the_run_after_the_earlier_iterations_without_the_trailer
     for threads in ["1", "4"] {
         let run = |text: &[u8]| {
             fs::write(&query, text).expect("write query");
-            let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+            let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
             for (name, _) in std::env::vars_os() {
                 if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
                     command.env_remove(name);
@@ -445,7 +445,7 @@ fn a_failing_batch_ends_the_run_after_the_earlier_iterations_without_the_trailer
         assert_eq!(partial, complete.strip_suffix(trailer).expect("trailer"));
         // A reader error in the first batch (BATCH_SIZE 5000: q1, q2 and the bad record share
         // the batch) writes nothing.
-        let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
                 command.env_remove(name);

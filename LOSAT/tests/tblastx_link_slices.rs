@@ -61,7 +61,7 @@ const THREADS: [u32; 2] = [1, 4];
 /// than one thread, and it selects nothing. The run must exit with 0. Returns the report and
 /// the standard error.
 fn tblastx(threads: u32, switches: &[(&str, &str)]) -> (Vec<u8>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);

@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The blastp search in blocks of whole query batches (`LOSAT_X_BPQBLOCK`) for outfmt 0 and 7
 //! with `LOSAT_X_BPQBLOCKFMT`, outfmt 8, 9 and 12 with `LOSAT_X_BPQBLOCKSA`, outfmt 5 with
 //! `LOSAT_X_BPQBLOCKXML`, and outfmt 15 and 16 with `LOSAT_X_BPQBLOCKXML2`
@@ -81,7 +82,7 @@ fn blastp(
     vars: &[(&str, &str)],
     extra: &[&OsStr],
 ) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -179,14 +180,14 @@ fn os(args: &[OsString]) -> Vec<&OsStr> {
     args.iter().map(OsString::as_os_str).collect()
 }
 
-/// A protein database of the subject proteome, made with `LOSAT makedb` in a directory of the
+/// A protein database of the subject proteome, made with `losat makedb` in a directory of the
 /// test (`tag` names it); returns the database name.
 fn subject_database(tag: &str) -> PathBuf {
     let dir =
         std::env::temp_dir().join(format!("losat-bpqblockfmt-db-{tag}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let name = dir.join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
@@ -194,7 +195,7 @@ fn subject_database(tag: &str) -> PathBuf {
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",
@@ -940,7 +941,7 @@ fn a_database_title_outside_the_printable_range_leaves_the_search_of_all_queries
         let fasta = dir.join(format!("{}.faa", name.replace(' ', "_")));
         std::fs::write(&fasta, text).unwrap();
         let db = dir.join(name.replace(' ', "_"));
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("makedb")
             .arg("-in")
             .arg(&fasta)
@@ -994,7 +995,7 @@ fn a_database_name_outside_us_ascii_leaves_the_search_of_all_queries() {
     let named = dir.join("d\u{e9}");
     std::fs::create_dir_all(&named).unwrap();
     let db = named.join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
@@ -1093,7 +1094,7 @@ fn the_frozen_ncbi_rows_of_two_query_batches_are_written_by_two_blocks() {
         }
         let expected_out = std::fs::read(frozen.join(format!("{row}.out"))).unwrap();
         for threads in THREADS {
-            let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+            let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
             for (name, _) in std::env::vars_os() {
                 let text = name.to_string_lossy();
                 if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -1189,7 +1190,7 @@ fn a_punctuation_database_title_stops_outfmt_6_blocks_but_not_the_others() {
         &subjects.replacen(&defline, ">, ,", 1),
     );
     let db = dir.join("punct");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(&source)

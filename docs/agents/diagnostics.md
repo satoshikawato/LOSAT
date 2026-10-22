@@ -220,7 +220,11 @@ their variables mean
 | not set, or empty | not set, empty, or anything but `0` | on |
 
 - `LOSAT_X_DEFAULT=0` runs the previous (reference) paths everywhere. With some variables set
-  as well, it gives the run those variables gave before the default changed.
+  as well, it gives the run those variables gave before the default changed. CI runs the tests
+  and the fast regressions that way on the pull request into `main` and on pushes that start
+  `ci.yml`, and the platform checks in both modes; pull requests into `dev` run the default only
+  (`LOSAT_X_REACH`, above, checks that it reaches the reference sides that
+  `LOSAT/tests/switch_reach_expected.tsv` requires).
 - `LOSAT_X_<NAME>=0` turns one switch off, to find which path a problem comes from. Single
   switches off are a diagnostic aid: `DPAVX2`, `DPW128` and `DPNEON` act only with `DPFAST`; `TBNSSIDE`,
   `TBNQSIDE` and `TBNBATCH` only with `TBNPAR` (`TBNEVENTS` only without it); `TBNBATCH` needs

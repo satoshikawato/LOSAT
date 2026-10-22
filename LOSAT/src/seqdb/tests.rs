@@ -281,13 +281,24 @@ fn check_nucleotide_ranges(db: &SeqDb, entries: &[Entry], name: &str) {
                 ranges.push((from, (from + step + 2).min(n)));
             }
         }
+        let ambiguity = db.nucleotide_ambiguity(entry.ordinal).unwrap();
+        assert_eq!(ambiguity.length(), n, "{what}: cached length");
         for (from, to) in ranges {
             assert_eq!(
                 db.nucleotide_iupac_range(entry.ordinal, from, to).unwrap(),
                 entry.seq[from..to],
                 "{what}: letters {from}..{to}"
             );
+            assert_eq!(
+                db.nucleotide_iupac_range_with(entry.ordinal, from, to, &ambiguity)
+                    .unwrap(),
+                entry.seq[from..to],
+                "{what}: cached letters {from}..{to}"
+            );
         }
+        assert!(db
+            .nucleotide_iupac_range_with(entry.ordinal, 0, n + 1, &ambiguity)
+            .is_err());
         assert!(db.nucleotide_iupac_range(entry.ordinal, 0, n + 1).is_err());
         assert!(db.nucleotide_iupac_range(entry.ordinal, 2, 1).is_err());
     }

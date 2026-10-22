@@ -420,17 +420,8 @@ impl Volume {
         skip: u64,
         count: Option<u64>,
     ) -> Result<(Vec<u8>, u32, u32, u32), SeqDbError> {
-        self.check_range(oid, oid.saturating_add(1))?;
-        let seq = self.index.sequence_offsets(oid, oid + 1)?;
-        let amb = self.index.ambiguity_offsets(oid, oid + 1)?;
-        let (start, amb_start, next) = (seq[0], amb[0], seq[1]);
+        let (start, amb_start, next) = self.part_offsets(oid, ordinal)?;
         let file = self.seq_file()?;
-        if !(start < amb_start && amb_start <= next) {
-            return Err(SeqDbError::Format {
-                path: file.path().to_path_buf(),
-                message: format!("sequence {ordinal}: the ambiguity offset lies outside its data"),
-            });
-        }
         let packed = u64::from(amb_start - start);
         let from = u64::from(start) + skip.min(packed);
         let to = match count {
@@ -438,6 +429,22 @@ impl Volume {
             None => u64::from(amb_start),
         };
         Ok((file.read_range(from, to)?, start, amb_start, next))
+    }
+
+    /// The offsets in the sequence file of nucleotide `oid` (volume-relative): `(start of its
+    /// packed bases, start of its ambiguity data, start of the next sequence)`.
+    fn part_offsets(&self, oid: u32, ordinal: u32) -> Result<(u32, u32, u32), SeqDbError> {
+        self.check_range(oid, oid.saturating_add(1))?;
+        let seq = self.index.sequence_offsets(oid, oid + 1)?;
+        let amb = self.index.ambiguity_offsets(oid, oid + 1)?;
+        let (start, amb_start, next) = (seq[0], amb[0], seq[1]);
+        if !(start < amb_start && amb_start <= next) {
+            return Err(SeqDbError::Format {
+                path: self.seq_file()?.path().to_path_buf(),
+                message: format!("sequence {ordinal}: the ambiguity offset lies outside its data"),
+            });
+        }
+        Ok((start, amb_start, next))
     }
 
     /// The length in bases of nucleotide `oid` (volume-relative; `ordinal` its database
@@ -477,22 +484,21 @@ impl Volume {
         from: usize,
         to: usize,
     ) -> Result<Vec<u8>, SeqDbError> {
+        let ambiguity = self.nucleotide_ambiguity(oid, ordinal)?;
+        self.nucleotide_iupac_range_with(oid, ordinal, from, to, &ambiguity)
+    }
+
+    /// The length of nucleotide `oid` (volume-relative; `ordinal` its database ordinal id) and
+    /// its decoded ambiguity runs, read once for any number of
+    /// [`Volume::nucleotide_iupac_range_with`] calls on the same sequence.
+    pub fn nucleotide_ambiguity(
+        &self,
+        oid: u32,
+        ordinal: u32,
+    ) -> Result<NucleotideAmbiguity, SeqDbError> {
         let length = self.nucleotide_length(oid, ordinal)?;
-        if from > to || to > length {
-            return Err(SeqDbError::Range(format!(
-                "letters {from}..{to} are outside sequence {ordinal}, which has {length}"
-            )));
-        }
-        let first_byte = (from / 4) as u64;
-        let end_byte = (to as u64).div_ceil(4);
-        let (packed, _, amb_start, next) =
-            self.packed_part(oid, ordinal, first_byte, Some(end_byte - first_byte))?;
-        let mut letters: Vec<u8> = (from..to)
-            .map(|at| {
-                let byte = packed[at / 4 - first_byte as usize];
-                b"ACGT"[usize::from((byte >> (6 - 2 * (at % 4))) & 3)]
-            })
-            .collect();
+        let (packed_start, amb_start, next) = self.part_offsets(oid, ordinal)?;
+        let mut runs = Vec::new();
         if u64::from(amb_start) < u64::from(next) {
             let file = self.seq_file()?;
             let words: Vec<u32> = file
@@ -500,18 +506,49 @@ impl Volume {
                 .chunks_exact(4)
                 .map(|word| u32::from_be_bytes([word[0], word[1], word[2], word[3]]))
                 .collect();
-            let runs = decode_ambiguity_runs(&words).map_err(|message| SeqDbError::Format {
+            runs = decode_ambiguity_runs(&words).map_err(|message| SeqDbError::Format {
                 path: file.path().to_path_buf(),
                 message: format!("sequence {ordinal}: {message}"),
             })?;
-            for run in runs {
-                let run_from = (run.offset as usize).max(from);
-                let run_to = (run.offset as usize + run.length as usize).min(to);
-                for at in run_from..run_to.max(run_from) {
-                    letters[at - from] = NCBI4NA_TO_IUPAC[usize::from(run.ncbi4na & 0xF)];
-                }
-            }
         }
+        Ok(NucleotideAmbiguity::new(
+            length,
+            u64::from(packed_start),
+            runs,
+        ))
+    }
+
+    /// [`Volume::nucleotide_iupac_range`] with the length and the ambiguity runs that
+    /// [`Volume::nucleotide_ambiguity`] read for the same `oid`: one read of the range's packed
+    /// bytes, and a binary search for the first run that can overlap the range.
+    pub fn nucleotide_iupac_range_with(
+        &self,
+        oid: u32,
+        ordinal: u32,
+        from: usize,
+        to: usize,
+        ambiguity: &NucleotideAmbiguity,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        let length = ambiguity.length;
+        if from > to || to > length {
+            return Err(SeqDbError::Range(format!(
+                "letters {from}..{to} are outside sequence {ordinal}, which has {length}"
+            )));
+        }
+        self.check_range(oid, oid.saturating_add(1))?;
+        let first_byte = (from / 4) as u64;
+        let end_byte = (to as u64).div_ceil(4);
+        let packed = self.seq_file()?.read_range(
+            ambiguity.packed_start + first_byte,
+            ambiguity.packed_start + end_byte,
+        )?;
+        let mut letters: Vec<u8> = (from..to)
+            .map(|at| {
+                let byte = packed[at / 4 - first_byte as usize];
+                b"ACGT"[usize::from((byte >> (6 - 2 * (at % 4))) & 3)]
+            })
+            .collect();
+        ambiguity.overlay(from, to, &mut letters);
         Ok(letters)
     }
 
@@ -693,6 +730,74 @@ pub struct AmbiguityRun {
     pub length: u32,
     /// The ambiguity code (NCBI4na, 0-15).
     pub ncbi4na: u8,
+}
+
+/// The length of one nucleotide sequence and its ambiguity runs, read once by
+/// [`Volume::nucleotide_ambiguity`] for any number of range reads
+/// ([`Volume::nucleotide_iupac_range_with`]).
+#[derive(Debug, Clone)]
+pub struct NucleotideAmbiguity {
+    length: usize,
+    /// Offset in the sequence file of the first packed byte.
+    packed_start: u64,
+    /// The runs in stored order: a later run overwrites an earlier one.
+    runs: Vec<AmbiguityRun>,
+    /// Whether the runs are in increasing order of offset and do not overlap, as NCBI writes
+    /// them: then the runs that overlap a range are found by binary search. Otherwise every run
+    /// is applied in stored order.
+    ordered: bool,
+}
+
+impl NucleotideAmbiguity {
+    fn new(length: usize, packed_start: u64, runs: Vec<AmbiguityRun>) -> Self {
+        let ordered = runs.windows(2).all(|pair| {
+            u64::from(pair[0].offset) + u64::from(pair[0].length) <= u64::from(pair[1].offset)
+        });
+        Self {
+            length,
+            packed_start,
+            runs,
+            ordered,
+        }
+    }
+
+    /// The length of the sequence in bases.
+    pub fn length(&self) -> usize {
+        self.length
+    }
+
+    /// Writes the IUPAC letters of the runs that overlap `[from, to)` into `letters`, which
+    /// holds the bases of that range.
+    fn overlay(&self, from: usize, to: usize, letters: &mut [u8]) {
+        overlay_ambiguity_runs(&self.runs, self.ordered, from, to, letters);
+    }
+}
+
+/// Writes the IUPAC letters of `runs` over `letters` (the bases `[from, to)`), a later run over
+/// an earlier one. With `ordered` runs (increasing offsets, no overlap) only those from the
+/// first run that ends after `from` to the first that starts at or after `to` are visited.
+fn overlay_ambiguity_runs(
+    runs: &[AmbiguityRun],
+    ordered: bool,
+    from: usize,
+    to: usize,
+    letters: &mut [u8],
+) {
+    let first = if ordered {
+        runs.partition_point(|run| (run.offset as usize + run.length as usize) <= from)
+    } else {
+        0
+    };
+    for run in &runs[first..] {
+        if ordered && run.offset as usize >= to {
+            break;
+        }
+        let run_from = (run.offset as usize).max(from);
+        let run_to = (run.offset as usize + run.length as usize).min(to);
+        for at in run_from..run_to.max(run_from) {
+            letters[at - from] = NCBI4NA_TO_IUPAC[usize::from(run.ncbi4na & 0xF)];
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:590-607
@@ -1060,5 +1165,101 @@ impl SequenceBlock {
         buffer[0] = BLASTNA_SENTINEL;
         buffer[base_length + 1] = BLASTNA_SENTINEL;
         Ok(buffer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{overlay_ambiguity_runs, AmbiguityRun, NucleotideAmbiguity};
+
+    /// A small deterministic generator (xorshift), so the test needs no fixture and no crate.
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self, below: u64) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0 % below
+        }
+    }
+
+    /// The letters of the whole sequence with every run applied in stored order (the decode
+    /// that `SequenceBlock` does), the reference for any range.
+    fn whole_decode(length: usize, runs: &[AmbiguityRun]) -> Vec<u8> {
+        let mut letters = vec![b'A'; length];
+        overlay_ambiguity_runs(runs, false, 0, length, &mut letters);
+        letters
+    }
+
+    fn check(length: usize, runs: Vec<AmbiguityRun>, rng: &mut Rng, ranges: usize) -> bool {
+        let whole = whole_decode(length, &runs);
+        let ambiguity = NucleotideAmbiguity::new(length, 0, runs);
+        for _ in 0..ranges {
+            let from = rng.next(length as u64 + 1) as usize;
+            let to = from + rng.next((length - from) as u64 + 1) as usize;
+            let mut letters = vec![b'A'; to - from];
+            ambiguity.overlay(from, to, &mut letters);
+            assert_eq!(letters, whole[from..to], "range {from}..{to}");
+        }
+        ambiguity.ordered
+    }
+
+    #[test]
+    fn many_runs_and_many_ranges_equal_the_whole_decode() {
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        // 3000 ordered runs of 1..=20 bases with gaps of 0..=30 bases (NCBI's layout).
+        let mut runs = Vec::new();
+        let mut at = 5u32;
+        for _ in 0..3000 {
+            let length = 1 + rng.next(20) as u32;
+            runs.push(AmbiguityRun {
+                offset: at,
+                length,
+                ncbi4na: 1 + rng.next(15) as u8,
+            });
+            at += length + rng.next(31) as u32;
+        }
+        let length = at as usize + 10;
+        assert!(check(length, runs.clone(), &mut rng, 5000));
+        // Ranges that start inside a run, end inside one, or lie between two.
+        for run in runs.iter().step_by(97) {
+            let mut one = vec![b'A'; 2];
+            let ambiguity = NucleotideAmbiguity::new(length, 0, runs.clone());
+            ambiguity.overlay(run.offset as usize, run.offset as usize + 1, &mut one[..1]);
+            assert_ne!(one[0], b'A');
+        }
+        // Stored runs that overlap or are out of order: every run applies in stored order, so
+        // a later run still overwrites an earlier one.
+        let mut messy = runs.clone();
+        messy.swap(10, 2900);
+        messy.push(AmbiguityRun {
+            offset: 7,
+            length: 5000,
+            ncbi4na: 3,
+        });
+        messy.push(AmbiguityRun {
+            offset: 100,
+            length: 3,
+            ncbi4na: 9,
+        });
+        assert!(!check(length, messy, &mut rng, 5000));
+    }
+
+    #[test]
+    fn a_range_outside_every_run_stays_unchanged() {
+        let runs = vec![AmbiguityRun {
+            offset: 10,
+            length: 4,
+            ncbi4na: 15,
+        }];
+        let ambiguity = NucleotideAmbiguity::new(40, 0, runs);
+        for (from, to) in [(0, 10), (14, 40), (0, 0), (40, 40)] {
+            let mut letters = vec![b'C'; to - from];
+            ambiguity.overlay(from, to, &mut letters);
+            assert!(letters.iter().all(|&letter| letter == b'C'), "{from}..{to}");
+        }
+        let mut letters = vec![b'C'; 6];
+        ambiguity.overlay(8, 14, &mut letters);
+        assert_eq!(letters, b"CCNNNN");
     }
 }

@@ -5996,8 +5996,9 @@ fn post_process_hits_and_write(
                     // A database's sequences are searched whole; the lengths come from its
                     // index (no letters).
                     let lengths = reader.sam_lengths(ordinals)?;
+                    let cache = database::SamLetterCache::default();
                     let letters_of = |rank: usize, from: usize, to: usize| {
-                        reader.sam_letters(ordinals[rank], from, to)
+                        reader.sam_letters(&cache, ordinals[rank], from, to)
                     };
                     super::super::sam::add_blastn_sam(
                         target.document,

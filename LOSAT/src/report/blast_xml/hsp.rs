@@ -22,6 +22,15 @@ pub fn round6(value: f64) -> f64 {
     format!("{value:.5e}").parse().unwrap_or(value)
 }
 
+/// What a masked query letter becomes: outfmt 5 writes one fixed letter (`X`, `N`;
+/// `eSubstituteMask`... `s_MaskQuerySeq`'s `eXMask` / `eNMask` forms), XML2 the lower-case
+/// letter (`eLowerCase`, blastxml2_format.cpp:279); `tolower` leaves `*` as it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MaskLetter {
+    Fixed(u8),
+    Lower,
+}
+
 /// The query row of an HSP with its masked regions replaced by the mask letter
 /// (`s_MaskQuerySeq`, blastfmtutil.cpp:446-521), literally.
 ///
@@ -96,7 +105,7 @@ pub fn mask_query_row(
     step: i32,
     masks: &[QueryMask],
     query_frame: i32,
-    mask_char: u8,
+    mask_letter: MaskLetter,
     out: &mut Vec<u8>,
     columns: &mut Vec<usize>,
 ) {
@@ -163,7 +172,10 @@ pub fn mask_query_row(
             while mask_pos <= mask_stop {
                 let letter = &mut out[mask_pos as usize];
                 if *letter != b'-' {
-                    *letter = mask_char;
+                    *letter = match mask_letter {
+                        MaskLetter::Fixed(letter) => letter,
+                        MaskLetter::Lower => letter.to_ascii_lowercase(),
+                    };
                 }
                 mask_pos += 1;
             }
@@ -264,7 +276,7 @@ mod tests {
             1,
             masks,
             0,
-            b'X',
+            MaskLetter::Fixed(b'X'),
             &mut out,
             &mut columns,
         );
@@ -327,6 +339,24 @@ mod tests {
     }
 
     #[test]
+    fn the_lower_case_mask_letter_keeps_a_star() {
+        // XML2: `tolower`, which leaves `*` and the gap as they are (tblastx_db_gc HSP 14)
+        let (mut out, mut columns) = (Vec::new(), Vec::new());
+        mask_query_row(
+            b"AC*-EF",
+            &[(0, 5)],
+            0,
+            1,
+            &[mask(0, 3)],
+            0,
+            MaskLetter::Lower,
+            &mut out,
+            &mut columns,
+        );
+        assert_eq!(out, b"ac*-eF");
+    }
+
+    #[test]
     fn masks_of_another_frame_are_ignored() {
         let (mut out, mut columns) = (Vec::new(), Vec::new());
         let masks = [QueryMask {
@@ -341,7 +371,7 @@ mod tests {
             1,
             &masks,
             0,
-            b'X',
+            MaskLetter::Fixed(b'X'),
             &mut out,
             &mut columns,
         );
@@ -353,7 +383,7 @@ mod tests {
             1,
             &masks,
             1,
-            b'N',
+            MaskLetter::Fixed(b'N'),
             &mut out,
             &mut columns,
         );
@@ -401,7 +431,7 @@ mod tests {
                 step,
                 masks,
                 query_frame,
-                b'X',
+                MaskLetter::Fixed(b'X'),
                 &mut out,
                 &mut columns,
             );

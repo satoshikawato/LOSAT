@@ -418,7 +418,7 @@ impl Encoder for AsnTextEncoder<'_> {
     /// }
     /// ```
     /// The variant's name and a space, on the line of what precedes it.
-    fn variant(&mut self, name: &str, _tag: u8) {
+    fn variant(&mut self, _type_name: &str, name: &str, _tag: u8) {
         self.block_start = false;
         self.put(name.as_bytes());
         self.put(b" ");

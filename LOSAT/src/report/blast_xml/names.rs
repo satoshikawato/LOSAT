@@ -70,22 +70,21 @@ fn generated(title: &[u8], protein: bool) -> Result<Vec<u8>, Refusal> {
     Ok(defline.text)
 }
 
-const NO_DEFINITION_LINE: &[u8] = b"No definition line";
+/// What outfmt 5 writes for an empty query or subject title (blastxml_format.cpp:557-565);
+/// XML2 omits the query title and writes an empty subject title.
+pub const NO_DEFINITION_LINE: &[u8] = b"No definition line";
 
-/// `Iteration_query-def` / `BlastOutput_query-def`: the generated definition line, or
-/// `No definition line` (blastxml_format.cpp:557-565).
-pub fn xml_query_def(title: &[u8], protein: bool) -> Result<Vec<u8>, Refusal> {
-    let text = generated(title, protein)?;
-    Ok(if text.is_empty() {
-        NO_DEFINITION_LINE.to_vec()
-    } else {
-        text
-    })
+/// The definition line of a query as generated (`GenerateDefline`, blastxml_format.cpp:
+/// 557-565; blastxml2_format.cpp:590-592): empty for an empty nucleotide title, which
+/// `Iteration_query-def` replaces by `No definition line` and `Search_query-title` omits.
+pub fn xml_query_title(title: &[u8], protein: bool) -> Result<Vec<u8>, Refusal> {
+    generated(title, protein)
 }
 
-/// The `Hit_id` and `Hit_def` of a `-subject` record: the first word of the generated
+/// The `Hit_id` and the title of a `-subject` record: the first word of the generated
 /// definition line (`CShowBlastDefline::GetSeqIdList`, showdefline.cpp:218-242), or the local
-/// ID `Subject_N` when that is empty; the definition line, or `No definition line`.
+/// ID `Subject_N` when that is empty; the definition line as generated (empty for an empty
+/// nucleotide title).
 pub fn xml_subject_names(
     local_id: &[u8],
     title: &[u8],
@@ -98,23 +97,14 @@ pub fn xml_subject_names(
     } else {
         word.to_vec()
     };
-    let def = if text.is_empty() {
-        NO_DEFINITION_LINE.to_vec()
-    } else {
-        text
-    };
-    Ok((id, def))
+    Ok((id, text))
 }
 
-/// The `Hit_def` of a `-db` sequence: its stored title as stored, or `No definition line`
-/// (showdefline.cpp:265-303 reads the Blast-def-line's title).
-pub fn xml_db_def(stored_title: &[u8]) -> Result<Vec<u8>, Refusal> {
+/// The title of a `-db` sequence: the stored title as stored (showdefline.cpp:265-303 reads
+/// the Blast-def-line's title).
+pub fn xml_db_title(stored_title: &[u8]) -> Result<Vec<u8>, Refusal> {
     check_text(stored_title)?;
-    Ok(if stored_title.is_empty() {
-        NO_DEFINITION_LINE.to_vec()
-    } else {
-        stored_title.to_vec()
-    })
+    Ok(stored_title.to_vec())
 }
 
 /// The `Iteration_message` of a query (data4xmlformat.cpp:156-169), or `None` when empty.
@@ -175,10 +165,10 @@ pub fn xml_message(query_id: &[u8], warnings: &[String], has_hits: bool) -> Opti
     (!message.is_empty()).then_some(message)
 }
 
-/// The definition line and message of a query, made and checked before the document is
-/// written.
+/// The title and message of a query, made and checked before the document is written.
 pub struct QueryText {
-    pub def: Vec<u8>,
+    /// The generated title (`xml_query_title`).
+    pub title: Vec<u8>,
     pub message: Option<Vec<u8>>,
 }
 
@@ -193,14 +183,17 @@ pub fn query_text(
     warnings: &[String],
     has_hits: bool,
 ) -> anyhow::Result<QueryText> {
-    let def =
-        xml_query_def(title, protein).map_err(|refusal| refusal.error(program, "a query title"))?;
+    let generated = xml_query_title(title, protein)
+        .map_err(|refusal| refusal.error(program, "a query title"))?;
     let id = crate::report::query_warnings::warning_query_id(local_id.as_bytes(), title);
     let message = xml_message(&id, warnings, has_hits);
     if let Some(message) = &message {
         check_text(message).map_err(|refusal| refusal.error(program, "a query title"))?;
     }
-    Ok(QueryText { def, message })
+    Ok(QueryText {
+        title: generated,
+        message,
+    })
 }
 
 /// The `QueryText` of every query of `records` (`program` names the program in a refusal):
@@ -264,22 +257,24 @@ mod tests {
     fn query_and_subject_names_of_the_probe_titles() {
         // blastp_sub_titles (DESIGN_OF4 2.2, 2.3)
         assert_eq!(
-            xml_query_def(b"q1 title ending with periods...", true).unwrap(),
+            xml_query_title(b"q1 title ending with periods...", true).unwrap(),
             b"q1 title ending with periods"
         );
         assert_eq!(
-            xml_query_def(b"TPA: q3 prefixed", true).unwrap(),
+            xml_query_title(b"TPA: q3 prefixed", true).unwrap(),
             b"q3 prefixed"
         );
         assert_eq!(
-            xml_query_def(b"q4  double  space ,  comma ;", true).unwrap(),
+            xml_query_title(b"q4  double  space ,  comma ;", true).unwrap(),
             b"q4 double space, comma"
         );
         assert_eq!(
-            xml_query_def(b"", true).unwrap(),
+            xml_query_title(b"", true).unwrap(),
             b"unnamed protein product"
         );
-        assert_eq!(xml_query_def(b"", false).unwrap(), b"No definition line");
+        // an empty nucleotide title stays empty: outfmt 5 writes `No definition line` for it,
+        // XML2 omits the member
+        assert_eq!(xml_query_title(b"", false).unwrap(), b"");
         let (id, def) = xml_subject_names(b"Subject_1", b"s1 subj ending.", true).unwrap();
         assert_eq!(
             (id.as_slice(), def.as_slice()),
@@ -303,21 +298,24 @@ mod tests {
         let (id, def) = xml_subject_names(b"Subject_1", b"", false).unwrap();
         assert_eq!(
             (id.as_slice(), def.as_slice()),
-            (&b"Subject_1"[..], &b"No definition line"[..])
+            (&b"Subject_1"[..], &b""[..])
         );
         // -db: the stored title as stored
-        assert_eq!(xml_db_def(b"s1 subj ending.").unwrap(), b"s1 subj ending.");
-        assert_eq!(xml_db_def(b"TPA: s4 tpa").unwrap(), b"TPA: s4 tpa");
-        assert_eq!(xml_db_def(b"").unwrap(), b"No definition line");
+        assert_eq!(
+            xml_db_title(b"s1 subj ending.").unwrap(),
+            b"s1 subj ending."
+        );
+        assert_eq!(xml_db_title(b"TPA: s4 tpa").unwrap(), b"TPA: s4 tpa");
+        assert_eq!(xml_db_title(b"").unwrap(), b"");
     }
 
     #[test]
     fn what_ncbi_cannot_write_is_refused() {
-        assert!(xml_query_def("caf\u{e9}".as_bytes(), true).is_err());
-        assert!(xml_query_def(b"caf\xe9", true).is_err());
-        assert_eq!(xml_query_def(b"a\x01b", true), Err(Refusal::Control));
+        assert!(xml_query_title("caf\u{e9}".as_bytes(), true).is_err());
+        assert!(xml_query_title(b"caf\xe9", true).is_err());
+        assert_eq!(xml_query_title(b"a\x01b", true), Err(Refusal::Control));
         assert!(xml_subject_names(b"Subject_1", "\u{e9}".as_bytes(), true).is_err());
-        assert_eq!(xml_db_def("\u{e9}".as_bytes()), Err(Refusal::NonAscii));
+        assert_eq!(xml_db_title("\u{e9}".as_bytes()), Err(Refusal::NonAscii));
         assert_eq!(check_text(b"tab\there\n"), Ok(()));
     }
 }

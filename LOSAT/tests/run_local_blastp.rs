@@ -22,7 +22,7 @@ use LOSAT::cli::{try_parse_from, Cli, Commands};
 
 const CUSTOM: &str =
     "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore qseq sseq btop";
-const FORMATS: [&str; 8] = ["0", "6", "7", CUSTOM, "8", "9", "12", "5"];
+const FORMATS: [&str; 10] = ["0", "6", "7", CUSTOM, "8", "9", "12", "5", "15", "16"];
 
 /// A temporary FASTA file holding the first `count` records of a fixture, byte for byte.
 fn fixture_prefix(name: &str, count: usize) -> PathBuf {

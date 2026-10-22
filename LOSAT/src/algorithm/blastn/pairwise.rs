@@ -391,7 +391,7 @@ fn context_rows_into(
 // so it is not shown. The masks of the search lie in the searched letters (`query_length`
 // of them); `Map` moves them by the start of the query's interval (`offset`, 0 without
 // `-query_loc`) into record coordinates, as the report's HSPs.
-fn shown_query_masks(
+pub(crate) fn shown_query_masks(
     masks: &[MaskedInterval],
     query_length: usize,
     offset: usize,

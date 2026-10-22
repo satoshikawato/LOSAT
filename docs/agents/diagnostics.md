@@ -291,6 +291,7 @@ export LOSAT_X_BPREDODBSUBJ=1
 export LOSAT_X_BPREDOFIT=1
 export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
+export LOSAT_X_BPREDOWINEXPAND=1
 export LOSAT_X_BPSCANBF=1
 export LOSAT_X_BPSEED=1
 export LOSAT_X_BPSUBJMETA=1
@@ -1423,6 +1424,45 @@ Rebuilding less:
   difference stops the run (panic) after printing the line that is otherwise printed at exit:
   `[X_SHADOW] BPREDOPAR searches= queries= matches_compared= lists_compared= diffs=`. With `LOSAT_TIMING=1`
   the new path's `[TIMING] x_bpredopar:` line is printed as well.
+- `LOSAT_X_BPREDOWINEXPAND=1` (BLASTP, memory; in the strict set from the pull request that added it
+  (perf/bp-redo-window-expand, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is
+  not set; acts only where `LOSAT_X_BPREDOPAR` runs, not in its shadow mode, with the compact lists of
+  `LOSAT_X_BPPCOMPACT`) the redo in windows expands the compact preliminary lists as its windows reach them instead of
+  the lists of all queries before the redo (`blastp/x_redo_par.rs`, `XExpandAhead`). Before each window the lists from
+  the first one not expanded are expanded in query order, by the same `x_expand_hit_list`, until the queries expanded
+  from the window's start hold more jobs than the window's budget (or every list is expanded); a query's jobs are its
+  matches in jobs of up to four, counted from its compact list as from its expansion. A window holds at most its
+  budget and then reads the next job (one query's), so the window and the first match after it lie within expanded
+  lists (asserted after each window), and the windows, the replay, the matches ended and the lists released are those of the full
+  expansion. The match counts that the early termination bound (`x_end_above`) and the choice of the path read are
+  counted from the compact lists. Where the path does not run after all (fewer than two matches), every list is expanded before
+  the other paths, as without the switch. The expanded lists held at a time are those of the queries of about one
+  window, and each query's compact list is freed when it is expanded. Shadow: `LOSAT_X_BPREDOWINEXPANDSHADOW=1`
+  (implies the switch) runs the redo on the lists expanded ahead and keeps a copy of every list as the full expansion
+  makes it (about twice the memory of the lists); it compares the matches per query with the copy's, and before each
+  window's computation the window (its matches, the matches ended before it, its jobs, the first match after it, its jobs at risk) with the
+  one that the full expansion gives, and every list of the window's queries with its full expansion (the hit list's
+  fields, each list's subject, best E-value and HSPs, every field; floating-point values by their bits); the first
+  difference prints the line otherwise printed at exit and panics:
+  `[X_SHADOW] BPREDOWINEXPAND searches= windows= lists= hsps= identical` (`lists`: the query lists compared, a query
+  once per window that holds its matches; `hsps`: their HSPs). The shadow's own expansions count on the
+  `[TIMING] x_bppcompact: expanded_lists=` line too. Evidence 2026-10-20 (v4-D12 s3 probe, workstation): in
+  `blastp -db` UniRef50 q100 at 32 threads the expansion of all 91 lists of the first query batch (194,347 HSPs of
+  168 bytes) added 31 MiB to the main heap before the redo, which ran in 10 windows. Measured (head 6ef84094,
+  workstation, on / off in one job): that run (node 1, the branch merged with `LOSAT_X_BPLISTEDLEAN`'s pull request)
+  peak RssAnon 268.0 / 286.2 MiB (max RSS 258.1 / 276.2 MiB; NCBI 195 MiB), wall 539.7 / 539.9 s, the same output (= NCBI),
+  the same 10 windows; the end-stage rise 67.9 / 86.6 MB. Less than the 31 MiB of the full expansion: with it, the
+  allocations after the redo fitted into the memory that the released lists left in the main heap. Swiss-Prot q100 at
+  8 threads, max RSS (median of 3 pairs): 119.6 / 123.6 MiB merged as above, 139.6 / 139.6 MiB with outfmt 0, and
+  166.4 / 165.4 MiB on the branch alone (without the lean titles the ASCII records made after the redo reused the
+  released lists' memory). Instructions (`perf stat` `:u`, 8 threads, on / off) x1.000011 OrthoFinder blastp-fast
+  Species4 x BlastDBSpecies6, x0.999987 Swiss-Prot q100 outfmt 6, x0.999980 the same with outfmt 0, x0.999998
+  `uniref50.04` q100. Timed (same binary on / off, 8 cores of node 0 with their siblings idle, warmed, order
+  alternated): median ratio of wall time x1.001 (0.958-1.048, 8 pairs) `uniref50.04` q100 (max RSS 49 / 53 MiB),
+  x1.000 (0.986-1.010, 10) Swiss-Prot q100, x1.000 (0.995-1.003, 8) OrthoFinder. Gates (head 1273374d): `cargo test`
+  (88 binaries, 2,018 passed); ci_fast all programs with the switch, with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases,
+  0 failures each); blastp `-db` fixtures at 1 and 4 threads under the shadow (56 rows, 0 differing, the exit line
+  `identical` in every run that ends without an error).
 - `LOSAT_X_BPSEED=1` (BLASTP, speed; in the strict set since 2026-10-14; `=0` turns it off) the two-hit seed
   stage with an amino-acid lookup table
   (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one

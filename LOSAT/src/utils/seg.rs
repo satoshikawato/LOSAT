@@ -443,7 +443,7 @@ fn get_prob(sv: &[i32], window_length: i32) -> f64 {
 /// NCBI SEG entropy (Shannon entropy, bits) implementation.
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1592-1624 (s_Entropy)
 fn entropy_from_state_vector(state: &[i32]) -> f64 {
-    // EXPERIMENT (LOSAT_X_SEGMEMO): the entropy is a pure function of the
+    // Memo (was LOSAT_X_SEGMEMO): the entropy is a pure function of the
     // state vector, and a 12-letter window has at most a few hundred distinct
     // state vectors, so remember the value computed for each one.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1598-1603,1616-1621
@@ -462,55 +462,47 @@ fn entropy_from_state_vector(state: &[i32]) -> f64 {
     //    }
     //    ent = fabs(ent/(double)total);
     // ```
-    // Dispatch point of LOSAT_X_SEGMEMO: the reference path is `entropy_from_state_vector_reference`, the port
-    // of this function. The memo is keyed by the sorted counts of the state vector, which is all that `s_Entropy`
-    // reads, so a repeated vector gets the value the first call returned.
-    if x_seg_memo() {
-        let mut key = 0u64;
-        let mut classes = 0u32;
-        let mut total = 0i32;
-        let mut packable = true;
-        for &count in state {
-            if count == 0 {
-                break;
-            }
-            total += count;
-            // Windows of at most 15 letters: fewer than 700 possible keys.
-            if count < 0 || total > 15 {
-                packable = false;
-                break;
-            }
-            key |= (count as u64) << (4 * classes);
-            classes += 1;
+    // `entropy_from_state_vector_reference` is the port of this function. The memo is keyed by the sorted
+    // counts of the state vector, which is all that `s_Entropy` reads, so a repeated vector gets the value
+    // the first call returned. A vector that cannot be packed (a window of more than 15 letters) takes the
+    // port directly.
+    let mut key = 0u64;
+    let mut classes = 0u32;
+    let mut total = 0i32;
+    let mut packable = true;
+    for &count in state {
+        if count == 0 {
+            break;
         }
-        if packable {
-            return X_ENTROPY_MEMO.with(|memo| {
-                let mut memo = memo.borrow_mut();
-                let mask = memo.len() - 1;
-                let mut slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as usize & mask;
-                loop {
-                    let (stored_key, bits) = memo[slot];
-                    if stored_key == key {
-                        return f64::from_bits(bits);
-                    }
-                    if stored_key == u64::MAX {
-                        let value = entropy_from_state_vector_reference(state);
-                        memo[slot] = (key, value.to_bits());
-                        return value;
-                    }
-                    slot = (slot + 1) & mask;
+        total += count;
+        // Windows of at most 15 letters: fewer than 700 possible keys.
+        if count < 0 || total > 15 {
+            packable = false;
+            break;
+        }
+        key |= (count as u64) << (4 * classes);
+        classes += 1;
+    }
+    if packable {
+        return X_ENTROPY_MEMO.with(|memo| {
+            let mut memo = memo.borrow_mut();
+            let mask = memo.len() - 1;
+            let mut slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as usize & mask;
+            loop {
+                let (stored_key, bits) = memo[slot];
+                if stored_key == key {
+                    return f64::from_bits(bits);
                 }
-            });
-        }
+                if stored_key == u64::MAX {
+                    let value = entropy_from_state_vector_reference(state);
+                    memo[slot] = (key, value.to_bits());
+                    return value;
+                }
+                slot = (slot + 1) & mask;
+            }
+        });
     }
     entropy_from_state_vector_reference(state)
-}
-
-// No NCBI counterpart: reads LOSAT_X_SEGMEMO once; it does not change any value NCBI computes.
-fn x_seg_memo() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_SEGMEMO"))
 }
 
 thread_local! {
@@ -932,7 +924,7 @@ impl SegMasker {
         if seq.len() < self.window {
             return Vec::new();
         }
-        // EXPERIMENT (LOSAT_X_SEGFAST / LOSAT_X_SEGSHADOW): see `x_mask_sequence`.
+        // Fast path (was LOSAT_X_SEGFAST): see `x_mask_sequence`.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2050-2053,2062-2064
         // ```c
         //    downset = (window+1)/2 - 1;
@@ -943,22 +935,11 @@ impl SegMasker {
         //    {
         //       if (H[i] <= locut && H[i] != -1.0)
         // ```
-        // Dispatch point of LOSAT_X_SEGFAST / LOSAT_X_SEGSHADOW: the reference path is `mask_sequence_reference`, the
-        // port of `s_SegSeq`. The fast path keeps the control flow of this loop and replaces only the entropy
-        // and trim computations.
-        match x_seg_fast() {
-            1 if self.x_fast_applies() => return self.x_mask_sequence(seq),
-            2 if self.x_fast_applies() => {
-                let fast = self.x_mask_sequence(seq);
-                let reference = self.mask_sequence_reference(seq);
-                assert!(
-                    fast == reference,
-                    "LOSAT_X_SEGSHADOW: fast SEG differs from the reference on a {}-residue sequence",
-                    seq.len()
-                );
-                return fast;
-            }
-            _ => {}
+        // The fast path runs where `x_fast_applies` (window of at most 15 letters, 20-letter alphabet);
+        // other settings run `mask_sequence_reference`, the port of `s_SegSeq`. The fast path keeps the
+        // control flow of this loop and replaces only the entropy and trim computations.
+        if self.x_fast_applies() {
+            return self.x_mask_sequence(seq);
         }
         self.mask_sequence_reference(seq)
     }
@@ -976,7 +957,8 @@ impl SegMasker {
     //    last = seq->length - upset;
     //    lowlim = first;
     // ```
-    // The original body of `mask_sequence`, moved here unchanged; it is the port of this function.
+    // The original body of `mask_sequence`, moved here unchanged; it is the port of this function. It runs
+    // where the fast path does not apply (`x_fast_applies`).
     fn mask_sequence_reference(&self, seq: &[u8]) -> Vec<MaskedInterval> {
         let mut segs_inclusive: Vec<(usize, usize)> = Vec::new();
 
@@ -1118,7 +1100,7 @@ impl SegMasker {
 // }
 // ```
 // ---------------------------------------------------------------------------
-// EXPERIMENT (LOSAT_X_SEGFAST): the same SEG, with the window kept as counts.
+// Fast path (was LOSAT_X_SEGFAST): the same SEG, with the window kept as counts.
 //
 // NCBI keeps a window as a "state vector": the counts of its letters sorted in
 // decreasing order (blast_seg.c s_StateOn / s_DecrementSV / s_IncrementSV), and
@@ -1157,21 +1139,9 @@ impl SegMasker {
 //             break;
 // ```
 // The state vector is the sorted list of letter counts. A shift by one letter lowers the count of the
-// leaving letter and raises the count of the entering one (`s_DecrementSV`, `s_IncrementSV`). The code below keeps a histogram of the counts instead, which holds the
-// same information, and updates it per shift. `x_seg_fast` itself reads LOSAT_X_SEGFAST and LOSAT_X_SEGSHADOW once.
-fn x_seg_fast() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_SEGSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_SEGFAST") {
-            1
-        } else {
-            0
-        }
-    })
-}
+// leaving letter and raises the count of the entering one (`s_DecrementSV`, `s_IncrementSV`). The code
+// below keeps a histogram of the counts instead, which holds the same information, and updates it per
+// shift.
 
 // No NCBI counterpart: size bound of the histogram arrays of `x_trim_segment`; longer segments use the reference trim; it does not change any value NCBI computes.
 /// Longest segment handled by the count histogram of `x_trim_segment`.
@@ -1839,7 +1809,7 @@ mod tests {
         residues
     }
 
-    // EXPERIMENT (LOSAT_X_SEGFAST): the histogram path against the reference on
+    // The histogram path (was LOSAT_X_SEGFAST) against the reference on
     // random protein-like sequences with planted low-complexity stretches,
     // ambiguity codes and stop codons.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2030-2032,2053-2060

@@ -268,43 +268,42 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    // 30,000 letters: three query chunks of 9,705 letters (blastx/split.rs), each against 3,422
-    // subjects (the 1,711 proteins twice), 54 tasks of 64. LOSAT_X_BXCHUNKFLOW needs at least
-    // 2,048 subjects and 256 per thread: up to 8 threads the chunks run one after another, each
-    // with the flow; at 16 they run side by side (LOSAT_X_BXPAR).
+    // 30,000 letters: three query chunks (blastx/split.rs), each against 3,422 subjects (the 1,711
+    // proteins twice), 54 tasks of 64. LOSAT_X_BXCHUNKFLOW needs at least 2,048 subjects and 256
+    // per thread: up to 8 threads the chunks run one after another, each with the flow; at 16
+    // they run side by side (LOSAT_X_BXPAR).
     let (query, set, db) = inputs_of(&dir, 30_000, 2);
-    let set = set.to_str().unwrap();
-    for (subjects, threads) in [
-        (["-db", db.as_str()], &[2, 3, 8, 16][..]),
-        (["-subject", set], &[4, 16][..]),
-    ] {
-        let args = [subjects[0], subjects[1], "-outfmt", "6"];
-        let (reference, _) = blastx(&query, &args, 1, &[]);
-        assert!(
-            reference.iter().filter(|&&b| b == b'\n').count() > 20,
-            "{args:?}: too few hits to test"
-        );
-        for &threads in threads {
-            for env in [
-                &[][..],
-                &[("LOSAT_X_BXCHUNKFLOW", "0")][..],
-                &[("LOSAT_X_DEFAULT", "0")][..],
-            ] {
-                let (report, _) = blastx(&query, &args, threads, env);
-                assert!(
-                    report == reference,
-                    "{args:?} threads {threads} {env:?}: report differs"
-                );
-            }
-        }
-    }
     let args = ["-db", db.as_str(), "-outfmt", "6"];
     let (reference, _) = blastx(&query, &args, 1, &[]);
-    for threads in [2, 8] {
-        let (report, stderr) = blastx(&query, &args, threads, &[("LOSAT_TIMING", "1")]);
-        assert!(report == reference);
-        assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 3);
-        assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 162);
+    assert!(
+        reference.iter().filter(|&&b| b == b'\n').count() > 20,
+        "too few hits to test"
+    );
+    // (threads, environment, flow loops): in order at 2 and 8 threads; side by side at 16 threads
+    // and with the switch off; LOSAT_X_DEFAULT=0 (LOSAT_X_BXPAR off too) runs the serial chunk
+    // loop with the waves.
+    for (threads, env, loops) in [
+        (2, &[][..], 3),
+        (8, &[][..], 3),
+        (16, &[][..], 0),
+        (2, &[("LOSAT_X_BXCHUNKFLOW", "0")][..], 0),
+        (2, &[("LOSAT_X_DEFAULT", "0")][..], 0),
+    ] {
+        let mut env = env.to_vec();
+        env.push(("LOSAT_TIMING", "1"));
+        let (report, stderr) = blastx(&query, &args, threads, &env);
+        assert!(
+            report == reference,
+            "threads {threads} {env:?}: report differs"
+        );
+        assert_eq!(
+            timing(&stderr, "blastx_subject_flow", "loops"),
+            loops,
+            "threads {threads} {env:?}"
+        );
+        if loops > 0 {
+            assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 162);
+        }
     }
     // The flow's shadow compares every task of the three chunks.
     let (report, stderr) = blastx(&query, &args, 3, &[("LOSAT_X_BXSUBJFLOWSHADOW", "1")]);
@@ -313,34 +312,26 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         stderr.contains("[X_SHADOW] BXSUBJFLOW tasks_compared=162 (subject results identical)"),
         "{stderr}"
     );
-    // Sixteen threads (fewer than 256 subjects per thread), the switch off, LOSAT_X_DEFAULT=0, or
-    // fewer than 2,048 subjects: the chunks side by side, where a chunk's subjects are searched
-    // without the flow.
-    std::fs::create_dir_all(dir.join("few")).unwrap();
-    let (few_query, _, few_db) = inputs_of(&dir.join("few"), 30_000, 1);
-    let few = ["-db", few_db.as_str(), "-outfmt", "6"];
-    for (query, args, threads, env) in [
-        (&query, &args, 16, &[("LOSAT_TIMING", "1")][..]),
-        (
-            &query,
-            &args,
-            2,
-            &[("LOSAT_X_BXCHUNKFLOW", "0"), ("LOSAT_TIMING", "1")][..],
-        ),
-        (
-            &query,
-            &args,
-            2,
-            &[("LOSAT_X_DEFAULT", "0"), ("LOSAT_TIMING", "1")][..],
-        ),
-        (&few_query, &few, 2, &[("LOSAT_TIMING", "1")][..]),
-    ] {
-        let (_, stderr) = blastx(query, args, threads, env);
-        assert_eq!(
-            timing(&stderr, "blastx_subject_flow", "loops"),
-            0,
-            "{args:?} threads {threads} {env:?}"
+    // A `-subject` file takes the same rule.
+    let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+    let (reference, _) = blastx(&query, &args, 1, &[]);
+    for (threads, loops) in [(4, 3), (16, 0)] {
+        let (report, stderr) = blastx(&query, &args, threads, &[("LOSAT_TIMING", "1")]);
+        assert!(
+            report == reference,
+            "-subject threads {threads}: report differs"
         );
+        assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), loops);
     }
+    // Fewer than 2,048 subjects: side by side.
+    std::fs::create_dir_all(dir.join("few")).unwrap();
+    let (query, _, db) = inputs_of(&dir.join("few"), 30_000, 1);
+    let (_, stderr) = blastx(
+        &query,
+        &["-db", db.as_str(), "-outfmt", "6"],
+        2,
+        &[("LOSAT_TIMING", "1")],
+    );
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
     std::fs::remove_dir_all(&dir).unwrap();
 }

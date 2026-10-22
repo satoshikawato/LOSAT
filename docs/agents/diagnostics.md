@@ -4237,9 +4237,8 @@ Scheduling (each value computed by one thread with the original function; order 
   than `k` subjects, no diagnostic stage traces the subjects and `-window_size` plus twice the longest subject is at
   most 2^28; the chunks of a longer query are searched side by side on the pool, one chunk per thread,
   `LOSAT_X_BXPAR`, unless `LOSAT_X_BXCHUNKFLOW` below keeps them in order, each with the flow): the subjects
-  are searched as a flow of tasks of `k`
-  consecutive subjects instead of waves of `threads x LOSAT_X_BXCHUNK` (`blastx/x_subject_flow.rs`, exactness argument
-  in its header). The other threads of the pool search tasks up to `4 x threads` ahead (`utils::xahead`, each helper
+  are searched as a flow of tasks of `k` consecutive subjects instead of waves of `threads x LOSAT_X_BXCHUNK`
+  (`blastx/x_subject_flow.rs`, exactness argument in its header). The other threads of the pool search tasks up to `4 x threads` ahead (`utils::xahead`, each helper
   on its own diagonal table) and the loop's thread takes the tasks in order, or searches one itself when no helper has
   started it, and hands the subjects to the sink in subject order with the waves' calls; a wave waits for its slowest
   worker and then for the hand-over on one thread. Above the 2^28 bound (a diagonal table of 1 GiB or more) the waves
@@ -4278,7 +4277,7 @@ Scheduling (each value computed by one thread with the original function; order 
   45-182 MiB. With few subjects the waves win and the rule keeps them: stride subsets of the fly proteins with
   512 / 1,024 / 2,048 subjects in order lost up to x1.80 at 16 threads (30 chunks x 512), x1.18 at 8 (512), and
   x1.04 / x1.01 at 2 threads (30 chunks x 512 / 1,024); `AP027131.fasta` against the 543 proteins of
-  `AP027133.faa` (`-subject`, 69 chunks) x1.20 at 8, x1.49 at 16 threads. Under the rule no measured case is
+  `AP027133.faa` (`-subject`, 68 chunks) x1.20 at 8, x1.49 at 16 threads. Under the rule no measured case is
   slower; the subsets with 2,048 subjects at 2-8 threads x0.81-0.99, with 4,096 at 16 threads x0.51-0.97.
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits

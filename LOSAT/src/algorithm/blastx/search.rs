@@ -671,10 +671,10 @@ pub(crate) fn search_core(
         // BlastHSPStreamMerge. With LOSAT_X_BXPAR a wave of chunks is searched on the pool
         // (x_compute_chunk) and written to the sink in chunk order below. Each chunk is searched
         // exactly as before.
-        // Dispatch point (LOSAT_X_BXCHUNKFLOW, in the strict set): where every chunk has enough
-        // subject-flow tasks for the pool (x_subject_flow::chunks_in_order), the chunks stay in
-        // the serial chunk loop below, one after another, and the flow searches each chunk's
-        // subjects on all threads.
+        // Dispatch point (LOSAT_X_BXCHUNKFLOW, in the strict set): where the subject flow would
+        // run and there are enough subjects for the pool (x_subject_flow::chunks_in_order), the
+        // chunks stay in the serial chunk loop below, one after another, and the flow searches
+        // each chunk's subjects on all threads.
         let x_t = super::x_timing::lap();
         #[cfg(feature = "parallel")]
         let x_chunks_par = super::runtime::x_bx_par_rule(|| {

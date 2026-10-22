@@ -90,10 +90,10 @@ fn fits(
         && offsets_stay_below_2_30(options.window_size, subjects.longest_length())
 }
 
-/// No NCBI counterpart: the fewest subjects per pool thread, and the fewest subjects in all, with
-/// which `LOSAT_X_BXCHUNKFLOW` searches the chunks of a split query one after another
-/// (`chunks_in_order`): four tasks of 64 per thread, and 32 tasks.
+/// No NCBI counterpart: the fewest subjects per pool thread with which `LOSAT_X_BXCHUNKFLOW`
+/// searches the chunks of a split query one after another (`chunks_in_order`): four tasks of 64.
 const CHUNK_FLOW_SUBJECTS_PER_THREAD: usize = 256;
+/// No NCBI counterpart: the fewest subjects in all for `chunks_in_order`: 32 tasks of 64.
 const CHUNK_FLOW_MIN_SUBJECTS: usize = 2_048;
 
 /// EXPERIMENT (LOSAT_X_BXCHUNKFLOW, in the strict set: on unless `=0` or `LOSAT_X_DEFAULT=0`): whether

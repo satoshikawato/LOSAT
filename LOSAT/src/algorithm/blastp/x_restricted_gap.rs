@@ -739,7 +739,7 @@ fn restricted_rows<const AVX2: bool>(
         let need = (band.b_size + 9).min(col_cap);
         if col_ready < need {
             let upto = (need + 56).min(col_cap);
-            if !fill_col(col, col_ready, upto, subject, subject_base, len2, reverse) {
+            if !fill_col::<false>(col, col_ready, upto, subject, subject_base, len2, reverse) {
                 return None;
             }
             col_ready = upto;
@@ -840,11 +840,10 @@ struct XParams {
 /// - c]`, the indices that function computes); the others go through that function. False: a
 /// letter code of 28 or more (not taken).
 ///
-/// Inlined into both row kernels: with two callers fat LTO kept it out of line, which changed the
-/// machine code of the 32-bit rows that `LOSAT_X_BPGAP16=0` runs; they keep the code of the build
-/// before the switch.
-#[inline(always)]
-fn fill_col(
+/// `NARROW`: one instance per row kernel (false: the 32-bit rows, true: the sixteen-bit rows), each
+/// with one caller. Shared by both, fat LTO kept it out of line, which changed the machine code of
+/// the 32-bit rows that `LOSAT_X_BPGAP16=0` runs; they keep the code of the build before the switch.
+fn fill_col<const NARROW: bool>(
     col: &mut [u8],
     from: usize,
     to: usize,
@@ -1521,7 +1520,7 @@ unsafe fn restricted_rows16_avx2(
         let need = (band.b_size + 17).min(col_cap);
         if col_ready < need {
             let upto = (need + 56).min(col_cap);
-            if !fill_col(col, col_ready, upto, subject, subject_base, len2, reverse) {
+            if !fill_col::<true>(col, col_ready, upto, subject, subject_base, len2, reverse) {
                 return None;
             }
             col_ready = upto;
@@ -2353,7 +2352,8 @@ mod tests {
             let from = rng.below(len2 as u64 + 30) as usize;
             let to = from + rng.below(100) as usize;
             for reverse in [false, true] {
-                let ok = fill_col(&mut col, from, to, &subject, subject_base, len2, reverse);
+                let ok =
+                    fill_col::<false>(&mut col, from, to, &subject, subject_base, len2, reverse);
                 for (c, &v) in col.iter().enumerate().take(to).skip(from) {
                     let want = if c == 0 || c > len2 + 1 {
                         0

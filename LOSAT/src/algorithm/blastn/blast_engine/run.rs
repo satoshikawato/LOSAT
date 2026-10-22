@@ -52,8 +52,7 @@ use super::super::alignment::{
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     extend_gapped_heuristic_with_traceback_with_scratch,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
-    // (the score-only call goes through `x_greedy_prelim`, which calls it when the search has no
-    // one-byte copy of the subject)
+    // (the score-only call goes through `x_greedy_prelim`, on the one-byte copy of the subject)
     greedy_gapped_alignment_with_traceback,
     stats_from_edit_ops,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
@@ -13940,7 +13939,8 @@ fn search_query_batch(
             //       rem = s_off % 4;
             // ```
             // No NCBI counterpart: the bases of `s_seq_packed` one per byte, for the
-            // greedy calls below; `None` (the packed call as ported) when the copy is off.
+            // greedy calls below; `None` where no score-only greedy call happens (no ungapped
+            // hits, or the dynamic-programming extension).
             let x_prelim_s = if total_ungapped > 0 {
                 x_prelim_subject.chunk(chunk.offset)
             } else {
@@ -14010,11 +14010,11 @@ fn search_query_batch(
                         let ungapped_len = uh.qe.saturating_sub(uh.qs);
                         let seed_qs = uh.qs + ungapped_len / 2;
                         let seed_ss = uh.ss + ungapped_len / 2;
-                        // `x_prelim_s` = None: the packed call as ported.
                         x_greedy_prelim::x_greedy_gapped_alignment_score_only(
-                            x_prelim_s,
+                            x_prelim_s.expect(
+                                "the one-byte copy exists wherever a score-only greedy call runs",
+                            ),
                             q_seq_blastna,
-                            s_seq_packed,
                             s_len,
                             seed_qs,
                             seed_ss,
@@ -14154,6 +14154,9 @@ fn search_query_batch(
                             // }
                             // ```
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
+                            // The dynamic-programming score-only call below reads the packed subject
+                            // (`s_seq_score`); the greedy one runs on the one-byte copy (`x_prelim_s`),
+                            // NCBI's `compressed_subject = FALSE` form.
                             let s_seq_score = s_seq_packed;
 
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
@@ -14410,12 +14413,10 @@ fn search_query_batch(
                                 let seed_qs = uh.qs + ungapped_len / 2;
                                 let seed_ss = uh.ss + ungapped_len / 2;
 
-                                // `x_prelim_s` = None: the packed call as ported.
                                 let prelim =
                                     match x_greedy_prelim::x_greedy_gapped_alignment_score_only(
-                                        x_prelim_s,
+                                        x_prelim_s.expect("the one-byte copy exists wherever a score-only greedy call runs"),
                                         q_seq_blastna,
-                                        s_seq_score,
                                         subject_len,
                                         seed_qs,
                                         seed_ss,

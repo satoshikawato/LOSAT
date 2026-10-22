@@ -61,15 +61,15 @@ use std::sync::OnceLock;
 /// verified with it on. `LOSAT_X_NEWTONLANES8` (eight Newton problems per round in the lanes of
 /// `LOSAT_X_NEWTONLANES`, `composition_adjustment/x_newton_lanes.rs`; it acts on aarch64 only)
 /// was added after the change as a switch that is off unless set and joined the set once it was
-/// verified on the arm64 runners with it on. `LOSAT_X_TBNSTATE` (the scan state of TBLASTN's unit
-/// path kept by a thread from one subject to the next, `tblastn/search_gapped.rs`) and
-/// `LOSAT_X_TBNXLATE` (the translated frames of a TBLASTN subject read from tables,
-/// `tblastn/x_subject_translate.rs`) were added after the change as switches that are off unless
-/// set and joined the set together once they were verified and timed with it on.
+/// verified on the arm64 runners with it on. `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` (TBLASTN's
+/// kept scan state and table translation) joined the set together the same way. Both graduated
+/// on 2026-10-22: they left `STRICT_SET` and their old code was deleted.
 /// `LOSAT_X_TBNOIDNEXT` (the threads take the next chunk of subjects when they are free,
 /// `tblastn/x_oid_flow.rs`) and `LOSAT_X_TBNOIDUNITS` (the units of a subject longer than a
 /// chunk's budget on the pool, `tblastn/stage_d_pipeline.rs`) joined the same way, together,
-/// after them.
+/// after them. `LOSAT_X_TBNOIDCHUNK`,
+/// `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`,
+/// `LOSAT_X_SEGSHARE` and `LOSAT_X_DEKKER` graduated on 2026-10-22 (see `GRADUATED`).
 /// `LOSAT_X_LINKSLICES` (the groups of the TBLASTX linking call linked as slices of its one list,
 /// `tblastx/x_link_slices.rs`) was added after the change as a switch that is off unless set and
 /// joined the set once it was verified with it on.
@@ -150,6 +150,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPQBLOCK",
     "LOSAT_X_BPQBLOCKFMT",
     "LOSAT_X_BPQBLOCKSA",
+    "LOSAT_X_BPQBLOCKWEB",
     "LOSAT_X_BPQBLOCKXML",
     "LOSAT_X_BPREDODBSUBJ",
     "LOSAT_X_BPREDOFIT",
@@ -178,12 +179,10 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_CTXO1",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
-    "LOSAT_X_DEKKER",
     "LOSAT_X_DIAGLV",
     "LOSAT_X_DISCLUTPAR",
     "LOSAT_X_DPEMASK",
     "LOSAT_X_ERFABSORB",
-    "LOSAT_X_LUTSPLIT",
     "LOSAT_X_MBLUTKEEP",
     "LOSAT_X_MBLUTONCE",
     "LOSAT_X_MBLUTPREFAULT",
@@ -201,26 +200,16 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_RPTSTREAM",
     "LOSAT_X_SEEDCOMPACT",
     "LOSAT_X_SEEDUNMAP",
-    "LOSAT_X_SEGSHARE",
     "LOSAT_X_SEGTRIMMEMO",
-    "LOSAT_X_TBNBATCH",
     "LOSAT_X_TBNBATCHRULE",
     "LOSAT_X_TBNFRAMEREUSE",
     "LOSAT_X_TBNHITBF",
     "LOSAT_X_TBNKEEPFEW",
     "LOSAT_X_TBNLINKWIN",
-    "LOSAT_X_TBNOIDCHUNK",
-    "LOSAT_X_TBNOIDNEXT",
-    "LOSAT_X_TBNOIDUNITS",
     "LOSAT_X_TBNOWNPOOLS",
-    "LOSAT_X_TBNPAR",
-    "LOSAT_X_TBNQSIDE",
     "LOSAT_X_TBNSCANBF",
     "LOSAT_X_TBNSCANBYTE",
-    "LOSAT_X_TBNSSIDE",
-    "LOSAT_X_TBNSTATE",
     "LOSAT_X_TBNSTORE",
-    "LOSAT_X_TBNXLATE",
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXBAND",
     "LOSAT_X_TBXEXTBATCH",
@@ -248,6 +237,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
 /// nothing chooses any more.
 pub(crate) const GRADUATED: &[&str] = &[
     "LOSAT_X_AHEAD",
+    "LOSAT_X_DEKKER",
     "LOSAT_X_DPAVX2",
     "LOSAT_X_DPNEON",
     "LOSAT_X_DPW128",
@@ -259,6 +249,12 @@ pub(crate) const GRADUATED: &[&str] = &[
     "LOSAT_X_PAIRLUT",
     "LOSAT_X_PAIRPAR",
     "LOSAT_X_SEEDBUCKET",
+    "LOSAT_X_SEGSHARE",
+    "LOSAT_X_TBNBATCH",
+    "LOSAT_X_TBNOIDCHUNK",
+    "LOSAT_X_TBNOIDNEXT",
+    "LOSAT_X_TBNOIDUNITS",
+    "LOSAT_X_TBNSSIDE",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that

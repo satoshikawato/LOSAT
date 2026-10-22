@@ -57,6 +57,15 @@ fn engine(message: impl fmt::Display) -> anyhow::Error {
     }
     .into()
 }
+
+/// The error of the database's sequences (`BlastxDatabase::read_stores`, or a read of
+/// `LOSAT_X_BXDBSTREAM`): NCBI's engine error of a reader error, or LOSAT's refusal as it is.
+fn database_error(kept: anyhow::Error) -> anyhow::Error {
+    match kept.downcast::<PreliminaryReadError>() {
+        Ok(PreliminaryReadError(text)) => engine(text),
+        Err(refusal) => refusal,
+    }
+}
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184
 // ```c++
 //     catch (const CObjReaderParseException& e) {                             \
@@ -617,12 +626,14 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                 .borrow_mut()
                 .take()
                 .expect("the database's error, raised once");
-            return match kept.downcast::<PreliminaryReadError>() {
-                Ok(PreliminaryReadError(text)) => engine(text),
-                Err(refusal) => refusal,
-            };
+            return database_error(kept);
         }
-        engine(error)
+        // EXPERIMENT (LOSAT_X_BXDBSTREAM): a read of the database that failed during the search,
+        // reported as the check's error for the same read.
+        match error.downcast::<super::x_db_stream::XReadError>() {
+            Ok(super::x_db_stream::XReadError(kept)) => database_error(kept),
+            Err(error) => engine(error),
+        }
     };
     // The reports of one query batch: with `-db`, the titles of its reported sequences are
     // read first and its hit lists renamed to ranks (`ReportedSubjects::for_batch`); NCBI's
@@ -660,7 +671,15 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         super::x_timing::run(XRun::Titles, x_t);
                         reported.map_err(|error| match error.downcast::<HeaderReadError>() {
                             Ok(header) => header.error,
-                            Err(error) => error,
+                            // EXPERIMENT (LOSAT_X_BXDBSTREAM): a failed read of a record's residues.
+                            Err(error) => {
+                                match error.downcast::<super::x_db_stream::XReadError>() {
+                                    Ok(super::x_db_stream::XReadError(kept)) => {
+                                        database_error(kept)
+                                    }
+                                    Err(error) => error,
+                                }
+                            }
                         })?
                     }
                 };

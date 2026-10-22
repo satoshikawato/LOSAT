@@ -212,8 +212,17 @@ impl<'a> Subjects<'a> {
         }
     }
 
-    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): what the sink reads of the subjects in its order, when
-    /// they are read in blocks.
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): a pass of the `-ungapped` sink over the residues of the
+    /// subjects with HSPs, when the subjects are read in blocks.
+    pub(crate) fn x_residue_pass(&self) -> Option<XPass<'a>> {
+        match self {
+            Subjects::Stream(stream) => Some(XPass::new(stream.db)),
+            _ => None,
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the lengths that the sink reads of the subjects in its
+    /// order, when they are read in blocks.
     pub(crate) fn x_cursor(&self) -> Option<XCursor<'a>> {
         match self {
             Subjects::Stream(stream) => Some(XCursor::new(stream.db)),

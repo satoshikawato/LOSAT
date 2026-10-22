@@ -522,6 +522,7 @@ pub fn x_search_internal_in_pool<'a>(
         options,
         subjects,
         x_cursor: subjects.x_cursor(),
+        x_residues: subjects.x_residue_pass(),
         db_length: subjects.total_length()?,
         ordinal: 0,
         stream: None,
@@ -571,6 +572,7 @@ pub fn search_internal_observed<'a>(
         options,
         subjects,
         x_cursor: subjects.x_cursor(),
+        x_residues: subjects.x_residue_pass(),
         db_length: subjects.total_length()?,
         ordinal: 0,
         stream: None,
@@ -587,8 +589,12 @@ struct Runtime<'a> {
     observer: &'a mut dyn RuntimeObserver,
     options: &'a ResolvedOptions,
     subjects: Subjects<'a>,
-    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): what the sink reads of a database read in blocks.
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the lengths that the sink reads of a database read in
+    /// blocks.
     x_cursor: Option<super::x_db_stream::XCursor<'a>>,
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the residues that the `-ungapped` sink reads of a database
+    /// read in blocks.
+    x_residues: Option<super::x_db_stream::XPass<'a>>,
     db_length: i64,
     ordinal: usize,
     stream: Option<HspStream>,
@@ -997,10 +1003,20 @@ impl PreliminarySink for Runtime<'_> {
         //          }
         // ```
         if !self.options.gapped {
-            let encoded = match &mut self.x_cursor {
-                Some(cursor) => std::borrow::Cow::Owned(cursor.encoded(oid)?.into_owned()),
+            // EXPERIMENT (LOSAT_X_BXDBSTREAM): with the database read in blocks, the length from
+            // the index (`XCursor`), and the residues, which only `identity_and_positive` reads,
+            // only of a subject with HSPs, from the sink's own pass (`XPass`).
+            let x_length = if self.x_cursor.is_some() {
+                Some(self.subject_length(oid)?)
+            } else {
+                None
+            };
+            let encoded = match &mut self.x_residues {
+                Some(pass) if !input.is_empty() => pass.view(oid)?.encoded(oid),
+                Some(_) => std::borrow::Cow::Borrowed(&[][..]),
                 None => self.subjects.encoded(oid),
             };
+            let subject_length = x_length.unwrap_or(encoded.len());
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1789
             // ```c++
             // {
@@ -1031,8 +1047,7 @@ impl PreliminarySink for Runtime<'_> {
             // ```
             if !input.is_empty() {
                 if let Some(link) = super::linking::link_parameters(self.options) {
-                    let length = self.subject_length(oid)? as i32;
-                    self.observer.link_run(length, false, &link);
+                    self.observer.link_run(subject_length as i32, false, &link);
                 }
             }
             let mut linked = super::statistics::evaluate_ungapped(
@@ -1040,7 +1055,7 @@ impl PreliminarySink for Runtime<'_> {
                 batch,
                 params,
                 self.options,
-                encoded.len() as i32,
+                subject_length as i32,
                 self.ungapped_link_state,
             )?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-676
@@ -1182,8 +1197,7 @@ impl PreliminarySink for Runtime<'_> {
             // ```
             if !input.is_empty() {
                 if let Some(link) = super::linking::link_parameters(self.options) {
-                    let length = self.subject_length(oid)? as i32;
-                    self.observer.link_run(length, false, &link);
+                    self.observer.link_run(subject_length as i32, false, &link);
                 }
             }
             let mut linked = super::statistics::evaluate_ungapped(
@@ -1191,7 +1205,7 @@ impl PreliminarySink for Runtime<'_> {
                 batch,
                 params,
                 self.options,
-                encoded.len() as i32,
+                subject_length as i32,
                 self.ungapped_link_state,
             )?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-676

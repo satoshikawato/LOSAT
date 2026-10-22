@@ -101,12 +101,39 @@ fn genome_slice(dir: &Path, bases: usize) -> PathBuf {
     query
 }
 
+/// `count` pieces of `bases` bases of the MelaMJNV genome, one query each.
+fn genome_pieces(dir: &Path, count: usize, bases: usize) -> PathBuf {
+    let genome = std::fs::read_to_string(fasta("MelaMJNV.fasta")).unwrap();
+    let letters: Vec<char> = genome.lines().skip(1).flat_map(str::chars).collect();
+    let mut fasta = String::new();
+    for i in 0..count {
+        let piece: String = letters[i * bases..(i + 1) * bases].iter().collect();
+        fasta.push_str(&format!(">piece{i} MelaMJNV piece\n{piece}\n"));
+    }
+    let query = dir.join("pieces.fna");
+    std::fs::write(&query, fasta).unwrap();
+    query
+}
+
+/// The scheduling switches whose paths read the database differently at more than one thread:
+/// the default (the subject flow, the query chunks of `LOSAT_X_BXPAR` side by side, the query
+/// batches of `LOSAT_X_BXBATCH` side by side), the waves of the pool (`LOSAT_X_BXSUBJFLOW=0`), the
+/// flow of each chunk in turn (`LOSAT_X_BXPAR=0`), and every other switch of the strict set off
+/// (`LOSAT_X_DEFAULT=0`).
+const SCHEDULES: [Option<(&str, &str)>; 4] = [
+    None,
+    Some(("LOSAT_X_BXSUBJFLOW", "0")),
+    Some(("LOSAT_X_BXPAR", "0")),
+    Some(("LOSAT_X_DEFAULT", "0")),
+];
+
 #[test]
 fn the_blocks_give_the_reports_of_the_copy() {
     let dir = temp_dir("reports");
-    // A 30,000-base slice (three query batches) against the PemoMJNVA proteins in volumes of at
-    // most 20,000 bytes.
-    let query = genome_slice(&dir, 30_000);
+    // A 30,000-base slice (one query batch of three query chunks) and 30 queries of 1,000 bases
+    // (three query batches) against the PemoMJNVA proteins in volumes of at most 20,000 bytes.
+    let slice = genome_slice(&dir, 30_000);
+    let pieces = genome_pieces(&dir, 30, 1_000);
     let db = makedb(&dir, &fasta("PemoMJNVA.faa"), "pemo", "20000");
     let volumes = std::fs::read_dir(&dir)
         .unwrap()
@@ -117,31 +144,45 @@ fn the_blocks_give_the_reports_of_the_copy() {
         })
         .count();
     assert!(volumes > 2, "{volumes} volumes");
-    let copy = [("LOSAT_X_BXDBSTREAM", "0")];
-    let small = [("LOSAT_X_BXDBSTREAM", "2")];
-    for (args, outfmt) in [
-        (&["-outfmt", "6"][..], "6"),
-        (&["-outfmt", "0"][..], "0"),
-        (&["-outfmt", "6", "-comp_based_stats", "0"][..], "6"),
+    let cases: [(&Path, &[&str]); 5] = [
+        (&slice, &["-outfmt", "6"]),
+        (&slice, &["-outfmt", "0"]),
+        (&slice, &["-outfmt", "6", "-comp_based_stats", "0"]),
         (
-            &["-outfmt", "6", "-ungapped", "-comp_based_stats", "0"][..],
-            "6",
+            &slice,
+            &["-outfmt", "6", "-ungapped", "-comp_based_stats", "0"],
         ),
-    ] {
+        (&pieces, &["-outfmt", "6"]),
+    ];
+    for (query, args) in cases {
         for threads in [1, 4] {
-            let (status, expected, stderr) = blastx(&query, &db, args, threads, &copy);
-            assert_eq!((status, stderr.as_str()), (Some(0), ""), "{args:?}");
-            assert!(!expected.is_empty(), "{args:?}");
-            if outfmt == "6" {
-                assert!(expected.iter().filter(|&&b| b == b'\n').count() > 10);
-            }
-            for env in [&[][..], &small[..]] {
-                let (status, report, stderr) = blastx(&query, &db, args, threads, env);
-                assert_eq!((status, stderr.as_str()), (Some(0), ""), "{args:?} {env:?}");
+            for schedule in SCHEDULES {
+                if threads == 1 && schedule.is_some() {
+                    continue;
+                }
+                let with = |blocks: &'static str| -> Vec<(&str, &str)> {
+                    schedule
+                        .into_iter()
+                        .chain([("LOSAT_X_BXDBSTREAM", blocks)])
+                        .collect()
+                };
+                let (status, expected, stderr) = blastx(query, &db, args, threads, &with("0"));
+                assert_eq!((status, stderr.as_str()), (Some(0), ""), "{args:?}");
                 assert!(
-                    report == expected,
-                    "{args:?} at {threads} threads with {env:?}: the report differs from the copy's"
+                    expected.iter().filter(|&&b| b == b'\n').count() > 10,
+                    "{args:?}"
                 );
+                // The default blocks (256 KiB: each volume in one), and blocks of 2 KiB (a few
+                // sequences each, many blocks in every pass).
+                for blocks in ["256", "2"] {
+                    let env = with(blocks);
+                    let (status, report, stderr) = blastx(query, &db, args, threads, &env);
+                    assert_eq!((status, stderr.as_str()), (Some(0), ""), "{args:?} {env:?}");
+                    assert!(
+                        report == expected,
+                        "{query:?} {args:?} at {threads} threads with {env:?}: the report differs from the copy's"
+                    );
+                }
             }
         }
     }
@@ -160,12 +201,12 @@ fn the_shadow_mode_finds_every_read_identical() {
     // (arguments, sequences read by the passes, lengths read by the sink): the gapped search
     // splits the query into three chunks, each a pass of the preliminary search and of the sink
     // over all 115 sequences; the ungapped search searches one chunk, and its sink reads the
-    // residues in a pass of its own.
+    // residues of the subjects with HSPs from a pass of its own (the blocks that hold them).
     for (args, sequences, lengths) in [
-        (&["-outfmt", "0"][..], 3 * 115, 3 * 115),
+        (&["-outfmt", "0"][..], 3 * 115..=3 * 115, 3 * 115),
         (
             &["-outfmt", "6", "-ungapped", "-comp_based_stats", "0"][..],
-            2 * 115,
+            116..=2 * 115,
             115,
         ),
     ] {
@@ -186,7 +227,7 @@ fn the_shadow_mode_finds_every_read_identical() {
             };
             // Every pass reads each of the 115 sequences once; the composition redo and the
             // reports read the subjects they need one by one.
-            assert_eq!(count("sequences="), sequences, "{line}");
+            assert!(sequences.contains(&count("sequences=")), "{line}");
             assert!(count("blocks=") > 2, "{line}");
             assert!(count("residues=") > 0, "{line}");
             assert_eq!(count("lengths="), lengths, "{line}");

@@ -16,21 +16,27 @@
 //!   limit), and keeps nothing but the length of the longest sequence. Its error is the error of
 //!   `read_stores`, which fails the same query batch with the same text.
 //! - The preliminary search reads the sequences of each pass over the database in ascending order
-//!   (`XPass`): a serial pass, a query chunk of `LOSAT_X_BXPAR`, the sink's `-ungapped` residues
-//!   read blocks of `block_bytes` (`SeqDb::next_block`) and drop each block before the next. A task
-//!   of the subject flow (`x_subject_flow.rs`) reads its own subjects with one read per volume, and
-//!   a wave of the pool (diagnostics, `LOSAT_X_BXWAVE`, `LOSAT_X_BXCHUNK`) reads its subjects before
-//!   its fork (`XStreamDb::read_range`). The passes that run at the same time (the query batches of
-//!   `LOSAT_X_BXBATCH`, the tasks of the flow) each read their own blocks: nothing is shared or
-//!   waited for between them.
+//!   (`XPass`): a serial pass and a query chunk of `LOSAT_X_BXPAR` read blocks of `block_bytes`
+//!   (`SeqDb::next_block`) and drop each block before the next. A task of the subject flow
+//!   (`x_subject_flow.rs`) reads its own subjects with one read per volume, and a wave of the pool
+//!   (where the flow is not chosen: `LOSAT_X_BXSUBJFLOW=0`, at most `k` subjects, the 2^28 bound;
+//!   `LOSAT_X_BXWAVE`, `LOSAT_X_BXCHUNK`) reads its subjects before its fork
+//!   (`XStreamDb::read_range`). The passes that run at the same time (the query batches of
+//!   `LOSAT_X_BXBATCH`, the chunks of `LOSAT_X_BXPAR`, the tasks of the flow) each read their own
+//!   blocks: nothing is shared or waited for between them.
 //! - The sink reads the lengths of the subjects in its order from the index (`XCursor`, a window of
 //!   `LENGTH_WINDOW` sequences per read): the gapped sink evaluates every subject with its length,
-//!   with or without HSPs.
+//!   with or without HSPs. The `-ungapped` sink reads the residues of the subjects with HSPs, which
+//!   it counts the identities of, from a pass of its own (only the blocks that hold them).
 //! - The composition redo (its speculation and its serial loop), the traceback of
 //!   `-comp_based_stats 0` and `ReportedSubjects::for_batch` read each subject they need with
 //!   `SeqDb::read_sequence` (`Subjects::read_encoded`), after the preliminary search of the batch,
-//!   as NCBI fetches the sequences of its hit lists. Only a database changed after the check can
-//!   fail there; the error is the reader's error of the check (`search_read_error`).
+//!   as NCBI fetches the sequences of its hit lists.
+//!
+//! A read that fails during the search (a database changed or damaged after the check, an error of
+//! the file system) gives the error that the check gives for the same read (`XReadError` holds
+//! `search_read_error`'s), which the run reports as it reports the check's (`native::search_error`:
+//! NCBI's engine error, or LOSAT's refusal).
 //!
 //! The stored bytes are the same in every read (the sentinel before and after the residues is the
 //! file's byte, which the check requires to be 0, as the copy holds), so every stage computes the
@@ -42,8 +48,8 @@
 //!
 //! `LOSAT_X_BXDBSTREAM` is a value switch of the strict set: on unless it is `0`, or
 //! `LOSAT_X_DEFAULT=0` and it is not set. Its value is the size of a pass's block in KiB, 2 to
-//! 1,048,576, 256 when it is not set or holds anything else (`1` among them). It acts for every task of BLASTX with
-//! `-db`.
+//! 1,048,576, 256 when it is not set or holds anything else (`1` among them). It acts for every
+//! task of BLASTX with `-db`.
 //!
 //! `LOSAT_X_BXDBSTREAMSHADOW=1` (shadow mode, with the switch on): `read_stores` makes the copy too,
 //! and every block, every window of lengths and every read of a subject is compared with it (the
@@ -83,6 +89,25 @@ pub(crate) fn x_shadow() -> bool {
     *ON.get_or_init(|| {
         x_block_bytes().is_some() && std::env::var_os("LOSAT_X_BXDBSTREAMSHADOW").is_some()
     })
+}
+
+/// A read of the database that failed during the search: the error of the check for the same read
+/// (`search_read_error`: NCBI's `PreliminaryReadError`, or LOSAT's refusal), which the run reports
+/// as the check's (`native::search_error`).
+#[derive(Debug)]
+pub(crate) struct XReadError(pub(crate) anyhow::Error);
+
+impl std::fmt::Display for XReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for XReadError {}
+
+/// The reader's error `error` of a read during the search.
+fn read_error(error: crate::seqdb::SeqDbError) -> anyhow::Error {
+    XReadError(search_read_error(error, PROGRAM)).into()
 }
 
 /// The database of a search that reads its sequences in blocks.
@@ -154,10 +179,7 @@ impl<'a> XStreamDb<'a> {
             .ok()
             .and_then(|first| self.db.next_block(first, self.block_bytes))
             .ok_or_else(|| anyhow!("BLASTX database ordinal id {oid} is past the database"))?;
-        let part = self
-            .db
-            .read_block(range)
-            .map_err(|error| search_read_error(error, PROGRAM))?;
+        let part = self.db.read_block(range).map_err(read_error)?;
         self.checked(XBlock {
             first: oid,
             end: range.end_ordinal() as usize,
@@ -174,11 +196,7 @@ impl<'a> XStreamDb<'a> {
             let range = self.db.x_block_range(at, end32).ok_or_else(|| {
                 anyhow!("BLASTX database ordinal ids {first}..{end} are past the database")
             })?;
-            parts.push(
-                self.db
-                    .read_block(range)
-                    .map_err(|error| search_read_error(error, PROGRAM))?,
-            );
+            parts.push(self.db.read_block(range).map_err(read_error)?);
             at = range.end_ordinal();
         }
         self.checked(XBlock { first, end, parts })
@@ -189,10 +207,7 @@ impl<'a> XStreamDb<'a> {
     fn read_lengths(&self, oid: usize) -> Result<Vec<u32>> {
         let first = u32::try_from(oid)?;
         let end = first.saturating_add(LENGTH_WINDOW as u32);
-        let lengths = self
-            .db
-            .x_protein_lengths(first, end)
-            .map_err(|error| search_read_error(error, PROGRAM))?;
+        let lengths = self.db.x_protein_lengths(first, end).map_err(read_error)?;
         if let Some(stores) = self.shadow {
             for (i, &length) in lengths.iter().enumerate() {
                 x_shadow_assert(stores.length(oid + i) == length as usize, || {
@@ -214,7 +229,7 @@ impl<'a> XStreamDb<'a> {
         let block = self
             .db
             .read_sequence(u32::try_from(oid)?)
-            .map_err(|error| search_read_error(error, PROGRAM))?;
+            .map_err(read_error)?;
         let residues = block.protein(0).to_vec();
         if let Some(stores) = self.shadow {
             let copy = stores.residues_with_sentinel(oid);
@@ -224,6 +239,18 @@ impl<'a> XStreamDb<'a> {
             X_SHADOW_READS.fetch_add(1, Ordering::Relaxed);
         }
         Ok(residues)
+    }
+
+    /// The residues of `oid` followed by the sentinel byte, read where no block holds them: no
+    /// stage does (every preliminary read has its pass's or task's block; the sink and the later
+    /// stages read through `XCursor` and `read_encoded`), so it is kept out of the callers' code.
+    #[cold]
+    #[inline(never)]
+    fn outside_block(&self, oid: usize) -> Vec<u8> {
+        debug_assert!(false, "subject {oid} is read outside a block");
+        let mut residues = self.read_one(oid).expect("the database read");
+        residues.push(0);
+        residues
     }
 
     /// `block` after the shadow mode's comparison with the copy.
@@ -285,12 +312,7 @@ impl<'a> XStream<'a> {
     pub(crate) fn encoded_with_sentinel(&self, oid: usize) -> Cow<'a, [u8]> {
         match self.block {
             Some(block) if block.contains(oid) => Cow::Borrowed(block.residues_with_sentinel(oid)),
-            _ => {
-                debug_assert!(false, "subject {oid} is read outside a block");
-                let mut residues = self.db.read_one(oid).expect("the database read");
-                residues.push(0);
-                Cow::Owned(residues)
-            }
+            _ => Cow::Owned(self.db.outside_block(oid)),
         }
     }
 
@@ -310,10 +332,7 @@ impl<'a> XStream<'a> {
     pub(crate) fn length(&self, oid: usize) -> usize {
         match self.block {
             Some(block) if block.contains(oid) => block.residues_with_sentinel(oid).len() - 1,
-            _ => {
-                debug_assert!(false, "the length of subject {oid} is read outside a block");
-                self.db.read_lengths(oid).expect("the index read")[0] as usize
-            }
+            _ => self.db.outside_block(oid).len() - 1,
         }
     }
 
@@ -355,14 +374,12 @@ impl<'a> XPass<'a> {
     }
 }
 
-/// EXPERIMENT (LOSAT_X_BXDBSTREAM): what the sink of one query batch reads of its subjects in its
-/// order: their lengths, from windows of the index, and, for `-ungapped`, their residues
-/// (`XPass`).
+/// EXPERIMENT (LOSAT_X_BXDBSTREAM): the lengths that the sink of one query batch reads of its
+/// subjects in its order, from windows of the index.
 pub(crate) struct XCursor<'a> {
     db: &'a XStreamDb<'a>,
     first: usize,
     lengths: Vec<u32>,
-    pass: XPass<'a>,
 }
 
 impl<'a> XCursor<'a> {
@@ -371,7 +388,6 @@ impl<'a> XCursor<'a> {
             db,
             first: 0,
             lengths: Vec::new(),
-            pass: XPass::new(db),
         }
     }
 
@@ -382,11 +398,6 @@ impl<'a> XCursor<'a> {
             self.first = oid;
         }
         Ok(self.lengths[oid - self.first] as usize)
-    }
-
-    /// The residues of subject `oid`.
-    pub(crate) fn encoded(&mut self, oid: usize) -> Result<Cow<'_, [u8]>> {
-        Ok(self.pass.view(oid)?.encoded(oid))
     }
 }
 
@@ -491,7 +502,6 @@ mod tests {
                 let mut cursor = XCursor::new(&stream);
                 for oid in (0..n).chain(0..n) {
                     assert_eq!(cursor.length(oid).unwrap(), stores.length(oid), "{oid}");
-                    assert_eq!(&*cursor.encoded(oid).unwrap(), without_sentinel(oid));
                 }
                 let outside = XStream {
                     db: &stream,
@@ -502,6 +512,35 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_read_that_fails_during_the_search_gives_the_error_of_the_check() {
+        // A copy of prot_v5 whose sequence file is cut short after the check.
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db");
+        let dir =
+            std::env::temp_dir().join(format!("losat-bxdbstream-read-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for extension in ["pdb", "phr", "pin", "psq"] {
+            let file = format!("prot_v5.{extension}");
+            std::fs::copy(fixtures.join(&file), dir.join(&file)).unwrap();
+        }
+        let name = dir.join("prot_v5");
+        let database =
+            BlastxDatabase::open(name.to_str().unwrap(), &ApplicationSettings::default()).unwrap();
+        let longest = database.x_check_stores().unwrap();
+        let stream = XStreamDb::new(database.x_seqdb(), longest, 1 << 20, None);
+        let psq = dir.join("prot_v5.psq");
+        let bytes = std::fs::read(&psq).unwrap();
+        std::fs::write(&psq, &bytes[..bytes.len() / 2]).unwrap();
+        let error = XPass::new(&stream).view(0).map(|_| ()).unwrap_err();
+        let XReadError(kept) = error.downcast::<XReadError>().unwrap();
+        assert_eq!(
+            kept.to_string(),
+            database.x_check_stores().unwrap_err().to_string()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

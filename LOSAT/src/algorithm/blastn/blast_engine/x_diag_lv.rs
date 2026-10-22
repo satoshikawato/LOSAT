@@ -433,7 +433,7 @@ impl DiagHashTable {
     /// bounds always walks. With LOSAT_X_DIAGLVSHADOW every skipped walk is done and checked
     /// (`x_lv_verify`).
     #[inline(always)]
-    pub(super) fn retrieve_below(
+    pub(super) fn retrieve_below<const MEMO: bool>(
         &self,
         diag: i32,
         seeds: &LvSeeds,
@@ -453,18 +453,22 @@ impl DiagHashTable {
         }
         // EXPERIMENT (LOSAT_X_DIAGLV2, module comment (iv)-(vi)): every cell but the latest
         // insert's lies below the bound; answer from the memo without the walk. (`insert` keeps
-        // the memo only on a table with bounds.)
+        // the memo only on a table with bounds.) Without `MEMO` (an instance of the strips fold of
+        // dc-megablast for a table without the memo) there is no test.
         debug_assert!(self.x_last.is_empty() || self.x_lv_on());
-        if let Some(last) = self.x_last.get(bucket) {
-            if last.other < bound {
-                let found =
-                    (last.diag == diag).then_some((last.level, last.hit_len, last.hit_saved));
-                if self.x_lv_shadow {
-                    self.x_lv2_verify(diag, bucket, seeds, s_off_pos, found);
+        debug_assert!(MEMO || self.x_last.is_empty());
+        if MEMO {
+            if let Some(last) = self.x_last.get(bucket) {
+                if last.other < bound {
+                    let found =
+                        (last.diag == diag).then_some((last.level, last.hit_len, last.hit_saved));
+                    if self.x_lv_shadow {
+                        self.x_lv2_verify(diag, bucket, seeds, s_off_pos, found);
+                    }
+                    #[cfg(test)]
+                    TEST_MEMOS.with(|memos| memos.set(memos.get() + 1));
+                    return found;
                 }
-                #[cfg(test)]
-                TEST_MEMOS.with(|memos| memos.set(memos.get() + 1));
-                return found;
             }
         }
         self.retrieve(diag)
@@ -867,7 +871,7 @@ mod tests {
                     let bound = seeds.bound(s);
                     let full = h.retrieve(diag);
                     let before = test_skips();
-                    let fast = h.retrieve_below(diag, &seeds, s);
+                    let fast = h.retrieve_below::<true>(diag, &seeds, s);
                     let skip = test_skips() > before;
                     probes += 1;
                     if skip {
@@ -1007,7 +1011,7 @@ mod tests {
                     let full = plain.retrieve(diag);
                     assert_eq!(h.retrieve(diag), full, "case {case} step {step}");
                     let before = test_memos();
-                    let fast = h.retrieve_below(diag, &seeds, s);
+                    let fast = h.retrieve_below::<true>(diag, &seeds, s);
                     if test_memos() > before {
                         memos += 1;
                         if fast.is_some() {
@@ -1073,7 +1077,10 @@ mod tests {
         );
         // an empty bucket (`i32::MIN`) is never below `i32::MIN`
         let h = table(40, true, false);
-        assert_eq!(h.retrieve_below(5, &LvSeeds::new(true, 18, 40), 10), None);
+        assert_eq!(
+            h.retrieve_below::<true>(5, &LvSeeds::new(true, 18, 40), 10),
+            None
+        );
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:839-841,939-941
@@ -1140,7 +1147,7 @@ mod tests {
                     let full = off.retrieve(diag);
                     assert_eq!(full, Some((level, hit_len, hit_saved)), "{at}");
                     let before = test_skips();
-                    let fast = on.retrieve_below(diag, &seeds, s_off_pos);
+                    let fast = on.retrieve_below::<true>(diag, &seeds, s_off_pos);
                     let skipped = test_skips() > before;
                     let walked = decisions(full, s_off_pos, two_hits, word_length, window_size);
                     let none = decisions(None, s_off_pos, two_hits, word_length, window_size);
@@ -1189,7 +1196,7 @@ mod tests {
         // a bound that lies wrong about the bucket
         h.max_level[bucket_of(7)] = 100;
         // one hit at 199: the seed's bound is 200
-        let _ = h.retrieve_below(7 + 512, &LvSeeds::new(false, 28, 0), 199);
+        let _ = h.retrieve_below::<true>(7 + 512, &LvSeeds::new(false, 28, 0), 199);
     }
 
     // LOSAT_X_DIAGLV2's shadow: a memo whose `other` lies wrong about an older cell of the
@@ -1204,7 +1211,7 @@ mod tests {
         h.insert(7 + 512, 1500, 0, true, 1000, 41);
         h.x_last[bucket_of(7)].other = 900;
         // two hits, template 18, at 1000: the bound is 978, above `other`, below max_level
-        let _ = h.retrieve_below(7, &LvSeeds::new(true, 18, 40), 1000);
+        let _ = h.retrieve_below::<true>(7, &LvSeeds::new(true, 18, 40), 1000);
     }
 
     // The shadow's check of (ii): with a one-hit bound one too high (`s_off_pos + 2`), a cell
@@ -1218,7 +1225,7 @@ mod tests {
         };
         let mut h = table(0, true, true);
         h.insert(7, 1001, 0, true, 980, 1);
-        let _ = h.retrieve_below(7, &seeds, 1000);
+        let _ = h.retrieve_below::<true>(7, &seeds, 1000);
     }
 
     // The same with a two-hit bound one too high (`s_end_pos - window_size + 1`, template 18):
@@ -1234,6 +1241,6 @@ mod tests {
         };
         let mut h = table(40, true, true);
         h.insert(7, 1000 + 18 - 40, 18, false, 960, 41);
-        let _ = h.retrieve_below(7, &seeds, 1000);
+        let _ = h.retrieve_below::<true>(7, &seeds, 1000);
     }
 }

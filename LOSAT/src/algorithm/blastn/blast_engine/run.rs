@@ -1028,16 +1028,34 @@ impl DiagHashTable {
         s_off: i32,
         window_size: i32,
     ) -> bool {
-        self.insert_inl(diag, level, hit_len, hit_saved, s_off, window_size)
+        self.insert_inl::<true>(diag, level, hit_len, hit_saved, s_off, window_size)
     }
 
     /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:396-449
     /// (`s_BlastDiagHashInsert`, quoted above `insert`).
-    /// The body of `insert`, inlined into its caller (EXPERIMENT LOSAT_X_FOLDLEAN, the strips
-    /// fold of dc-megablast `x_pair_seed_disc.rs` `fold_two_hit`; `insert` is this call). The
-    /// same statements.
+    /// `insert` without the memo of LOSAT_X_DIAGLV2: the strips fold of dc-megablast
+    /// (`x_pair_seed_disc.rs` `fold_two_hit`) calls it in its instance with LOSAT_X_FOLDLEAN and
+    /// LOSAT_X_DIAGLV2 off, which is then the code before those switches.
+    #[inline(never)]
+    pub(super) fn insert_plain(
+        &mut self,
+        diag: i32,
+        level: i32,
+        hit_len: i32,
+        hit_saved: bool,
+        s_off: i32,
+        window_size: i32,
+    ) -> bool {
+        self.insert_inl::<false>(diag, level, hit_len, hit_saved, s_off, window_size)
+    }
+
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:396-449
+    /// (`s_BlastDiagHashInsert`, quoted above `insert`).
+    /// The body of `insert` (`MEMO`) and `insert_plain`, inlined into its caller; the strips fold
+    /// of dc-megablast inlines it with LOSAT_X_FOLDLEAN (`x_pair_seed_disc.rs` `fold_two_hit`).
+    /// The same statements. Without `MEMO` the table must have no memo (LOSAT_X_DIAGLV2).
     #[inline(always)]
-    fn insert_inl(
+    pub(super) fn insert_inl<const MEMO: bool>(
         &mut self,
         diag: i32,
         level: i32,
@@ -1057,11 +1075,14 @@ impl DiagHashTable {
             }
             // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): this insert is the bucket's latest.
             // No NCBI counterpart; with the switch off `x_last` is empty and this is one length
-            // test.
-            if let Some(last) = self.x_last.get_mut(bucket) {
-                last.note(diag, level, hit_len, hit_saved);
+            // test (none without `MEMO`).
+            if MEMO {
+                if let Some(last) = self.x_last.get_mut(bucket) {
+                    last.note(diag, level, hit_len, hit_saved);
+                }
             }
         }
+        debug_assert!(MEMO || self.x_last.is_empty());
         let mut index = self.backbone[bucket];
         while index != 0 {
             let cell = &mut self.chain[index as usize];
@@ -11883,7 +11904,7 @@ fn search_query_batch(
                                         // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same
                                         // decisions without the walk of a bucket below the bound.
                                         let (level, _hit_len, hit_saved) = if x_lv_ref {
-                                            diag_hash.retrieve_below(
+                                            diag_hash.retrieve_below::<true>(
                                                 diag as i32,
                                                 &x_lv_seeds,
                                                 s_ext_start + diag_offset as usize,
@@ -13258,7 +13279,7 @@ fn search_query_batch(
                                         // decisions without the walk of a bucket below the bound
                                         // (`s_off_pos` below).
                                         let (level, _hit_len, hit_saved) = if x_lv_ref {
-                                            diag_hash.retrieve_below(
+                                            diag_hash.retrieve_below::<true>(
                                                 diag as i32,
                                                 &x_lv_seeds,
                                                 kmer_start + diag_offset as usize,

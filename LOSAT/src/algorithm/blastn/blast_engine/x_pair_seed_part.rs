@@ -184,12 +184,13 @@ impl PartOut {
 ///                           hit_ready, s_off_pos, window_size + Delta + 1);
 /// ```
 /// A fold's insert (`DiagHashTable::insert`; with `LEAN`, LOSAT_X_FOLDLEAN, the same statements
-/// inlined, `insert_inl`). With partitions (`PT`) it also records the diagonal's bucket and,
-/// when the insert appended a cell, the seed's key with the cell's number in the partition's
-/// table.
+/// inlined, `insert_inl`). Without `MEMO` the table has no memo (LOSAT_X_DIAGLV2) and the insert
+/// is `insert_plain`, the statements before that switch. With partitions (`PT`) it also records
+/// the diagonal's bucket and, when the insert appended a cell, the seed's key with the cell's
+/// number in the partition's table.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub(super) fn insert<const PT: bool, const LEAN: bool>(
+pub(super) fn insert<const PT: bool, const LEAN: bool, const MEMO: bool>(
     hash: &mut DiagHashTable,
     out: &mut PartOut,
     key: u64,
@@ -203,9 +204,11 @@ pub(super) fn insert<const PT: bool, const LEAN: bool>(
     if PT {
         let occupancy = hash.occupancy;
         if LEAN {
-            hash.insert_inl(diag, level, hit_len, hit_saved, s_off, window_size);
-        } else {
+            hash.insert_inl::<MEMO>(diag, level, hit_len, hit_saved, s_off, window_size);
+        } else if MEMO {
             hash.insert(diag, level, hit_len, hit_saved, s_off, window_size);
+        } else {
+            hash.insert_plain(diag, level, hit_len, hit_saved, s_off, window_size);
         }
         let bucket = bucket_of_diag(diag);
         if !out.touched[bucket] {
@@ -216,9 +219,11 @@ pub(super) fn insert<const PT: bool, const LEAN: bool>(
             out.appends.push((key, occupancy));
         }
     } else if LEAN {
-        hash.insert_inl(diag, level, hit_len, hit_saved, s_off, window_size);
-    } else {
+        hash.insert_inl::<MEMO>(diag, level, hit_len, hit_saved, s_off, window_size);
+    } else if MEMO {
         hash.insert(diag, level, hit_len, hit_saved, s_off, window_size);
+    } else {
+        hash.insert_plain(diag, level, hit_len, hit_saved, s_off, window_size);
     }
 }
 
@@ -965,7 +970,7 @@ mod tests {
 
     fn last_hit(hash: &DiagHashTable, op: &Op) -> i32 {
         let found = if hash.x_lv_on() {
-            hash.retrieve_below(op.diag, &LvSeeds::new(false, 11, 0), op.s_off_pos as usize)
+            hash.retrieve_below::<true>(op.diag, &LvSeeds::new(false, 11, 0), op.s_off_pos as usize)
         } else {
             hash.retrieve(op.diag)
         };
@@ -1075,7 +1080,7 @@ mod tests {
                     if op.pass {
                         st.hits.push(hit_of(index));
                         st.out.hit_keys.push(key);
-                        insert::<true, false>(
+                        insert::<true, false, true>(
                             &mut st.hash,
                             &mut st.out,
                             key,
@@ -1087,7 +1092,7 @@ mod tests {
                             window,
                         );
                     } else {
-                        insert::<true, false>(
+                        insert::<true, false, true>(
                             &mut st.hash,
                             &mut st.out,
                             key,

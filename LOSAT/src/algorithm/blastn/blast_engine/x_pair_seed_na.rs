@@ -348,7 +348,7 @@ fn fold_na<const PT: bool>(
         // of a bucket below the bound (`s_off_pos` below).
         let (last_hit, _hit_saved) = {
             let (level, _hit_len, hit_saved) = if x_lv {
-                diag_hash.retrieve_below(
+                diag_hash.retrieve_below::<true>(
                     diag as i32,
                     &x_lv_seeds,
                     kmer_start + diag_offset as usize,
@@ -512,7 +512,7 @@ fn fold_na<const PT: bool>(
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
             //                       hit_ready, s_off_pos, window_size + Delta + 1);
             // ```
-            part::insert::<PT, false>(
+            part::insert::<PT, false, true>(
                 diag_hash,
                 out,
                 x_key,
@@ -554,7 +554,7 @@ fn fold_na<const PT: bool>(
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                       hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT, false>(
+        part::insert::<PT, false, true>(
             diag_hash,
             out,
             x_key,

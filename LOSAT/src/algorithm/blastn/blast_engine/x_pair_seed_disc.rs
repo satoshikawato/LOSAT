@@ -392,9 +392,11 @@ fn scan_strip_disc_csr(
 /// With `LEAN` (LOSAT_X_FOLDLEAN, `lean_on`) the fold takes `type_of_word`'s early return
 /// itself (NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:531
 /// `if (word_length == lut_word_length) return 1;`, with `*extended = 0` and the offsets
-/// unchanged) when the word lengths are equal, and inlines the insert (`insert_inl`).
+/// unchanged) when the word lengths are equal, and inlines the insert (`insert_inl`). `MEMO`
+/// says the table has the memo of LOSAT_X_DIAGLV2 (`x_last`); without it the retrieve and the
+/// insert do not test for one, so with both off this is the fold before those switches.
 #[allow(clippy::too_many_arguments)]
-fn fold_two_hit<const PT: bool, const LEAN: bool>(
+fn fold_two_hit<const PT: bool, const LEAN: bool, const MEMO: bool>(
     x: &Inputs<'_>,
     seeds: &[Seed],
     diag_hash: &mut DiagHashTable,
@@ -456,7 +458,7 @@ fn fold_two_hit<const PT: bool, const LEAN: bool>(
             // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
             // of a bucket below the bound (the `last_hit` test and the window test).
             let (level, _hit_len, hit_saved) = if x_lv {
-                diag_hash.retrieve_below(
+                diag_hash.retrieve_below::<MEMO>(
                     diag as i32,
                     &x_lv_seeds,
                     s_ext_start + diag_offset as usize,
@@ -677,7 +679,7 @@ fn fold_two_hit<const PT: bool, const LEAN: bool>(
         //                           hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
         if !hit_ready {
-            part::insert::<PT, LEAN>(
+            part::insert::<PT, LEAN, MEMO>(
                 diag_hash,
                 out,
                 x_key,
@@ -774,7 +776,7 @@ fn fold_two_hit<const PT: bool, const LEAN: bool>(
         // ```
         if !(off_found || ungapped_score >= cutoff_score) {
             hit_ready = false;
-            part::insert::<PT, LEAN>(
+            part::insert::<PT, LEAN, MEMO>(
                 diag_hash,
                 out,
                 x_key,
@@ -841,7 +843,7 @@ fn fold_two_hit<const PT: bool, const LEAN: bool>(
         //                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                           hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT, LEAN>(
+        part::insert::<PT, LEAN, MEMO>(
             diag_hash,
             out,
             x_key,
@@ -869,8 +871,42 @@ fn fold_two_hit<const PT: bool, const LEAN: bool>(
 /// scanned by any thread, folded here in strip order into `hash` and `hits`. With `fold_part`
 /// (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`) the fold is split by diagonal-hash bucket over
 /// the threads instead.
+///
+/// EXPERIMENT (LOSAT_X_FOLDLEAN, LOSAT_X_DIAGLV2): one instance of the stage per pair of
+/// switches (`seed_stage_of`), the table's memo deciding `MEMO`, so that with both off the
+/// stage is the code before them.
 #[allow(clippy::too_many_arguments)]
 fn seed_stage(
+    x: &Inputs<'_>,
+    disc: &DiscTemplates,
+    threads: usize,
+    hash: &mut DiagHashTable,
+    hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    timed: bool,
+    fold_part: Option<part::FoldPart<'_>>,
+) -> StageStats {
+    let memo = !hash.x_last.is_empty();
+    match (lean_on(), memo) {
+        (false, false) => {
+            seed_stage_of::<false, false>(x, disc, threads, hash, hits, timing, timed, fold_part)
+        }
+        (false, true) => {
+            seed_stage_of::<false, true>(x, disc, threads, hash, hits, timing, timed, fold_part)
+        }
+        (true, false) => {
+            seed_stage_of::<true, false>(x, disc, threads, hash, hits, timing, timed, fold_part)
+        }
+        (true, true) => {
+            seed_stage_of::<true, true>(x, disc, threads, hash, hits, timing, timed, fold_part)
+        }
+    }
+}
+
+/// `seed_stage` for one pair of LOSAT_X_FOLDLEAN (`LEAN`) and the table's memo of
+/// LOSAT_X_DIAGLV2 (`MEMO`).
+#[allow(clippy::too_many_arguments)]
+fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
     x: &Inputs<'_>,
     disc: &DiscTemplates,
     threads: usize,
@@ -900,32 +936,17 @@ fn seed_stage(
                 scan_pause_ns,
                 ..
             } = st;
-            // EXPERIMENT (LOSAT_X_FOLDLEAN): the `LEAN` instance, the same statements.
-            if lean_on() {
-                fold_two_hit::<true, true>(
-                    x,
-                    seeds,
-                    hash,
-                    hits,
-                    timing,
-                    scan_pause_ns,
-                    counts,
-                    out,
-                    pos,
-                );
-            } else {
-                fold_two_hit::<true, false>(
-                    x,
-                    seeds,
-                    hash,
-                    hits,
-                    timing,
-                    scan_pause_ns,
-                    counts,
-                    out,
-                    pos,
-                );
-            }
+            fold_two_hit::<true, LEAN, MEMO>(
+                x,
+                seeds,
+                hash,
+                hits,
+                timing,
+                scan_pause_ns,
+                counts,
+                out,
+                pos,
+            );
         };
         let r = part::seed_stage_part(
             jobs.len(),
@@ -960,32 +981,17 @@ fn seed_stage(
         &produce,
         |_, seeds| {
             let t0 = timed.then(std::time::Instant::now);
-            // EXPERIMENT (LOSAT_X_FOLDLEAN): the `LEAN` instance, the same statements.
-            if lean_on() {
-                fold_two_hit::<false, true>(
-                    x,
-                    seeds,
-                    hash,
-                    hits,
-                    timing,
-                    scan_pause_ns,
-                    counts,
-                    &mut part::PartOut::default(),
-                    &[],
-                );
-            } else {
-                fold_two_hit::<false, false>(
-                    x,
-                    seeds,
-                    hash,
-                    hits,
-                    timing,
-                    scan_pause_ns,
-                    counts,
-                    &mut part::PartOut::default(),
-                    &[],
-                );
-            }
+            fold_two_hit::<false, LEAN, MEMO>(
+                x,
+                seeds,
+                hash,
+                hits,
+                timing,
+                scan_pause_ns,
+                counts,
+                &mut part::PartOut::default(),
+                &[],
+            );
             if let Some(t0) = t0 {
                 *fold_ns += t0.elapsed().as_nanos() as u64;
             }
@@ -1575,8 +1581,27 @@ fn fold_two_hit_array<const LEAN: bool>(
 /// ```
 /// EXPERIMENT (LOSAT_X_PAIRPARDISCARR): the seed stage of one chunk with the diagonal array on
 /// `threads` threads: the strips of `seed_stage` scanned by any thread, folded here in strip
-/// order into the array and `hits` (`fold_two_hit_array`).
+/// order into the array and `hits` (`fold_two_hit_array`). EXPERIMENT (LOSAT_X_FOLDLEAN): one
+/// instance of the stage per state of the switch (`seed_stage_array_of`), so that with it off
+/// the stage is the code before it.
 fn seed_stage_array(
+    x: &Inputs<'_>,
+    disc: &DiscTemplates,
+    threads: usize,
+    arr: &mut DiagArray<'_>,
+    hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    timed: bool,
+) -> StageStats {
+    if lean_on() {
+        seed_stage_array_of::<true>(x, disc, threads, arr, hits, timing, timed)
+    } else {
+        seed_stage_array_of::<false>(x, disc, threads, arr, hits, timing, timed)
+    }
+}
+
+/// `seed_stage_array` for one state of LOSAT_X_FOLDLEAN (`LEAN`).
+fn seed_stage_array_of<const LEAN: bool>(
     x: &Inputs<'_>,
     disc: &DiscTemplates,
     threads: usize,
@@ -1613,12 +1638,7 @@ fn seed_stage_array(
         &produce,
         |_, seeds| {
             let t0 = timed.then(std::time::Instant::now);
-            // EXPERIMENT (LOSAT_X_FOLDLEAN): the `LEAN` instance, the same statements.
-            if lean_on() {
-                fold_two_hit_array::<true>(x, seeds, arr, hits, timing, scan_pause_ns, counts);
-            } else {
-                fold_two_hit_array::<false>(x, seeds, arr, hits, timing, scan_pause_ns, counts);
-            }
+            fold_two_hit_array::<LEAN>(x, seeds, arr, hits, timing, scan_pause_ns, counts);
             if let Some(t0) = t0 {
                 *fold_ns += t0.elapsed().as_nanos() as u64;
             }
@@ -1886,6 +1906,67 @@ mod tests {
 
     type HashState = (Vec<u32>, Vec<(i32, i32, bool, i32, u32)>, u32, u32, i32);
 
+    /// `fold_two_hit` without partitions in the instance of `lean` (LOSAT_X_FOLDLEAN) and of
+    /// the table's memo (LOSAT_X_DIAGLV2), as `seed_stage` picks it.
+    #[allow(clippy::too_many_arguments)]
+    fn fold_serial(
+        lean: bool,
+        x: &Inputs<'_>,
+        seeds: &[Seed],
+        hash: &mut DiagHashTable,
+        hits: &mut Vec<UngappedHit>,
+        pause: &mut u64,
+        counts: &mut FoldCounts,
+    ) {
+        let out = &mut part::PartOut::default();
+        match (lean, !hash.x_last.is_empty()) {
+            (false, false) => fold_two_hit::<false, false, false>(
+                x,
+                seeds,
+                hash,
+                hits,
+                None,
+                pause,
+                counts,
+                out,
+                &[],
+            ),
+            (false, true) => fold_two_hit::<false, false, true>(
+                x,
+                seeds,
+                hash,
+                hits,
+                None,
+                pause,
+                counts,
+                out,
+                &[],
+            ),
+            (true, false) => fold_two_hit::<false, true, false>(
+                x,
+                seeds,
+                hash,
+                hits,
+                None,
+                pause,
+                counts,
+                out,
+                &[],
+            ),
+            (true, true) => fold_two_hit::<false, true, true>(
+                x,
+                seeds,
+                hash,
+                hits,
+                None,
+                pause,
+                counts,
+                out,
+                &[],
+            ),
+        }
+    }
+
     fn hash_state(h: &DiagHashTable) -> HashState {
         (
             h.backbone.clone(),
@@ -2130,16 +2211,14 @@ mod tests {
                     let mut serial_hits = Vec::new();
                     let mut counts = FoldCounts::default();
                     let mut pause = 0u64;
-                    fold_two_hit::<false, false>(
+                    fold_serial(
+                        false,
                         &x,
                         &seeds,
                         &mut serial_hash,
                         &mut serial_hits,
-                        None,
                         &mut pause,
                         &mut counts,
-                        &mut part::PartOut::default(),
-                        &[],
                     );
                     let saved = serial_hash.chain[1..serial_hash.occupancy as usize]
                         .iter()
@@ -2212,16 +2291,14 @@ mod tests {
                         let mut lv_hash = new_lv_hash();
                         let mut lv_hits = Vec::new();
                         let before = super::super::super::x_diag_lv::test_skips();
-                        fold_two_hit::<false, false>(
+                        fold_serial(
+                            false,
                             &x,
                             &seeds,
                             &mut lv_hash,
                             &mut lv_hits,
-                            None,
                             &mut pause,
                             &mut FoldCounts::default(),
-                            &mut part::PartOut::default(),
-                            &[],
                         );
                         let skipped = super::super::super::x_diag_lv::test_skips() - before;
                         assert!(skipped > 0, "case {case_no}: no walk skipped");
@@ -2265,16 +2342,14 @@ mod tests {
                     plain_hash.max_level = Vec::new();
                     plain_hash.x_last = Vec::new();
                     let mut plain_hits = Vec::new();
-                    fold_two_hit::<false, false>(
+                    fold_serial(
+                        false,
                         &x,
                         &seeds,
                         &mut plain_hash,
                         &mut plain_hits,
-                        None,
                         &mut pause,
                         &mut FoldCounts::default(),
-                        &mut part::PartOut::default(),
-                        &[],
                     );
                     assert_eq!(plain_hits.iter().map(key).collect::<Vec<_>>(), serial_keys);
                     assert_eq!(hash_state(&plain_hash), hash_state(&serial_hash));
@@ -2285,31 +2360,15 @@ mod tests {
                             h.x_lv2_start();
                             let mut hits = Vec::new();
                             let before = super::super::super::x_diag_lv::test_memos();
-                            if lean {
-                                fold_two_hit::<false, true>(
-                                    &x,
-                                    &seeds,
-                                    &mut h,
-                                    &mut hits,
-                                    None,
-                                    &mut pause,
-                                    &mut FoldCounts::default(),
-                                    &mut part::PartOut::default(),
-                                    &[],
-                                );
-                            } else {
-                                fold_two_hit::<false, false>(
-                                    &x,
-                                    &seeds,
-                                    &mut h,
-                                    &mut hits,
-                                    None,
-                                    &mut pause,
-                                    &mut FoldCounts::default(),
-                                    &mut part::PartOut::default(),
-                                    &[],
-                                );
-                            }
+                            fold_serial(
+                                lean,
+                                &x,
+                                &seeds,
+                                &mut h,
+                                &mut hits,
+                                &mut pause,
+                                &mut FoldCounts::default(),
+                            );
                             let memos = super::super::super::x_diag_lv::test_memos() - before;
                             let at = format!("case {case_no} shadow {shadow} lean {lean}");
                             assert!(memos > 0, "{at}: the memo never answered");
@@ -2344,16 +2403,14 @@ mod tests {
                         for xc in [&x, &x2] {
                             expected_hash.offset = xc.diag_offset as i32;
                             let mut hits = Vec::new();
-                            fold_two_hit::<false, false>(
+                            fold_serial(
+                                false,
                                 xc,
                                 &seeds,
                                 &mut expected_hash,
                                 &mut hits,
-                                None,
                                 &mut pause,
                                 &mut FoldCounts::default(),
-                                &mut part::PartOut::default(),
-                                &[],
                             );
                             expected.push((
                                 hits.iter().map(key).collect::<Vec<_>>(),

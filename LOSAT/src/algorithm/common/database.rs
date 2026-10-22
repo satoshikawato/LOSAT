@@ -615,6 +615,33 @@ pub(crate) fn read_protein_stores(db: &SeqDb, program: &str) -> Result<StoredPro
     })
 }
 
+/// EXPERIMENT (LOSAT_X_BXDBSTREAM): `read_protein_stores` without the store: the same reads in
+/// the same blocks and the same checks in the same order, with the same errors, the number of
+/// residues of each sequence handed to `each` (ordinal id, residues) and its bytes dropped with
+/// its block. A search that reads the sequences again later (BLASTX's passes,
+/// `blastx/x_db_stream.rs`) knows from it that they read, and what the store's
+/// `max_length` would be.
+pub(crate) fn x_check_protein_stores(
+    db: &SeqDb,
+    program: &str,
+    mut each: impl FnMut(u32, usize),
+) -> Result<()> {
+    let mut next_ordinal = 0u32;
+    while let Some(range) = db.next_block(next_ordinal, PROTEIN_STORE_BLOCK_BYTES) {
+        let block = db
+            .read_block(range)
+            .map_err(|error| search_read_error(error, program))?;
+        for i in 0..block.len() {
+            let with_sentinels = block.protein_with_sentinels(i);
+            let ordinal = range.first_ordinal + i as u32;
+            check_protein_sequence(with_sentinels, u64::from(ordinal), program)?;
+            each(ordinal, with_sentinels.len() - 2);
+        }
+        next_ordinal = range.end_ordinal();
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

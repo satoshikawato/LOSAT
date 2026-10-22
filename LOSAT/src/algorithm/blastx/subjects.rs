@@ -8,6 +8,7 @@ use std::borrow::Cow;
 use anyhow::{anyhow, Result};
 
 use super::input::FastaRecord;
+use super::x_db_stream::{XBlock, XCursor, XPass, XStream};
 use crate::algorithm::common::database::StoredProteins;
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 
@@ -26,6 +27,9 @@ pub(crate) enum Subjects<'a> {
     Fasta(&'a [FastaRecord]),
     /// `-db`: the stored sequences of the database.
     Database(&'a StoredProteins),
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): `-db` read in blocks (`x_db_stream.rs`), with the block of
+    /// the current pass or task.
+    Stream(XStream<'a>),
     /// `-db` whose sequences could not be read (`database::BlastxDatabase::read_stores`):
     /// a query batch without a valid context is reported as NCBI reports it (not
     /// searched); the first batch with one fails with `UnreadableSubjects`, which the
@@ -69,6 +73,7 @@ impl<'a> Subjects<'a> {
         match self {
             Subjects::Fasta(records) => records.len(),
             Subjects::Database(stores) => stores.len(),
+            Subjects::Stream(stream) => stream.db.len(),
             Subjects::Unreadable => 0,
         }
     }
@@ -88,6 +93,7 @@ impl<'a> Subjects<'a> {
         match self {
             Subjects::Fasta(records) => records[oid].sequence.len(),
             Subjects::Database(stores) => stores.length(oid),
+            Subjects::Stream(stream) => stream.length(oid),
             Subjects::Unreadable => unreachable!("no subject is read from an unreadable database"),
         }
     }
@@ -104,6 +110,7 @@ impl<'a> Subjects<'a> {
                 Cow::Owned(encoded)
             }
             Subjects::Database(stores) => Cow::Borrowed(stores.residues_with_sentinel(oid)),
+            Subjects::Stream(stream) => stream.encoded_with_sentinel(oid),
             Subjects::Unreadable => unreachable!("no subject is read from an unreadable database"),
         }
     }
@@ -117,6 +124,7 @@ impl<'a> Subjects<'a> {
                 let with_sentinel = stores.residues_with_sentinel(oid);
                 Cow::Borrowed(&with_sentinel[..with_sentinel.len() - 1])
             }
+            Subjects::Stream(stream) => stream.encoded(oid),
             Subjects::Unreadable => unreachable!("no subject is read from an unreadable database"),
         }
     }
@@ -133,6 +141,8 @@ impl<'a> Subjects<'a> {
                 .ok_or_else(|| anyhow!("BLASTX subject-set length exceeds Int8")),
             Subjects::Database(stores) => i64::try_from(stores.total_length())
                 .map_err(|_| anyhow!("BLASTX database length exceeds Int8")),
+            Subjects::Stream(stream) => i64::try_from(stream.db.total_length())
+                .map_err(|_| anyhow!("BLASTX database length exceeds Int8")),
             Subjects::Unreadable => Ok(0),
         }
     }
@@ -144,7 +154,9 @@ impl<'a> Subjects<'a> {
     pub(crate) fn shortest_length(&self) -> usize {
         match self {
             Subjects::Fasta(records) => records.iter().map(|s| s.sequence.len()).min().unwrap_or(0),
-            Subjects::Database(_) | Subjects::Unreadable => BLAST_SEQSRC_MINLENGTH,
+            Subjects::Database(_) | Subjects::Stream(_) | Subjects::Unreadable => {
+                BLAST_SEQSRC_MINLENGTH
+            }
         }
     }
 
@@ -153,7 +165,77 @@ impl<'a> Subjects<'a> {
         match self {
             Subjects::Fasta(records) => records.iter().map(|s| s.sequence.len()).max().unwrap_or(0),
             Subjects::Database(stores) => stores.max_length(),
+            Subjects::Stream(stream) => stream.db.longest(),
             Subjects::Unreadable => 0,
+        }
+    }
+
+    /// The NCBIstdaa residues of subject `oid` for the stages after the preliminary search (the
+    /// composition redo, the traceback, the reports' records): `encoded`, or with
+    /// `LOSAT_X_BXDBSTREAM` a read of the database whose error is the reader's error.
+    pub(crate) fn read_encoded(&self, oid: usize) -> Result<Cow<'a, [u8]>> {
+        match self {
+            Subjects::Stream(stream) => stream.read_encoded(oid),
+            _ => Ok(self.encoded(oid)),
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the reader of one pass over the subjects in ascending
+    /// order (`XSubjectPass::view`).
+    pub(crate) fn x_pass(&self) -> XSubjectPass<'a> {
+        match *self {
+            Subjects::Stream(stream) => XSubjectPass::Stream(XPass::new(stream.db)),
+            subjects => XSubjectPass::Whole(subjects),
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the subjects `first..end` (non-empty) read at once, for
+    /// `x_with_block`; `None` unless the subjects are read in blocks.
+    pub(crate) fn x_read_range(&self, first: usize, end: usize) -> Result<Option<XBlock>> {
+        match self {
+            Subjects::Stream(stream) => stream.db.read_range(first, end).map(Some),
+            _ => Ok(None),
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the subjects with the block of `x_read_range`.
+    pub(crate) fn x_with_block<'b>(&self, block: Option<&'b XBlock>) -> Subjects<'b>
+    where
+        'a: 'b,
+    {
+        match (*self, block) {
+            (Subjects::Stream(stream), Some(block)) => Subjects::Stream(XStream {
+                db: stream.db,
+                block: Some(block),
+            }),
+            (subjects, _) => subjects,
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): what the sink reads of the subjects in its order, when
+    /// they are read in blocks.
+    pub(crate) fn x_cursor(&self) -> Option<XCursor<'a>> {
+        match self {
+            Subjects::Stream(stream) => Some(XCursor::new(stream.db)),
+            _ => None,
+        }
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BXDBSTREAM): the subjects of one pass over them in ascending order: the
+/// subjects themselves, or the blocks of a database read in blocks.
+pub(crate) enum XSubjectPass<'a> {
+    Whole(Subjects<'a>),
+    Stream(XPass<'a>),
+}
+
+impl XSubjectPass<'_> {
+    /// The subjects to read subject `oid` from (`oid` at least that of the call before).
+    #[inline]
+    pub(crate) fn view(&mut self, oid: usize) -> Result<Subjects<'_>> {
+        match self {
+            XSubjectPass::Whole(subjects) => Ok(*subjects),
+            XSubjectPass::Stream(pass) => pass.view(oid).map(Subjects::Stream),
         }
     }
 }

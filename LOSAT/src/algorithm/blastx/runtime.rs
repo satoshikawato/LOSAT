@@ -359,7 +359,7 @@ fn x_speculate_match(
     use crate::core::composition_adjustment::redo_alignment::X_REDO_PROBE;
     worker.x_set_matrix(None);
     X_REDO_PROBE.with(|probe| probe.set(0));
-    let encoded = subjects.encoded(list.oid);
+    let encoded = subjects.read_encoded(list.oid).ok()?;
     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
     let redone = worker
         .redo_list_observed(&input, batch, &encoded, &mut |_| {})
@@ -521,6 +521,7 @@ pub fn x_search_internal_in_pool<'a>(
         ungapped_link_state: None,
         options,
         subjects,
+        x_cursor: subjects.x_cursor(),
         db_length: subjects.total_length()?,
         ordinal: 0,
         stream: None,
@@ -569,6 +570,7 @@ pub fn search_internal_observed<'a>(
         ungapped_link_state: None,
         options,
         subjects,
+        x_cursor: subjects.x_cursor(),
         db_length: subjects.total_length()?,
         ordinal: 0,
         stream: None,
@@ -585,11 +587,24 @@ struct Runtime<'a> {
     observer: &'a mut dyn RuntimeObserver,
     options: &'a ResolvedOptions,
     subjects: Subjects<'a>,
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): what the sink reads of a database read in blocks.
+    x_cursor: Option<super::x_db_stream::XCursor<'a>>,
     db_length: i64,
     ordinal: usize,
     stream: Option<HspStream>,
     chunk: Option<HspStream>,
     output: Vec<BatchResults>,
+}
+
+impl Runtime<'_> {
+    /// The length of subject `oid`, read in the sink's order (`LOSAT_X_BXDBSTREAM`: from the
+    /// index, `x_db_stream::XCursor`).
+    fn subject_length(&mut self, oid: usize) -> Result<usize> {
+        match &mut self.x_cursor {
+            Some(cursor) => cursor.length(oid),
+            None => Ok(self.subjects.length(oid)),
+        }
+    }
 }
 impl PreliminarySink for Runtime<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
@@ -803,7 +818,7 @@ impl PreliminarySink for Runtime<'_> {
     ) -> Result<()> {
         self.ungapped_link_state = prepared;
         if let Some(prepared) = prepared {
-            let length = self.subjects.length(oid) as i32;
+            let length = self.subject_length(oid)? as i32;
             let link = super::linking::link_parameters(self.options)
                 .expect("ungapped sum-stat parameters");
             self.observer
@@ -982,7 +997,10 @@ impl PreliminarySink for Runtime<'_> {
         //          }
         // ```
         if !self.options.gapped {
-            let encoded = self.subjects.encoded(oid);
+            let encoded = match &mut self.x_cursor {
+                Some(cursor) => std::borrow::Cow::Owned(cursor.encoded(oid)?.into_owned()),
+                None => self.subjects.encoded(oid),
+            };
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1789
             // ```c++
             // {
@@ -1013,8 +1031,8 @@ impl PreliminarySink for Runtime<'_> {
             // ```
             if !input.is_empty() {
                 if let Some(link) = super::linking::link_parameters(self.options) {
-                    self.observer
-                        .link_run(self.subjects.length(oid) as i32, false, &link);
+                    let length = self.subject_length(oid)? as i32;
+                    self.observer.link_run(length, false, &link);
                 }
             }
             let mut linked = super::statistics::evaluate_ungapped(
@@ -1164,8 +1182,8 @@ impl PreliminarySink for Runtime<'_> {
             // ```
             if !input.is_empty() {
                 if let Some(link) = super::linking::link_parameters(self.options) {
-                    self.observer
-                        .link_run(self.subjects.length(oid) as i32, false, &link);
+                    let length = self.subject_length(oid)? as i32;
+                    self.observer.link_run(length, false, &link);
                 }
             }
             let mut linked = super::statistics::evaluate_ungapped(
@@ -1290,10 +1308,10 @@ impl PreliminarySink for Runtime<'_> {
         //            compare with sum e-values. Use decay rate to compensate for
         //            multiple tests. */
         // ```
+        let subject_length = self.subject_length(oid)? as i32;
         if !input.is_empty() {
             if let Some(link) = super::linking::link_parameters(self.options) {
-                self.observer
-                    .link_run(self.subjects.length(oid) as i32, true, &link);
+                self.observer.link_run(subject_length, true, &link);
             }
         }
         let mut linked = evaluate_gapped(
@@ -1301,7 +1319,7 @@ impl PreliminarySink for Runtime<'_> {
             batch,
             params,
             self.options,
-            self.subjects.length(oid) as i32,
+            subject_length,
             self.db_length,
             1.0,
         )?;
@@ -1909,7 +1927,7 @@ impl PreliminarySink for Runtime<'_> {
                 } else {
                     x_serial += 1;
                     let x_t = super::x_timing::lap();
-                    let encoded = self.subjects.encoded(list.oid);
+                    let encoded = self.subjects.read_encoded(list.oid)?;
                     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
                     let redone =
                         state.redo_list_observed(&input, batch, &encoded, &mut |event| {
@@ -2217,7 +2235,7 @@ impl PreliminarySink for Runtime<'_> {
             //         ASSERT(batches);
             // ```
             for lists in result_batches {
-                let encoded = self.subjects.encoded(lists[0].oid);
+                let encoded = self.subjects.read_encoded(lists[0].oid)?;
                 for list in lists {
                     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:402-407

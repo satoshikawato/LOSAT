@@ -133,7 +133,15 @@ fn search_task(
     x_containment: bool,
 ) -> Task {
     let mut kept = Vec::new();
-    for oid in task * k..subjects.len().min((task + 1) * k) {
+    let (first, end) = (task * k, subjects.len().min((task + 1) * k));
+    // EXPERIMENT (LOSAT_X_BXDBSTREAM): the task's subjects, read at once when the subjects are read
+    // in blocks; an error stops the flow at the task's first subject.
+    let x_block = match subjects.x_read_range(first, end) {
+        Ok(block) => block,
+        Err(error) => return (kept, Some((first, error))),
+    };
+    let subjects = subjects.x_with_block(x_block.as_ref());
+    for oid in first..end {
         match compute_subject(
             subjects,
             batch,

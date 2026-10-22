@@ -116,6 +116,60 @@
 //! (`x_block_words_fit`, tested before the first block), so that the reference path's refusal,
 //! which comes before any row, is never made in a later block.
 //!
+//! LOSAT_X_BPQBLOCKSA (strict set, `x_bp_qblock_sa`, outfmt 8, 9 and 12) and LOSAT_X_BPQBLOCKXML
+//! (strict set, `x_bp_qblock_xml`, outfmt 5) take the other formats of one blastp report; both act
+//! only with `LOSAT_X_BPQBLOCK`, and the shadow implies both:
+//! - outfmt 8, 9 and 12 (Seq-annot of Seq-aligns as ASN.1 text, BER and JSON): NCBI writes one
+//!   self-contained Seq-annot per query that has alignments, at once, a new object stream for each,
+//!   and writes no prolog and no epilog for them. LOSAT's writer keeps nothing from one query to the
+//!   next (new encoder per query); what it reads is the query's final list and fixed inputs (the
+//!   program, the database title, the ids `Query_N` and `Subject_N` of the records, the oid of a
+//!   `-db` subject). So the blocks' documents written one after the other are the documents of
+//!   the whole search. The refusals that depend on the hits are those of a `-db` definition line
+//!   (`database::x_titles_read_allow_blocks`: every sequence has one definition line that reads and
+//!   holds no byte outside ' ' ..= '~'); a `-subject` search reads no title, and an encoder's real
+//!   (e-value, bit score) is finite, so the reference path fails nowhere that the blocks do not.
+//! - outfmt 5 (BLAST XML): NCBI makes one formatter for the run; its first formatted query writes
+//!   the header (from that query), each query appends an Iteration numbered over the run, and the
+//!   epilog writes the end once. The writer takes the count of the queries before its block
+//!   (`BlastpReports::x_queries_before`, which starts the header and `iter-num`) and the epilog
+//!   flag (the last block), as outfmt 7's count does; the run values (program, version,
+//!   `BlastOutput_db`, matrix, gap costs, filter, `db-num`, `db-len`, kappa, lambda, entropy) are
+//!   fixed inputs; `hsp-len`, `eff-space`, the masks and the message are the query's own. The
+//!   writer refuses what NCBI cannot write (a byte >= 0x80 or a control byte in a name, a title it
+//!   cannot guess the encoding of or reads past the end of) before its first byte, which in a later
+//!   block would come after the earlier blocks' bytes. So the block search is taken only when
+//!   none is refused, checked with the writer's own functions before the first block: the database
+//!   name and every query's definition line and message id (`x_block_xml_run_allowed`), every
+//!   `-subject` record's names (`x_block_xml_subjects_allowed`; conservative, the writer refuses
+//!   only a subject with hits), and with `-db` the definition lines as for outfmt 8
+//!   (`database::x_titles_read_allow_blocks`). Otherwise the search of all queries refuses where
+//!   it does today; the file sink is not created before then.
+//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
+//! ```c++
+//!         if (results.HasAlignments()) {
+//!     ...
+//!             if(m_FormatType == CFormattingArgs::eAsnText)
+//!             	m_Outfile << MSerial_AsnText << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-368,2232-2246
+//! ```c++
+//!     // no header for some output types
+//!     if (m_FormatType >= CFormattingArgs::eXml) {
+//!     ...
+//!     } else if (m_FormatType >= CFormattingArgs::eTabular)
+//!         return;  // No footer for these.
+//!     ...
+//!         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-744
+//! ```c++
+//!     if( incremental_output && incremental_struct->m_IterationNum == 0) {
+//!     ...
+//!         if (incremental_struct)
+//!         	incremental_struct->m_IterationNum++;
+//! ```
+//!
 //! `LOSAT_X_BPQBLOCK` is a value switch of the strict set (`utils/xswitch.rs`): a positive number
 //! of query letters (the block closes at the first batch end at or past it), 50,000 when it is
 //! not set or is not a positive number. `0`, or `LOSAT_X_DEFAULT=0` with the variable not set,
@@ -290,6 +344,127 @@ pub(crate) fn x_bp_qblock_fmt() -> u8 {
             0
         }
     })
+}
+
+// No NCBI counterpart: reads LOSAT_X_BPQBLOCKSA and LOSAT_X_BPQBLOCKXML (strict-set switches: on
+// unless `0`, or `LOSAT_X_DEFAULT=0` and not set) once; the shadow (LOSAT_X_BPQBLOCKFMTSHADOW) implies
+// both, as it implies LOSAT_X_BPQBLOCKFMT. They choose which reports the block search writes, not any
+// value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKSA): whether the block search also takes one Seq-annot report
+/// (outfmt 8, 9 or 12). Acts only with `LOSAT_X_BPQBLOCK`.
+pub(crate) fn x_bp_qblock_sa() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var_os("LOSAT_X_BPQBLOCKFMTSHADOW").is_some()
+            || crate::utils::xswitch::on("LOSAT_X_BPQBLOCKSA")
+    })
+}
+
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML): whether the block search also takes one BLAST XML report
+/// (outfmt 5). Acts only with `LOSAT_X_BPQBLOCK`.
+pub(crate) fn x_bp_qblock_xml() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var_os("LOSAT_X_BPQBLOCKFMTSHADOW").is_some()
+            || crate::utils::xswitch::on("LOSAT_X_BPQBLOCKXML")
+    })
+}
+
+// No NCBI counterpart: the reports the block search writes; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): which report the block search writes, which the driver's checks
+/// before the first block depend on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum XBlockReport {
+    /// Outfmt 6 and 7.
+    Tabular,
+    /// Outfmt 0 (LOSAT_X_BPQBLOCKFMT).
+    Pairwise,
+    /// Outfmt 8, 9 and 12 (LOSAT_X_BPQBLOCKSA).
+    Seqalign,
+    /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
+    Xml,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
+// ```c++
+//     if( incremental_output && incremental_struct->m_IterationNum == 0) {
+//     ...
+//         *out_stream << serial_xml_start << "\n<BlastOutput_iterations>" ;
+// ```
+// The refusals of the XML report (`write_blastp_xml`) come before its first byte; a block would
+// make them after the bytes of the blocks before. These are the writer's own checks, made for the
+// whole run before the first block (`names::check_text`, `names::xml_query_title`,
+// `query_warnings::warning_query_id`, `names::xml_subject_names`); when one fails the search of
+// all queries runs and refuses where it does today.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML): whether the database name and every query's definition line and
+/// message id can be written by the XML report. The message of a query holds only its warning id
+/// (`warning_query_id`) besides ASCII text. The database name check is defensive: the CLI refuses
+/// the name in block 0 before any byte with the same output, and `run_local` takes no `-db`; it
+/// would bind if `run_local` ever searched a database (its file is created at `open()`).
+pub(crate) fn x_block_xml_run_allowed(
+    db_name: &str,
+    queries: &[FastaRecord],
+    pool: &SearchPool<'_>,
+) -> bool {
+    use crate::report::blast_xml::names;
+    names::check_text(db_name.as_bytes()).is_ok()
+        && x_all_in_groups(queries.len(), pool, |range| {
+            queries[range].iter().all(|record| {
+                names::xml_query_title(&record.title, true).is_ok()
+                    && names::check_text(&crate::report::query_warnings::warning_query_id(
+                        record.local_id.as_bytes(),
+                        &record.title,
+                    ))
+                    .is_ok()
+            })
+        })
+}
+
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML): whether the names of every `-subject` record can be written
+/// by the XML report (`names::xml_subject_names`; the report refuses only a subject with hits,
+/// so this is conservative).
+pub(crate) fn x_block_xml_subjects_allowed(
+    subjects: &[FastaRecord],
+    pool: &SearchPool<'_>,
+) -> bool {
+    x_all_in_groups(subjects.len(), pool, |range| {
+        subjects[range].iter().all(|record| {
+            crate::report::blast_xml::names::xml_subject_names(
+                record.local_id.as_bytes(),
+                &record.title,
+                true,
+            )
+            .is_ok()
+        })
+    })
+}
+
+// No NCBI counterpart: runs a check over groups of consecutive records, on the pool's threads
+// when it has more than one; the outcome is whether all pass.
+fn x_all_in_groups(
+    count: usize,
+    pool: &SearchPool<'_>,
+    allowed: impl Fn(Range<usize>) -> bool + Sync,
+) -> bool {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() && pool.threads() > 1 {
+        use rayon::prelude::*;
+        let group = count.div_ceil(pool.threads()).max(1);
+        return pool.install(|| {
+            (0..count)
+                .into_par_iter()
+                .step_by(group)
+                .all(|start| allowed(start..(start + group).min(count)))
+        });
+    }
+    let _ = pool;
+    allowed(0..count)
 }
 
 // No NCBI counterpart: a copy of what LOSAT writes, for the shadow (LOSAT_X_BPQBLOCKFMTSHADOW); it
@@ -1033,6 +1208,110 @@ mod tests {
             None
         );
         assert_eq!(x_query_blocks(&[], &[], 1), Some(vec![]));
+    }
+
+    // The XML checks of the block search agree with the writer's own functions on the probe titles
+    // of `report/blast_xml/names.rs`: names that pass (periods, `TPA:`, doubled spaces, an empty
+    // title), a byte >= 0x80 (UTF-8 and Latin-1), a control byte, and punctuation that
+    // `x_CleanAndCompress` reads past the end of. A one-record check and the same record among
+    // others, on a pool of 1 and 3 threads.
+    #[test]
+    fn the_xml_checks_agree_with_the_writers_functions() {
+        use crate::report::blast_xml::{names, XmlSubjects};
+        let titles: [&[u8]; 12] = [
+            b"q1 title ending with periods...",
+            b"TPA: q3 prefixed",
+            b"q4  double  space ,  comma ;",
+            b"",
+            b"s2 &amp; <y> \"q\"",
+            b"tab\there",
+            "caf\u{e9}".as_bytes(),
+            b"caf\xe9",
+            b"a\x01b",
+            b", ,",
+            b",",
+            b"x \xc3\xa9 y",
+        ];
+        let record = |index: usize, title: &[u8]| {
+            FastaRecord::new(
+                format!("Query_{}", index + 1),
+                title,
+                b"MKVLAAGIVALLLAAGCSS",
+            )
+        };
+        let ok_query = |record: &FastaRecord| {
+            names::query_texts(
+                "BLASTP",
+                std::slice::from_ref(record),
+                true,
+                &[Vec::new()],
+                |_| false,
+            )
+            .is_ok()
+        };
+        let ok_subject = |record: &FastaRecord| {
+            XmlSubjects::Records {
+                records: std::slice::from_ref(record),
+                length: &|_| 0,
+                protein: true,
+            }
+            .names(0, "BLASTP")
+            .is_ok()
+        };
+        let records: Vec<FastaRecord> = titles
+            .iter()
+            .enumerate()
+            .map(|(index, title)| record(index, title))
+            .collect();
+        let passing = records.iter().filter(|record| ok_query(record)).count();
+        assert!(
+            passing >= 5 && passing < records.len(),
+            "the probe titles pass and fail: {passing}"
+        );
+        for threads in [1, 3] {
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                for record in &records {
+                    let one = std::slice::from_ref(record);
+                    assert_eq!(
+                        x_block_xml_run_allowed("db", one, pool),
+                        ok_query(record),
+                        "query title {:?}, threads {threads}",
+                        String::from_utf8_lossy(&record.title)
+                    );
+                    assert_eq!(
+                        x_block_xml_subjects_allowed(one, pool),
+                        ok_subject(record),
+                        "subject title {:?}, threads {threads}",
+                        String::from_utf8_lossy(&record.title)
+                    );
+                }
+                // One refusable record among many fails the whole set, wherever it lies.
+                let many = |bad: Option<usize>| -> Vec<FastaRecord> {
+                    (0..50)
+                        .map(|index| {
+                            let title: &[u8] = if Some(index) == bad {
+                                "caf\u{e9}".as_bytes()
+                            } else {
+                                b"ok title"
+                            };
+                            record(index, title)
+                        })
+                        .collect()
+                };
+                assert!(x_block_xml_run_allowed("db", &many(None), pool));
+                assert!(x_block_xml_subjects_allowed(&many(None), pool));
+                for bad in [0, 17, 49] {
+                    assert!(!x_block_xml_run_allowed("db", &many(Some(bad)), pool));
+                    assert!(!x_block_xml_subjects_allowed(&many(Some(bad)), pool));
+                }
+                // The database name is checked as the writer checks it.
+                assert!(x_block_xml_run_allowed("", &many(None), pool));
+                assert!(!x_block_xml_run_allowed("d\u{e9}", &many(None), pool));
+                assert!(!x_block_xml_run_allowed("d\x01", &many(None), pool));
+                Ok(())
+            })
+            .expect("pool");
+        }
     }
 
     #[test]

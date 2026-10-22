@@ -157,27 +157,33 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
     let run = run(matrix);
     let first = XmlQuery {
         id: b"Query_1",
-        def: b"noh first query",
+        title: b"noh first query",
         len: 32,
         stats: STATS,
         message: Some(b"No hits found"),
+        searched: true,
+        masks: &[],
     };
     writer.query(&run, &first, out, |_| Ok(())).unwrap();
     let second = XmlQuery {
         id: b"Query_2",
-        def: b"qp2 unrelated protein (no hits expected)",
+        title: b"qp2 unrelated protein (no hits expected)",
         len: 45,
         stats: STATS,
         message: None,
+        searched: true,
+        masks: &[],
     };
     writer
         .query(&run, &second, out, |sink| {
             sink.hit(
                 &XmlHit {
                     id: b"sp1",
-                    def: b"sp1 subject protein alpha",
+                    title: b"sp1 subject protein alpha",
                     accession: b"Subject_1",
                     len: 137,
+                    taxid: 0,
+                    taxonomy: crate::report::blast_xml::records::UNNAMED,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {
@@ -195,7 +201,6 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
                         ops: None,
                         query_first: 32,
                         query_step: 1,
-                        masks: &[],
                     })?;
                     hsps.hsp(&XmlHsp {
                         score: 20,
@@ -212,7 +217,6 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
                         ops: None,
                         query_first: 23,
                         query_step: 1,
-                        masks: &[],
                     })
                 },
             )
@@ -226,7 +230,7 @@ fn a_document_is_ncbis_pieces_joined() {
     let mut out = Vec::new();
     let mut writer = BlastXmlWriter::new(0);
     write_hits(&mut writer, &matrix, &mut out);
-    writer.finish(&mut out);
+    writer.finish(&mut out).unwrap();
     let expected = format!("{HEADER}{NO_HITS}{WITH_HITS}{TRAILER}");
     assert_eq!(String::from_utf8(out).unwrap(), expected);
 }
@@ -241,21 +245,23 @@ fn a_later_call_continues_the_document() {
     let run = run(&matrix);
     let query = XmlQuery {
         id: b"Query_2",
-        def: b"qp2 unrelated protein (no hits expected)",
+        title: b"qp2 unrelated protein (no hits expected)",
         len: 45,
         stats: STATS,
         message: None,
+        searched: true,
+        masks: &[],
     };
     writer.query(&run, &query, &mut out, |_| Ok(())).unwrap();
     let text = String::from_utf8(out.clone()).unwrap();
     assert!(text.starts_with("\n<Iteration>\n  <Iteration_iter-num>2</Iteration_iter-num>"));
     assert!(!text.contains("<BlastOutput>"));
-    writer.finish(&mut out);
+    writer.finish(&mut out).unwrap();
     assert!(out.ends_with(TRAILER.as_bytes()));
     // an epilog call for a run with no query writes the epilog's end of line alone
     // (blast_format.cpp:2242-2243)
     let mut none = Vec::new();
-    BlastXmlWriter::new(0).finish(&mut none);
+    BlastXmlWriter::new(0).finish(&mut none).unwrap();
     assert_eq!(none, b"\n");
 }
 
@@ -268,10 +274,13 @@ fn blastn_parameters_and_the_statistics_without_a_valid_context() {
     let mut writer = BlastXmlWriter::new(0);
     let query = XmlQuery {
         id: b"Query_1",
-        def: b"No definition line",
+        // an empty generated title is written as `No definition line`
+        title: b"",
         len: 0,
         stats: XmlStats::NONE,
         message: Some(b"x"),
+        searched: true,
+        masks: &[],
     };
     writer.query(&run, &query, &mut out, |_| Ok(())).unwrap();
     let text = String::from_utf8(out).unwrap();

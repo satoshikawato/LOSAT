@@ -1,6 +1,6 @@
 # docs/evidence/wasm_four_program_20260915 (archived)
 
-Four-program Wasm optimization, run-01 (2026-09-15): adoption decision (ADOPTED 2026-09-15), report, three-pair results, and the packed execution evidence. Plan: [wasm_four_program_optimization_plan_20260915.md](../../wasm_four_program_optimization_plan_20260915.md).
+Four-program Wasm optimization, run-01 (2026-09-15): adoption decision (ADOPTED 2026-09-15), report, three-pair results, and the packed execution evidence. Plan: [wasm_four_program_optimization_plan_20260915.md](../../archive/wasm_four_program_optimization_plan_20260915.md).
 
 The files moved to a GitHub release asset on 2026-10-22 (slim-20261022 P2a): no code, test,
 script, CI workflow, or skill read them.

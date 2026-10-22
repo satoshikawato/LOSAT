@@ -2,7 +2,7 @@
 
 作成日: 2026-09-13
 
-状態: 計測基盤と TBLASTX 限定 TurboFan 比較実行設定を実装。ユーザーのメモリ増許容を受けた [追加報告](evidence/wasm_performance_20260913/run-20260913-02/REPORT.md)に再測定・採用と追加 Rust 3候補の棄却を記録。[初回報告](evidence/wasm_performance_20260913/run-20260913-01/REPORT.md)は凍結したまま保持。P4は既存 megablast 出力差により PARTIAL。
+状態: 計測基盤と TBLASTX 限定 TurboFan 比較実行設定を実装。ユーザーのメモリ増許容を受けた [追加報告](../evidence/wasm_performance_20260913/run-20260913-02/REPORT.md)に再測定・採用と追加 Rust 3候補の棄却を記録。[初回報告](../evidence/wasm_performance_20260913/run-20260913-01/REPORT.md)は凍結したまま保持。P4は既存 megablast 出力差により PARTIAL。
 
 対象: LOSAT Native、WASI serial command、WASI threaded command。再利用時の検証には既存reactorも使用する。
 
@@ -61,7 +61,7 @@ V8は実行中のWasm関数を最適化コードへ途中置換しないと説�
 
 ## 3. 共通制約
 
-- [AGENTS.md](../AGENTS.md) と [verify-ncbi-parity-and-speed](../.agents/skills/verify-ncbi-parity-and-speed/SKILL.md) を適用する。実装前に対応するNCBIソースを読み、変更箇所へファイル名・行番号・関連snippetをコメントとして付ける。
+- [AGENTS.md](../../AGENTS.md) と [verify-ncbi-parity-and-speed](../../.agents/skills/verify-ncbi-parity-and-speed/SKILL.md) を適用する。実装前に対応するNCBIソースを読み、変更箇所へファイル名・行番号・関連snippetをコメントとして付ける。
 - NCBIは挙動の唯一の権威であり、実行ファイルは検証oracleに限る。LOSATのruntime/build/FFI/fallbackから呼ばない。
 - 候補HSP、seed、二-hit状態、X-drop、scoring、統計、丸め、tie-break、pruning、出力順を維持する。CBS/SEGの省略、近似計算、新しい候補削減で速くしない。
 - local-subject TBLASTXの非既定 `db_gencode` は既存の承認済み例外を適用する。それ以外の差を例外へ含めない。
@@ -113,8 +113,8 @@ compiled-module再利用は最適化済みコードの再利用まで保証す�
 
 1. 作業ツリーと既存変更を確認し、入力・ソース・runnerを含むbaseline snapshotを保存する。別target directoryで候補を作り、baseline artifactを差し替えない。
 2. 結果をrun IDごとの新規ディレクトリへ出す。古い `.out` と新しい `.log` が組み合わさらないようにし、成功status・対応するargv/hashが揃った結果だけを比較表へ入れる。
-3. [run_comparison.sh](../LOSAT/tests/run_comparison.sh) と [comparison_data.py](../LOSAT/tests/comparison_data.py) の必要箇所だけを修正する。statusがない旧ログは新しい性能比較では拒否し、過去資料として残す。失敗・timeout・同名の古い出力を使う検証を追加する。
-4. 計測は既存の [wasm_performance.py](../LOSAT/tests/wasm_performance.py)、[benchmark_wasm_threading.py](../LOSAT/tests/benchmark_wasm_threading.py)、[benchmark_wasi_reuse.js](../LOSAT/tests/benchmark_wasi_reuse.js) を再利用する。新しい汎用benchmark基盤を作らず、必要なfixture選択・Node引数・run manifestを既存の担当箇所へ追加する。
+3. [run_comparison.sh](../../LOSAT/tests/run_comparison.sh) と [comparison_data.py](../../LOSAT/tests/comparison_data.py) の必要箇所だけを修正する。statusがない旧ログは新しい性能比較では拒否し、過去資料として残す。失敗・timeout・同名の古い出力を使う検証を追加する。
+4. 計測は既存の [wasm_performance.py](../../LOSAT/tests/wasm_performance.py)、[benchmark_wasm_threading.py](../../LOSAT/tests/benchmark_wasm_threading.py)、[benchmark_wasi_reuse.js](../../LOSAT/tests/benchmark_wasi_reuse.js) を再利用する。新しい汎用benchmark基盤を作らず、必要なfixture選択・Node引数・run manifestを既存の担当箇所へ追加する。
 5. Node引数はargv配列で記録する。`NODE_BIN` にオプション込み文字列を入れない。Node起動時に指定するコンパイル設定と、LOSATの検索引数を分ける。
 6. 次の旧失敗を現在のartifactで再確認する。BLASTN `NZ_CP006932` selfのthreaded n8、BLASTP `AP027131.faa/NZ_CP006932.faa` のthreaded n8のout-of-boundsを、単なる速度欠測と扱わない。再現すれば正しさの修正を性能差分から分離し、影響する段階の採用を止める。
 
@@ -159,7 +159,7 @@ cargo build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm
 - ブラウザでNode flagsが使えるとは扱わない。WASI hostの検証からブラウザでの改善を主張しない。既存module再利用の効果は確認するが、ブラウザアプリへの統合は後続の別作業とする。
 - runtimeの互換性を変えるguard削除や永続pool導入へ広げない。
 
-主な担当箇所は [wasi_thread_host.js](../LOSAT/tests/wasi_thread_host.js)、既存benchmark runner、必要と判明した場合の [TBLASTX run_impl.rs](../LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs) と [linking.rs](../LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs)。
+主な担当箇所は [wasi_thread_host.js](../../LOSAT/tests/wasi_thread_host.js)、既存benchmark runner、必要と判明した場合の [TBLASTX run_impl.rs](../../LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs) と [linking.rs](../../LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs)。
 
 ### 完了条件
 
@@ -202,7 +202,7 @@ cargo build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm
 
 DP経路を通らないmegablastで、DP調整の効果を主張しない。2 chunkや1 chunkしかない入力では仕事量不足を記録する。NCBIの `MAX_DBSEQ_LEN`、overlap、mask境界を性能だけの理由で変更しない。さらに細かいscan分割が必要と判明した場合は、その状態継承の設計課題を残し、本段階へ混ぜない。
 
-主な担当箇所は [BLASTN run.rs](../LOSAT/src/algorithm/blastn/blast_engine/run.rs) と [alignment/gapped.rs](../LOSAT/src/algorithm/blastn/alignment/gapped.rs)。greedy、purge、interval treeそのものは、プロファイルとNCBI参照で必要性が判明しない限り変更しない。
+主な担当箇所は [BLASTN run.rs](../../LOSAT/src/algorithm/blastn/blast_engine/run.rs) と [alignment/gapped.rs](../../LOSAT/src/algorithm/blastn/alignment/gapped.rs)。greedy、purge、interval treeそのものは、プロファイルとNCBI参照で必要性が判明しない限り変更しない。
 
 ### 完了条件
 
@@ -236,7 +236,7 @@ DP経路を通らないmegablastで、DP調整の効果を主張しない。2 ch
 
 既に存在するBLOSUM62特殊化、SIMD設定、search-scoped pool、subject/Kappa並列化を作り直さない。`for_each_init` / `map_init` の初期化回数をworker数と同じと仮定せず、実数を計測する。大規模SIMD DP、別alignment算法、汎用arena/cacheは初期候補にしない。
 
-主な担当箇所は [BLASTP blast_engine.rs](../LOSAT/src/algorithm/blastp/blast_engine.rs)、[gapalign.rs](../LOSAT/src/algorithm/blastp/gapalign.rs)、選ばれた処理の直接のcaller/helper。Kappa match-redoとquery-redoを混同せず、変更した分岐を通るfixtureを用意する。
+主な担当箇所は [BLASTP blast_engine.rs](../../LOSAT/src/algorithm/blastp/blast_engine.rs)、[gapalign.rs](../../LOSAT/src/algorithm/blastp/gapalign.rs)、選ばれた処理の直接のcaller/helper。Kappa match-redoとquery-redoを混同せず、変更した分岐を通るfixtureを用意する。
 
 ### 完了条件
 
@@ -305,4 +305,4 @@ TBLASTX cold Node/WASI のピーク RSS 増分だけを `max(基準の10%, 48 Mi
 
 非実装の検証完了は `COMPLETE`、候補採用は `ACCEPTED`、棄却は `REJECTED`、対象外の根拠を確認した場合は `SKIPPED`、測定が不確定なら `INCONCLUSIVE` と記録する。前段階の非採用は次段階の独立した調査を妨げないが、未解決の共有runtime障害や出力差が影響する候補は採用しない。
 
-各段階の報告では、共通の[証拠テンプレート](../.agents/skills/verify-ncbi-parity-and-speed/references/evidence.md)を使い、次に使うbaselineのソース・artifact・runtime設定と、残る課題を明記する。計画の保存を、実装や検証の完了として記録しない。
+各段階の報告では、共通の[証拠テンプレート](../../.agents/skills/verify-ncbi-parity-and-speed/references/evidence.md)を使い、次に使うbaselineのソース・artifact・runtime設定と、残る課題を明記する。計画の保存を、実装や検証の完了として記録しない。

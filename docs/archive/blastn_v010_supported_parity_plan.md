@@ -47,7 +47,7 @@ Current artifact summary:
 - Static NCBI BLAST+ 2.17.0 source analysis establishes that the remaining
   common-endpoint survivor is source-underdetermined. The release contract is
   defined by
-  [`PD-BLASTN-HSP-CANONICALIZATION`](product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md)
+  [`PD-BLASTN-HSP-CANONICALIZATION`](../product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md)
   Version 1.1, not by one precompiled binary's survivor.
 
 Before any patch, refresh this baseline and save:

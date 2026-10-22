@@ -1,6 +1,6 @@
 # docs/evidence/wasm_threading_20260913 (archived)
 
-Wasm threading remediation evidence (2026-09-13): cold-process and reuse performance tables and the packed evidence tarball. Report: [wasm_threading_remediation_results_20260913.md](../../wasm_threading_remediation_results_20260913.md).
+Wasm threading remediation evidence (2026-09-13): cold-process and reuse performance tables and the packed evidence tarball. Report: [wasm_threading_remediation_results_20260913.md](../../archive/wasm_threading_remediation_results_20260913.md).
 
 The files moved to a GitHub release asset on 2026-10-22 (slim-20261022 P2a): no code, test,
 script, CI workflow, or skill read them.

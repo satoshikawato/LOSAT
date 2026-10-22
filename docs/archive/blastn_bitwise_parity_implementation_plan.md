@@ -23,7 +23,7 @@ The current native release binary is pinned to LOSAT commit
 `92b934d8defd299bdf821055d92053b8f8923fad` and SHA-256
 `d87f8c210d3506bd75ac9b0a5d7628a8c64bcb9c26f0b99923c2742fea366582`.
 Fresh manifest runs cover all 14 cases from
-[`tests/blastn_parity_manifest.tsv`](../LOSAT/tests/blastn_parity_manifest.tsv):
+[`tests/blastn_parity_manifest.tsv`](../../LOSAT/tests/blastn_parity_manifest.tsv):
 
 - 13 cases are byte-identical and match NCBI in hit count, coordinate keys,
   identity, alignment length, mismatches, gap opens, E-value, and bit score.
@@ -32,9 +32,9 @@ Fresh manifest runs cover all 14 cases from
 - The installed binary's first residual differs from LOSAT in the
   edit-script-derived statistics, but a direct current-source trace of all
   five residual HSPs produces the same greedy scripts as LOSAT.
-- The active BLASTN writer in [`src/algorithm/blastn/hsp.rs`](../LOSAT/src/algorithm/blastn/hsp.rs)
+- The active BLASTN writer in [`src/algorithm/blastn/hsp.rs`](../../LOSAT/src/algorithm/blastn/hsp.rs)
   emits NCBI-compatible outfmt-6/7 rows and headers, and
-  [`tests/compare_blastn_parity.py`](../LOSAT/tests/compare_blastn_parity.py)
+  [`tests/compare_blastn_parity.py`](../../LOSAT/tests/compare_blastn_parity.py)
   checks both structured fields and raw bytes for fresh paired runs.
 
 The comparison helper retains its structured diagnostic view (comment lines are
@@ -47,7 +47,7 @@ Source-defined BLASTN cases require exact official NCBI BLAST+ 2.17.0 binary
 parity. When distinct HSP edit scripts tie on every field in the NCBI
 common-endpoint comparator, the NCBI source does not define which edit script
 must survive its `qsort` and first-survivor purge. Under
-[`PD-BLASTN-HSP-CANONICALIZATION`](product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md)
+[`PD-BLASTN-HSP-CANONICALIZATION`](../product_decisions/PD-BLASTN-HSP-CANONICALIZATION.md)
 Version 1.1, LOSAT preserves that source semantics and does not add a secondary
 total order solely to reproduce one precompiled binary's survivor.
 
@@ -82,7 +82,7 @@ Out of scope:
 - Generic alignment heuristics, score-equivalent alignment selection, or
   changing `gapopen` statistics independently of the NCBI edit script.
 - Unrelated dirty-tree files and the older broad plan in
-  `docs/blastn_bit_parity_fix_plan.md`.
+  `docs/archive/blastn_bit_parity_fix_plan.md`.
 
 ## Phase 1 — Make the parity gate truthful
 

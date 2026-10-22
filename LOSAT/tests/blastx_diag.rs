@@ -6,9 +6,9 @@
 //! AVX2 cell test), and the reference runs here set it to `0`; its value `per-hit` or `scalar`
 //! forces a cell test, and `LOSAT_X_BXDIAGSHADOW` runs the reference beside it for
 //! every subject and stops at a difference. `LOSAT_X_BXDIAGMIN` sends the query batches with few
-//! hits per lookup cell to the other loop (`0`: none). `LOSAT_X_BXDEFER` (strict set) makes the AVX2
-//! cell test the deferred calls with a masked last batch; `0` gives the AVX2 batch. So the properties under test are that the
-//! report, standard error without the diagnostic lines and the exit status equal those of the
+//! hits per lookup cell to the other loop (`0`: none). `LOSAT_X_BXDEFER` (strict set) makes the
+//! AVX2 cell test the deferred calls with a masked last batch; `0` gives the AVX2 batch. So the
+//! properties under test are that the report, standard error without the diagnostic lines and the exit status equal those of the
 //! search with the switch off, with the default and every cell test, with `-subject` and `-db`, outfmt 6 and 7,
 //! one and three threads and a two-hit window other than the default, and with every batch, some
 //! or none fused; that the shadow compared subjects; that the timing line names the cell test that
@@ -400,8 +400,8 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
         }
         None => assert!(!avx2, "default with AVX2: no timing line: {}", run.stderr),
     }
-    // LOSAT_X_BXDEFER=0 (the switch not set otherwise), and LOSAT_X_DEFAULT=0 with LOSAT_X_BXDIAG
-    // set: the fused loop with the AVX2 batch where the CPU has AVX2.
+    // LOSAT_X_BXDEFER=0 (LOSAT_X_BXDIAG not set), and LOSAT_X_DEFAULT=0 with LOSAT_X_BXDIAG set:
+    // the fused loop with the AVX2 batch where the CPU has AVX2.
     for (name, value, named) in [
         ("LOSAT_X_BXDEFER", "0", false),
         ("LOSAT_X_DEFAULT", "0", true),

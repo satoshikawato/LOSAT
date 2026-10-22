@@ -3107,16 +3107,35 @@ struct UngappedHit {
 /// their sort by score, outside the per-query groups of `LOSAT_X_QGROUPPAR` and the merge of the
 /// folded strips, `x_pair_seed_part.rs`) are kept in buffers that glibc maps
 /// from 1 MiB on, so that they are returned when they are dropped instead of staying in the
-/// arena of the worker thread that freed them; the database's buffers go to the shared pool
-/// `utils::x_mapped::X_BYTES` when they are done, so that the next thread that needs one takes
-/// it with its pages resident. The hits are not pooled: a thread keeps its scratch, and with it
-/// its hit buffer, from one subject to the next (as NCBI keeps its `init_hitlist`), so idle hit
-/// buffers in a pool only added to what was in use (Sakai x EDL933 `-subject` blastn at 4
-/// threads, max RSS 298-327 MiB with a pool of 64 MiB, 245-264 without, 238-261 with the
-/// switch off).
+/// arena of the worker thread that freed them; the database's buffers and the sort's scratch go
+/// to shared pools (`utils::x_mapped::X_BYTES`, `X_SORT`) when they are done, so that the next
+/// thread that needs one takes it with its pages resident. The hits are not pooled: a thread
+/// keeps its scratch, and with it its hit buffer, from one subject to the next (as NCBI keeps its
+/// `init_hitlist`), so idle hit buffers in a pool only added to what was in use (Sakai x EDL933
+/// `-subject` blastn at 4 threads, max RSS 298-327 MiB with a pool of 64 MiB, 245-264 without,
+/// 238-261 with the switch off).
 fn x_bn_mapped() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
+}
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNMAPPED) the pool of the scratch of the hits' sort
+/// by score (`x_mapped::x_sort_by_mapped`), whose idle buffers may hold `x_sort_idle_bytes`.
+/// Without it each sort maps its scratch again and touches every page of it (Sakai x EDL933
+/// `-subject`, where the hits of one chunk are sorted at a time: x1.009-1.027 of the time with
+/// the switch off).
+static X_SORT: crate::utils::x_mapped::XPool<UngappedHit> =
+    crate::utils::x_mapped::XPool::new(x_sort_idle_bytes);
+
+/// No NCBI counterpart: the built-in bound of `x_sort_idle_bytes`, in MiB: about one scratch of
+/// the hits of a 5 Mb chunk.
+const X_SORT_IDLE_MIB: usize = 16;
+
+/// No NCBI counterpart: the idle bound of `X_SORT` (`LOSAT_X_SORTIDLE` MiB, a tuning variable,
+/// 0 to 65,536; built-in `X_SORT_IDLE_MIB`).
+fn x_sort_idle_bytes() -> usize {
+    static IDLE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *IDLE.get_or_init(|| crate::utils::x_mapped::x_idle_bytes("LOSAT_X_SORTIDLE", X_SORT_IDLE_MIB))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:254-268
@@ -13803,6 +13822,7 @@ fn search_query_batch(
                 _ if x_bn_mapped() => crate::utils::x_mapped::x_sort_by_mapped(
                     ungapped_hits,
                     score_compare_ungapped_hits,
+                    &X_SORT,
                 ),
                 _ => ungapped_hits.sort_by(score_compare_ungapped_hits),
             }

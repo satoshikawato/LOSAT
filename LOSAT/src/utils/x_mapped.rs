@@ -64,19 +64,23 @@ pub(crate) fn x_reserve_mapped<T>(v: &mut Vec<T>, additional: usize) {
 /// with 256; with 0 every reuse faults again, x1.04 wall).
 const X_POOL_IDLE_MIB: usize = 64;
 
-/// No NCBI counterpart: the idle buffers of an `XPool` may hold this many touched bytes
-/// (`LOSAT_X_POOLIDLE` MiB, a tuning variable, 0 to 65,536; built-in `X_POOL_IDLE_MIB`); the
-/// oldest ones beyond it are freed.
+/// No NCBI counterpart: the idle buffers of `X_BYTES` may hold this many touched bytes
+/// (`LOSAT_X_POOLIDLE` MiB, a tuning variable; built-in `X_POOL_IDLE_MIB`); the oldest ones
+/// beyond it are freed.
 pub(crate) fn x_pool_idle_bytes() -> usize {
     static IDLE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *IDLE.get_or_init(|| {
-        std::env::var("LOSAT_X_POOLIDLE")
-            .ok()
-            .and_then(|v| v.trim().parse::<usize>().ok())
-            .filter(|v| *v <= 65_536)
-            .unwrap_or(X_POOL_IDLE_MIB)
-            .saturating_mul(1 << 20)
-    })
+    *IDLE.get_or_init(|| x_idle_bytes("LOSAT_X_POOLIDLE", X_POOL_IDLE_MIB))
+}
+
+/// No NCBI counterpart: the idle bound of a pool in bytes from the tuning variable `var`, in MiB
+/// (0 to 65,536; unset or any other value gives `builtin_mib`).
+pub(crate) fn x_idle_bytes(var: &str, builtin_mib: usize) -> usize {
+    std::env::var(var)
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v <= 65_536)
+        .unwrap_or(builtin_mib)
+        .saturating_mul(1 << 20)
 }
 
 /// No NCBI counterpart: idle buffers of at least `X_MAPPED_FROM` bytes, shared by all threads
@@ -84,6 +88,8 @@ pub(crate) fn x_pool_idle_bytes() -> usize {
 /// most it held while lent out, as far as the pool saw it).
 pub(crate) struct XPool<T> {
     state: std::sync::Mutex<XPoolState<T>>,
+    // the bound of the idle buffers' touched bytes
+    idle_bytes: fn() -> usize,
 }
 
 struct XPoolState<T> {
@@ -94,13 +100,15 @@ struct XPoolState<T> {
 }
 
 impl<T: Copy> XPool<T> {
-    pub(crate) const fn new() -> Self {
+    /// A pool whose idle buffers may hold `idle_bytes()` touched bytes.
+    pub(crate) const fn new(idle_bytes: fn() -> usize) -> Self {
         Self {
             state: std::sync::Mutex::new(XPoolState {
                 idle: Vec::new(),
                 idle_touched: 0,
                 lent: Vec::new(),
             }),
+            idle_bytes,
         }
     }
 
@@ -161,8 +169,8 @@ impl<T: Copy> XPool<T> {
     }
 
     /// Puts `v` into the pool, empty, when its capacity is at least `X_MAPPED_FROM` bytes (`v`
-    /// becomes a new empty `Vec`); a smaller `v` stays as it is. Idle buffers beyond
-    /// `x_pool_idle_bytes` touched bytes are freed, the oldest first; a buffer that alone touched
+    /// becomes a new empty `Vec`); a smaller `v` stays as it is. Idle buffers beyond the pool's
+    /// bound of touched bytes are freed, the oldest first; a buffer that alone touched
     /// more is freed at once.
     pub(crate) fn give(&self, v: &mut Vec<T>) {
         let size = std::mem::size_of::<T>().max(1);
@@ -181,7 +189,7 @@ impl<T: Copy> XPool<T> {
                 None => 0,
             };
             let touched = used.max(before);
-            let cap = x_pool_idle_bytes();
+            let cap = (self.idle_bytes)();
             if touched > cap {
                 freed.push(v);
             } else {
@@ -200,7 +208,7 @@ impl<T: Copy> XPool<T> {
 
 /// No NCBI counterpart: the pool of byte buffers: BLASTN's database reads and BLASTNA letters
 /// (LOSAT_X_BNMAPPED).
-pub(crate) static X_BYTES: XPool<u8> = XPool::new();
+pub(crate) static X_BYTES: XPool<u8> = XPool::new(x_pool_idle_bytes);
 
 /// No NCBI counterpart: the elements sorted at a time with `sort_by` before they are merged in
 /// `x_sort_by_mapped` (its scratch stays below glibc's first mmap threshold).
@@ -208,14 +216,15 @@ const X_SORT_RUN_BYTES: usize = 64 << 10;
 
 /// No NCBI counterpart: `v.sort_by(cmp)` (a stable sort: the same order as `sort_by` for a
 /// comparator that is a total order) whose scratch, when it would need `X_MAPPED_FROM` bytes or
-/// more with glibc, is a mapped buffer as long as `v` (returned after the sort): runs of
-/// `X_SORT_RUN_BYTES` sorted with `sort_by`, then merged pairwise from `v` into the buffer and
-/// back (the left run first among equal elements). A scratch of half of `v`, the left run copied
-/// out before each merge, held no less at the peak and took x1.04 the time (Sakai x EDL933
-/// `-subject` dc-megablast at 16 threads, where one thread sorts several million hits).
+/// more with glibc, is a mapped buffer as long as `v` from `pool` (given back after the sort):
+/// runs of `X_SORT_RUN_BYTES` sorted with `sort_by`, then merged pairwise from `v` into the
+/// buffer and back (the left run first among equal elements). A scratch of half of `v`, the left
+/// run copied out before each merge, held no less at the peak and took x1.04 the time (Sakai x
+/// EDL933 `-subject` dc-megablast at 16 threads, where one thread sorts several million hits).
 pub(crate) fn x_sort_by_mapped<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     v: &mut [T],
     mut cmp: F,
+    pool: &XPool<T>,
 ) {
     let size = std::mem::size_of::<T>().max(1);
     let n = v.len();
@@ -227,7 +236,7 @@ pub(crate) fn x_sort_by_mapped<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     for chunk in v.chunks_mut(run) {
         chunk.sort_by(&mut cmp);
     }
-    x_merge_runs(v, &mut cmp, run);
+    x_merge_runs(v, &mut cmp, run, pool);
 }
 
 /// No NCBI counterpart: the merges of `x_sort_by_mapped`, `v` being sorted in runs of `run`
@@ -236,10 +245,11 @@ fn x_merge_runs<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     v: &mut [T],
     cmp: &mut F,
     run: usize,
+    pool: &XPool<T>,
 ) {
     let n = v.len();
     let mut buf: Vec<T> = Vec::new();
-    x_reserve_mapped(&mut buf, n);
+    pool.reserve(&mut buf, n);
     buf.extend_from_slice(v);
     let mut width = run;
     let mut in_v = true;
@@ -275,6 +285,7 @@ fn x_merge_runs<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     if !in_v {
         v.copy_from_slice(&buf);
     }
+    pool.give(&mut buf);
 }
 
 #[cfg(test)]
@@ -326,7 +337,8 @@ mod tests {
             let mut a = v.clone();
             a.sort_by(|x, y| y.0.cmp(&x.0));
             let mut b = v.clone();
-            x_sort_by_mapped(&mut b, |x, y| y.0.cmp(&x.0));
+            static POOL: XPool<(u32, u32)> = XPool::new(x_pool_idle_bytes);
+            x_sort_by_mapped(&mut b, |x, y| y.0.cmp(&x.0), &POOL);
             assert_eq!(a, b, "n = {n}");
             // The merges alone, with runs of 4 (every merge path, odd tails).
             let mut c = v.clone();
@@ -337,6 +349,7 @@ mod tests {
                 &mut c,
                 &mut |x: &(u32, u32), y: &(u32, u32)| y.0.cmp(&x.0),
                 4,
+                &POOL,
             );
             assert_eq!(a, c, "n = {n}, runs of 4");
         }
@@ -344,7 +357,7 @@ mod tests {
 
     #[test]
     fn pool_lends_idle_buffers_and_keeps_small_ones_out() {
-        let pool: XPool<u8> = XPool::new();
+        let pool: XPool<u8> = XPool::new(x_pool_idle_bytes);
         let mut small = vec![1u8; 100];
         pool.give(&mut small);
         assert_eq!(small.len(), 100);

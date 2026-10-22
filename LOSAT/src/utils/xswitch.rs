@@ -183,11 +183,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_DEKKER",
     "LOSAT_X_DIAGLV",
     "LOSAT_X_DISCLUTPAR",
-    "LOSAT_X_DPAVX2",
     "LOSAT_X_DPEMASK",
-    "LOSAT_X_DPFAST",
-    "LOSAT_X_DPNEON",
-    "LOSAT_X_DPW128",
     "LOSAT_X_ERFABSORB",
     "LOSAT_X_GREEDYFAST",
     "LOSAT_X_GREEDYFUSE",
@@ -269,7 +265,13 @@ pub(crate) const STRICT_SET: &[&str] = &[
 /// the names stay as the keys of `x_reach!` (`utils/xreach.rs`) and of the rows of
 /// `LOSAT/tests/switch_reach_expected.tsv`. An always-on switch that graduates leaves both lists:
 /// nothing chooses any more.
-pub(crate) const GRADUATED: &[&str] = &["LOSAT_X_NEWTONLANES", "LOSAT_X_NEWTONLANES8"];
+pub(crate) const GRADUATED: &[&str] = &[
+    "LOSAT_X_DPAVX2",
+    "LOSAT_X_DPNEON",
+    "LOSAT_X_DPW128",
+    "LOSAT_X_NEWTONLANES",
+    "LOSAT_X_NEWTONLANES8",
+];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that
 /// is not UTF-8 is "any other value".

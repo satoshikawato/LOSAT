@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_DPFAST / LOSAT_X_DPSHADOW): row-wise SIMD X-drop dynamic programming
+//! Row-wise SIMD X-drop dynamic programming
 //! that is intended to return exactly what the scalar transliterations of
 //! NCBI `Blast_SemiGappedAlign` / `ALIGN_EX` return.
 //!
@@ -100,8 +100,8 @@
 //! use `Blast_SemiGappedAlign` with `score_only` TRUE (preliminary gapped score) and with
 //! `score_only` FALSE, which calls `ALIGN_EX` (traceback). blastn uses
 //! `s_BlastAlignPackedNucl` (preliminary score on the packed subject) and `ALIGN_EX` on
-//! one byte per base (traceback). LOSAT_X_DPFAST runs the vector kernels below for all
-//! of these.
+//! one byte per base (traceback). The vector kernels below run for all of these.
+//! (The scalar ports stay for the calls the kernels decline.)
 //!
 //! How the module relates to that code. Each row of the DP is the same recurrence as the
 //! cited loops. The diagonal term (`next_score`), the column gap (`best_gap`) and the
@@ -109,8 +109,8 @@
 //! The row gap (`score_gap_row`), which the C loop carries from cell to cell, is a decayed
 //! prefix maximum over the lanes. The script bits have the values of the NCBI `SCRIPT_*`
 //! constants, and the traceback walk is the C walk. The argument above is why the cells that
-//! are kept have the C values. LOSAT_X_DPSHADOW and the random test
-//! (`simd_kernels_match_scalar_loops_on_random_problems`) compare every result with the
+//! are kept have the C values. The random test
+//! (`simd_kernels_match_scalar_loops_on_random_problems`) compares results with the
 //! scalar loop. The module is integer arithmetic only. A problem that does not fit the lanes
 //! is not handled here and the scalar port runs.
 
@@ -465,13 +465,12 @@ pub(crate) struct XdropScratch {
 }
 
 impl XdropScratch {
-    /// No NCBI counterpart: an empty scratch when the kernel is off, so that a search without the
-    /// switch allocates nothing for it; it does not change any value NCBI computes.
+    /// No NCBI counterpart: an empty scratch when the target has no vector kernel, so that a
+    /// search there allocates nothing for it; it does not change any value NCBI computes.
     ///
-    /// The scratch of a search: empty unless the kernel is switched on, so
-    /// that a search without the switch allocates nothing for it.
+    /// The scratch of a search: empty unless the vector kernels are compiled for the target.
     pub(crate) fn for_search() -> Self {
-        if mode() != 0 {
+        if KERNEL_COMPILED {
             return Self::new();
         }
         Self {
@@ -2318,8 +2317,10 @@ mod kernel {
 }
 
 /// No NCBI counterpart: whether the vector kernels of this file (`mod kernel`) are compiled for
-/// the target: x86_64, wasm32 built with simd128, and aarch64 (NEON).
-const KERNEL_COMPILED: bool = cfg!(any(
+/// the target: x86_64, wasm32 built with simd128, and aarch64 (NEON). The call sites run the
+/// scalar port of the X-drop where it is false, because `xdrop_align` returns `None` for every
+/// call there and would only build the kernel's tables before the scalar port runs.
+pub(crate) const KERNEL_COMPILED: bool = cfg!(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128"),
     target_arch = "aarch64"
@@ -2330,46 +2331,6 @@ const KERNEL_COMPILED: bool = cfg!(any(
 ///     if (!score_only) {
 ///         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
 /// ```
-/// Reads the LOSAT_X_DPFAST / LOSAT_X_DPSHADOW switches once. The mode only chooses whether the
-/// scalar port of these functions (0), the vector kernels (1), or both with a comparison (2) run.
-///
-/// 0 = scalar only, 1 = SIMD, 2 = SIMD and compare every call with the scalar kernel.
-/// LOSAT_X_DPFAST is on by default (`utils/xswitch.rs`); on a target without a vector kernel
-/// (`KERNEL_COMPILED` false) the mode stays 0, because `xdrop_align` returns `None` for every
-/// call there and mode 1 would only build the kernel's tables before the scalar port runs.
-/// On aarch64 mode 1 also needs LOSAT_X_DPNEON (`neon_on`), which is on by default as well.
-pub(crate) fn mode() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_DPSHADOW").is_some() {
-            2
-        } else if KERNEL_COMPILED && crate::utils::xswitch::on("LOSAT_X_DPFAST") && neon_on() {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-/// No NCBI counterpart: EXPERIMENT (LOSAT_X_DPNEON, a switch of the strict set,
-/// `utils/xswitch.rs`: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set): on
-/// aarch64 the NEON build of the vector kernels runs only while this switch is on; off, aarch64
-/// keeps the scalar port, as before the NEON layer existed. Always true on the other targets.
-/// LOSAT_X_DPSHADOW (mode 2) runs and compares the kernels whatever it says. EXPERIMENT
-/// (LOSAT_X_DPNEON2, off unless set): that variable turns the NEON kernels on as well, with the
-/// two-register kernels of `x_xdrop_neon2.rs` first (`x_extra_switches`).
-fn neon_on() -> bool {
-    #[cfg(target_arch = "aarch64")]
-    {
-        crate::utils::xswitch::on("LOSAT_X_DPNEON") || x_neon2::switch_on()
-    }
-    #[cfg(not(target_arch = "aarch64"))]
-    {
-        true
-    }
-}
-
 /// No NCBI counterpart: checks the CPU features at run time (LOSAT_X_DPNOAVX turns the AVX
 /// level off for timing); it does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
@@ -2426,13 +2387,13 @@ fn fits_8bit(scores: &Scores<'_>, gap_open: i32, gap_extend: i32, x_drop: i32) -
     }
 }
 
-// EXPERIMENT (LOSAT_X_DPAVX2): 256-bit AVX2 kernels (16 x i16, 32 x i8), x86_64 only. A child
+// EXPERIMENT: 256-bit AVX2 kernels (16 x i16, 32 x i8), x86_64 only. A child
 // module, so that it uses this module's private items (lookup tables, scratch, traceback walk)
 // without changing them.
 #[cfg(target_arch = "x86_64")]
 #[path = "x_xdrop_avx2.rs"]
 mod x_avx2;
-// EXPERIMENT (LOSAT_X_DPW128): the 128-bit kernels with the per-row savings of the 256-bit ones,
+// EXPERIMENT: the 128-bit kernels with the per-row savings of the 256-bit ones,
 // over the same `arch` layer (x86_64 SSE4.1 / AVX-128 builds, wasm32 simd128 and aarch64 NEON). A
 // child module like `x_avx2`.
 #[cfg(any(
@@ -2451,10 +2412,10 @@ mod x_neon2;
 #[path = "x_xdrop_capture.rs"]
 mod x_capture;
 
-/// No NCBI counterpart: reads the LOSAT_X_DPAVX2 and LOSAT_X_DPCAPTURE switches once; it does not
+/// No NCBI counterpart: reads the CPU tests and the LOSAT_X_DPCAPTURE switch once; it does not
 /// change any value NCBI computes. Bit 0: try the 256-bit kernels first (set only when the CPU
-/// has AVX2); bit 1: record a sample of the calls. 0 (both off) leaves `xdrop_align` as it was.
-/// Bit 2 (EXPERIMENT, LOSAT_X_DPW128): try the 128-bit kernels of `x_xdrop_w128.rs` after the
+/// has AVX2); bit 1: record a sample of the calls (LOSAT_X_DPCAPTURE).
+/// Bit 2 (EXPERIMENT): try the 128-bit kernels of `x_xdrop_w128.rs` after the
 /// 256-bit ones (set only when the CPU runs the 128-bit kernels; always on wasm32 simd128 and
 /// aarch64). Bit 3 (EXPERIMENT, LOSAT_X_DPNEON2, aarch64 only): try the two-register NEON kernels
 /// of `x_xdrop_neon2.rs` first, where bit 0 stands on x86_64. Bit 4 (LOSAT_X_DPEMASK, with bit 0):
@@ -2466,7 +2427,7 @@ fn x_extra_switches() -> u8 {
         let mut on = 0u8;
         #[cfg(target_arch = "x86_64")]
         {
-            if x_avx2::switch_on() {
+            if x_avx2::available() {
                 on |= 1;
                 if x_avx2::emask_on() {
                     on |= 16;
@@ -2485,7 +2446,7 @@ fn x_extra_switches() -> u8 {
             target_arch = "aarch64"
         ))]
         {
-            if x_w128::switch_on() {
+            if x_w128::available() {
                 on |= 4;
             }
         }
@@ -2508,17 +2469,15 @@ fn x_extra_switches() -> u8 {
 ///     if (!score_only) {
 ///         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
 /// ```
-/// EXPERIMENT dispatch point of LOSAT_X_DPAVX2 and LOSAT_X_DPCAPTURE, ahead of the 128-bit
-/// dispatch in `xdrop_align`. With LOSAT_X_DPAVX2 the 256-bit kernel (`x_xdrop_avx2.rs`) runs
+/// EXPERIMENT dispatch point of the 256-bit kernels and LOSAT_X_DPCAPTURE, ahead of the 128-bit
+/// dispatch in `xdrop_align`. On a CPU with AVX2 the 256-bit kernel (`x_xdrop_avx2.rs`) runs
 /// the same recurrence (`tb == false`: `Blast_SemiGappedAlign` score-only and
 /// `s_BlastAlignPackedNucl`; `tb == true`: `ALIGN_EX`) and returns exactly what the 128-bit
 /// kernel returns; when it returns None the 128-bit dispatch runs (and may itself leave the call
-/// to the scalar port). The argument for the equality is at the head of `x_xdrop_avx2.rs`. The
-/// call sites' LOSAT_X_DPSHADOW comparison applies to whatever `xdrop_align` returns, so it
-/// covers the 256-bit kernels as well. LOSAT_X_DPCAPTURE records every Nth call of a thread
-/// (inputs and result); the call itself runs through `xdrop_align` unchanged. With
-/// LOSAT_X_DPW128 the 128-bit kernels of `x_xdrop_w128.rs` are tried next (see the comment at
-/// that step).
+/// to the scalar port). The argument for the equality is at the head of `x_xdrop_avx2.rs`.
+/// LOSAT_X_DPCAPTURE records every Nth call of a thread
+/// (inputs and result); the call itself runs through `xdrop_align` unchanged. The 128-bit
+/// kernels of `x_xdrop_w128.rs` are tried next (see the comment at that step).
 ///
 /// `Some(r)`: the call is answered with `r`; `None`: run the 128-bit dispatch.
 #[inline]
@@ -2597,8 +2556,7 @@ fn x_extra_dispatch(
     // take the place of the 256-bit kernels: the same recurrence, the same lanes per block and
     // band steps as `x_xdrop_avx2.rs`, so exactly what the 128-bit kernel returns (the argument is
     // at the head of that file). When they return None (a row-gap precondition, or a problem the
-    // 128-bit kernel declines too) the next dispatch runs. The call sites' LOSAT_X_DPSHADOW
-    // comparison covers them as well.
+    // 128-bit kernel declines too) the next dispatch runs.
     #[cfg(target_arch = "aarch64")]
     {
         if on & 8 != 0 {
@@ -2628,14 +2586,13 @@ fn x_extra_dispatch(
     //     if (!score_only) {
     //         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
     // ```
-    // EXPERIMENT (LOSAT_X_DPW128): where the 128-bit dispatch below would run (after the 256-bit
+    // EXPERIMENT: where the 128-bit dispatch below would run (after the 256-bit
     // kernels, which keep priority), the 128-bit kernels of `x_xdrop_w128.rs` run the same
     // recurrence (`tb == false`: `Blast_SemiGappedAlign` score-only and `s_BlastAlignPackedNucl`;
     // `tb == true`: `ALIGN_EX`) with the per-row savings of the 256-bit kernels and return exactly
     // what the 128-bit kernel returns (the argument, item by item, is at the head of that file).
     // When they return None (the row-gap precondition, or a problem the 128-bit kernel declines
-    // too) the 128-bit dispatch runs. The call sites' LOSAT_X_DPSHADOW comparison applies to
-    // whatever `xdrop_align` returns, so it covers these kernels as well.
+    // too) the 128-bit dispatch runs.
     #[cfg(any(
         target_arch = "x86_64",
         all(target_arch = "wasm32", target_feature = "simd128"),
@@ -2680,10 +2637,10 @@ fn x_extra_dispatch(
 ///     if (!score_only) {
 ///         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
 /// ```
-/// Dispatch point of LOSAT_X_DPFAST / LOSAT_X_DPSHADOW for all callers. `tb == false` stands for
+/// Dispatch point of the vector kernels for all callers. `tb == false` stands for
 /// `score_only` (`Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl`), `tb == true` for `ALIGN_EX`.
 /// It picks the AVX or SSE build and the 8-bit or 16-bit lanes. `None` means that the caller must
-/// run the scalar port of the C function; callers do so, and compare when the mode is 2.
+/// run the scalar port of the C function; callers do so.
 ///
 /// Score-only (`tb == false`) or traceback X-drop alignment.
 /// `None` means "not handled here": the caller must run the scalar kernel.
@@ -2700,8 +2657,8 @@ pub(crate) fn xdrop_align(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
-    // EXPERIMENT (LOSAT_X_DPAVX2, LOSAT_X_DPCAPTURE): see `x_extra_dispatch`. With both
-    // switches off this is one read of a value set once, and the code below runs as before.
+    // EXPERIMENT (256-bit and 128-bit kernels, LOSAT_X_DPCAPTURE): see `x_extra_dispatch`. This
+    // is one read of a value set once; when the dispatch returns None the code below runs.
     let on = x_extra_switches();
     if on != 0 {
         if let Some(r) = x_extra_dispatch(

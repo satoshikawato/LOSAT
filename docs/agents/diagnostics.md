@@ -223,7 +223,7 @@ their variables mean
 - `LOSAT_X_DEFAULT=0` runs the previous (reference) paths everywhere. With some variables set
   as well, it gives the run those variables gave before the default changed.
 - `LOSAT_X_<NAME>=0` turns one switch off, to find which path a problem comes from. Single
-  switches off are a diagnostic aid: `DPAVX2`, `DPW128` and `DPNEON` act only with `DPFAST`; `TBNSSIDE`,
+  switches off are a diagnostic aid: `TBNSSIDE`,
   `TBNQSIDE` and `TBNBATCH` only with `TBNPAR` (`TBNEVENTS` only without it); `TBNBATCH` needs
   `TBNSSIDE`; `BXBATCH` needs `BXPOOL`; `AHEAD` needs `GREEDYSPEC` for megablast; `MBBATCH` runs
   where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
@@ -257,8 +257,7 @@ their variables mean
   switch turns its switch on whatever the two variables above say (except
   `LOSAT_X_AHEADSHADOW`, which compares only while `AHEAD` is on, and
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
-  shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
-  or base kernel that takes the call).
+  shadow compares the kernel the default selects.
 - The names are provisional (`x_` prefixes, `EXPERIMENT` comments). A switch graduates once it has
   been on `dev` for 7 days and in two full-set platform-checks runs (push to `main`, weekly or
   dispatch) with equal outputs and no failed test (2026-10-22, replacing "a few releases"): its
@@ -332,11 +331,7 @@ export LOSAT_X_DCCSR=1
 export LOSAT_X_DEKKER=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DISCLUTPAR=1
-export LOSAT_X_DPAVX2=1
 export LOSAT_X_DPEMASK=1
-export LOSAT_X_DPFAST=1
-export LOSAT_X_DPNEON=1
-export LOSAT_X_DPW128=1
 export LOSAT_X_ERFABSORB=1
 export LOSAT_X_GREEDYFAST=1
 export LOSAT_X_GREEDYFUSE=1
@@ -532,10 +527,9 @@ protein against the zebrafish genome, 8 threads) and 1,863 to 975-979 MiB (the h
 transcriptome).
 
 `LOSAT_X_DPNEON` was added after the default changed, as a switch that was off unless set, and
-joined the set on 2026-10-15. On aarch64 it lets `LOSAT_X_DPFAST` (and `LOSAT_X_DPW128`) run the
-vector X-drop kernels built over NEON, the kernel bodies x86_64 and wasm32 run. It changes no
-value and no order of computation, acts on aarch64 only (it does nothing on other targets) and
-only where `LOSAT_X_DPFAST` is on; `LOSAT_X_DPSHADOW` compares the NEON kernels whatever it says.
+joined the set on 2026-10-15. On aarch64 it let the vector X-drop kernels run, built over NEON, the
+kernel bodies x86_64 and wasm32 run. It changed no value and no order of computation and acted on
+aarch64 only. It graduated on 2026-10-22 (see its entry below).
 
 `LOSAT_X_TBNBATCHRULE` was added after the default changed, as a switch that was off unless set,
 and joined the set on 2026-10-16. With `LOSAT_X_TBNBATCH` it chooses which tblastn query batches
@@ -629,18 +623,17 @@ keep the batch order, so no value changes. Timings are in its entry below.
 
 What runs per target:
 
-- x86_64: the vector X-drop DP (`DPFAST`: SSE4.1 or AVX 128-bit; `DPAVX2`: 256-bit with AVX2;
-  `DPW128`), the AVX2 builds of the greedy rows and of the Newton kernels where the CPU has AVX2,
+- x86_64: the vector X-drop DP (SSE4.1 or AVX 128-bit; the 256-bit kernels with AVX2;
+  the `DPW128` kernels), the AVX2 builds of the greedy rows and of the Newton kernels where the CPU has AVX2,
   `MBDELAY` with the prefetch instruction.
-- wasm32 (built with simd128): the simd128 X-drop DP (`DPW128` replaces the first kernel),
+- wasm32 (built with simd128): the simd128 X-drop DP (the `DPW128` kernels replace the first kernel),
   `MBBATCH` instead of `MBDELAY`, `DEKKER`; everything else is the same Rust as on x86_64
   without AVX2.
-- aarch64: the NEON X-drop DP (`DPFAST` with `DPNEON`, and `DPW128` where the 128-bit kernel
-  would run; `DPAVX2` does nothing), `MBBATCH` instead of `MBDELAY`; `DEKKER` does nothing (it
+- aarch64: the NEON X-drop DP (the `DPW128` kernels where the 128-bit kernel would run; no
+  256-bit AVX2 kernel), `MBBATCH` instead of `MBDELAY`; `DEKKER` does nothing (it
   is compiled for wasm32 only); the Newton lanes take eight problems per round;
   everything else as on wasm32.
-- Any other target: no vector X-drop DP is compiled, so `DPFAST`, `DPAVX2`, `DPW128` and
-  `DPNEON` do nothing (the scalar port runs), and the Newton lanes stay four wide; otherwise as
+- Any other target: no vector X-drop DP is compiled (the scalar port runs), and the Newton lanes stay four wide; otherwise as
   on aarch64.
 - One thread (`-num_threads 1`, a build without the `parallel` feature, wasm32 without
   `wasm-threads`): the scheduling switches (`AHEAD`, `GREEDYSPEC`, `PAIRPAR` for
@@ -651,19 +644,21 @@ What runs per target:
 
 Same values, faster computation:
 
-- `LOSAT_X_DPFAST=1` X-drop gapped DP (score-only and traceback) in 128-bit vectors (16 x i8 or
-  8 x i16 lanes; AVX2/SSE on x86_64, simd128 on Wasm, NEON on aarch64 with `LOSAT_X_DPNEON`,
-  which is in the set),
-  blastn task blastn and the protein programs; calls that do not fit 8/16 bits use the original
-  loop (`utils/xdrop_simd.rs`).
-  Shadow: `LOSAT_X_DPSHADOW=1`. Timing aids: `LOSAT_X_DPNO8=1` (no 8-bit kernel),
-  `LOSAT_X_DPNOAVX=1` (no AVX2).
-- `LOSAT_X_DPAVX2=1` (with `LOSAT_X_DPFAST`; strict-set candidate) the same X-drop DP in 256-bit
-  AVX2 vectors (32 x i8 or 16 x i16 lanes, x86_64 with AVX2 only): the same values, lane width
-  and band steps as the 128-bit kernels, so the same result and edit script; a call the 256-bit
-  kernel does not take runs on the 128-bit kernel (`utils/x_xdrop_avx2.rs`). Covered by
-  `LOSAT_X_DPSHADOW=1`; `LOSAT_X_DPNOAVX=1` turns it off as well.
-- `LOSAT_X_DPEMASK=1` (with `LOSAT_X_DPAVX2`, speed; in the strict set from the pull request that
+- DPFAST (graduated 2026-10-22; no variable, no `LOSAT_X_DPSHADOW`; always on) X-drop gapped DP
+  (score-only and traceback) in 128-bit vectors (16 x i8 or 8 x i16 lanes; AVX2/SSE on x86_64,
+  simd128 on Wasm, NEON on aarch64), blastn task blastn and the protein programs
+  (`utils/xdrop_simd.rs`). The scalar ports of `Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl` and
+  `ALIGN_EX` stay for the calls that do not fit 8/16 bits and for a target without a vector kernel
+  (`KERNEL_COMPILED`); the side-by-side comparison at the call sites went with `LOSAT_X_DPSHADOW`.
+  The random unit test `simd_kernels_match_scalar_loops_on_random_problems` still compares the
+  kernels with the scalar loops. Timing aids (separate variables, they stay): `LOSAT_X_DPNO8=1` (no
+  8-bit kernel), `LOSAT_X_DPNOAVX=1` (no AVX2).
+- DPAVX2 (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED` for the
+  reach table) the same X-drop DP in 256-bit AVX2 vectors (32 x i8 or 16 x i16 lanes, x86_64 with
+  AVX2 only; the rule is `x_xdrop_avx2::available()`): the same values, lane width and band steps
+  as the 128-bit kernels, so the same result and edit script; a call the 256-bit kernel does not
+  take runs on the 128-bit kernel (`utils/x_xdrop_avx2.rs`). `LOSAT_X_DPNOAVX=1` turns it off.
+- `LOSAT_X_DPEMASK=1` (with the 256-bit AVX2 kernel, speed; in the strict set from the pull request that
   added it, 2026-10-19; `=0` or `LOSAT_X_DEFAULT=0` returns to the previous kernel) the 8-bit
   256-bit X-drop kernel (`align8`: blastp's and the translated programs' score-only DP, blastn's
   DP) stores the E (`score_gap_col`) of a dropped cell as minus infinity and no longer clears E
@@ -679,34 +674,32 @@ Same values, faster computation:
   traceback calls whose scores fit 8 bits (blastn; protein traceback with an unscaled matrix, for
   example `-comp_based_stats 0`). The 16-bit kernel (the traceback of the composition-based
   redo, whose matrix is scaled) is unchanged: the same change there measured x0.98-1.01.
-- `LOSAT_X_DPW128=1` (with `LOSAT_X_DPFAST`; strict-set candidate) the 128-bit X-drop DP kernels
-  with the per-row savings of `LOSAT_X_DPAVX2` (first and last survivor kept while the row runs,
+- DPW128 (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED`) the
+  128-bit X-drop DP kernels with the per-row savings of the 256-bit AVX2 kernels (first and last
+  survivor kept while the row runs,
   row gap as a prefix maximum with a two-operation carry, the first lane's missing diagonal as a
   lane mask, column residues copied 16 at a time, row tables of `Rows28` / `Flat` matrices built
   with vector instructions, byte shifts in the form V8 compiles to `palignr`): the same values,
   lane width, blocks and result as the 128-bit kernels; a call it does not take (8-bit lanes with
   `16 * gap_extend - (gap_open + gap_extend) > 128`) runs on the 128-bit kernel
-  (`utils/x_xdrop_w128.rs`). On x86_64 it runs where the 128-bit kernel would (after
-  `LOSAT_X_DPAVX2` when both are set on an AVX2 machine, which keeps priority), on the SSE4.1 or
-  AVX-128 build; on wasm32 it replaces the simd128 128-bit kernel (the only DP kernel there).
-  Covered by `LOSAT_X_DPSHADOW=1`.
-- `LOSAT_X_DPNEON=1` (aarch64 only, speed; in the strict set since 2026-10-15, `=0` turns it off)
-  lets `LOSAT_X_DPFAST` run on aarch64: the 128-bit kernels and the `LOSAT_X_DPW128` kernels
-  built over a NEON `arch` / `ext` layer (`mod arch` in `utils/xdrop_simd.rs`, `mod ext` in
-  `utils/x_xdrop_w128.rs`; the kernel bodies are the ones x86_64 and wasm32 run). Off, aarch64
-  runs the scalar port, as before the NEON layer. `LOSAT_X_DPSHADOW=1` runs and compares the NEON
-  kernels on aarch64 whatever it says. Platform checks hash the default (NEON) and, on the Linux
-  and macOS arm64 runners, `LOSAT_X_DPNEON=0` (mode `noneon`: the other switches on, the scalar
-  X-drop).
+  (`utils/x_xdrop_w128.rs`). The rule: where the 128-bit kernel would run (`x_xdrop_w128::available()`:
+  SSE4.1 on x86_64 after the 256-bit kernels, which keep priority on an AVX2 machine; always on
+  wasm32 simd128 and aarch64). On wasm32 it replaces the simd128 128-bit kernel (the only DP kernel there).
+- DPNEON (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED`; in the
+  strict set from 2026-10-15) the vector X-drop kernels on aarch64: the 128-bit kernels and the DPW128
+  kernels built over a NEON `arch` / `ext` layer (`mod arch` in `utils/xdrop_simd.rs`, `mod ext` in
+  `utils/x_xdrop_w128.rs`; the kernel bodies are the ones x86_64 and wasm32 run). They always run
+  on aarch64; there is no switch back to the scalar port, which stays for the calls the kernels
+  decline. Platform checks no longer have the mode `noneon`; they hash the default (NEON) and, on
+  the Linux and macOS arm64 runners, `dpneon2`.
 - `LOSAT_X_DPNEON2=1` (aarch64 only, speed; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it) the X-drop DP kernels of `LOSAT_X_DPAVX2` on NEON, each
+  `LOSAT_X_DEFAULT` does not touch it) the X-drop DP kernels of the 256-bit AVX2 kernels on NEON, each
   256-bit vector in two registers (32 x i8 or 16 x i16 lanes per block, the same band steps, the
-  row gap in the form of `LOSAT_X_DPW128`): the same values and result as the 128-bit kernels; a
+  row gap in the form of the DPW128 kernels): the same values and result as the 128-bit kernels; a
   call they do not take (8-bit lanes with `32 * gap_extend - (gap_open + gap_extend) > 128`, 16-bit
-  lanes with `16 * gap_extend - (gap_open + gap_extend) > 32768`) runs on the `LOSAT_X_DPW128` /
-  128-bit kernels (`utils/x_xdrop_neon2.rs`). It turns the NEON kernels on as `LOSAT_X_DPNEON`
-  does and takes the place `LOSAT_X_DPAVX2` has on x86_64 (first in the dispatch). Covered by
-  `LOSAT_X_DPSHADOW=1` when set. Platform checks hash it on the Linux and macOS arm64 runners
+  lanes with `16 * gap_extend - (gap_open + gap_extend) > 32768`) runs on the DPW128 /
+  128-bit kernels (`utils/x_xdrop_neon2.rs`). It takes the place the 256-bit AVX2 kernels have on
+  x86_64 (first in the dispatch). Platform checks hash it on the Linux and macOS arm64 runners
   (mode `dpneon2`).
 - `LOSAT_X_GREEDYFAST=1` megablast greedy alignment, one distance in three passes of 256 cells,
   match extension 8 bases at a time. Shadow: `LOSAT_X_GREEDYSHADOW=1`.
@@ -4429,16 +4422,16 @@ kernel tests).
 X-drop DP capture and replay (diagnostics, not part of the strict set):
 
 - `LOSAT_X_DPCAPTURE=<dir>` records every Nth call of each thread that reaches the vector X-drop
-  DP (`LOSAT_X_DPFAST`) as a self-contained problem (residues, matrix, gap costs, x_drop, result
+  DP as a self-contained problem (residues, matrix, gap costs, x_drop, result
   and edit script) in `<dir>/xdp-<pid>-t<k>.xdp`, one file per thread, appended
   (`utils/x_xdrop_capture.rs`, format in its header). `LOSAT_X_DPCAPTURE_EVERY=<n>` sets N
   (default 25). The search output does not change.
 - `LOSAT_X_DPREPLAY=<dir>` input of the ignored test `replay_captured_problems`
   (`cargo test --release replay_captured_problems -- --ignored --nocapture`): every captured
-  problem through the scalar loops, the 128-bit, the `LOSAT_X_DPW128` and the 256-bit kernels and
+  problem through the scalar loops, the 128-bit, the DPW128 and the 256-bit kernels and
   the dispatch, compared with the recorded result, then the three kernels timed (median ns per cell
   and per call, traceback and score-only, 8- and 16-bit lanes). `LOSAT_X_DPREPLAY_REPS` (default 7),
   `LOSAT_X_DPREPLAY_OUT=<file>` (append the table to a file). The ignored test
-  `w128_replay_captured_problems` does the same for the 128-bit and the `LOSAT_X_DPW128` kernels
+  `w128_replay_captured_problems` does the same for the 128-bit and the DPW128 kernels
   only and also runs in the wasm32-wasip1 test build (the libtest `.wasm` under a WASI host such
   as Node's `wasi` module with a root preopen), which times the simd128 kernels.

@@ -9,8 +9,9 @@
 //! large buffers of the worker threads come from their arenas, and the space they leave stays
 //! resident there (`tblastn/x_subject_translate.rs` has the same case for TBLASTN's frames). A
 //! buffer of at least `X_MAPPED_FROM` bytes is given a capacity above that ceiling, so that it
-//! is always mapped and returned when dropped; the pages beyond its length are never touched and
-//! are not resident. Other allocators return large blocks on their own, so elsewhere the
+//! is mapped and returned when dropped (unless an arena has that much free space at its top);
+//! the pages beyond its length are not resident until they are touched (a buffer lent by a pool
+//! may have touched more than it holds: the pool counts that). Other allocators return large blocks on their own, so elsewhere the
 //! capacity is what `Vec` would give.
 //!
 //! A mapped block that is freed and mapped again is touched again: every page faults, and with
@@ -74,7 +75,7 @@ pub(crate) fn x_pool_idle_bytes() -> usize {
             .and_then(|v| v.trim().parse::<usize>().ok())
             .filter(|v| *v <= 65_536)
             .unwrap_or(X_POOL_IDLE_MIB)
-            << 20
+            .saturating_mul(1 << 20)
     })
 }
 
@@ -103,31 +104,40 @@ impl<T: Copy> XPool<T> {
         }
     }
 
-    /// An empty idle buffer for `need` elements, if there is one: of those that have touched
-    /// enough bytes already, the one that touched the fewest, else the one that touched the most
-    /// (all are mapped, so capacity says nothing about the resident pages).
+    /// An empty idle buffer with room for `need` elements, if there is one: of those that have
+    /// touched enough bytes already, the one that touched the fewest, else the one that touched
+    /// the most (all are mapped, so capacity says nothing about the resident pages). Only a
+    /// buffer that holds `need` is lent, so that it is not moved before it is given back (its
+    /// touched bytes are kept by its address).
     pub(crate) fn take(&self, need: usize) -> Option<Vec<T>> {
         if !X_MAPPED_ALLOCATOR {
             return None;
         }
         let bytes = need.saturating_mul(std::mem::size_of::<T>().max(1));
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let fits = |(_, (v, _)): &(usize, &(Vec<T>, usize))| v.capacity() >= need;
         let pick = st
             .idle
             .iter()
             .enumerate()
+            .filter(fits)
             .filter(|(_, (_, touched))| *touched >= bytes)
             .min_by_key(|(_, (_, touched))| *touched)
             .or_else(|| {
                 st.idle
                     .iter()
                     .enumerate()
+                    .filter(fits)
                     .max_by_key(|(_, (_, touched))| *touched)
             })
             .map(|(i, _)| i)?;
         let (v, touched) = st.idle.swap_remove(pick);
         st.idle_touched -= touched;
-        st.lent.push((v.as_ptr() as usize, touched));
+        let addr = v.as_ptr() as usize;
+        // A buffer lent before at this address and never given back (dropped on an error path)
+        // left its entry; this one replaces it.
+        st.lent.retain(|&(a, _)| a != addr);
+        st.lent.push((addr, touched));
         Some(v)
     }
 
@@ -152,7 +162,8 @@ impl<T: Copy> XPool<T> {
 
     /// Puts `v` into the pool, empty, when its capacity is at least `X_MAPPED_FROM` bytes (`v`
     /// becomes a new empty `Vec`); a smaller `v` stays as it is. Idle buffers beyond
-    /// `x_pool_idle_bytes` touched bytes are freed, the oldest first.
+    /// `x_pool_idle_bytes` touched bytes are freed, the oldest first; a buffer that alone touched
+    /// more is freed at once.
     pub(crate) fn give(&self, v: &mut Vec<T>) {
         let size = std::mem::size_of::<T>().max(1);
         if !X_MAPPED_ALLOCATOR || v.capacity().saturating_mul(size) < X_MAPPED_FROM {
@@ -170,9 +181,13 @@ impl<T: Copy> XPool<T> {
                 None => 0,
             };
             let touched = used.max(before);
-            st.idle_touched += touched;
-            st.idle.push((v, touched));
             let cap = x_pool_idle_bytes();
+            if touched > cap {
+                freed.push(v);
+            } else {
+                st.idle_touched += touched;
+                st.idle.push((v, touched));
+            }
             while st.idle_touched > cap && !st.idle.is_empty() {
                 let (old, t) = st.idle.remove(0);
                 st.idle_touched -= t;
@@ -318,7 +333,11 @@ mod tests {
             for run in c.chunks_mut(4) {
                 run.sort_by(|x, y| y.0.cmp(&x.0));
             }
-            x_merge_runs(&mut c, &mut |x: &(u32, u32), y: &(u32, u32)| y.0.cmp(&x.0), 4);
+            x_merge_runs(
+                &mut c,
+                &mut |x: &(u32, u32), y: &(u32, u32)| y.0.cmp(&x.0),
+                4,
+            );
             assert_eq!(a, c, "n = {n}, runs of 4");
         }
     }
@@ -343,6 +362,15 @@ mod tests {
             pool.reserve(&mut w, X_MAPPED_FROM);
             assert_eq!(w.as_ptr(), addr);
             assert_eq!(&w[..], &[9u8; 3][..]);
+        }
+        // Only a buffer that holds what is asked is lent (a smaller one would be moved).
+        let mut big: Vec<u8> = Vec::new();
+        x_reserve_mapped(&mut big, X_MAPPED_FROM);
+        let cap = big.capacity();
+        pool.give(&mut big);
+        assert!(pool.take(cap + 1).is_none());
+        if X_MAPPED_ALLOCATOR {
+            assert_eq!(pool.take(cap).map(|v| v.capacity()), Some(cap));
         }
     }
 }

@@ -937,8 +937,8 @@ impl SequenceBlock {
         self.nucleotide_blastna_in(i, false)
     }
 
-    /// EXPERIMENT (LOSAT_X_BNMAPPED): `nucleotide_blastna` in a buffer with the capacity of
-    /// `utils::x_mapped::X_BYTES` (a mapped buffer from 1 MiB on, given back with
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): `nucleotide_blastna` in a buffer taken from or sized
+    /// by `utils::x_mapped::X_BYTES.reserve` (a mapped buffer from 1 MiB on, given back with
     /// `x_mapped::X_BYTES.give`). No NCBI counterpart: only where the bytes are kept.
     pub fn x_nucleotide_blastna_mapped(&self, i: usize) -> Result<Vec<u8>, SeqDbError> {
         self.nucleotide_blastna_in(i, true)

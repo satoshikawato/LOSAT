@@ -3103,7 +3103,9 @@ struct UngappedHit {
 /// EXPERIMENT (LOSAT_X_BNMAPPED, a switch of the strict set, `utils/xswitch.rs`: on unless it is
 /// `0`, or `LOSAT_X_DEFAULT=0` and it is not set): the large per-subject buffers of BLASTN (the
 /// blocks and sequences read from a database and their BLASTNA letters, `database.rs`; the
-/// ungapped hits of a subject and the scratch of their sort) are kept in buffers that glibc maps
+/// ungapped hits of a subject as the seed stages push them, `x_push_ungapped`, and the scratch of
+/// their sort by score, outside the per-query groups of `LOSAT_X_QGROUPPAR` and the merge of the
+/// folded strips, `x_pair_seed_part.rs`) are kept in buffers that glibc maps
 /// from 1 MiB on, so that they are returned when they are dropped instead of staying in the
 /// arena of the worker thread that freed them; the database's buffers go to the shared pool
 /// `utils::x_mapped::X_BYTES` when they are done, so that the next thread that needs one takes

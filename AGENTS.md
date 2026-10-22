@@ -171,6 +171,7 @@ authoritative, current guidance for agent behavior in LOSAT.
   pruning, ordering, statistics, and formatting as NCBI. If a faster path cannot
   be proven byte-identical on the relevant fixtures, keep it disabled or remove
   it.
+- Forbidden optimizations include approximations in mathematical calculations.
 - For performance paths, rule 8 ("Correct timing, order, and context") binds the
   values and the order that reach the output: work may run earlier, in another
   order or on other threads when every value and every decision the output
@@ -220,6 +221,10 @@ authoritative, current guidance for agent behavior in LOSAT.
   other behavior in the same run.
 - Frame concatenation shares boundary sentinels; frame offset advances by
   `aa_len + 1`, not `aa_len + 2`.
+- Offsets are frame-relative and 0-based on both sides: each subject frame is
+  searched as its own sequence (`blast_engine.c:811-812`) and
+  `s_AdjustInitialHSPOffsets` (`blast_gapalign.c:2384-2392`) subtracts the query
+  context start; linking compares these offsets, never concatenated-buffer ones.
 - Length adjustment asymmetry: query uses full adjustment, subject uses one third;
   effective search space uses full adjustment for both.
 - Masking: SEG applies to query only; extension uses masked sequence while identity
@@ -229,6 +234,11 @@ authoritative, current guidance for agent behavior in LOSAT.
   not during linking.
 - Cutoff score capping: `min(BLAST_Cutoffs, gap_trigger, cutoff_score_max)`;
   tblastx uses `scale_factor = 1.0`.
+- The per-subject cutoff update uses the search space
+  `MIN(subject length, query context length) * subject length` with the
+  untranslated (nucleotide) subject length, an amino-acid query frame length and
+  no length adjustment (`blast_parameters.c:360-362`, `blast_engine.c:1439-1440`);
+  `cutoff_score_max` and E-values use the length-adjusted `eff_searchsp`.
 
 ---
 
@@ -297,7 +307,7 @@ cd LOSAT && cargo fmt
   need the object manager, GenBank, BLAST databases, or PSI/RPS/PHI are `n-a`; whole-search
   cases (bl2seq) become fixture rows, not unit tests.
 - Integration tests must compare output with NCBI BLAST+ and verify hit counts,
-  bit scores, E-values, and coordinates.
+  bit scores, E-values, and coordinates, with both short and long sequences.
 - NCBI BLAST+ execution is allowed only as a comparison oracle during testing
   and diagnostics; it must not be part of LOSAT's feature implementation,
   runtime execution, build pipeline, fallback handling, or unsupported-feature
@@ -310,10 +320,8 @@ cd LOSAT && cargo fmt
 ```bash
 cd LOSAT/tests && bash run_comparison.sh
 cd LOSAT/tests && bash run_all_tests.sh
-bash compare_tblastx_results.sh
 bash tests/compare_self_tblastx.sh
 bash tests/compare_long_sequences_debug.sh
-bash docs/compare_seg_mask.sh
 ```
 
 ---
@@ -342,12 +350,11 @@ LOSAT/                     # Rust crate root
     ├── run_comparison.sh  # Compare vs NCBI BLAST+
     ├── run_all_tests.sh
     ├── unit/              # Rust unit tests
-    ├── blast_out/ ncbi_out/ losat_out/ fasta/
+    ├── fasta/             # Inputs (blast_out/ ncbi_out/ losat_out/: untracked run output)
     └── plots/
 ```
 
-Additional scripts and datasets live at repo root: `tests/`, `losat_out/`, and
-`compare_tblastx_results.sh`.
+Additional comparison scripts live in `tests/` at the repo root.
 
 ```
 web/                       # LOSAT Web (browser application)
@@ -403,17 +410,17 @@ requirements above.
 - Use `#[inline]` for hot-path functions; use `unsafe` only when necessary and
   always add safety comments.
 - Prefer `cargo fmt` and `cargo clippy` conventions for Rust style.
+- Prefer explicit types over inference in public APIs.
+- Explain every deviation from the NCBI implementation, and every performance
+  optimization and why it is safe, in a code comment.
 
 ---
 
 ## Other Guidance Files (Reference Only)
 
 - `CLAUDE.md`
-- `cursorrules.mdc`
-- `.cursor/rules/cursorrules.mdc`
-- `.cursor/rules/global_rules.mdc`
 
-This file consolidates their requirements; if there is a conflict, follow this file.
+This file consolidates its requirements; if there is a conflict, follow this file.
 
 ---
 

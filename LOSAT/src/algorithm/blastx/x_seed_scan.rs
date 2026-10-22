@@ -327,7 +327,11 @@ fn x_word_finder_direct(
     branch_free: bool,
     hit_bf: bool,
 ) -> Result<Vec<InitHsp>> {
-    if x_hitbf_acts(hit_bf, options, subject, diagonals) {
+    let acts = x_hitbf_acts(hit_bf, options, subject, diagonals);
+    if hit_bf {
+        crate::utils::xreach::x_reach!("LOSAT_X_BXHITBF", acts);
+    }
+    if acts {
         return x_word_finder_direct_bf(
             batch,
             parameters,

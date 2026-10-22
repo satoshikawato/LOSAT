@@ -189,7 +189,11 @@ pub(crate) fn min_cells() -> usize {
 #[inline]
 pub(crate) fn mode_for(cells: usize) -> u8 {
     match mode() {
-        1 if cells < min_cells() => 0,
+        1 => {
+            let bucketed = cells >= min_cells();
+            crate::utils::xreach::x_reach!("LOSAT_X_SEEDBUCKET", bucketed);
+            u8::from(bucketed)
+        }
         m => m,
     }
 }

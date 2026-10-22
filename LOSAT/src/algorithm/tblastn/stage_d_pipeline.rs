@@ -555,11 +555,12 @@ fn x_batches_on_own_pools(
     } else {
         threads / 2
     };
-    if few_subjects && left >= 2 && left <= most {
+    let own_pools = if few_subjects && left >= 2 && left <= most {
         left
     } else {
         0
-    }
+    };
+    own_pools
 }
 
 /// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the threads of the `index`-th of `pools` pools that share
@@ -641,6 +642,13 @@ pub(super) fn x_search_batches<'p>(
         || !super::search_seed::XSubjectSide::keep_few()
         || super::search_seed::XSubjectSide::kept_within_threads(subjects.lengths(), threads)
         || x_searched_side_by_side(subjects, ranges.len(), threads);
+    // The plans are dropped (the switch's own path) or kept as before while it is on.
+    if x_subject_side_on
+        && ranges.len() >= super::search_seed::XSubjectSide::KEEP_FROM_BATCHES
+        && super::search_seed::XSubjectSide::keep_few()
+    {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNKEEPFEW", !x_keep);
+    }
     let x_subject_side = super::search_seed::XSubjectSide::for_batches(
         x_subject_side_on && x_keep,
         ranges.len(),
@@ -710,6 +718,12 @@ pub(super) fn x_search_batches<'p>(
                 pool.threads(),
                 x_ssided_layout && fits,
             );
+            // The sides are recorded here, where the batches are dispatched (the same helpers also
+            // decide whether plans are kept, x_searched_side_by_side).
+            crate::utils::xreach::x_reach!("LOSAT_X_TBNBATCH", side_by_side > 0);
+            if x_ssided_layout && fits && x_tbn_batch_rule() {
+                crate::utils::xreach::x_reach!("LOSAT_X_TBNBATCHRULE", side_by_side > 0);
+            }
             // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the batches left after those, at the same time
             // on pools of their own (x_batches_on_own_pools).
             let own_pools = x_own_pool_batches(
@@ -718,6 +732,9 @@ pub(super) fn x_search_batches<'p>(
                 subjects.count(),
                 pool.threads(),
             );
+            if x_tbn_own_pools() && x_tbn_batch_rule() {
+                crate::utils::xreach::x_reach!("LOSAT_X_TBNOWNPOOLS", own_pools > 0);
+            }
             if crate::utils::threading::diagnostics_enabled() {
                 eprintln!(
                     "[losat-thread-stage] program=tblastn stage=query_batches batches={} threads={} side_by_side={} one_after_another={} own_pools={}",
@@ -2381,6 +2398,10 @@ fn run_preliminary_subjects(
     // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the bases one chunk may hold, from the size of the
     // sequence file of the subjects (x_oid_chunk_bases); none without the switch.
     #[cfg(feature = "parallel")]
+    if x_tbn_oid_chunk() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNOIDCHUNK", parallel_selected);
+    }
+    #[cfg(feature = "parallel")]
     let x_chunk_bases = match pool {
         Some(pool) if parallel_selected && x_tbn_oid_chunk() => Some(x_oid_chunk_bases(
             pool.threads(),
@@ -2405,10 +2426,12 @@ fn run_preliminary_subjects(
     let x_units_beyond = x_chunk_bases.filter(|_| x_tbn_oid_units());
     let x_unit_pool = |subject: SubjectNt<'_>| {
         #[cfg(feature = "parallel")]
-        if x_units_beyond
-            .is_some_and(|bases| u64::try_from(subject.len()).unwrap_or(u64::MAX) > bases)
-        {
-            return pool;
+        if let Some(bases) = x_units_beyond {
+            let beyond = u64::try_from(subject.len()).unwrap_or(u64::MAX) > bases;
+            crate::utils::xreach::x_reach!("LOSAT_X_TBNOIDUNITS", beyond);
+            if beyond {
+                return pool;
+            }
         }
         #[cfg(not(feature = "parallel"))]
         let _ = subject;
@@ -2559,6 +2582,10 @@ fn run_preliminary_subjects(
     };
     // EXPERIMENT (LOSAT_X_TBNOIDNEXT): every chunk of LOSAT_X_TBNOIDCHUNK handed to the threads
     // when they are free (`x_oid_flow.rs`); the lists come back below chunk by chunk in OID order.
+    #[cfg(feature = "parallel")]
+    if x_tbn_oid_next() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNOIDNEXT", x_chunk_bases.is_some());
+    }
     #[cfg(feature = "parallel")]
     let x_flow = match x_chunk_bases {
         Some(bases) if x_tbn_oid_next() => Some(super::x_oid_flow::XOidFlow::new(

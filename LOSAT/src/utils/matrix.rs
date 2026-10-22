@@ -719,6 +719,17 @@ pub fn protein_display_score(matrix: ScoringMatrix, query: u8, subject: u8) -> i
     // const char k_PSymbol[ePMatrixSize + 1] = "ARNDCQEGHILKMFPSTWYVBZX";
     // ```
     const SYMBOLS: &[u8] = b"ARNDCQEGHILKMFPSTWYVBZX";
+    // A byte-indexed table instead of `SYMBOLS.contains`: on wasm32 the
+    // slice search compiles to a `memchr` call per residue pair.
+    const IS_SYMBOL: [bool; 256] = {
+        let mut table = [false; 256];
+        let mut i = 0;
+        while i < SYMBOLS.len() {
+            table[SYMBOLS[i] as usize] = true;
+            i += 1;
+        }
+        table
+    };
     if (query == b'U' && matches!(subject, b'U' | b'C')) || (query == b'C' && subject == b'U') {
         return protein_score(
             matrix,
@@ -729,12 +740,12 @@ pub fn protein_display_score(matrix: ScoringMatrix, query: u8, subject: u8) -> i
     if query == b'*' && subject == b'*' {
         return 1;
     }
-    if (query == b'*' && SYMBOLS.contains(&subject))
-        || (subject == b'*' && SYMBOLS.contains(&query))
+    if (query == b'*' && IS_SYMBOL[subject as usize])
+        || (subject == b'*' && IS_SYMBOL[query as usize])
     {
         return -4;
     }
-    if !SYMBOLS.contains(&query) || !SYMBOLS.contains(&subject) {
+    if !IS_SYMBOL[query as usize] || !IS_SYMBOL[subject as usize] {
         return -1000;
     }
     protein_score(
@@ -1003,5 +1014,57 @@ mod tests {
             rows += 1;
         }
         assert_eq!(rows, 131072);
+    }
+
+    // The slice search that the byte table in protein_display_score replaced.
+    fn protein_display_score_slice_search(matrix: ScoringMatrix, query: u8, subject: u8) -> i32 {
+        const SYMBOLS: &[u8] = b"ARNDCQEGHILKMFPSTWYVBZX";
+        if (query == b'U' && matches!(subject, b'U' | b'C')) || (query == b'C' && subject == b'U') {
+            return protein_score(
+                matrix,
+                aa_char_to_ncbistdaa(b'C'),
+                aa_char_to_ncbistdaa(b'C'),
+            );
+        }
+        if query == b'*' && subject == b'*' {
+            return 1;
+        }
+        if (query == b'*' && SYMBOLS.contains(&subject))
+            || (subject == b'*' && SYMBOLS.contains(&query))
+        {
+            return -4;
+        }
+        if !SYMBOLS.contains(&query) || !SYMBOLS.contains(&subject) {
+            return -1000;
+        }
+        protein_score(
+            matrix,
+            aa_char_to_ncbistdaa(query),
+            aa_char_to_ncbistdaa(subject),
+        )
+    }
+
+    #[test]
+    fn display_score_byte_table_equals_slice_search_for_all_byte_pairs() {
+        for matrix in [
+            ScoringMatrix::Blosum45,
+            ScoringMatrix::Blosum50,
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Blosum80,
+            ScoringMatrix::Blosum90,
+            ScoringMatrix::Pam30,
+            ScoringMatrix::Pam70,
+            ScoringMatrix::Pam250,
+        ] {
+            for query in 0..=u8::MAX {
+                for subject in 0..=u8::MAX {
+                    assert_eq!(
+                        protein_display_score(matrix, query, subject),
+                        protein_display_score_slice_search(matrix, query, subject),
+                        "{matrix:?} {query} {subject}"
+                    );
+                }
+            }
+        }
     }
 }

@@ -515,8 +515,8 @@ def validate_manifest_row(row: dict[str, str]) -> None:
     )
     require_manifest_condition(
         row,
-        row["strand"] == "both",
-        "paired/refresh execution currently supports only strand=both",
+        row["strand"] in ("both", "plus", "minus"),
+        "paired/refresh execution supports only strand=both, plus or minus",
     )
     require_manifest_condition(
         row,
@@ -607,6 +607,12 @@ def build_losat_command(
     if int(row["max_hsps_per_subject"]) > 0:
         command.extend(["-max_hsps", row["max_hsps_per_subject"]])
     command.extend(["-dust", "yes" if manifest_bool(row, "dust") else "no"])
+    # NCBI blast_args.cpp:1953-1955 (kArgStrand, default "both"): the strand of the row, as in
+    # build_ncbi_command. Only a one-strand row passes it: `both` is LOSAT's default, and the
+    # commands of the default rows are frozen in the S02 baseline (ci_fast_regressions.py), the
+    # V-ABI cases and the certification catalogs.
+    if row["strand"] != "both":
+        command.extend(["-strand", row["strand"]])
     return command
 
 

@@ -104,6 +104,23 @@ pub(super) fn format_number(outfmt: &str) -> i32 {
     crate::blastinput::app::parse_formatting_string(outfmt).map_or(-1, |choice| choice.number)
 }
 
+/// The XML2 / JSON document of a checked `-outfmt` value (16 or 15; `None` for the others).
+pub(super) fn xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
+    use crate::blastinput::app::ReportFormat;
+    use crate::report::blast_xml2::Xml2Kind;
+    match ReportFormat::from_number(format_number(outfmt)) {
+        Some(ReportFormat::Xml2S) => Some(Xml2Kind::Single16),
+        Some(ReportFormat::JsonS) => Some(Xml2Kind::Single15),
+        _ => None,
+    }
+}
+
+/// Whether a checked `-outfmt` value is a format of the structured XML family that takes the
+/// path of outfmt 5: BLAST XML (5), XML2 (16) and JSON (15).
+pub(super) fn is_structured_xml(outfmt: &str) -> bool {
+    format_number(outfmt) == 5 || xml2_kind(outfmt).is_some()
+}
+
 /// The ranges of a search as the reports use them: where the searched letters of each
 /// query and subject lie in its record (`-query_loc`, `-subject_loc`), and whether the
 /// reports end with the epilog (a search that stops at a query batch writes none).
@@ -135,6 +152,7 @@ pub(super) fn render(
     query_warning_lines: &[Vec<u8>],
     ranges: &ReportRanges<'_>,
     xml_values: super::blast_xml::XmlValues,
+    xml_taxa: super::database::XmlTaxa,
 ) -> Result<()> {
     ensure!(
         query_records.len() == hitlists.len(),
@@ -147,12 +165,39 @@ pub(super) fn render(
         hitlist.drop_zero_score_hsps();
     }
     let hitlists: &[KappaResultHitList] = hitlists;
-    // BLAST XML (outfmt 5): its texts are made, and what NCBI cannot write is refused, before
-    // any format writes (`-out` is already created, empty, as NCBI's).
+    // BLAST XML (outfmt 5, and the XML2 and JSON documents of 15 and 16): its texts are made,
+    // and what NCBI cannot write is refused, before any format writes (`-out` is already
+    // created, empty, as NCBI's).
+    //
+    // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
+    // fails for a matrix of its formatting table's that it does not know when it makes the
+    // first report's data: the start alone is written then (probe `tblastn_sub_lcmatrix`).
+    if outputs
+        .formats
+        .iter()
+        .any(|format| is_structured_xml(format.outfmt))
+    {
+        if let Err(error) =
+            super::blast_xml::unsupported_matrix(matrix_name, !query_records.is_empty())
+        {
+            for format in outputs.formats.iter_mut() {
+                if let Some(kind) = xml2_kind(format.outfmt) {
+                    let mut writer = format.sink.open()?;
+                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+                    writer.flush()?;
+                }
+            }
+            return Err(error);
+        }
+    }
+    let xml_is_xml2 = outputs
+        .formats
+        .iter()
+        .any(|format| xml2_kind(format.outfmt).is_some());
     let xml = if outputs
         .formats
         .iter()
-        .any(|format| format_number(format.outfmt) == 5)
+        .any(|format| is_structured_xml(format.outfmt))
     {
         Some(super::blast_xml::prepare(
             xml_values,
@@ -163,10 +208,13 @@ pub(super) fn render(
             hitlists,
             parameters,
             query_validity,
+            query_batch_skipped,
             scoring,
             matrix_name,
             seg,
             ranges,
+            xml_is_xml2,
+            xml_taxa,
         )?)
     } else {
         None
@@ -215,17 +263,21 @@ pub(super) fn render(
         hits_sink(pairwise_hits);
     }
     // The warnings of each query are written before its report, once, with the first
-    // format (`QueryWarnings`).
-    let mut format_warnings = Some(crate::report::query_warnings::QueryWarnings {
-        before: query_warning_lines,
-        sink: &mut *outputs.diagnostics,
-    });
+    // format (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
+    // diagnostics at every format.
+    let mut warning_lines = Some(query_warning_lines);
     let observer = &mut outputs.observer;
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
-        let mut warnings = format_warnings.take();
+        let mut warnings =
+            (warning_lines.is_some() || xml2_kind(format.outfmt).is_some()).then(|| {
+                crate::report::query_warnings::QueryWarnings {
+                    before: warning_lines.take().unwrap_or(&[]),
+                    sink: &mut *outputs.diagnostics,
+                }
+            });
         let mut writer = format.sink.open()?;
         match format_number(format.outfmt) {
             6 | 7 => write_tabular(
@@ -269,6 +321,7 @@ pub(super) fn render(
                 .as_ref()
                 .expect("XML prepared for TBLASTN outfmt 5")
                 .write(
+                    &mut crate::report::blast_xml::BlastXmlWriter::new(0),
                     &mut writer,
                     query_records,
                     subject_letters,
@@ -279,6 +332,32 @@ pub(super) fn render(
                     ranges,
                     warnings.as_mut(),
                 )?,
+            // The XML2 and JSON documents (outfmt 16 and 15): the same records, written by
+            // `Xml2Writer`.
+            15 | 16 => {
+                let kind = xml2_kind(format.outfmt).expect("a checked XML2 or JSON format");
+                let xml = xml
+                    .as_ref()
+                    .expect("XML prepared for TBLASTN outfmt 15 and 16");
+                xml.write(
+                    &mut crate::report::blast_xml2::Xml2Writer::new(kind, xml.xml2_run()),
+                    &mut writer,
+                    query_records,
+                    subject_letters,
+                    hitlists,
+                    genetic_code,
+                    seg,
+                    mask_lowercase,
+                    ranges,
+                    warnings.as_mut(),
+                )?;
+                // A run that stops before its first report (a database whose sequences cannot
+                // be read) still writes the document's start, which NCBI writes before the
+                // search.
+                if query_records.is_empty() && !ranges.epilog {
+                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+                }
+            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
             // ```c++
             //     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
@@ -612,6 +691,27 @@ mod tests {
     use crate::api::local_blast::{FormatOutput, OutputSink};
     use crate::utils::seg::SegParams;
 
+    // Outfmt 5 and the XML2 and JSON documents (16 and 15) take the structured-XML path of
+    // `render`; no other format does.
+    #[test]
+    fn the_xml_family_is_5_15_and_16() {
+        use crate::report::blast_xml2::Xml2Kind;
+        for (outfmt, kind, structured) in [
+            ("5", None, true),
+            ("15", Some(Xml2Kind::Single15), true),
+            ("16", Some(Xml2Kind::Single16), true),
+            (" 16 std", Some(Xml2Kind::Single16), true),
+            ("0", None, false),
+            ("6", None, false),
+            ("12", None, false),
+            ("13", None, false),
+            ("14", None, false),
+        ] {
+            assert_eq!(xml2_kind(outfmt), kind, "{outfmt}");
+            assert_eq!(is_structured_xml(outfmt), structured, "{outfmt}");
+        }
+    }
+
     // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
     // results = lcl_blast.Run(); formatter.PrintOneResultSet(**result, query);
     // Compare complete saved formatter bytes after the Stage D local search.
@@ -715,7 +815,11 @@ mod tests {
                 super::super::blast_xml::XmlValues {
                     expect: 10.0,
                     soft_masking: false,
+                    gapped: true,
+                    cbs: 2,
+                    db_gencode: 1,
                 },
+                Default::default(),
             )
             .unwrap();
             drop(outputs);

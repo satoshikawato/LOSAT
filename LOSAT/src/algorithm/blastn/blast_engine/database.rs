@@ -473,6 +473,7 @@ where
         // EXPERIMENT (LOSAT_X_BNDBSTREAM / LOSAT_X_BNDBSTREAMSHADOW): `x_db_stream.rs`.
         let mode = x_db_stream::x_bn_db_stream();
         if mode != x_db_stream::XDbStream::Off {
+            crate::utils::xreach::x_reach!("LOSAT_X_BNDBSTREAM", true);
             return x_db_stream::x_search_blocks_stream(
                 mode,
                 db,
@@ -494,6 +495,14 @@ where
             search,
             merge,
         );
+    }
+    // One thread: the blocks are searched one after another (the reference path).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if x_db_stream::x_bn_db_stream() != x_db_stream::XDbStream::Off {
+        crate::utils::xreach::x_reach!("LOSAT_X_BNDBSTREAM", false);
     }
     #[cfg(any(
         not(feature = "parallel"),

@@ -1,0 +1,552 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/tslice</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>1e-300</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>BDT61857.1 innexin [Penaeus monodon majanivirus A]</query-title>
+              <query-len>378</query-len>
+              <query-masking>
+                <Range>
+                  <from>277</from>
+                  <to>302</to>
+                </Range>
+              </query-masking>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>5</db-num>
+                  <db-len>33385</db-len>
+                  <hsp-len>54</hsp-len>
+                  <eff-space>3517992</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/tslice</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>1e-300</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>BDT61859.1 hypothetical protein [Penaeus monodon majanivirus A]</query-title>
+              <query-len>183</query-len>
+              <query-masking>
+                <Range>
+                  <from>16</from>
+                  <to>36</to>
+                </Range>
+                <Range>
+                  <from>110</from>
+                  <to>133</to>
+                </Range>
+              </query-masking>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>5</db-num>
+                  <db-len>33385</db-len>
+                  <hsp-len>48</hsp-len>
+                  <eff-space>1469880</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/tslice</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>1e-300</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_3</query-id>
+              <query-title>BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]</query-title>
+              <query-len>731</query-len>
+              <query-masking>
+                <Range>
+                  <from>112</from>
+                  <to>128</to>
+                </Range>
+                <Range>
+                  <from>208</from>
+                  <to>217</to>
+                </Range>
+                <Range>
+                  <from>588</from>
+                  <to>604</to>
+                </Range>
+                <Range>
+                  <from>612</from>
+                  <to>630</to>
+                </Range>
+              </query-masking>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>5</db-num>
+                  <db-len>33385</db-len>
+                  <hsp-len>59</hsp-len>
+                  <eff-space>7279776</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/tslice</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>1e-300</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_4</query-id>
+              <query-title>BDT62090.1 hypothetical protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</query-title>
+              <query-len>671</query-len>
+              <query-masking>
+                <Range>
+                  <from>67</from>
+                  <to>89</to>
+                </Range>
+                <Range>
+                  <from>175</from>
+                  <to>179</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|2</id>
+                      <accession>2</accession>
+                      <title>v_slice LvMJNV 21001-39000 with ambiguity codes</title>
+                    </HitDescr>
+                  </description>
+                  <len>18000</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>1290.4</bit-score>
+                      <score>3338</score>
+                      <evalue>0</evalue>
+                      <identity>667</identity>
+                      <positive>667</positive>
+                      <query-from>1</query-from>
+                      <query-to>671</query-to>
+                      <hit-from>385</hit-from>
+                      <hit-to>2397</hit-to>
+                      <hit-frame>-1</hit-frame>
+                      <align-len>671</align-len>
+                      <gaps>0</gaps>
+                      <qseq>MKKGDKRKYKRRWKQIVSSSLQTDILEHGIKQITSPQNGFKFKKNMEQKWLTDTDQDNEHVPPFEPLqqediqviqqqtpitqttcilqqEEAQQQYGDIRGSYGNDVPSQQQLSFIAKQDVSSTEQTTDSLQHHGPPTPQTTCILQQEEAQQQYGDIRGSYRNDDGIQILHIPSqqqqqLSFIAKQDVSSTEQTTDSLQHHGPPTPQTTCILQQEEAQQQYGDIRGSYRNDDDFQILHIPSQQQQLSFIAKQDVSSTEQTTDSSQHHGPPTTQTTCILQQEEAQQQYGDIRGSYRNDDGIQILHIPSQQQLSFIAKQDVSSIEQTTDSSQHHGPPTTQTTGVLQQEEAQQQYGDIRGSYRNDDGIQILHIPSQQQLSFIAKQDVSSTEQTTDSLQHHGPPTPQTTCILQQEEAQQQYGDIRGSYRNDDGIQILHIPSQQQQLSFIAKQDVSSTEQTTDSLQHHGPLQQCSDSQDLNMTDKSMQQDEIQTLIKSKQNIMNKILCNQKIWEKIILLAFQKKMNNILEDSKDENYIYISFKDKFNKNKHYVSVAMESTSLDENKEKTIPESIHRFLEENKLNTNERLNTYLCGQVYTVKYMMVEIINLIGRVVYLRKYGSYITIVVKFLKNNEDFFVYNMSTRDEKQQTEYPIKQDTYNILYKMNYINITNSQ</qseq>
+                      <hseq>MKKGDKRKYKRRWKQIVSSSLQTDILEHGIKQITSPQNGFKFKKNMEQKWLTDTDQDNEHVPPFEPLQQEDIQVIQQQTPITQTTCILQQEEAQQQYGDIRGSYGNDVPSQQQLSFIAKQDVSSTEQTTDSLQHHGPPTPQTTCILQQEEAQQQYGDIRGSYRNDDGIQILHIPSQQQQQLSFIAKQDVSSTEQTTDSLQHHGPPTPQTTCILQQEEAQQQYGDIRGSYRNDDDFQILHIPSQQQQLSFIAKQDVSSTEQTTDSSQHHGPPTTQTTCILQQEEAQQQYGDIRGSYRNDDGIQILHIPSQQQLSFIAKQDVSSIEQTTDSSQHHGPPTTQTTGVLQQEEAQQQYGDIRGSYRNDDGIQILHIPSQQQLSFIAKQDVSSTEQTTDSLQHHGPPTPQTTCILQQEEAQQQYGDIRGSYRNDDGIQILHIPSQQQQLSFIAKQDVSSTEQTTDSLQXXXXLQQCSDSQDLNMTDKSMQQDEIQTLIKSKQNIMNKILCNQKIWEKIILLAFQKKMNNILEDSKDENYIYISFKDKFNKNKHYVSVAMESTSLDENKEKTIPESIHRFLEENKLNTNERLNTYLCGQVYTVKYMMVEIINLIGRVVYLRKYGSYITIVVKFLKNNEDFFVYNMSTRDEKQQTEYPIKQDTYNILYKMNYINITNSQ</hseq>
+                      <midline>MKKGDKRKYKRRWKQIVSSSLQTDILEHGIKQITSPQNGFKFKKNMEQKWLTDTDQDNEHVPPFEPLQQEDIQVIQQQTPITQTTCILQQEEAQQQYGDIRGSYGNDVPSQQQLSFIAKQDVSSTEQTTDSLQHHGPPTPQTTCILQQEEAQQQYGDIRGSYRNDDGIQILHIPSQQQQQLSFIAKQDVSSTEQTTDSLQHHGPPTPQTTCILQQEEAQQQYGDIRGSYRNDDDFQILHIPSQQQQLSFIAKQDVSSTEQTTDSSQHHGPPTTQTTCILQQEEAQQQYGDIRGSYRNDDGIQILHIPSQQQLSFIAKQDVSSIEQTTDSSQHHGPPTTQTTGVLQQEEAQQQYGDIRGSYRNDDGIQILHIPSQQQLSFIAKQDVSSTEQTTDSLQHHGPPTPQTTCILQQEEAQQQYGDIRGSYRNDDGIQILHIPSQQQQLSFIAKQDVSSTEQTTDSLQ    LQQCSDSQDLNMTDKSMQQDEIQTLIKSKQNIMNKILCNQKIWEKIILLAFQKKMNNILEDSKDENYIYISFKDKFNKNKHYVSVAMESTSLDENKEKTIPESIHRFLEENKLNTNERLNTYLCGQVYTVKYMMVEIINLIGRVVYLRKYGSYITIVVKFLKNNEDFFVYNMSTRDEKQQTEYPIKQDTYNILYKMNYINITNSQ</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>5</db-num>
+                  <db-len>33385</db-len>
+                  <hsp-len>59</hsp-len>
+                  <eff-space>6629796</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/tslice</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>1e-300</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_5</query-id>
+              <query-title>BDT62091.1 hypothetical protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</query-title>
+              <query-len>204</query-len>
+              <query-masking>
+                <Range>
+                  <from>135</from>
+                  <to>146</to>
+                </Range>
+                <Range>
+                  <from>188</from>
+                  <to>199</to>
+                </Range>
+              </query-masking>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>5</db-num>
+                  <db-len>33385</db-len>
+                  <hsp-len>49</hsp-len>
+                  <eff-space>1686865</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/tslice</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>1e-300</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_6</query-id>
+              <query-title>BDT62092.1 tyrosine recombinase [Litopenaeus vannamei majanivirus Nimav-1_LVa]</query-title>
+              <query-len>764</query-len>
+              <query-masking>
+                <Range>
+                  <from>11</from>
+                  <to>20</to>
+                </Range>
+                <Range>
+                  <from>27</from>
+                  <to>41</to>
+                </Range>
+                <Range>
+                  <from>47</from>
+                  <to>84</to>
+                </Range>
+                <Range>
+                  <from>89</from>
+                  <to>107</to>
+                </Range>
+                <Range>
+                  <from>132</from>
+                  <to>144</to>
+                </Range>
+                <Range>
+                  <from>645</from>
+                  <to>657</to>
+                </Range>
+                <Range>
+                  <from>661</from>
+                  <to>679</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|2</id>
+                      <accession>2</accession>
+                      <title>v_slice LvMJNV 21001-39000 with ambiguity codes</title>
+                    </HitDescr>
+                  </description>
+                  <len>18000</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>1144.03</bit-score>
+                      <score>2958</score>
+                      <evalue>0</evalue>
+                      <identity>591</identity>
+                      <positive>592</positive>
+                      <query-from>165</query-from>
+                      <query-to>759</query-to>
+                      <hit-from>7709</hit-from>
+                      <hit-to>9493</hit-to>
+                      <hit-frame>2</hit-frame>
+                      <align-len>595</align-len>
+                      <gaps>0</gaps>
+                      <qseq>FICNKQYVKLKRHIKDIHQKTGKDLEEAYSEAKNRYAGLSHQACNLCGKGVRHMKYHLVNIHKLVPRSDEYRMALGTNVERSRTVTQEKKRTIQERREDLSKIPVSVQAWIAYESRGGLTVDRKGMQRNMRLVMEILETHSLTIMDLIEYYTVETSYELLYKTLENRKYKYASIGVILGHLKRFIDWACTETNRPLCELTNREHNFYIKLCRKKGNVENMNRKAAEYVPTIDEMGPLIQYTKHRDIMDGLIDQPRETLYEYGADLVHATLAWPLIIRAGARTGVIKNLLTDEVVNAVKSSDGVVISVKTHKTSLQYGPYQIGIPAREHDALVNFINGRDWESKYVFSSRRGAPFSMANIQRFMRKLFLLYDLPRLRIATVRKFLTTQAHREGDDRIQEATASLLKHSMKTAKRDYKAMQRDHDALDTANRLSKMLREKLSEKGDCGNDIVNEDDSVALMDEDDIMQDNDAVTSTTINVPRIddddhhqqhrqyqEEGdvyddnnddvvnialdnldKYNKDDICDGNVQKIRDERFKPEHLELLKRVFKRNISKRQKVSKNVIKKKRELLEEIYTYPGYNPKTLTDKIYDSLRSQ</qseq>
+                      <hseq>FFLLQQYVKLKRHIKDIHQKTGKDLEEAYSEAKNRYAGLSHQACNLCGKGVRHMKYHLVNIHKLVPRSDEYRMALGTNVERSRTVTQEKKRTIQERREDLSKIPVSVQAWIAYESRGGLTVDRKGMQRNMRLVMEILETHSLTIMDLIEYYTVETSYELLYKTLENRKYKYASIGVILGHLKRFIDWACTETNRPLCELTNREHNFYIKLCRKKGNVENMNRKAAEYVPTIDEMGPLIQYTKHRDIMDGLIDQPRETLYEYGADLVHATLAWPLIIRAGARTGVIKNLLTDEVVNAVKSSDGVVISVKTHKTSLQYGPYQIGIPAREHDALVNFINGRDWESKYVFSSRRGAPFSMANIQRFMRKLFLLYDLPRLRIATVRKFLTTQAHREGDDRIQEATASLLKHSMKTAKRDYKAMQRDHDALDTANRLSKMLREKLSEKGDCGNDIVNEDDSVALMDEDDIMQDNDAVTSTTINVPRIDDDDHHQQHRQYQEEGDVYDDNNDDVVNIALDNLDKYNKDDICDGNVQKIRDERFKPEHLELLKRVFKRNISKRQKVSKNVIKKKRELLEEIYTYPGYNPKTLTDKIYDSLRSQ</hseq>
+                      <midline>F   +QYVKLKRHIKDIHQKTGKDLEEAYSEAKNRYAGLSHQACNLCGKGVRHMKYHLVNIHKLVPRSDEYRMALGTNVERSRTVTQEKKRTIQERREDLSKIPVSVQAWIAYESRGGLTVDRKGMQRNMRLVMEILETHSLTIMDLIEYYTVETSYELLYKTLENRKYKYASIGVILGHLKRFIDWACTETNRPLCELTNREHNFYIKLCRKKGNVENMNRKAAEYVPTIDEMGPLIQYTKHRDIMDGLIDQPRETLYEYGADLVHATLAWPLIIRAGARTGVIKNLLTDEVVNAVKSSDGVVISVKTHKTSLQYGPYQIGIPAREHDALVNFINGRDWESKYVFSSRRGAPFSMANIQRFMRKLFLLYDLPRLRIATVRKFLTTQAHREGDDRIQEATASLLKHSMKTAKRDYKAMQRDHDALDTANRLSKMLREKLSEKGDCGNDIVNEDDSVALMDEDDIMQDNDAVTSTTINVPRIDDDDHHQQHRQYQEEGDVYDDNNDDVVNIALDNLDKYNKDDICDGNVQKIRDERFKPEHLELLKRVFKRNISKRQKVSKNVIKKKRELLEEIYTYPGYNPKTLTDKIYDSLRSQ</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>5</db-num>
+                  <db-len>33385</db-len>
+                  <hsp-len>60</hsp-len>
+                  <eff-space>7622912</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/tslice</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>1e-300</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_7</query-id>
+              <query-title>BDT62096.1 wsv206-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</query-title>
+              <query-len>212</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>5</db-num>
+                  <db-len>33385</db-len>
+                  <hsp-len>49</hsp-len>
+                  <eff-space>1773929</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/tslice</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>1e-300</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_8</query-id>
+              <query-title>q_nohit random protein of 40 residues</query-title>
+              <query-len>40</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>5</db-num>
+                  <db-len>33385</db-len>
+                  <hsp-len>15</hsp-len>
+                  <eff-space>276325</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

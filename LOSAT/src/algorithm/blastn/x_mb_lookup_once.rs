@@ -944,6 +944,9 @@ pub(super) fn fill(
     timed: bool,
     resident: bool,
 ) -> OnceStats {
+    if resident && prefault_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_MBLUTPREFAULT", false);
+    }
     fill_chunked(
         parts,
         words,
@@ -1030,6 +1033,9 @@ fn fill_chunked(
     let pages = pages_of(offset, table_size);
     let (first_start, first_end) = bounds(0);
     let round_on = prefault && prefault_gate(first_end - first_start, table_size);
+    if prefault {
+        crate::utils::xreach::x_reach!("LOSAT_X_MBLUTPREFAULT", round_on);
+    }
     let mut marks = PageBits::new(if round_on { pages } else { 0 }, parts);
     let touched = Slots(
         (0..parts)

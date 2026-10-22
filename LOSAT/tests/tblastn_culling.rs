@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use LOSAT::cli::{try_parse_from, Commands};
+use LOSAT::cli::{try_parse_from, Cli, Commands};
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -33,7 +33,7 @@ fn losat() -> Command {
 fn limit(words: &[&str]) -> Result<i32, String> {
     let mut argv = vec!["losat", "tblastn", "-query", "q.fa", "-subject", "s.fa"];
     argv.extend(words);
-    match try_parse_from(argv) {
+    match try_parse_from::<Cli, _, _>(argv) {
         Ok(cli) => match cli.command {
             Commands::Tblastn(args) => Ok(args.culling_limit),
             _ => unreachable!("tblastn"),

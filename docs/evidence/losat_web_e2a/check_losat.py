@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compare LOSAT with the frozen NCBI -subject fixtures (LOSAT/tests/outfmt0_manifest.tsv: outfmt 0, 6
 and 7, and 8, 9 and 12 in the rows sa.*, 5 for all five programs, 15 and 16 (BLAST JSON and XML2) for
-all five programs, and 13 and 14 (the same as side files and a master file) for every program).
+all five programs, 13 and 14 (the same as side files and a master file) for every program, and 17 (SAM) for
+BLASTN, whose @PG CL tag is not compared).
 
 Every fixture runs from LOSAT/ as `LOSAT <program> <search_argv>` (the arguments of the
 oracle run). Its stdout must equal LOSAT/tests/fixtures/outfmt0/<fixture_id>.out byte for
@@ -30,7 +31,7 @@ import sys
 from pathlib import Path
 import subprocess
 
-from run_oracle import DEVIATION, ENGINE, outfmt, read_manifest, search_argv, xinclude
+from run_oracle import DEVIATION, ENGINE, is_sam_outfmt, outfmt, read_manifest, search_argv, strip_sam_cl, xinclude
 
 FIXTURES = ENGINE / "tests/fixtures/outfmt0"
 
@@ -106,6 +107,11 @@ def main() -> int:
                 problems.append("stdout (database oracle) " + first_difference(expected, observed))
         elif files:
             problems += xinclude.problems(written, row, FIXTURES, first_difference)
+        elif is_sam_outfmt(outfmt(row)):
+            # A SAM row (outfmt 17) differs from NCBI's in the CL tag of its @PG line only
+            # (`strip_sam_cl`): LOSAT writes its own command line.
+            if strip_sam_cl(run.stdout) != strip_sam_cl(expected_out):
+                problems.append("stdout " + first_difference(strip_sam_cl(expected_out), strip_sam_cl(run.stdout)))
         elif run.stdout != expected_out:
             problems.append("stdout " + first_difference(expected_out, run.stdout))
         if run.returncode == 0 and run.stderr != expected_err:

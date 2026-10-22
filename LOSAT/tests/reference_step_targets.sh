@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The cargo test targets of the reference step (`LOSAT_X_DEFAULT=0`) of ci.yml and
-# platform-checks.yml, as arguments for `cargo test`: the library and binary unit tests and every
-# integration test file without the marker line below.
+# platform-checks.yml, as arguments for `cargo test` or `cargo nextest run` (CI): the library and
+# binary unit tests and every integration test file without the marker line below.
 #
 # A file carries the marker when each LOSAT run it makes removes the caller's `LOSAT_*` variables
 # (all but `LOSAT_BLASTX_WORKER_LOG`, which selects no code path) and sets its own, and it calls
@@ -14,6 +14,7 @@
 #
 # Usage (from LOSAT/): targets=$(bash tests/reference_step_targets.sh)
 #                      cargo test --all-features $targets
+#                      (CI: cargo nextest run --all-features $targets)
 set -euo pipefail
 cd "$(dirname "$0")"
 

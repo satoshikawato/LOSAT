@@ -4278,7 +4278,12 @@ Scheduling (each value computed by one thread with the original function; order 
   512 / 1,024 / 2,048 subjects in order lost up to x1.80 at 16 threads (30 chunks x 512), x1.18 at 8 (512), and
   x1.04 / x1.01 at 2 threads (30 chunks x 512 / 1,024); `AP027131.fasta` against the 543 proteins of
   `AP027133.faa` (`-subject`, 68 chunks) x1.20 at 8, x1.49 at 16 threads. Under the rule no measured case is
-  slower; the subsets with 2,048 subjects at 2-8 threads x0.81-0.99, with 4,096 at 16 threads x0.51-0.97.
+  slower; the subsets with 2,048 subjects at 2-8 threads x0.68-0.99, with 4,096 at 16 threads x0.51-0.97.
+  This pull request's binary against its base, 3 pairs on the same cores (whole node 1 for 32 threads): bx50k at 32 /
+  16 / 8 threads 2.45 -> 0.76 / 0.95 / 1.62 s (x0.310 / x0.388 / x0.656), max RSS 71 -> 34-36 MiB, at one thread
+  x1.004 with the same instructions; with one chunk per batch (the 10 transcripts of BX-t10 against Swiss-Prot at 8
+  and 16 threads, 1,000 short reads against Swiss-Prot at 16) x0.996-1.000; the `-subject` case above x0.988-1.002
+  (kept on the waves).
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

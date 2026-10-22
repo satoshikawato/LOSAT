@@ -15,6 +15,13 @@
 //! does (`report::blast_xml::hsp`), over the SEG intervals of each frame joined as NCBI joins
 //! them (`report::xml_query_masks`).
 //!
+//! The XML2 and JSON documents of outfmt 15 and 16 (`report::blast_xml2`) are written from the
+//! same per-query records by `Xml2Writer`: `write_tblastx_xml` is generic over the writer
+//! (`StructuredXml`). They add the masks of every searched query (also one without hits; a
+//! query of a batch NCBI did not search has none), the `searched` flag of the query's batch,
+//! the taxid of a database sequence, and the genetic codes (TBLASTX is ungapped and has no
+//! composition-based statistics: no `gap-open`, `gap-extend` or `cbs`).
+//!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-744
 //! ```c++
 //!     } else if (m_FormatType == CFormattingArgs::eXml) {
@@ -45,9 +52,10 @@ use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    filter, BlastXmlWriter, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery,
-    XmlRun, XmlStats, XmlSubjects, REFERENCE_GAPPED_BLAST,
+    filter, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
+    XmlSubjects, REFERENCE_GAPPED_BLAST,
 };
+use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{QueryWarnings, INVALID_QUERY_MESSAGE};
 use crate::report::serial::seqalign::seqalign_evalue;
 use crate::utils::genetic_code::GeneticCode;
@@ -118,18 +126,40 @@ fn query_stats(stats: &TblastxQueryStats, numbers: &SubjectSetNumbers) -> XmlSta
     }
 }
 
+/// What the XML2 and JSON documents need of the run beyond outfmt 5's (`Xml2Writer::new`):
+/// the target, and the genetic codes (`Parameters`; TBLASTX is ungapped and has no
+/// composition-based statistics).
+pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
+    Xml2Run {
+        target: match &run.database {
+            Some(_) => Xml2Target::Database,
+            None => Xml2Target::Subjects(run.subjects.len()),
+        },
+        gapped: false,
+        cbs: 0,
+        query_gencode: Some(i32::from(run.args.query_gencode)),
+        db_gencode: Some(i32::from(run.args.db_gencode)),
+    }
+}
+
 /// Writes the document of every query of `run` (`hits` is the final list after
-/// `shift_to_records`: record coordinates, in query order) to `writer`, each query's warnings
-/// before it, with the document's header before the first query and its end after the last when
-/// `run.epilog`. Everything NCBI cannot write is refused before the first byte: the `-db` name,
-/// the query titles and messages, the titles of the subjects with hits.
-pub(crate) fn write_tblastx_xml(
+/// `shift_to_records`: record coordinates, in query order) through `document` (BLAST XML, or
+/// the XML2 / JSON documents) to `writer`, each query's warnings before it, with the document's
+/// header before the first query and its end after the last when `run.epilog`. Everything NCBI
+/// cannot write is refused before the first byte: the `-db` name, the query titles and
+/// messages, the titles of the subjects with hits. `all_masks`: the masks of every searched
+/// query are listed (XML2 and JSON), not those of the queries with hits alone (outfmt 5).
+/// `run.xml_taxa` holds the taxids of the database sequences that XML2 and JSON show.
+pub(crate) fn write_tblastx_xml<W: StructuredXml>(
+    document: &mut W,
+    all_masks: bool,
     writer: &mut dyn Write,
     hits: &[TblastxHsp],
     run: &TblastxReportRun<'_>,
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let args = run.args;
+    let taxa = run.xml_taxa;
     let (db_name, db_num, db_len) = match &run.database {
         Some(database) => (
             database.name,
@@ -193,9 +223,9 @@ pub(crate) fn write_tblastx_xml(
         Some(database) => XmlSubjects::Database {
             ordinals: &database.reported.ordinals,
             titles: crate::report::blast_xml::XmlTitles::Records(run.subjects),
-            // Only XML2 shows the taxid (outfmt 15 and 16 of TBLASTX: OF5b).
-            taxids: &[],
-            taxonomy: &[],
+            // Only XML2 shows the taxid (`taxa` is empty for outfmt 5).
+            taxids: &taxa.taxids,
+            taxonomy: &taxa.taxonomy,
             length: &subject_length,
         },
         None => XmlSubjects::Records {
@@ -214,7 +244,7 @@ pub(crate) fn write_tblastx_xml(
     }
     let query_code = GeneticCode::from_id(args.query_gencode);
     let db_code = GeneticCode::from_id(args.db_gencode);
-    let mut document = BlastXmlWriter::new(0);
+    let mut taxdb_printer = taxa.notes.printer();
     let mut buf: Vec<u8> = Vec::new();
     let mut masks: Vec<QueryMask> = Vec::new();
     let (mut window, mut query_row, mut subject_row): (Vec<u8>, Vec<u8>, Vec<u8>) =
@@ -229,7 +259,9 @@ pub(crate) fn write_tblastx_xml(
         let record_length = query_placements.length(q_idx, searched_length) as i32;
         let query_hits = &hits[query_hits[q_idx].clone()];
         masks.clear();
-        if !query_hits.is_empty() {
+        // A query of a batch NCBI did not search has no masks (its result is made without the
+        // search); XML2 and JSON list the masks of every other query, also one without hits.
+        if run.searched[q_idx] && (all_masks || !query_hits.is_empty()) {
             crate::algorithm::tblastx::report::xml_query_masks(
                 &run.query_stats[q_idx],
                 searched_length,
@@ -243,7 +275,7 @@ pub(crate) fn write_tblastx_xml(
             len: i32::try_from(searched_length)?,
             stats: query_stats(&run.query_stats[q_idx], run.numbers),
             message: text.message.as_deref(),
-            // Read by XML2 alone (outfmt 15 and 16 of TBLASTX: OF5b).
+            // Read by XML2 alone.
             searched: run.searched[q_idx],
             masks: &masks,
         };
@@ -265,6 +297,17 @@ pub(crate) fn write_tblastx_xml(
                     taxid: subject.taxid,
                     taxonomy: &subject.taxonomy,
                 };
+                // NCBI's messages about the taxonomy database: opening and the volume's lookup
+                // at the first `Hit` that needs them, the lookup of the `Hit` every time
+                // (nothing for the other formats).
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    taxdb_printer.at_hit(
+                        s_idx as usize,
+                        subject.taxid,
+                        &subject.taxonomy,
+                        &mut *warnings.sink,
+                    )?;
+                }
                 sink.hit(&hit, |hsps| {
                     for hsp in &query_hits[first..end] {
                         run.subject_letters.rows_into(

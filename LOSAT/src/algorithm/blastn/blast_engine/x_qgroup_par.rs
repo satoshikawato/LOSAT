@@ -195,10 +195,13 @@ pub(super) fn plan(counts: &[u32], stage: Stage) -> Option<Vec<u32>> {
     match choose(counts) {
         Choice::Empty => return None,
         Choice::Owner => {
+            crate::utils::xreach::x_reach!("LOSAT_X_QGROUPPAR", false);
             OWNER.fetch_add(1, Ordering::Relaxed);
             return None;
         }
-        Choice::Queries => {}
+        Choice::Queries => {
+            crate::utils::xreach::x_reach!("LOSAT_X_QGROUPPAR", true);
+        }
     }
     let mut order: Vec<u32> = (0..counts.len() as u32)
         .filter(|&query| counts[query as usize] > 0)

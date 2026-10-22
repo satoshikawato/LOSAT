@@ -795,6 +795,10 @@ impl XSubjectSide {
         gencode: u8,
         mask_lowercase: bool,
     ) -> Option<Self> {
+        // The own side is recorded where a plan is kept or refused (KEEP_LIMIT).
+        if on && batches < Self::KEEP_FROM_BATCHES {
+            crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", false);
+        }
         (on && batches >= Self::KEEP_FROM_BATCHES)
             .then(|| Self::new(subjects, gencode, mask_lowercase))
     }
@@ -862,8 +866,13 @@ impl XSubjectSide {
         let kept = slot.get_or_init(|| {
             made = true;
             match build() {
-                Ok(plan) if self.keep(&plan) => Some(plan),
+                Ok(plan) if self.keep(&plan) => {
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", true);
+                    Some(plan)
+                }
                 Ok(plan) => {
+                    // Over `KEEP_LIMIT`: the plan is made per use.
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", false);
                     own = Some(plan);
                     None
                 }
@@ -1203,11 +1212,10 @@ pub(super) fn x_scan_unit(
 ) {
     let (frame_index, chunk, ranges) = &plan.subject.units[unit];
     let frame = &plan.subject.frames[*frame_index];
-    // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan on presence bytes, for a table of tblastn's shape;
-    // it writes up to X_SCAN_BYTE_SLACK entries after the capacity.
+    // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan on presence bytes, for a table of tblastn's shape
+    // (without AVX2 a sparse one); it writes up to X_SCAN_BYTE_SLACK entries after the capacity.
     let scan_byte = super::x_scan_byte::x_scan_byte();
-    let presence = (scan_byte.on() && super::x_scan_byte::fits(&plan.lookup))
-        .then(|| super::x_scan_byte::presence_bytes(&plan.lookup));
+    let presence = super::x_scan_byte::x_presence(scan_byte, &plan.lookup);
     // EXPERIMENT (LOSAT_X_TBNSCANBF): the branch-free scan writes up to X_SCAN_BF_SLACK entries
     // after the capacity.
     let scan_bf = super::x_scan_bf::x_tbn_scan_bf();

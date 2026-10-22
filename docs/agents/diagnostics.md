@@ -174,6 +174,14 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   extension, `extension/two_hit.rs::x_two_hit_cells`) and `rescan` = cells / distinct subject positions
   per cell (positions past the furthest one an earlier extension of the cell reached). The statistics
   repeat every extension, so the run is slower; reports do not change.
+- `LOSAT_X_REACH=<directory>` records, at the decision points of the conditional switches of the strict set
+  (`utils/xreach.rs`, `x_reach!`), whether each took its own path or the reference path while it was on, and
+  writes `reach-<pid>-<ns>.tsv` (`switch new ref program`) into the directory at exit; output unchanged.
+  `LOSAT/tests/switch_reach_check.py` compares the folded files with `LOSAT/tests/switch_reach_expected.tsv`
+  (one row per switch of the set: class `always`, `platform` or `conditional`; for a conditional switch each
+  side `required` or `gap` with the input that would reach it). CI runs the fast regressions with it and the
+  check after them. A new switch of the set adds its row; a conditional one also marks its decision points
+  and, where cheap, adds a fixture for each side, or writes `gap` with the reason.
 - `LOSAT_STARTUP_TRACE=1` startup trace.
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.
 - `LOSAT_WASI_PRESPAWN=auto|N` (Node threaded runner; `auto` when unset since
@@ -3700,7 +3708,8 @@ Scheduling (each value computed by one thread with the original function; order 
   took x0.997 of the time at 1 thread (0.993-1.008, 6 pairs) and x1.000-1.004 at 8 (0.991-1.014,
   two runs of 6 pairs); the other measured cases are in `TBNKEEPFEW`.
 - `LOSAT_X_TBNSCANBYTE=1` tblastn (speed; in the strict set from the pull request that added it,
-  2026-10-21; `=0` turns it off; on by default where the CPU has AVX2, changes nothing elsewhere;
+  2026-10-21; `=0` turns it off; by default the AVX2 forms where the CPU has AVX2, the plain loops
+  for sparse tables on x86-64 without AVX2 and in WebAssembly (from 2026-10-22), nothing on aarch64;
   `tblastn/x_scan_byte.rs`, exactness argument in its header): for tblastn's table (word size 3,
   5-bit letters) the lookup scan of the unit path (`x_scan_unit`) makes the table indexes of a block
   of 256 words from the letters directly (`l[s] << 10 | l[s+1] << 5 | l[s+2]`, 16 at a time with
@@ -3713,12 +3722,17 @@ Scheduling (each value computed by one thread with the original function; order 
   so the scan stops at the same word and every call returns NCBI's pairs and scan range (test
   `x_scan_byte_equals_ncbi_scan_on_random_subjects` against `s_blast_aa_scan_subject_one_range`,
   both forms). The offset array has four entries more. `LOSAT_X_TBNSCANBYTE=2` takes plain loops of
-  the same form on any CPU (not the default anywhere: one core on the workstation, one protein x
-  the human genome x0.79, the LOSAT Web serial reactor one protein x E. coli x0.83, but x1.01-1.06
-  where most words are candidates). Tables of other shapes, CPUs without AVX2 and
-  `LOSAT_X_DEFAULT=0` keep the scans before (`TBNSCANBF`, NCBI's loop). Shadow:
-  `LOSAT_X_TBNSCANBYTESHADOW=1` also runs NCBI's loop on every scan call (the AVX2 forms where AVX2 is
-  there unless `=2`, else the plain loops) and stops (panic) if the count, a pair or the scan range
+  the same form on any CPU for every table (one core on the workstation: one protein x the human
+  genome x0.79, the LOSAT Web serial reactor one protein x E. coli x0.83, but x1.01-1.06 where most
+  words are candidates); `=3` takes them on any CPU for sparse tables only, those where at most three
+  tenths of the backbone cells have hits (the default without AVX2 on x86-64 and in WebAssembly). The
+  first k proteins of AP027131 x MG1655 (one core, plain loops against the scan before): the LOSAT
+  Web serial reactor x0.84-0.95 and x86-64 cycles x0.84-0.90 at a fill of 0.09-0.24 (k = 1-8), x1.00
+  and x0.95 at 0.34 (k = 16), x1.02-1.03 and x0.99-1.00 at 0.42-0.46. Tables of other shapes, tables
+  that are not sparse without AVX2, aarch64 and `LOSAT_X_DEFAULT=0` keep the scans before
+  (`TBNSCANBF`, NCBI's loop). Shadow: `LOSAT_X_TBNSCANBYTESHADOW=1` also runs NCBI's loop on every
+  scan call of every table (the AVX2 forms where AVX2 is there unless `=2` or `=3`, else the plain
+  loops) and stops (panic) if the count, a pair or the scan range
   differs; one `[X_SHADOW] TBNSCANBYTE calls_compared= pairs_compared=` line at the end. With
   `LOSAT_X_STATS=1` a line `[X_STATS] TBNSCANBYTE units= calls= avx2=` gives the units and scan calls
   taken this way (`tests/tblastn_scan_byte.rs` reads both). Timed on the workstation (one booked

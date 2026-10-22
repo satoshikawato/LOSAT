@@ -999,7 +999,11 @@ where
             .collect()
     };
     let new_scratch = || XScratch::new(BlastpKappaSubjectRangeCache::x_with_shared(shared.clone()));
-    let lpt = lpt && search.pool.enabled() && search.threads > 1 && window.jobs.len() > 1;
+    let lpt = lpt && {
+        let acts = search.pool.enabled() && search.threads > 1 && window.jobs.len() > 1;
+        crate::utils::xreach::x_reach!("LOSAT_X_BPREDOLPT", acts);
+        acts
+    };
     let per_job: Vec<XWindowResults> = if lpt {
         let order = x_lpt_order(&x_job_costs(search, lists, window));
         x_compute_window_lpt(

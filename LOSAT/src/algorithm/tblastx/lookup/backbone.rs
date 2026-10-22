@@ -639,8 +639,8 @@ fn count_lookup_positions(lookup_segments: &[(i32, i32)], word_length: usize) ->
 // if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
 //    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
 // ```
-// prepare_lookup_query now calls x_prepare_lookup_query with x_with_karlin = true, which runs the
-// same code as before (dispatch point of LOSAT_X_LUTSPLIT).
+// prepare_lookup_query calls x_prepare_lookup_query with x_with_karlin = true: every context gets
+// its Karlin block.
 fn prepare_lookup_query(
     queries: &[Vec<QueryFrame>],
     ideal_params: KarlinParams,
@@ -662,14 +662,6 @@ fn prepare_lookup_query(
     )
 }
 
-// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_LUTSPLIT): `LOSAT_X_LUTSPLIT` set.
-pub(crate) fn x_lut_split() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_LUTSPLIT"))
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
 // ```c
 // Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
@@ -682,18 +674,18 @@ pub(crate) fn x_lut_split() -> bool {
 // NCBI computes the per-context Karlin blocks from the query composition, separately from the
 // lookup table (the table is built in lookup_wrap.c from the query and its lookup segments only).
 // This function runs the same preparation (prepare_lookup_query) and returns only the contexts.
-/// EXPERIMENT (LOSAT_X_LUTSPLIT): the contexts `build_ncbi_lookup_for_profile`
-/// returns, for a caller that drops the table. The table build only reads the
-/// contexts (their count and the end of the last one) and hands them back
-/// unchanged, so they are those of `prepare_lookup_query`. `None` when the
-/// switch is off or the build would print its diagnostics.
+/// The contexts `build_ncbi_lookup_for_profile` returns, for a caller that
+/// drops the table (graduated 2026-10-22, was `LOSAT_X_LUTSPLIT`). The table
+/// build only reads the contexts (their count and the end of the last one) and
+/// hands them back unchanged, so they are those of `prepare_lookup_query`.
+/// `None` when the build would print its diagnostics.
 pub(crate) fn x_lookup_contexts_for_profile(
     queries: &[Vec<QueryFrame>],
     check_ideal: bool,
     matrix: ScoringMatrix,
     word_length: usize,
 ) -> Option<Vec<QueryContext>> {
-    if !x_lut_split() || diagnostics_enabled() {
+    if diagnostics_enabled() {
         return None;
     }
     let bounds = if matrix == ScoringMatrix::Blosum62 {
@@ -727,19 +719,16 @@ pub(crate) fn x_lookup_contexts_for_profile(
 // threshold; it reads no Karlin parameter. This function skips the Karlin computation and builds
 // the same table (the contexts it fills carry default Karlin parameters, which the table build
 // does not read).
-/// EXPERIMENT (LOSAT_X_LUTSPLIT): the table `build_ncbi_lookup_for_profile`
-/// returns, for a caller that drops the contexts. The per-context Karlin
-/// parameters are the only part of the preparation the table does not read;
-/// they are left out. `None` when the switch is off.
+/// The table `build_ncbi_lookup_for_profile` returns, for a caller that drops
+/// the contexts (graduated 2026-10-22, was `LOSAT_X_LUTSPLIT`). The
+/// per-context Karlin parameters are the only part of the preparation the
+/// table does not read; they are left out.
 pub(crate) fn x_lookup_table_for_profile(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     matrix: ScoringMatrix,
     word_length: usize,
-) -> Option<BlastAaLookupTable> {
-    if !x_lut_split() {
-        return None;
-    }
+) -> BlastAaLookupTable {
     let bounds = if matrix == ScoringMatrix::Blosum62 {
         (-4, 11)
     } else {
@@ -755,7 +744,7 @@ pub(crate) fn x_lookup_table_for_profile(
         bounds,
         false,
     );
-    Some(build_lookup_from_prepared(prepared, threshold, matrix, word_length).0)
+    build_lookup_from_prepared(prepared, threshold, matrix, word_length).0
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803
@@ -826,8 +815,9 @@ fn x_context_karlin(
 //    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
 // ```
 // This is prepare_lookup_query with a flag: x_with_karlin = true runs the code of the reference
-// path unchanged (the Karlin computation of `x_context_karlin`); false skips it for LOSAT_X_LUTSPLIT
-// (and for `x_prepare_blosum62_lookup_query_in_pool`, which computes it on a pool).
+// path unchanged (the Karlin computation of `x_context_karlin`); false skips it (for
+// `x_lookup_table_for_profile` and for `x_prepare_blosum62_lookup_query_in_pool`, which computes it
+// on a pool).
 fn x_prepare_lookup_query(
     queries: &[Vec<QueryFrame>],
     ideal_params: KarlinParams,
@@ -871,7 +861,7 @@ fn x_prepare_lookup_query(
             // ```
             // The table build reads only the query, the lookup segments, the matrix and the threshold, so
             // the contexts can skip the Karlin parameters here.
-            // EXPERIMENT (LOSAT_X_LUTSPLIT): a caller that only wants the table.
+            // A caller that only wants the table (`x_lookup_table_for_profile`).
             if !x_with_karlin {
                 prepared.contexts.push(QueryContext {
                     q_idx: q_idx as u32,

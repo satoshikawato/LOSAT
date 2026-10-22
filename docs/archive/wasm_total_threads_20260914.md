@@ -39,7 +39,7 @@ There is no increase in owner/path/compatibility excess. Previous consumer
 assets and notes are backed up for rollback.
 
 Build inputs, binaries, and verification records are retained in
-[`artifacts/gbdraw-wasm-total-threads-20260914`](../artifacts/gbdraw-wasm-total-threads-20260914/).
+[`artifacts/gbdraw-wasm-total-threads-20260914`](../../artifacts/gbdraw-wasm-total-threads-20260914/).
 Verification passed with the built artifacts:
 
 - Native scheduler: 3 tests, including caller participation, changing thread
@@ -70,6 +70,6 @@ recovery), with no external requests or page errors. `installed.json` records
 previous and installed hashes. Both existing gbdraw Worker source hashes are
 unchanged.
 
-The independent [read-only audit](../artifacts/gbdraw-wasm-total-threads-20260914/independent-audit.md)
+The independent [read-only audit](../../artifacts/gbdraw-wasm-total-threads-20260914/independent-audit.md)
 verified source/artifact hashes, 189 raw candidate/oracle equalities, N-1 child
 counts, reactor recovery, and both browser phases; it found no blocking defect.

@@ -2852,9 +2852,11 @@ fn finish_local_mode0_no_sum_stats(
         })
         .collect();
     for (context, oid, preliminary) in preliminary_lists {
-        // The subject as the readers of windows take it: the record's letters, or (EXPERIMENT,
-        // LOSAT_X_TBNSTORE) its store, whose windows the translations make when they read them
-        // (`TargetTranslation`), so the subject's whole letters are never made.
+        // The subject as the readers of windows take it: the record's letters, or its store (every
+        // `-db` sequence; with EXPERIMENT LOSAT_X_TBNSTORE every `-subject` record), whose windows
+        // the translations make when they read them (`TargetTranslation`). The whole subject's
+        // letters are made only for a list retried after a fence, whose frames NCBI translates
+        // whole (one window for all of them).
         let subject = subjects.nt(oid);
         let input: Vec<_> = preliminary.hsps.iter().map(|linked| linked.hsp).collect();
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536:

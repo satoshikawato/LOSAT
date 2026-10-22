@@ -3889,7 +3889,9 @@ Scheduling (each value computed by one thread with the original function; order 
   HSP's codons, or the window around an HSP that NCBI translates), made in upper case from the
   store when read, exactly as the reader gave them but for the case (every reader ignores the
   case; the comparison tests in `packed_subject.rs`), so no stage after the preliminary one makes
-  a subject's whole letters again. The packed bases are those NCBI's subject set-up makes
+  a subject's whole letters again but the traceback of a list retried after a fence, whose frames
+  NCBI translates whole (one window of the whole subject for all of them). Every `-db` sequence is
+  held packed too, with no switch. The packed bases are those NCBI's subject set-up makes
   (`encode_subject_ncbi2na_packed`, `s_Ncbi4naToNcbi2na` in `blast_objmgr_tools.cpp:427-475`; one
   pass over the letters). Memory: about a quarter of a byte per base held instead of one; per
   thread the frames of the subject in hand (two bytes per base) instead of four bytes per base
@@ -3899,8 +3901,8 @@ Scheduling (each value computed by one thread with the original function; order 
   In the set since 2026-10-16 (on unless `0`, or `LOSAT_X_DEFAULT=0` and not set). With
   `LOSAT_X_STATS=1` a `[X_STATS] TBNSTORE
   subjects= stored_bytes= letters_made= resolved_made= packed_plans=` line gives the subjects held
-  packed, the bytes of their stores, the times their whole letters and their resolved bases were
-  made, and the plans translated from the packed bases; `LOSAT/tests/tblastn_subject_store.rs`
+  packed, the bytes of their stores, the times their whole letters (outside the windows above) and
+  their resolved bases were made, and the plans translated from the packed bases; `LOSAT/tests/tblastn_subject_store.rs`
   reads it.
 - `LOSAT_X_BPGAP=1` blastp preliminary stage: the restricted gapped alignment (NCBI
   `s_RestrictedGappedAlign`, `blast_gapalign.c:991-1300`, which `s_BlastProtGappedAlignment` runs

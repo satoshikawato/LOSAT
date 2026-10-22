@@ -265,3 +265,19 @@ writes (`Error: [blastn] ...`).
   `LOSAT_X_BPQBLOCK` of 50,000 letters and two with a value of at most 10,000, which
   `tests/blastp_query_blocks_fmt.rs` runs against these frozen bytes), the first 30 of that length in file order. Rows `db.sa.bpqb.{5,8,9,12}`: `blastp -db paja -evalue 0.1
   -max_target_seqs 2 -max_hsps 1` (9 rows of outfmt 6: some queries have hits, some do not).
+
+## -culling_limit rows (line NP, O3b)
+
+Rows `db.blastp.culling_*` and `db.tblastn.culling_*` search `paja` with `bpqb_q.faa` (BLASTP) and `tslice` with
+`tslice_q.faa` (TBLASTN) with `-culling_limit`. The split rows `db.{blastp,tblastn}.culling_split_*` use two databases
+of the `culling_dom_s.{faa,fna}` subjects in `tests/fasta/outfmt0/` (45 protein records; 25 nucleotide records, the
+`-subject` rows `culling.{blastp,tblastn}.*` of `outfmt0_manifest.tsv` search the same files) and the queries
+`culling_dom_q.faa` / `culling_domq_q.faa`; their `CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50` tokens are environment
+variables of both programs (a query is searched in chunks of 300 letters with an overlap of 50; each chunk is
+culled by itself). Version 4, no `-parse_seqids`; only `.pin .psq .phr` / `.nin .nsq .nhr` are kept. Run from `LOSAT/`:
+
+    makeblastdb -in tests/fasta/outfmt0/culling_dom_s.faa -dbtype prot -out tests/db_search/culldom \
+        -title "culling dom" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/culling_dom_s.fna -dbtype nucl -out tests/db_search/culldomn \
+        -title "culling dom nucl" -blastdb_version 4
+    rm tests/db_search/culldom.pjs tests/db_search/culldomn.njs

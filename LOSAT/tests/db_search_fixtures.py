@@ -49,11 +49,11 @@ FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
 PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx")
-NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY")
+NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY")
 TIMEOUT = 600
 # The `NAME=VALUE` tokens of `extra_args` that are environment variables of both programs: BLASTDB
 # (the directory of a `taxdb.bti`) and the two that cut a query file into batches.
-ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE")
+ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE")
 
 
 def read_manifest() -> tuple[list[str], list[dict[str, str]]]:

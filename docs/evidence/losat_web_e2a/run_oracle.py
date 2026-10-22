@@ -15,6 +15,10 @@ search does; it writes DIR/<fixture_id>.db.out and checks `db_stdout_sha256`, th
 of that output with its `Posted date:` line (the time makeblastdb ran) replaced by a
 fixed text (check_losat.py compares LOSAT with that output outside the database lines).
 
+A row whose `contract` is `approved_culling_wrap:<limit>` (a -culling_limit above 2147483644, where
+NCBI's Int4 sum with 3 wraps; LOSAT adds in i64, approved exception 1.4 of PD-LOSAT-NCBI-DEFECTS) runs
+NCBI with `-culling_limit <limit>` in place of the row's; the expected output is that report.
+
 A row whose `contract` is `approved_punct_title:<stand-in subject>` (approved exception 2
 of PD-LOSAT-NCBI-DEFECTS: subject titles made only of punctuation, on which NCBI's outfmt 0
 crashes when the subject has hits) runs NCBI with the stand-in subject instead: the same
@@ -56,6 +60,7 @@ MANIFEST = ENGINE / "tests/outfmt0_manifest.tsv"
 HASHES = ("stdout_sha256", "stdout_bytes", "stderr_sha256")
 DEVIATION = "approved_db_gencode_deviation"
 PUNCT_TITLE = "approved_punct_title:"
+CULLING_WRAP = "approved_culling_wrap:"
 # BATCH_SIZE and CHUNK_SIZE change the query batches (blast_input_aux.cpp:86-90,
 # local_blast.cpp:59-62), and with them the report of an invalid query.
 REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE")
@@ -78,6 +83,16 @@ def search_argv(row: dict[str, str]) -> list[str]:
     task = ["-task", row["task"]] if row["task"] else []
     return ["-query", row["query"], "-subject", row["subject"], *task, *shlex.split(row["extra_args"]),
             "-outfmt", outfmt(row)]
+
+
+def oracle_argv(row: dict[str, str]) -> list[str]:
+    """The arguments of NCBI's run: the search arguments, with the -culling_limit of an
+    `approved_culling_wrap` row replaced by the contract's limit."""
+    argv = search_argv(row)
+    contract = row.get("contract", "")
+    if contract.startswith(CULLING_WRAP):
+        argv[argv.index("-culling_limit") + 1] = contract.removeprefix(CULLING_WRAP)
+    return argv
 
 
 def db_argv(row: dict[str, str], db: str) -> list[str]:
@@ -155,7 +170,7 @@ def main() -> int:
     records, differing = [], []
     selected = [row for row in rows if row["fixture_id"].startswith(args.only)]
     for row in selected:
-        command = [str(args.bin_dir / row["program"]), *search_argv(row)]
+        command = [str(args.bin_dir / row["program"]), *oracle_argv(row)]
         start = time.monotonic()
         if row.get("contract", "").startswith(PUNCT_TITLE):
             run = punct_title_run(row, args.bin_dir / row["program"])
@@ -191,7 +206,7 @@ def main() -> int:
             row.update(observed)
         elif any(row.get(key, "") != observed[key] for key in hashes):
             differing.append(row["fixture_id"])
-        shown = shlex.join([row["program"], *search_argv(row)])
+        shown = shlex.join([row["program"], *oracle_argv(row)])
         records.append([row["fixture_id"], f"{wall:.2f}", *(observed[key] for key in HASHES), shown])
 
     for record in [["fixture_id", "wall_s", *HASHES, "command"], *records]:

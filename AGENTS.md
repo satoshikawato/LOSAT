@@ -171,7 +171,8 @@ authoritative, current guidance for agent behavior in LOSAT.
   pruning, ordering, statistics, and formatting as NCBI. If a faster path cannot
   be proven byte-identical on the relevant fixtures, keep it disabled or remove
   it.
-- Forbidden optimizations include approximations in mathematical calculations.
+- Forbidden optimizations include approximations in mathematical calculations
+  and skipping validation or edge-case handling.
 - For performance paths, rule 8 ("Correct timing, order, and context") binds the
   values and the order that reach the output: work may run earlier, in another
   order or on other threads when every value and every decision the output
@@ -237,7 +238,9 @@ authoritative, current guidance for agent behavior in LOSAT.
 - The per-subject cutoff update uses the search space
   `MIN(subject length, query context length) * subject length` with the
   untranslated (nucleotide) subject length, an amino-acid query frame length and
-  no length adjustment (`blast_parameters.c:360-362`, `blast_engine.c:1439-1440`);
+  no length adjustment (`blast_parameters.c:360-362`); with `-subject` it runs
+  for each subject (`blast_engine.c:1439-1440`), with `-db` once, from the
+  average subject length (`blast_engine.c:1372-1374`, `blast_parameters.c:233-234`).
   `cutoff_score_max` and E-values use the length-adjusted `eff_searchsp`.
 
 ---
@@ -307,7 +310,7 @@ cd LOSAT && cargo fmt
   need the object manager, GenBank, BLAST databases, or PSI/RPS/PHI are `n-a`; whole-search
   cases (bl2seq) become fixture rows, not unit tests.
 - Integration tests must compare output with NCBI BLAST+ and verify hit counts,
-  bit scores, E-values, and coordinates, with both short and long sequences.
+  bit scores, E-values, and coordinates, on real short and long sequences.
 - NCBI BLAST+ execution is allowed only as a comparison oracle during testing
   and diagnostics; it must not be part of LOSAT's feature implementation,
   runtime execution, build pipeline, fallback handling, or unsupported-feature
@@ -350,7 +353,8 @@ LOSAT/                     # Rust crate root
     ├── run_comparison.sh  # Compare vs NCBI BLAST+
     ├── run_all_tests.sh
     ├── unit/              # Rust unit tests
-    ├── fasta/             # Inputs (blast_out/ ncbi_out/ losat_out/: untracked run output)
+    ├── fasta/             # Test inputs
+    ├── blast_out/ ncbi_out/ losat_out/  # Untracked run output
     └── plots/
 ```
 
@@ -420,7 +424,7 @@ requirements above.
 
 - `CLAUDE.md`
 
-This file consolidates its requirements; if there is a conflict, follow this file.
+`CLAUDE.md` imports this file; if they conflict, follow this file.
 
 ---
 

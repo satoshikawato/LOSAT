@@ -302,14 +302,17 @@ impl LvLast {
 /// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; read once) are on and the table
 /// takes two hits, nothing otherwise. The switch does not change any value NCBI computes.
 pub(super) fn new_last(window: i32) -> Vec<LvLast> {
-    static ON: OnceLock<bool> = OnceLock::new();
-    let on =
-        *ON.get_or_init(|| mode() != Mode::Off && crate::utils::xswitch::on("LOSAT_X_DIAGLV2"));
-    if on && window > 0 {
+    if lv2_on() && window > 0 {
         vec![LvLast::EMPTY; DIAGHASH_NUM_BUCKETS]
     } else {
         Vec::new()
     }
+}
+
+/// No NCBI counterpart: LOSAT_X_DIAGLV2 and LOSAT_X_DIAGLV, which it needs, are on (read once).
+pub(super) fn lv2_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| mode() != Mode::Off && crate::utils::xswitch::on("LOSAT_X_DIAGLV2"))
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-841

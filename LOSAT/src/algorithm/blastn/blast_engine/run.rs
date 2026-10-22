@@ -11250,6 +11250,13 @@ fn search_query_batch(
                     && !(debug_enabled || blastn_trace_enabled || debug_window.is_some());
                 if diag_hash.x_lv_on() {
                     crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV", use_diag_hash && x_lv_ref);
+                    // EXPERIMENT (LOSAT_X_DIAGLV2): the memo answers retrieves of a two-hit table.
+                    if x_diag_lv::lv2_on() {
+                        crate::utils::xreach::x_reach!(
+                            "LOSAT_X_DIAGLV2",
+                            use_diag_hash && x_lv_ref && !diag_hash.x_last.is_empty()
+                        );
+                    }
                 }
                 if use_array_indexing {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:145-149

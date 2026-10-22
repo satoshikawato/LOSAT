@@ -129,6 +129,15 @@ fn lean_on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_FOLDLEAN"))
 }
 
+/// No NCBI counterpart: LOSAT_X_REACH for LOSAT_X_FOLDLEAN, which acts in the strips folds only:
+/// `own_path` where a chunk's strips stage runs, false where the chunk goes to the reference
+/// fold. Nothing while the switch is off.
+fn reach_lean(own_path: bool) {
+    if lean_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_FOLDLEAN", own_path);
+    }
+}
+
 /// No NCBI counterpart (scheduling only): strips per thread of a chunk's scan, and strips
 /// per thread that the helpers may scan past the one the owner folds. The owner's fold is
 /// the slower side here (dc-megablast reaches the diagonal hash with most pairs), so the
@@ -1046,6 +1055,7 @@ pub(super) fn run(
     if !in_scope(x) {
         if !shadow {
             crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
+            reach_lean(false);
         }
         return false;
     }
@@ -1055,11 +1065,13 @@ pub(super) fn run(
         None if shadow => 1,
         None => {
             crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
+            reach_lean(false);
             return false;
         }
     };
     if !shadow {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", true);
+        reach_lean(true);
     }
     let timing = if shadow { None } else { x.timing };
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
@@ -1674,6 +1686,7 @@ fn run_array(
     if !in_scope_array(x) {
         if !shadow {
             crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", false);
+            reach_lean(false);
         }
         return false;
     }
@@ -1683,11 +1696,13 @@ fn run_array(
         None if shadow => 1,
         None => {
             crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", false);
+            reach_lean(false);
             return false;
         }
     };
     if !shadow {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", true);
+        reach_lean(true);
     }
     let timing = if shadow { None } else { x.timing };
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();

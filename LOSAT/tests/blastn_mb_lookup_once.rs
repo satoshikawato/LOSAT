@@ -8,7 +8,7 @@
 //! applied by the owner of its cell. So the property under test is that the report does not depend
 //! on it, and that the read-once fill really runs where the switch says: with `LOSAT_TIMING`,
 //! `[TIMING] x_mb_lookup_build` counts `once=` builds equal to its `parallel=` builds (more than
-//! 0) at 4 threads with the switch (also with `LOSAT_X_MBLUTPAD`, which it takes precedence over),
+//! 0) at 4 threads with the switch,
 //! with `[TIMING] x_mb_lookup_once` giving as many fills, and so without the variable (the
 //! default); 0 with `LOSAT_X_MBLUTONCE=0`, with `LOSAT_X_DEFAULT=0`
 //! (which turns `LOSAT_X_PAIRPAR` off) and at one thread (no pool); with `LOSAT_X_PAIRPARSHADOW`,
@@ -29,7 +29,6 @@ use std::process::Command;
 
 const SWITCH: (&str, &str) = ("LOSAT_X_MBLUTONCE", "1");
 const OFF: (&str, &str) = ("LOSAT_X_MBLUTONCE", "0");
-const PAD: (&str, &str) = ("LOSAT_X_MBLUTPAD", "1");
 const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_PAIRPARSHADOW", "1");
@@ -111,7 +110,7 @@ fn check(task: &str, query: &str, subject: &str) {
     let (reference, stderr) = blastn(task, query, subject, 4, &[OFF]);
     assert!(!reference.is_empty(), "{task}: no hits");
     assert_eq!(stderr, "", "{task}");
-    for switches in [&[SWITCH][..], &[], &[SWITCH, DEFAULT_OFF], &[SWITCH, PAD]] {
+    for switches in [&[SWITCH][..], &[], &[SWITCH, DEFAULT_OFF]] {
         let (report, stderr) = blastn(task, query, subject, 4, switches);
         assert!(
             report == reference,
@@ -133,7 +132,7 @@ fn check(task: &str, query: &str, subject: &str) {
     assert_eq!(field(&stderr, BUILD, "parallel="), 0, "{task}: {stderr}");
     assert_eq!(field(&stderr, BUILD, "once="), 0, "{task}: {stderr}");
 
-    for switches in [&[SWITCH, TIMING][..], &[TIMING], &[SWITCH, PAD, TIMING]] {
+    for switches in [&[SWITCH, TIMING][..], &[TIMING]] {
         let (report, stderr) = blastn(task, query, subject, 4, switches);
         assert!(report == reference, "{task} {switches:?}");
         assert_eq!(field(&stderr, BUILD, "parallel="), parallel, "{task}");
@@ -142,7 +141,6 @@ fn check(task: &str, query: &str, subject: &str) {
             parallel,
             "{task} {switches:?}: every table on the pool read once:\n{stderr}"
         );
-        assert_eq!(field(&stderr, BUILD, "padded="), 0, "{task}: {stderr}");
         assert_eq!(field(&stderr, ONCE, "fills="), parallel, "{task}: {stderr}");
         assert!(
             field(&stderr, ONCE, "chunks=") >= parallel,
@@ -168,10 +166,6 @@ fn check(task: &str, query: &str, subject: &str) {
         "{task}: the shadow compared no read-once table: {line}"
     );
     assert!(field(&stderr, SHADOW_LINE, "cells=") > 0, "{line}");
-    assert!(
-        !stderr.contains("[X_SHADOW] MBLUTPAD"),
-        "{task}: no padded build:\n{stderr}"
-    );
     let (_, stderr) = blastn(task, query, subject, 4, &[OFF, SHADOW]);
     assert!(
         !stderr.contains(SHADOW_LINE),

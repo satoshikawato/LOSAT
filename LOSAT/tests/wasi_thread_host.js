@@ -359,12 +359,33 @@ function hostImports(module, provided = {}) {
   return imports;
 }
 
+// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
+// The native command's write to standard output or error blocks while the reader drains a
+// full pipe. A Worker started with Node's default stdio opens process.stdout and
+// process.stderr, and Node sets a pipe there non-blocking, so the guest's fd_write to a full
+// pipe returns EAGAIN (WASI errno 6). Node's uv_fs_write returns EAGAIN only when it wrote
+// nothing (a partial write returns its count), so the host waits 1 ms (Atomics.wait, which
+// Node allows on every thread) and repeats the same write until the pipe takes it.
+const WASI_ERRNO_AGAIN = 6;
+const STDIO_WAIT = new Int32Array(new SharedArrayBuffer(4));
+
+function blockingStdioWrite(fdWrite) {
+  return (fd, iovs, iovsLen, nwritten) => {
+    for (;;) {
+      const errno = fdWrite(fd, iovs, iovsLen, nwritten);
+      if (errno !== WASI_ERRNO_AGAIN || (fd !== 1 && fd !== 2)) return errno;
+      Atomics.wait(STDIO_WAIT, 0, 0, 1);
+    }
+  };
+}
+
 function createImports(wasi, memory, spawnThread, extra) {
   return {
     ...extra,
     env: { memory },
     wasi: { "thread-spawn": spawnThread },
-    wasi_snapshot_preview1: wasi.wasiImport,
+    wasi_snapshot_preview1: { ...wasi.wasiImport, fd_write: blockingStdioWrite(wasi.wasiImport.fd_write) },
   };
 }
 

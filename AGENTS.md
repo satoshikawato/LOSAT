@@ -379,6 +379,18 @@ requirements above.
 
 ---
 
+## Evidence and Run Output
+
+- `docs/evidence/` keeps summaries, scripts, and small records (manifests, hashes, short logs).
+  Output of one run (a gate, sweep, capture, or benchmark) that is over 1 MiB in total or has
+  over 100 files goes to a GitHub release asset with a manifest, not into the tree; the evidence
+  directory keeps `README.md` (release, asset name, asset sha256, file count, bytes) and
+  `MANIFEST.tsv` (path, bytes, sha256 per file). Owner, 2026-10-22: evidence that nothing reads
+  goes to release assets (first release: `evidence-archive-20261022`). Files that code, tests,
+  CI, scripts, or skills read stay in the tree.
+
+---
+
 ## Entry Points
 
 - CLI: `LOSAT/src/main.rs`

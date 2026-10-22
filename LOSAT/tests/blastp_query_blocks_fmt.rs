@@ -1437,6 +1437,7 @@ type Files = std::collections::BTreeMap<String, Vec<u8>>;
 /// A run of outfmt `spec` (13 or 14) whose `-out` is `<dir>/rep.json` (13) or `<dir>/rep.xml` (14),
 /// in a fresh directory `dir` that `prepare` may fill first; the side files are `dir/rep_<n>.json`
 /// or `.xml` and the master is `dir/rep.json` / `dir/rep.xml`.
+#[allow(clippy::too_many_arguments)]
 fn files_run(
     query: &Path,
     subject: &[&OsStr],

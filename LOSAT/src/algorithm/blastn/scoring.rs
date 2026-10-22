@@ -5,6 +5,7 @@ use super::args::BlastnArgs;
 use super::coordination::determine_scoring_params;
 use super::ncbi_cutoffs::NCBIMATH_LN2;
 use super::pairwise::query_ungapped_karlin_blastna;
+use crate::blastinput::report_counts::{run_report_counts, ReportCounts};
 use crate::cli::NativeError;
 use crate::config::NuclScoringSpec;
 use crate::stats::{KarlinParams, NuclValues};
@@ -128,6 +129,12 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 /// `coordination.rs` `task_defaults`). The reward and the penalty are NCBI's 16-bit values
 /// (`determine_scoring_params`). LOSAT's own limits are `check_losat_limits`.
 pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
+    check_scoring_options_with(args, &args.report_counts)
+}
+
+/// `check_scoring_options` with the hit list size of `counts` (the counts that
+/// [`report_counts_of`] derives for a run; `args.report_counts` is set by the run).
+fn check_scoring_options_with(args: &BlastnArgs, counts: &ReportCounts) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     let word_size = super::coordination::determine_effective_word_size(args);
     let greedy = args.task == "megablast";
@@ -144,6 +151,11 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
         "Invalid discontiguous template parameters: word size must be either 11 or 12".to_string()
     } else if template_length > 0 && !mb_lookup_options {
         "Invalid lookup table type for discontiguous Mega BLAST".to_string()
+    } else if counts.hitlist_size < 1 {
+        // NCBI blast_options.c:1511-1517, `BlastHitSavingOptionsValidate`, whose hit list
+        // check comes before the e-value's (the message of `ReportCounts::validate`, which
+        // is not called because this check has its place among the others).
+        "No hits are being saved".to_string()
     } else if super::coordination::determine_evalue(args) <= 0.0 {
         "expect value or cutoff score must be greater than zero".to_string()
     } else if spec.gap_open == 0 && spec.gap_extend == 0 && !greedy {
@@ -169,6 +181,11 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
 /// after NCBI's conversion). The limit on greedy gap costs follows the table check
 /// (`check_greedy_gap_costs`).
 pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
+    check_losat_limits_with(args, &args.report_counts)
+}
+
+/// `check_losat_limits` with the hit list size of `counts`, see `check_scoring_options_with`.
+fn check_losat_limits_with(args: &BlastnArgs, counts: &ReportCounts) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     if spec.reward <= 0 {
         anyhow::bail!(
@@ -176,10 +193,15 @@ pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
             spec.reward
         );
     }
-    let hitlist_size = args.max_target_seqs.unwrap_or(args.hitlist_size);
+    let hitlist_size = counts.hitlist_size;
     if super::hsp::get_prelim_hitlist_size(hitlist_size, false, true) < 1 {
+        let what = if args.max_target_seqs.is_some() {
+            format!("a -max_target_seqs of {hitlist_size}")
+        } else {
+            format!("a hit list size of {hitlist_size} (-num_descriptions / -num_alignments)")
+        };
         anyhow::bail!(
-            "a -max_target_seqs of {hitlist_size}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN"
+            "{what}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN"
         );
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1506-1520
@@ -300,6 +322,23 @@ pub(crate) fn karlin_error(message: &str, batch_queries: usize) -> anyhow::Error
     .into()
 }
 
+/// The hit list size and the counts of the pairwise report of a run that writes the output
+/// formats `outfmts` (`-max_target_seqs`, `-num_descriptions`, `-num_alignments` of `args`),
+/// with the formatting handler's warnings: the one derivation of `process_options` and of
+/// `check_scoring`.
+pub(crate) fn report_counts_of(
+    args: &BlastnArgs,
+    outfmts: &[i32],
+) -> anyhow::Result<(ReportCounts, Vec<u8>)> {
+    run_report_counts(
+        "blastn",
+        outfmts,
+        args.max_target_seqs,
+        args.num_descriptions,
+        args.num_alignments,
+    )
+}
+
 /// The checks of `check_scoring_options`, `check_losat_limits` and the Karlin-Altschul
 /// tables, without the queries: the checks that a host can run before a search. A table
 /// error is reported as for a batch of one query.
@@ -308,8 +347,11 @@ pub fn check_scoring(args: &BlastnArgs) -> anyhow::Result<()> {
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
     }
-    check_scoring_options(args)?;
-    check_losat_limits(args)?;
+    // `args.report_counts` is set by `process_options` of a run; a host that has not run
+    // it derives the counts the same way, for the output format 0.
+    let (counts, _) = report_counts_of(args, &[0])?;
+    check_scoring_options_with(args, &counts)?;
+    check_losat_limits_with(args, &counts)?;
     let spec = scoring_spec(args);
     NuclValues::new(spec.reward, spec.penalty)
         .and_then(|values| values.check_gaps(&spec))
@@ -604,6 +646,58 @@ mod tests {
         ] {
             assert!(check_losat_limits(&args(words)).is_ok(), "{words:?}");
         }
+    }
+
+    #[test]
+    fn check_scoring_derives_the_counts_a_run_derives() {
+        // `args.report_counts` stays at its default until a run sets it, so a host's
+        // `check_scoring` must derive the counts from the options itself.
+        let error = message(check_scoring(&args(&[
+            "-num_descriptions",
+            "0",
+            "-num_alignments",
+            "0",
+        ])));
+        assert_eq!(
+            error,
+            "BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+        );
+        // The hit list of format 0 is the larger of the two numbers.
+        assert!(check_scoring(&args(&["-num_alignments", "0"])).is_ok());
+        assert!(check_scoring(&args(&["-num_descriptions", "0"])).is_ok());
+        assert!(check_scoring(&args(&["-num_descriptions", "1", "-num_alignments", "0"])).is_ok());
+        // The preliminary hit list size overflows.
+        let error = check_scoring(&args(&["-num_alignments", "2147483598"]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("(-num_descriptions / -num_alignments)")
+                && error.contains("not supported by LOSAT's BLASTN"),
+            "{error}"
+        );
+        let error = check_scoring(&args(&["-num_descriptions", "2147483598"]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("whose preliminary hit list size overflows"),
+            "{error}"
+        );
+        // `-max_target_seqs` keeps its own wording (the default path, before O1b).
+        let error = check_scoring(&args(&["-max_target_seqs", "2147483598"]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("a -max_target_seqs of 2147483598")
+                && error.contains("whose preliminary hit list size overflows"),
+            "{error}"
+        );
+        // The same options set on the args by a run give the same refusals.
+        let mut run_args = args(&["-num_descriptions", "0", "-num_alignments", "0"]);
+        run_args.report_counts = report_counts_of(&run_args, &[0]).unwrap().0;
+        assert!(check_scoring_options(&run_args)
+            .unwrap_err()
+            .to_string()
+            .contains("No hits are being saved"));
     }
 
     #[test]

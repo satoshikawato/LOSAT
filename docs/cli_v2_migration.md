@@ -114,6 +114,7 @@ paths beginning with a dash. `-help`/`--help` display canonical names; top-level
 | `-evalue` | Finite, nonnegative; ordinary default 10 |
 | BLASTP task and omitted E-value | Only `blastp`; parser retains `None`; resolve gives 10 |
 | `-max_target_seqs` | Positive integer; default 500 |
+| `-num_descriptions`, `-num_alignments` | Integers of 0 or more (NCBI's sign and hexadecimal forms); defaults 500 and 250 for outfmt 0; each excludes `-max_target_seqs`; they set the hit list size as NCBI's `ExtractAlgorithmOptions` does (`blastinput/report_counts.rs`) |
 | `-max_hsps` | BLASTN/BLASTP optional positive integer; omission becomes internal unlimited sentinel 0 |
 | `-seg` | BLASTP/TBLASTX shared `no`, `yes`, or one quoted `WINDOW LOCUT HICUT` value |
 | SEG defaults | BLASTP no; TBLASTX 12/2.2/2.5; finite cutoffs retain NCBI normalization |

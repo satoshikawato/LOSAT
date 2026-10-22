@@ -863,7 +863,15 @@ Same values, faster computation:
   against NCBI's 135 / 497 / 2.56. Shadow: `LOSAT_X_BNUNGAPCOUNTSHADOW=1` (implies the switch) runs
   both loops on every call and stops on the first difference; at exit `[X_SHADOW] BNUNGAPCOUNT
   compared=N`.
-  Measured: M_TBD
+  Measured 2026-10-22 on the workstation (node 1, one pinned core, HT sibling idle, warmed 3 s; 3 rounds,
+  the arm order reversed every other round; `perf stat` cycles against the binary before, `dev`
+  249c7454; outputs identical in every arm): blastn-short of 30,000 queries of 24 letters against
+  dmel_dna_3M x0.916 (30.00 -> 27.50 s), of 18 to 30 letters x0.920 (33.63 -> 30.96 s): 9 % fewer
+  instructions and 18 % fewer branch misses, about 36 cycles and 96 instructions less a call over R8's
+  220 M calls; blastn and dc-megablast of 31,168 dmel cDNAs against the same subject x0.995 / x1.000,
+  megablast Sakai x MG1655 x0.997; max RSS unchanged. `=0` x1.008-1.010 on blastn-short (8 more
+  instructions a call: the mode check now inlined in front of the ported loops, which were already a
+  call of their own), x0.999-1.003 on the others.
 - `LOSAT_X_LUTARENA=1` protein lookup-table chains carved from one arena per table.
 - `LOSAT_X_MBDELAY=1`, `LOSAT_X_MBBATCH=64` megablast lookup construction touches (prefetches)
   hash cells ahead in batches of 64; same update order.

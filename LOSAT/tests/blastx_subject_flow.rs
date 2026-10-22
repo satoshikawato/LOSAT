@@ -54,6 +54,13 @@ fn temp_dir() -> PathBuf {
 /// The query (letters 100,000-109,000 of AP027131) and the subject set (its proteins and those
 /// of AP027132 and AP027133) as files, and the subject set's `losat makedb` database.
 fn inputs(dir: &Path) -> (PathBuf, PathBuf, String) {
+    inputs_of(dir, 9_000, 1)
+}
+
+/// A query of `length` letters of AP027131 from position 100,000, and the three protein sets
+/// (1,711 proteins) `copies` times, each copy after the first with its names prefixed by `cN_`, as
+/// a FASTA file and as a database.
+fn inputs_of(dir: &Path, length: usize, copies: usize) -> (PathBuf, PathBuf, String) {
     let genome = std::fs::read_to_string(fixture("AP027131.fasta")).unwrap();
     let letters: String = genome
         .lines()
@@ -61,20 +68,27 @@ fn inputs(dir: &Path) -> (PathBuf, PathBuf, String) {
         .flat_map(str::chars)
         .filter(|c| !c.is_ascii_whitespace())
         .skip(100_000)
-        .take(9_000)
+        .take(length)
         .collect();
     let query = dir.join("query.fna");
     std::fs::write(
         &query,
-        format!(">piece AP027131 100000-109000\n{letters}\n"),
+        format!(">piece AP027131 100000-{}\n{letters}\n", 100_000 + length),
     )
     .unwrap();
     let set = dir.join("set.faa");
-    let mut bytes = Vec::new();
-    for name in ["AP027131.faa", "AP027132.faa", "AP027133.faa"] {
-        bytes.extend(std::fs::read(fixture(name)).unwrap());
+    let mut text = String::new();
+    for copy in 0..copies {
+        for name in ["AP027131.faa", "AP027132.faa", "AP027133.faa"] {
+            let proteins = std::fs::read_to_string(fixture(name)).unwrap();
+            if copy == 0 {
+                text.push_str(&proteins);
+            } else {
+                text.push_str(&proteins.replace('>', &format!(">c{copy}_")));
+            }
+        }
     }
-    std::fs::write(&set, bytes).unwrap();
+    std::fs::write(&set, text).unwrap();
     let db = dir.join("set").to_str().unwrap().to_string();
     let output = losat()
         .arg("makedb")
@@ -244,5 +258,89 @@ fn the_flow_takes_the_subject_loop() {
     let (report, stderr) = blastx(&query, &args, 1, &[("LOSAT_TIMING", "1")]);
     assert!(report == reference);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
+    let dir = std::env::temp_dir().join(format!(
+        "losat-blastx-subject-flow-chunks-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    // 30,000 letters: three query chunks of 9,705 letters (blastx/split.rs), each against 3,422
+    // subjects (the 1,711 proteins twice), 54 tasks of 64. LOSAT_X_BXCHUNKFLOW needs at least
+    // 2,048 subjects and 256 per thread: up to 8 threads the chunks run one after another, each
+    // with the flow; at 16 they run side by side (LOSAT_X_BXPAR).
+    let (query, set, db) = inputs_of(&dir, 30_000, 2);
+    let set = set.to_str().unwrap();
+    for (subjects, threads) in [
+        (["-db", db.as_str()], &[2, 3, 8, 16][..]),
+        (["-subject", set], &[4, 16][..]),
+    ] {
+        let args = [subjects[0], subjects[1], "-outfmt", "6"];
+        let (reference, _) = blastx(&query, &args, 1, &[]);
+        assert!(
+            reference.iter().filter(|&&b| b == b'\n').count() > 20,
+            "{args:?}: too few hits to test"
+        );
+        for &threads in threads {
+            for env in [
+                &[][..],
+                &[("LOSAT_X_BXCHUNKFLOW", "0")][..],
+                &[("LOSAT_X_DEFAULT", "0")][..],
+            ] {
+                let (report, _) = blastx(&query, &args, threads, env);
+                assert!(
+                    report == reference,
+                    "{args:?} threads {threads} {env:?}: report differs"
+                );
+            }
+        }
+    }
+    let args = ["-db", db.as_str(), "-outfmt", "6"];
+    let (reference, _) = blastx(&query, &args, 1, &[]);
+    for threads in [2, 8] {
+        let (report, stderr) = blastx(&query, &args, threads, &[("LOSAT_TIMING", "1")]);
+        assert!(report == reference);
+        assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 3);
+        assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 162);
+    }
+    // The flow's shadow compares every task of the three chunks.
+    let (report, stderr) = blastx(&query, &args, 3, &[("LOSAT_X_BXSUBJFLOWSHADOW", "1")]);
+    assert!(report == reference);
+    assert!(
+        stderr.contains("[X_SHADOW] BXSUBJFLOW tasks_compared=162 (subject results identical)"),
+        "{stderr}"
+    );
+    // Sixteen threads (fewer than 256 subjects per thread), the switch off, LOSAT_X_DEFAULT=0, or
+    // fewer than 2,048 subjects: the chunks side by side, where a chunk's subjects are searched
+    // without the flow.
+    std::fs::create_dir_all(dir.join("few")).unwrap();
+    let (few_query, _, few_db) = inputs_of(&dir.join("few"), 30_000, 1);
+    let few = ["-db", few_db.as_str(), "-outfmt", "6"];
+    for (query, args, threads, env) in [
+        (&query, &args, 16, &[("LOSAT_TIMING", "1")][..]),
+        (
+            &query,
+            &args,
+            2,
+            &[("LOSAT_X_BXCHUNKFLOW", "0"), ("LOSAT_TIMING", "1")][..],
+        ),
+        (
+            &query,
+            &args,
+            2,
+            &[("LOSAT_X_DEFAULT", "0"), ("LOSAT_TIMING", "1")][..],
+        ),
+        (&few_query, &few, 2, &[("LOSAT_TIMING", "1")][..]),
+    ] {
+        let (_, stderr) = blastx(query, args, threads, env);
+        assert_eq!(
+            timing(&stderr, "blastx_subject_flow", "loops"),
+            0,
+            "{args:?} threads {threads} {env:?}"
+        );
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }

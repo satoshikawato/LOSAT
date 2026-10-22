@@ -138,7 +138,12 @@ fn the_shadow_compares_the_two_loops_and_the_report_is_unchanged() {
     let dir = TestDir::new("shadow");
     for (task, query) in queries(&dir) {
         let (expected, _) = search(task, &query, 1, &[]);
-        let (report, _) = search(task, &query, 1, &[DEFAULT_OFF, ("LOSAT_X_BNUNGAPCOUNT", "1")]);
+        let (report, _) = search(
+            task,
+            &query,
+            1,
+            &[DEFAULT_OFF, ("LOSAT_X_BNUNGAPCOUNT", "1")],
+        );
         assert_eq!(report, expected, "{task}");
         for switches in [&[SHADOW][..], &[DEFAULT_OFF, SHADOW][..]] {
             let (report, stderr) = search(task, &query, 1, switches);

@@ -320,7 +320,7 @@ const X_MASK_LETTERS: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
 // for (i = 0; i < 4; i++) if (codon[0] & mapping[i])
 // ```
 // `GeneticCode::get` reads a codon only through the masks of its three letters (`base_mask`;
-// `LOSAT_X_CODONFAST` gives the loop's residue for single-bit masks), so the residue of a codon
+// its table read gives the loop's residue for single-bit masks), so the residue of a codon
 // is the residue of any codon with the same masks: here, of the letters `X_MASK_LETTERS`.
 /// The NCBIstdaa residue `codon_to_aa_ncbistdaa` gives every codon with masks (m0, m1, m2), at
 /// index m0 << 8 | m1 << 4 | m2; one table per thread for the last genetic code asked for.

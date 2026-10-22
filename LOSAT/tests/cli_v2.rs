@@ -1039,8 +1039,11 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "9", None, Writes(AsnBinary)),
         (ALL, " 9 std", None, Writes(AsnBinary)),
         (ALL, "11", None, UNSUPPORTED),
-        (ALL, "13", Some("o.json"), UNSUPPORTED),
-        (ALL, "14", Some("o.xml"), UNSUPPORTED),
+        // 13 and 14 (BLAST JSON and XML2 as side files and a master file at `-out`): every
+        // program (BLASTP and BLASTN: OF5c part 1; BLASTX, TBLASTN and TBLASTX: part 2).
+        (ALL, "13", Some("o.json"), Writes(Json)),
+        (ALL, "14", Some("o.xml"), Writes(Xml2)),
+        (ALL, " 14 std", Some("o"), Writes(Xml2)),
         (ALL, "15", None, Writes(JsonS)),
         (ALL, "16", None, Writes(Xml2S)),
         (ALL, " 16 std", None, Writes(Xml2S)),

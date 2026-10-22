@@ -171,7 +171,7 @@ pub fn compute_std_aa_composition() -> [f64; BLASTAA_SIZE] {
 // }
 // ```
 pub fn compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
-    // EXPERIMENT (LOSAT_X_IDEALMEMO): the function has no inputs (standard
+    // Memo (was LOSAT_X_IDEALMEMO): the function has no inputs (standard
     // composition, BLOSUM62, score range -4..11), so its value is computed
     // once per process. TBLASTN and BLASTX call it for every query batch and,
     // in the parallel redo, on every worker.
@@ -190,14 +190,10 @@ pub fn compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
     // `Blast_ScoreBlkKbpUngappedCalc`; BLOSUM62 with the standard composition has no other inputs.
     // The memo keeps the value of the first call of the port below and returns it again. It is reuse only.
     use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    if *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_IDEALMEMO")) {
-        static IDEAL: OnceLock<Result<KarlinParams, String>> = OnceLock::new();
-        return IDEAL
-            .get_or_init(x_compute_blosum62_ideal_karlin_params)
-            .clone();
-    }
-    x_compute_blosum62_ideal_karlin_params()
+    static IDEAL: OnceLock<Result<KarlinParams, String>> = OnceLock::new();
+    IDEAL
+        .get_or_init(x_compute_blosum62_ideal_karlin_params)
+        .clone()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2843-2848

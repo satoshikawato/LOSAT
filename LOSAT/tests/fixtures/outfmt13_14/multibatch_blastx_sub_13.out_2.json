@@ -1,0 +1,308 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "q2 plus frame, padded to 10003",
+            "query_len": 10003,
+            "query_masking": [
+              {
+                "from": 732,
+                "to": 771
+              },
+              {
+                "from": 3534,
+                "to": 3576
+              },
+              {
+                "from": 3603,
+                "to": 3618
+              },
+              {
+                "from": 5457,
+                "to": 5487
+              },
+              {
+                "from": 5520,
+                "to": 5568
+              },
+              {
+                "from": 6984,
+                "to": 7026
+              },
+              {
+                "from": 7578,
+                "to": 7602
+              },
+              {
+                "from": 7764,
+                "to": 7815
+              },
+              {
+                "from": 1207,
+                "to": 1264
+              },
+              {
+                "from": 4039,
+                "to": 4069
+              },
+              {
+                "from": 6604,
+                "to": 6655
+              },
+              {
+                "from": 7783,
+                "to": 7840
+              },
+              {
+                "from": 8320,
+                "to": 8359
+              },
+              {
+                "from": 8674,
+                "to": 8698
+              },
+              {
+                "from": 9727,
+                "to": 9757
+              },
+              {
+                "from": 425,
+                "to": 476
+              },
+              {
+                "from": 2396,
+                "to": 2438
+              },
+              {
+                "from": 4472,
+                "to": 4520
+              },
+              {
+                "from": 5456,
+                "to": 5495
+              },
+              {
+                "from": 7391,
+                "to": 7433
+              },
+              {
+                "from": 8081,
+                "to": 8123
+              },
+              {
+                "from": 8291,
+                "to": 8342
+              },
+              {
+                "from": 9209,
+                "to": 9239
+              },
+              {
+                "from": 9599,
+                "to": 9641
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "sp1",
+                    "title": "sp1 subject protein alpha"
+                  }
+                ],
+                "len": 137,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 290.041,
+                    "score": 741,
+                    "evalue": 5.15141e-95,
+                    "identity": 137,
+                    "positive": 137,
+                    "query_from": 1,
+                    "query_to": 411,
+                    "query_frame": 1,
+                    "hit_from": 1,
+                    "hit_to": 137,
+                    "align_len": 137,
+                    "gaps": 0,
+                    "qseq": "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPWICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG",
+                    "hseq": "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPWICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG",
+                    "midline": "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPWICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 16.9346,
+                    "score": 32,
+                    "evalue": 5.46317,
+                    "identity": 4,
+                    "positive": 4,
+                    "query_from": 7399,
+                    "query_to": 7410,
+                    "query_frame": 1,
+                    "hit_from": 72,
+                    "hit_to": 75,
+                    "align_len": 4,
+                    "gaps": 0,
+                    "qseq": "PGWW",
+                    "hseq": "PGWW",
+                    "midline": "PGWW"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 16.5494,
+                    "score": 31,
+                    "evalue": 7.60298,
+                    "identity": 10,
+                    "positive": 17,
+                    "query_from": 8849,
+                    "query_to": 8947,
+                    "query_frame": -1,
+                    "hit_from": 2,
+                    "hit_to": 31,
+                    "align_len": 33,
+                    "gaps": 3,
+                    "qseq": "WMYCSVLAKTLYVCRPSIRSAMSPSLRNFPNSI",
+                    "hseq": "WMEHSVL-KAVFAVRRKVMD--DPKIRDGPMAV",
+                    "midline": "WM  SVL K ++  R  +     P +R+ P ++"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 16.5494,
+                    "score": 31,
+                    "evalue": 7.87934,
+                    "identity": 7,
+                    "positive": 11,
+                    "query_from": 6136,
+                    "query_to": 6192,
+                    "query_frame": -2,
+                    "hit_from": 107,
+                    "hit_to": 125,
+                    "align_len": 19,
+                    "gaps": 0,
+                    "qseq": "LRVENASNAANYRQVSILH",
+                    "hseq": "LRHWEINTDANFEKLKILH",
+                    "midline": "LR    +  AN+ ++ ILH"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 16.5494,
+                    "score": 31,
+                    "evalue": 9.2493,
+                    "identity": 4,
+                    "positive": 6,
+                    "query_from": 6885,
+                    "query_to": 6911,
+                    "query_frame": -3,
+                    "hit_from": 31,
+                    "hit_to": 39,
+                    "align_len": 9,
+                    "gaps": 0,
+                    "qseq": "ILKKWRNRC",
+                    "hseq": "VMKGWENYC",
+                    "midline": "++K W N C"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "sp2",
+                    "title": "sp2 subject protein beta, distant"
+                  }
+                ],
+                "len": 142,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 168.703,
+                    "score": 426,
+                    "evalue": 1.81255e-52,
+                    "identity": 92,
+                    "positive": 100,
+                    "query_from": 4,
+                    "query_to": 411,
+                    "query_frame": 1,
+                    "hit_from": 2,
+                    "hit_to": 142,
+                    "align_len": 143,
+                    "gaps": 9,
+                    "qseq": "WMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCW----PANMSWKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG",
+                    "hseq": "WMEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSGIHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALRHWKINEICNFEKLKAFPYQVPMGRAANEG",
+                    "midline": "WMEHSVLKA     RKVMDDPKIRDGPMAVMK WE+YC+     ANMS  VLMKYEF S IHP   W CWIPK    PGW  TDTLH++EMGLWMH  P  MC MVR T  +LRHW+IN   NFEKLK   + V  GR A+EG"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 18.4754,
+                    "score": 36,
+                    "evalue": 2.05197,
+                    "identity": 5,
+                    "positive": 8,
+                    "query_from": 8936,
+                    "query_to": 8971,
+                    "query_frame": -1,
+                    "hit_from": 87,
+                    "hit_to": 98,
+                    "align_len": 12,
+                    "gaps": 0,
+                    "qseq": "LHTVQIHAWMYC",
+                    "hseq": "LHVSEMGLWMHC",
+                    "midline": "LH  ++  WM+C"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 16.9346,
+                    "score": 32,
+                    "evalue": 5.57823,
+                    "identity": 7,
+                    "positive": 8,
+                    "query_from": 280,
+                    "query_to": 309,
+                    "query_frame": -2,
+                    "hit_from": 44,
+                    "hit_to": 53,
+                    "align_len": 10,
+                    "gaps": 0,
+                    "qseq": "SIANHNAHAL",
+                    "hseq": "SIANMSAHVL",
+                    "midline": "SIAN +AH L"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 42,
+              "eff_space": 641940,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+}

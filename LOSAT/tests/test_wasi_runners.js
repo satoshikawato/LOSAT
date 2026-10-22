@@ -46,30 +46,36 @@ function i32(value) {
 const vector = (items) => [...uleb(items.length), ...items.flat()];
 const name = (value) => [...uleb(Buffer.byteLength(value)), ...Buffer.from(value)];
 const section = (id, bytes) => [id, ...uleb(bytes.length), ...bytes];
-const body = (instructions) => {
-  const bytes = [0, ...instructions, 0x0b];
+const body = (instructions, locals = 0) => {
+  const bytes = [...(locals ? [1, locals, 0x7f] : [0]), ...instructions, 0x0b];
   return [...uleb(bytes.length), ...bytes];
 };
 
 // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); ... return status;
-// Entry/export/memory variations exercise Wasm ABI inspection only.
+// Entry/export/memory variations exercise Wasm ABI inspection only. `writes` (threaded only)
+// appends that many fd_write calls of 4,096 bytes to standard output after the worker part,
+// exiting with the first nonzero WASI errno.
 function command({ threaded, status = 0, worker = null, entry = "_start",
-  aliases = [], exportMemory = true, memoryLimits = [1, 0, 1] }) {
+  aliases = [], exportMemory = true, memoryLimits = [1, 0, 1], writes = 0 }) {
   const types = vector([
     [0x60, 1, 0x7f, 0],                 // proc_exit(i32)
     [0x60, 0, 0],                       // _start()
     [0x60, 1, 0x7f, 1, 0x7f],          // thread-spawn(i32) -> i32
     [0x60, 2, 0x7f, 0x7f, 0],          // wasi_thread_start(i32, i32)
+    [0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f], // fd_write(fd, iovs, iovs_len, nwritten) -> errno
   ]);
   const imports = [[...name("wasi_snapshot_preview1"), ...name("proc_exit"), 0, 0]];
   if (threaded) {
     imports.push([...name("env"), ...name("memory"), 2, 3, 21, ...uleb(16384)]);
     imports.push([...name("wasi"), ...name("thread-spawn"), 0, 2]);
   }
+  if (writes) imports.push([...name("wasi_snapshot_preview1"), ...name("fd_write"), 0, 4]);
+  // Imported functions come first in the function index space (the memory is not one).
+  const imported = (threaded ? 2 : 1) + (writes ? 1 : 0);
   const exports = exportMemory ? [[...name("memory"), 2, 0]] : [];
   for (const exported of [entry, ...aliases].filter(Boolean)) {
-    exports.push([...name(exported), 0, threaded ? 2 : 1]);
+    exports.push([...name(exported), 0, imported]);
   }
   const functions = [1];
   let main = [...i32(status), 0x10, 0];
@@ -80,7 +86,7 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
     main = [...i32(0), 0x10, 1, 0x1a,
       ...i32(0), ...i32(0), 0x42, 0x7f, 0xfe, 1, 2, 0, 0x1a];
     functions.push(3);
-    if (worker !== "missing-export") exports.push([...name("wasi_thread_start"), 0, 3]);
+    if (worker !== "missing-export") exports.push([...name("wasi_thread_start"), 0, imported + 1]);
     bodies.push(body(worker === "trap"
       ? [...i32(-1), ...i32(0), ...i32(1), 0xfc, 11, 0] // OOB memory.fill
       : [...i32(0), ...i32(1), 0xfe, 0x17, 2, 0,      // atomic store + notify
@@ -88,8 +94,18 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
   }
   if (threaded && !worker) {
     functions.push(3);
-    exports.push([...name("wasi_thread_start"), 0, 3]);
+    exports.push([...name("wasi_thread_start"), 0, imported + 1]);
     bodies.push(body([]));
+  }
+  if (writes) {
+    // The iovec at 16 names the 4,096 bytes at 4,096; nwritten goes to 24. Local 0 holds
+    // the errno, local 1 counts the writes.
+    main = [...main, ...i32(16), ...i32(4096), 0x36, 2, 0, ...i32(20), ...i32(4096), 0x36, 2, 0,
+      0x03, 0x40,
+      ...i32(1), ...i32(16), ...i32(1), ...i32(24), 0x10, imported - 1, 0x22, 0,
+      0x04, 0x40, 0x20, 0, 0x10, 0, 0x0b,
+      0x20, 1, ...i32(1), 0x6a, 0x22, 1, ...i32(writes), 0x49, 0x0d, 0,
+      0x0b];
   }
   return Buffer.from([
     0, 97, 115, 109, 1, 0, 0, 0,
@@ -98,7 +114,7 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
     ...section(3, vector(functions.map((type) => [type]))),
     ...(threaded ? [] : section(5, memoryLimits)),
     ...section(7, vector(exports)),
-    ...section(10, vector([body(main), ...bodies])),
+    ...section(10, vector([body(main, writes ? 2 : 0), ...bodies])),
   ]);
 }
 
@@ -148,6 +164,33 @@ test("successful worker releases its parent and exits successfully", () => {
   assert.equal(result.signal, null, result.stderr);
   assert.equal(result.status, 0, result.stderr);
 });
+
+// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
+// The native command's output write blocks while a slow reader drains a full pipe. Starting a
+// Worker makes Node open process.stdout, which sets a piped stdout non-blocking, so the
+// guest's fd_write to a full pipe returned EAGAIN (WASI errno 6) and LOSAT stopped with
+// "Resource temporarily unavailable (os error 6)". 64 writes of 4,096 bytes overfill the
+// 64 KiB pipe of a reader that waits a second; every byte must arrive and the exit be 0.
+test("threaded command output waits for a slow reader of a full pipe",
+  { skip: process.platform === "win32" && "needs sh" }, () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-runner-"));
+    try {
+      const fixture = path.join(directory, "command.wasm");
+      const bytes = command({ threaded: true, worker: "success", writes: 64 });
+      assert.ok(WebAssembly.validate(bytes));
+      fs.writeFileSync(fixture, bytes);
+      const result = spawnSync("sh", ["-c", '{ "$0" "$1" "$2"; echo "exit $?" >&2; } | { sleep 1; wc -c; }',
+        process.execPath, path.join(__dirname, "run_losat_wasi_threads.js"), fixture], {
+        env: hostEnv(), encoding: "utf8", timeout: 20000, killSignal: "SIGKILL",
+      });
+      assert.ifError(result.error);
+      assert.match(result.stderr, /^exit 0$/m, result.stderr);
+      assert.equal(Number(result.stdout.trim()), 64 * 4096, result.stderr);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
 
 // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); ... return status;

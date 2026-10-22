@@ -178,7 +178,8 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   (`utils/xreach.rs`, `x_reach!`), whether each took its own path or the reference path while it was on, and
   writes `reach-<pid>-<ns>.tsv` (`switch new ref program`) into the directory at exit; output unchanged.
   `LOSAT/tests/switch_reach_check.py` compares the folded files with `LOSAT/tests/switch_reach_expected.tsv`
-  (one row per switch of the set: class `always`, `platform` or `conditional`; for a conditional switch each
+  (one row per switch of the set and per graduated one, `GRADUATED`: class `always`, `platform` or
+  `conditional`, never `always` for a graduated one; for a conditional switch each
   side `required` or `gap` with the input that would reach it). CI runs the fast regressions with it and the
   check after them. A new switch of the set adds its row; a conditional one also marks its decision points
   and, where cheap, adds a fixture for each side, or writes `gap` with the reason.
@@ -226,12 +227,12 @@ their variables mean
   (`LOSAT_X_REACH`, above, checks that it reaches the reference sides that
   `LOSAT/tests/switch_reach_expected.tsv` requires).
 - `LOSAT_X_<NAME>=0` turns one switch off, to find which path a problem comes from. Single
-  switches off are a diagnostic aid: `DPAVX2`, `DPW128` and `DPNEON` act only with `DPFAST`; `TBNSSIDE`,
+  switches off are a diagnostic aid: `TBNSSIDE`,
   `TBNQSIDE` and `TBNBATCH` only with `TBNPAR`; `TBNBATCH` needs
   `TBNSSIDE`; `BXBATCH` needs `BXPOOL`; `AHEAD` needs `GREEDYSPEC` for megablast; `MBBATCH` runs
   where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
   in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
-  `NEWTONLANES8` acts only with `NEWTONLANES`, and only on aarch64; `TBNSTATE` and `TBNXLATE`
+  `TBNSTATE` and `TBNXLATE`
   act only with `TBNPAR`; `TBNKEEPFEW` only with `TBNSSIDE` and four or more query batches;
   `TBNBATCHRULE` only with `TBNBATCH`; `TBNOWNPOOLS` only with `TBNBATCH`
   and `TBNBATCHRULE`, natively; `TBNSCANBF` only with `TBNPAR`; `TBNXLATESIMD` only with
@@ -262,11 +263,15 @@ their variables mean
   switch turns its switch on whatever the two variables above say (except
   `LOSAT_X_AHEADSHADOW`, which compares only while `AHEAD` is on, and
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
-  shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
-  or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The single variables are to be
-  removed once the default has run on every CI environment and through a few releases;
-  `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
+  shadow compares the kernel the default selects.
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). A switch graduates once it has
+  been on `dev` for 7 days and in two full-set platform-checks runs (push to `main`, weekly or
+  dispatch) with equal outputs and no failed test (2026-10-22, replacing "a few releases"): its
+  variable and its `...SHADOW` mode go, an always-on switch loses its previous code, and a
+  conditional or platform switch keeps its rule and its fallback path and moves to `GRADUATED` in
+  `xswitch.rs` (its `x_reach!` marks and its row of `switch_reach_expected.tsv` stay). Neither
+  `LOSAT_X_<NAME>=0` nor `LOSAT_X_DEFAULT=0` reaches a graduated switch's previous path;
+  `LOSAT_X_DEFAULT` stays for the switches of the set. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
   the set.
 
@@ -327,8 +332,6 @@ export LOSAT_X_BXSCAN=1
 export LOSAT_X_BXSCANBF=1
 export LOSAT_X_BXSEGMEMO=1
 export LOSAT_X_BXSUBJFLOW=1
-export LOSAT_X_CODONFAST=1
-export LOSAT_X_COMPFAST=1
 export LOSAT_X_CTXFAST=1
 export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
@@ -336,24 +339,14 @@ export LOSAT_X_DCCSR=1
 export LOSAT_X_DEKKER=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DISCLUTPAR=1
-export LOSAT_X_DPAVX2=1
 export LOSAT_X_DPEMASK=1
-export LOSAT_X_DPFAST=1
-export LOSAT_X_DPNEON=1
-export LOSAT_X_DPW128=1
-export LOSAT_X_DUSTFAST=1
-export LOSAT_X_DUSTRING=1
-export LOSAT_X_ENVCACHE=1
 export LOSAT_X_ERFABSORB=1
-export LOSAT_X_ERFMEMO=1
 export LOSAT_X_GREEDYFAST=1
 export LOSAT_X_GREEDYFUSE=1
 export LOSAT_X_GREEDYPRELIM=1
 export LOSAT_X_GREEDYSPEC=1
 export LOSAT_X_HSPINPLACE=1
-export LOSAT_X_IDEALMEMO=1
 export LOSAT_X_ITREEFAST=1
-export LOSAT_X_KARLINFAST=1
 export LOSAT_X_LINKSLICES=1
 export LOSAT_X_LINKSORT=1
 export LOSAT_X_LUTARENA=1
@@ -363,9 +356,6 @@ export LOSAT_X_MBDELAY=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
 export LOSAT_X_MBLUTPREFAULT=1
-export LOSAT_X_NEWTONEXACT=1
-export LOSAT_X_NEWTONLANES=1
-export LOSAT_X_NEWTONLANES8=1
 export LOSAT_X_PAIRLUT=1
 export LOSAT_X_PAIRPAR=1
 export LOSAT_X_PAIRPARDISC=1
@@ -385,8 +375,6 @@ export LOSAT_X_SEEDBUCKET=1
 export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDRELEASE=1
 export LOSAT_X_SEEDUNMAP=1
-export LOSAT_X_SEGFAST=1
-export LOSAT_X_SEGMEMO=1
 export LOSAT_X_SEGSHARE=1
 export LOSAT_X_SEGTRIMMEMO=1
 export LOSAT_X_TBNBATCH=1
@@ -489,12 +477,10 @@ where `LOSAT_X_HSPINPLACE` does (the reference bodies have their own sorts). The
 `LOSAT_X_LINKSORTSHADOW` stays opt-in.
 
 `LOSAT_X_NEWTONLANES8` was added after the default changed, as a switch that was off unless set,
-and joined the set on 2026-10-15. On aarch64 the Newton lanes of `LOSAT_X_NEWTONLANES` (blastp and
-tblastn) solve eight problems per round instead of four. It changes only which independent
-problems share a vector, not the operations of a problem, and acts only where
-`LOSAT_X_NEWTONLANES` runs. On x86-64 and Wasm it does nothing: the lanes stay four wide there.
-`LOSAT_X_DEFAULT=0` runs no lanes (the reference Newton port), so on the arm64 runners
-platform-checks compares eight lanes with no lanes.
+and joined the set on 2026-10-15. On aarch64 the Newton lanes (blastp and tblastn) solve eight
+problems per round instead of four; it changes only which independent problems share a vector, not
+the operations of a problem. It graduated on 2026-10-22 together with `LOSAT_X_NEWTONLANES`: no
+variable; the eight lanes run on aarch64 only, the lanes stay four wide on x86-64 and Wasm.
 
 `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` were added after the default changed, as switches that
 were off unless set, and joined the set together on 2026-10-15. They cut the work tblastn does per
@@ -548,10 +534,9 @@ protein against the zebrafish genome, 8 threads) and 1,863 to 975-979 MiB (the h
 transcriptome).
 
 `LOSAT_X_DPNEON` was added after the default changed, as a switch that was off unless set, and
-joined the set on 2026-10-15. On aarch64 it lets `LOSAT_X_DPFAST` (and `LOSAT_X_DPW128`) run the
-vector X-drop kernels built over NEON, the kernel bodies x86_64 and wasm32 run. It changes no
-value and no order of computation, acts on aarch64 only (it does nothing on other targets) and
-only where `LOSAT_X_DPFAST` is on; `LOSAT_X_DPSHADOW` compares the NEON kernels whatever it says.
+joined the set on 2026-10-15. On aarch64 it let the vector X-drop kernels run, built over NEON, the
+kernel bodies x86_64 and wasm32 run. It changed no value and no order of computation and acted on
+aarch64 only. It graduated on 2026-10-22 (see its entry below).
 
 `LOSAT_X_TBNBATCHRULE` was added after the default changed, as a switch that was off unless set,
 and joined the set on 2026-10-16. With `LOSAT_X_TBNBATCH` it chooses which tblastn query batches
@@ -645,18 +630,17 @@ keep the batch order, so no value changes. Timings are in its entry below.
 
 What runs per target:
 
-- x86_64: the vector X-drop DP (`DPFAST`: SSE4.1 or AVX 128-bit; `DPAVX2`: 256-bit with AVX2;
-  `DPW128`), the AVX2 builds of the greedy rows and of the Newton kernels where the CPU has AVX2,
+- x86_64: the vector X-drop DP (SSE4.1 or AVX 128-bit; the 256-bit kernels with AVX2;
+  the `DPW128` kernels), the AVX2 builds of the greedy rows and of the Newton kernels where the CPU has AVX2,
   `MBDELAY` with the prefetch instruction.
-- wasm32 (built with simd128): the simd128 X-drop DP (`DPW128` replaces the first kernel),
+- wasm32 (built with simd128): the simd128 X-drop DP (the `DPW128` kernels replace the first kernel),
   `MBBATCH` instead of `MBDELAY`, `DEKKER`; everything else is the same Rust as on x86_64
   without AVX2.
-- aarch64: the NEON X-drop DP (`DPFAST` with `DPNEON`, and `DPW128` where the 128-bit kernel
-  would run; `DPAVX2` does nothing), `MBBATCH` instead of `MBDELAY`; `DEKKER` does nothing (it
-  is compiled for wasm32 only); `NEWTONLANES8` gives the Newton lanes eight problems per round;
+- aarch64: the NEON X-drop DP (the `DPW128` kernels where the 128-bit kernel would run; no
+  256-bit AVX2 kernel), `MBBATCH` instead of `MBDELAY`; `DEKKER` does nothing (it
+  is compiled for wasm32 only); the Newton lanes take eight problems per round;
   everything else as on wasm32.
-- Any other target: no vector X-drop DP is compiled, so `DPFAST`, `DPAVX2`, `DPW128` and
-  `DPNEON` do nothing (the scalar port runs), and the Newton lanes stay four wide; otherwise as
+- Any other target: no vector X-drop DP is compiled (the scalar port runs), and the Newton lanes stay four wide; otherwise as
   on aarch64.
 - One thread (`-num_threads 1`, a build without the `parallel` feature, wasm32 without
   `wasm-threads`): the scheduling switches (`AHEAD`, `GREEDYSPEC`, `PAIRPAR` for
@@ -667,19 +651,21 @@ What runs per target:
 
 Same values, faster computation:
 
-- `LOSAT_X_DPFAST=1` X-drop gapped DP (score-only and traceback) in 128-bit vectors (16 x i8 or
-  8 x i16 lanes; AVX2/SSE on x86_64, simd128 on Wasm, NEON on aarch64 with `LOSAT_X_DPNEON`,
-  which is in the set),
-  blastn task blastn and the protein programs; calls that do not fit 8/16 bits use the original
-  loop (`utils/xdrop_simd.rs`).
-  Shadow: `LOSAT_X_DPSHADOW=1`. Timing aids: `LOSAT_X_DPNO8=1` (no 8-bit kernel),
-  `LOSAT_X_DPNOAVX=1` (no AVX2).
-- `LOSAT_X_DPAVX2=1` (with `LOSAT_X_DPFAST`; strict-set candidate) the same X-drop DP in 256-bit
-  AVX2 vectors (32 x i8 or 16 x i16 lanes, x86_64 with AVX2 only): the same values, lane width
-  and band steps as the 128-bit kernels, so the same result and edit script; a call the 256-bit
-  kernel does not take runs on the 128-bit kernel (`utils/x_xdrop_avx2.rs`). Covered by
-  `LOSAT_X_DPSHADOW=1`; `LOSAT_X_DPNOAVX=1` turns it off as well.
-- `LOSAT_X_DPEMASK=1` (with `LOSAT_X_DPAVX2`, speed; in the strict set from the pull request that
+- DPFAST (graduated 2026-10-22; no variable, no `LOSAT_X_DPSHADOW`; always on) X-drop gapped DP
+  (score-only and traceback) in 128-bit vectors (16 x i8 or 8 x i16 lanes; AVX2/SSE on x86_64,
+  simd128 on Wasm, NEON on aarch64), blastn task blastn and the protein programs
+  (`utils/xdrop_simd.rs`). The scalar ports of `Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl` and
+  `ALIGN_EX` stay for the calls that do not fit 8/16 bits and for a target without a vector kernel
+  (`KERNEL_COMPILED`); the side-by-side comparison at the call sites went with `LOSAT_X_DPSHADOW`.
+  The random unit test `simd_kernels_match_scalar_loops_on_random_problems` still compares the
+  kernels with the scalar loops. Timing aids (separate variables, they stay): `LOSAT_X_DPNO8=1` (no
+  8-bit kernel), `LOSAT_X_DPNOAVX=1` (no AVX2).
+- DPAVX2 (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED` for the
+  reach table) the same X-drop DP in 256-bit AVX2 vectors (32 x i8 or 16 x i16 lanes, x86_64 with
+  AVX2 only; the rule is `x_xdrop_avx2::available()`): the same values, lane width and band steps
+  as the 128-bit kernels, so the same result and edit script; a call the 256-bit kernel does not
+  take runs on the 128-bit kernel (`utils/x_xdrop_avx2.rs`). `LOSAT_X_DPNOAVX=1` turns it off.
+- `LOSAT_X_DPEMASK=1` (with the 256-bit AVX2 kernel, speed; in the strict set from the pull request that
   added it, 2026-10-19; `=0` or `LOSAT_X_DEFAULT=0` returns to the previous kernel) the 8-bit
   256-bit X-drop kernel (`align8`: blastp's and the translated programs' score-only DP, blastn's
   DP) stores the E (`score_gap_col`) of a dropped cell as minus infinity and no longer clears E
@@ -695,34 +681,32 @@ Same values, faster computation:
   traceback calls whose scores fit 8 bits (blastn; protein traceback with an unscaled matrix, for
   example `-comp_based_stats 0`). The 16-bit kernel (the traceback of the composition-based
   redo, whose matrix is scaled) is unchanged: the same change there measured x0.98-1.01.
-- `LOSAT_X_DPW128=1` (with `LOSAT_X_DPFAST`; strict-set candidate) the 128-bit X-drop DP kernels
-  with the per-row savings of `LOSAT_X_DPAVX2` (first and last survivor kept while the row runs,
+- DPW128 (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED`) the
+  128-bit X-drop DP kernels with the per-row savings of the 256-bit AVX2 kernels (first and last
+  survivor kept while the row runs,
   row gap as a prefix maximum with a two-operation carry, the first lane's missing diagonal as a
   lane mask, column residues copied 16 at a time, row tables of `Rows28` / `Flat` matrices built
   with vector instructions, byte shifts in the form V8 compiles to `palignr`): the same values,
   lane width, blocks and result as the 128-bit kernels; a call it does not take (8-bit lanes with
   `16 * gap_extend - (gap_open + gap_extend) > 128`) runs on the 128-bit kernel
-  (`utils/x_xdrop_w128.rs`). On x86_64 it runs where the 128-bit kernel would (after
-  `LOSAT_X_DPAVX2` when both are set on an AVX2 machine, which keeps priority), on the SSE4.1 or
-  AVX-128 build; on wasm32 it replaces the simd128 128-bit kernel (the only DP kernel there).
-  Covered by `LOSAT_X_DPSHADOW=1`.
-- `LOSAT_X_DPNEON=1` (aarch64 only, speed; in the strict set since 2026-10-15, `=0` turns it off)
-  lets `LOSAT_X_DPFAST` run on aarch64: the 128-bit kernels and the `LOSAT_X_DPW128` kernels
-  built over a NEON `arch` / `ext` layer (`mod arch` in `utils/xdrop_simd.rs`, `mod ext` in
-  `utils/x_xdrop_w128.rs`; the kernel bodies are the ones x86_64 and wasm32 run). Off, aarch64
-  runs the scalar port, as before the NEON layer. `LOSAT_X_DPSHADOW=1` runs and compares the NEON
-  kernels on aarch64 whatever it says. Platform checks hash the default (NEON) and, on the Linux
-  and macOS arm64 runners, `LOSAT_X_DPNEON=0` (mode `noneon`: the other switches on, the scalar
-  X-drop).
+  (`utils/x_xdrop_w128.rs`). The rule: where the 128-bit kernel would run (`x_xdrop_w128::available()`:
+  SSE4.1 on x86_64 after the 256-bit kernels, which keep priority on an AVX2 machine; always on
+  wasm32 simd128 and aarch64). On wasm32 it replaces the simd128 128-bit kernel (the only DP kernel there).
+- DPNEON (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED`; in the
+  strict set from 2026-10-15) the vector X-drop kernels on aarch64: the 128-bit kernels and the DPW128
+  kernels built over a NEON `arch` / `ext` layer (`mod arch` in `utils/xdrop_simd.rs`, `mod ext` in
+  `utils/x_xdrop_w128.rs`; the kernel bodies are the ones x86_64 and wasm32 run). They always run
+  on aarch64; there is no switch back to the scalar port, which stays for the calls the kernels
+  decline. Platform checks no longer have the mode `noneon`; they hash the default (NEON) and, on
+  the Linux and macOS arm64 runners, `dpneon2`.
 - `LOSAT_X_DPNEON2=1` (aarch64 only, speed; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it) the X-drop DP kernels of `LOSAT_X_DPAVX2` on NEON, each
+  `LOSAT_X_DEFAULT` does not touch it) the X-drop DP kernels of the 256-bit AVX2 kernels on NEON, each
   256-bit vector in two registers (32 x i8 or 16 x i16 lanes per block, the same band steps, the
-  row gap in the form of `LOSAT_X_DPW128`): the same values and result as the 128-bit kernels; a
+  row gap in the form of the DPW128 kernels): the same values and result as the 128-bit kernels; a
   call they do not take (8-bit lanes with `32 * gap_extend - (gap_open + gap_extend) > 128`, 16-bit
-  lanes with `16 * gap_extend - (gap_open + gap_extend) > 32768`) runs on the `LOSAT_X_DPW128` /
-  128-bit kernels (`utils/x_xdrop_neon2.rs`). It turns the NEON kernels on as `LOSAT_X_DPNEON`
-  does and takes the place `LOSAT_X_DPAVX2` has on x86_64 (first in the dispatch). Covered by
-  `LOSAT_X_DPSHADOW=1` when set. Platform checks hash it on the Linux and macOS arm64 runners
+  lanes with `16 * gap_extend - (gap_open + gap_extend) > 32768`) runs on the DPW128 /
+  128-bit kernels (`utils/x_xdrop_neon2.rs`). It takes the place the 256-bit AVX2 kernels have on
+  x86_64 (first in the dispatch). Platform checks hash it on the Linux and macOS arm64 runners
   (mode `dpneon2`).
 - `LOSAT_X_GREEDYFAST=1` megablast greedy alignment, one distance in three passes of 256 cells,
   match extension 8 bases at a time. Shadow: `LOSAT_X_GREEDYSHADOW=1`.
@@ -747,47 +731,53 @@ Same values, faster computation:
   `LOSAT_X_GREEDYFUSESHADOW=1` (implies the switch) runs it on copies, runs the reference call as
   well and stops on the first difference in the return value, align lengths, seed, fence flag,
   rows or `max_score`; at exit `[X_SHADOW] GREEDYFUSE compared=N`.
-- `LOSAT_X_COMPFAST=1` composition adjustment (Newton) loops reordered with the same element
-  operations in the same order. Shadow: `LOSAT_X_COMPSHADOW=1`.
-- `LOSAT_X_NEWTONEXACT=1` the Newton iteration of the composition adjustment with fixed-size
-  storage, a structured right-looking column Cholesky and AVX2, same element operations
-  (`core/composition_adjustment/x_newton_exact.rs`). Shadow: `LOSAT_X_NEWTONEXACTSHADOW=1`
-  (convergence state and the 400 values compared bitwise). `LOSAT_X_NEWTONEXACT_LEVEL=0|2`
-  (scalar | try AVX-512), `LOSAT_X_NEWTONEXACT_PROF=1` (cycle counters per phase).
-- `LOSAT_X_NEWTONLANES=1` (blastp and tblastn) Newton problems of the composition adjustment
-  solved ahead, four problems side by side (one per AVX2 lane, each lane with the operations of
-  `x_newton_exact`; `core/composition_adjustment/x_newton_lanes.rs`): blastp the first adjustment of
-  the next 16 matches of a query (serial and query-parallel redo; the single-query match-parallel
-  redo is unchanged), tblastn the adjustments of the coming windows of a match (at least 32 problems;
-  the window ranges, translation + SEG, computed ahead are handed to the redo loop). A call uses a
-  stored result only when its input (q, row and column probabilities, relative entropy) has the same
-  bits; otherwise the existing path runs. Shadow: `LOSAT_X_NEWTONLANESSHADOW=1` (every stored result
-  that is used is compared with the reference port, status and the 400 values bitwise; every kept
-  tblastn range with a fresh `get_range`). With `LOSAT_X_STATS=1` it prints
-  `[X_STATS] NEWTONLANES prefetched= hits= misses= unused= ...` (no `xstats` feature needed).
-  Strict-set candidate (S-F, round 5).
-- `LOSAT_X_NEWTONLANES8=1` (aarch64 only; in the strict set since 2026-10-15) the Newton lanes of
-  `LOSAT_X_NEWTONLANES` solve eight problems per round instead of four (`F8`, four 128-bit NEON
-  operations per value) in batches of five or more problems; once the queue is empty and at most
-  four lanes hold a problem, those problems move to four lanes (bit copies of the values kept
-  between rounds) and finish there. Each problem keeps its operation sequence, so the results are
-  the same bits (`x_newton_lanes.rs`, module header). It only widens the lanes: with
-  `LOSAT_X_NEWTONLANES` off it does nothing, and `LOSAT_X_NEWTONLANES8=0` runs four lanes. On other
-  targets it is ignored: on x86-64 the two 256-bit operations per value gained nothing (0 to 3 %
-  slower on blastp / tblastn), and Wasm is not measured. Measured 2026-10-15 on the GitHub runners,
-  bench5's blastp_wssv / tblastn_small at one thread, wall relative to four lanes: Linux arm64
-  (Neoverse-N2) 0.981 / 0.959, macOS arm64 0.974 / 0.893 (macOS rounds are noisy); on Neoverse-N2
-  `LOSAT_X_NEWTONLANES=0` gave 0.967 / 0.941. Shadow: `LOSAT_X_NEWTONLANESSHADOW=1` compares the
-  eight-lane results too. With `LOSAT_X_STATS=1` it adds
-  `[X_STATS] NEWTONLANES8 batches8= rounds8= tail_rounds=` (rounds on eight lanes and after the move).
-- `LOSAT_X_SEGFAST=1`, `LOSAT_X_SEGMEMO=1` SEG window as a residue histogram updated in O(1),
-  entropy memoised per state vector. Shadow (`SEGFAST` path): `LOSAT_X_SEGSHADOW=1`.
+- COMPFAST, NEWTONEXACT (graduated 2026-10-22; no variables, no `LOSAT_X_COMPSHADOW`, no
+  `LOSAT_X_NEWTONEXACTSHADOW`) composition adjustment (Newton). COMPFAST: the loops of the Newton
+  iteration reordered with the same element operations in the same order (`step_bound`,
+  `ScaledSymmetricProductA`, `MultiplyByA`, `MultiplyByAtranspose`, the divisions of `Dinv`, the
+  column-major Cholesky factor and forward solve). NEWTONEXACT: the iteration with fixed-size storage, a
+  structured right-looking column Cholesky and AVX2, same element operations
+  (`core/composition_adjustment/x_newton_exact.rs`). Both always run. The line-by-line ports stay where
+  the default still takes them: `optimize_target_frequencies_reference` for a problem without the
+  relative-entropy constraint (the unconstrained matrix-adjust rule) or with another alphabet size, and
+  `step_bound_reference`, `scaled_symmetric_product_a_reference`, `factor_ltriang_pos_def` and
+  `solve_ltriang_pos_def` for a vector or matrix larger than the fast form's fixed size. The original-order
+  `MultiplyByA` / `MultiplyByAtranspose` loops and the bitwise shadow comparisons were deleted. The unit tests
+  compare the exact module and the lanes with the port bitwise. `LOSAT_X_NEWTONEXACT_LEVEL=0|2` (scalar | try
+  AVX-512) and `LOSAT_X_NEWTONEXACT_PROF=1` (cycle counters per phase) are separate variables and stay.
+- NEWTONLANES, NEWTONLANES8 (graduated 2026-10-22; no variables, no `LOSAT_X_NEWTONLANESSHADOW`; class
+  conditional / platform, the names stay in `GRADUATED` as the keys of `x_reach!`) Newton problems of the
+  composition adjustment solved ahead, four problems side by side (one per AVX2 lane, each lane with the
+  operations of `x_newton_exact`; `core/composition_adjustment/x_newton_lanes.rs`): blastp the first
+  adjustment of the next 16 matches of a query (serial and query-parallel redo; the single-query
+  match-parallel redo solves none), tblastn the adjustments of the coming windows of a match (at least 32
+  problems; the window ranges, translation + SEG, computed ahead are handed to the redo loop). A call uses a
+  stored result only when its input (q, row and column probabilities, relative entropy) has the same bits;
+  otherwise the exact module runs. NEWTONLANES8 (aarch64 only; in the strict set from 2026-10-15 to
+  2026-10-22): batches of five or more problems use eight lanes (`F8`, four 128-bit NEON operations per
+  value); once the queue is empty and at most four lanes hold a problem, those problems move to four lanes
+  (bit copies of the values kept between rounds) and finish there. Each problem keeps its operation
+  sequence, so the results are the same bits (`x_newton_lanes.rs`, module header). On other targets the
+  lanes stay four wide: on x86-64 the two 256-bit operations per value gained nothing (0 to 3 % slower on
+  blastp / tblastn), and Wasm is not measured. Measured 2026-10-15 on the GitHub runners, bench5's
+  blastp_wssv / tblastn_small at one thread, wall relative to four lanes: Linux arm64 (Neoverse-N2)
+  0.981 / 0.959, macOS arm64 0.974 / 0.893 (macOS rounds are noisy); on Neoverse-N2 no lanes gave
+  0.967 / 0.941. With `LOSAT_X_STATS=1` it prints
+  `[X_STATS] NEWTONLANES prefetched= hits= misses= unused= ...` and, on aarch64,
+  `[X_STATS] NEWTONLANES8 batches8= rounds8= tail_rounds=` (rounds on eight lanes and after the move; no
+  `xstats` feature needed). Strict-set candidate (S-F, round 5).
+- SEGFAST, SEGMEMO (graduated 2026-10-22; no variable, no `LOSAT_X_SEGSHADOW`) SEG window as a residue
+  histogram updated in O(1), entropy memoised per state vector. Always run (`SegMasker::mask_sequence`)
+  for a window of at most 15 letters and the 20-letter alphabet (`x_fast_applies`); other settings run
+  `mask_sequence_reference`, the port of `s_SegSeq`, and a segment of more than 127 letters is trimmed by
+  the port of `s_Trim`. The memo falls back to the port of `s_Entropy` for a state vector that does not
+  pack (more than 15 letters). The unit tests compare the histogram path with the port on random sequences.
 - `LOSAT_X_SEGTRIMMEMO=1` (speed; in the strict set from the pull request that added it, 2026-10-19;
   `=0` or `LOSAT_X_DEFAULT=0` returns to the previous path) SEG's trim of a candidate segment (the
   port of `s_Trim`: about L^2 / 2 evaluations of `s_GetProb` for a segment of L letters up to
   maxtrim + 1 = 51, about 1,275 for longer ones) is kept per thread by the segment's letters and
   `maxtrim`, and a segment with the same letters takes the stored offsets instead of being trimmed
-  again (`utils/x_seg_trim_memo.rs`; SEGFAST path). The offsets are a function of those letters,
+  again (`utils/x_seg_trim_memo.rs`; the histogram SEG path). The offsets are a function of those letters,
   `maxtrim` and the fixed 20-letter alphabet; the whole slice is compared, the hash only picks the
   slot. Only the maskers that repeat segments use it (`SegMasker::x_with_trim_memo`): TBLASTN's
   redo windows (a window around every alignment, so a low-complexity stretch of the subject is
@@ -804,10 +794,17 @@ Same values, faster computation:
   0.935. WSSV x PajaWSV, OrthoFinder q0 x Species6 n8 and TBLASTX d04 do not use it. Max RSS +1 to
   +4 MiB (BLASTX n8 68 MiB; NCBI n1 88 MiB). At eight threads the repeats fall on other threads'
   tables, hence the smaller gain.
-- `LOSAT_X_DUSTFAST=1`, `LOSAT_X_DUSTRING=1` DUST perfect-interval list built in one merge,
-  window kept in a ring buffer. Shadow: `LOSAT_X_DUSTSHADOW=1`.
-- `LOSAT_X_KARLINFAST=1` Karlin K convolution in eight lanes (same per-lane order).
-- `LOSAT_X_ERFMEMO=1` Spouge ErfC memoised per thread by the argument's bits.
+- DUSTFAST, DUSTRING (graduated 2026-10-22; no variables, no `LOSAT_X_DUSTSHADOW`) DUST perfect-interval
+  list built in one merge, window kept in a ring buffer. Always run: `TripletWindow::find_perfect` is the
+  merge (the literal `std::list` port was deleted), and `DustMasker::mask_subsequence` uses the ring buffer
+  for a window of at most 64; `mask_subsequence_reference`, the port of `CSymDustMasker::operator()`, runs
+  for a larger window. The unit test compares the ring buffer with that port on random sequences.
+- KARLINFAST (graduated 2026-10-22; no variable) Karlin K convolution in eight lanes (same per-lane
+  order). Always run where `first == 0` and eight positions remain; the scalar loop runs for `first != 0`
+  and for the remaining positions. The unit test that compared the lanes with the scalar-only run went
+  with the variable.
+- ERFMEMO (graduated 2026-10-22; no variable) Spouge ErfC memoised per thread by the argument's bits;
+  always on, `erf_impl_ncbi` computes the missing values.
 - `LOSAT_X_ERFABSORB=1` (speed; in the strict set from the pull request that added it, 2026-10-19;
   `=0` or `LOSAT_X_DEFAULT=0` returns to the previous path) Spouge ErfC returns 2.0 for an
   argument below -6 without evaluating ErfImpl. The reference computes `2.0 - ErfImpl(-z, TRUE)`
@@ -823,7 +820,8 @@ Same values, faster computation:
   `LOSAT_X_BPCOMPOREUSE` as well, n8 0.958), tblastn AP027131 x AP027133 0.994, blastx
   AP027131 x AP027133 0.987, OrthoFinder q0 x Species6 n8 0.995 and n1 1.00 (both switches).
 - `LOSAT_X_DEKKER=1` (Wasm only) ErfC product error by Dekker's product instead of `fma`.
-- `LOSAT_X_CODONFAST=1` an unambiguous codon translated by one table read.
+- CODONFAST (graduated 2026-10-22; no variable) an unambiguous codon translated by one table read; a
+  codon with an ambiguity code still runs the port of `s_CodonToAA`'s loops (`GeneticCode::get`).
 - `LOSAT_X_PURGEFAST=1` blastn common-endpoint purge without shifting the array per removal.
 - `LOSAT_X_ITREEFAST=1` blastn interval tree with side indexes (grid, endpoint bitmaps) that
   answer "none contained" / "no such endpoint" without walking the tree. Shadow:
@@ -858,7 +856,8 @@ Same values, faster computation:
 - `LOSAT_X_LUTARENA=1` protein lookup-table chains carved from one arena per table.
 - `LOSAT_X_MBDELAY=1`, `LOSAT_X_MBBATCH=64` megablast lookup construction touches (prefetches)
   hash cells ahead in batches of 64; same update order.
-- `LOSAT_X_ENVCACHE=1` blastn debug variables read once instead of per extension.
+- ENVCACHE (graduated 2026-10-22; no variable) blastn debug variables (`LOSAT_DEBUG_COORDS`,
+  `LOSAT_DEBUG_COORDS_START`) read once per process instead of per extension (`utils/xenv.rs`).
 - `LOSAT_X_BXLAZYCTX=1` blastx seed context lookup moved after the diagonal test.
 - `LOSAT_X_BXLEAN=1` does not build records nobody reads (candidate copies without an observer);
   no tree or DP space for a (chunk, subject) without HSPs. The tblastn reference loop
@@ -969,7 +968,8 @@ Rebuilding less:
   genome at 32 threads took 1.60 (`-subject`) and 2.86 (`-db`) times NCBI BLAST+ 2.17.0 `-db` at 32
   threads (1.59 s).
 - `LOSAT_X_LUTSPLIT=1` tblastn: build only the half (contexts or table) a caller uses.
-- `LOSAT_X_IDEALMEMO=1` BLOSUM62 ideal Karlin block once per process.
+- IDEALMEMO (graduated 2026-10-22; no variable) BLOSUM62 ideal Karlin block computed once per process
+  (`x_compute_blosum62_ideal_karlin_params` is the memo's source).
 - `LOSAT_X_BXSEGMEMO=1` blastx redo stage: the subject SEG once per subject instead of once per window
   (per-thread memo of the last subject, byte-equal input; `blastx/x_seg_memo.rs`). Shadow:
   `LOSAT_X_BXSEGMEMOSHADOW=1` (the masker also runs on every call). Strict-set candidate (S-C, round 5).
@@ -1281,7 +1281,7 @@ Rebuilding less:
   redo (`blastp/x_redo_subjects.rs`, `blastp/blast_engine/database/x_redo_db_subjects.rs`). Without it
   `ListedSubjects::read` copies the residues of every subject of the preliminary hit lists, which the redo and the
   reports read. With it `ListedSubjects::x_list` keeps their ordinal ids and lengths (from the index; the estimate of
-  `LOSAT_X_BPREDOLPT` reads the lengths), every redo path and the first Newton problems of `LOSAT_X_NEWTONLANES` read a
+  `LOSAT_X_BPREDOLPT` reads the lengths), every redo path and the first Newton problems of the Newton lanes read a
   match's stored residues with `SeqDb::read_sequence` and drop them after the match (the Newton problems read ahead of
   the redo and the redo reads again: keeping the reads ahead for the redo raised the maximum resident set; the
   one-thread loop reads after the early termination test, as NCBI, and after the Newton problems; the parallel paths
@@ -1355,7 +1355,7 @@ Rebuilding less:
   (`LOSAT_X_BPREDOPARWINDOW` below), so at most 4 x 64 x threads redone results are held before their
   replay. A job builds its query's workspace once per window (`OnceLock`; a query that spans windows has it
   built again from the same inputs, a small cost that grows with the query's length) and its own
-  parameters, prefetches the first Newton problems of its own matches with `LOSAT_X_NEWTONLANES` (one vector
+  parameters, prefetches the first Newton problems of its own matches with the Newton lanes (one vector
   of four, against the heaps as the window's start left them), and redoes its matches with per-worker
   scratch and the search's `LOSAT_X_SEGSHARE` store. A
   query's preliminary list is released after the replay of the window that holds its last match, as the
@@ -1382,7 +1382,7 @@ Rebuilding less:
   and traces of the redo count the `wasted` matches as well (`[TIMING] x_bpredofit: lists= hsps=`, the
   kappa range counters, `LOSAT_DEBUG_BLASTP_TRACE_HSP` lines), and `[X_STATS] NEWTONLANES` counts the
   prefetches of the jobs (four matches each, the one-thread loop prefetches 16 ahead). With
-  `LOSAT_X_NEWTONLANES8` (aarch64) a job's prefetch of at most four problems never fills eight lanes.
+  the eight lanes (aarch64) a job's prefetch of at most four problems never fills eight lanes.
   Reason: the query-level redo waits for the largest query of a search (in the blocks of the human x yeast
   blastp-fast job with `LOSAT_X_BPQBLOCK=20000`, 33 % of a block's redo work at the median, 54 % at p90).
   Default ON since 2026-10-17 (perf/perfmb-default-bundle; workstation (2x Xeon Gold 6338, 16 physical cores of one
@@ -2935,7 +2935,7 @@ Scheduling (each value computed by one thread with the original function; order 
   (`tblastx/x_query_frames.rs`, called from `search_query_batch` for every query batch, `-subject` and `-db`). NCBI
   filters the contexts of a batch one after the other (`blast_filter.c:1280-1290`); each task reads and writes only
   its own frame (letters, intervals, unmasked copy) and only reads the `SegMasker`, and SEG's two caches (the memo
-  of `LOSAT_X_SEGMEMO` and the histogram memo of `LOSAT_X_SEGFAST`) are `thread_local!` tables of a pure function of
+  of SEG's entropy and the histogram memo of the fast SEG path) are `thread_local!` tables of a pure function of
   the window's letter counts, so every frame gets the serial loop's intervals. It acts only with a pool of two or
   more threads and two or more frames in the batch; with one thread, a build without the `parallel` feature,
   WebAssembly without `wasm-threads`, the switch off, or `-seg no`, the serial loop runs. The translation of the
@@ -2973,8 +2973,8 @@ Scheduling (each value computed by one thread with the original function; order 
   Blocks: `par_iter().map().collect()` over the contexts (rayon splits them into ranges; the blocks are per context, the
   jobs are not). Exact because the encoding of a query is a function of its letters, its two context offsets and the block
   length (constant tables, and the reverse-complement table, a `OnceLock` that every caller fills with the same 256
-  bytes), and the block of a context is a function of its bytes and the reward and penalty (locals only; the one global of
-  `compute_karlin_params_ungapped` is the `LOSAT_X_KARLINFAST` flag, read once); there is no cache, memo table, counter
+  bytes), and the block of a context is a function of its bytes and the reward and penalty (locals only; `compute_karlin_params_ungapped`
+  has none); there is no cache, memo table, counter
   or random generator, results are collected in order, and no floating-point operation changes order (the sums are inside
   one context). It acts only with a pool of two or more threads and two or more queries (encoding) or contexts (blocks);
   with one thread, a slot of one thread, a build without the `parallel` feature, WebAssembly without `wasm-threads`, or
@@ -4420,16 +4420,16 @@ kernel tests).
 X-drop DP capture and replay (diagnostics, not part of the strict set):
 
 - `LOSAT_X_DPCAPTURE=<dir>` records every Nth call of each thread that reaches the vector X-drop
-  DP (`LOSAT_X_DPFAST`) as a self-contained problem (residues, matrix, gap costs, x_drop, result
+  DP as a self-contained problem (residues, matrix, gap costs, x_drop, result
   and edit script) in `<dir>/xdp-<pid>-t<k>.xdp`, one file per thread, appended
   (`utils/x_xdrop_capture.rs`, format in its header). `LOSAT_X_DPCAPTURE_EVERY=<n>` sets N
   (default 25). The search output does not change.
 - `LOSAT_X_DPREPLAY=<dir>` input of the ignored test `replay_captured_problems`
   (`cargo test --release replay_captured_problems -- --ignored --nocapture`): every captured
-  problem through the scalar loops, the 128-bit, the `LOSAT_X_DPW128` and the 256-bit kernels and
+  problem through the scalar loops, the 128-bit, the DPW128 and the 256-bit kernels and
   the dispatch, compared with the recorded result, then the three kernels timed (median ns per cell
   and per call, traceback and score-only, 8- and 16-bit lanes). `LOSAT_X_DPREPLAY_REPS` (default 7),
   `LOSAT_X_DPREPLAY_OUT=<file>` (append the table to a file). The ignored test
-  `w128_replay_captured_problems` does the same for the 128-bit and the `LOSAT_X_DPW128` kernels
+  `w128_replay_captured_problems` does the same for the 128-bit and the DPW128 kernels
   only and also runs in the wasm32-wasip1 test build (the libtest `.wasm` under a WASI host such
   as Node's `wasi` module with a root preopen), which times the simd128 kernels.

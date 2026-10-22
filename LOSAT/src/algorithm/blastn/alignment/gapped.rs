@@ -943,7 +943,7 @@ pub fn extend_gapped_heuristic_with_scratch(
             s_length
         };
 
-        // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once with LOSAT_X_ENVCACHE);
+        // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once);
         // it does not change any value NCBI computes.
         if crate::utils::xenv::debug_coords_is_ok() {
             eprintln!("[COORDS] dp_start: qs={}, ss={}", qs, ss);
@@ -1054,7 +1054,7 @@ pub fn extend_gapped_heuristic_with_scratch(
     let final_s_start = ss.saturating_sub(left_s_consumed);
     let final_s_end = ss + seed_len + right_s_consumed;
 
-    // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once with LOSAT_X_ENVCACHE);
+    // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once);
     // it does not change any value NCBI computes.
     if crate::utils::xenv::debug_coords_is_ok() {
         eprintln!("[COORDS] seed: qs={}, ss={}, len={}", qs, ss, seed_len);
@@ -1242,7 +1242,7 @@ fn extend_gapped_one_direction_with_scratch(
     // Main DP loop - for each query position (row)
     for a_index in 1..=m {
         // Debug: track last few rows
-        // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once with LOSAT_X_ENVCACHE);
+        // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once);
         // it does not change any value NCBI computes.
         if crate::utils::xenv::debug_coords_is_ok() && m > 1000 && a_index >= m.saturating_sub(2) {
             eprintln!(
@@ -1387,7 +1387,7 @@ fn extend_gapped_one_direction_with_scratch(
     // This matches NCBI's approach where stats are computed in traceback
 
     // Debug: check offset values
-    // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once with LOSAT_X_ENVCACHE);
+    // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once);
     // it does not change any value NCBI computes.
     if crate::utils::xenv::debug_coords_is_ok() {
         eprintln!(
@@ -2022,7 +2022,7 @@ fn extend_gapped_one_direction_ex_with_scratch(
     // For score-only mode, we estimate stats from score and positions
 
     // Debug: check offset values for extension
-    // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once with LOSAT_X_ENVCACHE);
+    // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once);
     // it does not change any value NCBI computes.
     if crate::utils::xenv::debug_coords_is_ok() {
         eprintln!("[EXT_{}] m={}, n={}, a_offset={}, b_offset={}, best_score={}, expected_perfect_score={}",
@@ -3664,7 +3664,7 @@ pub fn extend_gapped_heuristic_with_traceback(
 // ```
 #[inline]
 fn debug_coords_traceback_enabled(qs: usize, ss: usize) -> bool {
-    // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once with LOSAT_X_ENVCACHE);
+    // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once);
     // it does not change any value NCBI computes.
     let debug_all = crate::utils::xenv::debug_coords_is_some();
     let Some(filter) = crate::utils::xenv::debug_coords_start() else {

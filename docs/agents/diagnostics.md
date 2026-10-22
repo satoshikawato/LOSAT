@@ -325,7 +325,6 @@ export LOSAT_X_BXSCAN=1
 export LOSAT_X_BXSCANBF=1
 export LOSAT_X_BXSEGMEMO=1
 export LOSAT_X_BXSUBJFLOW=1
-export LOSAT_X_CODONFAST=1
 export LOSAT_X_COMPFAST=1
 export LOSAT_X_CTXFAST=1
 export LOSAT_X_CTXO1=1
@@ -339,19 +338,13 @@ export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPFAST=1
 export LOSAT_X_DPNEON=1
 export LOSAT_X_DPW128=1
-export LOSAT_X_DUSTFAST=1
-export LOSAT_X_DUSTRING=1
-export LOSAT_X_ENVCACHE=1
 export LOSAT_X_ERFABSORB=1
-export LOSAT_X_ERFMEMO=1
 export LOSAT_X_GREEDYFAST=1
 export LOSAT_X_GREEDYFUSE=1
 export LOSAT_X_GREEDYPRELIM=1
 export LOSAT_X_GREEDYSPEC=1
 export LOSAT_X_HSPINPLACE=1
-export LOSAT_X_IDEALMEMO=1
 export LOSAT_X_ITREEFAST=1
-export LOSAT_X_KARLINFAST=1
 export LOSAT_X_LINKSLICES=1
 export LOSAT_X_LINKSORT=1
 export LOSAT_X_LUTARENA=1
@@ -383,8 +376,6 @@ export LOSAT_X_SEEDBUCKET=1
 export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDRELEASE=1
 export LOSAT_X_SEEDUNMAP=1
-export LOSAT_X_SEGFAST=1
-export LOSAT_X_SEGMEMO=1
 export LOSAT_X_SEGSHARE=1
 export LOSAT_X_SEGTRIMMEMO=1
 export LOSAT_X_TBNBATCH=1
@@ -779,14 +770,18 @@ Same values, faster computation:
   `LOSAT_X_NEWTONLANES=0` gave 0.967 / 0.941. Shadow: `LOSAT_X_NEWTONLANESSHADOW=1` compares the
   eight-lane results too. With `LOSAT_X_STATS=1` it adds
   `[X_STATS] NEWTONLANES8 batches8= rounds8= tail_rounds=` (rounds on eight lanes and after the move).
-- `LOSAT_X_SEGFAST=1`, `LOSAT_X_SEGMEMO=1` SEG window as a residue histogram updated in O(1),
-  entropy memoised per state vector. Shadow (`SEGFAST` path): `LOSAT_X_SEGSHADOW=1`.
+- SEGFAST, SEGMEMO (graduated 2026-10-22; no variable, no `LOSAT_X_SEGSHADOW`) SEG window as a residue
+  histogram updated in O(1), entropy memoised per state vector. Always run (`SegMasker::mask_sequence`)
+  for a window of at most 15 letters and the 20-letter alphabet (`x_fast_applies`); other settings run
+  `mask_sequence_reference`, the port of `s_SegSeq`, and a segment of more than 127 letters is trimmed by
+  the port of `s_Trim`. The memo falls back to the port of `s_Entropy` for a state vector that does not
+  pack (more than 15 letters). The unit tests compare the histogram path with the port on random sequences.
 - `LOSAT_X_SEGTRIMMEMO=1` (speed; in the strict set from the pull request that added it, 2026-10-19;
   `=0` or `LOSAT_X_DEFAULT=0` returns to the previous path) SEG's trim of a candidate segment (the
   port of `s_Trim`: about L^2 / 2 evaluations of `s_GetProb` for a segment of L letters up to
   maxtrim + 1 = 51, about 1,275 for longer ones) is kept per thread by the segment's letters and
   `maxtrim`, and a segment with the same letters takes the stored offsets instead of being trimmed
-  again (`utils/x_seg_trim_memo.rs`; SEGFAST path). The offsets are a function of those letters,
+  again (`utils/x_seg_trim_memo.rs`; the histogram SEG path). The offsets are a function of those letters,
   `maxtrim` and the fixed 20-letter alphabet; the whole slice is compared, the hash only picks the
   slot. Only the maskers that repeat segments use it (`SegMasker::x_with_trim_memo`): TBLASTN's
   redo windows (a window around every alignment, so a low-complexity stretch of the subject is
@@ -803,10 +798,17 @@ Same values, faster computation:
   0.935. WSSV x PajaWSV, OrthoFinder q0 x Species6 n8 and TBLASTX d04 do not use it. Max RSS +1 to
   +4 MiB (BLASTX n8 68 MiB; NCBI n1 88 MiB). At eight threads the repeats fall on other threads'
   tables, hence the smaller gain.
-- `LOSAT_X_DUSTFAST=1`, `LOSAT_X_DUSTRING=1` DUST perfect-interval list built in one merge,
-  window kept in a ring buffer. Shadow: `LOSAT_X_DUSTSHADOW=1`.
-- `LOSAT_X_KARLINFAST=1` Karlin K convolution in eight lanes (same per-lane order).
-- `LOSAT_X_ERFMEMO=1` Spouge ErfC memoised per thread by the argument's bits.
+- DUSTFAST, DUSTRING (graduated 2026-10-22; no variables, no `LOSAT_X_DUSTSHADOW`) DUST perfect-interval
+  list built in one merge, window kept in a ring buffer. Always run: `TripletWindow::find_perfect` is the
+  merge (the literal `std::list` port was deleted), and `DustMasker::mask_subsequence` uses the ring buffer
+  for a window of at most 64; `mask_subsequence_reference`, the port of `CSymDustMasker::operator()`, runs
+  for a larger window. The unit test compares the ring buffer with that port on random sequences.
+- KARLINFAST (graduated 2026-10-22; no variable) Karlin K convolution in eight lanes (same per-lane
+  order). Always run where `first == 0` and eight positions remain; the scalar loop runs for `first != 0`
+  and for the remaining positions. The unit test that compared the lanes with the scalar-only run went
+  with the variable.
+- ERFMEMO (graduated 2026-10-22; no variable) Spouge ErfC memoised per thread by the argument's bits;
+  always on, `erf_impl_ncbi` computes the missing values.
 - `LOSAT_X_ERFABSORB=1` (speed; in the strict set from the pull request that added it, 2026-10-19;
   `=0` or `LOSAT_X_DEFAULT=0` returns to the previous path) Spouge ErfC returns 2.0 for an
   argument below -6 without evaluating ErfImpl. The reference computes `2.0 - ErfImpl(-z, TRUE)`
@@ -822,7 +824,8 @@ Same values, faster computation:
   `LOSAT_X_BPCOMPOREUSE` as well, n8 0.958), tblastn AP027131 x AP027133 0.994, blastx
   AP027131 x AP027133 0.987, OrthoFinder q0 x Species6 n8 0.995 and n1 1.00 (both switches).
 - `LOSAT_X_DEKKER=1` (Wasm only) ErfC product error by Dekker's product instead of `fma`.
-- `LOSAT_X_CODONFAST=1` an unambiguous codon translated by one table read.
+- CODONFAST (graduated 2026-10-22; no variable) an unambiguous codon translated by one table read; a
+  codon with an ambiguity code still runs the port of `s_CodonToAA`'s loops (`GeneticCode::get`).
 - `LOSAT_X_PURGEFAST=1` blastn common-endpoint purge without shifting the array per removal.
 - `LOSAT_X_ITREEFAST=1` blastn interval tree with side indexes (grid, endpoint bitmaps) that
   answer "none contained" / "no such endpoint" without walking the tree. Shadow:
@@ -857,7 +860,8 @@ Same values, faster computation:
 - `LOSAT_X_LUTARENA=1` protein lookup-table chains carved from one arena per table.
 - `LOSAT_X_MBDELAY=1`, `LOSAT_X_MBBATCH=64` megablast lookup construction touches (prefetches)
   hash cells ahead in batches of 64; same update order.
-- `LOSAT_X_ENVCACHE=1` blastn debug variables read once instead of per extension.
+- ENVCACHE (graduated 2026-10-22; no variable) blastn debug variables (`LOSAT_DEBUG_COORDS`,
+  `LOSAT_DEBUG_COORDS_START`) read once per process instead of per extension (`utils/xenv.rs`).
 - `LOSAT_X_BXLAZYCTX=1` blastx seed context lookup moved after the diagonal test.
 - `LOSAT_X_BXLEAN=1`, `LOSAT_X_TBNEVENTS=1` do not build records nobody reads (candidate copies
   without an observer, test events); no tree or DP space for a (chunk, subject) without HSPs.
@@ -967,7 +971,8 @@ Rebuilding less:
   genome at 32 threads took 1.60 (`-subject`) and 2.86 (`-db`) times NCBI BLAST+ 2.17.0 `-db` at 32
   threads (1.59 s).
 - `LOSAT_X_LUTSPLIT=1` tblastn: build only the half (contexts or table) a caller uses.
-- `LOSAT_X_IDEALMEMO=1` BLOSUM62 ideal Karlin block once per process.
+- IDEALMEMO (graduated 2026-10-22; no variable) BLOSUM62 ideal Karlin block computed once per process
+  (`x_compute_blosum62_ideal_karlin_params` is the memo's source).
 - `LOSAT_X_BXSEGMEMO=1` blastx redo stage: the subject SEG once per subject instead of once per window
   (per-thread memo of the last subject, byte-equal input; `blastx/x_seg_memo.rs`). Shadow:
   `LOSAT_X_BXSEGMEMOSHADOW=1` (the masker also runs on every call). Strict-set candidate (S-C, round 5).
@@ -2943,7 +2948,7 @@ Scheduling (each value computed by one thread with the original function; order 
   (`tblastx/x_query_frames.rs`, called from `search_query_batch` for every query batch, `-subject` and `-db`). NCBI
   filters the contexts of a batch one after the other (`blast_filter.c:1280-1290`); each task reads and writes only
   its own frame (letters, intervals, unmasked copy) and only reads the `SegMasker`, and SEG's two caches (the memo
-  of `LOSAT_X_SEGMEMO` and the histogram memo of `LOSAT_X_SEGFAST`) are `thread_local!` tables of a pure function of
+  of SEG's entropy and the histogram memo of the fast SEG path) are `thread_local!` tables of a pure function of
   the window's letter counts, so every frame gets the serial loop's intervals. It acts only with a pool of two or
   more threads and two or more frames in the batch; with one thread, a build without the `parallel` feature,
   WebAssembly without `wasm-threads`, the switch off, or `-seg no`, the serial loop runs. The translation of the
@@ -2981,8 +2986,8 @@ Scheduling (each value computed by one thread with the original function; order 
   Blocks: `par_iter().map().collect()` over the contexts (rayon splits them into ranges; the blocks are per context, the
   jobs are not). Exact because the encoding of a query is a function of its letters, its two context offsets and the block
   length (constant tables, and the reverse-complement table, a `OnceLock` that every caller fills with the same 256
-  bytes), and the block of a context is a function of its bytes and the reward and penalty (locals only; the one global of
-  `compute_karlin_params_ungapped` is the `LOSAT_X_KARLINFAST` flag, read once); there is no cache, memo table, counter
+  bytes), and the block of a context is a function of its bytes and the reward and penalty (locals only; `compute_karlin_params_ungapped`
+  has none); there is no cache, memo table, counter
   or random generator, results are collected in order, and no floating-point operation changes order (the sums are inside
   one context). It acts only with a pool of two or more threads and two or more queries (encoding) or contexts (blocks);
   with one thread, a slot of one thread, a build without the `parallel` feature, WebAssembly without `wasm-threads`, or

@@ -207,7 +207,7 @@ test('several runs in the queue; the next job is edited while one runs; separate
     await waitStatus(page, 3, 'completed');
   }
   const last = await result(page, BUILD_HAS_ENGINE ? 5 : 3, 6);
-  expect(last.command).toBe('LOSAT tblastx -query query.fa -subject b.fa -evalue 1e-3 -outfmt 6');
+  expect(last.command).toBe('losat tblastx -query query.fa -subject b.fa -evalue 1e-3 -outfmt 6');
   // A finished card has the same lines: the run and its status, the time it took, "Open results"
   // at the right, then what it searched.
   const number = BUILD_HAS_ENGINE ? 5 : 3;
@@ -286,7 +286,7 @@ test('the region of a role with one record: the drag, the fields, the limits and
   await submit(page);
   await waitStatus(page, 1, 'completed');
   expect((await result(page, 1, 6)).command).toBe(
-    'LOSAT blastn -query query.fa -subject subject.fa -query_loc 3-20 -subject_loc 5-60 -outfmt 6',
+    'losat blastn -query query.fa -subject subject.fa -query_loc 3-20 -subject_loc 5-60 -outfmt 6',
   );
 });
 
@@ -312,7 +312,7 @@ test("the options form: the engine's defaults are not written; tasks, templates 
   await paste(page, 'subject', '>s\nACGTACGTACGTACGTAC\n');
   await submit(page);
   await waitStatus(page, 1, 'completed');
-  expect((await result(page, 1, 7)).command).toBe('LOSAT tblastx -query query.fa -subject subject.fa -db_gencode 11 -outfmt 7');
+  expect((await result(page, 1, 7)).command).toBe('losat tblastx -query query.fa -subject subject.fa -db_gencode 11 -outfmt 7');
 
   // TBLASTN's subject codes include 32 (the approved exception); its tasks are radio buttons.
   await program(page, 'tblastn');

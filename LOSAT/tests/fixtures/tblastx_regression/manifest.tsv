@@ -1,5 +1,5 @@
 # Frozen TBLASTX outputs of tblastx: 2.17.0+;  Package: blast 2.17.0, build Aug 11 2025 09:46:06 (comparison oracle only; see tblastx_regression_fixtures.py).
-# Run from LOSAT/: env <env> tblastx <argv> (LOSAT: LOSAT tblastx <argv> <losat_extra>). Written by `freeze`; do not edit.
+# Run from LOSAT/: env <env> tblastx <argv> (LOSAT: losat tblastx <argv> <losat_extra>). Written by `freeze`; do not edit.
 case_id	argv	losat_extra	exit	stdout_sha256	stdout_bytes	stderr_sha256	env	oracle_env
 env.batch700	-query tests/fasta/outfmt0/tblastx_batch_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -outfmt 6		0	ac52bd2e5cbc363053fb8acab40e4de84c2f1b51507cf19677826d8b50f588a9	17629		BATCH_SIZE=700	
 env.batch22000_fmt0	-query tests/fasta/outfmt0/tblastx_batch_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -outfmt 0		0	322144a76db8d4cd35002fe89f3d387420fcaff5a131d3622af871ef58b1e1fe	54549		BATCH_SIZE=22000	

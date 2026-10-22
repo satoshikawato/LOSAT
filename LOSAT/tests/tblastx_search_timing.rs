@@ -73,7 +73,7 @@ const LINK_STAGES: [&str; 7] = [
 /// CI) needs that file name as soon as a search has more than one thread, and it selects
 /// nothing. Returns the report and the standard error.
 fn tblastx(subject: &Path, threads: u32, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);

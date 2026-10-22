@@ -497,13 +497,13 @@ Targeted traces:
 
 ```bash
 LOSAT_TRACE_HSP=187401,187733,241784,242116 \
-  LOSAT/target/release/LOSAT tblastx \
+  LOSAT/target/release/losat tblastx \
   -q LOSAT/tests/fasta/LC738874.fasta \
   -s LOSAT/tests/fasta/LC738875.fasta \
   --outfmt 6 -n 1 -o .tmp/trace_hsp_187401_241784.out
 
 LOSAT_TRACE_HSP=187429,187680,241812,242063 \
-  LOSAT/target/release/LOSAT tblastx \
+  LOSAT/target/release/losat tblastx \
   -q LOSAT/tests/fasta/LC738874.fasta \
   -s LOSAT/tests/fasta/LC738875.fasta \
   --outfmt 6 -n 1 -o .tmp/trace_hsp_187429_241812.out
@@ -583,7 +583,7 @@ Targeted trace:
 ```bash
 LOSAT_TRACE_CHAIN_HSP=7264,7353,1987,2076 \
   LOSAT_TRACE_LINK_SELECTIONS=1 \
-  LOSAT/target/release/LOSAT tblastx \
+  LOSAT/target/release/losat tblastx \
   -q LOSAT/tests/fasta/LC738874.fasta \
   -s LOSAT/tests/fasta/LC738875.fasta \
   --outfmt 6 -n 1 \
@@ -669,17 +669,17 @@ Why this fixed the main discrepancy:
 Targeted validation:
 
 ```bash
-RAYON_NUM_THREADS=1 LOSAT/target/release/LOSAT tblastx \
+RAYON_NUM_THREADS=1 LOSAT/target/release/losat tblastx \
   -q LOSAT/tests/fasta/LC738874.fasta \
   -s LOSAT/tests/fasta/LC738875.fasta \
   -e 10 --outfmt 6 -n 1 -o .tmp/losat_prelink_e10.out
 
-RAYON_NUM_THREADS=1 LOSAT/target/release/LOSAT tblastx \
+RAYON_NUM_THREADS=1 LOSAT/target/release/losat tblastx \
   -q LOSAT/tests/fasta/LC738874.fasta \
   -s LOSAT/tests/fasta/LC738875.fasta \
   -e 100 --outfmt 6 -n 1 -o .tmp/losat_prelink_e100.out
 
-RAYON_NUM_THREADS=1 LOSAT/target/release/LOSAT tblastx \
+RAYON_NUM_THREADS=1 LOSAT/target/release/losat tblastx \
   -q LOSAT/tests/fasta/LC738874.fasta \
   -s LOSAT/tests/fasta/LC738875.fasta \
   -e 10000 --outfmt 6 -n 1 -o .tmp/losat_prelink_e10000.out
@@ -762,17 +762,17 @@ Targeted validation:
 ```bash
 cargo build --release --manifest-path LOSAT/Cargo.toml
 
-RAYON_NUM_THREADS=1 LOSAT/target/release/LOSAT tblastx \
+RAYON_NUM_THREADS=1 LOSAT/target/release/losat tblastx \
   -q LOSAT/tests/fasta/LC738874.fasta \
   -s LOSAT/tests/fasta/LC738875.fasta \
   -e 10 --outfmt 6 -n 1 -o .tmp/losat_framesort_e10.out
 
-RAYON_NUM_THREADS=1 LOSAT/target/release/LOSAT tblastx \
+RAYON_NUM_THREADS=1 LOSAT/target/release/losat tblastx \
   -q LOSAT/tests/fasta/LC738874.fasta \
   -s LOSAT/tests/fasta/LC738875.fasta \
   -e 100 --outfmt 6 -n 1 -o .tmp/losat_framesort_e100.out
 
-RAYON_NUM_THREADS=1 LOSAT/target/release/LOSAT tblastx \
+RAYON_NUM_THREADS=1 LOSAT/target/release/losat tblastx \
   -q LOSAT/tests/fasta/LC738874.fasta \
   -s LOSAT/tests/fasta/LC738875.fasta \
   -e 10000 --outfmt 6 -n 1 -o .tmp/losat_framesort_e10000.out
@@ -819,7 +819,7 @@ Result:
 Long-sequence rerun:
 
 ```bash
-RAYON_NUM_THREADS=1 LOSAT/target/release/LOSAT tblastx \
+RAYON_NUM_THREADS=1 LOSAT/target/release/losat tblastx \
   -q LOSAT/tests/fasta/AP027131.fasta \
   -s LOSAT/tests/fasta/AP027133.fasta \
   --query-gencode 4 --db-gencode 4 \

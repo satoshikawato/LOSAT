@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp's block search (`LOSAT_X_BPQBLOCK`) with the subjects' tabular IDs and titles made once
 //! for all blocks (`LOSAT_X_BPSUBJMETA`, `src/algorithm/blastp/blast_engine/x_subject_meta.rs`) on
 //! whole searches.
@@ -123,7 +124,7 @@ fn blastp_with(
     outfmt: &str,
     extra: &[&str],
 ) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -300,9 +301,9 @@ fn the_switch_does_not_act_without_the_subject_block_search() {
     );
     let counts = counts.expect("a line at exit");
     assert!(counts.values().all(|&count| count == 0), "{counts:?}");
-    // A database made with `LOSAT makedb`; its block search reads the definition lines per block.
+    // A database made with `losat makedb`; its block search reads the definition lines per block.
     let name = dir.join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
@@ -310,7 +311,7 @@ fn the_switch_does_not_act_without_the_subject_block_search() {
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",

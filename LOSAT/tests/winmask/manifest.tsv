@@ -1,0 +1,22 @@
+# counts	fasta	windowmasker flags	expected intervals (paths relative to this directory)
+counts/mg1655_u9.obinary	../fasta/NZ_CP006932.fasta	-	expected/mg1655_u9.NZ_CP006932.interval
+counts/mg1655_u9.obinary	../fasta/AP027131.fasta	-	expected/mg1655_u9.AP027131.interval
+counts/mg1655_u9.obinary	../fasta/PsCLPV.fasta	-	expected/mg1655_u9.PsCLPV.interval
+counts/mg1655_u9.obinary	fasta/dm_edge.fa	-	expected/mg1655_u9.dm_edge.interval
+counts/dm2L_u9.binary	fasta/dm2L_60k.fa	-	expected/dm2L_u9.dm2L_60k.interval
+counts/dm2L_u9.binary	fasta/dm_edge.fa	-	expected/dm2L_u9.dm_edge.interval
+counts/mg1655_u9.obinary	../fasta/NZ_CP006932.fasta	-t_extend 100	expected/mg1655_u9.p_text100.interval
+counts/mg1655_u9.obinary	../fasta/NZ_CP006932.fasta	-t_thres 120	expected/mg1655_u9.p_thres120.interval
+counts/mg1655_u9.obinary	../fasta/NZ_CP006932.fasta	-t_high 150	expected/mg1655_u9.p_high150.interval
+counts/mg1655_u9.obinary	../fasta/NZ_CP006932.fasta	-t_low 100	expected/mg1655_u9.p_low100.interval
+counts/mg1655_u9.obinary	../fasta/NZ_CP006932.fasta	-t_low 50	expected/mg1655_u9.p_low50.interval
+counts/mg1655_u9.obinary	../fasta/NZ_CP006932.fasta	-set_t_high 400	expected/mg1655_u9.p_sethigh400.interval
+counts/mg1655_u9.obinary	../fasta/NZ_CP006932.fasta	-set_t_low 10	expected/mg1655_u9.p_setlow10.interval
+counts/mg1655_u9.obinary	../fasta/NZ_CP006932.fasta	-window 20	expected/mg1655_u9.p_window20.interval
+counts/dm2L_u9.binary	fasta/dm2L_60k.fa	-t_thres 100 -t_extend 60	expected/dm2L_u9.p_thres100_text60.interval
+counts/mg1655_u9.obinary	fasta/dm2L_60k.fa	-set_t_low 200	expected/mg1655_u9.dmp_setlow200.interval
+counts/mg1655_u9.obinary	fasta/dm2L_60k.fa	-t_extend 50	expected/mg1655_u9.dmp_text50.interval
+counts/mg1655_u9.obinary	fasta/dm2L_60k.fa	-window 9	expected/mg1655_u9.dmp_window9.interval
+counts/mg1655_u9.obinary	fasta/dm2L_60k.fa	-window 255	expected/mg1655_u9.dmp_window255.interval
+counts/mg1655_u9.obinary	fasta/dm2L_60k.fa	-window 256	expected/mg1655_u9.dmp_window256.interval
+counts/dm_u2.obinary	fasta/dm2L_3k.fa	-	expected/dm_u2.dm2L_3k.interval

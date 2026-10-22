@@ -12,7 +12,7 @@ The question: on small public databases, how long does `LOSAT -db` (the default
 configuration) take compared with NCBI BLAST+ 2.17.0 `-db` at 1, 8 and 16 threads, with
 what peak memory, and is every LOSAT output the same bytes as NCBI BLAST+
 `-db -num_threads 1`? It also times database construction (`makeblastdb` and
-`LOSAT makedb`). Seven search cases cover megablast, blastn (`-task blastn`),
+`losat makedb`). Seven search cases cover megablast, blastn (`-task blastn`),
 blastp and blastx.
 
 Not covered: large databases (nr, nt), tblastn and tblastx database searches, and
@@ -40,13 +40,13 @@ Query sets:
   proteins, 35,048 aa.
 - the yeast proteome itself (blastp, all against all).
 - `t10` (blastx): the first 10 records (10,954 nt) of a 100-transcript set used in
-  an earlier LOSAT blastx benchmark; the 10 transcripts are not an extra public
+  an earlier losat blastx benchmark; the 10 transcripts are not an extra public
   download.
 
 The databases are built in the run directory from these files (timings below). The
 searches of both tools use the `makeblastdb` default database (format version 5, as
 a user gets it). One extra untimed LOSAT run per case at 8 threads searches the
-`LOSAT makedb` database and must give the same bytes.
+`losat makedb` database and must give the same bytes.
 
 ## Machine and build
 
@@ -83,7 +83,7 @@ per tool and database.
 ## Exactness
 
 In every case, every LOSAT output (1, 8 and 16 threads, warmups and timed runs, and
-the run on the `LOSAT makedb` database) is NCBI BLAST+ 2.17.0 `-db -num_threads 1`'s
+the run on the `losat makedb` database) is NCBI BLAST+ 2.17.0 `-db -num_threads 1`'s
 output byte for byte (SHA-256 compared). NCBI's own 8- and 16-thread outputs equal
 its 1-thread output in all seven cases. Row counts and the first 16 hex digits of
 the SHA-256 are in `rows/db6_summary.txt`.
@@ -137,13 +137,13 @@ busy-CPU counts) are in `rows/db6_runs.tsv`; the per-case summary is
 Small-tier run, median of 3 (min-max in `rows/db6_summary.txt`), one thread; neither
 tool has a thread option for building.
 
-| Database | `makeblastdb` (default, v5) | `makeblastdb -blastdb_version 4` | `LOSAT makedb` |
+| Database | `makeblastdb` (default, v5) | `makeblastdb -blastdb_version 4` | `losat makedb` |
 | --- | --- | --- | --- |
 | RefSeq 16S | 0.69 s | 0.70 s | 0.17 s |
 | Swiss-Prot | 8.47 s | 8.26 s | 2.02 s |
 | yeast proteome | 0.16 s | 0.15 s | 0.03 s |
 
-The sequence, header and index files of `LOSAT makedb` are byte for byte those of
+The sequence, header and index files of `losat makedb` are byte for byte those of
 `makeblastdb -blastdb_version 4` (0 differing bytes in `.nsq`/`.nhr`/`.nin` and
 `.psq`/`.phr`/`.pin`). The sequence-file hashes of the three builds of each
 database agree (`sq_sha16` in `rows/db6_summary.txt`). The timed searches use the
@@ -236,7 +236,7 @@ rather than something to run unchanged.
   and builds); columns `case tool threads run rc wall_s user_s sys_s maxrss_kib rows
   sha16 load busy0 busy1`. Run label `w` is the warmup, `1`-`3` the timed rounds
   (`1d1` and so on a disturbed run that was repeated), `p` the pilot run that chose
-  the size of the blastn task query set, and `x` the run on the `LOSAT makedb`
+  the size of the blastn task query set, and `x` the run on the `losat makedb`
   database (tool `losatdb`).
 - `db6_summary.txt`: the output of `db6_summary.py` for it (tables, exactness line
   per case, build medians).

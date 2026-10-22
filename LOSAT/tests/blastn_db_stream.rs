@@ -126,7 +126,7 @@ fn database(label: &str, first: usize, count: usize, extra: &[&str]) -> PathBuf 
     let input = dir.join("pieces.fna");
     std::fs::write(&input, pieces(first, count)).unwrap();
     let name = dir.join("pieces");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(&input)
@@ -178,7 +178,7 @@ fn blastn_any_exit(
     vars: &[(&str, &str)],
     outfmt: &str,
 ) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")

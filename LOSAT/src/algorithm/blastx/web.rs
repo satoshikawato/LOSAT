@@ -131,11 +131,18 @@ pub(crate) fn run_pair(
     //    		ERR_POST(Warning << "Examining 5 or more matches is recommended");
     //     }
     // ```
-    if args.max_target_seqs.unwrap_or(500) < 5 {
-        diagnostics
-            .borrow_mut()
-            .write_all(b"Warning: [blastx] Examining 5 or more matches is recommended\n")?;
-    }
+    // (The same bytes as before for the options ABI v1 had: a hit list size below 5 from
+    // -max_target_seqs; `native::warnings_of` also reads -num_descriptions / -num_alignments,
+    // which the CLI parser now accepts.)
+    let v1_outfmt_number = args
+        .outfmt
+        .split_whitespace()
+        .next()
+        .and_then(|word| word.parse::<i32>().ok())
+        .unwrap_or(0);
+    diagnostics
+        .borrow_mut()
+        .write_all(&native::warnings_of(&args, v1_outfmt_number))?;
     let options = v1_resolve(&args)?;
     if query.is_empty() {
         bail!("No sequence input was provided");
@@ -393,7 +400,7 @@ mod tests {
 
     // ABI v1 is frozen (plan TD-1): its BLASTX `-outfmt` keeps the values and the parser
     // errors of the CLI parser before BLASTX read `-outfmt` as NCBI (dev 0797cc40, whose
-    // `LOSAT blastx -outfmt 5` wrote these lines with exit status 2).
+    // `losat blastx -outfmt 5` wrote these lines with exit status 2).
     #[test]
     fn web_v1_keeps_its_outfmt_values_and_errors() {
         let error = |outfmt: &str| {

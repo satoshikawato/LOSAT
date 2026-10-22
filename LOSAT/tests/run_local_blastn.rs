@@ -128,6 +128,8 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
         &["-max_target_seqs", "1"][..],
         &["-task", "blastn"][..],
         &["-num_threads", "2"][..],
+        // The culling writer and pipe (`-culling_limit`) act on every path of the shared entry.
+        &["-culling_limit", "1"][..],
     ] {
         let together = inputs.run(&FORMATS, extra, true);
         assert_eq!(

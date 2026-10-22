@@ -33,9 +33,17 @@
 //! (diagnostics; the tests use them). `LOSAT_X_BXDIAGSHADOW` (any value) also runs the reference on
 //! a copy of the diagonal table for every subject and stops (panics) if the hit lists or the tables
 //! differ, and prints a summary at exit. With `LOSAT_TIMING=1` a run prints
-//! `[TIMING] blastx_diag: mode=<avx2|scalar|per-hit> subjects=N cells=N batched_hits=N
-//! candidates=N` (the subjects the fused loop scanned, the cells it tested in batches, their hits,
-//! and the hits passed to the closure; zeros but the subjects with `per-hit`).
+//! `[TIMING] blastx_diag: mode=<avx2-defer-masked|avx2|scalar|per-hit> subjects=N cells=N
+//! batched_hits=N candidates=N` (the subjects the fused loop scanned, the cells it tested in
+//! batches, their hits, and the hits passed to the closure; zeros but the subjects with `per-hit`).
+//!
+//! EXPERIMENT (LOSAT_X_BXDEFER): the AVX2 batch is `XDiagMode::Avx2DeferMasked`: blastp's
+//! LOSAT_X_BPDEFER (the calls of a cell's candidates after its batches) with the lanes' entry
+//! coordinates from scalar loads and the last batch of fewer than eight hits as a masked AVX2 batch;
+//! the argument that the calls, their order and the table are the AVX2 batch's is in
+//! `x_seed_fused`'s module header. A switch of the strict set: on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BXDEFER=0` gives the AVX2 batch (`mode=avx2`).
+//! `LOSAT_X_BXDIAGSHADOW` compares it with the reference like the other cell tests.
 //!
 //! A query batch whose lookup table has fewer hits per used backbone cell than
 //! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 500; `0` fuses every batch) is scanned by the loop
@@ -140,17 +148,32 @@ pub(crate) fn x_bxdiag_mode() -> u8 {
 /// EXPERIMENT (LOSAT_X_BXDIAG): whether the cell test is the AVX2 batch, where the default acts.
 fn x_avx2_batches() -> bool {
     #[cfg(target_arch = "x86_64")]
-    if matches!(x_cell_mode(), XDiagMode::Avx2) {
+    if matches!(x_cell_mode(), XDiagMode::Avx2 | XDiagMode::Avx2DeferMasked) {
         return true;
     }
     false
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BXDEFER switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BXDEFER): whether the AVX2 batch is `XDiagMode::Avx2DeferMasked` (module
+/// header); a switch of the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not
+/// set.
+fn x_bx_defer() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXDEFER"))
 }
 
 // No NCBI counterpart: chooses LOSAT's code path once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXDIAG): the cell test of the fused loop (the switch's value names one).
 fn x_cell_mode() -> XDiagMode {
     static MODE: OnceLock<XDiagMode> = OnceLock::new();
-    *MODE.get_or_init(|| x_cell_test(std::env::var("LOSAT_X_BXDIAG").unwrap_or_default().as_str()))
+    *MODE.get_or_init(|| {
+        x_cell_test(
+            std::env::var("LOSAT_X_BXDIAG").unwrap_or_default().as_str(),
+            x_bx_defer(),
+        )
+    })
 }
 
 // No NCBI counterpart: reads LOSAT_X_BXDIAGMIN once; it does not change any value NCBI computes.
@@ -559,13 +582,15 @@ mod tests {
     use super::*;
     use crate::algorithm::blastx::{input::parse_fasta, parameters, query_setup::prepare_queries};
 
-    /// The cell tests this machine can run, each with the presence-test scan and with the
-    /// branch-free one (LOSAT_X_BXSCANBF).
+    /// The cell tests this machine can run (the AVX2 batch with LOSAT_X_BXDEFER and without), each
+    /// with the presence-test scan and with the branch-free one (LOSAT_X_BXSCANBF).
     fn modes() -> Vec<(XDiagMode, bool)> {
         let mut modes = vec![XDiagMode::PerHit, XDiagMode::Scalar];
-        let auto = x_cell_test("");
-        if auto != XDiagMode::PerHit {
-            modes.push(auto);
+        for masked in [true, false] {
+            let auto = x_cell_test("", masked);
+            if auto != XDiagMode::PerHit {
+                modes.push(auto);
+            }
         }
         modes
             .into_iter()

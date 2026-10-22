@@ -35,6 +35,7 @@ LOSAT_X_BPSUBJRUN	blastp	conditional	required	required	-subject only, 2+ threads
 LOSAT_X_BPUNGAP	blastp,blastx	always			Flat BLOSUM62 score table for ungapped extension walks
 LOSAT_X_BXBATCH	blastx	conditional	gap	required	needs BXPOOL, 2+ threads, several query batches; new gap: needs blastx at 2+ threads with several small query batches
 LOSAT_X_BXCHUNK	blastx	conditional	required	required	2+ threads
+LOSAT_X_BXDEFER	blastx	platform			only where BXDIAG fused loop runs AVX2 batch (x86 AVX2)
 LOSAT_X_BXDIAG	blastx	conditional	required	required	x86-64 AVX2; word size 3 standard table; only batches with >=5 hits per used cell (short queries use direct loop)
 LOSAT_X_BXFLOW	blastx	conditional	required	required	2+ threads, native only (Web keeps waves), needs BXBATCH/BXPOOL, several batches
 LOSAT_X_BXHITBF	blastx	conditional	required	gap	direct loop only: no-AVX2 CPUs, aarch64, Wasm, or short queries (<5 hits per cell) on x86; ref gap: needs -window_size 0 or <= 3 (or a diagonal offset near 2^30)

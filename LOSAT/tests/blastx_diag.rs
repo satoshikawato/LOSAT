@@ -220,21 +220,30 @@ fn the_fused_seed_loop_gives_the_reports_of_the_reference() {
         );
         // LOSAT_X_BXDIAGMIN=0 makes every batch take the fused loop; the built-in value and one
         // above every table's hits per cell (no batch fused) give the same report. An empty value
-        // is the default (the switch on, with the AVX2 cell test only).
-        for (value, min) in [
-            ("", ""),
-            ("", "0"),
-            ("1", "0"),
-            ("per-hit", "0"),
-            ("scalar", "0"),
-            ("1", ""),
-            ("1", "1000000"),
+        // is the default (the switch on, with the AVX2 cell test only). LOSAT_X_BXDEFER=0 gives
+        // the AVX2 batch without the deferred calls and the masked last batch.
+        for (value, min, defer) in [
+            ("", "", ""),
+            ("", "0", ""),
+            ("", "0", "0"),
+            ("1", "0", ""),
+            ("1", "0", "0"),
+            ("per-hit", "0", ""),
+            ("scalar", "0", ""),
+            ("1", "", ""),
+            ("1", "1000000", ""),
         ] {
             let run = blastx(
                 &args,
-                &[("LOSAT_X_BXDIAG", value), ("LOSAT_X_BXDIAGMIN", min)],
+                &[
+                    ("LOSAT_X_BXDIAG", value),
+                    ("LOSAT_X_BXDIAGMIN", min),
+                    ("LOSAT_X_BXDEFER", defer),
+                ],
             );
-            let what = format!("{args:?} LOSAT_X_BXDIAG={value} LOSAT_X_BXDIAGMIN={min}");
+            let what = format!(
+                "{args:?} LOSAT_X_BXDIAG={value} LOSAT_X_BXDIAGMIN={min} LOSAT_X_BXDEFER={defer}"
+            );
             assert_eq!(run.code, reference.code, "{what}: {}", run.stderr);
             assert!(run.stdout == reference.stdout, "{what}: report differs");
             assert_eq!(run.messages(), reference.messages(), "{what}");
@@ -248,17 +257,26 @@ fn the_shadow_compares_every_subject_and_the_timing_line_names_the_cell_test() {
     let args = searches(&inputs).remove(0);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let reference = blastx(&args, &[OFF]);
-    for value in ["1", "per-hit", "scalar"] {
+    for (value, defer) in [("1", ""), ("1", "0"), ("per-hit", ""), ("scalar", "")] {
         let run = blastx(
             &args,
             &[
                 ("LOSAT_X_BXDIAG", value),
+                ("LOSAT_X_BXDEFER", defer),
                 ("LOSAT_X_BXDIAGSHADOW", "1"),
                 ("LOSAT_TIMING", "1"),
             ],
         );
-        assert_eq!(run.code, Some(0), "{value}: {}", run.stderr);
-        assert!(run.stdout == reference.stdout, "{value}: report differs");
+        assert_eq!(
+            run.code,
+            Some(0),
+            "{value} LOSAT_X_BXDEFER={defer}: {}",
+            run.stderr
+        );
+        assert!(
+            run.stdout == reference.stdout,
+            "{value} LOSAT_X_BXDEFER={defer}: report differs"
+        );
         // Every query batch scans every subject; the shadow compares each scan.
         let compared = run
             .stderr
@@ -266,13 +284,26 @@ fn the_shadow_compares_every_subject_and_the_timing_line_names_the_cell_test() {
             .find_map(|line| line.strip_prefix("[X_SHADOW] BXDIAG subjects_compared="))
             .and_then(|rest| rest.split(' ').next())
             .and_then(|n| n.parse::<u64>().ok())
-            .unwrap_or_else(|| panic!("{value}: no shadow line: {}", run.stderr));
-        assert!(compared >= 150, "{value}: {compared} subjects compared");
+            .unwrap_or_else(|| {
+                panic!(
+                    "{value} LOSAT_X_BXDEFER={defer}: no shadow line: {}",
+                    run.stderr
+                )
+            });
+        assert!(
+            compared >= 150,
+            "{value} LOSAT_X_BXDEFER={defer}: {compared} subjects compared"
+        );
         let line = run
             .stderr
             .lines()
             .find(|line| line.starts_with("[TIMING] blastx_diag: "))
-            .unwrap_or_else(|| panic!("{value}: no timing line: {}", run.stderr));
+            .unwrap_or_else(|| {
+                panic!(
+                    "{value} LOSAT_X_BXDEFER={defer}: no timing line: {}",
+                    run.stderr
+                )
+            });
         let mode = line
             .split_whitespace()
             .find_map(|field| field.strip_prefix("mode="))
@@ -282,10 +313,12 @@ fn the_shadow_compares_every_subject_and_the_timing_line_names_the_cell_test() {
             "scalar" => assert_eq!(mode, "scalar", "{line}"),
             _ => {
                 #[cfg(target_arch = "x86_64")]
-                let expected = if std::arch::is_x86_feature_detected!("avx2") {
+                let expected = if !std::arch::is_x86_feature_detected!("avx2") {
+                    "per-hit"
+                } else if defer == "0" {
                     "avx2"
                 } else {
-                    "per-hit"
+                    "avx2-defer-masked"
                 };
                 #[cfg(not(target_arch = "x86_64"))]
                 let expected = "per-hit";
@@ -362,7 +395,7 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
     match line {
         Some(line) => {
             assert!(avx2, "default without AVX2: {line}");
-            assert!(line.contains("mode=avx2 "), "{line}");
+            assert!(line.contains("mode=avx2-defer-masked "), "{line}");
             assert!(field(line, "subjects") >= 150, "{line}");
         }
         None => assert!(!avx2, "default with AVX2: no timing line: {}", run.stderr),

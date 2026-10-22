@@ -16,7 +16,7 @@ fn fasta(name: &str) -> PathBuf {
 }
 
 fn run(query: &str, subject: &str, extra: &[&str]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     command
         .arg("blastn")
         .args(["-query"])

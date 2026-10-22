@@ -3068,7 +3068,7 @@ fn scan_subject_disc_words_with_ranges<F>(
 /// Structure to hold ungapped hit data for batch processing
 /// NCBI reference: blast_gapalign.c - init_hsp_array is sorted by score descending
 /// before gapped extension
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct UngappedHit {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
     // ```c
@@ -3096,6 +3096,84 @@ struct UngappedHit {
     ss: usize,  // subject start in search_seq coordinates
     se: usize,  // subject end in search_seq coordinates
     score: i32, // ungapped score
+}
+
+// No NCBI counterpart: only where LOSAT keeps its buffers (no value changes).
+/// EXPERIMENT (LOSAT_X_BNMAPPED, a switch of the strict set, `utils/xswitch.rs`: on unless it is
+/// `0`, or `LOSAT_X_DEFAULT=0` and it is not set): the large per-subject buffers of BLASTN (the
+/// blocks and sequences read from a database and their BLASTNA letters, `database.rs`; the
+/// ungapped hits of a subject as the seed stages push them, `x_push_ungapped`, and the scratch of
+/// their sort by score, outside the per-query groups of `LOSAT_X_QGROUPPAR` and the merge of the
+/// folded strips, `x_pair_seed_part.rs`) are kept in buffers that glibc maps
+/// from 1 MiB on, so that they are returned when they are dropped instead of staying in the
+/// arena of the worker thread that freed them; the database's buffers and the sort's scratch go
+/// to shared pools (`utils::x_mapped::X_BYTES`, `X_SORT`) when they are done, so that the next
+/// thread that needs one takes it with its pages resident. The hits are not pooled: a thread
+/// keeps its scratch, and with it its hit buffer, from one subject to the next (as NCBI keeps its
+/// `init_hitlist`), so idle hit buffers in a pool only added to what was in use (Sakai x EDL933
+/// `-subject` blastn at 4 threads, max RSS 298-327 MiB with a pool of 64 MiB, 245-264 without,
+/// 238-261 with the switch off).
+fn x_bn_mapped() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
+}
+
+/// No NCBI counterpart: records for `LOSAT_X_REACH` whether a buffer of `bytes` takes
+/// LOSAT_X_BNMAPPED's own path (mapped, and pooled where it has a pool) or stays as `Vec` keeps
+/// it (below 1 MiB, or not glibc).
+pub(super) fn x_bn_mapped_reach(bytes: usize) {
+    crate::utils::xreach::x_reach!(
+        "LOSAT_X_BNMAPPED",
+        crate::utils::x_mapped::x_is_mapped(bytes)
+    );
+}
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNMAPPED) the pool of the scratch of the hits' sort
+/// by score (`x_mapped::x_sort_by_mapped`), whose idle buffers may hold `x_sort_idle_bytes`.
+/// Without it each sort maps its scratch again and touches every page of it (Sakai x EDL933
+/// `-subject` blastn, where the hits of one chunk are sorted at a time: x1.009-1.027 of the time
+/// with the switch off).
+static X_SORT: crate::utils::x_mapped::XPool<UngappedHit> =
+    crate::utils::x_mapped::XPool::new(x_sort_idle_bytes);
+
+/// No NCBI counterpart: the built-in bound of `x_sort_idle_bytes`, in MiB: one scratch of the
+/// largest hit lists measured (Sakai x EDL933 `-subject` blastn sorts 10 lists of 1.0-11.4 MiB;
+/// with 8 each of the 5 above 9 MiB is mapped again, x1.009 of the time).
+const X_SORT_IDLE_MIB: usize = 16;
+
+/// No NCBI counterpart: the idle bound of `X_SORT` (`LOSAT_X_SORTIDLE` MiB, a tuning variable,
+/// 0 to 65,536; built-in `X_SORT_IDLE_MIB`).
+fn x_sort_idle_bytes() -> usize {
+    static IDLE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *IDLE.get_or_init(|| crate::utils::x_mapped::x_idle_bytes("LOSAT_X_SORTIDLE", X_SORT_IDLE_MIB))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:254-268
+// ```c
+//     if (init_hitlist->total >= init_hitlist->allocated) {
+//         Int4 new_size = MAX(100, 2 * init_hitlist->allocated);
+//         ...
+//         init_hsp_array = (BlastInitHSP *)
+//             realloc(init_hitlist->init_hsp_array, sizeof(BlastInitHSP) * new_size);
+// ```
+/// `hits.push(hit)`, growing as `Vec` does; with LOSAT_X_BNMAPPED with the capacity of
+/// `x_mapped::x_reserve_mapped`.
+#[inline(always)]
+fn x_push_ungapped(hits: &mut Vec<UngappedHit>, hit: UngappedHit) {
+    if hits.len() == hits.capacity() {
+        x_grow_ungapped(hits);
+    }
+    hits.push(hit);
+}
+
+#[cold]
+#[inline(never)]
+fn x_grow_ungapped(hits: &mut Vec<UngappedHit>) {
+    if x_bn_mapped() {
+        crate::utils::x_mapped::x_reserve_mapped(hits, 1);
+    } else {
+        hits.reserve(1);
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:271-300
@@ -5159,6 +5237,15 @@ fn update_hitlists_with_subject_hits(
     }
 }
 
+/// The SAM document that a report call adds its queries to (outfmt 17): the stream's, which
+/// the last call writes, or the document of a call of its own (the off path), which the call
+/// writes at its end. NCBI writes the document when its formatter is destroyed.
+struct SamTarget<'a> {
+    document: &'a mut crate::report::sam::SamDocument,
+    /// Whether the call writes the document after adding its queries.
+    finish: bool,
+}
+
 /// What the pairwise report, the hit records and the query warnings need besides the
 /// final hit list.
 struct BlastnReportInputs<'a> {
@@ -5227,6 +5314,9 @@ struct BlastnReportInputs<'a> {
     /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool that formats the outfmt 0 rows and text
     /// (`report::x_pairwise_par`); `None`: the serial writer.
     x_pairwise_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
+    /// `-out`: the base of the side files of outfmt 13 and 14 and of the names their master
+    /// file lists.
+    out: Option<&'a std::path::Path>,
     /// The e-value threshold of the search (BLAST XML's `Parameters_expect`).
     expect: f64,
     /// The DUST options as NCBI's filter string prints them (BLAST XML's `Parameters_filter`);
@@ -5660,6 +5750,7 @@ fn post_process_hits_and_write(
     report: &BlastnReportInputs<'_>,
     unsearched: Vec<bool>,
     query_warnings: &[Vec<u8>],
+    mut sam: Vec<Option<SamTarget<'_>>>,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:183-187
     // ```c
@@ -5983,6 +6074,101 @@ fn post_process_hits_and_write(
                 &mut writer,
                 format_warnings.as_mut(),
             )?;
+        } else if let BlastnOutputFormat::Sam(_) = output_format {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755
+            // ```c++
+            //     if (m_FormatType == CFormattingArgs::eSAM) {
+            //         if (results.HasAlignments()) {
+            //             m_SamFormatter->Print(*results.GetSeqAlign());
+            //         }
+            //         return;
+            //     }
+            // ```
+            // The queries' records are added to the run's document, which NCBI writes when its
+            // formatter is destroyed (`SamDocument::finish`): after the last call, or in a call
+            // that is the run's only one.
+            let target = sam[format_index]
+                .as_mut()
+                .expect("a SAM document is made for outfmt 17");
+            if let Some(warnings) = format_warnings.as_mut() {
+                for q_idx in 0..hit_lists.len() {
+                    warnings.before_query(q_idx, &mut writer)?;
+                }
+            }
+            let names = QueryNames {
+                records: report.queries,
+                searched_lengths: query_lengths,
+                placements: &report.ranges.queries.placements,
+            };
+            match (
+                report.database_ordinals,
+                report.database,
+                report.database_reader,
+            ) {
+                (Some(ordinals), Some(database), Some(reader)) => {
+                    // A database's sequences are searched whole; the lengths come from its
+                    // index (no letters).
+                    let lengths = reader.sam_lengths(ordinals)?;
+                    let cache = database::SamLetterCache::default();
+                    let letters_of = |rank: usize, from: usize, to: usize| {
+                        reader.sam_letters(&cache, ordinals[rank], from, to)
+                    };
+                    super::super::sam::add_blastn_sam(
+                        target.document,
+                        &hit_lists,
+                        &names,
+                        report.queries_before,
+                        SubjectNames::Database {
+                            ordinals,
+                            title: &database.definition,
+                        },
+                        report.ranges.subjects.placements,
+                        &super::super::sam::SubjectLengths {
+                            searched: &|rank| lengths[rank],
+                            whole: &|rank| lengths[rank],
+                        },
+                        &mut super::super::sam::BlastnSamLetters {
+                            queries: report.queries,
+                            query_placements: &report.ranges.queries.placements,
+                            subjects: super::super::sam::SubjectSource::Database(&letters_of),
+                        },
+                    )?;
+                }
+                _ => {
+                    // The records as read with `-subject_loc` (never packed), else the
+                    // searched ones: the letters are asked for in record coordinates.
+                    let whole_records = match report.ranges.subjects.records {
+                        Some(records) => SubjectLetters::new(records, None),
+                        None => report.subjects,
+                    };
+                    super::super::sam::add_blastn_sam(
+                        target.document,
+                        &hit_lists,
+                        &names,
+                        report.queries_before,
+                        SubjectNames::Records(report.subjects.records()),
+                        report.ranges.subjects.placements,
+                        &super::super::sam::SubjectLengths {
+                            searched: &|s_idx| report.subjects.len(s_idx),
+                            whole: &|s_idx| {
+                                report
+                                    .ranges
+                                    .subjects
+                                    .placements
+                                    .length(s_idx, report.subjects.len(s_idx))
+                            },
+                        },
+                        &mut super::super::sam::BlastnSamLetters {
+                            queries: report.queries,
+                            query_placements: &report.ranges.queries.placements,
+                            subjects: super::super::sam::SubjectSource::Records(whole_records),
+                        },
+                    )?;
+                }
+            }
+            if target.finish {
+                target.document.finish(&mut writer)?;
+            }
         } else if output_format.is_structured_xml() {
             // The XML2 / JSON documents of outfmt 15 and 16 take the path of outfmt 5: the same
             // per-query records, written by another writer.
@@ -6149,7 +6335,8 @@ fn post_process_hits_and_write(
                         query_gencode: None,
                         db_gencode: None,
                     };
-                    let mut document = crate::report::blast_xml2::Xml2Writer::new(kind, params);
+                    let mut document =
+                        crate::report::blast_xml2::Xml2Writer::for_run(kind, params, report.out);
                     super::super::blast_xml::write_blastn_xml(
                         &xml,
                         &mut document,
@@ -6828,7 +7015,7 @@ fn cli_output_formats(
 ) -> Result<Vec<BlastnOutputFormat>> {
     let choice = app::parse_formatting_string(outfmt)?;
     app::report_format(&choice, Program::Blastn, out)?
-        .map(BlastnOutputFormat::of)
+        .map(|format| BlastnOutputFormat::of(format, &choice.spec))
         .into_iter()
         .collect()
 }
@@ -6844,7 +7031,7 @@ fn parse_output_formats<'a>(
         .map(|outfmt| {
             let choice = app::parse_formatting_string(outfmt)?;
             match app::report_format(&choice, Program::Blastn, None)? {
-                Some(format) => BlastnOutputFormat::of(format),
+                Some(format) => BlastnOutputFormat::of(format, &choice.spec),
                 None => {
                     app::formatting_handler_check(&choice, Program::Blastn)?;
                     app::xinclude_check(&choice)?;
@@ -7046,9 +7233,12 @@ fn search(
     //         formatter.PrintProlog();
     // ```
     // The XInclude formats written to standard output fail after the formatter is made (a
-    // format 13 or 14 to a file is LOSAT's rejection, `cli_output_formats`).
+    // format 13 or 14 to a file takes the file name as the base of its side files).
     for format in &outputs.formats {
-        app::xinclude_check(&app::parse_formatting_string(format.outfmt)?)?;
+        app::xinclude_check_for(
+            &app::parse_formatting_string(format.outfmt)?,
+            args.out.as_deref(),
+        )?;
     }
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
@@ -7936,6 +8126,7 @@ fn run_in_pool(
                         )
                     };
                     if stream.acting() {
+                        stream.finish_sam(outputs)?;
                         stream.check("before a reader error", before);
                     } else {
                         before(outputs)?;
@@ -7986,6 +8177,7 @@ fn run_in_pool(
                     )
                 };
                 if stream.acting() {
+                    stream.finish_sam(outputs)?;
                     stream.check("before a batch without queries", before);
                 } else {
                     before(outputs)?;
@@ -8066,6 +8258,7 @@ fn run_in_pool(
                     )
                 };
                 if stream.acting() {
+                    stream.finish_sam(outputs)?;
                     stream.check("before a batch of queries without letters", before);
                 } else {
                     before(outputs)?;
@@ -8172,6 +8365,7 @@ fn run_in_pool(
                             )
                         };
                         if stream.acting() {
+                            stream.finish_sam(outputs)?;
                             stream.check("before an error after invalid batches", before);
                         } else {
                             before(outputs)?;
@@ -8302,6 +8496,7 @@ fn run_in_pool(
                         )
                     };
                     if stream.acting() {
+                        stream.finish_sam(outputs)?;
                         stream.check("before a header read error", before);
                     } else {
                         before(outputs)?;
@@ -9022,12 +9217,42 @@ fn write_reports_untimed(
     output_formats: &[BlastnOutputFormat],
     results: BatchResults<'_>,
     epilog: bool,
-    written: x_rpt_stream::Written<'_>,
+    mut written: x_rpt_stream::Written<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
     let megablast = args.task == "megablast";
     let config = configure_task(args);
     let mut hit_lists = results.hit_lists;
+    // The SAM documents (outfmt 17), one per SAM format: the stream's, which only its last call
+    // writes (the stream acts for one format), else documents of this call's own, which it
+    // writes at its end (the off path's single call, and the calls that write the document of
+    // the batches before an NCBI error).
+    let mut own_sams: Vec<Option<crate::report::sam::SamDocument>> = Vec::new();
+    let mut sam_targets: Vec<Option<SamTarget<'_>>> = Vec::new();
+    // No SAM format: no target is made (the vectors stay empty and are never indexed).
+    let has_sam = output_formats
+        .iter()
+        .any(|format| format.sam_spec().is_some());
+    match written.sam.take() {
+        Some(document) => sam_targets.push(Some(SamTarget {
+            document,
+            finish: epilog,
+        })),
+        None if !has_sam => {}
+        None => {
+            own_sams.extend(output_formats.iter().map(|format| {
+                format
+                    .sam_spec()
+                    .map(|spec| x_rpt_stream::sam_document(args, spec))
+            }));
+            sam_targets.extend(own_sams.iter_mut().map(|document| {
+                document.as_mut().map(|document| SamTarget {
+                    document,
+                    finish: true,
+                })
+            }));
+        }
+    }
     // A database: the reported sequences, named by rank from here on, with their stored
     // titles, and their stored letters where a report shows them (outfmt 0 and the hit
     // records; `database::reported_subjects`).
@@ -9104,6 +9329,7 @@ fn write_reports_untimed(
         queries_before: written.queries,
         subject_cache: written.subjects,
         x_pairwise_pool: x_pool.and_then(crate::report::x_pairwise_par::pool),
+        out: args.out.as_deref(),
         expect: super::super::coordination::determine_evalue(args),
         dust: args.dust.params().map(|(level, window, linker)| {
             (level as i32, window as u32 as i32, linker as u32 as i32)
@@ -9160,6 +9386,7 @@ fn write_reports_untimed(
         &report_inputs,
         results.unsearched,
         results.warnings,
+        sam_targets,
     )
 }
 
@@ -12509,23 +12736,26 @@ fn search_query_batch(
                                 // NCBI architecture: Collect ungapped hit for batch processing
                                 // NCBI reference: blast_gapalign.c:3824 - init_hsp_array is sorted by score DESCENDING
                                 // Gapped extension will be done later in score order with containment check
-                                ungapped_hits.push(UngappedHit {
-                                    context_idx: q_idx,
-                                    query_idx: ctx.query_idx,
-                                    query_frame: ctx.frame,
-                                    query_context_offset: ctx.query_offset,
-                                    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
-                                    // ```c
-                                    // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
-                                    // ```
-                                    seed_q_off: q_off - q_context_start,
-                                    seed_s_off: s_off,
-                                    qs,
-                                    qe,
-                                    ss,
-                                    se: ungapped_se,
-                                    score: ungapped_score,
-                                });
+                                x_push_ungapped(
+                                    ungapped_hits,
+                                    UngappedHit {
+                                        context_idx: q_idx,
+                                        query_idx: ctx.query_idx,
+                                        query_frame: ctx.frame,
+                                        query_context_offset: ctx.query_offset,
+                                        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
+                                        // ```c
+                                        // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
+                                        // ```
+                                        seed_q_off: q_off - q_context_start,
+                                        seed_s_off: s_off,
+                                        qs,
+                                        qe,
+                                        ss,
+                                        se: ungapped_se,
+                                        score: ungapped_score,
+                                    },
+                                );
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
                                 // ```c
@@ -13769,23 +13999,26 @@ fn search_query_batch(
 
                                 // NCBI architecture: Collect ungapped hit for batch processing
                                 // NCBI reference: blast_gapalign.c:3824 - init_hsp_array is sorted by score DESCENDING
-                                ungapped_hits.push(UngappedHit {
-                                    context_idx: q_idx,
-                                    query_idx: ctx.query_idx,
-                                    query_frame: ctx.frame,
-                                    query_context_offset: ctx.query_offset,
-                                    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
-                                    // ```c
-                                    // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
-                                    // ```
-                                    seed_q_off: q_off,
-                                    seed_s_off: s_off,
-                                    qs,
-                                    qe,
-                                    ss,
-                                    se: ungapped_se,
-                                    score: ungapped_score,
-                                });
+                                x_push_ungapped(
+                                    ungapped_hits,
+                                    UngappedHit {
+                                        context_idx: q_idx,
+                                        query_idx: ctx.query_idx,
+                                        query_frame: ctx.frame,
+                                        query_context_offset: ctx.query_offset,
+                                        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
+                                        // ```c
+                                        // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
+                                        // ```
+                                        seed_q_off: q_off,
+                                        seed_s_off: s_off,
+                                        qs,
+                                        qe,
+                                        ss,
+                                        se: ungapped_se,
+                                        score: ungapped_score,
+                                    },
+                                );
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
                                 // ```c
@@ -13905,6 +14138,20 @@ fn search_query_batch(
             match (&x_order, &x_counts) {
                 (Some(_), Some(counts)) => {
                     x_qgroup_par::group_in_place(ungapped_hits, |hit| hit.query_idx, counts)
+                }
+                // EXPERIMENT (LOSAT_X_BNMAPPED): `x_mapped::x_sort_by_mapped` is a stable sort
+                // with the same comparator, so the order is that of `sort_by`.
+                _ if x_bn_mapped() => {
+                    x_bn_mapped_reach(
+                        ungapped_hits
+                            .len()
+                            .saturating_mul(std::mem::size_of::<UngappedHit>()),
+                    );
+                    crate::utils::x_mapped::x_sort_by_mapped(
+                        ungapped_hits,
+                        score_compare_ungapped_hits,
+                        &X_SORT,
+                    )
                 }
                 _ => ungapped_hits.sort_by(score_compare_ungapped_hits),
             }
@@ -18719,12 +18966,37 @@ mod tests {
         assert!(cli_output_formats("13", Some(std::path::Path::new("-")))
             .unwrap()
             .is_empty());
-        for outfmt in ["13", "17", "10"] {
+        // 13 and 14 to a file are written (OF5c part 1): the XML2 / JSON documents as files.
+        for (outfmt, kind) in [
+            ("13", crate::report::blast_xml2::Xml2Kind::Files13),
+            ("14", crate::report::blast_xml2::Xml2Kind::Files14),
+        ] {
+            assert_eq!(
+                cli_output_formats(outfmt, file).unwrap(),
+                [BlastnOutputFormat::Xml2(kind)],
+                "{outfmt}"
+            );
+        }
+        for outfmt in ["10"] {
             assert_eq!(
                 cli_output_formats(outfmt, file).unwrap_err().to_string(),
                 format!("output format {outfmt} is not supported by LOSAT's BLASTN")
             );
         }
+        // SAM (OF6) reads its words and ignores the rest and a delimiter.
+        assert_eq!(
+            cli_output_formats("17", file).unwrap(),
+            [BlastnOutputFormat::Sam(
+                crate::report::sam::SamSpec::default()
+            )]
+        );
+        assert_eq!(
+            cli_output_formats(" 17 delim=, SR SQ foo", None).unwrap(),
+            [BlastnOutputFormat::Sam(crate::report::sam::SamSpec {
+                subject_as_reference: true,
+                sequence: true
+            })]
+        );
         assert_eq!(
             cli_output_formats("0 qaccver", None).unwrap(),
             [BlastnOutputFormat::Pairwise]
@@ -18797,8 +19069,14 @@ mod tests {
             ]
         );
         assert_eq!(
-            parse_output_formats(["17"]).unwrap_err().to_string(),
-            "output format 17 is not supported by LOSAT's BLASTN"
+            parse_output_formats(["17", "17 SQ SR"]).unwrap(),
+            [
+                BlastnOutputFormat::Sam(crate::report::sam::SamSpec::default()),
+                BlastnOutputFormat::Sam(crate::report::sam::SamSpec {
+                    subject_as_reference: true,
+                    sequence: true
+                })
+            ]
         );
     }
 }

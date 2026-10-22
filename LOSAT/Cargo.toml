@@ -100,7 +100,9 @@ codegen-units = 1
 panic = "abort"
 opt-level = 3
 
-# Optimized test code, as in CI; the test profile keeps the dev profile's debug
-# assertions and overflow checks.
+# Optimized test code; the test profile keeps the dev profile's debug assertions
+# and overflow checks. CI builds it at opt-level 3 with line tables only
+# (CARGO_PROFILE_TEST_* in .github/workflows/ci.yml and platform-checks.yml): the
+# tests ran 5 % faster than at level 1, and line tables cut the build by a fifth.
 [profile.test]
 opt-level = 1

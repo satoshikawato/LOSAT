@@ -376,6 +376,11 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
         .filter(|line| line.starts_with("db.sa.x16_taxid."))
     {
         let cells: Vec<&str> = line.split('\t').collect();
+        // A row of outfmt 13 or 14 (the `files` column) writes files next to `-out`:
+        // `tests/outfmt13_14_files.rs` and the harness check it.
+        if cells.get(12) == Some(&"xinclude") {
+            continue;
+        }
         let (id, kind, db, query, extra, outfmt, rc, covers) = (
             cells[0], cells[2], cells[3], cells[4], cells[5], cells[6], cells[7], cells[11],
         );

@@ -4,8 +4,10 @@ LOSAT_X_AHEAD	blastn	conditional	required	required	2+ threads (1 thread runs ref
 LOSAT_X_BNDBCUT	blastn	conditional	required	required	-db only, 2+ threads; DB below 4 x threads MiB of sequence bytes
 LOSAT_X_BNDBSTREAM	blastn	conditional	required	required	-db only, 2+ threads; memory switch (little change for few long sequences)
 LOSAT_X_BNFEWSUBJ	blastn	conditional	gap	required	-subject, 2+ threads, longest work unit a large share of letters (per-task thresholds); no -lcase_masking, never -db; new gap: needs -subject with 2+ subjects at 2+ threads, one subject holding most letters, query block > 8000
+LOSAT_X_BNMAPPED	blastn	conditional	required	required	Linux 64-bit glibc and a buffer of 1 MiB or more: a subject's ungapped hits at their sort by score, a -db sequence's BLASTNA letters at traceback (mapped; database buffers and sort scratch pooled); smaller buffers or other allocators keep Vec's capacity
 LOSAT_X_BNSTORE	blastn	conditional	required	required	-subject without -subject_loc; letters kept for subject ranges or bytes without ncbi4na code
 LOSAT_X_BNSTREAM	blastn	conditional	required	required	-subject only, 2+ threads (1 thread hands over at once); -db has own drivers
+LOSAT_X_BNUNGAPCOUNT	blastn	always			Exact ungapped extension with step counts worked out first
 LOSAT_X_BPCLUT	blastp	conditional	required	required	-task blastp-fast only; exact blastp builds no compressed table
 LOSAT_X_BPCOMPOREUSE	blastp	always			Subject composition kept in SEG cache entry, reused by redo
 LOSAT_X_BPDBCUT	blastp	conditional	required	required	-db only, 2+ threads; DB below 4 x threads MiB (Swiss-Prot keeps 1 MiB blocks)
@@ -36,6 +38,7 @@ LOSAT_X_BPSUBJRUN	blastp	conditional	required	required	-subject only, 2+ threads
 LOSAT_X_BPUNGAP	blastp,blastx	always			Flat BLOSUM62 score table for ungapped extension walks
 LOSAT_X_BXBATCH	blastx	conditional	gap	required	needs BXPOOL, 2+ threads, several query batches; new gap: needs blastx at 2+ threads with several small query batches
 LOSAT_X_BXCHUNK	blastx	conditional	required	required	2+ threads
+LOSAT_X_BXCHUNKFLOW	blastx	conditional	gap	required	one query of 2+ chunks (>= 19,410 letters), 2+ threads, subject flow chosen, >= max(256 x threads, 2,048) subjects; new gap: needs such a query against 2,048+ subjects (tests/blastx_subject_flow.rs covers it)
 LOSAT_X_BXDIAG	blastx	conditional	required	required	x86-64 AVX2; word size 3 standard table; only batches with >=5 hits per used cell (short queries use direct loop)
 LOSAT_X_BXFLOW	blastx	conditional	required	required	2+ threads, native only (Web keeps waves), needs BXBATCH/BXPOOL, several batches
 LOSAT_X_BXHITBF	blastx	conditional	required	gap	direct loop only: no-AVX2 CPUs, aarch64, Wasm, or short queries (<5 hits per cell) on x86; ref gap: needs -window_size 0 or <= 3 (or a diagonal offset near 2^30)
@@ -84,7 +87,7 @@ LOSAT_X_QDUSTPAR	blastn	conditional	required	required	DUST on (default except bl
 LOSAT_X_QGROUPPAR	blastn	conditional	required	required	2+ threads, one subject at a time, 2+ queries with HSPs, no query holding >1/4 of HSPs, no debug
 LOSAT_X_QPREPPAR	blastn	conditional	required	required	2+ threads and 2+ queries (encoding) or contexts (blocks)
 LOSAT_X_QSTREAM	blastn	conditional	required	required	only with RPTSTREAM; off for -task megablast, stdin/pipes, file <2x largest batch, files where QBATCHPAR slots may run
-LOSAT_X_RPTSTREAM	blastn	conditional	required	required	usually on (CLI); off for Web adapter/observers, debug, several formats, refused scoring/titles/search space; checks only with 2+ batches
+LOSAT_X_RPTSTREAM	blastn	conditional	required	required	usually on (CLI); off for Web adapter/observers, debug, several formats, refused scoring/titles/search space (outfmt 17 streams despite titles and ambiguity: sam_despite); checks only with 2+ batches
 LOSAT_X_SEEDBUCKET	tblastx	conditional	gap	required	only where PAIRPAR leaves scan loop and diagonal table >=2^21 cells (query >=524 kb); new gap: needs the reference frame loop with a diagonal table >= 2^21 cells (query >= 524 kb)
 LOSAT_X_SEEDCOMPACT	tblastx	conditional	required	required	only where PAIRPAR unit path runs (gated by PAIRPARGATE on query size)
 LOSAT_X_SEEDRELEASE	tblastx	always			Seed-stage-only tables freed before last subject's HSP merge and linking

@@ -116,7 +116,7 @@ pub(crate) fn seqalign_evalue(evalue: f64) -> f64 {
         evalue
     }
 }
-const GAP_VALUE: i32 = -1;
+pub(crate) const GAP_VALUE: i32 = -1;
 const BLAST_ALIGNMENT_DIM: i32 = 2;
 
 /// `CODON_LENGTH` (include/algo/blast/core/blast_def.h:62-63: `#define CODON_LENGTH 3`).
@@ -192,6 +192,50 @@ pub struct Segments {
     starts: Vec<i32>,
     lens: Vec<i32>,
     strands: Vec<Strand>,
+}
+
+impl Segments {
+    /// The numbers of the segments' rows: `starts` (2 per segment, query then subject,
+    /// `GAP_VALUE` for a gap; in the searched letters, before the remaps of the query's and
+    /// the subject's ranges), `lens` and `strands` (2 per segment).
+    pub(crate) fn starts(&self) -> &[i32] {
+        &self.starts
+    }
+
+    pub(crate) fn lens(&self) -> &[i32] {
+        &self.lens
+    }
+
+    pub(crate) fn strands(&self) -> &[Strand] {
+        &self.strands
+    }
+}
+
+/// The Dense-seg segments of a gapped HSP of a non-translated search as the Seq-align holds
+/// them after `RemapToQueryLoc` and `s_RemapToSubjectLoc` (for a `-subject` search), minus the
+/// range starts that the caller adds (`QueryRecord::offset`, `SubjectRecord::offset`): what
+/// `write_seq_align_gapped` writes into the Dense-seg. The SAM formatter reads them
+/// (`report::sam`).
+pub(crate) fn gapped_segments(
+    run: &RunRecord<'_>,
+    query: &QueryRecord<'_>,
+    subject: &SubjectRecord<'_>,
+    hsp: &HspRecord<'_>,
+    segments: &mut Segments,
+) {
+    let translate1 = query_is_translated(run.program);
+    let translate2 = subject_is_translated(run.program);
+    collect_seq_align_data(
+        hsp,
+        query.searched_length,
+        subject.searched_length,
+        translate1,
+        translate2,
+        segments,
+    );
+    if run.remaps_subjects() && !(translate1 || translate2) {
+        remap_strands(segments);
+    }
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:89-100

@@ -196,6 +196,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_LINKSORT",
     "LOSAT_X_LUTARENA",
     "LOSAT_X_LUTSPLIT",
+    "LOSAT_X_MBFILL",
     "LOSAT_X_MBLUTKEEP",
     "LOSAT_X_MBLUTONCE",
     "LOSAT_X_MBLUTPREFAULT",

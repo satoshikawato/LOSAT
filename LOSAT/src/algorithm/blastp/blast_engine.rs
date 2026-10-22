@@ -2413,17 +2413,13 @@ fn blastp_is_xml(outfmt: &str) -> bool {
     })
 }
 
-/// The XML2 / JSON document of a `-outfmt` value (outfmt 15 and 16), read as NCBI reads it;
-/// `None` for the other formats.
+/// The XML2 / JSON document of a `-outfmt` value (outfmt 13 to 16), read as NCBI reads it;
+/// `None` for the other formats. Outfmt 13 and 14 write files next to `-out`: only the command
+/// line reaches them (`resolve_for_formats` stops the other callers at NCBI's XInclude check).
 fn blastp_xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
     use crate::blastinput::app::ReportFormat;
-    use crate::report::blast_xml2::Xml2Kind;
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
-    match ReportFormat::from_number(choice.number)? {
-        ReportFormat::Xml2S => Some(Xml2Kind::Single16),
-        ReportFormat::JsonS => Some(Xml2Kind::Single15),
-        _ => None,
-    }
+    crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(choice.number)?)
 }
 
 // NCBI blast_args.cpp:2657-2660; tabular.cpp:1100-1108:
@@ -5551,6 +5547,10 @@ fn search_cli(
         QueryEnd::EofError => QueryReading::BlankLines,
         QueryEnd::Error { error, warnings } => QueryReading::Error { error, warnings },
     };
+    let choice_to_standard_output = resolved
+        .out
+        .as_deref()
+        .is_none_or(|path| path.as_os_str() == "-");
     search(
         resolved,
         &records,
@@ -5559,7 +5559,9 @@ fn search_cli(
         database.as_ref(),
         "",
         outputs,
-        Some(&choice),
+        // The XInclude formats fail only on standard output; to a file they take its name as
+        // the base of their side files.
+        choice_to_standard_output.then_some(&choice),
         None,
     )
 }
@@ -6967,7 +6969,8 @@ fn write_reports_without_queries(
         if let Some(kind) = blastp_xml2_kind(format.outfmt) {
             let mut writer = format.sink.open()?;
             let mut bytes = Vec::new();
-            crate::report::blast_xml2::Xml2Document::new(kind, false).epilog(&mut bytes)?;
+            crate::report::blast_xml2::Xml2Document::for_run(kind, false, args.out.as_deref())
+                .epilog(&mut bytes)?;
             writer.write_all(&bytes)?;
             writer.flush()?;
             continue;
@@ -11171,8 +11174,12 @@ fn run_resolved_in_pool(
                             // No report data is made without a query: the prolog and
                             // the epilog alone.
                             let mut bytes = Vec::new();
-                            crate::report::blast_xml2::Xml2Document::new(kind, false)
-                                .epilog(&mut bytes)?;
+                            crate::report::blast_xml2::Xml2Document::for_run(
+                                kind,
+                                false,
+                                args.out.as_deref(),
+                            )
+                            .epilog(&mut bytes)?;
                             writer.write_all(&bytes)?;
                         }
                         writer.flush()?;
@@ -11393,7 +11400,11 @@ fn run_resolved_in_pool(
                         };
                         super::blast_xml::write_blastp_xml(
                             &xml,
-                            &mut crate::report::blast_xml2::Xml2Writer::new(kind, params),
+                            &mut crate::report::blast_xml2::Xml2Writer::for_run(
+                                kind,
+                                params,
+                                args.out.as_deref(),
+                            ),
                             &hit_lists,
                             &mut xml_rows,
                             &mut writer,

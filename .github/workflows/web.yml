@@ -149,7 +149,7 @@ jobs:
       - name: V-ABI (quick suite)
         run: |
           python3 web/adapter/tools/v_abi_cases.py --suite quick --out ${{ runner.temp }}/v-abi-cases.json
-          node web/adapter/tests/v_abi.js --native LOSAT/target/release/LOSAT \
+          node web/adapter/tests/v_abi.js --native LOSAT/target/release/losat \
             --serial ${{ runner.temp }}/reactors/losat-web-serial.wasm \
             --threads ${{ runner.temp }}/reactors/losat-web-threads.wasm \
             --cases ${{ runner.temp }}/v-abi-cases.json
@@ -166,7 +166,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native
-          path: LOSAT/target/release/LOSAT
+          path: LOSAT/target/release/losat
           retention-days: 3
 
   # V-BR (plan §6.2): the application's EngineGateway and Engine worker with the reactors
@@ -196,7 +196,7 @@ jobs:
         with:
           name: native
           path: ${{ runner.temp }}/native
-      - run: chmod +x ${{ runner.temp }}/native/LOSAT
+      - run: chmod +x ${{ runner.temp }}/native/losat
       - run: npm ci
       - run: npx playwright install --with-deps chromium firefox webkit
       - name: RecordScanner contract on the serial reactor (Node)
@@ -206,7 +206,7 @@ jobs:
       - name: V-BR and every E2E test with the engine in the build
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
-          LOSAT_WEB_NATIVE: ${{ runner.temp }}/native/LOSAT
+          LOSAT_WEB_NATIVE: ${{ runner.temp }}/native/losat
         run: npm run e2e
       - uses: actions/upload-artifact@v4
         if: failure()

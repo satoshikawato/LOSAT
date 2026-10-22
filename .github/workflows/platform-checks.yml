@@ -188,7 +188,7 @@ jobs:
           workspaces: LOSAT -> target
           key: outputs-${{ matrix.id }}
       - name: Build release binary
-        run: cd LOSAT && cargo build --release --locked --bin LOSAT
+        run: cd LOSAT && cargo build --release --locked --bin losat
       # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
       # result *= expl(-z * z) / z;
       # LOSAT's one mul_add emulates that long-double line; no other function of the release binary
@@ -196,9 +196,9 @@ jobs:
       # contract"). The runner's GNU objdump reads aarch64.
       - name: Floating-point contract (release binary)
         if: matrix.id == 'linux-arm64'
-        run: mkdir -p platform-check && python3 LOSAT/tests/check_fp_contract.py binary --losat LOSAT/target/release/LOSAT --out platform-check/fp-contract.txt
+        run: mkdir -p platform-check && python3 LOSAT/tests/check_fp_contract.py binary --losat LOSAT/target/release/losat --out platform-check/fp-contract.txt
       - name: Default against LOSAT_X_DEFAULT=0, 49 cases, 1 and 4 threads
-        run: ${{ matrix.python }} LOSAT/tests/platform_checks.py run --losat LOSAT/target/release/LOSAT --out platform-check ${{ matrix.extra }}
+        run: ${{ matrix.python }} LOSAT/tests/platform_checks.py run --losat LOSAT/target/release/losat --out platform-check ${{ matrix.extra }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

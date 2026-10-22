@@ -31,7 +31,7 @@ python3 web/adapter/tools/check_build_identity.py
 RUSTUP_TOOLCHAIN=1.92.0 python3 web/adapter/tools/build_reactors.py --target-dir <dir> --output-dir <reactors>
 (cd LOSAT && cargo +1.92.0 build --release --locked)
 python3 web/adapter/tools/v_abi_cases.py --suite quick --out <cases.json>
-node web/adapter/tests/v_abi.js --native LOSAT/target/release/LOSAT \
+node web/adapter/tests/v_abi.js --native LOSAT/target/release/losat \
   --serial <reactors>/losat-web-serial.wasm --threads <reactors>/losat-web-threads.wasm \
   --cases <cases.json> [--out <dir>]
 ```

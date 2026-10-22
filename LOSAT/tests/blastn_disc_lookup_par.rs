@@ -128,7 +128,7 @@ fn queries() -> Temp {
     Temp(path)
 }
 
-/// The database made by `LOSAT makedb` from LC738868, LC738869 and LC738870 (in a directory of
+/// The database made by `losat makedb` from LC738868, LC738869 and LC738870 (in a directory of
 /// this test, removed when dropped), and its name.
 fn database() -> (Temp, String) {
     let dir = Temp(temp_path("db"));
@@ -146,7 +146,7 @@ fn database() -> (Temp, String) {
         .arg(&set)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",
@@ -161,7 +161,7 @@ fn database() -> (Temp, String) {
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
 /// soon as a search has more than one thread, and it selects nothing.
 fn losat() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")

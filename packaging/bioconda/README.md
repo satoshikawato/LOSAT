@@ -72,7 +72,7 @@ The proposed recipe deliberately stays small:
 - use the Bioconda/conda-forge Rust compiler toolchain;
 - install the CLI with `cargo install --locked`;
 - generate third-party license metadata with `cargo-bundle-licenses`;
-- smoke-test `LOSAT --version`, top-level help, and the three certified program
+- smoke-test `losat --version`, top-level help, and the three certified program
   subcommands;
 - opt in to `linux-aarch64` and `osx-arm64` in addition to Bioconda's default
   x86_64 Linux/macOS builds.

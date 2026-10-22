@@ -252,7 +252,7 @@ Evidence: release binary rebuilt, then the complete fresh native serial gate
 was run:
 `python tests/compare_blastn_parity.py --fresh-paired
 --paired-output-dir /tmp/losat-blastn-manifest-20260810-full
---losat-bin target/release/LOSAT --ncbi-bin blastn`. NCBI was
+--losat-bin target/release/losat --ncbi-bin blastn`. NCBI was
 `blastn 2.17.0+` (build Aug 11 2025 09:46:06), with binary SHA-256
 `0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1`;
 LOSAT was commit `92b934d8defd299bdf821055d92053b8f8923fad` with binary

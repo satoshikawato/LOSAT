@@ -37,7 +37,7 @@ fn run(args: &[&std::ffi::OsStr]) -> Output {
 
 /// `run` with the extra environment variables `env` (NCBI's own `BATCH_SIZE`, for example).
 fn run_with(args: &[&std::ffi::OsStr], env: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
             command.env_remove(name);

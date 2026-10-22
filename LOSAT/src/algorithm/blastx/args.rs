@@ -1094,7 +1094,7 @@ mod tests {
     //
     // ```
     fn parse(options: &[&str]) -> BlastxArgs {
-        let mut argv = vec!["LOSAT", "blastx", "-query", "q", "-subject", "s"];
+        let mut argv = vec!["losat", "blastx", "-query", "q", "-subject", "s"];
         argv.extend_from_slice(options);
         let cli: crate::cli::Cli = crate::cli::try_parse_from(argv).unwrap();
         match cli.command {

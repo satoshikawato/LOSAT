@@ -25,7 +25,7 @@ fn args(query: &TempFasta, subject: &TempFasta) -> BlastnArgs {
         subject.0.display().to_string(),
     );
     let cli: Cli = try_parse_from([
-        "LOSAT", "blastn", "-query", &query, "-subject", &subject, "-outfmt", "6",
+        "losat", "blastn", "-query", &query, "-subject", &subject, "-outfmt", "6",
     ])
     .expect("blastn argv");
     match cli.command {

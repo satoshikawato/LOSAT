@@ -52,7 +52,7 @@ fn blastp_args(
     extra: &[&str],
 ) -> LOSAT::algorithm::blastp::BlastpArgs {
     let mut argv = vec![
-        "LOSAT".to_string(),
+        "losat".to_string(),
         "blastp".to_string(),
         "-query".to_string(),
         query.display().to_string(),
@@ -112,7 +112,7 @@ fn cli(inputs: &Inputs, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
     let out = inputs
         .query
         .with_extension(format!("cli{}.out", outfmt.len()));
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("blastp")
         .arg("-query")
         .arg(&inputs.query)
@@ -280,7 +280,7 @@ fn cli_run(
     extra: &[&str],
     env: &[(&str, &str)],
 ) -> (Option<i32>, Vec<u8>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     command
         .arg("blastp")
         .arg("-query")

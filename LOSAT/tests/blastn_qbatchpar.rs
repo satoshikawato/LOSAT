@@ -210,12 +210,12 @@ fn earlier_budget(args: &[&str]) -> String {
     (per_thread * threads.saturating_sub(1)).to_string()
 }
 
-/// One `LOSAT blastn` run with `args`, with `env` as its only variables that choose a code path
+/// One `losat blastn` run with `args`, with `env` as its only variables that choose a code path
 /// or NCBI's batches (and the earlier default budget, `earlier_budget`). `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
 /// soon as a search has more than one thread, and it selects nothing.
 fn blastn(args: &[&str], env: &[(&str, &str)]) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && text != "LOSAT_BLASTX_WORKER_LOG")
@@ -1176,7 +1176,7 @@ fn the_loop_keeps_the_batches_where_the_path_is_off() {
 }
 
 // Debug output (written while a batch is searched) and a BLAST database (`-db`, made here by
-// `LOSAT makedb`) keep the loop: the reports are those without the switch. (`-verbose` is not a
+// `losat makedb`) keep the loop: the reports are those without the switch. (`-verbose` is not a
 // command-line option of LOSAT's blastn.)
 #[test]
 fn debug_output_and_a_database_keep_the_loop() {
@@ -1214,10 +1214,10 @@ fn debug_output_and_a_database_keep_the_loop() {
     std::fs::create_dir_all(&db).expect("make the database directory");
     let name = db.join("subject");
     let name = name.to_str().expect("UTF-8 path");
-    let made = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let made = Command::new(env!("CARGO_BIN_EXE_losat"))
         .args(["makedb", "-in", subject, "-dbtype", "nucl", "-out", name])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         made.status.success(),
         "{}",

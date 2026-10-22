@@ -67,7 +67,7 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
     // The formats come from `Program::formats`, and every program accepts the CLI's
     // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
     // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
-    let argv = std::iter::once("LOSAT").chain(words.iter().copied());
+    let argv = std::iter::once("losat").chain(words.iter().copied());
     let cli: Cli =
         LOSAT::cli::try_parse_from(argv).map_err(|error| LOSAT::cli::render_message(&error))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
@@ -387,7 +387,7 @@ mod tests {
         // An unknown program and a parser error are the CLI's messages.
         for words in [&["nosuch"][..], &["tblastx", "-query", "q"][..]] {
             let cli = LOSAT::cli::try_parse_from::<Cli, _, _>(
-                std::iter::once("LOSAT").chain(words.iter().copied()),
+                std::iter::once("losat").chain(words.iter().copied()),
             )
             .map(|_| ())
             .map_err(|error| LOSAT::cli::render_message(&error));
@@ -494,7 +494,7 @@ mod tests {
             ][..],
         ] {
             let cli = LOSAT::cli::try_parse_from::<Cli, _, _>(
-                ["LOSAT"].into_iter().chain(words.iter().copied()),
+                ["losat"].into_iter().chain(words.iter().copied()),
             )
             .unwrap_err();
             assert_eq!(

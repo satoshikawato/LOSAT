@@ -31,7 +31,7 @@ fn repository(path: &str) -> PathBuf {
 
 /// Parses the TBLASTN options. `query` and `subject` are display names only.
 fn tblastn_args(query: &str, subject: &str, extra: &[&str]) -> TblastnArgs {
-    let mut argv = vec!["LOSAT", "tblastn", "-query", query, "-subject", subject];
+    let mut argv = vec!["losat", "tblastn", "-query", query, "-subject", subject];
     argv.extend_from_slice(extra);
     let cli: Cli = try_parse_from(argv).expect("tblastn argv");
     match cli.command {
@@ -215,7 +215,7 @@ impl Drop for Inputs {
 /// The CLI output file and standard error of one single-format run.
 fn cli(inputs: &Inputs, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
     let out = inputs.query.with_extension(format!("cli{outfmt}.out"));
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("tblastn")
         .arg("-query")
         .arg(&inputs.query)
@@ -440,7 +440,7 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
 
 /// One CLI run: the exit code, standard output and standard error.
 fn cli_run(query: &Path, subject: &Path, extra: &[&str]) -> (Option<i32>, Vec<u8>, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("tblastn")
         .arg("-query")
         .arg(query)

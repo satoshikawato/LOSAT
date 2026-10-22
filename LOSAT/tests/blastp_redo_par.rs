@@ -137,7 +137,7 @@ struct Run {
 /// without the caller's value a file of the tests is named. `BATCH_SIZE` is the test's own (3000:
 /// several query batches of several queries). The run must exit with 0.
 fn blastp(query: &Path, threads: u32, vars: &[(&str, &str)], args: &[&str]) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")

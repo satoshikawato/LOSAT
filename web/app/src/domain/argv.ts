@@ -50,7 +50,7 @@ export function buildArgv(input: ArgvInput): readonly string[] {
 export function toShellCommand(argv: readonly string[], outfmt: OutputFormat): string {
   const quote = (word: string) =>
     /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
-  return ['LOSAT', ...argv, '-outfmt', String(outfmt)].map(quote).join(' ');
+  return ['losat', ...argv, '-outfmt', String(outfmt)].map(quote).join(' ');
 }
 
 /** The value of an option in an argv (the word after its last occurrence), or undefined where it is not given. */

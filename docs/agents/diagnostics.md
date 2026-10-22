@@ -4300,7 +4300,14 @@ Scheduling (each value computed by one thread with the original function; order 
   every report is the same. Shadow: `LOSAT_X_BXDBSTREAMSHADOW=1` also makes the copy and compares every block, window of
   lengths and read with it (and the check's error with the copy's), stopping at the first difference; at exit
   `[X_SHADOW] BXDBSTREAM blocks= sequences= residues= lengths= reads= identical` (`tests/blastx_db_stream.rs`).
-  Measured: (to come).
+  Measured 2026-10-22 (workstation, every report identical): peak RssAnon of `uniref50.03` x 201 reads at 8
+  threads 49.3 MiB against 2,888.2 MiB with `=0` (NCBI: 61 MiB at 1 thread), untimed. Timed on node 1, warmed 3 s,
+  8 alternated pairs: against `=0` alone, Swiss-Prot x 201 reads x0.992 at 8 threads and x0.974 at 16,
+  `uniref50.03` x 201 x0.996 and x0.992, but x1.0067 at 1 thread (7 of 8 pairs above 1: cycles:u +0.8 to +1.2 %
+  at blocks of 16 KiB to 1 MiB, in the scan kernels, not in the new code). With `LOSAT_X_BXEVALEMPTY`, against the
+  binary before both: Swiss-Prot x 201 x0.980 / x0.975 / x0.966 at 1 / 8 / 16 threads, `uniref50.03` x 201 x0.969 /
+  x0.950 at 8 / 16, no pair above 1. Max RSS there: Swiss-Prot 15.6 / 31.3 / 38.4 MiB against 219.4 / 231.4 /
+  239.9, `uniref50.03` 52.3 / 63.1 MiB against 2,825.7 / 2,835.7.
 - `LOSAT_X_BXEVALEMPTY=1` (BLASTX, speed; in the strict set from the pull request that added it, with
   `LOSAT_X_BXDBSTREAM`: on unless `=0` or `LOSAT_X_DEFAULT=0`): the gapped evaluation of a subject without
   preliminary HSPs (`statistics::evaluate_gapped`, which the sink calls for every subject, and the composition redo
@@ -4310,7 +4317,10 @@ Scheduling (each value computed by one thread with the original function; order 
   thread the evaluation was 2.1 % of the run's user cycles (`perf record`, workstation). Shadow:
   `LOSAT_X_BXEVALEMPTYSHADOW=1` also evaluates every empty input the full way; at exit, after at least one
   comparison, `[X_SHADOW] BXEVALEMPTY lists_compared=N identical` (`tests/blastx_db_stream.rs`). At a difference the
-  same line, with the lists compared before it, comes just before the panic.
+  same line, with the lists compared before it, comes just before the panic. Measured 2026-10-22 (workstation, with
+  `LOSAT_X_BXDBSTREAM`, against the binary before both): Swiss-Prot x 201 reads `-db` at one thread, instructions:u
+  x0.9877 and cycles:u x0.9835 (`perf stat`, 3 runs each; x0.9873 and x0.9878 against both switches `=0`), wall
+  x0.980 (node 1, 8 alternated pairs, none above 1); `-subject` (201 reads x PemoMJNVA) instructions:u x0.9993.
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

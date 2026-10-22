@@ -75,11 +75,11 @@ use anyhow::Result;
 use crate::seqdb::SeqDb;
 use crate::utils::threading::SearchPool;
 
+use super::super::PrelimCollector;
 use super::{
     read_search_block, search_blocks_of, BlastpDatabase, BlastpHitList, BlastpSubjectRef,
     BlastpSubjectResult, BlastpSubjectScratch, PrelimSink, XPrelimHsp, BLOCK_BYTES,
 };
-use super::super::PrelimCollector;
 
 /// EXPERIMENT (LOSAT_X_BPDBCUT): the mode the variables select.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

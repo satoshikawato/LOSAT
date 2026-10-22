@@ -349,14 +349,21 @@ mod tests {
     }
 
     /// The subject result of `oid` with the HSPs of one query in both representations.
-    fn subject(oid: usize, query: usize, hsps: &[(BlastpPreliminaryHsp, f64)]) -> BlastpSubjectResult {
+    fn subject(
+        oid: usize,
+        query: usize,
+        hsps: &[(BlastpPreliminaryHsp, f64)],
+    ) -> BlastpSubjectResult {
         let mut result = BlastpSubjectResult::new(oid);
         result.query_hsp_lists.push((
             query,
             BlastpHspList {
                 oid: oid as u32,
                 query_index: query as u32,
-                hsps: hsps.iter().map(|(h, e)| full_hsp(h, oid as u32, *e)).collect(),
+                hsps: hsps
+                    .iter()
+                    .map(|(h, e)| full_hsp(h, oid as u32, *e))
+                    .collect(),
                 best_evalue: 0.0,
             },
         ));
@@ -384,7 +391,10 @@ mod tests {
     fn finished(
         culling: PrelimCulling,
         queries: usize,
-    ) -> (Vec<Option<BlastpHitList>>, Vec<Option<BlastpHitList<XPrelimHsp>>>) {
+    ) -> (
+        Vec<Option<BlastpHitList>>,
+        Vec<Option<BlastpHitList<XPrelimHsp>>>,
+    ) {
         let mut lists: Vec<Option<BlastpHitList>> = (0..queries).map(|_| None).collect();
         let mut compact: Vec<Option<BlastpHitList<XPrelimHsp>>> =
             (0..queries).map(|_| None).collect();
@@ -405,7 +415,10 @@ mod tests {
             .unwrap_or_default()
     }
 
-    fn compact_scores(lists: &[Option<BlastpHitList<XPrelimHsp>>], query: usize) -> Vec<(u32, Vec<i32>)> {
+    fn compact_scores(
+        lists: &[Option<BlastpHitList<XPrelimHsp>>],
+        query: usize,
+    ) -> Vec<(u32, Vec<i32>)> {
         lists[query]
             .as_ref()
             .map(|hit_list| {
@@ -450,7 +463,14 @@ mod tests {
     fn the_hit_list_is_not_cut_and_keeps_the_rip_order_in_both_forests() {
         let mut culling = PrelimCulling::new(2, 5);
         for oid in 0..4usize {
-            let a = prelim(0, 1000, 100 + 50 * oid as i32, 120 + 50 * oid as i32, 1, 40 - oid as i32);
+            let a = prelim(
+                0,
+                1000,
+                100 + 50 * oid as i32,
+                120 + 50 * oid as i32,
+                1,
+                40 - oid as i32,
+            );
             let b = prelim(0, 1000, 100 + 50 * oid as i32, 110 + 50 * oid as i32, 2, 20);
             let c = prelim(1, 500, 10, 30, 1, 30);
             let mut first = subject(oid, 0, &[(a, 1e-5), (b, 1e-2)]);

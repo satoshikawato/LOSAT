@@ -9103,12 +9103,7 @@ fn run_resolved_in_pool(
         // searched in the order of their ordinal ids (`database::search_blocks`).
         let merge_sort_start = blastp_timing_start(timing_enabled);
         let new_scratch = || {
-            BlastpSubjectScratch::new(
-                offset_array_size,
-                diag_array_size,
-                window,
-                total_query_span,
-            )
+            BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span)
         };
         match culling.as_mut() {
             Some(culling) => database::search_blocks(

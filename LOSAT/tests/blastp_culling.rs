@@ -191,9 +191,15 @@ fn the_report_is_the_same_at_every_thread_count_and_source() {
                 &[("LOSAT_X_BPPCOMPACT", "shadow")][..],
             ] {
                 let subject = subject_search(&args, env);
-                assert_eq!(subject.stdout, reference.stdout, "{limit} -subject {threads} {env:?}");
+                assert_eq!(
+                    subject.stdout, reference.stdout,
+                    "{limit} -subject {threads} {env:?}"
+                );
                 let database = db_search(&db, &args, env);
-                assert_eq!(database.stdout, reference.stdout, "{limit} -db {threads} {env:?}");
+                assert_eq!(
+                    database.stdout, reference.stdout,
+                    "{limit} -db {threads} {env:?}"
+                );
             }
         }
     }

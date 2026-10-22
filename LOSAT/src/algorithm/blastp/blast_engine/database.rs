@@ -43,8 +43,8 @@ use crate::stats::{compute_length_adjustment_ncbi, KarlinParams};
 use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
 
 use super::{
-    ncbistdaa_to_ascii, BlastpHitList, BlastpSubjectRef,
-    BlastpSubjectResult, BlastpSubjectScratch, EncodedProtein, PrelimSink, XPrelimHsp,
+    ncbistdaa_to_ascii, BlastpHitList, BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch,
+    EncodedProtein, PrelimSink, XPrelimHsp,
 };
 
 // EXPERIMENT (LOSAT_X_BPDBCUT / LOSAT_X_BPDBCUTSHADOW): the blocks of the preliminary stage cut by

@@ -50,7 +50,7 @@ use std::sync::OnceLock;
 
 pub use alias::SearchPath;
 pub use header::Defline;
-pub use volume::{AmbiguityRun, SequenceBlock, Volume, BLASTNA_SENTINEL};
+pub use volume::{AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, BLASTNA_SENTINEL};
 
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): how the volumes read their index files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -859,6 +859,45 @@ impl SeqDb {
     pub fn check_ambiguity(&self, ordinal: u32) -> Result<(), SeqDbError> {
         let (volume, oid) = self.find_volume(ordinal)?;
         self.volumes[volume].check_ambiguity(oid, ordinal)
+    }
+
+    /// The length in bases of nucleotide `ordinal`, read from the index and the last byte of
+    /// its packed bases (no letters).
+    pub fn nucleotide_length(&self, ordinal: u32) -> Result<usize, SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.volumes[volume].nucleotide_length(oid, ordinal)
+    }
+
+    /// The IUPAC letters `[from, to)` of nucleotide `ordinal`: the bases of the range and the
+    /// ambiguity runs that overlap it, read without the rest of the sequence.
+    pub fn nucleotide_iupac_range(
+        &self,
+        ordinal: u32,
+        from: usize,
+        to: usize,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.volumes[volume].nucleotide_iupac_range(oid, ordinal, from, to)
+    }
+
+    /// The length and the ambiguity runs of nucleotide `ordinal`, read once for any number of
+    /// [`SeqDb::nucleotide_iupac_range_with`] calls on it.
+    pub fn nucleotide_ambiguity(&self, ordinal: u32) -> Result<NucleotideAmbiguity, SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.volumes[volume].nucleotide_ambiguity(oid, ordinal)
+    }
+
+    /// [`SeqDb::nucleotide_iupac_range`] with the length and the runs of
+    /// [`SeqDb::nucleotide_ambiguity`] for the same `ordinal`: one read of the range's bytes.
+    pub fn nucleotide_iupac_range_with(
+        &self,
+        ordinal: u32,
+        from: usize,
+        to: usize,
+        ambiguity: &NucleotideAmbiguity,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.volumes[volume].nucleotide_iupac_range_with(oid, ordinal, from, to, ambiguity)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2222-2241

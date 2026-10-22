@@ -1010,6 +1010,7 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "0 delim", None, INVALID_DELIMITER),
         (ALL, "abc delim", None, INVALID_DELIMITER),
         (ALL, "99 delimiter qaccver", None, INVALID_DELIMITER),
+        (ALL, "17 delim SQ", None, INVALID_DELIMITER),
         // NCBI's errors after the inputs are opened: the formats of other programs, and the
         // XInclude formats written to standard output.
         (NOT_BLASTN, "17", None, NcbiLater("SAM format is only applicable to blastn")),
@@ -1047,8 +1048,12 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "15", None, Writes(JsonS)),
         (ALL, "16", None, Writes(Xml2S)),
         (ALL, " 16 std", None, Writes(Xml2S)),
-        (&["blastn"], "17", None, UNSUPPORTED),
-        (&["blastn"], "17 qseqid", None, UNSUPPORTED),
+        // SAM (OF6): BLASTN alone writes it, reading the words SQ and SR and ignoring the rest and a
+        // delimiter (`CBlast_SAM_Formatter::x_ProcessCustomSpec`).
+        (&["blastn"], "17", None, Writes(Sam)),
+        (&["blastn"], "17 qseqid", None, Writes(Sam)),
+        (&["blastn"], " 17 SQ SR ", None, Writes(Sam)),
+        (&["blastn"], "17 delim=, SQ", None, Writes(Sam)),
     ]
 };
 

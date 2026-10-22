@@ -24,7 +24,9 @@
 //! `-subject` path (`run.rs`); the opening of the database, the reader's errors and the
 //! rules for the stored titles are shared with BLASTP (`algorithm::common::database`).
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -41,7 +43,7 @@ pub(super) use crate::algorithm::common::database::{HeaderReadError, Preliminary
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::pairwise::PairwiseDatabase;
-use crate::seqdb::{BlockRange, SeqDb, SeqDbError, SeqType, SequenceBlock};
+use crate::seqdb::{BlockRange, NucleotideAmbiguity, SeqDb, SeqDbError, SeqType, SequenceBlock};
 use crate::utils::threading::SearchPool;
 
 use super::BlastnSubjectRef;
@@ -118,7 +120,54 @@ pub(super) struct BlastnDatabase {
     taxdb: shared::TaxdbRun,
 }
 
+/// The length and the ambiguity runs of the database sequences that one report call wrote
+/// letters of (`BlastnDatabase::sam_letters`), by ordinal id.
+#[derive(Default)]
+pub(super) struct SamLetterCache(RefCell<HashMap<u32, NucleotideAmbiguity>>);
+
 impl BlastnDatabase {
+    // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:185
+    // ```c++
+    //             "\tLN:" + NStr::UInt8ToString(refseq.GetBioseqLength()));
+    // ```
+    /// The length in bases of each of the database sequences `ordinals` (outfmt 17: the
+    /// Bioseq's length for `@SQ` and the clips of a record), from the index and the last byte
+    /// of each sequence's packed bases; no letters are read.
+    pub(super) fn sam_lengths(&self, ordinals: &[u32]) -> Result<Vec<usize>> {
+        ordinals
+            .iter()
+            .map(|&ordinal| self.db.nucleotide_length(ordinal).map_err(database_error))
+            .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:222-234
+    // ```c++
+    //             vect.GetSeqData(tgt_rg.GetFrom(), tgt_rg.GetToOpen(), seq_data);
+    // ```
+    /// The IUPAC letters `[from, to)` of database sequence `ordinal` (outfmt 17 with `SQ`):
+    /// only the bytes of the range are read, and the sequence's length and ambiguity runs are
+    /// read once per call and kept in `cache` (NCBI's `CSeqVector` also keeps them).
+    pub(super) fn sam_letters(
+        &self,
+        cache: &SamLetterCache,
+        ordinal: u32,
+        from: usize,
+        to: usize,
+    ) -> Result<Vec<u8>> {
+        let mut entries = cache.0.borrow_mut();
+        let ambiguity = match entries.entry(ordinal) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(
+                self.db
+                    .nucleotide_ambiguity(ordinal)
+                    .map_err(database_error)?,
+            ),
+        };
+        self.db
+            .nucleotide_iupac_range_with(ordinal, from, to, ambiguity)
+            .map_err(database_error)
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
     // ```c++
     //         /*** Initialize the database/subject ***/

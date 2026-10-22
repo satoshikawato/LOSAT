@@ -49,6 +49,7 @@ pub(crate) mod x_ungap_count;
 // } BlastHSPList;
 // ```
 pub mod hsp;
+pub(crate) mod sam;
 pub(crate) mod seqalign;
 
 pub use args::BlastnArgs;

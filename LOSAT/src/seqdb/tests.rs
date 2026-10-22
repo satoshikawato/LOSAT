@@ -252,6 +252,58 @@ fn check_deflines_and_single_reads(db: &SeqDb, entries: &[Entry], name: &str) {
     ));
 }
 
+/// The length and the letters of ranges of a nucleotide sequence, read without the rest of
+/// the sequence, are those NCBI reads back (the whole sequence, ambiguity codes included).
+fn check_nucleotide_ranges(db: &SeqDb, entries: &[Entry], name: &str) {
+    for entry in entries {
+        let what = format!("{name} ordinal {}", entry.ordinal);
+        assert_eq!(
+            db.nucleotide_length(entry.ordinal).unwrap(),
+            entry.seq.len(),
+            "{what}: length"
+        );
+        let n = entry.seq.len();
+        let mut ranges = vec![(0, n), (0, 0), (n, n)];
+        for (from, to) in [
+            (0, 1),
+            (1, 5),
+            (3, 4),
+            (2, 9),
+            (n / 2, n),
+            (n.saturating_sub(7), n),
+        ] {
+            if from <= to && to <= n {
+                ranges.push((from, to));
+            }
+        }
+        for step in [1usize, 3, 5, 61] {
+            for from in (0..n).step_by(step.max(1)) {
+                ranges.push((from, (from + step + 2).min(n)));
+            }
+        }
+        let ambiguity = db.nucleotide_ambiguity(entry.ordinal).unwrap();
+        assert_eq!(ambiguity.length(), n, "{what}: cached length");
+        for (from, to) in ranges {
+            assert_eq!(
+                db.nucleotide_iupac_range(entry.ordinal, from, to).unwrap(),
+                entry.seq[from..to],
+                "{what}: letters {from}..{to}"
+            );
+            assert_eq!(
+                db.nucleotide_iupac_range_with(entry.ordinal, from, to, &ambiguity)
+                    .unwrap(),
+                entry.seq[from..to],
+                "{what}: cached letters {from}..{to}"
+            );
+        }
+        assert!(db
+            .nucleotide_iupac_range_with(entry.ordinal, 0, n + 1, &ambiguity)
+            .is_err());
+        assert!(db.nucleotide_iupac_range(entry.ordinal, 0, n + 1).is_err());
+        assert!(db.nucleotide_iupac_range(entry.ordinal, 2, 1).is_err());
+    }
+}
+
 fn check_info(db: &SeqDb, name: &str) {
     let info = expected_info(name);
     assert_eq!(db.title(), info["title"].as_bytes(), "{name}: title");
@@ -285,6 +337,9 @@ fn check_against_ncbi(name: &str, seqtype: SeqType) -> (SeqDb, Vec<Entry>) {
         check_database(&db, &entries, max_bytes, name);
     }
     check_deflines_and_single_reads(&db, &entries, name);
+    if seqtype == SeqType::Nucleotide {
+        check_nucleotide_ranges(&db, &entries, name);
+    }
     (db, entries)
 }
 

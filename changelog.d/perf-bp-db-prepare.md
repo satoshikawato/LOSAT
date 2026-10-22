@@ -1,0 +1,1 @@
+- `blastp -db` checks each database block before the search with a loop that works on 16 bytes at a time (it counted the gap bytes one byte at a time in 64 bits, 38 % of the cycles of a blastp-fast search with one query): one 357-residue query against UniRef50 volume 00, blastp-fast x0.75 of the time at one thread and x0.77 at eight, exact blastp x0.93. Reports do not change.

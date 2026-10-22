@@ -3104,17 +3104,18 @@ struct UngappedHit {
 /// `0`, or `LOSAT_X_DEFAULT=0` and it is not set): the large per-subject buffers of BLASTN (the
 /// blocks and sequences read from a database and their BLASTNA letters, `database.rs`; the
 /// ungapped hits of a subject and the scratch of their sort) are kept in buffers that glibc maps
-/// from 1 MiB on and that go to the shared pools of `utils/x_mapped.rs` when they are done (the
-/// hits when their scratch is dropped), so that a worker thread's chromosome-sized buffers are
-/// lent to the next thread that needs one instead of staying in that thread's arena.
+/// from 1 MiB on, so that they are returned when they are dropped instead of staying in the
+/// arena of the worker thread that freed them; the database's buffers go to the shared pool
+/// `utils::x_mapped::X_BYTES` when they are done, so that the next thread that needs one takes
+/// it with its pages resident. The hits are not pooled: a thread keeps its scratch, and with it
+/// its hit buffer, from one subject to the next (as NCBI keeps its `init_hitlist`), so idle hit
+/// buffers in a pool only added to what was in use (Sakai x EDL933 `-subject` blastn at 4
+/// threads, max RSS 298-327 MiB with a pool of 64 MiB, 245-264 without, 238-261 with the
+/// switch off).
 fn x_bn_mapped() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
 }
-
-/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNMAPPED) the pool of the ungapped hits' buffers and
-/// of their sort's scratch.
-static X_HITS: crate::utils::x_mapped::XPool<UngappedHit> = crate::utils::x_mapped::XPool::new();
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:254-268
 // ```c
@@ -3124,8 +3125,8 @@ static X_HITS: crate::utils::x_mapped::XPool<UngappedHit> = crate::utils::x_mapp
 //         init_hsp_array = (BlastInitHSP *)
 //             realloc(init_hitlist->init_hsp_array, sizeof(BlastInitHSP) * new_size);
 // ```
-/// `hits.push(hit)`, growing as `Vec` does; with LOSAT_X_BNMAPPED from `X_HITS` and with the
-/// capacity of `x_mapped::x_reserve_mapped`.
+/// `hits.push(hit)`, growing as `Vec` does; with LOSAT_X_BNMAPPED with the capacity of
+/// `x_mapped::x_reserve_mapped`.
 #[inline(always)]
 fn x_push_ungapped(hits: &mut Vec<UngappedHit>, hit: UngappedHit) {
     if hits.len() == hits.capacity() {
@@ -3138,7 +3139,7 @@ fn x_push_ungapped(hits: &mut Vec<UngappedHit>, hit: UngappedHit) {
 #[inline(never)]
 fn x_grow_ungapped(hits: &mut Vec<UngappedHit>) {
     if x_bn_mapped() {
-        X_HITS.reserve(hits, 1);
+        crate::utils::x_mapped::x_reserve_mapped(hits, 1);
     } else {
         hits.reserve(1);
     }
@@ -4081,18 +4082,6 @@ struct SubjectScratch {
 // hsp_list = Blast_HSPListFree(hsp_list);
 // BlastInitHitListReset(init_hitlist);
 // ```
-// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNMAPPED) a scratch that is dropped (the parallel
-// stages make one per job of `map_init`) gives its large hit buffer to `X_HITS`, so the next
-// scratch takes it with its pages resident; a scratch that lives on keeps its buffer, as NCBI
-// keeps its `init_hitlist`.
-impl Drop for SubjectScratch {
-    fn drop(&mut self) {
-        if x_bn_mapped() {
-            X_HITS.give(&mut self.ungapped_hits);
-        }
-    }
-}
-
 impl SubjectScratch {
     fn new(query_count: usize, offset_array_size: usize, window_size: usize) -> Self {
         Self {
@@ -13812,7 +13801,6 @@ fn search_query_batch(
                 _ if x_bn_mapped() => crate::utils::x_mapped::x_sort_by_mapped(
                     ungapped_hits,
                     score_compare_ungapped_hits,
-                    &X_HITS,
                 ),
                 _ => ungapped_hits.sort_by(score_compare_ungapped_hits),
             }

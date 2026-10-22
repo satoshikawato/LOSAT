@@ -20,7 +20,9 @@
 //! must grow past `X_MAPPED_FROM` takes one from there, its pages already resident. A thread's
 //! arena keeps its free space for that thread only; the pool lends it to any thread, so the
 //! resident buffers are those in use at the busiest moment, plus at most `x_pool_idle_bytes` of
-//! idle ones.
+//! idle ones. Only buffers that are done after every subject use a pool (BLASTN's database
+//! reads, `X_BYTES`); a buffer that its thread keeps from one subject to the next is mapped but
+//! not pooled, since idle copies of it would only add to those in use.
 
 /// No NCBI counterpart: the buffers from which a buffer is mapped (Linux with glibc).
 pub(crate) const X_MAPPED_FROM: usize = 1 << 20;
@@ -191,13 +193,14 @@ const X_SORT_RUN_BYTES: usize = 64 << 10;
 
 /// No NCBI counterpart: `v.sort_by(cmp)` (a stable sort: the same order as `sort_by` for a
 /// comparator that is a total order) whose scratch, when it would need `X_MAPPED_FROM` bytes or
-/// more with glibc, is a buffer of `pool` (given back after the sort): runs of
-/// `X_SORT_RUN_BYTES` sorted with `sort_by`, then merged pairwise (the left run first among equal
-/// elements).
+/// more with glibc, is a mapped buffer as long as `v` (returned after the sort): runs of
+/// `X_SORT_RUN_BYTES` sorted with `sort_by`, then merged pairwise from `v` into the buffer and
+/// back (the left run first among equal elements). A scratch of half of `v`, the left run copied
+/// out before each merge, held no less at the peak and took x1.04 the time (Sakai x EDL933
+/// `-subject` dc-megablast at 16 threads, where one thread sorts several million hits).
 pub(crate) fn x_sort_by_mapped<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     v: &mut [T],
     mut cmp: F,
-    pool: &XPool<T>,
 ) {
     let size = std::mem::size_of::<T>().max(1);
     let n = v.len();
@@ -209,8 +212,19 @@ pub(crate) fn x_sort_by_mapped<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     for chunk in v.chunks_mut(run) {
         chunk.sort_by(&mut cmp);
     }
+    x_merge_runs(v, &mut cmp, run);
+}
+
+/// No NCBI counterpart: the merges of `x_sort_by_mapped`, `v` being sorted in runs of `run`
+/// elements.
+fn x_merge_runs<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
+    v: &mut [T],
+    cmp: &mut F,
+    run: usize,
+) {
+    let n = v.len();
     let mut buf: Vec<T> = Vec::new();
-    pool.reserve(&mut buf, n);
+    x_reserve_mapped(&mut buf, n);
     buf.extend_from_slice(v);
     let mut width = run;
     let mut in_v = true;
@@ -246,7 +260,6 @@ pub(crate) fn x_sort_by_mapped<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     if !in_v {
         v.copy_from_slice(&buf);
     }
-    pool.give(&mut buf);
 }
 
 #[cfg(test)]
@@ -286,7 +299,7 @@ mod tests {
     fn sort_by_mapped_is_stable_and_equals_sort_by() {
         // (key, position): sorted by key only, so equal keys must keep their order.
         let mut state = 0x2545_f491_4f6c_dd1du64;
-        for &n in &[0usize, 1, 7, 70_000, 200_003] {
+        for &n in &[0usize, 1, 5, 7, 9, 70_000, 200_003] {
             let v: Vec<(u32, u32)> = (0..n as u32)
                 .map(|i| {
                     state ^= state << 13;
@@ -298,9 +311,15 @@ mod tests {
             let mut a = v.clone();
             a.sort_by(|x, y| y.0.cmp(&x.0));
             let mut b = v.clone();
-            static POOL: XPool<(u32, u32)> = XPool::new();
-            x_sort_by_mapped(&mut b, |x, y| y.0.cmp(&x.0), &POOL);
+            x_sort_by_mapped(&mut b, |x, y| y.0.cmp(&x.0));
             assert_eq!(a, b, "n = {n}");
+            // The merges alone, with runs of 4 (every merge path, odd tails).
+            let mut c = v.clone();
+            for run in c.chunks_mut(4) {
+                run.sort_by(|x, y| y.0.cmp(&x.0));
+            }
+            x_merge_runs(&mut c, &mut |x: &(u32, u32), y: &(u32, u32)| y.0.cmp(&x.0), 4);
+            assert_eq!(a, c, "n = {n}, runs of 4");
         }
     }
 

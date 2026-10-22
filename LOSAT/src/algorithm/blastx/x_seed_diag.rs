@@ -43,7 +43,14 @@
 //! the argument that the calls, their order and the table are the AVX2 batch's is in
 //! `x_seed_fused`'s module header. A switch of the strict set: on unless it is `0`, or
 //! `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BXDEFER=0` gives the AVX2 batch (`mode=avx2`).
-//! `LOSAT_X_BXDIAGSHADOW` compares it with the reference like the other cell tests.
+//! It acts on the tables with at least `LOSAT_X_BXDEFERMIN` hits per used backbone cell
+//! (hundredths, built-in 700; `0` every table); a fused table with fewer takes the AVX2 batch, as
+//! there the masked batch and the buffer cost more than they save (the fused loop forced on a
+//! 1.5-kb cDNA x the fly proteome, 4.91 hits per used cell: x1.033 cycles; the 2.1-kb cDNA, 6.77:
+//! x0.996). The choice is made with LOSAT_X_BXDIAGMIN's, once per thread and table; the timing
+//! line then also gives `defer_min_hits_per_cell=` and `tables_avx2=` (the fused tables that took
+//! the AVX2 batch). `LOSAT_X_BXDIAGSHADOW` compares it with the reference like the other cell
+//! tests, on the tables the rule gives it.
 //!
 //! A query batch whose lookup table has fewer hits per used backbone cell than
 //! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 500; `0` fuses every batch) is scanned by the loop
@@ -68,11 +75,11 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::OnceLock;
 
 thread_local! {
-    /// EXPERIMENT (LOSAT_X_BXDIAGMIN): the last lookup table this thread chose a loop for (its
-    /// address, its backbone's address and its overflow length) and the choice (see
-    /// [`x_fused_pays`]).
-    static X_CHOICE: std::cell::Cell<(usize, usize, usize, bool)> =
-        const { std::cell::Cell::new((0, 0, 0, false)) };
+    /// EXPERIMENT (LOSAT_X_BXDIAGMIN, LOSAT_X_BXDEFERMIN): the last lookup table this thread chose
+    /// a loop for (its address, its backbone's address and its overflow length) and its hits per
+    /// used cell (see [`x_table_ratio`]).
+    static X_CHOICE: std::cell::Cell<(usize, usize, usize, u64)> =
+        const { std::cell::Cell::new((0, 0, 0, 0)) };
     /// EXPERIMENT (LOSAT_X_BXDIAG): the context table of the query batch this thread searches,
     /// with the frame bases and the span it was made for (see [`x_with_context_table`]).
     static X_CONTEXTS: RefCell<Option<(Vec<i32>, usize, XContextTable)>> =
@@ -206,36 +213,84 @@ fn x_hits_per_cell(table: &BlastAaLookupTable) -> u64 {
     (hits * 100).checked_div(used).unwrap_or(0)
 }
 
-// No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's hits and table.
-/// EXPERIMENT (LOSAT_X_BXDIAGMIN): whether the fused loop scans the subjects of `table`'s query
-/// batch: its hits per used cell are at least [`x_min_hits_per_cell`]. Worked out once per table
-/// and thread (the table's addresses and overflow length identify it; a later table that matched
-/// all three would reuse the choice, which changes only the speed).
-fn x_fused_pays(table: &BlastAaLookupTable) -> bool {
+// No NCBI counterpart: a property of the lookup table that chooses LOSAT's loop; it does not
+// change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXDIAGMIN, LOSAT_X_BXDEFERMIN): `table`'s hits per used cell
+/// ([`x_hits_per_cell`]), worked out once per table and thread (the table's addresses and overflow
+/// length identify it; a later table that matched all three would reuse the value, which changes
+/// only the speed), and whether this call worked it out.
+fn x_table_ratio(table: &BlastAaLookupTable) -> (u64, bool) {
     let key = (
         table as *const BlastAaLookupTable as usize,
         table.backbone.as_ptr() as usize,
         table.overflow.len(),
     );
     X_CHOICE.with(|choice| {
-        let (a, b, c, fused) = choice.get();
+        let (a, b, c, ratio) = choice.get();
         if (a, b, c) == key {
-            return fused;
+            return (ratio, false);
         }
         let ratio = x_hits_per_cell(table);
-        let fused = ratio >= x_min_hits_per_cell();
+        choice.set((key.0, key.1, key.2, ratio));
+        (ratio, true)
+    })
+}
+
+// No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's hits and table.
+/// EXPERIMENT (LOSAT_X_BXDIAGMIN): whether the fused loop scans the subjects of `table`'s query
+/// batch: its hits per used cell are at least [`x_min_hits_per_cell`]. Counted for the timing line
+/// once per table and thread, with the cell test `mode` would take for it.
+fn x_fused_pays(table: &BlastAaLookupTable, mode: XDiagMode) -> bool {
+    let (ratio, first) = x_table_ratio(table);
+    let fused = ratio >= x_min_hits_per_cell();
+    if first {
         X_TABLES[usize::from(!fused)].fetch_add(1, Relaxed);
         X_RATIO_MIN.fetch_min(ratio, Relaxed);
         X_RATIO_MAX.fetch_max(ratio, Relaxed);
-        choice.set((key.0, key.1, key.2, fused));
-        fused
+        if fused && x_table_mode(mode, ratio) != mode {
+            X_TABLES_AVX2.fetch_add(1, Relaxed);
+        }
+    }
+    fused
+}
+
+// No NCBI counterpart: reads LOSAT_X_BXDEFERMIN once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXDEFERMIN): the fewest hits per used lookup cell, in hundredths, for
+/// which the fused loop takes LOSAT_X_BXDEFER's cell test (built-in 700); a table with fewer takes
+/// the AVX2 batch. With few hits per cell the masked last batch and the buffer cost more than they
+/// save (the fused loop on 4.91 hits per used cell x1.033 cycles, 6.77 x0.996). `0` takes it for
+/// every table; a value that is not a number takes the built-in one.
+fn x_min_hits_per_cell_defer() -> u64 {
+    static MIN: OnceLock<u64> = OnceLock::new();
+    *MIN.get_or_init(|| {
+        std::env::var("LOSAT_X_BXDEFERMIN")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(700)
     })
+}
+
+// No NCBI counterpart: chooses LOSAT's cell test; every cell test gives the reference's hits and
+// table.
+/// EXPERIMENT (LOSAT_X_BXDEFERMIN): the cell test for a table of `ratio` hits per used cell:
+/// `mode`, but the AVX2 batch instead of LOSAT_X_BXDEFER's below [`x_min_hits_per_cell_defer`].
+fn x_table_mode(mode: XDiagMode, ratio: u64) -> XDiagMode {
+    #[cfg(target_arch = "x86_64")]
+    if mode == XDiagMode::Avx2DeferMasked && ratio < x_min_hits_per_cell_defer() {
+        return XDiagMode::Avx2;
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = ratio;
+    mode
 }
 
 // No NCBI counterpart: counters of the timing line and of the shadow summary.
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): the (thread, table) choices for the fused loop (`[0]`) and
 /// for the other loop (`[1]`), and the least and greatest hits per used cell (hundredths) seen.
 static X_TABLES: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+/// EXPERIMENT (LOSAT_X_BXDEFERMIN): the (thread, table) choices for the fused loop that took the
+/// AVX2 batch instead of LOSAT_X_BXDEFER's cell test.
+static X_TABLES_AVX2: AtomicU64 = AtomicU64::new(0);
 static X_RATIO_MIN: AtomicU64 = AtomicU64::new(u64::MAX);
 static X_RATIO_MAX: AtomicU64 = AtomicU64::new(0);
 static X_SUBJECTS: AtomicU64 = AtomicU64::new(0);
@@ -251,7 +306,7 @@ pub(crate) fn x_write_timing(out: &mut dyn std::io::Write) -> std::io::Result<()
     if x_bxdiag_mode() != 0 {
         writeln!(
             out,
-            "[TIMING] blastx_diag: mode={} subjects={} cells={} batched_hits={} candidates={} min_hits_per_cell={} tables_fused={} tables_other={} hits_per_cell={}-{}",
+            "[TIMING] blastx_diag: mode={} subjects={} cells={} batched_hits={} candidates={} min_hits_per_cell={} tables_fused={} tables_other={} hits_per_cell={}-{} defer_min_hits_per_cell={} tables_avx2={}",
             x_cell_mode().name(),
             X_SUBJECTS.load(Relaxed),
             X_CELLS.load(Relaxed),
@@ -262,6 +317,8 @@ pub(crate) fn x_write_timing(out: &mut dyn std::io::Write) -> std::io::Result<()
             X_TABLES[1].load(Relaxed),
             X_RATIO_MIN.load(Relaxed).min(X_RATIO_MAX.load(Relaxed)),
             X_RATIO_MAX.load(Relaxed),
+            x_min_hits_per_cell_defer(),
+            X_TABLES_AVX2.load(Relaxed),
         )?;
     }
     Ok(())
@@ -328,13 +385,19 @@ pub(crate) fn x_word_finder_diag(
     let mode = x_cell_mode();
     if x_bxdiag_mode() != 2 {
         // EXPERIMENT (LOSAT_X_BXDIAGMIN): a batch with few hits per cell goes to the other loop.
-        let pays = x_fused_pays(table);
+        let pays = x_fused_pays(table, mode);
         crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", pays);
         if !pays {
             return Ok(None);
         }
+        // EXPERIMENT (LOSAT_X_BXDEFERMIN): LOSAT_X_BXDEFER's cell test only with enough hits per cell.
+        let table_mode = x_table_mode(mode, x_table_ratio(table).0);
+        #[cfg(target_arch = "x86_64")]
+        if mode == XDiagMode::Avx2DeferMasked {
+            crate::utils::xreach::x_reach!("LOSAT_X_BXDEFER", table_mode == mode);
+        }
         let (hits, counts) = x_word_finder_fused(
-            mode,
+            table_mode,
             x_bxscan_bf(),
             batch,
             parameters,
@@ -361,7 +424,7 @@ pub(crate) fn x_word_finder_diag(
         |_| {},
     )?;
     let (fused, counts) = x_word_finder_fused(
-        mode,
+        x_table_mode(mode, x_table_ratio(table).0),
         x_bxscan_bf(),
         batch,
         parameters,

@@ -222,16 +222,18 @@ fn the_fused_seed_loop_gives_the_reports_of_the_reference() {
         // LOSAT_X_BXDIAGMIN=0 makes every batch take the fused loop; the built-in value and one
         // above every table's hits per cell (no batch fused) give the same report. An empty value
         // is the default (the switch on, with the AVX2 cell test only). LOSAT_X_BXDEFER=0 gives
-        // the AVX2 batch without the deferred calls and the masked last batch.
-        for (value, min, defer) in [
-            ("", "", ""),
-            ("", "0", ""),
-            ("", "0", "0"),
-            ("1", "0", ""),
-            ("per-hit", "0", ""),
-            ("scalar", "0", ""),
-            ("1", "", ""),
-            ("1", "1000000", ""),
+        // the AVX2 batch without the deferred calls and the masked last batch, and
+        // LOSAT_X_BXDEFERMIN=0 takes LOSAT_X_BXDEFER's cell test for every fused table.
+        for (value, min, defer, defer_min) in [
+            ("", "", "", ""),
+            ("", "0", "", ""),
+            ("", "0", "", "0"),
+            ("", "0", "0", ""),
+            ("1", "0", "", ""),
+            ("per-hit", "0", "", ""),
+            ("scalar", "0", "", ""),
+            ("1", "", "", ""),
+            ("1", "1000000", "", ""),
         ] {
             let run = blastx(
                 &args,
@@ -239,10 +241,12 @@ fn the_fused_seed_loop_gives_the_reports_of_the_reference() {
                     ("LOSAT_X_BXDIAG", value),
                     ("LOSAT_X_BXDIAGMIN", min),
                     ("LOSAT_X_BXDEFER", defer),
+                    ("LOSAT_X_BXDEFERMIN", defer_min),
                 ],
             );
             let what = format!(
-                "{args:?} LOSAT_X_BXDIAG={value} LOSAT_X_BXDIAGMIN={min} LOSAT_X_BXDEFER={defer}"
+                "{args:?} LOSAT_X_BXDIAG={value} LOSAT_X_BXDIAGMIN={min} LOSAT_X_BXDEFER={defer} \
+                 LOSAT_X_BXDEFERMIN={defer_min}"
             );
             assert_eq!(run.code, reference.code, "{what}: {}", run.stderr);
             assert!(run.stdout == reference.stdout, "{what}: report differs");
@@ -257,12 +261,14 @@ fn the_shadow_compares_every_subject_and_the_timing_line_names_the_cell_test() {
     let args = searches(&inputs).remove(0);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let reference = blastx(&args, &[OFF]);
+    // LOSAT_X_BXDEFERMIN=0: LOSAT_X_BXDEFER's cell test on every table the shadow compares.
     for (value, defer) in [("1", ""), ("1", "0"), ("per-hit", ""), ("scalar", "")] {
         let run = blastx(
             &args,
             &[
                 ("LOSAT_X_BXDIAG", value),
                 ("LOSAT_X_BXDEFER", defer),
+                ("LOSAT_X_BXDEFERMIN", "0"),
                 ("LOSAT_X_BXDIAGSHADOW", "1"),
                 ("LOSAT_TIMING", "1"),
             ],
@@ -375,6 +381,37 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
     let (least, most) = range.split_once('-').unwrap();
     let (least, most): (u64, u64) = (least.parse().unwrap(), most.parse().unwrap());
     assert!(0 < least && least <= most, "{all}");
+    // EXPERIMENT (LOSAT_X_BXDEFERMIN): every fused table takes LOSAT_X_BXDEFER's cell test with 0
+    // and the AVX2 batch with a minimum above every table's (the per-hit loop without AVX2).
+    #[cfg(target_arch = "x86_64")]
+    let avx2 = std::arch::is_x86_feature_detected!("avx2");
+    #[cfg(not(target_arch = "x86_64"))]
+    let avx2 = false;
+    for (defer_min, unmasked) in [("0".to_string(), 0), ((most + 1).to_string(), 1)] {
+        let run = blastx(
+            &args,
+            &[
+                ("LOSAT_X_BXDIAG", "1"),
+                ("LOSAT_X_BXDIAGMIN", "0"),
+                ("LOSAT_X_BXDEFERMIN", &defer_min),
+                ("LOSAT_TIMING", "1"),
+            ],
+        );
+        assert_eq!(run.code, Some(0), "{defer_min}: {}", run.stderr);
+        assert!(
+            run.stdout == reference.stdout,
+            "{defer_min}: report differs"
+        );
+        let line = run
+            .stderr
+            .lines()
+            .find(|line| line.starts_with("[TIMING] blastx_diag: "))
+            .unwrap_or_else(|| panic!("{defer_min}: no timing line: {}", run.stderr));
+        let fused = field(line, "tables_fused");
+        assert!(fused > 0, "{line}");
+        let expected = if avx2 { unmasked * fused } else { 0 };
+        assert_eq!(field(line, "tables_avx2"), expected, "{line}");
+    }
     // A minimum above every table's: no subject went through the fused loop.
     let none = timing(&(most + 1).to_string());
     assert_eq!(field(&none, "tables_fused"), 0, "{none}");
@@ -388,10 +425,6 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
         .stderr
         .lines()
         .find(|line| line.starts_with("[TIMING] blastx_diag: "));
-    #[cfg(target_arch = "x86_64")]
-    let avx2 = std::arch::is_x86_feature_detected!("avx2");
-    #[cfg(not(target_arch = "x86_64"))]
-    let avx2 = false;
     match line {
         Some(line) => {
             assert!(avx2, "default without AVX2: {line}");

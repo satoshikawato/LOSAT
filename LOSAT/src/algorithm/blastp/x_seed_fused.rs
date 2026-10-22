@@ -88,7 +88,7 @@
 //! function of its own, never inlined, and a cell test of its own). `LOSAT_X_BXDEFER` is a switch of
 //! the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; off, blastx's
 //! fused loop takes the AVX2 batch ([`XDiagMode::Avx2`]). It acts only where that loop runs the AVX2
-//! batch.
+//! batch, on tables with at least `LOSAT_X_BXDEFERMIN` hits per used cell (`blastx/x_seed_diag.rs`).
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF, blastx's switch): `x_scan_two_hit_with(.., branch_free: true, ..)`
 //! finds the cells with hits by the candidate loop of LOSAT_X_TBNSCANBF
@@ -1764,11 +1764,6 @@ where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     use std::arch::x86_64::*;
-    // A cell without a batch of eight takes the scalar batch, as XDiagMode::Avx2 tests it: on a
-    // table with few hits per cell the masked batch and the buffer cost more than it.
-    if hits.len() < X_DIAG_LANES {
-        return x_test_batch_scalar(hits, s, table, test, candidate);
-    }
     let mut batches = hits.chunks_exact(X_DIAG_LANES);
     // Room for a full register past the last candidate (each batch stores eight lanes).
     buffer.clear();

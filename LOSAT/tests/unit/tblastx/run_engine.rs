@@ -21,7 +21,7 @@ fn temp_path(stem: &str, extension: &str) -> PathBuf {
 }
 
 fn losat_binary() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_LOSAT") {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_losat") {
         return PathBuf::from(path);
     }
 
@@ -56,6 +56,9 @@ fn db_gencode_controls_local_subject_search_translation() {
         query_gencode: 4,
         db_gencode: 4,
         max_target_seqs: None,
+        num_descriptions: None,
+        num_alignments: None,
+        report_counts: Default::default(),
         max_hsps: None,
         qcov_hsp_perc: None,
         seg: "no".to_string(),

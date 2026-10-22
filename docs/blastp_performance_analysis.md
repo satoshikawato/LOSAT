@@ -20,7 +20,7 @@ AP027xxx/NZ_CP006932 系の大きいタンパク質セットでは LOSATP が数
 
 - 参照したプロット: `LOSAT/tests/plots/execution_time_comparison_all.png`
 - 計測コマンド: `LOSAT/tests/run_comparison.sh`
-- LOSATP: `../target/release/LOSAT blastp ... -n 1 --outfmt 6`
+- LOSATP: `../target/release/losat blastp ... -n 1 --outfmt 6`
 - BLASTP: `blastp ... -num_threads 1 -outfmt 6`
 - 実装入口: `LOSAT/src/algorithm/blastp/blast_engine.rs`
 - NCBI 参照入口:

@@ -77,7 +77,7 @@ python3 tests/compare_blastn_parity.py \
   --manifest tests/blastn_parity_manifest.tsv \
   --fresh-paired \
   --paired-output-dir /tmp/losat-blastn-v010-certification/paired-base \
-  --losat-bin target/release/LOSAT \
+  --losat-bin target/release/losat \
   --ncbi-bin /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn
 python3 tests/certify_blastn_v010.py \
   --manifest tests/blastn_parity_manifest.tsv \

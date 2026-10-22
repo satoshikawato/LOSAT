@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp `-db` reports with `LOSAT_X_BPLISTEDLEAN`
 //! (`src/algorithm/blastp/blast_engine/database/x_listed_lean.rs`) on whole searches.
 //!
@@ -70,13 +71,13 @@ impl Run {
 }
 
 /// A protein database of the fixture's subject proteome (`MejoMJNV.faa`, 124 sequences), made with
-/// `LOSAT makedb` in a directory of this test; returns the database name.
+/// `losat makedb` in a directory of this test; returns the database name.
 fn subject_database() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("losat-bplistedlean-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let name = dir.join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
@@ -84,7 +85,7 @@ fn subject_database() -> PathBuf {
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         output.status.success(),
         "makedb: {}",
@@ -100,7 +101,7 @@ fn subject_database() -> PathBuf {
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
 /// soon as a search has more than one thread, and it selects nothing.
 fn blastp(db: &Path, threads: u32, vars: &[(&str, &str)], outfmt: &str) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")

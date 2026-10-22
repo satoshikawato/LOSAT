@@ -33,9 +33,9 @@ for s in $SHA $BASE; do
   echo "dbsearch-20261012 session 16 (local losat-baselines-92) since $(date '+%F %T'): node $node CPUs $CPUS ONLY (UNTIMED): cargo build --release of $s (~6 min); driver PID $$; removed at its end." > $MK
   git -C $R fetch -q origin perf/blastx-db-subject-flow dev && git -C $R checkout -q --detach "$s" || { echo "FAILED checkout $s" | tee -a $S; exit 1; }
   touch $R/LOSAT/src/main.rs
-  (cd $R/LOSAT && CARGO_BUILD_JOBS=4 numactl --physcpubind=$CPUS --membind=$node cargo build --release --locked --bin LOSAT --target-dir $D3/target_db6) > $O/build-${s:0:8}.log 2>&1 || { echo "FAILED build $s" | tee -a $S; exit 1; }
+  (cd $R/LOSAT && CARGO_BUILD_JOBS=4 numactl --physcpubind=$CPUS --membind=$node cargo build --release --locked --bin losat --target-dir $D3/target_db6) > $O/build-${s:0:8}.log 2>&1 || { echo "FAILED build $s" | tee -a $S; exit 1; }
   grep -q "Compiling LOSAT" $O/build-${s:0:8}.log || { echo "FAILED: no Compiling line ($s)" | tee -a $S; exit 1; }
-  cp $D3/target_db6/release/LOSAT $N
+  cp $D3/target_db6/release/losat $N
   echo "$(date '+%F %T') built $N $(sha256sum $N | cut -c1-16) from $(git -C $R rev-parse HEAD) on node $node CPUs $CPUS" | tee -a $S
   rm -f $MK; MK=""
 done

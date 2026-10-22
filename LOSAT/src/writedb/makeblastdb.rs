@@ -1,4 +1,4 @@
-//! `LOSAT makedb`: the application layer of makeblastdb
+//! `losat makedb`: the application layer of makeblastdb
 //! (`c++/src/app/blastdb/makeblastdb.cpp`, `CMakeBlastDBApp`) for a FASTA
 //! input and a version 4 database without parsed Seq-ids.
 
@@ -59,7 +59,7 @@ use crate::seqdb::{SeqDb, SeqDbError, SeqType};
 // the default of `-blastdb_version` here and 5 is refused. The options of
 // makeblastdb that LOSAT does not support are not registered; `crate::cli`
 // names them in its error.
-/// Arguments of `LOSAT makedb`, under makeblastdb's names.
+/// Arguments of `losat makedb`, under makeblastdb's names.
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct MakedbArgs {
@@ -93,7 +93,7 @@ pub struct MakedbArgs {
 // static const char* s_AutoHelp     = "h";
 // static const char* s_AutoHelpFull = "help";
 // ```
-/// The options of makeblastdb 2.17.0 that `LOSAT makedb` refuses
+/// The options of makeblastdb 2.17.0 that `losat makedb` refuses
 /// (makeblastdb.cpp:246-333), and `-h`, the short usage that the NCBI C++
 /// Toolkit gives every program (`-help` prints LOSAT's own usage, as for the
 /// search programs).
@@ -115,7 +115,7 @@ pub const UNSUPPORTED_OPTIONS: [&str; 15] = [
     "version",
 ];
 
-/// How `LOSAT makedb` ends when it does not build a database, or cannot
+/// How `losat makedb` ends when it does not build a database, or cannot
 /// open the one it built.
 #[derive(Debug)]
 pub enum MakedbError {
@@ -208,7 +208,7 @@ impl std::fmt::Display for MakedbError {
         match self {
             MakedbError::Build(error) => error.fmt(f),
             MakedbError::Database(error) => write!(f, "BLAST Database error: {error}"),
-            MakedbError::Unsupported(message) => write!(f, "LOSAT makedb: {message}"),
+            MakedbError::Unsupported(message) => write!(f, "losat makedb: {message}"),
         }
     }
 }
@@ -527,7 +527,7 @@ pub fn build_database(
     let names = split_quoted(&args.input);
     let [name] = names.as_slice() else {
         return Err(unsupported(
-            "-in names several input files (or none); LOSAT makedb reads one FASTA file",
+            "-in names several input files (or none); losat makedb reads one FASTA file",
         ));
     };
     let name = *name;
@@ -551,7 +551,7 @@ pub fn build_database(
             .any(|ext| lower.ends_with(ext))
     {
         return Err(unsupported(format!(
-            "{name}: makeblastdb reads a file of this name as compressed; LOSAT makedb reads \
+            "{name}: makeblastdb reads a file of this name as compressed; losat makedb reads \
              uncompressed FASTA only"
         )));
     }
@@ -729,7 +729,7 @@ fn add_fasta(
 // destination (`2>&1`) in the order of the events. The standard output of
 // the Rust library is line buffered whatever it is connected to; the log
 // goes to it without another buffer.
-/// Runs `LOSAT makedb` and returns the exit code.
+/// Runs `losat makedb` and returns the exit code.
 pub fn run(args: &MakedbArgs) -> i32 {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();

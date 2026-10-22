@@ -14,7 +14,7 @@
 // search marked `"expect": "failure"` must fail in the CLI and in the ABI with the same
 // error.
 //
-// Usage: node v_abi.js --native LOSAT --serial losat-web-serial.wasm
+// Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
 //          [--out DIR]
 // Several processes may run parts of the case list (for example one engine or one

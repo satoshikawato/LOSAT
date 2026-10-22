@@ -3119,6 +3119,16 @@ fn x_bn_mapped() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
 }
 
+/// No NCBI counterpart: records for `LOSAT_X_REACH` whether a buffer of `bytes` takes
+/// LOSAT_X_BNMAPPED's own path (mapped, and pooled where it has a pool) or stays as `Vec` keeps
+/// it (below 1 MiB, or not glibc).
+pub(super) fn x_bn_mapped_reach(bytes: usize) {
+    crate::utils::xreach::x_reach!(
+        "LOSAT_X_BNMAPPED",
+        crate::utils::x_mapped::x_is_mapped(bytes)
+    );
+}
+
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNMAPPED) the pool of the scratch of the hits' sort
 /// by score (`x_mapped::x_sort_by_mapped`), whose idle buffers may hold `x_sort_idle_bytes`.
 /// Without it each sort maps its scratch again and touches every page of it (Sakai x EDL933
@@ -14023,11 +14033,18 @@ fn search_query_batch(
                 }
                 // EXPERIMENT (LOSAT_X_BNMAPPED): `x_mapped::x_sort_by_mapped` is a stable sort
                 // with the same comparator, so the order is that of `sort_by`.
-                _ if x_bn_mapped() => crate::utils::x_mapped::x_sort_by_mapped(
-                    ungapped_hits,
-                    score_compare_ungapped_hits,
-                    &X_SORT,
-                ),
+                _ if x_bn_mapped() => {
+                    x_bn_mapped_reach(
+                        ungapped_hits
+                            .len()
+                            .saturating_mul(std::mem::size_of::<UngappedHit>()),
+                    );
+                    crate::utils::x_mapped::x_sort_by_mapped(
+                        ungapped_hits,
+                        score_compare_ungapped_hits,
+                        &X_SORT,
+                    )
+                }
                 _ => ungapped_hits.sort_by(score_compare_ungapped_hits),
             }
             x_shadow_hits.sort_by(score_compare_ungapped_hits);

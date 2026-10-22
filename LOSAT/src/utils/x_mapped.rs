@@ -9,10 +9,11 @@
 //! large buffers of the worker threads come from their arenas, and the space they leave stays
 //! resident there (`tblastn/x_subject_translate.rs` has the same case for TBLASTN's frames). A
 //! buffer of at least `X_MAPPED_FROM` bytes is given a capacity above that ceiling, so that it
-//! is mapped and returned when dropped (unless an arena has that much free space at its top);
-//! the pages beyond its length are not resident until they are touched (a buffer lent by a pool
-//! may have touched more than it holds: the pool counts that). Other allocators return large blocks on their own, so elsewhere the
-//! capacity is what `Vec` would give.
+//! is mapped and returned when dropped (unless an arena has a free chunk that large); the pages
+//! beyond its length are not resident until they are touched (a buffer lent by a pool may have
+//! touched more than it holds: the pool counts that). Other allocators return large blocks on
+//! their own, and 32-bit glibc's ceiling is 512 KiB, so elsewhere the capacity is what `Vec`
+//! would give.
 //!
 //! A mapped block that is freed and mapped again is touched again: every page faults, and with
 //! many threads the faults wait for each other (BLASTN of 1,500 cDNAs x the D. melanogaster
@@ -20,10 +21,12 @@
 //! to an `XPool` of its element type instead, shared by all threads, and the next buffer that
 //! must grow past `X_MAPPED_FROM` takes one from there, its pages already resident. A thread's
 //! arena keeps its free space for that thread only; the pool lends it to any thread, so the
-//! resident buffers are those in use at the busiest moment, plus at most `x_pool_idle_bytes` of
-//! idle ones. Only buffers that are done after every subject use a pool (BLASTN's database
-//! reads, `X_BYTES`); a buffer that its thread keeps from one subject to the next is mapped but
-//! not pooled, since idle copies of it would only add to those in use.
+//! resident buffers are those in use at the busiest moment, plus at most the pool's idle bound
+//! of idle ones. Only buffers that are done after every subject use a pool: BLASTN's database
+//! reads and BLASTNA letters (`X_BYTES`, idle bound `x_pool_idle_bytes`) and the scratch of the
+//! ungapped hits' sort (`blastn` `X_SORT`, its own bound); a buffer that its thread keeps from
+//! one subject to the next (the ungapped hits) is mapped but not pooled, since idle copies of it
+//! would only add to those in use.
 
 /// No NCBI counterpart: the buffers from which a buffer is mapped (Linux with glibc).
 pub(crate) const X_MAPPED_FROM: usize = 1 << 20;
@@ -32,9 +35,19 @@ pub(crate) const X_MAPPED_FROM: usize = 1 << 20;
 /// 64-bit), and one page more.
 const X_MAPPED_BYTES: usize = (32 << 20) + 4096;
 
-/// No NCBI counterpart: whether the allocator is glibc's (the only one that keeps large freed
-/// blocks this way).
-pub(crate) const X_MAPPED_ALLOCATOR: bool = cfg!(all(target_os = "linux", target_env = "gnu"));
+/// No NCBI counterpart: whether the allocator is 64-bit glibc's (the only one that keeps large
+/// freed blocks this way; on 32 bits its ceiling is 512 KiB and a padded capacity would only
+/// spend address space).
+pub(crate) const X_MAPPED_ALLOCATOR: bool = cfg!(all(
+    target_os = "linux",
+    target_env = "gnu",
+    target_pointer_width = "64"
+));
+
+/// No NCBI counterpart: whether a buffer of `bytes` is mapped (`x_mapped_capacity`).
+pub(crate) fn x_is_mapped(bytes: usize) -> bool {
+    X_MAPPED_ALLOCATOR && bytes >= X_MAPPED_FROM
+}
 
 /// No NCBI counterpart: the capacity, in elements of `size` bytes, of a buffer that must hold
 /// `elements`: above glibc's ceiling once it reaches `X_MAPPED_FROM` bytes.
@@ -139,7 +152,8 @@ impl<T: Copy> XPool<T> {
                     .max_by_key(|(_, (_, touched))| *touched)
             })
             .map(|(i, _)| i)?;
-        let (v, touched) = st.idle.swap_remove(pick);
+        // `remove`, not `swap_remove`: `give` frees the oldest idle buffers first.
+        let (v, touched) = st.idle.remove(pick);
         st.idle_touched -= touched;
         let addr = v.as_ptr() as usize;
         // A buffer lent before at this address and never given back (dropped on an error path)
@@ -337,7 +351,7 @@ mod tests {
             let mut a = v.clone();
             a.sort_by(|x, y| y.0.cmp(&x.0));
             let mut b = v.clone();
-            static POOL: XPool<(u32, u32)> = XPool::new(x_pool_idle_bytes);
+            static POOL: XPool<(u32, u32)> = XPool::new(|| 64 << 20);
             x_sort_by_mapped(&mut b, |x, y| y.0.cmp(&x.0), &POOL);
             assert_eq!(a, b, "n = {n}");
             // The merges alone, with runs of 4 (every merge path, odd tails).
@@ -357,7 +371,7 @@ mod tests {
 
     #[test]
     fn pool_lends_idle_buffers_and_keeps_small_ones_out() {
-        let pool: XPool<u8> = XPool::new(x_pool_idle_bytes);
+        let pool: XPool<u8> = XPool::new(|| 64 << 20);
         let mut small = vec![1u8; 100];
         pool.give(&mut small);
         assert_eq!(small.len(), 100);
@@ -369,7 +383,8 @@ mod tests {
         let addr = v.as_ptr();
         v.resize(X_MAPPED_FROM + 10, 0);
         pool.give(&mut v);
-        assert_eq!(v.capacity(), 0);
+        // Elsewhere than glibc `give` keeps nothing and leaves `v` as it is.
+        assert_eq!(v.capacity() == 0, X_MAPPED_ALLOCATOR);
         if X_MAPPED_ALLOCATOR {
             let mut w: Vec<u8> = vec![9; 3];
             pool.reserve(&mut w, X_MAPPED_FROM);
@@ -384,6 +399,35 @@ mod tests {
         assert!(pool.take(cap + 1).is_none());
         if X_MAPPED_ALLOCATOR {
             assert_eq!(pool.take(cap).map(|v| v.capacity()), Some(cap));
+        }
+    }
+
+    #[test]
+    fn pool_frees_beyond_its_bound() {
+        // A buffer that alone touched more than the bound is not kept.
+        let none: XPool<u8> = XPool::new(|| 0);
+        let mut v: Vec<u8> = Vec::new();
+        x_reserve_mapped(&mut v, X_MAPPED_FROM);
+        v.resize(X_MAPPED_FROM, 1);
+        none.give(&mut v);
+        assert_eq!(v.capacity() == 0, X_MAPPED_ALLOCATOR);
+        assert!(none.take(1).is_none());
+        // With room for one touched buffer, the older one is freed when a second comes back.
+        let one: XPool<u8> = XPool::new(|| X_MAPPED_FROM + X_MAPPED_FROM / 2);
+        let (mut a, mut b): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
+        x_reserve_mapped(&mut a, X_MAPPED_FROM);
+        x_reserve_mapped(&mut b, X_MAPPED_FROM);
+        a.resize(X_MAPPED_FROM, 1);
+        b.resize(X_MAPPED_FROM, 2);
+        let b_addr = b.as_ptr();
+        one.give(&mut a);
+        one.give(&mut b);
+        if X_MAPPED_ALLOCATOR {
+            let kept = one.take(1).expect("the newer buffer is kept");
+            assert_eq!(kept.as_ptr(), b_addr);
+            assert!(one.take(1).is_none());
+        } else {
+            assert!(one.take(1).is_none());
         }
     }
 }

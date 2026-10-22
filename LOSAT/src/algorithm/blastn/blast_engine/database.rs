@@ -124,6 +124,7 @@ fn x_done_block(block: SequenceBlock) {
 /// With LOSAT_X_BNMAPPED, gives letters of `x_blastna` back to `utils::x_mapped::X_BYTES`.
 fn x_done_bytes(mut bytes: Vec<u8>) {
     if super::x_bn_mapped() {
+        super::x_bn_mapped_reach(bytes.len());
         crate::utils::x_mapped::X_BYTES.give(&mut bytes);
     }
 }

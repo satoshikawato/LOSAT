@@ -91,7 +91,12 @@ impl<'a> SubjectLetters<'a> {
             Self::Packed(subjects) if !case || subjects[oid].lowercase().is_empty() => {
                 f(SubjectNt::Packed(&subjects[oid]))
             }
-            _ => self.with_letters(oid, |letters| f(SubjectNt::Letters(letters))),
+            Self::Packed(_) => {
+                // A packed subject whose lower-case letters the stage reads: the letters.
+                crate::utils::xreach::x_reach!("LOSAT_X_TBNSTORE", false);
+                self.with_letters(oid, |letters| f(SubjectNt::Letters(letters)))
+            }
+            Self::Records(_) => self.with_letters(oid, |letters| f(SubjectNt::Letters(letters))),
         }
     }
 
@@ -137,9 +142,11 @@ thread_local! {
     static X_LETTERS: Cell<Vec<u8>> = const { Cell::new(Vec::new()) };
 }
 
-/// EXPERIMENT (LOSAT_X_TBNSTORE): the subject records (`read_subjects` without a range), each
-/// one's letters packed as soon as it has been read, so the letters of the whole set are never
-/// held at once. The records keep their deflines and no letters. If a record holds a byte without
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the subject records (`read_subjects`), each one's letters packed
+/// as soon as it has been read, so the letters of the whole set are never held at once. With a
+/// subject range (`-subject_loc`) each record is first cut to its interval, in place, into the
+/// record `seq_range::cut_subjects` makes, and the placements are returned (empty without a
+/// range). The records keep their deflines and no letters. If a record holds a byte without
 /// an ncbi4na code (only an API caller can make one), every record keeps its letters and no store
 /// is returned: the search then reads the letters as without the switch. With `threads` above one
 /// a second thread packs each record while the reader reads the next one (`x_packed_while_read`),
@@ -147,27 +154,48 @@ thread_local! {
 /// started outside the search pool is one more host worker than `-num_threads` asks for.
 pub(super) fn x_read_subject_stores<R: std::io::Read>(
     source: &mut crate::blastinput::fasta_reader::FastaInputSource<R>,
+    range: Option<&crate::blastinput::seq_range::SequenceRange>,
     warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
     threads: usize,
 ) -> anyhow::Result<(
     Vec<crate::blastinput::fasta_reader::FastaRecord>,
     Option<Vec<PackedNucleotide>>,
+    crate::blastinput::seq_range::Placements,
 )> {
+    use crate::blastinput::seq_range::{record_cut, Placements, RecordPlacement};
+    let mut placements = Vec::new();
+    // `FastaRecord::cut` of the record's interval without a copy of the letters: the same
+    // identifiers and title, the interval's letters, no warnings.
+    let mut cut = |mut record: crate::blastinput::fasta_reader::FastaRecord| {
+        if let Some(range) = range {
+            let length = record.sequence.len();
+            let (from, to_exclusive) = record_cut(range, length)?;
+            record.sequence.truncate(to_exclusive);
+            record.sequence.drain(..from);
+            record.warnings = Vec::new();
+            placements.push(RecordPlacement {
+                offset: from,
+                length,
+            });
+        }
+        anyhow::Ok(record)
+    };
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let read = if threads > 1 {
-        x_packed_while_read(source, warn)?
+        x_packed_while_read(source, range, warn, &mut cut)?
     } else {
-        crate::blastinput::fasta_reader::read_subjects_map(source, None, warn, |record| {
-            Ok(x_packed(record))
+        crate::blastinput::fasta_reader::read_subjects_map(source, range, warn, |record| {
+            Ok(x_packed(cut(record)?))
         })?
     };
     #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
     let read = {
         let _ = threads;
-        crate::blastinput::fasta_reader::read_subjects_map(source, None, warn, |record| {
-            Ok(x_packed(record))
+        crate::blastinput::fasta_reader::read_subjects_map(source, range, warn, |record| {
+            Ok(x_packed(cut(record)?))
         })?
     };
+    let placements = Placements(placements);
     let all_packed = read.iter().all(|(_, store)| store.is_some());
     // A byte without an ncbi4na code keeps the letters (the reference path).
     crate::utils::xreach::x_reach!("LOSAT_X_TBNSTORE", all_packed);
@@ -181,8 +209,9 @@ pub(super) fn x_read_subject_stores<R: std::io::Read>(
             stores.iter().map(|store| store.heap_bytes() as u64).sum(),
             Ordering::Relaxed,
         );
-        return Ok((records, Some(stores)));
+        return Ok((records, Some(stores), placements));
     }
+    // The records are already cut: their letters are those of their intervals.
     Ok((
         read.into_iter()
             .map(|(mut record, store)| {
@@ -193,6 +222,7 @@ pub(super) fn x_read_subject_stores<R: std::io::Read>(
             })
             .collect(),
         None,
+        placements,
     ))
 }
 
@@ -229,11 +259,15 @@ fn x_packed(
 // hand-overs) and only when that thread takes a batch (a channel without a buffer), so at most
 // two batches' letters are held; the records come back in reading order. Packing is a function
 // of a record alone, so the records and stores are those of the reader packing them itself.
-/// EXPERIMENT (LOSAT_X_TBNSTORE): the records read and packed on two threads.
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the records read (each cut by `cut`) and packed on two threads.
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 fn x_packed_while_read<R: std::io::Read>(
     source: &mut crate::blastinput::fasta_reader::FastaInputSource<R>,
+    range: Option<&crate::blastinput::seq_range::SequenceRange>,
     warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+    cut: &mut dyn FnMut(
+        crate::blastinput::fasta_reader::FastaRecord,
+    ) -> anyhow::Result<crate::blastinput::fasta_reader::FastaRecord>,
 ) -> anyhow::Result<
     Vec<(
         crate::blastinput::fasta_reader::FastaRecord,
@@ -254,7 +288,9 @@ fn x_packed_while_read<R: std::io::Read>(
         let mut batch = Vec::new();
         let mut letters = 0usize;
         let read =
-            crate::blastinput::fasta_reader::read_subjects_map(source, None, warn, |record| {
+            crate::blastinput::fasta_reader::read_subjects_map(source, range, warn, |record| {
+                // the reader cuts a record to its interval before it hands it over
+                let record = cut(record)?;
                 letters += record.sequence.len();
                 batch.push(record);
                 if batch.len() >= X_PACK_BATCH || letters >= X_PACK_BATCH_LETTERS {

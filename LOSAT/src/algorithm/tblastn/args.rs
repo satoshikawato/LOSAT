@@ -861,7 +861,8 @@ impl TblastnArgs {
                 ReaderConfig::subject("TBLASTN", false, settings.data_loaders),
             );
             // EXPERIMENT (LOSAT_X_TBNSTORE): each record's letters packed as it is read
-            // (`x_read_subject_stores`); a subject range keeps the letters.
+            // (`x_read_subject_stores`), with a subject range after the record is cut to its
+            // interval (the record `cut_subjects` makes).
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
             // ```c
             //     virtual SBlastSequence GetCompressedPlusStrand() {
@@ -877,34 +878,39 @@ impl TblastnArgs {
             // with LOSAT_X_TBNSTORE the packing of each record is in this interval too. No NCBI
             // counterpart.
             let t_read_fasta = crate::utils::xtiming::clock();
-            let (read_subject_records, x_subject_stores) = {
+            // With the switch the records come back cut to the range (`Some` placements).
+            let (read_subject_records, x_subject_stores, x_placements) = {
                 let mut stderr = std::io::stderr();
                 let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
-                let x_store = super::x_subject_store::x_tbn_store();
                 // The stores' own side is recorded where they are read (x_subject_store.rs).
-                if x_store && subject_range.is_some() {
-                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSTORE", false);
-                }
-                if x_store && subject_range.is_none() {
-                    super::x_subject_store::x_read_subject_stores(
-                        &mut subject_source,
-                        &mut warn,
-                        args.num_threads,
-                    )?
+                if super::x_subject_store::x_tbn_store() {
+                    let (records, stores, placements) =
+                        super::x_subject_store::x_read_subject_stores(
+                            &mut subject_source,
+                            subject_range.as_ref(),
+                            &mut warn,
+                            args.num_threads,
+                        )?;
+                    (records, stores, Some(placements))
                 } else {
                     (
                         read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?,
+                        None,
                         None,
                     )
                 }
             };
             crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
             drop(subject_source);
-            let (subjects, subject_placements) =
-                match seq_range::cut_subjects(&read_subject_records, subject_range.as_ref())? {
-                    Some((cut, placements)) => (cut, placements),
-                    None => (read_subject_records, seq_range::Placements::default()),
-                };
+            let (subjects, subject_placements) = match x_placements {
+                Some(placements) => (read_subject_records, placements),
+                None => {
+                    match seq_range::cut_subjects(&read_subject_records, subject_range.as_ref())? {
+                        Some((cut, placements)) => (cut, placements),
+                        None => (read_subject_records, seq_range::Placements::default()),
+                    }
+                }
+            };
             // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
             // ```c
             // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)

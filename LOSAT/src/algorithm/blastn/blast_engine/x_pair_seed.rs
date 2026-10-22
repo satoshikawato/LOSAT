@@ -802,7 +802,7 @@ fn fold<const PT: bool>(
         // ```
         // (`hit_ready` is still 1 in one-hit mode; the reference keeps this test.)
         if !hit_ready {
-            part::insert::<PT>(
+            part::insert::<PT, false>(
                 diag_hash,
                 out,
                 x_key,
@@ -905,7 +905,7 @@ fn fold<const PT: bool>(
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
             //                       hit_ready, s_off_pos, window_size + Delta + 1);
             // ```
-            part::insert::<PT>(
+            part::insert::<PT, false>(
                 diag_hash,
                 out,
                 x_key,
@@ -966,7 +966,7 @@ fn fold<const PT: bool>(
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                       hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT>(
+        part::insert::<PT, false>(
             diag_hash,
             out,
             x_key,
@@ -1400,6 +1400,7 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
         window: h.window,
         max_level: h.max_level.clone(),
         x_lv_shadow: h.x_lv_shadow,
+        x_last: h.x_last.clone(),
     }
 }
 
@@ -1578,6 +1579,11 @@ pub(super) fn shadow_check(
     assert!(
         h.max_level == diag_hash.max_level,
         "{name}: the level bounds of the diagonal hash (LOSAT_X_DIAGLV) differ"
+    );
+    // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): and the memo.
+    assert!(
+        h.x_last == diag_hash.x_last,
+        "{name}: the memo of the diagonal hash (LOSAT_X_DIAGLV2) differs"
     );
     if let Some(b) = (0..diag_hash.backbone.len()).find(|&b| diag_hash.backbone[b] != h.backbone[b])
     {

@@ -512,7 +512,7 @@ fn fold_na<const PT: bool>(
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
             //                       hit_ready, s_off_pos, window_size + Delta + 1);
             // ```
-            part::insert::<PT>(
+            part::insert::<PT, false>(
                 diag_hash,
                 out,
                 x_key,
@@ -554,7 +554,7 @@ fn fold_na<const PT: bool>(
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                       hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT>(
+        part::insert::<PT, false>(
             diag_hash,
             out,
             x_key,

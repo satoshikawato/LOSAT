@@ -129,7 +129,6 @@ use std::sync::OnceLock;
 /// `tblastx/lookup/x_lut_direct.rs`) were added after the change as switches that are off unless
 /// set and joined the set together once they were verified and timed with them on and off.
 pub(crate) const STRICT_SET: &[&str] = &[
-    "LOSAT_X_AHEAD",
     "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNDBSTREAM",
     "LOSAT_X_BNFEWSUBJ",
@@ -178,7 +177,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXSCANBF",
     "LOSAT_X_BXSEGMEMO",
     "LOSAT_X_BXSUBJFLOW",
-    "LOSAT_X_CTXFAST",
     "LOSAT_X_CTXO1",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
@@ -187,18 +185,11 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_DISCLUTPAR",
     "LOSAT_X_DPEMASK",
     "LOSAT_X_ERFABSORB",
-    "LOSAT_X_GREEDYFAST",
-    "LOSAT_X_GREEDYFUSE",
-    "LOSAT_X_GREEDYPRELIM",
-    "LOSAT_X_GREEDYSPEC",
     "LOSAT_X_HSPINPLACE",
-    "LOSAT_X_ITREEFAST",
     "LOSAT_X_LINKSLICES",
     "LOSAT_X_LINKSORT",
     "LOSAT_X_LUTARENA",
     "LOSAT_X_LUTSPLIT",
-    "LOSAT_X_MBBATCH",
-    "LOSAT_X_MBDELAY",
     "LOSAT_X_MBLUTKEEP",
     "LOSAT_X_MBLUTONCE",
     "LOSAT_X_MBLUTPREFAULT",
@@ -210,7 +201,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_PAIRPARGATE",
     "LOSAT_X_PAIRPARNA",
     "LOSAT_X_PAIRWISEPAR",
-    "LOSAT_X_PURGEFAST",
     "LOSAT_X_QBATCHPAR",
     "LOSAT_X_QDUSTPAR",
     "LOSAT_X_QGROUPPAR",
@@ -267,9 +257,13 @@ pub(crate) const STRICT_SET: &[&str] = &[
 /// `LOSAT/tests/switch_reach_expected.tsv`. An always-on switch that graduates leaves both lists:
 /// nothing chooses any more.
 pub(crate) const GRADUATED: &[&str] = &[
+    "LOSAT_X_AHEAD",
     "LOSAT_X_DPAVX2",
     "LOSAT_X_DPNEON",
     "LOSAT_X_DPW128",
+    "LOSAT_X_GREEDYSPEC",
+    "LOSAT_X_MBBATCH",
+    "LOSAT_X_MBDELAY",
     "LOSAT_X_NEWTONLANES",
     "LOSAT_X_NEWTONLANES8",
 ];

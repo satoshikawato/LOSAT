@@ -4228,48 +4228,6 @@ Scheduling (each value computed by one thread with the original function; order 
   7.09-7.14 s, 3.887-3.896 s and 4.116-4.122 s; max RSS unchanged (226 MB, NCBI 289-297 MB). The waves' own lines
   (`LOSAT_TIMING`) at 16 threads: 563 waves, 4.27 s, of which the waves' longest tasks 4.00 s against a mean of
   2.02 s (with 1,024 subjects per task still 3.34 against 2.03 s: the work clusters in oid ranges).
-- `LOSAT_X_BXDEFER=1` (BLASTX, speed; in the strict set from the pull request that added it, 2026-10-22;
-  `=0` turns it off, and with `LOSAT_X_DEFAULT=0` it is off unless set; acts only where `LOSAT_X_BXDIAG`'s fused
-  loop runs the AVX2 batch: not with `LOSAT_X_BXDIAG=per-hit` or `scalar`, not in the query batches
-  `LOSAT_X_BXDIAGMIN` sends to the direct loop, not without AVX2 (aarch64, WebAssembly)) the AVX2 cell test of
-  blastx's fused seed loop takes `LOSAT_X_BPDEFER`'s form (a cell's candidates packed into a buffer and the
-  closure called for the buffer after the cell's batches) with two changes (`blastp/x_seed_fused.rs`,
-  `x_cell_avx2_defer_masked`, exactness argument in its header): a batch of eight computes its lanes' entry
-  coordinates from scalar loads of its hits instead of taking them out of the hits' register, and a cell's last
-  batch of fewer than eight hits is one masked AVX2 batch (the missing lanes repeat the first hit, their
-  candidate bits are dropped) whose candidates join the buffer, instead of the scalar batch after the calls.
-  Exact because the coordinates are the same values, a repeated lane reads its entry before any lane of the
-  batch stores and so stores what lane 0 stores, and the last batch's hits lie on entries no other hit or call
-  of the cell touches, so the calls (the batches', then the last batch's lanes', each with the entry its test
-  read) and the table are those of the AVX2 batch. A blastx cell holds about 19 hits on the dense cases below
-  (a blastp cell about 106), so the cell's last batch weighs more than in blastp: `LOSAT_X_BPDEFER`'s form alone
-  was x0.984 cycles on 201 reads x Swiss-Prot and x1.040 on the sparsest fused table below (one 2.1-kb cDNA x the
-  fly proteome, 4.8 hits per cell), the form with the two changes x0.875 and x0.992 (v4-A14 probe 1, the probe
-  binary of v4-F p5, 3 rounds). The two changes come from line R's probes of blastp's cell test (v4-R R2); blastp
-  keeps its code (the new cell test has a scan function of its own, never inlined): blastp's instructions equal
-  those of the binary before the switch (x1.000 on 300 yeast proteins x the fly proteome, WSSV x PajaWSV x0.9999).
-  With `LOSAT_TIMING=1` the `blastx_diag` line names `mode=avx2-defer-masked` (`mode=avx2` with `=0`), with the
-  same counts. Shadow: `LOSAT_X_BXDIAGSHADOW=1` compares it with the reference for every subject (every table
-  through the fused loop); `tests/blastx_diag.rs` runs the default, `=0` and the shadow.
-  Measured 2026-10-22 on the workstation (perf stat, user-space cycles; one physical core of node 0 for 1 thread
-  (load 60-70 on the other cores), 16 physical cores of node 1 for 8 and 16 threads; HT siblings idle, the booked
-  cores warmed 3 s before every run, arm order reversed every other round, one warm-up round and 8 rounds (fewer
-  where noted), medians; the arms the binary before the switch (dev 7cfec941), the default and `=0`; every report
-  identical between the arms, and on 201 reads x Swiss-Prot the same bytes as NCBI BLAST+ 2.17.0 `-db
-  -num_threads 1`; max RSS unchanged), the default against `=0`, wall time (cycles, instructions, mispredicted
-  branches): at 1 thread 201 150-nt reads (ENA DRR1003646) x Swiss-Prot (`-db`) x0.891 (59.19 -> 52.26 s; x0.881,
-  x0.933, x0.730; 5 rounds), a 50-kb piece of the fly genome x the fly proteome (`-db`, `-evalue 1e-5`) x0.894
-  (11.44 -> 10.23 s; x0.892, x0.948, x0.726), 800 cDNAs x the yeast proteome x0.899 (64.27 -> 56.53 s; cycles
-  x0.884; 3 rounds), 50 fly cDNAs x the yeast proteome x0.885, AP027131 x AP027133 proteins (`-subject`,
-  `-query_gencode 4`) x0.964 (cycles x0.959), one 2.1-kb fly cDNA x the fly proteome (4.8 hits per cell, the
-  sparsest table the fused loop takes) x0.995 (cycles x0.996, instructions x0.970); at 16 threads 1,000 reads x
-  Swiss-Prot x0.887 (17.24 -> 15.28 s), 1,000 reads x UniRef50 2026_03 volume 03 x0.882 against the binary
-  before the switch (256.3 -> 226.0 s; 2 rounds), the 50-kb piece x0.905; AP027131 x AP027133 at 8 threads
-  x0.969. NCBI BLAST+ 2.17.0 on the same machine (v4-E): 201 reads x Swiss-Prot 79.6 s at 1 thread, 1,000 reads x
-  Swiss-Prot 27.59 s and x UniRef50 volume 03 385.94 s at 16 threads. The `=0` arm has the instructions of the
-  binary before the switch (x1.000) and cycles x0.998-1.013 (the loaded node's spread). Query batches the direct
-  loop takes (a 300-nt cDNA piece x UniRef50 volume 00, the first 1,000 nt of the 2.1-kb cDNA) run as before
-  (instructions x1.000, cycles x1.001-1.003).
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it
@@ -4279,7 +4237,8 @@ Scheduling (each value computed by one thread with the original function; order 
   the subject scan and the two-hit diagonal test in one loop, with the hits of one lookup cell tested in
   batches of eight (`blastx/x_seed_diag.rs`, exactness argument in its header): blastx calls blastp's
   fused scan of `LOSAT_X_BPSEED` with the cell test of `LOSAT_X_BPDIAG` (the AVX2 batch on an x86-64 CPU
-  with AVX2, by default in the form of `LOSAT_X_BXDEFER`; the per-hit loop elsewhere), and the hits that pass the test go to the reference's context
+  with AVX2, by default in the form of `LOSAT_X_BXDEFER`; the per-hit loop elsewhere), and the hits that
+  pass the test go to the reference's context
   check, extension, save and entry update unchanged (the context from blastp's `XContextTable`, made once
   per query batch and thread, which gives the binary search's index). It rests on blastx's entries being
   NCBI's `DiagStruct`, as blastp's are. `LOSAT_X_BXDIAG=per-hit` and `LOSAT_X_BXDIAG=scalar` force a cell test
@@ -4287,8 +4246,9 @@ Scheduling (each value computed by one thread with the original function; order 
   the diagonal table for every subject and stops at a difference of the hit lists or the tables (the
   tables are not compared for a subject shorter than a word less one letter, whose one scan position the
   reference reads past the sentinel); at exit `[X_SHADOW] BXDIAG subjects_compared=N ...`. With
-  `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2-defer-masked|avx2|scalar|per-hit> subjects= cells= batched_hits=
-  candidates= min_hits_per_cell= tables_fused= tables_other= hits_per_cell=LEAST-MOST`. A query batch whose
+  `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2-defer-masked|avx2|scalar|per-hit> subjects= cells=
+  batched_hits= candidates= min_hits_per_cell= tables_fused= tables_other= hits_per_cell=LEAST-MOST
+  defer_min_hits_per_cell= tables_avx2=` (the last two: `LOSAT_X_BXDEFER`'s rule). A query batch whose
   lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 500,
   `0` fuses every batch) is scanned by `LOSAT_X_BXSCAN`'s direct loop instead, which is faster there; the
   choice is made once per thread and table and changes only the speed (the timing line counts the choices and
@@ -4317,6 +4277,63 @@ Scheduling (each value computed by one thread with the original function; order 
   default loop: a 300-nt cDNA piece against the first UniRef50 volume (1.5 hits per cell) took 38.08-38.25 s
   against 35.76-36.00 s (one thread, 3 rounds, the build with LOSAT_X_BXSCANBF's const parameter; instructions
   250 G against 185 G); one 2.1-kb cDNA (4.6 hits per cell) 123.9-125.4 s against 140.4-140.7 s.
+- `LOSAT_X_BXDEFER=1` (BLASTX, speed; in the strict set from the pull request that added it, 2026-10-22;
+  `=0` turns it off, and with `LOSAT_X_DEFAULT=0` it is off unless set; acts only where `LOSAT_X_BXDIAG`'s fused
+  loop runs the AVX2 batch: not with `LOSAT_X_BXDIAG=per-hit` or `scalar`, not in the query batches
+  `LOSAT_X_BXDIAGMIN` sends to the direct loop, not without AVX2 (aarch64, WebAssembly); and only on lookup
+  tables with at least `LOSAT_X_BXDEFERMIN` hits per used backbone cell, in hundredths, built-in 700, `0` every
+  table) the AVX2 cell test of blastx's fused seed loop takes `LOSAT_X_BPDEFER`'s form (a cell's candidates
+  packed into a buffer and the closure called for the buffer after the cell's batches) with two changes
+  (`blastp/x_seed_fused.rs`, `x_cell_avx2_defer_masked`, exactness argument in its header): a batch of eight
+  computes its lanes' entry coordinates from scalar loads of its hits instead of taking them out of the hits'
+  register, and a cell's last batch of fewer than eight hits is one masked AVX2 batch (the missing lanes repeat
+  the first hit, their candidate bits are dropped) whose candidates join the buffer, instead of the scalar batch
+  after the calls. Exact because the coordinates are the same values, a repeated lane reads its entry before any
+  lane of the batch stores and so stores what lane 0 stores, and the last batch's hits lie on entries no other
+  hit or call of the cell touches, so the calls (the batches', then the last batch's lanes', each with the entry
+  its test read) and the table are those of the AVX2 batch. The two changes come from line R's probes of
+  blastp's cell test (v4-R R2); a tested blastx cell holds about 19 hits on the dense tables below (a blastp
+  cell about 106), so its last batch weighs more than in blastp. On a table with few hits per cell the masked
+  batch and the buffer cost more than they save, so a fused table below `LOSAT_X_BXDEFERMIN` takes the AVX2
+  batch (`XDiagMode::Avx2`); the choice is made with `LOSAT_X_BXDIAGMIN`'s, once per thread and table. With the
+  fused loop and the cell test forced on every table (`LOSAT_X_BXDIAGMIN=0 LOSAT_X_BXDEFERMIN=0`, one core,
+  medians of 6-8 per-round ratios against `=0`) the cycles were x1.256 at 1.76 hits per used cell (a 300-nt
+  cDNA piece x UniRef50 volume 00), x1.071 at 3.56 (the first 1,000 nt of a 2.1-kb fly cDNA x the fly proteome),
+  x1.033 at 4.91 (its first 1,500 nt), x0.996 at 6.77 (the whole cDNA), x0.946 at 9.85 and x0.918 at 13.32 (the
+  first two and three of 50 fly cDNAs x the fly proteome), and x0.88-0.96 on the tables of 17 or more below.
+  `LOSAT_X_BPDEFER`'s form alone was x1.040 at 6.77 and x0.984 on 201 reads x Swiss-Prot (v4-A14 probe 1, ratios
+  of the medians of 3 rounds). blastp's hot loops keep their code (the new cell test has a scan function of its
+  own, never inlined, and calls none of blastp's batch helpers): blastp's instructions equal those of the binary
+  before the switch (x1.0000 on 300 yeast proteins x the fly proteome and on WSSV x PajaWSV). With
+  `LOSAT_TIMING=1` the `blastx_diag` line names `mode=avx2-defer-masked` (`mode=avx2` with `=0`) and gives
+  `defer_min_hits_per_cell=` and `tables_avx2=` (the fused tables that took the AVX2 batch). Shadow:
+  `LOSAT_X_BXDIAGSHADOW=1` compares the cell test each table takes with the reference for every subject (every
+  table through the fused loop; `LOSAT_X_BXDEFERMIN=0` for this one on all); `tests/blastx_diag.rs` runs the
+  default, `=0`, the rule's two ends and the shadow.
+  Measured 2026-10-22 on the workstation (perf stat, user-space cycles; one physical core of node 0 for 1 thread
+  (load 29-83 on the other cores), 16 physical cores of node 1 for 8 and 16 threads; HT siblings idle, the booked
+  cores warmed 3 s before every run, arm order reversed every other round, one warm-up round and 8 rounds (fewer
+  where noted), medians of the per-round ratios; the arms the binary before the switch (dev 7cfec941), the
+  default and `=0`, before the rule (every table below takes 17 or more hits per used cell, where the rule takes
+  this cell test); every report identical between the arms, and those of the reads the same bytes as NCBI BLAST+
+  2.17.0 on the same inputs (201 reads `-num_threads 1`; 1,000 reads the 16-thread runs of line E); max RSS
+  equal or lower), the default against `=0`, wall time (cycles, instructions, mispredicted branches): at 1
+  thread 201 150-nt reads (ENA DRR1003646) x Swiss-Prot (`-db`) x0.891 (59.19 -> 52.26 s; x0.881, x0.933,
+  x0.730; 5 rounds), a 50-kb piece of the fly genome x the fly proteome (`-db`, `-evalue 1e-5`) x0.894 (11.44 ->
+  10.23 s; x0.892, x0.948, x0.726), 800 cDNAs x the yeast proteome x0.899 (64.27 -> 56.53 s; cycles x0.884; 3
+  rounds), 50 fly cDNAs x the yeast proteome x0.885, AP027131 x AP027133 proteins (`-subject`,
+  `-query_gencode 4`) x0.964 (cycles x0.959); at 16 threads 1,000 reads x Swiss-Prot x0.887 (17.24 -> 15.28 s),
+  1,000 reads x UniRef50 2026_03 volume 03 x0.882 against the binary before the switch (256.3 -> 226.0 s; 2
+  rounds), the 50-kb piece x0.905; AP027131 x AP027133 at 8 threads x0.969. NCBI BLAST+ 2.17.0 on the same
+  machine (v4-E): 201 reads x Swiss-Prot 79.6 s at 1 thread, 1,000 reads x Swiss-Prot 27.59 s and x UniRef50
+  volume 03 385.94 s at 16 threads. The `=0` arm has the instructions of the binary before the switch (x1.000)
+  and cycles x0.998-1.013 (the loaded node's spread). Query batches the direct loop takes by default (the
+  first 1,000 nt of the 2.1-kb cDNA, 3.56 hits per used cell; the 300-nt piece, 1.76, no hit at `-evalue 1e-5`)
+  run as before (instructions x1.000, cycles x1.001-1.003). With the rule (the same setup on one core, load
+  9-38, 3-8 rounds, against the binary before the switch): the 2.1-kb cDNA (6.77 hits per used cell, the AVX2
+  batch by the rule) cycles x1.001, instructions x1.000; the first two and three of the 50 cDNAs x0.939 and
+  x0.922; AP027131 x AP027133 x0.963; the 50-kb piece x0.897; 201 reads x Swiss-Prot x0.883 (wall 57.33 ->
+  50.10 s); WSSV x PajaWSV (blastp) instructions x1.000.
 - `LOSAT_X_BXSCANBF=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's decision of that day
   (perf-si-20261012 DECISIONS 175) on the timings below: on by default, `=0` turns it off, and with
   `LOSAT_X_DEFAULT=0` it is off unless set; acts where the standard lookup table is scanned by `LOSAT_X_BXSCAN`'s

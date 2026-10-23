@@ -136,7 +136,8 @@
 //! cells then go to the cell test in position order. The cells, their order and their hit lists
 //! are the presence-test loop's, so every outcome above is unchanged. blastp's own loop
 //! (`x_scan_two_hit`) takes the same cells under its own switch, LOSAT_X_BPSCANBF (a switch of the
-//! strict set; [`x_bp_scan_bf`]).
+//! strict set; [`x_bp_scan_bf`]); blastp-fast's loop on the flat compressed table lists its cells
+//! the same way under LOSAT_X_BPCLUTSCANBF (`x_seed_fused_clut.rs`).
 //!
 //! EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loop (`x_cell_per_hit`: the fused loop without
 //! LOSAT_X_BPDIAG's batches, the default where the CPU has no AVX2, i.e. aarch64 and WebAssembly)

@@ -278,6 +278,7 @@ export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTBRANGE=1
 export LOSAT_X_BNUNGAPCOUNT=1
 export LOSAT_X_BPCLUT=1
+export LOSAT_X_BPCLUTSCANBF=1
 export LOSAT_X_BPCOMPOREUSE=1
 export LOSAT_X_BPDBCUT=1
 export LOSAT_X_BPDEFER=1
@@ -325,6 +326,7 @@ export LOSAT_X_DCCSR=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DISCLUTPAR=1
 export LOSAT_X_DPEMASK=1
+export LOSAT_X_DPWINDOW=1
 export LOSAT_X_ERFABSORB=1
 export LOSAT_X_MBFILL=1
 export LOSAT_X_MBLUTKEEP=1
@@ -651,6 +653,31 @@ Same values, faster computation:
   traceback calls whose scores fit 8 bits (blastn; protein traceback with an unscaled matrix, for
   example `-comp_based_stats 0`). The 16-bit kernel (the traceback of the composition-based
   redo, whose matrix is scaled) is unchanged: the same change there measured x0.98-1.01.
+- `LOSAT_X_DPWINDOW=1` (every program's vector X-drop DP, memory; in the strict set from the pull request
+  that added it, 2026-10-23; a value switch: `=<n>`, 128 or more, is the band start at which the rows move,
+  built-in 1024; `=0` or `LOSAT_X_DEFAULT=0` returns to rows that hold every column) the vector kernels
+  (`utils/xdrop_simd.rs`, `x_xdrop_avx2.rs`, `x_xdrop_w128.rs`) kept their DP rows (`H` and `E` on 8- and
+  16-bit lanes and the column letters, 10 bytes per column) indexed by column, as NCBI's `score_array` is,
+  so a scratch grew, zero-filled, to the last column its longest band reached: 524,288 lanes (5 MiB) on
+  Sakai x EDL933, and a search grows one scratch per worker and stage (blastn `-subject` 16 threads: 92).
+  Now a kernel whose band start reaches the bound moves the lanes from `first - 64`, rounded down to a
+  multiple of 64, to lane 0 and lowers every column it keeps by the same amount (`XdropScratch::x_shift`:
+  the band, the buffers' write ends, the filled column letters, the fence and bad-letter columns); the best
+  cell and the traceback rows keep absolute columns. The lanes keep their values and the freed lanes are
+  zero as lanes never written are, so every score, drop decision, script byte and cell count is the same.
+  The fuzz tests against the scalar NCBI loops run each kernel with the bound at 128, 320 and off, and
+  every family and lane width moves rows there (20,000 cases); `band_window_keeps_every_result` compares
+  long problems on and off. The opt-in NEON2 kernels never move their rows. Memory on the workstation
+  (dev cd8e0f89 / this switch / `=0`, max RSS MiB, `v4-B/results/b16c/mem1/`, same output): Sakai x
+  EDL933 `-subject` blastn 16 threads 592-597 / 526-550 / 575-622, dc-megablast 16 threads 689-736 /
+  614-630 / 651-684, 4 threads 289-292 / 268-272 / 296-303 (blastn 4 threads and 1 thread, the D.
+  melanogaster `-db` cells and blastp unchanged within 15 MiB); NCBI `-subject` (one thread) 164-177. The
+  rest of the genome-pair excess is the traceback rows of the long alignments, one per worker. Time
+  (workstation node 1, against dev cd8e0f89, per-pair median wall, `v4-B/results/b16c/summary_ab1.txt`):
+  Sakai x EDL933 blastn 16 threads x0.954 (8 pairs), 4 threads x0.986 (6), dc-megablast 16 threads x0.886
+  (8; user x0.838), 4 threads x0.985 (6); D. melanogaster cDNAs x genome `-db` dc-megablast 16 threads
+  x1.011 (4 pairs, 0.993-1.015; user x1.000, instructions x0.9995); blastp sp4 `-subject` x1.000 (6),
+  yeast `-db` x1.001 (4); user-space instructions x0.970-0.9995 in every cell.
 - DPW128 (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED`) the
   128-bit X-drop DP kernels with the per-row savings of the 256-bit AVX2 kernels (first and last
   survivor kept while the row runs,
@@ -1700,6 +1727,37 @@ Rebuilding less:
   With more than one thread the pool's build runs too and its outcome and table (every field, slot for slot)
   are compared with the serial flat build's. One line at exit: `[X_SHADOW] BPCLUT tables_compared=
   refusals_compared= hits= parallel_tables_compared= parallel_refusals_compared= identical`.
+- `LOSAT_X_BPCLUTSCANBF=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that
+  added it, 2026-10-23, line v4-G #11; `=0` turns it off; acts in the fused loop, `LOSAT_X_BPSEED`, on the flat
+  compressed table of `LOSAT_X_BPCLUT`, on tables with at least `LOSAT_X_BPCLUTSCANBFMIN` used cells per 10,000;
+  the reference compressed table keeps its scan) the flat table's scan (`tblastx/lookup/x_clut_direct.rs`
+  `for_each_cell::<true, _>`) writes every subject offset that reaches `PV_TEST` at the end of its list and
+  advances the list's length by the presence bit, the form of `LOSAT_X_BPSCANBF`'s `x_scan_cells_bf`. The
+  offsets, their indices and their order are those of the loop with the branch, so the cells visited and the
+  report are the same (the lib test `flat_scans_give_the_reference_scans_hits` compares both lists with the
+  reference scan, `the_flat_loop_is_the_fused_loop_on_the_reference_table` both instances of the fused loop with
+  the reference table's loop, and `tests/blastp_fast_scan_bf.rs` the reports with `=0`'s). The table records its
+  cells with hits (`used_cells`, `finalize`'s count, set by the serial and the parallel builder), and the
+  branch-free list is taken for a table with at least `LOSAT_X_BPCLUTSCANBFMIN` used cells per 10,000 (built-in
+  500 natively and 0 on wasm32; `0` every table): natively, with fewer, few offsets pass `PV_TEST`, the branch is
+  predicted, and the store at every offset costs more than the mispredicts it saves (one core on the workstation,
+  branch-free / branch cycles: 1.071 at 2.3 % of the cells used, 1.001 at 4.4 %, 0.956 at 7.3 %, 0.845 at 14.9 %,
+  0.800 at 22.6 %); in WebAssembly the loop with the branch is the slower one at every density measured (the
+  serial WASI command in Node 26, one instance per search in one process, 3 rounds, workstation node 0: branch-free /
+  branch time 0.81 at 1.2 %, 0.80 at 2.3 %, 0.70 at 7.3 %, 0.81 at 31.6 %; the 357-residue protein 13.33 -> 10.62 s,
+  10 proteins 51.87 -> 42.10 s). The decision is
+  recorded per query block (`LOSAT_X_REACH`). The branch-free instance (`blastp/x_seed_fused_clut.rs`
+  `x_scan_flat_bf`) is out of line with a closure of its own type, so the instance with the branch is compiled as
+  without it; the forms that put the scan in a function of its own, or both lists inline before one visit loop,
+  ran 0.5-10 % more cycles with the branch. Timed 2026-10-23 on the workstation (node 0 CPUs 8-11; dev cd8e0f89
+  and this change's code at 4cd3b735 in turn, its arms `LOSAT_X_BPSCANBF=0` (the branch, at 4cd3b735 still that
+  switch) and `LOSAT_X_BPSCANBFMIN=0` (the branch-free list) standing for the list the built-in 500 chooses; 3
+  rounds, one output hash per case; UniRef50 2026_03 volume 00 `-db`, `-evalue 1e-5`): one thread, a 42-residue
+  protein (1.2 % of the cells used) 7.37 -> 7.26 s and the 357-residue protein (2.3 %) 8.35 -> 8.18 s (the branch;
+  that instance runs 6 G fewer instructions than dev's), 3 proteins of 1,005 residues (7.3 %) 10.33 -> 9.68 s, 10
+  proteins of 4,639 residues (31.6 %) 34.27 -> 27.95 s (branch misses 1.18 G -> 0.55 G); 100 proteins of 58,139
+  residues at 4 threads (two blocks, 91 % and 23 %) 70.92 -> 66.84 s; max RSS unchanged. In the strict set from
+  its first pull request (no measured case slower; AGENTS.md "Speed-up switches").
 - `LOSAT_X_BPLKPFLAT=1` (BLASTP `-task blastp-fast`, speed; in the strict set since 2026-10-17, on by default
   together with `LOSAT_X_BPCLUT`; acts only where the search's pool builds the flat table of
   `LOSAT_X_BPCLUT` or `LOSAT_X_BPCLUTSHADOW`, with more than one thread) changes how that build is scheduled

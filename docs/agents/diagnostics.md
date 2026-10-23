@@ -4803,20 +4803,23 @@ Scheduling (each value computed by one thread with the original function; order 
   program's chunk of 1,024 and a test-only instance of 64 (drains inside a subject and inside long cells, the
   hits a drain leaves, windows in parts across drains) with the per-hit test. Measured 2026-10-23 on the
   workstation (`perf stat` user-space cycles, one physical core of node 0 with its HT sibling idle, warmed 3 s
-  before every run, load 7-67 on the other cores; paired arms, arm order reversed every other round; medians of
-  the per-round ratios, 3 rounds for the reads and 5 for the others), the pull request's code against `dev`'s
-  default 32a63700 (`LOSAT_X_BXDEFER` with its rule, `LOSAT_X_BXDIAGMIN` 500), with every table of these runs
-  fused: 201 reads x Swiss-Prot (`-db`; 26-28 hits per used cell) x0.886, a 50-kb piece of the fly genome x
-  the fly proteome (`-db`, `-evalue 1e-5`; 25-31) x0.916, AP027131 x AP027133 proteins (`-subject`,
-  `-query_gencode 4`; 17-26) x0.973, 50 fly cDNAs x the yeast proteome (20-33) x0.882, one 2.1-kb fly cDNA x
-  the fly proteome (6.77) x0.846, the first two of the 50 cDNAs x the fly proteome (9.85) x0.847; `=0`
-  x0.999-1.002 of `dev` (the same instructions); every report identical between the arms, max RSS unchanged.
-  `LOSAT_X_BXDIAGMIN`'s built-in 900 (perf/bx-diag-min) was set against `LOSAT_X_BXDEFER`'s cell test, so a
-  table below 9 hits per used cell, such as the one cDNA's (6.77), still takes the direct loop by default;
+  before every run, load 8-38 on the other cores; paired arms, arm order reversed every other round; medians of
+  the per-round ratios, 3 rounds for the reads and 5 for the others), against `dev`'s default 7d7de94e
+  (`LOSAT_X_BXDEFER` with its rule, `LOSAT_X_BXUNGAPSENT`, `LOSAT_X_BXDIAGMIN` 900): 201 reads x Swiss-Prot
+  (`-db`; 26-28 hits per used cell) x0.880, a 50-kb piece of the fly genome x the fly proteome (`-db`,
+  `-evalue 1e-5`; 25-31) x0.899, AP027131 x AP027133 proteins (`-subject`, `-query_gencode 4`; 17-26) x0.966,
+  50 fly cDNAs x the yeast proteome (20-33) x0.861, the first two of the 50 cDNAs x the fly proteome (9.85)
+  x0.830; one 2.1-kb fly cDNA x the fly proteome (6.77) takes the direct loop in both arms (x1.002); `=0`
+  x0.998-1.001 of `dev` (the same instructions); every report identical between the arms, max RSS unchanged.
+  Against the `dev` before `LOSAT_X_BXDIAGMIN` 900 and `LOSAT_X_BXUNGAPSENT` (32a63700, the same setting),
+  where every one of these tables was fused: x0.886, x0.916, x0.973, x0.882, the one cDNA x0.846, the two
+  x0.847. `LOSAT_X_BXDIAGMIN`'s built-in 900 (perf/bx-diag-min) was set against `LOSAT_X_BXDEFER`'s cell
+  test, so a table below 9 hits per used cell, such as the one cDNA's (6.77), still takes the direct loop;
   with this cell test the fused loop breaks even with the direct loop lower (near 6.6 with this pull request's
-  first prototype, v4-A10 bdm1), and line A10 measures the cutoff again with it. Design and timings: v4-A14 results/p2 (DESIGN_cross.md), results/p3 (DESIGN_s3.md: round 2) and
-  results/p4 (DESIGN_s4.md: round 3, r1's loops with a constant chunk, two arrays, the windows with a repeated
-  entry out of line).
+  first prototype, v4-A10 bdm1), and line A10 measures the cutoff again with it. Timings: v4-A14 results/fab2
+  (and results/fab against 32a63700). Design and timings: v4-A14 results/p2 (DESIGN_cross.md), results/p3
+  (DESIGN_s3.md: round 2) and results/p4 (DESIGN_s4.md: round 3, r1's loops with a constant chunk, two arrays,
+  the windows with a repeated entry out of line).
 - `LOSAT_X_BXSCANBF=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's decision of that day
   (perf-si-20261012 DECISIONS 175) on the timings below: on by default, `=0` turns it off, and with
   `LOSAT_X_DEFAULT=0` it is off unless set; acts where the standard lookup table is scanned by the

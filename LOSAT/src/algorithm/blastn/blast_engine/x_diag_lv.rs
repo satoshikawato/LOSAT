@@ -167,7 +167,7 @@ enum Mode {
 }
 
 /// No NCBI counterpart: reads LOSAT_X_DIAGLVSHADOW (off unless set to any value) and LOSAT_X_DIAGLV
-/// (a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) once; the
+/// (a strict-set switch: on unless it is `0`) once; the
 /// shadow implies the switch. They do not change any
 /// value NCBI computes.
 fn mode() -> Mode {

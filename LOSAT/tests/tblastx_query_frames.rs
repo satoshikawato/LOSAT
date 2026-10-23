@@ -1,6 +1,6 @@
 //! The SEG of a TBLASTX query batch's frames on the search pool (`LOSAT_X_TBXQFRAMES`, in the
-//! strict set: on unless `=0`, or `LOSAT_X_DEFAULT=0` and it is not set;
-//! `src/algorithm/tblastx/x_query_frames.rs`) on whole runs of the binary.
+//! strict set: on unless `=0`; `src/algorithm/tblastx/x_query_frames.rs`) on whole runs of the
+//! binary.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1281
 //! ```c
@@ -12,8 +12,8 @@
 //! the report does not depend on it: for several queries with low-complexity runs (pieces of
 //! MelaMJNV, a query of four letters, whose four frames hold one residue each, and one of two
 //! letters, which has no frame) at 1 and 4 threads, the searches with the switch off,
-//! by default, with `LOSAT_X_DEFAULT=0` and with the shadow (`LOSAT_X_TBXQFRAMESSHADOW`, which
-//! masks the frames serially as well and compares them) give the same bytes; with several query
+//! by default and with the shadow (`LOSAT_X_TBXQFRAMESSHADOW`, which masks the frames serially
+//! as well and compares them) give the same bytes; with several query
 //! batches (`BATCH_SIZE`) too; and `-seg no` is not acted on. That the frames are masked on the
 //! pool's threads is checked by the unit test `frames_are_masked_on_the_pool_threads`; here the
 //! shadow's counters show that the pool path ran. That those bytes equal NCBI's is the business
@@ -25,7 +25,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const OFF: (&str, &str) = ("LOSAT_X_TBXQFRAMES", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBXQFRAMESSHADOW", "1");
-const PREVIOUS_DEFAULT: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -169,10 +168,9 @@ fn shadow_counts(stderr: &str) -> (u64, u64, u64) {
     (field("batches="), field("frames="), field("intervals="))
 }
 
-/// The search with the switch off at one thread, then off, by default, with `LOSAT_X_DEFAULT=0`
-/// and with the shadow at 1 and 4 threads, all with the same bytes and no standard error but the
-/// shadow's line, which counts frames masked on the pool only at 4 threads. Returns the shadow's
-/// counts at 4 threads.
+/// The search with the switch off at one thread, then off, by default and with the shadow at 1 and
+/// 4 threads, all with the same bytes and no standard error but the shadow's line, which counts
+/// frames masked on the pool only at 4 threads. Returns the shadow's counts at 4 threads.
 fn check(env: &[(&'static str, &'static str)], extra: &[&str]) -> (u64, u64, u64) {
     let inputs = Inputs::new();
     let with = |more: &[(&'static str, &'static str)]| -> Vec<(&str, &str)> {
@@ -183,7 +181,7 @@ fn check(env: &[(&'static str, &'static str)], extra: &[&str]) -> (u64, u64, u64
     assert_eq!(stderr, "", "{env:?} {extra:?}");
     let mut counts = (0, 0, 0);
     for threads in [1, 4] {
-        for vars in [&[OFF][..], &[], &[PREVIOUS_DEFAULT]] {
+        for vars in [&[OFF][..], &[]] {
             let (report, stderr) = tblastx(&inputs, extra, threads, &with(vars));
             assert!(
                 report == expected,

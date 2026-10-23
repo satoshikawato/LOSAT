@@ -61,8 +61,8 @@
 //! searches a run and in what order the runs end change nothing: the results are merged by
 //! subject index, and no floating-point operation changes order.
 //!
-//! A strict-set switch (`utils/xswitch.rs`): on unless `LOSAT_X_BPSUBJRUN=0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set. It acts only where
+//! A strict-set switch (`utils/xswitch.rs`): on unless `LOSAT_X_BPSUBJRUN=0`.
+//! It acts only where
 //! the parallel loop runs: a `-subject` search with more than one thread whose subjects
 //! `blastp_should_parallelize_stage` gives to the pool. The one-thread loop and the database path
 //! (`-db`) already search with one table and are not changed.
@@ -177,8 +177,8 @@ pub(super) enum XSubjRun {
 
 // No NCBI counterpart: reads the LOSAT_X_BPSUBJRUN / LOSAT_X_BPSUBJRUNSHADOW switches once; it does
 // not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPSUBJRUN): a strict-set switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-/// and it is not set); `LOSAT_X_BPSUBJRUNSHADOW` (any value, not part of the set) selects the
+/// EXPERIMENT (LOSAT_X_BPSUBJRUN): a strict-set switch (on unless it is `0`);
+/// `LOSAT_X_BPSUBJRUNSHADOW` (any value, not part of the set) selects the
 /// shadow mode.
 pub(super) fn x_bp_subj_run() -> XSubjRun {
     static MODE: OnceLock<XSubjRun> = OnceLock::new();

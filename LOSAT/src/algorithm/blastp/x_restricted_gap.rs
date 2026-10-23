@@ -114,7 +114,7 @@
 //!   code.
 //!
 //! The variables are read once. `LOSAT_X_BPGAP` (a strict-set switch, `utils/xswitch.rs`: on
-//! unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) runs this module, and
+//! unless it is `0`) runs this module, and
 //! `LOSAT_X_BPGAP16` (another strict-set switch) its sixteen-bit rows first where they fit;
 //! `LOSAT_X_BPGAPSHADOW` runs both for every restricted alignment and panics if they differ, and
 //! `main` prints one `[X_SHADOW] BPGAP` line.

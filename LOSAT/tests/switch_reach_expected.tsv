@@ -53,6 +53,7 @@ LOSAT_X_BXPAR	blastx	conditional	required	required	2+ threads (1 thread leaves r
 LOSAT_X_BXPOOL	blastx	conditional	required	required	2+ threads
 LOSAT_X_BXSCANBF	blastx	always			Branch-free finding of subject words with lookup hits
 LOSAT_X_BXSUBJFLOW	blastx	conditional	required	required	2+ threads, more than k (64) subjects, window_size + 2x longest subject <= 2^28, no diagnostics
+LOSAT_X_BXUNGAPSENT	blastx	conditional	required	gap	word size 3 two-hit search (default blastx); ref gap: no CI blastx fixture runs -word_size 5 or -window_size 0 (tests/blastx_ungap_sent.rs records both sides)
 LOSAT_X_CTXO1	blastn	always			Constant-time context of a hit's query offset
 LOSAT_X_DBIDXREAD	blastn,blastp,blastx,tblastn,tblastx	conditional	required	required	-db searches only (not -subject)
 LOSAT_X_DCCSR	blastn	conditional	required	required	dc-megablast one-template table as CSR when positions x 4 >= cells; ref = two templates or a small query
@@ -95,6 +96,7 @@ LOSAT_X_SEGSHARE	blastp	conditional	required	required	blastp with 2+ threads
 LOSAT_X_SEGTRIMMEMO	blastx,tblastn	always			SEG trim of candidate segment memoised per thread
 LOSAT_X_TBNBATCH	tblastn	conditional	gap	required	needs 4+ query batches and at least one batch per thread; rule via TBNBATCHRULE; new gap: needs 4+ query batches of 20,000 residues and 4+ batches per thread
 LOSAT_X_TBNBATCHRULE	tblastn	conditional	gap	gap	several query batches; full waves of threads side by side; subjects <=24 Mb or <2 per thread; new gap: needs 4+ query batches with batches >= threads; ref gap: needs 4+ batches at 2+ threads with plans that fit and no full wave (batches < threads, or > 24 Mb of many subjects)
+LOSAT_X_TBNFLOWHELP	tblastn	conditional	required	required	2+ threads, several subjects (where the subject flow of TBNOIDNEXT runs); a thread waiting in the flow runs the pool's jobs
 LOSAT_X_TBNFRAMEREUSE	tblastn	always			a dropped plan's frames are reused by the next plan of its thread (rides on TBNKEEPFEW's drops)
 LOSAT_X_TBNHITBF	tblastn	always			Branch-free too-far/overlap outcomes in two-hit loop
 LOSAT_X_TBNKEEPFEW	tblastn	conditional	required	gap	4+ query batches searched one after another: plans dropped unless they fit threads x longest plan; ref gap: needs 4+ batches whose plans are kept (fit threads x longest plan, or batches side by side)

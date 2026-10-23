@@ -12,7 +12,7 @@
 //! The switch tests the candidates of NCBI's window less those that cannot be admissible, in
 //! NCBI's order (the unit test `x_chosen_candidates_give_the_links_of_the_whole_window` compares
 //! the links), so a search with it gives the report of NCBI's loop (`LOSAT_X_TBNLINKWIN=0`). It is
-//! on by default, off with `=0`, and off with `LOSAT_X_DEFAULT=0` unless its variable is set. These
+//! on by default and off with `=0`. These
 //! tests compare the reports and read the `[X_STATS] TBNLINKWIN heads= window= chosen=
 //! shadow_heads=` line (`LOSAT_X_STATS=1`, printed when a list was linked with the switch).
 //!
@@ -89,9 +89,7 @@ fn stats(stderr: &str) -> Option<[u64; 4]> {
 }
 
 const OFF: (&str, &str) = ("LOSAT_X_TBNLINKWIN", "0");
-const ON: (&str, &str) = ("LOSAT_X_TBNLINKWIN", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBNLINKWINSHADOW", "1");
-const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723 (above). The default, the shadow
 // (every head's whole window tested as well) and four threads give the report of NCBI's loop
@@ -123,18 +121,4 @@ fn the_report_is_that_of_ncbis_loop() {
             assert!(report == expected, "{query:?} {variables:?}: four threads");
         }
     }
-}
-
-// No NCBI counterpart: with `LOSAT_X_DEFAULT=0` the switch is off unless its variable is set, as
-// before it joined the set; the report does not change either way.
-#[test]
-fn the_previous_default_leaves_it_off_unless_set() {
-    let [one, _] = queries();
-    let (expected, _) = tblastn(one, 1, &[]);
-    let (report, stderr) = tblastn(one, 1, &[PREVIOUS]);
-    assert!(report == expected);
-    assert_eq!(stats(&stderr), None);
-    let (report, stderr) = tblastn(one, 1, &[PREVIOUS, ON]);
-    assert!(report == expected);
-    assert!(stats(&stderr).expect("a line when set")[0] > 0);
 }

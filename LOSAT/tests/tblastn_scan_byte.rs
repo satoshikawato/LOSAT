@@ -22,8 +22,7 @@
 //! calls. The switch is on by default: the AVX2 forms where the CPU has AVX2, the plain loops for
 //! sparse tables (at most three tenths of the cells with hits) on x86-64 without AVX2 and in
 //! WebAssembly, as before on aarch64; `=2` takes the plain loops on any CPU for every table and
-//! `=3` for sparse tables only. It is off with `=0`, and off with `LOSAT_X_DEFAULT=0` unless its
-//! variable is set;
+//! `=3` for sparse tables only. It is off with `=0`;
 //! it acts in the unit path, which every search takes. These tests compare the reports and read the
 //! `[X_STATS] TBNSCANBYTE units= calls= avx2=` line (`LOSAT_X_STATS=1`), the
 //! `[X_STATS] TBNSCANBF` line of the scans before, and the `[X_SHADOW] TBNSCANBYTE` line of
@@ -149,11 +148,9 @@ fn avx2() -> bool {
 }
 
 const OFF: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "0");
-const ON: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "1");
 const PLAIN: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "2");
 const SPARSE: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "3");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBNSCANBYTESHADOW", "1");
-const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (above). Each search gives the
 // report of the scan before the switch with the switch on (the default; =2, the plain loops) and in the
@@ -254,30 +251,5 @@ fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
                 "{query:?} {variables:?}"
             );
         }
-    }
-}
-
-// No NCBI counterpart: where the switch acts. With `LOSAT_X_DEFAULT=0` the switch is off unless its
-// variable (or the shadow's) is set, as before it joined the set; `=1` then scans this way where
-// the CPU has AVX2 (and the sparse table of one protein without AVX2 off aarch64), `=2`, `=3` and
-// the shadow on any CPU.
-#[test]
-fn the_default_off_turns_the_switch_off_unless_its_variable_is_set() {
-    let [one, _] = queries();
-    let (expected, _) = tblastn(one, 1, &[]);
-    let (report, stderr) = tblastn(one, 1, &[PREVIOUS]);
-    assert!(report == expected);
-    assert_eq!(byte_scans(&stderr), None);
-    assert!(earlier_scans(&stderr).is_some());
-    for (variables, byte) in [
-        (&[PREVIOUS, ON][..], avx2() || sparse_default()),
-        (&[PREVIOUS, PLAIN], true),
-        (&[PREVIOUS, SPARSE], true),
-        (&[PREVIOUS, SHADOW], true),
-    ] {
-        let (report, stderr) = tblastn(one, 1, variables);
-        assert!(report == expected, "{variables:?}");
-        assert_eq!(byte_scans(&stderr).is_some(), byte, "{variables:?}");
-        assert_eq!(earlier_scans(&stderr).is_some(), !byte, "{variables:?}");
     }
 }

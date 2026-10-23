@@ -46,8 +46,8 @@
 //! NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:328-350, quoted
 //! above `SeqDb::next_block`: NCBI's threads read the database in chunks of consecutive ordinal ids.
 //!
-//! `LOSAT_X_BXDBSTREAM` is a value switch of the strict set: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. Its value is the size of a pass's block in KiB, 2 to
+//! `LOSAT_X_BXDBSTREAM` is a value switch of the strict set: on unless it is `0`.
+//! Its value is the size of a pass's block in KiB, 2 to
 //! 1,048,576, 256 when it is not set or holds anything else (`1` among them). It acts for every
 //! task of BLASTX with `-db`.
 //!
@@ -295,6 +295,18 @@ impl XBlock {
         }
         unreachable!("sequence {oid} is outside its block")
     }
+
+    /// The residues of `oid` (in the block) between the sentinel bytes of the volume.
+    fn x_residues_with_sentinels(&self, oid: usize) -> &[u8] {
+        let mut i = oid - self.first;
+        for part in &self.parts {
+            if i < part.len() {
+                return part.protein_with_sentinels(i);
+            }
+            i -= part.len();
+        }
+        unreachable!("sequence {oid} is outside its block")
+    }
 }
 
 /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the subjects of a `-db` search read in blocks
@@ -313,6 +325,21 @@ impl<'a> XStream<'a> {
         match self.block {
             Some(block) if block.contains(oid) => Cow::Borrowed(block.residues_with_sentinel(oid)),
             _ => Cow::Owned(self.db.outside_block(oid)),
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `encoded_with_sentinel` with the sentinel byte before the
+    /// residues too.
+    pub(crate) fn x_encoded_with_sentinels(&self, oid: usize) -> Cow<'a, [u8]> {
+        match self.block {
+            Some(block) if block.contains(oid) => {
+                Cow::Borrowed(block.x_residues_with_sentinels(oid))
+            }
+            _ => {
+                let mut residues = vec![0];
+                residues.extend_from_slice(&self.db.outside_block(oid));
+                Cow::Owned(residues)
+            }
         }
     }
 
@@ -466,6 +493,16 @@ mod tests {
                 let bytes = stores.residues_with_sentinel(oid);
                 &bytes[..bytes.len() - 1]
             };
+            // EXPERIMENT (LOSAT_X_BXUNGAPSENT): the same bytes with the sentinel before them.
+            let with_sentinels =
+                |oid: usize| [&[0u8][..], stores.residues_with_sentinel(oid)].concat();
+            for oid in 0..n {
+                assert_eq!(
+                    stores.x_residues_with_sentinels(oid),
+                    with_sentinels(oid),
+                    "{name} store {oid}"
+                );
+            }
             // One byte: a block of one sequence; 200: a few; 1 MiB: the rest of the volume.
             for block_bytes in [1, 200, 1 << 20] {
                 let stream =
@@ -482,6 +519,11 @@ mod tests {
                         stores.residues_with_sentinel(oid),
                         "{name} {block_bytes} {oid}"
                     );
+                    assert_eq!(
+                        &*view.x_encoded_with_sentinels(oid),
+                        with_sentinels(oid),
+                        "{name} {block_bytes} {oid}"
+                    );
                     assert_eq!(&*view.encoded(oid), without_sentinel(oid));
                     assert_eq!(view.length(oid), stores.length(oid));
                     assert_eq!(&*view.read_encoded(oid).unwrap(), without_sentinel(oid));
@@ -493,6 +535,11 @@ mod tests {
                             assert_eq!(
                                 block.residues_with_sentinel(oid),
                                 stores.residues_with_sentinel(oid),
+                                "{name} {first}..{end} {oid}"
+                            );
+                            assert_eq!(
+                                block.x_residues_with_sentinels(oid),
+                                with_sentinels(oid),
                                 "{name} {first}..{end} {oid}"
                             );
                         }

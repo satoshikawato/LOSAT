@@ -42,8 +42,8 @@
 //! writer in larger writes; a failed write stops the report as before. Each row is the serial
 //! function of its HSP list.
 //!
-//! Off (the serial writer, `write_serial`): the switch off (`LOSAT_X_PAIRWISEPAR=0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set); no pool or one of one thread (`-num_threads 1`,
+//! Off (the serial writer, `write_serial`): the switch off (`LOSAT_X_PAIRWISEPAR=0`);
+//! no pool or one of one thread (`-num_threads 1`,
 //! builds without the `parallel` feature, Wasm without threads); a format observer (the text
 //! only); the callers' own conditions (BLASTN: while threads of LOSAT_X_QBATCHPAR slots exist,
 //! from their start to the end of the speculation, whose pools would share the CPUs).
@@ -83,8 +83,8 @@ const WINDOW_BYTES_PER_THREAD: usize = 1 << 20;
 
 // No NCBI counterpart: chooses which threads format the report; it does not change any value NCBI
 // computes. Read once per process.
-/// 0 = off, 1 = LOSAT_X_PAIRWISEPAR (a strict-set switch: on unless `LOSAT_X_PAIRWISEPAR` is `0`,
-/// or `LOSAT_X_DEFAULT=0` and it is not set; `utils/xswitch.rs`), 2 = LOSAT_X_PAIRWISEPARSHADOW.
+/// 0 = off, 1 = LOSAT_X_PAIRWISEPAR (a strict-set switch: on unless `LOSAT_X_PAIRWISEPAR` is `0`;
+/// `utils/xswitch.rs`), 2 = LOSAT_X_PAIRWISEPARSHADOW.
 pub(crate) fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {

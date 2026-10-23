@@ -117,12 +117,16 @@ fn genome_pieces(dir: &Path, count: usize, bases: usize) -> PathBuf {
 
 /// The scheduling switches whose paths read the database differently at more than one thread:
 /// the default (the subject flow, the query chunks side by side, the query batches side by side),
-/// the waves of the pool (`LOSAT_X_BXSUBJFLOW=0`), and every other switch of the strict set off
-/// (`LOSAT_X_DEFAULT=0`).
-const SCHEDULES: [Option<(&str, &str)>; 3] = [
-    None,
-    Some(("LOSAT_X_BXSUBJFLOW", "0")),
-    Some(("LOSAT_X_DEFAULT", "0")),
+/// the waves of the pool (`LOSAT_X_BXSUBJFLOW=0`), and the waves with the query batches as waves
+/// and the index held (`LOSAT_X_BXSUBJFLOW=0 LOSAT_X_BXFLOW=0 LOSAT_X_DBIDXREAD=0`).
+const SCHEDULES: [&[(&str, &str)]; 3] = [
+    &[],
+    &[("LOSAT_X_BXSUBJFLOW", "0")],
+    &[
+        ("LOSAT_X_BXSUBJFLOW", "0"),
+        ("LOSAT_X_BXFLOW", "0"),
+        ("LOSAT_X_DBIDXREAD", "0"),
+    ],
 ];
 
 #[test]
@@ -155,12 +159,13 @@ fn the_blocks_give_the_reports_of_the_copy() {
     for (query, args) in cases {
         for threads in [1, 4] {
             for schedule in SCHEDULES {
-                if threads == 1 && schedule.is_some() {
+                if threads == 1 && !schedule.is_empty() {
                     continue;
                 }
                 let with = |blocks: &'static str| -> Vec<(&str, &str)> {
                     schedule
-                        .into_iter()
+                        .iter()
+                        .copied()
                         .chain([("LOSAT_X_BXDBSTREAM", blocks)])
                         .collect()
                 };

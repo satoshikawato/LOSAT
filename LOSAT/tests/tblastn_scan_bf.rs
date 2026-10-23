@@ -19,8 +19,8 @@
 //! The switch's loop returns NCBI's offset pairs and scan range on every call (the unit test
 //! `x_scan_bf_equals_ncbi_scan_on_random_subjects` compares the calls), so a search with it gives
 //! the report of NCBI's loop (`LOSAT_X_TBNSCANBF=0`) and takes as many scan calls. The switch is
-//! on by default, off with `LOSAT_X_TBNSCANBF=0`, and off with `LOSAT_X_DEFAULT=0` unless its
-//! variable is set; it acts in the unit path, which every search takes. These tests compare the reports
+//! on by default and off with `LOSAT_X_TBNSCANBF=0`;
+//! it acts in the unit path, which every search takes. These tests compare the reports
 //! and read the `[X_STATS] TBNSCANBF units_bf= calls_bf= units_ref= calls_ref=` line
 //! (`LOSAT_X_STATS=1`) to check which loop scanned.
 //!
@@ -106,8 +106,6 @@ fn scans(stderr: &str) -> Option<[u64; 4]> {
 }
 
 const OFF: (&str, &str) = ("LOSAT_X_TBNSCANBF", "0");
-const ON: (&str, &str) = ("LOSAT_X_TBNSCANBF", "1");
-const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (above). Each search gives the
 // report of NCBI's loop with the switch on (the default) and off, at one and four threads; the
@@ -154,22 +152,4 @@ fn the_report_and_the_scan_calls_are_those_of_ncbis_loop() {
             );
         }
     }
-}
-
-// No NCBI counterpart: where the switch acts. With `LOSAT_X_DEFAULT=0` the switch is off, as
-// before it joined the set: the unit path scans with NCBI's loop unless its variable is set.
-#[test]
-fn the_default_off_turns_the_switch_off_unless_its_variable_is_set() {
-    let [one, _] = queries();
-    let (expected, _) = tblastn(one, 1, &[]);
-    let (report, stderr) = tblastn(one, 1, &[PREVIOUS]);
-    assert!(report == expected);
-    let [units_bf, _, units_ref, _] = scans(&stderr).expect("a line in the unit path");
-    assert_eq!(units_bf, 0);
-    assert!(units_ref > 0);
-    let (report, stderr) = tblastn(one, 1, &[PREVIOUS, ON]);
-    assert!(report == expected);
-    let [units_bf, _, units_ref, _] = scans(&stderr).expect("a line in the unit path");
-    assert!(units_bf > 0);
-    assert_eq!(units_ref, 0);
 }

@@ -171,8 +171,7 @@ const SLOT_STACK_BYTES: usize = 8 << 20;
 /// code path and change no value NCBI computes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Switches {
-    /// `LOSAT_X_QBATCHPAR` (a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and
-    /// it is not set), or the shadow.
+    /// `LOSAT_X_QBATCHPAR` (a strict-set switch: on unless it is `0`), or the shadow.
     pub on: bool,
     /// `LOSAT_X_QBATCHPARSHADOW` (any value; implies the switch).
     pub shadow: bool,
@@ -212,7 +211,7 @@ impl Switches {
 /// Why a search does not speculate, or stopped to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Off {
-    /// The switch is off (`LOSAT_X_QBATCHPAR=0`, or `LOSAT_X_DEFAULT=0` and it is not set).
+    /// The switch is off (`LOSAT_X_QBATCHPAR=0`).
     NotSet,
     /// A build without the `parallel` feature, or wasm32.
     Build,

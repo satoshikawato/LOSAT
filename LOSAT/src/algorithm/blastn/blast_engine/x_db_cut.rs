@@ -57,8 +57,8 @@
 //! the threads claim the cut's blocks in ordinal order and the results are handed over in that
 //! order; the shadow's second search with blocks of 1 MiB runs the same way.
 //!
-//! `LOSAT_X_BNDBCUT` is a switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set. It acts for every BLASTN task with `-db` (megablast, blastn, dc-megablast,
+//! `LOSAT_X_BNDBCUT` is a switch of the strict set: on unless it is `0`.
+//! It acts for every BLASTN task with `-db` (megablast, blastn, dc-megablast,
 //! blastn-short).
 //!
 //! `LOSAT_X_BNDBCUTSHADOW=1` (shadow mode, implies the switch): each `-db` search (at one thread too,
@@ -98,8 +98,8 @@ pub(super) enum XDbCut {
 
 // No NCBI counterpart: reads the LOSAT_X_BNDBCUT / LOSAT_X_BNDBCUTSHADOW switches once; it does not
 // change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BNDBCUT): a strict-set switch, on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-/// and it is not set; `LOSAT_X_BNDBCUTSHADOW` (any value) selects the shadow mode.
+/// EXPERIMENT (LOSAT_X_BNDBCUT): a strict-set switch, on unless it is `0`;
+/// `LOSAT_X_BNDBCUTSHADOW` (any value) selects the shadow mode.
 pub(super) fn x_bn_db_cut() -> XDbCut {
     static MODE: OnceLock<XDbCut> = OnceLock::new();
     *MODE.get_or_init(|| {

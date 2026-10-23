@@ -65,7 +65,7 @@
 //! queue is 64 words deep (32 was 1 % slower, 16 the old depth).
 //!
 //! The variables are read once. `LOSAT_X_MBFILL` (a switch of the strict set,
-//! `utils/xswitch.rs`: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) runs this
+//! `utils/xswitch.rs`: on unless it is `0`) runs this
 //! module. `LOSAT_X_MBFILLSHADOW` (set to any value; not in the strict set; implies it) runs this
 //! module, builds the arrays again with `x_fill_mb_queued` and panics unless every array and
 //! counter is equal; `main` prints one `[X_SHADOW] MBFILL compared=N` line.

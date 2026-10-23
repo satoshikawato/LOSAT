@@ -1,5 +1,4 @@
-//! `LOSAT_X_TBXLUT` (in the strict set: on unless `=0`, or `LOSAT_X_DEFAULT=0` and it is not set)
-//! on whole runs of the binary: the full
+//! `LOSAT_X_TBXLUT` (in the strict set: on unless `=0`) on whole runs of the binary: the full
 //! lookup table of a TBLASTX query batch, the table of the reference frame loop, filled in place
 //! from per-cell counts (`x_tbx_build_ncbi_lookup` in `src/algorithm/tblastx/lookup/backbone.rs`,
 //! `x_build_direct` in `x_lut_direct.rs`) instead of being copied out of one chain per cell.

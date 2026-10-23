@@ -2,7 +2,7 @@
 //! `src/algorithm/tblastx/x_kmerge.rs`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_TBXKMERGE`
-//! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it on, each unit of the unit path
+//! is `0`. With it on, each unit of the unit path
 //! sorts its own list, a chunk's init list is the k-way merge of its units' lists, the conversion
 //! sorts only the runs of HSPs equal in score and subject range, and each frame list is merged into
 //! the subject's list. `[X_STATS] TBXKMERGE` (printed while the switch or its shadow is on) counts
@@ -38,21 +38,17 @@ fn fasta(name: &str) -> PathBuf {
         .join(name)
 }
 
-const SWITCH: (&str, &str) = ("LOSAT_X_TBXKMERGE", "1");
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_TBXKMERGE", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBXKMERGESHADOW", "1");
-const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const THREADS: [u32; 5] = [1, 2, 4, 8, 16];
 
 /// The binary with the given variables as its only `LOSAT_*` variables that choose a code path.
-/// `LOSAT_X_DEFAULT` of the test's own environment is dropped as well: every test states the
-/// default it runs with. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
-/// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
-/// soon as a search has more than one thread, and it selects nothing. `LOSAT_X_PAIRPARGATE=0`
-/// comes first (a test's own variables may set it again): the fixtures' query batches are short,
-/// so the gate, in the strict set, would send them to the reference frame loop, and these tests
-/// are about the unit path.
+/// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
+/// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
+/// one thread, and it selects nothing. `LOSAT_X_PAIRPARGATE=0` comes first (a test's own
+/// variables may set it again): the fixtures' query batches are short, so the gate, in the strict
+/// set, would send them to the reference frame loop, and these tests are about the unit path.
 fn losat(switches: &[(&str, &str)]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
@@ -179,27 +175,19 @@ fn the_switch_merges_the_lists_and_gives_ncbis_report() {
 // ```c
 // Blast_HSPListSortByScore(combined_hsp_list);
 // ```
-// `LOSAT_X_TBXKMERGE=0` and `LOSAT_X_DEFAULT=0` turn the switch off: no TBXKMERGE line, the same
-// report. `LOSAT_X_DEFAULT=0` with `LOSAT_X_TBXKMERGE=1` merges with the switch on the paths of the
-// previous default.
+// `LOSAT_X_TBXKMERGE=0` turns the switch off: no TBXKMERGE line, the same report.
 #[test]
-fn the_switch_follows_its_variable_and_the_global_one() {
+fn the_switch_follows_its_variable() {
     let expected = ncbi_report();
     for threads in [1, 4] {
-        for off in [SWITCH_OFF, PREVIOUS] {
-            let what = format!("{off:?} threads {threads}");
-            let (report, stderr) = pair(threads, &[STATS, off]);
-            assert_eq!(report, expected, "{what}");
-            assert_eq!(
-                line(&stderr, "[X_STATS] TBXKMERGE "),
-                None,
-                "{what}:\n{stderr}"
-            );
-        }
-        let what = format!("previous paths with the switch set, threads {threads}");
-        let (report, stderr) = pair(threads, &[STATS, PREVIOUS, SWITCH]);
+        let what = format!("{SWITCH_OFF:?} threads {threads}");
+        let (report, stderr) = pair(threads, &[STATS, SWITCH_OFF]);
         assert_eq!(report, expected, "{what}");
-        assert_kmerge_ran(&stderr, 1, &what);
+        assert_eq!(
+            line(&stderr, "[X_STATS] TBXKMERGE "),
+            None,
+            "{what}:\n{stderr}"
+        );
     }
 }
 

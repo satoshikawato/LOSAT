@@ -123,8 +123,8 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
 
-/// No NCBI counterpart: reads LOSAT_X_PAIRPARFOLD once (a strict-set switch: on unless it is `0`,
-/// or `LOSAT_X_DEFAULT=0` and it is not set). It does not change any value NCBI computes.
+/// No NCBI counterpart: reads LOSAT_X_PAIRPARFOLD once (a strict-set switch: on unless it is `0`).
+/// It does not change any value NCBI computes.
 fn switch_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRPARFOLD"))
@@ -142,10 +142,9 @@ pub(super) fn partitions(threads: usize) -> Option<usize> {
     (switch_on() && threads >= 2).then(|| threads.min(DIAGHASH_NUM_BUCKETS))
 }
 
-/// No NCBI counterpart: reads LOSAT_X_PAIRPARHOME once (a strict-set switch: on unless it is `0`,
-/// or `LOSAT_X_DEFAULT=0` and it is not set): the participants of a partitioned stage fold
-/// their home partitions (`seed_stage_home`) instead of any partition they can lock. It does not
-/// change any value NCBI computes.
+/// No NCBI counterpart: reads LOSAT_X_PAIRPARHOME once (a strict-set switch: on unless it is
+/// `0`): the participants of a partitioned stage fold their home partitions (`seed_stage_home`)
+/// instead of any partition they can lock. It does not change any value NCBI computes.
 fn home_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRPARHOME"))

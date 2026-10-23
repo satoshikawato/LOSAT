@@ -60,9 +60,7 @@ fn command(env: &[(&str, &str)]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy();
-        if (name_text.starts_with("LOSAT_") && name_text != "LOSAT_X_DEFAULT")
-            || name_text.starts_with("NCBI")
-        {
+        if name_text.starts_with("LOSAT_") || name_text.starts_with("NCBI") {
             command.env_remove(name);
         }
     }

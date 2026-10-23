@@ -104,9 +104,9 @@
 //! for every subject the direct loop scans, and `main` prints `[X_SHADOW] BXHITBF subjects_compared=N`
 //! at exit beside BXSCAN's line, N the subjects this loop scanned.
 //!
-//! EXPERIMENT (LOSAT_X_BXUNGAPSENT, `x_ungap_sent.rs`): for a subject on that path the direct loop's
-//! two-hit extension is the sentinel walks, in instances of their own (`x_word_finder_direct_sent`,
-//! never inlined); the loops without it keep their code.
+//! EXPERIMENT (LOSAT_X_BXUNGAPSENT, `x_ungap_sent.rs`): for a subject on that path the direct
+//! loop's two-hit extension is the sentinel walks, in instances of their own
+//! (`x_word_finder_direct_sent`, never inlined); the loops without it keep their code.
 
 use super::x_ungap_sent::XSent;
 use super::*;
@@ -925,8 +925,21 @@ mod tests {
             // branch-free scan and the branch-free two-hit test, each on its own table, compared
             // alike.
             let mut tables = ARMS.map(|_| Diagonals::new(length, window).unwrap());
+            // EXPERIMENT (LOSAT_X_BXUNGAPSENT): the same arms with the sentinel walks, without and
+            // with the shadow's comparison.
+            let mut sent_tables = ARMS.map(|_| {
+                [
+                    Diagonals::new(length, window).unwrap(),
+                    Diagonals::new(length, window).unwrap(),
+                ]
+            });
+            let lead: Vec<u8> = std::iter::once(0).chain(subject.iter().copied()).collect();
             for state in 0..4 {
-                for d in tables.iter_mut().chain([&mut reference]) {
+                for d in tables
+                    .iter_mut()
+                    .chain(sent_tables.iter_mut().flatten())
+                    .chain([&mut reference])
+                {
                     if state == 2 {
                         d.offset = 536_870_910;
                         d.entries.fill(entry(123));
@@ -974,6 +987,31 @@ mod tests {
                         d.offset == reference.offset && d.entries == reference.entries,
                         "window={window} state={state} scan_bf={branch_free} hit_bf={hit_bf}"
                     );
+                }
+                for (&(branch_free, hit_bf), pair) in ARMS.iter().zip(&mut sent_tables) {
+                    for (d, shadow) in pair.iter_mut().zip([false, true]) {
+                        let hits = x_word_finder_direct_sent(
+                            &batch,
+                            &params,
+                            &options,
+                            &subject,
+                            &lookup,
+                            d,
+                            branch_free,
+                            hit_bf,
+                            XSent::for_test(&batch.sequence_start, &lead, shadow),
+                        )
+                        .unwrap();
+                        let arm = format!(
+                            "window={window} state={state} scan_bf={branch_free} \
+                             hit_bf={hit_bf} sent shadow={shadow}"
+                        );
+                        assert_eq!(hits, plain, "{arm}");
+                        assert!(
+                            d.offset == reference.offset && d.entries == reference.entries,
+                            "{arm}"
+                        );
+                    }
                 }
             }
             // EXPERIMENT (LOSAT_X_BXHITBF): the edge of the branch-free test's range. At the most

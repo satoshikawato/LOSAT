@@ -493,6 +493,16 @@ mod tests {
                 let bytes = stores.residues_with_sentinel(oid);
                 &bytes[..bytes.len() - 1]
             };
+            // EXPERIMENT (LOSAT_X_BXUNGAPSENT): the same bytes with the sentinel before them.
+            let with_sentinels =
+                |oid: usize| [&[0u8][..], stores.residues_with_sentinel(oid)].concat();
+            for oid in 0..n {
+                assert_eq!(
+                    stores.x_residues_with_sentinels(oid),
+                    with_sentinels(oid),
+                    "{name} store {oid}"
+                );
+            }
             // One byte: a block of one sequence; 200: a few; 1 MiB: the rest of the volume.
             for block_bytes in [1, 200, 1 << 20] {
                 let stream =
@@ -509,6 +519,11 @@ mod tests {
                         stores.residues_with_sentinel(oid),
                         "{name} {block_bytes} {oid}"
                     );
+                    assert_eq!(
+                        &*view.x_encoded_with_sentinels(oid),
+                        with_sentinels(oid),
+                        "{name} {block_bytes} {oid}"
+                    );
                     assert_eq!(&*view.encoded(oid), without_sentinel(oid));
                     assert_eq!(view.length(oid), stores.length(oid));
                     assert_eq!(&*view.read_encoded(oid).unwrap(), without_sentinel(oid));
@@ -520,6 +535,11 @@ mod tests {
                             assert_eq!(
                                 block.residues_with_sentinel(oid),
                                 stores.residues_with_sentinel(oid),
+                                "{name} {first}..{end} {oid}"
+                            );
+                            assert_eq!(
+                                block.x_residues_with_sentinels(oid),
+                                with_sentinels(oid),
                                 "{name} {first}..{end} {oid}"
                             );
                         }

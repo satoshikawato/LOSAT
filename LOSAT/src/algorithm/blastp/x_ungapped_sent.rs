@@ -27,6 +27,9 @@
 //!   a score is never below `best - 255` (a step costs at most 128 and the walk stops once
 //!   `best - score` reaches `dropoff <= 127`).
 //!
+//! BLASTX's seed loops call the same extension, [`two_hit_in`] with `TAIL` 1, on buffers laid out
+//! differently (`blastx/x_ungap_sent.rs`, whose header gives the argument for them).
+//!
 //! In a replay of the closure on 4.3 million captured candidates of an OrthoFinder job (line F,
 //! `v4-F/results/s1/p2`, arm V6) every result equalled the reference's, at 204.7 instead of 264.7
 //! cycles per candidate.

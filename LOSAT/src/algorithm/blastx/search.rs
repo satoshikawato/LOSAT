@@ -1400,8 +1400,8 @@ fn compute_subject(
     worker_probe("start", oid);
     let mut containment = Vec::new();
     // EXPERIMENT (LOSAT_X_BXUNGAPSENT): for a batch on the path of the seed loops' sentinel walks,
-    // the subject with the sentinel before its residues too (`seed/x_ungap_sent.rs`); `encoded` is
-    // the same bytes either way.
+    // the subject with the sentinel before its residues too (`blastx/x_ungap_sent.rs`);
+    // `encoded` is the same bytes either way.
     let x_lead = batch.x_ungap_sent;
     let x_buffer = if x_lead {
         subjects.x_encoded_with_sentinels(oid)
@@ -1487,13 +1487,7 @@ fn compute_subject(
             || super::seed::x_seed_diag::x_bxdiag_mode() != 0)
     {
         let x_sent = if x_lead {
-            super::seed::x_ungap_sent::XSent::new(
-                &batch.sequence_start,
-                x_lead,
-                options.word_size,
-                options.window_size,
-                &x_buffer,
-            )
+            super::seed::x_ungap_sent::XSent::new(&batch.sequence_start, &x_buffer)
         } else {
             None
         };

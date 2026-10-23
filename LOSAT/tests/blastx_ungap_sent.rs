@@ -24,7 +24,9 @@
 //! off the path and print no line.
 //!
 //! The query is the first 30,000 bases of AP027131 (genetic code 4), the subjects the first 150
-//! proteins of the related AP027133, so there are long walks and HSPs.
+//! proteins of the related AP027133, so there are long walks and HSPs. Its lookup table has few
+//! hits per cell, so the direct loop runs by default; an arm forces the fused loop
+//! (`LOSAT_X_BXDIAG=1 LOSAT_X_BXDIAGMIN=0`), and `LOSAT_X_REACH` shows which side each run took.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -35,6 +37,8 @@ const SHADOW: (&str, &str) = ("LOSAT_X_BXUNGAPSENTSHADOW", "1");
 const DIRECT: (&str, &str) = ("LOSAT_X_BXDIAG", "0");
 const NO_HITBF: (&str, &str) = ("LOSAT_X_BXHITBF", "0");
 const NO_STREAM: (&str, &str) = ("LOSAT_X_BXDBSTREAM", "0");
+/// The fused loop on every CPU and every table (the per-hit cell test without AVX2).
+const FUSED: [(&str, &str); 2] = [("LOSAT_X_BXDIAG", "1"), ("LOSAT_X_BXDIAGMIN", "0")];
 const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 fn fixture(name: &str) -> PathBuf {
@@ -201,14 +205,43 @@ fn blastx(args: &[&str], env: &[(&str, &str)]) -> Run {
     }
 }
 
-/// Default, `=0`, the shadow (fused and direct loops) and `LOSAT_X_DEFAULT=0` give the same
-/// report, on `-subject` and `-db` at 1 and 2 threads; the shadow compares extensions.
+/// The sides of `switch` that a run with `LOSAT_X_REACH=dir` recorded: (new, ref).
+fn reached(dir: &Path, switch: &str) -> (bool, bool) {
+    let (mut new, mut reference) = (false, false);
+    for file in std::fs::read_dir(dir).expect("the reach directory") {
+        let text = std::fs::read_to_string(file.unwrap().path()).unwrap();
+        for row in text.lines().skip(1) {
+            let f: Vec<&str> = row.split('\t').collect();
+            if f[0] == switch {
+                new |= f[1] == "1";
+                reference |= f[2] == "1";
+            }
+        }
+    }
+    (new, reference)
+}
+
+/// `blastx` with `env` and `LOSAT_X_REACH` set to a directory of its own: the run and its reach
+/// directory (removed by the caller).
+fn blastx_reach(args: &[&str], env: &[(&str, &str)]) -> (Run, PathBuf) {
+    let dir = temp_path("reach");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut env = env.to_vec();
+    env.push(("LOSAT_X_REACH", dir.to_str().unwrap()));
+    (blastx(args, &env), dir)
+}
+
+/// Default, `=0`, the shadow (by default, in the fused loop, in the direct loop with and without
+/// LOSAT_X_BXHITBF, and for `-db` from the store) and `LOSAT_X_DEFAULT=0` give the same report, on
+/// `-subject` and `-db`; at 2 threads the default and the shadow. The shadow compares extensions
+/// and records the switch's new side (and LOSAT_X_BXDIAG's in the fused loop).
 #[test]
 fn reports_do_not_depend_on_the_sentinel_extension() {
     let inputs = Inputs::new();
     let query = inputs.query.to_str().unwrap();
     let subject = inputs.subject.to_str().unwrap();
     let db = inputs.db.to_str().unwrap();
+    let fused_shadow = [SHADOW, FUSED[0], FUSED[1]];
     for (source, target) in [("-subject", subject), ("-db", db)] {
         for threads in ["1", "2"] {
             let args = [
@@ -228,47 +261,52 @@ fn reports_do_not_depend_on_the_sentinel_extension() {
             let on = blastx(&args, &[]);
             assert_eq!(on.code, Some(0), "{source} n{threads}: {}", on.stderr);
             assert!(!on.stdout.is_empty(), "{source} n{threads}: no hits");
-            for (label, env) in [
-                ("off", &[OFF][..]),
-                ("shadow", &[SHADOW][..]),
-                ("shadow direct", &[SHADOW, DIRECT][..]),
-                ("shadow direct no-bf", &[SHADOW, DIRECT, NO_HITBF][..]),
-                ("shadow store", &[SHADOW, NO_STREAM][..]),
-                ("LOSAT_X_DEFAULT=0", &[DEFAULT_OFF][..]),
-            ] {
-                let run = blastx(&args, env);
-                assert_eq!(
-                    run.code,
-                    Some(0),
-                    "{source} n{threads} {label}: {}",
-                    run.stderr
-                );
-                assert!(
-                    run.stdout == on.stdout,
-                    "{source} n{threads} {label}: report differs"
-                );
-                assert_eq!(run.messages(), on.messages(), "{source} n{threads} {label}");
+            let mut arms: Vec<(&str, &[(&str, &str)])> =
+                vec![("shadow", &[SHADOW]), ("shadow fused", &fused_shadow)];
+            if threads == "1" {
+                arms.extend([
+                    ("off", &[OFF][..]),
+                    ("shadow direct", &[SHADOW, DIRECT][..]),
+                    ("shadow direct no-bf", &[SHADOW, DIRECT, NO_HITBF][..]),
+                    ("LOSAT_X_DEFAULT=0", &[DEFAULT_OFF][..]),
+                ]);
+                if source == "-db" {
+                    arms.push(("shadow store", &[SHADOW, NO_STREAM][..]));
+                }
+            }
+            for (label, env) in arms {
+                let (run, reach) = blastx_reach(&args, env);
+                let run_name = format!("{source} n{threads} {label}");
+                assert_eq!(run.code, Some(0), "{run_name}: {}", run.stderr);
+                assert!(run.stdout == on.stdout, "{run_name}: report differs");
+                assert_eq!(run.messages(), on.messages(), "{run_name}");
                 if label.starts_with("shadow") {
                     let compared = run.shadow("compared").expect("shadow line");
-                    assert!(
-                        compared > 0,
-                        "{source} n{threads} {label}: nothing compared"
-                    );
+                    assert!(compared > 0, "{run_name}: nothing compared");
                     assert!(run.shadow("subjects").unwrap() > 0);
+                    assert_eq!(
+                        reached(&reach, "LOSAT_X_BXUNGAPSENT"),
+                        (true, false),
+                        "{run_name}"
+                    );
+                    if label == "shadow fused" {
+                        assert!(reached(&reach, "LOSAT_X_BXDIAG").0, "{run_name}");
+                    }
                 } else {
                     assert_eq!(
                         run.shadow("compared"),
                         None,
-                        "{label} printed a shadow line"
+                        "{run_name} printed a shadow line"
                     );
                 }
+                let _ = std::fs::remove_dir_all(&reach);
             }
         }
     }
 }
 
 /// Word size 5 (the compressed table) and the one-hit extension (`-window_size 0`) stay off the
-/// path: the same report, no shadow line.
+/// path: the same report, no shadow line, the switch's reference side recorded.
 #[test]
 fn word_size_5_and_one_hit_stay_off_the_path() {
     let inputs = Inputs::new();
@@ -288,7 +326,7 @@ fn word_size_5_and_one_hit_stay_off_the_path() {
         args.extend_from_slice(extra);
         let on = blastx(&args, &[]);
         assert_eq!(on.code, Some(0), "{extra:?}: {}", on.stderr);
-        let shadow = blastx(&args, &[SHADOW]);
+        let (shadow, reach) = blastx_reach(&args, &[SHADOW]);
         assert_eq!(shadow.code, Some(0), "{extra:?}: {}", shadow.stderr);
         assert!(shadow.stdout == on.stdout, "{extra:?}: report differs");
         assert_eq!(
@@ -296,5 +334,11 @@ fn word_size_5_and_one_hit_stay_off_the_path() {
             None,
             "{extra:?}: shadow line off the path"
         );
+        assert_eq!(
+            reached(&reach, "LOSAT_X_BXUNGAPSENT"),
+            (false, true),
+            "{extra:?}"
+        );
+        let _ = std::fs::remove_dir_all(&reach);
     }
 }

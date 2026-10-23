@@ -276,3 +276,29 @@ fn encode(record: &FastaRecord) -> Vec<u8> {
         .map(aa_char_to_ncbistdaa)
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::algorithm::blastx::input::parse_fasta;
+
+    // No NCBI counterpart: LOSAT's encoding of `-subject` records (`encoded_with_sentinel` is the
+    // reference).
+    /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): a FASTA subject read with both sentinels is the record's
+    /// encoding with the byte 0 added before it, for records of 0, 1 and more letters, lower case
+    /// and letters outside the alphabet included.
+    #[test]
+    fn fasta_subjects_with_both_sentinels_add_the_byte_before() {
+        let records =
+            parse_fasta(b">a\nMKV*LLAx\n>b\nW\n>c\n\n>d\nbjouzBJOUZ-\n", true, false).unwrap();
+        let subjects = Subjects::Fasta(&records);
+        for oid in 0..records.len() {
+            let both = subjects.x_encoded_with_sentinels(oid);
+            assert_eq!(
+                *both,
+                [&[0u8][..], &subjects.encoded_with_sentinel(oid)].concat(),
+                "{oid}"
+            );
+        }
+    }
+}

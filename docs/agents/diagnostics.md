@@ -1933,7 +1933,8 @@ Rebuilding less:
   the same best, length and stop. The word loop is unrolled for three letters and the walks take two steps a
   loop. A block with another word size (blastp-fast, `-word_size`), an X-drop outside 1..=127 or a code
   >= 32, and a subject with a code >= 32, run the closure of `LOSAT_X_BPUNGAP`; so do `-window_size 0` and
-  `LOSAT_X_BPSEED=0` (no fused loop). BLASTX has its own switch, `LOSAT_X_BXUNGAPSENT`.
+  `LOSAT_X_BPSEED=0` (no fused loop). BLASTX has its own switch, `LOSAT_X_BXUNGAPSENT`; its reference
+  extension keeps `LOSAT_X_BPUNGAP`.
   Measured 2026-10-23 on the workstation (node 1, CPU 40 for one thread and CPUs 40-47 for eight, their HT siblings
   idle, warmed 3 s before every run, arm order reversed every other round, one warm-up round + 8 rounds at one
   thread and 2 rounds at eight, medians of the per-round ratios against dev 7cfec941, the binary before the switch;
@@ -4798,16 +4799,20 @@ Scheduling (each value computed by one thread with the original function; order 
   closure (fused loop) or a loop instance (direct loop) of its own. The six-frame query buffer has a sentinel
   before each frame and after the last, and each subject is read with a sentinel at each end (a database's
   bytes as they are stored, the sequence before ending with one; a FASTA subject encoded with one added
-  before it), so a step on a sentinel (-128 in the byte table) stops each walk at the step where the
-  reference's bound or sentinel stops it, with the same best, length and stop. The checks of
-  `LOSAT_X_BPUNGAP` are made once: residue codes below 32 and the sentinels per query batch and per subject;
-  the X-drop (1..=127) per candidate. Off the path (the reference extension): `-word_size 5`,
-  `-window_size 0` (one-hit), a query batch of more than `i32::MAX / 16` letters, a candidate whose
-  context's X-drop is outside 1..=127, and the diagnostic stages that trace the seeds.
+  before it), so a step on a sentinel (-128 in the byte table) stops each walk where the reference's
+  sentinel or bound stops it (the left walk at the bound one step later, on the buffer's first byte), with
+  the same best, length and stop. The checks of `LOSAT_X_BPUNGAP` are made once: the word size, the window,
+  residue codes below 32 and the sentinels per query batch, codes and sentinels per subject; the X-drop
+  (1..=127) per candidate (the X-drops are the contexts' parameters). Off the path (the reference
+  extension): a word size other than 3 (`-word_size 5`), `-window_size 0` (one-hit), a query batch of more
+  than `i32::MAX / 16` letters, a candidate whose context's X-drop is outside 1..=127, and the searches
+  where `word_finder` runs (the diagnostic stages that trace the seeds; `LOSAT_X_BXSCAN=0` where the fused
+  loop does not act).
 - `LOSAT_X_BXUNGAPSENTSHADOW=1` shadow of `LOSAT_X_BXUNGAPSENT` (turns the path on): every extension of the
   path also runs `extend_two_hit_blosum62` and the results (score, offsets, length, `right_extend`,
   `s_last_off`, and the early return) must be equal; any difference panics with the inputs. One line at exit,
-  after a subject took the path: `[X_SHADOW] BXUNGAPSENT subjects= compared=`.
+  after a subject took the path: `[X_SHADOW] BXUNGAPSENT subjects= compared=` (`subjects=`: the pairs of a
+  query batch and a subject made ready for the path).
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (distinct composition-adjustment inputs),

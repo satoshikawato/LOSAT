@@ -66,9 +66,11 @@
 //! `branch_free`, blastp's `x_scan_cells_bf`): the same cells in the same order.
 //!
 //! EXPERIMENT (LOSAT_X_BXUNGAPSENT, `x_ungap_sent.rs`): for a subject on that path the closure's
-//! two-hit extension is the sentinel walks (a closure of its own; the other statements unchanged).
+//! two-hit extension is the sentinel walks, in an instance of its own (`x_word_finder_fused_sent`,
+//! never inlined; the other statements unchanged), so the loop without it keeps its code.
 
 use super::x_seed_scan::x_bxscan_bf;
+use super::x_ungap_sent::XSent;
 use super::*;
 use crate::algorithm::blastp::x_seed_fused::{
     x_cell_test, x_scan_two_hit_with, XContextTable, XDiagMode,
@@ -373,7 +375,7 @@ pub(crate) fn x_word_finder_diag(
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
-    sent: Option<super::x_ungap_sent::XSent<'_>>,
+    sent: Option<XSent<'_>>,
 ) -> Result<Option<Vec<InitHsp>>> {
     let Lookup::Standard(table) = lookup else {
         if x_bxdiag_mode() != 2 {
@@ -401,7 +403,7 @@ pub(crate) fn x_word_finder_diag(
         if mode == XDiagMode::Avx2DeferMasked {
             crate::utils::xreach::x_reach!("LOSAT_X_BXDEFER", table_mode == mode);
         }
-        let (hits, counts) = x_word_finder_fused(
+        let (hits, counts) = x_word_finder_fused_or_sent(
             table_mode,
             x_bxscan_bf(),
             batch,
@@ -429,7 +431,7 @@ pub(crate) fn x_word_finder_diag(
         &mut copy,
         |_| {},
     )?;
-    let (fused, counts) = x_word_finder_fused(
+    let (fused, counts) = x_word_finder_fused_or_sent(
         x_table_mode(mode, x_table_ratio(table).0),
         x_bxscan_bf(),
         batch,
@@ -487,13 +489,52 @@ fn x_add_counts(counts: [u64; 3]) {
     }
 }
 
+// No NCBI counterpart: chooses the instance of the fused loop; both give the reference's hits and
+// table.
+/// EXPERIMENT (LOSAT_X_BXUNGAPSENT): [`x_word_finder_fused`], or with `sent` its instance with the
+/// sentinel walks, [`x_word_finder_fused_sent`].
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_fused_or_sent(
+    mode: XDiagMode,
+    branch_free: bool,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    table: &BlastAaLookupTable,
+    diagonals: &mut Diagonals,
+    sent: Option<XSent<'_>>,
+) -> Result<(Vec<InitHsp>, [u64; 3])> {
+    match sent {
+        Some(sent) => x_word_finder_fused_sent(
+            mode,
+            branch_free,
+            batch,
+            parameters,
+            options,
+            subject,
+            table,
+            diagonals,
+            sent,
+        ),
+        None => x_word_finder_fused(
+            mode,
+            branch_free,
+            batch,
+            parameters,
+            options,
+            subject,
+            table,
+            diagonals,
+        ),
+    }
+}
+
 /// EXPERIMENT (LOSAT_X_BXDIAG): `x_word_finder_direct`'s two-hit stage for one subject on the
 /// standard lookup table `table`, with the scan and the diagonal test fused (cell test `mode`;
 /// the branch-free scan with `branch_free`, LOSAT_X_BXSCANBF); also returns the cells tested in
 /// batches, their hits and the candidates.
 /// `subject` starts at the first residue and keeps the sentinel after the last one.
-/// EXPERIMENT (LOSAT_X_BXUNGAPSENT): with `sent` the two-hit extension is its sentinel walks
-/// (`x_ungap_sent.rs`), in a closure of its own (the closure without it keeps its code).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
 // ```c
 //         wordsize = lookup->word_length;
@@ -521,7 +562,6 @@ fn x_word_finder_fused(
     subject: &[u8],
     table: &BlastAaLookupTable,
     diagonals: &mut Diagonals,
-    sent: Option<super::x_ungap_sent::XSent<'_>>,
 ) -> Result<(Vec<InitHsp>, [u64; 3])> {
     let query = &batch.sequence_start[1..];
     let word = options.word_size;
@@ -533,10 +573,150 @@ fn x_word_finder_fused(
     let length = subject.len().saturating_sub(1);
     let mut hits = Vec::new();
     let counts = x_with_context_table(batch, |contexts| {
-        // The candidate closure with the extension `$extend` (`extend_two_hit_blosum62`'s
-        // arguments and result).
+        x_scan_two_hit_with(
+            mode,
+            branch_free,
+            table,
+            subject,
+            length,
+            &mut diagonals.entries,
+            mask,
+            offset,
+            options.window_size,
+            word,
+            |q, s, previous, diff, entry| {
+                // From here to the end of the closure: the statements of x_word_finder_direct after
+                // the diagonal tests (`previous` = last_hit - diag_offset, `diff` = s - previous).
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560
+                // ```c
+                //                 curr_context = BSearchContextInfo(query_offset, query_info);
+                // ```
+                // The table's index is the binary search's (x_with_context_table); an offset outside
+                // the table (none from the lookup) takes the binary search.
+                let context = contexts.get(q).unwrap_or_else(|| {
+                    batch
+                        .contexts
+                        .partition_point(|c| c.offset as i32 <= q)
+                        .saturating_sub(1)
+                });
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
+                // ```c
+                //                 if (query_offset - diff <
+                //                     query_info->contexts[curr_context].query_offset) {
+                //
+                //                     /* there was no last hit for this diagnol; start a new hit */
+                //                     diag_array[diag_coord].last_hit =
+                //                         subject_offset + diag_offset;
+                //                     continue;
+                //                 }
+                // ```
+                if q - diff < batch.contexts[context].offset as i32 {
+                    entry.set_last_hit(s.wrapping_add(offset));
+                    return;
+                }
+                let p = &parameters[context];
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
+                // ```c
+                //                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
+                //                                               last_hit + wordsize,
+                //                                               subject_offset, query_offset,
+                //                                               cutoffs->x_dropoff,
+                //                                               &hsp_q, &hsp_s,
+                //                                               &hsp_len, use_pssm,
+                //                                               wordsize, &right_extend,
+                // ```
+                let Some(result) = extend_two_hit_blosum62(
+                    query,
+                    subject,
+                    (previous + word) as usize,
+                    s as usize,
+                    q as usize,
+                    p.word_xdrop,
+                    word as usize,
+                ) else {
+                    return;
+                };
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-606
+                // ```c
+                //                 if (score >= cutoffs->cutoff_score)
+                //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+                //                                      query_offset, subject_offset, hsp_len,
+                //                                      score);
+                //
+                //                 /* If an extension to the right happened, reset the last hit
+                //                    so that future hits to this diagonal must start over. */
+                //
+                //                 if (right_extend) {
+                //                     diag_array[diag_coord].flag = 1;
+                //                     diag_array[diag_coord].last_hit =
+                //                         s_last_off - (wordsize - 1) + diag_offset;
+                //                 }
+                //                 /* Otherwise, make the present hit into the previous hit for
+                //                    this diagonal */
+                //                 else {
+                //                     diag_array[diag_coord].last_hit =
+                //                         subject_offset + diag_offset;
+                //                 }
+                // ```
+                let u = result.ungapped_data;
+                if u.score >= p.word_cutoff {
+                    hits.push(InitHsp {
+                        q_seed: q,
+                        s_seed: s,
+                        q_start: u.q_start,
+                        s_start: u.s_start,
+                        length: u.length,
+                        score: u.score,
+                    });
+                }
+                if result.right_extend {
+                    entry.set_flag(1);
+                    entry.set_last_hit((result.s_last_off - (word - 1)).wrapping_add(offset));
+                } else {
+                    entry.set_last_hit(s.wrapping_add(offset));
+                }
+            },
+        )
+    });
+    // The rest of word_finder, unchanged.
+    diagonals.finish_subject(length)?;
+    hits.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then(a.s_start.cmp(&b.s_start))
+            .then(b.length.cmp(&a.length))
+            .then(a.q_start.cmp(&b.q_start))
+    });
+    Ok((hits, counts))
+}
+
+/// EXPERIMENT (LOSAT_X_BXUNGAPSENT): [`x_word_finder_fused`] with the two-hit extension of `sent`
+/// (`x_ungap_sent.rs`), in a function of its own so that the loop without it keeps its code. The
+/// closure's other statements are those of `x_word_finder_fused`'s, in the same order.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-606 (as in
+// `x_word_finder_fused`).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_fused_sent(
+    mode: XDiagMode,
+    branch_free: bool,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    table: &BlastAaLookupTable,
+    diagonals: &mut Diagonals,
+    sent: XSent<'_>,
+) -> Result<(Vec<InitHsp>, [u64; 3])> {
+    let word = options.word_size;
+    let offset = diagonals.offset;
+    let mask = diagonals.entries.len() as i32 - 1;
+    let length = subject.len().saturating_sub(1);
+    let mut hits = Vec::new();
+    let counts = x_with_context_table(batch, |contexts| {
+        // The candidate closure with the extension `two_hit::<$shadow>`.
         macro_rules! scan {
-            ($extend:expr) => {
+            ($shadow:literal) => {
                 x_scan_two_hit_with(
                     mode,
                     branch_free,
@@ -549,79 +729,31 @@ fn x_word_finder_fused(
                     options.window_size,
                     word,
                     |q, s, previous, diff, entry| {
-                        // From here to the end of the closure: the statements of x_word_finder_direct after
-                        // the diagonal tests (`previous` = last_hit - diag_offset, `diff` = s - previous).
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560
-                        // ```c
-                        //                 curr_context = BSearchContextInfo(query_offset, query_info);
-                        // ```
-                        // The table's index is the binary search's (x_with_context_table); an offset outside
-                        // the table (none from the lookup) takes the binary search.
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560-573
+                        // (as in `x_word_finder_fused`)
                         let context = contexts.get(q).unwrap_or_else(|| {
                             batch
                                 .contexts
                                 .partition_point(|c| c.offset as i32 <= q)
                                 .saturating_sub(1)
                         });
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
-                        // ```c
-                        //                 if (query_offset - diff <
-                        //                     query_info->contexts[curr_context].query_offset) {
-                        //
-                        //                     /* there was no last hit for this diagnol; start a new hit */
-                        //                     diag_array[diag_coord].last_hit =
-                        //                         subject_offset + diag_offset;
-                        //                     continue;
-                        //                 }
-                        // ```
                         if q - diff < batch.contexts[context].offset as i32 {
                             entry.set_last_hit(s.wrapping_add(offset));
                             return;
                         }
                         let p = &parameters[context];
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
-                        // ```c
-                        //                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
-                        //                                               last_hit + wordsize,
-                        //                                               subject_offset, query_offset,
-                        //                                               cutoffs->x_dropoff,
-                        //                                               &hsp_q, &hsp_s,
-                        //                                               &hsp_len, use_pssm,
-                        //                                               wordsize, &right_extend,
-                        // ```
-                        let Some(result) = $extend(
-                            query,
-                            subject,
+                        // (`x_ungap_sent.rs`)
+                        let Some(result) = sent.two_hit::<$shadow>(
                             (previous + word) as usize,
                             s as usize,
                             q as usize,
                             p.word_xdrop,
-                            word as usize,
                         ) else {
                             return;
                         };
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-606
-                        // ```c
-                        //                 if (score >= cutoffs->cutoff_score)
-                        //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                        //                                      query_offset, subject_offset, hsp_len,
-                        //                                      score);
-                        //
-                        //                 /* If an extension to the right happened, reset the last hit
-                        //                    so that future hits to this diagonal must start over. */
-                        //
-                        //                 if (right_extend) {
-                        //                     diag_array[diag_coord].flag = 1;
-                        //                     diag_array[diag_coord].last_hit =
-                        //                         s_last_off - (wordsize - 1) + diag_offset;
-                        //                 }
-                        //                 /* Otherwise, make the present hit into the previous hit for
-                        //                    this diagonal */
-                        //                 else {
-                        //                     diag_array[diag_coord].last_hit =
-                        //                         subject_offset + diag_offset;
-                        //                 }
-                        // ```
+                        // (as in `x_word_finder_fused`)
                         let u = result.ungapped_data;
                         if u.score >= p.word_cutoff {
                             hits.push(InitHsp {
@@ -635,7 +767,9 @@ fn x_word_finder_fused(
                         }
                         if result.right_extend {
                             entry.set_flag(1);
-                            entry.set_last_hit((result.s_last_off - (word - 1)).wrapping_add(offset));
+                            entry.set_last_hit(
+                                (result.s_last_off - (word - 1)).wrapping_add(offset),
+                            );
                         } else {
                             entry.set_last_hit(s.wrapping_add(offset));
                         }
@@ -643,20 +777,10 @@ fn x_word_finder_fused(
                 )
             };
         }
-        match sent {
-            None => scan!(extend_two_hit_blosum62),
-            Some(sent) if sent.shadow() => {
-                let extend = |_: &[u8], _: &[u8], s_left, s_right, q_right, dropoff, _: usize| {
-                    sent.two_hit::<true>(s_left, s_right, q_right, dropoff)
-                };
-                scan!(extend)
-            }
-            Some(sent) => {
-                let extend = |_: &[u8], _: &[u8], s_left, s_right, q_right, dropoff, _: usize| {
-                    sent.two_hit::<false>(s_left, s_right, q_right, dropoff)
-                };
-                scan!(extend)
-            }
+        if sent.shadow() {
+            scan!(true)
+        } else {
+            scan!(false)
         }
     });
     // The rest of word_finder, unchanged.
@@ -788,8 +912,15 @@ mod tests {
         let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
         let mut reference = Diagonals::new(length, options.window_size).unwrap();
         let mut fused = Diagonals::new(length, options.window_size).unwrap();
+        // EXPERIMENT (LOSAT_X_BXUNGAPSENT): the instances with the sentinel walks, without and
+        // with the shadow's comparison, each on a table of its own.
+        let mut sent = [
+            Diagonals::new(length, options.window_size).unwrap(),
+            Diagonals::new(length, options.window_size).unwrap(),
+        ];
         start(&mut reference);
         start(&mut fused);
+        sent.iter_mut().for_each(&start);
         let (mut hits, mut counts) = (0, [0u64; 3]);
         for (i, subject) in subjects.iter().enumerate() {
             let expected = word_finder(
@@ -811,13 +942,32 @@ mod tests {
                 subject,
                 table,
                 &mut fused,
-                None,
             )
             .unwrap();
             let run = format!("{mode:?} branch_free={branch_free} subject {i}");
             assert_eq!(actual, expected, "{run}");
             assert_eq!(fused.offset, reference.offset, "{run}");
             assert!(fused.entries == reference.entries, "{run}");
+            let lead: Vec<u8> = std::iter::once(0).chain(subject.iter().copied()).collect();
+            for (table_sent, shadow) in sent.iter_mut().zip([false, true]) {
+                let x = XSent::for_test(&batch.sequence_start, &lead, shadow);
+                let (got, c2) = x_word_finder_fused_sent(
+                    mode,
+                    branch_free,
+                    batch,
+                    params,
+                    options,
+                    subject,
+                    table,
+                    table_sent,
+                    x,
+                )
+                .unwrap();
+                assert_eq!(got, expected, "{run} sent shadow={shadow}");
+                assert_eq!(c2, c, "{run} sent shadow={shadow}");
+                assert_eq!(table_sent.offset, reference.offset, "{run} sent");
+                assert!(table_sent.entries == reference.entries, "{run} sent");
+            }
             hits += actual.len();
             for (total, n) in counts.iter_mut().zip(c) {
                 *total += n;

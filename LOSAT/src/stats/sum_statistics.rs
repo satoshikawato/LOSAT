@@ -533,6 +533,40 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
     }
 }
 
+// No NCBI counterpart (`LOSAT_X_SUMPMEMO`, docs/agents/diagnostics.md): s_BlastSumP calls
+// s_BlastSumPCalc on every call. Its value depends only on `r` and `s`, and a linking round asks
+// again for the chain that was not chosen in the round before: in TBLASTX of two ~650 kb genomes
+// at one thread, 56,780 of 59,452 calls had the arguments of one of the two calls before them.
+// The thread keeps the last two results and returns a stored one when `r` and the bits of `s` are
+// the same.
+/// `blast_sum_p_calc(r, s)`, from the thread's last two results when one has the same arguments.
+fn blast_sum_p_calc_reused(r: i32, s: f64) -> f64 {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_SUMPMEMO")) {
+        return blast_sum_p_calc(r, s);
+    }
+    thread_local! {
+        // The last two (r, bits of s, value), the later one first. r = 0 gives 0.0 for any s.
+        static LAST: std::cell::Cell<[(i32, u64, f64); 2]> =
+            const { std::cell::Cell::new([(0, 0, 0.0); 2]) };
+    }
+    let key = (r, s.to_bits());
+    LAST.with(|last| {
+        let mut l = last.get();
+        if (l[0].0, l[0].1) == key {
+            return l[0].2;
+        }
+        if (l[1].0, l[1].1) == key {
+            l.swap(0, 1);
+            last.set(l);
+            return l[0].2;
+        }
+        let p = blast_sum_p_calc(r, s);
+        last.set([(r, key.1, p), l[0]]);
+        p
+    })
+}
+
 /// Estimate the Sum P-value by calculation or interpolation.
 ///
 /// Approx. 2-1/2 digits accuracy minimum throughout the range of r, s.
@@ -578,7 +612,7 @@ fn blast_sum_p(r: i32, s: f64) -> f64 {
         return 1.0;
     }
 
-    blast_sum_p_calc(r, s)
+    blast_sum_p_calc_reused(r, s)
 }
 
 /// Romberg numerical integrator (NCBI BLAST compatible).
@@ -938,5 +972,30 @@ mod tests {
         let xsum = normalize_score(score, lambda, log_k);
         let expected = lambda * 100.0 - log_k;
         assert!((xsum - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn sum_p_calc_reused_gives_the_computed_value() {
+        // Repeats after one and after two other calls, a key that left the two kept, and a
+        // value of `s` that differs from a kept one in its last bit.
+        let s: f64 = -366.25;
+        let args = [
+            (157, s),
+            (157, s),
+            (12, -20.0),
+            (157, s),
+            (30, -50.5),
+            (12, -20.0),
+            (157, s),
+            (157, f64::from_bits(s.to_bits() + 1)),
+            (157, s),
+        ];
+        for (r, s) in args {
+            assert_eq!(
+                blast_sum_p_calc_reused(r, s).to_bits(),
+                blast_sum_p_calc(r, s).to_bits(),
+                "r {r} s {s}"
+            );
+        }
     }
 }

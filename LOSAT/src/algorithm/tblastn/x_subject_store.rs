@@ -35,6 +35,9 @@ pub(super) enum SubjectLetters<'a> {
     Records(&'a [&'a [u8]]),
     /// EXPERIMENT (LOSAT_X_TBNSTORE): packed subjects, the letters of one made when it is read.
     Packed(&'a [PackedNucleotide]),
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the sequences of a `-db` database, each read where it is
+    /// searched (`x_db_stream.rs`).
+    Stream(&'a super::x_db_stream::XDbStream<'a>),
 }
 
 impl<'a> SubjectLetters<'a> {
@@ -43,6 +46,7 @@ impl<'a> SubjectLetters<'a> {
         match self {
             Self::Records(subjects) => subjects.len(),
             Self::Packed(subjects) => subjects.len(),
+            Self::Stream(stream) => stream.count(),
         }
     }
 
@@ -51,6 +55,7 @@ impl<'a> SubjectLetters<'a> {
         match self {
             Self::Records(subjects) => subjects[oid].len(),
             Self::Packed(subjects) => subjects[oid].len(),
+            Self::Stream(stream) => stream.length(oid),
         }
     }
 
@@ -70,6 +75,7 @@ impl<'a> SubjectLetters<'a> {
                 LETTERS_MADE.fetch_add(1, Ordering::Relaxed);
                 with_buffer(|buffer| subjects[oid].ascii_into(buffer), f)
             }
+            Self::Stream(_) => unreachable!("a database sequence has no lower-case letters"),
         }
     }
 
@@ -80,31 +86,92 @@ impl<'a> SubjectLetters<'a> {
     /// frames alone and neither the letters nor the resolved bases. A database sequence (`-db`)
     /// has no lower-case letters, so its stage always reads its stored bases, as NCBI's (no
     /// subject mask without `-db_soft_mask`).
+    ///
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): a sequence of a `-db` stream is given unread
+    /// (`XPrelimSubject::Stream`): the stage reads it when it makes its plan.
     pub(super) fn with_search_subject<R>(
         &self,
         oid: usize,
         case: bool,
-        f: impl FnOnce(SubjectNt<'_>) -> R,
+        f: impl FnOnce(XPrelimSubject<'_>) -> R,
     ) -> R {
         match self {
             Self::Packed(subjects) if !case || subjects[oid].lowercase().is_empty() => {
-                f(SubjectNt::Packed(&subjects[oid]))
+                f(XPrelimSubject::Nt(SubjectNt::Packed(&subjects[oid])))
             }
             Self::Packed(_) => {
                 // A packed subject whose lower-case letters the stage reads: the letters.
                 crate::utils::xreach::x_reach!("LOSAT_X_TBNSTORE", false);
-                self.with_letters(oid, |letters| f(SubjectNt::Letters(letters)))
+                self.with_letters(oid, |letters| {
+                    f(XPrelimSubject::Nt(SubjectNt::Letters(letters)))
+                })
             }
-            Self::Records(_) => self.with_letters(oid, |letters| f(SubjectNt::Letters(letters))),
+            Self::Records(_) => self.with_letters(oid, |letters| {
+                f(XPrelimSubject::Nt(SubjectNt::Letters(letters)))
+            }),
+            Self::Stream(stream) => f(XPrelimSubject::Stream(stream, oid)),
         }
     }
 
     /// Subject `oid` for the readers of windows (the redo, the traceback's translations, the
     /// report): the record's letters, or its store, whose windows are made when read.
+    /// The search reads a `-db` stream's sequences with `x_nt`; the reports see the reported
+    /// sequences as `Packed`.
     pub(super) fn nt(&self, oid: usize) -> SubjectNt<'a> {
         match self {
             Self::Records(subjects) => SubjectNt::Letters(subjects[oid]),
             Self::Packed(subjects) => SubjectNt::Packed(&subjects[oid]),
+            Self::Stream(_) => unreachable!("a -db stream is read with x_nt"),
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `nt`, where a sequence of a `-db` stream is read (one read)
+    /// and held by the result.
+    pub(super) fn x_nt(&self, oid: usize) -> anyhow::Result<XNt<'a>> {
+        Ok(match self {
+            Self::Stream(stream) => XNt::Read(stream.read(oid)?),
+            _ => XNt::Nt(self.nt(oid)),
+        })
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the subject of one preliminary stage: its letters or its
+/// store, or a sequence of a `-db` stream, which `search_seed::x_scan_plan` reads when it makes
+/// the subject's plan and drops once the plan is made.
+#[derive(Clone, Copy)]
+pub(super) enum XPrelimSubject<'a> {
+    Nt(SubjectNt<'a>),
+    Stream(&'a super::x_db_stream::XDbStream<'a>, usize),
+}
+
+impl XPrelimSubject<'_> {
+    /// The number of bases.
+    pub(super) fn len(&self) -> usize {
+        match self {
+            Self::Nt(subject) => subject.len(),
+            Self::Stream(stream, oid) => stream.length(*oid),
+        }
+    }
+}
+
+impl<'a> From<SubjectNt<'a>> for XPrelimSubject<'a> {
+    fn from(subject: SubjectNt<'a>) -> Self {
+        Self::Nt(subject)
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): a subject for the readers of windows (`SubjectLetters::x_nt`):
+/// a view of the letters or the store, or the sequence of a `-db` stream, read for them.
+pub(super) enum XNt<'a> {
+    Nt(SubjectNt<'a>),
+    Read(PackedNucleotide),
+}
+
+impl XNt<'_> {
+    pub(super) fn get(&self) -> SubjectNt<'_> {
+        match self {
+            Self::Nt(subject) => *subject,
+            Self::Read(store) => SubjectNt::Packed(store),
         }
     }
 }

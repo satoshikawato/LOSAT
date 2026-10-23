@@ -1502,11 +1502,19 @@ fn search(
         // without sequences (BLASTN's `Database memory map file error`,
         // blastn/blast_engine/run.rs) or a sequence file that cannot be read fails that batch,
         // after the reports of the batches before, which are searched without sequences; a run
-        // without such a batch never reads the file.
+        // without such a batch never reads the file. EXPERIMENT (LOSAT_X_TBNDBSTREAM): the
+        // database is checked as `read_stores` reads it, with the same error, and each sequence
+        // is read where it is searched (`x_db_stream.rs`).
+        let mut x_stream = None;
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
                 let read = if database.numbers().num_seqs == 0 {
                     Err(PreliminaryReadError("Database memory map file error").into())
+                } else if super::x_db_stream::x_tbn_db_stream() {
+                    database.x_stream().map(|stream| {
+                        x_stream = Some(stream);
+                        Vec::new()
+                    })
                 } else {
                     database.read_stores()
                 };
@@ -1517,9 +1525,10 @@ fn search(
             }
             None => (Vec::new(), None),
         };
-        let search_letters = match database {
-            Some(_) => SubjectLetters::Packed(&database_stores),
-            None => subject_letters,
+        let search_letters = match (database, &x_stream) {
+            (Some(_), Some(stream)) => SubjectLetters::Stream(stream),
+            (Some(_), None) => SubjectLetters::Packed(&database_stores),
+            (None, _) => subject_letters,
         };
         // The batches before the stop are searched and reported; a reader at the end of its
         // input reads no batch (`!input->End()`), and the reports have no query (an empty
@@ -1822,11 +1831,12 @@ fn search(
             Some(_) => Some(super::database::reported_subjects(
                 &titles,
                 &mut results,
-                &database_stores,
+                search_letters,
             )?),
             None => None,
         };
         drop(database_stores);
+        super::x_db_stream::x_print_shadow_summary();
         // `-db`, XML2 and JSON: the taxid of each reported sequence, and what the taxonomy
         // database says about it (the refusals of both come before any byte).
         let xml_taxa = match (&reported, database) {

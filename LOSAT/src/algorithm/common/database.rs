@@ -234,6 +234,67 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
     Ok(stores)
 }
 
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the checks of `read_nucleotide_stores` without the copy. The
+/// database is read in the same blocks, and every sequence's length and ambiguity runs are read
+/// with the same errors in the same order; only the lengths are kept, by ordinal id. A search
+/// that reads its subjects where it searches them (`x_read_nucleotide_store`) fails the query
+/// batch that the copy would fail, with the same text.
+pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<u32>> {
+    let mut lengths = Vec::with_capacity(db.num_seqs() as usize);
+    let mut next_ordinal = 0u32;
+    while let Some(range) = db.next_block(next_ordinal, STORE_BLOCK_BYTES) {
+        let block = db
+            .read_block(range)
+            .map_err(|error| search_read_error(error, program))?;
+        for i in 0..block.len() {
+            let (length, _) = x_stored_parts(&block, i, range.first_ordinal + i as u32, program)?;
+            lengths.push(u32::try_from(length).expect("a database sequence length fits Uint4"));
+        }
+        next_ordinal = range.end_ordinal();
+    }
+    Ok(lengths)
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): sequence `ordinal` of `db` as `read_nucleotide_stores` packs
+/// it (`PackedNucleotide::from_stored` of the stored 2-bit data, length and ambiguity runs), read
+/// with one read of the sequence file. The errors are those of `read_nucleotide_stores` for the
+/// same sequence.
+pub(crate) fn x_read_nucleotide_store(
+    db: &SeqDb,
+    ordinal: u32,
+    program: &str,
+) -> Result<PackedNucleotide> {
+    let block = db
+        .read_sequence(ordinal)
+        .map_err(|error| search_read_error(error, program))?;
+    let (length, runs) = x_stored_parts(&block, 0, ordinal, program)?;
+    Ok(PackedNucleotide::from_stored(
+        block.nucleotide_packed(0),
+        length,
+        &runs,
+    ))
+}
+
+/// The length and the ambiguity runs of sequence `i` of `block` (ordinal id `ordinal`), with the
+/// errors of `read_nucleotide_stores`.
+fn x_stored_parts(
+    block: &crate::seqdb::SequenceBlock,
+    i: usize,
+    ordinal: u32,
+    program: &str,
+) -> Result<(usize, Vec<crate::seqdb::AmbiguityRun>)> {
+    let length = block
+        .nucleotide_len(i)
+        .map_err(|error| search_read_error(error, program))?;
+    let runs = block.ambiguity_runs(i).map_err(|error| {
+        refusal(
+            &format!("the ambiguity data of database sequence {ordinal} cannot be read ({error})"),
+            program,
+        )
+    })?;
+    Ok((length, runs))
+}
+
 /// NCBI's error of a database file that cannot be read during the preliminary search
 /// (`search_read_error`), with the text after `BLAST engine error: `.
 #[derive(Debug)]

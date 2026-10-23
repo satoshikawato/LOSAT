@@ -1258,7 +1258,7 @@ mod tests {
                         // The plan `x_scan_plan` makes is the reference's too.
                         let scan = x_scan_plan(
                             &[query],
-                            crate::sequence::packed_subject::SubjectNt::Letters(&subject),
+                            crate::sequence::packed_subject::SubjectNt::Letters(&subject).into(),
                             db_gencode,
                             None,
                             11,
@@ -1338,7 +1338,7 @@ mod tests {
             let query: &[u8] = b"MKVLAAGIVGLLLAQWSTRE";
             let scan = x_scan_plan(
                 &[query],
-                crate::sequence::packed_subject::SubjectNt::Letters(&subject),
+                crate::sequence::packed_subject::SubjectNt::Letters(&subject).into(),
                 db_gencode,
                 None,
                 11,
@@ -1473,7 +1473,7 @@ mod tests {
                     }
                     let scan = x_scan_plan(
                         &[query],
-                        SubjectNt::Packed(&store),
+                        SubjectNt::Packed(&store).into(),
                         db_gencode,
                         None,
                         11,
@@ -1500,7 +1500,7 @@ mod tests {
         let scan = |store: &PackedNucleotide, mask_lowercase: bool| {
             x_scan_plan(
                 &[query],
-                SubjectNt::Packed(store),
+                SubjectNt::Packed(store).into(),
                 1,
                 None,
                 11,

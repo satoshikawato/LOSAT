@@ -126,6 +126,11 @@ use std::ops::RangeInclusive;
 /// subjects as the subject flow on the whole pool, where each chunk has enough tasks for the pool,
 /// `blastx/x_subject_flow.rs`) joined the set in the pull request that added it, after it was
 /// verified and timed with it on and off.
+/// `LOSAT_X_BXDIAGKEEP`, `LOSAT_X_BXLUTPOOL` and `LOSAT_X_BXUNITCAP` (BLASTX's memory at many
+/// threads: the workers' diagonal tables kept one per thread, the lookup tables' neighbour lists
+/// shared and their vectors kept between builds, at most K query batches or chunks searched at a
+/// time, `blastx/x_bx_mem.rs`, `tblastx/lookup/x_lut_direct.rs`) joined the set in the pull
+/// request that added them, after they were verified and timed with them on and off.
 /// `LOSAT_X_PAIRPARGATE` (TBLASTX's unit path only for the query batches where it is expected to
 /// be faster than the reference frame loop, `tblastx/x_pair_par.rs`) and `LOSAT_X_TBXLUT` (the
 /// reference loop's full lookup table filled in place from per-cell counts,
@@ -177,12 +182,15 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXDBSTREAM",
     "LOSAT_X_BXDEFER",
     "LOSAT_X_BXDIAG",
+    "LOSAT_X_BXDIAGKEEP",
     "LOSAT_X_BXEVALEMPTY",
     "LOSAT_X_BXFLOW",
     "LOSAT_X_BXHITBF",
+    "LOSAT_X_BXLUTPOOL",
     "LOSAT_X_BXSCANBF",
     "LOSAT_X_BXSUBJFLOW",
     "LOSAT_X_BXUNGAPSENT",
+    "LOSAT_X_BXUNITCAP",
     "LOSAT_X_CTXO1",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",

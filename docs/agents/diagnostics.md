@@ -4819,7 +4819,11 @@ Scheduling (each value computed by one thread with the original function; order 
   million candidates; 36.0 % of dev's cycles in `perf record`). With `=0` the instruction counts equal dev's
   (x1.0000-1.0002) and the machine code of the loops without the switch is dev's (normalized `objdump`);
   cycles x0.996-1.008 (the same code at other addresses). Max RSS within the spread of repeated runs of one
-  binary (14-15 MB on the 50-kb case).
+  binary (14-15 MB on the 50-kb case). On WebAssembly (the serial WASI command, wasm32-wasip1, under Node 26
+  in one process: the module compiled once, a new instance per search, the default and `=0` alternating, one
+  warm-up round + 8 rounds, on one booked workstation core; the direct loop, as there is no AVX2): AP027131 x
+  AP027133 x0.987 (5.63 -> 5.56 s, 8 of 8 rounds below 1), 50 fly cDNAs x the yeast proteome (`-subject`)
+  x0.974 (4.28 -> 4.17 s, 8 of 8), the same output bytes.
 - `LOSAT_X_BXUNGAPSENTSHADOW=1` shadow of `LOSAT_X_BXUNGAPSENT` (turns the path on): every extension of the
   path also runs `extend_two_hit_blosum62` and the results (score, offsets, length, `right_extend`,
   `s_last_off`, and the early return) must be equal; any difference panics with the inputs. One line at exit,

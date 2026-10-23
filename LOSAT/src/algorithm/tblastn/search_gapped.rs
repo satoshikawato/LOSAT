@@ -1068,7 +1068,7 @@ pub(super) fn preliminary_hsps_of_letters(
 ) -> Result<Vec<(usize, GappedHsp)>> {
     preliminary_protein_hsps_for_search(
         queries,
-        SubjectNt::Letters(subject),
+        SubjectNt::Letters(subject).into(),
         db_gencode,
         profile,
         None,

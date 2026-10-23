@@ -616,11 +616,10 @@ fn x_frame_buffer(length: usize) -> Vec<u8> {
 /// or more goes to `utils::x_mapped::X_BYTES` instead (which frees the idle buffers beyond its
 /// bound).
 pub(super) fn x_reuse_frame(mut frame: Vec<u8>) {
-    if frame.capacity() > X_REUSED_FRAME && super::x_db_stream::x_frames_pooled() {
-        crate::utils::x_mapped::X_BYTES.give(&mut frame);
-        return;
-    }
     if frame.capacity() == 0 || frame.capacity() > X_REUSED_FRAME || !x_frame_reuse() {
+        if frame.capacity() > X_REUSED_FRAME && super::x_db_stream::x_frames_pooled() {
+            crate::utils::x_mapped::X_BYTES.give(&mut frame);
+        }
         return;
     }
     // A thread that is ending keeps nothing.

@@ -50,13 +50,14 @@
 //! for the window while that chunk is the one the owner waits for. Once every loop runs,
 //! only units are left for a waiting thread to take.
 //!
-//! `LOSAT_X_TBNFLOWHELP` (on unless `=0`): a thread that waits for the flow after the start (the
-//! owner for the next chunk in order, a thread of the pool for the window) runs the pool's jobs
-//! meanwhile instead of sleeping on the flow's condition (no NCBI counterpart: NCBI's threads do
-//! not wait for one another). Those jobs are units of the subjects being searched, which do not
-//! wait for the flow; a unit's result goes back to its subject by unit number, so the reports are
-//! the same. With `=0` the owner sleeps while a long subject's units wait in the pool, when it
-//! took a short subject first and every chunk it could take is taken.
+//! `LOSAT_X_TBNFLOWHELP` (on unless `=0` or `LOSAT_X_DEFAULT=0`): a thread that waits for the flow
+//! after the start (the owner for the next chunk in order, a thread of the pool for the window)
+//! runs the pool's jobs meanwhile instead of sleeping on the flow's condition (no NCBI
+//! counterpart: NCBI's threads do not wait for one another). Those jobs are units of the subjects
+//! being searched, which do not wait for the flow; a unit's result goes back to its subject by
+//! unit number, so the reports are the same. With `=0` the owner sleeps while a long subject's
+//! units wait in the pool, when it took a short subject first and every chunk it could take is
+//! taken.
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -94,7 +95,7 @@ struct XWaitStats {
 /// `LOSAT_X_TBNFLOWHELP` (strict set; `=0` off): how long a waiting thread that found no job
 /// waits for a change of the flow before it looks for a job again, 100 us unless the variable
 /// gives a number of microseconds from 2 to 1,000,000.
-fn x_flow_help() -> Option<Duration> {
+pub(super) fn x_flow_help() -> Option<Duration> {
     static HELP: OnceLock<Option<Duration>> = OnceLock::new();
     *HELP.get_or_init(|| {
         crate::utils::xswitch::value("LOSAT_X_TBNFLOWHELP", 2..=1_000_000, 100)
@@ -117,6 +118,9 @@ struct XFlowState<T> {
     peak_waiting: usize,
     /// The threads that have entered `work`.
     started: usize,
+    /// Counts the changes above that a waiting thread may wait for (each one notifies), so that
+    /// a thread that let go of the lock to look for the pool's jobs sees one it missed.
+    changes: u64,
 }
 
 impl<T: Send> XOidFlow<T> {
@@ -138,6 +142,7 @@ impl<T: Send> XOidFlow<T> {
                 failed: false,
                 peak_waiting: 0,
                 started: 0,
+                changes: 0,
             }),
             changed: Condvar::new(),
         }
@@ -155,30 +160,42 @@ impl<T: Send> XOidFlow<T> {
     }
 
     /// Waits for a change of the flow after the start (`owner`: the owner of the search, else a
-    /// thread in `work`). With `LOSAT_X_TBNFLOWHELP` a thread of the pool runs one pending job of
-    /// the pool and returns, so that its caller looks at the flow again; when there is
-    /// none it waits for a change for at most `help`, and a change between the look at the pool
-    /// and that wait is seen after `help` at the latest. Every loop of the flow runs by then
-    /// (`start_together`), so the job is a unit of a subject being searched and never a loop.
+    /// thread in `work`; `idle`: the waits of the caller since it last ran a job or took a chunk).
+    /// With `LOSAT_X_TBNFLOWHELP` a thread of the pool runs one pending job of the pool and
+    /// returns, so that its caller looks at the flow again. When there is none it returns at once
+    /// if the flow changed meanwhile, and otherwise waits for a change for at most `help` times
+    /// 2^`idle` (up to 16 times `help`), after which it looks for a job again. Every loop of the
+    /// flow runs by then (`start_together`), so the job is a unit of a subject being searched and
+    /// never a loop.
     fn wait<'s>(
         &'s self,
         state: MutexGuard<'s, XFlowState<T>>,
         owner: bool,
+        idle: &mut u32,
     ) -> MutexGuard<'s, XFlowState<T>> {
         let start = self.stats.as_ref().map(|_| Instant::now());
         let who = usize::from(!owner);
         let (state, helped) = match self.help {
             Some(help) if rayon::current_thread_index().is_some() => {
+                let seen = state.changes;
                 drop(state);
                 if let Some(rayon::Yield::Executed) = rayon::yield_now() {
+                    *idle = 0;
                     (self.lock(), true)
                 } else {
-                    let state = self
-                        .changed
-                        .wait_timeout(self.lock(), help)
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .0;
-                    (state, false)
+                    let state = self.lock();
+                    if state.changes != seen {
+                        (state, false)
+                    } else {
+                        let timeout = help * (1 << (*idle).min(4));
+                        *idle += 1;
+                        let state = self
+                            .changed
+                            .wait_timeout(state, timeout)
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .0;
+                        (state, false)
+                    }
                 }
             }
             _ => (
@@ -200,12 +217,13 @@ impl<T: Send> XOidFlow<T> {
         state
     }
 
-    /// Diagnostic (`LOSAT_X_STATS`): the waits of the flow, in milliseconds, for stderr.
+    /// Diagnostic (`LOSAT_X_STATS`): the waits of the flow, in milliseconds, for stderr (one line
+    /// per flow, that is per query batch searched by the flow).
     pub(super) fn stats_line(&self) -> Option<String> {
         let stats = self.stats.as_ref()?;
         let ms = |v: &AtomicU64| v.load(Ordering::Relaxed) as f64 / 1e6;
         Some(format!(
-            "[X_TBNFLOWHELP] help={} owner_idle_ms={:.1} owner_help_ms={:.1} owner_jobs={} workers_idle_ms={:.1} workers_help_ms={:.1} workers_jobs={}",
+            "[X_STATS] TBNFLOWHELP help={} owner_idle_ms={:.1} owner_help_ms={:.1} owner_jobs={} workers_idle_ms={:.1} workers_help_ms={:.1} workers_jobs={}",
             self.help.map_or(0, |d| d.as_micros()),
             ms(&stats.idle_ns[0]),
             ms(&stats.help_ns[0]),
@@ -251,6 +269,7 @@ impl<T: Send> XOidFlow<T> {
                 if std::thread::panicking() {
                     let mut state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
                     state.failed = true;
+                    state.changes += 1;
                     drop(state);
                     self.0.changed.notify_all();
                 }
@@ -261,6 +280,7 @@ impl<T: Send> XOidFlow<T> {
         let mut state = self.lock();
         state.finished.insert(index, lists);
         state.peak_waiting = state.peak_waiting.max(state.finished.len());
+        state.changes += 1;
         drop(state);
         self.changed.notify_all();
     }
@@ -270,8 +290,10 @@ impl<T: Send> XOidFlow<T> {
     pub(super) fn work(&self, search: &(impl Fn(usize) -> T + Sync)) {
         let mut state = self.lock();
         state.started += 1;
+        state.changes += 1;
         self.changed.notify_all();
         state = self.start_together(state);
+        let mut idle = 0;
         loop {
             if state.closed || state.failed || state.next >= self.chunks.len() {
                 return;
@@ -279,9 +301,10 @@ impl<T: Send> XOidFlow<T> {
             if let Some(index) = self.take(&mut state) {
                 drop(state);
                 self.search_chunk(index, search);
+                idle = 0;
                 state = self.lock();
             } else {
-                state = self.wait(state, false);
+                state = self.wait(state, false, &mut idle);
             }
         }
     }
@@ -294,6 +317,7 @@ impl<T: Send> XOidFlow<T> {
         search: &(impl Fn(usize) -> T + Sync),
     ) -> Result<Option<Vec<T>>> {
         let mut state = self.start_together(self.lock());
+        let mut idle = 0;
         loop {
             let wanted = state.taken_back;
             if wanted >= self.chunks.len() {
@@ -301,6 +325,7 @@ impl<T: Send> XOidFlow<T> {
             }
             if let Some(lists) = state.finished.remove(&wanted) {
                 state.taken_back += 1;
+                state.changes += 1;
                 drop(state);
                 self.changed.notify_all();
                 return Ok(Some(lists));
@@ -313,16 +338,20 @@ impl<T: Send> XOidFlow<T> {
             if let Some(index) = self.take(&mut state) {
                 drop(state);
                 self.search_chunk(index, search);
+                idle = 0;
                 state = self.lock();
             } else {
-                state = self.wait(state, true);
+                state = self.wait(state, true, &mut idle);
             }
         }
     }
 
     /// Stops the threads: no chunk is taken after this (the owner's end, error or panic).
     pub(super) fn close(&self) {
-        self.lock().closed = true;
+        let mut state = self.lock();
+        state.closed = true;
+        state.changes += 1;
+        drop(state);
         self.changed.notify_all();
     }
 
@@ -469,7 +498,10 @@ mod tests {
         let owner = AtomicUsize::new(usize::MAX);
         let owner_parts = AtomicUsize::new(0);
         let parts_run = AtomicUsize::new(0);
-        // Subject 0 is long (64 parts of 1 ms on the pool); the others are short.
+        let wait_for_owner = std::sync::atomic::AtomicBool::new(false);
+        // Subject 0 is long (64 parts of 1 ms on the pool); the others are short. With the help
+        // the other thread's parts wait (10 s at most) until the owner has run one, so that a
+        // slow owner cannot find them all run.
         let search = |subject: usize| {
             if subject == 0 {
                 (0..64).into_par_iter().with_max_len(1).for_each(|_| {
@@ -477,6 +509,13 @@ mod tests {
                     parts_run.fetch_add(1, Ordering::SeqCst);
                     if rayon::current_thread_index() == Some(owner.load(Ordering::SeqCst)) {
                         owner_parts.fetch_add(1, Ordering::SeqCst);
+                    } else if wait_for_owner.load(Ordering::SeqCst) {
+                        let start = Instant::now();
+                        while owner_parts.load(Ordering::SeqCst) == 0
+                            && start.elapsed() < Duration::from_secs(10)
+                        {
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
                     }
                 });
             }
@@ -489,6 +528,7 @@ mod tests {
         for help in HELPS {
             owner_parts.store(0, Ordering::SeqCst);
             parts_run.store(0, Ordering::SeqCst);
+            wait_for_owner.store(help.is_some(), Ordering::SeqCst);
             let flow = XOidFlow::new((0..12).map(|i| i..i + 1).collect(), 2, 1).x_with_help(help);
             let received = pool.install(|| {
                 rayon::scope(|scope| {

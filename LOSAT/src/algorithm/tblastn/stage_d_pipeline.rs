@@ -2485,6 +2485,11 @@ fn run_preliminary_subjects(
     // they are free (`x_oid_flow.rs`); the lists come back below chunk by chunk in OID order.
     #[cfg(feature = "parallel")]
     crate::utils::xreach::x_reach!("LOSAT_X_TBNOIDNEXT", x_chunk_bases.is_some());
+    // LOSAT_X_TBNFLOWHELP: the threads that wait in the flow run the pool's jobs; no flow, no wait.
+    #[cfg(feature = "parallel")]
+    if super::x_oid_flow::x_flow_help().is_some() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNFLOWHELP", x_chunk_bases.is_some());
+    }
     #[cfg(feature = "parallel")]
     let x_flow = x_chunk_bases.map(|bases| {
         super::x_oid_flow::XOidFlow::new(

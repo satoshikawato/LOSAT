@@ -20,7 +20,7 @@
 
 追加指示により、標準Wasm配布・通常検証はthreadedへ統一し、単一スレッド比較にも同じartifactのn1を使う。serialは明示指定の互換ビルド・検証とする。現在のgbdrawはAUTOやfallbackでserialを使用しているため、完全廃止はconsumer移行と別途扱う。既存serial測定、凍結された認証・release契約は保存する。この後の通常候補測定はnative n1/n8とthreaded n1/n8を主軸とし、serial性能測定は互換オプションに移す。
 
-2026-09-14の追加承認により、基準版にもある反復時のWasm linear memory増加は共通runtimeの別件として残す。今回の採用では絶対的なplateau条件を外し、既定のRSS非回帰・メモリ予算、実保持量の比較、scratch再利用の検証を維持する。元の失敗結果は保存し、すべての観測memory byte数が同一とは主張しない。承認と適用境界は [runtime-memory-scope-decision.json](../evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/runtime-memory-scope-decision.json) に記録する。時間・出力・速度下限の条件は変更しない。
+2026-09-14の追加承認により、基準版にもある反復時のWasm linear memory増加は共通runtimeの別件として残す。今回の採用では絶対的なplateau条件を外し、既定のRSS非回帰・メモリ予算、実保持量の比較、scratch再利用の検証を維持する。元の失敗結果は保存し、すべての観測memory byte数が同一とは主張しない。承認と適用境界は `docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/runtime-memory-scope-decision.json`（2026-10-23 にリリース資産へ移動：[ARCHIVED.md](../evidence/megablast_wasm_np_remediation_20260913/ARCHIVED.md)）に記録する。時間・出力・速度下限の条件は変更しない。
 
 さらにユーザーからTLOSATXにも同じデータ移動削減を依頼された。BLASTPの判定を優先し、その後TBLASTXのHSP sort/link/replayを実測して、NCBIと同じ本体保持・参照操作へ改善する。TBLASTXの新しい短縮率下限は指定されていない。現在の出力・順序・遺伝暗号の契約と性能非回帰を維持し、既存の解決済みparity問題は回帰対象として扱う。
 
@@ -225,4 +225,4 @@ NCBI root は `/mnt/c/Users/genom/GitHub/ncbi-blast/`、代替は AGENTS.md の�
 
 ## 10. ユーザー指示による暫定採用（2026-09-14）
 
-「計測はこれ以上繰り返さないで。まとめよう」「とりあえず採用しようよ」の指示により、現状の実装と検証済みnative設定を暫定採用し、追加計測を停止した。全589対象sourceの一致を確認。G-Mの現行比較は達成、G-N/G-Pの主入力速度は短いBLASTNの既承認免除を含め条件を満たす。一方、TBLASTX反復時間9/12未達、後続6群と最終native megablast再確認は未実行のまま保存する。G-N/G-Pの最終統合ゲートおよび計画全体を全条件達成と読み替えない。詳細は上記STATUSとuser-provisional-adoption-20260914.jsonを参照。
+「計測はこれ以上繰り返さないで。まとめよう」「とりあえず採用しようよ」の指示により、現状の実装と検証済みnative設定を暫定採用し、追加計測を停止した。全589対象sourceの一致を確認。G-Mの現行比較は達成、G-N/G-Pの主入力速度は短いBLASTNの既承認免除を含め条件を満たす。一方、TBLASTX反復時間9/12未達、後続6群と最終native megablast再確認は未実行のまま保存する。G-N/G-Pの最終統合ゲートおよび計画全体を全条件達成と読み替えない。詳細は上記STATUSとuser-provisional-adoption-20260914.json（2026-10-23 にリリース資産へ移動：[ARCHIVED.md](../evidence/megablast_wasm_np_remediation_20260913/ARCHIVED.md)）を参照。

@@ -364,10 +364,9 @@ pub fn prepare_queries(
         // trim of a segment trimmed before on this thread from its memo.
         .x_with_trim_memo()
     });
-    // EXPERIMENT (LOSAT_X_BXPAR): SEG reads only the residues of its own context
-    // and the hard masking below writes only there, so the contexts of a large
-    // batch (the six frames of the full query) are filtered on the search pool
-    // before the loop consumes the intervals in context order.
+    // SEG reads only the residues of its own context and the hard masking below writes only there,
+    // so the contexts of a large batch (the six frames of the full query) are filtered on the
+    // search pool before the loop consumes the intervals in context order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
     // ```c
     //     for (context = query_info->first_context;
@@ -383,8 +382,8 @@ pub fn prepare_queries(
     //                                                       blast_message);
     // ```
     // NCBI filters the contexts one after another in this loop. SEG of one context reads only that
-    // context, so with LOSAT_X_BXPAR the contexts of a large batch are filtered in parallel and the
-    // intervals are kept in seg_ready; the loop below still consumes them in context order.
+    // context, so with a pool of 2+ threads the contexts of a large batch are filtered in parallel
+    // and the intervals are kept in seg_ready; the loop below still consumes them in context order.
     #[allow(unused_mut)]
     let mut seg_ready: Vec<Option<Vec<(i32, i32)>>> = Vec::new();
     #[cfg(feature = "parallel")]

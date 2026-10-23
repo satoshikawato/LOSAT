@@ -20,7 +20,7 @@ S07+ で分かった、TBLASTX にも当てはまる NCBI の振る舞い（`doc
 
 ## S07+++b からの引き継ぎ（2026-10-02 の実測）
 
-S07+++b（E2g）は BLASTN の棚卸し（`docs/evidence/losat_web_e2g/INVENTORY.tsv`、1015 行）の一括の transpile を終え、独立監査は第 4 回で supported になった（[ゲート記録](../evidence/losat_web_e2g/README.md)）。毎晩の WASI の TIMEOUT（`threaded/tblastx/p11_avclpv_psclpv`）は runner の差で、TBLASTX の速度の退行ではない（手元の 4 コアで HEAD 相当 2164 秒、緑の run の成果物 2809 秒）。期限を 7200 秒にした（`beea0bddf`）ので、S08 の最初の作業にはしない。S08 で使えること、守ること：
+S07+++b（E2g）は BLASTN の棚卸し（`docs/evidence/losat_web_e2g/INVENTORY.tsv`、1015 行。2026-10-23 にリリース資産へ移動：[ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md)）の一括の transpile を終え、独立監査は第 4 回で supported になった（[ゲート記録](../evidence/losat_web_e2g/README.md)）。毎晩の WASI の TIMEOUT（`threaded/tblastx/p11_avclpv_psclpv`）は runner の差で、TBLASTX の速度の退行ではない（手元の 4 コアで HEAD 相当 2164 秒、緑の run の成果物 2809 秒）。期限を 7200 秒にした（`beea0bddf`）ので、S08 の最初の作業にはしない。S08 で使えること、守ること：
 
 - **進め方：** オーケストレータは Opus（設計を伴う作業：移植の設計と実装、監査の指摘の判断、agent の成果の確認）。機械的な作業（NCBI との比較の実行、sweep、ゲート、記録の下書き、決まった観点の走査）は Agent ツールに `model: "sonnet"` で回す。sonnet の agent は互いに独立なら 4 つを超えて並行してよい。エンジンのソースの変更、ゲート、V-PERF は 1 つずつ。agent には結果を途中でファイルに書かせ、作業ディレクトリと `--target-dir` を分ける。
 - **棚卸しの方式（DW-12）：** S08 以降も、NCBI の経路の関数を棚卸しして（`docs/evidence/losat_web_e2g/` の `inventory_refs.py`・`build_inventory.py`・`stage2/` の方式）、未移植と差のある移植を一括で移す。

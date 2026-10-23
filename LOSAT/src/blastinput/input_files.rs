@@ -83,6 +83,56 @@ fn standard_input() -> std::io::Result<std::fs::File> {
     }
 }
 
+/// Whether an opened input has a stream position the way a regular file on Linux has one:
+/// `tellg()` of NCBI's `IsIStreamEmpty` is not negative (a pipe has none, a terminal has none,
+/// while a character device such as `/dev/null` has one).
+///
+/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859
+/// ```c
+/// 	char c;
+/// 	CNcbiStreampos orig_p = in.tellg();
+/// 	// Piped input
+/// 	if(orig_p < 0)
+/// 		return false;
+/// ```
+/// On Unix and WASI the answer is whether the position can be read, as before
+/// (`lseek` fails on a pipe and on a terminal, not on `/dev/null`; the position is not moved).
+/// On Windows `SetFilePointerEx` succeeds on a pipe or a console handle (its result is
+/// undefined there), so an empty pipe would look like an empty file. Follow Linux by the type
+/// of the handle (`GetFileType`): a disk file has a position; a character device has one
+/// unless it is a console (`GetConsoleMode` succeeds on a console only; `NUL` has a position,
+/// as `/dev/null` has); a pipe or an unknown type has none. LOSAT takes the Linux branch of
+/// `IsIStreamEmpty` on every platform (`AUTHORITY.md` §C1).
+pub fn has_stream_position(file: &std::fs::File) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::HANDLE;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileType, FILE_TYPE_CHAR, FILE_TYPE_DISK,
+        };
+        use windows_sys::Win32::System::Console::GetConsoleMode;
+        let handle: HANDLE = file.as_raw_handle().cast();
+        // SAFETY: `GetFileType` only reads the type of the handle it is given; the handle comes
+        // from `file`, which is open for the call. A failure returns FILE_TYPE_UNKNOWN (0),
+        // which has no position.
+        match unsafe { GetFileType(handle) } {
+            FILE_TYPE_DISK => true,
+            FILE_TYPE_CHAR => {
+                let mut mode = 0u32;
+                // SAFETY: `handle` is open as above and `mode` is a valid `u32` to write; the
+                // call fails (returns 0) on a handle that is not a console.
+                unsafe { GetConsoleMode(handle, &mut mode) == 0 }
+            }
+            _ => false,
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        std::io::Seek::stream_position(&mut &*file).is_ok()
+    }
+}
+
 /// Rejects a file name that is not UTF-8, where NCBI opens the file (the subjects, then the
 /// queries, then the output: `CBlastDatabaseArgs` comes before `CStdCmdLineArgs`).
 ///
@@ -166,4 +216,52 @@ pub fn write_empty_subject_warnings_by_length(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_stream_position;
+
+    #[cfg(unix)]
+    fn owned(reader: std::io::PipeReader) -> std::os::fd::OwnedFd {
+        reader.into()
+    }
+
+    #[cfg(windows)]
+    fn owned(reader: std::io::PipeReader) -> std::os::windows::io::OwnedHandle {
+        reader.into()
+    }
+
+    // NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859 (`tellg() < 0` is piped
+    // input). A regular file has a position; a pipe has none, on Linux because `lseek`
+    // fails and on Windows because `GetFileType` is not `FILE_TYPE_DISK`.
+    #[test]
+    fn a_regular_file_has_a_position_and_a_pipe_has_none() {
+        let path = std::env::temp_dir().join(format!(
+            "losat-input-files-has-stream-position-{}",
+            std::process::id()
+        ));
+        std::fs::write(&path, b">q\nACGT\n").unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        assert!(has_stream_position(&file));
+        drop(file);
+        std::fs::remove_file(&path).unwrap();
+        // WASI has no pipe to make here.
+        #[cfg(any(unix, windows))]
+        {
+            let (reader, mut writer) = std::io::pipe().unwrap();
+            std::io::Write::write_all(&mut writer, b">q\nACGT\n").unwrap();
+            drop(writer);
+            let pipe = std::fs::File::from(owned(reader));
+            assert!(!has_stream_position(&pipe));
+        }
+        // `NUL` is a character device that is not a console: it has a position, as
+        // `/dev/null` has on Linux (`Stdio::null()` with `-query -` is an empty file).
+        #[cfg(windows)]
+        assert!(has_stream_position(&std::fs::File::open("NUL").unwrap()));
+        #[cfg(unix)]
+        assert!(has_stream_position(
+            &std::fs::File::open("/dev/null").unwrap()
+        ));
+    }
 }

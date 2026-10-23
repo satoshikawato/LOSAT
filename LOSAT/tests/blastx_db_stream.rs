@@ -116,14 +116,12 @@ fn genome_pieces(dir: &Path, count: usize, bases: usize) -> PathBuf {
 }
 
 /// The scheduling switches whose paths read the database differently at more than one thread:
-/// the default (the subject flow, the query chunks of `LOSAT_X_BXPAR` side by side, the query
-/// batches of `LOSAT_X_BXBATCH` side by side), the waves of the pool (`LOSAT_X_BXSUBJFLOW=0`), the
-/// flow of each chunk in turn (`LOSAT_X_BXPAR=0`), and every other switch of the strict set off
+/// the default (the subject flow, the query chunks side by side, the query batches side by side),
+/// the waves of the pool (`LOSAT_X_BXSUBJFLOW=0`), and every other switch of the strict set off
 /// (`LOSAT_X_DEFAULT=0`).
-const SCHEDULES: [Option<(&str, &str)>; 4] = [
+const SCHEDULES: [Option<(&str, &str)>; 3] = [
     None,
     Some(("LOSAT_X_BXSUBJFLOW", "0")),
-    Some(("LOSAT_X_BXPAR", "0")),
     Some(("LOSAT_X_DEFAULT", "0")),
 ];
 

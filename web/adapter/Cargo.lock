@@ -18,6 +18,7 @@ dependencies = [
  "rayon",
  "rustc-hash",
  "rustix",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

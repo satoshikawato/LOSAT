@@ -23,10 +23,11 @@
 //! arena keeps its free space for that thread only; the pool lends it to any thread, so the
 //! resident buffers are those in use at the busiest moment, plus at most the pool's idle bound
 //! of idle ones. Only buffers that are done after every subject use a pool: BLASTN's database
-//! reads and BLASTNA letters (`X_BYTES`, idle bound `x_pool_idle_bytes`) and the scratch of the
-//! ungapped hits' sort (`blastn` `X_SORT`, its own bound); a buffer that its thread keeps from
-//! one subject to the next (the ungapped hits) is mapped but not pooled, since idle copies of it
-//! would only add to those in use.
+//! reads and BLASTNA letters (`X_BYTES`, idle bound `x_pool_idle_bytes`), TBLASTN's `-db` reads
+//! and, while a `-db` stream is open, its large frames (`X_BYTES` too, `tblastn/x_db_stream.rs`),
+//! and the scratch of the ungapped hits' sort (`blastn` `X_SORT`, its own bound); a buffer that
+//! its thread keeps from one subject to the next (the ungapped hits) is mapped but not pooled,
+//! since idle copies of it would only add to those in use.
 
 /// No NCBI counterpart: the buffers from which a buffer is mapped (Linux with glibc).
 pub(crate) const X_MAPPED_FROM: usize = 1 << 20;
@@ -221,7 +222,7 @@ impl<T: Copy> XPool<T> {
 }
 
 /// No NCBI counterpart: the pool of byte buffers: BLASTN's database reads and BLASTNA letters
-/// (LOSAT_X_BNMAPPED).
+/// (LOSAT_X_BNMAPPED), TBLASTN's `-db` reads and large frames (LOSAT_X_TBNDBSTREAM).
 pub(crate) static X_BYTES: XPool<u8> = XPool::new(x_pool_idle_bytes);
 
 /// No NCBI counterpart: the elements sorted at a time with `sort_by` before they are merged in

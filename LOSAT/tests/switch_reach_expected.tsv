@@ -10,6 +10,7 @@ LOSAT_X_BNSTREAM	blastn	conditional	required	required	-subject only, 2+ threads 
 LOSAT_X_BNTBRANGE	blastn	conditional	gap	required	-db only, sequences of 1 Mi bases or more (traceback decodes the HSP ranges); new gap: the CI databases hold shorter sequences (the gate runs the blastn fixtures with LOSAT_X_BNTBRANGEMIN=0, and with LOSAT_X_BNTBRANGEPAD=0 for the retraces)
 LOSAT_X_BNUNGAPCOUNT	blastn	always			Exact ungapped extension with step counts worked out first
 LOSAT_X_BPCLUT	blastp	conditional	required	required	-task blastp-fast only; exact blastp builds no compressed table
+LOSAT_X_BPCLUTSCANBF	blastp	conditional	required	required	-task blastp-fast, fused loop on the flat compressed table with >= BPCLUTSCANBFMIN used cells per 10,000 (built-in 500, 0 on wasm32; a short query keeps the PV branch natively); reference compressed table never
 LOSAT_X_BPCOMPOREUSE	blastp	always			Subject composition kept in SEG cache entry, reused by redo
 LOSAT_X_BPDBCUT	blastp	conditional	required	required	-db only, 2+ threads; DB below 4 x threads MiB (Swiss-Prot keeps 1 MiB blocks)
 LOSAT_X_BPDEFER	blastp	platform			only where BPDIAG AVX2 batch runs (x86 AVX2)

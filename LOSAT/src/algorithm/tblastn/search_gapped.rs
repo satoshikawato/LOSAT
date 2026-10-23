@@ -1,5 +1,5 @@
-//! Internal TBLASTN protein gapped-score boundary.
-//! The public TBLASTN CLI remains unsupported until downstream stages agree.
+//! Internal TBLASTN protein gapped stage of the preliminary search: the gapped score of each
+//! (frame, chunk) unit, the endpoint purge, the merge and the append, and the traceback helpers.
 
 use super::search_init::InitHsp;
 #[cfg(test)]
@@ -95,7 +95,7 @@ fn score_gapped_chunk(
             .then(b.length.cmp(&a.length))
             .then(a.q_start.cmp(&b.q_start))
     });
-    // NCBI c++/src/algo/blast/core/blast_engine.c:489-493:
+    // NCBI c++/src/algo/blast/core/blast_engine.c:500:
     // if (init_hitlist->total == 0) continue; GetGappedScore is skipped.
     if frame_initial.is_empty() {
         return Ok(Vec::new());
@@ -216,8 +216,7 @@ fn score_gapped_chunk(
 // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
 // WordFinder -> GetGappedScore -> endpoint purge -> offset adjustment ->
 // Blast_HSPListsMerge runs within each chunk; Blast_HSPListAppend ends a frame.
-// This diagnostic keeps that function and input order while the public CLI
-// remains explicitly unimplemented through Stages C-E.
+// The preliminary search keeps that function and input order for every unit.
 #[derive(Clone, Copy)]
 pub(super) struct PreliminaryProfile<'a> {
     pub(super) seg: Option<&'a SegParams>,
@@ -333,6 +332,12 @@ fn x_query_frames(queries: &[&[u8]], profile: PreliminaryProfile<'_>) -> Result<
     let query_frames: Vec<_> = queries
         .iter()
         .map(|query| {
+            // NCBI c++/src/algo/blast/core/blast_setup.c:620-623:
+            // if (!mask_at_hash) {
+            //     BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc, program_number);
+            // }
+            // Soft masking retains the unmasked WordFinder query while lookup still excludes the
+            // SEG intervals used by the candidate scanner.
             if profile.soft_masking {
                 encode_protein_query_frame_with_seg(query, None)
             } else {
@@ -509,6 +514,9 @@ fn x_preliminary_protein_hsps_by_unit(
     use super::search_init::XTwoHit;
     use super::search_seed::{x_scan_plan, x_scan_unit};
     use super::x_tbn_hitbf::XHitLoop;
+    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
+    // cutoff = hit_params->cutoffs[context].cutoff_score;
+    // Every query context must supply its own measured cutoff.
     if profile.gapped_cutoff.len() != queries.len() {
         bail!("one preliminary gapped cutoff is required per query context");
     }
@@ -622,7 +630,7 @@ fn x_preliminary_protein_hsps_by_unit(
         probe_event(unit, || {
             PreliminaryEvent::Initial(frame.frame, chunk.offset, hits.to_vec())
         });
-        // NCBI c++/src/algo/blast/core/blast_engine.c:489-493:
+        // NCBI c++/src/algo/blast/core/blast_engine.c:500:
         // if (init_hitlist->total == 0) continue;
         if hits.is_empty() {
             return Ok(Vec::new());
@@ -1007,6 +1015,8 @@ pub(super) fn preliminary_stages(
     Ok(stages)
 }
 
+// No NCBI counterpart: test statics. Per-context cutoffs of INT4_MAX (nothing is saved) and
+// per-context x-drops of 0, for the test profiles below.
 #[cfg(test)]
 static TEST_NEVER: [i32; 4] = [i32::MAX; 4];
 #[cfg(test)]
@@ -1047,7 +1057,7 @@ pub(super) fn word_finder_profile<'a>(
 
 // No NCBI counterpart: test helper. A profile for tests that read the scan's offset pairs only: a
 // word cutoff of INT4_MAX saves no initial HSP, so GetGappedScore is never called
-// (blast_engine.c:489-493); `Candidates` does not depend on the window or the x-drop.
+// (blast_engine.c:500); `Candidates` does not depend on the window or the x-drop.
 #[cfg(test)]
 pub(super) fn scan_profile(
     queries: usize,
@@ -2636,7 +2646,7 @@ mod tests {
             gapped_cutoff: &gapped_cutoff,
             hsp_num_max: i32::MAX as usize,
         };
-        let st = preliminary_stages(&refs, subject, 1, profile).unwrap();
+        let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
         let trace = fs::read_to_string(format!("{root}gapped_events.tsv")).unwrap();
         let expected: Vec<_> = trace
             .lines()
@@ -2659,7 +2669,7 @@ mod tests {
                 )
             })
             .collect();
-        let actual = st
+        let actual = stages
             .gapped
             .iter()
             .map(|(context, hsp, _)| (*context, *hsp))
@@ -2714,13 +2724,8 @@ mod tests {
             gapped_cutoff: &gapped_cutoff,
             hsp_num_max: i32::MAX as usize,
         };
-        let st = preliminary_stages(&refs, subject, 1, profile).unwrap();
-        let gapped = st
-            .gapped
-            .iter()
-            .map(|(context, hsp, _)| (*context, *hsp))
-            .collect::<Vec<_>>();
-        let actual = st.appended.clone();
+        let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
+        let actual = stages.appended.clone();
         let trace = fs::read_to_string(format!("{root}append_events.tsv")).unwrap();
         let mut expected: Vec<Vec<(usize, i32, i8, i32, i32, i32, i32)>> = vec![Vec::new(); 6];
         for line in trace
@@ -2950,13 +2955,8 @@ mod tests {
             gapped_cutoff: &gapped_cutoff,
             hsp_num_max: i32::MAX as usize,
         };
-        let st = preliminary_stages(&refs, subject, 1, profile).unwrap();
-        let gapped = st
-            .gapped
-            .iter()
-            .map(|(context, hsp, _)| (*context, *hsp))
-            .collect::<Vec<_>>();
-        let appended = st.list.clone();
+        let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
+        let appended = stages.list.clone();
 
         let trace = fs::read_to_string(format!("{root}traceback_events.tsv")).unwrap();
         let mut expected: Vec<Vec<(i32, i8, i32, i32, i32, i32)>> = vec![Vec::new(); refs.len()];
@@ -3047,13 +3047,8 @@ mod tests {
             gapped_cutoff: &gapped_cutoff,
             hsp_num_max: i32::MAX as usize,
         };
-        let st = preliminary_stages(&refs, subject, 1, profile).unwrap();
-        let gapped = st
-            .gapped
-            .iter()
-            .map(|(context, hsp, _)| (*context, *hsp))
-            .collect::<Vec<_>>();
-        let appended = st.list.clone();
+        let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
+        let appended = stages.list.clone();
         let trace =
             fs::read_to_string(format!("{root}hsp_test_real_path_20260924/trace.tsv")).unwrap();
         let mut expected_tests = vec![Vec::new(); refs.len()];
@@ -3238,13 +3233,8 @@ mod tests {
             gapped_cutoff: &gapped_cutoff,
             hsp_num_max: i32::MAX as usize,
         };
-        let st = preliminary_stages(&refs, subject, 1, profile).unwrap();
-        let gapped = st
-            .gapped
-            .iter()
-            .map(|(context, hsp, _)| (*context, *hsp))
-            .collect::<Vec<_>>();
-        let appended = st.list.clone();
+        let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
+        let appended = stages.list.clone();
         let case = if positive {
             "start_success_real_path_20260924"
         } else {
@@ -3567,8 +3557,8 @@ mod tests {
                 gapped_cutoff: &[0],
                 hsp_num_max: i32::MAX as usize,
             };
-            let st = preliminary_stages(&[query], subject, 1, profile).unwrap();
-            for (_, hsp, _) in st.gapped {
+            let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
+            for (_, hsp, _) in stages.gapped {
                 actual.push((id.clone(), hsp));
             }
         }
@@ -3644,8 +3634,12 @@ mod tests {
             gapped_cutoff: &[1],
             hsp_num_max: i32::MAX as usize,
         };
-        let st = preliminary_stages(&[query], subject, 32, profile).unwrap();
-        let actual = st.gapped.iter().map(|(_, hsp, _)| *hsp).collect::<Vec<_>>();
+        let stages = preliminary_stages(&[query], subject, 32, profile).unwrap();
+        let actual = stages
+            .gapped
+            .iter()
+            .map(|(_, hsp, _)| *hsp)
+            .collect::<Vec<_>>();
         let expected: Vec<GappedHsp> = fs::read_to_string(oracle)
             .unwrap()
             .lines()
@@ -3672,7 +3666,7 @@ mod tests {
         // same function order and code-32 subject translation enter the
         // comparison-only NCBI C++ API gapped score oracle.
         assert_eq!(
-            st.list,
+            stages.list,
             expected.into_iter().map(|hsp| (0, hsp)).collect::<Vec<_>>()
         );
     }
@@ -3713,8 +3707,12 @@ mod tests {
                 gapped_cutoff: &[0],
                 hsp_num_max: i32::MAX as usize,
             };
-            let st = preliminary_stages(&[query], subject, 1, profile).unwrap();
-            let gapped = st.gapped.iter().map(|(_, hsp, _)| *hsp).collect::<Vec<_>>();
+            let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
+            let gapped = stages
+                .gapped
+                .iter()
+                .map(|(_, hsp, _)| *hsp)
+                .collect::<Vec<_>>();
             for (hsp, fence_hit) in
                 full_translation_traceback_blosum62(query, subject, 1, &gapped, 11, 1, 64).unwrap()
             {
@@ -3855,8 +3853,13 @@ mod tests {
                         gapped_cutoff: &[0],
                         hsp_num_max: i32::MAX as usize,
                     };
-                    let st = preliminary_stages(&[query], &letters, db_gencode, profile).unwrap();
-                    let mut gapped = st.gapped.iter().map(|(_, hsp, _)| *hsp).collect::<Vec<_>>();
+                    let stages =
+                        preliminary_stages(&[query], &letters, db_gencode, profile).unwrap();
+                    let mut gapped = stages
+                        .gapped
+                        .iter()
+                        .map(|(_, hsp, _)| *hsp)
+                        .collect::<Vec<_>>();
                     sort_gapped_score_if_needed(&mut gapped);
                     let traceback = |subject| {
                         full_translation_traceback_with_matrix_and_events_with_mask_mode_owned(
@@ -3969,8 +3972,12 @@ mod tests {
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
         };
-        let st = preliminary_stages(&[query], subject, 1, profile).unwrap();
-        let gapped = st.gapped.iter().map(|(_, hsp, _)| *hsp).collect::<Vec<_>>();
+        let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
+        let gapped = stages
+            .gapped
+            .iter()
+            .map(|(_, hsp, _)| *hsp)
+            .collect::<Vec<_>>();
         assert_eq!(gapped, expected);
         let actual =
             full_translation_traceback_blosum62(query, subject, 1, &gapped, 11, 1, 64).unwrap();
@@ -4065,8 +4072,12 @@ mod tests {
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
         };
-        let st = preliminary_stages(&[query], subject, 1, profile).unwrap();
-        let gapped = st.gapped.iter().map(|(_, hsp, _)| *hsp).collect::<Vec<_>>();
+        let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
+        let gapped = stages
+            .gapped
+            .iter()
+            .map(|(_, hsp, _)| *hsp)
+            .collect::<Vec<_>>();
         let oracle_gapped: Vec<_> = fs::read_to_string(format!("{root}gapped_hsps.tsv"))
             .unwrap()
             .lines()
@@ -4166,8 +4177,12 @@ mod tests {
             gapped_cutoff: &[0],
             hsp_num_max: i32::MAX as usize,
         };
-        let st = preliminary_stages(&[query], subject, 1, profile).unwrap();
-        let gapped = st.gapped.iter().map(|(_, hsp, _)| *hsp).collect::<Vec<_>>();
+        let stages = preliminary_stages(&[query], subject, 1, profile).unwrap();
+        let gapped = stages
+            .gapped
+            .iter()
+            .map(|(_, hsp, _)| *hsp)
+            .collect::<Vec<_>>();
         assert_eq!(gapped, expected_gapped);
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-589,635-666:
         // BLAST_GappedAlignmentWithTraceback(...);
@@ -4303,8 +4318,8 @@ mod tests {
             gapped_cutoff: &[0, 0, i32::MAX],
             hsp_num_max: i32::MAX as usize,
         };
-        let st = preliminary_stages(&refs, subject, 1, profile).unwrap();
-        let gapped = st.gapped.clone();
+        let stages = preliminary_stages(&refs, subject, 1, profile).unwrap();
+        let gapped = stages.gapped.clone();
         let trace = fs::read_to_string(format!("{root}gapped_events.tsv")).unwrap();
         let expected: Vec<_> = trace
             .lines()
@@ -4340,7 +4355,7 @@ mod tests {
             );
         }
 
-        let snapshots = st.appended.clone();
+        let snapshots = stages.appended.clone();
         let append_trace = fs::read_to_string(format!("{root}append_events.tsv")).unwrap();
         let expected_snapshots: Vec<Vec<_>> = (0..6)
             .map(|call| {
@@ -4440,14 +4455,11 @@ mod tests {
             }
         }
         assert_eq!(appended.len(), 22);
-        // NCBI c++/src/algo/blast/core/blast_engine.c:804-850:
-        // The same natural query/subject
-        // inputs pass through WordFinder, gapped extension, chunk purge,
-        // merge and append before this positive containment call.
         let refs: Vec<&[u8]> = queries.iter().map(|(_, seq)| seq.as_slice()).collect();
         // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
-        // preserve the same BLOSUM45/word-2 chunk-to-append call path before
-        // testing positive traceback interval-tree containment.
+        // the same natural query/subject inputs pass through WordFinder, gapped extension, chunk
+        // purge, merge and append (BLOSUM45/word-2) before the positive traceback interval-tree
+        // containment call.
         let profile = PreliminaryProfile {
             seg: None,
             soft_masking: false,
@@ -4641,8 +4653,8 @@ mod tests {
             gapped_cutoff: &[28],
             hsp_num_max: i32::MAX as usize,
         };
-        let st = preliminary_stages(&[query], &subject, 1, profile).unwrap();
-        let chunked = st.gapped.clone();
+        let stages = preliminary_stages(&[query], &subject, 1, profile).unwrap();
+        let chunked = stages.gapped.clone();
         assert_eq!(
             chunked.iter().map(|row| row.2).collect::<Vec<_>>(),
             [0, 4_999_900]
@@ -4706,7 +4718,7 @@ mod tests {
             })
             .collect();
         assert_eq!(merged, merged_expected);
-        let snapshots = st.appended.clone();
+        let snapshots = stages.appended.clone();
         assert_eq!(snapshots.iter().map(Vec::len).collect::<Vec<_>>(), [1; 6]);
         assert_eq!(snapshots.last().unwrap(), &merged_expected);
     }
@@ -4921,6 +4933,10 @@ mod tests {
             });
         }
         assert_eq!(candidate_by_call.iter().map(Vec::len).sum::<usize>(), 394);
+        // The per-event compares below filter these lists by (frame, chunk); the sizes show that
+        // no expected row is left outside the events.
+        assert_eq!(expected_initial.len(), 4);
+        assert_eq!(expected.len(), 4);
         let mut tags = Vec::new();
         let mut call = 0usize;
         let mut append = 0usize;
@@ -6314,8 +6330,8 @@ mod tests {
             gapped_cutoff: &[30],
             hsp_num_max: i32::MAX as usize,
         };
-        let st = preliminary_stages(&[query], &subject, 1, profile).unwrap();
-        let initial = st.initial.clone();
+        let stages = preliminary_stages(&[query], &subject, 1, profile).unwrap();
+        let initial = stages.initial.clone();
         let word_trace = fs::read_to_string(format!("{case}frame_chunks.tsv")).unwrap();
         let expected_init: Vec<_> = word_trace
             .lines()
@@ -6337,7 +6353,7 @@ mod tests {
             })
             .collect();
         assert_eq!(initial, expected_init);
-        let chunked = st.gapped.clone();
+        let chunked = stages.gapped.clone();
         let trace = fs::read_to_string(format!("{case}gapped_events.tsv")).unwrap();
         let expected_local: Vec<_> = trace
             .lines()
@@ -6363,7 +6379,7 @@ mod tests {
             })
             .collect();
         assert_eq!(chunked, expected_local);
-        let snapshots = st.appended.clone();
+        let snapshots = stages.appended.clone();
         let expected_append: Vec<_> = trace
             .lines()
             .filter(|line| line.starts_with("APPEND_OUT_HSP\t"))

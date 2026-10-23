@@ -338,9 +338,9 @@ pub(super) fn translated_chunk_scan_ranges(
 // chunk with a read-only lookup table. XScanPlan holds what those calls need (the lookup table and
 // the translated frames with their chunks and scan ranges) so that every unit can be scanned on its
 // own.
-// The scan state of the preliminary search, built once so that each (frame, chunk) unit can
-// be scanned on its own.  NCBI c++/src/algo/blast/core/blast_engine.c:478-500,
-// 804-841 calls WordFinder once per unit; the lookup table is read-only there.
+// The scan state of the preliminary search, built once.  NCBI c++/src/algo/blast/core/
+// blast_engine.c:478-500, 804-841 calls WordFinder once per unit; the lookup table is read-only
+// there.
 pub(super) struct XScanPlan {
     pub lookup: std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>,
     pub subject: std::sync::Arc<XSubjectPlan>,
@@ -916,12 +916,13 @@ pub(super) fn x_scan_unit(
 ) {
     let (frame_index, chunk, ranges) = &plan.subject.units[unit];
     let frame = &plan.subject.frames[*frame_index];
-    // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan on presence bytes, for a table of tblastn's shape
-    // (without AVX2 a sparse one); it writes up to X_SCAN_BYTE_SLACK entries after the capacity.
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1023-1050
+    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1018-1019
     // BlastChooseProteinScanSubject(lookup_wrap);
     // aux_struct->WordFinder = BlastAaWordFinder;
     // The scan variant of the unit is chosen once per table, as NCBI picks one scansub.
+    //
+    // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan on presence bytes, for a table of tblastn's shape
+    // (without AVX2 a sparse one); it writes up to X_SCAN_BYTE_SLACK entries after the capacity.
     let scan_byte = super::x_scan_byte::x_scan_byte();
     let presence = super::x_scan_byte::x_presence(scan_byte, &plan.lookup);
     // EXPERIMENT (LOSAT_X_TBNSCANBF): the branch-free scan writes up to X_SCAN_BF_SLACK entries

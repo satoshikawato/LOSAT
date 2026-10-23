@@ -349,6 +349,7 @@ export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_SEGTRIMMEMO=1
 export LOSAT_X_SUMPMEMO=1
 export LOSAT_X_TBNBATCHRULE=1
+export LOSAT_X_TBNDBSTREAM=1
 export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNHITBF=1
@@ -4707,6 +4708,31 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_BXDBSTREAM`, against the binary before both): Swiss-Prot x 201 reads `-db` at one thread, instructions:u
   x0.9877 and cycles:u x0.9835 (`perf stat`, 3 runs each; x0.9873 and x0.9878 against both switches `=0`), wall
   x0.980 (node 1, 8 alternated pairs, none above 1); `-subject` (201 reads x PemoMJNVA) instructions:u x0.9993.
+- `LOSAT_X_TBNDBSTREAM=1` (TBLASTN `-db`, memory; in the strict set from the pull request that added it: on unless
+  `=0`): the search reads each database sequence where it searches it instead of the copy of
+  the whole database that `TblastnDatabase::read_stores` makes before the first query batch
+  (`tblastn/x_db_stream.rs`, exactness argument in its header). The database is checked once before the first batch
+  with the blocks and checks of the copy (`common::database::x_check_nucleotide_stores`: the same error fails the
+  same batch with the same text) and only the lengths of its sequences are kept. The preliminary search reads a
+  subject when it makes the subject's plan and drops it once the plan is made (the plans of the short ones are made
+  from the bytes of one block of 256 KiB per thread, without a store); the composition redo and the traceback of `-comp_based_stats 0` read each subject of their
+  lists when they first align it and hold it until the stage ends; the reports read the sequences they show. A long
+  sequence is read into a buffer that glibc maps (taken from `utils::x_mapped::X_BYTES` when it holds one) and its
+  store is that buffer cut to the 2-bit data; stages and batches that hold it at the same time share it. While a
+  stream is open, the frames of 1 MiB or more of a dropped subject plan go to `X_BYTES` (idle bound
+  `LOSAT_X_POOLIDLE`), and the next frames and long reads take them with their pages resident. A read that fails
+  after the check fails its query batch with the check's error, after the reports of the batches before. Every
+  read packs the stored bytes as the copy does, so every report is the same. Shadow:
+  `LOSAT_X_TBNDBSTREAMSHADOW=1` also makes the copy and compares the check's lengths and error and every read with
+  it, stopping at the first difference; at exit `[X_SHADOW] TBNDBSTREAM sequences= reads= bases= identical`
+  (`tests/tblastn_db_stream.rs`). Measured 2026-10-24 (workstation, every report identical, against dev 5215b7d5):
+  peak RssAnon (untimed, 2 runs) of 30 C. elegans proteins x the C. elegans genome (100 Mb in 7 sequences) 51 /
+  215-216 / 222-224 MiB at 1 / 8 / 16 threads against 72 / 237-239 / 250 with `=0` (NCBI 75 / 210 / 212), of 118
+  fly proteins x zebrafish cDNAs (57,776 sequences, `-max_target_seqs 5`) 22 / 55-56 / 86-87 against 52 / 83-84 /
+  113-114 (NCBI 16 / 28 / 34). At one thread (`perf stat`, 3 runs) minor faults 30.0k against 66.8k and
+  instructions:u x0.99990 on the genome, x1.00013 on the cDNAs (x1.00006 with `=0`; the check reads the database
+  once more). Timed against dev (node 1, warmed 3 s, 8 alternated pairs): the genome x0.995 / x0.991 (24 pairs) /
+  x0.993 at 1 / 8 / 16 threads, the cDNAs x0.999 / x0.998 / x0.998.
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

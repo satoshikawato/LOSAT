@@ -272,7 +272,7 @@ pub(super) fn preliminary_protein_hsps_for_search(
     queries: &[&[u8]],
     // EXPERIMENT (LOSAT_X_TBNSTORE): the subject's letters, or its packed store (the unit path
     // translates the store).
-    subject: SubjectNt<'_>,
+    subject: super::x_subject_store::XPrelimSubject<'_>,
     db_gencode: u8,
     profile: PreliminaryProfile<'_>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
@@ -504,7 +504,7 @@ thread_local! {
 // consumed straight from the scan buffer, so no per-frame seed list is kept.
 fn x_preliminary_protein_hsps_by_unit(
     queries: &[&[u8]],
-    subject: SubjectNt<'_>,
+    subject: super::x_subject_store::XPrelimSubject<'_>,
     db_gencode: u8,
     profile: PreliminaryProfile<'_>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
@@ -931,7 +931,7 @@ pub(super) fn preliminary_hsps_of_letters(
 ) -> Result<Vec<(usize, GappedHsp)>> {
     preliminary_protein_hsps_for_search(
         queries,
-        SubjectNt::Letters(subject),
+        SubjectNt::Letters(subject).into(),
         db_gencode,
         profile,
         None,

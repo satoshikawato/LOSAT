@@ -721,8 +721,9 @@ pub(super) fn x_keep_few_print_summary() {
 /// `None` when the subject is too short to be searched.
 pub(super) fn x_scan_plan(
     queries: &[&[u8]],
-    // EXPERIMENT (LOSAT_X_TBNSTORE): the subject's letters, or its packed store.
-    subject: crate::sequence::packed_subject::SubjectNt<'_>,
+    // EXPERIMENT (LOSAT_X_TBNSTORE): the subject's letters, or its packed store; (EXPERIMENT,
+    // LOSAT_X_TBNDBSTREAM) or a `-db` sequence, read here when its plan is made.
+    subject: super::x_subject_store::XPrelimSubject<'_>,
     db_gencode: u8,
     seg: Option<&SegParams>,
     threshold: i32,
@@ -791,9 +792,15 @@ pub(super) fn x_scan_plan(
     // are packed for the plan (`x_plan_store`), and the plan is made from them as for a packed
     // subject.
     let x_build_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
+        use super::x_subject_store::XPrelimSubject;
         use crate::sequence::packed_subject::SubjectNt;
         match subject {
-            SubjectNt::Letters(letters) => {
+            // EXPERIMENT (LOSAT_X_TBNDBSTREAM): the plan is made from the sequence's bytes, read
+            // for it (a database sequence has no lower-case letters).
+            XPrelimSubject::Stream(stream, oid) => stream.plan_with(oid, |packed, length| {
+                super::x_subject_translate::x_packed_bytes_plan(packed, length, db_gencode)
+            }),
+            XPrelimSubject::Nt(SubjectNt::Letters(letters)) => {
                 match super::x_subject_store::x_plan_store(letters, mask_lowercase) {
                     Some(store) => {
                         super::x_subject_translate::x_packed_subject_plan(&store, db_gencode)
@@ -805,7 +812,7 @@ pub(super) fn x_scan_plan(
                     ),
                 }
             }
-            SubjectNt::Packed(store) => {
+            XPrelimSubject::Nt(SubjectNt::Packed(store)) => {
                 anyhow::ensure!(
                     !mask_lowercase || store.lowercase().is_empty(),
                     "TBLASTN: a packed subject with lower-case letters searched with lowercase masking"
@@ -1206,7 +1213,7 @@ mod tests {
             let plan = plans.entry(subject_id).or_insert_with(|| {
                 x_scan_plan(
                     &[query],
-                    SubjectNt::Letters(by_id[subject_id]),
+                    SubjectNt::Letters(by_id[subject_id]).into(),
                     1,
                     None,
                     13,
@@ -1362,7 +1369,7 @@ mod tests {
         // The frames the search translates: the unit path's plan.
         let plan = x_scan_plan(
             &[query],
-            SubjectNt::Letters(subject),
+            SubjectNt::Letters(subject).into(),
             1,
             None,
             13,
@@ -1441,7 +1448,7 @@ mod tests {
             // The frames the search translates: the unit path's plan.
             let plan = x_scan_plan(
                 &[query],
-                SubjectNt::Letters(subject),
+                SubjectNt::Letters(subject).into(),
                 1,
                 None,
                 13,
@@ -2165,7 +2172,7 @@ mod tests {
                         barrier.wait();
                         x_scan_plan(
                             &[query],
-                            crate::sequence::packed_subject::SubjectNt::Letters(&subject),
+                            crate::sequence::packed_subject::SubjectNt::Letters(&subject).into(),
                             1,
                             None,
                             13,
@@ -2213,7 +2220,7 @@ mod tests {
         let scan = |side: Option<&XSubjectSide>| {
             x_scan_plan(
                 &[query],
-                crate::sequence::packed_subject::SubjectNt::Letters(&subject),
+                crate::sequence::packed_subject::SubjectNt::Letters(&subject).into(),
                 1,
                 None,
                 13,

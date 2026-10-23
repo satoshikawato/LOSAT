@@ -1034,6 +1034,22 @@ impl SequenceBlock {
         crate::utils::x_mapped::X_BYTES.give(&mut self.data);
     }
 
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the bytes of a block of one nucleotide cut to its 2-bit
+    /// data (`nucleotide_packed(0)`, which starts the block), in the block's buffer with its
+    /// capacity. No NCBI counterpart: only where the bytes are kept.
+    pub fn x_into_nucleotide_packed(mut self) -> Vec<u8> {
+        self.expect(SeqType::Nucleotide);
+        assert_eq!(self.len(), 1, "the packed bytes of a block of one sequence");
+        assert_eq!(
+            u64::from(self.seq_offsets[0]),
+            self.data_start,
+            "a nucleotide block starts with its first sequence"
+        );
+        let end = self.nucleotide_packed(0).len();
+        self.data.truncate(end);
+        self.data
+    }
+
     /// Sequence type of the block.
     pub fn seqtype(&self) -> SeqType {
         self.seqtype

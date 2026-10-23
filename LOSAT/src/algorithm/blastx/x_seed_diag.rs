@@ -1,6 +1,7 @@
 //! EXPERIMENT (LOSAT_X_BXDIAG / LOSAT_X_BXDIAGSHADOW): the BLASTX two-hit seed stage with the
 //! subject scan and the diagonal test in one loop, and the hits of one lookup cell tested in AVX2
-//! batches of eight.
+//! batches of eight (by default the batches cross the cells' borders: see the LOSAT_X_BXCROSS
+//! paragraph below, where they rest on a conflict test instead).
 //!
 //! The reference (`word_finder`, and `x_word_finder_direct` of `x_seed_scan.rs`) has the
 //! scanner copy every word hit into the offset-pair buffer and then reads the buffer back for the
@@ -18,7 +19,8 @@
 //! the hits are visited in the reference's order (subject offset ascending, a cell's hits in their
 //! stored order). The query offsets of one cell are distinct and the table is at least the six-frame
 //! query's length plus the window (`Diagonals::new`), so the hits of one subject offset fall on
-//! distinct entries, which the batches of eight rest on. The values are those of the bit-field and
+//! distinct entries, which the batches of eight within a cell rest on (the batches that cross cells
+//! rest on the conflict test of LOSAT_X_BXCROSS, below). The values are those of the bit-field and
 //! of the wrapping i32 arithmetic, in both loops. The closure takes a candidate's context from
 //! blastp's `XContextTable` (made once per query batch and thread), which gives the index of the
 //! reference's binary search.

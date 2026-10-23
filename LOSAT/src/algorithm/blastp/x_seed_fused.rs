@@ -105,7 +105,7 @@
 //! lanes of [`x_batch_avx2_at`] with a subject offset per lane) and calls the closure for its
 //! candidates in lane order, all before the next batch loads. The fewer than eight hits left at the
 //! end of the subject go one after the other through [`x_test_hit`], each candidate called at once;
-//! those left when a chunk is tested move to the front of the stage, before the next cell's hits.
+//! those left when a chunk is tested move to the front of the stage, before the hits staged next.
 //! The query offset is not staged: the table has a power of two entries, at least the query's
 //! length plus the window (`blastx/seed.rs`, `Diagonals::new`, NCBI's `diag_array_length`), so
 //! every query offset `q` of the lookup is at most `mask`, and `q = (coord + s) & mask` exactly
@@ -376,7 +376,7 @@ pub(crate) enum XDiagMode {
     /// scalar code ([`x_test_batch_scalar`]).
     Scalar,
     /// LOSAT_X_BPDIAG with AVX2 and LOSAT_X_BPDEFER off (and blastx's fused loop with
-    /// LOSAT_X_BXDEFER off): batches of eight hits in AVX2 registers ([`x_test_batch_avx2`]); a
+    /// LOSAT_X_BXDEFER off and LOSAT_X_BXCROSS off or no POPCNT): batches of eight hits in AVX2 registers ([`x_test_batch_avx2`]); a
     /// cell's last batch of fewer than eight hits is a scalar batch.
     #[cfg(target_arch = "x86_64")]
     Avx2,
@@ -384,7 +384,8 @@ pub(crate) enum XDiagMode {
     /// cell's batches of eight called after its last one ([`x_cell_avx2_defer`]).
     #[cfg(target_arch = "x86_64")]
     Avx2Defer,
-    /// LOSAT_X_BXDEFER (blastx's fused loop only, [`x_cell_test`]): [`XDiagMode::Avx2Defer`] with
+    /// LOSAT_X_BXDEFER (blastx's fused loop only, [`x_cell_test`]; with LOSAT_X_BXCROSS off or no
+    /// POPCNT): [`XDiagMode::Avx2Defer`] with
     /// the lanes' entry coordinates from scalar loads of the hits and a cell's last batch of fewer
     /// than eight hits as one masked AVX2 batch ([`x_cell_avx2_defer_masked`]).
     #[cfg(target_arch = "x86_64")]
@@ -1221,6 +1222,13 @@ where
         (0..=i64::from(table.mask) + 1).contains(&i64::from(lookup.query_length)),
         "the cross-cell stage needs every query offset at most the diagonal mask"
     );
+    // `mask + 1` a power of two (written in i64, so that `mask + 1` cannot overflow): the
+    // recovery `(coord + s) & mask` of `x_cross_query` equals `q` only then (mask 5, q 2, s 3
+    // stages coord (2 - 3) & 5 = 5 and recovers (5 + 3) & 5 = 0).
+    assert!(
+        i64::from(table.mask) >= 0 && i64::from(table.mask) & (i64::from(table.mask) + 1) == 0,
+        "the cross-cell stage needs a diagonal mask of the form 2^k - 1"
+    );
     let mut counts = XCrossCounts::default();
     // SAFETY: the CPU has AVX2 and POPCNT, and every query offset of the lookup is below
     // `query_length`, so at most the mask (asserted above).
@@ -1354,11 +1362,14 @@ const X_CROSS_TEST_CHUNK: usize = 64;
 const X_CROSS_PIECE: usize = 3 * X_DIAG_LANES;
 
 /// EXPERIMENT (LOSAT_X_BXCROSS): the room in each array past the chunk: a piece starts with fewer
-/// than the chunk staged and stores [`X_CROSS_PIECE`] lanes (those past its hits are never read),
+/// than the chunk staged and stores [`X_CROSS_PIECE`] lanes (those past its hits are never read as hits),
 /// so a drain starts with fewer than the chunk plus 24 staged, and its move of the fewer than eight
 /// left reads eight lanes from below that count ([`x_cross_drain`]).
 #[cfg(target_arch = "x86_64")]
 const X_CROSS_SLACK: usize = 32;
+
+#[cfg(target_arch = "x86_64")]
+const _: () = assert!(X_CROSS_SLACK >= X_CROSS_PIECE + X_DIAG_LANES - 1);
 
 #[cfg(target_arch = "x86_64")]
 thread_local! {
@@ -1367,6 +1378,8 @@ thread_local! {
     static X_CROSS_STAGE: std::cell::Cell<Vec<i32>> = const { std::cell::Cell::new(Vec::new()) };
 }
 
+// No NCBI counterpart: NCBI keeps the offset pair of every hit in `offset_pairs`; the stage keeps
+// the entry coordinate and the subject offset of the hits not yet tested.
 /// EXPERIMENT (LOSAT_X_BXCROSS): one subject's view of the stage: two arrays of
 /// [`XCross::STRIDE`] values in one allocation, so that a cell's stores take one base register
 /// and constant displacements; per staged hit its entry coordinate `(q - s) & mask` (the array at
@@ -1414,16 +1427,13 @@ impl<'a, const CHUNK: usize> XCross<'a, CHUNK> {
 /// EXPERIMENT (LOSAT_X_BXCROSS): the query offset of a staged hit from its entry coordinate
 /// `coord = (q - s) & mask` and its subject offset `s`: `(coord + s) & mask` is `q & mask` (the
 /// sums wrap modulo 2^32, a multiple of the table's power-of-two length), which is `q` for the
-/// query offsets `0..=mask` of the lookup ([`x_scan_cells_cross`] checks the bound).
+/// query offsets `0..=mask` of the lookup ([`x_scan_cells_cross`] checks the bound and that the
+/// table's length is a power of two once per subject; [`x_cross_cell`] checks each cell's offsets in
+/// debug builds).
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 fn x_cross_query(coord: i32, s: i32, mask: i32) -> i32 {
-    let q = coord.wrapping_add(s) & mask;
-    debug_assert!(
-        (0..=mask).contains(&q) && q.wrapping_sub(s) & mask == coord,
-        "query offset {q} from coord {coord}, subject offset {s}, mask {mask}"
-    );
-    q
+    coord.wrapping_add(s) & mask
 }
 
 /// [`x_scan_cells_avx2`] with LOSAT_X_BXCROSS's batches across the cells' borders (blastx's fused
@@ -2204,6 +2214,13 @@ where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     use std::arch::x86_64::*;
+    // The stage keeps no query offset ([`x_cross_query`]): each must be at most the mask (the
+    // bound `x_scan_cells_cross` asserts from the lookup's length), or the recovery gives another.
+    debug_assert!(
+        hits.iter().all(|q| (0..=table.mask).contains(q)),
+        "a query offset of the cell at subject offset {s} is above the mask {}",
+        table.mask
+    );
     counts.diag.add_staged(hits.len());
     let subject = _mm256_set1_epi32(s);
     let mask = _mm256_set1_epi32(table.mask);
@@ -2251,7 +2268,7 @@ where
 /// batch loads. Then with `end` (the subject's scan is over) the fewer than eight left go one after
 /// the other ([`x_cross_hit`], the reference's order); otherwise they move to the front of the
 /// stage by one eight-lane load and store per array (the lanes past them are never read), where
-/// the next cell's hits follow them. The candidates and the windows tested in parts are added to
+/// the hits staged next follow them. The candidates and the windows tested in parts are added to
 /// `counts` (once per drain). Returns the hits left staged. Out of line: it runs once per chunk of
 /// staged hits and once per subject.
 ///
@@ -3776,8 +3793,8 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn cross_batches_equal_the_per_hit_test_on_cells_of_every_size() {
-        if !x_avx2_available() {
-            eprintln!("no AVX2 on this CPU: the cross-cell batches are not compared");
+        if !x_cross_available() {
+            eprintln!("no AVX2 and POPCNT on this CPU: the cross-cell batches are not compared");
             return;
         }
         let mut seed = 0xc055_u64;
@@ -3849,8 +3866,8 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn cross_batches_with_hits_of_one_diagonal_in_consecutive_cells() {
-        if !x_avx2_available() {
-            eprintln!("no AVX2 on this CPU: the cross-cell batches are not compared");
+        if !x_cross_available() {
+            eprintln!("no AVX2 and POPCNT on this CPU: the cross-cell batches are not compared");
             return;
         }
         let mut seed = 0xd1a9_u64;
@@ -3913,6 +3930,79 @@ mod tests {
         assert!(cases.late_parts > 100, "{cases:?}");
         assert!(cases.candidate_before_later_cell > 100, "{cases:?}");
         assert!(cases.drains > 100, "{cases:?}");
+    }
+
+    // No NCBI counterpart: LOSAT's stage; the checks of its precondition have no NCBI form.
+    /// Runs [`x_scan_cells_cross`] on a one-protein lookup whose `query_length` is set to
+    /// `query_length` over a table of `mask + 1` entries (the scan stops at its first assert).
+    #[cfg(target_arch = "x86_64")]
+    fn scan_cross_with_bounds(query_length: i32, entries: usize, mask: i32) {
+        use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
+        use crate::algorithm::tblastx::translation::QueryFrame;
+        use crate::config::ScoringMatrix;
+        use crate::stats::lookup_protein_params_ungapped;
+
+        let seq = [1u8, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+        let mut aa_seq = vec![0u8];
+        aa_seq.extend_from_slice(&seq);
+        aa_seq.push(0);
+        let frames = vec![vec![QueryFrame {
+            frame: 1,
+            aa_seq,
+            aa_seq_nomask: None,
+            aa_len: seq.len(),
+            orig_len: seq.len(),
+            seg_masks: Vec::new(),
+        }]];
+        let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let (mut lookup, _) = build_ncbi_lookup(&frames, 11, &params, false);
+        lookup.query_length = query_length;
+        let mut entries = vec![DiagStruct::clear(40); entries];
+        let mut table = XDiagTable::new(&mut entries, mask);
+        let test = XDiagTest {
+            diag_offset: 40,
+            window: 40,
+            word_size: 3,
+            prefetch: 0,
+        };
+        let subject = [1u8, 3, 4, 5, 6, 7, 0];
+        let mut candidate = |_: i32, _: i32, _: i32, _: i32, _: &mut DiagStruct| {};
+        x_scan_cells_cross::<X_CROSS_TEST_CHUNK, _>(
+            false,
+            &lookup,
+            &subject,
+            subject.len() - 1,
+            &mut table,
+            test,
+            &mut candidate,
+        );
+    }
+
+    // The scan asserts, once per subject and before it stages a hit, that every query offset of
+    // the lookup is at most the mask: here the lookup is longer than the table.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    #[should_panic(expected = "needs every query offset at most the diagonal mask")]
+    fn cross_scan_asserts_that_the_lookup_fits_the_table() {
+        if !x_cross_available() {
+            // The scan would panic on the CPU check with another message: fail as expected.
+            panic!(
+                "needs every query offset at most the diagonal mask (no AVX2 and POPCNT: skipped)"
+            );
+        }
+        scan_cross_with_bounds(64, 16, 15);
+    }
+
+    // The scan also asserts that `mask + 1` is a power of two: the recovery of the query offset
+    // needs it (here the table has 21 entries).
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    #[should_panic(expected = "needs a diagonal mask of the form 2^k - 1")]
+    fn cross_scan_asserts_that_the_mask_is_a_power_of_two_less_one() {
+        if !x_cross_available() {
+            panic!("needs a diagonal mask of the form 2^k - 1 (no AVX2 and POPCNT: skipped)");
+        }
+        scan_cross_with_bounds(5, 21, 20);
     }
 
     // Every pattern of equal lanes of eight coordinates (the 4,140 partitions of the lanes, as

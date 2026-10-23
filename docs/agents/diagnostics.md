@@ -326,6 +326,7 @@ export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
 export LOSAT_X_DPEMASK=1
+export LOSAT_X_DPWINDOW=1
 export LOSAT_X_ERFABSORB=1
 export LOSAT_X_FOLDLEAN=1
 export LOSAT_X_MBFILL=1
@@ -659,6 +660,31 @@ Same values, faster computation:
   elsewhere (that branch's) made blastn of 31,168 dmel cDNAs against 3 Mb at 16 threads x1.023 slower, with the
   same instructions and blocked store forwards x3.1, all in this kernel; with the rows aligned x1.002 against dev
   [0.999-1.004], dev with the same rows x1.003.
+- `LOSAT_X_DPWINDOW=1` (every program's vector X-drop DP, memory; in the strict set from the pull request
+  that added it, 2026-10-23; a value switch: `=<n>`, 128 or more, is the band start at which the rows move,
+  built-in 1024; `=0` or `LOSAT_X_DEFAULT=0` returns to rows that hold every column) the vector kernels
+  (`utils/xdrop_simd.rs`, `x_xdrop_avx2.rs`, `x_xdrop_w128.rs`) kept their DP rows (`H` and `E` on 8- and
+  16-bit lanes and the column letters, 10 bytes per column) indexed by column, as NCBI's `score_array` is,
+  so a scratch grew, zero-filled, to the last column its longest band reached: 524,288 lanes (5 MiB) on
+  Sakai x EDL933, and a search grows one scratch per worker and stage (blastn `-subject` 16 threads: 92).
+  Now a kernel whose band start reaches the bound moves the lanes from `first - 64`, rounded down to a
+  multiple of 64, to lane 0 and lowers every column it keeps by the same amount (`XdropScratch::x_shift`:
+  the band, the buffers' write ends, the filled column letters, the fence and bad-letter columns); the best
+  cell and the traceback rows keep absolute columns. The lanes keep their values and the freed lanes are
+  zero as lanes never written are, so every score, drop decision, script byte and cell count is the same.
+  The fuzz tests against the scalar NCBI loops run each kernel with the bound at 128, 320 and off, and
+  every family and lane width moves rows there (20,000 cases); `band_window_keeps_every_result` compares
+  long problems on and off. The opt-in NEON2 kernels never move their rows. Memory on the workstation
+  (dev cd8e0f89 / this switch / `=0`, max RSS MiB, `v4-B/results/b16c/mem1/`, same output): Sakai x
+  EDL933 `-subject` blastn 16 threads 592-597 / 526-550 / 575-622, dc-megablast 16 threads 689-736 /
+  614-630 / 651-684, 4 threads 289-292 / 268-272 / 296-303 (blastn 4 threads and 1 thread, the D.
+  melanogaster `-db` cells and blastp unchanged within 15 MiB); NCBI `-subject` (one thread) 164-177. The
+  rest of the genome-pair excess is the traceback rows of the long alignments, one per worker. Time
+  (workstation node 1, against dev cd8e0f89, per-pair median wall, `v4-B/results/b16c/summary_ab1.txt`):
+  Sakai x EDL933 blastn 16 threads x0.954 (8 pairs), 4 threads x0.986 (6), dc-megablast 16 threads x0.886
+  (8; user x0.838), 4 threads x0.985 (6); D. melanogaster cDNAs x genome `-db` dc-megablast 16 threads
+  x1.011 (4 pairs, 0.993-1.015; user x1.000, instructions x0.9995); blastp sp4 `-subject` x1.000 (6),
+  yeast `-db` x1.001 (4); user-space instructions x0.970-0.9995 in every cell.
 - DPW128 (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED`) the
   128-bit X-drop DP kernels with the per-row savings of the 256-bit AVX2 kernels (first and last
   survivor kept while the row runs,

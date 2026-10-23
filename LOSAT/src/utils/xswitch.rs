@@ -189,6 +189,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_DIAGLV2",
     "LOSAT_X_DISCLUTPAR",
     "LOSAT_X_DPEMASK",
+    "LOSAT_X_DPWINDOW",
     "LOSAT_X_ERFABSORB",
     "LOSAT_X_FOLDLEAN",
     "LOSAT_X_MBFILL",

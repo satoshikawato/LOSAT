@@ -22,6 +22,7 @@ LOSAT_X_BPLISTEDLEAN	blastp	conditional	required	gap	-db searches only (every ta
 LOSAT_X_BPLKPAHEAD	blastp	conditional	required	required	only in BPQBLOCK block search (>50,000 query letters, 2+ blocks, supported outfmt), more than one thread
 LOSAT_X_BPLKPFLAT	blastp	conditional	required	required	-task blastp-fast and more than one thread
 LOSAT_X_BPLUT	blastp	always			Default (non-compressed) lookup table filled in place from per-cell counts
+LOSAT_X_BPMASKED	blastp	conditional	required	required	x86-64 AVX2, where BPDEFER deferred calls run; tables with >=2.5 hits per used cell (BPMASKEDMIN 250) take it, fewer take the deferred calls (short queries); never blastp-fast (no AVX2 batches on the compressed table)
 LOSAT_X_BPPCOMPACT	blastp	always			Preliminary HSPs kept as 64-byte elements instead of 168-byte
 LOSAT_X_BPPFREE	blastp	always			Preliminary hit lists give back room; serial redo frees each list
 LOSAT_X_BPQBLOCK	blastp	conditional	required	required	outfmt 6 only (other formats need FMT/SA/XML switches), >50,000 query letters, 2+ blocks, no -query_loc, no refusals

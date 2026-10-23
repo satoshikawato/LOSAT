@@ -229,7 +229,7 @@ their variables mean
   on a packed subject (`TBNSTORE`: `-subject`, the plans of `run_local`'s letters; `-db`) and with AVX2; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPSEED` acts on the two-hit seed stage only; `BPDIAG` acts only
   in `BPSEED`'s fused loop and batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
-  in `BPDIAG`'s AVX2 batch; `BPGAP` runs the
+  in `BPDIAG`'s AVX2 batch; `BPMASKED` only with `BPDEFER`'s deferred calls, on tables of at least `BPMASKEDMIN` hits per used cell; `BPGAP` runs the
   vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPGAP16` acts only
   in `BPGAP`'s vector alignment, where its costs fit 16 bits; `BPLUT` declines in
   diagnostics mode; `BPQBLOCK` takes the block path only for one `-outfmt 6` report (with
@@ -290,6 +290,7 @@ export LOSAT_X_BPLISTEDLEAN=1
 export LOSAT_X_BPLKPAHEAD=1
 export LOSAT_X_BPLKPFLAT=1
 export LOSAT_X_BPLUT=1
+export LOSAT_X_BPMASKED=1
 export LOSAT_X_BPPCOMPACT=1
 export LOSAT_X_BPPFREE=1
 export LOSAT_X_BPQBLOCK=50000
@@ -1891,7 +1892,7 @@ Rebuilding less:
   mitigation on) the gather was slower than eight scalar loads; locally both were equal. The batches prefetch
   nothing (`LOSAT_X_BPSEED_PREFETCH` is the per-hit loop's). Shadow: `LOSAT_X_BPSEEDSHADOW=1` with
   `LOSAT_X_BPDIAG=1` compares the batched loop with the reference for every subject. With `LOSAT_TIMING=1`
-  each search of a query set prints `[TIMING] x_bpdiag: mode=<avx2|avx2-defer|scalar|per-hit> cells=<n>
+  each search of a query set prints `[TIMING] x_bpdiag: mode=<avx2|avx2-defer|avx2-defer-masked|scalar|per-hit> cells=<n>
   batched_hits=<m> candidates=<k>` (the path that ran, cells tested in batches, their hits, the hits passed on; zeros with
   `per-hit`). Measured 2026-10-14 on the workstation (one pinned core, alternating, the other 8 exact switches
   and `LOSAT_X_BPQBLOCK=50000`, x human proteome by `-subject`, rows identical in every arm; `blastp_scan_ungapped`
@@ -1908,7 +1909,8 @@ Rebuilding less:
   cell's last batch of fewer than eight hits is the scalar batch as before. Exact because the hits of one cell
   lie on distinct entries and a call reads and writes only its candidate's entry and the HSP list, so the later
   batches of the cell touch nothing a call reads or writes, and the calls keep their order. With
-  `LOSAT_TIMING=1` the `x_bpdiag` line names `mode=avx2-defer`, with the counts of the AVX2 batch. Shadow:
+  `LOSAT_TIMING=1` the `x_bpdiag` line names `mode=avx2-defer` (with `LOSAT_X_BPMASKED=0`; by default
+  `avx2-defer-masked`, see that entry), with the counts of the AVX2 batch. Shadow:
   `LOSAT_X_BPSEEDSHADOW=1` with `LOSAT_X_BPDIAG=1 LOSAT_X_BPDEFER=1` compares it with the reference for every
   subject. Measured 2026-10-16 on the workstation (perf stat, user-space cycles; the other nine blastp switches
   and `LOSAT_X_BPQBLOCK=50000` in both arms, x the subject proteome by `-subject`, one thread, outputs identical
@@ -1917,6 +1919,35 @@ Rebuilding less:
   job 0.925-0.965, median 0.936) and the instructions 0.985; on one core in alternated pairs Blast0_6 0.920
   (`blastp_scan_ungapped` 45.0 -> 40.2 s), human block 1 0.950 and C. elegans block 5 0.963 (its gapped
   stages are over half of the job), with 13-18 % fewer branch mispredicts.
+- `LOSAT_X_BPMASKED=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-24;
+  `=0` turns it off; acts only where `LOSAT_X_BPDEFER`'s deferred calls run: not with `LOSAT_X_BPDEFER=0` or
+  `LOSAT_X_BPDIAG_SIMD=0`, not without AVX2 (aarch64, WebAssembly), not with `LOSAT_X_BPSEED=0` or
+  `LOSAT_X_BPDIAG=0`, never in blastp-fast's loops on the compressed table (they have no AVX2 batches); and
+  only on lookup tables with at least `LOSAT_X_BPMASKEDMIN` hits per used backbone cell, in hundredths,
+  built-in 250, `0` every table) blastp's
+  fused loop takes `LOSAT_X_BXDEFER`'s masked batch in place of `LOSAT_X_BPDEFER`'s deferred calls
+  (`blastp/x_seed_fused.rs`, `x_cell_avx2_defer_masked`; exactness argument at `LOSAT_X_BXDEFER` in its
+  header): the same buffer and calls, with the batches of eight taking their lanes' entry coordinates from
+  scalar loads of the hits, and a cell's last batch of fewer than eight hits as one masked AVX2 batch whose
+  candidates join the buffer instead of the scalar batch after the calls. The calls (each with the entry its
+  test read) and the table are those of the deferred calls. A table with fewer hits per used cell than
+  `LOSAT_X_BPMASKEDMIN` (a short query) keeps the deferred calls: there the masked batch and the buffer cost
+  more than the scalar batch they replace. The choice is made once per thread and table, with
+  `LOSAT_X_BXDIAGMIN`'s measure. With `LOSAT_TIMING=1` the `x_bpdiag` line names `mode=avx2-defer-masked`
+  (the counts of every table), and a second line `[TIMING] x_bpmasked: min_hits_per_cell=<n>
+  tables_masked=<a> tables_deferred=<b> hits_per_cell=<least>-<most>` gives the rule's (thread, table)
+  choices. Measured 2026-10-24 on the workstation (one pinned core, user-space cycles, medians of paired
+  per-round ratios, every output identical in every arm), against `dev` before the switch: stage7 Blast6_6 and
+  Blast0_6 (`-subject`, about 100 hits per used cell) x0.954 and x0.941 (the cell test 7.28 -> 6.32 cycles per
+  hit), 300 yeast proteins x the fly proteome (`-db`) x0.955, 567 human proteins x Species4 x0.957, WSSV x
+  PajaWSV x0.984 (its redo dominates), 3 proteins (2.60 hits per used cell) x UniRef50 volume 00 (`-db`) x0.933
+  and x the fly proteome x0.989; the tables below the cutoff take the deferred calls and run as before: one
+  42-residue (1.11) and one 357-residue protein (1.48) x UniRef50 volume 00 x1.006 and x1.000, 2 proteins
+  (2.08) x the fly proteome x1.006 (0.982-1.024, a 0.55 s run). With the masked batch on every table
+  (`LOSAT_X_BPMASKEDMIN=0`) against `LOSAT_X_BPMASKED=0` the first k of 10 UniRef50 query proteins against
+  the fly proteome took x1.148 at 1.11 hits per used cell (x1.192 against UniRef50 volume 00), x1.123 at 1.48
+  (x1.071), x1.020 at 2.08, x0.987 at 2.60, x0.924 at 4.52, x0.928 at 7.07 and x0.935 at 10.38 (x0.919 against
+  UniRef50 volume 00), so the built-in cutoff lies between 2.08 and 2.60.
 - `LOSAT_X_BPSCANBF=1` (BLASTP, speed; in the strict set since 2026-10-17, on by default; `=0` turns it
   off; acts in the fused loop, `LOSAT_X_BPSEED`, on the standard lookup table; the compressed table keeps
   its scan) blastp's fused loop finds the lookup cells with hits by the
@@ -4807,8 +4838,9 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_BPDEFER`'s form alone was x1.040 at 6.77 and x0.984 on 201 reads x Swiss-Prot (v4-A14 probe 1, ratios
   of the medians of 3 rounds). blastp's hot loops keep their code (the new cell test has a scan function of its
   own, never inlined, and calls none of blastp's batch helpers): blastp's instructions equal those of the binary
-  before the switch (x1.0000 on 300 yeast proteins x the fly proteome and on WSSV x PajaWSV). With
-  `LOSAT_TIMING=1` the `blastx_diag` line names `mode=avx2-defer-masked` (`mode=avx2` with `=0`) and gives
+  before the switch (x1.0000 on 300 yeast proteins x the fly proteome and on WSSV x PajaWSV; since 2026-10-24
+  blastp's fused loop takes the same cell test by default, `LOSAT_X_BPMASKED`). With `LOSAT_TIMING=1` the
+  `blastx_diag` line names `mode=avx2-defer-masked` (`mode=avx2` with `=0`) and gives
   `defer_min_hits_per_cell=` and `tables_avx2=` (the fused tables that took the AVX2 batch). Shadow:
   `LOSAT_X_BXDIAGSHADOW=1` compares the cell test each table takes with the reference for every subject (every
   table through the fused loop; `LOSAT_X_BXDEFERMIN=0` for this one on all); `tests/blastx_diag.rs` runs the

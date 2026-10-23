@@ -1696,9 +1696,13 @@ Rebuilding less:
   the reference table's loop, and `tests/blastp_fast_scan_bf.rs` the reports with `=0`'s). The table records its
   cells with hits (`used_cells`, `finalize`'s count, set by the serial and the parallel builder), and the
   branch-free list is taken for a table with at least `LOSAT_X_BPCLUTSCANBFMIN` used cells per 10,000 (built-in
-  500; `0` every table): with fewer, few offsets pass `PV_TEST`, the branch is predicted, and the store at every
-  offset costs more than the mispredicts it saves (one core on the workstation, branch-free / branch cycles: 1.071
-  at 2.3 % of the cells used, 1.001 at 4.4 %, 0.956 at 7.3 %, 0.845 at 14.9 %, 0.800 at 22.6 %). The decision is
+  500 natively and 0 on wasm32; `0` every table): natively, with fewer, few offsets pass `PV_TEST`, the branch is
+  predicted, and the store at every offset costs more than the mispredicts it saves (one core on the workstation,
+  branch-free / branch cycles: 1.071 at 2.3 % of the cells used, 1.001 at 4.4 %, 0.956 at 7.3 %, 0.845 at 14.9 %,
+  0.800 at 22.6 %); in WebAssembly the loop with the branch is the slower one at every density measured (the
+  serial WASI command in Node 26, one instance per search in one process, 3 rounds, workstation node 0: branch-free /
+  branch time 0.81 at 1.2 %, 0.80 at 2.3 %, 0.70 at 7.3 %, 0.81 at 31.6 %; the 357-residue protein 13.33 -> 10.62 s,
+  10 proteins 51.87 -> 42.10 s). The decision is
   recorded per query block (`LOSAT_X_REACH`). The branch-free instance (`blastp/x_seed_fused_clut.rs`
   `x_scan_flat_bf`) is out of line with a closure of its own type, so the instance with the branch is compiled as
   without it; the forms that put the scan in a function of its own, or both lists inline before one visit loop,

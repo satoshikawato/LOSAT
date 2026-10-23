@@ -16,7 +16,7 @@
 //! property under test is that the report does not depend on it, for subjects read from FASTA
 //! (`-subject`) and from a database (`-db`), at 1 and 2 threads. That reports equal NCBI's is the
 //! business of the BLASTP fixtures. `LOSAT_X_REACH` shows the side each run took: a query block's
-//! table with at least `LOSAT_X_BPCLUTSCANBFMIN` used cells per 10,000 (built-in 500) takes the
+//! table with at least `LOSAT_X_BPCLUTSCANBFMIN` used cells per 10,000 (built-in 500 natively) takes the
 //! branch-free list, a sparser one keeps the branch, and `LOSAT_X_BPCLUTSCANBFMIN=0` takes the list
 //! on every table. Exact blastp builds no compressed table and records no side.
 //!

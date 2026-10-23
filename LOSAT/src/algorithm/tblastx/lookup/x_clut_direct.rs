@@ -1533,18 +1533,26 @@ fn x_dense_enough(used: usize, cells: usize, min: u64) -> bool {
     u128::from(used as u64) * 10_000 >= u128::from(min) * cells as u128
 }
 
+// No NCBI counterpart: a tuning value of LOSAT's list form; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPCLUTSCANBFMIN): the built-in value of [`x_scan_bf_min`]. Natively 500: on
+/// the workstation the branch-free list cost x1.07 the cycles at 234 used cells per 10,000, x1.00 at
+/// 442, x0.96 at 728 and x0.80 at 2,260. On wasm32 0 (every table): in Node the loop with the branch
+/// is the slower one at every density measured, the branch-free list x0.81 the time at 119 and x0.80
+/// at 234.
+const X_SCAN_BF_MIN: u64 = if cfg!(target_arch = "wasm32") { 0 } else { 500 };
+
 // No NCBI counterpart: reads LOSAT_X_BPCLUTSCANBFMIN once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPCLUTSCANBFMIN): the fewest backbone cells with hits, per 10,000, for which
-/// blastp-fast's scan lists the offsets without a branch (built-in 500: on the workstation the
-/// branch-free list cost x1.07 the cycles at 234, x1.00 at 442, x0.96 at 728 and x0.80 at 2,260);
-/// `0` every table; a value that is not a number takes the built-in one.
+/// blastp-fast's scan lists the offsets without a branch (built-in [`X_SCAN_BF_MIN`]); `0` every
+/// table; a value that is not a number takes the built-in one.
 fn x_scan_bf_min() -> u64 {
     static MIN: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
     *MIN.get_or_init(|| {
         std::env::var("LOSAT_X_BPCLUTSCANBFMIN")
             .ok()
             .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(500)
+            .unwrap_or(X_SCAN_BF_MIN)
     })
 }
 

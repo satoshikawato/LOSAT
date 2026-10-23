@@ -52,7 +52,7 @@
 //! (`x_qbatch_par::Driver::may_speculate`: no `LOSAT_X_QBATCHPARSLOTS`, and a budget of 0 or one
 //! thread). A slot holds a whole batch while others run, and QBATCHPAR's budget counts one table
 //! per batch in flight, so a table kept between the loop's batches would add to the slots' peak.
-//! The tables of LOSAT_X_PAIRPAR's sub-lookups, of the discontiguous tables
+//! The tables of PAIRPAR's sub-lookups, of the discontiguous tables
 //! (`build_disc_mb_lookup`) and of the tests are not kept.
 //!
 //! Memory. Between two batches the loop holds the longest table built so far, and no build

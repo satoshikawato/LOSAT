@@ -1,6 +1,6 @@
-//! Which TBLASTN query batches are searched side by side (`LOSAT_X_TBNBATCH` and
-//! `LOSAT_X_TBNBATCHRULE`) and which at the same time on pools of their own
-//! (`LOSAT_X_TBNOWNPOOLS`), all in the strict set; `src/algorithm/tblastn/stage_d_pipeline.rs`.
+//! Which TBLASTN query batches are searched side by side (the rule that was `LOSAT_X_TBNBATCH`,
+//! graduated 2026-10-22, and `LOSAT_X_TBNBATCHRULE`) and which at the same time on pools of their
+//! own (`LOSAT_X_TBNOWNPOOLS`); `src/algorithm/tblastn/stage_d_pipeline.rs`.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
 //! ```c++
@@ -11,7 +11,7 @@
 //!                 ...
 //!                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
 //! ```
-//! NCBI searches each query batch on its own, one after another. With `LOSAT_X_TBNBATCH`, two or
+//! NCBI searches each query batch on its own, one after another. With two or
 //! more threads, the subject plans shared (four or more batches) and at least one batch per
 //! thread, LOSAT searches the batches side by side, each as the one-thread search. With
 //! `LOSAT_X_TBNBATCHRULE` as well (the default), only the batches of the full waves (a multiple of
@@ -124,21 +124,6 @@ fn the_report_is_the_one_thread_report_with_and_without_the_rule() {
             Some(all),
             "rule off, {threads} threads"
         );
-    }
-}
-
-// The rule acts only with `LOSAT_X_TBNBATCH`: with it off, alone or through `LOSAT_X_DEFAULT=0`,
-// the batches are searched one after another and the report is unchanged.
-#[test]
-fn the_rule_does_nothing_without_the_side_by_side_switch() {
-    let (expected, _) = tblastn(1, &[]);
-    for variables in [
-        &[("LOSAT_X_TBNBATCH", "0")][..],
-        &[("LOSAT_X_DEFAULT", "0")],
-    ] {
-        let (report, stderr) = tblastn(3, variables);
-        assert_eq!(report, expected, "{variables:?}");
-        assert_eq!(side_by_side(&stderr), None, "{variables:?}");
     }
 }
 

@@ -271,6 +271,18 @@ impl FastaRecord {
             .and_then(|source| source.uncut.as_deref())
             .unwrap_or(&self.sequence)
     }
+
+    /// The record `cut` makes, in place: the letters before `from` and from `to_exclusive` on are
+    /// dropped (the room of the whole letters stays until the sequence is replaced). A record that
+    /// keeps its source for outfmt 11 keeps the whole letters there first, as `cut` does.
+    pub fn cut_in_place(&mut self, from: usize, to_exclusive: usize) {
+        if let Some(source) = self.source.as_mut() {
+            source.uncut.get_or_insert_with(|| self.sequence.clone());
+        }
+        self.sequence.truncate(to_exclusive);
+        self.sequence.drain(..from);
+        self.warnings = Vec::new();
+    }
 }
 
 /// A record as the programs use it: its residues, the record cut to a range, and its title

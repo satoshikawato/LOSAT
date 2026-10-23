@@ -667,8 +667,8 @@ pub(super) fn link_hsp_group_incr(
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
 // NCBI links each group as a sublist of the one sorted array. The kernel on the group's records
-// wherever they lie (a Vec of its own, or a sub-slice of the linking call's list for
-// LOSAT_X_LINKSLICES, tblastx/x_link_slices.rs): it wraps link_hsp_group_incr_with_slice, adds
+// wherever they lie (a Vec of its own, or a sub-slice of the linking call's list,
+// tblastx/x_link_slices.rs): it wraps link_hsp_group_incr_with_slice, adds
 // the LOSAT_LINK_STATS line and changes no value of the result.
 /// `link_hsp_group_incr` on the group's records in place.
 #[allow(clippy::too_many_arguments)]
@@ -946,7 +946,7 @@ pub(super) fn link_hsp_group_incr_with_slice(
 // The replacement for the per-group body of s_BlastEvenGapLinkHSPs: same rounds, same selection
 // rule, same removal; a pass after the first computes again only the HSPs described in the
 // module documentation. It takes the group's records as a slice (its own Vec, or a sub-slice of
-// the linking call's list for LOSAT_X_LINKSLICES) and hands the same slice back: the body indexes,
+// the linking call's list, `x_link_slices.rs`) and hands the same slice back: the body indexes,
 // reads and writes fields of the records and never adds, removes or moves one.
 #[allow(clippy::too_many_arguments)]
 fn link_group<'g, K: LinkKey>(

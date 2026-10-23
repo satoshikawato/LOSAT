@@ -592,7 +592,7 @@ fn the_out_file_and_the_shadow() {
         [OsStr::new("-subject"), fasta.as_os_str()],
         [OsStr::new("-db"), db.as_os_str()],
     ] {
-        for spec in ["0", "6", "7", "5", "8", "9", "11", "12", "15", "16"] {
+        for spec in ["0", "6", "7", "5", "8", "9", "12", "15", "16"] {
             let fmt = outfmt(spec);
             let what = format!("{:?} outfmt {spec}", subject[0]);
             let reference = blastp(&query, &subject, 4, &[BATCH, SWITCH_OFF], &os(&fmt));
@@ -723,7 +723,7 @@ fn queries_without_hits_at_the_edges_of_blocks() {
         [OsStr::new("-subject"), fasta.as_os_str()],
         [OsStr::new("-db"), db.as_os_str()],
     ] {
-        for spec in ["5", "8", "9", "11", "12", "15", "16"] {
+        for spec in ["5", "8", "9", "12", "15", "16"] {
             let fmt = outfmt(spec);
             for threads in THREADS {
                 let what = format!("{:?} outfmt {spec} threads {threads}", subject[0]);

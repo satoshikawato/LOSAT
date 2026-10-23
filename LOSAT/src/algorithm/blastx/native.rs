@@ -1022,20 +1022,9 @@ fn run_inner(
                 let x_events = std::cell::RefCell::new(Vec::<XEvent>::new());
                 let x_failed = std::cell::Cell::new(false);
                 let x_wave = pool.threads() * 4;
-                // A batch above twice the DEFAULT batch (10002 letters, not the run's `BATCH_SIZE`)
-                // is searched with the pool inside; between 10003 and 20004 letters a batch is
-                // searched on one thread, and `x_wave` of them at once.
                 let x_large = |queries: &[super::input::FastaRecord]| {
                     queries.iter().map(|q| q.sequence.len()).sum::<usize>() > 2 * BATCH_SIZE
                 };
-                // The flow holds `x_wave` default-sized batches (about `x_wave` x 10002 letters)
-                // read and not yet written. With a larger `BATCH_SIZE` the same count would hold
-                // `x_wave` large batches, each with its own tables and scratch while it is
-                // searched, so the bound is a letter budget: the count falls as the batch grows
-                // (`BATCH_SIZE` unset, or up to 10002: exactly `x_wave`, the flow's schedule
-                // before this bound existed), and the batches held back for the tail (searched
-                // alone, side by side) stay below it.
-                let (x_flow_bound, x_flow_lookahead) = x_flow_limits(pool.threads(), batch_size);
                 // EXPERIMENT (LOSAT_X_BXFLOW): the queued batches as a flow instead of waves.
                 //
                 // The waves below search `x_wave` batches and then wait for the last of them
@@ -1056,8 +1045,8 @@ fn run_inner(
                 // order; the flow changes only LOSAT's scheduling of the searches above.
                 if super::runtime::x_bx_flow() {
                     return x_flow(
-                        x_flow_bound,
-                        x_flow_lookahead,
+                        x_wave,
+                        pool.threads(),
                         &mut query_stream,
                         args.lcase_masking,
                         batch_size,
@@ -1552,17 +1541,6 @@ pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> 
     Ok(())
 }
 
-/// The bound of the flow (`x_flow`): the batches read and not yet written, and the batches held
-/// back for the tail. `threads x 4` and `threads` when a batch has at most 10002 letters (the
-/// default, or a smaller `BATCH_SIZE`); with a larger batch the count falls with the batch size
-/// (`threads x 4 x 10002 / batch_size`, at least 1), the held tail below it.
-#[cfg(feature = "parallel")]
-fn x_flow_limits(threads: usize, batch_size: usize) -> (usize, usize) {
-    let wave = threads * 4;
-    let bound = (wave * BATCH_SIZE / batch_size.max(1)).clamp(1, wave);
-    (bound, threads.min(bound - 1))
-}
-
 // EXPERIMENT (LOSAT_X_BXFLOW): the reading loop of `run` with every query batch searched as a task
 // of its own (see the call in `run`). `search` searches one batch (the waves' function; `alone`:
 // with the pool inside), `write_batch` writes one batch's reports (or ends the run at its error),
@@ -1787,37 +1765,5 @@ mod archive_error_tests {
         let engine_error = archive_error(anyhow::anyhow!("something else"));
         assert!(engine_error.downcast_ref::<NativeError>().is_some());
         assert!(archive::error_lines(&engine_error, false).is_some());
-    }
-}
-
-#[cfg(all(test, feature = "parallel"))]
-mod flow_limit_tests {
-    use super::x_flow_limits;
-
-    /// With `BATCH_SIZE` unset, or up to the default 10002, the flow's bound and tail are
-    /// `threads x 4` and `threads`, as before the letter bound existed.
-    #[test]
-    fn a_default_sized_batch_keeps_the_threads_times_four_bound() {
-        for threads in 2..=128 {
-            for batch_size in [1, 40, 10_000, 10_002] {
-                assert_eq!(x_flow_limits(threads, batch_size), (threads * 4, threads));
-            }
-        }
-    }
-
-    /// A larger batch lowers the count of batches with the letters; the tail stays below it.
-    #[test]
-    fn a_large_batch_lowers_the_bound() {
-        assert_eq!(x_flow_limits(16, 100_000), (6, 5));
-        assert_eq!(x_flow_limits(16, 300_000), (2, 1));
-        assert_eq!(x_flow_limits(8, 1_000_000), (1, 0));
-        assert_eq!(x_flow_limits(8, usize::MAX), (1, 0));
-        assert_eq!(x_flow_limits(8, 0), (32, 8));
-        for threads in 2..=64 {
-            for batch_size in [10_003, 20_004, 50_000, 3_000_000, 4_294_967_295] {
-                let (bound, lookahead) = x_flow_limits(threads, batch_size);
-                assert!((1..=threads * 4).contains(&bound) && lookahead < bound);
-            }
-        }
     }
 }

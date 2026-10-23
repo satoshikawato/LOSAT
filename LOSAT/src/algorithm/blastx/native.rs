@@ -1035,8 +1035,7 @@ fn run_inner(
                 // (`BATCH_SIZE` unset, or up to 10002: exactly `x_wave`, the flow's schedule
                 // before this bound existed), and the batches held back for the tail (searched
                 // alone, side by side) stay below it.
-                let x_flow_bound = (x_wave * BATCH_SIZE / batch_size.max(1)).clamp(1, x_wave);
-                let x_flow_lookahead = pool.threads().min(x_flow_bound - 1);
+                let (x_flow_bound, x_flow_lookahead) = x_flow_limits(pool.threads(), batch_size);
                 // EXPERIMENT (LOSAT_X_BXFLOW): the queued batches as a flow instead of waves.
                 //
                 // The waves below search `x_wave` batches and then wait for the last of them
@@ -1564,6 +1563,16 @@ pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> 
 // is computed by the same calls as without the switch, in the same order of writing.
 #[cfg(feature = "parallel")]
 #[allow(clippy::too_many_arguments)]
+/// The bound of the flow (`x_flow`): the batches read and not yet written, and the batches held
+/// back for the tail. `threads x 4` and `threads` when a batch has at most 10002 letters (the
+/// default, or a smaller `BATCH_SIZE`); with a larger batch the count falls with the batch size
+/// (`threads x 4 x 10002 / batch_size`, at least 1), the held tail below it.
+fn x_flow_limits(threads: usize, batch_size: usize) -> (usize, usize) {
+    let wave = threads * 4;
+    let bound = (wave * BATCH_SIZE / batch_size.max(1)).clamp(1, wave);
+    (bound, threads.min(bound - 1))
+}
+
 fn x_flow(
     bound: usize,
     lookahead: usize,
@@ -1777,5 +1786,37 @@ mod archive_error_tests {
         let engine_error = archive_error(anyhow::anyhow!("something else"));
         assert!(engine_error.downcast_ref::<NativeError>().is_some());
         assert!(archive::error_lines(&engine_error, false).is_some());
+    }
+}
+
+#[cfg(test)]
+mod flow_limit_tests {
+    use super::x_flow_limits;
+
+    /// With `BATCH_SIZE` unset, or up to the default 10002, the flow's bound and tail are
+    /// `threads x 4` and `threads`, as before the letter bound existed.
+    #[test]
+    fn a_default_sized_batch_keeps_the_threads_times_four_bound() {
+        for threads in 2..=128 {
+            for batch_size in [1, 40, 10_000, 10_002] {
+                assert_eq!(x_flow_limits(threads, batch_size), (threads * 4, threads));
+            }
+        }
+    }
+
+    /// A larger batch lowers the count of batches with the letters; the tail stays below it.
+    #[test]
+    fn a_large_batch_lowers_the_bound() {
+        assert_eq!(x_flow_limits(16, 100_000), (6, 5));
+        assert_eq!(x_flow_limits(16, 300_000), (2, 1));
+        assert_eq!(x_flow_limits(8, 1_000_000), (1, 0));
+        assert_eq!(x_flow_limits(8, usize::MAX), (1, 0));
+        assert_eq!(x_flow_limits(8, 0), (32, 8));
+        for threads in 2..=64 {
+            for batch_size in [10_003, 20_004, 50_000, 3_000_000, 4_294_967_295] {
+                let (bound, lookahead) = x_flow_limits(threads, batch_size);
+                assert!((1..=threads * 4).contains(&bound) && lookahead < bound);
+            }
+        }
     }
 }

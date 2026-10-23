@@ -1214,7 +1214,7 @@ mod tests {
             let plan = plans.entry(subject_id).or_insert_with(|| {
                 x_scan_plan(
                     &[query],
-                    SubjectNt::Letters(by_id[subject_id]),
+                    SubjectNt::Letters(by_id[subject_id]).into(),
                     1,
                     None,
                     13,
@@ -1370,7 +1370,7 @@ mod tests {
         // The frames the search translates: the unit path's plan.
         let plan = x_scan_plan(
             &[query],
-            SubjectNt::Letters(subject),
+            SubjectNt::Letters(subject).into(),
             1,
             None,
             13,
@@ -1449,7 +1449,7 @@ mod tests {
             // The frames the search translates: the unit path's plan.
             let plan = x_scan_plan(
                 &[query],
-                SubjectNt::Letters(subject),
+                SubjectNt::Letters(subject).into(),
                 1,
                 None,
                 13,

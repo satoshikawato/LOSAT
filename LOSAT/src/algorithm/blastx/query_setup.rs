@@ -230,6 +230,7 @@ pub fn prepare_queries(
     records: &[FastaRecord],
     options: &ResolvedOptions,
 ) -> Result<PreparedQueryBatch> {
+    let _probe = crate::utils::probe_mem::tag(crate::utils::probe_mem::NG as u8 - 1);
     if records.is_empty() {
         bail!("cannot prepare an empty BLASTX query batch");
     }

@@ -789,6 +789,7 @@ impl PreliminarySink for Runtime<'_> {
         batch: &PreparedQueryBatch,
         params: &[ContextParameters],
     ) -> Result<()> {
+        let _probe = crate::utils::probe_mem::tag(crate::utils::probe_mem::COLLECT);
         let mut hsps: Vec<_> = input
             .iter()
             .map(|h| Hsp {
@@ -1375,6 +1376,7 @@ impl PreliminarySink for Runtime<'_> {
     // }
     // ```
     fn chunk_end(&mut self, chunk: &QueryChunk, is_split: bool) -> Result<()> {
+        let _probe = crate::utils::probe_mem::tag(crate::utils::probe_mem::COLLECT);
         let incoming = self.chunk.take().expect("chunk stream");
         if is_split {
             self.stream.as_mut().expect("batch stream").merge_observed(
@@ -1408,6 +1410,7 @@ impl PreliminarySink for Runtime<'_> {
     ) -> Result<()> {
         // Diagnostic (LOSAT_TIMING): the clocks of the intervals of this function
         // (x_timing.rs). No NCBI counterpart.
+        let _probe = crate::utils::probe_mem::tag(crate::utils::probe_mem::TRACE);
         use super::x_timing::End as XEnd;
         let x_t = super::x_timing::lap();
         let mut x_t_finish = None;

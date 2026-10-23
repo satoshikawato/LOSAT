@@ -1391,6 +1391,7 @@ fn compute_subject(
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
+    let _probe = crate::utils::probe_mem::tag(crate::utils::probe_mem::PRELIM);
     #[cfg(feature = "blastx-worker-probe")]
     worker_probe("start", oid);
     let mut containment = Vec::new();

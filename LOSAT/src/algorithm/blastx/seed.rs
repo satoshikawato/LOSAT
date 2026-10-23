@@ -105,6 +105,7 @@ impl Diagonals {
     //         }
     // ```
     pub fn new(query_length: usize, window: i32) -> Result<Self> {
+        let _probe = crate::utils::probe_mem::tag(crate::utils::probe_mem::SCAN);
         let n = query_length
             .checked_add(usize::try_from(window)?)
             .and_then(|n| n.max(1).checked_next_power_of_two())
@@ -314,6 +315,7 @@ impl Lookup {
         parameters: &[ContextParameters],
         options: &ResolvedOptions,
     ) -> Result<Self> {
+        let _probe = crate::utils::probe_mem::tag(crate::utils::probe_mem::LOOKUP);
         let query = batch.sequence_start[1..].to_vec();
         if options.word_size == 5 {
             return Ok(Self::Compressed(

@@ -115,23 +115,14 @@ impl<'a> SubjectLetters<'a> {
 
     /// Subject `oid` for the readers of windows (the redo, the traceback's translations, the
     /// report): the record's letters, or its store, whose windows are made when read.
-    /// The search reads a `-db` stream's sequences with `x_nt`; the reports see the reported
-    /// sequences as `Packed`.
+    /// The stages after the preliminary search read a `-db` stream's sequences through
+    /// `x_db_stream::XStageSubjects`; the reports see the reported sequences as `Packed`.
     pub(super) fn nt(&self, oid: usize) -> SubjectNt<'a> {
         match self {
             Self::Records(subjects) => SubjectNt::Letters(subjects[oid]),
             Self::Packed(subjects) => SubjectNt::Packed(&subjects[oid]),
-            Self::Stream(_) => unreachable!("a -db stream is read with x_nt"),
+            Self::Stream(_) => unreachable!("a -db stream is read through XStageSubjects"),
         }
-    }
-
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `nt`, where a sequence of a `-db` stream is read (one read)
-    /// and held by the result.
-    pub(super) fn x_nt(&self, oid: usize) -> anyhow::Result<XNt<'a>> {
-        Ok(match self {
-            Self::Stream(stream) => XNt::Read(stream.read(oid)?),
-            _ => XNt::Nt(self.nt(oid)),
-        })
     }
 }
 
@@ -157,22 +148,6 @@ impl XPrelimSubject<'_> {
 impl<'a> From<SubjectNt<'a>> for XPrelimSubject<'a> {
     fn from(subject: SubjectNt<'a>) -> Self {
         Self::Nt(subject)
-    }
-}
-
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): a subject for the readers of windows (`SubjectLetters::x_nt`):
-/// a view of the letters or the store, or the sequence of a `-db` stream, read for them.
-pub(super) enum XNt<'a> {
-    Nt(SubjectNt<'a>),
-    Read(PackedNucleotide),
-}
-
-impl XNt<'_> {
-    pub(super) fn get(&self) -> SubjectNt<'_> {
-        match self {
-            Self::Nt(subject) => *subject,
-            Self::Read(store) => SubjectNt::Packed(store),
-        }
     }
 }
 

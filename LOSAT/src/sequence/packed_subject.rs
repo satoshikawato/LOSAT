@@ -203,6 +203,21 @@ impl PackedNucleotide {
     /// bytes those of its preliminary stage. A run may hold the code of `A`, `C`, `G` or `T`
     /// (another letter than the stored base); it is kept, as the letters show it.
     pub fn from_stored(packed: &[u8], length: usize, runs: &[AmbiguityRun]) -> Self {
+        Self::from_stored_box(packed.into(), length, runs)
+    }
+
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `from_stored` with the packed bytes in a buffer that
+    /// glibc maps from 1 MiB on (`utils::x_mapped`), so that a store made for a while and dropped
+    /// (a database sequence read where it is searched) gives its pages back instead of leaving
+    /// them in the thread's arena. No NCBI counterpart: only where the bytes are held.
+    pub fn x_from_stored_mapped(packed: &[u8], length: usize, runs: &[AmbiguityRun]) -> Self {
+        let mut bytes = Vec::with_capacity(crate::utils::x_mapped::x_mapped_capacity(packed.len(), 1));
+        bytes.extend_from_slice(packed);
+        Self::from_stored_box(bytes.into_boxed_slice(), length, runs)
+    }
+
+    /// `from_stored` of packed bytes already held in `packed`.
+    fn from_stored_box(packed: Box<[u8]>, length: usize, runs: &[AmbiguityRun]) -> Self {
         let mut clipped: Vec<AmbiguityRun> = Vec::with_capacity(runs.len());
         let mut in_order = true;
         let mut previous_end = 0usize;
@@ -226,7 +241,7 @@ impl PackedNucleotide {
             });
         }
         let mut store = Self {
-            packed: packed.into(),
+            packed,
             length,
             ambiguity: Box::default(),
             lowercase: Box::default(),

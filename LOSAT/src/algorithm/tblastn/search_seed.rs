@@ -1047,7 +1047,7 @@ pub(super) fn x_scan_plan(
             // EXPERIMENT (LOSAT_X_TBNDBSTREAM): the sequence is read for its plan and dropped once
             // the plan is made (a database sequence has no lower-case letters).
             XPrelimSubject::Stream(stream, oid) => {
-                let store = stream.read(oid)?;
+                let store = stream.read_for_plan(oid)?;
                 super::x_subject_translate::x_packed_subject_plan(&store, db_gencode)
             }
             XPrelimSubject::Nt(SubjectNt::Letters(letters)) => {

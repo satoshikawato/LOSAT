@@ -19,11 +19,14 @@
 //!   (`search_seed::x_scan_plan`, `XPrelimSubject::Stream`) and drops it once the plan is made:
 //!   the frames are translated from it and the stage reads nothing else of the sequence. A plan
 //!   that the search keeps between query batches (`XSubjectSide`) is not made again, and its
-//!   sequence is not read again.
-//! - The composition redo and the traceback of `-comp_based_stats 0` read the sequence of each
-//!   subject they align (`SubjectLetters::x_nt`), and the reports read the sequences they show
-//!   (`database::reported_subjects`), one read each, as NCBI fetches the sequences of its hit
-//!   lists.
+//!   sequence is not read again. Each thread keeps the last block of 256 KiB of the sequence file
+//!   it read for the plans (`XDbStream::read_for_plan`), from which the next short subjects come.
+//! - The composition redo and the traceback of `-comp_based_stats 0` read each subject of their
+//!   lists once, before the stage, and hold them until it ends (`XStageSubjects`), and the reports
+//!   read the sequences they show (`database::reported_subjects`), one read each, as NCBI fetches
+//!   the sequences of its hit lists. A long sequence read on its own is held in buffers that
+//!   glibc maps (`utils::x_mapped`), so that its pages go back when it is dropped instead of
+//!   staying in the thread's arena.
 //!
 //! Every read packs the stored bytes as the copy does (`common::database::x_read_nucleotide_store`,
 //! the same `PackedNucleotide::from_stored`), so every stage computes the same values on the same
@@ -104,6 +107,8 @@ pub(super) fn x_print_shadow_summary() {
 /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the database of a `-db` search, read where it is searched.
 pub(super) struct XDbStream<'a> {
     db: &'a SeqDb,
+    /// A number of its own in the process (`XPlanBlock::stream`).
+    id: u64,
     /// The length of every sequence, by ordinal id (`x_check_nucleotide_stores`).
     lengths: Vec<u32>,
     /// The copy of the shadow mode.
@@ -146,8 +151,10 @@ impl<'a> XDbStream<'a> {
         } else {
             None
         };
+        static STREAMS: AtomicU64 = AtomicU64::new(0);
         Ok(Self {
             db,
+            id: STREAMS.fetch_add(1, Ordering::Relaxed),
             lengths: checked?,
             copy,
         })
@@ -167,6 +174,54 @@ impl<'a> XDbStream<'a> {
     pub(super) fn read(&self, oid: usize) -> Result<PackedNucleotide> {
         let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
         let store = shared::x_read_nucleotide_store(self.db, ordinal, PROGRAM)?;
+        Ok(self.checked(oid, store))
+    }
+
+    /// Sequence `oid` for the plan of its preliminary stage. The thread keeps the last block of
+    /// sequences it read (`SeqDb::next_block` of `PLAN_BLOCK_BYTES` from the sequence asked for)
+    /// and takes the next sequences of the block from it: the preliminary stage asks for the
+    /// subjects of a range in ascending order on each thread, so most short subjects come
+    /// without a read. A block of one sequence (a long one) is read alone and not kept.
+    pub(super) fn read_for_plan(&self, oid: usize) -> Result<PackedNucleotide> {
+        let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
+        let mut kept = X_PLAN_BLOCK.with(std::cell::Cell::take);
+        let held = |kept: &Option<XPlanBlock>| {
+            kept.as_ref().is_some_and(|kept| {
+                kept.stream == self.id
+                    && (kept.first..kept.first + kept.block.len() as u32).contains(&ordinal)
+            })
+        };
+        if !held(&kept) {
+            kept = None;
+            let range = self.db.next_block(ordinal, PLAN_BLOCK_BYTES);
+            match range {
+                Some(range) if range.len() > 1 => {
+                    let block = self
+                        .db
+                        .read_block(range)
+                        .map_err(|error| shared::search_read_error(error, PROGRAM))?;
+                    kept = Some(XPlanBlock {
+                        stream: self.id,
+                        first: range.first_ordinal,
+                        block,
+                    });
+                }
+                _ => return self.read(oid),
+            }
+        }
+        let block = kept.as_ref().expect("a block holds the sequence");
+        let store = shared::x_nucleotide_store_in(
+            &block.block,
+            (ordinal - block.first) as usize,
+            ordinal,
+            PROGRAM,
+        );
+        X_PLAN_BLOCK.with(|cell| cell.set(kept));
+        Ok(self.checked(oid, store?))
+    }
+
+    /// `store`, read for sequence `oid`, after the shadow mode's comparison with the copy.
+    fn checked(&self, oid: usize, store: PackedNucleotide) -> PackedNucleotide {
         if let Some(copy) = &self.copy {
             shadow_assert(store == copy[oid], || {
                 format!("database sequence {oid} differs from the copy")
@@ -174,6 +229,65 @@ impl<'a> XDbStream<'a> {
             SHADOW_READS.fetch_add(1, Ordering::Relaxed);
             SHADOW_BASES.fetch_add(store.len() as u64, Ordering::Relaxed);
         }
-        Ok(store)
+        store
+    }
+}
+
+/// No NCBI counterpart: the bytes of the sequence file in a block that a thread keeps for the
+/// plans (`XDbStream::read_for_plan`; the blocks of BLASTX's `-db` stream are 256 KiB too).
+const PLAN_BLOCK_BYTES: u64 = 256 << 10;
+
+/// A block of sequences that a thread keeps for the plans, and its stream.
+struct XPlanBlock {
+    /// `XDbStream::id` of the stream that read it (a pool thread outlives a run).
+    stream: u64,
+    first: u32,
+    block: crate::seqdb::SequenceBlock,
+}
+
+thread_local! {
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): this thread's block for the plans.
+    static X_PLAN_BLOCK: std::cell::Cell<Option<XPlanBlock>> = const { std::cell::Cell::new(None) };
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the subjects that a stage after the preliminary search reads
+/// (the composition redo, the traceback of `-comp_based_stats 0`): with a `-db` stream, each
+/// distinct subject of the stage's lists read once (`XDbStream::read`) before the stage and held
+/// until it ends; otherwise the search's subjects.
+pub(super) enum XStageSubjects<'a> {
+    All(super::x_subject_store::SubjectLetters<'a>),
+    Read(Vec<(usize, PackedNucleotide)>),
+}
+
+impl<'a> XStageSubjects<'a> {
+    /// The subjects of a stage whose lists name the subjects `oids`.
+    pub(super) fn new(
+        subjects: super::x_subject_store::SubjectLetters<'a>,
+        oids: impl Iterator<Item = usize>,
+    ) -> Result<Self> {
+        let super::x_subject_store::SubjectLetters::Stream(stream) = subjects else {
+            return Ok(Self::All(subjects));
+        };
+        let mut oids: Vec<usize> = oids.collect();
+        oids.sort_unstable();
+        oids.dedup();
+        let read = oids
+            .into_iter()
+            .map(|oid| Ok((oid, stream.read(oid)?)))
+            .collect::<Result<_>>()?;
+        Ok(Self::Read(read))
+    }
+
+    /// Subject `oid` for the readers of windows (`SubjectLetters::nt`).
+    pub(super) fn nt(&self, oid: usize) -> crate::sequence::packed_subject::SubjectNt<'_> {
+        match self {
+            Self::All(subjects) => subjects.nt(oid),
+            Self::Read(read) => {
+                let at = read
+                    .binary_search_by_key(&oid, |(read, _)| *read)
+                    .expect("every subject of the stage's lists was read");
+                crate::sequence::packed_subject::SubjectNt::Packed(&read[at].1)
+            }
+        }
     }
 }

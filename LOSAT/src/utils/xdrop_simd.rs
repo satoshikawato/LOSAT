@@ -438,15 +438,20 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
 /// values and the lengths are those of the `Vec` before.
 struct Rows<T> {
     v: Vec<T>,
-    off: usize,
+    /// `v`'s element on the boundary (`v` is never pushed to, so its buffer does not move).
+    ptr: *mut T,
     len: usize,
 }
+
+// SAFETY: `ptr` points into `v`, which the struct owns; it goes and is shared with `v`.
+unsafe impl<T: Send> Send for Rows<T> {}
+unsafe impl<T: Sync> Sync for Rows<T> {}
 
 impl<T: Copy + Default> Rows<T> {
     fn new(len: usize) -> Self {
         let mut r = Rows {
             v: Vec::new(),
-            off: 0,
+            ptr: std::ptr::NonNull::dangling().as_ptr(),
             len: 0,
         };
         r.resize(len, T::default());
@@ -463,20 +468,25 @@ impl<T: Copy + Default> Rows<T> {
         let off = v.as_ptr().align_offset(64);
         assert!(off <= 64 / std::mem::size_of::<T>());
         v[off..off + self.len].copy_from_slice(self);
-        *self = Rows { v, off, len };
+        let ptr = v[off..].as_mut_ptr();
+        *self = Rows { v, ptr, len };
     }
 }
 
 impl<T> std::ops::Deref for Rows<T> {
     type Target = [T];
+    #[inline(always)]
     fn deref(&self) -> &[T] {
-        &self.v[self.off..self.off + self.len]
+        // SAFETY: `ptr` and `len` lie in `v` (`resize`), and `v` is not changed elsewhere.
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
     }
 }
 
 impl<T> std::ops::DerefMut for Rows<T> {
+    #[inline(always)]
     fn deref_mut(&mut self) -> &mut [T] {
-        &mut self.v[self.off..self.off + self.len]
+        // SAFETY: as `deref`, and `&mut self` borrows `v` uniquely.
+        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
     }
 }
 

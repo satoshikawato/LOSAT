@@ -149,7 +149,7 @@ use super::{
 };
 
 // No NCBI counterpart: reads the switches once (LOSAT_X_RPTSTREAM is a strict-set switch since
-// 2026-10-17: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; the shadow, off
+// 2026-10-17: on unless it is `0`; the shadow, off
 // unless set to any value, implies the switch). They choose when LOSAT writes the same reports.
 /// 0 = off, 1 = LOSAT_X_RPTSTREAM, 2 = LOSAT_X_RPTSTREAMSHADOW.
 fn mode() -> u8 {

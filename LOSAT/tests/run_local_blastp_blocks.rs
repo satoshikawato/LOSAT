@@ -531,14 +531,14 @@ fn calls_the_block_search_takes_and_does_not() {
         );
     }
     // An observer without the hit records; several outputs that are not the caller's writers; an
-    // output the block search does not write (outfmt 15 and 16); the switch off by
-    // `LOSAT_X_DEFAULT=0` (one outfmt 6 output with the records and the observer, which only
+    // output the block search does not write (outfmt 15 and 16); the switch off
+    // (`LOSAT_X_BPQBLOCKWEB=0`; one outfmt 6 output with the records and the observer, which only
     // `LOSAT_X_BPQBLOCKWEB` takes); the block search off.
     for (formats, observe, extra) in [
         (&WEB[..], Observe::ObserverOnly, None),
         (&WEB[..], Observe::Files, None),
         (&["0", "6", "7", "15", "16"][..], Observe::Both, None),
-        (&WEB[1..2], Observe::Both, Some(("LOSAT_X_DEFAULT", "0"))),
+        (&WEB[1..2], Observe::Both, Some(WEB_OFF)),
         (&WEB[..], Observe::Both, Some(("LOSAT_X_BPQBLOCK", "0"))),
     ] {
         let mut vars = vec![BATCH];

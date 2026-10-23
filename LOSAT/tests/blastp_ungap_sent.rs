@@ -1,4 +1,3 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! BLASTP's two-hit ungapped extension inlined into the fused seed loop with sentinel-stopped walks
 //! (`LOSAT_X_BPUNGAPSENT`, `src/algorithm/blastp/x_ungapped_sent.rs`, module header) on whole
 //! searches.
@@ -12,7 +11,7 @@
 //!     ...
 //!         right_score = s_BlastAaExtendRight(matrix, subject, query, ...);
 //! ```
-//! The switch is in the strict set (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set).
+//! The switch is in the strict set (on unless it is `0`).
 //! The path gives the extension's result of the closure it replaces (the module's argument), so
 //! the property under test is that the report does not depend on it, for subjects read from FASTA
 //! (`-subject`) and from a database (`-db`), whose buffers carry the sentinels in different ways.
@@ -30,7 +29,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const OFF: (&str, &str) = ("LOSAT_X_BPUNGAPSENT", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_BPUNGAPSENTSHADOW", "1");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -186,7 +184,7 @@ fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
     }
 }
 
-/// Default, `=0`, the shadow and `LOSAT_X_DEFAULT=0` give the same report, on `-subject` and `-db`
+/// Default, `=0` and the shadow give the same report, on `-subject` and `-db`
 /// at 1 and 2 threads; the shadow compares extensions.
 #[test]
 fn reports_do_not_depend_on_the_sentinel_extension() {
@@ -211,11 +209,7 @@ fn reports_do_not_depend_on_the_sentinel_extension() {
             let on = blastp(&args, &[]);
             assert_eq!(on.code, Some(0), "{source} n{threads}: {}", on.stderr);
             assert!(!on.stdout.is_empty(), "{source} n{threads}: no hits");
-            for (label, env) in [
-                ("off", &[OFF][..]),
-                ("shadow", &[SHADOW][..]),
-                ("LOSAT_X_DEFAULT=0", &[DEFAULT_OFF][..]),
-            ] {
+            for (label, env) in [("off", &[OFF][..]), ("shadow", &[SHADOW][..])] {
                 let run = blastp(&args, env);
                 assert_eq!(
                     run.code,

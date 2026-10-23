@@ -43,7 +43,7 @@
 //!
 //! Programs that reach it: only TBLASTX (`-subject` and `-db`, every query batch of
 //! `search_query_batch`). The translation of the frames (at most a few ms per batch) stays serial.
-//! BLASTX already masks the contexts of a large batch on the pool (`LOSAT_X_BXPAR`,
+//! BLASTX already masks the contexts of a large batch on the pool (at 2+ threads,
 //! `blastx/query_setup.rs`) and prepares the chunks of a split query in parallel
 //! (`blastx/split.rs`).
 //!
@@ -67,7 +67,7 @@ use crate::utils::threading::SearchPool;
 use rayon::prelude::*;
 
 // No NCBI counterpart: reads the switches once (LOSAT_X_TBXQFRAMES is a strict-set switch: on
-// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; the shadow, off unless set to any
+// unless it is `0`; the shadow, off unless set to any
 // value, implies the switch). They choose between two LOSAT code paths with the same result and
 // change no value NCBI computes.
 /// 0 = off, 1 = LOSAT_X_TBXQFRAMES, 2 = LOSAT_X_TBXQFRAMESSHADOW.

@@ -1,7 +1,7 @@
 //! BLASTX's subject loop searched as a flow of tasks (`LOSAT_X_BXSUBJFLOW`,
 //! `src/algorithm/blastx/x_subject_flow.rs`) on whole searches.
 //!
-//! The switch is in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). With `=0` and two or
+//! The switch is in the strict set (on unless `=0`). With `=0` and two or
 //! more threads a query chunk's subjects are searched in waves of `threads x 64` and each wave is
 //! handed to the sink after its slowest worker; with the switch the other threads search tasks of
 //! `k` consecutive subjects ahead and the loop's thread hands them to the sink in subject order.
@@ -245,15 +245,6 @@ fn the_flow_takes_the_subject_loop() {
     assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 856);
     assert!(timing(&stderr, "blastx_subject_flow", "ahead") > 0);
     assert!(timing(&stderr, "blastx_subject_flow", "taken") > 0);
-    // LOSAT_X_DEFAULT=0 returns to the waves.
-    let (report, stderr) = blastx(
-        &query,
-        &args,
-        2,
-        &[("LOSAT_X_DEFAULT", "0"), ("LOSAT_TIMING", "1")],
-    );
-    assert!(report == reference);
-    assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
     // One thread: no pool, so the subject loop of the waves runs (on this thread).
     let (report, stderr) = blastx(&query, &args, 1, &[("LOSAT_TIMING", "1")]);
     assert!(report == reference);
@@ -271,7 +262,7 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
     // 30,000 letters: three query chunks (blastx/split.rs), each against 3,422 subjects (the 1,711
     // proteins twice), 54 tasks of 64. LOSAT_X_BXCHUNKFLOW needs at least 2,048 subjects and 256
     // per thread: up to 8 threads the chunks run one after another, each with the flow; at 16
-    // they run side by side (LOSAT_X_BXPAR).
+    // they run side by side.
     let (query, set, db) = inputs_of(&dir, 30_000, 2);
     let args = ["-db", db.as_str(), "-outfmt", "6"];
     let (reference, _) = blastx(&query, &args, 1, &[]);
@@ -280,14 +271,14 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         "too few hits to test"
     );
     // (threads, environment, flow loops): in order at 2 and 8 threads; side by side at 16 threads
-    // and with the switch off; LOSAT_X_DEFAULT=0 (LOSAT_X_BXPAR off too) runs the serial chunk
-    // loop with the waves.
+    // and with the switch off; with LOSAT_X_BXSUBJFLOW=0 the chunks run side by side (2 threads)
+    // with the waves.
     for (threads, env, loops) in [
         (2, &[][..], 3),
         (8, &[][..], 3),
         (16, &[][..], 0),
         (2, &[("LOSAT_X_BXCHUNKFLOW", "0")][..], 0),
-        (2, &[("LOSAT_X_DEFAULT", "0")][..], 0),
+        (2, &[("LOSAT_X_BXSUBJFLOW", "0")][..], 0),
     ] {
         let mut env = env.to_vec();
         env.push(("LOSAT_TIMING", "1"));

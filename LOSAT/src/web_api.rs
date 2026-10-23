@@ -550,6 +550,7 @@ fn parse_blastp_args(
         query_loc: None,
         subject_loc: None,
         outfmt: "6".to_string(),
+        archive: None,
     };
 
     let mut index = 0;

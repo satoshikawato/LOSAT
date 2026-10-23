@@ -1,0 +1,1 @@
+- The unit tests that compare TBLASTN's preliminary stage with NCBI traces now run the search's own (frame, chunk) unit path through a test-only probe, instead of a serial copy of the stage; the serial copy (`preliminary_protein_hsps_in_ncbi_order`, `preliminary_protein_hsps_with_comparison_input`) is removed. The probe exists in test builds only. Outputs do not change.

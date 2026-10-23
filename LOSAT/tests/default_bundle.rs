@@ -1,11 +1,10 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle): blastp's
 //! `LOSAT_X_BPREDOPAR`, `LOSAT_X_BPREDOLPT`, `LOSAT_X_BPDBCUT`, `LOSAT_X_BPSUBJMETA` and
 //! `LOSAT_X_BPLKPAHEAD`, and blastn's `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARFOLD`,
 //! `LOSAT_X_QDUSTPAR`, `LOSAT_X_DIAGLV`, `LOSAT_X_QBATCHPAR`, `LOSAT_X_QPREPPAR` and
 //! `LOSAT_X_RPTSTREAM`. Each has its own test file, whose searches run with the others off (the
 //! default before). Here the searches run with the default (no variable) and
-//! give the report of the default before (`LOSAT_X_DEFAULT=0`), of each switch off (`=0`) and of
+//! give the report of each switch off (`=0`) and of
 //! all of them off, with the same standard error. And the default runs them: the
 //! `[TIMING] x_bpredopar:` line of BPREDOPAR, with BPREDOLPT's `lpt_windows=`, comes without a
 //! variable and not with `LOSAT_X_BPREDOPAR=0`; QBATCHPAR's `[X_STATS]` line comes without a
@@ -86,7 +85,7 @@ fn losat(args: &[&str], vars: &[(&str, &str)]) -> (Vec<u8>, String) {
 }
 
 /// The search `args` (with `base` set in every run) gives one report and one standard error with
-/// no variable, with `LOSAT_X_DEFAULT=0`, with each switch of `switches` at `0`, and with all of
+/// no variable, with each switch of `switches` at `0`, and with all of
 /// them at `0`; returns the report.
 fn one_report(args: &[&str], base: &[(&str, &str)], switches: &[&'static str]) -> Vec<u8> {
     let with = |extra: Vec<(&'static str, &'static str)>| -> Vec<(&str, &str)> {
@@ -94,7 +93,7 @@ fn one_report(args: &[&str], base: &[(&str, &str)], switches: &[&'static str]) -
     };
     let (report, stderr) = losat(args, base);
     assert!(!report.is_empty(), "{args:?}: the search has hits");
-    let mut arms = vec![with(vec![("LOSAT_X_DEFAULT", "0")])];
+    let mut arms = Vec::new();
     for &name in switches {
         arms.push(with(vec![(name, "0")]));
     }

@@ -2,12 +2,9 @@
 //! and without `LOSAT_X_BPGAP`, against NCBI BLAST+ 2.17.0.
 //!
 //! `LOSAT_X_BPGAP` is in the strict set (`src/utils/xswitch.rs`): it is on by default, unless its
-//! variable is `0`, or `LOSAT_X_DEFAULT=0` and its variable is not set. Every test states the
-//! default it runs with: the report is NCBI's with no variable, with `LOSAT_X_BPGAP=0`, with
-//! `LOSAT_X_DEFAULT=0` and with `LOSAT_X_DEFAULT=0 LOSAT_X_BPGAP=1` (the run the variable gave
-//! before it joined the set). `LOSAT_X_BPGAP16` (the sixteen-bit rows, also in the set) is checked
-//! the same way: with `LOSAT_X_BPGAP16=0`, and with `LOSAT_X_DEFAULT=0 LOSAT_X_BPGAP=1
-//! LOSAT_X_BPGAP16=1`.
+//! variable is `0`. Every test states the
+//! default it runs with: the report is NCBI's with no variable, with `LOSAT_X_BPGAP=0` and with
+//! `LOSAT_X_BPGAP16=0` (the sixteen-bit rows, also in the set).
 //!
 //! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:3777-3786,3955-3957
 //! ```c
@@ -41,8 +38,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
-
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 const OUTFMT: &str = "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore score";
 
@@ -165,8 +160,7 @@ fn inputs() -> &'static (PathBuf, PathBuf) {
 
 /// One BLASTP run with `variables` and no other `LOSAT_*` variable except
 /// `LOSAT_BLASTX_WORKER_LOG` (a build with the worker probe writes to it as soon as a pool
-/// starts, so the caller's value is kept, or a file of the tests is named). `LOSAT_X_DEFAULT` of
-/// the test's own environment is dropped too: every test states the default it runs with.
+/// starts, so the caller's value is kept, or a file of the tests is named).
 /// Returns the report and standard error.
 fn blastp(threads: usize, variables: &[(&str, &str)]) -> (String, String) {
     const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
@@ -220,14 +214,7 @@ fn restricted_gapped_alignments_match_ncbi_with_and_without_the_switch() {
         for variables in [
             &[][..],
             &[("LOSAT_X_BPGAP", "0")][..],
-            &[DEFAULT_OFF][..],
-            &[DEFAULT_OFF, ("LOSAT_X_BPGAP", "1")][..],
             &[("LOSAT_X_BPGAP16", "0")][..],
-            &[
-                DEFAULT_OFF,
-                ("LOSAT_X_BPGAP", "1"),
-                ("LOSAT_X_BPGAP16", "1"),
-            ][..],
         ] {
             let (report, _) = blastp(threads, variables);
             assert_eq!(report, NCBI_ROWS, "{threads} threads, {variables:?}");

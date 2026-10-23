@@ -37,8 +37,7 @@ fn losat_binary() -> PathBuf {
 fn clean_losat_command() -> Command {
     let mut command = Command::new(losat_binary());
     for (name, _) in std::env::vars_os() {
-        // LOSAT_X_DEFAULT stays (src/utils/xswitch.rs): with 0 the run is on the reference paths.
-        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
+        if name.to_string_lossy().starts_with("LOSAT_") {
             command.env_remove(name);
         }
     }

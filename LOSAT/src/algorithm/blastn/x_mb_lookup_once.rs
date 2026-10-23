@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set since 2026-10-18: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set): PAIRPAR's pool fill of the megablast lookup table of
+//! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set since 2026-10-18: on unless it is `0`)
+//! : PAIRPAR's pool fill of the megablast lookup table of
 //! `build_mb_lookup` (`x_mb_lookup_par.rs`) with each query position read once. In the fill of
 //! `x_mb_lookup_par` every worker reads every word of the query and applies those of its own
 //! cells, so each worker pays the whole read (0.65 s of each worker's time at 16 threads for
@@ -131,8 +131,8 @@
 //! round (below); `arena` the largest arena of one fill (MiB); `prefault_rounds` the fills that ran
 //! the round and `prefault_touches` the zeros those rounds wrote.
 //!
-//! EXPERIMENT (LOSAT_X_MBLUTPREFAULT; in the strict set since 2026-10-19: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set, which turns this fill off anyway): the prefault round
+//! EXPERIMENT (LOSAT_X_MBLUTPREFAULT; in the strict set since 2026-10-19: on unless it is `0`
+//! , which turns this fill off anyway): the prefault round
 //! (scheduling only), the form of LOSAT_X_DISCLUTPAR's round (`x_disc_lookup_par.rs`, "The
 //! prefault round") for the one array here. Between phases A and B of the first chunk (in
 //! processing order), when that chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per

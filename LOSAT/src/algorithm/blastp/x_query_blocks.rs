@@ -117,7 +117,7 @@
 //! (`x_block_words_fit`, tested before the first block), so that the reference path's refusal,
 //! which comes before any row, is never made in a later block.
 //!
-//! LOSAT_X_BPQBLOCKSA (strict set, `x_bp_qblock_sa`, outfmt 8, 9 and 12) and LOSAT_X_BPQBLOCKXML
+//! LOSAT_X_BPQBLOCKSA (strict set, `x_bp_qblock_sa`, outfmt 8, 9, 11 and 12) and LOSAT_X_BPQBLOCKXML
 //! (strict set, `x_bp_qblock_xml`, outfmt 5) take the other formats of one blastp report; both act
 //! only with `LOSAT_X_BPQBLOCK`, and the shadow implies both:
 //! - outfmt 8, 9 and 12 (Seq-annot of Seq-aligns as ASN.1 text, BER and JSON): NCBI writes one
@@ -191,6 +191,34 @@
 //!   them does not change what a later block reads. The shadow compares each side file `1..=written`
 //!   of the blocks with the search of all queries' (written into a fresh directory under TMPDIR with
 //!   `-out`'s file name, so that the run's files are not rewritten and the master lists the same names).
+//! - outfmt 11 (the BLAST archive, under LOSAT_X_BPQBLOCKSA as outfmt 8, 9 and 12; no new switch.
+//!   `LOSAT_X_BPQBLOCKSA=0` keeps 8, 9, 11 and 12 on the search of all queries): NCBI writes one
+//!   `Blast4-archive` per query batch, straight after the batch's search (`blastp_app.cpp`), and
+//!   no prolog or epilog. A batch's document is made from the batch's own data: its queries'
+//!   Bioseqs, the Seq-aligns of its final hit lists (as outfmt 8), the SEG masks of its queries,
+//!   the blocks and search space of its first query, the `-subject` Bioseqs or the `-db` name
+//!   (fixed inputs), the request's options (fixed inputs) and, as options of the request, the
+//!   `EffectiveSearchSpace` of the batch. Blocks are whole batches (above) and the batches in a
+//!   block are those of the whole input, so every document the block search writes is the one the
+//!   search of all queries writes. The run-level state is the `ArchiveHandle`, one per run and
+//!   shared by the blocks (`ResolvedBlastpArgs::archive` is an `Arc`): it carries (1) the
+//!   `EffectiveSearchSpace` of the last searched batch, which an unsearched batch (every query
+//!   invalid) repeats and which is absent before the first searched one, and (2) the messages
+//!   saved since the last archive (the diagnostics stream is a `DiagTee`; each batch's reader
+//!   messages are written, so saved, just before the batch's document, and the messages an option
+//!   handler or the subject reader wrote before the first batch go to the first document). Both
+//!   are updated by a document in the order the documents are written, which is the order of the
+//!   blocks, so a block sees what the search of all queries has at that batch. The refusals
+//!   before the first byte are those of outfmt 8 (with `-db` the definition lines,
+//!   `database::x_titles_read_allow_blocks`: the archive reads the same Seq-ids) and the titles
+//!   and `-db` name that the archive cannot write (a byte outside `0x20..=0x7E`, `check_titles`),
+//!   which `search_cli` checks for every record before the search starts. The errors that NCBI
+//!   turns into an error archive (`run`) come after the documents of the batches before, from
+//!   the same handle. In a call of several outputs, hit records or an observer
+//!   (LOSAT_X_BPQBLOCKWEB) the plan is refused for 11 as for 15 and 16: the handle's muting and
+//!   messages with several formats were argued for the CLI's shape. The shadow compares the
+//!   archives too: its search of all queries runs on a scratch copy of the handle's state taken
+//!   before the blocks (`ArchiveHandle::scratch`, `XFeedWriter` saves its diagnostics).
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
 //! ```c++
 //!         if (results.HasAlignments()) {
@@ -253,7 +281,7 @@
 //!
 //! `LOSAT_X_BPQBLOCK` is a value switch of the strict set (`utils/xswitch.rs`): a positive number
 //! of query letters (the block closes at the first batch end at or past it), 50,000 when it is
-//! not set or is not a positive number. `0`, or `LOSAT_X_DEFAULT=0` with the variable not set,
+//! not set or is not a positive number. `0`,
 //! turns the block path off.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
@@ -400,16 +428,15 @@ use {
 // No NCBI counterpart: reads the LOSAT_X_BPQBLOCK switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): the number of query letters of a block, or `None` (off). A
-/// strict-set value switch: the positive integer given, else 50,000; `None` for `0`, or for
-/// `LOSAT_X_DEFAULT=0` with the variable not set.
+/// strict-set value switch: the positive integer given, else 50,000; `None` for `0`.
 pub(crate) fn x_bp_qblock() -> Option<usize> {
     use std::sync::OnceLock;
     static N: OnceLock<Option<usize>> = OnceLock::new();
     *N.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BPQBLOCK", 1..=usize::MAX, 50_000))
 }
 
-// No NCBI counterpart: reads LOSAT_X_BPQBLOCKFMT (a strict-set switch: on unless it is `0`, or
-// `LOSAT_X_DEFAULT=0` and it is not set) and its shadow LOSAT_X_BPQBLOCKFMTSHADOW (off unless set to
+// No NCBI counterpart: reads LOSAT_X_BPQBLOCKFMT (a strict-set switch: on unless it is `0`)
+// and its shadow LOSAT_X_BPQBLOCKFMTSHADOW (off unless set to
 // any value; it implies the switch) once. They choose which reports the block search writes, not
 // any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): 0 = the block search only for one outfmt 6 report, 1 = for one
@@ -430,11 +457,11 @@ pub(crate) fn x_bp_qblock_fmt() -> u8 {
 }
 
 // No NCBI counterpart: reads LOSAT_X_BPQBLOCKSA and LOSAT_X_BPQBLOCKXML (strict-set switches: on
-// unless `0`, or `LOSAT_X_DEFAULT=0` and not set) once; the shadow (LOSAT_X_BPQBLOCKFMTSHADOW) implies
+// unless `0`) once; the shadow (LOSAT_X_BPQBLOCKFMTSHADOW) implies
 // both, as it implies LOSAT_X_BPQBLOCKFMT. They choose which reports the block search writes, not any
 // value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKSA): whether the block search also takes one Seq-annot report
-/// (outfmt 8, 9 or 12). Acts only with `LOSAT_X_BPQBLOCK`.
+/// (outfmt 8, 9 or 12) or the BLAST archive (outfmt 11). Acts only with `LOSAT_X_BPQBLOCK`.
 pub(crate) fn x_bp_qblock_sa() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -466,8 +493,8 @@ pub(crate) fn x_bp_qblock_xml2() -> bool {
     })
 }
 
-// No NCBI counterpart: reads LOSAT_X_BPQBLOCKWEB (a strict-set switch: on unless `0`, or
-// `LOSAT_X_DEFAULT=0` and not set) once; the shadow (LOSAT_X_BPQBLOCKFMTSHADOW) implies it. It
+// No NCBI counterpart: reads LOSAT_X_BPQBLOCKWEB (a strict-set switch: on unless `0`)
+// once; the shadow (LOSAT_X_BPQBLOCKFMTSHADOW) implies it. It
 // chooses which calls the block search takes, not any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKWEB): whether the block search also takes a `run_local` call with
 /// more than one output, the hit records or an observer (ABI v2 of the Web build: outfmt 0, 6 and
@@ -482,6 +509,29 @@ pub(crate) fn x_bp_qblock_web() -> bool {
     })
 }
 
+// No NCBI counterpart: the shadow's diagnostics; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): the diagnostics of the shadow's search of all queries:
+/// what is written goes to `inner` and, for a run that writes the BLAST archive (outfmt 11), is
+/// also saved as the archive's messages (what `DiagTee` does for the run's own stream).
+pub(crate) struct XFeedWriter<'a> {
+    pub inner: &'a mut Vec<u8>,
+    pub handle: Option<crate::report::archive::ArchiveHandle>,
+}
+
+impl std::io::Write for XFeedWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        if let Some(handle) = &self.handle {
+            handle.feed(&buf[..written]);
+        }
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 // No NCBI counterpart: the reports the block search writes; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): which report the block search writes, which the driver's checks
@@ -492,7 +542,7 @@ pub(crate) enum XBlockReport {
     Tabular,
     /// Outfmt 0 (LOSAT_X_BPQBLOCKFMT).
     Pairwise,
-    /// Outfmt 8, 9 and 12 (LOSAT_X_BPQBLOCKSA).
+    /// Outfmt 8, 9, 11 and 12 (LOSAT_X_BPQBLOCKSA).
     Seqalign,
     /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
     Xml,
@@ -519,7 +569,7 @@ impl XBlockReport {
 pub(crate) enum XBlockFormat {
     /// Outfmt 0 and 7 (LOSAT_X_BPQBLOCKFMT).
     Fmt,
-    /// Outfmt 8, 9 and 12 (LOSAT_X_BPQBLOCKSA).
+    /// Outfmt 8, 9, 11 and 12 (LOSAT_X_BPQBLOCKSA).
     Seqalign,
     /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
     Xml,

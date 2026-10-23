@@ -12,10 +12,9 @@
 //!     hits = scansub(lookup_wrap, subject,
 //!                               offset_pairs, array_size, scan_range);
 //! ```
-//! The switch is in the strict set (on unless `LOSAT_X_PAIRPARGATE=0`, or `LOSAT_X_DEFAULT=0` and it
-//! is not set). Both paths give NCBI's list of each subject (module doc of x_pair_par.rs), so the
-//! switch may not change a report. The tests compare the reports of the default (the gate on) and
-//! of `LOSAT_X_PAIRPARGATE=0`, and read
+//! The switch is in the strict set (on unless `LOSAT_X_PAIRPARGATE=0`). Both paths give NCBI's list
+//! of each subject (module doc of x_pair_par.rs), so the switch may not change a report. The tests
+//! compare the reports of the default (the gate on) and of `LOSAT_X_PAIRPARGATE=0`, and read
 //! `[X_STATS] PAIRPAR ... fallback_cost=` and `units=` to see which path ran.
 
 use std::path::{Path, PathBuf};

@@ -2,7 +2,7 @@
 //! subject scan and the diagonal test in one loop, and the hits of one lookup cell tested in AVX2
 //! batches of eight.
 //!
-//! The reference (`word_finder`, and LOSAT_X_BXSCAN's `x_word_finder_direct`) has the
+//! The reference (`word_finder`, and `x_word_finder_direct` of `x_seed_scan.rs`) has the
 //! scanner copy every word hit into the offset-pair buffer and then reads the buffer back for the
 //! two-hit test (NCBI's `s_BlastAaScanSubject` and `s_BlastAaWordFinder_TwoHit`). With the switch,
 //! blastp's fused scan (`blastp::x_seed_fused::x_scan_two_hit_with`: LOSAT_X_BPSEED's loop with
@@ -25,7 +25,7 @@
 //!
 //! Where it acts: the two-hit stage (`-window_size` above 0) with the standard lookup table
 //! (`-word_size 3`, the default), when nothing traces the seeds; elsewhere the reference runs. `LOSAT_X_BXDIAG` is a
-//! switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. When it
+//! switch of the strict set: on unless it is `0`. When it
 //! is not set (or empty) it acts only where the cell test is the AVX2 batch (an x86-64 CPU with
 //! AVX2), the cell test it was timed with; set to a value, it runs on any CPU. The cell test is the
 //! AVX2 batch on an x86-64 CPU with AVX2 and the per-hit loop elsewhere, as LOSAT_X_BPDIAG chooses;
@@ -41,31 +41,43 @@
 //! LOSAT_X_BPDEFER (the calls of a cell's candidates after its batches) with the lanes' entry
 //! coordinates from scalar loads and the last batch of fewer than eight hits as a masked AVX2 batch;
 //! the argument that the calls, their order and the table are the AVX2 batch's is in
-//! `x_seed_fused`'s module header. A switch of the strict set: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BXDEFER=0` gives the AVX2 batch (`mode=avx2`).
+//! `x_seed_fused`'s module header. A switch of the strict set: on unless it is `0`;
+//! `LOSAT_X_BXDEFER=0` gives the AVX2 batch (`mode=avx2`).
 //! It acts on the tables with at least `LOSAT_X_BXDEFERMIN` hits per used backbone cell
 //! (hundredths, built-in 700; `0` every table); a fused table with fewer takes the AVX2 batch, as
 //! there the masked batch and the buffer cost more than they save (the fused loop forced on the
 //! first 1,500 nt of a 2.1-kb fly cDNA x the fly proteome, 4.91 hits per used cell: x1.033
-//! cycles; the whole cDNA, 6.77: x0.996). The choice is made with LOSAT_X_BXDIAGMIN's, once per thread and table; the timing
-//! line then also gives `defer_min_hits_per_cell=` and `tables_avx2=` (the fused tables that took
-//! the AVX2 batch). `LOSAT_X_BXDIAGSHADOW` compares it with the reference like the other cell
-//! tests, on the tables the rule gives it.
+//! cycles; the whole cDNA, 6.77: x0.996). The choice is made with LOSAT_X_BXDIAGMIN's, once per
+//! thread and table; as LOSAT_X_BXDIAGMIN's built-in value is above 700, no fused table falls under
+//! the rule by default (only with LOSAT_X_BXDIAGMIN set below 700). The timing line then also gives
+//! `defer_min_hits_per_cell=` and `tables_avx2=` (the fused tables that took the AVX2 batch).
+//! `LOSAT_X_BXDIAGSHADOW` compares it with the reference like the other cell tests, on the tables
+//! the rule gives it.
 //!
 //! A query batch whose lookup table has fewer hits per used backbone cell than
-//! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 500; `0` fuses every batch) is scanned by the loop
-//! LOSAT_X_BXSCAN chooses instead: with few hits per cell the fused loop's per-cell work costs more
-//! than the copy it saves (a 300-nt query x the first UniRef50 volume, 1.76 hits per used cell:
-//! x1.20 the time of the direct loop; 4.91: x1.00; 6.77: x0.94; 800 cDNAs x yeast: x0.72). Both
-//! loops give the reference's hits and table, so the choice changes only the speed; it is made once
-//! per thread and table ([`x_fused_pays`]). The timing line then also gives `min_hits_per_cell=`,
-//! `tables_fused=` and `tables_other=` (the choices made) and `hits_per_cell=LEAST-MOST` (hundredths).
+//! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 900; `0` fuses every batch) is scanned by the
+//! direct loop instead: with few hits per cell the fused loop's per-cell work costs more
+//! than the copy it saves. Since LOSAT_X_BXHITBF made the direct loop faster, the two break even
+//! near 9 hits per used cell (about 8.75 against the fly proteome, 10.7 against Swiss-Prot; one
+//! core, user-space cycles of the fused loop with the cell test it takes against the direct loop,
+//! fly cDNAs x the fly proteome: 4.91 hits per used cell x1.20, 6.77 x1.13, 8.38 x1.03, 9.37
+//! x0.98, 13.32 x0.90); the built-in value was 500 before (measured against the direct loop
+//! without LOSAT_X_BXHITBF: 1.76 x1.20, 4.91 x1.00, 6.77 x0.94, 800 cDNAs x yeast x0.72), and
+//! `LOSAT_X_BXDIAGMIN=500` gives that rule. Both loops give the reference's hits and table, so the
+//! choice changes only the speed; it is made once per thread and table ([`x_fused_pays`]). The
+//! timing line then also gives `min_hits_per_cell=`, `tables_fused=` and `tables_other=` (the
+//! choices made) and `hits_per_cell=LEAST-MOST` (hundredths).
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF, `x_seed_scan.rs`): with that switch the fused loop finds the
 //! cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`'s
 //! `branch_free`, blastp's `x_scan_cells_bf`): the same cells in the same order.
+//!
+//! EXPERIMENT (LOSAT_X_BXUNGAPSENT, `x_ungap_sent.rs`): for a subject on that path the closure's
+//! two-hit extension is the sentinel walks, in an instance of its own (`x_word_finder_fused_sent`,
+//! never inlined; the other statements unchanged), so the loop without it keeps its code.
 
 use super::x_seed_scan::x_bxscan_bf;
+use super::x_ungap_sent::XSent;
 use super::*;
 use crate::algorithm::blastp::x_seed_fused::{
     x_cell_test, x_scan_two_hit_with, XContextTable, XDiagMode,
@@ -135,7 +147,7 @@ fn x_with_context_table<R>(batch: &PreparedQueryBatch, f: impl FnOnce(&XContextT
 // computes.
 /// EXPERIMENT (LOSAT_X_BXDIAG): 0 = off, 1 = the fused loop, 2 = shadow
 /// (`LOSAT_X_BXDIAGSHADOW`: the fused loop and the reference on a copy of the table, compared).
-/// A switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; on
+/// A switch of the strict set: on unless it is `0`; on
 /// by default (not set, or empty) only with the AVX2 batch ([`x_cell_mode`]).
 pub(crate) fn x_bxdiag_mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
@@ -164,8 +176,7 @@ fn x_avx2_batches() -> bool {
 // No NCBI counterpart: reads the LOSAT_X_BXDEFER switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BXDEFER): whether the AVX2 batch is `XDiagMode::Avx2DeferMasked` (module
-/// header); a switch of the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not
-/// set.
+/// header); a switch of the strict set, on unless it is `0`.
 fn x_bx_defer() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXDEFER"))
@@ -185,8 +196,9 @@ fn x_cell_mode() -> XDiagMode {
 
 // No NCBI counterpart: reads LOSAT_X_BXDIAGMIN once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): the fewest hits per used lookup cell, in hundredths, for
-/// which the fused loop scans a query batch's subjects (built-in 500, where the two loops took
-/// the same time); a batch whose table has fewer is scanned by the loop LOSAT_X_BXSCAN chooses.
+/// which the fused loop scans a query batch's subjects (built-in 900, near where the two loops
+/// take the same time since LOSAT_X_BXHITBF; 500 before it); a batch whose table has fewer is
+/// scanned by the direct loop.
 /// `0` fuses every batch; a value that is not a number takes the built-in one.
 fn x_min_hits_per_cell() -> u64 {
     static MIN: OnceLock<u64> = OnceLock::new();
@@ -194,7 +206,7 @@ fn x_min_hits_per_cell() -> u64 {
         std::env::var("LOSAT_X_BXDIAGMIN")
             .ok()
             .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(500)
+            .unwrap_or(900)
     })
 }
 
@@ -370,6 +382,7 @@ pub(crate) fn x_word_finder_diag(
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
+    sent: Option<XSent<'_>>,
 ) -> Result<Option<Vec<InitHsp>>> {
     let Lookup::Standard(table) = lookup else {
         if x_bxdiag_mode() != 2 {
@@ -397,7 +410,7 @@ pub(crate) fn x_word_finder_diag(
         if mode == XDiagMode::Avx2DeferMasked {
             crate::utils::xreach::x_reach!("LOSAT_X_BXDEFER", table_mode == mode);
         }
-        let (hits, counts) = x_word_finder_fused(
+        let (hits, counts) = x_word_finder_fused_or_sent(
             table_mode,
             x_bxscan_bf(),
             batch,
@@ -406,6 +419,7 @@ pub(crate) fn x_word_finder_diag(
             subject,
             table,
             diagonals,
+            sent,
         )?;
         x_add_counts(counts);
         return Ok(Some(hits));
@@ -424,7 +438,7 @@ pub(crate) fn x_word_finder_diag(
         &mut copy,
         |_| {},
     )?;
-    let (fused, counts) = x_word_finder_fused(
+    let (fused, counts) = x_word_finder_fused_or_sent(
         x_table_mode(mode, x_table_ratio(table).0),
         x_bxscan_bf(),
         batch,
@@ -433,6 +447,7 @@ pub(crate) fn x_word_finder_diag(
         subject,
         table,
         diagonals,
+        sent,
     )?;
     x_add_counts(counts);
     if fused != reference {
@@ -478,6 +493,47 @@ fn x_add_counts(counts: [u64; 3]) {
         X_CELLS.fetch_add(counts[0], Relaxed);
         X_HITS.fetch_add(counts[1], Relaxed);
         X_CANDIDATES.fetch_add(counts[2], Relaxed);
+    }
+}
+
+// No NCBI counterpart: chooses the instance of the fused loop; both give the reference's hits and
+// table.
+/// EXPERIMENT (LOSAT_X_BXUNGAPSENT): [`x_word_finder_fused`], or with `sent` its instance with the
+/// sentinel walks, [`x_word_finder_fused_sent`].
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_fused_or_sent(
+    mode: XDiagMode,
+    branch_free: bool,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    table: &BlastAaLookupTable,
+    diagonals: &mut Diagonals,
+    sent: Option<XSent<'_>>,
+) -> Result<(Vec<InitHsp>, [u64; 3])> {
+    match sent {
+        Some(sent) => x_word_finder_fused_sent(
+            mode,
+            branch_free,
+            batch,
+            parameters,
+            options,
+            subject,
+            table,
+            diagonals,
+            sent,
+        ),
+        None => x_word_finder_fused(
+            mode,
+            branch_free,
+            batch,
+            parameters,
+            options,
+            subject,
+            table,
+            diagonals,
+        ),
     }
 }
 
@@ -641,6 +697,111 @@ fn x_word_finder_fused(
     Ok((hits, counts))
 }
 
+/// EXPERIMENT (LOSAT_X_BXUNGAPSENT): [`x_word_finder_fused`] with the two-hit extension of `sent`
+/// (`x_ungap_sent.rs`), in a function of its own so that the loop without it keeps its code. The
+/// closure's other statements are those of `x_word_finder_fused`'s, in the same order.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-606 (as in
+// `x_word_finder_fused`).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_fused_sent(
+    mode: XDiagMode,
+    branch_free: bool,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    table: &BlastAaLookupTable,
+    diagonals: &mut Diagonals,
+    sent: XSent<'_>,
+) -> Result<(Vec<InitHsp>, [u64; 3])> {
+    let word = options.word_size;
+    let offset = diagonals.offset;
+    let mask = diagonals.entries.len() as i32 - 1;
+    let length = subject.len().saturating_sub(1);
+    let mut hits = Vec::new();
+    let counts = x_with_context_table(batch, |contexts| {
+        // The candidate closure with the extension `two_hit::<$shadow>`.
+        macro_rules! scan {
+            ($shadow:literal) => {
+                x_scan_two_hit_with(
+                    mode,
+                    branch_free,
+                    table,
+                    subject,
+                    length,
+                    &mut diagonals.entries,
+                    mask,
+                    offset,
+                    options.window_size,
+                    word,
+                    |q, s, previous, diff, entry| {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560-573
+                        // (as in `x_word_finder_fused`)
+                        let context = contexts.get(q).unwrap_or_else(|| {
+                            batch
+                                .contexts
+                                .partition_point(|c| c.offset as i32 <= q)
+                                .saturating_sub(1)
+                        });
+                        if q - diff < batch.contexts[context].offset as i32 {
+                            entry.set_last_hit(s.wrapping_add(offset));
+                            return;
+                        }
+                        let p = &parameters[context];
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
+                        // (`x_ungap_sent.rs`)
+                        let Some(result) = sent.two_hit::<$shadow>(
+                            (previous + word) as usize,
+                            s as usize,
+                            q as usize,
+                            p.word_xdrop,
+                        ) else {
+                            return;
+                        };
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-606
+                        // (as in `x_word_finder_fused`)
+                        let u = result.ungapped_data;
+                        if u.score >= p.word_cutoff {
+                            hits.push(InitHsp {
+                                q_seed: q,
+                                s_seed: s,
+                                q_start: u.q_start,
+                                s_start: u.s_start,
+                                length: u.length,
+                                score: u.score,
+                            });
+                        }
+                        if result.right_extend {
+                            entry.set_flag(1);
+                            entry.set_last_hit(
+                                (result.s_last_off - (word - 1)).wrapping_add(offset),
+                            );
+                        } else {
+                            entry.set_last_hit(s.wrapping_add(offset));
+                        }
+                    },
+                )
+            };
+        }
+        if sent.shadow() {
+            scan!(true)
+        } else {
+            scan!(false)
+        }
+    });
+    // The rest of word_finder, unchanged.
+    diagonals.finish_subject(length)?;
+    hits.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then(a.s_start.cmp(&b.s_start))
+            .then(b.length.cmp(&a.length))
+            .then(a.q_start.cmp(&b.q_start))
+    });
+    Ok((hits, counts))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -758,8 +919,15 @@ mod tests {
         let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
         let mut reference = Diagonals::new(length, options.window_size).unwrap();
         let mut fused = Diagonals::new(length, options.window_size).unwrap();
+        // EXPERIMENT (LOSAT_X_BXUNGAPSENT): the instances with the sentinel walks, without and
+        // with the shadow's comparison, each on a table of its own.
+        let mut sent = [
+            Diagonals::new(length, options.window_size).unwrap(),
+            Diagonals::new(length, options.window_size).unwrap(),
+        ];
         start(&mut reference);
         start(&mut fused);
+        sent.iter_mut().for_each(&start);
         let (mut hits, mut counts) = (0, [0u64; 3]);
         for (i, subject) in subjects.iter().enumerate() {
             let expected = word_finder(
@@ -787,6 +955,26 @@ mod tests {
             assert_eq!(actual, expected, "{run}");
             assert_eq!(fused.offset, reference.offset, "{run}");
             assert!(fused.entries == reference.entries, "{run}");
+            let lead: Vec<u8> = std::iter::once(0).chain(subject.iter().copied()).collect();
+            for (table_sent, shadow) in sent.iter_mut().zip([false, true]) {
+                let x = XSent::for_test(&batch.sequence_start, &lead, shadow);
+                let (got, c2) = x_word_finder_fused_sent(
+                    mode,
+                    branch_free,
+                    batch,
+                    params,
+                    options,
+                    subject,
+                    table,
+                    table_sent,
+                    x,
+                )
+                .unwrap();
+                assert_eq!(got, expected, "{run} sent shadow={shadow}");
+                assert_eq!(c2, c, "{run} sent shadow={shadow}");
+                assert_eq!(table_sent.offset, reference.offset, "{run} sent");
+                assert!(table_sent.entries == reference.entries, "{run} sent");
+            }
             hits += actual.len();
             for (total, n) in counts.iter_mut().zip(c) {
                 *total += n;

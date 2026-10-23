@@ -14,10 +14,10 @@
 //! ```
 //! The vector loop and the word loop give the frames of `x_generate_frames` (the unit test
 //! `x_packed_frames_read_from_the_bytes_are_the_frames_of_the_codes`), so the report does not
-//! depend on the switch. It is on by default, off with `LOSAT_X_TBNXLATESIMD=0`, and off with
-//! `LOSAT_X_DEFAULT=0` unless its variable is set; it acts on packed subjects (`LOSAT_X_TBNSTORE`,
-//! here `-subject`) and only where the CPU has AVX2. These tests compare the reports and read the
-//! `[X_STATS] TBNXLATESIMD codons_vector= codons_scalar=` line (`LOSAT_X_STATS=1`).
+//! depend on the switch. It is on by default and off with `LOSAT_X_TBNXLATESIMD=0`;
+//! it acts on packed subjects (`LOSAT_X_TBNSTORE`, here `-subject`) and only where the CPU has
+//! AVX2. These tests compare the reports and read the `[X_STATS] TBNXLATESIMD codons_vector=
+//! codons_scalar=` line (`LOSAT_X_STATS=1`).
 //!
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` and all 115 of them; the
 //! subject is `tests/fasta/MelaMJNV.fasta`.
@@ -92,9 +92,7 @@ fn stats(stderr: &str) -> Option<[u64; 2]> {
 }
 
 const OFF: (&str, &str) = ("LOSAT_X_TBNXLATESIMD", "0");
-const ON: (&str, &str) = ("LOSAT_X_TBNXLATESIMD", "1");
-const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
-const STORE: (&str, &str) = ("LOSAT_X_TBNSTORE", "1");
+const NO_STORE: (&str, &str) = ("LOSAT_X_TBNSTORE", "0");
 
 /// Whether the vector loop can run here.
 fn vector_cpu() -> bool {
@@ -131,24 +129,13 @@ fn the_report_does_not_depend_on_the_loop() {
     }
 }
 
-// No NCBI counterpart: where the switch acts. With `LOSAT_X_DEFAULT=0` the subjects are not held
-// packed (no packed subject, no line); with the store set again, the switch is off unless its
-// variable is set, as before it joined the set.
+// No NCBI counterpart: where the switch acts. With `LOSAT_X_TBNSTORE=0` the subjects are not held
+// packed: no packed subject, no line.
 #[test]
 fn the_switch_acts_on_packed_subjects_only() {
     let [one, _] = queries();
     let (expected, _) = tblastn(one, 1, &[]);
-    let (report, stderr) = tblastn(one, 1, &[PREVIOUS]);
+    let (report, stderr) = tblastn(one, 1, &[NO_STORE]);
     assert!(report == expected);
     assert_eq!(stats(&stderr), None);
-    let packed = [PREVIOUS, STORE];
-    let (report, stderr) = tblastn(one, 1, &packed);
-    assert!(report == expected);
-    assert_eq!(stats(&stderr).expect("a line for packed subjects")[0], 0);
-    let (report, stderr) = tblastn(one, 1, &[PREVIOUS, STORE, ON]);
-    assert!(report == expected);
-    assert_eq!(
-        stats(&stderr).expect("a line when set")[0] > 0,
-        vector_cpu()
-    );
 }

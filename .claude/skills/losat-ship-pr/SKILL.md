@@ -50,8 +50,7 @@ twice per improvement).
   conditions where it wins and loses in its diagnostics entry; its default is decided later,
   bundled with the work's next default PR (Owner, 2026-10-17: a speed-up that cannot be on by
   default is still adopted). A no-go is for a change that wins nowhere or is inexact.
-- `LOSAT_X_<NAME>=0` turns it off and `LOSAT_X_DEFAULT=0` returns to the previous default. Shadow
-  and diagnostic switches stay opt-in.
+- `LOSAT_X_<NAME>=0` turns it off. Shadow and diagnostic switches stay opt-in.
 - Put its name in sorted order into `STRICT_SET` (`LOSAT/src/utils/xswitch.rs`) and its `export`
   line in sorted order into the block in `docs/agents/diagnostics.md` ("Performance switches"; the
   unit test `the_documented_block_lists_the_strict_set` compares them).
@@ -69,9 +68,8 @@ twice per improvement).
   `LOSAT/src/**`, `LOSAT/Cargo.*`, or the WASI test files changed. `rust` takes about 35 minutes
   (it waits for `rust lint` and the two `cargo test (k/2)` shards), the others 5-20. A PR into
   `dev` needs these (`rust`, `fast output regressions`, `web result`) and merges by auto-merge.
-  `rust` also runs the tests with `LOSAT_X_DEFAULT=0` (about 2 minutes per shard). On a PR into
-  `dev` the reference fast regressions are skipped; they run on the promotion PR into `main` (and
-  the default run must reach the reference sides `switch_reach_expected.tsv` requires).
+  `fast output regressions` also requires that the default run reaches the sides of the
+  conditional switches that `switch_reach_expected.tsv` requires.
 - `platform-checks.yml` (`platform checks result`) runs its platform jobs only on a PR into
   `main` (the promotion PR), when `LOSAT/src/**`, `LOSAT/Cargo.*`, `LOSAT/build.rs` or its own
   files changed and the PR is not a draft: outputs on Linux x64, Linux arm64, Windows x64 and

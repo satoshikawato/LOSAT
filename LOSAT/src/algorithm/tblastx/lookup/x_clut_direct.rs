@@ -150,8 +150,8 @@
 //! With more than one thread the search's pool builds the same table (`x_clut_par.rs`, exactness
 //! argument in its header); at one thread the builder above runs.
 //!
-//! A strict-set switch (`utils/xswitch.rs`): on unless `LOSAT_X_BPCLUT=0`, or `LOSAT_X_DEFAULT=0` and it
-//! is not set. `LOSAT_X_BPCLUTSHADOW` (not in the set) builds both tables, compares
+//! A strict-set switch (`utils/xswitch.rs`): on unless `LOSAT_X_BPCLUT=0`.
+//! `LOSAT_X_BPCLUTSHADOW` (not in the set) builds both tables, compares
 //! them (every cell's sequence, the PV array, the header) and the refusal, and searches with the
 //! reference's table; with more than one thread it also builds the pool's table and compares it with
 //! the flat one, slot for slot.
@@ -183,7 +183,7 @@ mod x_clut_par;
 
 // No NCBI counterpart: reads the switches once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW): `LOSAT_X_BPCLUT` is a strict-set switch (on
-/// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set); `LOSAT_X_BPCLUTSHADOW` (any value, not
+/// unless it is `0`); `LOSAT_X_BPCLUTSHADOW` (any value, not
 /// part of the set) selects the shadow mode. 0 = off (the reference builder), 1 = the flat table,
 /// 2 = shadow (both builders, compared; the reference's table used).
 pub(crate) fn x_bpclut_mode() -> u8 {
@@ -233,8 +233,8 @@ pub(crate) enum XLkpFlat {
 
 // No NCBI counterpart: reads the LOSAT_X_BPLKPFLAT / LOSAT_X_BPLKPFLATSHADOW switches once; it does
 // not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPFLAT): a strict-set switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-/// and it is not set); `LOSAT_X_BPLKPFLATSHADOW` (any value, not part of the set) selects the shadow
+/// EXPERIMENT (LOSAT_X_BPLKPFLAT): a strict-set switch (on unless it is `0`);
+/// `LOSAT_X_BPLKPFLATSHADOW` (any value, not part of the set) selects the shadow
 /// mode, which implies the switch.
 pub(crate) fn x_bplkpflat_mode() -> XLkpFlat {
     use std::sync::OnceLock;

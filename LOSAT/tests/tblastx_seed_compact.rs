@@ -3,13 +3,12 @@
 //! on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_SEEDCOMPACT`
-//! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it on, the units of
-//! the unit path keep their saved init HSPs as 28-byte records, copied out of a per-thread
-//! vector at their exact length; the merge expands them into the same init lists, converts each
-//! chunk's list into a list of its exact length and moves the first chunk's list into the empty
-//! frame list. Every test reads the `[X_STATS] SEEDCOMPACT` line, which is printed only while the
-//! switch is on, to check that the compact lists were made (or, where no unit path runs, that
-//! none was), not only that the report is equal.
+//! is `0`. With it on, the units of the unit path keep their saved init HSPs as 28-byte records,
+//! copied out of a per-thread vector at their exact length; the merge expands them into the same
+//! init lists, converts each chunk's list into a list of its exact length and moves the first
+//! chunk's list into the empty frame list. Every test reads the `[X_STATS] SEEDCOMPACT` line, which
+//! is printed only while the switch is on, to check that the compact lists were made (or, where no
+//! unit path runs, that none was), not only that the report is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:367-372
 //! ```c
@@ -44,20 +43,16 @@ fn fasta(name: &str) -> PathBuf {
         .join(name)
 }
 
-const SWITCH: (&str, &str) = ("LOSAT_X_SEEDCOMPACT", "1");
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_SEEDCOMPACT", "0");
-const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const THREADS: [u32; 2] = [1, 4];
 
 /// The binary with the given variables as its only `LOSAT_*` variables that choose a code path.
-/// `LOSAT_X_DEFAULT` of the test's own environment is dropped as well: every test states the
-/// default it runs with. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
-/// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
-/// soon as a search has more than one thread, and it selects nothing. `LOSAT_X_PAIRPARGATE=0`
-/// comes first (a test's own variables may set it again): the fixtures' query batches are short,
-/// so the gate, in the strict set, would send them to the reference frame loop, and these tests
-/// are about the unit path.
+/// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
+/// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
+/// one thread, and it selects nothing. `LOSAT_X_PAIRPARGATE=0` comes first (a test's own
+/// variables may set it again): the fixtures' query batches are short, so the gate, in the strict
+/// set, would send them to the reference frame loop, and these tests are about the unit path.
 fn losat(switches: &[(&str, &str)]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
@@ -193,27 +188,19 @@ fn the_switch_keeps_compact_lists_and_gives_ncbis_report() {
 // ```c
 //     BLAST_SaveInitialHit(ungapped_hsps, q_off, s_off, ungapped_data);
 // ```
-// `LOSAT_X_SEEDCOMPACT=0` and `LOSAT_X_DEFAULT=0` turn the switch off: no SEEDCOMPACT line, the
-// same report. `LOSAT_X_DEFAULT=0` with `LOSAT_X_SEEDCOMPACT=1` is the run the variable gave
-// before the switch joined the set: the compact lists are made.
+// `LOSAT_X_SEEDCOMPACT=0` turns the switch off: no SEEDCOMPACT line, the same report.
 #[test]
-fn the_switch_follows_its_variable_and_the_global_one() {
+fn the_switch_follows_its_variable() {
     let expected = ncbi_report();
     for threads in THREADS {
-        for off in [SWITCH_OFF, PREVIOUS] {
-            let what = format!("{off:?} threads {threads}");
-            let (report, stderr) = pair(threads, &[STATS, off]);
-            assert_eq!(report, expected, "{what}");
-            assert_eq!(
-                line(&stderr, "[X_STATS] SEEDCOMPACT "),
-                None,
-                "{what}:\n{stderr}"
-            );
-        }
-        let what = format!("previous paths with the switch set, threads {threads}");
-        let (report, stderr) = pair(threads, &[STATS, PREVIOUS, SWITCH]);
+        let what = format!("{SWITCH_OFF:?} threads {threads}");
+        let (report, stderr) = pair(threads, &[STATS, SWITCH_OFF]);
         assert_eq!(report, expected, "{what}");
-        assert_compact_ran(&stderr, 1, &what);
+        assert_eq!(
+            line(&stderr, "[X_STATS] SEEDCOMPACT "),
+            None,
+            "{what}:\n{stderr}"
+        );
     }
 }
 

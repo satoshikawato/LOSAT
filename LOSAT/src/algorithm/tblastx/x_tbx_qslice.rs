@@ -130,8 +130,8 @@ struct XSliceRule {
 
 // No NCBI counterpart: which scan the units of the unit path use (scheduling only). Read once per
 // process, as the other modes of x_pair_par.rs.
-/// LOSAT_X_TBXQSLICE: a strict-set value switch (`utils/xswitch.rs`). `None` when it is off (`0`,
-/// or `LOSAT_X_DEFAULT=0` and it is not set) and on targets other than x86-64; the built-in rule
+/// LOSAT_X_TBXQSLICE: a strict-set value switch (`utils/xswitch.rs`). `None` when it is off (`0`)
+/// and on targets other than x86-64; the built-in rule
 /// when it is not given a number (the built-in passed to `xswitch::value` is 0, outside the range);
 /// otherwise slices of at most the number given, on every group.
 fn slice_rule() -> Option<XSliceRule> {

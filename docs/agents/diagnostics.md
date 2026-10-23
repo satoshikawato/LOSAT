@@ -332,6 +332,7 @@ export LOSAT_X_BXSCAN=1
 export LOSAT_X_BXSCANBF=1
 export LOSAT_X_BXSEGMEMO=1
 export LOSAT_X_BXSUBJFLOW=1
+export LOSAT_X_BXUNGAPSENT=1
 export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
@@ -1932,7 +1933,7 @@ Rebuilding less:
   the same best, length and stop. The word loop is unrolled for three letters and the walks take two steps a
   loop. A block with another word size (blastp-fast, `-word_size`), an X-drop outside 1..=127 or a code
   >= 32, and a subject with a code >= 32, run the closure of `LOSAT_X_BPUNGAP`; so do `-window_size 0` and
-  `LOSAT_X_BPSEED=0` (no fused loop). BLASTX keeps `LOSAT_X_BPUNGAP`.
+  `LOSAT_X_BPSEED=0` (no fused loop). BLASTX has its own switch, `LOSAT_X_BXUNGAPSENT`.
   Measured 2026-10-23 on the workstation (node 1, CPU 40 for one thread and CPUs 40-47 for eight, their HT siblings
   idle, warmed 3 s before every run, arm order reversed every other round, one warm-up round + 8 rounds at one
   thread and 2 rounds at eight, medians of the per-round ratios against dev 7cfec941, the binary before the switch;
@@ -4789,6 +4790,24 @@ Scheduling (each value computed by one thread with the original function; order 
   the spread is wide): AP027131 x AP027133 x0.907 (6.11 -> 5.20 s, 7 of 8 rounds below 1), 50 cDNAs x the
   yeast proteome (`-subject`) x0.848 (CPU time x0.789, 8 of 8), the same output bytes. (blastx is not in
   LOSAT Web's ABI v2 yet.)
+- `LOSAT_X_BXUNGAPSENT=1` (BLASTX, speed; in the strict set from the pull request that added it, 2026-10-23;
+  `=0` turns it off) the two-hit ungapped extension of BLASTX's seed loops, the fused loop of `LOSAT_X_BXDIAG`
+  and the direct loop of `LOSAT_X_BXSCAN`, for word size 3, with the walks of blastp's `LOSAT_X_BPUNGAPSENT`
+  (`blastx/x_ungap_sent.rs`, exactness argument in its header; the extension is
+  `blastp/x_ungapped_sent.rs`'s `two_hit_in`): no bound test in the walks, the extension inlined into a
+  closure (fused loop) or a loop instance (direct loop) of its own. The six-frame query buffer has a sentinel
+  before each frame and after the last, and each subject is read with a sentinel at each end (a database's
+  bytes as they are stored, the sequence before ending with one; a FASTA subject encoded with one added
+  before it), so a step on a sentinel (-128 in the byte table) stops each walk at the step where the
+  reference's bound or sentinel stops it, with the same best, length and stop. The checks of
+  `LOSAT_X_BPUNGAP` are made once: residue codes below 32 and the sentinels per query batch and per subject;
+  the X-drop (1..=127) per candidate. Off the path (the reference extension): `-word_size 5`,
+  `-window_size 0` (one-hit), a query batch of more than `i32::MAX / 16` letters, a candidate whose
+  context's X-drop is outside 1..=127, and the diagnostic stages that trace the seeds.
+- `LOSAT_X_BXUNGAPSENTSHADOW=1` shadow of `LOSAT_X_BXUNGAPSENT` (turns the path on): every extension of the
+  path also runs `extend_two_hit_blosum62` and the results (score, offsets, length, `right_extend`,
+  `s_last_off`, and the early return) must be equal; any difference panics with the inputs. One line at exit,
+  after a subject took the path: `[X_SHADOW] BXUNGAPSENT subjects= compared=`.
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (distinct composition-adjustment inputs),

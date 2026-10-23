@@ -1491,6 +1491,7 @@ fn compute_subject(
                 &batch.sequence_start,
                 x_lead,
                 options.word_size,
+                options.window_size,
                 &x_buffer,
             )
         } else {

@@ -80,7 +80,13 @@ pub(crate) fn on() -> bool {
 /// code >= 32.
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 pub(crate) fn query_fits(buffer: &[u8]) -> bool {
-    on() && buffer.len() >= 2
+    on() && query_on_path(buffer)
+}
+
+/// [`query_fits`] without the switch.
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+fn query_on_path(buffer: &[u8]) -> bool {
+    buffer.len() >= 2
         && buffer.len() - 2 <= MAX_QUERY_LEN
         && buffer[0] == 0
         && buffer[buffer.len() - 1] == 0
@@ -116,7 +122,8 @@ pub(crate) struct XSent<'a> {
 
 impl<'a> XSent<'a> {
     /// `None` when the switch is off or the pair is outside the path: a batch that
-    /// [`query_fits`] did not pass (`fits`), a word size other than 3, or a subject buffer
+    /// [`query_fits`] did not pass (`fits`), a word size other than 3 (blastx-fast's 5), no
+    /// two-hit window (`-window_size 0`: the one-hit extension), or a subject buffer
     /// (`with_sentinels`, the residues between two sentinels) that `XSentSubject::new` refuses.
     // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
     #[inline]
@@ -124,9 +131,10 @@ impl<'a> XSent<'a> {
         query: &'a [u8],
         fits: bool,
         word_size: i32,
+        window_size: i32,
         with_sentinels: &'a [u8],
     ) -> Option<Self> {
-        if !fits || word_size != WORD_SIZE {
+        if !fits || word_size != WORD_SIZE || window_size <= 0 {
             return None;
         }
         let state = state();
@@ -204,5 +212,102 @@ impl<'a> XSent<'a> {
     #[inline]
     fn subject_raw(&self) -> &'a [u8] {
         &self.subject.with_sentinels()[1..]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    /// A six-frame query buffer as `query_setup.rs` lays it out: `[0, frame, 0, frame, .., 0]`
+    /// (some frames copied from `subject` with substitutions, so that walks run long), codes 1..25.
+    fn query_buffer(rng: &mut Rng, subject: &[u8]) -> Vec<u8> {
+        let mut buffer = vec![0u8];
+        for _ in 0..6 {
+            let len = 1 + rng.below(90) as usize;
+            if rng.below(2) == 0 && subject.len() > 2 {
+                let from = 1 + rng.below((subject.len() - 2) as u64) as usize;
+                for i in 0..len {
+                    let c = subject[1 + (from + i) % (subject.len() - 2)];
+                    buffer.push(if rng.below(6) == 0 {
+                        1 + rng.below(24) as u8
+                    } else {
+                        c
+                    });
+                }
+            } else {
+                for _ in 0..len {
+                    buffer.push(1 + rng.below(24) as u8);
+                }
+            }
+            buffer.push(0);
+        }
+        buffer
+    }
+
+    /// The path gives `extend_two_hit_blosum62`'s result on the reference's sequences (the buffers
+    /// without their first byte) for every offset of a word, the ends of both sequences and the
+    /// frame borders included, and for X-drops on and off the path (above 127: the reference).
+    #[test]
+    fn two_hit_is_the_reference_on_blastx_buffers() {
+        let table = build_table().expect("BLOSUM62 fits a byte table");
+        let table: &'static Table = Box::leak(table);
+        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+        let mut compared = 0u64;
+        for round in 0..300 {
+            let slen = 1 + rng.below(if round % 10 == 0 { 4 } else { 120 }) as usize;
+            let mut subject = vec![0u8];
+            subject.extend((0..slen).map(|_| 1 + rng.below(24) as u8));
+            subject.push(0);
+            let query = query_buffer(&mut rng, &subject);
+            assert!(query_on_path(&query));
+            let sent = XSent {
+                query: &query,
+                subject: XSentSubject::new(&subject).expect("subject on the path"),
+                table,
+                shadow: false,
+            };
+            let (q_ref, s_ref) = (&query[1..], &subject[1..]);
+            for _ in 0..200 {
+                let q = rng.below(q_ref.len() as u64 + 1) as usize;
+                let s = rng.below(s_ref.len() as u64 + 1) as usize;
+                let s_left = rng.below(s as u64 + 4) as usize;
+                let dropoff = [1, 7, 16, 40, 127, 128, 300][rng.below(7) as usize];
+                let want = extend_two_hit_blosum62(q_ref, s_ref, s_left, s, q, dropoff, 3);
+                let got = sent.two_hit::<false>(s_left, s, q, dropoff);
+                assert_eq!(
+                    got, want,
+                    "round {round}: s_left={s_left} s={s} q={q} dropoff={dropoff}"
+                );
+                compared += u64::from(want.is_some());
+            }
+        }
+        assert!(compared > 10_000, "only {compared} extensions");
+    }
+
+    /// The batch check: sentinels at both ends and codes below 32.
+    #[test]
+    fn query_on_path_checks_the_buffer() {
+        assert!(query_on_path(&[0, 3, 4, 0, 5, 0]));
+        assert!(query_on_path(&[0, 0]));
+        assert!(!query_on_path(&[0]));
+        assert!(!query_on_path(&[]));
+        assert!(!query_on_path(&[1, 3, 0]));
+        assert!(!query_on_path(&[0, 3, 1]));
+        assert!(!query_on_path(&[0, 32, 0]));
+        assert!(query_on_path(&[0, 31, 0]));
     }
 }

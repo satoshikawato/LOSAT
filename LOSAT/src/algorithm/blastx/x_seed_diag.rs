@@ -64,6 +64,9 @@
 //! EXPERIMENT (LOSAT_X_BXSCANBF, `x_seed_scan.rs`): with that switch the fused loop finds the
 //! cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`'s
 //! `branch_free`, blastp's `x_scan_cells_bf`): the same cells in the same order.
+//!
+//! EXPERIMENT (LOSAT_X_BXUNGAPSENT, `x_ungap_sent.rs`): for a subject on that path the closure's
+//! two-hit extension is the sentinel walks (a closure of its own; the other statements unchanged).
 
 use super::x_seed_scan::x_bxscan_bf;
 use super::*;

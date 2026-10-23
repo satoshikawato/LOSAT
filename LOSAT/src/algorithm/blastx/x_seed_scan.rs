@@ -103,6 +103,10 @@
 //! runs, this one where the switch acts, is compared with `word_finder` on a copy of the table
 //! for every subject the direct loop scans, and `main` prints `[X_SHADOW] BXHITBF subjects_compared=N`
 //! at exit beside BXSCAN's line, N the subjects this loop scanned.
+//!
+//! EXPERIMENT (LOSAT_X_BXUNGAPSENT, `x_ungap_sent.rs`): for a subject on that path the direct loop's
+//! two-hit extension is the sentinel walks, in instances of their own (`x_word_finder_direct_sent`,
+//! never inlined); the loops without it keep their code.
 
 use super::x_ungap_sent::XSent;
 use super::*;

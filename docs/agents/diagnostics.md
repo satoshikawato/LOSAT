@@ -682,7 +682,12 @@ Same values, faster computation:
   EDL933 `-subject` blastn 16 threads 592-597 / 526-550 / 575-622, dc-megablast 16 threads 689-736 /
   614-630 / 651-684, 4 threads 289-292 / 268-272 / 296-303 (blastn 4 threads and 1 thread, the D.
   melanogaster `-db` cells and blastp unchanged within 15 MiB); NCBI `-subject` (one thread) 164-177. The
-  rest of the genome-pair excess is the traceback rows of the long alignments, one per worker.
+  rest of the genome-pair excess is the traceback rows of the long alignments, one per worker. Time
+  (workstation node 1, against dev cd8e0f89, per-pair median wall, `v4-B/results/b16c/summary_ab1.txt`):
+  Sakai x EDL933 blastn 16 threads x0.954 (8 pairs), 4 threads x0.986 (6), dc-megablast 16 threads x0.886
+  (8; user x0.838), 4 threads x0.985 (6); D. melanogaster cDNAs x genome `-db` dc-megablast 16 threads
+  x1.011 (4 pairs, 0.993-1.015; user x1.000, instructions x0.9995); blastp sp4 `-subject` x1.000 (6),
+  yeast `-db` x1.001 (4); user-space instructions x0.970-0.9995 in every cell.
 - DPW128 (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED`) the
   128-bit X-drop DP kernels with the per-row savings of the 256-bit AVX2 kernels (first and last
   survivor kept while the row runs,

@@ -10,7 +10,10 @@
 //! AVX2 cell test the deferred calls with a masked last batch on the tables with at least
 //! `LOSAT_X_BXDEFERMIN` hits per used cell (the others count in `tables_avx2=`); `0` gives the
 //! AVX2 batch. `LOSAT_X_BXCROSS` (an opt-in prototype, off unless set to a value other than `0`)
-//! makes the AVX2 cell test the batches cut across the cells' borders on every fused table. So the
+//! makes the AVX2 cell test the batches cut across the cells' borders on every fused table, run at
+//! the staged hits `LOSAT_X_BXCROSSCHUNK` gives (an experiment knob: a multiple of eight from 64 to
+//! 4096, else 1024); the timing line then ends with `cross_chunk=` and `cross_splits=` (the
+//! batches cut short before a hit that repeats an earlier one's entry). So the
 //! properties under test are that the report, standard error without the diagnostic lines and the exit status equal those of the
 //! search with the switch off, with the default and every cell test, with `-subject` and `-db`, outfmt 6 and 7,
 //! one and three threads and a two-hit window other than the default, and with every batch, some
@@ -502,11 +505,16 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
     }
 }
 
-/// The AVX2 cell test this machine runs with LOSAT_X_BXCROSS (the per-hit loop without AVX2).
+/// The AVX2 cell test this machine runs with LOSAT_X_BXCROSS (the per-hit loop without AVX2; it
+/// also needs POPCNT, else LOSAT_X_BXDEFER's cell test runs).
 fn cross_mode() -> &'static str {
     #[cfg(target_arch = "x86_64")]
     if std::arch::is_x86_feature_detected!("avx2") {
-        return "avx2-cross";
+        return if std::arch::is_x86_feature_detected!("popcnt") {
+            "avx2-cross"
+        } else {
+            "avx2-defer-masked"
+        };
     }
     "per-hit"
 }
@@ -521,6 +529,9 @@ fn diag_line(run: &Run) -> Option<&str> {
 // EXPERIMENT (LOSAT_X_BXCROSS): the batches across the cells' borders give the reports of the
 // reference with every search, with the built-in LOSAT_X_BXDIAGMIN and with every table fused, and
 // LOSAT_X_BXDEFERMIN does not reach them (`tables_avx2=0`); the timing line names `avx2-cross`.
+// With every table fused, the batches are cut short before repeated entries (`cross_splits=`: the
+// hits of a diagonal in consecutive cells, the two-hit pairs of these related sequences), with the
+// built-in chunk and with LOSAT_X_BXCROSSCHUNK=64 (a drain every few cells).
 #[test]
 fn the_cross_cell_batches_give_the_reports_of_the_reference() {
     let inputs = Inputs::new();
@@ -529,36 +540,88 @@ fn the_cross_cell_batches_give_the_reports_of_the_reference() {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let reference = blastx(&args, &[OFF]);
         assert_eq!(reference.code, Some(0), "{args:?}: {}", reference.stderr);
-        for (min, defer_min) in [("", ""), ("0", ""), ("0", "1000000")] {
+        for (min, defer_min, chunk) in [
+            ("", "", ""),
+            ("0", "", ""),
+            ("0", "1000000", ""),
+            ("0", "", "64"),
+        ] {
             let run = blastx(
                 &args,
                 &[
                     ("LOSAT_X_BXCROSS", "1"),
+                    ("LOSAT_X_BXCROSSCHUNK", chunk),
                     ("LOSAT_X_BXDIAGMIN", min),
                     ("LOSAT_X_BXDEFERMIN", defer_min),
                     ("LOSAT_TIMING", "1"),
                 ],
             );
             let what = format!(
-                "{args:?} LOSAT_X_BXCROSS=1 LOSAT_X_BXDIAGMIN={min} LOSAT_X_BXDEFERMIN={defer_min}"
+                "{args:?} LOSAT_X_BXCROSS=1 LOSAT_X_BXCROSSCHUNK={chunk} LOSAT_X_BXDIAGMIN={min} \
+                 LOSAT_X_BXDEFERMIN={defer_min}"
             );
             assert_eq!(run.code, reference.code, "{what}: {}", run.stderr);
             assert!(run.stdout == reference.stdout, "{what}: report differs");
             assert_eq!(run.messages(), reference.messages(), "{what}");
             // LOSAT_X_BXDIAG not set: the fused loop only with an AVX2 cell test.
             match diag_line(&run) {
-                Some(line) => {
-                    assert_eq!(mode, "avx2-cross", "{what}: {line}");
+                Some(line) if mode == "avx2-cross" => {
                     assert!(line.contains("mode=avx2-cross "), "{what}: {line}");
                     assert_eq!(field(line, "tables_avx2"), 0, "{what}: {line}");
+                    let expected = if chunk.is_empty() { 1024 } else { 64 };
+                    assert_eq!(field(line, "cross_chunk"), expected, "{what}: {line}");
                     if min == "0" {
                         assert!(field(line, "subjects") >= 150, "{what}: {line}");
                         assert!(field(line, "batched_hits") > field(line, "cells"), "{line}");
                         assert!(field(line, "candidates") > 0, "{what}: {line}");
+                        assert!(field(line, "cross_splits") > 0, "{what}: {line}");
                     }
                 }
+                Some(line) => assert_eq!(mode, "avx2-defer-masked", "{what}: {line}"),
                 None => assert_eq!(mode, "per-hit", "{what}: no timing line: {}", run.stderr),
             }
+        }
+    }
+}
+
+// EXPERIMENT (LOSAT_X_BXCROSSCHUNK): the knob takes a multiple of eight from 64 to 4096 (white
+// space around it ignored); any other value, or none, gives the built-in 1024. The reports equal
+// the reference's with each.
+#[test]
+fn the_cross_chunk_takes_the_multiples_of_eight_from_64_to_4096() {
+    let inputs = Inputs::new();
+    let args = searches(&inputs).remove(0);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let reference = blastx(&args, &[OFF]);
+    for (value, chunk) in [
+        ("64", 64),
+        ("72", 72),
+        ("4096", 4096),
+        (" 128 ", 128),
+        ("65", 1024),
+        ("56", 1024),
+        ("4104", 1024),
+        ("x", 1024),
+        ("", 1024),
+    ] {
+        let what = format!("LOSAT_X_BXCROSSCHUNK={value:?}");
+        let run = blastx(
+            &args,
+            &[
+                ("LOSAT_X_BXCROSS", "1"),
+                ("LOSAT_X_BXCROSSCHUNK", value),
+                ("LOSAT_X_BXDIAGMIN", "0"),
+                ("LOSAT_TIMING", "1"),
+            ],
+        );
+        assert_eq!(run.code, Some(0), "{what}: {}", run.stderr);
+        assert!(run.stdout == reference.stdout, "{what}: report differs");
+        let line = diag_line(&run);
+        if cross_mode() == "avx2-cross" {
+            let line = line.unwrap_or_else(|| panic!("{what}: no timing line: {}", run.stderr));
+            assert_eq!(field(line, "cross_chunk"), chunk, "{what}: {line}");
+        } else if let Some(line) = line {
+            assert!(!line.contains("cross_chunk="), "{what}: {line}");
         }
     }
 }
@@ -571,27 +634,38 @@ fn the_shadow_compares_the_cross_cell_batches_and_zero_turns_them_off() {
     let args = searches(&inputs).remove(0);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let reference = blastx(&args, &[OFF]);
-    let run = blastx(
-        &args,
-        &[
-            ("LOSAT_X_BXCROSS", "1"),
-            ("LOSAT_X_BXDIAG", "1"),
-            ("LOSAT_X_BXDIAGSHADOW", "1"),
-            ("LOSAT_TIMING", "1"),
-        ],
-    );
-    assert_eq!(run.code, Some(0), "shadow: {}", run.stderr);
-    assert!(run.stdout == reference.stdout, "shadow: report differs");
-    let compared = run
-        .stderr
-        .lines()
-        .find_map(|line| line.strip_prefix("[X_SHADOW] BXDIAG subjects_compared="))
-        .and_then(|rest| rest.split(' ').next())
-        .and_then(|n| n.parse::<u64>().ok())
-        .unwrap_or_else(|| panic!("shadow: no shadow line: {}", run.stderr));
-    assert!(compared >= 150, "shadow: {compared} subjects compared");
-    let line = diag_line(&run).unwrap_or_else(|| panic!("shadow: no timing line: {}", run.stderr));
-    assert!(line.contains(&format!("mode={} ", cross_mode())), "{line}");
+    // The built-in chunk and the smallest.
+    for chunk in ["", "64"] {
+        let run = blastx(
+            &args,
+            &[
+                ("LOSAT_X_BXCROSS", "1"),
+                ("LOSAT_X_BXCROSSCHUNK", chunk),
+                ("LOSAT_X_BXDIAG", "1"),
+                ("LOSAT_X_BXDIAGSHADOW", "1"),
+                ("LOSAT_TIMING", "1"),
+            ],
+        );
+        assert_eq!(run.code, Some(0), "shadow {chunk}: {}", run.stderr);
+        assert!(
+            run.stdout == reference.stdout,
+            "shadow {chunk}: report differs"
+        );
+        let compared = run
+            .stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("[X_SHADOW] BXDIAG subjects_compared="))
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or_else(|| panic!("shadow {chunk}: no shadow line: {}", run.stderr));
+        assert!(
+            compared >= 150,
+            "shadow {chunk}: {compared} subjects compared"
+        );
+        let line = diag_line(&run)
+            .unwrap_or_else(|| panic!("shadow {chunk}: no timing line: {}", run.stderr));
+        assert!(line.contains(&format!("mode={} ", cross_mode())), "{line}");
+    }
     // Off: LOSAT_X_BXDEFER's cell test (on every table with LOSAT_X_BXDEFERMIN=0).
     #[cfg(target_arch = "x86_64")]
     let off = if std::arch::is_x86_feature_detected!("avx2") {

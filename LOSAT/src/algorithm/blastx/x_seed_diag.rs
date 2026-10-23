@@ -63,14 +63,17 @@
 //!
 //! EXPERIMENT (LOSAT_X_BXCROSS, an opt-in prototype): the AVX2 batch is `XDiagMode::Avx2Cross`:
 //! the subject's hits staged and tested in batches of eight cut across the cells' borders, a batch
-//! that names one entry twice and the last hits of the subject one after the other; the argument
-//! that the calls, their order and the table are the per-hit loop's is in `x_seed_fused`'s module
-//! header (it rests on the closure of [`x_word_finder_fused`] writing only its hit's entry). Off
-//! unless `LOSAT_X_BXCROSS` is set to a value other than `0` (read once; not in the strict set). On,
-//! it is the cell test of every table the fused loop takes where the CPU has AVX2, in place of
-//! LOSAT_X_BXDEFER's and of LOSAT_X_BXDEFERMIN's rule (`tables_avx2=0`); `LOSAT_X_BXDIAGMIN` still
-//! chooses the tables, and `LOSAT_X_BXDIAGSHADOW` compares it with the reference like the other cell
-//! tests. The timing line names `mode=avx2-cross`.
+//! cut short before a hit that repeats an earlier one's entry, the last hits of the subject one
+//! after the other; the argument that the calls, their order and the table are the per-hit loop's
+//! is in `x_seed_fused`'s module header (it rests on the closure of [`x_word_finder_fused`] writing
+//! only its hit's entry). Off unless `LOSAT_X_BXCROSS` is set to a value other than `0` (read once;
+//! not in the strict set). On, it is the cell test of every table the fused loop takes where the
+//! CPU has AVX2 and POPCNT, in place of LOSAT_X_BXDEFER's and of LOSAT_X_BXDEFERMIN's rule
+//! (`tables_avx2=0`); `LOSAT_X_BXDIAGMIN` still chooses the tables, and `LOSAT_X_BXDIAGSHADOW`
+//! compares it with the reference like the other cell tests. `LOSAT_X_BXCROSSCHUNK` (an experiment
+//! knob, read once) sets the staged hits at which the batches run: a multiple of eight from 64 to
+//! 4096, otherwise the built-in 1,024. The timing line names `mode=avx2-cross` and ends with
+//! `cross_chunk=N cross_splits=N` (the chunk, and the batches cut short before a repeated entry).
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF, `x_seed_scan.rs`): with that switch the fused loop finds the
 //! cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`'s
@@ -81,6 +84,8 @@ use super::*;
 use crate::algorithm::blastp::x_seed_fused::{
     x_cell_test, x_scan_two_hit_with, XContextTable, XDiagMode,
 };
+#[cfg(target_arch = "x86_64")]
+use crate::algorithm::blastp::x_seed_fused::{x_cross_chunk, x_cross_splits};
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::OnceLock;
@@ -334,7 +339,7 @@ static X_SHADOW_SHORT: AtomicU64 = AtomicU64::new(0);
 /// EXPERIMENT (LOSAT_X_BXDIAG): with the switch on, the `[TIMING] blastx_diag` line of the run.
 pub(crate) fn x_write_timing(out: &mut dyn std::io::Write) -> std::io::Result<()> {
     if x_bxdiag_mode() != 0 {
-        writeln!(
+        write!(
             out,
             "[TIMING] blastx_diag: mode={} subjects={} cells={} batched_hits={} candidates={} min_hits_per_cell={} tables_fused={} tables_other={} hits_per_cell={}-{} defer_min_hits_per_cell={} tables_avx2={}",
             x_cell_mode().name(),
@@ -350,6 +355,17 @@ pub(crate) fn x_write_timing(out: &mut dyn std::io::Write) -> std::io::Result<()
             x_min_hits_per_cell_defer(),
             X_TABLES_AVX2.load(Relaxed),
         )?;
+        // EXPERIMENT (LOSAT_X_BXCROSS, LOSAT_X_BXCROSSCHUNK): the chunk and the cut batches.
+        #[cfg(target_arch = "x86_64")]
+        if x_cell_mode() == XDiagMode::Avx2Cross {
+            write!(
+                out,
+                " cross_chunk={} cross_splits={}",
+                x_cross_chunk(),
+                x_cross_splits()
+            )?;
+        }
+        writeln!(out)?;
     }
     Ok(())
 }

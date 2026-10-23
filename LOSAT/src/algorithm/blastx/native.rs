@@ -1382,61 +1382,87 @@ fn x_flow(
     struct XState {
         events: VecDeque<XEvent>,
         searched: BTreeMap<usize, XSearched>,
-        // Batches read and not yet spawned (the newest `lookahead`), in reader order.
-        held: VecDeque<(usize, Arc<Vec<FastaRecord>>)>,
         read: usize,
         unwritten: usize,
-        // Batches spawned and not yet sent back; at most `max_live`.
+    }
+    // Batches read and not yet spawned (the newest `lookahead` until the end of the input), in
+    // reader order, and the number spawned and not yet searched (at most `max_live`).
+    struct XHeld {
+        batches: VecDeque<(usize, Arc<Vec<FastaRecord>>)>,
         live: usize,
         ended: bool,
     }
+    struct XLaunch<'f> {
+        held: std::sync::Mutex<XHeld>,
+        lookahead: usize,
+        max_live: usize,
+        search: &'f (dyn Fn(&[FastaRecord], bool) -> Result<Vec<BatchResults>> + Sync),
+    }
+    impl XLaunch<'_> {
+        // Spawns the held batches beyond the newest `lookahead` (all of them at the end of the
+        // input, then searched alone) while fewer than `max_live` are spawned and unsearched.
+        // Each search sends its result (or panic) once and then spawns again, so a place freed
+        // by a search is filled without waiting for the writing thread.
+        fn release<'s>(
+            &'s self,
+            scope: &rayon::Scope<'s>,
+            sender: &mpsc::Sender<(usize, XSearched)>,
+        ) {
+            loop {
+                let next = {
+                    let mut held = self.held.lock().expect("held batches");
+                    let keep = if held.ended { 0 } else { self.lookahead };
+                    if held.batches.len() > keep && held.live < self.max_live {
+                        held.live += 1;
+                        let alone = held.ended;
+                        held.batches
+                            .pop_front()
+                            .map(|(index, queries)| (index, queries, alone))
+                    } else {
+                        None
+                    }
+                };
+                let Some((index, queries, alone)) = next else {
+                    break;
+                };
+                if alone {
+                    super::x_timing::run_add(XRun::FlowAlone, 1);
+                }
+                let sender = sender.clone();
+                scope.spawn(move |scope| {
+                    let searched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        (self.search)(&queries, alone)
+                    }));
+                    self.held.lock().expect("held batches").live -= 1;
+                    // The receiver is gone only when the run already ended at an error.
+                    let _ = sender.send((index, searched));
+                    self.release(scope, &sender);
+                });
+            }
+        }
+    }
     debug_assert!(rayon::current_thread_index().is_some());
     debug_assert!(lookahead < bound);
+    let launch = XLaunch {
+        held: std::sync::Mutex::new(XHeld {
+            batches: VecDeque::new(),
+            live: 0,
+            ended: false,
+        }),
+        lookahead,
+        max_live,
+        search,
+    };
     rayon::in_place_scope(|scope| {
         let (sender, receiver) = mpsc::channel::<(usize, XSearched)>();
         let state = RefCell::new(XState {
             events: VecDeque::new(),
             searched: BTreeMap::new(),
-            held: VecDeque::new(),
             read: 0,
             unwritten: 0,
-            live: 0,
-            ended: false,
         });
         let failed = Cell::new(false);
-        // Spawns one batch's search; its result (or panic) is sent to `receiver` once.
-        let spawn = |index: usize, queries: Arc<Vec<FastaRecord>>, alone: bool| {
-            if alone {
-                super::x_timing::run_add(XRun::FlowAlone, 1);
-            }
-            let sender = sender.clone();
-            scope.spawn(move |_| {
-                let searched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    search(&queries, alone)
-                }));
-                // The receiver is gone only when the run already ended at an error.
-                let _ = sender.send((index, searched));
-            });
-        };
-        // Spawns the held batches beyond the newest `lookahead` (all of them at the end of the
-        // input, then searched alone) while fewer than `max_live` are spawned and not sent back.
-        let release = || loop {
-            let next = {
-                let mut state = state.borrow_mut();
-                let keep = if state.ended { 0 } else { lookahead };
-                if state.held.len() > keep && state.live < max_live {
-                    state.live += 1;
-                    let alone = state.ended;
-                    state.held.pop_front().map(|(index, queries)| (index, queries, alone))
-                } else {
-                    None
-                }
-            };
-            match next {
-                Some((index, queries, alone)) => spawn(index, queries, alone),
-                None => break,
-            }
-        };
+        let release = || launch.release(scope, &sender);
         // Writes the events at the front whose batches are searched; then, until fewer than
         // `bound` batches are unwritten (or, with `all`, until every event is written), runs a
         // pending task or waits for a result, and writes again.
@@ -1446,10 +1472,8 @@ fn x_flow(
                     let mut state = state.borrow_mut();
                     while let Ok((index, searched)) = receiver.try_recv() {
                         state.searched.insert(index, searched);
-                        state.live -= 1;
                     }
                 }
-                release();
                 loop {
                     let event = {
                         let mut state = state.borrow_mut();
@@ -1500,9 +1524,7 @@ fn x_flow(
                     // search as it goes.
                     match receiver.recv_timeout(std::time::Duration::from_millis(1)) {
                         Ok((index, searched)) => {
-                            let mut state = state.borrow_mut();
-                            state.searched.insert(index, searched);
-                            state.live -= 1;
+                            state.borrow_mut().searched.insert(index, searched);
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => {}
                         Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -1532,7 +1554,8 @@ fn x_flow(
                     state
                         .events
                         .push_back(XEvent::Batch(index, Arc::clone(&queries)));
-                    state.held.push_back((index, queries));
+                    let mut held = launch.held.lock().expect("held batches");
+                    held.batches.push_back((index, queries));
                 }
                 super::x_timing::run_add(XRun::FlowBatches, 1);
                 release();
@@ -1552,7 +1575,7 @@ fn x_flow(
         if !failed.get() {
             // The end of the input: the held batches (the last of the input) are searched alone,
             // side by side.
-            state.borrow_mut().ended = true;
+            launch.held.lock().expect("held batches").ended = true;
             release();
             write(true)?;
         }

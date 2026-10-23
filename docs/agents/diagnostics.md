@@ -3688,8 +3688,8 @@ Scheduling (each value computed by one thread with the original function; order 
 - TBNPAR (graduated 2026-10-22; no variable, no `LOSAT_X_TBNPARSHADOW`; always on) tblastn:
   preliminary stage per (frame, chunk) and redo per match in parallel, one pool for the search. The
   unit-wise stage is the only preliminary stage of a search (at one thread, without a pool, it
-  runs the units in order); the serial port `preliminary_protein_hsps_in_ncbi_order` is a
-  `#[cfg(test)]` harness that no search runs and unit tests check against NCBI traces. The query batches go to `x_search_batches` at any thread count (since
+  runs the units in order); the unit tests that check the stage against NCBI traces run this unit
+  path through a `#[cfg(test)]` probe (`preliminary_hsps_traced`). The query batches go to `x_search_batches` at any thread count (since
   `TBNSSIDE` graduated); the one-batch-at-a-time loop searches a batch that `x_search_batches`
   did not take (a database whose sequences could not be read).
 - TBNBATCH (graduated 2026-10-22; no variable; conditional: its rule stays) tblastn query batches

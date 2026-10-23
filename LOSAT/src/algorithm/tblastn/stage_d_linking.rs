@@ -994,7 +994,7 @@ mod tests {
             compo_early_termination, CompoHeap, CompoHeapRecord,
         };
         use crate::algorithm::tblastn::search_gapped::{
-            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile, TargetTranslation,
+            preliminary_hsps_of_letters, PreliminaryProfile, TargetTranslation,
         };
         use crate::algorithm::tblastn::stage_d_kappa_params::{
             local_extension_final_xdrop, local_kappa_redo_params,
@@ -1157,8 +1157,7 @@ mod tests {
         };
         let mut retained: Vec<(usize, LinkedHspList)> = Vec::new();
         for (oid, subject) in subjects.iter().enumerate() {
-            let (preliminary, _) =
-                preliminary_protein_hsps_in_ncbi_order(&[&query], subject, 1, profile).unwrap();
+            let preliminary = preliminary_hsps_of_letters(&[&query], subject, 1, profile).unwrap();
             let expected = before.get(&oid).map(Vec::as_slice).unwrap_or(&[]);
             assert_eq!(preliminary.len(), expected.len(), "OID {oid} prelink count");
             for ((context, hsp), row) in preliminary.iter().zip(expected) {

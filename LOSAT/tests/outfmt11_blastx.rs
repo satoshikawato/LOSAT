@@ -535,6 +535,143 @@ fn non_ascii_titles_and_database_names_are_refused() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A title the archive cannot write in a batch that NCBI completes before a reader error: the
+/// archive of that batch would be written before the error, so LOSAT refuses before the first
+/// byte (the prescan checks the titles batch by batch, with the run's batch size). The bad record
+/// is in the second batch (`BATCH_SIZE=60`), or after the first 10,002 letters (the default).
+#[test]
+fn a_non_ascii_title_before_a_reader_error_is_refused_before_the_first_byte() {
+    let dir =
+        std::env::temp_dir().join(format!("losat_outfmt11_batchtitle_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let subject = engine().join(input("arch_bx_s.faa"));
+    let subject = subject.to_str().unwrap();
+    let short = dir.join("utf_bad.fna");
+    std::fs::write(
+        &short,
+        b">bq1 caf\xc3\xa9 title\nATGTGGATGGAACACTCGGTGTTGAAAGCAGTATTTGCGGTACGCAGA\n\
+          >bq2 ok\nAGTGTATTGAAGGCAGACCAACTCCAGCTAAGAAAAGTCATGGATGAT\n>bq3 bad\nAC1GT%\n",
+    )
+    .unwrap();
+    let long = dir.join("utf_bad_default.fna");
+    let mut bytes = b">bq1 caf\xc3\xa9 title\n".to_vec();
+    for _ in 0..842 {
+        bytes.extend_from_slice(b"ATGAAAGTGCTG");
+    }
+    bytes.extend_from_slice(
+        b"\n>bq2 ok\nAGTGTATTGAAGGCAGACCAACTCCAGCTAAGAAAAGTCATGGATGAT\n>bq3 bad\nAC1GT%\n",
+    );
+    std::fs::write(&long, bytes).unwrap();
+    for (file, batch_size) in [(&short, Some("60")), (&long, None)] {
+        let env: Vec<(&str, &str)> = batch_size
+            .map(|size| ("BATCH_SIZE", size))
+            .into_iter()
+            .collect();
+        let output = run(
+            &env,
+            &[
+                "-query",
+                file.to_str().unwrap(),
+                "-subject",
+                subject,
+                "-outfmt",
+                "11",
+            ],
+            "1",
+        );
+        let label = format!("{file:?} {batch_size:?}");
+        assert_eq!(output.status.code(), Some(1), "{label}");
+        assert!(output.stdout.is_empty(), "{label}: nothing is written");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("visible ASCII"), "{label}: {stderr}");
+        // The same file without outfmt 11 reaches the reader error (the archive's refusal is
+        // not involved).
+        let output = run(
+            &env,
+            &[
+                "-query",
+                file.to_str().unwrap(),
+                "-subject",
+                subject,
+                "-outfmt",
+                "8",
+            ],
+            "1",
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("CFastaReader"),
+            "{label}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A named FIFO as `-query` with outfmt 11 is refused at once (the prescan would open it a second
+/// time and wait for a writer that never comes): the type is decided on the open handle.
+#[cfg(unix)]
+#[test]
+fn a_fifo_query_is_refused_without_waiting() {
+    use std::time::{Duration, Instant};
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_fifo_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("query_fifo");
+    let _ = std::fs::remove_file(&fifo);
+    let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+    assert!(made.success());
+    let writer = {
+        let fifo = fifo.clone();
+        let bytes = std::fs::read(engine().join(input("arch_bx_q.fna"))).unwrap();
+        std::thread::spawn(move || {
+            use std::io::Write;
+            // Opens when the run opens the FIFO, writes, and closes: later opens find no writer.
+            let mut file = std::fs::OpenOptions::new().write(true).open(&fifo).unwrap();
+            let _ = file.write_all(&bytes);
+        })
+    };
+    let subject = engine().join(input("arch_bx_s.faa"));
+    let mut command = Command::new(BIN);
+    command
+        .current_dir(engine())
+        .args(["blastx", "-query", fifo.to_str().unwrap(), "-subject"])
+        .arg(&subject)
+        .args(["-outfmt", "11", "-num_threads", "1"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    for (name, _) in std::env::vars() {
+        if name.starts_with("LOSAT_X_") || matches!(name.as_str(), "ARCHIVE_FORMAT" | "BATCH_SIZE")
+        {
+            command.env_remove(name);
+        }
+    }
+    let mut child = command.spawn().expect("spawn losat");
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if started.elapsed() > Duration::from_secs(30) {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    // The writer finished when the run opened the FIFO; it is not joined when the run never did.
+    if writer.is_finished() {
+        let _ = writer.join();
+    }
+    let output = child.wait_with_output().unwrap();
+    let status = status.expect("the run must refuse the FIFO, not wait on it");
+    assert_eq!(status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("regular file"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A database that does not exist: rc 2 and an error archive whose message is the line on
 /// standard error (the message wraps at 78 columns, so the comparison joins the lines).
 #[test]

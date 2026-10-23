@@ -567,6 +567,9 @@ fn run_inner(
     //
     // 	return false;
     // ```
+    // The prescan of the titles of outfmt 11 (below) reads the query file a second time: whether it
+    // is a regular file is decided here, on the handle already open, before any second open.
+    let query_is_regular = archive::query_is_regular(&query_file);
     let mut query_stream = FastaStream::from_file(query_file);
     if stream_is_empty(&mut query_stream) {
         stderr.write_all(b"Warning: [blastx] Query is Empty!\n")?;
@@ -600,7 +603,10 @@ fn run_inner(
     // though the query file is read batch by batch: the titles are checked by a read of the
     // file before the search.
     if archive.is_some() {
-        archive::prescan_query_titles(&args.query, args.lcase_masking)?;
+        if !query_is_regular {
+            archive::refuse_irregular_query()?;
+        }
+        archive::prescan_query_titles(&args.query, args.lcase_masking, batch_size)?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
     // ```c++

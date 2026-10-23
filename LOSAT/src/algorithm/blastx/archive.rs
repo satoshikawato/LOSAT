@@ -116,31 +116,60 @@ pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
 
 pub(crate) use crate::report::archive::error_lines;
 
-/// Reads the query file once before the search and refuses the first record whose title the
-/// archive cannot write (`check_titles`), so that no refusal can follow a written byte. A
-/// record the reader refuses for every format ends the scan: the run reads the file again
-/// and fails there as it always did. A query that is not a regular file (a pipe, a FIFO)
-/// cannot be read a second time and is refused.
-pub(crate) fn prescan_query_titles(path: &std::path::Path, lowercase: bool) -> Result<()> {
-    let file = std::fs::File::open(path)?;
-    if !file.metadata().is_ok_and(|metadata| metadata.is_file())
-        || !crate::blastinput::input_files::has_stream_position(&file)
-    {
-        anyhow::bail!("unsupported BLASTX query input for -outfmt 11: use a regular file");
+/// A title the archive cannot write, found by `prescan_query_titles` (`check_titles`); a typed
+/// error, so that it is told apart from the reader's own errors, which end the scan.
+#[derive(Debug)]
+struct TitleRefusal(String);
+
+impl std::fmt::Display for TitleRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
+}
+
+impl std::error::Error for TitleRefusal {}
+
+/// Whether the query is a regular file, decided on the handle already open (`fstat`), before any
+/// second `open` by path: `prescan_query_titles` reads the file a second time, which would take
+/// bytes from a pipe (`<(...)`, `/dev/stdin`) or wait for a writer of a named FIFO.
+pub(crate) fn query_is_regular(file: &std::fs::File) -> bool {
+    file.metadata().is_ok_and(|metadata| metadata.is_file())
+        && crate::blastinput::input_files::has_stream_position(file)
+}
+
+/// The refusal of a query for which `query_is_regular` is false.
+pub(crate) fn refuse_irregular_query() -> Result<()> {
+    anyhow::bail!("unsupported BLASTX query input for -outfmt 11: use a regular file")
+}
+
+/// Reads the query file once before the search, batch by batch as the search reads it
+/// (`batch_size` letters, the run's), and refuses the first record whose title the archive
+/// cannot write (`check_titles`), so that no refusal can follow a written byte. A reader error
+/// ends the scan: the run reads the file again and fails there as it always did, after the
+/// archives of the batches before it (NCBI writes them), so the titles of the batches the reader
+/// completed before the error are checked; the records of the batch the error interrupts are
+/// never written and need no check. The file must be a regular file (`query_is_regular`).
+pub(crate) fn prescan_query_titles(
+    path: &std::path::Path,
+    lowercase: bool,
+    batch_size: usize,
+) -> Result<()> {
+    let file = std::fs::File::open(path)?;
     let mut stream = super::input::FastaStream::from_file(file);
-    let records = match super::input::parse_fasta_stream_with_warnings(
+    let scanned = super::input::parse_fasta_stream_with_warnings(
         &mut stream,
         false,
         lowercase,
-        usize::MAX,
+        batch_size,
+        &mut |batch| {
+            check_titles(batch, "query").map_err(|refusal| TitleRefusal(refusal.to_string()).into())
+        },
         &mut |_| Ok(()),
-        &mut |_| Ok(()),
-    ) {
-        Ok(records) => records,
-        Err(_) => return Ok(()),
-    };
-    check_titles(&records, "query")
+    );
+    match scanned {
+        Err(error) if error.is::<TitleRefusal>() => Err(error),
+        _ => Ok(()),
+    }
 }
 
 /// What the archive of one query batch needs.

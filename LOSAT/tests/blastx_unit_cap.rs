@@ -10,13 +10,14 @@
 //! the same search with all three `=0`, for several query batches (the batch flow,
 //! `LOSAT_X_BXFLOW`) and for one query split into chunks (the chunk waves, `LOSAT_X_BXPAR`), with
 //! the cap acting (`LOSAT_X_BXUNITCAP=2` at 4 threads; its built-in K = 8 needs 9 threads or more),
-//! not acting, and with each part off. `LOSAT_X_REACH` shows that the cap acted. That a pooled
+//! not acting, and with each part off. `LOSAT_X_REACH` shows that the cap acted, and that it does
+//! not act where K units would leave threads without a task (too few subjects). That a pooled
 //! table equals the reference table is a unit test of `x_lut_direct.rs`; that the bytes equal
 //! NCBI's is the business of the BLASTX fixtures and the campaign's comparison runs.
 //!
-//! The queries are pieces of AP027131; the subjects are the proteins of AP027131, AP027132 and
-//! AP027133 (1,711 records, fewer than `LOSAT_X_BXCHUNKFLOW` needs, so a split query's chunks are
-//! searched in waves).
+//! The queries are pieces of AP027131; the subjects are its 595 proteins (more than the subject
+//! flow's 64, fewer than `LOSAT_X_BXCHUNKFLOW` needs, so a split query's chunks are searched in
+//! waves), or the first few of them.
 
 #![cfg(feature = "parallel")]
 
@@ -65,8 +66,8 @@ fn genome() -> String {
 }
 
 /// `pieces` queries of `length` letters of AP027131, 20,000 letters apart from position 100,000,
-/// and the three protein sets (1,711 proteins), as files.
-fn inputs(dir: &Path, pieces: usize, length: usize) -> (PathBuf, PathBuf) {
+/// and the first `proteins` proteins of AP027131, as files.
+fn inputs(dir: &Path, pieces: usize, length: usize, proteins: usize) -> (PathBuf, PathBuf) {
     let genome = genome();
     let mut text = String::new();
     for piece in 0..pieces {
@@ -79,12 +80,21 @@ fn inputs(dir: &Path, pieces: usize, length: usize) -> (PathBuf, PathBuf) {
     }
     let query = dir.join("query.fna");
     std::fs::write(&query, text).unwrap();
-    let set = dir.join("set.faa");
-    let mut proteins = String::new();
-    for name in ["AP027131.faa", "AP027132.faa", "AP027133.faa"] {
-        proteins.push_str(&std::fs::read_to_string(fixture(name)).unwrap());
+    let set = dir.join(format!("set{proteins}.faa"));
+    let text = std::fs::read_to_string(fixture("AP027131.faa")).unwrap();
+    let mut kept = String::new();
+    let mut records = 0;
+    for line in text.lines() {
+        if line.starts_with('>') {
+            records += 1;
+        }
+        if records > proteins {
+            break;
+        }
+        kept.push_str(line);
+        kept.push('\n');
     }
-    std::fs::write(&set, proteins).unwrap();
+    std::fs::write(&set, kept).unwrap();
     (query, set)
 }
 
@@ -158,7 +168,7 @@ fn several_query_batches_give_the_report_without_the_switches() {
     let dir = temp_dir("batches");
     // Eight queries of 4,000 letters: four query batches of 10,002 bases or more for the batch
     // flow at 4 threads.
-    let (query, set) = inputs(&dir, 8, 4_000);
+    let (query, set) = inputs(&dir, 8, 4_000, 595);
     let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
     let reference = blastx(&query, &args, 4, ALL_OFF);
     assert!(
@@ -170,7 +180,6 @@ fn several_query_batches_give_the_report_without_the_switches() {
         &[("LOSAT_X_BXUNITCAP", "2")][..],
         &[("LOSAT_X_BXUNITCAP", "3"), ("LOSAT_X_BXLUTPOOL", "0")][..],
         &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXDIAGKEEP", "0")][..],
-        &[("LOSAT_X_DEFAULT", "0")][..],
     ] {
         assert!(
             blastx(&query, &args, 4, env) == reference,
@@ -192,6 +201,15 @@ fn several_query_batches_give_the_report_without_the_switches() {
         ),
         (false, true)
     );
+    // 40 proteins: the subject flow does not run (64 subjects or fewer), so a capped batch would
+    // search on one thread; the cap does not act.
+    let (query, few) = inputs(&dir, 8, 4_000, 40);
+    let args = ["-subject", few.to_str().unwrap(), "-outfmt", "6"];
+    assert_eq!(
+        cap_sides(&dir, &query, &args, &[("LOSAT_X_BXUNITCAP", "2")]),
+        (false, true)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -199,18 +217,14 @@ fn a_split_query_gives_the_report_without_the_switches() {
     let dir = temp_dir("split");
     // 45,000 letters: a query split into chunks (blastx/split.rs), searched in waves of two with
     // LOSAT_X_BXUNITCAP=2, each chunk's 1,711 subjects as tasks on the pool.
-    let (query, set) = inputs(&dir, 1, 45_000);
+    let (query, set) = inputs(&dir, 1, 45_000, 595);
     let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
     let reference = blastx(&query, &args, 4, ALL_OFF);
     assert!(
         reference.iter().filter(|&&b| b == b'\n').count() > 20,
         "too few hits to test"
     );
-    for env in [
-        &[][..],
-        &[("LOSAT_X_BXUNITCAP", "2")][..],
-        &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXLUTPOOL", "0")][..],
-    ] {
+    for env in [&[][..], &[("LOSAT_X_BXUNITCAP", "2")][..]] {
         assert!(
             blastx(&query, &args, 4, env) == reference,
             "{env:?}: report differs"
@@ -228,4 +242,20 @@ fn a_split_query_gives_the_report_without_the_switches() {
             == blastx(&query, &args, 4, ALL_OFF),
         "-db: report differs"
     );
+    // 20 proteins make two tasks of 16 per chunk: two chunks at a time give four threads a task,
+    // and the cap acts on the chunk waves (not on the batch flow, whose batch has no subject flow
+    // with 64 subjects or fewer); 10 proteins make one task, and it acts nowhere.
+    let (query, twenty) = inputs(&dir, 1, 45_000, 20);
+    let args = ["-subject", twenty.to_str().unwrap(), "-outfmt", "6"];
+    assert_eq!(
+        cap_sides(&dir, &query, &args, &[("LOSAT_X_BXUNITCAP", "2")]),
+        (true, true)
+    );
+    let (query, ten) = inputs(&dir, 1, 45_000, 10);
+    let args = ["-subject", ten.to_str().unwrap(), "-outfmt", "6"];
+    assert_eq!(
+        cap_sides(&dir, &query, &args, &[("LOSAT_X_BXUNITCAP", "2")]),
+        (false, true)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

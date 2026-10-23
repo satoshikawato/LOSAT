@@ -689,11 +689,15 @@ pub(crate) fn search_core(
         let chunks = if x_chunks_par {
             use rayon::prelude::*;
             crate::utils::threading::report_stage("blastx", "query_chunks", chunks.len(), true);
-            // Dispatch point (LOSAT_X_BXUNITCAP, in the strict set): waves of K chunks, each
-            // chunk's subjects as tasks on the pool (x_bx_mem.rs).
-            let x_cap = x_bx_mem::unit_cap(pool.threads(), options, subjects);
-            let wave = x_cap.unwrap_or(pool.threads()).max(2);
-            for wave_chunks in chunks.chunks(wave) {
+            // Dispatch point (LOSAT_X_BXUNITCAP, in the strict set): waves of at most K chunks
+            // (fewer inside the capped batch flow, x_bx_mem::chunk_wave), each chunk's subjects as
+            // tasks on the pool (x_bx_mem.rs).
+            let x_cap = x_bx_mem::chunk_unit_cap(pool, options, subjects);
+            let mut x_next = 0;
+            while x_next < chunks.len() {
+                let wave = x_cap.map_or(pool.threads().max(2), x_bx_mem::chunk_wave);
+                let wave_chunks = &chunks[x_next..chunks.len().min(x_next + wave)];
+                x_next += wave_chunks.len();
                 let computed: Vec<_> = pool.install(|| {
                     wave_chunks
                         .par_iter()
@@ -1263,7 +1267,6 @@ fn x_compute_chunk(
     }
     let lookup = Lookup::new(batch, &params, options)?;
     let last = batch.contexts.last().expect("BLASTX contexts");
-    #[cfg(feature = "parallel")]
     if x_par {
         let xdrop = subject_parameters(
             batch,
@@ -1286,7 +1289,6 @@ fn x_compute_chunk(
         )?;
         return Ok(Some((params, results)));
     }
-    let _ = x_par;
     let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
     let xdrop = subject_parameters(
         batch,

@@ -894,12 +894,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                     // Dispatch point (LOSAT_X_BXUNITCAP=K, in the strict set): each batch searched
                     // with the pool inside (the subject flow) instead of one batch per thread, and
                     // at most K at a time: the flow spawns a batch once one batch follows it and
-                    // reads on while fewer than K + 1 are unwritten (search/x_bx_mem.rs).
-                    let x_cap = super::search::x_bx_mem::unit_cap(
-                        pool.threads(),
-                        &options,
-                        search_subjects,
-                    );
+                    // reads on while fewer than K + 1 are unwritten (blastx/x_bx_mem.rs).
+                    let x_cap =
+                        super::search::x_bx_mem::flow_unit_cap(pool, &options, search_subjects);
                     let (x_bound, x_lookahead) = match x_cap {
                         Some(k) => (k + 1, 1),
                         None => (x_wave, pool.threads()),
@@ -913,6 +910,8 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                             let large = x_cap.is_some() || alone || x_large(queries);
                             crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !large);
                             if large {
+                                let _x_live =
+                                    x_cap.map(|_| super::search::x_bx_mem::XCappedBatch::enter());
                                 super::runtime::x_search_internal_in_pool(
                                     queries,
                                     search_subjects,

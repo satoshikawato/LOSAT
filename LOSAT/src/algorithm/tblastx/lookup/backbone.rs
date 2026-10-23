@@ -33,7 +33,7 @@ pub(crate) use x_lut_direct::{x_tbxlut_reach_stub, x_tbxlut_shadow_tables};
 // itself.
 pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table, XAaSpares};
 // LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build.
-pub(crate) use x_lut_direct::{x_bx_lut_pool, x_give_back_pooled};
+pub(crate) use x_lut_direct::{x_bx_pooled_builds, x_give_back_pooled};
 // EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
 // path's group tables (x_pair_lut.rs, a child module of x_lut_direct.rs), used by
 // tblastx/x_pair_par.rs.

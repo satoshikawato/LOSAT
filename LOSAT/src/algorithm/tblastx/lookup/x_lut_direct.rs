@@ -106,12 +106,21 @@ pub(crate) fn x_bx_lut_pool() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLUTPOOL"))
 }
 
+// No NCBI counterpart: buffer reuse only (above).
+/// Whether a BLASTX table is built pooled, so that its vectors go back to the pool when it is
+/// dropped: the switch is on and the in-place builder runs (diagnostics mode runs the reference
+/// builder, whose tables are freed as before).
+pub(crate) fn x_bx_pooled_builds() -> bool {
+    x_bx_lut_pool() && !diagnostics_enabled()
+}
+
 /// No NCBI counterpart (memoised neighbour lists shared by threads, `XNeighborMemo` otherwise).
 struct XSharedMemo {
     key: (ScoringMatrix, i32, usize, usize),
     lists: Box<[std::sync::OnceLock<Box<[u16]>>]>,
 }
 
+// No NCBI counterpart: the shared neighbour lists of the last key built pooled.
 static X_SHARED_MEMO: std::sync::Mutex<Option<std::sync::Arc<XSharedMemo>>> =
     std::sync::Mutex::new(None);
 
@@ -144,6 +153,7 @@ enum XLists<'a> {
 }
 
 impl XLists<'_> {
+    // No NCBI counterpart: the memo's lookup (the lists are those s_AddWordHitsCore would produce).
     fn get_or_make(&mut self, idx: usize, make: impl FnOnce() -> Box<[u16]>) -> &[u16] {
         match self {
             Self::Own(lists) => lists[idx].get_or_insert_with(make),
@@ -151,6 +161,7 @@ impl XLists<'_> {
         }
     }
 
+    // No NCBI counterpart: as `get_or_make`, for a cell the count pass listed.
     fn get(&self, idx: usize) -> &[u16] {
         match self {
             Self::Own(lists) => lists[idx].as_deref(),
@@ -175,6 +186,7 @@ struct XBuildTemps {
 // temporaries are moved between threads under the pool's lock, never shared.
 unsafe impl Send for XBuildTemps {}
 
+// No NCBI counterpart: the kept build temporaries and table vectors (buffer reuse only).
 static X_BX_TEMPS: std::sync::Mutex<Vec<XBuildTemps>> = std::sync::Mutex::new(Vec::new());
 static X_BX_TABLES: std::sync::Mutex<Vec<XAaVectors>> = std::sync::Mutex::new(Vec::new());
 
@@ -186,16 +198,25 @@ fn x_pool_lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 // No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them); one
-// short of room is replaced by one of `n + n / 4` (not the doubling of `resize`).
-fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize) -> Vec<T> {
+// short of room is replaced by one of `n` entries, or with `slack` (the overflow, whose length
+// changes from table to table) `n + n / 4`, not the doubling of `resize`.
+fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
     if vector.capacity() < n {
-        vector = Vec::with_capacity(n + n / 4);
+        vector = Vec::with_capacity(if slack { n + n / 4 } else { n });
     }
     vector.clear();
     vector.resize(n, T::default());
     vector
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 (see
+// `x_build_direct`)
+// ```c
+//     for (i = 0; i < lookup->backbone_size; i++) {
+//         if (exact_backbone[i] != NULL) {
+//             s_AddWordHits(lookup, matrix, query->sequence,
+//                           exact_backbone[i], query_bias, row_max);
+// ```
 /// [`x_build_direct`] with the shared neighbour lists and kept vectors (`LOSAT_X_BXLUTPOOL`).
 pub(super) fn x_build_direct_pooled(
     prepared: PreparedLookupQuery,
@@ -749,7 +770,7 @@ fn x_build_direct_in(
 
     // Count pass: count[w] = number of appends the reference makes to cell w.
     let mut counts: Vec<u32> = if pooled {
-        x_zeroed(std::mem::take(&mut temps.counts), backbone_size)
+        x_zeroed(std::mem::take(&mut temps.counts), backbone_size, false)
     } else {
         vec![0; backbone_size]
     };
@@ -792,9 +813,9 @@ fn x_build_direct_in(
         None if pooled => {
             let kept = x_pool_lock(&X_BX_TABLES).pop().unwrap_or_default();
             (
-                x_zeroed(kept.backbone, backbone_size),
-                x_zeroed(kept.pv, pv_size),
-                x_zeroed(kept.overflow, overflow_size),
+                x_zeroed(kept.backbone, backbone_size, false),
+                x_zeroed(kept.pv, pv_size, false),
+                x_zeroed(kept.overflow, overflow_size, true),
             )
         }
         None => (
@@ -808,7 +829,7 @@ fn x_build_direct_in(
         },
     };
     let mut base: Vec<u32> = if pooled {
-        x_zeroed(std::mem::take(&mut temps.base), backbone_size)
+        x_zeroed(std::mem::take(&mut temps.base), backbone_size, false)
     } else {
         vec![0; backbone_size]
     };
@@ -828,7 +849,7 @@ fn x_build_direct_in(
 
     // Fill pass: the reference's appends, in the reference's order.
     let mut fill: Vec<u32> = if pooled {
-        x_zeroed(std::mem::take(&mut temps.fill), backbone_size)
+        x_zeroed(std::mem::take(&mut temps.fill), backbone_size, false)
     } else {
         vec![0; backbone_size]
     };

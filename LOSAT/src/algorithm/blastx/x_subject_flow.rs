@@ -80,7 +80,7 @@ pub(super) fn chosen(
 }
 
 /// No NCBI counterpart: `chosen`'s rule for tasks of `k` subjects, without recording a side.
-fn fits(
+pub(super) fn fits(
     k: usize,
     pool: &crate::utils::threading::SearchPool<'_>,
     diagnostics: bool,

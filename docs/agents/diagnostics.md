@@ -349,6 +349,7 @@ export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_SEGTRIMMEMO=1
 export LOSAT_X_TBNBATCHRULE=1
+export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNHITBF=1
 export LOSAT_X_TBNKEEPFEW=1
@@ -3881,6 +3882,34 @@ Scheduling (each value computed by one thread with the original function; order 
   (`x_candidates_w3c5`, #273: cycles -6.0 % on the human and zebrafish genomes x one protein). An
   AVX2 form of the loop (`vpgatherdd` of the presence words) cut instructions by a third but was 2-7
   % slower (IPC 3.6 -> 2.3) and is not used.
+- `LOSAT_X_TBNFLOWHELP=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-23;
+  `=0` or `LOSAT_X_DEFAULT=0` turns it off; a number from 2 to 1,000,000 sets the wait below in microseconds;
+  acts where the subject flow of `TBNOIDNEXT` runs: 2+ threads and several subjects; `tblastn/x_oid_flow.rs`
+  `wait`): a thread that waits in the flow after the start runs the pool's jobs meanwhile (`rayon::yield_now`)
+  instead of sleeping on the flow's condition: the thread that owns the search when the next chunk in OID order
+  is not finished and every chunk it could take is taken, and a thread of the pool when the window of
+  `4 * threads` chunks is full. When the pool has no pending job the thread waits for a change of the flow (a
+  chunk finished or taken back, the close, a failure; a change it missed while it looked at the pool ends the wait
+  at once) for at most 100 us, doubled after each such wait up to 1.6 ms until it runs a job or takes a chunk, and
+  looks again (where the OS timer is coarse, as on Windows, the waits are longer). The jobs it can run are the (frame, chunk) units of the subjects being searched
+  (`TBNOIDUNITS`): the threads start together, so no loop of the flow is still queued in the pool once a thread
+  waits, and a unit does not wait for the flow. A unit's result goes back to its subject by unit number and the
+  merge stays on the subject's thread, so the report is the same. Before, on a genome database the owner that took
+  a short subject first slept while the units of a chromosome another thread searched waited in the pool.
+  With `LOSAT_X_STATS=1` each search by the flow (each query batch) prints `[X_STATS] TBNFLOWHELP help=<us>
+  owner_idle_ms= owner_help_ms= owner_jobs= workers_idle_ms= workers_help_ms= workers_jobs=` (the time the owner and
+  the other threads waited without and with a job, `help=0` with the switch off). Measured 2026-10-23 on the
+  workstation (physical cores of node 1 with their HT siblings idle, `--membind=1`, cores warmed 3 s before each
+  run, pairs with the order alternated; node 0 busy, load 22-77), the pull request's binary against its base, one
+  protein against a genome (`-db -evalue 1e-5 -max_target_seqs 5`), every output the same bytes across arms: the
+  fly genome at 8 threads 2.44 -> 2.30 s (x0.939, 8 pairs; the base's owner slept about 2 s in 4 of 8 runs, 2.52-2.60
+  s, the branch in none, 2.27-2.33 s), at 16 threads 1.38 -> 1.33 s (x0.964), at 32 threads x0.984; the human genome
+  at 16 threads 2.16 -> 2.09 s (x0.963), at 32 threads x0.990; the zebrafish genome at 8 / 16 / 32 threads x0.987 /
+  0.998 / 1.002 (8 pairs, `perf stat` walls); 2,500 and 5,000 16S sequences with fly 2L between them (`-subject`) at 8
+  / 16 threads x1.000 / 0.989; max RSS unchanged. With `LOSAT_X_STATS=1` on the fly genome at 16 threads the owner
+  waited 1.17-1.20 s with `=0` and 0.06 s with the switch, during which it ran 2-3 parts of chromosomes (0.99-1.09
+  s). Where the flow does not run (one thread, one subject such as an E. coli genome) the code is not reached:
+  instructions the same.
 - `LOSAT_X_TBNFRAMEREUSE=1` tblastn (speed; in the strict set from the pull request that added it,
   2026-10-19, with `TBNKEEPFEW`; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_frame_buffer`,
   `x_reuse_frame`): a subject plan that is dropped gives its six frames to the next plan its thread

@@ -336,6 +336,27 @@ fn cases() -> Vec<Case> {
         db: true,
         ..case("batches_db_fmt6", &[BATCH], "arch_bx_batches.fna", &[], 0)
     });
+    // A reader batch that spans several search units: `arch_bx_units.fna` is 89 queries and
+    // 36,608 letters; with `BATCH_SIZE=30000` the first reader batch holds three units (the
+    // second is a single query of 10,100 `N`, which has no valid context) and the second batch
+    // one. The search keeps units of 10,002 letters, the reports are NCBI's batches'.
+    for format in ["11", "6", "5"] {
+        let name = if format == "11" {
+            "units_sub".to_string()
+        } else {
+            format!("units_sub_fmt{format}")
+        };
+        cases.push(Case {
+            outfmt: format.to_string(),
+            ..case(
+                &name,
+                &[("BATCH_SIZE", "30000")],
+                "arch_bx_units.fna",
+                &[],
+                0,
+            )
+        });
+    }
     cases
 }
 
@@ -354,6 +375,8 @@ const MULTI_BATCH: &[&str] = &[
     "segbatch_sub",
     "batches_sub_fmt6",
     "batches_sub_fmt5",
+    "units_sub",
+    "units_sub_fmt6",
 ];
 
 fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {

@@ -4,7 +4,7 @@ use super::{
     input::FastaRecord,
     parameters::{effective_lengths, score_block, subject_parameters, ContextParameters},
     preliminary::{gapped, purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
-    query_setup::{batch_ranges, prepare_queries, PreparedQueryBatch},
+    query_setup::{batch_ranges, prepare_queries, PreparedQueryBatch, BATCH_SIZE},
     seed::{word_finder, Diagonals, InitHsp, Lookup},
     split::{adjust_chunk_hsps, merge_chunk_hsps, split_queries, QueryChunk},
     subjects::Subjects,
@@ -548,7 +548,7 @@ pub(crate) fn search_core(
     // it does not change any value NCBI computes.
     let x_containment = diagnostics || sink.x_wants_containment();
     use super::x_timing::Batch as XBatch;
-    for range in batch_ranges(records, options.batch_size) {
+    for range in batch_ranges(records, BATCH_SIZE) {
         // Diagnostic (LOSAT_TIMING): the clocks of the batch's stages (x_timing.rs). No NCBI
         // counterpart.
         let x_t_batch = super::x_timing::lap();

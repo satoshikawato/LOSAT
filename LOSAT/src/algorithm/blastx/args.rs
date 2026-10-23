@@ -718,9 +718,6 @@ pub struct ResolvedOptions {
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
     pub culling_limit: i32,
-    /// The letters of a query batch (`GetQueryBatchSize`, or `BATCH_SIZE` as the command line
-    /// reads it): 10002 for the library entries, which have no environment.
-    pub batch_size: usize,
     pub subject_besthit: bool,
     pub hitlist_size: i32,
     pub num_descriptions: i32,
@@ -1020,7 +1017,6 @@ impl BlastxArgs {
             max_hsps: self.max_hsps.unwrap_or(0),
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit.unwrap_or(0),
-            batch_size: super::query_setup::BATCH_SIZE,
             subject_besthit: self.subject_besthit,
             hitlist_size,
             num_descriptions: counts.num_descriptions as i32,

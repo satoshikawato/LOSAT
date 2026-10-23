@@ -7,7 +7,8 @@
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
   C++ Toolkit words in an option's value, Session S08+b, plan DW-19)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
-  that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, actions `S08` and
+  that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
+  asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
   `OPEN`) left for a maintainer decision. Plan decision DW-13 in
   [`docs/losat_web_gui_plan.md`](../losat_web_gui_plan.md).
 

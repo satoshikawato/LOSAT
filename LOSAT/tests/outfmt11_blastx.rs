@@ -16,8 +16,8 @@
 //! Frozen bytes: `tests/fixtures/outfmt11/bx_<case>.out` and `.err`, written by NCBI's `blastx
 //! -num_threads 1 <args> -outfmt N` run from `LOSAT/` with the case's environment
 //! (S/of8/scripts/freeze_outfmt11_bx_tests.sh of the line OF8 records). Every case runs at 1 and 4
-//! threads, and the multi-batch cases also with every strict-set switch off
-//! (`LOSAT_X_DEFAULT=0`). A database that does not exist (rc 2) carries the search path in its
+//! threads, and the multi-batch cases also with the batches searched in waves instead of the flow
+//! (`LOSAT_X_BXFLOW=0`). A database that does not exist (rc 2) carries the search path in its
 //! message, which depends on where the test runs: only the structure is compared.
 
 use std::path::PathBuf;
@@ -418,18 +418,16 @@ fn archives_equal_ncbis_at_one_and_four_threads() {
     }
 }
 
-/// The strict-set paths (the flow of batches, the streamed database, the deferred and lean hit
-/// lists, ...) write the archives the plain paths write. `LOSAT_X_DEFAULT=0` no longer turns
-/// `BXBATCH` / `BXPOOL` off (they graduated); it still turns off `BXFLOW`, so the multi-batch cases
-/// are compared between the flow and the waves.
+/// The flow of batches (`LOSAT_X_BXFLOW`, in the strict set) writes the archives the waves write:
+/// the multi-batch cases are compared with `LOSAT_X_BXFLOW=0`.
 #[test]
-fn the_strict_set_does_not_change_the_archives() {
+fn the_flow_does_not_change_the_archives() {
     for case in cases()
         .iter()
         .filter(|case| MULTI_BATCH.contains(&case.name.as_str()))
     {
         for threads in ["1", "4"] {
-            check(case, &[("LOSAT_X_DEFAULT", "0")], threads);
+            check(case, &[("LOSAT_X_BXFLOW", "0")], threads);
         }
     }
 }

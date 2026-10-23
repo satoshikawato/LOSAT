@@ -336,7 +336,8 @@ pub(super) struct PartStats {
     /// helpers that left a stalled stage before its end
     pub(super) helpers_left: u64,
     /// LOSAT_X_PAIRPARHOME: the runs folded (locks of a partition that folded one strip or
-    /// more), and those of them by a participant whose home the partition is not
+    /// more), and those of them folded by a participant that had nothing else to do (the
+    /// slowest partition, or any partition once every strip was handed out)
     pub(super) runs: u64,
     pub(super) steals: u64,
 }
@@ -1267,8 +1268,8 @@ pub(super) fn shadow_fields(kind: usize) -> String {
 /// No NCBI counterpart: the fields the LOSAT_TIMING lines of `kind` end with when the switch is
 /// on: the partition count of the stages, the number of partitioned stages merged, the time in
 /// merges and the number of helpers that left a stalled stage; with LOSAT_X_PAIRPARHOME also the
-/// runs folded and those folded away from home. Without the switch the lines are those of the
-/// strips paths alone.
+/// runs folded and those folded by idle participants (`PartStats::runs`, `steals`). Without the
+/// switch the lines are those of the strips paths alone.
 pub(super) fn timing_fields(kind: usize) -> String {
     if !switch_on() {
         return String::new();

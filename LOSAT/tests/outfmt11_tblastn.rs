@@ -273,26 +273,36 @@ fn cases() -> Vec<Case> {
     ]
 }
 
-/// The cases with more than one batch to a searched end.
-const MULTI_BATCH: &[&str] = &[
-    "batches_sub",
-    "batches_sub_bin",
-    "batch1_sub",
-    "warn_sub",
-    "invbatch_sub",
-    "lcbatch_sub",
-    "segbatch_sub",
-    "qlocbatch_sub",
-];
-
-/// The switches of the strict set that choose how the batches and subjects are searched or held
-/// (`=0` is the reference side of each).
-const SWITCHES: &[&str] = &[
-    "LOSAT_X_TBNSTORE",
-    "LOSAT_X_TBNOWNPOOLS",
-    "LOSAT_X_TBNBATCHRULE",
-    "LOSAT_X_TBNFLOWHELP",
-    "LOSAT_X_TBNKEEPFEW",
+/// The runs of the strict-set test: (case, switch, side the default run reaches). `=0` is the
+/// reference side of each switch, so a pair is listed only when the default run takes the new
+/// side (4 threads, `LOSAT_X_REACH`, OF8b2 review N1); the `=0` run then takes a path other than
+/// the default one.
+///
+/// - `LOSAT_X_TBNSTORE`: new in every `-subject` run (the plans pack per plan); the archive reads
+///   the records on the `=0` side whichever the switch says, so one case is enough.
+/// - `LOSAT_X_TBNBATCHRULE`: new only where a batch is searched on its own (`batch1_sub`,
+///   `warn_sub`).
+/// - `LOSAT_X_TBNOWNPOOLS`, `LOSAT_X_TBNFLOWHELP`: new in the multi-batch cases below (ref only
+///   in `batch1_sub` and `warn_sub`). `batches_sub_bin` is `batches_sub`'s search and is left out.
+/// - `LOSAT_X_TBNKEEPFEW` is not here: with `-subject` and these inputs the default run reaches
+///   its ref side only (or not at all), so a `=0` run would repeat the default path, and no
+///   fixture reaches the new side (it needs a database of about 30 Mb). The review checked it by
+///   hand on a 30.0 Mb database (675 records, `BATCH_SIZE=300`, 8 proteins, 4 threads): the 7
+///   archives equal NCBI's with and without `LOSAT_X_TBNKEEPFEW=0`.
+const STRICT_SET_RUNS: &[(&str, &str)] = &[
+    ("batches_sub", "LOSAT_X_TBNSTORE"),
+    ("batch1_sub", "LOSAT_X_TBNBATCHRULE"),
+    ("warn_sub", "LOSAT_X_TBNBATCHRULE"),
+    ("batches_sub", "LOSAT_X_TBNOWNPOOLS"),
+    ("invbatch_sub", "LOSAT_X_TBNOWNPOOLS"),
+    ("lcbatch_sub", "LOSAT_X_TBNOWNPOOLS"),
+    ("qlocbatch_sub", "LOSAT_X_TBNOWNPOOLS"),
+    ("segbatch_sub", "LOSAT_X_TBNOWNPOOLS"),
+    ("batches_sub", "LOSAT_X_TBNFLOWHELP"),
+    ("invbatch_sub", "LOSAT_X_TBNFLOWHELP"),
+    ("lcbatch_sub", "LOSAT_X_TBNFLOWHELP"),
+    ("qlocbatch_sub", "LOSAT_X_TBNFLOWHELP"),
+    ("segbatch_sub", "LOSAT_X_TBNFLOWHELP"),
 ];
 
 fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
@@ -336,17 +346,17 @@ fn archives_equal_ncbis_at_one_and_four_threads() {
 
 /// The paths of the strict set (`LOSAT_X_TBNSTORE`, which a run that writes the archive does not
 /// take for `-subject`: the archive writes the subjects' letters, `LOSAT_X_TBNOWNPOOLS`,
-/// `LOSAT_X_TBNBATCHRULE`, `LOSAT_X_TBNFLOWHELP`, `LOSAT_X_TBNKEEPFEW`) write the archives their
-/// `=0` side writes: the multi-batch cases are compared with each switch turned off.
+/// `LOSAT_X_TBNBATCHRULE`, `LOSAT_X_TBNFLOWHELP`) write the archives their `=0` side writes: the
+/// runs of `STRICT_SET_RUNS` are compared with the switch turned off.
 #[test]
 fn the_strict_set_does_not_change_the_archives() {
-    for case in cases()
-        .iter()
-        .filter(|case| MULTI_BATCH.contains(&case.name.as_str()))
-    {
-        for switch in SWITCHES {
-            check(case, &[(switch, "0")], "4");
-        }
+    let all = cases();
+    for &(name, switch) in STRICT_SET_RUNS {
+        let case = all
+            .iter()
+            .find(|case| case.name == name)
+            .unwrap_or_else(|| panic!("no case {name}"));
+        check(case, &[(switch, "0")], "4");
     }
 }
 

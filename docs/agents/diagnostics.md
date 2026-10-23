@@ -359,6 +359,7 @@ export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_SEGTRIMMEMO=1
 export LOSAT_X_TBNBATCHRULE=1
+export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNHITBF=1
 export LOSAT_X_TBNKEEPFEW=1
@@ -3885,6 +3886,21 @@ Scheduling (each value computed by one thread with the original function; order 
   (`x_candidates_w3c5`, #273: cycles -6.0 % on the human and zebrafish genomes x one protein). An
   AVX2 form of the loop (`vpgatherdd` of the presence words) cut instructions by a third but was 2-7
   % slower (IPC 3.6 -> 2.3) and is not used.
+- `LOSAT_X_TBNFLOWHELP=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-23;
+  `=0` or `LOSAT_X_DEFAULT=0` turns it off; a number from 2 to 1,000,000 sets the wait below in microseconds;
+  acts where the subject flow of `TBNOIDNEXT` runs: 2+ threads and several subjects; `tblastn/x_oid_flow.rs`
+  `wait`): a thread that waits in the flow after the start runs the pool's jobs meanwhile (`rayon::yield_now`)
+  instead of sleeping on the flow's condition: the thread that owns the search when the next chunk in OID order
+  is not finished and every chunk it could take is taken, and a thread of the pool when the window of
+  `4 * threads` chunks is full. When the pool has no pending job the thread waits for a change of the flow for at
+  most 100 us and looks again. The jobs it can run are the (frame, chunk) units of the subjects being searched
+  (`TBNOIDUNITS`): the threads start together, so no loop of the flow is still queued in the pool once a thread
+  waits, and a unit does not wait for the flow. A unit's result goes back to its subject by unit number and the
+  merge stays on the subject's thread, so the report is the same. Before, on a genome database the owner that took
+  a short subject first slept while the units of a chromosome another thread searched waited in the pool.
+  With `LOSAT_X_STATS=1` the search prints `[X_TBNFLOWHELP] help=<us> owner_idle_ms= owner_help_ms= owner_jobs=
+  workers_idle_ms= workers_help_ms= workers_jobs=` (the time the owner and the other threads waited without and
+  with a job, `help=0` with the switch off). MEASURED
 - `LOSAT_X_TBNFRAMEREUSE=1` tblastn (speed; in the strict set from the pull request that added it,
   2026-10-19, with `TBNKEEPFEW`; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_frame_buffer`,
   `x_reuse_frame`): a subject plan that is dropped gives its six frames to the next plan its thread

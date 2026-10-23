@@ -2601,6 +2601,10 @@ fn run_preliminary_subjects(
     }
     #[cfg(not(feature = "parallel"))]
     reduce_subjects()?;
+    #[cfg(feature = "parallel")]
+    if let Some(line) = x_flow.as_ref().and_then(|flow| flow.stats_line()) {
+        eprintln!("{line}");
+    }
     // NCBI c++/src/algo/blast/core/blast_engine.c:1659-1668:
     // /* Use a local diagnostics structure, because the one passed in an input
     //    argument can be shared between multiple threads */

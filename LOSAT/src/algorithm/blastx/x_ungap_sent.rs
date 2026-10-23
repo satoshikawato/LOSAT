@@ -99,9 +99,8 @@ static SHADOW_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
 
 /// The summary line (printed by `main` at exit), only in shadow mode and after a subject took the
-/// path: `subjects=` counts the pairs of a query batch and a subject made ready for the path (the
-/// seed loop then extends with it, or, with `LOSAT_X_BXSCAN=0` where the fused loop does not act,
-/// runs `word_finder`), `compared=` the extensions compared.
+/// path: `subjects=` counts the pairs of a query batch and a subject made ready for the path,
+/// `compared=` the extensions compared.
 // No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
 pub(crate) fn print_shadow_stats() {
     let subjects = SHADOW_SUBJECTS.load(Ordering::Relaxed);

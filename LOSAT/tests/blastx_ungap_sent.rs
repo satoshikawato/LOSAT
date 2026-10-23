@@ -1,4 +1,3 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! BLASTX's two-hit ungapped extension with sentinel-stopped walks in the seed loops
 //! (`LOSAT_X_BXUNGAPSENT`, `src/algorithm/blastx/x_ungap_sent.rs`, module header) on whole
 //! searches.

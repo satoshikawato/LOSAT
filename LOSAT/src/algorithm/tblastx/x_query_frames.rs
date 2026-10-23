@@ -43,7 +43,7 @@
 //!
 //! Programs that reach it: only TBLASTX (`-subject` and `-db`, every query batch of
 //! `search_query_batch`). The translation of the frames (at most a few ms per batch) stays serial.
-//! BLASTX already masks the contexts of a large batch on the pool (`LOSAT_X_BXPAR`,
+//! BLASTX already masks the contexts of a large batch on the pool (at 2+ threads,
 //! `blastx/query_setup.rs`) and prepares the chunks of a split query in parallel
 //! (`blastx/split.rs`).
 //!

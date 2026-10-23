@@ -2,7 +2,7 @@
 
 ## INSTRUCTION PROMPT
 
-LOSAT の段階 E2g の続きを実行する。S07+++ は、CI の整備と、NCBI の BLASTN の経路の棚卸し（`docs/evidence/losat_web_e2g/INVENTORY.tsv`、1006 行）までを終えた。このセッションでは、棚卸しで決めた一括の transpile（と 2026-10-02 の保守者の決定で足した項目）を行い、試験・ゲート・V-PERF・独立監査を通して、E2g の完了条件を満たす。完了条件の正本は総合計画書 §7 の S07+++ の行で、[S07+++ の指示書](session_s07ppp_e2g_blastn_inventory.md)がその細部である（条件を緩めない）。
+LOSAT の段階 E2g の続きを実行する。S07+++ は、CI の整備と、NCBI の BLASTN の経路の棚卸し（`docs/evidence/losat_web_e2g/INVENTORY.tsv`、1006 行。2026-10-23 にリリース資産へ移動：[ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md)）までを終えた。このセッションでは、棚卸しで決めた一括の transpile（と 2026-10-02 の保守者の決定で足した項目）を行い、試験・ゲート・V-PERF・独立監査を通して、E2g の完了条件を満たす。完了条件の正本は総合計画書 §7 の S07+++ の行で、[S07+++ の指示書](session_s07ppp_e2g_blastn_inventory.md)がその細部である（条件を緩めない）。
 
 先に次を読む：
 - [セッション README](README.md) の共通規則（特に規則 4）

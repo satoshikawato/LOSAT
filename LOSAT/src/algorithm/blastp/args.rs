@@ -370,6 +370,10 @@ pub struct BlastpArgs {
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
     #[arg(long, default_value = "0", value_name = "SPEC")]
     pub outfmt: String,
+    /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search
+    /// reads the arguments (`archive::handle_for`).
+    #[arg(skip)]
+    pub archive: Option<crate::report::archive::ArchiveHandle>,
 }
 
 // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:381-402
@@ -536,6 +540,8 @@ pub struct ResolvedBlastpArgs {
     /// The `-query_loc` range, as given.
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
     pub outfmt: String,
+    /// The run's BLAST archive (outfmt 11), shared by the blocks and batches of the run.
+    pub archive: Option<crate::report::archive::ArchiveHandle>,
 }
 
 impl BlastpArgs {
@@ -842,6 +848,7 @@ impl BlastpArgs {
             chaining: options.chaining,
             query_range,
             outfmt: self.outfmt.clone(),
+            archive: self.archive.clone(),
         })
     }
 }

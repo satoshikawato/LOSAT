@@ -509,4 +509,80 @@ mod tests {
         );
         assert_eq!(handed, (0..20).map(|i| (i, i * 2)).collect::<Vec<_>>());
     }
+
+    // B17 probe (run by hand with `--ignored`): many passes whose first item hands out nested jobs
+    // at once, on more threads than CPUs. A pool thread that steals one of those jobs before it
+    // has started its loop runs the loop nested inside the stolen job's join wait (rayon-core 1.13
+    // `take_local_job` pops the thread's own broadcast deque there), above unfinished work of item
+    // 0. A pass that makes no progress for LOSAT_B17_STALL_S seconds ends the process (exit 3).
+    #[test]
+    #[ignore]
+    fn probe_b17_many_passes_with_a_nested_first_item() {
+        use rayon::prelude::*;
+        use std::time::{Duration, Instant};
+        let var = |name: &str, default: usize| {
+            std::env::var(name)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(default)
+        };
+        let threads = var("LOSAT_B17_THREADS", 32);
+        let passes = var("LOSAT_B17_PASSES", 100_000);
+        let stall = var("LOSAT_B17_STALL_S", 20) as u64;
+        let assist = var("LOSAT_B17_ASSIST", 1) == 1;
+        let chunks = var("LOSAT_B17_CHUNKS", 256);
+        let done = AtomicUsize::new(0);
+        let start = Instant::now();
+        let light =
+            |x: usize| (0..200u64).fold(x as u64, |a, y| a.wrapping_mul(31).wrapping_add(y));
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let mut last = 0;
+                let mut since = Instant::now();
+                loop {
+                    std::thread::sleep(Duration::from_millis(200));
+                    let now = done.load(Ordering::Relaxed);
+                    if now >= passes {
+                        return;
+                    }
+                    if now != last {
+                        last = now;
+                        since = Instant::now();
+                    } else if since.elapsed() > Duration::from_secs(stall) {
+                        eprintln!(
+                            "B17 HANG at pass {now} of {passes} after {:.1} s (threads {threads} assist {assist})",
+                            start.elapsed().as_secs_f64()
+                        );
+                        std::process::exit(3);
+                    }
+                }
+            });
+            pool(threads).install(|| {
+                for p in 0..passes {
+                    search_in_order(
+                        16,
+                        2,
+                        assist,
+                        &|| (),
+                        &|_: &mut (), i: usize| -> u64 {
+                            if i == 0 {
+                                (0..chunks)
+                                    .into_par_iter()
+                                    .map(light)
+                                    .reduce(|| 0, u64::wrapping_add)
+                            } else {
+                                light(i)
+                            }
+                        },
+                        &mut |_, _| {},
+                    );
+                    done.store(p + 1, Ordering::Relaxed);
+                }
+            });
+        });
+        eprintln!(
+            "B17 {passes} passes in {:.3} s (threads {threads} assist {assist})",
+            start.elapsed().as_secs_f64()
+        );
+    }
 }

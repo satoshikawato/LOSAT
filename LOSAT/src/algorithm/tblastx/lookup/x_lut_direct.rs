@@ -740,7 +740,11 @@ fn x_build_direct_in(
     };
 
     // Count pass: count[w] = number of appends the reference makes to cell w.
-    let mut counts: Vec<u32> = x_zeroed(std::mem::take(&mut temps.counts), backbone_size);
+    let mut counts: Vec<u32> = if pooled {
+        x_zeroed(std::mem::take(&mut temps.counts), backbone_size)
+    } else {
+        vec![0; backbone_size]
+    };
     for idx in 0..backbone_size {
         let Some(offset_list) = exact_backbone[idx].as_deref() else {
             continue;
@@ -795,7 +799,11 @@ fn x_build_direct_in(
             None => return Ok(None),
         },
     };
-    let mut base: Vec<u32> = x_zeroed(std::mem::take(&mut temps.base), backbone_size);
+    let mut base: Vec<u32> = if pooled {
+        x_zeroed(std::mem::take(&mut temps.base), backbone_size)
+    } else {
+        vec![0; backbone_size]
+    };
     let mut overflow_cursor = 0usize;
     for (idx, &count) in counts.iter().enumerate() {
         if count == 0 {
@@ -811,7 +819,11 @@ fn x_build_direct_in(
     }
 
     // Fill pass: the reference's appends, in the reference's order.
-    let mut fill: Vec<u32> = x_zeroed(std::mem::take(&mut temps.fill), backbone_size);
+    let mut fill: Vec<u32> = if pooled {
+        x_zeroed(std::mem::take(&mut temps.fill), backbone_size)
+    } else {
+        vec![0; backbone_size]
+    };
     for idx in 0..backbone_size {
         let Some(offset_list) = exact_backbone[idx].as_deref() else {
             continue;

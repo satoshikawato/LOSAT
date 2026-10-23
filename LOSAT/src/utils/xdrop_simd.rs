@@ -430,10 +430,10 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
 }
 
 /// No NCBI counterpart (memory placement only): a row of the vector kernels whose first element
-/// lies on a 64-byte boundary. The 256-bit kernels store 32 bytes at `PAD` plus multiples of 32
-/// bytes and load the same places in the next row; from a buffer at glibc's 16-byte alignment
-/// half of those stores could cross a cache line, and a split store does not forward to the
-/// load after it (an offset set by the heap's history: one more allocation elsewhere made
+/// lies on a 64-byte boundary. The 256-bit kernels store 32 bytes at `PAD + first` plus multiples
+/// of 32 bytes and load the same places in the next row; from a buffer at glibc's 16-byte
+/// alignment half of those stores could cross a cache line, and a split store does not forward
+/// to the load after it (an offset set by the heap's history: one more allocation elsewhere made
 /// blastn's 16-thread search 2 % slower with three times the blocked store forwards). The
 /// values and the lengths are those of the `Vec` before.
 struct Rows<T> {

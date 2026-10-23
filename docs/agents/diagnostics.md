@@ -654,9 +654,11 @@ Same values, faster computation:
   traceback calls whose scores fit 8 bits (blastn; protein traceback with an unscaled matrix, for
   example `-comp_based_stats 0`). The 16-bit kernel (the traceback of the composition-based
   redo, whose matrix is scaled) is unchanged: the same change there measured x0.98-1.01.
-  The rows of the vector kernels (`XdropScratch`: H, E, the 8-bit rows and the traceback bits) start on 64-byte
-  boundaries (`Rows` in `utils/xdrop_simd.rs`, no switch: placement only, the same values and lengths;
-  perf/dc-fold-lean). From glibc's 16-byte alignment the offset was the heap's history: one more allocation
+  The rows of the vector kernels (`XdropScratch`: H and E on 16- and 8-bit lanes and the column letters `sb`; the
+  traceback rows stay a `Vec`) start on 64-byte boundaries (`Rows` in `utils/xdrop_simd.rs`, no switch: placement
+  only, the same values and lengths; perf/dc-fold-lean). The 256-bit kernels store 32 bytes at `PAD + first` plus
+  multiples of 32 and load them in the next row, so whether those stores split a cache line now depends on the
+  band start only. From glibc's 16-byte alignment it also depended on the heap's history: one more allocation
   elsewhere (that branch's) made blastn of 31,168 dmel cDNAs against 3 Mb at 16 threads x1.023 slower, with the
   same instructions and blocked store forwards x3.1, all in this kernel; with the rows aligned x1.002 against dev
   [0.999-1.004], dev with the same rows x1.003.
@@ -3389,17 +3391,18 @@ Scheduling (each value computed by one thread with the original function; order 
   on 1 to 8 threads and 2 to 16 partitions), the partition tests of `x_pair_seed_part.rs`,
   `LOSAT/tests/blastn_diag_lv.rs` (`the_memo_and_the_lean_folds_give_the_same_report`: dc-megablast at 1 and 4
   threads with each switch, the memo answering under the shadow; megablast keeps no memo).
-  Evidence (ws, node 1 timed, dev f664ceee against perf/dc-fold-lean 33397e4a, medians of pairs in rotated order,
-  every output dev's; v4-A15 ab9 and the many-pair runs fin6; both switches on unless named): 31,168 dmel cDNAs
+  Evidence (ws, node 1 timed, dev f664ceee against perf/dc-fold-lean 33397e4a, medians of the per-pair ratios,
+  pairs in rotated order, every output dev's; v4-A15 ab9 and the many-pair runs fin6; both switches on unless
+  named): 31,168 dmel cDNAs
   against 3 Mb of dmel genome with `-subject`, 16 threads 1.842 -> 1.611 s (x0.872, 8 of 8 pairs; cycles:u 69.35
   -> 59.37 G, instructions 167.81 -> 150.18 G), 8 threads 3.083 -> 2.660 s (x0.862), 1 thread x0.998 (the
   reference fold, no memo); the same queries against that genome as `-db`, 16 threads 2.065 -> 1.786 s (x0.864);
-  1,775 cDNAs x0.885 (16 threads, 60 pairs) and x0.997 (1 thread); 236 cDNAs (a small table: the memo answers 7 %
-  of the retrieves) x0.996 / x0.986 / x0.981 / x1.001 at 16 / 8 / 4 / 1 threads (300 / 150 / 80 / 60 pairs); 100
+  1,775 cDNAs x0.890 (16 threads, 60 pairs) and x0.997 (1 thread); 236 cDNAs (a small table: the memo answers 7 %
+  of the retrieves) x0.995 / x0.985 / x0.981 / x1.001 at 16 / 8 / 4 / 1 threads (300 / 150 / 80 / 60 pairs); 100
   16S queries against a 16S `-db` (every worker in the reference fold) x0.996 with dev's instructions; megablast
   and blastn (no memo) with dev's instructions: the 31,168 cDNAs with blastn at 16 threads x1.002 [0.999-1.004]
   (16 pairs, CPU time x0.999), megablast at 1 thread x0.998, 100 16S queries with megablast at 16 threads x0.999.
-  Both switches off: x0.991 (31,168 cDNAs, 16 threads, instructions x0.9996) and x0.992 (236 cDNAs, 16 threads).
+  Both switches off: x0.991 (31,168 cDNAs, 16 threads, instructions x0.9996) and x0.990 (236 cDNAs, 16 threads).
   Each switch alone (ab6, 85bf2fd2 against dev 249c7454, 31,168 cDNAs at 16 threads): this switch x0.927,
   `LOSAT_X_FOLDLEAN` x0.957. Before the partition states had their own lines, 236 cDNAs at 16 threads were x1.014
   (both off x1.025: the same instructions, memory-ordering machine clears x1.37). Memory (RssAnon at the peak, the
@@ -3416,7 +3419,7 @@ Scheduling (each value computed by one thread with the original function; order 
   instance takes `s_TypeOfWord`'s early return
   itself (na_ungapped.c:531 `if (word_length == lut_word_length) return 1;`, always so for a discontiguous word: no call, no
   arguments, the offsets unchanged and nothing extended) and inlines the diagonal-hash insert
-  (`DiagHashTable::insert_inl`, the statements of `insert_plain`). Same statements in the same order. The reference
+  (`DiagHashTable::insert_inl`: the statements of `insert_plain`, or of `insert_memo` with the memo). Same statements in the same order. The reference
   fold (`process_offset_pairs`) is not changed.
   Tests: the dc strips stage tests of `x_pair_seed_disc.rs` (both instances on a table with bounds and memo),
   `LOSAT/tests/blastn_diag_lv.rs` (`the_memo_and_the_lean_folds_give_the_same_report`).

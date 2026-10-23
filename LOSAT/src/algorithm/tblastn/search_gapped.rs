@@ -482,8 +482,8 @@ struct XQueryFrames {
 // ...
 //     BlastSeqLocCombine(filter_out, 0);
 // ```
-// The query frames of the preliminary stage (as the NCBI-order serial stage built them per subject,
-// now removed), taken out so that one value can serve all subjects of a query set.
+// The query frames of the preliminary stage, built once so that one value can serve all subjects
+// of a query set.
 fn x_query_frames(queries: &[&[u8]], profile: PreliminaryProfile<'_>) -> Result<XQueryFrames> {
     let query_frames: Vec<_> = queries
         .iter()
@@ -792,7 +792,12 @@ fn x_preliminary_protein_hsps_by_unit(
         // NCBI c++/src/algo/blast/core/blast_engine.c:539-552:
         // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE);
         // Blast_HSPListSortByScore(hsp_list);
-        Ok(purge_preliminary_common_endpoints(gapped))
+        let purged = purge_preliminary_common_endpoints(gapped);
+        #[cfg(test)]
+        probe_event(unit, || {
+            PreliminaryEvent::Purged(frame.frame, chunk.offset, purged.clone())
+        });
+        Ok(purged)
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-482,805-812
     // ```c
@@ -984,11 +989,9 @@ fn probe_event(unit: usize, event: impl FnOnce() -> PreliminaryEvent) {
 // NCBI c++/src/algo/blast/core/blast_engine.c:525-552:
 // GetGappedScore returns hsp_list; immediately afterward the same list is
 // passed to Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE).
-// The hook edits that input for comparison-only artificial NCBI input states. `Purged` is the
-// purge of the edited list; the search then purges the same list again, so the recorded value and
-// the search's value are equal.
-/// Records `Gapped`, applies the purge-input hook, records `Purged`, and returns the (edited)
-/// gapped list for the search's own purge.
+// The hook edits that input for comparison-only artificial NCBI input states.
+/// Records `Gapped`, applies the purge-input hook, and returns the (edited) gapped list for the
+/// search's purge.
 #[cfg(test)]
 fn probe_gapped(
     unit: usize,
@@ -1009,13 +1012,6 @@ fn probe_gapped(
         Some(hook) => hook(frame, chunk_offset, &mut gapped),
         None => Ok(()),
     };
-    if edited.is_ok() {
-        probe.unit_events[unit].push(PreliminaryEvent::Purged(
-            frame,
-            chunk_offset,
-            purge_preliminary_common_endpoints(gapped.clone()),
-        ));
-    }
     PRELIMINARY_PROBE.with_borrow_mut(|slot| *slot = Some(probe));
     edited.map(|()| gapped)
 }

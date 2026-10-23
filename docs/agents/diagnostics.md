@@ -3875,7 +3875,7 @@ Scheduling (each value computed by one thread with the original function; order 
   AVX2 form of the loop (`vpgatherdd` of the presence words) cut instructions by a third but was 2-7
   % slower (IPC 3.6 -> 2.3) and is not used.
 - `LOSAT_X_TBNFLOWHELP=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-23;
-  `=0` or `LOSAT_X_DEFAULT=0` turns it off; a number from 2 to 1,000,000 sets the wait below in microseconds;
+  `=0` turns it off; a number from 2 to 1,000,000 sets the wait below in microseconds;
   acts where the subject flow of `TBNOIDNEXT` runs: 2+ threads and several subjects; `tblastn/x_oid_flow.rs`
   `wait`): a thread that waits in the flow after the start runs the pool's jobs meanwhile (`rayon::yield_now`)
   instead of sleeping on the flow's condition: the thread that owns the search when the next chunk in OID order

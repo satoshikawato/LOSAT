@@ -3227,6 +3227,33 @@ mod tests {
     //     if (!score_only) {
     //         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
     // ```
+    // `Rows` (memory placement only): the first element on a 64-byte boundary at every length
+    // the scratch takes, the contents kept when the rows grow, as `Vec::resize`.
+    #[test]
+    fn rows_start_on_64_byte_boundaries_and_keep_their_values_when_they_grow() {
+        fn check<T: Copy + Default + PartialEq + std::fmt::Debug + From<u8>>() {
+            let mut r = Rows::<T>::new(1024);
+            assert_eq!(r.len(), 1024);
+            assert_eq!(r.as_ptr() as usize % 64, 0);
+            for (i, x) in r.iter_mut().enumerate() {
+                *x = T::from((i % 251) as u8);
+            }
+            for len in [1030usize, 2100, 4096, 9001] {
+                r.resize(len, T::default());
+                assert_eq!(r.len(), len);
+                assert_eq!(r.as_ptr() as usize % 64, 0, "len {len}");
+                assert!(r[..1024]
+                    .iter()
+                    .enumerate()
+                    .all(|(i, &x)| x == T::from((i % 251) as u8)));
+                assert!(r[1024..].iter().all(|&x| x == T::default()));
+            }
+            assert_eq!(Rows::<T>::new(0).len(), 0);
+        }
+        check::<u8>();
+        check::<i16>();
+    }
+
     // Random problems (matrices of 16 and 28 letters, several gap costs and X-drop values,
     // some with a fence sentinel) are run through `reference` and `xdrop_align`. The
     // offsets, score, fence flag, edit script and cell count are compared.

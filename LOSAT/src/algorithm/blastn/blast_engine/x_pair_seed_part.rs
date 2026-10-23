@@ -116,7 +116,7 @@ use super::super::{DiagHashCell, DiagHashTable, UngappedHit, DIAGHASH_NUM_BUCKET
 use super::{FoldCounts, Seed};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
 
 /// No NCBI counterpart: reads LOSAT_X_PAIRPARFOLD once (a strict-set switch: on unless it is `0`,
 /// or `LOSAT_X_DEFAULT=0` and it is not set). It does not change any value NCBI computes.
@@ -135,6 +135,15 @@ pub(super) fn partitions(threads: usize) -> Option<usize> {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARFOLD", threads >= 2);
     }
     (switch_on() && threads >= 2).then(|| threads.min(DIAGHASH_NUM_BUCKETS))
+}
+
+/// No NCBI counterpart: reads LOSAT_X_PAIRPARHOME once (a strict-set switch: on unless it is `0`,
+/// or `LOSAT_X_DEFAULT=0` and it is not set): the participants of a partitioned stage fold
+/// their home partitions (`seed_stage_home`) instead of any partition they can lock. It does not
+/// change any value NCBI computes.
+fn home_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRPARHOME"))
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:368
@@ -326,6 +335,10 @@ pub(super) struct PartStats {
     pub(super) merge_ns: u64,
     /// helpers that left a stalled stage before its end
     pub(super) helpers_left: u64,
+    /// LOSAT_X_PAIRPARHOME: the runs folded (locks of a partition that folded one strip or
+    /// more), and those of them by a participant whose home the partition is not
+    pub(super) runs: u64,
+    pub(super) steals: u64,
 }
 
 thread_local! {
@@ -435,6 +448,36 @@ where
     FS: Fn(usize, &mut Vec<Seed>) + Sync,
     FF: Fn(&mut PartState, &[Seed], &[u32]) + Sync,
 {
+    // EXPERIMENT (LOSAT_X_PAIRPARHOME): home partitions, folded run by run of ready strips.
+    let home = home_on();
+    if home {
+        // every partitioned stage takes the switch's path
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARHOME", true);
+    }
+    seed_stage_in(
+        home, n, threads, ahead, hash, hits, fold_part, scan, fold, timed,
+    )
+}
+
+/// `seed_stage_part` with the sharing of the folds given (`home`: LOSAT_X_PAIRPARHOME,
+/// `seed_stage_home`; else any participant folds any partition it can lock).
+#[allow(clippy::too_many_arguments)]
+fn seed_stage_in<FS, FF>(
+    home: bool,
+    n: usize,
+    threads: usize,
+    ahead: usize,
+    hash: &mut DiagHashTable,
+    hits: &mut Vec<UngappedHit>,
+    fold_part: FoldPart<'_>,
+    scan: &FS,
+    fold: &FF,
+    timed: bool,
+) -> PartStats
+where
+    FS: Fn(usize, &mut Vec<Seed>) + Sync,
+    FF: Fn(&mut PartState, &[Seed], &[u32]) + Sync,
+{
     let FoldPart { scratch, parts } = fold_part;
     assert!(
         (1..=DIAGHASH_NUM_BUCKETS).contains(&parts),
@@ -443,6 +486,11 @@ where
     let ahead = ahead.max(1);
     rebuild(scratch, hash, parts);
     let occ0 = hash.occupancy;
+    if home {
+        return seed_stage_home(
+            n, threads, ahead, hash, hits, scratch, parts, occ0, scan, fold, timed,
+        );
+    }
 
     let states: Vec<Mutex<PartState>> = scratch.parts.drain(..).map(Mutex::new).collect();
     let spare = Mutex::new(std::mem::take(&mut scratch.spare));
@@ -660,6 +708,366 @@ where
     stats
 }
 
+/// No NCBI counterpart (scheduling only, LOSAT_X_PAIRPARHOME): a value on cache lines of its own
+/// (128 bytes: a line and the adjacent line the prefetcher pairs with it).
+#[derive(Default)]
+#[repr(align(128))]
+struct OwnLines<T>(T);
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_PAIRPARHOME): marks the home partitions of a
+/// participant (`p % threads == me`) as having their participant in the stage while it lives,
+/// so that a helper that leaves a stalled stage (or unwinds) hands them to every participant.
+/// (The flags change twice per participant and stage, so they share lines; the partitions'
+/// next strips, which change with every strip folded, have lines of their own.)
+struct AtHome<'a> {
+    homes: &'a [AtomicBool],
+    me: usize,
+    threads: usize,
+}
+
+impl<'a> AtHome<'a> {
+    fn enter(homes: &'a [AtomicBool], me: usize, threads: usize) -> Self {
+        for home in homes.iter().skip(me).step_by(threads) {
+            home.store(true, Ordering::Relaxed);
+        }
+        AtHome { homes, me, threads }
+    }
+}
+
+impl Drop for AtHome<'_> {
+    fn drop(&mut self) {
+        for home in self.homes.iter().skip(self.me).step_by(self.threads) {
+            home.store(false, Ordering::Relaxed);
+        }
+    }
+}
+
+fn read<T>(m: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
+    m.read().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn write<T>(m: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
+    m.write().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_PAIRPARHOME): the stage of `seed_stage_part`
+/// after `rebuild`, with the folds shared by home partitions. Partition p is the home of
+/// participant `p % threads`, which folds p's strips as they become ready, every ready strip
+/// from p's next one on in one lock (a run); it scans a strip within the window between runs.
+/// Another participant folds p only while p has no participant at home in the stage (its
+/// helper job has not started, started on a participant's thread and returned, or left a
+/// stalled stage), when p is the slowest partition and the participant has nothing else to do
+/// (the window is closed, or every strip is handed out and its home partitions wait), or once
+/// every strip is handed out. Partition p keeps its strips' order and one folder at a time
+/// (its lock) as in the stage without the switch, so the output is the same (module comment);
+/// only who folds which run changes. A strip's buffer is given back once every partition has
+/// folded it (the slowest partition's next strip is past it; `freed`), without a count per
+/// strip; the strips are read under a read lock instead of a shared pointer per fold unit; the
+/// helpers' stall test sums the cursor and the partitions' next strips instead of a shared
+/// count per fold unit; and each partition's next strip and state are on lines of their own.
+/// The owner alone can still scan every strip and fold every partition.
+#[allow(clippy::too_many_arguments)]
+fn seed_stage_home<FS, FF>(
+    n: usize,
+    threads: usize,
+    ahead: usize,
+    hash: &mut DiagHashTable,
+    hits: &mut Vec<UngappedHit>,
+    scratch: &mut PartScratch,
+    parts: usize,
+    occ0: u32,
+    scan: &FS,
+    fold: &FF,
+    timed: bool,
+) -> PartStats
+where
+    FS: Fn(usize, &mut Vec<Seed>) + Sync,
+    FF: Fn(&mut PartState, &[Seed], &[u32]) + Sync,
+{
+    let threads = threads.max(1);
+    let states: Vec<Mutex<OwnLines<PartState>>> = scratch
+        .parts
+        .drain(..)
+        .map(|st| Mutex::new(OwnLines(st)))
+        .collect();
+    let spare = Mutex::new(std::mem::take(&mut scratch.spare));
+    let raw_spare = Mutex::new(std::mem::take(&mut scratch.raw));
+    // per partition: the next strip it folds (set under its lock by the participant that folded
+    // the strip before) and whether a participant whose home it is takes part in the stage
+    let lanes: Vec<OwnLines<AtomicUsize>> = (0..parts).map(|_| OwnLines::default()).collect();
+    let homes: Vec<AtomicBool> = (0..parts).map(|_| AtomicBool::new(false)).collect();
+    let slots: Vec<RwLock<Option<StripBuf>>> = (0..n).map(|_| RwLock::new(None)).collect();
+    let ready: Vec<AtomicBool> = (0..n).map(|_| AtomicBool::new(false)).collect();
+    let cursor = AtomicUsize::new(0);
+    // the strips below it have been given back (every partition folded them)
+    let freed = AtomicUsize::new(0);
+    let failed = AtomicBool::new(false);
+    let left = AtomicUsize::new(0);
+    let runs = AtomicU64::new(0);
+    let steals = AtomicU64::new(0);
+
+    // A strip's seeds, cut by partition with a stable counting sort.
+    let produce = |i: usize, raw: &mut Vec<Seed>, fill: &mut Vec<u32>| {
+        raw.clear();
+        scan(i, raw);
+        let mut buf = lock(&spare).pop().unwrap_or_default();
+        let StripBuf { seeds, pos, offs } = &mut buf;
+        offs.clear();
+        offs.resize(parts + 1, 0);
+        for seed in raw.iter() {
+            offs[bucket_of(seed) % parts + 1] += 1;
+        }
+        for p in 0..parts {
+            offs[p + 1] += offs[p];
+        }
+        fill.clear();
+        fill.extend_from_slice(&offs[..parts]);
+        let zero = Seed {
+            context: 0,
+            q: 0,
+            s: 0,
+            s_range: 0,
+        };
+        seeds.clear();
+        seeds.resize(raw.len(), zero);
+        pos.clear();
+        pos.resize(raw.len(), 0);
+        for (k, seed) in raw.iter().enumerate() {
+            let p = bucket_of(seed) % parts;
+            let at = fill[p] as usize;
+            fill[p] += 1;
+            seeds[at] = *seed;
+            pos[at] = k as u32;
+        }
+        *write(&slots[i]) = Some(buf);
+        ready[i].store(true, Ordering::Release);
+    };
+
+    // The slowest partition's next strip (every partition has folded the strips below it); the
+    // strips below it go back to the spare buffers, by the participant that moves `freed`.
+    let slowest = || -> usize {
+        let min_next = lanes
+            .iter()
+            .map(|lane| lane.0.load(Ordering::Acquire))
+            .min()
+            .unwrap_or(n);
+        let f = freed.load(Ordering::Relaxed);
+        if f < min_next
+            && freed
+                .compare_exchange(f, min_next, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+        {
+            for slot in &slots[f..min_next] {
+                if let Some(buf) = write(slot).take() {
+                    lock(&spare).push(buf);
+                }
+            }
+        }
+        min_next
+    };
+
+    // (the owner's time in scans, in waits and in the ungapped extensions of its folds)
+    let participant = |me: usize, owner: bool| -> (u64, u64, u64) {
+        // A helper job that this thread steals while it waits inside a participant (a nested
+        // parallel call) does not join: it could wait for the partition that participant holds.
+        if !owner && IN_STAGE.with(Cell::get) {
+            return (0, 0, 0);
+        }
+        let _in_stage = InStage::enter();
+        let mut failing = Failing {
+            failed: &failed,
+            done: false,
+        };
+        let _at_home = AtHome::enter(&homes, me, threads);
+        let mut raw = lock(&raw_spare).pop().unwrap_or_default();
+        let mut fill: Vec<u32> = Vec::with_capacity(parts);
+        let (mut scan_ns, mut wait_ns, mut pause_ns) = (0u64, 0u64, 0u64);
+        let (mut my_runs, mut my_steals) = (0u64, 0u64);
+        let mut wait_start: Option<std::time::Instant> = None;
+        let mut idle = 0u32;
+        let mut stall: Option<(std::time::Instant, usize)> = None;
+        // the slowest partition's next strip as this participant last read it (it only grows)
+        let mut seen = 0usize;
+
+        // Folds partition p's ready strips from its next one on, in order, if it can lock p.
+        let mut run = |p: usize, pause_ns: &mut u64| -> bool {
+            let lane = &lanes[p].0;
+            let i = lane.load(Ordering::Acquire);
+            if i >= n || !ready[i].load(Ordering::Acquire) {
+                return false;
+            }
+            let Ok(mut guard) = states[p].try_lock() else {
+                return false;
+            };
+            let st = &mut guard.0;
+            let mut i = st.next;
+            let mut did = false;
+            while i < n && ready[i].load(Ordering::Acquire) {
+                let slot = read(&slots[i]);
+                let strip = slot.as_ref().expect("a ready strip");
+                let (a, b) = (strip.offs[p] as usize, strip.offs[p + 1] as usize);
+                if a < b {
+                    st.out.strip = i as u64;
+                    let t0 = timed.then(std::time::Instant::now);
+                    let pause0 = st.scan_pause_ns;
+                    fold(st, &strip.seeds[a..b], &strip.pos[a..b]);
+                    if let Some(t0) = t0 {
+                        st.fold_ns += t0.elapsed().as_nanos() as u64;
+                    }
+                    if owner {
+                        *pause_ns += st.scan_pause_ns - pause0;
+                    }
+                }
+                drop(slot);
+                i += 1;
+                st.next = i;
+                lane.store(i, Ordering::Release);
+                did = true;
+            }
+            my_runs += u64::from(did);
+            did
+        };
+
+        loop {
+            if failed.load(Ordering::Acquire) {
+                if owner {
+                    panic!("LOSAT_X_PAIRPARFOLD: a participant of the partitioned fold failed");
+                }
+                failing.done = true;
+                break;
+            }
+            let mut did = false;
+            // its home partitions, and those without a participant at home in the stage
+            for p in 0..parts {
+                if p % threads == me || !homes[p].load(Ordering::Relaxed) {
+                    did |= run(p, &mut pause_ns);
+                }
+            }
+            let c = cursor.load(Ordering::Relaxed);
+            if c >= n || c >= seen + ahead || !did {
+                seen = slowest();
+                if seen >= n {
+                    failing.done = true;
+                    break;
+                }
+            }
+            if c < n && c < seen + ahead {
+                let i = cursor.fetch_add(1, Ordering::Relaxed);
+                if i < n {
+                    let t0 = (timed && owner).then(std::time::Instant::now);
+                    produce(i, &mut raw, &mut fill);
+                    if let Some(t0) = t0 {
+                        scan_ns += t0.elapsed().as_nanos() as u64;
+                    }
+                    did = true;
+                }
+            }
+            if !did {
+                // nothing of its own: the slowest partition, or any partition once every strip
+                // is handed out
+                let tail = cursor.load(Ordering::Relaxed) >= n;
+                for k in 1..parts {
+                    let p = (me + k) % parts;
+                    if (tail || lanes[p].0.load(Ordering::Acquire) == seen) && run(p, &mut pause_ns)
+                    {
+                        my_steals += 1;
+                        did = true;
+                        break;
+                    }
+                }
+            }
+            if did {
+                idle = 0;
+                stall = None;
+                if let Some(t0) = wait_start.take() {
+                    wait_ns += t0.elapsed().as_nanos() as u64;
+                }
+            } else {
+                if timed && owner && wait_start.is_none() {
+                    wait_start = Some(std::time::Instant::now());
+                }
+                idle = idle.saturating_add(1);
+                if !owner && idle.is_multiple_of(64) {
+                    // the owner can finish the stage alone; the stage's progress: strips handed
+                    // out plus strips folded by each partition
+                    let now = cursor.load(Ordering::Relaxed)
+                        + lanes
+                            .iter()
+                            .map(|lane| lane.0.load(Ordering::Relaxed))
+                            .sum::<usize>();
+                    match stall {
+                        Some((since, seen_progress)) if seen_progress == now => {
+                            if since.elapsed() >= HELPER_STALL {
+                                left.fetch_add(1, Ordering::Relaxed);
+                                failing.done = true;
+                                break;
+                            }
+                        }
+                        _ => stall = Some((std::time::Instant::now(), now)),
+                    }
+                }
+                pause(idle, owner);
+            }
+        }
+        if let Some(t0) = wait_start {
+            wait_ns += t0.elapsed().as_nanos() as u64;
+        }
+        runs.fetch_add(my_runs, Ordering::Relaxed);
+        steals.fetch_add(my_steals, Ordering::Relaxed);
+        lock(&raw_spare).push(raw);
+        (scan_ns, wait_ns, pause_ns)
+    };
+
+    let (owner_scan_ns, wait_ns, owner_pause_ns) = run_participants(threads, &participant);
+
+    let mut states: Vec<PartState> = states
+        .into_iter()
+        .map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner).0)
+        .collect();
+    let t_merge = timed.then(std::time::Instant::now);
+    let mut stats = PartStats {
+        scan_pause_ns: owner_pause_ns,
+        owner_scan_ns,
+        wait_ns,
+        helpers_left: left.into_inner() as u64,
+        runs: runs.into_inner(),
+        steals: steals.into_inner(),
+        ..PartStats::default()
+    };
+    for st in &states {
+        stats.counts.seeds += st.counts.seeds;
+        stats.counts.skipped += st.counts.skipped;
+        stats.fold_ns += st.fold_ns;
+        stats.ungapped_ns += st.out.ungapped_ns;
+        stats.ungapped_calls += st.out.ungapped_calls;
+    }
+    merge(
+        hash,
+        hits,
+        &mut states,
+        occ0,
+        &mut scratch.order,
+        &mut scratch.apps,
+    );
+    if let Some(t0) = t_merge {
+        stats.merge_ns = t0.elapsed().as_nanos() as u64;
+    }
+    // (the allocations only: the next stage's `rebuild` sets every partition's contents; the
+    // strips the stage did not give back are those of a failed stage)
+    scratch.parts = states;
+    let mut spare = spare.into_inner().unwrap_or_else(PoisonError::into_inner);
+    spare.extend(
+        slots
+            .into_iter()
+            .filter_map(|slot| slot.into_inner().unwrap_or_else(PoisonError::into_inner)),
+    );
+    scratch.spare = spare;
+    scratch.raw = raw_spare
+        .into_inner()
+        .unwrap_or_else(PoisonError::into_inner);
+    stats
+}
+
 /// No NCBI counterpart (scheduling only): `participant(0, true)` on this thread (the owner)
 /// and `participant(h, false)` for `h` in `1..threads` as jobs of an `in_place_scope` of its
 /// pool; outside a pool, only the owner. Returns the owner's result.
@@ -828,6 +1236,8 @@ static MERGES: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 static PARTS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 static MERGE_NS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 static LEFT: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+static RUNS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+static STEALS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
 /// No NCBI counterpart: counts one partitioned stage of `kind` (once per stage).
 pub(super) fn record(kind: usize, parts: usize, stats: &PartStats) {
@@ -835,6 +1245,8 @@ pub(super) fn record(kind: usize, parts: usize, stats: &PartStats) {
     PARTS[kind].fetch_max(parts as u64, Ordering::Relaxed);
     MERGE_NS[kind].fetch_add(stats.merge_ns, Ordering::Relaxed);
     LEFT[kind].fetch_add(stats.helpers_left, Ordering::Relaxed);
+    RUNS[kind].fetch_add(stats.runs, Ordering::Relaxed);
+    STEALS[kind].fetch_add(stats.steals, Ordering::Relaxed);
 }
 
 /// No NCBI counterpart: the fields the shadow summary lines of `kind` end with when the switch
@@ -854,15 +1266,21 @@ pub(super) fn shadow_fields(kind: usize) -> String {
 
 /// No NCBI counterpart: the fields the LOSAT_TIMING lines of `kind` end with when the switch is
 /// on: the partition count of the stages, the number of partitioned stages merged, the time in
-/// merges and the number of helpers that left a stalled stage. Without the switch the lines are
-/// those of the strips paths alone.
+/// merges and the number of helpers that left a stalled stage; with LOSAT_X_PAIRPARHOME also the
+/// runs folded and those folded away from home. Without the switch the lines are those of the
+/// strips paths alone.
 pub(super) fn timing_fields(kind: usize) -> String {
     if !switch_on() {
         return String::new();
     }
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
+    let home = if home_on() {
+        format!(" runs={} steals={}", load(&RUNS[kind]), load(&STEALS[kind]))
+    } else {
+        String::new()
+    };
     format!(
-        " partitions={} merges={} merge={:.3}s helpers_left={}",
+        " partitions={} merges={} merge={:.3}s helpers_left={}{home}",
         load(&PARTS[kind]),
         load(&MERGES[kind]),
         load(&MERGE_NS[kind]) as f64 / 1e9,
@@ -1017,6 +1435,7 @@ mod tests {
         window: i32,
         nested: bool,
         owner_waits: bool,
+        home: bool,
     ) -> (Vec<usize>, PartStats, usize) {
         let threads = pool.current_num_threads();
         let folders = Mutex::new(std::collections::BTreeSet::new());
@@ -1087,7 +1506,8 @@ mod tests {
                 }
             };
             let mut hits = Vec::new();
-            let stats = seed_stage_part(
+            let stats = seed_stage_in(
+                home,
                 cuts.len() - 1,
                 threads,
                 ahead,
@@ -1259,6 +1679,9 @@ mod tests {
                                 window,
                                 false,
                                 owner_waits,
+                                // both ways of sharing the folds (LOSAT_X_PAIRPARHOME), the
+                                // stages of a case alternating
+                                (case + stage) % 2 == 1,
                             );
                             most_folders = most_folders.max(folders);
                             assert_eq!(got, expected, "{at}: hits");
@@ -1328,6 +1751,7 @@ mod tests {
                     40,
                     true,
                     false,
+                    stage != 1,
                 );
                 assert_eq!(got, expected, "threads {threads} stage {stage}");
                 assert_eq!(
@@ -1351,8 +1775,9 @@ mod tests {
                 .num_threads(threads)
                 .build()
                 .unwrap();
-            for (case, place) in ["owner fold", "helper fold", "scan"]
+            for (case, (place, home)) in ["owner fold", "helper fold", "scan"]
                 .into_iter()
+                .flat_map(|place| [(place, false), (place, true)])
                 .enumerate()
             {
                 let mut reference_hash = DiagHashTable::new(16);
@@ -1393,7 +1818,8 @@ mod tests {
                             st.counts.seeds += seeds.len() as u64;
                         };
                         let mut hits = Vec::new();
-                        seed_stage_part(
+                        seed_stage_in(
+                            home,
                             strips,
                             threads,
                             2,
@@ -1413,7 +1839,7 @@ mod tests {
                 }));
                 assert!(
                     result.is_err(),
-                    "threads {threads} case {case} ({place}): no panic"
+                    "threads {threads} case {case} ({place}, home {home}): no panic"
                 );
                 // the table is the one before the stage: a merge never ran
                 let fresh = DiagHashTable::new(16);
@@ -1430,8 +1856,9 @@ mod tests {
                     40,
                     false,
                     false,
+                    !home,
                 );
-                assert_eq!(got, expected, "threads {threads} {place}");
+                assert_eq!(got, expected, "threads {threads} {place} home {home}");
                 assert_eq!(
                     hash_state(&hash),
                     hash_state(&reference_hash),
@@ -1471,6 +1898,7 @@ mod tests {
             40,
             false,
             false,
+            true,
         );
         assert_eq!(got, expected, "first stage: hits");
         assert_eq!(
@@ -1508,6 +1936,7 @@ mod tests {
             2,
             2,
             40,
+            false,
             false,
             false,
         );

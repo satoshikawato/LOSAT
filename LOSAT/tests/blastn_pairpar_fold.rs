@@ -229,9 +229,9 @@ fn dc_megablast_without_its_strips_path_is_not_taken() {
 }
 
 // LOSAT_TIMING: the strips paths' `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` lines end
-// with the partitioned fold's fields (`partitions= merges= merge= helpers_left=`) only with the
-// switch; without it they end with `owner_wait=`, as before the switch existed. (Names and
-// counts only; no duration is compared.)
+// with the partitioned fold's fields (`partitions= merges= merge= helpers_left=`, and `runs=
+// steals=` of LOSAT_X_PAIRPARHOME, on by default) only with the switch; without it they end with
+// `owner_wait=`, as before the switch existed. (Names and counts only; no duration is compared.)
 #[test]
 fn timing_lines_have_the_fold_fields_only_with_the_switch() {
     let dir = TestDir::new("timing");
@@ -271,7 +271,14 @@ fn timing_lines_have_the_fold_fields_only_with_the_switch() {
                 "owner_wait",
             ];
             if on {
-                expected.extend(["partitions", "merges", "merge", "helpers_left"]);
+                expected.extend([
+                    "partitions",
+                    "merges",
+                    "merge",
+                    "helpers_left",
+                    "runs",
+                    "steals",
+                ]);
             }
             assert_eq!(names, expected, "{at}: {line}");
             if on {
@@ -284,6 +291,7 @@ fn timing_lines_have_the_fold_fields_only_with_the_switch() {
                 assert_eq!(number("partitions="), 4, "{at}: {line}");
                 assert!(number("chunks=") > 0, "{at}: {line}");
                 assert_eq!(number("merges="), number("chunks="), "{at}: {line}");
+                assert!(number("runs=") >= number("steals="), "{at}: {line}");
             }
         }
     }

@@ -1093,6 +1093,19 @@ impl DiagHashTable {
     ) -> bool {
         let bucket =
             ((diag as u32).wrapping_mul(0x9E370001) % DIAGHASH_NUM_BUCKETS as u32) as usize;
+        // (Debug builds: the memo's upkeep needs the memo of the cells; an insert that does not
+        // keep a memo the table has ends it until the next stage's `x_lv2_reset`.)
+        #[cfg(debug_assertions)]
+        {
+            if MEMO {
+                assert!(
+                    self.x_last.is_empty() || self.x_last_fresh,
+                    "LOSAT_X_DIAGLV2: an insert keeps a stale memo (no x_lv2_reset since an insert without it)"
+                );
+            } else if !self.x_last.is_empty() {
+                self.x_last_fresh = false;
+            }
+        }
         // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): this insert writes `level` into one cell
         // of this bucket (the match, a take-over or the append below). No NCBI counterpart;
         // with the switch off `max_level` is empty and this is one length test.
@@ -1107,19 +1120,6 @@ impl DiagHashTable {
                 if let Some(last) = self.x_last.get_mut(bucket) {
                     last.note(diag, level, hit_len, hit_saved);
                 }
-            }
-        }
-        // (Debug builds: the memo's upkeep needs the memo of the cells; an insert that does not
-        // keep a memo the table has ends it until the next stage's `x_lv2_reset`.)
-        #[cfg(debug_assertions)]
-        {
-            if MEMO {
-                assert!(
-                    self.x_last.is_empty() || self.x_last_fresh,
-                    "LOSAT_X_DIAGLV2: an insert keeps a stale memo (no x_lv2_reset since an insert without it)"
-                );
-            } else if !self.x_last.is_empty() {
-                self.x_last_fresh = false;
             }
         }
         let mut index = self.backbone[bucket];

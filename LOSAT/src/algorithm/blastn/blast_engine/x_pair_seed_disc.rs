@@ -2445,15 +2445,18 @@ mod tests {
                         assert_eq!(hash_state(&h), hash_state(&plain_hash), "{at}");
                     }
                     // LOSAT_X_PAIRPARFOLD (`x_pair_seed_part.rs`): the two-hit fold split into
-                    // 2, 3, 7, 8 and 16 partitions on 1..8 threads, on tables without level
-                    // bounds, with bounds, and with bounds and the memo (LOSAT_X_DIAGLV2), in the
-                    // stage's instances with and without LOSAT_X_FOLDLEAN (`stage_of`, alternating
-                    // over the configurations), for two stages on one scratch with a chunk that
-                    // the fold without the memo folds between them (as the reference fold does
-                    // where a subject takes it: the memo is not kept there, and the next stage
-                    // makes it again), each with the hash offset moved on: the hits and the table
-                    // of the serial fold, and with every configuration those of the table without
-                    // bounds.
+                    // 2, 3, 7, 8 and 16 partitions on 1..8 threads (and two configurations
+                    // without partitions), on tables without level bounds, with bounds, and with
+                    // bounds and the memo (LOSAT_X_DIAGLV2), in the stage's instances with and
+                    // without LOSAT_X_FOLDLEAN (alternating over the configurations), for two
+                    // stages on one scratch with a chunk that the fold without the memo folds
+                    // between them (as the reference fold does where a subject takes it: the memo
+                    // is not kept there, and the next stage makes it again), each with the hash
+                    // offset moved on: the hits and the table of the serial fold, and with every
+                    // configuration those of the table without bounds. Where the environment's
+                    // LOSAT_X_FOLDLEAN is the configuration's, the stage is `seed_stage` itself, so
+                    // that its reset of the memo after the fold without it is the one tested (a
+                    // debug build panics on a stale memo); elsewhere `stage_of`.
                     let x2 = Inputs {
                         diag_offset: diag_offset + c.s_len as isize + window_size as isize,
                         ..x
@@ -2542,6 +2545,8 @@ mod tests {
                             (5, 16),
                             (8, 8),
                             (8, 16),
+                            (4, 0),
+                            (6, 0),
                         ]
                         .into_iter()
                         .enumerate()
@@ -2561,18 +2566,21 @@ mod tests {
                                     hash.offset = xc.diag_offset as i32;
                                     let mut hits = Vec::new();
                                     if stage {
-                                        let stats = stage_of(
-                                            lean,
-                                            xc,
-                                            disc,
-                                            threads,
-                                            &mut hash,
-                                            &mut hits,
-                                            Some(part::FoldPart {
-                                                scratch: &mut scratch,
-                                                parts,
-                                            }),
-                                        );
+                                        let fold_part = (parts > 0).then(|| part::FoldPart {
+                                            scratch: &mut scratch,
+                                            parts,
+                                        });
+                                        let stats = if lean == lean_on() {
+                                            seed_stage(
+                                                xc, disc, threads, &mut hash, &mut hits, None,
+                                                false, fold_part,
+                                            )
+                                        } else {
+                                            stage_of(
+                                                lean, xc, disc, threads, &mut hash, &mut hits,
+                                                fold_part,
+                                            )
+                                        };
                                         assert_eq!(stats.counts.seeds, seeds.len() as u64, "{at}");
                                     } else {
                                         fold_memo_free(xc, &mut hash, &mut hits);

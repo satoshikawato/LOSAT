@@ -255,6 +255,8 @@ fn the_strips_shadows_compare_the_tables_with_the_level_bounds() {
         !line.contains("seed chunks equal=0 "),
         "{at}: no chunk compared: {line}"
     );
+    let (memo, _) = memo_counts(&stderr, &at);
+    assert!(memo > 0, "{at}: the memo answered no retrieve: {stderr}");
 }
 
 /// The `memo=` and `memofound=` counters of the shadow's line (`LOSAT_X_DIAGLV2`).

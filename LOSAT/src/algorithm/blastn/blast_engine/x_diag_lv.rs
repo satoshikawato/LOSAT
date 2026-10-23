@@ -1137,22 +1137,47 @@ mod tests {
         }
     }
 
-    // LOSAT_X_DIAGLV2, debug builds: a read of the memo after an insert that did not keep it
-    // (the reference fold's `insert_plain`) and before a stage made it again (`x_lv2_reset`)
-    // panics; after the reset it answers.
+    // LOSAT_X_DIAGLV2, debug builds: a read of the memo, and an insert that keeps it, after an
+    // insert that did not keep it (the reference fold's `insert_plain`) and before a stage made
+    // it again (`x_lv2_reset`) panic, each with its own message; after the reset both work.
     #[cfg(debug_assertions)]
     #[test]
-    #[should_panic(expected = "stale memo")]
-    fn a_memo_read_after_a_memo_free_insert_panics_in_debug_builds() {
+    fn a_stale_memo_panics_in_debug_builds() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
         let seeds = LvSeeds::new(true, 18, 40);
-        let mut h = table(40, true, false);
-        h.x_lv2_start();
-        h.insert_memo(7, 500, 0, true, 480, 41);
-        h.insert_plain(7 + 512, 490, 0, true, 470, 41);
-        h.x_lv2_reset();
-        let _ = h.retrieve_below::<true>(7, &seeds, 480);
-        h.insert_plain(7, 520, 0, true, 500, 41);
-        let _ = h.retrieve_below::<true>(7, &seeds, 480);
+        for (read, expected) in [
+            (true, "a retrieve reads a stale memo"),
+            (false, "an insert keeps a stale memo"),
+        ] {
+            let mut h = table(40, true, false);
+            h.x_lv2_start();
+            h.insert_memo(7, 500, 0, true, 480, 41);
+            h.insert_plain(7 + 512, 490, 0, true, 470, 41);
+            h.x_lv2_reset();
+            let fresh = catch_unwind(AssertUnwindSafe(|| {
+                let _ = h.retrieve_below::<true>(7, &seeds, 480);
+                h.insert_memo(7 + 1024, 505, 0, true, 485, 41);
+            }));
+            assert!(
+                fresh.is_ok(),
+                "read {read}: the memo after the reset panicked"
+            );
+            h.insert_plain(7, 520, 0, true, 500, 41);
+            let stale = catch_unwind(AssertUnwindSafe(|| {
+                if read {
+                    let _ = h.retrieve_below::<true>(7, &seeds, 480);
+                } else {
+                    h.insert_memo(7 + 1024, 530, 0, true, 510, 41);
+                }
+            }));
+            let payload = stale.expect_err("a stale memo did not panic");
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default();
+            assert!(message.contains(expected), "read {read}: {message}");
+        }
     }
 
     #[test]

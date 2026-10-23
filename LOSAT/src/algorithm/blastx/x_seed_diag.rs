@@ -67,7 +67,8 @@
 //! x0.98, 13.32 x0.90); the built-in value was 500 before (measured against the direct loop
 //! without LOSAT_X_BXHITBF: 1.76 x1.20, 4.91 x1.00, 6.77 x0.94, 800 cDNAs x yeast x0.72), and
 //! `LOSAT_X_BXDIAGMIN=500` gives that rule. Both loops give the reference's hits and table, so the
-//! choice changes only the speed; it is made once per thread and table ([`x_fused_pays`]). The
+//! choice changes only the speed; it is made once per thread and table ([`x_fused_pays`]), and once
+//! for all the threads that search one table's subjects in tasks ([`x_shared_table_ratio`]). The
 //! timing line then also gives `min_hits_per_cell=`, `tables_fused=` and `tables_other=` (the
 //! choices made) and `hits_per_cell=LEAST-MOST` (hundredths).
 //!
@@ -267,11 +268,7 @@ fn x_hits_per_cell(table: &BlastAaLookupTable) -> u64 {
 /// length identify it; a later table that matched all three would reuse the value, which changes
 /// only the speed), and whether this call worked it out.
 fn x_table_ratio(table: &BlastAaLookupTable) -> (u64, bool) {
-    let key = (
-        table as *const BlastAaLookupTable as usize,
-        table.backbone.as_ptr() as usize,
-        table.overflow.len(),
-    );
+    let key = x_table_key(table);
     X_CHOICE.with(|choice| {
         let (a, b, c, ratio) = choice.get();
         if (a, b, c) == key {
@@ -290,16 +287,68 @@ fn x_table_ratio(table: &BlastAaLookupTable) -> (u64, bool) {
 /// [`x_table_mode`]).
 fn x_fused_pays(table: &BlastAaLookupTable, mode: XCellTest) -> bool {
     let (ratio, first) = x_table_ratio(table);
-    let fused = ratio >= x_min_hits_per_cell();
     if first {
-        X_TABLES[usize::from(!fused)].fetch_add(1, Relaxed);
-        X_RATIO_MIN.fetch_min(ratio, Relaxed);
-        X_RATIO_MAX.fetch_max(ratio, Relaxed);
-        if fused && x_table_mode(mode, ratio) != mode {
-            X_TABLES_AVX2.fetch_add(1, Relaxed);
-        }
+        x_count_choice(ratio, mode);
     }
-    fused
+    ratio >= x_min_hits_per_cell()
+}
+
+// No NCBI counterpart: counters of the timing line.
+/// EXPERIMENT (LOSAT_X_BXDIAGMIN): counts one choice of the loop for a table of `ratio` hits per
+/// used cell (see [`x_fused_pays`]).
+fn x_count_choice(ratio: u64, mode: XCellTest) {
+    let fused = ratio >= x_min_hits_per_cell();
+    X_TABLES[usize::from(!fused)].fetch_add(1, Relaxed);
+    X_RATIO_MIN.fetch_min(ratio, Relaxed);
+    X_RATIO_MAX.fetch_max(ratio, Relaxed);
+    if fused && x_table_mode(mode, ratio) != mode {
+        X_TABLES_AVX2.fetch_add(1, Relaxed);
+    }
+}
+
+// No NCBI counterpart: identifies a lookup table for the choice of the loop (speed only).
+/// EXPERIMENT (LOSAT_X_BXDIAGMIN): the table's address, its backbone's address and its overflow
+/// length (see [`x_table_ratio`]).
+fn x_table_key(table: &BlastAaLookupTable) -> (usize, usize, usize) {
+    (
+        table as *const BlastAaLookupTable as usize,
+        table.backbone.as_ptr() as usize,
+        table.overflow.len(),
+    )
+}
+
+// No NCBI counterpart: chooses LOSAT's loop once for the threads that share a table's subjects
+// (LOSAT_X_BXUNITCAP's tasks and the subject flow, blastx/x_bx_mem.rs); it does not change any
+// value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXDIAGMIN): `lookup`'s hits per used cell where the fused loop may scan its
+/// subjects, worked out (and counted) on this thread, to be given to the threads that search some
+/// of them ([`x_take_table_ratio`]); `None` where [`x_word_finder_diag`] does not ask for it. A
+/// thread that takes tasks of several tables in turn would otherwise work it out again at each
+/// change of table (its cache holds one).
+#[cfg(feature = "parallel")]
+pub(crate) fn x_shared_table_ratio(lookup: &Lookup, options: &ResolvedOptions) -> Option<u64> {
+    let Lookup::Standard(table) = lookup else {
+        return None;
+    };
+    if x_bxdiag_mode() == 0 || options.window_size <= 0 {
+        return None;
+    }
+    let (ratio, first) = x_table_ratio(table);
+    if first {
+        x_count_choice(ratio, x_cell_mode());
+    }
+    Some(ratio)
+}
+
+// No NCBI counterpart: see `x_shared_table_ratio` (speed only).
+/// EXPERIMENT (LOSAT_X_BXDIAGMIN): makes `ratio` (from [`x_shared_table_ratio`] for `lookup`) this
+/// thread's choice for `lookup`'s table, so that the thread does not work it out again.
+#[cfg(feature = "parallel")]
+pub(crate) fn x_take_table_ratio(lookup: &Lookup, ratio: Option<u64>) {
+    if let (Lookup::Standard(table), Some(ratio)) = (lookup, ratio) {
+        let (a, b, c) = x_table_key(table);
+        X_CHOICE.with(|choice| choice.set((a, b, c, ratio)));
+    }
 }
 
 // No NCBI counterpart: reads LOSAT_X_BXDEFERMIN once; it does not change any value NCBI computes.

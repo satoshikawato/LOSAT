@@ -352,22 +352,38 @@ impl<K: Copy + Ord + Default> MaxTree<K> {
 
     #[inline]
     fn set(&mut self, i: usize, v: [K; 2]) {
-        let mut pos = self.cap + i;
-        self.nodes[pos] = v;
-        while pos > 1 {
-            pos >>= 1;
-            let l = self.nodes[pos * 2];
-            let r = self.nodes[pos * 2 + 1];
-            let m = [l[0].max(r[0]), l[1].max(r[1])];
-            // wasm32 runs the 16-byte array compare as a byte loop over a stack copy of `m`.
-            #[cfg(target_arch = "wasm32")]
-            let same = self.nodes[pos][0] == m[0] && self.nodes[pos][1] == m[1];
-            #[cfg(not(target_arch = "wasm32"))]
-            let same = self.nodes[pos] == m;
-            if same {
-                break;
+        let leaf = self.cap + i;
+        self.nodes[leaf] = v;
+        // On wasm32 (LOSAT Web) each channel walks up on its own, which leaves the same tree (a
+        // parent whose channel does not change leaves its ancestors' channel unchanged). Walking
+        // both channels at once, LLVM made the two maxima of `u64` keys one 64x2 vector, which needs
+        // an unsigned compare that WebAssembly lacks; V8 ran it as lane extracts, scalar compares
+        // and lane inserts.
+        #[cfg(target_arch = "wasm32")]
+        for c in 0..2 {
+            let mut pos = leaf;
+            while pos > 1 {
+                pos >>= 1;
+                let m = self.nodes[pos * 2][c].max(self.nodes[pos * 2 + 1][c]);
+                if self.nodes[pos][c] == m {
+                    break;
+                }
+                self.nodes[pos][c] = m;
             }
-            self.nodes[pos] = m;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut pos = leaf;
+            while pos > 1 {
+                pos >>= 1;
+                let l = self.nodes[pos * 2];
+                let r = self.nodes[pos * 2 + 1];
+                let m = [l[0].max(r[0]), l[1].max(r[1])];
+                if self.nodes[pos] == m {
+                    break;
+                }
+                self.nodes[pos] = m;
+            }
         }
     }
 

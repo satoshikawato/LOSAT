@@ -344,6 +344,7 @@ export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_SEGTRIMMEMO=1
 export LOSAT_X_TBNBATCHRULE=1
+export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNHITBF=1
 export LOSAT_X_TBNKEEPFEW=1
@@ -3873,6 +3874,34 @@ Scheduling (each value computed by one thread with the original function; order 
   (`x_candidates_w3c5`, #273: cycles -6.0 % on the human and zebrafish genomes x one protein). An
   AVX2 form of the loop (`vpgatherdd` of the presence words) cut instructions by a third but was 2-7
   % slower (IPC 3.6 -> 2.3) and is not used.
+- `LOSAT_X_TBNFLOWHELP=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-23;
+  `=0` or `LOSAT_X_DEFAULT=0` turns it off; a number from 2 to 1,000,000 sets the wait below in microseconds;
+  acts where the subject flow of `TBNOIDNEXT` runs: 2+ threads and several subjects; `tblastn/x_oid_flow.rs`
+  `wait`): a thread that waits in the flow after the start runs the pool's jobs meanwhile (`rayon::yield_now`)
+  instead of sleeping on the flow's condition: the thread that owns the search when the next chunk in OID order
+  is not finished and every chunk it could take is taken, and a thread of the pool when the window of
+  `4 * threads` chunks is full. When the pool has no pending job the thread waits for a change of the flow (a
+  chunk finished or taken back, the close, a failure; a change it missed while it looked at the pool ends the wait
+  at once) for at most 100 us, doubled after each such wait up to 1.6 ms until it runs a job or takes a chunk, and
+  looks again (where the OS timer is coarse, as on Windows, the waits are longer). The jobs it can run are the (frame, chunk) units of the subjects being searched
+  (`TBNOIDUNITS`): the threads start together, so no loop of the flow is still queued in the pool once a thread
+  waits, and a unit does not wait for the flow. A unit's result goes back to its subject by unit number and the
+  merge stays on the subject's thread, so the report is the same. Before, on a genome database the owner that took
+  a short subject first slept while the units of a chromosome another thread searched waited in the pool.
+  With `LOSAT_X_STATS=1` each search by the flow (each query batch) prints `[X_STATS] TBNFLOWHELP help=<us>
+  owner_idle_ms= owner_help_ms= owner_jobs= workers_idle_ms= workers_help_ms= workers_jobs=` (the time the owner and
+  the other threads waited without and with a job, `help=0` with the switch off). Measured 2026-10-23 on the
+  workstation (physical cores of node 1 with their HT siblings idle, `--membind=1`, cores warmed 3 s before each
+  run, pairs with the order alternated; node 0 busy, load 22-77), the pull request's binary against its base, one
+  protein against a genome (`-db -evalue 1e-5 -max_target_seqs 5`), every output the same bytes across arms: the
+  fly genome at 8 threads 2.44 -> 2.30 s (x0.939, 8 pairs; the base's owner slept about 2 s in 4 of 8 runs, 2.52-2.60
+  s, the branch in none, 2.27-2.33 s), at 16 threads 1.38 -> 1.33 s (x0.964), at 32 threads x0.984; the human genome
+  at 16 threads 2.16 -> 2.09 s (x0.963), at 32 threads x0.990; the zebrafish genome at 8 / 16 / 32 threads x0.987 /
+  0.998 / 1.002 (8 pairs, `perf stat` walls); 2,500 and 5,000 16S sequences with fly 2L between them (`-subject`) at 8
+  / 16 threads x1.000 / 0.989; max RSS unchanged. With `LOSAT_X_STATS=1` on the fly genome at 16 threads the owner
+  waited 1.17-1.20 s with `=0` and 0.06 s with the switch, during which it ran 2-3 parts of chromosomes (0.99-1.09
+  s). Where the flow does not run (one thread, one subject such as an E. coli genome) the code is not reached:
+  instructions the same.
 - `LOSAT_X_TBNFRAMEREUSE=1` tblastn (speed; in the strict set from the pull request that added it,
   2026-10-19, with `TBNKEEPFEW`; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_frame_buffer`,
   `x_reuse_frame`): a subject plan that is dropped gives its six frames to the next plan its thread
@@ -4623,10 +4652,26 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2-defer-masked|avx2|scalar|per-hit> subjects= cells=
   batched_hits= candidates= min_hits_per_cell= tables_fused= tables_other= hits_per_cell=LEAST-MOST
   defer_min_hits_per_cell= tables_avx2=` (the last two: `LOSAT_X_BXDEFER`'s rule). A query batch whose
-  lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 500,
+  lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 900,
   `0` fuses every batch) is scanned by the direct loop instead, which is faster there; the
   choice is made once per thread and table and changes only the speed (the timing line counts the choices and
-  gives the least and most hits per cell, in hundredths). Where the two loops break even (one thread, `-db`
+  gives the least and most hits per cell, in hundredths). The built-in value is 900 since the pull request
+  perf/bx-diag-min (2026-10-23; 500 before, which `LOSAT_X_BXDIAGMIN=500` gives): with `LOSAT_X_BXHITBF`'s
+  branch-free hit test the direct loop is faster up to about 9 hits per used cell. The fused loop with the
+  cell test it takes (the AVX2 batch below `LOSAT_X_BXDEFERMIN`, `LOSAT_X_BXDEFER`'s above) against the direct
+  loop, user-space cycles, one core (workstation node 1, HT sibling idle, warmed 3 s, 8 rounds with the arm
+  order reversed every other round, medians, dev cd8e0f89; every output the same bytes): 4.91 hits per used
+  cell (the first 1,500 nt of a 2.1-kb fly cDNA x the fly proteome) x1.198, 5.79 (another cDNA) x1.187,
+  6.77 (the whole cDNA) x1.133, then sets of two or three of 50 fly cDNAs: 7.34 x1.073, 8.38 x1.030, 8.63
+  x1.006, 8.92 x0.994, 9.37 x0.981, 9.85 x0.975, 10.52 x0.965, 11.46 x0.946, 13.32 x0.899; 50 cDNAs x yeast
+  (20-33 per batch) x0.781. Against Swiss-Prot (`-db`, 3 rounds) the loops break even later: 6.77 x1.178,
+  8.92 x1.012, 9.81 x1.020, 11.46 x0.968, 13.32 x0.916; 900 lies between the fly proteome's break-even (about
+  8.75) and Swiss-Prot's (about 10.7), within 2 % of the faster loop on either side. Against dev's default
+  (the same runs; one thread): 5.79 x0.846 cycles (0.655 -> 0.555 s), 6.77 x0.883, 7.34 x0.931, 7.64
+  x0.942, 8.38 x0.967, 8.63 x0.997, 8.92 x1.005, the cDNA x Swiss-Prot x0.847 (7.14 -> 6.06 s), 8.92 x
+  Swiss-Prot x0.987, and x0.993-1.004 on the tables of 9 or more (the same loop as before).
+  At 8 threads (node 1, 8 physical cores, 5 rounds): 6.77 x0.885 (0.125 -> 0.116 s), 8.38 x0.964, 8.92
+  x1.007, 9.85 x0.999. The measurements below came before `LOSAT_X_BXHITBF`. Where the two loops break even (one thread, `-db`
   UniRef50 2026_03 volume 00, both with `LOSAT_X_BXSCANBF=1`, every batch fused against the direct loop, 2
   rounds each; pieces of one 2.1-kb fly cDNA): hits per used cell 1.76 (300 nt) x1.20 the direct loop's
   time, 2.34 (600 nt; 41.48-41.66 s against 34.49-34.74 s) x1.20, 3.56 (1,000 nt; 68.62-68.86 / 63.55-64.06)
@@ -4669,7 +4714,9 @@ Scheduling (each value computed by one thread with the original function; order 
   blastp's cell test (v4-R R2); a tested blastx cell holds about 19 hits on the dense tables below (a blastp
   cell about 106), so its last batch weighs more than in blastp. On a table with few hits per cell the masked
   batch and the buffer cost more than they save, so a fused table below `LOSAT_X_BXDEFERMIN` takes the AVX2
-  batch (`XDiagMode::Avx2`); the choice is made with `LOSAT_X_BXDIAGMIN`'s, once per thread and table. With the
+  batch (`XDiagMode::Avx2`); the choice is made with `LOSAT_X_BXDIAGMIN`'s, once per thread and table. Since
+  `LOSAT_X_BXDIAGMIN`'s built-in value became 900 (above 700; perf/bx-diag-min) every fused table takes
+  `LOSAT_X_BXDEFER`'s cell test by default, and the rule acts where `LOSAT_X_BXDIAGMIN` is set below 700. With the
   fused loop and the cell test forced on every table (`LOSAT_X_BXDIAGMIN=0` on the binary before the rule,
   the same as `LOSAT_X_BXDEFERMIN=0`; one core, medians of 3-8 per-round ratios against `=0`) the cycles were
   x1.256 at 1.76 hits per used cell (a 300-nt

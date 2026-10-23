@@ -565,50 +565,52 @@ mod tests {
 
     /// The inputs of a command line that LOSAT's `blastx` refuses (a task, matrix, word size,
     /// composition mode or `-use_sw_tback` it does not search with): the options model must still
-    /// write the list NCBI wrote for it.
+    /// write the list NCBI wrote for it. The options LOSAT takes come from its arguments, the
+    /// refused ones are set by hand.
     fn refused_inputs(extra: &[&str]) -> OptionInputs {
-        let mut task = "blastx";
-        let mut matrix = None;
-        let mut inputs = OptionInputs::new(Program::Blastx, "blastx");
-        inputs.seg = Some(Filter::Seg {
-            window: 12,
-            locut: 2.2,
-            hicut: 2.5,
-        });
-        inputs.soft_masking = Some(false);
+        const REFUSED: [&str; 8] = [
+            "-task",
+            "-matrix",
+            "-word_size",
+            "-gapopen",
+            "-gapextend",
+            "-comp_based_stats",
+            "-xdrop_gap",
+            "-xdrop_gap_final",
+        ];
+        let mut kept = Vec::new();
+        let mut refused: Vec<(&str, &str)> = Vec::new();
         let mut index = 0;
         while index < extra.len() {
-            let value = extra.get(index + 1).copied().unwrap_or_default();
-            match extra[index] {
-                "-task" => {
-                    task = if value == "blastx-fast" {
-                        "blastx-fast"
-                    } else {
-                        "blastx"
-                    }
-                }
-                "-matrix" => matrix = Some(value.to_string()),
+            let flag = extra[index];
+            if REFUSED.contains(&flag) {
+                refused.push((flag, extra.get(index + 1).copied().unwrap_or_default()));
+                index += 2;
+            } else if matches!(flag, "-use_sw_tback" | "-xdrop_ungap") {
+                refused.push((flag, extra.get(index + 1).copied().unwrap_or_default()));
+                index += if flag == "-use_sw_tback" { 1 } else { 2 };
+            } else {
+                kept.push(flag);
+                index += 1;
+            }
+        }
+        let mut inputs = option_inputs(&parse(&kept).expect("the options LOSAT takes parse"));
+        for (flag, value) in refused {
+            match flag {
+                "-task" if value == "blastx-fast" => inputs.task = "blastx-fast".to_string(),
+                "-matrix" => inputs.matrix = Some(value.to_string()),
                 "-word_size" => inputs.word_size = value.parse().ok(),
-                "-threshold" => inputs.threshold = value.parse::<f64>().ok().map(|v| v as i32),
                 "-gapopen" => inputs.gapopen = value.parse().ok(),
                 "-gapextend" => inputs.gapextend = value.parse().ok(),
-                "-window_size" => inputs.window_size = value.parse().ok(),
                 "-xdrop_gap" => inputs.xdrop_gap = value.parse().ok(),
                 "-xdrop_gap_final" => inputs.xdrop_gap_final = value.parse().ok(),
                 "-comp_based_stats" => {
-                    inputs.comp_based_stats = value.trim_end_matches('u').parse().unwrap_or(2)
+                    inputs.comp_based_stats = value.trim_end_matches('u').parse().unwrap_or(2);
                 }
-                "-use_sw_tback" => {
-                    inputs.use_sw_tback = true;
-                    index += 1;
-                    continue;
-                }
+                "-use_sw_tback" => inputs.use_sw_tback = true,
                 _ => {}
             }
-            index += 2;
         }
-        inputs.task = task.to_string();
-        inputs.matrix = matrix;
         inputs
     }
 

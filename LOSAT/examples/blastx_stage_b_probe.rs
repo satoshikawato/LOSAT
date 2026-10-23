@@ -3,7 +3,7 @@ use anyhow::{bail, Result};
 use LOSAT::algorithm::blastx::{
     args::ResolvedOptions,
     input::{read_fasta, FastaRecord},
-    query_setup::{batch_ranges, prepare_queries},
+    query_setup::{batch_ranges, prepare_queries, BATCH_SIZE},
 };
 use LOSAT::cli::{Cli, Commands};
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:142-147
@@ -360,7 +360,7 @@ fn main() -> Result<()> {
     )?;
     records(&s, "S", 0);
     let q = read_fasta(&args.query, false, args.lcase_masking)?;
-    for (batch, r) in batch_ranges(&q).into_iter().enumerate() {
+    for (batch, r) in batch_ranges(&q, BATCH_SIZE).into_iter().enumerate() {
         records(&q[r.clone()], "Q", r.start);
         println!("A\t{batch}\t{}\t{}", r.start, r.len());
         let p = prepare_queries(&q[r], &o)?;

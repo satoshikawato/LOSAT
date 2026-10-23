@@ -349,6 +349,7 @@ export LOSAT_X_RPTSTREAM=1
 export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_SEGTRIMMEMO=1
+export LOSAT_X_SUMPMEMO=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNFRAMEREUSE=1
@@ -770,6 +771,21 @@ Same values, faster computation:
   0.935. WSSV x PajaWSV, OrthoFinder q0 x Species6 n8 and TBLASTX d04 do not use it. Max RSS +1 to
   +4 MiB (BLASTX n8 68 MiB; NCBI n1 88 MiB). At eight threads the repeats fall on other threads'
   tables, hence the smaller gain.
+- `LOSAT_X_SUMPMEMO=1` (BLASTX, TBLASTN and TBLASTX, the sum P-value of linked HSPs; speed; in the strict set from the
+  pull request that added it, 2026-10-23; `=0` or `LOSAT_X_DEFAULT=0` computes every value) `blast_sum_p` (the port of
+  `s_BlastSumP`, `stats/sum_statistics.rs`) keeps per thread the arguments (`r` and the bits of `s`) and values of its
+  last two calls of `blast_sum_p_calc` (the port of `s_BlastSumPCalc`: for r > 4, a Romberg integral of a Romberg
+  integral, hundreds of `exp` and `log` per call) and returns the stored value for the same arguments. The value is a
+  function of `r` and `s` alone. TBLASTX's linking asks for the sums of the best chain of each ordering method in every
+  round (`link_hsps.c:901-953`), and the chain that was not chosen is asked for again in the next round: AP027131 x
+  AP027133 (genetic code 4) at one thread calls `blast_sum_p_calc` 59,452 times, 56,780 of them with the arguments of
+  one of the two calls before (the same chain up to 296 times in a row), MelaMJNV x PemoMJNVA 16,121 and 14,796. BLASTX
+  and TBLASTN of AP027131 x AP027133 do not reach `blast_sum_p_calc`. Workstation, one core, the same binary with
+  `=0` and without, 8 rounds in alternating order (2026-10-23, outputs identical in every run): TBLASTX AP027131 x
+  AP027133 x0.942 of the time (cycles x0.946, instructions x0.943), MelaMJNV x PemoMJNVA x0.950 (cycles x0.945);
+  eight threads (eight cores, siblings idle) x0.923 and x0.965 (cycles x0.944 and x0.946). LOSAT Web (Node, serial
+  reactor, 8 rounds in one process against dev 32a63700): the whole search x0.945 and x0.946 of the cycles, the sum
+  P-value stage x0.09 and x0.15.
 - DUSTFAST, DUSTRING (graduated 2026-10-22; no variables, no `LOSAT_X_DUSTSHADOW`) DUST perfect-interval
   list built in one merge, window kept in a ring buffer. Always run: `TripletWindow::find_perfect` is the
   merge (the literal `std::list` port was deleted), and `DustMasker::mask_subsequence` uses the ring buffer

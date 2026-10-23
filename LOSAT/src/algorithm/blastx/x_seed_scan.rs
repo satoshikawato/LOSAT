@@ -1,5 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BXSCAN / LOSAT_X_BXSCANSHADOW): the BLASTX seed loop reads the scan
-//! buffer directly, and the buffer is kept per thread.
+//! The BLASTX seed loop reads the scan buffer directly, and the buffer is kept per thread.
 //!
 //! NCBI allocates the offset-pair array once per search thread and its word finder reads the
 //! pairs straight from that array:
@@ -23,12 +22,13 @@
 //!             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
 //! ```
 //!
-//! The reference (`Lookup::scan` + `word_finder`) allocates and zero-fills a buffer of
-//! `capacity()` pairs per (chunk, subject) and copies every batch into a new `(i32, i32)` vector
-//! before the diagonal loop reads it. `x_word_finder_scan` is `word_finder` with the
-//! scan loop of `Lookup::scan` inlined: the same `scan_range` state machine, the same
-//! `array_size` (`capacity()`), the scanner writing into a per-thread buffer (grown when a table
-//! needs more, never shrunk), and the diagonal statements reading the pairs in place.
+//! The reference (`Lookup::scan` + `word_finder`, which the diagnostic stages run) allocates and
+//! zero-fills a buffer of `capacity()` pairs per (chunk, subject) and copies every batch into a
+//! new `(i32, i32)` vector before the diagonal loop reads it. `x_word_finder_scan` is
+//! `word_finder` with the scan loop of `Lookup::scan` inlined: the same `scan_range` state
+//! machine, the same `array_size` (`capacity()`), the scanner writing into a per-thread buffer
+//! (grown when a table needs more, never shrunk), and the diagonal statements reading the pairs in
+//! place.
 //!
 //! Identity argument: the scanners (`s_blast_aa_scan_subject_one_range`, the compressed
 //! `scan_subject`) only write the buffer and return the number of pairs written, and only
@@ -93,41 +93,21 @@
 //! `word_finder`, unchanged; any other hit stores `s + diag_offset` (too far; the flag stays
 //! 0) or what it read (overlap), selected without a branch. So the table holds after each hit what
 //! the statements leave there, the statements see the same table for every hit they run, and the
-//! init HSPs are the same, in the same order. (The context lookup the statements make before the
-//! diagonal test without LOSAT_X_BXLAZYCTX only reads.)
+//! init HSPs are the same, in the same order.
 //!
 //! The switch is read once; it is in the strict set (`utils/xswitch.rs`): on unless
 //! `LOSAT_X_BXHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. The loop with the test is its own
 //! function (`x_word_finder_direct_bf`, never inlined), so the loop without it keeps its code. The
-//! fused loop of LOSAT_X_BXDIAG keeps its own tests. With `LOSAT_X_BXSCANSHADOW` the direct loop that
-//! runs, this one where the switch acts, is compared with `word_finder` on a copy of the table
-//! for every subject the direct loop scans, and `main` prints `[X_SHADOW] BXHITBF subjects_compared=N`
-//! at exit beside BXSCAN's line, N the subjects this loop scanned.
+//! fused loop of LOSAT_X_BXDIAG keeps its own tests.
 
 use super::*;
 use crate::algorithm::blastp::x_seed_fused::XHitBf;
 use crate::algorithm::tblastn::x_scan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 use std::cell::RefCell;
 
-/// EXPERIMENT (LOSAT_X_BXSCAN): 0 = off, 1 = direct scan loop, 2 = shadow
-/// (`LOSAT_X_BXSCANSHADOW`: also the reference on a copy of the diagonal table, compared).
-pub(crate) fn x_bxscan_mode() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BXSCANSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_BXSCAN") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
 // No NCBI counterpart: reads the LOSAT_X_BXSCANBF switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BXSCANBF): whether the seed scans (BXSCAN's loop and BXDIAG's fused loop)
+/// EXPERIMENT (LOSAT_X_BXSCANBF): whether the seed scans (the direct loop and BXDIAG's fused loop)
 /// find the words with hits by the branch-free candidate loop (module header); a switch of the
 /// strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
 pub(crate) fn x_bxscan_bf() -> bool {
@@ -147,47 +127,15 @@ pub(crate) fn x_bxhitbf() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXHITBF"))
 }
 
-/// EXPERIMENT (LOSAT_X_BXSCANSHADOW): subjects compared so far.
-pub(crate) static X_SHADOW_SUBJECTS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-/// EXPERIMENT (LOSAT_X_BXSCANSHADOW with LOSAT_X_BXHITBF): of those, the subjects the branch-free
-/// direct loop scanned.
-pub(crate) static X_SHADOW_HITBF_SUBJECTS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-/// EXPERIMENT (LOSAT_X_BXLUTSHADOW / LOSAT_X_BXSCANSHADOW / LOSAT_X_BXSEGMEMOSHADOW): the
-/// shadow-mode summary of the S-C switches (printed by `main` at exit, one line per switch in
-/// shadow mode).
+/// The `[X_SHADOW]` summaries of the BXDIAG, BXSUBJFLOW, BXDBSTREAM and BXEVALEMPTY switches
+/// (printed by `main` at exit, one line per switch that ran in shadow mode).
 // No NCBI counterpart: prints the shadow-mode counters; it does not change any value NCBI computes.
 pub fn print_shadow_stats() {
-    use std::sync::atomic::Ordering;
     super::x_seed_diag::x_print_shadow_summary();
     #[cfg(feature = "parallel")]
     super::super::search::x_subject_flow::x_print_shadow_summary();
     crate::algorithm::blastx::x_db_stream::x_print_shadow_summary();
     crate::algorithm::blastx::statistics::x_print_eval_empty_summary();
-    if let Some(tables) = crate::algorithm::tblastx::lookup::x_bxlut_shadow_tables() {
-        eprintln!("[X_SHADOW] BXLUT tables_compared={tables} (lookup tables identical)");
-    }
-    if x_bxscan_mode() == 2 {
-        eprintln!(
-            "[X_SHADOW] BXSCAN subjects_compared={} (hit lists and diagonal tables identical)",
-            X_SHADOW_SUBJECTS.load(Ordering::Relaxed)
-        );
-        if x_bxhitbf() {
-            eprintln!(
-                "[X_SHADOW] BXHITBF subjects_compared={} (the branch-free direct loop; hit lists and diagonal tables identical)",
-                X_SHADOW_HITBF_SUBJECTS.load(Ordering::Relaxed)
-            );
-        }
-    }
-    if super::super::x_seg_memo::x_bxsegmemo_mode() == 2 {
-        eprintln!(
-            "[X_SHADOW] BXSEGMEMO memo_hits_compared={} (SEG intervals identical)",
-            super::super::x_seg_memo::X_SHADOW_CALLS.load(Ordering::Relaxed)
-        );
-    }
 }
 
 thread_local! {
@@ -209,9 +157,8 @@ thread_local! {
 //                     diag_array[diag_coord].last_hit =
 //                         s_last_off - (wordsize - 1) + diag_offset;
 // ```
-/// EXPERIMENT (LOSAT_X_BXSCAN): `word_finder` without the per-call buffer and the
-/// batch copy; with the shadow switch the reference also runs on a copy of the diagonal table
-/// and the hit lists and tables are compared.
+/// `word_finder` without the per-call buffer and the batch copy (the seed loop of a search that
+/// traces nothing).
 pub(crate) fn x_word_finder_scan(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
@@ -221,65 +168,13 @@ pub(crate) fn x_word_finder_scan(
     diagonals: &mut Diagonals,
 ) -> Result<Vec<InitHsp>> {
     // EXPERIMENT (LOSAT_X_BXDIAG): the fused loop where it acts (x_seed_diag.rs); where it does
-    // not, the loop LOSAT_X_BXSCAN chooses (the reference word finder when BXSCAN is off).
+    // not, the direct loop.
     if super::x_seed_diag::x_bxdiag_mode() != 0 {
         if let Some(hits) = super::x_seed_diag::x_word_finder_diag(
             batch, parameters, options, subject, lookup, diagonals,
         )? {
             return Ok(hits);
         }
-        if x_bxscan_mode() == 0 {
-            return word_finder(
-                batch,
-                parameters,
-                options,
-                subject,
-                lookup,
-                diagonals,
-                |_| {},
-            );
-        }
-    }
-    if x_bxscan_mode() == 2 {
-        let mut copy = Diagonals {
-            entries: diagonals.entries.clone(),
-            offset: diagonals.offset,
-            window: diagonals.window,
-        };
-        let reference = word_finder(
-            batch,
-            parameters,
-            options,
-            subject,
-            lookup,
-            &mut copy,
-            |_| {},
-        )?;
-        if x_hitbf_acts(x_bxhitbf(), options, subject, diagonals) {
-            X_SHADOW_HITBF_SUBJECTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
-        let direct = x_word_finder_direct(
-            batch,
-            parameters,
-            options,
-            subject,
-            lookup,
-            diagonals,
-            x_bxscan_bf(),
-            x_bxhitbf(),
-        )?;
-        assert!(
-            copy.offset == diagonals.offset && copy.entries == diagonals.entries,
-            "LOSAT_X_BXSCANSHADOW: diagonal table differs"
-        );
-        assert!(
-            direct == reference,
-            "LOSAT_X_BXSCANSHADOW: hit list differs ({} vs {} hits)",
-            direct.len(),
-            reference.len()
-        );
-        X_SHADOW_SUBJECTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Ok(direct);
     }
     x_word_finder_direct(
         batch,
@@ -421,11 +316,6 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
     let word = options.word_size;
     let mask = diagonals.entries.len() as i32 - 1;
     let mut hits = Vec::new();
-    let lazy_context = {
-        use std::sync::OnceLock;
-        static ON: OnceLock<bool> = OnceLock::new();
-        *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLAZYCTX"))
-    };
     // Lookup::scan's set-up, with length = subject.len() - 1 as word_finder passes it.
     let length = subject.len().saturating_sub(1);
     let window = options.window_size;
@@ -500,11 +390,6 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
                         .partition_point(|c| c.offset as i32 <= q)
                         .saturating_sub(1)
                 };
-                let eager_context = if lazy_context {
-                    usize::MAX
-                } else {
-                    context_of(q)
-                };
                 let context;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516,776
                 // ```c
@@ -530,11 +415,7 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
                     if s.wrapping_sub(entry.last_hit().wrapping_sub(diagonals.offset)) < 0 {
                         continue;
                     }
-                    context = if lazy_context {
-                        context_of(q)
-                    } else {
-                        eager_context
-                    };
+                    context = context_of(q);
                     let p = &parameters[context];
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:787-790
                     // ```c
@@ -608,11 +489,7 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
                     if diff < word {
                         continue;
                     }
-                    context = if lazy_context {
-                        context_of(q)
-                    } else {
-                        eager_context
-                    };
+                    context = context_of(q);
                     let p = &parameters[context];
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
                     // ```c

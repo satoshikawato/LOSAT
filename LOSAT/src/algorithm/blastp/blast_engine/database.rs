@@ -135,6 +135,12 @@ impl BlastpDatabase {
         })
     }
 
+    /// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): starts the run's taxonomy database over, for the
+    /// shadow's second search (`TaxdbRun::x_reset`).
+    pub(super) fn x_reset_taxdb(&self) {
+        self.taxdb.x_reset();
+    }
+
     /// The `-db` value as NCBI keeps it.
     pub(super) fn name(&self) -> &str {
         &self.name
@@ -1246,6 +1252,98 @@ pub(super) fn x_titles_read_allow_blocks(
     }
     let _ = pool;
     (0..db.num_seqs()).all(allowed)
+}
+
+// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the block search of outfmt 15 and 16. Besides what outfmt 5
+// reads (`x_titles_read_allow_blocks`) they read, for each subject with hits, the Blast-def-line
+// taxid (`SeqDb::defline_taxids`, a decode apart from the titles') and, when `taxdb.bti` is on the
+// search path, the taxonomy database (`shared::read_reported_taxids`): its opening, the lookup of
+// the taxid, and a scientific name that NCBI's stream can write (`names::check_text`). The search
+// of all queries makes those refusals before its first byte; a block would make them after the
+// earlier blocks' bytes. So the block search is taken only where none can fail for any subject
+// of the database: every sequence's taxid reads, and `shared::taxdb_may_refuse` (OF5b, the one
+// implementation of "can a lookup of this database refuse?", DECISIONS 34 and 38) says no. That
+// check answers from the smaller side: one pass over the taxonomy database when it is the smaller
+// one (NCBI's real taxdb has no refusable record, so no taxid lookup and no pass over the
+// database's taxids), else the database's taxids, sorted and deduplicated, looked up. It has its
+// own taxonomy handle, so the run's open messages stay for the report. This is conservative,
+// since the report reads the taxids of the subjects with hits only.
+// The titles and the taxid decodes are read in one pass over the headers (`SeqDb::visit_deflines_taxids`,
+// one read per `HEADER_RANGE_SEQS` sequences, as `x_titles_read_allow_blocks` reads them); no set of
+// taxids is built here.
+// No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): `x_titles_read_allow_blocks` and `x_taxids_allow_blocks`
+/// in one pass over the headers: whether every sequence of the database has one definition line
+/// that reads and holds no byte outside ' ' ..= '~', its taxid reads, and no lookup of the
+/// taxonomy database can be refused (`shared::taxdb_may_refuse`). Read in `pool`; a failure is
+/// `false`. It writes nothing and changes no state of the run. With `LOSAT_X_DBIDXREAD=0` the two
+/// checks run one after the other, one sequence at a time.
+pub(super) fn x_titles_taxids_allow_blocks(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> bool {
+    let db = &database.db;
+    if crate::seqdb::x_dbidxread() == crate::seqdb::XDbIdxRead::Off {
+        return x_titles_read_allow_blocks(database, pool) && x_taxids_allow_blocks(database, pool);
+    }
+    let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
+    let readable_range = |range: &BlockRange| -> bool {
+        db.visit_deflines_taxids(*range, |_ordinal, deflines| match deflines {
+            // The taxid `read_reported_taxids` takes of a sequence: its first definition
+            // line's.
+            Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
+            Err(_) => false,
+        })
+    };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let readable = if pool.enabled() {
+        pool.install(|| ranges.par_iter().all(readable_range))
+    } else {
+        ranges.iter().all(readable_range)
+    };
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let readable = {
+        let _ = pool;
+        ranges.iter().all(readable_range)
+    };
+    readable && !shared::taxdb_may_refuse(db)
+}
+
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): whether every sequence's taxid reads and no lookup of the
+/// taxonomy database can be refused (`shared::taxdb_may_refuse`, which is `false` where
+/// `taxdb.bti` is not found). One sequence at a time (`LOSAT_X_DBIDXREAD=0`); see
+/// `x_titles_taxids_allow_blocks`.
+fn x_taxids_allow_blocks(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> bool {
+    let db = &database.db;
+    let reads = |ordinal: u32| db.defline_taxids(ordinal).is_ok();
+    let count = db.num_seqs();
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let all_read = if pool.enabled() {
+        pool.install(|| (0..count).into_par_iter().with_min_len(4096).all(reads))
+    } else {
+        (0..count).all(reads)
+    };
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let all_read = {
+        let _ = pool;
+        (0..count).all(reads)
+    };
+    all_read && !shared::taxdb_may_refuse(db)
 }
 
 #[cfg(test)]
@@ -2571,6 +2669,58 @@ mod tests {
             .collect();
         renamed.sort();
         assert_eq!(renamed, [(0, 0), (2, 2)]);
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the one pass over the headers (`SeqDb::visit_deflines_taxids`)
+    // gives the answer of the two checks it replaces (`x_titles_read_allow_blocks`, then
+    // `x_taxids_allow_blocks` one sequence at a time), for a database whose headers read, one with
+    // taxids, an alias of volumes, and one whose header file is missing, at one thread and in a pool.
+    #[test]
+    fn titles_and_taxids_in_one_pass_give_the_answers_of_the_two_checks() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let paja = manifest_dir.join("tests/db_search/paja_taxid");
+        let dir = std::env::temp_dir().join(format!(
+            "losat-db-qblock-onepass-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        for ext in ["pin", "psq"] {
+            std::fs::copy(paja.with_extension(ext), dir.join(format!("nohdr.{ext}"))).unwrap();
+        }
+        let mut databases = vec![
+            (open("prot_v4"), true),
+            (open("prot_mv"), true),
+            (
+                BlastpDatabase::open(paja.to_str().unwrap(), &ApplicationSettings::default())
+                    .unwrap(),
+                true,
+            ),
+        ];
+        // A database whose header file is missing: the search of all queries reports NCBI's error.
+        if let Ok(missing) = BlastpDatabase::open(
+            dir.join("nohdr").to_str().unwrap(),
+            &ApplicationSettings::default(),
+        ) {
+            databases.push((missing, false));
+        }
+        for (database, readable) in &databases {
+            for threads in [1, 4] {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    let two = x_titles_read_allow_blocks(database, pool)
+                        && x_taxids_allow_blocks(database, pool);
+                    assert_eq!(two, *readable);
+                    assert_eq!(
+                        x_titles_taxids_allow_blocks(database, pool),
+                        two,
+                        "threads {threads}"
+                    );
+                    Ok(())
+                })
+                .unwrap();
+            }
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search of `-db` runs only when every definition

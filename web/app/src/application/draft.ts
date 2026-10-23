@@ -131,6 +131,8 @@ export class SearchDraft {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly workers = new Map<string, () => void>();
   private readonly pending = new Set<Promise<unknown>>();
+  /** The argv of the latest validation that the engine accepted (the prepare hint's argv). */
+  private validArgv: readonly string[] | undefined;
   private nextKey = 1;
 
   constructor(private readonly deps: DraftDeps) {
@@ -681,6 +683,7 @@ export class SearchDraft {
       validation = { state: 'invalid', message: messageOf(error) };
     }
     if (this.generations.get('validate') !== generation) return;
+    this.validArgv = validation.state === 'ok' ? argv : undefined;
     this.set({ validation });
     this.prepareEngine();
   }
@@ -688,7 +691,8 @@ export class SearchDraft {
   /**
    * Tells the engine that a search like the draft's may come (EngineGateway.prepare), once
    * its conditions are valid and both roles have indexed inputs, so that the engine can
-   * start its runtime before "Add to queue". The size is that of the largest run.
+   * start its runtime and compile the code of the search before "Add to queue". The size is
+   * that of the largest run.
    */
   private prepareEngine(): void {
     const { threads, validation } = this.state.get();
@@ -699,7 +703,7 @@ export class SearchDraft {
       if (groups.length === 0) return;
       inputBytes += Math.max(...groups.map((group) => group.sources.reduce((sum, source) => sum + source.size, 0)));
     }
-    this.deps.engine.prepare({ requestedThreads: threads, inputBytes });
+    this.deps.engine.prepare({ requestedThreads: threads, inputBytes, ...(this.validArgv === undefined ? {} : { argv: this.validArgv }) });
   }
 
   // --- helpers ----------------------------------------------------------------------------

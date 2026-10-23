@@ -92,7 +92,7 @@
 //! `s_off_pos + 1`. `retrieve_below` returns `None` without a walk when the bucket's
 //! `max_level` is below the bound, and is `retrieve` otherwise. The callers: the two retrieves
 //! of `process_offset_pairs` (`run.rs`; not while the debug, trace or window diagnostics print
-//! what they read), the one-hit fold of `LOSAT_X_PAIRPAR` (`x_pair_seed.rs` `fold`) and the
+//! what they read), the one-hit fold of PAIRPAR (`x_pair_seed.rs` `fold`) and the
 //! two-hit fold of `LOSAT_X_PAIRPARDISC` (`x_pair_seed_disc.rs` `fold_two_hit`). The
 //! off-diagonal retrieves (`scan_range > 0`, an unported option) stay plain walks.
 //!

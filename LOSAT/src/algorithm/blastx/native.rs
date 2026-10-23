@@ -1552,6 +1552,17 @@ pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> 
     Ok(())
 }
 
+/// The bound of the flow (`x_flow`): the batches read and not yet written, and the batches held
+/// back for the tail. `threads x 4` and `threads` when a batch has at most 10002 letters (the
+/// default, or a smaller `BATCH_SIZE`); with a larger batch the count falls with the batch size
+/// (`threads x 4 x 10002 / batch_size`, at least 1), the held tail below it.
+#[cfg(feature = "parallel")]
+fn x_flow_limits(threads: usize, batch_size: usize) -> (usize, usize) {
+    let wave = threads * 4;
+    let bound = (wave * BATCH_SIZE / batch_size.max(1)).clamp(1, wave);
+    (bound, threads.min(bound - 1))
+}
+
 // EXPERIMENT (LOSAT_X_BXFLOW): the reading loop of `run` with every query batch searched as a task
 // of its own (see the call in `run`). `search` searches one batch (the waves' function; `alone`:
 // with the pool inside), `write_batch` writes one batch's reports (or ends the run at its error),
@@ -1563,16 +1574,6 @@ pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> 
 // is computed by the same calls as without the switch, in the same order of writing.
 #[cfg(feature = "parallel")]
 #[allow(clippy::too_many_arguments)]
-/// The bound of the flow (`x_flow`): the batches read and not yet written, and the batches held
-/// back for the tail. `threads x 4` and `threads` when a batch has at most 10002 letters (the
-/// default, or a smaller `BATCH_SIZE`); with a larger batch the count falls with the batch size
-/// (`threads x 4 x 10002 / batch_size`, at least 1), the held tail below it.
-fn x_flow_limits(threads: usize, batch_size: usize) -> (usize, usize) {
-    let wave = threads * 4;
-    let bound = (wave * BATCH_SIZE / batch_size.max(1)).clamp(1, wave);
-    (bound, threads.min(bound - 1))
-}
-
 fn x_flow(
     bound: usize,
     lookahead: usize,
@@ -1789,7 +1790,7 @@ mod archive_error_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "parallel"))]
 mod flow_limit_tests {
     use super::x_flow_limits;
 

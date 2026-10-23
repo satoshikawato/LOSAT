@@ -74,8 +74,7 @@ use super::MAX_DBSEQ_LEN;
 
 // No NCBI counterpart: reads the LOSAT_X_BNFEWSUBJ switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BNFEWSUBJ): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set.
+/// EXPERIMENT (LOSAT_X_BNFEWSUBJ): a strict-set switch, on unless it is `0`.
 pub(super) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNFEWSUBJ"))
@@ -194,7 +193,7 @@ mod tests {
     }
 
     // The cells of the probe (the switch is on by default in a test run, as in the strict set,
-    // unless the test runs with LOSAT_X_DEFAULT=0 or LOSAT_X_BNFEWSUBJ=0).
+    // unless the test runs with LOSAT_X_BNFEWSUBJ=0).
     #[test]
     fn the_rule_follows_the_probe() {
         let subjects = |lengths: &[usize], threads, kind| {

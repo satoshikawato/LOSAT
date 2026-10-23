@@ -1,0 +1,68 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_24",
+          "query_title": "BDT62596.1 wsv161-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 430,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|25",
+                  "accession": "25",
+                  "title": "BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]"
+                }
+              ],
+              "len": 1243,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 31.187,
+                  "score": 69,
+                  "evalue": 0.00891728,
+                  "identity": 16,
+                  "positive": 26,
+                  "query_from": 248,
+                  "query_to": 294,
+                  "hit_from": 1196,
+                  "hit_to": 1241,
+                  "align_len": 47,
+                  "gaps": 1,
+                  "qseq": "NLYVKQLSFNEYKEKLFFPIWRNMSQSIDNIIGVSNDEFKKCLDAIL",
+                  "hseq": "NQYIREFPGHTILRPVFYPATTNYSRAA-NIIGIENKTFEKCYKQIL",
+                  "midline": "N Y+++   +     +F+P   N S++  NIIG+ N  F+KC   IL"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 67,
+            "eff_space": 22134288,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+}

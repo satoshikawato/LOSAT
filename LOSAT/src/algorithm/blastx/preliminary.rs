@@ -406,12 +406,10 @@ pub(crate) fn gapped_observed(
     //       return 0;
     // ```
     // NCBI returns at once when the initial hit list is empty (and the engine skips the gapped
-    // stage, blast_engine.c:500). With the switch on this port returns the empty list before it
-    // builds the interval tree and the DP scratch; the loop below would have done nothing.
-    // EXPERIMENT (LOSAT_X_BXLEAN): most (chunk, subject) pairs have no initial
-    // HSP; the loop below then does nothing, so the tree and the DP scratch
-    // need not be built.
-    if initial.is_empty() && super::runtime::x_bx_lean() {
+    // stage, blast_engine.c:500). This port returns the empty list before it builds the interval
+    // tree and the DP scratch; the loop below would have done nothing. Most (chunk, subject)
+    // pairs have no initial HSP.
+    if initial.is_empty() {
         return Ok(Vec::new());
     }
     let last = batch.contexts.last().expect("BLASTX contexts");

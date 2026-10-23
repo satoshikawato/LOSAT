@@ -22,7 +22,7 @@ use LOSAT::cli::{try_parse_from, Cli, Commands};
 
 const CUSTOM: &str =
     "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore qseq sseq btop";
-const FORMATS: [&str; 10] = ["0", "6", "7", CUSTOM, "8", "9", "12", "5", "15", "16"];
+const FORMATS: [&str; 11] = ["0", "6", "7", CUSTOM, "8", "9", "12", "5", "15", "16", "11"];
 
 /// A temporary FASTA file holding the first `count` records of a fixture, byte for byte.
 fn fixture_prefix(name: &str, count: usize) -> PathBuf {
@@ -90,12 +90,18 @@ impl Drop for Inputs {
 
 /// The query records of a FASTA file as NCBI's reader reads them for BLASTP.
 fn queries(path: &Path) -> Vec<FastaRecord> {
-    reader_records(path, ReaderConfig::query("BLASTP", true, true))
+    reader_records(
+        path,
+        ReaderConfig::query("BLASTP", true, true).with_defline(true),
+    )
 }
 
 /// The subject records of a FASTA file as NCBI's reader reads them for BLASTP.
 fn subjects(path: &Path) -> Vec<FastaRecord> {
-    reader_records(path, ReaderConfig::subject("BLASTP", true, true))
+    reader_records(
+        path,
+        ReaderConfig::subject("BLASTP", true, true).with_defline(true),
+    )
 }
 
 fn run(inputs: &Inputs, formats: &[&str], extra: &[&str], observe: bool) -> Run {

@@ -221,7 +221,7 @@ enum Mode {
 }
 
 /// No NCBI counterpart: reads LOSAT_X_DIAGLVSHADOW (off unless set to any value) and LOSAT_X_DIAGLV
-/// (a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) once; the
+/// (a strict-set switch: on unless it is `0`) once; the
 /// shadow implies the switch. They do not change any
 /// value NCBI computes.
 fn mode() -> Mode {
@@ -316,7 +316,7 @@ impl LvLast {
 
 /// No NCBI counterpart: the memo of a new table (`DiagHashTable::new`, window `window`): one
 /// `LvLast::EMPTY` per bucket while LOSAT_X_DIAGLV and LOSAT_X_DIAGLV2 (a strict-set switch: on
-/// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; read once) are on and the table
+/// unless it is `0`; read once) are on and the table
 /// takes two hits, nothing otherwise. The switch does not change any value NCBI computes.
 pub(super) fn new_last(window: i32) -> Vec<LvLast> {
     if lv2_on() && window > 0 {

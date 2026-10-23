@@ -1,5 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BXSEGMEMO / LOSAT_X_BXSEGMEMOSHADOW): the redo-stage SEG of a BLASTX
-//! subject computed once per subject instead of once per window.
+//! The redo-stage SEG of a BLASTX subject computed once per subject instead of once per window.
 //!
 //! NCBI copies the whole subject and runs SEG on it every time the composition-based redo asks
 //! for a subject range, i.e. for every window of every query context of a match:
@@ -47,53 +46,21 @@
 use crate::utils::dust::MaskedInterval;
 use std::cell::RefCell;
 
-/// EXPERIMENT (LOSAT_X_BXSEGMEMO): 0 = off, 1 = memo, 2 = shadow
-/// (`LOSAT_X_BXSEGMEMOSHADOW`: memo and reference on every call, compared).
-pub(crate) fn x_bxsegmemo_mode() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BXSEGMEMOSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_BXSEGMEMO") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-/// EXPERIMENT (LOSAT_X_BXSEGMEMOSHADOW): memo hits compared with the masker so far.
-pub(crate) static X_SHADOW_CALLS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
 thread_local! {
     /// The last subject this thread masked and its SEG intervals.
     static X_LAST: RefCell<Option<(Vec<u8>, Vec<MaskedInterval>)>> = const { RefCell::new(None) };
 }
 
-/// EXPERIMENT (LOSAT_X_BXSEGMEMO): the intervals `reference(subject)` returns, from the
-/// per-thread memo when `subject` equals the last masked subject byte for byte. `reference`
-/// must be the pure masker call of the caller. With the shadow switch the reference is
-/// evaluated on every call and compared with the memoised list.
+/// The intervals `reference(subject)` returns, from the per-thread memo when `subject` equals
+/// the last masked subject byte for byte. `reference` must be the pure masker call of the caller.
 pub(crate) fn x_subject_seg(
     subject: &[u8],
     reference: impl Fn(&[u8]) -> Vec<MaskedInterval>,
 ) -> Vec<MaskedInterval> {
-    let shadow = x_bxsegmemo_mode() == 2;
     X_LAST.with(|last| {
         let mut last = last.borrow_mut();
         if let Some((bytes, intervals)) = last.as_ref() {
             if bytes.as_slice() == subject {
-                if shadow {
-                    let fresh = reference(subject);
-                    assert!(
-                        fresh == *intervals,
-                        "LOSAT_X_BXSEGMEMOSHADOW: memoised SEG differs on a {}-residue subject",
-                        subject.len()
-                    );
-                    X_SHADOW_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
                 return intervals.clone();
             }
         }

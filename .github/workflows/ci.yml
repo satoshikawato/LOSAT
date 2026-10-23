@@ -91,9 +91,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.92.0
+      # cache-on-failure: a red push run still saves the dependencies it built (the crate's
+      # tests run after them), so that pull request shards do not build them cold until the
+      # next green push run.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: LOSAT -> target
+          cache-on-failure: true
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest@0.9.148
@@ -105,23 +109,6 @@ jobs:
       - name: cargo test --all-features --doc
         if: matrix.shard == 1
         run: cd LOSAT && cargo test --all-features --doc
-      # The performance switches are on by default (LOSAT/src/utils/xswitch.rs), so the run
-      # above tests the new paths. This one keeps the reference paths under test. It leaves out
-      # the test files marked "CI reference step: skipped": each of their runs sets its own
-      # LOSAT_* variables, so it would repeat the run above (LOSAT/tests/reference_step_targets.sh).
-      # Not on pull requests into dev: their default run reaches both sides of every conditional
-      # switch that switch_reach_expected.tsv requires (fast output regressions). It runs on the
-      # promotion pull request into main, once for the batch (merges into dev by auto-merge are
-      # pushes of GITHUB_TOKEN, which start no workflow), and on pushes that start this workflow.
-      - name: cargo nextest run on the reference paths (LOSAT_X_DEFAULT=0)
-        if: github.event_name != 'pull_request' || github.base_ref != 'dev'
-        run: |
-          cd LOSAT
-          targets=$(bash tests/reference_step_targets.sh)
-          cargo nextest run --all-features --no-fail-fast --partition count:${{ matrix.shard }}/2 $targets
-        env:
-          LOSAT_X_DEFAULT: '0'
-          LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker-reference.log
 
   # The check to require in the rulesets: it always runs and fails if a job above failed or was
   # cancelled.
@@ -201,18 +188,6 @@ jobs:
         run: |
           python3 LOSAT/tests/switch_reach_check.py --dir .tmp/switch-reach \
             --programs "${{ steps.select.outputs.programs }}"
-      # The same checks with the performance switches off (LOSAT/src/utils/xswitch.rs): the
-      # reference paths must keep giving the frozen bytes. Not on pull requests into dev, as the
-      # reference cargo test step of `rust`.
-      - name: The same on the reference paths (LOSAT_X_DEFAULT=0)
-        if: >-
-          steps.select.outputs.programs != 'none'
-          && (github.event_name != 'pull_request' || github.base_ref != 'dev')
-        env:
-          LOSAT_X_DEFAULT: '0'
-        run: |
-          python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/losat \
-            --out .tmp/fast-regressions-reference --programs "${{ steps.select.outputs.programs }}"
       - uses: actions/upload-artifact@v4
         if: always() && steps.select.outputs.programs != 'none'
         with:
@@ -223,7 +198,5 @@ jobs:
             .tmp/fast-regressions/timing.tsv
             .tmp/fast-regressions/outfmt0-fixtures-*.tsv
             .tmp/fast-regressions/*-regression-fixtures.tsv
-            .tmp/fast-regressions-reference/summary.json
-            .tmp/fast-regressions-reference/hashes.tsv
           if-no-files-found: warn
           retention-days: 14

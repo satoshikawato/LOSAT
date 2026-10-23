@@ -1,5 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BXSCAN / LOSAT_X_BXSCANSHADOW): the BLASTX seed loop reads the scan
-//! buffer directly, and the buffer is kept per thread.
+//! The BLASTX seed loop reads the scan buffer directly, and the buffer is kept per thread.
 //!
 //! NCBI allocates the offset-pair array once per search thread and its word finder reads the
 //! pairs straight from that array:
@@ -23,12 +22,13 @@
 //!             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
 //! ```
 //!
-//! The reference (`Lookup::scan` + `word_finder`) allocates and zero-fills a buffer of
-//! `capacity()` pairs per (chunk, subject) and copies every batch into a new `(i32, i32)` vector
-//! before the diagonal loop reads it. `x_word_finder_scan` is `word_finder` with the
-//! scan loop of `Lookup::scan` inlined: the same `scan_range` state machine, the same
-//! `array_size` (`capacity()`), the scanner writing into a per-thread buffer (grown when a table
-//! needs more, never shrunk), and the diagonal statements reading the pairs in place.
+//! The reference (`Lookup::scan` + `word_finder`, which the diagnostic stages run) allocates and
+//! zero-fills a buffer of `capacity()` pairs per (chunk, subject) and copies every batch into a
+//! new `(i32, i32)` vector before the diagonal loop reads it. `x_word_finder_scan` is
+//! `word_finder` with the scan loop of `Lookup::scan` inlined: the same `scan_range` state
+//! machine, the same `array_size` (`capacity()`), the scanner writing into a per-thread buffer
+//! (grown when a table needs more, never shrunk), and the diagonal statements reading the pairs in
+//! place.
 //!
 //! Identity argument: the scanners (`s_blast_aa_scan_subject_one_range`, the compressed
 //! `scan_subject`) only write the buffer and return the number of pairs written, and only
@@ -38,7 +38,7 @@
 //! path only when nothing traces the seeds (not in the diagnostic stages).
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF): with this switch (a switch of the strict set: on unless it is
-//! `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the scan of the standard lookup table is
+//! `0`) the scan of the standard lookup table is
 //! tblastn's branch-free scan (`tblastn/x_scan_bf.rs`, `x_scan_one_range_bf`, LOSAT_X_TBNSCANBF's
 //! loop): the presence bits of a block of words advance a candidate list instead of a branch, and
 //! the listed words' hits are copied in position order with NCBI's stop and resume when the offset
@@ -93,43 +93,29 @@
 //! `word_finder`, unchanged; any other hit stores `s + diag_offset` (too far; the flag stays
 //! 0) or what it read (overlap), selected without a branch. So the table holds after each hit what
 //! the statements leave there, the statements see the same table for every hit they run, and the
-//! init HSPs are the same, in the same order. (The context lookup the statements make before the
-//! diagonal test without LOSAT_X_BXLAZYCTX only reads.)
+//! init HSPs are the same, in the same order.
 //!
 //! The switch is read once; it is in the strict set (`utils/xswitch.rs`): on unless
-//! `LOSAT_X_BXHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. The loop with the test is its own
+//! `LOSAT_X_BXHITBF=0`. The loop with the test is its own
 //! function (`x_word_finder_direct_bf`, never inlined), so the loop without it keeps its code. The
-//! fused loop of LOSAT_X_BXDIAG keeps its own tests. With `LOSAT_X_BXSCANSHADOW` the direct loop that
-//! runs, this one where the switch acts, is compared with `word_finder` on a copy of the table
-//! for every subject the direct loop scans, and `main` prints `[X_SHADOW] BXHITBF subjects_compared=N`
-//! at exit beside BXSCAN's line, N the subjects this loop scanned.
+//! fused loop of LOSAT_X_BXDIAG keeps its own tests.
+//!
+//! EXPERIMENT (LOSAT_X_BXUNGAPSENT, `x_ungap_sent.rs`): for a subject on that path the direct
+//! loop's two-hit extension is the sentinel walks, in instances of their own
+//! (`x_word_finder_direct_sent`, never inlined); the loops without it keep their code.
 
+use super::x_ungap_sent::XSent;
 use super::*;
+use crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult;
 use crate::algorithm::blastp::x_seed_fused::XHitBf;
 use crate::algorithm::tblastn::x_scan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 use std::cell::RefCell;
 
-/// EXPERIMENT (LOSAT_X_BXSCAN): 0 = off, 1 = direct scan loop, 2 = shadow
-/// (`LOSAT_X_BXSCANSHADOW`: also the reference on a copy of the diagonal table, compared).
-pub(crate) fn x_bxscan_mode() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BXSCANSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_BXSCAN") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
 // No NCBI counterpart: reads the LOSAT_X_BXSCANBF switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BXSCANBF): whether the seed scans (BXSCAN's loop and BXDIAG's fused loop)
+/// EXPERIMENT (LOSAT_X_BXSCANBF): whether the seed scans (the direct loop and BXDIAG's fused loop)
 /// find the words with hits by the branch-free candidate loop (module header); a switch of the
-/// strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+/// strict set, on unless it is `0`.
 pub(crate) fn x_bxscan_bf() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -140,52 +126,23 @@ pub(crate) fn x_bxscan_bf() -> bool {
 // computes.
 /// EXPERIMENT (LOSAT_X_BXHITBF): whether the direct loop takes the too-far and overlap outcomes
 /// without a branch where [`XHitBf::fits`] holds (module header); a switch of the strict set, on
-/// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+/// unless it is `0`.
 pub(crate) fn x_bxhitbf() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXHITBF"))
 }
 
-/// EXPERIMENT (LOSAT_X_BXSCANSHADOW): subjects compared so far.
-pub(crate) static X_SHADOW_SUBJECTS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-/// EXPERIMENT (LOSAT_X_BXSCANSHADOW with LOSAT_X_BXHITBF): of those, the subjects the branch-free
-/// direct loop scanned.
-pub(crate) static X_SHADOW_HITBF_SUBJECTS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-/// EXPERIMENT (LOSAT_X_BXLUTSHADOW / LOSAT_X_BXSCANSHADOW / LOSAT_X_BXSEGMEMOSHADOW): the
-/// shadow-mode summary of the S-C switches (printed by `main` at exit, one line per switch in
-/// shadow mode).
+/// The `[X_SHADOW]` summaries of the BXDIAG, BXUNGAPSENT, BXSUBJFLOW, BXDBSTREAM and BXEVALEMPTY
+/// switches (printed by `main` at exit, one line per switch that ran in shadow mode).
 // No NCBI counterpart: prints the shadow-mode counters; it does not change any value NCBI computes.
 pub fn print_shadow_stats() {
-    use std::sync::atomic::Ordering;
     super::x_seed_diag::x_print_shadow_summary();
+    super::x_ungap_sent::print_shadow_stats();
     #[cfg(feature = "parallel")]
     super::super::search::x_subject_flow::x_print_shadow_summary();
-    if let Some(tables) = crate::algorithm::tblastx::lookup::x_bxlut_shadow_tables() {
-        eprintln!("[X_SHADOW] BXLUT tables_compared={tables} (lookup tables identical)");
-    }
-    if x_bxscan_mode() == 2 {
-        eprintln!(
-            "[X_SHADOW] BXSCAN subjects_compared={} (hit lists and diagonal tables identical)",
-            X_SHADOW_SUBJECTS.load(Ordering::Relaxed)
-        );
-        if x_bxhitbf() {
-            eprintln!(
-                "[X_SHADOW] BXHITBF subjects_compared={} (the branch-free direct loop; hit lists and diagonal tables identical)",
-                X_SHADOW_HITBF_SUBJECTS.load(Ordering::Relaxed)
-            );
-        }
-    }
-    if super::super::x_seg_memo::x_bxsegmemo_mode() == 2 {
-        eprintln!(
-            "[X_SHADOW] BXSEGMEMO memo_hits_compared={} (SEG intervals identical)",
-            super::super::x_seg_memo::X_SHADOW_CALLS.load(Ordering::Relaxed)
-        );
-    }
+    crate::algorithm::blastx::x_db_stream::x_print_shadow_summary();
+    crate::algorithm::blastx::statistics::x_print_eval_empty_summary();
 }
 
 thread_local! {
@@ -207,9 +164,11 @@ thread_local! {
 //                     diag_array[diag_coord].last_hit =
 //                         s_last_off - (wordsize - 1) + diag_offset;
 // ```
-/// EXPERIMENT (LOSAT_X_BXSCAN): `word_finder` without the per-call buffer and the
-/// batch copy; with the shadow switch the reference also runs on a copy of the diagonal table
-/// and the hit lists and tables are compared.
+/// `word_finder` without the per-call buffer and the batch copy (the seed loop of a search that
+/// traces nothing).
+/// EXPERIMENT (LOSAT_X_BXUNGAPSENT): with `sent` (the subject and its batch on that path,
+/// `x_ungap_sent.rs`) the fused and the direct loops extend with the sentinel walks.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn x_word_finder_scan(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
@@ -217,46 +176,24 @@ pub(crate) fn x_word_finder_scan(
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
+    sent: Option<XSent<'_>>,
 ) -> Result<Vec<InitHsp>> {
+    // No NCBI counterpart: records which extension this subject takes (LOSAT_X_REACH); both
+    // loops below take `sent`.
+    if super::x_ungap_sent::on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BXUNGAPSENT", sent.is_some());
+    }
     // EXPERIMENT (LOSAT_X_BXDIAG): the fused loop where it acts (x_seed_diag.rs); where it does
-    // not, the loop LOSAT_X_BXSCAN chooses (the reference word finder when BXSCAN is off).
+    // not, the direct loop.
     if super::x_seed_diag::x_bxdiag_mode() != 0 {
         if let Some(hits) = super::x_seed_diag::x_word_finder_diag(
-            batch, parameters, options, subject, lookup, diagonals,
+            batch, parameters, options, subject, lookup, diagonals, sent,
         )? {
             return Ok(hits);
         }
-        if x_bxscan_mode() == 0 {
-            return word_finder(
-                batch,
-                parameters,
-                options,
-                subject,
-                lookup,
-                diagonals,
-                |_| {},
-            );
-        }
     }
-    if x_bxscan_mode() == 2 {
-        let mut copy = Diagonals {
-            entries: diagonals.entries.clone(),
-            offset: diagonals.offset,
-            window: diagonals.window,
-        };
-        let reference = word_finder(
-            batch,
-            parameters,
-            options,
-            subject,
-            lookup,
-            &mut copy,
-            |_| {},
-        )?;
-        if x_hitbf_acts(x_bxhitbf(), options, subject, diagonals) {
-            X_SHADOW_HITBF_SUBJECTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
-        let direct = x_word_finder_direct(
+    if let Some(sent) = sent {
+        return x_word_finder_direct_sent(
             batch,
             parameters,
             options,
@@ -265,19 +202,8 @@ pub(crate) fn x_word_finder_scan(
             diagonals,
             x_bxscan_bf(),
             x_bxhitbf(),
-        )?;
-        assert!(
-            copy.offset == diagonals.offset && copy.entries == diagonals.entries,
-            "LOSAT_X_BXSCANSHADOW: diagonal table differs"
+            sent,
         );
-        assert!(
-            direct == reference,
-            "LOSAT_X_BXSCANSHADOW: hit list differs ({} vs {} hits)",
-            direct.len(),
-            reference.len()
-        );
-        X_SHADOW_SUBJECTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Ok(direct);
     }
     x_word_finder_direct(
         batch,
@@ -342,7 +268,7 @@ fn x_word_finder_direct(
             branch_free,
         );
     }
-    x_word_finder_direct_with::<false>(
+    x_word_finder_direct_with::<false, _>(
         batch,
         parameters,
         options,
@@ -350,7 +276,53 @@ fn x_word_finder_direct(
         lookup,
         diagonals,
         branch_free,
+        extend_two_hit_blosum62,
     )
+}
+
+// No NCBI counterpart: instances of `x_word_finder_direct_with`, kept out of line; they do not
+// change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `x_word_finder_direct` with the extension of `sent`
+/// (`x_ungap_sent.rs`), in a function of its own so that the loops without it keep their code.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_direct_sent(
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &Lookup,
+    diagonals: &mut Diagonals,
+    branch_free: bool,
+    hit_bf: bool,
+    sent: XSent<'_>,
+) -> Result<Vec<InitHsp>> {
+    let acts = x_hitbf_acts(hit_bf, options, subject, diagonals);
+    if hit_bf {
+        crate::utils::xreach::x_reach!("LOSAT_X_BXHITBF", acts);
+    }
+    macro_rules! direct {
+        ($hit_bf:literal, $shadow:literal) => {
+            x_word_finder_direct_with::<$hit_bf, _>(
+                batch,
+                parameters,
+                options,
+                subject,
+                lookup,
+                diagonals,
+                branch_free,
+                move |_: &[u8], _: &[u8], s_left_off, s_right_off, q_right_off, dropoff, _| {
+                    sent.two_hit::<$shadow>(s_left_off, s_right_off, q_right_off, dropoff)
+                },
+            )
+        };
+    }
+    match (acts, sent.shadow()) {
+        (true, false) => direct!(true, false),
+        (true, true) => direct!(true, true),
+        (false, false) => direct!(false, false),
+        (false, true) => direct!(false, true),
+    }
 }
 
 // No NCBI counterpart: an instance of `x_word_finder_direct_with`, kept out of line; it does not
@@ -367,7 +339,7 @@ fn x_word_finder_direct_bf(
     diagonals: &mut Diagonals,
     branch_free: bool,
 ) -> Result<Vec<InitHsp>> {
-    x_word_finder_direct_with::<true>(
+    x_word_finder_direct_with::<true, _>(
         batch,
         parameters,
         options,
@@ -375,6 +347,7 @@ fn x_word_finder_direct_bf(
         lookup,
         diagonals,
         branch_free,
+        extend_two_hit_blosum62,
     )
 }
 
@@ -405,8 +378,11 @@ fn x_word_finder_direct_bf(
 // EXPERIMENT (LOSAT_X_BXHITBF): with `HIT_BF` (only where the caller found `XHitBf::fits` to hold)
 // each hit first goes through the branch-free two-hit test (`XHitBf::test`), and only a flag-1 cell
 // or a candidate reaches the statements of `word_finder`.
+// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `extend` is the two-hit extension, `extend_two_hit_blosum62`'s
+// arguments and result (the sentinel walks of `x_ungap_sent.rs` in `x_word_finder_direct_sent`).
 #[inline(always)]
-fn x_word_finder_direct_with<const HIT_BF: bool>(
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_direct_with<const HIT_BF: bool, E>(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -414,16 +390,15 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
     lookup: &Lookup,
     diagonals: &mut Diagonals,
     branch_free: bool,
-) -> Result<Vec<InitHsp>> {
+    extend: E,
+) -> Result<Vec<InitHsp>>
+where
+    E: Fn(&[u8], &[u8], usize, usize, usize, i32, usize) -> Option<BlastpTwoHitUngappedResult>,
+{
     let query = &batch.sequence_start[1..];
     let word = options.word_size;
     let mask = diagonals.entries.len() as i32 - 1;
     let mut hits = Vec::new();
-    let lazy_context = {
-        use std::sync::OnceLock;
-        static ON: OnceLock<bool> = OnceLock::new();
-        *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLAZYCTX"))
-    };
     // Lookup::scan's set-up, with length = subject.len() - 1 as word_finder passes it.
     let length = subject.len().saturating_sub(1);
     let window = options.window_size;
@@ -498,11 +473,6 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
                         .partition_point(|c| c.offset as i32 <= q)
                         .saturating_sub(1)
                 };
-                let eager_context = if lazy_context {
-                    usize::MAX
-                } else {
-                    context_of(q)
-                };
                 let context;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516,776
                 // ```c
@@ -528,11 +498,7 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
                     if s.wrapping_sub(entry.last_hit().wrapping_sub(diagonals.offset)) < 0 {
                         continue;
                     }
-                    context = if lazy_context {
-                        context_of(q)
-                    } else {
-                        eager_context
-                    };
+                    context = context_of(q);
                     let p = &parameters[context];
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:787-790
                     // ```c
@@ -606,11 +572,7 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
                     if diff < word {
                         continue;
                     }
-                    context = if lazy_context {
-                        context_of(q)
-                    } else {
-                        eager_context
-                    };
+                    context = context_of(q);
                     let p = &parameters[context];
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
                     // ```c
@@ -637,7 +599,7 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
                     //                                               &hsp_len, use_pssm,
                     //                                               wordsize, &right_extend,
                     // ```
-                    let Some(result) = extend_two_hit_blosum62(
+                    let Some(result) = extend(
                         query,
                         subject,
                         (previous + word) as usize,
@@ -821,8 +783,21 @@ mod tests {
             // branch-free scan and the branch-free two-hit test, each on its own table, compared
             // alike.
             let mut tables = ARMS.map(|_| Diagonals::new(length, window).unwrap());
+            // EXPERIMENT (LOSAT_X_BXUNGAPSENT): the same arms with the sentinel walks, without and
+            // with the shadow's comparison.
+            let mut sent_tables = ARMS.map(|_| {
+                [
+                    Diagonals::new(length, window).unwrap(),
+                    Diagonals::new(length, window).unwrap(),
+                ]
+            });
+            let lead: Vec<u8> = std::iter::once(0).chain(subject.iter().copied()).collect();
             for state in 0..4 {
-                for d in tables.iter_mut().chain([&mut reference]) {
+                for d in tables
+                    .iter_mut()
+                    .chain(sent_tables.iter_mut().flatten())
+                    .chain([&mut reference])
+                {
                     if state == 2 {
                         d.offset = 536_870_910;
                         d.entries.fill(entry(123));
@@ -870,6 +845,31 @@ mod tests {
                         d.offset == reference.offset && d.entries == reference.entries,
                         "window={window} state={state} scan_bf={branch_free} hit_bf={hit_bf}"
                     );
+                }
+                for (&(branch_free, hit_bf), pair) in ARMS.iter().zip(&mut sent_tables) {
+                    for (d, shadow) in pair.iter_mut().zip([false, true]) {
+                        let hits = x_word_finder_direct_sent(
+                            &batch,
+                            &params,
+                            &options,
+                            &subject,
+                            &lookup,
+                            d,
+                            branch_free,
+                            hit_bf,
+                            XSent::for_test(&batch.sequence_start, &lead, shadow),
+                        )
+                        .unwrap();
+                        let arm = format!(
+                            "window={window} state={state} scan_bf={branch_free} \
+                             hit_bf={hit_bf} sent shadow={shadow}"
+                        );
+                        assert_eq!(hits, plain, "{arm}");
+                        assert!(
+                            d.offset == reference.offset && d.entries == reference.entries,
+                            "{arm}"
+                        );
+                    }
                 }
             }
             // EXPERIMENT (LOSAT_X_BXHITBF): the edge of the branch-free test's range. At the most

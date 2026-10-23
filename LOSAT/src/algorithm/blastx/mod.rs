@@ -335,11 +335,15 @@ pub mod kappa;
 //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
 //                                              subject_maybe_biased);
 // ```
-// EXPERIMENT (LOSAT_X_BXSEGMEMO): the redo-stage subject SEG memoised per subject.
+// The redo-stage subject SEG memoised per subject.
 mod x_seg_memo;
 
 // Diagnostic (LOSAT_TIMING): the stage times of a BLASTX run. No NCBI counterpart.
 mod x_timing;
+
+// EXPERIMENT (LOSAT_X_BXDBSTREAM): `-db` read in blocks where it is searched, instead of a copy of
+// the whole database.
+pub(crate) mod x_db_stream;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1508
 // ```c++

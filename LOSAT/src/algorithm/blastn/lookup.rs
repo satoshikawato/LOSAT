@@ -39,13 +39,26 @@ mod x_mb_lookup_once;
 #[path = "x_mb_lut_keep.rs"]
 pub(crate) mod x_mb_lut_keep;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
+// ```c
+//          if (mb_lt->hashtable[ecode] == 0) {
+//             PV_SET(pv_array, ecode, pv_array_bts);
+//          }
+// ```
+// EXPERIMENT (LOSAT_X_MBFILL): the one-thread fill of the megablast table with the words read
+// run by run and the update queued 64 words.
+#[path = "x_mb_fill.rs"]
+mod x_mb_fill;
+
 /// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): with
 /// LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the megablast table builds; then the
 /// `[X_SHADOW] MBLUTKEEP` line (LOSAT_X_MBLUTKEEPSHADOW) and, with LOSAT_TIMING, the `[TIMING]
-/// x_mb_lut_keep` line (`x_mb_lut_keep::print_summary`).
+/// x_mb_lut_keep` line (`x_mb_lut_keep::print_summary`); then the `[X_SHADOW] MBFILL` line
+/// (LOSAT_X_MBFILLSHADOW, `x_mb_fill::print_summary`).
 pub fn x_mb_lookup_print_summary() {
     x_mb_lookup_par::print_summary();
     x_mb_lut_keep::print_summary();
+    x_mb_fill::print_summary();
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786,803-804
@@ -1925,28 +1938,42 @@ fn build_mb_lookup(
             x_resident,
         );
     } else {
-        x_fill_mb_queued(
-            x_mb_queue(),
+        let x_tables = &mut XMbTables {
+            hashtable: &mut hashtable[..table_size],
+            next_pos: &mut next_pos,
+            pv_array: &mut pv_array,
+            pv_array_bts,
+            helper_array: &mut helper_array,
+            words: &mut words,
+            total_positions: &mut total_positions,
+            ambiguous_skipped: &mut ambiguous_skipped,
+        };
+        // Dispatch point of LOSAT_X_MBFILL: the same words and updates in the same order, read run
+        // by run (`x_mb_fill.rs`); otherwise, and for the builds it does not take, the queued loop.
+        let x_words = x_mb_lookup_par::Words {
             queries_blastna,
             query_offsets,
             query_masks,
             word_length,
             lut_word_length,
             kmer_mask,
-            db_word_counts,
-            max_db_word_count,
             ascending_cells,
-            &mut XMbTables {
-                hashtable: &mut hashtable[..table_size],
-                next_pos: &mut next_pos,
-                pv_array: &mut pv_array,
-                pv_array_bts,
-                helper_array: &mut helper_array,
-                words: &mut words,
-                total_positions: &mut total_positions,
-                ambiguous_skipped: &mut ambiguous_skipped,
-            },
-        );
+        };
+        if !x_mb_fill::fill(&x_words, db_word_counts, x_tables) {
+            x_fill_mb_queued(
+                x_mb_queue(),
+                queries_blastna,
+                query_offsets,
+                query_masks,
+                word_length,
+                lut_word_length,
+                kmer_mask,
+                db_word_counts,
+                max_db_word_count,
+                ascending_cells,
+                x_tables,
+            );
+        }
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:74-76
     // ```c

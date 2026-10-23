@@ -1,4 +1,3 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The batch preparation of blastn on the search pool (`LOSAT_X_QPREPPAR`,
 //! `src/algorithm/blastn/blast_engine/x_query_prep_par.rs`) on whole searches.
 //!

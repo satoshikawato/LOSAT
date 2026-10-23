@@ -108,9 +108,8 @@ pub(crate) trait PreliminarySink {
     // only reports that test to an observer. This method says whether the callback reads its
     // arguments, so that the search can skip the copy of every candidate HSP kept for it. No value
     // NCBI computes changes.
-    /// EXPERIMENT (LOSAT_X_BXLEAN): false when `containment` ignores its
-    /// arguments, so that the search need not keep a copy of every candidate
-    /// HSP for it.
+    /// False when `containment` ignores its arguments, so that the search need not keep a copy of
+    /// every candidate HSP for it.
     fn x_wants_containment(&self) -> bool {
         true
     }
@@ -488,16 +487,12 @@ pub fn search_preliminary(
 //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //            != BLAST_SEQSRC_EOF) {
 // ```
-// NCBI scans the subjects one after another in this loop. LOSAT_X_BXCHUNK sets how many consecutive
-// subjects one worker scans in a wave (on its own diagonal table). Only the unit of parallel work
-// changes.
-/// EXPERIMENT (LOSAT_X_BXCHUNK[=k]): subjects per worker in one wave; `None`
-/// when the switch is off.
-fn x_bx_chunk() -> Option<usize> {
-    use std::sync::OnceLock;
-    static K: OnceLock<Option<usize>> = OnceLock::new();
-    *K.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXCHUNK", 1..=usize::MAX, 64))
-}
+// NCBI scans the subjects one after another in this loop. A pool of 2+ threads scans this many
+// consecutive subjects per worker in a wave (on its own diagonal table). Only the unit of parallel
+// work changes.
+/// Subjects per worker in one wave (also the default size of a task of the subject flow,
+/// `x_subject_flow.rs`).
+const X_BX_CHUNK: usize = 64;
 
 // EXPERIMENT (LOSAT_X_BXSUBJFLOW): the subject loop as a flow of tasks (a child module, so that
 // it uses compute_subject and SubjectComputation).
@@ -643,7 +638,7 @@ pub(crate) fn search_core(
         } else {
             Vec::new()
         };
-        // EXPERIMENT (LOSAT_X_BXPAR): one job per query chunk instead of one per
+        // With a pool of 2+ threads: one job per query chunk instead of one per
         // subject.  NCBI c++/src/algo/blast/api/prelim_stage.cpp:235-271 searches
         // the chunks one after another and only `BlastHSPStreamMerge` relates
         // them; here a wave of chunks is searched on the pool and then written
@@ -668,7 +663,7 @@ pub(crate) fn search_core(
         //                                 m_InternalData->m_HspStream->GetPointer());
         // ```
         // NCBI searches the query chunks one after another and relates them only in
-        // BlastHSPStreamMerge. With LOSAT_X_BXPAR a wave of chunks is searched on the pool
+        // BlastHSPStreamMerge. With a pool of 2+ threads a wave of chunks is searched on the pool
         // (x_compute_chunk) and written to the sink in chunk order below. Each chunk is searched
         // exactly as before.
         // Dispatch point (LOSAT_X_BXCHUNKFLOW, in the strict set): where the subject flow would
@@ -830,58 +825,27 @@ pub(crate) fn search_core(
             // utils::threading owns the search pool; each slot retains its own
             // diagonal table across bounded O(worker-count) reduction windows.
             // Caller/collector/Kappa state remains serial in the original OID order.
-            // EXPERIMENT (LOSAT_X_BXWAVE=k): k subjects per worker in each
-            // parallel wave instead of one, so a wave is long enough for the
-            // other workers to wake up and take part.
+            // With a pool of 2+ threads a wave is `X_BX_CHUNK` consecutive subjects per worker,
+            // and a worker scans its `X_BX_CHUNK` subjects one after another on its own diagonal
+            // table, as the serial loop does on the single table. One subject per worker per wave
+            // would mean a fork-join for every `threads` subjects, each shorter than the
+            // fork-join itself.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
             // ```c
             //     /* iterate over all subject sequences */
             //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
             //            != BLAST_SEQSRC_EOF) {
             // ```
-            // LOSAT_X_BXWAVE=k: k subjects per worker in each parallel wave instead of one. The
-            // subjects are still scanned with the same word finder and their results are still
-            // handed to the sink in OID order. Scheduling only.
-            let x_wave_factor = {
-                use std::sync::OnceLock;
-                static K: OnceLock<usize> = OnceLock::new();
-                *K.get_or_init(|| {
-                    std::env::var("LOSAT_X_BXWAVE")
-                        .ok()
-                        .and_then(|v| v.parse::<usize>().ok())
-                        .filter(|&k| k >= 1)
-                        .unwrap_or(1)
-                })
-            };
-            // EXPERIMENT (LOSAT_X_BXCHUNK[=k]): a wave is k consecutive subjects
-            // per worker, and a worker scans its k subjects one after another
-            // on its own diagonal table, as the serial loop does on the single
-            // table. One subject per worker per wave means a fork-join for
-            // every `threads` subjects, each shorter than the fork-join itself.
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-            // ```c
-            //     /* iterate over all subject sequences */
-            //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-            //            != BLAST_SEQSRC_EOF) {
-            // ```
-            // LOSAT_X_BXCHUNK: a worker scans k consecutive subjects one after another, as the
+            // A worker scans `X_BX_CHUNK` consecutive subjects one after another, as the
             // serial loop does on the single table. Scheduling only.
-            let x_chunk = if pool.enabled() { x_bx_chunk() } else { None };
-            let wave_size = if let Some(x_k) = x_chunk {
-                pool.threads() * x_k
-            } else if pool.enabled() {
-                pool.threads() * x_wave_factor
+            let wave_size = if pool.enabled() {
+                pool.threads() * X_BX_CHUNK
             } else {
                 1
             };
             #[cfg(feature = "parallel")]
             let mut worker_diagonals = if pool.enabled() {
-                let x_tables = if x_chunk.is_some() {
-                    pool.threads()
-                } else {
-                    wave_size
-                };
-                (0..subjects.len().min(x_tables))
+                (0..subjects.len().min(pool.threads()))
                     .map(|_| Diagonals::new(last.offset + last.length, options.window_size))
                     .collect::<Result<Vec<_>>>()?
             } else {
@@ -889,9 +853,9 @@ pub(crate) fn search_core(
             };
             super::x_timing::batch(XBatch::Lookup, x_t);
             let mut subject_stages = Vec::new();
-            // Dispatch point (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0` or
-            // `LOSAT_X_DEFAULT=0`): the subjects as a flow of
-            // tasks of k consecutive subjects, handed to the sink in subject order by this thread
+            // Dispatch point (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0`): the
+            // subjects as a flow of tasks of k consecutive subjects, handed to the sink in subject
+            // order by this thread
             // (x_subject_flow.rs); the waves below then have nothing left to do.
             #[cfg(feature = "parallel")]
             let x_flowed =
@@ -923,18 +887,28 @@ pub(crate) fn search_core(
             #[cfg(not(feature = "parallel"))]
             let x_flowed = false;
             // The flow (LOSAT_X_BXSUBJFLOW) leaves the waves, and so the chunks, nothing to do.
-            if !x_flowed && x_bx_chunk().is_some() {
-                crate::utils::xreach::x_reach!("LOSAT_X_BXCHUNK", x_chunk.is_some());
+            if !x_flowed {
+                crate::utils::xreach::x_reach!("LOSAT_X_BXCHUNK", pool.enabled());
             }
             let x_waves = if x_flowed {
                 0
             } else {
                 subjects.len().div_ceil(wave_size)
             };
+            // EXPERIMENT (LOSAT_X_BXDBSTREAM): the blocks of the serial pass.
+            let mut x_pass = subjects.x_pass();
             for wave_index in 0..x_waves {
                 let wave_start = wave_index * wave_size;
                 let wave: Vec<usize> =
                     (wave_start..subjects.len().min(wave_start + wave_size)).collect();
+                // EXPERIMENT (LOSAT_X_BXDBSTREAM): the subjects of a wave that the pool searches,
+                // read before its fork.
+                let x_wave_block = if pool.enabled() {
+                    subjects.x_read_range(wave_start, wave_start + wave.len())?
+                } else {
+                    None
+                };
+                let x_wave_subjects = subjects.x_with_block(x_wave_block.as_ref());
                 let x_t = super::x_timing::lap();
                 // Diagnostic (LOSAT_TIMING): the wave's tasks (x_timing::SubjectWave). No NCBI
                 // counterpart.
@@ -954,65 +928,39 @@ pub(crate) fn search_core(
                                 //       status =
                                 //           s_BlastSearchEngineCore(program_number, query, query_info,
                                 // ```
-                                // Dispatch point: with LOSAT_X_BXCHUNK each worker runs
-                                // compute_subject for its k subjects in order; the results are
-                                // flattened in subject order. Without the switch the code below
-                                // runs one subject per worker.
-                                if let Some(x_k) = x_chunk {
-                                    return wave
-                                        .par_chunks(x_k)
-                                        .zip(worker_diagonals.par_iter_mut())
-                                        .enumerate()
-                                        .flat_map_iter(|(x_slot, (x_part, scratch))| {
-                                            x_wave.task(|| {
-                                                x_part
-                                                    .iter()
-                                                    .enumerate()
-                                                    .map(|(x_within, &oid)| {
-                                                        debug_assert_eq!(
-                                                            oid,
-                                                            wave_index * wave_size
-                                                                + x_slot * x_k
-                                                                + x_within
-                                                        );
-                                                        compute_subject(
-                                                            subjects,
-                                                            batch,
-                                                            &params,
-                                                            options,
-                                                            &lookup,
-                                                            scratch,
-                                                            xdrop,
-                                                            diagnostics,
-                                                            db_length,
-                                                            oid,
-                                                            x_containment,
-                                                        )
-                                                    })
-                                                    .collect::<Vec<_>>()
-                                            })
-                                        })
-                                        .collect::<Vec<_>>();
-                                }
-                                wave.par_iter()
+                                // Each worker runs compute_subject for its `X_BX_CHUNK`
+                                // subjects in order; the results are flattened in subject order.
+                                let x_k = X_BX_CHUNK;
+                                wave.par_chunks(x_k)
                                     .zip(worker_diagonals.par_iter_mut())
                                     .enumerate()
-                                    .map(|(within, (&oid, scratch))| {
-                                        debug_assert_eq!(oid, wave_index * wave_size + within);
+                                    .flat_map_iter(|(x_slot, (x_part, scratch))| {
                                         x_wave.task(|| {
-                                            compute_subject(
-                                                subjects,
-                                                batch,
-                                                &params,
-                                                options,
-                                                &lookup,
-                                                scratch,
-                                                xdrop,
-                                                diagnostics,
-                                                db_length,
-                                                oid,
-                                                x_containment,
-                                            )
+                                            x_part
+                                                .iter()
+                                                .enumerate()
+                                                .map(|(x_within, &oid)| {
+                                                    debug_assert_eq!(
+                                                        oid,
+                                                        wave_index * wave_size
+                                                            + x_slot * x_k
+                                                            + x_within
+                                                    );
+                                                    compute_subject(
+                                                        x_wave_subjects,
+                                                        batch,
+                                                        &params,
+                                                        options,
+                                                        &lookup,
+                                                        scratch,
+                                                        xdrop,
+                                                        diagnostics,
+                                                        db_length,
+                                                        oid,
+                                                        x_containment,
+                                                    )
+                                                })
+                                                .collect::<Vec<_>>()
                                         })
                                     })
                                     .collect::<Vec<_>>()
@@ -1035,8 +983,13 @@ pub(crate) fn search_core(
                         computed?
                     } else {
                         let x_t = super::x_timing::lap();
+                        let x_subjects = if x_wave_block.is_some() {
+                            x_wave_subjects
+                        } else {
+                            x_pass.view(oid)?
+                        };
                         let computed = compute_subject(
-                            subjects,
+                            x_subjects,
                             batch,
                             &params,
                             options,
@@ -1258,9 +1211,8 @@ pub(crate) fn search_core(
 // x_compute_chunk is everything the serial chunk loop does for one chunk before it writes to the
 // sink: the chunk's scoring parameters, lookup table, diagonal table, subject parameters and the
 // subject loop. The code is the same; it returns the results instead of writing them to the sink.
-/// EXPERIMENT (LOSAT_X_BXPAR): everything the chunk loop computes before it
-/// talks to the sink, for one chunk; `None` when no context of the chunk has
-/// valid Karlin parameters (the loop then skips the chunk).
+/// Everything the chunk loop computes before it talks to the sink, for one chunk; `None` when no
+/// context of the chunk has valid Karlin parameters (the loop then skips the chunk).
 #[cfg(feature = "parallel")]
 #[allow(clippy::type_complexity)]
 fn x_compute_chunk(
@@ -1295,9 +1247,11 @@ fn x_compute_chunk(
     // without a hit. The sink gets the others as empty computations (`SubjectComputation::
     // empty`), so it sees the same calls as from the serial chunk loop.
     let mut results = Vec::new();
+    // EXPERIMENT (LOSAT_X_BXDBSTREAM): the blocks of the chunk's pass.
+    let mut x_pass = subjects.x_pass();
     for oid in 0..subjects.len() {
         let mut computed = compute_subject(
-            subjects,
+            x_pass.view(oid)?,
             batch,
             &params,
             options,
@@ -1332,7 +1286,8 @@ struct SubjectComputation {
 
 #[cfg(feature = "parallel")]
 impl SubjectComputation {
-    /// A subject without anything for the sink (LOSAT_X_BXPAR's chunks keep only the others).
+    /// A subject without anything for the sink (the chunks searched side by side keep only the
+    /// others).
     fn empty() -> Self {
         Self {
             seeds: Vec::new(),
@@ -1382,8 +1337,19 @@ fn compute_subject(
     #[cfg(feature = "blastx-worker-probe")]
     worker_probe("start", oid);
     let mut containment = Vec::new();
-    let encoded = subjects.encoded_with_sentinel(oid);
-    let subject_length = subjects.length(oid);
+    // EXPERIMENT (LOSAT_X_BXUNGAPSENT): for a batch on the path of the seed loops' sentinel walks,
+    // the subject with the sentinel before its residues too (`blastx/x_ungap_sent.rs`);
+    // `encoded` is the same bytes either way.
+    let x_lead = batch.x_ungap_sent;
+    let x_buffer = if x_lead {
+        subjects.x_encoded_with_sentinels(oid)
+    } else {
+        subjects.encoded_with_sentinel(oid)
+    };
+    let encoded: &[u8] = &x_buffer[usize::from(x_lead)..];
+    // `subjects.length(oid)` for every kind of subjects: the residues before the sentinel byte (a
+    // database read in blocks then looks the subject up once, LOSAT_X_BXDBSTREAM).
+    let subject_length = encoded.len() - 1;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
     // ```c++
     //       if (hit_params->link_hsp_params && !kNucleotide &&
@@ -1450,16 +1416,19 @@ fn compute_subject(
     //             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
     //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
     // ```
-    // Dispatch point of LOSAT_X_BXSCAN / LOSAT_X_BXSCANSHADOW and LOSAT_X_BXDIAG /
-    // LOSAT_X_BXDIAGSHADOW: when nothing traces the seeds (not the diagnostic stages), the
-    // seed loop reads the scanner's per-thread buffer in place (x_seed_scan.rs), or with LOSAT_X_BXDIAG reads the
-    // lookup cells in place (x_seed_diag.rs); otherwise the reference word finder below runs.
-    let initial = if !diagnostics
-        && (super::seed::x_seed_scan::x_bxscan_mode() != 0
-            || super::seed::x_seed_diag::x_bxdiag_mode() != 0)
-    {
+    // Dispatch point between the fast seed loops and the diagnostic stages: when nothing traces the
+    // seeds (not the diagnostic stages), the seed loop reads the scanner's per-thread buffer in
+    // place (x_seed_scan.rs; LOSAT_X_BXDIAG, chosen inside `x_word_finder_scan`, reads the lookup
+    // cells in place instead, x_seed_diag.rs); otherwise the reference word finder below runs and
+    // collects the seeds.
+    let initial = if !diagnostics {
+        let x_sent = if x_lead {
+            super::seed::x_ungap_sent::XSent::new(&batch.sequence_start, &x_buffer)
+        } else {
+            None
+        };
         super::seed::x_seed_scan::x_word_finder_scan(
-            batch, params, options, &encoded, lookup, diagonals,
+            batch, params, options, encoded, lookup, diagonals, x_sent,
         )?
     } else {
         word_finder(
@@ -1479,11 +1448,7 @@ fn compute_subject(
             //
             //             if (init_hitlist->total == 0) continue;
             // ```
-            |pairs| {
-                if diagnostics {
-                    seeds.extend_from_slice(pairs);
-                }
-            },
+            |pairs| seeds.extend_from_slice(pairs),
         )?
     };
     let raw = if options.gapped {

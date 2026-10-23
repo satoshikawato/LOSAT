@@ -9,7 +9,11 @@
 //! hits per lookup cell to the other loop (`0`: none). `LOSAT_X_BXDEFER` (strict set) makes the
 //! AVX2 cell test the deferred calls with a masked last batch on the tables with at least
 //! `LOSAT_X_BXDEFERMIN` hits per used cell (the others count in `tables_avx2=`); `0` gives the
-//! AVX2 batch. So the
+//! AVX2 batch. `LOSAT_X_BXCROSS` (strict set) makes the AVX2 cell test, where the CPU also has
+//! POPCNT, the batches cut across the cells' borders on every fused table, in place of
+//! `LOSAT_X_BXDEFER` and its rule; the timing line then ends with `cross_splits=` (the windows of
+//! eight staged hits with a repeated entry, tested in parts); `0` gives `LOSAT_X_BXDEFER`'s choice.
+//! So the
 //! properties under test are that the report, standard error without the diagnostic lines and the exit status equal those of the
 //! search with the switch off, with the default and every cell test, with `-subject` and `-db`, outfmt 6 and 7,
 //! one and three threads and a two-hit window other than the default, and with every batch, some
@@ -223,32 +227,36 @@ fn the_fused_seed_loop_gives_the_reports_of_the_reference() {
         );
         // LOSAT_X_BXDIAGMIN=0 makes every batch take the fused loop; the built-in value and one
         // above every table's hits per cell (no batch fused) give the same report. An empty value
-        // is the default (the switch on, with the AVX2 cell test only). LOSAT_X_BXDEFER=0 gives
-        // the AVX2 batch without the deferred calls and the masked last batch, and
-        // LOSAT_X_BXDEFERMIN=0 takes LOSAT_X_BXDEFER's cell test for every fused table.
-        for (value, min, defer, defer_min) in [
-            ("", "", "", ""),
-            ("", "0", "", ""),
-            ("", "0", "", "0"),
-            ("", "0", "0", ""),
-            ("1", "0", "", ""),
-            ("per-hit", "0", "", ""),
-            ("scalar", "0", "", ""),
-            ("1", "", "", ""),
-            ("1", "1000000", "", ""),
+        // is the default (the switch on, with the AVX2 cell test only; LOSAT_X_BXCROSS's cell test
+        // where the CPU has POPCNT). LOSAT_X_BXCROSS=0 gives LOSAT_X_BXDEFER's choice: with
+        // LOSAT_X_BXDEFER=0 the AVX2 batch without the deferred calls and the masked last batch,
+        // and with LOSAT_X_BXDEFERMIN=0 LOSAT_X_BXDEFER's cell test for every fused table.
+        for (value, min, cross, defer, defer_min) in [
+            ("", "", "", "", ""),
+            ("", "0", "", "", ""),
+            ("", "0", "0", "", ""),
+            ("", "0", "0", "", "0"),
+            ("", "0", "0", "0", ""),
+            ("", "0", "", "0", "0"),
+            ("1", "0", "", "", ""),
+            ("per-hit", "0", "", "", ""),
+            ("scalar", "0", "", "", ""),
+            ("1", "", "", "", ""),
+            ("1", "1000000", "", "", ""),
         ] {
             let run = blastx(
                 &args,
                 &[
                     ("LOSAT_X_BXDIAG", value),
                     ("LOSAT_X_BXDIAGMIN", min),
+                    ("LOSAT_X_BXCROSS", cross),
                     ("LOSAT_X_BXDEFER", defer),
                     ("LOSAT_X_BXDEFERMIN", defer_min),
                 ],
             );
             let what = format!(
-                "{args:?} LOSAT_X_BXDIAG={value} LOSAT_X_BXDIAGMIN={min} LOSAT_X_BXDEFER={defer} \
-                 LOSAT_X_BXDEFERMIN={defer_min}"
+                "{args:?} LOSAT_X_BXDIAG={value} LOSAT_X_BXDIAGMIN={min} LOSAT_X_BXCROSS={cross} \
+                 LOSAT_X_BXDEFER={defer} LOSAT_X_BXDEFERMIN={defer_min}"
             );
             assert_eq!(run.code, reference.code, "{what}: {}", run.stderr);
             assert!(run.stdout == reference.stdout, "{what}: report differs");
@@ -263,28 +271,29 @@ fn the_shadow_compares_every_subject_and_the_timing_line_names_the_cell_test() {
     let args = searches(&inputs).remove(0);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let reference = blastx(&args, &[OFF]);
-    // LOSAT_X_BXDEFERMIN=0: LOSAT_X_BXDEFER's cell test on every table the shadow compares.
-    for (value, defer) in [("1", ""), ("1", "0"), ("per-hit", ""), ("scalar", "")] {
+    // LOSAT_X_BXDEFERMIN=0: LOSAT_X_BXDEFER's cell test on every table the shadow compares when
+    // LOSAT_X_BXCROSS=0 (the default takes LOSAT_X_BXCROSS's on every table).
+    for (value, cross, defer) in [
+        ("1", "", ""),
+        ("1", "0", ""),
+        ("1", "0", "0"),
+        ("per-hit", "", ""),
+        ("scalar", "", ""),
+    ] {
+        let what = format!("{value} LOSAT_X_BXCROSS={cross} LOSAT_X_BXDEFER={defer}");
         let run = blastx(
             &args,
             &[
                 ("LOSAT_X_BXDIAG", value),
+                ("LOSAT_X_BXCROSS", cross),
                 ("LOSAT_X_BXDEFER", defer),
                 ("LOSAT_X_BXDEFERMIN", "0"),
                 ("LOSAT_X_BXDIAGSHADOW", "1"),
                 ("LOSAT_TIMING", "1"),
             ],
         );
-        assert_eq!(
-            run.code,
-            Some(0),
-            "{value} LOSAT_X_BXDEFER={defer}: {}",
-            run.stderr
-        );
-        assert!(
-            run.stdout == reference.stdout,
-            "{value} LOSAT_X_BXDEFER={defer}: report differs"
-        );
+        assert_eq!(run.code, Some(0), "{what}: {}", run.stderr);
+        assert!(run.stdout == reference.stdout, "{what}: report differs");
         // Every query batch scans every subject; the shadow compares each scan.
         let compared = run
             .stderr
@@ -292,49 +301,23 @@ fn the_shadow_compares_every_subject_and_the_timing_line_names_the_cell_test() {
             .find_map(|line| line.strip_prefix("[X_SHADOW] BXDIAG subjects_compared="))
             .and_then(|rest| rest.split(' ').next())
             .and_then(|n| n.parse::<u64>().ok())
-            .unwrap_or_else(|| {
-                panic!(
-                    "{value} LOSAT_X_BXDEFER={defer}: no shadow line: {}",
-                    run.stderr
-                )
-            });
-        assert!(
-            compared >= 150,
-            "{value} LOSAT_X_BXDEFER={defer}: {compared} subjects compared"
-        );
-        let line = run
-            .stderr
-            .lines()
-            .find(|line| line.starts_with("[TIMING] blastx_diag: "))
-            .unwrap_or_else(|| {
-                panic!(
-                    "{value} LOSAT_X_BXDEFER={defer}: no timing line: {}",
-                    run.stderr
-                )
-            });
+            .unwrap_or_else(|| panic!("{what}: no shadow line: {}", run.stderr));
+        assert!(compared >= 150, "{what}: {compared} subjects compared");
+        let line =
+            diag_line(&run).unwrap_or_else(|| panic!("{what}: no timing line: {}", run.stderr));
         let mode = line
             .split_whitespace()
             .find_map(|field| field.strip_prefix("mode="))
             .unwrap();
-        match value {
-            "per-hit" => assert_eq!(mode, "per-hit", "{line}"),
-            "scalar" => assert_eq!(mode, "scalar", "{line}"),
-            _ => {
-                #[cfg(target_arch = "x86_64")]
-                let expected = if !std::arch::is_x86_feature_detected!("avx2") {
-                    "per-hit"
-                } else if defer == "0" {
-                    "avx2"
-                } else {
-                    "avx2-defer-masked"
-                };
-                #[cfg(not(target_arch = "x86_64"))]
-                let expected = "per-hit";
-                assert_eq!(mode, expected, "{line}");
-            }
-        }
+        let expected = match value {
+            "per-hit" => "per-hit",
+            "scalar" => "scalar",
+            _ if cross != "0" => cross_mode(),
+            _ => defer_mode(defer),
+        };
+        assert_eq!(mode, expected, "{what}: {line}");
         if mode != "per-hit" {
-            assert!(!line.contains(" cells=0 "), "{line}");
+            assert!(!line.contains(" cells=0 "), "{what}: {line}");
         }
     }
 }
@@ -383,18 +366,17 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
     let (least, most) = range.split_once('-').unwrap();
     let (least, most): (u64, u64) = (least.parse().unwrap(), most.parse().unwrap());
     assert!(0 < least && least <= most, "{all}");
-    // EXPERIMENT (LOSAT_X_BXDEFERMIN): every fused table takes LOSAT_X_BXDEFER's cell test with 0
-    // and the AVX2 batch with a minimum above every table's (the per-hit loop without AVX2).
-    #[cfg(target_arch = "x86_64")]
-    let avx2 = std::arch::is_x86_feature_detected!("avx2");
-    #[cfg(not(target_arch = "x86_64"))]
-    let avx2 = false;
+    // EXPERIMENT (LOSAT_X_BXDEFERMIN, with LOSAT_X_BXCROSS=0): every fused table takes
+    // LOSAT_X_BXDEFER's cell test with 0 and the AVX2 batch with a minimum above every table's (the
+    // per-hit loop without AVX2).
+    let avx2 = defer_mode("") != "per-hit";
     for (defer_min, unmasked) in [("0".to_string(), 0), ((most + 1).to_string(), 1)] {
         let run = blastx(
             &args,
             &[
                 ("LOSAT_X_BXDIAG", "1"),
                 ("LOSAT_X_BXDIAGMIN", "0"),
+                ("LOSAT_X_BXCROSS", "0"),
                 ("LOSAT_X_BXDEFERMIN", &defer_min),
                 ("LOSAT_TIMING", "1"),
             ],
@@ -425,6 +407,7 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
         &[
             ("LOSAT_X_BXDIAG", "1"),
             ("LOSAT_X_BXDIAGMIN", "0"),
+            ("LOSAT_X_BXCROSS", "0"),
             ("LOSAT_X_BXDEFERMIN", &most.to_string()),
             ("LOSAT_TIMING", "1"),
         ],
@@ -450,34 +433,33 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
     assert_eq!(field(&none, "tables_fused"), 0, "{none}");
     assert!(field(&none, "tables_other") > 0, "{none}");
     assert_eq!(field(&none, "subjects"), 0, "{none}");
-    // The default (the switch not set) acts only with the AVX2 cell test.
+    // The default (the switch not set) acts only with the AVX2 cell test: LOSAT_X_BXCROSS's where
+    // the CPU has POPCNT, on every fused table (LOSAT_X_BXDEFERMIN does not reach it).
     let run = blastx(&args, &[("LOSAT_X_BXDIAGMIN", "0"), ("LOSAT_TIMING", "1")]);
     assert_eq!(run.code, Some(0), "default: {}", run.stderr);
     assert!(run.stdout == reference.stdout, "default: report differs");
-    let line = run
-        .stderr
-        .lines()
-        .find(|line| line.starts_with("[TIMING] blastx_diag: "));
-    match line {
+    match diag_line(&run) {
         Some(line) => {
             assert!(avx2, "default without AVX2: {line}");
-            assert!(line.contains("mode=avx2-defer-masked "), "{line}");
+            assert!(line.contains(&format!("mode={} ", cross_mode())), "{line}");
             assert!(field(line, "subjects") >= 150, "{line}");
+            if cross_mode() == "avx2-cross" {
+                assert_eq!(field(line, "tables_avx2"), 0, "{line}");
+                assert!(field(line, "cross_splits") > 0, "{line}");
+            }
         }
         None => assert!(!avx2, "default with AVX2: no timing line: {}", run.stderr),
     }
-    // LOSAT_X_BXDEFER=0 (LOSAT_X_BXDIAG not set), and LOSAT_X_DEFAULT=0 with LOSAT_X_BXDIAG set:
-    // the fused loop with the AVX2 batch where the CPU has AVX2.
-    for (name, value, named) in [
-        ("LOSAT_X_BXDEFER", "0", false),
-        ("LOSAT_X_DEFAULT", "0", true),
-    ] {
-        let what = format!("{name}={value}");
+    // LOSAT_X_BXCROSS=0 and LOSAT_X_BXDEFER=0, with LOSAT_X_BXDIAG not set and set: the fused loop
+    // with the AVX2 batch where the CPU has AVX2 (set: the per-hit test elsewhere).
+    for named in [false, true] {
         let diag = if named { "1" } else { "" };
+        let what = format!("LOSAT_X_BXCROSS=0 LOSAT_X_BXDEFER=0 LOSAT_X_BXDIAG={diag:?}");
         let run = blastx(
             &args,
             &[
-                (name, value),
+                ("LOSAT_X_BXCROSS", "0"),
+                ("LOSAT_X_BXDEFER", "0"),
                 ("LOSAT_X_BXDIAG", diag),
                 ("LOSAT_X_BXDIAGMIN", "0"),
                 ("LOSAT_TIMING", "1"),
@@ -498,5 +480,169 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
             }
             None => assert!(!avx2 && !named, "{what}: no timing line: {}", run.stderr),
         }
+    }
+}
+
+/// The AVX2 cell test this machine runs with LOSAT_X_BXCROSS (the default; the per-hit loop
+/// without AVX2; it also needs POPCNT, else LOSAT_X_BXDEFER's cell test runs).
+fn cross_mode() -> &'static str {
+    #[cfg(target_arch = "x86_64")]
+    if std::arch::is_x86_feature_detected!("avx2") {
+        return if std::arch::is_x86_feature_detected!("popcnt") {
+            "avx2-cross"
+        } else {
+            "avx2-defer-masked"
+        };
+    }
+    "per-hit"
+}
+
+/// The cell test this machine runs with LOSAT_X_BXCROSS=0, LOSAT_X_BXDEFER=`defer` and
+/// LOSAT_X_BXDEFERMIN=0: LOSAT_X_BXDEFER's (`avx2` with `0`), the per-hit loop without AVX2.
+fn defer_mode(defer: &str) -> &'static str {
+    #[cfg(target_arch = "x86_64")]
+    if std::arch::is_x86_feature_detected!("avx2") {
+        return if defer == "0" {
+            "avx2"
+        } else {
+            "avx2-defer-masked"
+        };
+    }
+    let _ = defer;
+    "per-hit"
+}
+
+/// The `[TIMING] blastx_diag` line of a run, if it printed one.
+fn diag_line(run: &Run) -> Option<&str> {
+    run.stderr
+        .lines()
+        .find(|line| line.starts_with("[TIMING] blastx_diag: "))
+}
+
+// EXPERIMENT (LOSAT_X_BXCROSS): the batches across the cells' borders (the default) give the
+// reports of the reference with every search, with the built-in LOSAT_X_BXDIAGMIN and with every
+// table fused, and LOSAT_X_BXDEFERMIN does not reach them (`tables_avx2=0`); the timing line names
+// `avx2-cross`. With every table fused, the batches are cut short before repeated entries
+// (`cross_splits=`: the hits of a diagonal in consecutive cells, the two-hit pairs of these related
+// sequences). `LOSAT_X_BXCROSS=0` gives the same reports with LOSAT_X_BXDEFER's cell test.
+#[test]
+fn the_cross_cell_batches_give_the_reports_of_the_reference() {
+    let inputs = Inputs::new();
+    let mode = cross_mode();
+    for args in searches(&inputs) {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let reference = blastx(&args, &[OFF]);
+        assert_eq!(reference.code, Some(0), "{args:?}: {}", reference.stderr);
+        for (cross, min, defer_min) in [
+            ("", "", ""),
+            ("", "0", ""),
+            ("", "0", "1000000"),
+            ("1", "0", ""),
+            ("0", "0", ""),
+            ("0", "", ""),
+        ] {
+            let run = blastx(
+                &args,
+                &[
+                    ("LOSAT_X_BXCROSS", cross),
+                    ("LOSAT_X_BXDIAGMIN", min),
+                    ("LOSAT_X_BXDEFERMIN", defer_min),
+                    ("LOSAT_TIMING", "1"),
+                ],
+            );
+            let what = format!(
+                "{args:?} LOSAT_X_BXCROSS={cross} LOSAT_X_BXDIAGMIN={min} \
+                 LOSAT_X_BXDEFERMIN={defer_min}"
+            );
+            assert_eq!(run.code, reference.code, "{what}: {}", run.stderr);
+            assert!(run.stdout == reference.stdout, "{what}: report differs");
+            assert_eq!(run.messages(), reference.messages(), "{what}");
+            // LOSAT_X_BXDIAG not set: the fused loop only with an AVX2 cell test.
+            let expected = if cross == "0" { defer_mode("") } else { mode };
+            match diag_line(&run) {
+                Some(line) if expected == "avx2-cross" => {
+                    assert!(line.contains("mode=avx2-cross "), "{what}: {line}");
+                    assert_eq!(field(line, "tables_avx2"), 0, "{what}: {line}");
+                    if min == "0" {
+                        assert!(field(line, "subjects") >= 150, "{what}: {line}");
+                        assert!(field(line, "batched_hits") > field(line, "cells"), "{line}");
+                        assert!(field(line, "candidates") > 0, "{what}: {line}");
+                        assert!(field(line, "cross_splits") > 0, "{what}: {line}");
+                    }
+                }
+                Some(line) => {
+                    assert!(
+                        line.contains(&format!("mode={expected} ")),
+                        "{what}: {line}"
+                    );
+                    assert!(!line.contains("cross_splits="), "{what}: {line}");
+                }
+                None => assert_eq!(
+                    expected, "per-hit",
+                    "{what}: no timing line: {}",
+                    run.stderr
+                ),
+            }
+        }
+    }
+}
+
+// EXPERIMENT (LOSAT_X_BXCROSS): the shadow compares the batches across the cells' borders with the
+// reference for every subject, and `0` (white space around it ignored) leaves LOSAT_X_BXDEFER's
+// cell test; an empty value is the default.
+#[test]
+fn the_shadow_compares_the_cross_cell_batches_and_zero_turns_them_off() {
+    let inputs = Inputs::new();
+    let args = searches(&inputs).remove(0);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let reference = blastx(&args, &[OFF]);
+    for value in ["", "1"] {
+        let what = format!("shadow LOSAT_X_BXCROSS={value:?}");
+        let run = blastx(
+            &args,
+            &[
+                ("LOSAT_X_BXCROSS", value),
+                ("LOSAT_X_BXDIAG", "1"),
+                ("LOSAT_X_BXDIAGSHADOW", "1"),
+                ("LOSAT_TIMING", "1"),
+            ],
+        );
+        assert_eq!(run.code, Some(0), "{what}: {}", run.stderr);
+        assert!(run.stdout == reference.stdout, "{what}: report differs");
+        let compared = run
+            .stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("[X_SHADOW] BXDIAG subjects_compared="))
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or_else(|| panic!("{what}: no shadow line: {}", run.stderr));
+        assert!(compared >= 150, "{what}: {compared} subjects compared");
+        let line =
+            diag_line(&run).unwrap_or_else(|| panic!("{what}: no timing line: {}", run.stderr));
+        assert!(line.contains(&format!("mode={} ", cross_mode())), "{line}");
+    }
+    // Off: LOSAT_X_BXDEFER's cell test (on every table with LOSAT_X_BXDEFERMIN=0).
+    for env in [
+        &[("LOSAT_X_BXCROSS", "0")][..],
+        &[("LOSAT_X_BXCROSS", " 0 ")][..],
+    ] {
+        let what = format!("{env:?}");
+        let mut env = env.to_vec();
+        env.extend([
+            ("LOSAT_X_BXDIAG", "1"),
+            ("LOSAT_X_BXDIAGMIN", "0"),
+            ("LOSAT_X_BXDEFERMIN", "0"),
+            ("LOSAT_TIMING", "1"),
+        ]);
+        let run = blastx(&args, &env);
+        assert_eq!(run.code, Some(0), "{what}: {}", run.stderr);
+        assert!(run.stdout == reference.stdout, "{what}: report differs");
+        let line =
+            diag_line(&run).unwrap_or_else(|| panic!("{what}: no timing line: {}", run.stderr));
+        assert!(
+            line.contains(&format!("mode={} ", defer_mode(""))),
+            "{what}: {line}"
+        );
+        assert!(!line.contains("cross_splits="), "{what}: {line}");
     }
 }

@@ -42,7 +42,7 @@ fn command(env: &[(&str, &str)]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
-        if text.starts_with("LOSAT_") && text != "LOSAT_X_DEFAULT" || text.starts_with("NCBI") {
+        if text.starts_with("LOSAT_") || text.starts_with("NCBI") {
             command.env_remove(name);
         }
     }
@@ -221,9 +221,7 @@ fn a_stored_title_that_no_hit_reads_still_streams_the_document() {
     let dir = fixtures();
     for format in ["17", "17 SQ SR"] {
         let mut env = BATCHES.to_vec();
-        // The switch's own variable: the caller's `LOSAT_X_DEFAULT` is kept (`command`), and with
-        // `LOSAT_X_DEFAULT=0` (the reference step of CI) the switch would not act.
-        env.extend([("LOSAT_X_STATS", "1"), ("LOSAT_X_RPTSTREAM", "1")]);
+        env.push(("LOSAT_X_STATS", "1"));
         let output = run_in(
             &dir,
             &[
@@ -392,9 +390,18 @@ fn a_header_file_that_cannot_be_read_writes_nothing() {
                 without_cl(&expected),
                 "{name} {threads}"
             );
+            // Windows writes the path with backslashes, where the frozen bytes (and the fixture
+            // directory built from `CARGO_MANIFEST_DIR`) mix in slashes: compare them alike.
+            let separators = |text: &str| {
+                if cfg!(windows) {
+                    text.replace('\\', "/")
+                } else {
+                    text.to_string()
+                }
+            };
             assert_eq!(
-                String::from_utf8_lossy(&output.stderr),
-                expected_err,
+                separators(&String::from_utf8_lossy(&output.stderr)),
+                separators(&expected_err),
                 "{name} {threads}"
             );
         }

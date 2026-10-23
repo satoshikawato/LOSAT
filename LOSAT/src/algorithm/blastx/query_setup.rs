@@ -60,6 +60,9 @@ pub struct PreparedQueryBatch {
     pub sequence_start_nomask: Vec<u8>,
     pub lookup_segments: Vec<(i32, i32)>,
     pub split_eligible: bool,
+    /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): whether `sequence_start` is on the path of the seed
+    /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`; false with the switch off).
+    pub(crate) x_ungap_sent: bool,
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:123-136
 // ```c++
@@ -364,10 +367,9 @@ pub fn prepare_queries(
         // trim of a segment trimmed before on this thread from its memo.
         .x_with_trim_memo()
     });
-    // EXPERIMENT (LOSAT_X_BXPAR): SEG reads only the residues of its own context
-    // and the hard masking below writes only there, so the contexts of a large
-    // batch (the six frames of the full query) are filtered on the search pool
-    // before the loop consumes the intervals in context order.
+    // SEG reads only the residues of its own context and the hard masking below writes only there,
+    // so the contexts of a large batch (the six frames of the full query) are filtered on the
+    // search pool before the loop consumes the intervals in context order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
     // ```c
     //     for (context = query_info->first_context;
@@ -383,8 +385,8 @@ pub fn prepare_queries(
     //                                                       blast_message);
     // ```
     // NCBI filters the contexts one after another in this loop. SEG of one context reads only that
-    // context, so with LOSAT_X_BXPAR the contexts of a large batch are filtered in parallel and the
-    // intervals are kept in seg_ready; the loop below still consumes them in context order.
+    // context, so with a pool of 2+ threads the contexts of a large batch are filtered in parallel
+    // and the intervals are kept in seg_ready; the loop below still consumes them in context order.
     #[allow(unused_mut)]
     let mut seg_ready: Vec<Option<Vec<(i32, i32)>>> = Vec::new();
     #[cfg(feature = "parallel")]
@@ -472,6 +474,8 @@ pub fn prepare_queries(
         );
     }
     let lookup_segments = complement_masks(&contexts);
+    let x_ungap_sent =
+        super::seed::x_ungap_sent::query_fits(&buffer, options.word_size, options.window_size);
     Ok(PreparedQueryBatch {
         original_lengths: records.iter().map(|r| r.sequence.len()).collect(),
         contexts,
@@ -482,6 +486,7 @@ pub fn prepare_queries(
         sequence_start_nomask: nomask,
         lookup_segments,
         split_eligible: records.len() == 1 && options.gapped,
+        x_ungap_sent,
     })
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:923-929

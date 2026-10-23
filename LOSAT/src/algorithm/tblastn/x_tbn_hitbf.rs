@@ -68,7 +68,7 @@
 //! reference's index, and it is never past the end of the table.
 //!
 //! The switch is read once. It is in the strict set (`utils/xswitch.rs`): on unless
-//! `LOSAT_X_TBNHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. With
+//! `LOSAT_X_TBNHITBF=0`. With
 //! `LOSAT_X_TBNHITBFSHADOW` set (any value; it turns the path on) each offset array the scan fills
 //! runs the loop before the switch on a copy of the table and then the branch-free one, and the
 //! init HSPs and every cell of the table must be equal; `main` prints
@@ -93,7 +93,7 @@ pub(super) enum XHitLoop {
 // No NCBI counterpart: reads LOSAT_X_TBNHITBF and LOSAT_X_TBNHITBFSHADOW once; it does not change
 // any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNHITBF): the loop the unit path runs. LOSAT_X_TBNHITBF is a switch of
-/// the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; the shadow wins.
+/// the strict set, on unless it is `0`; the shadow wins.
 pub(super) fn x_hit_loop() -> XHitLoop {
     static LOOP: std::sync::OnceLock<XHitLoop> = std::sync::OnceLock::new();
     *LOOP.get_or_init(|| {

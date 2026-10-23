@@ -1,18 +1,20 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp's parallel `-subject` loop in runs of subjects with `LOSAT_X_BPSUBJRUN`
 //! (`src/algorithm/blastp/blast_engine/x_subject_runs.rs`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on by default, `LOSAT_X_BPSUBJRUN=0`
-//! turns it off, and `LOSAT_X_DEFAULT=0` leaves it off unless it is set. It acts only where the
+//! turns it off. It acts only where the
 //! subjects of a `-subject` search are searched on the pool (more than one thread and more than
 //! one subject). With it on, the subjects are cut into runs of
 //! consecutive subjects, each run searched with one diagonal table that is filled once, at the
 //! one-thread order's offset of the run's first subject. These tests compare the reports with the
-//! switch off (`LOSAT_X_BPSUBJRUN=0`) and on (blastp and blastp-fast, one hit and two hits, the block search of
-//! `LOSAT_X_BPQBLOCK`, `-db`) and run its shadow mode (`LOSAT_X_BPSUBJRUNSHADOW`), which checks
-//! every later subject of a run's offset and table and compares every subject's result with the
-//! result from a cleared table; its line at exit shows that the path ran. A difference stops the
-//! run.
+//! switch off (`LOSAT_X_BPSUBJRUN=0`) and on (the default; blastp and blastp-fast, one hit and two
+//! hits, the block search of `LOSAT_X_BPQBLOCK`) and run its shadow mode
+//! (`LOSAT_X_BPSUBJRUNSHADOW`), which checks every later subject of a run's offset and table and
+//! compares every subject's result with the result from a cleared table; its line at exit shows
+//! that the path ran (and, at one thread and on `-db`, that it did not). A difference stops the
+//! run. Each kernel and case runs at one thread count: the runs are cut by the subjects' lengths
+//! and the thread count only, and the unit tests of `x_subject_runs.rs` cut them at several
+//! thread counts.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-172
 //! ```c
@@ -129,11 +131,11 @@ fn with<'a>(base: &[(&'a str, &'a str)], extra: &[(&'a str, &'a str)]) -> Vec<(&
     base.iter().chain(extra).copied().collect()
 }
 
-const ON: (&str, &str) = ("LOSAT_X_BPSUBJRUN", "1");
 const OFF: (&str, &str) = ("LOSAT_X_BPSUBJRUN", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_BPSUBJRUNSHADOW", "1");
 
-/// The switch off, on and in its shadow mode give the same report; returns the shadow's counters.
+/// The switch off, on (the default: the switch is in the strict set) and in its shadow mode give
+/// the same report; returns the shadow's counters.
 fn same_reports(
     task: &str,
     subject: &[&OsStr],
@@ -145,7 +147,7 @@ fn same_reports(
     let what = format!("{task} {base:?} {extra:?} threads {threads} outfmt {outfmt}");
     let off = blastp(task, subject, threads, &with(base, &[OFF]), extra, outfmt);
     assert!(!off.stdout.is_empty(), "{what}: the fixture pair has rows");
-    let on = blastp(task, subject, threads, &with(base, &[ON]), extra, outfmt);
+    let on = blastp(task, subject, threads, base, extra, outfmt);
     assert!(
         on.stdout == off.stdout,
         "{what}: the report differs with the switch"
@@ -201,87 +203,52 @@ fn assert_engaged(counts: &HashMap<String, u64>, searches: u64, what: &str) {
     assert_eq!(counts["resets_in_runs"], 0, "{what}: {counts:?}");
 }
 
-// blastp and blastp-fast at 2 and 4 threads, the reference loops (the two-hit loop of
-// `blastp_for_each_offset_pair` and the reference compressed scan; `LOSAT_X_DEFAULT=0`, so that they
-// stay the reference loops where the strict set turns `LOSAT_X_BPSEED` on) and the fused loop of
-// `LOSAT_X_BPSEED` (with the flat table of `LOSAT_X_BPCLUT` for blastp-fast): one search of all
-// queries, run by the switch.
+// blastp and blastp-fast, the reference loops (the two-hit loop of
+// `blastp_for_each_offset_pair` and the reference compressed scan; `LOSAT_X_BPSEED=0`, and
+// `LOSAT_X_BPCLUT=0` for blastp-fast) and the fused loop of `LOSAT_X_BPSEED` (the default; with
+// the flat table of `LOSAT_X_BPCLUT` for blastp-fast): one search of all queries, run by the
+// switch, each kernel at 2 or 4 threads.
 #[test]
 fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    for (task, base) in [
-        ("blastp", &[("LOSAT_X_DEFAULT", "0")][..]),
-        ("blastp", &[("LOSAT_X_BPSEED", "1")][..]),
-        ("blastp-fast", &[("LOSAT_X_DEFAULT", "0")][..]),
+    for (task, kernel, base, threads) in [
+        ("blastp", "reference", &[("LOSAT_X_BPSEED", "0")][..], 2),
+        ("blastp", "fused", &[][..], 4),
         (
             "blastp-fast",
-            &[("LOSAT_X_BPSEED", "1"), ("LOSAT_X_BPCLUT", "1")][..],
+            "reference",
+            &[("LOSAT_X_BPSEED", "0"), ("LOSAT_X_BPCLUT", "0")][..],
+            4,
         ),
+        ("blastp-fast", "fused", &[][..], 2),
     ] {
-        for threads in [2, 4] {
-            let counts = same_reports(task, &subject, threads, base, &[], "6");
-            assert_engaged(&counts, 1, &format!("{task} {base:?} threads {threads}"));
-        }
+        let counts = same_reports(task, &subject, threads, base, &[], "6");
+        assert_engaged(&counts, 1, &format!("{task} {kernel} threads {threads}"));
     }
 }
 
-// The switch is on by default: the report with no variable, with `LOSAT_X_BPSUBJRUN=0`, with
-// `LOSAT_X_DEFAULT=0` (off unless set) and with `LOSAT_X_DEFAULT=0` and the switch set are one
-// report, at 4 threads for blastp and blastp-fast.
-#[test]
-fn the_default_the_switch_off_and_the_global_off_give_one_report() {
-    let subject = subject_file();
-    let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    for task in ["blastp", "blastp-fast"] {
-        let default = blastp(task, &subject, 4, &[], &[], "6");
-        assert!(
-            !default.stdout.is_empty(),
-            "{task}: the fixture pair has rows"
-        );
-        for vars in [
-            &[OFF][..],
-            &[("LOSAT_X_DEFAULT", "0")][..],
-            &[("LOSAT_X_DEFAULT", "0"), ON][..],
-        ] {
-            let run = blastp(task, &subject, 4, vars, &[], "6");
-            assert!(
-                run.stdout == default.stdout,
-                "{task} {vars:?}: the report differs from the default's"
-            );
-        }
-    }
-}
-
-// One hit (`-window_size 0`): an entry left by an earlier subject of a run reads as a cleared one
+// One hit (`-window_size 0`, the one-hit loop of `blastp_for_each_offset_pair`; `LOSAT_X_BPSEED`
+// does not act at window 0): an entry left by an earlier subject of a run reads as a cleared one
 // there too (`diff >= 0`).
 #[test]
 fn one_hit_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    for base in [&[][..], &[("LOSAT_X_BPSEED", "1")][..]] {
-        let counts = same_reports("blastp", &subject, 3, base, &["-window_size", "0"], "6");
-        assert_engaged(&counts, 1, &format!("one hit {base:?}"));
-    }
+    let counts = same_reports("blastp", &subject, 3, &[], &["-window_size", "0"], "6");
+    assert_engaged(&counts, 1, "one hit");
 }
 
-// The block search (`LOSAT_X_BPQBLOCK`, every block a search of all subjects) and the pairwise
-// report with `LOSAT_X_BPQBLOCKFMT=0`, which is then not written in blocks.
+// The block search (`LOSAT_X_BPQBLOCK`, every block a search of all subjects). A report that is
+// not written in blocks is one search of all queries, as in the tests above.
 #[test]
-fn block_search_and_pairwise_reports_with_the_switch_are_the_reports_without_it() {
+fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    let base = [("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPSEED", "1")];
+    let base = [("LOSAT_X_BPQBLOCK", "1")];
     let counts = same_reports("blastp", &subject, 4, &base, &[], "6");
     assert!(counts["searches"] > 1, "{counts:?}");
     assert_engaged(&counts, counts["searches"], "block search");
-    let pairwise = [
-        ("LOSAT_X_BPQBLOCK", "1"),
-        ("LOSAT_X_BPSEED", "1"),
-        ("LOSAT_X_BPQBLOCKFMT", "0"),
-    ];
-    let counts = same_reports("blastp-fast", &subject, 2, &pairwise, &[], "0");
-    assert_engaged(&counts, 1, "pairwise report");
 }
 
 // `-window_size 10000000`: each subject moves the diagonal offset by its length and 10,000,000, so
@@ -366,17 +333,25 @@ fn subject_database() -> PathBuf {
 }
 
 // Where the subjects are not searched on the pool (one thread; a database, whose blocks are
-// searched with one table each already), the switch changes nothing and its shadow compares
-// nothing.
+// searched with one table each already), the switch does not act: its shadow mode, which runs the
+// switch, searches no run and compares nothing.
 #[test]
 fn the_switch_does_not_act_at_one_thread_or_on_a_database() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    let counts = same_reports("blastp", &subject, 1, &[], &[], "6");
-    assert!(counts.values().all(|&count| count == 0), "{counts:?}");
     let database = subject_database();
     let db = [OsStr::new("-db"), database.as_os_str()];
-    let counts = same_reports("blastp", &db, 4, &[], &[], "6");
-    assert!(counts.values().all(|&count| count == 0), "{counts:?}");
+    for (subject, threads) in [(&subject, 1), (&db, 4)] {
+        let run = blastp("blastp", subject, threads, &[SHADOW], &[], "6");
+        assert!(
+            !run.stdout.is_empty(),
+            "threads {threads}: the fixture pair has rows"
+        );
+        let counts = run.shadow();
+        assert!(
+            counts.values().all(|&count| count == 0),
+            "threads {threads}: {counts:?}"
+        );
+    }
     let _ = std::fs::remove_dir_all(database.parent().unwrap());
 }

@@ -67,8 +67,8 @@ pub(crate) enum XDbIdxRead {
 
 // No NCBI counterpart: reads the LOSAT_X_DBIDXREAD / LOSAT_X_DBIDXREADSHADOW switches once; it does
 // not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_DBIDXREAD): a strict-set switch, on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-/// and it is not set; `LOSAT_X_DBIDXREADSHADOW` (any value) selects the shadow mode.
+/// EXPERIMENT (LOSAT_X_DBIDXREAD): a strict-set switch, on unless it is `0`;
+/// `LOSAT_X_DBIDXREADSHADOW` (any value) selects the shadow mode.
 pub(crate) fn x_dbidxread() -> XDbIdxRead {
     static MODE: OnceLock<XDbIdxRead> = OnceLock::new();
     *MODE.get_or_init(|| {
@@ -828,6 +828,43 @@ impl SeqDb {
             end,
             first_ordinal,
         })
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the block of the sequences `first_ordinal..end_ordinal`
+    /// that the volume of `first_ordinal` holds (to `end_ordinal` or to the end of the volume),
+    /// found without reading the index (`next_block` reads it to cut by bytes). `None` when the
+    /// range is empty or `first_ordinal` is past the last sequence.
+    pub fn x_block_range(&self, first_ordinal: u32, end_ordinal: u32) -> Option<BlockRange> {
+        if first_ordinal >= end_ordinal {
+            return None;
+        }
+        let (volume, first) = self.find_volume(first_ordinal).ok()?;
+        let end = self.volumes[volume]
+            .num_oids()
+            .min(first.saturating_add(end_ordinal - first_ordinal));
+        Some(BlockRange {
+            volume,
+            first,
+            end,
+            first_ordinal,
+        })
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the numbers of residues of the proteins of
+    /// `x_block_range(first_ordinal, end_ordinal)`, from the index alone
+    /// (`Volume::x_protein_lengths`).
+    pub fn x_protein_lengths(
+        &self,
+        first_ordinal: u32,
+        end_ordinal: u32,
+    ) -> Result<Vec<u32>, SeqDbError> {
+        let Some(range) = self.x_block_range(first_ordinal, end_ordinal) else {
+            return Err(SeqDbError::Range(format!(
+                "ordinal ids {first_ordinal}..{end_ordinal} are not a non-empty range of the database ({} sequences)",
+                self.num_seqs()
+            )));
+        };
+        self.volumes[range.volume].x_protein_lengths(range.first, range.end)
     }
 
     /// Reads the sequences of `range` with one positioned read.

@@ -182,7 +182,7 @@ pub(crate) fn run_pair(
     //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
     //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
     // ```
-    // EXPERIMENT (LOSAT_X_BXPOOL): see native.rs.
+    // One pool for the whole run at 2+ threads: see native.rs.
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
     // ```c
     //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -200,9 +200,9 @@ pub(crate) fn run_pair(
     // Same batch loop as in native.rs, as a closure over the pool its searches run on (see
     // native.rs).
     let mut x_run_batches = |x_pool: Option<&crate::utils::threading::SearchPool<'_>>| {
-        // EXPERIMENT (LOSAT_X_BXBATCH): see native.rs.
+        // Several query batches searched at a time with a pool of 2+ threads: see native.rs.
         #[cfg(feature = "parallel")]
-        if let Some(pool) = x_pool.filter(|pool| runtime::x_bx_batch() && pool.enabled()) {
+        if let Some(pool) = x_pool.filter(|pool| pool.enabled()) {
             use rayon::prelude::*;
             enum XEvent {
                 Warn(Vec<u8>),
@@ -376,9 +376,9 @@ pub(crate) fn run_pair(
     //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
     //                 results = lcl_blast.Run();
     // ```
-    // Dispatch point: one pool for the whole run (LOSAT_X_BXPOOL) instead of one per batch, as
+    // Dispatch point: with 2+ threads one pool for the whole run instead of one per batch, as
     // NCBI's CLocalBlast has per batch. Reuse of threads only.
-    if runtime::x_bx_pool() && options.num_threads > 1 {
+    if options.num_threads > 1 {
         crate::utils::threading::x_with_search_pool_local(
             options.num_threads as usize,
             "BLASTX",

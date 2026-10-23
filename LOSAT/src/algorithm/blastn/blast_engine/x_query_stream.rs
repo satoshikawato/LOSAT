@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_QSTREAM, in the strict set since 2026-10-18: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set; shadow LOSAT_X_QSTREAMSHADOW, off unless set): blastn reads the records of each query batch from the query file when the batch loop of
+//! EXPERIMENT (LOSAT_X_QSTREAM, in the strict set since 2026-10-18: on unless it is `0`;
+//! shadow LOSAT_X_QSTREAMSHADOW, off unless set): blastn reads the records of each query batch from the query file when the batch loop of
 //! `run_in_pool` takes the batch (or a LOSAT_X_QBATCHPAR slot searches it ahead of the loop), as
 //! NCBI reads its query batches one at a time, instead of holding the records of the whole query
 //! file for the whole search. It saves memory (the records of the batches not in flight) and costs
@@ -270,7 +270,12 @@ impl Opening {
             return off(Off::StandardInput);
         }
         let bytes = match file.metadata() {
-            Ok(metadata) if metadata.is_file() => metadata.len(),
+            Ok(metadata)
+                if metadata.is_file()
+                    && crate::blastinput::input_files::has_stream_position(file) =>
+            {
+                metadata.len()
+            }
             Ok(_) => return off(Off::NotAFile),
             Err(_) => return off(Off::Io),
         };

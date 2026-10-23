@@ -1,5 +1,5 @@
 //! EXPERIMENT (LOSAT_X_DCCSR, in the strict set: default ON since 2026-10-21, off with
-//! `LOSAT_X_DCCSR=0` or `LOSAT_X_DEFAULT=0`; shadow LOSAT_X_DCCSRSHADOW): the chains of a
+//! `LOSAT_X_DCCSR=0`; shadow LOSAT_X_DCCSRSHADOW): the chains of a
 //! one-template discontiguous megablast table (`build_disc_mb_lookup`) laid out as CSR
 //! (compressed sparse rows) instead of NCBI's `hashtable` / `next_pos`: `offsets[cell] ..
 //! offsets[cell + 1]` indexes `qs`, which holds the cell's 1-based query offsets in the order
@@ -90,7 +90,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: reads the switches once (LOSAT_X_DCCSR, in the strict set: on unless
-/// `LOSAT_X_DCCSR=0` or `LOSAT_X_DEFAULT=0`; LOSAT_X_DCCSRSHADOW, off unless set to any value,
+/// `LOSAT_X_DCCSR=0`; LOSAT_X_DCCSRSHADOW, off unless set to any value,
 /// implies the switch). They choose between two LOSAT layouts of the same chains and change no
 /// value NCBI computes.
 pub(super) fn switches() -> (bool, bool) {

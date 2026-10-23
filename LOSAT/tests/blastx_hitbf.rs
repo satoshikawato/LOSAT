@@ -18,16 +18,15 @@
 //!                     continue;
 //!                 }
 //! ```
-//! The switch is in the strict set (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set).
+//! The switch is in the strict set (on unless it is `0`).
 //! The direct loop takes these two outcomes without a branch where its range holds and hands the
 //! others to the statements of the reference word finder, with the same cell states and the same
 //! init HSPs (the module's argument), so the property under test is that the report does not
 //! depend on it. That reports equal NCBI's is the business of the BLASTX fixtures. The searches set
 //! `LOSAT_X_BXDIAG=0`, so that the direct loop scans every subject (the default where the CPU has no
-//! AVX2: aarch64, WebAssembly), besides the default. The shadow (`LOSAT_X_BXSCANSHADOW`) compares
-//! the direct loop with the reference word finder on every subject and counts the subjects the
-//! branch-free loop scanned: all of them at a two-hit window above the word size, none at the
-//! one-hit window or at a window equal to the word size, where the loop keeps its statements.
+//! AVX2: aarch64, WebAssembly), besides the default. At the one-hit window and at a window equal to
+//! the word size the loop keeps its statements, so the reports must not depend on the switch there
+//! either.
 //!
 //! The queries are 6 pieces of AP027131 of 1,500 to 3,900 letters each; the subjects are the first
 //! 150 proteins of AP027131, so there are extensions, flag-1 cells and HSPs.
@@ -40,10 +39,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const DIRECT: (&str, &str) = ("LOSAT_X_BXDIAG", "0");
 const OFF: (&str, &str) = ("LOSAT_X_BXHITBF", "0");
 const ON: (&str, &str) = ("LOSAT_X_BXHITBF", "1");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
-/// The direct loop (`LOSAT_X_DEFAULT=0` turns it off with the rest of the strict set).
-const SCAN: (&str, &str) = ("LOSAT_X_BXSCAN", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_BXSCANSHADOW", "1");
+/// The branch-free candidate scan off: the switch alone on the scan before it.
+const SCAN_OFF: (&str, &str) = ("LOSAT_X_BXSCANBF", "0");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -183,25 +180,6 @@ impl Run {
             .map(|line| format!("{line}\n"))
             .collect()
     }
-
-    /// The number after `name=` in the `[X_SHADOW] <switch>` line, or `None` without that line.
-    fn shadow(&self, switch: &str, name: &str) -> Option<u64> {
-        let prefix = format!("[X_SHADOW] {switch} ");
-        let line = self.stderr.lines().find(|line| line.starts_with(&prefix))?;
-        let key = format!(" {name}=");
-        let at = line
-            .find(&key)
-            .unwrap_or_else(|| panic!("no {name} in {line}"))
-            + key.len();
-        Some(
-            line[at..]
-                .split(|c: char| !c.is_ascii_digit())
-                .next()
-                .unwrap()
-                .parse()
-                .unwrap(),
-        )
-    }
 }
 
 fn blastx(args: &[&str], env: &[(&str, &str)]) -> Run {
@@ -252,13 +230,13 @@ fn the_branch_free_test_gives_the_reports_of_the_loop_without_it() {
             assert_eq!(reference.code, Some(0), "{what}: {}", reference.stderr);
             assert!(!reference.stdout.is_empty(), "{what}: no report");
             // The direct loop with the test; the default (the fused loop where it pays, the direct
-            // loop elsewhere); the switch alone, without the rest of the strict set.
-            let alone = blastx(&args, &[DEFAULT_OFF, SCAN]);
+            // loop elsewhere); the switch alone, on the scan before `LOSAT_X_BXSCANBF`.
+            let alone = blastx(&args, &[DIRECT, SCAN_OFF, OFF]);
             for (arm, run, against) in [
                 ("on", blastx(&args, &[DIRECT]), &reference),
                 ("named", blastx(&args, &[DIRECT, ON]), &reference),
                 ("default", blastx(&args, &[]), &reference),
-                ("alone", blastx(&args, &[DEFAULT_OFF, SCAN, ON]), &alone),
+                ("alone", blastx(&args, &[DIRECT, SCAN_OFF, ON]), &alone),
             ] {
                 assert_eq!(run.code, against.code, "{what} {arm}: {}", run.stderr);
                 assert!(run.stdout == against.stdout, "{what} {arm}: report differs");
@@ -270,41 +248,25 @@ fn the_branch_free_test_gives_the_reports_of_the_loop_without_it() {
 }
 
 #[test]
-fn the_shadow_compares_the_branch_free_loop_on_every_subject_in_its_range() {
+fn the_reports_do_not_depend_on_the_switch_where_the_loop_keeps_its_statements() {
     let inputs = Inputs::new();
-    // A two-hit window above the word size (3): every subject; a window equal to the word size and
-    // the one-hit window: none.
-    for (window, all) in [("40", true), ("3", false), ("0", false)] {
+    // A window equal to the word size (3) and the one-hit window: the branch-free test does not act.
+    for window in ["3", "0"] {
         let args = search(&inputs, false, "6", "1", window);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let reference = blastx(&args, &[DIRECT, OFF]);
-        let run = blastx(&args, &[DIRECT, SHADOW]);
+        assert_eq!(
+            reference.code,
+            Some(0),
+            "window={window}: {}",
+            reference.stderr
+        );
+        let run = blastx(&args, &[DIRECT, ON]);
         assert_eq!(run.code, Some(0), "window={window}: {}", run.stderr);
         assert!(
             run.stdout == reference.stdout,
             "window={window}: report differs"
         );
-        let scanned = run
-            .shadow("BXSCAN", "subjects_compared")
-            .unwrap_or_else(|| panic!("window={window}: no BXSCAN line: {}", run.stderr));
-        let branch_free = run
-            .shadow("BXHITBF", "subjects_compared")
-            .unwrap_or_else(|| panic!("window={window}: no BXHITBF line: {}", run.stderr));
-        // Every query batch scans every subject.
-        assert!(scanned >= 150, "window={window}: {scanned} subjects");
-        assert_eq!(
-            branch_free,
-            if all { scanned } else { 0 },
-            "window={window}"
-        );
-        // Without the switch the shadow compares the loop without the test and has no BXHITBF line.
-        let off = blastx(&args, &[DIRECT, SHADOW, OFF]);
-        assert_eq!(off.code, Some(0), "window={window}: {}", off.stderr);
-        assert!(
-            off.stdout == reference.stdout,
-            "window={window}: off differs"
-        );
-        assert_eq!(off.shadow("BXSCAN", "subjects_compared"), Some(scanned));
-        assert_eq!(off.shadow("BXHITBF", "subjects_compared"), None);
+        assert_eq!(run.messages(), reference.messages(), "window={window}");
     }
 }

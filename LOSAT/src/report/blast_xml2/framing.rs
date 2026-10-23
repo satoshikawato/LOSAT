@@ -243,6 +243,14 @@ pub struct Xml2Carry {
     has_pending: bool,
 }
 
+impl Xml2Carry {
+    /// The reports written so far: the number of the last side file of an outfmt 13 or 14 run
+    /// (the shadow of the block search compares side files `1..=written`).
+    pub fn written(&self) -> u32 {
+        self.written
+    }
+}
+
 impl<F: SideFiles> Xml2Document<F> {
     /// Takes the state of the run so far, leaving the document as new. A later call's document
     /// takes it up with [`Xml2Document::resume`].

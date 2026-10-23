@@ -83,7 +83,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: reads the switches once (LOSAT_X_PAIRPARNA, a strict-set switch: on
-/// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; LOSAT_X_PAIRPARNASHADOW, off
+/// unless it is `0`; LOSAT_X_PAIRPARNASHADOW, off
 /// unless set to any value); they do not change any value NCBI computes.
 fn switches() -> (bool, bool) {
     static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();

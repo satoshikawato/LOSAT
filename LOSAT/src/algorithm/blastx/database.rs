@@ -27,6 +27,7 @@ use anyhow::Result;
 
 use super::input::FastaRecord;
 use super::runtime::BatchResults;
+use super::subjects::Subjects;
 use crate::algorithm::common::database::{self as shared, PreliminaryReadError, StoredProteins};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::blast_xml::HitTaxonomy;
@@ -116,13 +117,44 @@ impl BlastxDatabase {
         // same limit stops `-subject` in `search::search_core`); the refusal belongs to the
         // first batch with a valid context, as the reader's errors.
         if let Some(ordinal) = (0..stores.len()).find(|&i| stores.length(i) > MAX_DBSEQ_LEN) {
-            anyhow::bail!(
-                "database sequence {ordinal} has {} residues; a subject longer than {MAX_DBSEQ_LEN} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX",
-                stores.length(ordinal)
-            );
+            return Err(too_long(ordinal, stores.length(ordinal)));
         }
         Ok(stores)
     }
+
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): `read_stores` without the store
+    /// (`common::database::x_check_protein_stores`): the same reads and checks with the same
+    /// errors, the residues of the longest sequence (`StoredProteins::max_length`) when they pass.
+    pub(crate) fn x_check_stores(&self) -> Result<usize> {
+        if self.db.num_seqs() == 0 {
+            return Err(PreliminaryReadError("Database memory map file error").into());
+        }
+        let mut longest = 0;
+        let mut first_too_long = None;
+        shared::x_check_protein_stores(&self.db, PROGRAM, |ordinal, length| {
+            longest = longest.max(length);
+            if length > MAX_DBSEQ_LEN && first_too_long.is_none() {
+                first_too_long = Some((ordinal, length));
+            }
+        })?;
+        if let Some((ordinal, length)) = first_too_long {
+            return Err(too_long(ordinal as usize, length));
+        }
+        Ok(longest)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the opened database.
+    pub(crate) fn x_seqdb(&self) -> &SeqDb {
+        &self.db
+    }
+}
+
+/// LOSAT's refusal of database sequence `ordinal` of `length` residues, longer than
+/// `MAX_DBSEQ_LEN`.
+fn too_long(ordinal: usize, length: usize) -> anyhow::Error {
+    anyhow::anyhow!(
+        "database sequence {ordinal} has {length} residues; a subject longer than {MAX_DBSEQ_LEN} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX"
+    )
 }
 
 /// The reported sequences of one query batch, by rank (their order of ordinal ids): the
@@ -163,7 +195,7 @@ impl ReportedSubjects {
     /// `check_shown_protein_title`).
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
-        stores: &StoredProteins,
+        subjects: Subjects<'_>,
         batches: &mut [BatchResults],
         gapped: bool,
         tabular: bool,
@@ -218,11 +250,11 @@ impl ReportedSubjects {
                     .tabular_ids
                     .push(String::from_utf8_lossy(&id).into_owned());
             }
-            let encoded = stores.residues_with_sentinel(oid);
+            let encoded = subjects.read_encoded(oid)?;
             reported.records.push(FastaRecord {
                 internal_id: format!("gnl|BL_ORD_ID|{ordinal}"),
                 title: String::from_utf8_lossy(&title).into_owned(),
-                sequence: encoded[..encoded.len() - 1]
+                sequence: encoded
                     .iter()
                     .map(|&residue| NCBISTDAA_TO_AMINOACID[usize::from(residue)])
                     .collect(),
@@ -332,7 +364,6 @@ impl ReportedSubjects {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::algorithm::blastx::subjects::Subjects;
 
     fn fixture(name: &str) -> String {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

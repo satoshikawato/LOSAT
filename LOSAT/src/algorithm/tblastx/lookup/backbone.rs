@@ -18,11 +18,10 @@ use crate::utils::matrix::{blosum62_ncbistdaa_score_row, protein_score};
 
 pub const AA_HITS_PER_CELL: usize = 3;
 
-// EXPERIMENT (LOSAT_X_BXLUT / LOSAT_X_BXLUTSHADOW): the BLASTX table filled in place, see
-// x_lut_direct.rs (a child module, so that it uses this file's private builder pieces).
+// The BLASTX table filled in place, see x_lut_direct.rs (a child module, so that it uses this
+// file's private builder pieces).
 #[path = "x_lut_direct.rs"]
 mod x_lut_direct;
-pub(crate) use x_lut_direct::x_shadow_tables as x_bxlut_shadow_tables;
 // EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): BLASTP's table built in place
 // by the same builder (x_lut_direct.rs); the shadow counter for the exit summary.
 pub(crate) use x_lut_direct::x_bplut_shadow_tables;
@@ -1533,13 +1532,14 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     //         }
     //     }
     // ```
-    // Dispatch point of LOSAT_X_BXLUT / LOSAT_X_BXLUTSHADOW (BLASTX only): with the switch the
-    // table is filled in place from the per-cell counts, in the same append order as this loop
-    // and BlastAaLookupFinalize (x_lut_direct.rs); without it the reference builder below runs.
-    let prepared = match x_lut_direct::x_dispatch(prepared, threshold, ScoringMatrix::Blosum62, 3) {
-        Ok(table) => return table,
-        Err(prepared) => prepared,
-    };
+    // BLASTX: the table is filled in place from the per-cell counts, in the same append order as
+    // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines (diagnostics
+    // mode, or a backbone index wider than 16 bits) the reference builder below runs.
+    let prepared =
+        match x_lut_direct::x_build_direct(prepared, threshold, ScoringMatrix::Blosum62, 3) {
+            Ok(table) => return table,
+            Err(prepared) => prepared,
+        };
     build_lookup_from_prepared(prepared, threshold, ScoringMatrix::Blosum62, 3).0
 }
 

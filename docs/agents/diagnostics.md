@@ -339,6 +339,7 @@ export LOSAT_X_DIAGLV=1
 export LOSAT_X_DISCLUTPAR=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_ERFABSORB=1
+export LOSAT_X_MBFILL=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
 export LOSAT_X_MBLUTPREFAULT=1
@@ -2676,6 +2677,30 @@ Scheduling (each value computed by one thread with the original function; order 
   1-16 threads), because of the slots, not of the round. On this WSL machine (THP `always`) megablast of 5 kb to 4.6
   Mb of MG1655 against LC738868 at 8 threads kept its max RSS within 0.4 MiB of the fill without the round, at 0.57-0.86
   of the time from 150 kb on.
+- `LOSAT_X_MBFILL=1` (BLASTN megablast and blastn, the one-thread fill of `build_mb_lookup`: the contiguous megablast
+  table and the two-stage blastn table; speed; in the strict set from the pull request that added it, 2026-10-23; `=0` or
+  `LOSAT_X_DEFAULT=0` runs the queued loop `x_fill_mb_queued`) reads the words of the fill run by run
+  (`blastn/x_mb_fill.rs`, argument in its header): the first `lut_word_length - 1` bases of each run of unambiguous bases
+  build the code, every later base of the run ends a word, and the words are NCBI's words in NCBI's order; each update
+  (`blast_nalookup.c:1081-1091`, the same statements) is applied 64 words after a prefetch of its cell (the queued loop's
+  `Delay` queue was 16 deep). The loop over a run is a function of its own, so the tables and the queue stay in
+  registers; the indexes are checked once per build instead of per word, and the presence bit comes from a table, so the
+  shift by `pv_array_bts` keeps `cl` (x86-64 without BMI2). Where: x86_64 (the queue needs a prefetch instruction), a
+  table built off a pool of two threads or more (PAIRPAR's pool fill takes the others), without database word counts
+  (`limit_lookup`, which the command line does not offer). R10 (line R, megablast Sakai x MG1655 at one thread): the queued loop spent 0.190 s, about 87
+  instructions and 42 cycles a word, on 10.9 M words (NCBI 45.5 cycles); the loop shape of R10's probe (a closure and a
+  queue 32 deep) gained 11 ms, and a branch-free update of the presence bit and helper counter lost here as in R10
+  (megablast of the cDNAs below x1.004: about 21 more instructions a word for few saved misses). Shadow:
+  `LOSAT_X_MBFILLSHADOW=1` (implies the switch) builds every such table again with the queued loop and compares
+  `hashtable`, `next_pos`, `pv_array`, the helper counters, the words of a two-stage table and the debug counters (a
+  difference panics; at exit `[X_SHADOW] MBFILL compared=N`).
+  Measured 2026-10-23 on the workstation (node 1, one pinned core, HT sibling idle, warmed 3 s; 5 rounds, the arm order
+  reversed every other round; `perf stat` cycles against the binary before, `dev` ceaef53e; outputs and max RSS
+  identical in every arm): megablast of Sakai against MG1655 x0.906 (0.683 -> 0.623 s; the fill 0.189 -> 0.131 s under
+  `LOSAT_TIMING`, 9 % fewer instructions), of 31,168 D. melanogaster cDNAs against dmel_dna_3M x0.874 (5.73 -> 5.06 s,
+  37 table builds), of Sakai with every 20th letter N (runs of 19 letters, 8 words a run) x0.907, blastn of the cDNAs
+  against MG1655 x0.985 (91 two-stage builds); megablast of Sakai at 8 threads (pool fill) x1.001. `=0` x0.976-0.999
+  of the binary before (0.2-2.4 % fewer instructions: the queued loop sits behind the dispatch now).
 - `LOSAT_X_MBLUTKEEP=1` (BLASTN megablast and blastn, the contiguous megablast lookup table of `build_mb_lookup`; in the
   strict set since 2026-10-19 (perf/mb-lut-keep, evidence at the end of this entry): on unless it is `0`, or
   `LOSAT_X_DEFAULT=0` and it is not set) the batch loop keeps the table's `hashtable` from one query batch to the next

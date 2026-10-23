@@ -23,6 +23,10 @@
 //! the idle workers of a `par_iter` would; it spins or sleeps only when no job is pending. The jobs
 //! it can run are those nested stages' (the loops are broadcast jobs, which no other thread runs),
 //! and they end on their own.
+//!
+//! No item is searched before every thread has started its loop (`wait_for_every_loop`): a
+//! thread also runs its own broadcast job inside a wait for a nested job, so a loop started after
+//! the thread took a job of an item's nested stage would run above that unfinished job.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -229,6 +233,28 @@ fn run_pending_job() -> bool {
     false
 }
 
+/// No NCBI counterpart (scheduling only): each thread of the pass counts itself in `started` and
+/// waits until all `threads` have, so that no item is searched (and no nested job of an item can
+/// be taken) before every thread has started its loop. rayon-core 1.13 runs a thread's own
+/// broadcast job wherever the thread looks for work, also inside a join wait
+/// (`WorkerThread::take_local_job` pops the broadcast deque after the local one, and
+/// `join_context` calls it): a thread that stole a job of an item's nested parallel stage before
+/// it started its loop ran the loop nested above that job, the loop waited for room in the window,
+/// the window for that item, and the item for the job below it (the assist test hung for hours on a
+/// loaded host). Once every thread has started, none has a loop left to start.
+fn wait_for_every_loop(started: &AtomicUsize, threads: usize) {
+    started.fetch_add(1, Ordering::AcqRel);
+    let mut idle = 0u32;
+    while started.load(Ordering::Acquire) < threads {
+        idle = idle.saturating_add(1);
+        if idle < 128 {
+            std::hint::spin_loop();
+        } else {
+            std::thread::yield_now();
+        }
+    }
+}
+
 /// No NCBI counterpart: a helper's wait for room in the window. A native helper sleeps
 /// `micros`; a wasm helper yields instead, because `std::thread::sleep` panics under the
 /// browser's WASI shim (@bjorn3/browser_wasi_shim 0.4.2 returns from `poll_oneoff` without
@@ -254,7 +280,9 @@ fn pause(micros: u64) {
 ///
 /// The threads run their loops as one broadcast job each, not as jobs that a thread may steal:
 /// a thread that waits inside a search (a nested parallel stage) runs only stolen jobs that end
-/// on their own, never a second loop that would wait for the search it interrupted.
+/// on their own, never a second loop that would wait for the search it interrupted. No item is
+/// searched before every thread has started its loop (`wait_for_every_loop`), so that no thread
+/// starts its own loop inside a wait for an item's nested job either.
 pub(super) fn search_in_order<S, R: Send>(
     n: usize,
     window: usize,
@@ -275,8 +303,10 @@ pub(super) fn search_in_order<S, R: Send>(
         let shared = &shared;
         // The first thread to start its job is the owner.
         let owner = Mutex::new(Some(hand_over));
-        rayon::broadcast(|_| {
+        let started = AtomicUsize::new(0);
+        rayon::broadcast(|ctx| {
             let hand_over = owner.lock().unwrap_or_else(|e| e.into_inner()).take();
+            wait_for_every_loop(&started, ctx.num_threads());
             match hand_over {
                 Some(hand_over) => shared.owner(init, search, hand_over),
                 None => shared.helper(init, search),
@@ -377,6 +407,70 @@ mod tests {
             });
             assert_eq!(handed, want, "assist {assist}");
         }
+    }
+
+    // A thread of the pool that is busy when the pass starts holds back every item until it has
+    // started its loop (`wait_for_every_loop`): before then it could take a nested job of an item
+    // and start its loop inside the wait for that job.
+    #[test]
+    fn no_item_is_searched_before_every_thread_has_started_its_loop() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+        let pool = pool(4);
+        let busy = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        {
+            let (busy, release) = (Arc::clone(&busy), Arc::clone(&release));
+            pool.spawn(move || {
+                busy.store(true, Ordering::SeqCst);
+                while !release.load(Ordering::SeqCst) {
+                    std::hint::spin_loop();
+                }
+            });
+        }
+        while !busy.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        let released_at: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+        let releaser = {
+            let (release, released_at) = (Arc::clone(&release), Arc::clone(&released_at));
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(200));
+                *released_at.lock().unwrap() = Some(Instant::now());
+                release.store(true, Ordering::SeqCst);
+            })
+        };
+        let first: Mutex<Option<Instant>> = Mutex::new(None);
+        let handed = pool.install(|| {
+            let mut handed = Vec::new();
+            search_in_order(
+                32,
+                4,
+                true,
+                &|| (),
+                &|_: &mut (), i| {
+                    first.lock().unwrap().get_or_insert_with(Instant::now);
+                    work(i)
+                },
+                &mut |i, _| handed.push(i),
+            );
+            handed
+        });
+        releaser.join().unwrap();
+        assert_eq!(handed, (0..32).collect::<Vec<_>>());
+        let first = first
+            .into_inner()
+            .unwrap()
+            .expect("the items were searched");
+        let released = released_at
+            .lock()
+            .unwrap()
+            .expect("the busy thread was released");
+        assert!(
+            first >= released,
+            "an item was searched before the busy thread started its loop"
+        );
     }
 
     // With `assist`, the threads that wait for the window run the chunks that a slow item's

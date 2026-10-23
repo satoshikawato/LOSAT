@@ -3688,8 +3688,8 @@ Scheduling (each value computed by one thread with the original function; order 
 - TBNPAR (graduated 2026-10-22; no variable, no `LOSAT_X_TBNPARSHADOW`; always on) tblastn:
   preliminary stage per (frame, chunk) and redo per match in parallel, one pool for the search. The
   unit-wise stage is the only preliminary stage of a search (at one thread, without a pool, it
-  runs the units in order); the serial port `preliminary_protein_hsps_in_ncbi_order` is a
-  `#[cfg(test)]` harness that no search runs and unit tests check against NCBI traces. The query batches go to `x_search_batches` at any thread count (since
+  runs the units in order); the unit tests that check the stage against NCBI traces run this unit
+  path through a `#[cfg(test)]` probe (`preliminary_hsps_traced`). The query batches go to `x_search_batches` at any thread count (since
   `TBNSSIDE` graduated); the one-batch-at-a-time loop searches a batch that `x_search_batches`
   did not take (a database whose sequences could not be read).
 - TBNBATCH (graduated 2026-10-22; no variable; conditional: its rule stays) tblastn query batches
@@ -4636,10 +4636,26 @@ Scheduling (each value computed by one thread with the original function; order 
   cells= batched_hits= candidates= min_hits_per_cell= tables_fused= tables_other= hits_per_cell=LEAST-MOST
   defer_min_hits_per_cell= tables_avx2=` (these two: `LOSAT_X_BXDEFER`'s rule), and with `mode=avx2-cross`
   `cross_splits=` (`LOSAT_X_BXCROSS`'s windows tested in parts). A query batch whose
-  lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 500,
+  lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 900,
   `0` fuses every batch) is scanned by the direct loop instead, which is faster there; the
   choice is made once per thread and table and changes only the speed (the timing line counts the choices and
-  gives the least and most hits per cell, in hundredths). Where the two loops break even (one thread, `-db`
+  gives the least and most hits per cell, in hundredths). The built-in value is 900 since the pull request
+  perf/bx-diag-min (2026-10-23; 500 before, which `LOSAT_X_BXDIAGMIN=500` gives): with `LOSAT_X_BXHITBF`'s
+  branch-free hit test the direct loop is faster up to about 9 hits per used cell. The fused loop with the
+  cell test it takes (the AVX2 batch below `LOSAT_X_BXDEFERMIN`, `LOSAT_X_BXDEFER`'s above) against the direct
+  loop, user-space cycles, one core (workstation node 1, HT sibling idle, warmed 3 s, 8 rounds with the arm
+  order reversed every other round, medians, dev cd8e0f89; every output the same bytes): 4.91 hits per used
+  cell (the first 1,500 nt of a 2.1-kb fly cDNA x the fly proteome) x1.198, 5.79 (another cDNA) x1.187,
+  6.77 (the whole cDNA) x1.133, then sets of two or three of 50 fly cDNAs: 7.34 x1.073, 8.38 x1.030, 8.63
+  x1.006, 8.92 x0.994, 9.37 x0.981, 9.85 x0.975, 10.52 x0.965, 11.46 x0.946, 13.32 x0.899; 50 cDNAs x yeast
+  (20-33 per batch) x0.781. Against Swiss-Prot (`-db`, 3 rounds) the loops break even later: 6.77 x1.178,
+  8.92 x1.012, 9.81 x1.020, 11.46 x0.968, 13.32 x0.916; 900 lies between the fly proteome's break-even (about
+  8.75) and Swiss-Prot's (about 10.7), within 2 % of the faster loop on either side. Against dev's default
+  (the same runs; one thread): 5.79 x0.846 cycles (0.655 -> 0.555 s), 6.77 x0.883, 7.34 x0.931, 7.64
+  x0.942, 8.38 x0.967, 8.63 x0.997, 8.92 x1.005, the cDNA x Swiss-Prot x0.847 (7.14 -> 6.06 s), 8.92 x
+  Swiss-Prot x0.987, and x0.993-1.004 on the tables of 9 or more (the same loop as before).
+  At 8 threads (node 1, 8 physical cores, 5 rounds): 6.77 x0.885 (0.125 -> 0.116 s), 8.38 x0.964, 8.92
+  x1.007, 9.85 x0.999. The measurements below came before `LOSAT_X_BXHITBF`. Where the two loops break even (one thread, `-db`
   UniRef50 2026_03 volume 00, both with `LOSAT_X_BXSCANBF=1`, every batch fused against the direct loop, 2
   rounds each; pieces of one 2.1-kb fly cDNA): hits per used cell 1.76 (300 nt) x1.20 the direct loop's
   time, 2.34 (600 nt; 41.48-41.66 s against 34.49-34.74 s) x1.20, 3.56 (1,000 nt; 68.62-68.86 / 63.55-64.06)
@@ -4684,7 +4700,9 @@ Scheduling (each value computed by one thread with the original function; order 
   blastp's cell test (v4-R R2); a tested blastx cell holds about 19 hits on the dense tables below (a blastp
   cell about 106), so its last batch weighs more than in blastp. On a table with few hits per cell the masked
   batch and the buffer cost more than they save, so a fused table below `LOSAT_X_BXDEFERMIN` takes the AVX2
-  batch (`XDiagMode::Avx2`); the choice is made with `LOSAT_X_BXDIAGMIN`'s, once per thread and table. With the
+  batch (`XDiagMode::Avx2`); the choice is made with `LOSAT_X_BXDIAGMIN`'s, once per thread and table. Since
+  `LOSAT_X_BXDIAGMIN`'s built-in value became 900 (above 700; perf/bx-diag-min) every fused table that takes
+  `LOSAT_X_BXDEFER`'s choice takes its masked batch, and the rule acts where `LOSAT_X_BXDIAGMIN` is set below 700. With the
   fused loop and the cell test forced on every table (`LOSAT_X_BXDIAGMIN=0` on the binary before the rule,
   the same as `LOSAT_X_BXDEFERMIN=0`; one core, medians of 3-8 per-round ratios against `=0`) the cycles were
   x1.256 at 1.76 hits per used cell (a 300-nt
@@ -4753,14 +4771,19 @@ Scheduling (each value computed by one thread with the original function; order 
   runs the default with every search, the shadow, `=0` and `LOSAT_X_DEFAULT=0`; the unit tests compare the
   program's chunk of 1,024 and a test-only instance of 64 (drains inside a subject and inside long cells, the
   hits a drain leaves, windows in parts across drains) with the per-hit test. Measured 2026-10-23 on the
-  workstation (`perf stat` user-space cycles, one physical core of node 0 with its HT sibling idle, load 22-40
-  on the other cores; paired arms, arm order reversed every other round; medians of the per-round ratios, 3
-  rounds for the reads and 5 for the others), against `dev`'s default 80a847e0 (`LOSAT_X_BXDEFER` with its
-  rule): 201 reads x Swiss-Prot (`-db`) x0.892, a 50-kb piece of the fly genome x the fly proteome (`-db`,
-  `-evalue 1e-5`) x0.914, AP027131 x AP027133 proteins (`-subject`, `-query_gencode 4`) x0.977, 50 fly cDNAs x
-  the yeast proteome x0.884, one 2.1-kb fly cDNA x the fly proteome (6.77 hits per used cell) x0.862, the first
-  two of the 50 cDNAs x the fly proteome (9.85) x0.861; every report identical between the arms, max RSS
-  unchanged. Design and timings: v4-A14 results/p2 (DESIGN_cross.md), results/p3 (DESIGN_s3.md: round 2) and
+  workstation (`perf stat` user-space cycles, one physical core of node 0 with its HT sibling idle, warmed 3 s
+  before every run, load 7-67 on the other cores; paired arms, arm order reversed every other round; medians of
+  the per-round ratios, 3 rounds for the reads and 5 for the others), the pull request's code against `dev`'s
+  default 32a63700 (`LOSAT_X_BXDEFER` with its rule, `LOSAT_X_BXDIAGMIN` 500), with every table of these runs
+  fused: 201 reads x Swiss-Prot (`-db`; 26-28 hits per used cell) x0.886, a 50-kb piece of the fly genome x
+  the fly proteome (`-db`, `-evalue 1e-5`; 25-31) x0.916, AP027131 x AP027133 proteins (`-subject`,
+  `-query_gencode 4`; 17-26) x0.973, 50 fly cDNAs x the yeast proteome (20-33) x0.882, one 2.1-kb fly cDNA x
+  the fly proteome (6.77) x0.846, the first two of the 50 cDNAs x the fly proteome (9.85) x0.847; `=0`
+  x0.999-1.002 of `dev` (the same instructions); every report identical between the arms, max RSS unchanged.
+  `LOSAT_X_BXDIAGMIN`'s built-in 900 (perf/bx-diag-min) was set against `LOSAT_X_BXDEFER`'s cell test, so a
+  table below 9 hits per used cell, such as the one cDNA's (6.77), still takes the direct loop by default;
+  with this cell test the fused loop breaks even with the direct loop lower (near 6.6 with this pull request's
+  first prototype, v4-A10 bdm1), and line A10 measures the cutoff again with it. Design and timings: v4-A14 results/p2 (DESIGN_cross.md), results/p3 (DESIGN_s3.md: round 2) and
   results/p4 (DESIGN_s4.md: round 3, r1's loops with a constant chunk, two arrays, the windows with a repeated
   entry out of line).
 - `LOSAT_X_BXSCANBF=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's decision of that day

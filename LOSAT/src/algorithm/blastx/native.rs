@@ -1009,9 +1009,21 @@ fn run_inner(
                 let x_events = std::cell::RefCell::new(Vec::<XEvent>::new());
                 let x_failed = std::cell::Cell::new(false);
                 let x_wave = pool.threads() * 4;
+                // A batch above twice the DEFAULT batch (10002 letters, not the run's `BATCH_SIZE`)
+                // is searched with the pool inside; between 10003 and 20004 letters a batch is
+                // searched on one thread, and `x_wave` of them at once.
                 let x_large = |queries: &[super::input::FastaRecord]| {
                     queries.iter().map(|q| q.sequence.len()).sum::<usize>() > 2 * BATCH_SIZE
                 };
+                // The flow holds `x_wave` default-sized batches (about `x_wave` x 10002 letters)
+                // read and not yet written. With a larger `BATCH_SIZE` the same count would hold
+                // `x_wave` large batches, each with its own tables and scratch while it is
+                // searched, so the bound is a letter budget: the count falls as the batch grows
+                // (`BATCH_SIZE` unset, or up to 10002: exactly `x_wave`, the flow's schedule
+                // before this bound existed), and the batches held back for the tail (searched
+                // alone, side by side) stay below it.
+                let x_flow_bound = (x_wave * BATCH_SIZE / batch_size.max(1)).clamp(1, x_wave);
+                let x_flow_lookahead = pool.threads().min(x_flow_bound - 1);
                 // EXPERIMENT (LOSAT_X_BXFLOW): the queued batches as a flow instead of waves.
                 //
                 // The waves below search `x_wave` batches and then wait for the last of them
@@ -1032,8 +1044,8 @@ fn run_inner(
                 // order; the flow changes only LOSAT's scheduling of the searches above.
                 if super::runtime::x_bx_flow() {
                     return x_flow(
-                        x_wave,
-                        pool.threads(),
+                        x_flow_bound,
+                        x_flow_lookahead,
                         &mut query_stream,
                         args.lcase_masking,
                         batch_size,

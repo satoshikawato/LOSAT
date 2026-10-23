@@ -20,7 +20,8 @@
 //!   the frames are translated from it and the stage reads nothing else of the sequence. A plan
 //!   that the search keeps between query batches (`XSubjectSide`) is not made again, and its
 //!   sequence is not read again. Each thread keeps the last block of 256 KiB of the sequence file
-//!   it read for the plans (`XDbStream::read_for_plan`), from which the next short subjects come.
+//!   it read for the plans (`XDbStream::plan_with`), from whose bytes the plans of the next short
+//!   subjects are made, without a store.
 //! - The composition redo and the traceback of `-comp_based_stats 0` read a subject of their
 //!   lists when they first align it and hold it until the stage ends (`XStageSubjects`); the
 //!   reports read the sequences they show (`database::reported_subjects`), one read each.
@@ -249,13 +250,18 @@ impl<'a> XDbStream<'a> {
         Ok(store)
     }
 
-    /// Sequence `oid` for the plan of its preliminary stage. The thread keeps the last block of
-    /// sequences it read (`SeqDb::next_block` of `PLAN_BLOCK_BYTES` from the sequence asked for)
-    /// and takes the next sequences of the block from it: the preliminary stage asks for the
-    /// subjects of a range in ascending order on each thread, so most short subjects come
-    /// without a read. A block of one sequence (a long one) is read alone and shared
-    /// (`read_shared`).
-    pub(super) fn read_for_plan(&self, oid: usize) -> Result<Arc<PackedNucleotide>> {
+    /// `make` of the packed bytes and the length of sequence `oid`, for the plan of its
+    /// preliminary stage. The thread keeps the last block of sequences it read
+    /// (`SeqDb::next_block` of `PLAN_BLOCK_BYTES` from the sequence asked for) and gives the next
+    /// sequences of the block from its bytes, with the errors of their stores but without the
+    /// stores: the preliminary stage asks for the subjects of a range in ascending order on each
+    /// thread, so most short subjects come without a read or a copy. A block of one sequence (a
+    /// long one) is read alone and shared (`read_shared`).
+    pub(super) fn plan_with<R>(
+        &self,
+        oid: usize,
+        make: impl FnOnce(&[u8], usize) -> Result<R>,
+    ) -> Result<R> {
         let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
         let mut kept = X_PLAN_BLOCK.with(std::cell::Cell::take);
         let held = |kept: &Option<XPlanBlock>| {
@@ -278,18 +284,37 @@ impl<'a> XDbStream<'a> {
                         block,
                     });
                 }
-                _ => return self.read_shared(oid),
+                _ => {
+                    let store = self.read_shared(oid)?;
+                    return make(store.packed(), store.len());
+                }
             }
         }
         let block = kept.as_ref().expect("a block holds the sequence");
-        let store = shared::x_nucleotide_store_in(
-            &block.block,
-            (ordinal - block.first) as usize,
-            ordinal,
-            PROGRAM,
-        );
+        let i = (ordinal - block.first) as usize;
+        let made = self
+            .length_in(&block.block, i, oid)
+            .and_then(|length| make(block.block.nucleotide_packed(i), length));
         X_PLAN_BLOCK.with(|cell| cell.set(kept));
-        Ok(Arc::new(self.checked(oid, store.map_err(XReadError)?)))
+        made
+    }
+
+    /// The length of sequence `oid`, sequence `i` of `block`, with the errors of its store
+    /// (`XReadError`); the shadow mode packs the store and compares it with the copy.
+    fn length_in(
+        &self,
+        block: &crate::seqdb::SequenceBlock,
+        i: usize,
+        oid: usize,
+    ) -> Result<usize> {
+        let ordinal = oid as u32;
+        if self.copy.is_some() {
+            let store =
+                shared::x_nucleotide_store_in(block, i, ordinal, PROGRAM).map_err(XReadError)?;
+            return Ok(self.checked(oid, store).len());
+        }
+        shared::x_nucleotide_length_in(block, i, ordinal, PROGRAM)
+            .map_err(|error| XReadError(error).into())
     }
 
     /// `store`, read for sequence `oid`, after the shadow mode's comparison with the copy.
@@ -329,7 +354,7 @@ pub(super) fn x_frames_pooled() -> bool {
 }
 
 /// No NCBI counterpart: the bytes of the sequence file in a block that a thread keeps for the
-/// plans (`XDbStream::read_for_plan`; the blocks of BLASTX's `-db` stream are 256 KiB too).
+/// plans (`XDbStream::plan_with`; the blocks of BLASTX's `-db` stream are 256 KiB too).
 const PLAN_BLOCK_BYTES: u64 = 256 << 10;
 
 /// A block of sequences that a thread keeps for the plans, and its stream.

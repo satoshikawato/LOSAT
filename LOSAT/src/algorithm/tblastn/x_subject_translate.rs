@@ -656,22 +656,20 @@ pub(super) fn x_reuse_frame(mut frame: Vec<u8>) {
 // `seq[..length - i]` counted from its end). So the codons of one phase (`p % 3`) fill one plus
 // frame forward and one minus frame backward, and every residue is the one `x_generate_frames`
 // puts there.
-/// EXPERIMENT (LOSAT_X_TBNSTORE): `x_generate_frames` of a packed subject's codes.
-fn x_packed_frames(
-    store: &crate::sequence::packed_subject::PackedNucleotide,
-    tables: &XCodonTables,
-) -> Vec<QueryFrame> {
-    x_packed_frames_with(store, tables, x_xlate_simd())
+/// EXPERIMENT (LOSAT_X_TBNSTORE): `x_generate_frames` of a packed subject's codes, from its packed
+/// bytes (`PackedNucleotide::packed`) and its length `seq_len`.
+fn x_packed_frames(packed: &[u8], seq_len: usize, tables: &XCodonTables) -> Vec<QueryFrame> {
+    x_packed_frames_with(packed, seq_len, tables, x_xlate_simd())
 }
 
 /// EXPERIMENT (LOSAT_X_TBNSTORE / LOSAT_X_TBNXLATESIMD): [`x_packed_frames`], with the vector
 /// loop when `simd` (and the CPU has it).
 fn x_packed_frames_with(
-    store: &crate::sequence::packed_subject::PackedNucleotide,
+    packed: &[u8],
+    seq_len: usize,
     tables: &XCodonTables,
     simd: bool,
 ) -> Vec<QueryFrame> {
-    let seq_len = store.len();
     let frame_count = (0..3).filter(|&i| i + 3 <= seq_len).count();
     // x_phase_residues writes every residue (positions 1 to aa_len) of the frames.
     let empty_frame = |i: usize| x_frame_buffer((seq_len - i) / 3 + 2);
@@ -684,7 +682,7 @@ fn x_packed_frames_with(
         // from the last one down, of minus frame `-(r + 1)`, which has as many
         let codons = (seq_len - phase) / 3;
         let minus = &mut reverse[(seq_len - phase) % 3];
-        vector += x_phase_residues(store.packed(), phase, codons, tables, plus, minus, simd);
+        vector += x_phase_residues(packed, phase, codons, tables, plus, minus, simd);
         all += codons;
     }
     if all > 0 && std::env::var_os("LOSAT_X_STATS").is_some() {
@@ -943,8 +941,13 @@ fn x_packed_plan(
     store: &crate::sequence::packed_subject::PackedNucleotide,
     db_gencode: u8,
 ) -> Result<XSubjectPlan> {
+    x_bytes_plan(store.packed(), store.len(), db_gencode)
+}
+
+/// EXPERIMENT (LOSAT_X_TBNSTORE): [`x_packed_plan`] of a subject's packed bytes and length.
+fn x_bytes_plan(packed: &[u8], length: usize, db_gencode: u8) -> Result<XSubjectPlan> {
     let tables = x_codon_tables(db_gencode)?;
-    let frames = x_packed_frames(store, tables);
+    let frames = x_packed_frames(packed, length, tables);
     let negative_first_length = frames
         .iter()
         .find(|frame| frame.frame == -1)
@@ -981,6 +984,17 @@ pub(super) fn x_packed_subject_plan(
     db_gencode: u8,
 ) -> Result<Arc<XSubjectPlan>> {
     x_packed_plan(store, db_gencode).map(Arc::new)
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): [`x_packed_subject_plan`] of a database sequence's packed
+/// bytes and length, read in a block of the sequence file (`XDbStream::plan_with`), without its
+/// store: the plan reads nothing else of a packed subject.
+pub(super) fn x_packed_bytes_plan(
+    packed: &[u8],
+    length: usize,
+    db_gencode: u8,
+) -> Result<Arc<XSubjectPlan>> {
+    x_bytes_plan(packed, length, db_gencode).map(Arc::new)
 }
 
 #[cfg(test)]
@@ -1590,7 +1604,7 @@ mod tests {
                 let tables = x_codon_tables(db_gencode).unwrap();
                 let expected = x_generate_frames(&codes, tables);
                 for simd in [false, true] {
-                    let frames = x_packed_frames_with(&store, tables, simd);
+                    let frames = x_packed_frames_with(store.packed(), length, tables, simd);
                     assert_eq!(frames.len(), expected.len(), "{length} bases, simd {simd}");
                     for (frame, reference) in frames.iter().zip(&expected) {
                         assert_eq!(

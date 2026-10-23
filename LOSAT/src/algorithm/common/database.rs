@@ -283,6 +283,17 @@ pub(crate) fn x_nucleotide_store_in(
     ))
 }
 
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the length of sequence `i` of `block` (ordinal id
+/// `ordinal`), with the errors of `x_nucleotide_store_in`, without the store.
+pub(crate) fn x_nucleotide_length_in(
+    block: &crate::seqdb::SequenceBlock,
+    i: usize,
+    ordinal: u32,
+    program: &str,
+) -> Result<usize> {
+    stored_parts(block, i, ordinal, program).map(|(length, _)| length)
+}
+
 /// The length and the ambiguity runs of sequence `i` of `block` (ordinal id `ordinal`), with the
 /// errors of `read_nucleotide_stores` (which reads every sequence through it). NCBI's preliminary
 /// search reads the 2-bit data only; it reads the ambiguity data in the traceback, of the

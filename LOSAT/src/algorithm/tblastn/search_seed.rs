@@ -795,12 +795,11 @@ pub(super) fn x_scan_plan(
         use super::x_subject_store::XPrelimSubject;
         use crate::sequence::packed_subject::SubjectNt;
         match subject {
-            // EXPERIMENT (LOSAT_X_TBNDBSTREAM): the sequence is read for its plan and dropped once
-            // the plan is made (a database sequence has no lower-case letters).
-            XPrelimSubject::Stream(stream, oid) => {
-                let store = stream.read_for_plan(oid)?;
-                super::x_subject_translate::x_packed_subject_plan(&store, db_gencode)
-            }
+            // EXPERIMENT (LOSAT_X_TBNDBSTREAM): the plan is made from the sequence's bytes, read
+            // for it (a database sequence has no lower-case letters).
+            XPrelimSubject::Stream(stream, oid) => stream.plan_with(oid, |packed, length| {
+                super::x_subject_translate::x_packed_bytes_plan(packed, length, db_gencode)
+            }),
             XPrelimSubject::Nt(SubjectNt::Letters(letters)) => {
                 match super::x_subject_store::x_plan_store(letters, mask_lowercase) {
                     Some(store) => {

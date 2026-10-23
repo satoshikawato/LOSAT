@@ -429,6 +429,69 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
     Some(t)
 }
 
+/// No NCBI counterpart (memory placement only): a row of the vector kernels whose first element
+/// lies on a 64-byte boundary. The 256-bit kernels store 32 bytes at `PAD` plus multiples of 32
+/// bytes and load the same places in the next row; from a buffer at glibc's 16-byte alignment
+/// half of those stores could cross a cache line, and a split store does not forward to the
+/// load after it (an offset set by the heap's history: one more allocation elsewhere made
+/// blastn's 16-thread search 2 % slower with three times the blocked store forwards). The
+/// values and the lengths are those of the `Vec` before.
+struct Rows<T> {
+    v: Vec<T>,
+    off: usize,
+    len: usize,
+}
+
+impl<T: Copy + Default> Rows<T> {
+    fn new(len: usize) -> Self {
+        let mut r = Rows {
+            v: Vec::new(),
+            off: 0,
+            len: 0,
+        };
+        r.resize(len, T::default());
+        r
+    }
+
+    /// `Vec::resize`: the rows only grow (`grow`).
+    fn resize(&mut self, len: usize, value: T) {
+        if len <= self.len {
+            self.len = len;
+            return;
+        }
+        let mut v = vec![value; len + 64 / std::mem::size_of::<T>()];
+        let off = v.as_ptr().align_offset(64);
+        assert!(off <= 64 / std::mem::size_of::<T>());
+        v[off..off + self.len].copy_from_slice(self);
+        *self = Rows { v, off, len };
+    }
+}
+
+impl<T> std::ops::Deref for Rows<T> {
+    type Target = [T];
+    fn deref(&self) -> &[T] {
+        &self.v[self.off..self.off + self.len]
+    }
+}
+
+impl<T> std::ops::DerefMut for Rows<T> {
+    fn deref_mut(&mut self) -> &mut [T] {
+        &mut self.v[self.off..self.off + self.len]
+    }
+}
+
+impl<T: PartialEq> PartialEq for Rows<T> {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+
+impl<T: std::fmt::Debug> std::fmt::Debug for Rows<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (**self).fmt(f)
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:462-468,476-479
 // ```c
 //     if (num_extra_cells > gap_align->dp_mem_alloc) {
@@ -442,15 +505,15 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
 // The vector kernels' rows (`best`, `best_gap` of `score_array`, here `H` and `E`), the traceback
 // rows (`edit_script`) and the operation list. Kept between calls like `gap_align->dp_mem`.
 pub(crate) struct XdropScratch {
-    ha: Vec<i16>,
-    hb: Vec<i16>,
-    e: Vec<i16>,
+    ha: Rows<i16>,
+    hb: Rows<i16>,
+    e: Rows<i16>,
     // 8-bit path
-    h8a: Vec<u8>,
-    h8b: Vec<u8>,
-    e8: Vec<u8>,
+    h8a: Rows<u8>,
+    h8b: Rows<u8>,
+    e8: Rows<u8>,
     dirty8: usize,
-    sb: Vec<u8>,
+    sb: Rows<u8>,
     sb_filled: usize,
     fence_k: usize,
     bad_k: usize,
@@ -474,14 +537,14 @@ impl XdropScratch {
             return Self::new();
         }
         Self {
-            ha: Vec::new(),
-            hb: Vec::new(),
-            e: Vec::new(),
-            h8a: Vec::new(),
-            h8b: Vec::new(),
-            e8: Vec::new(),
+            ha: Rows::new(0),
+            hb: Rows::new(0),
+            e: Rows::new(0),
+            h8a: Rows::new(0),
+            h8b: Rows::new(0),
+            e8: Rows::new(0),
             dirty8: 0,
-            sb: Vec::new(),
+            sb: Rows::new(0),
             sb_filled: 0,
             fence_k: usize::MAX,
             bad_k: usize::MAX,
@@ -505,14 +568,14 @@ impl XdropScratch {
     // The initial allocation, like the first `dp_mem` allocation.
     pub(crate) fn new() -> Self {
         Self {
-            ha: vec![0; 1024],
-            hb: vec![0; 1024],
-            e: vec![0; 1024],
-            h8a: vec![0; 1024],
-            h8b: vec![0; 1024],
-            e8: vec![0; 1024],
+            ha: Rows::new(1024),
+            hb: Rows::new(1024),
+            e: Rows::new(1024),
+            h8a: Rows::new(1024),
+            h8b: Rows::new(1024),
+            e8: Rows::new(1024),
             dirty8: 0,
-            sb: vec![0; 1024],
+            sb: Rows::new(1024),
             sb_filled: 0,
             fence_k: usize::MAX,
             bad_k: usize::MAX,

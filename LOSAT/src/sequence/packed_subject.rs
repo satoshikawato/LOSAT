@@ -211,7 +211,8 @@ impl PackedNucleotide {
     /// (a database sequence read where it is searched) gives its pages back instead of leaving
     /// them in the thread's arena. No NCBI counterpart: only where the bytes are held.
     pub fn x_from_stored_mapped(packed: &[u8], length: usize, runs: &[AmbiguityRun]) -> Self {
-        let mut bytes = Vec::with_capacity(crate::utils::x_mapped::x_mapped_capacity(packed.len(), 1));
+        let mut bytes =
+            Vec::with_capacity(crate::utils::x_mapped::x_mapped_capacity(packed.len(), 1));
         bytes.extend_from_slice(packed);
         Self::from_stored_box(bytes.into_boxed_slice(), length, runs)
     }

@@ -11,7 +11,7 @@
 
 use std::cell::Cell;
 
-use super::x_seed_fused::{x_prefetch, x_prefetch_distance, x_test_hit};
+use super::x_seed_fused::{x_bp_scan_bf, x_prefetch, x_prefetch_distance, x_test_hit};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::XFlatCompressedLookup;
 
@@ -48,10 +48,89 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
 ) where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
+    // EXPERIMENT (LOSAT_X_BPSCANBF): the offsets listed without a branch on the presence bit
+    // (`for_each_cell`); off, the loop with the branch.
+    if !x_bp_scan_bf() {
+        x_scan_flat_pv(
+            lookup,
+            subject,
+            subject_length,
+            diag_array,
+            diag_mask,
+            diag_offset,
+            window,
+            word_size,
+            &mut candidate,
+        );
+        return;
+    }
+    x_scan_flat_in::<true, F>(
+        lookup,
+        subject,
+        subject_length,
+        diag_array,
+        diag_mask,
+        diag_offset,
+        window,
+        word_size,
+        &mut candidate,
+    );
+}
+
+/// EXPERIMENT (LOSAT_X_BPSCANBF=0): [`x_scan_two_hit_compressed_flat`] with the branch on the
+/// presence bit. Out of line, and with a closure of its own type, so that the default instance is
+/// compiled as without this one (`x_seed_fused::x_scan_two_hit_bf`).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_scan_flat_pv<F>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let mut own = |query_offset, subject_offset, last_hit, diff, entry: &mut DiagStruct| {
+        candidate(query_offset, subject_offset, last_hit, diff, entry)
+    };
+    x_scan_flat_in::<false, _>(
+        lookup,
+        subject,
+        subject_length,
+        diag_array,
+        diag_mask,
+        diag_offset,
+        window,
+        word_size,
+        &mut own,
+    );
+}
+
+/// The loop of [`x_scan_two_hit_compressed_flat`]; `BRANCH_FREE` is `for_each_cell`'s.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn x_scan_flat_in<const BRANCH_FREE: bool, F>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
     assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
     let prefetch_distance = x_prefetch_distance();
     let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
-    lookup.for_each_cell(subject, subject_length, &mut cells, |s, cell_hits| {
+    lookup.for_each_cell::<BRANCH_FREE, _>(subject, subject_length, &mut cells, |s, cell_hits| {
         for (i, &query_offset) in cell_hits.iter().enumerate() {
             // Read ahead the entry of a later hit of this cell (a cache hint; see `x_scan_two_hit`).
             if let Some(&ahead) = cell_hits.get(i + prefetch_distance) {

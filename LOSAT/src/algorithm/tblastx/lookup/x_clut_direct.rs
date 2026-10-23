@@ -1366,7 +1366,13 @@ impl XFlatCompressedLookup {
     /// The scan of `x_seed_fused_compressed::x_scan_cells` (the rounds of the two-hit scan of a
     /// subject's one range, without the offset-pair array) on the flat table: calls
     /// `visit(subject_offset, hits)` for every cell found, with its slice. `cells` is scratch.
-    pub(crate) fn for_each_cell<V>(
+    ///
+    /// EXPERIMENT (LOSAT_X_BPSCANBF): with `BRANCH_FREE` the offsets are listed without a branch on
+    /// the presence bit, as `x_seed_fused::x_scan_cells_bf` lists them: every offset that reaches
+    /// `PV_TEST` is written at the list's end, and the list's length advances by the bit. The list
+    /// holds the same offsets and indices in the same order, so the calls are the same; `cells`
+    /// then reserves a place for every offset of the subject.
+    pub(crate) fn for_each_cell<const BRANCH_FREE: bool, V>(
         &self,
         subject: &[u8],
         subject_length: usize,
@@ -1430,6 +1436,13 @@ impl XFlatCompressedLookup {
         };
         let mut preshift = compressed_reciprocal_divide(index, recip);
 
+        // EXPERIMENT (LOSAT_X_BPSCANBF): a place for every offset from `s` to `s_last` (`s <= s_last
+        // + 1` here), written through `list`; `listed` of them are the list.
+        if BRANCH_FREE {
+            cells.reserve(s_last + 1 - s);
+        }
+        let list = cells.as_mut_ptr();
+        let mut listed = 0usize;
         while s <= s_last {
             let mut compressed_char = scaled_compress_table[usize::from(next_char)];
             next_char = byte_at(s + word_length);
@@ -1459,10 +1472,23 @@ impl XFlatCompressedLookup {
             preshift = compressed_reciprocal_divide(index, recip);
 
             // index = preshift + compressed_char >= 0: both terms are (from) non-negative letters.
-            if compressed_pv_test(pv, index as usize, pv_array_bts) {
+            if BRANCH_FREE {
+                // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
+                let ix = index as usize;
+                let bit = (pv[ix >> pv_array_bts] >> (ix & PV_ARRAY_MASK)) & 1;
+                // SAFETY: each offset tested adds at most one to `listed`, so with `s0` the offset
+                // at the reserve, `listed <= s - s0 < s_last + 1 - s0`: inside the reserve of the
+                // empty `cells`.
+                unsafe { list.add(listed).write((s as i32, index as u32)) };
+                listed += bit as usize;
+            } else if compressed_pv_test(pv, index as usize, pv_array_bts) {
                 cells.push((s as i32, index as u32));
             }
             s += 1;
+        }
+        if BRANCH_FREE {
+            // SAFETY: the first `listed` places were written above, within the reserve.
+            unsafe { cells.set_len(listed) };
         }
 
         let starts = &self.starts;
@@ -2184,10 +2210,23 @@ mod tests {
                     expected.get_or_insert(want);
                 }
                 let mut fused = Vec::new();
-                flat.for_each_cell(subject, length, &mut cells, |s, hits| {
+                flat.for_each_cell::<false, _>(subject, length, &mut cells, |s, hits| {
                     fused.extend(hits.iter().map(|&q| (s as u32, q as u32)));
                 });
                 assert_eq!(Some(fused), expected, "subject {n}: for_each_cell");
+                // LOSAT_X_BPSCANBF: the branch-free list, on the used scratch and on a new one.
+                for mut scratch in [std::mem::take(&mut cells), Vec::new()] {
+                    let mut fused = Vec::new();
+                    flat.for_each_cell::<true, _>(subject, length, &mut scratch, |s, hits| {
+                        fused.extend(hits.iter().map(|&q| (s as u32, q as u32)));
+                    });
+                    assert_eq!(
+                        Some(fused),
+                        expected,
+                        "subject {n}: branch-free for_each_cell"
+                    );
+                    cells = scratch;
+                }
             }
         }
     }

@@ -148,7 +148,11 @@ fn inputs() -> &'static (PathBuf, PathBuf) {
                 }
             })
             .collect();
-        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("blastp_restricted_gapped");
+        // One directory per process: nextest runs each test in a process of its own, and a
+        // process that wrote these files again while another one's search read them cut its input.
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join("blastp_restricted_gapped")
+            .join(std::process::id().to_string());
         std::fs::create_dir_all(&dir).expect("work directory");
         let files = (dir.join("query.faa"), dir.join("subject.faa"));
         std::fs::write(&files.0, fasta(&queries)).expect("query file");

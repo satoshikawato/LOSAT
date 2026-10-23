@@ -33,7 +33,7 @@ pub(crate) use x_lut_direct::{x_tbxlut_reach_stub, x_tbxlut_shadow_tables};
 // the comparison of its shadow mode (x_lut_direct.rs); no NCBI counterpart for the re-export
 // itself.
 pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table, XAaSpares};
-// EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the direct builder of the TBLASTX unit
+// EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
 // path's group tables (x_pair_lut.rs, a child module of x_lut_direct.rs), used by
 // tblastx/x_pair_par.rs.
 //
@@ -187,19 +187,16 @@ impl BlastAaLookupTable {
     }
 }
 
-// EXPERIMENT (LOSAT_X_LUTARENA): the per-cell chains of a thin backbone are
-// carved from a few large blocks owned by the backbone instead of being one
-// `malloc`/`realloc`/`free` each.
+// The per-cell chains of a thin backbone are carved from a few large blocks owned by the backbone
+// instead of being one `malloc`/`realloc`/`free` each.
 //
-// A lookup table for one query chunk makes tens of thousands of chains that
-// start at 8 `Int4` and double as they fill, and frees them all when the
-// final backbone has been written. Under WebAssembly threads the allocator
-// has one lock for all threads, and two threads building lookup tables spend
-// more time waiting for it than allocating. The arena hands out blocks of the
-// same sizes with the same contents (zeroed where `calloc`/`Vec::resize` zero
-// them) and reuses the block a chain leaves when it doubles, so every chain
-// holds exactly the integers it held before; only where the block lives
-// changes. Everything is released when the backbone is dropped, as before.
+// A lookup table for one query chunk makes tens of thousands of chains that start at 8 `Int4` and
+// double as they fill, and frees them all when the final backbone has been written. Under
+// WebAssembly threads the allocator has one lock for all threads, and two threads building lookup
+// tables spend more time waiting for it than allocating. The arena hands out blocks of the same
+// sizes with the same contents (zeroed where `calloc`/`Vec::resize` zero them) and reuses the
+// block a chain leaves when it doubles, so every chain holds exactly the integers a `Vec` chain
+// held; only where the block lives changes. Everything is released when the backbone is dropped.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:48-72
 // ```c
@@ -231,12 +228,7 @@ impl BlastAaLookupTable {
 // ```
 // NCBI frees each chain when it has been copied into the final backbone. The arena frees all its
 // blocks together when the backbone is dropped. Reuse of memory only.
-fn x_lut_arena() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_LUTARENA"))
-}
-
+//
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:52,67
 // ```c
 // chain = (Int4 *) malloc(chain_size * sizeof(Int4));
@@ -323,17 +315,14 @@ impl XChainArena {
 //     backbone[index] = chain;
 // ```
 // A chain is the C array: chain[0] = allocated size, chain[1] = number of hits, then the hits.
-// It is either a Vec (the reference path) or a block of the arena (LOSAT_X_LUTARENA).
+// It is a block of the arena of the backbone that holds it.
 /// One chain of a thin backbone: `chain[0]` = allocated ints, `chain[1]` =
-/// hits, then the hits (NCBI `Int4 *`).
-enum LookupChain {
-    Heap(Vec<i32>),
-    /// `1 << class` ints inside the arena of the backbone that holds this
-    /// chain. Only ever stored in that backbone's `cells`.
-    Pooled {
-        block: std::ptr::NonNull<i32>,
-        class: u8,
-    },
+/// hits, then the hits (NCBI `Int4 *`): `1 << class` ints inside the arena of
+/// the backbone that holds this chain. Only ever stored in that backbone's
+/// `cells`.
+struct LookupChain {
+    block: std::ptr::NonNull<i32>,
+    class: u8,
 }
 
 impl LookupChain {
@@ -347,19 +336,14 @@ impl LookupChain {
     // chain[1] = hits_in_chain;
     // backbone[index] = chain;
     // ```
-    // Dispatch point: with LOSAT_X_LUTARENA the new chain comes from the arena, otherwise from a
-    // Vec of 8 zeroed ints. Both have chain_size 8 and the same contents.
-    /// The 8-int chain of blast_lookup.c:50-56. NCBI `malloc`s it and sets `chain[0..2]`; main's
-    /// `vec![0; 8]` zeroes all 8 ints, and so does the arena block.
+    // The new chain comes from the arena: chain_size 8, all ints zero.
+    /// The 8-int chain of blast_lookup.c:50-56. NCBI `malloc`s it and sets `chain[0..2]`; the
+    /// arena block is zeroed in all 8 ints.
     fn x_zeroed8(arena: &mut XChainArena) -> Self {
-        if x_lut_arena() {
-            let block = arena.take(3);
-            // SAFETY: the block has 8 ints.
-            unsafe { std::ptr::write_bytes(block.as_ptr(), 0, 8) };
-            LookupChain::Pooled { block, class: 3 }
-        } else {
-            LookupChain::Heap(vec![0; 8])
-        }
+        let block = arena.take(3);
+        // SAFETY: the block has 8 ints.
+        unsafe { std::ptr::write_bytes(block.as_ptr(), 0, 8) };
+        LookupChain { block, class: 3 }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:65-72
@@ -371,29 +355,24 @@ impl LookupChain {
     //     backbone[index] = chain;
     //     chain[0] = chain_size;
     // ```
-    // Dispatch point: a Vec chain is resized as before; an arena chain is copied into a block of twice
-    // the size and the old block is given back. The first old_size ints are the same, the rest are zero.
+    // A chain is copied into a block of twice the size and the old block is given back. The
+    // first old_size ints are the same, the rest are zero.
     /// `Vec::resize(new_size, 0)` for a chain that doubles.
     fn x_resize(&mut self, new_size: usize, arena: &mut XChainArena) {
-        match self {
-            LookupChain::Heap(chain) => chain.resize(new_size, 0),
-            LookupChain::Pooled { block, class } => {
-                let old_size = 1usize << *class;
-                assert!(
-                    new_size == old_size * 2,
-                    "lookup chains double: {old_size} -> {new_size}"
-                );
-                let new_block = arena.take(*class + 1);
-                // SAFETY: both blocks are valid for their sizes and distinct.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(block.as_ptr(), new_block.as_ptr(), old_size);
-                    std::ptr::write_bytes(new_block.as_ptr().add(old_size), 0, old_size);
-                }
-                arena.give(*block, *class);
-                *block = new_block;
-                *class += 1;
-            }
+        let old_size = 1usize << self.class;
+        assert!(
+            new_size == old_size * 2,
+            "lookup chains double: {old_size} -> {new_size}"
+        );
+        let new_block = arena.take(self.class + 1);
+        // SAFETY: both blocks are valid for their sizes and distinct.
+        unsafe {
+            std::ptr::copy_nonoverlapping(self.block.as_ptr(), new_block.as_ptr(), old_size);
+            std::ptr::write_bytes(new_block.as_ptr().add(old_size), 0, old_size);
         }
+        arena.give(self.block, self.class);
+        self.block = new_block;
+        self.class += 1;
     }
 }
 
@@ -401,28 +380,17 @@ impl std::ops::Deref for LookupChain {
     type Target = [i32];
     #[inline(always)]
     fn deref(&self) -> &[i32] {
-        match self {
-            LookupChain::Heap(chain) => chain,
-            // SAFETY: the block has `1 << class` initialised ints, and the
-            // arena it lies in lives as long as the backbone this chain is
-            // borrowed from.
-            LookupChain::Pooled { block, class } => unsafe {
-                std::slice::from_raw_parts(block.as_ptr(), 1usize << *class)
-            },
-        }
+        // SAFETY: the block has `1 << class` initialised ints, and the arena it lies in lives as
+        // long as the backbone this chain is borrowed from.
+        unsafe { std::slice::from_raw_parts(self.block.as_ptr(), 1usize << self.class) }
     }
 }
 
 impl std::ops::DerefMut for LookupChain {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut [i32] {
-        match self {
-            LookupChain::Heap(chain) => chain,
-            // SAFETY: as in `deref`, and `&mut self` is the only access.
-            LookupChain::Pooled { block, class } => unsafe {
-                std::slice::from_raw_parts_mut(block.as_ptr(), 1usize << *class)
-            },
-        }
+        // SAFETY: as in `deref`, and `&mut self` is the only access.
+        unsafe { std::slice::from_raw_parts_mut(self.block.as_ptr(), 1usize << self.class) }
     }
 }
 
@@ -639,8 +607,8 @@ fn count_lookup_positions(lookup_segments: &[(i32, i32)], word_length: usize) ->
 // if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
 //    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
 // ```
-// prepare_lookup_query now calls x_prepare_lookup_query with x_with_karlin = true, which runs the
-// same code as before (dispatch point of LOSAT_X_LUTSPLIT).
+// prepare_lookup_query calls x_prepare_lookup_query with x_with_karlin = true: every context gets
+// its Karlin block.
 fn prepare_lookup_query(
     queries: &[Vec<QueryFrame>],
     ideal_params: KarlinParams,
@@ -662,14 +630,6 @@ fn prepare_lookup_query(
     )
 }
 
-// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_LUTSPLIT): `LOSAT_X_LUTSPLIT` set.
-pub(crate) fn x_lut_split() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_LUTSPLIT"))
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
 // ```c
 // Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
@@ -682,18 +642,18 @@ pub(crate) fn x_lut_split() -> bool {
 // NCBI computes the per-context Karlin blocks from the query composition, separately from the
 // lookup table (the table is built in lookup_wrap.c from the query and its lookup segments only).
 // This function runs the same preparation (prepare_lookup_query) and returns only the contexts.
-/// EXPERIMENT (LOSAT_X_LUTSPLIT): the contexts `build_ncbi_lookup_for_profile`
-/// returns, for a caller that drops the table. The table build only reads the
-/// contexts (their count and the end of the last one) and hands them back
-/// unchanged, so they are those of `prepare_lookup_query`. `None` when the
-/// switch is off or the build would print its diagnostics.
+/// The contexts `build_ncbi_lookup_for_profile` returns, for a caller that
+/// drops the table (graduated 2026-10-22, was `LOSAT_X_LUTSPLIT`). The table
+/// build only reads the contexts (their count and the end of the last one) and
+/// hands them back unchanged, so they are those of `prepare_lookup_query`.
+/// `None` when the build would print its diagnostics.
 pub(crate) fn x_lookup_contexts_for_profile(
     queries: &[Vec<QueryFrame>],
     check_ideal: bool,
     matrix: ScoringMatrix,
     word_length: usize,
 ) -> Option<Vec<QueryContext>> {
-    if !x_lut_split() || diagnostics_enabled() {
+    if diagnostics_enabled() {
         return None;
     }
     let bounds = if matrix == ScoringMatrix::Blosum62 {
@@ -727,19 +687,16 @@ pub(crate) fn x_lookup_contexts_for_profile(
 // threshold; it reads no Karlin parameter. This function skips the Karlin computation and builds
 // the same table (the contexts it fills carry default Karlin parameters, which the table build
 // does not read).
-/// EXPERIMENT (LOSAT_X_LUTSPLIT): the table `build_ncbi_lookup_for_profile`
-/// returns, for a caller that drops the contexts. The per-context Karlin
-/// parameters are the only part of the preparation the table does not read;
-/// they are left out. `None` when the switch is off.
+/// The table `build_ncbi_lookup_for_profile` returns, for a caller that drops
+/// the contexts (graduated 2026-10-22, was `LOSAT_X_LUTSPLIT`). The
+/// per-context Karlin parameters are the only part of the preparation the
+/// table does not read; they are left out.
 pub(crate) fn x_lookup_table_for_profile(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     matrix: ScoringMatrix,
     word_length: usize,
-) -> Option<BlastAaLookupTable> {
-    if !x_lut_split() {
-        return None;
-    }
+) -> BlastAaLookupTable {
     let bounds = if matrix == ScoringMatrix::Blosum62 {
         (-4, 11)
     } else {
@@ -755,7 +712,7 @@ pub(crate) fn x_lookup_table_for_profile(
         bounds,
         false,
     );
-    Some(build_lookup_from_prepared(prepared, threshold, matrix, word_length).0)
+    build_lookup_from_prepared(prepared, threshold, matrix, word_length).0
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803
@@ -826,8 +783,9 @@ fn x_context_karlin(
 //    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
 // ```
 // This is prepare_lookup_query with a flag: x_with_karlin = true runs the code of the reference
-// path unchanged (the Karlin computation of `x_context_karlin`); false skips it for LOSAT_X_LUTSPLIT
-// (and for `x_prepare_blosum62_lookup_query_in_pool`, which computes it on a pool).
+// path unchanged (the Karlin computation of `x_context_karlin`); false skips it (for
+// `x_lookup_table_for_profile` and for `x_prepare_blosum62_lookup_query_in_pool`, which computes it
+// on a pool).
 fn x_prepare_lookup_query(
     queries: &[Vec<QueryFrame>],
     ideal_params: KarlinParams,
@@ -871,7 +829,7 @@ fn x_prepare_lookup_query(
             // ```
             // The table build reads only the query, the lookup segments, the matrix and the threshold, so
             // the contexts can skip the Karlin parameters here.
-            // EXPERIMENT (LOSAT_X_LUTSPLIT): a caller that only wants the table.
+            // A caller that only wants the table (`x_lookup_table_for_profile`).
             if !x_with_karlin {
                 prepared.contexts.push(QueryContext {
                     q_idx: q_idx as u32,
@@ -1141,8 +1099,8 @@ fn blast_lookup_add_word_hit(
     //     backbone[index] = chain;
     //     chain[0] = chain_size;
     // ```
-    // Dispatch point: the chain is created and grown through x_zeroed8 and x_resize, which use the
-    // arena when LOSAT_X_LUTARENA is set. The statements that follow are the C ones.
+    // The chain is created and grown through x_zeroed8 and x_resize, which use the arena. The
+    // statements that follow are the C ones.
     let LookupBackboneChains { cells, arena } = backbone;
     let chain = cells[index].get_or_insert_with(|| {
         let mut chain = LookupChain::x_zeroed8(arena);
@@ -1693,7 +1651,7 @@ fn build_lookup_from_prepared(
     // ```c
     // exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
     // ```
-    // Same empty backbone as the C code; with LOSAT_X_LUTARENA its chains come from an arena.
+    // Same empty backbone as the C code; its chains come from an arena.
     let mut exact_backbone = LookupBackboneChains::new(backbone_size);
     build_stats.total_exact_positions = blast_lookup_index_query_exact_matches(
         &mut exact_backbone,
@@ -1739,7 +1697,7 @@ fn build_lookup_from_prepared(
     // lookup->thin_backbone =
     //     (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
     // ```
-    // Same empty thin backbone as the C code; with LOSAT_X_LUTARENA its chains come from an arena.
+    // Same empty thin backbone as the C code; its chains come from an arena.
     let mut thin_backbone = LookupBackboneChains::new(backbone_size);
     let mut counts: Vec<u32> = vec![0; backbone_size];
 

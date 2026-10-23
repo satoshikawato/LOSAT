@@ -8209,6 +8209,17 @@ fn run_resolved_in_pool(
 
     let window = args.window_size as i32;
     let word_size = lookup.word_length();
+    // EXPERIMENT (LOSAT_X_BPUNGAPSENT): this block made ready for the inlined two-hit extension of
+    // the fused loop (`x_ungapped_sent.rs`); None when the switch is off or a check fails.
+    let x_ungap_sent = super::x_ungapped_sent::XSentQuery::new(
+        &concatenated_query,
+        &x_dropoff_per_context,
+        word_size,
+        args.word_size,
+    );
+    if x_ungap_sent.is_none() && super::x_ungapped_sent::on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
+    }
     let offset_array_size = blastp_offset_array_size(lookup.longest_chain());
     let query_length = blastp_concatenated_query_length(&contexts);
     crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP")?;
@@ -8419,36 +8430,142 @@ fn run_resolved_in_pool(
             //         lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
             //     }
             // ```
-            match &lookup {
-                BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
-                    aa_lookup,
-                    subject_sequence,
-                    subject.aa_len,
-                    &mut scratch.diag_array,
-                    diag_mask,
-                    subject_diag_offset,
-                    window,
-                    word_size,
-                    x_candidate,
-                ),
-                BlastpRuntimeLookup::Compressed(compressed_lookup) => {
-                    super::x_seed_fused_compressed::x_scan_two_hit_compressed(
-                        compressed_lookup,
-                        subject_sequence,
-                        subject.aa_len,
-                        &mut scratch.diag_array,
-                        diag_mask,
-                        subject_diag_offset,
-                        window,
-                        word_size,
-                        x_candidate,
-                    )
+            // EXPERIMENT (LOSAT_X_BPUNGAPSENT / LOSAT_X_BPUNGAPSENTSHADOW): the closure above with the
+            // two-hit extension of `x_ungapped_sent.rs` inlined (word size 3, walks stopped by the
+            // sentinels), for the table of single letters, on a block and a subject that pass the
+            // path's checks; with the shadow variable the closure above's extension runs as well and
+            // the two results are compared. Each use of the macro is a closure type of its own, so the
+            // loops of the closure above keep their own instances.
+            macro_rules! x_candidate_sent {
+                ($sent_query:expr, $sent_subject:expr, $shadow:literal) => {
+                    |query_offset: i32,
+                     subject_offset: i32,
+                     last_hit: i32,
+                     diff: i32,
+                     diag_entry: &mut DiagStruct| {
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:551-570
+                        // (as in the closure above)
+                        let ctx_idx = x_context_table
+                            .as_ref()
+                            .and_then(|table| table.get(query_offset))
+                            .unwrap_or_else(|| {
+                                blastp_context_idx_for_query_offset_with_bounds(
+                                    &contexts,
+                                    context_lookup_bounds,
+                                    query_offset,
+                                )
+                            });
+                        let ctx = &contexts[ctx_idx];
+                        if query_offset - diff < ctx.frame_base {
+                            diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                            return;
+                        }
+                        let x_drop = x_dropoff_per_context[ctx_idx];
+                        let cutoff = word_cutoff_scores[ctx_idx];
+                        let s_left_off = usize::try_from(last_hit + word_size)
+                            .expect("NCBI BLAST two-hit seed boundary must be non-negative");
+                        let s_right_off = usize::try_from(subject_offset)
+                            .expect("NCBI BLAST two-hit subject offset must be non-negative");
+                        let q_right_off = usize::try_from(query_offset)
+                            .expect("NCBI BLAST two-hit query offset must be non-negative");
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1155
+                        // (`x_ungapped_sent::two_hit`)
+                        // SAFETY: x_drop is a context's X-drop, which `XSentQuery::new` checked.
+                        let extended = unsafe {
+                            super::x_ungapped_sent::two_hit(
+                                $sent_query,
+                                $sent_subject,
+                                s_left_off,
+                                s_right_off,
+                                q_right_off,
+                                x_drop,
+                            )
+                        };
+                        if $shadow {
+                            let expected = extend_two_hit_blosum62(
+                                &concatenated_query,
+                                subject_raw,
+                                s_left_off,
+                                s_right_off,
+                                q_right_off,
+                                x_drop,
+                                args.word_size,
+                            );
+                            assert_eq!(
+                                extended, expected,
+                                "[X_SHADOW] BPUNGAPSENT two-hit mismatch: s_left_off={s_left_off} s_right_off={s_right_off} q_right_off={q_right_off} dropoff={x_drop}"
+                            );
+                            super::x_ungapped_sent::count_shadow();
+                        }
+                        let Some(ungapped_hit) = extended else {
+                            return;
+                        };
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-588
+                        // (as in the closure above)
+                        if ungapped_hit.ungapped_data.score >= cutoff {
+                            blastp_save_init_hsp(
+                                &mut init_hsps,
+                                ungapped_hit.ungapped_data.q_start,
+                                ungapped_hit.ungapped_data.s_start,
+                                query_offset,
+                                subject_offset,
+                                ungapped_hit.ungapped_data.length,
+                                ungapped_hit.ungapped_data.score,
+                            );
+                        }
+                        if ungapped_hit.right_extend {
+                            diag_entry.set_flag(1);
+                            diag_entry.set_last_hit(
+                                ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,
+                            );
+                        } else {
+                            diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                        }
+                    }
+                };
+            }
+            let x_sent = match (&x_ungap_sent, &lookup) {
+                (Some(sent_query), BlastpRuntimeLookup::Aa(aa_lookup)) => {
+                    let sent_subject = super::x_ungapped_sent::XSentSubject::new(subject.aa_seq);
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", sent_subject.is_some());
+                    sent_subject.map(|sent_subject| (sent_query, sent_subject, aa_lookup))
                 }
-                // EXPERIMENT (LOSAT_X_BPCLUT): the same loop on the flat table, each cell read as one
-                // slice (`x_seed_fused_clut.rs`).
-                BlastpRuntimeLookup::CompressedFlat(flat_lookup) => {
-                    super::x_seed_fused_clut::x_scan_two_hit_compressed_flat(
-                        flat_lookup,
+                (Some(_), _) => {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
+                    None
+                }
+                (None, _) => None,
+            };
+            if let Some((sent_query, sent_subject, aa_lookup)) = x_sent {
+                if sent_query.shadow() {
+                    super::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate_sent!(sent_query, sent_subject, true),
+                    );
+                } else {
+                    super::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate_sent!(sent_query, sent_subject, false),
+                    );
+                }
+            } else {
+                match &lookup {
+                    BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
                         subject_sequence,
                         subject.aa_len,
                         &mut scratch.diag_array,
@@ -8457,7 +8574,35 @@ fn run_resolved_in_pool(
                         window,
                         word_size,
                         x_candidate,
-                    )
+                    ),
+                    BlastpRuntimeLookup::Compressed(compressed_lookup) => {
+                        super::x_seed_fused_compressed::x_scan_two_hit_compressed(
+                            compressed_lookup,
+                            subject_sequence,
+                            subject.aa_len,
+                            &mut scratch.diag_array,
+                            diag_mask,
+                            subject_diag_offset,
+                            window,
+                            word_size,
+                            x_candidate,
+                        )
+                    }
+                    // EXPERIMENT (LOSAT_X_BPCLUT): the same loop on the flat table, each cell read as one
+                    // slice (`x_seed_fused_clut.rs`).
+                    BlastpRuntimeLookup::CompressedFlat(flat_lookup) => {
+                        super::x_seed_fused_clut::x_scan_two_hit_compressed_flat(
+                            flat_lookup,
+                            subject_sequence,
+                            subject.aa_len,
+                            &mut scratch.diag_array,
+                            diag_mask,
+                            subject_diag_offset,
+                            window,
+                            word_size,
+                            x_candidate,
+                        )
+                    }
                 }
             }
         }
@@ -10018,16 +10163,15 @@ fn run_resolved_in_pool(
         (use_parallel_kappa_match_redo, use_parallel_kappa_redo)
     };
 
-    // EXPERIMENT (LOSAT_X_SEGSHARE): the query-parallel redo and the windows of `x_redo_par` share
-    // the masked ranges; the match-parallel redo shares none, and the one-thread loop shares none.
+    // Graduated 2026-10-22 (was `LOSAT_X_SEGSHARE`): the query-parallel redo and the windows of
+    // `x_redo_par` share the masked ranges; the match-parallel redo shares none, and the
+    // one-thread loop shares none.
     // The serial and the query-parallel redo loops solve the first Newton problems of the next
     // `X_NEWTON_LANES_MATCHES` matches ahead (Newton lanes); the match-parallel redo solves none.
-    if crate::algorithm::blastp::kappa::x_seg_share() != 0 {
-        crate::utils::xreach::x_reach!(
-            "LOSAT_X_SEGSHARE",
-            x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
-        );
-    }
+    crate::utils::xreach::x_reach!(
+        "LOSAT_X_SEGSHARE",
+        x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
+    );
     crate::utils::xreach::x_reach!(
         "LOSAT_X_NEWTONLANES",
         x_redo_par_run || !use_parallel_kappa_match_redo
@@ -10250,11 +10394,10 @@ fn run_resolved_in_pool(
             // Dispatch point: NCBI SEGs the subject range inside the per-match loop (omp for over
             // matches). Here the masked ranges are kept in one store for all queries, as the serial
             // redo already does. Reuse of an identical result only.
-            // EXPERIMENT (LOSAT_X_SEGSHARE): one store of masked subject
-            // ranges for all queries, as in the serial redo below.
-            let x_shared_ranges = (crate::algorithm::blastp::kappa::x_seg_share() != 0).then(|| {
-                std::sync::Arc::new(crate::algorithm::blastp::kappa::XSharedSubjectRanges::new())
-            });
+            // One store of masked subject ranges for all queries, as in the serial redo below.
+            let x_shared_ranges = Some(std::sync::Arc::new(
+                crate::algorithm::blastp::kappa::XSharedSubjectRanges::new(),
+            ));
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
             // ```c
             //                 if (BlastCompo_EarlyTermination(
@@ -10314,7 +10457,7 @@ fn run_resolved_in_pool(
                         let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
                         let mut kappa_preliminary_hits = Vec::new();
                         let mut kappa_gap_scratch = GapAlignScratch::new();
-                        // EXPERIMENT (LOSAT_X_SEGSHARE): see XSharedSubjectRanges.
+                        // See XSharedSubjectRanges.
                         let mut kappa_subject_range_cache =
                             BlastpKappaSubjectRangeCache::x_with_shared(x_shared_ranges.clone());
                         let mut redone_match =

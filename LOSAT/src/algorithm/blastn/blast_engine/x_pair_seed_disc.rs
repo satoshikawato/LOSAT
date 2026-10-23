@@ -3,7 +3,7 @@
 //! diagonal hash, with the subject scan cut into strips that the threads of the search pool
 //! scan, and the diagonal-hash fold done by the owner thread in the original pair order.
 //! The scheduling (`plan_strips`, `run_strips`) and the per-pair word step (`seed_of_pair`)
-//! are those of `LOSAT_X_PAIRPAR` in the parent module.
+//! are those of PAIRPAR in the parent module.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1624-1634,1673-1684
 //! ```c

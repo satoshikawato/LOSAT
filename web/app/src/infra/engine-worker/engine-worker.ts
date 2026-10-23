@@ -19,9 +19,9 @@ let generation = 0;
 let runtime: EngineRuntime | undefined;
 // Preparations and searches use the runtime one after another, in the order they came.
 let previous: Promise<unknown> = Promise.resolve();
-// The threads of the latest preparation that waits for its turn: newer ones replace it, and a
-// search drops it (the search prepares for itself).
-let pendingThreads: number | undefined;
+// The latest preparation that waits for its turn: newer ones replace it, and a search drops
+// it (the search prepares for itself).
+let pending: WorkerPrepare | undefined;
 
 function inTurn(work: () => Promise<unknown>): void {
   const turn = previous.then(work);
@@ -29,13 +29,13 @@ function inTurn(work: () => Promise<unknown>): void {
 }
 
 function queuePrepare(command: WorkerPrepare): void {
-  const queued = pendingThreads !== undefined;
-  pendingThreads = command.threads;
+  const queued = pending !== undefined;
+  pending = command;
   if (queued) return;
   inTurn(async () => {
-    const threads = pendingThreads;
-    pendingThreads = undefined;
-    if (threads !== undefined) await prepare(threads);
+    const latest = pending;
+    pending = undefined;
+    if (latest !== undefined) await prepare(latest.threads, latest.argv);
   });
 }
 
@@ -66,9 +66,9 @@ function toWorkerError(error: unknown): WorkerError {
   return { name: 'Error', message: String(error) };
 }
 
-async function prepare(threads: number): Promise<void> {
+async function prepare(threads: number, argv: readonly string[] | undefined): Promise<void> {
   try {
-    await runtime?.prepare(threads);
+    await runtime?.prepare(threads, argv);
   } catch {
     // The search that follows starts the runtime again and reports what fails.
   }
@@ -114,7 +114,7 @@ scope.onmessage = (event) => {
   const command = event.data;
   if (command.type === 'init') init(command);
   else if (command.type === 'run') {
-    pendingThreads = undefined;
+    pending = undefined;
     inTurn(() => run(command));
   } else if (command.type === 'prepare') queuePrepare(command);
   else if (__LOSAT_TEST_HOOKS__) test(command);

@@ -10,7 +10,7 @@
 //! and with the switch off and on at one, two and four threads, for blastp and blastp-fast, alone
 //! and with the block search of `LOSAT_X_BPQBLOCK`; a search with `-max_target_seqs 1`, where the
 //! early termination test ends matches; one query; the release of the preliminary lists
-//! (`LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`) and the per-worker SEG cache (`LOSAT_X_SEGSHARE=0`);
+//! (`LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`) and pairwise output;
 //! small windows (`LOSAT_X_BPREDOPARWINDOW=1`) that end inside queries and leave out the matches
 //! the test has ended before them, at two and eight threads; and the shadow mode
 //! (`LOSAT_X_BPREDOPARSHADOW`), also with small windows, ended matches and released lists; and the
@@ -67,7 +67,11 @@ fn one_query() -> &'static PathBuf {
     FILE.get_or_init(|| {
         let text = std::fs::read_to_string(fixture("MeenMJNV.faa")).expect("query fixture");
         let second = text[1..].find("\n>").map_or(text.len(), |at| at + 2);
-        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("blastp_redo_par");
+        // One directory per process: nextest runs each test in a process of its own, and a
+        // process that wrote these files again while another one's search read them cut its input.
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join("blastp_redo_par")
+            .join(std::process::id().to_string());
         std::fs::create_dir_all(&dir).expect("work directory");
         let file = dir.join("one_query.faa");
         std::fs::write(&file, &text[..second]).expect("query file");
@@ -336,15 +340,11 @@ fn early_termination_ends_the_matches_it_ends_in_the_one_thread_redo() {
 }
 
 #[test]
-fn released_lists_the_per_worker_seg_cache_and_pairwise_reports_are_unchanged() {
+fn released_lists_and_pairwise_reports_are_unchanged() {
     let query = fixture("MeenMJNV.faa");
     for (vars, args) in [
         (
             vec![("LOSAT_X_BPPFREE", "1"), ("LOSAT_X_BPPCOMPACT", "1")],
-            ["-evalue", "0.001", "-outfmt", "6"],
-        ),
-        (
-            vec![("LOSAT_X_SEGSHARE", "0")],
             ["-evalue", "0.001", "-outfmt", "6"],
         ),
         (vec![], ["-evalue", "0.001", "-outfmt", "0"]),

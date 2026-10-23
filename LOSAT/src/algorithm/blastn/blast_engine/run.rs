@@ -141,9 +141,9 @@ use crate::utils::dust::MaskedInterval;
 //
 //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
 // ```
-// EXPERIMENT (LOSAT_X_PAIRPAR): the one-hit seed stage of one subject chunk scanned in strips
-// by the pool threads and folded in scan order by the owner (a child module, so that it uses
-// the private types and kernels of this file without changing them).
+// EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the one-hit seed stage of one subject
+// chunk scanned in strips by the pool threads and folded in scan order by the owner (a child
+// module, so that it uses the private types and kernels of this file without changing them).
 #[path = "x_pair_seed.rs"]
 mod x_pair_seed;
 
@@ -7323,8 +7323,8 @@ fn search(
             batching,
         )
     });
-    // No NCBI counterpart: the summary line of LOSAT_X_PAIRPARSHADOW (and the LOSAT_X_PAIRPAR
-    // counters with LOSAT_TIMING); nothing without those switches.
+    // No NCBI counterpart: the PAIRPAR counters with LOSAT_TIMING (and the lines of the dc and Na
+    // shadows); nothing without those variables.
     x_pair_seed::summary();
     // No NCBI counterpart: the summary line of LOSAT_X_DIAGLVSHADOW; nothing without it.
     x_diag_lv::summary();
@@ -11463,12 +11463,11 @@ fn search_query_batch(
                     //                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
                     //     }
                     // ```
-                    // Dispatch point of LOSAT_X_PAIRPAR: `x_pair_seed::run` runs this block (scan,
+                    // Dispatch point of PAIRPAR: `x_pair_seed::run` runs this block (scan,
                     // word extension, diagonal hash, ungapped extension; one-hit diagonal-hash
                     // scope only) with the subject scan in strips on the pool threads and the
                     // pairs folded by this thread in the scan order; `continue` ends the
-                    // one-iteration strand loop. Otherwise (and with LOSAT_X_PAIRPARSHADOW) the
-                    // code below runs.
+                    // one-iteration strand loop. Otherwise the code below runs.
                     if x_pair_seed::run(
                         &x_pair_seed::Inputs {
                             two_stage,
@@ -14108,8 +14107,8 @@ fn search_query_batch(
             // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
             // compare equal keep the order in which they were saved. `sort_by`
             // is stable too.
-            // Dispatch point of LOSAT_X_PAIRPARSHADOW (and of the dc shadows,
-            // LOSAT_X_PAIRPARDISCSHADOW and LOSAT_X_PAIRPARDISCARRSHADOW): the hit list and the
+            // Dispatch point of the strips shadows (LOSAT_X_PAIRPARDISCSHADOW,
+            // LOSAT_X_PAIRPARNASHADOW and LOSAT_X_PAIRPARDISCARRSHADOW): the hit list and the
             // diagonal hash (or array) of the code above against those `x_pair_seed::run`
             // computed for this chunk.
             x_pair_seed::shadow_check(

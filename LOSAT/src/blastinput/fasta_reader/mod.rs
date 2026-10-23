@@ -217,6 +217,14 @@ impl FastaRecord {
             warnings: Vec::new(),
         }
     }
+
+    /// The record `cut` makes, in place: the letters before `from` and from `to_exclusive` on are
+    /// dropped (the room of the whole letters stays until the sequence is replaced).
+    pub fn cut_in_place(&mut self, from: usize, to_exclusive: usize) {
+        self.sequence.truncate(to_exclusive);
+        self.sequence.drain(..from);
+        self.warnings = Vec::new();
+    }
 }
 
 /// A record as the programs use it: its residues, the record cut to a range, and its title

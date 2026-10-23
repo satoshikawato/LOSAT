@@ -1,5 +1,6 @@
-//! EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the six translated frames of a
-//! TBLASTN subject read from tables, as NCBI makes them from the compressed subject.
+//! The six translated frames of a TBLASTN subject read from tables, as NCBI makes them from the
+//! compressed subject (graduated 2026-10-22: `LOSAT_X_TBNXLATE` and `LOSAT_X_TBNXLATESHADOW` are
+//! gone, this is the only translation).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1071-1074,1080-1090
 //! ```c
@@ -21,22 +22,11 @@
 //!                   nucl_length, nucl_seq, frame, translation_buffer+offset);
 //! ```
 //! The preliminary search reads the subject in ncbi2na, so `BLAST_GetAllTranslations` takes this
-//! branch: one table of 64 residues per strand and one table read per codon. The reference path
-//! of LOSAT (`resolve_local_subject_ncbi2na`, then `tblastx::translation::generate_frames`)
-//! reaches the same residues through letters: the subject as ncbi4na, as ncbi2na, as "ACGT", its
-//! reverse complement, and `GeneticCode::get` per codon. With `LOSAT_X_TBNXLATE` the subject is
-//! turned into ncbi2na in one pass and the frames are read from the two tables. The tables are
-//! filled from the reference path's own functions, so every residue is the reference's by
-//! construction; the ambiguous letters draw from the same generator with the same seed in the
-//! same order.
-//!
-//! `LOSAT_X_TBNXLATE` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. `LOSAT_X_TBNXLATESHADOW` is not: it counts when set to
-//! any value and wins over the switch. They act where the subject plans of the unit path are made
-//! (`search_seed::x_scan_plan`, `LOSAT_X_TBNPAR`, on by default); the reference loop that
-//! searches a subject without that switch translates it itself and reads neither variable.
-//! `LOSAT_X_TBNXLATESHADOW` makes both translations for every such plan and stops the search
-//! if a frame, a unit or an error differs.
+//! branch: one table of 64 residues per strand and one table read per codon. The subject is turned
+//! into ncbi2na in one pass and the frames are read from the two tables. The tables are filled
+//! from `GeneticCode::get` and `aa_char_to_ncbistdaa`, so every residue is the one the letter-wise
+//! translation of `tblastx::translation::generate_frames` gives; the ambiguous letters draw from
+//! the same generator with the same seed in the same order (`resolve_local_subject_ncbi2na`).
 //!
 //! A packed subject (`LOSAT_X_TBNSTORE`, every `-db` sequence) is translated from its packed
 //! bytes (`x_packed_frames`), 32 codons of a phase at a time with AVX2 (`LOSAT_X_TBNXLATESIMD`,
@@ -54,73 +44,18 @@ use anyhow::{bail, Result};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
-/// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): which translation makes a subject
-/// plan.
-// No NCBI counterpart: names the LOSAT code path; it does not change any value NCBI computes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum XTranslate {
-    /// The reference path.
-    Reference,
-    /// The tables.
-    Tables,
-    /// Both; the search stops if they differ.
-    Shadow,
-}
-
-// No NCBI counterpart: reads the LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW variables once; it
-// does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): `LOSAT_X_TBNXLATE` is a strict-set
-/// switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set); the shadow counts when
-/// set to any value and wins.
-pub(super) fn x_translate() -> XTranslate {
-    static MODE: OnceLock<XTranslate> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_TBNXLATESHADOW").is_some() {
-            XTranslate::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_TBNXLATE") {
-            XTranslate::Tables
-        } else {
-            XTranslate::Reference
-        }
-    })
-}
-
-// No NCBI counterpart: counters for the shadow summary and LOSAT_X_STATS that tell which
-// translation ran; they do not change any value NCBI computes.
-/// Subject plans made from the tables (in shadow mode the table half of each comparison).
-static TABLE_PLANS: AtomicU64 = AtomicU64::new(0);
-/// Shadow mode: the subjects whose two plans were compared, the translated residues in them
-/// (sentinels included), and the subjects that both translations refused with the same error.
-static SHADOW_PLANS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_RESIDUES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_ERRORS: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart: counter for LOSAT_X_STATS that tells how the packed subjects were
+// translated; it does not change any value NCBI computes.
 /// The codons of packed subjects read by the vector loop (`[0]`) and by the word loop or one at
 /// a time (`[1]`).
 static PACKED_CODONS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 
-/// The summary lines (printed by `main` at exit): the shadow summaries (`LOSAT_X_TBNKEEPFEWSHADOW`
-/// and this one), and with LOSAT_X_STATS the number of subject plans made from the tables.
+/// The summary lines (printed by `main` at exit): the `LOSAT_X_TBNKEEPFEWSHADOW` summary, and with
+/// LOSAT_X_STATS the codons of packed subjects read by the vector loop.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
     super::search_seed::x_keep_few_print_summary();
-    if x_translate() == XTranslate::Shadow {
-        let plans = SHADOW_PLANS.load(Ordering::Relaxed);
-        let errors = SHADOW_ERRORS.load(Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] TBNXLATE plans_compared={plans} residues_compared={} errors_compared={errors} ({})",
-            SHADOW_RESIDUES.load(Ordering::Relaxed),
-            if plans + errors == 0 {
-                "nothing compared: no subject plan of the unit path was made"
-            } else {
-                "frames, units and errors identical"
-            }
-        );
-    }
     if std::env::var_os("LOSAT_X_STATS").is_some() {
-        eprintln!(
-            "[X_STATS] TBNXLATE table_plans={}",
-            TABLE_PLANS.load(Ordering::Relaxed)
-        );
         let [vector, scalar] = PACKED_CODONS
             .each_ref()
             .map(|codons| codons.load(Ordering::Relaxed));
@@ -154,7 +89,7 @@ const X_AMBIGUOUS: u8 = 0x10;
 // value of `A`, `C`, `G`, `T` (either case), the flagged ncbi4na value of a gap or an ambiguous
 // letter, or `X_NOT_A_LETTER`. It is filled from the reference path's own
 // `iupacna_to_ncbi4na`, with the reference path's rule for `U`.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): what a subject byte is, in one read.
+/// What a subject byte is, in one read.
 fn x_letter_table() -> &'static [u8; 256] {
     static TABLE: OnceLock<[u8; 256]> = OnceLock::new();
     TABLE.get_or_init(|| {
@@ -205,7 +140,7 @@ fn x_letter_table() -> &'static [u8; 256] {
 // ```
 // One draw per gap or ambiguous letter: two bits of it for a gap or `N`, otherwise the set bit
 // of the ncbi4na value that the draw picks.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): the ncbi2na value drawn for a gap or an ambiguous letter
+/// The ncbi2na value drawn for a gap or an ambiguous letter
 /// with the ncbi4na value `mask`.
 fn x_draw_base(mask: u8, random: &mut NcbiRandom) -> u8 {
     if mask == 0 || mask == 0x0F {
@@ -254,7 +189,7 @@ fn x_draw_base(mask: u8, random: &mut NcbiRandom) -> u8 {
 // every letter before its first draw; this loop may have drawn for the letters before the
 // byte it stops at. The error is the same one, for the first such byte of the subject, and
 // the draws made before it are dropped with the generator, which belongs to this call.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): `resolve_local_subject_ncbi2na` as ncbi2na values (0 A, 1 C,
+/// `resolve_local_subject_ncbi2na` as ncbi2na values (0 A, 1 C,
 /// 2 G, 3 T) instead of letters.
 fn x_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
     let length = u32::try_from(subject.len())?;
@@ -278,7 +213,7 @@ fn x_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
     Ok(ncbi2na)
 }
 
-/// EXPERIMENT (LOSAT_X_TBNXLATE): the residue (ncbistdaa) of every codon of one genetic code,
+/// The residue (ncbistdaa) of every codon of one genetic code,
 /// by the three ncbi2na values of the plus strand in sequence order.
 // No NCBI counterpart for the type: the two arrays are NCBI's `translation_table` and
 // `translation_table_rc` (see `x_codon_tables`).
@@ -320,7 +255,7 @@ struct XCodonTables {
 // gives for that codon as letters (`GeneticCode::get`, then `aa_char_to_ncbistdaa`, the two
 // calls of `tblastx::translation::codon_to_aa_ncbistdaa`), so a table read returns the
 // reference path's residue. The tables of a genetic code are made once per process.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): the two codon tables of the genetic code `db_gencode`.
+/// The two codon tables of the genetic code `db_gencode`.
 fn x_codon_tables(db_gencode: u8) -> Result<&'static XCodonTables> {
     static TABLES: [OnceLock<XCodonTables>; 256] = [const { OnceLock::new() }; 256];
     let cell = &TABLES[db_gencode as usize];
@@ -360,7 +295,7 @@ fn x_codon_tables(db_gencode: u8) -> Result<&'static XCodonTables> {
 // ```
 // The index of three ncbi2na values in a codon table. The values are below 4, so the mask
 // changes nothing; it tells the compiler that the index is below 64.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): where a codon is in a table of `XCodonTables`.
+/// Where a codon is in a table of `XCodonTables`.
 #[inline(always)]
 fn x_codon_index(codon: &[u8]) -> usize {
     (((codon[0] as usize) << 4) | ((codon[1] as usize) << 2) | (codon[2] as usize)) & 63
@@ -399,7 +334,7 @@ fn x_codon_index(codon: &[u8]) -> usize {
 // subject and its reverse complement: frame `i + 1` holds the codons of `seq[i..]`, frame
 // `-(i + 1)` those of `revcomp(seq)[i..]`, which are the plus-strand triplets of
 // `seq[..len - i]` counted from its end.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): `generate_frames` from ncbi2na values and the codon tables.
+/// The frames `generate_frames` gives, made from ncbi2na values and the codon tables.
 fn x_generate_frames(ncbi2na: &[u8], tables: &XCodonTables) -> Vec<QueryFrame> {
     let seq_len = ncbi2na.len();
     let mut frames = Vec::with_capacity(6);
@@ -441,7 +376,7 @@ fn x_generate_frames(ncbi2na: &[u8], tables: &XCodonTables) -> Vec<QueryFrame> {
 // ```
 // One translated frame: the sentinel, the residues, the sentinel, and the fields that
 // `generate_frames` gives a frame (`translate_sequence` for the bytes and the length).
-/// EXPERIMENT (LOSAT_X_TBNXLATE): a frame of `aa_len` residues.
+/// A frame of `aa_len` residues.
 #[inline(always)]
 fn x_frame(
     frame: i8,
@@ -470,10 +405,10 @@ fn x_frame(
 //                                      subject->gen_code_string, &translation_buffer,
 //                                      &frame_offsets, NULL);
 // ```
-// The subject plan as the reference closure of `x_scan_plan` makes it, with the frames from the
-// tables. The chunks and scan ranges of the frames come from the same function as there
+// The subject plan as `x_scan_plan` makes it, with the frames from the tables. The chunks and
+// scan ranges of the frames come from the same function as there
 // (`translated_chunk_scan_ranges`), in the same order.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): the plan of one subject from the tables.
+/// The plan of one subject from the tables.
 fn x_table_plan(subject: &[u8], db_gencode: u8, mask_lowercase: bool) -> Result<XSubjectPlan> {
     let tables = x_codon_tables(db_gencode)?;
     let ncbi2na = x_subject_ncbi2na(subject)?;
@@ -497,42 +432,13 @@ fn x_table_plan(subject: &[u8], db_gencode: u8, mask_lowercase: bool) -> Result<
             units.push((index, chunk, ranges));
         }
     }
-    TABLE_PLANS.fetch_add(1, Ordering::Relaxed);
     Ok(XSubjectPlan { frames, units })
 }
 
-// No NCBI counterpart: the comparison of the shadow mode; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_TBNXLATESHADOW): what differs between the plan from the tables and the
-/// reference plan of one subject, `None` when nothing does. Two errors are the same when their
-/// texts are.
-fn x_plan_difference(
-    tables: &Result<XSubjectPlan>,
-    reference: &Result<Arc<XSubjectPlan>>,
-) -> Option<String> {
-    let (tables, reference) = match (tables, reference) {
-        (Ok(tables), Ok(reference)) => (tables, reference),
-        (Err(tables), Err(reference)) => {
-            let (tables, reference) = (format!("{tables:#}"), format!("{reference:#}"));
-            return (tables != reference)
-                .then(|| format!("error \"{tables}\" for the reference's \"{reference}\""));
-        }
-        (Ok(_), Err(reference)) => {
-            return Some(format!(
-                "a plan for the reference's error \"{reference:#}\""
-            ))
-        }
-        (Err(tables), Ok(_)) => {
-            return Some(format!("error \"{tables:#}\" for a plan of the reference"))
-        }
-    };
-    x_plan_fields_difference(tables, reference)
-}
-
-// No NCBI counterpart: the comparison of two plans of one subject for the shadow modes; it does
+// No NCBI counterpart: the comparison of two plans of one subject for the shadow mode; it does
 // not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNXLATESHADOW, LOSAT_X_TBNKEEPFEWSHADOW): what differs between two plans
-/// of one subject, `None` when nothing does.
+/// EXPERIMENT (LOSAT_X_TBNKEEPFEWSHADOW): what differs between two plans of one subject, `None`
+/// when nothing does.
 pub(super) fn x_plan_fields_difference(
     tables: &XSubjectPlan,
     reference: &XSubjectPlan,
@@ -600,42 +506,14 @@ pub(super) fn x_plan_fields_difference(
 //                                      subject->gen_code_string, &translation_buffer,
 //                                      &frame_offsets, NULL);
 // ```
-// Dispatch point: how the translation of one subject is made. `Reference`: the closure of
-// `x_scan_plan`, as before. `Tables`: `x_table_plan`. `Shadow`: both, and the search stops if a
-// frame, a unit or an error differs; the plan from the tables is the one searched.
-/// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the plan of one subject.
+// The translation of one subject is made from the tables (`x_table_plan`).
+/// The plan of one subject.
 pub(super) fn x_subject_plan(
-    mode: XTranslate,
     subject: &[u8],
     db_gencode: u8,
     mask_lowercase: bool,
-    reference: impl Fn() -> Result<Arc<XSubjectPlan>>,
 ) -> Result<Arc<XSubjectPlan>> {
-    match mode {
-        XTranslate::Reference => reference(),
-        XTranslate::Tables => x_table_plan(subject, db_gencode, mask_lowercase).map(Arc::new),
-        XTranslate::Shadow => {
-            let tables = x_table_plan(subject, db_gencode, mask_lowercase);
-            let reference = reference();
-            if let Some(difference) = x_plan_difference(&tables, &reference) {
-                panic!(
-                    "LOSAT_X_TBNXLATESHADOW: the subject translation from the tables differs from the reference one (subject of {} bases, genetic code {db_gencode}): {difference}",
-                    subject.len()
-                );
-            }
-            match &tables {
-                Ok(plan) => {
-                    SHADOW_PLANS.fetch_add(1, Ordering::Relaxed);
-                    let residues: usize = plan.frames.iter().map(|frame| frame.aa_seq.len()).sum();
-                    SHADOW_RESIDUES.fetch_add(residues as u64, Ordering::Relaxed);
-                }
-                Err(_) => {
-                    SHADOW_ERRORS.fetch_add(1, Ordering::Relaxed);
-                }
-            }
-            tables.map(Arc::new)
-        }
-    }
+    x_table_plan(subject, db_gencode, mask_lowercase).map(Arc::new)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058,1063-1064
@@ -1082,40 +960,13 @@ fn x_packed_plan(
 //                                      subject->gen_code_string, &translation_buffer,
 //                                      &frame_offsets, NULL);
 // ```
-// Dispatch point: a packed subject is translated from its codes (`x_packed_plan`) whichever
-// translation the variables select, since the reference path reads letters. With
-// `LOSAT_X_TBNXLATESHADOW` the letters the reference path reads (the resolved bases) are made
-// too and the search stops if the two plans differ.
-/// EXPERIMENT (LOSAT_X_TBNSTORE): the plan of one packed subject; `reference` makes the plan of
-/// the letters it is given.
+// A packed subject is translated from its codes (`x_packed_plan`).
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the plan of one packed subject.
 pub(super) fn x_packed_subject_plan(
-    mode: XTranslate,
     store: &crate::sequence::packed_subject::PackedNucleotide,
     db_gencode: u8,
-    reference: impl Fn(&[u8]) -> Result<Arc<XSubjectPlan>>,
 ) -> Result<Arc<XSubjectPlan>> {
-    let packed = x_packed_plan(store, db_gencode);
-    if mode == XTranslate::Shadow {
-        let mut letters = Vec::new();
-        store.resolved_letters_into(&mut letters);
-        if let Some(difference) = x_plan_difference(&packed, &reference(&letters)) {
-            panic!(
-                "LOSAT_X_TBNXLATESHADOW: the subject translation from the packed subject differs from the reference one (subject of {} bases, genetic code {db_gencode}): {difference}",
-                store.len()
-            );
-        }
-        match &packed {
-            Ok(plan) => {
-                SHADOW_PLANS.fetch_add(1, Ordering::Relaxed);
-                let residues: usize = plan.frames.iter().map(|frame| frame.aa_seq.len()).sum();
-                SHADOW_RESIDUES.fetch_add(residues as u64, Ordering::Relaxed);
-            }
-            Err(_) => {
-                SHADOW_ERRORS.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-    }
-    packed.map(Arc::new)
+    x_packed_plan(store, db_gencode).map(Arc::new)
 }
 
 #[cfg(test)]
@@ -1136,9 +987,9 @@ mod tests {
         codes
     }
 
-    /// The reference plan of one subject: a copy of the reference closure of `x_scan_plan`.
-    /// `x_table_plans_are_the_reference_plans` compares it with what `x_scan_plan` itself
-    /// gives for every subject it takes, so the copy cannot drift from that closure.
+    /// The reference plan of one subject: the letter-wise translation of
+    /// `tblastx::translation::generate_frames` (after `resolve_local_subject_ncbi2na`), which the
+    /// tables must reproduce.
     fn reference_plan(
         subject: &[u8],
         db_gencode: u8,
@@ -1165,6 +1016,34 @@ mod tests {
             }
         }
         Ok(Arc::new(XSubjectPlan { frames, units }))
+    }
+
+    // No NCBI counterpart: the comparison of two plans for the tests; it computes no value NCBI
+    // computes.
+    /// What differs between the plan from the tables and the plan of the letter-wise reference
+    /// (`reference_plan`) of one subject, `None` when nothing does. Two errors are the same when
+    /// their texts are.
+    fn x_plan_difference(
+        tables: &Result<XSubjectPlan>,
+        reference: &Result<Arc<XSubjectPlan>>,
+    ) -> Option<String> {
+        let (tables, reference) = match (tables, reference) {
+            (Ok(tables), Ok(reference)) => (tables, reference),
+            (Err(tables), Err(reference)) => {
+                let (tables, reference) = (format!("{tables:#}"), format!("{reference:#}"));
+                return (tables != reference)
+                    .then(|| format!("error \"{tables}\" for the reference's \"{reference}\""));
+            }
+            (Ok(_), Err(reference)) => {
+                return Some(format!(
+                    "a plan for the reference's error \"{reference:#}\""
+                ))
+            }
+            (Err(tables), Ok(_)) => {
+                return Some(format!("error \"{tables:#}\" for a plan of the reference"))
+            }
+        };
+        x_plan_fields_difference(tables, reference)
     }
 
     /// `length` letters of `alphabet`, drawn by a fixed linear congruential sequence.
@@ -1351,7 +1230,7 @@ mod tests {
         let mut compared = 0usize;
         let mut residues = 0usize;
         let mut scan_plans = 0usize;
-        // One lookup table for every call of `x_scan_plan` (as `LOSAT_X_TBNQSIDE` shares it).
+        // One lookup table for every call of `x_scan_plan` (as `XQuerySide` shares it).
         let query: &[u8] = b"MKVLAAGIVGLLLAQWSTRE";
         let lookup = OnceLock::new();
         for (which, alphabet) in alphabets.iter().enumerate() {
@@ -1376,8 +1255,7 @@ mod tests {
                         assert_eq!(plan.frames.len(), 2 * length.saturating_sub(2).min(3));
                         residues += plan.frames.iter().map(|f| f.aa_len).sum::<usize>();
                         compared += 1;
-                        // The plan `x_scan_plan` makes (by its reference closure unless the
-                        // test run has one of the variables set) is the copy's too.
+                        // The plan `x_scan_plan` makes is the reference's too.
                         let scan = x_scan_plan(
                             &[query],
                             crate::sequence::packed_subject::SubjectNt::Letters(&subject),
@@ -1387,7 +1265,7 @@ mod tests {
                             mask_lowercase,
                             ScoringMatrix::Blosum62,
                             3,
-                            Some(&lookup),
+                            &lookup,
                             None,
                         )
                         .unwrap();
@@ -1446,24 +1324,17 @@ mod tests {
     //                                      subject->gen_code_string, &translation_buffer,
     //                                      &frame_offsets, NULL);
     // ```
-    // The three ways of `x_subject_plan` give one plan, and `x_scan_plan` (whichever way the
-    // environment of the test run selects) gives it too. A subject with a byte that is no
-    // letter gives the reference path's error in all three.
+    // `x_subject_plan` gives the reference plan, and `x_scan_plan` gives it too. A subject with a
+    // byte that is no letter gives the reference path's error.
     #[test]
-    fn x_subject_plans_agree_in_every_mode_and_with_the_scan_plan() {
+    fn x_subject_plans_agree_with_the_reference_and_the_scan_plan() {
         let subject = letters(b"ACGTACGTACGTacgtnRY", 3_001, 11);
+        let lookup = OnceLock::new();
         for (db_gencode, mask_lowercase) in [(1, false), (1, true), (4, true), (11, false)] {
-            let reference = || reference_plan(&subject, db_gencode, mask_lowercase);
-            let expected = reference();
-            for mode in [
-                XTranslate::Reference,
-                XTranslate::Tables,
-                XTranslate::Shadow,
-            ] {
-                let plan = x_subject_plan(mode, &subject, db_gencode, mask_lowercase, reference)
-                    .map(|plan| Arc::try_unwrap(plan).ok().expect("one owner"));
-                assert_eq!(x_plan_difference(&plan, &expected), None, "{mode:?}");
-            }
+            let expected = reference_plan(&subject, db_gencode, mask_lowercase);
+            let plan = x_subject_plan(&subject, db_gencode, mask_lowercase)
+                .map(|plan| Arc::try_unwrap(plan).ok().expect("one owner"));
+            assert_eq!(x_plan_difference(&plan, &expected), None);
             let query: &[u8] = b"MKVLAAGIVGLLLAQWSTRE";
             let scan = x_scan_plan(
                 &[query],
@@ -1474,7 +1345,7 @@ mod tests {
                 mask_lowercase,
                 ScoringMatrix::Blosum62,
                 3,
-                None,
+                &lookup,
                 None,
             )
             .unwrap()
@@ -1484,22 +1355,16 @@ mod tests {
         }
         let mut bad = subject.clone();
         bad[1_500] = b'u';
-        let reference = || reference_plan(&bad, 1, false);
-        let expected = reference().err().expect("no letter").to_string();
+        let expected = reference_plan(&bad, 1, false)
+            .err()
+            .expect("no letter")
+            .to_string();
         assert_eq!(expected, "TBLASTN subject base 'u' is not implemented");
-        for mode in [
-            XTranslate::Reference,
-            XTranslate::Tables,
-            XTranslate::Shadow,
-        ] {
-            let error = x_subject_plan(mode, &bad, 1, false, reference)
-                .err()
-                .expect("no letter");
-            assert_eq!(error.to_string(), expected, "{mode:?}");
-        }
+        let error = x_subject_plan(&bad, 1, false).err().expect("no letter");
+        assert_eq!(error.to_string(), expected);
     }
 
-    // No NCBI counterpart: the comparison of the shadow mode. It must see a changed residue, a
+    // No NCBI counterpart: the comparison helper of these tests. It must see a changed residue, a
     // changed field of a frame, a missing frame, changed units and a different error.
     #[test]
     fn x_plan_difference_sees_every_part_of_a_plan() {
@@ -1566,7 +1431,7 @@ mod tests {
     // masking: every length from 0 to 40 bases, lengths around the blocks of `x_packed_frames`
     // (every remainder of a block and of a frame), of the four bases, with lowercase runs, of
     // every IUPAC letter with gaps, and of `N` only; for every genetic code on the long subjects.
-    // In every mode of the variables, and as `x_scan_plan` makes it from the store.
+    // And as `x_scan_plan` makes it from the store.
     #[test]
     fn x_packed_plans_are_the_reference_plans() {
         use crate::sequence::packed_subject::{PackedNucleotide, SubjectNt};
@@ -1606,17 +1471,6 @@ mod tests {
                     if db_gencode != 11 {
                         continue;
                     }
-                    for mode in [
-                        XTranslate::Reference,
-                        XTranslate::Tables,
-                        XTranslate::Shadow,
-                    ] {
-                        let plan = x_packed_subject_plan(mode, &store, db_gencode, |letters| {
-                            reference_plan(letters, db_gencode, false)
-                        })
-                        .map(|plan| Arc::try_unwrap(plan).ok().expect("one owner"));
-                        assert_eq!(x_plan_difference(&plan, &reference), None, "{mode:?}");
-                    }
                     let scan = x_scan_plan(
                         &[query],
                         SubjectNt::Packed(&store),
@@ -1626,7 +1480,7 @@ mod tests {
                         false,
                         ScoringMatrix::Blosum62,
                         3,
-                        Some(&lookup),
+                        &lookup,
                         None,
                     )
                     .unwrap();
@@ -1653,7 +1507,7 @@ mod tests {
                 mask_lowercase,
                 ScoringMatrix::Blosum62,
                 3,
-                Some(&lookup),
+                &lookup,
                 None,
             )
         };
@@ -1721,36 +1575,6 @@ mod tests {
         if x_avx2_available() {
             assert!(vector_codons > 30_000, "{vector_codons}");
         }
-    }
-
-    // No NCBI counterpart: the shadow mode stops the search when the plan of a packed subject
-    // differs from the reference plan of its letters.
-    #[test]
-    #[should_panic(
-        expected = "LOSAT_X_TBNXLATESHADOW: the subject translation from the packed subject differs"
-    )]
-    fn x_shadow_mode_stops_on_a_difference_of_a_packed_plan() {
-        let subject = letters(b"ACGT", 300, 5);
-        let other = letters(b"ACGT", 300, 6);
-        let store =
-            crate::sequence::packed_subject::PackedNucleotide::from_subject_letters(&subject)
-                .unwrap();
-        let _ = x_packed_subject_plan(XTranslate::Shadow, &store, 1, |_| {
-            reference_plan(&other, 1, false)
-        });
-    }
-
-    // No NCBI counterpart: the shadow mode stops the search when the two plans differ.
-    #[test]
-    #[should_panic(
-        expected = "LOSAT_X_TBNXLATESHADOW: the subject translation from the tables differs"
-    )]
-    fn x_shadow_mode_stops_on_a_difference() {
-        let subject = letters(b"ACGT", 300, 5);
-        let other = letters(b"ACGT", 300, 6);
-        let _ = x_subject_plan(XTranslate::Shadow, &subject, 1, false, || {
-            reference_plan(&other, 1, false)
-        });
     }
 
     // No NCBI counterpart: test of LOSAT_X_TBNFRAMEREUSE; it does not change any value NCBI computes.

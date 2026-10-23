@@ -301,23 +301,27 @@ pub fn cut_subjects<R: InputRecord>(
     let mut cut_records = Vec::with_capacity(records.len());
     let mut placements = Vec::with_capacity(records.len());
     for record in records {
-        let length = record.seq().len();
-        let (from, to_exclusive) = match record_interval(range, length) {
-            RecordInterval::Letters { from, to } => (from, to + 1),
-            RecordInterval::Empty => (length, length),
-            RecordInterval::PastEnd => {
-                return Err(app::options_error(
-                    "Invalid from coordinate (greater than sequence length)",
-                ))
-            }
-        };
+        let (from, to_exclusive) = record_cut(range, record.seq().len())?;
         cut_records.push(record.cut(from, to_exclusive));
         placements.push(RecordPlacement {
             offset: from,
-            length,
+            length: record.seq().len(),
         });
     }
     Ok(Some((cut_records, Placements(placements))))
+}
+
+/// The letters `[from, to_exclusive)` of a record of `length` letters that `cut_subjects` keeps
+/// (`from == to_exclusive == length` for an interval without letters), or the error of an interval
+/// that starts past the end.
+pub fn record_cut(range: &SequenceRange, length: usize) -> Result<(usize, usize)> {
+    match record_interval(range, length) {
+        RecordInterval::Letters { from, to } => Ok((from, to + 1)),
+        RecordInterval::Empty => Ok((length, length)),
+        RecordInterval::PastEnd => Err(app::options_error(
+            "Invalid from coordinate (greater than sequence length)",
+        )),
+    }
 }
 
 /// How many subject records NCBI's reader reads (and writes the title warnings of) before

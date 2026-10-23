@@ -43,10 +43,11 @@
 //! not depend on which thread searched which subject or in which order: each subject's HSPs are
 //! sent as one list (`WorkerState::tx`) and `report::final_hit_order` orders them by query and
 //! subject index, as for rayon's pieces, whose order of completion is not fixed either. The
-//! tables of LOSAT_X_SEEDRELEASE count the subjects whose stages have ended, not their order.
+//! tables of the seed release (`x_seed_release.rs`) count the subjects whose stages have ended, not
+//! their order.
 //!
 //! The threads run their loops as one broadcast job each, not as jobs a thread may steal, so a
-//! thread that waits inside a search (the unit path of LOSAT_X_PAIRPAR runs a subject's units on
+//! thread that waits inside a search (the unit path of PAIRPAR runs a subject's units on
 //! the pool) runs only stolen units, which end on their own. A loop never waits: it takes indices
 //! until the counter passes the last one. A panic in a search stops the other loops before their
 //! next subject, and `rayon::broadcast` raises it on the calling thread.

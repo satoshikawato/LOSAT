@@ -2,7 +2,7 @@
 //! `src/algorithm/tblastx/x_kmerge.rs`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_TBXKMERGE`
-//! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it on, each unit of `LOSAT_X_PAIRPAR`
+//! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it on, each unit of the unit path
 //! sorts its own list, a chunk's init list is the k-way merge of its units' lists, the conversion
 //! sorts only the runs of HSPs equal in score and subject range, and each frame list is merged into
 //! the subject's list. `[X_STATS] TBXKMERGE` (printed while the switch or its shadow is on) counts
@@ -180,8 +180,8 @@ fn the_switch_merges_the_lists_and_gives_ncbis_report() {
 // Blast_HSPListSortByScore(combined_hsp_list);
 // ```
 // `LOSAT_X_TBXKMERGE=0` and `LOSAT_X_DEFAULT=0` turn the switch off: no TBXKMERGE line, the same
-// report. `LOSAT_X_DEFAULT=0` with `LOSAT_X_PAIRPAR=1` and `LOSAT_X_TBXKMERGE=1` merges with the
-// switch on the paths of the previous default.
+// report. `LOSAT_X_DEFAULT=0` with `LOSAT_X_TBXKMERGE=1` merges with the switch on the paths of the
+// previous default.
 #[test]
 fn the_switch_follows_its_variable_and_the_global_one() {
     let expected = ncbi_report();
@@ -197,10 +197,7 @@ fn the_switch_follows_its_variable_and_the_global_one() {
             );
         }
         let what = format!("previous paths with the switch set, threads {threads}");
-        let (report, stderr) = pair(
-            threads,
-            &[STATS, PREVIOUS, ("LOSAT_X_PAIRPAR", "1"), SWITCH],
-        );
+        let (report, stderr) = pair(threads, &[STATS, PREVIOUS, SWITCH]);
         assert_eq!(report, expected, "{what}");
         assert_kmerge_ran(&stderr, 1, &what);
     }
@@ -219,17 +216,12 @@ fn shadow_counts(stderr: &str) -> [u64; 2] {
 // ```c
 // if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
 // ```
-// The shadow on both forms of the units' lists (`LOSAT_X_SEEDCOMPACT` on by default, and off),
-// and with `LOSAT_X_PAIRPARSHADOW=1`, which also compares the subject's list with the reference
-// frame loop's: every HSP compared, the report NCBI's.
+// The shadow on both forms of the units' lists (`LOSAT_X_SEEDCOMPACT` on by default, and off):
+// every HSP compared, the report NCBI's.
 #[test]
 fn the_shadow_finds_the_lists_of_the_switch_off() {
     let expected = ncbi_report();
-    for others in [
-        &[][..],
-        &[("LOSAT_X_SEEDCOMPACT", "0")][..],
-        &[("LOSAT_X_PAIRPARSHADOW", "1")][..],
-    ] {
+    for others in [&[][..], &[("LOSAT_X_SEEDCOMPACT", "0")][..]] {
         for threads in [1, 4, 16] {
             let what = format!("{others:?} threads {threads}");
             let mut switches = vec![STATS, SHADOW];

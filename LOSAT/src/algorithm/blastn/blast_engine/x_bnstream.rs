@@ -282,9 +282,11 @@ fn pause(micros: u64) {
 /// a thread that waits inside a search (a nested parallel stage) runs only stolen jobs that end
 /// on their own, never a second loop that would wait for the search it interrupted. No item is
 /// searched before every thread has started its loop (`wait_for_every_loop`), so that no thread
-/// starts its own loop inside a wait for an item's nested job either. A pool runs one pass at a
-/// time: a pass started inside an item, or beside another pass (from the items of a parallel
-/// stage), could start its loops above another pass's items and wait for them there.
+/// starts its own loop inside a wait for an item's nested job either. Callers must run one pass
+/// at a time per pool (the code does not check it): a pass started inside an item, or beside
+/// another pass (from the items of a parallel stage), could start its loops above the other
+/// pass's items and wait there, at its start or for its window (a pass inside an item of a pass
+/// without `assist` never fills its start, because the outer loops run no pending job).
 pub(super) fn search_in_order<S, R: Send>(
     n: usize,
     window: usize,
@@ -417,8 +419,8 @@ mod tests {
     #[test]
     fn no_item_is_searched_before_every_thread_has_started_its_loop() {
         use std::sync::atomic::AtomicBool;
-        use std::sync::{Arc, Mutex};
-        use std::time::{Duration, Instant};
+        use std::sync::Arc;
+        use std::time::Duration;
         let pool = pool(4);
         let busy = Arc::new(AtomicBool::new(false));
         let release = Arc::new(AtomicBool::new(false));
@@ -434,16 +436,15 @@ mod tests {
         while !busy.load(Ordering::SeqCst) {
             std::thread::yield_now();
         }
-        let released_at: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
         let releaser = {
-            let (release, released_at) = (Arc::clone(&release), Arc::clone(&released_at));
+            let release = Arc::clone(&release);
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(200));
-                *released_at.lock().unwrap() = Some(Instant::now());
                 release.store(true, Ordering::SeqCst);
             })
         };
-        let first: Mutex<Option<Instant>> = Mutex::new(None);
+        // items searched while the busy thread had not been released
+        let early = AtomicUsize::new(0);
         let handed = pool.install(|| {
             let mut handed = Vec::new();
             search_in_order(
@@ -452,7 +453,9 @@ mod tests {
                 true,
                 &|| (),
                 &|_: &mut (), i| {
-                    first.lock().unwrap().get_or_insert_with(Instant::now);
+                    if !release.load(Ordering::SeqCst) {
+                        early.fetch_add(1, Ordering::SeqCst);
+                    }
                     work(i)
                 },
                 &mut |i, _| handed.push(i),
@@ -461,17 +464,10 @@ mod tests {
         });
         releaser.join().unwrap();
         assert_eq!(handed, (0..32).collect::<Vec<_>>());
-        let first = first
-            .into_inner()
-            .unwrap()
-            .expect("the items were searched");
-        let released = released_at
-            .lock()
-            .unwrap()
-            .expect("the busy thread was released");
-        assert!(
-            first >= released,
-            "an item was searched before the busy thread started its loop"
+        assert_eq!(
+            early.load(Ordering::SeqCst),
+            0,
+            "items were searched before the busy thread started its loop"
         );
     }
 

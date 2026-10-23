@@ -550,3 +550,45 @@ fn calls_the_block_search_takes_and_does_not() {
         assert_eq!(run.searches, 1, "{formats:?} {observe:?} {extra:?}");
     }
 }
+
+/// A call of two outputs (outfmt 6 and 16, both writers of the caller) over queries that make four
+/// blocks does not take the block search, whichever of `LOSAT_X_BPQBLOCKXML2` and
+/// `LOSAT_X_BPQBLOCKWEB` is on: one search, and the bytes are those of the run with the block
+/// search off. (The outfmt 16 run-level frame was checked for a call of one output only.) The CLI's
+/// one-output outfmt 16 run takes the blocks and writes the same document.
+#[test]
+fn outfmt_16_in_a_call_of_several_outputs_is_not_blocked() {
+    let inputs = Inputs::new();
+    let formats = ["6", "16"];
+    let unblocked = child(
+        &inputs,
+        &formats,
+        Observe::Nothing,
+        1,
+        &[BATCH, ("LOSAT_X_BPQBLOCK", "0")],
+        "x16_off",
+    );
+    let run = child(
+        &inputs,
+        &formats,
+        Observe::Nothing,
+        1,
+        &[BATCH, BLOCK_PER_BATCH],
+        "x16_on",
+    );
+    assert_eq!(run.searches, 1, "outfmt 6 and 16: one search");
+    assert_eq!(unblocked.searches, 1);
+    for name in ["out0", "out1", "diagnostics"] {
+        assert!(
+            run.file(name) == unblocked.file(name),
+            "{name} differs from the unblocked run"
+        );
+    }
+    // The CLI's one-output outfmt 16 run is blocked (four batches, one block each) and writes the
+    // same document as the second output.
+    let (document, _) = cli(&inputs, "16", 1, &[BATCH, BLOCK_PER_BATCH]);
+    assert!(
+        run.file("out1") == document,
+        "outfmt 16 differs from the CLI"
+    );
+}

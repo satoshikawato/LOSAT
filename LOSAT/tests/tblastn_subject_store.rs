@@ -61,10 +61,11 @@ fn inputs() -> &'static (PathBuf, PathBuf, PathBuf) {
     static FILES: OnceLock<(PathBuf, PathBuf, PathBuf)> = OnceLock::new();
     FILES.get_or_init(|| {
         let fasta = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
-        // One directory per process: nextest runs every test in a process of its own, and a
-        // process that wrote the files while another read them would change its inputs.
+        // One directory per process: nextest runs each test in a process of its own, and a
+        // process that wrote these files again while another one's search read them cut its input.
         let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
-            .join(format!("tblastn_subject_store.{}", std::process::id()));
+            .join("tblastn_subject_store")
+            .join(std::process::id().to_string());
         std::fs::create_dir_all(&dir).expect("work directory");
         let proteins = records(&fasta.join("PemoMJNVA.faa"));
         let mut ten = String::new();

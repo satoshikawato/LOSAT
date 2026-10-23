@@ -16,6 +16,7 @@ import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from
 import { RunOutputWriter } from '../run-output/writer';
 import type { RuntimePath, WorkerRun, WorkerRunResult } from './protocol';
 import { ThreadHost } from './thread-host';
+import { warmUp } from './warm-up';
 
 export interface RuntimeOptions {
   readonly serial: () => Promise<WebAssembly.Module>;
@@ -36,6 +37,8 @@ interface Loaded {
   readonly threads?: ThreadHost;
   runs: number;
   retained: Retained | undefined;
+  /** The argvs (without -num_threads) of the searches and warm-ups that ran on this instance. */
+  readonly ran: Set<string>;
 }
 
 /** Why this worker cannot run the threaded module, or undefined if it may. */
@@ -111,6 +114,7 @@ export class EngineRuntime {
       });
       const linearBytesAfter = abi.memoryBytes();
       loaded.runs++;
+      loaded.ran.add(request.argv.join('\0'));
       // The last call into the instance comes before `end`: a failure after it must not
       // follow an output that the data layer may already commit.
       releaseQuery();
@@ -133,17 +137,20 @@ export class EngineRuntime {
 
   /**
    * Starts what a search of `threads` threads starts before it runs: the module's instance
-   * and, for the threaded module, its thread workers. It never ends a working instance of
-   * the other module: a queued search may still use it and the subject it holds. A failure
-   * is thrown; `run` loads and prepares again and handles it as before. The Engine worker
-   * calls `prepare` and `run` one after another, never together.
+   * and, for the threaded module, its thread workers. With the search's `argv` (program
+   * first, without -num_threads), it then runs that search once on one thread on built-in
+   * sequences (warm-up.ts) unless one like it ran on the instance. It never ends a working
+   * instance of the other module: a queued search may still use it and the subject it holds.
+   * A failure is thrown; `run` loads and prepares again and handles it as before. The Engine
+   * worker calls `prepare` and `run` one after another, never together.
    */
-  async prepare(threads: number): Promise<void> {
+  async prepare(threads: number, argv?: readonly string[]): Promise<void> {
     const path: RuntimePath = threads > 1 && this.threadedUnavailable === undefined ? 'threaded' : 'serial';
     const current = this.loaded;
     if (current !== undefined && current.path !== path && current.instance.abi.stoppedBy === undefined) return;
     if (path === 'serial') {
-      await this.load('serial');
+      const loaded = await this.load('serial');
+      if (argv !== undefined) this.warmUp(loaded, argv);
       return;
     }
     let loaded: Loaded;
@@ -161,6 +168,18 @@ export class EngineRuntime {
       this.dispose();
       throw error;
     }
+    if (argv !== undefined) this.warmUp(loaded, argv);
+  }
+
+  /** The warm-up of `argv`, unless a search or warm-up like it ran on the instance. */
+  private warmUp(loaded: Loaded, argv: readonly string[]): void {
+    const key = argv.join('\0');
+    if (loaded.ran.has(key)) return;
+    loaded.ran.add(key);
+    warmUp(loaded.instance.abi, argv);
+    loaded.instance.wasi.clear();
+    // The next search loads the module again.
+    if (loaded.instance.abi.stoppedBy !== undefined) this.dispose();
   }
 
   /** Ends the instance and its thread workers. */
@@ -187,7 +206,8 @@ export class EngineRuntime {
     if (current?.path === path && current.instance.abi.stoppedBy === undefined) return current;
     this.dispose();
     if (path === 'serial') {
-      this.loaded = { path, instance: await instantiateSerial(await this.options.serial()), runs: 0, retained: undefined };
+      const instance = await instantiateSerial(await this.options.serial());
+      this.loaded = { path, instance, runs: 0, retained: undefined, ran: new Set() };
       return this.loaded;
     }
     const unsupported = threadedSupport();
@@ -208,7 +228,7 @@ export class EngineRuntime {
     const threads = new ThreadHost({ module, memory, faultChannel: this.options.faultChannel });
     try {
       const instance = await instantiateThreadedMain(module, memory, threads.spawn);
-      this.loaded = { path, instance, threads, runs: 0, retained: undefined };
+      this.loaded = { path, instance, threads, runs: 0, retained: undefined, ran: new Set() };
       return this.loaded;
     } catch (error) {
       threads.terminate();

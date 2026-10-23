@@ -367,20 +367,21 @@ const PARSED_SEQIDS: &str = "the database stores parsed Seq-ids (makeblastdb -pa
 /// Decodes the `Blast-def-line-set` of one sequence. An empty record gives no
 /// definition line, as in NCBI.
 pub fn decode_defline_set(record: &[u8], path: &Path) -> Result<Vec<Defline>, SeqDbError> {
-    decode_deflines(record, path, false)
+    decode_deflines_as(record, path, false)
 }
 
 /// The `taxid` of each definition line of one sequence's record (0 for none), which the XML2
 /// and JSON formats show (`Hit` description). It is decoded apart from `decode_defline_set`,
 /// which skips it, so that no other report reads it.
 pub fn decode_defline_taxids(record: &[u8], path: &Path) -> Result<Vec<i32>, SeqDbError> {
-    Ok(decode_deflines(record, path, true)?
+    Ok(decode_deflines_as(record, path, true)?
         .into_iter()
         .map(|defline| defline.taxid)
         .collect())
 }
 
-fn decode_deflines(
+/// The definition lines of one sequence's record, with their `taxid` when `want_taxid`.
+pub fn decode_deflines_as(
     record: &[u8],
     path: &Path,
     want_taxid: bool,

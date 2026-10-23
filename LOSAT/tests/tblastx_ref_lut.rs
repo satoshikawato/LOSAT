@@ -12,12 +12,13 @@
 //!             sfree(lookup->thin_backbone[i]);
 //! ```
 //! The table must be the same, so the report must be: the tests run the reference frame loop
-//! (`LOSAT_X_PAIRPAR=0`) and compare the report with the switch (the default), and with its shadow
-//! (`LOSAT_X_TBXLUTSHADOW`, which builds both tables and compares them field by field), against
-//! the report with `LOSAT_X_TBXLUT=0`, at the default threshold (13), at 11 and at `+inf` (NCBI's
-//! INT_MIN: every word enters every cell it can), at one and four threads; and on the default path,
-//! where the unit path builds its own tables and the switch acts only on a batch the guard or
-//! `LOSAT_X_PAIRPARGATE` sends back.
+//! (`LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1`, whose gate sends every batch to the frame loop at any
+//! threshold and thread count) and compare the report with the switch (the default), and with its
+//! shadow (`LOSAT_X_TBXLUTSHADOW`, which builds both tables and compares them field by field),
+//! against the report with `LOSAT_X_TBXLUT=0`, at the default threshold (13), at 11 and at `+inf`
+//! (NCBI's INT_MIN: every word enters every cell it can), at one and four threads; and on the
+//! default path, where the unit path builds its own tables and the switch acts only on a batch the
+//! guard or `LOSAT_X_PAIRPARGATE` sends back.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -99,19 +100,42 @@ fn tblastx(
     if let Some(threshold) = threshold {
         command.args(["-threshold", threshold]);
     }
+    command.env("LOSAT_X_STATS", "1");
     let output = command.output().expect("run LOSAT");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(
         output.status.success(),
-        "{switches:?} threshold {threshold:?} threads {threads}: {}",
-        String::from_utf8_lossy(&output.stderr)
+        "{switches:?} threshold {threshold:?} threads {threads}: {stderr}"
     );
-    (
-        output.stdout,
-        String::from_utf8_lossy(&output.stderr).into_owned(),
-    )
+    if switches.contains(&REFERENCE) {
+        // The chunk-switch gate sends every batch to the reference frame loop: no unit runs.
+        let [units, fallback_gate] = pair_par(&stderr);
+        assert_eq!(
+            (units, fallback_gate >= 1),
+            (0, true),
+            "{switches:?} threshold {threshold:?} threads {threads}: the frame loop:\n{stderr}"
+        );
+    }
+    (output.stdout, stderr)
 }
 
-const REFERENCE: (&str, &str) = ("LOSAT_X_PAIRPAR", "0");
+/// `[X_STATS] PAIRPAR`: units, fallback_gate.
+fn pair_par(stderr: &str) -> [u64; 2] {
+    let line = stderr
+        .lines()
+        .find(|line| line.starts_with("[X_STATS] PAIRPAR "))
+        .unwrap_or_else(|| panic!("no [X_STATS] PAIRPAR line in: {stderr}"));
+    ["units", "fallback_gate"].map(|name| {
+        let key = format!("{name}=");
+        line.split_whitespace()
+            .find_map(|field| field.strip_prefix(key.as_str()))
+            .unwrap_or_else(|| panic!("no {name} in {line}"))
+            .parse()
+            .expect("counter")
+    })
+}
+
+const REFERENCE: (&str, &str) = ("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS", "1");
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_TBXLUT", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBXLUTSHADOW", "1");
 

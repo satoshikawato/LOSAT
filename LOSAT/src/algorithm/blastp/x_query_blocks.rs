@@ -145,6 +145,30 @@
 //!   only a subject with hits), and with `-db` the definition lines as for outfmt 8
 //!   (`database::x_titles_read_allow_blocks`). Otherwise the search of all queries refuses where
 //!   it does today; the file sink is not created before then.
+//! - outfmt 15 and 16 (LOSAT_X_BPQBLOCKXML2, strict set, `x_bp_qblock_xml2`; BLAST JSON and XML2):
+//!   NCBI writes one complete document per query (`x_PrintXML2Report`), `PrintProlog` the start of the
+//!   whole document and `PrintEpilog` its end; JSON joins the documents with `,\n`; a `-subject`
+//!   run (`m_IsBl2Seq`) holds each document until the next arrives and writes the last in
+//!   `PrintEpilog`. Nothing else in a document depends on another query: the values are those of
+//!   outfmt 5's records (run values fixed, the query's statistics, messages and masks its own;
+//!   the `searched` flag of the query's batch, a batch property, and blocks are whole batches).
+//!   The framing state that outlives a report (the count of documents written, whether the start
+//!   was written, the held document) moves from block to block (`Xml2Carry`, taken from a block's
+//!   document and put into the next block's, `BlastpReports::x_xml2_carry`); the epilog flag is
+//!   the last block's, as for outfmt 5. The refusals before the first byte are those of outfmt 5
+//!   (the same `x_block_xml_run_allowed` and `x_block_xml_subjects_allowed`, and with `-db`
+//!   `x_titles_read_allow_blocks`) and the taxid and taxonomy database ones of the two formats
+//!   (`database::x_titles_taxids_allow_blocks`: the titles and the taxid decodes in one pass over the
+//!   headers, so every sequence's taxid reads, and then OF5b's `taxdb_may_refuse`, the one
+//!   implementation of "can a lookup of this database be refused?" (DECISIONS 34 and 38): where
+//!   `taxdb.bti` is not found it is `false` at once; else it answers from the smaller side, one pass
+//!   over the taxonomy database or the database's taxids looked up). The taxonomy database's messages on standard error are written at the first `Hit`
+//!   that needs them (`TaxdbNotes`): the run's `TaxdbRun` (the database opened once, the (volume,
+//!   taxid) lookups already made) lives on the `-db` database, so a block writes the messages
+//!   that no block before it wrote, at the `Hit` that first needs them, which is the place in
+//!   the search of all queries. Outfmt 13 and 14 (side files and a master file) are excluded by
+//!   the plan arm (`Some(Single15 | Single16)` only); they join by widening that match and adding
+//!   the checks of the side files' names and of the files' opening, which are not made here.
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
 //! ```c++
 //!         if (results.HasAlignments()) {
@@ -199,6 +223,11 @@
 //!   each format's events apart (the ABI orders the events within a stream only).
 //! The shadow also compares, with these, the records (`Debug` text) and each format's events with
 //! their positions in that format's bytes (`XShadowObserver`).
+//! An outfmt 15 or 16 output (LOSAT_X_BPQBLOCKXML2) does not take blocks in such a call: the
+//! document's run-level frame and `Xml2Carry` were argued and checked for a call of one output
+//! (the CLI's shape) only, so `x_query_block_plan` records `XBlockFormat::Xml2` for the reach check
+//! and then refuses the plan when the call has several outputs, hit records or an observer; the
+//! search of all queries runs, as it did before either switch (Owner-delegated 2026-10-22).
 //!
 //! `LOSAT_X_BPQBLOCK` is a value switch of the strict set (`utils/xswitch.rs`): a positive number
 //! of query letters (the block closes at the first batch end at or past it), 50,000 when it is
@@ -404,6 +433,17 @@ pub(crate) fn x_bp_qblock_xml() -> bool {
     })
 }
 
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): whether the block search also takes one XML2 or JSON report
+/// (outfmt 15 or 16; 13 and 14 join with the side files' check). Acts only with `LOSAT_X_BPQBLOCK`.
+pub(crate) fn x_bp_qblock_xml2() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var_os("LOSAT_X_BPQBLOCKFMTSHADOW").is_some()
+            || crate::utils::xswitch::on("LOSAT_X_BPQBLOCKXML2")
+    })
+}
+
 // No NCBI counterpart: reads LOSAT_X_BPQBLOCKWEB (a strict-set switch: on unless `0`, or
 // `LOSAT_X_DEFAULT=0` and not set) once; the shadow (LOSAT_X_BPQBLOCKFMTSHADOW) implies it. It
 // chooses which calls the block search takes, not any value NCBI computes.
@@ -434,6 +474,19 @@ pub(crate) enum XBlockReport {
     Seqalign,
     /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
     Xml,
+    /// Outfmt 15 and 16 (LOSAT_X_BPQBLOCKXML2). Outfmt 13 and 14 are excluded by the plan arm
+    /// (`Single15 | Single16` only); they join by widening that match and adding the driver's
+    /// checks (the side files' names, their opening, the master file). The framing state
+    /// already moves from block to block (`Xml2Carry`).
+    Xml2,
+}
+
+impl XBlockReport {
+    /// Whether the report is a BLAST XML document of outfmt 5, 15 or 16, whose names the writer
+    /// refuses before its first byte.
+    pub(crate) fn is_xml(self) -> bool {
+        matches!(self, XBlockReport::Xml | XBlockReport::Xml2)
+    }
 }
 
 // No NCBI counterpart: names which switches decide the block search of a call for `x_reach!`; it
@@ -450,6 +503,8 @@ pub(crate) enum XBlockFormat {
     Seqalign,
     /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
     Xml,
+    /// Outfmt 15 and 16 (LOSAT_X_BPQBLOCKXML2).
+    Xml2,
     /// Several outputs, the hit records or an observer (LOSAT_X_BPQBLOCKWEB).
     Web,
 }
@@ -469,6 +524,7 @@ pub(crate) fn x_reach_block_search(formats: &[XBlockFormat], own: bool) {
             XBlockFormat::Fmt if x_bp_qblock_fmt() > 0 => x_reach!("LOSAT_X_BPQBLOCKFMT", own),
             XBlockFormat::Seqalign if x_bp_qblock_sa() => x_reach!("LOSAT_X_BPQBLOCKSA", own),
             XBlockFormat::Xml if x_bp_qblock_xml() => x_reach!("LOSAT_X_BPQBLOCKXML", own),
+            XBlockFormat::Xml2 if x_bp_qblock_xml2() => x_reach!("LOSAT_X_BPQBLOCKXML2", own),
             XBlockFormat::Web if x_bp_qblock_web() => x_reach!("LOSAT_X_BPQBLOCKWEB", own),
             _ => {}
         }

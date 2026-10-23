@@ -119,6 +119,11 @@ pub(crate) struct Ahead<R> {
     cells: Box<[Mutex<Cell<R>>]>,
     /// Indexes below this have been offered or closed by the owner.
     announced: Padded<AtomicUsize>,
+    /// The loop's length as the owner last gave it (`announce`), `usize::MAX` before.
+    total: Padded<AtomicUsize>,
+    /// Whether a helper leaves once every index is offered and none is left to claim
+    /// (`x_new_leaving`), instead of waiting for the owner to finish.
+    leave: bool,
     /// The next index a helper looks at.
     cursor: Padded<AtomicUsize>,
     finished: AtomicBool,
@@ -160,6 +165,18 @@ impl<R> Ahead<R> {
     // No NCBI counterpart: makes an empty ring of `window` slots; it does not change any value
     // NCBI computes.
     pub(crate) fn new(window: usize) -> Self {
+        Self::x_with(window, false)
+    }
+
+    // No NCBI counterpart: scheduling only. A helper that leaves frees its thread for other work
+    // of the pool (another loop's tasks); the owner evaluates any index nobody claimed.
+    /// `new(window)` whose helpers leave once every index is offered and none is left to claim.
+    pub(crate) fn x_new_leaving(window: usize) -> Self {
+        Self::x_with(window, true)
+    }
+
+    // No NCBI counterpart: the constructor of both (scheduling only).
+    fn x_with(window: usize, leave: bool) -> Self {
         let window = window.max(2);
         Self {
             cells: (0..window)
@@ -171,6 +188,8 @@ impl<R> Ahead<R> {
                 })
                 .collect(),
             announced: Padded(AtomicUsize::new(0)),
+            total: Padded(AtomicUsize::new(usize::MAX)),
+            leave,
             cursor: Padded(AtomicUsize::new(0)),
             finished: AtomicBool::new(false),
             evaluated: AtomicU64::new(0),
@@ -195,6 +214,7 @@ impl<R> Ahead<R> {
     /// `len` that have not been offered yet. `wanted(j)` is the owner's guess,
     /// with what it knows now, whether index `j` will need its value.
     pub(crate) fn announce(&self, at: usize, len: usize, mut wanted: impl FnMut(usize) -> bool) {
+        self.total.0.store(len, Ordering::Release);
         let end = at.saturating_add(self.cells.len()).min(len);
         let mut next = self.announced.0.load(Ordering::Relaxed);
         while next < end {
@@ -269,6 +289,12 @@ impl<R> Ahead<R> {
                     self.evaluate(index, scratch, compute);
                 }
                 None => {
+                    if self.leave
+                        && self.announced.0.load(Ordering::Acquire)
+                            >= self.total.0.load(Ordering::Acquire)
+                    {
+                        return;
+                    }
                     idle = idle.saturating_add(1);
                     if idle < 128 {
                         std::hint::spin_loop();

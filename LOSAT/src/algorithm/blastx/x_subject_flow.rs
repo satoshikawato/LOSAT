@@ -306,7 +306,12 @@ pub(super) fn run(
     };
     // Four tasks per thread ahead of the owner: a helper always finds one while the owner hands a
     // task to the sink, and the tasks held at once stay few (only subjects with hits are kept).
-    let ahead = crate::utils::xahead::Ahead::new(4 * (helper_tables.len() + 1));
+    // PROTOTYPE (LOSAT_X_BXFLOWLEAVE=1): helpers leave once every task is offered and none is left.
+    let ahead = if std::env::var_os("LOSAT_X_BXFLOWLEAVE").is_some_and(|v| v != "0") {
+        crate::utils::xahead::Ahead::x_new_leaving(4 * (helper_tables.len() + 1))
+    } else {
+        crate::utils::xahead::Ahead::new(4 * (helper_tables.len() + 1))
+    };
     let x_t = super::super::x_timing::lap();
     let mut call = 0usize;
     let mut own = super::x_bx_mem::XScratch::Borrowed(diagonals);

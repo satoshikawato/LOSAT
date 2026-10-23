@@ -17,8 +17,7 @@
 //! for saved hits. In both searches below such a result starts two letters left of the minus
 //! strand; a build that asserted it before the cutoff test stopped there: `qctx.assert` at one
 //! thread in `search_query_batch`, `qctx.pairpar` (a query longer than 8000) at four threads in
-//! the search pool's seed stage (`x_pair_seed.rs`; the strips run with `LOSAT_X_DEFAULT=0` too,
-//! as in CI's second run, so that run takes the same path). Each report must equal the NCBI BLAST+
+//! the search pool's seed stage (`x_pair_seed.rs`). Each report must equal the NCBI BLAST+
 //! 2.17.0 output frozen in `tests/fixtures/blastn_regression/` (`blastn_regression_fixtures.py`).
 
 use std::path::{Path, PathBuf};
@@ -30,17 +29,14 @@ fn engine(path: &str) -> PathBuf {
 
 /// One search of a `qctx_*` query against LC738868 at `threads` threads; the report must be the
 /// frozen NCBI output of `case`, with nothing on standard error. `LOSAT_*` variables other than
-/// `LOSAT_X_DEFAULT` (the paths under test) and `LOSAT_BLASTX_WORKER_LOG` are dropped. A binary
-/// built with the `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs
-/// `LOSAT_BLASTX_WORKER_LOG` as soon as a search has more than one thread; it selects nothing, so
-/// a file in the temporary directory is given when it is not set.
+/// `LOSAT_BLASTX_WORKER_LOG` are dropped. A binary built with the `blastx-worker-probe` feature
+/// (`cargo test --all-features`, as in CI) needs `LOSAT_BLASTX_WORKER_LOG` as soon as a search has
+/// more than one thread; it selects nothing, so a file in the temporary directory is given when it
+/// is not set.
 fn check(case: &str, query: &str, threads: u32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with("LOSAT_")
-            && name != "LOSAT_X_DEFAULT"
-            && name != "LOSAT_BLASTX_WORKER_LOG"
-        {
+        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
         }
     }

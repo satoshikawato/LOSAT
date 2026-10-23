@@ -47,8 +47,8 @@
 //! `ListedSubjects::read`: NCBI's redo fetches each match's sequence from the database in the
 //! encoding of the search.
 //!
-//! `LOSAT_X_BPREDODBSUBJ` is a switch of the strict set: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. It acts for every task of BLASTP with `-db`.
+//! `LOSAT_X_BPREDODBSUBJ` is a switch of the strict set: on unless it is `0`.
+//! It acts for every task of BLASTP with `-db`.
 //!
 //! `LOSAT_X_BPREDODBSUBJSHADOW=1` (shadow mode, implies the switch): `ListedSubjects::x_list` makes
 //! the copy of `read` too, first, and compares the lengths with it, and every read of the redo and
@@ -82,8 +82,8 @@ pub(crate) enum XRedoDbSubj {
 
 // No NCBI counterpart: reads the LOSAT_X_BPREDODBSUBJ / LOSAT_X_BPREDODBSUBJSHADOW switches once;
 // it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BPREDODBSUBJSHADOW` (any value) selects the
+/// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a strict-set switch, on unless it is `0`;
+/// `LOSAT_X_BPREDODBSUBJSHADOW` (any value) selects the
 /// shadow mode.
 pub(crate) fn x_bp_redo_db_subj() -> XRedoDbSubj {
     static MODE: OnceLock<XRedoDbSubj> = OnceLock::new();

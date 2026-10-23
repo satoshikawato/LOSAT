@@ -853,9 +853,9 @@ pub(crate) fn search_core(
             };
             super::x_timing::batch(XBatch::Lookup, x_t);
             let mut subject_stages = Vec::new();
-            // Dispatch point (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0` or
-            // `LOSAT_X_DEFAULT=0`): the subjects as a flow of
-            // tasks of k consecutive subjects, handed to the sink in subject order by this thread
+            // Dispatch point (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0`): the
+            // subjects as a flow of tasks of k consecutive subjects, handed to the sink in subject
+            // order by this thread
             // (x_subject_flow.rs); the waves below then have nothing left to do.
             #[cfg(feature = "parallel")]
             let x_flowed =
@@ -1337,7 +1337,16 @@ fn compute_subject(
     #[cfg(feature = "blastx-worker-probe")]
     worker_probe("start", oid);
     let mut containment = Vec::new();
-    let encoded = subjects.encoded_with_sentinel(oid);
+    // EXPERIMENT (LOSAT_X_BXUNGAPSENT): for a batch on the path of the seed loops' sentinel walks,
+    // the subject with the sentinel before its residues too (`blastx/x_ungap_sent.rs`);
+    // `encoded` is the same bytes either way.
+    let x_lead = batch.x_ungap_sent;
+    let x_buffer = if x_lead {
+        subjects.x_encoded_with_sentinels(oid)
+    } else {
+        subjects.encoded_with_sentinel(oid)
+    };
+    let encoded: &[u8] = &x_buffer[usize::from(x_lead)..];
     // `subjects.length(oid)` for every kind of subjects: the residues before the sentinel byte (a
     // database read in blocks then looks the subject up once, LOSAT_X_BXDBSTREAM).
     let subject_length = encoded.len() - 1;
@@ -1413,8 +1422,13 @@ fn compute_subject(
     // cells in place instead, x_seed_diag.rs); otherwise the reference word finder below runs and
     // collects the seeds.
     let initial = if !diagnostics {
+        let x_sent = if x_lead {
+            super::seed::x_ungap_sent::XSent::new(&batch.sequence_start, &x_buffer)
+        } else {
+            None
+        };
         super::seed::x_seed_scan::x_word_finder_scan(
-            batch, params, options, &encoded, lookup, diagonals,
+            batch, params, options, encoded, lookup, diagonals, x_sent,
         )?
     } else {
         word_finder(

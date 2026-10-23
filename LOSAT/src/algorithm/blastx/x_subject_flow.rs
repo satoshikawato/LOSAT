@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0` or `LOSAT_X_DEFAULT=0`):
+//! EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0`):
 //! the subject loop of a query chunk as a flow of tasks of `k` consecutive subjects
 //! (`search::X_BX_CHUNK` = 64, the waves' subjects per worker, when the variable is `1` or not a
 //! number from 2 to 65,536), searched ahead by the other threads of the pool and handed to the sink
@@ -97,7 +97,7 @@ const CHUNK_FLOW_SUBJECTS_PER_THREAD: usize = 256;
 /// No NCBI counterpart: the fewest subjects in all for `chunks_in_order`: 32 tasks of 64.
 const CHUNK_FLOW_MIN_SUBJECTS: usize = 2_048;
 
-/// EXPERIMENT (LOSAT_X_BXCHUNKFLOW, in the strict set: on unless `=0` or `LOSAT_X_DEFAULT=0`): whether
+/// EXPERIMENT (LOSAT_X_BXCHUNKFLOW, in the strict set: on unless `=0`): whether
 /// the chunks of a split query are searched one after another, each chunk's subjects as the flow
 /// on the whole pool, instead of side by side, one chunk per thread. It holds
 /// where the flow runs in each chunk (`chosen`) and there are at least

@@ -1,4 +1,3 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The gapped stages of a blastn subject run per query on the search pool (`LOSAT_X_QGROUPPAR`,
 //! `src/algorithm/blastn/blast_engine/x_qgroup_par.rs`) on whole searches.
 //!

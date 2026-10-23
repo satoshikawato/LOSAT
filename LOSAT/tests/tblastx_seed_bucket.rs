@@ -43,9 +43,8 @@ const SCAN_LOOP: [(&str, &str); 4] = [
 ];
 
 /// One TBLASTX run of the fixture pair (`-outfmt 6` on standard output) with `SCAN_LOOP` and
-/// the given variables as its only `LOSAT_*` variables. `LOSAT_X_DEFAULT` of the test's own
-/// environment is dropped as well: every test states the default it runs with. Returns the
-/// report and the standard error.
+/// the given variables as its only `LOSAT_*` variables. Returns the report and the standard
+/// error.
 fn tblastx(switches: &[(&str, &str)]) -> (Vec<u8>, String) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {

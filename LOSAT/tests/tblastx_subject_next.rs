@@ -3,8 +3,7 @@
 //! `src/algorithm/tblastx/x_subject_next.rs`) and `LOSAT_X_TBXFRAMES` (a subject's preliminary
 //! frames made in windows and freed after the seed stage, the frames of its letters made only when
 //! HSPs reach the re-evaluation, `Subjects::x_preliminary_frames` / `x_letter_frames`). Both are on
-//! by default (`src/utils/xswitch.rs`); `LOSAT_X_<NAME>=0` turns one off and `LOSAT_X_DEFAULT=0`
-//! runs the previous paths.
+//! by default (`src/utils/xswitch.rs`); `LOSAT_X_<NAME>=0` turns one off.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
 //! ```c
@@ -13,11 +12,11 @@
 //!            != BLAST_SEQSRC_EOF) {
 //! ```
 //! Neither switch may change a report: the tests compare the reports by default (both on), with
-//! each one off, and with both set on the previous paths, at one and several threads, against the
-//! one-thread search on the previous paths (`LOSAT_X_DEFAULT=0`), on a set laid out as
-//! a genome database is (two long records first, then many short ones), with ambiguity codes in
-//! the long records (N blocks, single IUPAC codes, one of them in a run across a translation
-//! window), through `-subject` and through a database of the same records (`losat makedb`).
+//! each one off and with both off, at one and several threads, against the one-thread search with
+//! both off, on a set laid out as a genome database is (two long records first, then many short
+//! ones), with ambiguity codes in the long records (N blocks, single IUPAC codes, one of them in a
+//! run across a translation window), through `-subject` and through a database of the same records
+//! (`losat makedb`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -146,16 +145,12 @@ fn tblastx(
     output.stdout
 }
 
-const NEXT: (&str, &str) = ("LOSAT_X_TBXNEXT", "1");
-const FRAMES: (&str, &str) = ("LOSAT_X_TBXFRAMES", "1");
 const NEXT_OFF: (&str, &str) = ("LOSAT_X_TBXNEXT", "0");
 const FRAMES_OFF: (&str, &str) = ("LOSAT_X_TBXFRAMES", "0");
-/// The previous paths: every switch of the strict set off unless it is set.
-const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 fn same_reports(subjects: &[&str], query: &Path) {
     for outfmt in ["6", "0"] {
-        let reference = tblastx(query, subjects, outfmt, 1, &[PREVIOUS]);
+        let reference = tblastx(query, subjects, outfmt, 1, &[NEXT_OFF, FRAMES_OFF]);
         assert!(
             reference.iter().filter(|&&b| b == b'\n').count() > 20,
             "the search finds hits"
@@ -170,12 +165,12 @@ fn same_reports(subjects: &[&str], query: &Path) {
                 (8, &[FRAMES_OFF]),
                 (1, &[FRAMES_OFF]),
                 (2, &[NEXT_OFF, FRAMES_OFF]),
-                (2, &[PREVIOUS, NEXT]),
-                (1, &[PREVIOUS, FRAMES]),
-                (3, &[PREVIOUS, NEXT, FRAMES]),
+                (2, &[FRAMES_OFF]),
+                (1, &[NEXT_OFF]),
+                (3, &[]),
             ]
         } else {
-            &[(1, &[]), (4, &[]), (4, &[PREVIOUS, NEXT, FRAMES])]
+            &[(1, &[]), (4, &[])]
         };
         for &(threads, switches) in runs {
             let report = tblastx(query, subjects, outfmt, threads, switches);

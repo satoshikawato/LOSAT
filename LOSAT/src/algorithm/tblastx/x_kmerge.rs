@@ -85,8 +85,8 @@ static KM_SHADOW_HSPS: AtomicU64 = AtomicU64::new(0);
 
 // No NCBI counterpart: chooses how LOSAT orders the same lists; it does not change any value NCBI
 // computes. Read once per process, as the other modes of x_pair_par.rs.
-/// 0 = off, 1 = LOSAT_X_TBXKMERGE (a strict-set switch: on unless `LOSAT_X_TBXKMERGE` is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set; `utils/xswitch.rs`), 2 = LOSAT_X_TBXKMERGESHADOW.
+/// 0 = off, 1 = LOSAT_X_TBXKMERGE (a strict-set switch: on unless `LOSAT_X_TBXKMERGE` is `0`;
+/// `utils/xswitch.rs`), 2 = LOSAT_X_TBXKMERGESHADOW.
 pub(super) fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {

@@ -101,8 +101,8 @@
 //!   after the appends pass and makes no table (`None`, the spare keeps the vectors); the block then
 //!   builds its table itself.
 //!
-//! On with `LOSAT_X_BPCLUT` (a strict-set switch: on unless `=0`, or `LOSAT_X_DEFAULT=0` and it is not
-//! set) where the search's pool has more than one thread; at one thread the serial builder runs. `LOSAT_X_BPCLUTSHADOW` builds this table too (with more than one thread)
+//! On with `LOSAT_X_BPCLUT` (a strict-set switch: on unless `=0`)
+//! where the search's pool has more than one thread; at one thread the serial builder runs. `LOSAT_X_BPCLUTSHADOW` builds this table too (with more than one thread)
 //! and compares it with the serial one. `LOSAT_X_BPLKPFLATSHADOW` builds the table of
 //! `LOSAT_X_BPLKPFLAT` (one-latch passes, recycled vectors, extra tasks) and then again with the
 //! `par_iter` passes on fresh vectors, and compares the outcomes and the tables slot for slot.
@@ -987,6 +987,7 @@ fn x_try_build_flat_parallel_with(
         compressed_alphabet_size: header.alphabet as i32,
         reciprocal_alphabet_size: header.reciprocal_alphabet_size,
         longest_chain,
+        used_cells: nonempty_count,
         pv,
         pv_array_bts: pv_array_bts as i32,
         scaled_compress_table_u8: build_scaled_compress_table_u8(&header.scaled_compress_table),

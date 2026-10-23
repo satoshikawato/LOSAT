@@ -1,11 +1,11 @@
 //! The branch-free hit loop of the TBLASTX unit scan (`LOSAT_X_TBXHITBF`,
 //! `src/algorithm/tblastx/x_tbx_hitbf.rs`, module doc) on whole searches.
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. It acts on the units of the unit path that run without the
-//! probes of `LOSAT_TIMING` / `LOSAT_X_STATS`, in `scan_unit` and in the batched scan of
-//! `LOSAT_X_TBXEXTBATCH`; its shadow (`LOSAT_X_TBXHITBFSHADOW`) turns it on and compares it with the
-//! loop before the switch on every unit.
+//! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`. It
+//! acts on the units of the unit path that run without the probes of `LOSAT_TIMING` /
+//! `LOSAT_X_STATS`, in `scan_unit` and in the batched scan of `LOSAT_X_TBXEXTBATCH`; its shadow
+//! (`LOSAT_X_TBXHITBFSHADOW`) turns it on and compares it with the loop before the switch on every
+//! unit.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:536-552
 //! ```c
@@ -23,9 +23,9 @@
 //! under test is that the report does not depend on it. That reports equal NCBI's is the business of
 //! the fixture comparisons. The input (150,000 bases of MelaMJNV against 150,000 of PemoMJNVA) has
 //! frames of about 50,000 letters, so the unit path runs; `LOSAT_X_TBXEXTBATCH=2` sends its units to
-//! the batched scan. The tests compare the default, `LOSAT_X_DEFAULT=0`, the batched scan, the
-//! prefetch on every subject, today's lists and the shadow (which also shows that the loop ran and
-//! that no unit fell outside its range) with `=0`.
+//! the batched scan. The tests compare the default, the batched scan, the prefetch
+//! on every subject, today's lists and the shadow (which also shows that the loop ran and that no
+//! unit fell outside its range) with `=0`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -38,7 +38,6 @@ fn fasta(name: &str) -> PathBuf {
 
 const OFF: (&str, &str) = ("LOSAT_X_TBXHITBF", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBXHITBFSHADOW", "1");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 /// The batched scan of LOSAT_X_TBXEXTBATCH on every unit (`x_hit_batched` for the rare hits).
 const BATCHED: (&str, &str) = ("LOSAT_X_TBXEXTBATCH", "2");
 /// Today's `InitHSP` lists instead of the compact records (`run_unit`, `run_unit_batched`).
@@ -177,7 +176,6 @@ fn the_branch_free_loop_gives_the_same_report() {
         assert!(!off.is_empty(), "threads {threads}: no hits");
         for switches in [
             &[][..],
-            &[DEFAULT_OFF][..],
             &[FULL_LISTS][..],
             &[PREFETCH][..],
             &[BATCHED][..],

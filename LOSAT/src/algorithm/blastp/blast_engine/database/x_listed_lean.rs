@@ -27,8 +27,8 @@
 //! mapped database files when it formats a hit (`CSeqDBVol::x_GetHdrAsn1Binary`, quoted above
 //! `read_titles`).
 //!
-//! `LOSAT_X_BPLISTEDLEAN` is a switch of the strict set: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. It acts for every task of BLASTP with `-db`, in the
+//! `LOSAT_X_BPLISTEDLEAN` is a switch of the strict set: on unless it is `0`.
+//! It acts for every task of BLASTP with `-db`, in the
 //! search of all queries and in the blocks of `LOSAT_X_BPQBLOCK` (not with ABI v1's titles, which
 //! read the records).
 //!
@@ -62,8 +62,8 @@ pub(in crate::algorithm::blastp::blast_engine) enum XListedLean {
 
 // No NCBI counterpart: reads the LOSAT_X_BPLISTEDLEAN / LOSAT_X_BPLISTEDLEANSHADOW switches once;
 // it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BPLISTEDLEANSHADOW` (any value) selects the
+/// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): a strict-set switch, on unless it is `0`;
+/// `LOSAT_X_BPLISTEDLEANSHADOW` (any value) selects the
 /// shadow mode.
 pub(in crate::algorithm::blastp::blast_engine) fn x_bp_listed_lean() -> XListedLean {
     static MODE: OnceLock<XListedLean> = OnceLock::new();

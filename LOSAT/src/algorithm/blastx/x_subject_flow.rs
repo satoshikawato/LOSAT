@@ -129,7 +129,7 @@ pub(super) fn chunks_in_order(
 
 /// No NCBI counterpart: whether `-window_size` plus twice the longest subject is at most 2^28,
 /// so that no diagonal offset of any table history passes 2^30 (module comment).
-fn offsets_stay_below_2_30(window_size: i32, longest: usize) -> bool {
+pub(super) fn offsets_stay_below_2_30(window_size: i32, longest: usize) -> bool {
     u64::try_from(window_size)
         .ok()
         .and_then(|window| window.checked_add(2 * longest as u64))
@@ -277,14 +277,18 @@ pub(super) fn run(
     options: &ResolvedOptions,
     lookup: &Lookup,
     diagonals: &mut Diagonals,
-    helper_tables: Vec<Diagonals>,
+    helper_tables: Vec<super::x_bx_mem::XScratch<'_>>,
     xdrop: i32,
     db_length: i64,
     x_containment: bool,
     sink: &mut impl PreliminarySink,
 ) -> Result<usize> {
     let tasks = subjects.len().div_ceil(k);
-    let compute = |task: usize, table: &mut Diagonals| {
+    let compute = |task: usize, scratch: &mut super::x_bx_mem::XScratch<'_>| {
+        let table = match scratch.get() {
+            Ok(table) => table,
+            Err(error) => return (Vec::new(), Some((task * k, error))),
+        };
         search_task(
             task,
             k,
@@ -304,12 +308,13 @@ pub(super) fn run(
     let ahead = crate::utils::xahead::Ahead::new(4 * (helper_tables.len() + 1));
     let x_t = super::super::x_timing::lap();
     let mut call = 0usize;
+    let mut own = super::x_bx_mem::XScratch::Borrowed(diagonals);
     let result = crate::utils::xahead::with_helpers(Some(&ahead), helper_tables, &compute, || {
         for task in 0..tasks {
             ahead.announce(task, tasks, |_| true);
-            let (kept, error) = match ahead.take(task, diagonals, &compute) {
+            let (kept, error) = match ahead.take(task, &mut own, &compute) {
                 Some(value) => value,
-                None => compute(task, diagonals),
+                None => compute(task, &mut own),
             };
             if shadow() {
                 // The owner searches the task again on its own table (one that has seen other
@@ -317,7 +322,7 @@ pub(super) fn run(
                 x_shadow_check(
                     &kept,
                     error.as_ref().map(|(oid, _)| *oid),
-                    &compute(task, diagonals),
+                    &compute(task, &mut own),
                 );
             }
             let end = error

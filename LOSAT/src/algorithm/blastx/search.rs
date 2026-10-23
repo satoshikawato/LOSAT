@@ -500,6 +500,12 @@ const X_BX_CHUNK: usize = 64;
 #[path = "x_subject_flow.rs"]
 pub(crate) mod x_subject_flow;
 
+// PROTOTYPE (LOSAT_X_BXDIAGTLS, LOSAT_X_BXUNITCAP): blastx memory at many threads (a child module,
+// so that it uses compute_subject and SubjectComputation).
+#[cfg(feature = "parallel")]
+#[path = "x_bx_mem.rs"]
+pub(crate) mod x_bx_mem;
+
 pub(crate) fn search_core(
     records: &[FastaRecord],
     subjects: Subjects<'_>,
@@ -682,7 +688,9 @@ pub(crate) fn search_core(
         let chunks = if x_chunks_par {
             use rayon::prelude::*;
             crate::utils::threading::report_stage("blastx", "query_chunks", chunks.len(), true);
-            let wave = pool.threads().max(2);
+            let x_cap = x_bx_mem::unit_cap(pool.threads())
+                .filter(|_| x_bx_mem::diag_tls(options, subjects));
+            let wave = x_cap.unwrap_or(pool.threads()).max(2);
             for wave_chunks in chunks.chunks(wave) {
                 let computed: Vec<_> = pool.install(|| {
                     wave_chunks
@@ -698,6 +706,7 @@ pub(crate) fn search_core(
                                 db_count,
                                 min_subject_length,
                                 x_containment,
+                                x_cap.is_some(),
                             )
                         })
                         .collect()
@@ -844,7 +853,14 @@ pub(crate) fn search_core(
                 1
             };
             #[cfg(feature = "parallel")]
-            let mut worker_diagonals = if pool.enabled() {
+            let x_flow_k = x_subject_flow::chosen(pool, diagnostics, options, subjects);
+            // PROTOTYPE (LOSAT_X_BXDIAGTLS): only where the flow searches the subjects (the waves
+            // below then have nothing to do).
+            #[cfg(feature = "parallel")]
+            let x_tls =
+                pool.enabled() && x_flow_k.is_some() && x_bx_mem::diag_tls(options, subjects);
+            #[cfg(feature = "parallel")]
+            let mut worker_diagonals = if pool.enabled() && !x_tls {
                 (0..subjects.len().min(pool.threads()))
                     .map(|_| Diagonals::new(last.offset + last.length, options.window_size))
                     .collect::<Result<Vec<_>>>()?
@@ -858,32 +874,43 @@ pub(crate) fn search_core(
             // tasks of k consecutive subjects, handed to the sink in subject order by this thread
             // (x_subject_flow.rs); the waves below then have nothing left to do.
             #[cfg(feature = "parallel")]
-            let x_flowed =
-                if let Some(x_k) = x_subject_flow::chosen(pool, diagnostics, options, subjects) {
-                    let x_t = super::x_timing::lap();
-                    let helper_tables = std::mem::take(&mut worker_diagonals)
+            let x_flowed = if let Some(x_k) = x_flow_k {
+                let x_t = super::x_timing::lap();
+                let helper_tables = if x_tls {
+                    (1..pool.threads())
+                        .map(|_| {
+                            x_bx_mem::XScratch::Slot(x_bx_mem::XDiagSlot::new(
+                                last.offset + last.length,
+                                options.window_size,
+                            ))
+                        })
+                        .collect()
+                } else {
+                    std::mem::take(&mut worker_diagonals)
                         .into_iter()
                         .take(pool.threads() - 1)
-                        .collect();
-                    call += x_subject_flow::run(
-                        x_k,
-                        subjects,
-                        batch,
-                        &params,
-                        options,
-                        &lookup,
-                        &mut diagonals,
-                        helper_tables,
-                        xdrop,
-                        db_length,
-                        x_containment,
-                        sink,
-                    )?;
-                    super::x_timing::batch(XBatch::ScanPar, x_t);
-                    true
-                } else {
-                    false
+                        .map(x_bx_mem::XScratch::Owned)
+                        .collect()
                 };
+                call += x_subject_flow::run(
+                    x_k,
+                    subjects,
+                    batch,
+                    &params,
+                    options,
+                    &lookup,
+                    &mut diagonals,
+                    helper_tables,
+                    xdrop,
+                    db_length,
+                    x_containment,
+                    sink,
+                )?;
+                super::x_timing::batch(XBatch::ScanPar, x_t);
+                true
+            } else {
+                false
+            };
             #[cfg(not(feature = "parallel"))]
             let x_flowed = false;
             // The flow (LOSAT_X_BXSUBJFLOW) leaves the waves, and so the chunks, nothing to do.
@@ -1224,6 +1251,7 @@ fn x_compute_chunk(
     db_count: i64,
     min_subject_length: usize,
     x_containment: bool,
+    x_par: bool,
 ) -> Result<Option<(Vec<ContextParameters>, Vec<(usize, SubjectComputation)>)>> {
     let batch = &chunk.prepared;
     let mut params = score_block(batch);
@@ -1232,6 +1260,30 @@ fn x_compute_chunk(
     }
     let lookup = Lookup::new(batch, &params, options)?;
     let last = batch.contexts.last().expect("BLASTX contexts");
+    #[cfg(feature = "parallel")]
+    if x_par {
+        let xdrop = subject_parameters(
+            batch,
+            &mut params,
+            options,
+            db_length,
+            db_count,
+            min_subject_length,
+            Some(fixed_spaces),
+        )?;
+        let results = x_bx_mem::chunk_subjects_par(
+            subjects,
+            batch,
+            &params,
+            options,
+            &lookup,
+            xdrop,
+            db_length,
+            x_containment,
+        )?;
+        return Ok(Some((params, results)));
+    }
+    let _ = x_par;
     let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
     let xdrop = subject_parameters(
         batch,

@@ -32,6 +32,8 @@ pub(crate) use x_lut_direct::{x_tbxlut_reach_stub, x_tbxlut_shadow_tables};
 // the comparison of its shadow mode (x_lut_direct.rs); no NCBI counterpart for the re-export
 // itself.
 pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table, XAaSpares};
+// PROTOTYPE (LOSAT_X_BXLUTPOOL): the BLASTX table's vectors given back for the next build.
+pub(crate) use x_lut_direct::{x_bx_lut_pool, x_give_back_pooled};
 // EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
 // path's group tables (x_pair_lut.rs, a child module of x_lut_direct.rs), used by
 // tblastx/x_pair_par.rs.
@@ -244,6 +246,8 @@ struct XChainArena {
     remaining: usize,
     /// Blocks chains have left, by size class (`1 << class` ints).
     free: Vec<Vec<std::ptr::NonNull<i32>>>,
+    /// PROTOTYPE (LOSAT_X_BXLUTPOOL): slabs of `SLAB_INTS` kept by `x_reset` for the next build.
+    spare: Vec<Box<[i32]>>,
 }
 
 impl XChainArena {
@@ -256,10 +260,32 @@ impl XChainArena {
             cursor: std::ptr::null_mut(),
             remaining: 0,
             free: Vec::new(),
+            spare: Vec::new(),
+        }
+    }
+
+    // No NCBI counterpart (buffer reuse): every block given up at once, the slabs kept.
+    fn x_reset(&mut self) {
+        for slab in self.slabs.drain(..) {
+            if slab.len() == Self::SLAB_INTS {
+                self.spare.push(slab);
+            }
+        }
+        self.cursor = std::ptr::null_mut();
+        self.remaining = 0;
+        for list in &mut self.free {
+            list.clear();
         }
     }
 
     fn allocate(&mut self, ints: usize) -> *mut i32 {
+        if ints == Self::SLAB_INTS {
+            if let Some(mut slab) = self.spare.pop() {
+                let start = slab.as_mut_ptr();
+                self.slabs.push(slab);
+                return start;
+            }
+        }
         let mut slab = vec![0i32; ints].into_boxed_slice();
         let start = slab.as_mut_ptr();
         // Moving the box into the list does not move the ints.
@@ -415,6 +441,14 @@ impl LookupBackboneChains {
                 .collect(),
             arena: XChainArena::new(),
         }
+    }
+
+    // No NCBI counterpart (buffer reuse, LOSAT_X_BXLUTPOOL): as `new(backbone_size)`, on this
+    // backbone's vectors and slabs.
+    fn x_reset(&mut self, backbone_size: usize) {
+        self.cells.clear();
+        self.cells.resize_with(backbone_size, || None);
+        self.arena.x_reset();
     }
 }
 
@@ -1535,11 +1569,15 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     // BLASTX: the table is filled in place from the per-cell counts, in the same append order as
     // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines (diagnostics
     // mode, or a backbone index wider than 16 bits) the reference builder below runs.
-    let prepared =
-        match x_lut_direct::x_build_direct(prepared, threshold, ScoringMatrix::Blosum62, 3) {
-            Ok(table) => return table,
-            Err(prepared) => prepared,
-        };
+    let built = if x_lut_direct::x_bx_lut_pool() {
+        x_lut_direct::x_build_direct_pooled(prepared, threshold, ScoringMatrix::Blosum62, 3)
+    } else {
+        x_lut_direct::x_build_direct(prepared, threshold, ScoringMatrix::Blosum62, 3)
+    };
+    let prepared = match built {
+        Ok(table) => return table,
+        Err(prepared) => prepared,
+    };
     build_lookup_from_prepared(prepared, threshold, ScoringMatrix::Blosum62, 3).0
 }
 

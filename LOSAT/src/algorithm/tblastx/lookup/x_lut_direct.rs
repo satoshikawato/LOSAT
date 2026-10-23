@@ -88,6 +88,136 @@ thread_local! {
     static X_MEMO: RefCell<Option<XNeighborMemo>> = const { RefCell::new(None) };
 }
 
+// PROTOTYPE (LOSAT_X_BXLUTPOOL, v4-A s6): BLASTX tables built with one set of neighbour lists for
+// all threads, and on vectors kept between builds (the table's when it is dropped, the build's
+// counts and exact backbone after the build), instead of new vectors on each building thread
+// (whose glibc arena keeps them resident after they are freed). Buffer reuse only.
+/// PROTOTYPE (LOSAT_X_BXLUTPOOL): whether BLASTX builds its tables pooled.
+pub(crate) fn x_bx_lut_pool() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var_os("LOSAT_X_BXLUTPOOL").is_some_and(|v| !v.is_empty() && v != "0")
+    })
+}
+
+/// No NCBI counterpart (memoised neighbour lists shared by threads, `XNeighborMemo` otherwise).
+struct XSharedMemo {
+    key: (ScoringMatrix, i32, usize, usize),
+    lists: Box<[std::sync::OnceLock<Box<[u16]>>]>,
+}
+
+static X_SHARED_MEMO: std::sync::Mutex<Option<std::sync::Arc<XSharedMemo>>> =
+    std::sync::Mutex::new(None);
+
+// No NCBI counterpart: the shared lists for `key` (a new set where the kept one has another key).
+fn x_shared_memo(
+    key: (ScoringMatrix, i32, usize, usize),
+    backbone_size: usize,
+) -> std::sync::Arc<XSharedMemo> {
+    let mut kept = x_pool_lock(&X_SHARED_MEMO);
+    if let Some(memo) = kept
+        .as_ref()
+        .filter(|m| m.key == key && m.lists.len() == backbone_size)
+    {
+        return std::sync::Arc::clone(memo);
+    }
+    let memo = std::sync::Arc::new(XSharedMemo {
+        key,
+        lists: (0..backbone_size)
+            .map(|_| std::sync::OnceLock::new())
+            .collect(),
+    });
+    *kept = Some(std::sync::Arc::clone(&memo));
+    memo
+}
+
+/// No NCBI counterpart: the neighbour lists a build reads, its thread's or the shared ones.
+enum XLists<'a> {
+    Own(&'a mut Vec<Option<Box<[u16]>>>),
+    Shared(&'a [std::sync::OnceLock<Box<[u16]>>]),
+}
+
+impl XLists<'_> {
+    fn get_or_make(&mut self, idx: usize, make: impl FnOnce() -> Box<[u16]>) -> &[u16] {
+        match self {
+            Self::Own(lists) => lists[idx].get_or_insert_with(make),
+            Self::Shared(lists) => lists[idx].get_or_init(make),
+        }
+    }
+
+    fn get(&self, idx: usize) -> &[u16] {
+        match self {
+            Self::Own(lists) => lists[idx].as_deref(),
+            Self::Shared(lists) => lists[idx].get().map(|list| &list[..]),
+        }
+        .expect("listed in the count pass")
+    }
+}
+
+/// No NCBI counterpart: a build's temporary vectors, kept between pooled builds.
+#[derive(Default)]
+struct XBuildTemps {
+    counts: Vec<u32>,
+    base: Vec<u32>,
+    fill: Vec<u32>,
+    chains: Option<LookupBackboneChains>,
+}
+
+// SAFETY-free note: the exact backbone's raw block pointers point into its own slabs, which move
+// with it; a kept backbone is reset (every cell empty) before the next build.
+unsafe impl Send for XBuildTemps {}
+
+static X_BX_TEMPS: std::sync::Mutex<Vec<XBuildTemps>> = std::sync::Mutex::new(Vec::new());
+static X_BX_TABLES: std::sync::Mutex<Vec<XAaVectors>> = std::sync::Mutex::new(Vec::new());
+
+// No NCBI counterpart: a lock held only around a move (a poisoned lock's value is still valid).
+fn x_pool_lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+// No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them).
+fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize) -> Vec<T> {
+    vector.clear();
+    vector.resize(n, T::default());
+    vector
+}
+
+/// PROTOTYPE (LOSAT_X_BXLUTPOOL): [`x_build_direct`] with the shared neighbour lists and kept
+/// vectors.
+pub(super) fn x_build_direct_pooled(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    let mut unused = None;
+    x_build_direct_in(
+        prepared,
+        threshold,
+        matrix,
+        word_length,
+        &mut unused,
+        None,
+        true,
+    )
+    .map(|table| table.expect("pooled vectors grow to any table"))
+}
+
+/// PROTOTYPE (LOSAT_X_BXLUTPOOL): keeps `table`'s backbone, overflow and pv vectors for the next
+/// pooled build (the table is left empty).
+pub(crate) fn x_give_back_pooled(table: &mut BlastAaLookupTable) {
+    let vectors = XAaVectors {
+        backbone: std::mem::take(&mut table.backbone),
+        overflow: std::mem::take(&mut table.overflow),
+        pv: std::mem::take(&mut table.pv),
+    };
+    if !vectors.is_empty() {
+        x_pool_lock(&X_BX_TABLES).push(vectors);
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:321-336
 // ```c
 //       lookup->thick_backbone =
@@ -292,6 +422,7 @@ impl XAaSpares {
             LOOKUP_WORD_LENGTH,
             &mut memo,
             Some(&mut room),
+            false,
         );
         *x_locked(&self.memo) = memo;
         *x_locked(&self.ahead) = room;
@@ -514,6 +645,7 @@ pub(super) fn x_build_direct(
             word_length,
             &mut memo.borrow_mut(),
             None,
+            false,
         )
         .map(|table| table.expect("fresh vectors have the room for any table"))
     })
@@ -530,6 +662,7 @@ fn x_build_direct_in(
     word_length: usize,
     memo: &mut Option<XNeighborMemo>,
     room: Option<&mut XAaVectors>,
+    pooled: bool,
 ) -> std::result::Result<Option<BlastAaLookupTable>, PreparedLookupQuery> {
     let alphabet_size = LOOKUP_ALPHABET_SIZE;
     let charsize = ilog2(alphabet_size) + 1;
@@ -560,7 +693,18 @@ fn x_build_direct_in(
         })
         .collect();
     // The reference exact backbone (blast_aalookup.c:448-456).
-    let mut exact_backbone = LookupBackboneChains::new(backbone_size);
+    let mut temps = if pooled {
+        x_pool_lock(&X_BX_TEMPS).pop().unwrap_or_default()
+    } else {
+        XBuildTemps::default()
+    };
+    let mut exact_backbone = match temps.chains.take() {
+        Some(mut chains) => {
+            chains.x_reset(backbone_size);
+            chains
+        }
+        None => LookupBackboneChains::new(backbone_size),
+    };
     let mut skipped_invalid_residue = 0usize;
     blast_lookup_index_query_exact_matches(
         &mut exact_backbone,
@@ -573,9 +717,11 @@ fn x_build_direct_in(
     );
 
     let key = (matrix, threshold, word_length, alphabet_size);
-    if memo
-        .as_ref()
-        .is_none_or(|m| m.key != key || m.lists.len() != backbone_size)
+    let shared = pooled.then(|| x_shared_memo(key, backbone_size));
+    if shared.is_none()
+        && memo
+            .as_ref()
+            .is_none_or(|m| m.key != key || m.lists.len() != backbone_size)
     {
         *memo = Some(XNeighborMemo {
             key,
@@ -584,16 +730,19 @@ fn x_build_direct_in(
                 .collect(),
         });
     }
-    let lists = &mut memo.as_mut().expect("memo set above").lists;
+    let mut lists = match &shared {
+        Some(shared) => XLists::Shared(&shared.lists),
+        None => XLists::Own(&mut memo.as_mut().expect("memo set above").lists),
+    };
 
     // Count pass: count[w] = number of appends the reference makes to cell w.
-    let mut counts: Vec<u32> = vec![0; backbone_size];
+    let mut counts: Vec<u32> = x_zeroed(std::mem::take(&mut temps.counts), backbone_size);
     for idx in 0..backbone_size {
         let Some(offset_list) = exact_backbone[idx].as_deref() else {
             continue;
         };
         let k = lookup_chain_num_used(offset_list) as u32;
-        let list = lists[idx].get_or_insert_with(|| {
+        let list = lists.get_or_make(idx, || {
             // blast_aalookup.c:490: w = query + offset_list[2];
             let first = usize::try_from(offset_list[2]).expect("NCBI BLAST query offset must fit");
             x_target_list(
@@ -624,6 +773,14 @@ fn x_build_direct_in(
         }
     }
     let (mut backbone, mut pv, mut overflow) = match room {
+        None if pooled => {
+            let kept = x_pool_lock(&X_BX_TABLES).pop().unwrap_or_default();
+            (
+                x_zeroed(kept.backbone, backbone_size),
+                x_zeroed(kept.pv, pv_size),
+                x_zeroed(kept.overflow, overflow_size),
+            )
+        }
         None => (
             vec![BackboneCell::default(); backbone_size],
             vec![0u32; pv_size],
@@ -634,7 +791,7 @@ fn x_build_direct_in(
             None => return Ok(None),
         },
     };
-    let mut base: Vec<u32> = vec![0; backbone_size];
+    let mut base: Vec<u32> = x_zeroed(std::mem::take(&mut temps.base), backbone_size);
     let mut overflow_cursor = 0usize;
     for (idx, &count) in counts.iter().enumerate() {
         if count == 0 {
@@ -650,14 +807,14 @@ fn x_build_direct_in(
     }
 
     // Fill pass: the reference's appends, in the reference's order.
-    let mut fill: Vec<u32> = vec![0; backbone_size];
+    let mut fill: Vec<u32> = x_zeroed(std::mem::take(&mut temps.fill), backbone_size);
     for idx in 0..backbone_size {
         let Some(offset_list) = exact_backbone[idx].as_deref() else {
             continue;
         };
         // query_bias is 0 here (build_lookup_from_prepared passes 0).
         let offsets = lookup_chain_entries(offset_list);
-        let list = lists[idx].as_deref().expect("listed in the count pass");
+        let list = lists.get(idx);
         for &w in list {
             let w = w as usize;
             let at = fill[w] as usize;
@@ -671,6 +828,14 @@ fn x_build_direct_in(
         }
     }
 
+    if pooled {
+        x_pool_lock(&X_BX_TEMPS).push(XBuildTemps {
+            counts,
+            base,
+            fill,
+            chains: Some(exact_backbone),
+        });
+    }
     Ok(Some(BlastAaLookupTable {
         backbone,
         overflow,

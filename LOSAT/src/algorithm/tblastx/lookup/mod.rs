@@ -228,6 +228,8 @@ pub(crate) use backbone::x_bp_build_ncbi_lookup;
 // EXPERIMENT (LOSAT_X_BPLKPAHEAD): exact blastp's table built ahead of its block
 // (lookup/x_lut_direct.rs `XAaSpares`); no NCBI counterpart for the re-export itself.
 pub(crate) use backbone::{x_assert_same_table_as, x_same_table, XAaSpares};
+// PROTOTYPE (LOSAT_X_BXLUTPOOL): see backbone.rs.
+pub(crate) use backbone::{x_bx_lut_pool, x_give_back_pooled};
 
 /// EXPERIMENT (LOSAT_X_BPLUTSHADOW): the shadow mode's line (printed by `main` at exit).
 // No NCBI counterpart: prints a counter; it does not change any value NCBI computes.

@@ -160,6 +160,15 @@ impl Diagonals {
     //     return 0;
     // }
     // ```
+    // No NCBI counterpart: buffer reuse only (LOSAT_X_BXDIAGTLS, x_bx_mem.rs).
+    /// Whether this table has the length and window `new(query_length, window)` gives.
+    pub(crate) fn x_fits(&self, query_length: usize, window: i32) -> bool {
+        let n = usize::try_from(window)
+            .ok()
+            .and_then(|w| query_length.checked_add(w))
+            .and_then(|n| n.max(1).checked_next_power_of_two());
+        self.window == window && n == Some(self.entries.len())
+    }
     pub fn finish_subject(&mut self, length: usize) -> Result<()> {
         if self.offset >= i32::MAX / 4 {
             self.offset = self.window;
@@ -248,6 +257,18 @@ pub struct InitHsp {
 pub enum Lookup {
     Standard(BlastAaLookupTable),
     Compressed(BlastCompressedAaLookupTable),
+}
+
+// PROTOTYPE (LOSAT_X_BXLUTPOOL): a dropped table's vectors are kept for the next build (buffer
+// reuse only; no NCBI counterpart).
+impl Drop for Lookup {
+    fn drop(&mut self) {
+        if let Self::Standard(table) = self {
+            if crate::algorithm::tblastx::lookup::x_bx_lut_pool() {
+                crate::algorithm::tblastx::lookup::x_give_back_pooled(table);
+            }
+        }
+    }
 }
 impl Lookup {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469

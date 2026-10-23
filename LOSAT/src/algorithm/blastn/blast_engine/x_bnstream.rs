@@ -282,7 +282,9 @@ fn pause(micros: u64) {
 /// a thread that waits inside a search (a nested parallel stage) runs only stolen jobs that end
 /// on their own, never a second loop that would wait for the search it interrupted. No item is
 /// searched before every thread has started its loop (`wait_for_every_loop`), so that no thread
-/// starts its own loop inside a wait for an item's nested job either.
+/// starts its own loop inside a wait for an item's nested job either. A pool runs one pass at a
+/// time: a pass started inside an item, or beside another pass (from the items of a parallel
+/// stage), could start its loops above another pass's items and wait for them there.
 pub(super) fn search_in_order<S, R: Send>(
     n: usize,
     window: usize,

@@ -26,7 +26,8 @@
 //! into ncbi2na in one pass and the frames are read from the two tables. The tables are filled
 //! from `GeneticCode::get` and `aa_char_to_ncbistdaa`, so every residue is the one the letter-wise
 //! translation of `tblastx::translation::generate_frames` gives; the ambiguous letters draw from
-//! the same generator with the same seed in the same order (`resolve_local_subject_ncbi2na`).
+//! the same generator with the same seed in the same order (`resolve_local_subject_ncbi2na`, kept in
+//! this module's tests as the reference).
 //!
 //! A packed subject (`LOSAT_X_TBNSTORE`, every `-db` sequence) is translated from its packed
 //! bytes (`x_packed_frames`), 32 codons of a phase at a time with AVX2 (`LOSAT_X_TBNXLATESIMD`,
@@ -189,6 +190,9 @@ fn x_draw_base(mask: u8, random: &mut NcbiRandom) -> u8 {
 // every letter before its first draw; this loop may have drawn for the letters before the
 // byte it stops at. The error is the same one, for the first such byte of the subject, and
 // the draws made before it are dropped with the generator, which belongs to this call.
+// NCBI c++/src/algo/blast/api/blast_objmgr_tools.cpp:428-473 resolves the ambiguities during
+// the ncbi2na encoding; c++/src/algo/blast/api/blast_setup_cxx.cpp:742-745,830-853 keeps the
+// ncbi4na sequence for the later reevaluation.
 /// `resolve_local_subject_ncbi2na` as ncbi2na values (0 A, 1 C,
 /// 2 G, 3 T) instead of letters.
 fn x_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
@@ -981,10 +985,43 @@ pub(super) fn x_packed_subject_plan(
 
 #[cfg(test)]
 mod tests {
-    use super::super::search_seed::{resolve_local_subject_ncbi2na, x_scan_plan};
+    use super::super::search_seed::x_scan_plan;
     use super::*;
     use crate::algorithm::tblastx::translation::generate_frames;
     use crate::config::ScoringMatrix;
+
+    // NCBI reference: c++/src/algo/blast/core/blast_encoding.c:95-103 and
+    // c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474,515-520
+    // static unsigned char ctable[16] = {0xFF,0,1,0xFF,2,0xFF,0xFF,0xFF,
+    //                                    3,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+    // CRandom random(base_length);
+    // if (b == 0 || b == 0x0F) ncbi2na[i] = random.GetRand() & 0x3;
+    // else { int pick = random.GetRand() % bitcount; /* pick a set bit */ }
+    // The uncompressed ncbi4na sequence is retained by SetupSubjects_OMF for
+    // traceback reevaluation; these resolved bases are preliminary-search input.
+    fn resolve_local_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
+        u32::try_from(subject.len())?;
+        let ncbi4na = subject
+            .iter()
+            .map(|&base| {
+                // TBLASTN reads the IUPAC letters without `U`.
+                crate::core::blast_encoding::iupacna_to_ncbi4na(base)
+                    .filter(|_| !base.eq_ignore_ascii_case(&b'U'))
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "TBLASTN subject base '{}' is not implemented",
+                            base as char
+                        )
+                    })
+            })
+            .collect::<Result<Vec<u8>>>()?;
+        Ok(
+            crate::core::blast_encoding::resolve_ncbi4na_to_ncbi2na(&ncbi4na)
+                .into_iter()
+                .map(|code| b"ACGT"[code as usize])
+                .collect(),
+        )
+    }
 
     // No NCBI counterpart: the three helpers below prepare the inputs of the tests; they compute
     // no value NCBI computes.

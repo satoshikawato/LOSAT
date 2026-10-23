@@ -415,8 +415,8 @@ impl PackedNucleotide {
     }
 
     /// The bases as packed, one `A`, `C`, `G` or `T` per base: every ambiguous base resolved as
-    /// NCBI's subject set-up resolves it (the letters TBLASTN's preliminary stage translates,
-    /// `resolve_local_subject_ncbi2na`).
+    /// NCBI's subject set-up resolves it (the draws the live TBLASTN subject translation makes
+    /// for a record's letters, `x_subject_ncbi2na`).
     pub fn resolved_letters_into(&self, out: &mut Vec<u8>) {
         self.unpack_into(out, *b"ACGT");
     }
@@ -559,8 +559,8 @@ mod tests {
             assert_eq!(out, ncbi4na);
             store.blastna_into(&mut out);
             assert_eq!(out, encode_iupac_to_blastna(&seq));
-            // TBLASTN's seed input (`resolve_local_subject_ncbi2na`): the letters' ncbi4na codes
-            // resolved by `CRandom(length)`, as letters
+            // The letters' ncbi4na codes resolved by `CRandom(length)`, as letters, the way the
+            // live TBLASTN subject translation (`x_subject_ncbi2na`) resolves a record's letters.
             store.resolved_letters_into(&mut out);
             let resolved: Vec<u8> =
                 crate::core::blast_encoding::resolve_ncbi4na_to_ncbi2na(&ncbi4na)

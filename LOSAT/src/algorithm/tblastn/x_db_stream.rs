@@ -25,17 +25,20 @@
 //!   lists when they first align it and hold it until the stage ends (`XStageSubjects`); the
 //!   reports read the sequences they show (`database::reported_subjects`), one read each.
 //! - A long sequence (a block of its own) is read once while anything holds it: the stages and
-//!   the query batches that run at the same time share it (`XDbStream::read_shared`). Its bytes
-//!   and its store are held in buffers that glibc maps (`utils::x_mapped`), so that its pages go
-//!   back when it is dropped instead of staying in the thread's arena.
+//!   the query batches that run at the same time share it (`XDbStream::read_shared`). It is read
+//!   into a buffer that glibc maps (`utils::x_mapped`), and its store is that buffer cut to the
+//!   2-bit data, not a copy. Dropped, the buffer goes to the pool `utils::x_mapped::X_BYTES`
+//!   (`XStreamStore`), from which the next read of a long sequence takes it with its pages
+//!   resident; the pool frees the idle buffers beyond its bound (`x_pool_idle_bytes`). So the
+//!   pages neither stay in the thread's arena nor fault again at every read.
 //!
 //! Every read packs the stored bytes as the copy does (`common::database::x_nucleotide_store_in`,
-//! `x_read_nucleotide_store`: the same `PackedNucleotide::from_stored`), so every stage computes
-//! the same values on the same subjects in the same order. A read that fails during the search (a
-//! database changed or damaged after the check, an error of the file system) is an `XReadError`
-//! holding the error that the check gives for the same read: the search of the batches is then
-//! made again one batch at a time, so that the batch that reads it fails after the reports of the
-//! batches before, as with the check's error (`args.rs`).
+//! `x_read_nucleotide_store`: the packing of `PackedNucleotide::from_stored`), so every stage
+//! computes the same values on the same subjects in the same order. A read that fails during the
+//! search (a database changed or damaged after the check, an error of the file system) is an
+//! `XReadError` holding the error that the check gives for the same read: the search of the
+//! batches is then made again one batch at a time, so that the batch that reads it fails after the
+//! reports of the batches before, as with the check's error (`args.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:374-376 (the sequence of
 //! the search is the mapped volume's bytes, not a copy)
@@ -143,7 +146,7 @@ pub(super) struct XDbStream<'a> {
     /// The length of every sequence, by ordinal id (`x_check_nucleotide_stores`).
     lengths: Vec<usize>,
     /// The long sequences that something holds (`read_shared`), by ordinal id.
-    shared: Mutex<HashMap<usize, Weak<PackedNucleotide>>>,
+    shared: Mutex<HashMap<usize, Weak<XStreamStore>>>,
     /// The copy of the shadow mode.
     copy: Option<Vec<PackedNucleotide>>,
 }
@@ -217,14 +220,13 @@ impl<'a> XDbStream<'a> {
 
     /// Sequence `oid` (`read`), shared with whatever holds it already: a stage or a query batch
     /// that runs at the same time reads it once. It is read again once nothing holds it.
-    pub(super) fn read_shared(&self, oid: usize) -> Result<Arc<PackedNucleotide>> {
-        let held = |shared: &HashMap<usize, Weak<PackedNucleotide>>| {
-            shared.get(&oid).and_then(Weak::upgrade)
-        };
+    pub(super) fn read_shared(&self, oid: usize) -> Result<Arc<XStreamStore>> {
+        let held =
+            |shared: &HashMap<usize, Weak<XStreamStore>>| shared.get(&oid).and_then(Weak::upgrade);
         if let Some(store) = held(&self.shared.lock().unwrap_or_else(|e| e.into_inner())) {
             return Ok(store);
         }
-        let store = Arc::new(self.read(oid)?);
+        let store = Arc::new(XStreamStore(self.read(oid)?));
         let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(store) = held(&shared) {
             return Ok(store);
@@ -242,7 +244,7 @@ impl<'a> XDbStream<'a> {
     /// subjects of a range in ascending order on each thread, so most short subjects come
     /// without a read. A block of one sequence (a long one) is read alone and shared
     /// (`read_shared`).
-    pub(super) fn read_for_plan(&self, oid: usize) -> Result<Arc<PackedNucleotide>> {
+    pub(super) fn read_for_plan(&self, oid: usize) -> Result<Arc<XStreamStore>> {
         let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
         let mut kept = X_PLAN_BLOCK.with(std::cell::Cell::take);
         let held = |kept: &Option<XPlanBlock>| {
@@ -276,7 +278,9 @@ impl<'a> XDbStream<'a> {
             PROGRAM,
         );
         X_PLAN_BLOCK.with(|cell| cell.set(kept));
-        Ok(Arc::new(self.checked(oid, store.map_err(XReadError)?)))
+        Ok(Arc::new(XStreamStore(
+            self.checked(oid, store.map_err(XReadError)?),
+        )))
     }
 
     /// `store`, read for sequence `oid`, after the shadow mode's comparison with the copy.
@@ -297,6 +301,25 @@ impl Drop for XDbStream<'_> {
     /// stream. The pool's other threads end with the pool.
     fn drop(&mut self) {
         let _ = X_PLAN_BLOCK.try_with(std::cell::Cell::take);
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): a sequence read for a stage (`XDbStream::read_shared`,
+/// `read_for_plan`). Dropped, it gives its buffer to `utils::x_mapped::X_BYTES` (the mapped buffer
+/// of a long sequence; a smaller one is freed). No NCBI counterpart: only where the bytes go.
+pub(super) struct XStreamStore(PackedNucleotide);
+
+impl std::ops::Deref for XStreamStore {
+    type Target = PackedNucleotide;
+
+    fn deref(&self) -> &PackedNucleotide {
+        &self.0
+    }
+}
+
+impl Drop for XStreamStore {
+    fn drop(&mut self) {
+        crate::utils::x_mapped::X_BYTES.give(&mut self.0.x_take_packed());
     }
 }
 
@@ -328,7 +351,7 @@ pub(super) enum XStageSubjects<'a> {
         /// The subjects of the lists, ascending.
         oids: Vec<usize>,
         /// The store of each, once read.
-        stores: Vec<OnceLock<Arc<PackedNucleotide>>>,
+        stores: Vec<OnceLock<Arc<XStreamStore>>>,
     },
 }
 

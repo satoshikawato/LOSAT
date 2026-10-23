@@ -85,7 +85,9 @@ const NCBI4NA_TO_BASE: [u8; 16] = {
 /// the real codes, which the traceback and the reports read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackedNucleotide {
-    packed: Box<[u8]>,
+    // A `Vec`, not a box, so that (EXPERIMENT, LOSAT_X_TBNDBSTREAM) a buffer of a database read
+    // keeps its capacity for a pool (`x_from_stored_buffer`, `x_take_packed`).
+    packed: Vec<u8>,
     length: usize,
     ambiguity: Box<[AmbiguityRun]>,
     lowercase: Box<[MaskedInterval]>,
@@ -169,7 +171,7 @@ impl PackedNucleotide {
             lowercase.push(MaskedInterval::new(start, length));
         }
         Some(Self {
-            packed: packed.into_boxed_slice(),
+            packed,
             length,
             ambiguity: ambiguity.into_boxed_slice(),
             lowercase: lowercase.into_boxed_slice(),
@@ -203,22 +205,25 @@ impl PackedNucleotide {
     /// bytes those of its preliminary stage. A run may hold the code of `A`, `C`, `G` or `T`
     /// (another letter than the stored base); it is kept, as the letters show it.
     pub fn from_stored(packed: &[u8], length: usize, runs: &[AmbiguityRun]) -> Self {
-        Self::from_stored_box(packed.into(), length, runs)
+        Self::from_stored_vec(packed.to_vec(), length, runs)
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `from_stored` with the packed bytes in a buffer that
-    /// glibc maps from 1 MiB on (`utils::x_mapped`), so that a store made for a while and dropped
-    /// (a database sequence read where it is searched) gives its pages back instead of leaving
-    /// them in the thread's arena. No NCBI counterpart: only where the bytes are held.
-    pub fn x_from_stored_mapped(packed: &[u8], length: usize, runs: &[AmbiguityRun]) -> Self {
-        let mut bytes =
-            Vec::with_capacity(crate::utils::x_mapped::x_mapped_capacity(packed.len(), 1));
-        bytes.extend_from_slice(packed);
-        Self::from_stored_box(bytes.into_boxed_slice(), length, runs)
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `from_stored` of the packed bytes held in `packed`, a
+    /// buffer of a database read cut to them (`seqdb::SequenceBlock::x_into_nucleotide_packed`):
+    /// the store keeps the buffer, with its capacity, instead of a copy, and gives it back with
+    /// `x_take_packed`. No NCBI counterpart: only where the bytes are held.
+    pub fn x_from_stored_buffer(packed: Vec<u8>, length: usize, runs: &[AmbiguityRun]) -> Self {
+        Self::from_stored_vec(packed, length, runs)
+    }
+
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the buffer of the packed bytes, taken out (the store is
+    /// left without them), for the pool it came from (`x_from_stored_buffer`).
+    pub fn x_take_packed(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.packed)
     }
 
     /// `from_stored` of packed bytes already held in `packed`.
-    fn from_stored_box(packed: Box<[u8]>, length: usize, runs: &[AmbiguityRun]) -> Self {
+    fn from_stored_vec(packed: Vec<u8>, length: usize, runs: &[AmbiguityRun]) -> Self {
         let mut clipped: Vec<AmbiguityRun> = Vec::with_capacity(runs.len());
         let mut in_order = true;
         let mut previous_end = 0usize;

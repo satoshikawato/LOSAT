@@ -244,9 +244,10 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
 /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): sequence `ordinal` of `db` as `read_nucleotide_stores` packs
 /// it (`PackedNucleotide::from_stored` of the stored 2-bit data, length and ambiguity runs), read
 /// with one read of the sequence file. The errors are those of `read_nucleotide_stores` for the
-/// same sequence. The bytes read and the store are held in buffers that glibc maps from 1 MiB on
-/// (`SeqDb::x_read_sequence_mapped`, `PackedNucleotide::x_from_stored_mapped`), so that a long
-/// sequence read for a while and dropped gives its pages back.
+/// same sequence. The bytes are read into a buffer that glibc maps from 1 MiB on, taken from
+/// `utils::x_mapped::X_BYTES` when it holds one (`SeqDb::x_read_sequence_mapped`), and the store
+/// is that buffer cut to the 2-bit data (`PackedNucleotide::x_from_stored_buffer`): a long
+/// sequence read for a while and dropped gives its pages back, or its buffer to the pool.
 pub(crate) fn x_read_nucleotide_store(
     db: &SeqDb,
     ordinal: u32,
@@ -256,8 +257,8 @@ pub(crate) fn x_read_nucleotide_store(
         .x_read_sequence_mapped(ordinal)
         .map_err(|error| search_read_error(error, program))?;
     let (length, runs) = stored_parts(&block, 0, ordinal, program)?;
-    Ok(PackedNucleotide::x_from_stored_mapped(
-        block.nucleotide_packed(0),
+    Ok(PackedNucleotide::x_from_stored_buffer(
+        block.x_into_nucleotide_packed(),
         length,
         &runs,
     ))

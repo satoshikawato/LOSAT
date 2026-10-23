@@ -225,38 +225,32 @@ fn assert_built_ahead(counts: &HashMap<String, u64>, searches: u64, what: &str) 
     assert_eq!(counts["compared"], counts["prebuilt"], "{what}: {counts:?}");
 }
 
-// The block search at 2 and 4 threads, with blocks of one batch and of 20,000 letters: each block
-// after the first takes the values built ahead during the block before it, and the shadow finds
-// them equal to its own build.
-// Both tasks: blastp-fast's flat table and exact blastp's table.
+// The block search with blocks of one batch and of 20,000 letters: each block after the first
+// takes the values built ahead during the block before it, and the shadow finds them equal to its
+// own build. Both tasks: blastp-fast's flat table and exact blastp's table. One case per path (each
+// search of the fixture pair costs CI seconds): four threads (every gate is `threads() > 1`; two
+// threads, where the build ahead has the block's one helper: the `-db` test and the `/dev/full`
+// test); the build beside the redo windows of `LOSAT_X_BPREDOPAR`: the `-db` test.
 #[test]
 fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     let dir = test_dir("blocks");
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     for (task, acts) in TASKS {
-        for threads in [2, 4] {
-            for letters in ["1", "20000"] {
-                let base = with(acts, &[("LOSAT_X_BPQBLOCK", letters)]);
-                let (off, shadow) = same_runs(&dir, task, &subject, threads, &base, &[]);
-                assert!(!off.stdout.is_empty(), "the fixture pair has rows");
-                let what = format!("{task}, threads {threads}, blocks of {letters}");
-                let counts = shadow.shadow("BPLKPAHEAD");
-                assert_built_ahead(&counts, off.searches(), &what);
-                // Exact blastp in blocks of one batch: a block whose table's overflow exceeds the
-                // room (the largest so far plus a half) builds its table itself, after its
-                // thread took the neighbour lists back.
-                if task == "blastp" && letters == "1" {
-                    assert!(counts["dropped"] > 0, "{what}: {counts:?}");
-                }
+        for letters in ["1", "20000"] {
+            let base = with(acts, &[("LOSAT_X_BPQBLOCK", letters)]);
+            let (off, shadow) = same_runs(&dir, task, &subject, 4, &base, &[]);
+            assert!(!off.stdout.is_empty(), "the fixture pair has rows");
+            let what = format!("{task}, threads 4, blocks of {letters}");
+            let counts = shadow.shadow("BPLKPAHEAD");
+            assert_built_ahead(&counts, off.searches(), &what);
+            // Exact blastp in blocks of one batch: a block whose table's overflow exceeds the
+            // room (the largest so far plus a half) builds its table itself, after its
+            // thread took the neighbour lists back.
+            if task == "blastp" && letters == "1" {
+                assert!(counts["dropped"] > 0, "{what}: {counts:?}");
             }
         }
-        // One more configuration with BPREDOPAR: the build ahead beside the redo windows' nested
-        // scopes of the block's search (the hang of a waiting helper would show here).
-        let base = with(acts, &[("LOSAT_X_BPQBLOCK", "1"), REDOPAR]);
-        let (off, shadow) = same_runs(&dir, task, &subject, 4, &base, &[]);
-        let what = format!("{task}, BPREDOPAR, threads 4");
-        assert_built_ahead(&shadow.shadow("BPLKPAHEAD"), off.searches(), &what);
     }
     // Exact blastp's pairwise report written in blocks (`LOSAT_X_BPQBLOCKFMT`): the build ahead
     // beside the block's report.
@@ -271,7 +265,11 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// `-db`: the database search in blocks runs the same block loop and lookup region.
+// `-db`: the database search in blocks runs the same block loop and lookup region. With
+// `LOSAT_X_BPREDOPAR`: the build ahead beside the redo windows' nested scopes of the block's search
+// (the hang of a waiting helper would show here), blastp-fast at two threads (the block's one
+// helper; its build ahead waits for its own nested passes, exact blastp's is a leaf task) and exact
+// blastp at four.
 #[test]
 fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
     let dir = test_dir("db");
@@ -291,15 +289,12 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
         String::from_utf8_lossy(&output.stderr)
     );
     let subject = [OsStr::new("-db"), name.as_os_str()];
-    for (task, acts) in TASKS {
-        for threads in [2, 4] {
-            // With BPREDOPAR (see `REDOPAR`) in every `-db` run.
-            let base = with(acts, &[("LOSAT_X_BPQBLOCK", "1"), REDOPAR]);
-            let (off, shadow) = same_runs(&dir, task, &subject, threads, &base, &[]);
-            assert!(!off.stdout.is_empty(), "the fixture pair has rows");
-            let what = format!("{task} -db, threads {threads}");
-            assert_built_ahead(&shadow.shadow("BPLKPAHEAD"), off.searches(), &what);
-        }
+    for ((task, acts), threads) in TASKS.into_iter().zip([2, 4]) {
+        let base = with(acts, &[("LOSAT_X_BPQBLOCK", "1"), REDOPAR]);
+        let (off, shadow) = same_runs(&dir, task, &subject, threads, &base, &[]);
+        assert!(!off.stdout.is_empty(), "the fixture pair has rows");
+        let what = format!("{task} -db, threads {threads}");
+        assert_built_ahead(&shadow.shadow("BPLKPAHEAD"), off.searches(), &what);
     }
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -308,30 +303,38 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
 // (`x_query_block_plan`), as for `LOSAT_X_BPQBLOCK=0` and for a pairwise report with
 // `LOSAT_X_BPQBLOCKFMT=0` (not written in blocks): one search, nothing built ahead, nothing counted.
 // The last block of a block search builds nothing ahead either (`assert_built_ahead`: blocks - 1
-// builds).
+// builds). The three are refusals of `x_query_block_plan`, which does not read the task, and the
+// switch's state is made in the block loop only (`XLookupAhead::new`): each runs once, the tasks
+// in turn.
 #[test]
 fn one_block_and_the_search_of_all_queries_build_nothing_ahead() {
     let dir = test_dir("one");
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    for (task, acts) in TASKS {
-        for (blocks, extra) in [
-            (&[("LOSAT_X_BPQBLOCK", "100000000")][..], &[][..]),
-            (&[("LOSAT_X_BPQBLOCK", "0")][..], &[][..]),
-            (
-                &[("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPQBLOCKFMT", "0")][..],
-                &["-outfmt", "0"][..],
-            ),
-        ] {
-            let base = with(acts, blocks);
-            let (off, shadow) = same_runs(&dir, task, &subject, 4, &base, extra);
-            assert_eq!(off.searches(), 1, "{task} {blocks:?} {extra:?}");
-            let counts = shadow.shadow("BPLKPAHEAD");
-            assert!(
-                counts.values().all(|&count| count == 0),
-                "{task} {blocks:?} {extra:?}: {counts:?}"
-            );
-        }
+    let [(fast, fast_acts), (exact, exact_acts)] = TASKS;
+    for (task, acts, blocks, extra) in [
+        (
+            fast,
+            fast_acts,
+            &[("LOSAT_X_BPQBLOCK", "100000000")][..],
+            &[][..],
+        ),
+        (exact, exact_acts, &[("LOSAT_X_BPQBLOCK", "0")][..], &[][..]),
+        (
+            fast,
+            fast_acts,
+            &[("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPQBLOCKFMT", "0")][..],
+            &["-outfmt", "0"][..],
+        ),
+    ] {
+        let base = with(acts, blocks);
+        let (off, shadow) = same_runs(&dir, task, &subject, 4, &base, extra);
+        assert_eq!(off.searches(), 1, "{task} {blocks:?} {extra:?}");
+        let counts = shadow.shadow("BPLKPAHEAD");
+        assert!(
+            counts.values().all(|&count| count == 0),
+            "{task} {blocks:?} {extra:?}: {counts:?}"
+        );
     }
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -373,9 +376,10 @@ fn the_switch_does_not_act_without_the_pools_flat_table() {
 }
 
 // Exact blastp where its table is not built in place by the pool's search (one thread,
-// `LOSAT_X_BPLUT=0` and `LOSAT_X_BPLUTSHADOW`, which build the reference builder's table, and
-// `LOSAT_DIAGNOSTICS`, whose reference builder prints its phases in order): the switch changes
-// nothing and its shadow counts nothing. The flat table's switches do not decide it.
+// `LOSAT_X_BPLUTSHADOW`, which builds the reference builder's table, and `LOSAT_DIAGNOSTICS`, whose
+// reference builder prints its phases in order): the switch changes nothing and its shadow counts
+// nothing. `LOSAT_X_BPLUT=0` is the shadow's branch (`XAaSpares::x_applies`: mode 1 only). The flat
+// table's switches do not decide it.
 #[test]
 fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
     let dir = test_dir("exact-off");
@@ -385,7 +389,6 @@ fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
     let lut = ("LOSAT_X_BPLUT", "1");
     for (threads, base) in [
         (1, vec![block, lut]),
-        (4, vec![block, ("LOSAT_X_BPLUT", "0")]),
         (4, vec![block, ("LOSAT_X_BPLUTSHADOW", "1")]),
         (4, vec![block, lut, ("LOSAT_DIAGNOSTICS", "1")]),
     ] {

@@ -2,7 +2,7 @@
 //! subject scan and the diagonal test in one loop, and the hits of one lookup cell tested in AVX2
 //! batches of eight.
 //!
-//! The reference (`word_finder`, and LOSAT_X_BXSCAN's `x_word_finder_direct`) has the
+//! The reference (`word_finder`, and `x_word_finder_direct` of `x_seed_scan.rs`) has the
 //! scanner copy every word hit into the offset-pair buffer and then reads the buffer back for the
 //! two-hit test (NCBI's `s_BlastAaScanSubject` and `s_BlastAaWordFinder_TwoHit`). With the switch,
 //! blastp's fused scan (`blastp::x_seed_fused::x_scan_two_hit_with`: LOSAT_X_BPSEED's loop with
@@ -55,8 +55,8 @@
 //! the rule gives it.
 //!
 //! A query batch whose lookup table has fewer hits per used backbone cell than
-//! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 900; `0` fuses every batch) is scanned by the loop
-//! LOSAT_X_BXSCAN chooses instead: with few hits per cell the fused loop's per-cell work costs more
+//! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 900; `0` fuses every batch) is scanned by the
+//! direct loop instead: with few hits per cell the fused loop's per-cell work costs more
 //! than the copy it saves. Since LOSAT_X_BXHITBF made the direct loop faster, the two break even
 //! near 9 hits per used cell (about 8.75 against the fly proteome, 10.7 against Swiss-Prot; one
 //! core, user-space cycles of the fused loop with the cell test it takes against the direct loop,
@@ -193,7 +193,7 @@ fn x_cell_mode() -> XDiagMode {
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): the fewest hits per used lookup cell, in hundredths, for
 /// which the fused loop scans a query batch's subjects (built-in 900, near where the two loops
 /// take the same time since LOSAT_X_BXHITBF; 500 before it); a batch whose table has fewer is
-/// scanned by the loop LOSAT_X_BXSCAN chooses.
+/// scanned by the direct loop.
 /// `0` fuses every batch; a value that is not a number takes the built-in one.
 fn x_min_hits_per_cell() -> u64 {
     static MIN: OnceLock<u64> = OnceLock::new();

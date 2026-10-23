@@ -1,0 +1,157 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 204
+        },
+        {
+          id str "blast_score",
+          value int 204
+        },
+        {
+          id str "e_value",
+          value real { 326352241599788, 10, -41 }
+        },
+        {
+          id str "bit_score",
+          value real { 831889457671841, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 37
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 40
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 677131147540984, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          local str "Subject_1"
+        },
+        starts {
+          109,
+          70
+        },
+        lens {
+          41
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 139
+        },
+        {
+          id str "blast_score",
+          value int 139
+        },
+        {
+          id str "e_value",
+          value real { 215505662571153, 10, -31 }
+        },
+        {
+          id str "bit_score",
+          value real { 581509733325561, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 30
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 34
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 709918032786885, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 3,
+        ids {
+          local str "Query_1",
+          local str "Subject_2"
+        },
+        starts {
+          107,
+          75,
+          132,
+          -1,
+          134,
+          100
+        },
+        lens {
+          25,
+          2,
+          16
+        },
+        strands {
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}

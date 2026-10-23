@@ -50,7 +50,9 @@ use std::sync::OnceLock;
 
 pub use alias::SearchPath;
 pub use header::Defline;
-pub use volume::{AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, BLASTNA_SENTINEL};
+pub use volume::{
+    AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, BLASTNA_SENTINEL, FENCE_SENTRY,
+};
 
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): how the volumes read their index files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -826,6 +828,43 @@ impl SeqDb {
             end,
             first_ordinal,
         })
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the block of the sequences `first_ordinal..end_ordinal`
+    /// that the volume of `first_ordinal` holds (to `end_ordinal` or to the end of the volume),
+    /// found without reading the index (`next_block` reads it to cut by bytes). `None` when the
+    /// range is empty or `first_ordinal` is past the last sequence.
+    pub fn x_block_range(&self, first_ordinal: u32, end_ordinal: u32) -> Option<BlockRange> {
+        if first_ordinal >= end_ordinal {
+            return None;
+        }
+        let (volume, first) = self.find_volume(first_ordinal).ok()?;
+        let end = self.volumes[volume]
+            .num_oids()
+            .min(first.saturating_add(end_ordinal - first_ordinal));
+        Some(BlockRange {
+            volume,
+            first,
+            end,
+            first_ordinal,
+        })
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the numbers of residues of the proteins of
+    /// `x_block_range(first_ordinal, end_ordinal)`, from the index alone
+    /// (`Volume::x_protein_lengths`).
+    pub fn x_protein_lengths(
+        &self,
+        first_ordinal: u32,
+        end_ordinal: u32,
+    ) -> Result<Vec<u32>, SeqDbError> {
+        let Some(range) = self.x_block_range(first_ordinal, end_ordinal) else {
+            return Err(SeqDbError::Range(format!(
+                "ordinal ids {first_ordinal}..{end_ordinal} are not a non-empty range of the database ({} sequences)",
+                self.num_seqs()
+            )));
+        };
+        self.volumes[range.volume].x_protein_lengths(range.first, range.end)
     }
 
     /// Reads the sequences of `range` with one positioned read.

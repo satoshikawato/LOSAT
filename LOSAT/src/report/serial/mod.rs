@@ -29,6 +29,8 @@ pub use seqalign::{write_query, SeqAlignError, SerialFormat};
 #[cfg(test)]
 mod asn_ber_tests;
 #[cfg(test)]
+mod asn_text_octets_tests;
+#[cfg(test)]
 mod real_tests;
 #[cfg(test)]
 mod seqalign_tests;

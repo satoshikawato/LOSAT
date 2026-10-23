@@ -373,23 +373,35 @@ impl Rule {
 ///             throw;
 ///         }
 /// ```
-fn scan<R: Read>(source: &mut FastaInputSource<R>) -> (Vec<usize>, QueryEnd) {
+fn scan<R: Read>(
+    source: &mut FastaInputSource<R>,
+    archive: bool,
+) -> Result<(Vec<usize>, QueryEnd)> {
     let mut lengths = Vec::new();
     loop {
         if source.end() {
-            return (lengths, QueryEnd::Input);
+            return Ok((lengths, QueryEnd::Input));
         }
         let mut warnings = Vec::new();
         match source.next_sequence(&mut |message: &[u8]| {
             warnings.extend_from_slice(message);
             Ok(())
         }) {
-            Ok(record) => lengths.push(record.sequence.len()),
+            Ok(record) => {
+                if archive {
+                    crate::report::archive::check_titles(
+                        std::slice::from_ref(&record),
+                        "query",
+                        "BLASTN",
+                    )?;
+                }
+                lengths.push(record.sequence.len());
+            }
             Err(ReadError::Parse {
                 code: ParseErrorCode::Eof,
                 ..
-            }) => return (lengths, QueryEnd::EofError),
-            Err(error) => return (lengths, QueryEnd::Error { error, warnings }),
+            }) => return Ok((lengths, QueryEnd::EofError)),
+            Err(error) => return Ok((lengths, QueryEnd::Error { error, warnings })),
         }
     }
 }
@@ -474,7 +486,9 @@ impl Store {
             .again
             .expect("LOSAT_X_QSTREAM reads a file it can read again");
         let started = Instant::now();
-        let (input_lengths, end) = scan(source);
+        // The BLAST archive (outfmt 11) refuses a query title it cannot write before the
+        // first byte: this reading sees every record.
+        let (input_lengths, end) = scan(source, config.keep_defline)?;
         let scan = started.elapsed();
         let (query_input, lengths) = query_input_of(input_lengths, range);
         let reopen = |handle: &File| -> Result<File> {
@@ -1688,7 +1702,7 @@ mod tests {
             let old = old(&file.0);
             let mut source = FastaInputSource::from_file(File::open(&file.0).unwrap(), config());
             assert!(!source.stream_is_empty());
-            let (lengths, end) = scan(&mut source);
+            let (lengths, end) = scan(&mut source, false).unwrap();
             let old_lengths: Vec<usize> = old.records.iter().map(|r| r.seq().len()).collect();
             assert_eq!(lengths, old_lengths, "seed {seed}");
             assert_eq!(end_text(&end), end_text(&old.end), "seed {seed}");

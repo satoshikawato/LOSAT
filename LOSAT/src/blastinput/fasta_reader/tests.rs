@@ -1324,3 +1324,26 @@ fn cut_keeps_ncbis_record() {
     assert_eq!(cut, FastaRecord::new("Query_2", b"q2 title", b"GTac"));
     assert_eq!(InputRecord::cut(&record, 2, 6), cut);
 }
+
+#[test]
+fn cut_in_place_keeps_the_whole_letters_of_a_kept_source_as_cut_does() {
+    let mut record = FastaRecord::new("Subject_1", b"t", b"ACGTACGTAA");
+    record.source = Some(Box::new(RecordSource {
+        defline: b">t".to_vec(),
+        uncut: None,
+    }));
+    let cut = record.cut(2, 7);
+    let mut in_place = record.clone();
+    in_place.cut_in_place(2, 7);
+    assert_eq!(in_place, cut);
+    assert_eq!(in_place.archive_letters(), b"ACGTACGTAA");
+    // A second cut keeps the letters of the first record, not those of the cut one.
+    in_place.cut_in_place(1, 3);
+    assert_eq!(in_place, cut.cut(1, 3));
+    assert_eq!(in_place.archive_letters(), b"ACGTACGTAA");
+    // Without a source nothing is kept.
+    let mut plain = FastaRecord::new("Subject_2", b"t", b"ACGTACGTAA");
+    plain.cut_in_place(2, 7);
+    assert!(plain.source.is_none());
+    assert_eq!(plain.sequence, b"GTACG");
+}

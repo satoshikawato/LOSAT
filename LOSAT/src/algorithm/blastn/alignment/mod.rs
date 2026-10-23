@@ -10,6 +10,8 @@ pub mod gapped;
 pub mod greedy;
 pub mod statistics;
 pub mod utilities;
+// No NCBI counterpart: the fences that a thread's traceback alignments met (LOSAT_X_BNTBRANGE).
+pub(crate) mod x_fence;
 // No NCBI counterpart: the preliminary greedy alignment on a one-byte copy of the
 // packed subject (see its doc for the NCBI references).
 pub mod x_greedy_prelim;

@@ -336,6 +336,7 @@ fn block_subject(block: &SequenceBlock, i: usize) -> Result<BlastnSubjectRef<'_>
         letters: None,
         blastna: None,
         store: None,
+        x_fenced: None,
     })
 }
 
@@ -677,35 +678,71 @@ where
 /// what `traceback` returns of each, in the order of `listed`. With `parallel` the
 /// sequences are searched in parallel with a scratch per worker (`map_init`), as the
 /// parallel `-subject` path searches its subjects.
-pub(super) fn traceback_listed<T, P, R, I, K>(
+///
+/// EXPERIMENT (LOSAT_X_BNTBRANGE): a sequence of at least `x_tb_range_min` bases is decoded in
+/// the ranges of its kept HSPs only (`spans`: `[from, to)` on the sequence; `x_partial_ranges`),
+/// with fences; when a traceback alignment meets one, the sequence is decoded whole and traced
+/// again from `kept`.
+pub(super) fn traceback_listed<T, P, R, I, K, S>(
     database: &BlastnDatabase,
     pool: &SearchPool<'_>,
     parallel: bool,
     listed: &[(u32, P)],
     new_scratch: &I,
     traceback: &K,
+    spans: &S,
 ) -> Result<Vec<R>>
 where
     P: Sync,
-    R: Send,
+    R: Send + std::fmt::Debug,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>, &P) -> Option<R> + Sync + Send,
+    S: Fn(&P) -> Vec<(usize, usize)> + Sync + Send,
 {
     let db = &database.db;
+    let x_ranged = super::x_bn_tb_range();
+    let x_min = super::x_tb_range_min();
     let one = |scratch: &mut T, &(ordinal, ref kept): &(u32, P)| -> Result<Option<R>> {
         let stored = x_read_sequence(db, ordinal).map_err(database_error)?;
         let length = stored.nucleotide_len(0).map_err(database_error)?;
-        let blastna = x_blastna(&stored).map_err(database_error)?;
-        let subject = BlastnSubjectRef {
-            length,
-            packed: stored.nucleotide_packed(0),
-            letters: None,
-            // The kernel's BLASTNA has no sentinel bytes.
-            blastna: Some(&blastna[1..=length]),
-            store: None,
-        };
-        let result = traceback(scratch, ordinal, subject, kept);
-        x_done_bytes(blastna);
+        let x_in_ranges = x_ranged && length >= x_min;
+        if x_ranged {
+            crate::utils::xreach::x_reach!("LOSAT_X_BNTBRANGE", x_in_ranges);
+        }
+        if x_in_ranges {
+            let ranges = x_partial_ranges(spans(kept), length);
+            let blastna = stored
+                .x_nucleotide_blastna_ranges(0, &ranges)
+                .map_err(database_error)?;
+            let fenced = std::sync::atomic::AtomicBool::new(false);
+            let subject = BlastnSubjectRef {
+                length,
+                packed: stored.nucleotide_packed(0),
+                letters: None,
+                blastna: Some(&blastna[1..=length]),
+                store: None,
+                x_fenced: Some(&fenced),
+            };
+            let result = traceback(scratch, ordinal, subject, kept);
+            drop(blastna);
+            let fenced = fenced.into_inner();
+            x_tb_range_count(length, &ranges, fenced);
+            if !fenced {
+                if x_tb_range_shadow() {
+                    let whole =
+                        x_traceback_whole(&stored, length, scratch, ordinal, kept, traceback)?;
+                    if format!("{whole:?}") != format!("{result:?}") {
+                        eprintln!(
+                            "[X_BNTBRANGE_SHADOW] MISMATCH sequence {ordinal}: ranges {} of {length} bases",
+                            ranges.len()
+                        );
+                    }
+                }
+                x_done_block(stored);
+                return Ok(result);
+            }
+        }
+        let result = x_traceback_whole(&stored, length, scratch, ordinal, kept, traceback)?;
         x_done_block(stored);
         Ok(result)
     };
@@ -738,6 +775,150 @@ where
         results.extend(one(&mut scratch, entry)?);
     }
     Ok(results)
+}
+
+/// The traceback of `traceback_listed` on the whole sequence of `stored`.
+fn x_traceback_whole<T, P, R, K>(
+    stored: &SequenceBlock,
+    length: usize,
+    scratch: &mut T,
+    ordinal: u32,
+    kept: &P,
+    traceback: &K,
+) -> Result<Option<R>>
+where
+    K: Fn(&mut T, u32, BlastnSubjectRef<'_>, &P) -> Option<R>,
+{
+    let blastna = x_blastna(stored).map_err(database_error)?;
+    let subject = BlastnSubjectRef {
+        length,
+        packed: stored.nucleotide_packed(0),
+        letters: None,
+        // The kernel's BLASTNA has no sentinel bytes.
+        blastna: Some(&blastna[1..=length]),
+        store: None,
+        x_fenced: None,
+    };
+    let result = traceback(scratch, ordinal, subject, kept);
+    x_done_bytes(blastna);
+    Ok(result)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seqsrc.c:467-519
+// ```c
+//     begin = MAX(0, begin - BLAST_SEQSRC_OVERHANG);
+//     end = MIN(end + BLAST_SEQSRC_OVERHANG, len);
+//     arg->ranges[arg->num_ranges++] = begin;
+//     arg->ranges[arg->num_ranges++] = end;
+// ...
+//     arg->num_ranges /= 2;
+//     if (arg->num_ranges <= 1) return;
+//     qsort(arg->ranges, arg->num_ranges, 2*sizeof(Int4), BeginCompareHSPs);
+//     i=0;
+//     for (j=1; j<arg->num_ranges; ++j) {
+//         Int4 begin = arg->ranges[j*2];
+//         Int4 end = arg->ranges[j*2+1];
+//         ASSERT(begin >= arg->ranges[2*i]);
+//         if (begin > arg->ranges[2*i+1] + BLAST_SEQSRC_MINGAP) {
+//             /* insert as a new range */
+//             ++i;
+//             arg->ranges[i*2] = begin;
+//             arg->ranges[i*2+1] = end;
+//         } else if (end > arg->ranges[2*i+1]) {
+//             /* merge into the previous range */
+//             arg->ranges[i*2+1] = end;
+//         }
+//     }
+//     arg->num_ranges = i+1;
+// ```
+// (blast_seqsrc.h:203-204: BLAST_SEQSRC_MINGAP 1024, BLAST_SEQSRC_OVERHANG 1024.) The ranges
+// come from every HSP that the batch keeps of the sequence (`BLAST_SetupPartialFetching`,
+// blast_traceback.c:1320-1370); the merged ranges do not depend on the order of equal starts.
+/// EXPERIMENT (LOSAT_X_BNTBRANGE): NCBI's partial-fetch ranges of a sequence of `length` bases
+/// whose HSPs cover `spans` (`[from, to)`): each widened by 1024 bases on both sides within the
+/// sequence, sorted by start, and merged into the range before unless it starts more than 1024
+/// bases after that one's end. Sorted and disjoint.
+pub(super) fn x_partial_ranges(
+    spans: impl IntoIterator<Item = (usize, usize)>,
+    length: usize,
+) -> Vec<(usize, usize)> {
+    x_partial_ranges_padded(spans, length, x_tb_range_pad())
+}
+
+/// EXPERIMENT (LOSAT_X_BNTBRANGEPAD=<bases>, a test knob): NCBI's 1024 of `x_partial_ranges`
+/// (both the widening and the gap), 16 to 1,048,576; a small one makes the traceback meet
+/// fences, so that the tests reach the whole sequence's second traceback. Not below 16: the
+/// start of a gapped alignment is found by reading up to 12 bases on each side of the seed
+/// (`blast_get_start_for_gapped_alignment_nucl`), outside the kernels' fence tests.
+fn x_tb_range_pad() -> usize {
+    static PAD: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *PAD.get_or_init(|| {
+        std::env::var("LOSAT_X_BNTBRANGEPAD")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|pad| (16..=1 << 20).contains(pad))
+            .unwrap_or(1024)
+    })
+}
+
+fn x_partial_ranges_padded(
+    spans: impl IntoIterator<Item = (usize, usize)>,
+    length: usize,
+    pad: usize,
+) -> Vec<(usize, usize)> {
+    #[allow(non_snake_case)]
+    let (OVERHANG, MINGAP) = (pad, pad);
+    let mut ranges: Vec<(usize, usize)> = spans
+        .into_iter()
+        .map(|(from, to)| {
+            (
+                from.saturating_sub(OVERHANG).min(length),
+                to.saturating_add(OVERHANG).min(length),
+            )
+        })
+        .collect();
+    ranges.sort_unstable_by_key(|range| range.0);
+    let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
+    for (from, to) in ranges {
+        match merged.last_mut() {
+            Some(last) if from <= last.1.saturating_add(MINGAP) => last.1 = last.1.max(to),
+            _ => merged.push((from, to)),
+        }
+    }
+    merged
+}
+
+/// EXPERIMENT (LOSAT_X_BNTBRANGESHADOW=1): every sequence decoded in ranges is also traced
+/// whole, and a difference is a stderr line.
+fn x_tb_range_shadow() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BNTBRANGESHADOW").is_some_and(|v| v == "1"))
+}
+
+/// EXPERIMENT (LOSAT_X_BNTBRANGE): sequences decoded in ranges, those traced again whole, their
+/// bases and the bases of their ranges (`x_tb_range_print_summary`).
+static X_TB_RANGE_COUNTS: [std::sync::atomic::AtomicU64; 4] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 4];
+
+fn x_tb_range_count(length: usize, ranges: &[(usize, usize)], fenced: bool) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let in_ranges: usize = ranges.iter().map(|range| range.1 - range.0).sum();
+    X_TB_RANGE_COUNTS[0].fetch_add(1, Relaxed);
+    X_TB_RANGE_COUNTS[1].fetch_add(u64::from(fenced), Relaxed);
+    X_TB_RANGE_COUNTS[2].fetch_add(length as u64, Relaxed);
+    X_TB_RANGE_COUNTS[3].fetch_add(in_ranges as u64, Relaxed);
+}
+
+/// EXPERIMENT (LOSAT_X_BNTBRANGELOG=1): one stderr line with the counts of LOSAT_X_BNTBRANGE.
+pub(super) fn x_tb_range_print_summary() {
+    use std::sync::atomic::Ordering::Relaxed;
+    if std::env::var_os("LOSAT_X_BNTBRANGELOG").is_none_or(|v| v != "1") {
+        return;
+    }
+    let [ranged, fenced, bases, in_ranges] = X_TB_RANGE_COUNTS.each_ref().map(|c| c.load(Relaxed));
+    eprintln!(
+        "[X_BNTBRANGE] sequences in ranges {ranged}, traced again whole {fenced}, bases {bases}, in ranges {in_ranges}"
+    );
 }
 
 /// The stored titles of the database sequences that the final hit lists of the query
@@ -905,6 +1086,7 @@ pub(super) fn reported_subjects(
             title: stored.title.clone(),
             sequence,
             warnings: Vec::new(),
+            source: Default::default(),
         });
     }
     Ok(ReportedSubjects { ordinals, records })
@@ -1293,6 +1475,7 @@ mod tests {
                             .collect();
                         (ordinal != 7).then_some((ordinal, letters))
                     },
+                    &|_: &u32| Vec::new(),
                 )
             })
             .unwrap();
@@ -1302,6 +1485,85 @@ mod tests {
                 .collect();
             assert_eq!(found, expected, "{threads} threads");
         }
+    }
+
+    // blast_seqsrc.c:467-519: each HSP widened by 1024 bases within the sequence, sorted by
+    // start, merged unless it starts more than 1024 bases after the range before.
+    #[test]
+    fn partial_ranges_are_ncbis() {
+        assert_eq!(x_partial_ranges_padded([], 100, 1024), vec![]);
+        assert_eq!(
+            x_partial_ranges_padded([(10, 20)], 100, 1024),
+            vec![(0, 100)]
+        );
+        // 3976..7024, 5476..8024, 8976..11124: each within 1024 of the one before.
+        assert_eq!(
+            x_partial_ranges_padded([(6500, 7000), (5000, 6000), (10000, 10100)], 20000, 1024),
+            vec![(3976, 11124)]
+        );
+        // 0..1124 and 3172..6124: 3172 > 1124 + 1024.
+        assert_eq!(
+            x_partial_ranges_padded([(4196, 5100), (0, 100)], 5500, 1024),
+            vec![(0, 1124), (3172, 5500)]
+        );
+        // 0..1124 and 2148..: exactly 1024 apart merges.
+        assert_eq!(
+            x_partial_ranges_padded([(0, 100), (3172, 3200)], 10000, 1024),
+            vec![(0, 4224)]
+        );
+        // A range inside the one before.
+        assert_eq!(
+            x_partial_ranges_padded([(5000, 9000), (6000, 6100)], 20000, 1024),
+            vec![(3976, 10024)]
+        );
+    }
+
+    // seqdbvol.cpp:1565-1595 (`GetAmbigPartialSeq`): the bases of the ranges as the whole
+    // decode gives them, a fence before and after each range inside the sequence, the two
+    // sentinels, and nothing written elsewhere.
+    #[test]
+    fn blastna_in_ranges_is_the_whole_decode_inside_them() {
+        let database = open("nucl_mv");
+        let mut checked = 0;
+        for ordinal in 0..12u32 {
+            let block = database.db.read_sequence(ordinal).unwrap();
+            let length = block.nucleotide_len(0).unwrap();
+            let whole = block.nucleotide_blastna(0).unwrap();
+            let mut lists: Vec<Vec<(usize, usize)>> = vec![
+                vec![(0, length)],
+                vec![(1, length.saturating_sub(1).max(1))],
+            ];
+            if length >= 3 {
+                lists.push(vec![(0, 1), (length - 1, length)]);
+            }
+            if length >= 12 {
+                lists.push(vec![(2, 5), (7, 9), (11, length)]);
+                lists.push(vec![(0, 3), (length / 2, length / 2 + 2)]);
+            }
+            for ranges in lists {
+                let ranges: Vec<(usize, usize)> =
+                    ranges.into_iter().filter(|r| r.0 < r.1).collect();
+                let ranged = block.x_nucleotide_blastna_ranges(0, &ranges).unwrap();
+                assert_eq!(ranged.len(), length + 2);
+                let mut expected = vec![0u8; length + 2];
+                for &(from, to) in &ranges {
+                    if from > 0 {
+                        expected[from] = crate::seqdb::FENCE_SENTRY;
+                    }
+                    if to < length {
+                        expected[to + 1] = crate::seqdb::FENCE_SENTRY;
+                    }
+                }
+                for &(from, to) in &ranges {
+                    expected[from + 1..=to].copy_from_slice(&whole[from + 1..=to]);
+                }
+                expected[0] = whole[0];
+                expected[length + 1] = whole[length + 1];
+                assert_eq!(ranged, expected, "sequence {ordinal}, ranges {ranges:?}");
+                checked += 1;
+            }
+        }
+        assert!(checked >= 36);
     }
 
     // blast_seqalign.cpp:1569-1582 and seqdbvol.cpp:2302-2310: NCBI opens a volume's

@@ -1738,6 +1738,33 @@ fn has_alignments(run: &RunRecord<'_>, hsps: &[HspRecord<'_>]) -> bool {
     }
 }
 
+/// The Seq-aligns of one query's HSPs, as the elements of the list that the caller opened
+/// (`Seq-annot` `data align` of outfmt 8, `alignments` of the archive of outfmt 11).
+/// `after_each` is called after each Seq-align (the archive hands the encoder's final bytes to
+/// its sink there).
+pub(crate) fn write_seq_aligns<E: Encoder>(
+    enc: &mut E,
+    run: &RunRecord<'_>,
+    query: &QueryRecord<'_>,
+    subjects: &[SubjectRecord<'_>],
+    hsps: &[HspRecord<'_>],
+    segments: &mut Segments,
+    mut after_each: impl FnMut(&mut E),
+) {
+    if run.gapped {
+        for hsp in hsps.iter().filter(|hsp| hsp.score != 0) {
+            let subject = &subjects[hsp.subject as usize];
+            write_seq_align_gapped(enc, run, query, subject, hsp, segments);
+            after_each(enc);
+        }
+    } else {
+        for list in hsps.chunk_by(|a, b| a.subject == b.subject) {
+            write_seq_align_diags(enc, query, &subjects[list[0].subject as usize], list);
+            after_each(enc);
+        }
+    }
+}
+
 /// The Seq-annot of one query's Seq-aligns: the `desc` user objects and `data align` with,
 /// subject by subject in the order of `hsps`, one Seq-align per HSP of score other than 0
 /// (a gapped search) or one `diags` Seq-align per subject (an ungapped search).
@@ -1802,16 +1829,7 @@ fn write_seq_annot<E: Encoder>(
     enc.member("data", 4);
     enc.variant("Seq-annot_data", "align", 1);
     enc.begin_list(true);
-    if run.gapped {
-        for hsp in hsps.iter().filter(|hsp| hsp.score != 0) {
-            let subject = &subjects[hsp.subject as usize];
-            write_seq_align_gapped(enc, run, query, subject, hsp, &mut segments);
-        }
-    } else {
-        for list in hsps.chunk_by(|a, b| a.subject == b.subject) {
-            write_seq_align_diags(enc, query, &subjects[list[0].subject as usize], list);
-        }
-    }
+    write_seq_aligns(enc, run, query, subjects, hsps, &mut segments, |_| {});
     enc.end_list();
     enc.end_variant();
     enc.end_member();

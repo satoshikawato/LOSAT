@@ -291,6 +291,45 @@ pub struct ReportOutputs<'a> {
     pub observer: Option<&'a mut (dyn FormatObserver + Send)>,
 }
 
+impl ReportOutputs<'_> {
+    /// Runs `f` with the same outputs and a diagnostics stream that also saves what it
+    /// writes as the messages of the BLAST archive (outfmt 11) of `handle`.
+    pub(crate) fn with_archive_diagnostics<R>(
+        &mut self,
+        handle: crate::report::archive::ArchiveHandle,
+        f: impl FnOnce(&mut ReportOutputs<'_>) -> R,
+    ) -> R {
+        let ReportOutputs {
+            formats,
+            diagnostics,
+            hits,
+            observer,
+        } = self;
+        let mut tee = crate::report::archive::DiagTee::new(&mut **diagnostics, handle);
+        let mut view = ReportOutputs {
+            formats: formats
+                .iter_mut()
+                .map(|format| FormatOutput {
+                    outfmt: format.outfmt,
+                    sink: match &mut format.sink {
+                        OutputSink::Stdout => OutputSink::Stdout,
+                        OutputSink::File(path) => OutputSink::File(path),
+                        OutputSink::Writer(writer) => OutputSink::Writer(&mut **writer),
+                    },
+                })
+                .collect(),
+            diagnostics: &mut tee,
+            hits: hits
+                .as_mut()
+                .map(|hits| &mut **hits as &mut (dyn FnMut(&[PairwiseHit]) + Send)),
+            observer: observer
+                .as_mut()
+                .map(|observer| &mut **observer as &mut (dyn FormatObserver + Send)),
+        };
+        f(&mut view)
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:225-226
 // ```c
 // CBlastFormat formatter(opt, *db_adapter,

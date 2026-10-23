@@ -38,6 +38,8 @@ pub enum BlastnOutputFormat {
     /// The XML2 / JSON documents of outfmt 16, 15, 14 and 13 (`report::blast_xml2`, through the same
     /// `algorithm::blastn::blast_xml`).
     Xml2(crate::report::blast_xml2::Xml2Kind),
+    /// The BLAST archive (outfmt 11; `report::archive`, through `algorithm::blastn::archive`).
+    Archive,
     /// SAM (outfmt 17; `report::sam`, through `algorithm::blastn::sam`).
     Sam(crate::report::sam::SamSpec),
 }
@@ -82,6 +84,7 @@ impl BlastnOutputFormat {
             ReportFormat::Tabular => Ok(BlastnOutputFormat::Tabular),
             ReportFormat::TabularWithComments => Ok(BlastnOutputFormat::TabularWithComments),
             ReportFormat::Xml => Ok(BlastnOutputFormat::Xml),
+            ReportFormat::ArchiveFormat => Ok(BlastnOutputFormat::Archive),
             // 16, 15, 14 and 13 (the last two write files next to `-out`: only the command line
             // reaches them, `run_local` has no output file).
             ReportFormat::Xml2S | ReportFormat::JsonS | ReportFormat::Xml2 | ReportFormat::Json => {
@@ -116,6 +119,7 @@ impl BlastnOutputFormat {
             BlastnOutputFormat::Seqalign(_)
                 | BlastnOutputFormat::Xml
                 | BlastnOutputFormat::Xml2(_)
+                | BlastnOutputFormat::Archive
                 | BlastnOutputFormat::Sam(_)
         )
     }

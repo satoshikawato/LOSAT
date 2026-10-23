@@ -36,6 +36,9 @@ use super::real::write_asn_text_double;
 /// The column after which a VisibleString is wrapped (`WrapAt(78, true)`).
 const STRING_WRAP: usize = 78;
 
+/// The line length from which an OCTET STRING starts a new line (`WrapAt(78, false)`).
+const OCTET_WRAP: usize = 78;
+
 /// The ASN.1 text encoder, appending one document to `out`.
 pub struct AsnTextEncoder<'b> {
     out: &'b mut Vec<u8>,
@@ -165,6 +168,15 @@ impl<'b> AsnTextEncoder<'b> {
             self.put(b",");
         }
         self.eol();
+    }
+
+    /// `COStreamBuffer::WrapAt(lineLength, false)`: an end of line without indentation when the
+    /// line holds `line_length` bytes or more.
+    fn wrap_at_line_length(&mut self, line_length: usize) {
+        if self.line_length >= line_length {
+            self.out.push(b'\n');
+            self.line_length = 0;
+        }
     }
 
     /// `COStreamBuffer::PutEolAtWordEnd(lineLength)`: inserts an end of line (without
@@ -551,6 +563,92 @@ impl Encoder for AsnTextEncoder<'_> {
         let before = self.out.len();
         write_asn_text_double(value, self.out);
         self.line_length += self.out.len() - before;
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:868-895
+    /// ```c++
+    /// void CObjectOStreamAsn::BeginBytes(const ByteBlock& )
+    /// {
+    ///     m_Output.PutChar('\'');
+    /// }
+    ///
+    /// static const char HEX[] = "0123456789ABCDEF";
+    ///
+    /// void CObjectOStreamAsn::WriteBytes(const char* bytes, size_t length)
+    /// {
+    ///     while ( length-- > 0 ) {
+    ///         char c = *bytes++;
+    ///         m_Output.WrapAt(78, false);
+    ///         m_Output.PutChar(HEX[(c >> 4) & 0xf]);
+    ///         m_Output.PutChar(HEX[c & 0xf]);
+    ///     }
+    /// }
+    ///
+    /// void CObjectOStreamAsn::EndBytes(const ByteBlock& )
+    /// {
+    ///     m_Output.WrapAt(78, false);
+    ///     m_Output.PutString("\'H");
+    /// }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/include/util/strbuffer.inl:382-393
+    /// ```c++
+    /// inline
+    /// void COStreamBuffer::WrapAt(size_t lineLength, bool keepWord)
+    ///     THROWS1((CIOException, bad_alloc))
+    /// {
+    ///     if ( keepWord ) {
+    ///         if ( GetCurrentLineLength() > lineLength )
+    ///             PutEolAtWordEnd(lineLength);
+    ///     }
+    ///     else {
+    ///         if ( GetCurrentLineLength() >= lineLength )
+    ///             PutEol(false);
+    ///     }
+    /// }
+    /// ```
+    fn octets(&mut self, value: &[u8]) {
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        self.put(b"'");
+        for &byte in value {
+            self.wrap_at_line_length(OCTET_WRAP);
+            self.put(&[HEX[usize::from(byte >> 4)], HEX[usize::from(byte & 0xf)]]);
+        }
+        self.wrap_at_line_length(OCTET_WRAP);
+        self.put(b"'H");
+    }
+
+    /// `WriteStringStore` writes the bytes as `WriteString` does.
+    fn string_store(&mut self, value: &[u8]) {
+        self.visible_str(value);
+    }
+
+    fn buffered(&self) -> usize {
+        self.out.len() - self.start
+    }
+
+    /// Keeps the last end of line and the line after it: `put_eol_at_word_end` looks back to
+    /// the start of the current line and to the byte before it (an end of line stops it, and
+    /// an end of line right before a place stops it from adding a second), and the buffer
+    /// start of NCBI's stream only matters when the line is the first one.
+    fn flush_to(&mut self, sink: &mut dyn std::io::Write, all: bool) -> std::io::Result<()> {
+        if all {
+            sink.write_all(&self.out[self.start..])?;
+            self.out.truncate(self.start);
+            return Ok(());
+        }
+        let Some(last_eol) = self.out[self.start..]
+            .iter()
+            .rposition(|&byte| byte == b'\n')
+        else {
+            return Ok(());
+        };
+        let keep_from = self.start + last_eol;
+        if keep_from == self.start {
+            return Ok(());
+        }
+        sink.write_all(&self.out[self.start..keep_from])?;
+        self.out.drain(self.start..keep_from);
+        Ok(())
     }
 
     fn error(&self) -> Option<SerialError> {

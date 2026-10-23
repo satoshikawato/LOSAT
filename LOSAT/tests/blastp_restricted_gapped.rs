@@ -5,7 +5,9 @@
 //! variable is `0`, or `LOSAT_X_DEFAULT=0` and its variable is not set. Every test states the
 //! default it runs with: the report is NCBI's with no variable, with `LOSAT_X_BPGAP=0`, with
 //! `LOSAT_X_DEFAULT=0` and with `LOSAT_X_DEFAULT=0 LOSAT_X_BPGAP=1` (the run the variable gave
-//! before it joined the set).
+//! before it joined the set). `LOSAT_X_BPGAP16` (the sixteen-bit rows, also in the set) is checked
+//! the same way: with `LOSAT_X_BPGAP16=0`, and with `LOSAT_X_DEFAULT=0 LOSAT_X_BPGAP=1
+//! LOSAT_X_BPGAP16=1`.
 //!
 //! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:3777-3786,3955-3957
 //! ```c
@@ -220,6 +222,12 @@ fn restricted_gapped_alignments_match_ncbi_with_and_without_the_switch() {
             &[("LOSAT_X_BPGAP", "0")][..],
             &[DEFAULT_OFF][..],
             &[DEFAULT_OFF, ("LOSAT_X_BPGAP", "1")][..],
+            &[("LOSAT_X_BPGAP16", "0")][..],
+            &[
+                DEFAULT_OFF,
+                ("LOSAT_X_BPGAP", "1"),
+                ("LOSAT_X_BPGAP16", "1"),
+            ][..],
         ] {
             let (report, _) = blastp(threads, variables);
             assert_eq!(report, NCBI_ROWS, "{threads} threads, {variables:?}");

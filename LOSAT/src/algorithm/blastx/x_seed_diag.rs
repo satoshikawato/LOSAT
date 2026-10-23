@@ -62,18 +62,22 @@
 //! `tables_fused=` and `tables_other=` (the choices made) and `hits_per_cell=LEAST-MOST` (hundredths).
 //!
 //! EXPERIMENT (LOSAT_X_BXCROSS, an opt-in prototype): the AVX2 batch is `XDiagMode::Avx2Cross`:
-//! the subject's hits staged and tested in batches of eight cut across the cells' borders, a batch
-//! cut short before a hit that repeats an earlier one's entry, the last hits of the subject one
-//! after the other; the argument that the calls, their order and the table are the per-hit loop's
-//! is in `x_seed_fused`'s module header (it rests on the closure of [`x_word_finder_fused`] writing
-//! only its hit's entry). Off unless `LOSAT_X_BXCROSS` is set to a value other than `0` (read once;
-//! not in the strict set). On, it is the cell test of every table the fused loop takes where the
-//! CPU has AVX2 and POPCNT, in place of LOSAT_X_BXDEFER's and of LOSAT_X_BXDEFERMIN's rule
-//! (`tables_avx2=0`); `LOSAT_X_BXDIAGMIN` still chooses the tables, and `LOSAT_X_BXDIAGSHADOW`
-//! compares it with the reference like the other cell tests. `LOSAT_X_BXCROSSCHUNK` (an experiment
-//! knob, read once) sets the staged hits at which the batches run: a multiple of eight from 64 to
-//! 4096, otherwise the built-in 1,024. The timing line names `mode=avx2-cross` and ends with
-//! `cross_chunk=N cross_splits=N` (the chunk, and the batches cut short before a repeated entry).
+//! the subject's hits staged and tested in windows of eight cut across the cells' borders, a
+//! window with a repeated entry in parts cut before each hit that repeats an entry of its part, the
+//! last hits of the subject one after the other; the argument that the calls, their order and the
+//! table are the per-hit loop's is in `x_seed_fused`'s module header (it rests on the closure of
+//! [`x_word_finder_fused`] writing only its hit's entry). The stage keeps no query offset: it is
+//! recovered as `(coord + s) & mask`, exact because the table made by `Diagonals::new` for the
+//! query batch has at least its length plus the window entries, so `mask` is at least every query
+//! offset of the batch's lookup (`x_seed_fused::x_scan_cells_cross` asserts it per subject). Off
+//! unless `LOSAT_X_BXCROSS` is set to a value other than `0` (read once; not in the strict set).
+//! On, it is the cell test of every table the fused loop takes where the CPU has AVX2 and POPCNT,
+//! in place of LOSAT_X_BXDEFER's and of LOSAT_X_BXDEFERMIN's rule (`tables_avx2=0`);
+//! `LOSAT_X_BXDIAGMIN` still chooses the tables, and `LOSAT_X_BXDIAGSHADOW` compares it with the
+//! reference like the other cell tests. The batches run at 1,024 staged hits;
+//! `LOSAT_X_BXCROSSCHUNK=64` (a test hook, read once) runs the instance of 64 instead. The timing
+//! line names `mode=avx2-cross` and ends with `cross_chunk=N cross_splits=N` (the chunk, and the
+//! windows of eight with a repeated entry, tested in parts).
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF, `x_seed_scan.rs`): with that switch the fused loop finds the
 //! cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`'s
@@ -355,7 +359,7 @@ pub(crate) fn x_write_timing(out: &mut dyn std::io::Write) -> std::io::Result<()
             x_min_hits_per_cell_defer(),
             X_TABLES_AVX2.load(Relaxed),
         )?;
-        // EXPERIMENT (LOSAT_X_BXCROSS, LOSAT_X_BXCROSSCHUNK): the chunk and the cut batches.
+        // EXPERIMENT (LOSAT_X_BXCROSS, LOSAT_X_BXCROSSCHUNK): the chunk and the windows in parts.
         #[cfg(target_arch = "x86_64")]
         if x_cell_mode() == XDiagMode::Avx2Cross {
             write!(

@@ -317,15 +317,6 @@ pub(crate) fn value(name: &str, range: RangeInclusive<usize>, builtin: usize) ->
     Some(given(raw.as_deref(), &range).unwrap_or(builtin))
 }
 
-/// No NCBI counterpart: a tuning variable outside the strict set that carries a number (an
-/// experiment knob): the number given if it lies in `range`, `None` if the variable is not set or
-/// holds anything else (the caller then takes its built-in value). `LOSAT_X_DEFAULT` does not
-/// reach it.
-pub(crate) fn tuning(name: &str, range: RangeInclusive<usize>) -> Option<usize> {
-    debug_assert!(!STRICT_SET.contains(&name), "{name} is a strict-set switch");
-    given(std::env::var_os(name).as_deref(), &range)
-}
-
 /// No NCBI counterpart: the number in a value switch's variable, if it is one within `range`.
 fn given(value: Option<&OsStr>, range: &RangeInclusive<usize>) -> Option<usize> {
     value?

@@ -4490,26 +4490,29 @@ Scheduling (each value computed by one thread with the original function; order 
   every table it takes, in place of `LOSAT_X_BXDEFER` and its `LOSAT_X_BXDEFERMIN` rule; needs POPCNT as well
   as AVX2) the cell test of blastx's fused seed loop cuts its batches of eight across the cells' borders
   (`blastp/x_seed_fused.rs`, `x_scan_cells_avx2_cross`, exactness argument in its header): the scan's call for
-  a cell only stages the cell's hits (coordinate, query offset, subject offset, in three arrays of one
-  allocation; three masked 8-lane loads per 24 hits), and every chunk of staged hits (1,024, or
-  `LOSAT_X_BXCROSSCHUNK`) and at the end of the subject the stage is tested in batches (the lanes of
-  `LOSAT_X_BXDEFER`'s batch with a subject offset per lane, each batch's candidates called before the next
-  batch loads). Eight staged hits on eight distinct diagonal entries are one batch; otherwise the batch takes
-  the hits before the first one that repeats an earlier one's entry (its other lanes repeat its first hit and
-  their candidate bits are dropped) and the next batch starts at the repeating hit; the last fewer than eight
-  hits of a subject take the hit-by-hit test, and those left by a chunk move to the front of the stage. Exact
-  because the stream is the scan order and a hit's test and call touch only its own entry. With
-  `LOSAT_TIMING=1` the `blastx_diag` line names `mode=avx2-cross` (and `tables_avx2=0`) and ends with
-  `cross_chunk=N cross_splits=N` (the chunk, and the batches cut short before a repeated entry). Shadow:
-  `LOSAT_X_BXDIAGSHADOW=1` compares it with the reference for every subject; `tests/blastx_diag.rs` runs it
-  with every search, the shadow, the chunk 64 and `=0`. Design and timings: v4-A14 results/p2
-  (DESIGN_cross.md) and results/p3 (DESIGN_s3.md: round 2, the cut batches, `popcnt`, the chunk knob, one
-  allocation and the staged count in a register).
-- `LOSAT_X_BXCROSSCHUNK=N` (BLASTX, experiment knob of the `LOSAT_X_BXCROSS` prototype (v4-A14 s3,
-  2026-10-23), not in the strict set, read once; acts only with `LOSAT_X_BXCROSS`) the staged hits at which
-  the cross-cell batches run: a multiple of eight from 64 to 4096 (white space around it ignored); not set, or
-  any other value, the built-in 1,024. The stage holds the chunk plus 32 hits per array. Any value gives the
-  same output; the timing line's `cross_chunk=` gives the one in use.
+  a cell only stages the cell's hits (coordinate and subject offset, in two arrays of one allocation; three
+  masked 8-lane loads per 24 hits), and every 1,024 staged hits and at the end of the subject the stage is
+  tested in windows of eight (the lanes of `LOSAT_X_BXDEFER`'s batch with a subject offset per lane, each
+  batch's candidates called before the next batch loads). A window on eight distinct diagonal entries is one
+  batch; otherwise (out of line) it is tested in parts, each the hits before the first one that repeats an
+  entry of the part (the batch's other lanes repeat the part's first hit and their candidate bits are
+  dropped); the last fewer than eight hits of a subject take the hit-by-hit test, and those left by a chunk
+  move to the front of the stage. The query offset is not staged: it is `(coord + s) & mask`, exact because
+  the diagonal table has at least the query's length plus the window entries (`Diagonals::new`), so the mask
+  is at least every query offset of the lookup (asserted once per subject scan). Exact because the stream is
+  the scan order and a hit's test and call touch only its own entry. With `LOSAT_TIMING=1` the `blastx_diag`
+  line names `mode=avx2-cross` (and `tables_avx2=0`) and ends with `cross_chunk=N cross_splits=N` (the chunk,
+  and the windows with a repeated entry). Shadow: `LOSAT_X_BXDIAGSHADOW=1` compares it with the reference for
+  every subject; `tests/blastx_diag.rs` runs it with every search, the shadow, the chunk 64 and `=0`. Design
+  and timings: v4-A14 results/p2 (DESIGN_cross.md), results/p3 (DESIGN_s3.md: round 2) and results/p4
+  (DESIGN_s4.md: round 3, r1's loops with a constant chunk, two arrays, the windows with a repeated entry
+  out of line).
+- `LOSAT_X_BXCROSSCHUNK=64` (BLASTX, test hook of the `LOSAT_X_BXCROSS` prototype (v4-A14 s3, 2026-10-23; a
+  hook since s4), not in the strict set, read once; acts only with `LOSAT_X_BXCROSS`) runs the instance of the
+  cross-cell batches with a chunk of 64 staged hits (a drain every few cells) instead of the built-in 1,024
+  (the chunk is a constant of each instance). `64` (white space around it ignored) selects it; not set, or
+  any other value, the built-in 1,024. Either gives the same output; the timing line's `cross_chunk=` gives
+  the one in use.
 - `LOSAT_X_BXSCANBF=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's decision of that day
   (perf-si-20261012 DECISIONS 175) on the timings below: on by default, `=0` turns it off, and with
   `LOSAT_X_DEFAULT=0` it is off unless set; acts where the standard lookup table is scanned by `LOSAT_X_BXSCAN`'s

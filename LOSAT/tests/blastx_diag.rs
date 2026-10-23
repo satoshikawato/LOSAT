@@ -11,9 +11,9 @@
 //! `LOSAT_X_BXDEFERMIN` hits per used cell (the others count in `tables_avx2=`); `0` gives the
 //! AVX2 batch. `LOSAT_X_BXCROSS` (an opt-in prototype, off unless set to a value other than `0`)
 //! makes the AVX2 cell test the batches cut across the cells' borders on every fused table, run at
-//! the staged hits `LOSAT_X_BXCROSSCHUNK` gives (an experiment knob: a multiple of eight from 64 to
-//! 4096, else 1024); the timing line then ends with `cross_chunk=` and `cross_splits=` (the
-//! batches cut short before a hit that repeats an earlier one's entry). So the
+//! 1024 staged hits, or at 64 with the test hook `LOSAT_X_BXCROSSCHUNK=64`; the timing line then
+//! ends with `cross_chunk=` and `cross_splits=` (the windows of eight staged hits with a repeated
+//! entry, tested in parts). So the
 //! properties under test are that the report, standard error without the diagnostic lines and the exit status equal those of the
 //! search with the switch off, with the default and every cell test, with `-subject` and `-db`, outfmt 6 and 7,
 //! one and three threads and a two-hit window other than the default, and with every batch, some
@@ -531,7 +531,7 @@ fn diag_line(run: &Run) -> Option<&str> {
 // LOSAT_X_BXDEFERMIN does not reach them (`tables_avx2=0`); the timing line names `avx2-cross`.
 // With every table fused, the batches are cut short before repeated entries (`cross_splits=`: the
 // hits of a diagonal in consecutive cells, the two-hit pairs of these related sequences), with the
-// built-in chunk and with LOSAT_X_BXCROSSCHUNK=64 (a drain every few cells).
+// built-in chunk and with the test hook LOSAT_X_BXCROSSCHUNK=64 (a drain every few cells).
 #[test]
 fn the_cross_cell_batches_give_the_reports_of_the_reference() {
     let inputs = Inputs::new();
@@ -584,23 +584,21 @@ fn the_cross_cell_batches_give_the_reports_of_the_reference() {
     }
 }
 
-// EXPERIMENT (LOSAT_X_BXCROSSCHUNK): the knob takes a multiple of eight from 64 to 4096 (white
-// space around it ignored); any other value, or none, gives the built-in 1024. The reports equal
-// the reference's with each.
+// EXPERIMENT (LOSAT_X_BXCROSSCHUNK): the test hook takes `64` (white space around it ignored) for
+// the instance of 64; any other value, or none, gives the built-in 1024. The reports equal the
+// reference's with each.
 #[test]
-fn the_cross_chunk_takes_the_multiples_of_eight_from_64_to_4096() {
+fn the_cross_chunk_is_64_or_the_built_in_1024() {
     let inputs = Inputs::new();
     let args = searches(&inputs).remove(0);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let reference = blastx(&args, &[OFF]);
     for (value, chunk) in [
         ("64", 64),
-        ("72", 72),
-        ("4096", 4096),
-        (" 128 ", 128),
-        ("65", 1024),
-        ("56", 1024),
-        ("4104", 1024),
+        (" 64 ", 64),
+        ("72", 1024),
+        ("128", 1024),
+        ("4096", 1024),
         ("x", 1024),
         ("", 1024),
     ] {

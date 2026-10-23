@@ -84,7 +84,8 @@ fn standard_input() -> std::io::Result<std::fs::File> {
 }
 
 /// Whether an opened input has a stream position the way a regular file on Linux has one:
-/// `tellg()` of NCBI's `IsIStreamEmpty` is not negative (a pipe has none, a console has none).
+/// `tellg()` of NCBI's `IsIStreamEmpty` is not negative (a pipe has none, a terminal has none,
+/// while a character device such as `/dev/null` has one).
 ///
 /// NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859
 /// ```c
@@ -95,23 +96,38 @@ fn standard_input() -> std::io::Result<std::fs::File> {
 /// 		return false;
 /// ```
 /// On Unix and WASI the answer is whether the position can be read, as before
-/// (`lseek` fails on a pipe; the position is not moved). On Windows `SetFilePointerEx` succeeds on a pipe or a console
-/// handle (its result is undefined there), so an empty pipe would look like an empty file:
-/// only a handle of `FILE_TYPE_DISK` has a position. LOSAT takes the Linux branch of
+/// (`lseek` fails on a pipe and on a terminal, not on `/dev/null`; the position is not moved).
+/// On Windows `SetFilePointerEx` succeeds on a pipe or a console handle (its result is
+/// undefined there), so an empty pipe would look like an empty file. Follow Linux by the type
+/// of the handle (`GetFileType`): a disk file has a position; a character device has one
+/// unless it is a console (`GetConsoleMode` succeeds on a console only; `NUL` has a position,
+/// as `/dev/null` has); a pipe or an unknown type has none. LOSAT takes the Linux branch of
 /// `IsIStreamEmpty` on every platform (`AUTHORITY.md` §C1).
 pub fn has_stream_position(file: &std::fs::File) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;
         const FILE_TYPE_DISK: u32 = 1;
+        const FILE_TYPE_CHAR: u32 = 2;
         #[link(name = "kernel32")]
         extern "system" {
             fn GetFileType(handle: *mut std::ffi::c_void) -> u32;
+            fn GetConsoleMode(handle: *mut std::ffi::c_void, mode: *mut u32) -> i32;
         }
+        let handle: *mut std::ffi::c_void = file.as_raw_handle().cast();
         // SAFETY: `GetFileType` only reads the type of the handle it is given; the handle comes
         // from `file`, which is open for the call. A failure returns FILE_TYPE_UNKNOWN (0),
-        // which is not a disk: no position.
-        unsafe { GetFileType(file.as_raw_handle().cast()) == FILE_TYPE_DISK }
+        // which has no position.
+        match unsafe { GetFileType(handle) } {
+            FILE_TYPE_DISK => true,
+            FILE_TYPE_CHAR => {
+                let mut mode = 0u32;
+                // SAFETY: `handle` is open as above and `mode` is a valid `u32` to write; the
+                // call fails (returns 0) on a handle that is not a console.
+                unsafe { GetConsoleMode(handle, &mut mode) == 0 }
+            }
+            _ => false,
+        }
     }
     #[cfg(not(windows))]
     {
@@ -241,5 +257,13 @@ mod tests {
             let pipe = std::fs::File::from(owned(reader));
             assert!(!has_stream_position(&pipe));
         }
+        // `NUL` is a character device that is not a console: it has a position, as
+        // `/dev/null` has on Linux (`Stdio::null()` with `-query -` is an empty file).
+        #[cfg(windows)]
+        assert!(has_stream_position(&std::fs::File::open("NUL").unwrap()));
+        #[cfg(unix)]
+        assert!(has_stream_position(
+            &std::fs::File::open("/dev/null").unwrap()
+        ));
     }
 }

@@ -392,9 +392,18 @@ fn a_header_file_that_cannot_be_read_writes_nothing() {
                 without_cl(&expected),
                 "{name} {threads}"
             );
+            // Windows writes the path with backslashes, where the frozen bytes (and the fixture
+            // directory built from `CARGO_MANIFEST_DIR`) mix in slashes: compare them alike.
+            let separators = |text: &str| {
+                if cfg!(windows) {
+                    text.replace('\\', "/")
+                } else {
+                    text.to_string()
+                }
+            };
             assert_eq!(
-                String::from_utf8_lossy(&output.stderr),
-                expected_err,
+                separators(&String::from_utf8_lossy(&output.stderr)),
+                separators(&expected_err),
                 "{name} {threads}"
             );
         }

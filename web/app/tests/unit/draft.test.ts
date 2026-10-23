@@ -330,19 +330,21 @@ describe('SearchDraft submit', () => {
     expect(requests[1]!.every((r) => !('title' in r))).toBe(true);
   });
 
-  it('asks the engine to prepare once the argv is valid and both roles have inputs, with the size of the run', async () => {
-    const { draft, prepared } = setup();
+  it('asks the engine to prepare once the argv is valid and both roles have inputs, with the size and argv of the run', async () => {
+    const { draft, prepared, validated } = setup();
     draft.setPaste('query', '>q1\nACGT\n');
     await draft.idle();
     expect(prepared).toEqual([]);
     draft.setPaste('subject', '>s1\nACGTACGT\n');
     await draft.idle();
-    expect(prepared.at(-1)).toEqual({ requestedThreads: 'auto', inputBytes: 9 + 13 });
+    const argv = validated.at(-1);
+    expect(argv?.slice(0, 5)).toEqual(['blastn', '-query', 'query.fa', '-subject', 'subject.fa']);
+    expect(prepared.at(-1)).toEqual({ requestedThreads: 'auto', inputBytes: 9 + 13, argv });
     draft.setThreads(8);
     draft.setThreads(4);
     await draft.idle();
     // Stepping through the choices hints only the last one.
-    expect(prepared.filter((hint) => hint.requestedThreads !== 'auto')).toEqual([{ requestedThreads: 4, inputBytes: 22 }]);
+    expect(prepared.filter((hint) => hint.requestedThreads !== 'auto')).toEqual([{ requestedThreads: 4, inputBytes: 22, argv }]);
   });
 
   it('does not ask the engine to prepare for an argv that it refuses', async () => {

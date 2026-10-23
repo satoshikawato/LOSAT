@@ -1,5 +1,5 @@
 //! TBLASTN subjects held packed (`LOSAT_X_TBNSTORE`, `src/algorithm/tblastn/x_subject_store.rs`,
-//! `src/sequence/packed_subject.rs`), on whole searches.
+//! `src/sequence/packed_subject.rs`), on whole searches and with a subject range.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
 //! ```c
@@ -54,7 +54,11 @@ fn inputs() -> &'static (PathBuf, PathBuf, PathBuf) {
     static FILES: OnceLock<(PathBuf, PathBuf, PathBuf)> = OnceLock::new();
     FILES.get_or_init(|| {
         let fasta = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
-        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("tblastn_subject_store");
+        // One directory per process: nextest runs each test in a process of its own, and a
+        // process that wrote these files again while another one's search read them cut its input.
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join("tblastn_subject_store")
+            .join(std::process::id().to_string());
         std::fs::create_dir_all(&dir).expect("work directory");
         let proteins = records(&fasta.join("PemoMJNVA.faa"));
         let mut ten = String::new();
@@ -140,28 +144,7 @@ fn tblastn(
     options: &[&str],
     variables: &[(&str, &str)],
 ) -> (Vec<u8>, String, String) {
-    const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
-    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
-    for (name, _) in std::env::vars_os() {
-        let name_text = name.to_string_lossy();
-        if name_text.starts_with("LOSAT_") && name_text != WORKER_LOG {
-            command.env_remove(name);
-        }
-    }
-    if std::env::var_os(WORKER_LOG).is_none() {
-        command.env(WORKER_LOG, query.with_file_name("worker.log"));
-    }
-    let output = command
-        .arg("tblastn")
-        .arg("-query")
-        .arg(query)
-        .arg("-subject")
-        .arg(subjects)
-        .args(options)
-        .env("LOSAT_X_STATS", "1")
-        .envs(variables.iter().copied())
-        .output()
-        .expect("run LOSAT");
+    let output = run(query, subjects, options, variables);
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(
         output.status.success(),
@@ -178,6 +161,37 @@ fn tblastn(
         .collect();
     assert_eq!(stats.len(), 1, "one TBNSTORE line:\n{stderr}");
     (output.stdout, messages, stats[0].to_string())
+}
+
+/// The process of one TBLASTN run (see `tblastn`).
+fn run(
+    query: &Path,
+    subjects: &Path,
+    options: &[&str],
+    variables: &[(&str, &str)],
+) -> std::process::Output {
+    const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    for (name, _) in std::env::vars_os() {
+        let name_text = name.to_string_lossy();
+        if name_text.starts_with("LOSAT_") && name_text != WORKER_LOG {
+            command.env_remove(name);
+        }
+    }
+    if std::env::var_os(WORKER_LOG).is_none() {
+        command.env(WORKER_LOG, query.with_file_name("worker.log"));
+    }
+    command
+        .arg("tblastn")
+        .arg("-query")
+        .arg(query)
+        .arg("-subject")
+        .arg(subjects)
+        .args(options)
+        .env("LOSAT_X_STATS", "1")
+        .envs(variables.iter().copied())
+        .output()
+        .expect("run LOSAT")
 }
 
 /// The number after `field=` in a `[X_STATS]` line.
@@ -307,21 +321,80 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
     }
 }
 
-// No NCBI counterpart: where the switch acts. A subject range (`-subject_loc`) keeps the
-// letters (the records are cut before the search), so the switch changes nothing there and no
-// subject is held packed. `LOSAT_X_DEFAULT=0` turns the switch off; with it set as well the
-// subjects are still held packed and the report is the same.
+// No NCBI counterpart: where the switch acts. With a subject range (`-subject_loc`) each record is
+// cut to its interval as it is read and then held packed, and the report and the messages are
+// those of the records cut from the letters (`LOSAT_X_TBNSTORE=0`): tabular and pairwise reports
+// (the frames and coordinates from each record's length and its interval's start), three threads
+// (the packing thread), `-lcase_masking` with an interval that holds lower-case letters, an
+// interval without letters in one record (the warning of an empty subject), and an interval that
+// starts past the ends (the error, its exit code and the messages before it).
+// `LOSAT_X_DEFAULT=0` turns the switch off; with it set as well the subjects are still held packed
+// and the report is the same.
 #[test]
-fn a_subject_range_keeps_the_letters_and_the_default_off_still_translates_the_packed_subjects() {
+fn a_subject_range_is_cut_and_held_packed_and_the_default_off_still_translates_the_packed_subjects()
+{
     let (ten, _, subjects) = inputs();
     let long = long_subjects(subjects);
-    let ranged = ["-outfmt", "6", "-subject_loc", "100-5000"];
+    for ranged in [
+        &["-outfmt", "6", "-subject_loc", "100-5000"][..],
+        &[
+            "-outfmt",
+            "0",
+            "-subject_loc",
+            "1001-6000",
+            "-num_threads",
+            "3",
+        ],
+        &[
+            "-outfmt",
+            "6",
+            "-subject_loc",
+            "100-6000",
+            "-num_threads",
+            "3",
+            "-lcase_masking",
+        ],
+    ] {
+        let (expected, messages, _) = tblastn(ten, &long, ranged, &[NO_STORE]);
+        let (report, store_messages, stats) = tblastn(ten, &long, ranged, &[]);
+        assert!(report == expected, "{ranged:?}");
+        assert_eq!(store_messages, messages, "{ranged:?}");
+        assert_eq!(counter(&stats, "subjects"), 4, "{ranged:?}: {stats}");
+        if ranged.contains(&"-lcase_masking") {
+            // the stage reads the letters of the subject with lower-case letters in its interval
+            assert!(counter(&stats, "letters_made") >= 1, "{ranged:?}: {stats}");
+        } else {
+            assert_eq!(counter(&stats, "letters_made"), 0, "{ranged:?}: {stats}");
+        }
+        assert!(!expected.is_empty(), "{ranged:?}: no report");
+    }
+    // an interval that starts at the end of the shortest piece (the reader drops `-`): a subject
+    // without letters, whose warning the pairwise report writes
+    let shortest = records(&long)
+        .iter()
+        .map(|(_, letters)| letters.bytes().filter(|&letter| letter != b'-').count())
+        .min()
+        .expect("pieces");
+    let empty = format!("{}-6000", shortest + 1);
+    let ranged = ["-outfmt", "0", "-subject_loc", empty.as_str()];
     let (expected, messages, _) = tblastn(ten, &long, &ranged, &[NO_STORE]);
     let (report, store_messages, stats) = tblastn(ten, &long, &ranged, &[]);
     assert!(report == expected);
     assert_eq!(store_messages, messages);
-    assert_eq!(counter(&stats, "subjects"), 0);
-    assert_eq!(counter(&stats, "letters_made"), 0);
+    assert_eq!(counter(&stats, "subjects"), 4, "{stats}");
+    assert!(
+        String::from_utf8_lossy(&expected).contains("Subject sequence contains no data")
+            || messages.contains("Subject sequence contains no data"),
+        "no warning of an empty subject"
+    );
+    // the pieces hold at most 6,000 letters
+    let past_end = ["-outfmt", "6", "-subject_loc", "6001-7000"];
+    let expected = run(ten, &long, &past_end, &[NO_STORE]);
+    let output = run(ten, &long, &past_end, &[]);
+    assert!(!expected.status.success());
+    assert_eq!(output.status.code(), expected.status.code());
+    assert_eq!(output.stdout, expected.stdout);
+    assert_eq!(output.stderr, expected.stderr);
 
     let options = ["-outfmt", "6", "-num_threads", "1"];
     let (expected, messages, stats) = tblastn(ten, subjects, &options, &[]);

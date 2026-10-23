@@ -59,7 +59,7 @@
 use super::*;
 use std::cell::RefCell;
 
-// EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the per-group tables of the TBLASTX unit
+// EXPERIMENT (PAIRLUT): the per-group tables of the TBLASTX unit
 // path built by this file's count, layout and fill passes on the lookup locations of one group; a
 // child module so that it uses `x_target_list` and the memo below unchanged (see x_pair_lut.rs).
 //
@@ -846,7 +846,7 @@ pub(super) fn x_tbxlut_mode() -> u8 {
 
 // No NCBI counterpart: records the side the switch took (`LOSAT_X_REACH`).
 /// EXPERIMENT (LOSAT_X_TBXLUT): a batch whose unit path builds its group tables directly
-/// (`LOSAT_X_PAIRLUT`) builds no full table, so the switch is not used for it.
+/// (PAIRLUT) builds no full table, so the switch is not used for it.
 pub(crate) fn x_tbxlut_reach_stub() {
     if x_tbxlut_mode() == 1 {
         crate::utils::xreach::x_reach!("LOSAT_X_TBXLUT", false);

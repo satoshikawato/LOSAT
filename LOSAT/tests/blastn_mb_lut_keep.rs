@@ -191,8 +191,7 @@ fn check(task: &str) {
         let (report, stderr) = blastn(task, genomes(), threads, &[DEFAULT_OFF, BATCH, TIMING]);
         assert!(report == reference, "{task} threads {threads}");
         assert!(!stderr.contains(KEEP), "{task}: {stderr}");
-        // Set, the switch keeps the table with `LOSAT_X_DEFAULT=0` too (where the original loop
-        // fills it: `LOSAT_X_PAIRPAR` is off).
+        // Set, the switch keeps the table with `LOSAT_X_DEFAULT=0` too.
         let (report, stderr) = blastn(
             task,
             genomes(),
@@ -200,7 +199,6 @@ fn check(task: &str) {
             &[SWITCH, DEFAULT_OFF, BATCH, TIMING],
         );
         assert!(report == reference, "{task} threads {threads}");
-        assert_eq!(field(&stderr, BUILD, "parallel="), 0, "{task}: {stderr}");
         assert_eq!(field(&stderr, KEEP, "kept="), kept, "{task}: {stderr}");
 
         let (report, stderr) = blastn(task, genomes(), threads, &[BATCH, SHADOW]);

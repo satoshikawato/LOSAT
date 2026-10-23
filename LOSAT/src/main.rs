@@ -232,7 +232,7 @@ fn main() -> Result<()> {
     LOSAT::utils::xstats::print();
     LOSAT::core::composition_adjustment::adjust_scores::x_adjmemo_print_stats();
     LOSAT::core::composition_adjustment::adjust_scores::x_newtonexact_print_stats();
-    LOSAT::algorithm::tblastx::x_seed_bucket::print_shadow_stats();
+    LOSAT::algorithm::tblastx::x_seed_bucket::print_summary();
     LOSAT::algorithm::tblastx::blast_engine::x_pair_par_print_summary();
     LOSAT::algorithm::tblastx::blast_engine::x_query_frames_print_summary();
     LOSAT::algorithm::tblastx::blast_engine::x_seed_release_print_summary();

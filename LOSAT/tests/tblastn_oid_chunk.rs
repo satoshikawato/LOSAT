@@ -69,7 +69,11 @@ fn inputs() -> &'static (PathBuf, PathBuf) {
     static FILES: OnceLock<(PathBuf, PathBuf)> = OnceLock::new();
     FILES.get_or_init(|| {
         let fasta = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
-        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("tblastn_oid_chunk");
+        // One directory per process: nextest runs each test in a process of its own, and a
+        // process that wrote these files again while another one's search read them cut its input.
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join("tblastn_oid_chunk")
+            .join(std::process::id().to_string());
         std::fs::create_dir_all(&dir).expect("work directory");
         let mut query = String::new();
         for (title, letters) in records(&fasta.join("PemoMJNVA.faa")).iter().take(QUERIES) {
@@ -103,8 +107,9 @@ enum Long {
 /// The subject file with one long subject (`LONG_SUBJECT` bases, the start of the genome) and
 /// `SHORT_SUBJECTS` pieces of `SUBJECT_LENGTH` bases after it in the genome; the long subject is
 /// first, after half of the pieces, or last. The three files are written once for the whole test
-/// binary: the tests run side by side, and a test that wrote a file again while another one's
-/// search read it gave that search an empty subject file.
+/// binary (`cargo test`) or process (nextest), in the directory of `inputs`: the tests run side by
+/// side, and a test that wrote a file again while another one's search read it gave that search an
+/// empty subject file.
 fn long_subject_set(position: Long) -> PathBuf {
     static FILES: OnceLock<Vec<PathBuf>> = OnceLock::new();
     FILES.get_or_init(|| {

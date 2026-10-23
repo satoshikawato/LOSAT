@@ -83,6 +83,42 @@ fn standard_input() -> std::io::Result<std::fs::File> {
     }
 }
 
+/// Whether an opened input has a stream position the way a regular file on Linux has one:
+/// `tellg()` of NCBI's `IsIStreamEmpty` is not negative (a pipe has none, a console has none).
+///
+/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859
+/// ```c
+/// 	char c;
+/// 	CNcbiStreampos orig_p = in.tellg();
+/// 	// Piped input
+/// 	if(orig_p < 0)
+/// 		return false;
+/// ```
+/// On Unix and WASI the answer is whether the position can be read, as before
+/// (`lseek` fails on a pipe; the position is not moved). On Windows `SetFilePointerEx` succeeds on a pipe or a console
+/// handle (its result is undefined there), so an empty pipe would look like an empty file:
+/// only a handle of `FILE_TYPE_DISK` has a position. LOSAT takes the Linux branch of
+/// `IsIStreamEmpty` on every platform (`AUTHORITY.md` §C1).
+pub fn has_stream_position(file: &std::fs::File) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        const FILE_TYPE_DISK: u32 = 1;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetFileType(handle: *mut std::ffi::c_void) -> u32;
+        }
+        // SAFETY: `GetFileType` only reads the type of the handle it is given; the handle comes
+        // from `file`, which is open for the call. A failure returns FILE_TYPE_UNKNOWN (0),
+        // which is not a disk: no position.
+        unsafe { GetFileType(file.as_raw_handle().cast()) == FILE_TYPE_DISK }
+    }
+    #[cfg(not(windows))]
+    {
+        std::io::Seek::stream_position(&mut &*file).is_ok()
+    }
+}
+
 /// Rejects a file name that is not UTF-8, where NCBI opens the file (the subjects, then the
 /// queries, then the output: `CBlastDatabaseArgs` comes before `CStdCmdLineArgs`).
 ///
@@ -166,4 +202,44 @@ pub fn write_empty_subject_warnings_by_length(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_stream_position;
+
+    #[cfg(unix)]
+    fn owned(reader: std::io::PipeReader) -> std::os::fd::OwnedFd {
+        reader.into()
+    }
+
+    #[cfg(windows)]
+    fn owned(reader: std::io::PipeReader) -> std::os::windows::io::OwnedHandle {
+        reader.into()
+    }
+
+    // NCBI reference: c++/src/app/blast/blast_app_util.cpp:856-859 (`tellg() < 0` is piped
+    // input). A regular file has a position; a pipe has none, on Linux because `lseek`
+    // fails and on Windows because `GetFileType` is not `FILE_TYPE_DISK`.
+    #[test]
+    fn a_regular_file_has_a_position_and_a_pipe_has_none() {
+        let path = std::env::temp_dir().join(format!(
+            "losat-input-files-has-stream-position-{}",
+            std::process::id()
+        ));
+        std::fs::write(&path, b">q\nACGT\n").unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        assert!(has_stream_position(&file));
+        drop(file);
+        std::fs::remove_file(&path).unwrap();
+        // WASI has no pipe to make here.
+        #[cfg(any(unix, windows))]
+        {
+            let (reader, mut writer) = std::io::pipe().unwrap();
+            std::io::Write::write_all(&mut writer, b">q\nACGT\n").unwrap();
+            drop(writer);
+            let pipe = std::fs::File::from(owned(reader));
+            assert!(!has_stream_position(&pipe));
+        }
+    }
 }

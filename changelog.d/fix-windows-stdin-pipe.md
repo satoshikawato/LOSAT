@@ -1,0 +1,1 @@
+- Fixed `-query -` on Windows: an empty standard-input pipe was read as an empty regular file (`SetFilePointerEx` succeeds on a pipe there), so nothing was written where Linux and NCBI write the prolog, the epilog or a newline. A handle that is not a disk file (`GetFileType`) now has no stream position, as a Linux pipe has none; Linux results are unchanged.

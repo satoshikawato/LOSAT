@@ -898,4 +898,32 @@ mod tests {
             vec![0..1, 1..2]
         );
     }
+
+    // `BATCH_SIZE` sets the limit (`GetQueryBatchSize`): the record that crosses it ends its
+    // batch, and a limit above the default keeps the longer batch whole.
+    #[test]
+    fn the_batch_size_is_the_limit_of_a_batch() {
+        let record = |n| FastaRecord {
+            internal_id: String::new(),
+            title: String::new(),
+            sequence: vec![b'A'; n],
+            lowercase_masks: vec![],
+            warnings: vec![],
+            source: None,
+        };
+        let records = [
+            record(100),
+            record(100),
+            record(100),
+            record(100),
+            record(100),
+        ];
+        assert_eq!(batch_ranges(&records, 200), vec![0..2, 2..4, 4..5]);
+        assert_eq!(batch_ranges(&records, 201), vec![0..3, 3..5]);
+        assert_eq!(
+            batch_ranges(&records, 1),
+            vec![0..1, 1..2, 2..3, 3..4, 4..5]
+        );
+        assert_eq!(batch_ranges(&records, 30000), vec![0..5]);
+    }
 }

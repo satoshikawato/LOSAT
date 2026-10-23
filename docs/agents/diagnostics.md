@@ -231,7 +231,7 @@ their variables mean
   `TBNKEEPFEW` only with four or more query batches;
   `TBNBATCHRULE` only where query batches are searched side by side (2 or more threads, four or
   more batches); `TBNOWNPOOLS` only with `TBNBATCHRULE`, natively; `TBNXLATESIMD` only
-  on a packed subject (`TBNSTORE`, `-db`) and with AVX2; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
+  on a packed subject (`TBNSTORE`: `-subject`, the plans of `run_local`'s letters; `-db`) and with AVX2; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPSEED` acts on the two-hit seed stage only; `BPDIAG` acts only
   in `BPSEED`'s fused loop and batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
   in `BPDIAG`'s AVX2 batch; `BPGAP` runs the
@@ -4019,13 +4019,19 @@ Scheduling (each value computed by one thread with the original function; order 
   thread the frames of the subject in hand (two bytes per base) instead of four bytes per base
   (letters or resolved bases, reverse complement, frames). A set with a byte that has no ncbi4na
   code (only an API caller can make one) keeps the letters; the library entry `run_local` reads the
-  caller's records.
+  caller's records. The plans of letters are made from them packed (below).
   In the set since 2026-10-16 (on unless `0`, or `LOSAT_X_DEFAULT=0` and not set). With
   `LOSAT_X_STATS=1` a `[X_STATS] TBNSTORE
   subjects= stored_bytes= letters_made= packed_plans=` line gives the subjects held
   packed, the bytes of their stores, the times their whole letters (outside the windows above)
   were made, and the plans translated from the packed bases; `LOSAT/tests/tblastn_subject_store.rs`
-  reads it.
+  reads it. The records `run_local` (LOSAT Web) is given keep their letters; since 2026-10-23 the
+  worker that makes a subject's plan packs its letters (`x_plan_store` in
+  `tblastn/x_subject_store.rs`) and makes the plan from the packed bases, a quarter of a byte per
+  base in place of the plan's ncbi2na copy of one byte per base, while the plan is made (LOSAT
+  Web, one protein against the fly genome: the run x0.85-0.89 at 1, 4 and 8 threads, linear
+  memory at 8 threads 510 -> 452 MiB); a subject with lower-case letters searched with
+  `-lcase_masking` keeps its letters. `packed_plans` counts these plans too.
 - `LOSAT_X_BPGAP=1` blastp preliminary stage: the restricted gapped alignment (NCBI
   `s_RestrictedGappedAlign`, `blast_gapalign.c:991-1300`, which `s_BlastProtGappedAlignment` runs
   for a query whose best ungapped score is below 0.68 of the cutoff) keeps the two score rows and

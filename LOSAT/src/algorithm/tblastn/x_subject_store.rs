@@ -210,6 +210,37 @@ pub(super) fn x_read_subject_stores<R: std::io::Read>(
     ))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
+// ```c
+//     virtual SBlastSequence GetCompressedPlusStrand() {
+//         SBlastSequence retval(size());
+//         string ncbi4na = kEmptyStr;
+//         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
+//         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
+// ```
+// NCBI makes the compressed subject of every search from its scope. A subject the search reads
+// as letters (the records a caller gives `run_local`: LOSAT Web, the library; the records of a set
+// that keeps its letters because one of them holds a byte without an ncbi4na code) was made into
+// one byte per base for its plan; packed, it is a quarter of a byte per base, and the frames are
+// read from the packed bases. The worker that makes the plan packs the subject, and the store is
+// dropped once the plan is made.
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the letters of a subject searched from its letters, packed for
+/// its plan: `None` with the switch off, when the plan reads the case of its letters
+/// (`mask_lowercase` and a lower-case letter), when a byte has no ncbi4na code, or when the
+/// subject is longer than a store holds (`u32::MAX` bases).
+pub(super) fn x_plan_store(letters: &[u8], mask_lowercase: bool) -> Option<PackedNucleotide> {
+    if !x_tbn_store() {
+        return None;
+    }
+    let store = if mask_lowercase && letters.iter().any(u8::is_ascii_lowercase) {
+        None
+    } else {
+        PackedNucleotide::from_subject_letters(letters)
+    };
+    crate::utils::xreach::x_reach!("LOSAT_X_TBNSTORE", store.is_some());
+    store
+}
+
 /// A record and its store (`None` when a byte has no ncbi4na code; the record keeps its letters
 /// then, and drops them otherwise).
 fn x_packed(
@@ -346,6 +377,30 @@ mod tests {
     use super::*;
     use crate::blastinput::fasta_reader::{read_subjects, FastaInputSource, ReaderConfig};
     use crate::blastinput::seq_range::{cut_subjects, SequenceRange};
+
+    // No NCBI counterpart: when the letters of a subject are packed for its plan. The test holds
+    // with the switch on (the default) and off (`LOSAT_X_DEFAULT=0`, as in CI's reference step).
+    #[test]
+    fn a_plan_packs_its_letters_unless_it_reads_their_case_or_cannot() {
+        let on = x_tbn_store();
+        let packed = |letters: &[u8], mask_lowercase: bool| {
+            x_plan_store(letters, mask_lowercase).map(|store| {
+                let mut back = Vec::new();
+                store.ascii_into(&mut back);
+                back
+            })
+        };
+        // every IUPAC letter, `-` and lower case: the store gives the letters back
+        let letters = b"ACGTacgtNRYKMSWBDHVnrykmswbdhv-ACGT".to_vec();
+        assert_eq!(packed(&letters, false), on.then(|| letters.clone()));
+        // `-lcase_masking` reads the case: letters with lower case stay letters
+        assert_eq!(packed(&letters, true), None);
+        let upper = b"ACGTNRYKMSWBDHV".to_vec();
+        assert_eq!(packed(&upper, true), on.then(|| upper.clone()));
+        // a byte without an ncbi4na code (only an API caller can give one)
+        assert_eq!(packed(b"ACGU", false), None);
+        assert_eq!(packed(b"", false), on.then(Vec::new));
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-431
     // ```c

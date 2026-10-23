@@ -385,7 +385,7 @@ pub(super) type XBatchReport = (
 // No NCBI counterpart: reads the LOSAT_X_TBNBATCHRULE variable once; it does not change any value
 // NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNBATCHRULE): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only where query batches are
+/// it is `0`. It acts only where query batches are
 /// searched side by side (`x_side_by_side_batches`).
 #[cfg(feature = "parallel")]
 fn x_tbn_batch_rule() -> bool {
@@ -510,7 +510,7 @@ fn x_searched_side_by_side(subjects: SubjectLetters<'_>, batches: usize, threads
 // No NCBI counterpart: reads the LOSAT_X_TBNOWNPOOLS variable once; it does not change any value
 // NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only together with
+/// it is `0`. It acts only together with
 /// `LOSAT_X_TBNBATCHRULE`, on the batches that are not searched side by side, and only natively: in
 /// WebAssembly only the main thread can start threads (the WASI thread hosts give a thread a
 /// `thread-spawn` that fails, `tests/wasi_thread_host.js` and
@@ -2492,6 +2492,11 @@ fn run_preliminary_subjects(
     // they are free (`x_oid_flow.rs`); the lists come back below chunk by chunk in OID order.
     #[cfg(feature = "parallel")]
     crate::utils::xreach::x_reach!("LOSAT_X_TBNOIDNEXT", x_chunk_bases.is_some());
+    // LOSAT_X_TBNFLOWHELP: the threads that wait in the flow run the pool's jobs; no flow, no wait.
+    #[cfg(feature = "parallel")]
+    if super::x_oid_flow::x_flow_help().is_some() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNFLOWHELP", x_chunk_bases.is_some());
+    }
     #[cfg(feature = "parallel")]
     let x_flow = x_chunk_bases.map(|bases| {
         super::x_oid_flow::XOidFlow::new(
@@ -2608,6 +2613,10 @@ fn run_preliminary_subjects(
     }
     #[cfg(not(feature = "parallel"))]
     reduce_subjects()?;
+    #[cfg(feature = "parallel")]
+    if let Some(line) = x_flow.as_ref().and_then(|flow| flow.stats_line()) {
+        eprintln!("{line}");
+    }
     // NCBI c++/src/algo/blast/core/blast_engine.c:1659-1668:
     // /* Use a local diagnostics structure, because the one passed in an input
     //    argument can be shared between multiple threads */

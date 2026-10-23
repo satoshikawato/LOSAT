@@ -5,7 +5,7 @@
 //! NCBI keeps the diagonals of a query block of at most 8000 letters (both strands) in an array
 //! (`kQueryLenForHashTable`), so a query of at most about 4000 bases takes the array, and
 //! `LOSAT_X_PAIRPARDISC` (the diagonal hash only) never takes its chunks. The switch (in the
-//! strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) chooses between
+//! strict set: on unless it is `0`) chooses between
 //! two LOSAT code paths with the same result: the subject scan cut into strips that the pool
 //! threads scan, and the diagonal-array fold done by the owner thread in the scan order, or the
 //! scan and fold of the reference code. So the property under test is that the report does not
@@ -155,8 +155,8 @@ fn check_template(query: &Path, template: &[&str]) {
 }
 
 // The byte comparisons above would also pass if the stage silently stopped running: with
-// LOSAT_TIMING the stage prints how many chunks it took; with the switch at `0` or with
-// `LOSAT_X_DEFAULT=0` it takes none and prints no line.
+// LOSAT_TIMING the stage prints how many chunks it took; with the switch at `0` it takes none
+// and prints no line.
 #[test]
 fn the_stage_runs_by_default_and_not_when_switched_off() {
     let query = query_file("runs", &[(180_000, 3900)]);
@@ -166,17 +166,13 @@ fn the_stage_runs_by_default_and_not_when_switched_off() {
     assert!(report == expected, "the report differs by default");
     let (chunks, seeds) = stage_counts(&stderr);
     assert!(chunks > 0 && seeds > 0, "the stage took nothing:\n{stderr}");
-    for off in [
-        &[SWITCH_OFF, ("LOSAT_TIMING", "1")][..],
-        &[("LOSAT_X_DEFAULT", "0"), ("LOSAT_TIMING", "1")][..],
-    ] {
-        let (report, stderr) = blastn(&query.0, &[], 4, off);
-        assert!(report == expected, "the report differs with {off:?}");
-        assert!(
-            !stderr.contains("[TIMING] x_pairpardiscarr_seed:"),
-            "{off:?}:\n{stderr}"
-        );
-    }
+    let off = &[SWITCH_OFF, ("LOSAT_TIMING", "1")][..];
+    let (report, stderr) = blastn(&query.0, &[], 4, off);
+    assert!(report == expected, "the report differs with {off:?}");
+    assert!(
+        !stderr.contains("[TIMING] x_pairpardiscarr_seed:"),
+        "{off:?}:\n{stderr}"
+    );
 }
 
 // The default template of dc-megablast (word size 11, coding, length 18), word size 12, the

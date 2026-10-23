@@ -11,7 +11,7 @@ use crate::sequence::packed_subject::{PackedNucleotide, SubjectNt};
 // No NCBI counterpart: reads the LOSAT_X_TBNSTORE variable once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_TBNSTORE): a switch of the strict set (`utils/xswitch.rs`): on unless it
-/// is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+/// is `0`.
 pub(super) fn x_tbn_store() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSTORE"))
@@ -421,7 +421,7 @@ mod tests {
     use crate::blastinput::seq_range::{cut_subjects, SequenceRange};
 
     // No NCBI counterpart: when the letters of a subject are packed for its plan. The test holds
-    // with the switch on (the default) and off (`LOSAT_X_DEFAULT=0`, as in CI's reference step).
+    // with the switch on (the default) and off (`LOSAT_X_TBNSTORE=0` in the test's environment).
     #[test]
     fn a_plan_packs_its_letters_unless_it_reads_their_case_or_cannot() {
         let on = x_tbn_store();

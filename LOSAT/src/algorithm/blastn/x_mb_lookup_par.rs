@@ -112,8 +112,7 @@
 //! wasm32) the buffer has the fill's size and is freed at the end of the fill: those allocators
 //! return large blocks themselves, and there is no threshold to keep low.
 //!
-//! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set since 2026-10-18: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set): `fill`
+//! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set since 2026-10-18: on unless it is `0`): `fill`
 //! hands the table to the read-once fill of `x_mb_lookup_once.rs` (its first dispatch), in which
 //! each query position is read by one worker and each word handed to the owner of its cell,
 //! instead of every worker reading every word as above. That fill counts into the private

@@ -24,8 +24,8 @@
 //! be admissible are left out, and the loop keeps the first best one in that order, so every
 //! link, E-value and number is NCBI's.
 //!
-//! `LOSAT_X_TBNLINKWIN` is in the strict set (`utils/xswitch.rs`): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_X_TBNLINKWINSHADOW` set as well (any
+//! `LOSAT_X_TBNLINKWIN` is in the strict set (`utils/xswitch.rs`): on unless it is `0`.
+//! With `LOSAT_X_TBNLINKWINSHADOW` set as well (any
 //! value), the whole window of each head whose candidates were chosen is tested too (a head that
 //! takes its whole window needs no check), and the search stops (panic) if an admissible
 //! candidate is not among the chosen ones. With `LOSAT_X_STATS`
@@ -40,7 +40,7 @@ use std::sync::OnceLock;
 // No NCBI counterpart: reads LOSAT_X_TBNLINKWIN once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_TBNLINKWIN): whether the linking loop tests the chosen candidates only; a
-/// switch of the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+/// switch of the strict set, on unless it is `0`.
 pub(super) fn x_tbn_link_window() -> bool {
     #[cfg(test)]
     if let Some((on, _)) = tests::X_FORCE.get() {

@@ -66,8 +66,8 @@
 //!         if (BlastSeqSrcGetSequence(seqSrc, &seq_info->seq_arg) >= 0) {
 //! ```
 //!
-//! `LOSAT_X_TBNDBSTREAM` is a switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set. It acts for every TBLASTN search with `-db`.
+//! `LOSAT_X_TBNDBSTREAM` is a switch of the strict set: on unless it is `0`. It acts for every
+//! TBLASTN search with `-db`.
 //!
 //! `LOSAT_X_TBNDBSTREAMSHADOW=1` (shadow mode, with the switch on): `read_stores` makes the copy
 //! too; the check's lengths and error, and every read sequence, are compared with it. The first

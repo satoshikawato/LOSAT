@@ -2,7 +2,7 @@
 //! `src/algorithm/tblastx/x_rpt_par.rs`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_TBXRPTPAR` is
-//! `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it on and two or more threads, the displayed
+//! `0`. With it on and two or more threads, the displayed
 //! identities, the outfmt 0 rows and the tabular rows of the final list are computed by the pool's
 //! threads; `LOSAT_X_TBXRPTPARSHADOW=1` also runs the serial stage and compares the two.
 //!
@@ -18,7 +18,6 @@ use std::process::{Command, Output};
 
 const OFF: (&str, &str) = ("LOSAT_X_TBXRPTPAR", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBXRPTPARSHADOW", "1");
-const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const THREADS: [u32; 5] = [1, 2, 4, 8, 16];
 
 fn letters(name: &str) -> Vec<u8> {
@@ -217,12 +216,4 @@ fn the_commented_tabular_report_does_not_depend_on_the_switch() {
 #[test]
 fn the_pairwise_report_does_not_depend_on_the_switch() {
     check_format("0");
-}
-
-#[test]
-fn the_previous_defaults_write_the_same_report() {
-    let off = tblastx(4, "6", &[OFF]);
-    let previous = tblastx(4, "6", &[PREVIOUS]);
-    assert!(previous.status.success(), "{}", stderr(&previous));
-    assert_eq!(previous.stdout, off.stdout);
 }

@@ -75,7 +75,7 @@ fn run(work: &WorkDir, program: &str, extra: &[&str]) -> Output {
     // file of the test's own directory.
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
-        if (text.starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT")
+        if text.starts_with("LOSAT_")
             || matches!(&*text, "BATCH_SIZE" | "CHUNK_SIZE" | "OVERLAP_CHUNK_SIZE")
         {
             command.env_remove(name);

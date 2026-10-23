@@ -2,8 +2,8 @@
 //! LOSAT_X_QBATCHPAR slot) needs them (`LOSAT_X_QSTREAM`,
 //! `src/algorithm/blastn/blast_engine/x_query_stream.rs`), on whole searches.
 //!
-//! The switch is in the strict set since 2026-10-18 (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set), with a rule (off for `-task megablast`, for a file shorter than twice the
+//! The switch is in the strict set since 2026-10-18 (on unless it is `0`),
+//! with a rule (off for `-task megablast`, for a file shorter than twice the
 //! largest query batch, and where LOSAT_X_QBATCHPAR's slots may read at least half of the file
 //! ahead; not the shadow). It chooses when LOSAT reads the same records: all of them before the
 //! search, or a first reading that keeps their lengths and a second one batch by batch, which it does only where the reports may be written
@@ -844,14 +844,13 @@ fn a_database_search_gives_the_off_bytes() {
 }
 
 /// The switch is on by default (an empty value): with LOSAT_X_RPTSTREAM it reads the batches
-/// again (its `[X_STATS]` line with `off=none`); with `LOSAT_X_QSTREAM=0`, or `LOSAT_X_DEFAULT=0`
-/// and no value, the records are read before the search (no line). Its rule, where the line says
-/// why and the shadow still reads the batches again: `-task megablast` (`off=megablast`); a file
-/// shorter than twice the largest batch (`off=batch`; here `BATCH_SIZE` half the file's bytes plus
-/// one, and half the file's bytes on); where the slots of LOSAT_X_QBATCHPAR may run, a file
-/// shorter than twice what their budget holds (`off=slots`; a budget set by
-/// `LOSAT_X_QBATCHPARMEM` for a small file at 2 threads, none at one thread). The bytes are the
-/// same.
+/// again (its `[X_STATS]` line with `off=none`); with `LOSAT_X_QSTREAM=0` the records are read
+/// before the search (no line). Its rule, where the line says why and the shadow still reads the
+/// batches again: `-task megablast` (`off=megablast`); a file shorter than twice the largest batch
+/// (`off=batch`; here `BATCH_SIZE` half the file's bytes plus one, and half the file's bytes on);
+/// where the slots of LOSAT_X_QBATCHPAR may run, a file shorter than twice what their budget holds
+/// (`off=slots`; a budget set by `LOSAT_X_QBATCHPARMEM` for a small file at 2 threads, none at one
+/// thread). The bytes are the same.
 #[test]
 fn the_switch_is_on_by_default() {
     let dir = TempDir::new("default");
@@ -884,14 +883,10 @@ fn the_switch_is_on_by_default() {
         read.contains(" off=none") && read.contains(" read=19 "),
         "{read}"
     );
-    for switches in [
-        &[RPTSTREAM, STATS][..],
-        &[RPTSTREAM, STATS, default, ("LOSAT_X_DEFAULT", "0")],
-    ] {
-        let off = blastn(&blastn_args, 4, switches, None);
-        assert_eq!(line(&off), "", "{switches:?}");
-        assert_eq!((off.status, &off.report), (on.status, &on.report));
-    }
+    let switches = &[RPTSTREAM, STATS][..];
+    let off = blastn(&blastn_args, 4, switches, None);
+    assert_eq!(line(&off), "", "{switches:?}");
+    assert_eq!((off.status, &off.report), (on.status, &on.report));
     // The rule: (task, threads, switches, the line's `off=`); each against the switch `0`, and the
     // shadow, which ignores the rule.
     let half = std::fs::metadata(&query).unwrap().len() / 2;

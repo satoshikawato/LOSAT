@@ -648,6 +648,12 @@ impl StoredProteins {
         &self.bytes[self.starts[ordinal]..self.starts[ordinal + 1]]
     }
 
+    /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `residues_with_sentinel` with the sentinel before the
+    /// residues (the store's first byte, or the sentinel after the sequence before).
+    pub(crate) fn x_residues_with_sentinels(&self, ordinal: usize) -> &[u8] {
+        &self.bytes[self.starts[ordinal] - 1..self.starts[ordinal + 1]]
+    }
+
     /// The total length of the index files.
     pub(crate) fn total_length(&self) -> u64 {
         self.total_length

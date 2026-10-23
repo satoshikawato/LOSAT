@@ -302,6 +302,16 @@ fn a_long_subject_first_in_the_middle_or_last_gives_the_one_thread_report() {
                 1,
                 "{position:?} at {threads} threads"
             );
+            // LOSAT_X_TBNFLOWHELP: the threads that wait in the flow run the long subject's units
+            // (the default) or sleep on the flow's condition (`=0`); the report is the same.
+            if matches!(position, Long::First) && threads != 3 {
+                let off = ("LOSAT_X_TBNFLOWHELP", "0");
+                let (report, _) = tblastn_on(&subjects, threads, &[off]);
+                assert!(
+                    report == expected,
+                    "{position:?}: {threads} threads with {off:?} differ from one thread"
+                );
+            }
         }
     }
 }

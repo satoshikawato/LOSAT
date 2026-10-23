@@ -61,7 +61,7 @@ const MAX_DROPOFF: i32 = 127;
 /// Longest word whose sentinel sum stays below zero (11 * 11 < 128).
 const MAX_WORD_SIZE: usize = 11;
 
-pub(super) type Table = [i8; TABLE_LEN];
+pub(crate) type Table = [i8; TABLE_LEN];
 
 struct State {
     /// 0 = off, 1 = LOSAT_X_BPUNGAP, 2 = LOSAT_X_BPUNGAPSHADOW (both paths, compared).
@@ -73,7 +73,7 @@ struct State {
 /// with it too).
 // NCBI reference: aa_ungapped.c:804-883 `matrix[q[i]][s[i]]`; the scores are those of the
 // function the reference walks call.
-pub(super) fn build_table() -> Option<Box<Table>> {
+pub(crate) fn build_table() -> Option<Box<Table>> {
     let mut t = Box::new([0i8; TABLE_LEN]);
     for q in 0..CODES {
         for s in 0..CODES {

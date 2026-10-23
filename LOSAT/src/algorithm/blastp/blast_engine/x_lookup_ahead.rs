@@ -96,8 +96,7 @@
 //! 1.5-1.9 MiB) are the block search's thread's, moved to `XAaSpares` once and used by every build
 //! ahead, so no pool thread keeps a set of its own.
 //!
-//! `LOSAT_X_BPLKPAHEAD` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set.
+//! `LOSAT_X_BPLKPAHEAD` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`.
 //!
 //! `LOSAT_X_BPLKPAHEADSHADOW=1` (shadow mode, implies the switch): each block that takes values
 //! built ahead also builds them inline as without the switch (blastp-fast's on the block spare's
@@ -165,8 +164,8 @@ pub(crate) enum XLkpAhead {
 
 // No NCBI counterpart: reads the LOSAT_X_BPLKPAHEAD / LOSAT_X_BPLKPAHEADSHADOW switches once; it does
 // not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BPLKPAHEADSHADOW` (any value) selects the shadow
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): a strict-set switch, on unless it is `0`;
+/// `LOSAT_X_BPLKPAHEADSHADOW` (any value) selects the shadow
 /// mode, which implies the switch.
 pub(crate) fn x_bp_lkp_ahead() -> XLkpAhead {
     static MODE: OnceLock<XLkpAhead> = OnceLock::new();
@@ -408,6 +407,7 @@ fn x_same_flat_tables(a: &XFlatCompressedLookup, b: &XFlatCompressedLookup) -> b
         && a.compressed_alphabet_size == b.compressed_alphabet_size
         && a.reciprocal_alphabet_size == b.reciprocal_alphabet_size
         && a.longest_chain == b.longest_chain
+        && a.used_cells == b.used_cells
         && a.pv_array_bts == b.pv_array_bts
         && a.scaled_compress_table_u8 == b.scaled_compress_table_u8
         && a.pv == b.pv
@@ -1014,6 +1014,7 @@ mod tests {
             compressed_alphabet_size: 15,
             reciprocal_alphabet_size: 7,
             longest_chain: 2,
+            used_cells: 1,
             pv: vec![1, 0],
             pv_array_bts: 5,
             scaled_compress_table_u8: [-1; 256],

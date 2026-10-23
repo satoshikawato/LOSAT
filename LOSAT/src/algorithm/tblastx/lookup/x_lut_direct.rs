@@ -764,7 +764,7 @@ pub(super) fn x_bp_build_lookup(
 /// builder), 1 = TBLASTX's full table built in place by [`x_build_direct`], 2 = shadow (both
 /// builders, compared).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result. A strict-set
-// switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; `utils/xswitch.rs`); the
+// switch (on unless it is `0`; `utils/xswitch.rs`); the
 // shadow variable is read first.
 pub(super) fn x_tbxlut_mode() -> u8 {
     use std::sync::OnceLock;

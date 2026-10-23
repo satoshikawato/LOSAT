@@ -184,6 +184,33 @@ authoritative, current guidance for agent behavior in LOSAT.
   kernel (`sum_stats_linking/linking_incr.rs`) replaces NCBI's rescans with an
   index. Owner approval 2026-10-15.
 
+### Speed-up switches (`LOSAT_X_*`)
+- A speed-up that keeps every output byte lands on by default, in its own pull request: its
+  `LOSAT_X_<NAME>` joins `STRICT_SET` in `LOSAT/src/utils/xswitch.rs` and the `export` block of
+  `docs/agents/diagnostics.md` (both sorted), its entry there says since when and on what evidence,
+  and `LOSAT_X_<NAME>=0` runs the previous path. Owner, 2026-10-17.
+- A switch whose path runs only under a rule (input sizes, threads, options, memory) marks the
+  decision with `x_reach!("LOSAT_X_<NAME>", own_path)`, never inside a per-hit loop, and adds its
+  row to `LOSAT/tests/switch_reach_expected.tsv` (class `conditional`; `platform` for a CPU or
+  target rule; `always` without a rule).
+- Tests of both sides, narrow: a unit test compares the new function with the one `=0` runs in the
+  same process (random and edge inputs, every field or table cell, not only what a report prints);
+  an integration test compares the default's report with `=0`'s (and with the frozen NCBI bytes
+  where the file has them) and shows that the new path ran (`LOSAT_X_REACH`, or a counter of the
+  live path printed with `LOSAT_X_STATS` or `LOSAT_TIMING`).
+- No run-time comparison modes: no `LOSAT_X_<NAME>SHADOW` or `...VERIFY` variable. A check of the
+  new path against the old one is a unit test.
+- Lifetime: a switch graduates at the first graduation check after it reaches `main`: on `dev` for 7
+  days and in two full-set platform-checks runs (push to `main`, weekly or dispatch) in which every
+  `outputs (<id>)` job and the cross-platform compare passed and no `cargo test (<id>)` job failed.
+  Graduation removes the variable and the tests' `=0` arms; an always-on switch also loses its
+  previous code; a conditional or platform switch keeps its rule and fallback and moves to
+  `GRADUATED` (its `x_reach!` marks and TSV row stay).
+- A switch's tuning variables (`LOSAT_X_<NAME>MIN`, `..._POOL`, a value switch's number) become
+  constants with their built-in values when the switch graduates. Diagnostic variables
+  (`LOSAT_X_STATS`, `LOSAT_X_REACH`, `LOSAT_TIMING`; `docs/agents/diagnostics.md`) change no output
+  and are not switches.
+
 ### Benchmark target protocol
 - Treat repository benchmark figures as compute-program benchmarks, not as
   biological interpretation or downstream bioinformatics analysis.

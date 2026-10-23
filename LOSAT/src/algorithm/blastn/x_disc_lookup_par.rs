@@ -1,5 +1,5 @@
 //! EXPERIMENT (LOSAT_X_DISCLUTPAR, in the strict set: default ON since 2026-10-17, off with
-//! `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0`; shadow LOSAT_X_DISCLUTPARSHADOW): the
+//! `LOSAT_X_DISCLUTPAR=0`; shadow LOSAT_X_DISCLUTPARSHADOW): the
 //! discontiguous megablast tables of `build_disc_mb_lookup` (`s_FillDiscMBTable`) filled by the
 //! threads of the search pool, each thread owning a fixed set of table cells of both templates'
 //! tables. The plan of the cells and the pool test are those of PAIRPAR's megablast table
@@ -257,7 +257,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: reads the switches once (LOSAT_X_DISCLUTPAR, in the strict set: on
-/// unless `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0`; LOSAT_X_DISCLUTPARSHADOW, off unless set
+/// unless `LOSAT_X_DISCLUTPAR=0`; LOSAT_X_DISCLUTPARSHADOW, off unless set
 /// to any value, implies the switch). They choose between two LOSAT code paths with the same
 /// result and change no value NCBI computes.
 fn switches() -> (bool, bool) {

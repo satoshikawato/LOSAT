@@ -35,8 +35,8 @@
 //! No floating-point value is summed across HSPs. The same bytes go to the writer in the same
 //! order, in larger writes; a failed write stops the run as before.
 //!
-//! Off (the serial stage): the switch off (`LOSAT_X_TBXRPTPAR=0`, or `LOSAT_X_DEFAULT=0` and it
-//! is not set); a pool of one thread or none (`-num_threads 1`, builds without the `parallel`
+//! Off (the serial stage): the switch off (`LOSAT_X_TBXRPTPAR=0`);
+//! a pool of one thread or none (`-num_threads 1`, builds without the `parallel`
 //! feature, Wasm without threads).
 //!
 //! Memory: the outfmt 0 rows are one list of the final list's length in both forms; the tabular
@@ -82,8 +82,8 @@ static SHADOW_BYTES: AtomicU64 = AtomicU64::new(0);
 
 // No NCBI counterpart: chooses which threads compute the report's values; it does not change any
 // value NCBI computes. Read once per process.
-/// 0 = off, 1 = LOSAT_X_TBXRPTPAR (a strict-set switch: on unless `LOSAT_X_TBXRPTPAR` is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set; `utils/xswitch.rs`), 2 = LOSAT_X_TBXRPTPARSHADOW.
+/// 0 = off, 1 = LOSAT_X_TBXRPTPAR (a strict-set switch: on unless `LOSAT_X_TBXRPTPAR` is `0`;
+/// `utils/xswitch.rs`), 2 = LOSAT_X_TBXRPTPARSHADOW.
 pub(crate) fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {

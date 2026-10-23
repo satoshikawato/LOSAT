@@ -1,16 +1,20 @@
 //! blastp's `-db` blocks cut by the database size and the thread count with `LOSAT_X_BPDBCUT`
 //! (`src/algorithm/blastp/blast_engine/database/x_db_cut.rs`) on whole searches.
 //!
-//! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
-//! set, and it acts only where a `-db` search runs its rounds of blocks on the pool (more than one
-//! thread). With it on, the blocks of the preliminary stage hold about a quarter of the database's
-//! sequence bytes per thread (at least 4 KiB, at most the 1 MiB of the search without it), each
-//! starting at the one-thread order's diagonal offset of its first sequence, and the results are
-//! merged in ordinal order. These tests compare the reports with the switch off and on (blastp and
-//! blastp-fast, one search of all queries and the block search of `LOSAT_X_BPQBLOCK`, tabular and
-//! pairwise) and run its shadow mode (`LOSAT_X_BPDBCUTSHADOW`), which searches the database again
-//! with blocks of 1 MiB and compares every hit list; its line at exit shows that the path ran. A
-//! difference stops the run.
+//! The switch is in the strict set (`src/utils/xswitch.rs`, on by default since 2026-10-17; the
+//! searches here set it to `0` unless they name it, `PREVIOUS_DEFAULT`), and it acts only where a
+//! `-db` search runs its rounds of blocks on the pool (more than one thread). With it on, the
+//! blocks of the preliminary stage hold about a quarter of the database's sequence bytes per
+//! thread (at least 4 KiB, at most the 1 MiB of the search without it), each starting at the
+//! one-thread order's diagonal offset of its first sequence, and the results are merged in ordinal
+//! order. These tests compare the reports with the switch off and on (blastp and blastp-fast, one
+//! search of all queries and the block search of `LOSAT_X_BPQBLOCK`) and run its shadow mode
+//! (`LOSAT_X_BPDBCUTSHADOW`), which searches the database again with blocks of 1 MiB and compares
+//! every hit list; its line at exit shows that the path ran (and, at one thread, that the blocks
+//! keep 1 MiB). A difference stops the run. Each task and case runs at one thread count: the
+//! thread count sets only the number of blocks (`blocks_of_the_cut`), the blocks per round and
+//! the number of workers, and the report is written from the merged hit lists whatever the
+//! outfmt.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413,1553-1554
 //! ```c
@@ -281,33 +285,25 @@ fn blocks_of_the_cut(db: &Path, threads: u64) -> u64 {
     blocks
 }
 
-// blastp and blastp-fast at 2 and 4 threads, one search of all queries.
+// blastp at 2 threads and blastp-fast at 4, one search of all queries.
 #[test]
 fn search_of_all_queries_reports_with_the_cut_are_the_reports_without_it() {
     let db = subject_database("all");
-    for threads in [2u64, 4] {
+    for (task, threads) in [("blastp", 2u64), ("blastp-fast", 4)] {
         let blocks = blocks_of_the_cut(&db, threads);
         assert!(blocks > 2 * threads, "{threads} threads: {blocks} blocks");
-    }
-    for task in ["blastp", "blastp-fast"] {
         let one_thread = blastp(task, &db, 1, &[], &[], "6");
-        for threads in [2u64, 4] {
-            let counts = same_reports(task, &db, threads as u32, &[], &[], "6", &one_thread);
-            assert_engaged(
-                &counts,
-                1,
-                blocks_of_the_cut(&db, threads),
-                &format!("{task} threads {threads}"),
-            );
-        }
+        let counts = same_reports(task, &db, threads as u32, &[], &[], "6", &one_thread);
+        assert_engaged(&counts, 1, blocks, &format!("{task} threads {threads}"));
     }
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
-// The block search (`LOSAT_X_BPQBLOCK`, every block of queries a search of the database) and the
-// pairwise report.
+// The block search (`LOSAT_X_BPQBLOCK`, every block of queries a search of the database). Every
+// outfmt's search reaches the cut through `database::search_blocks`; outfmt 0 with the cut on runs
+// in `pairwise_par.rs`.
 #[test]
-fn block_search_and_pairwise_reports_with_the_cut_are_the_reports_without_it() {
+fn block_search_reports_with_the_cut_are_the_reports_without_it() {
     let db = subject_database("blocks");
     let base = [("LOSAT_X_BPQBLOCK", "1")];
     let one_thread = blastp("blastp-fast", &db, 1, &base, &[], "6");
@@ -319,25 +315,20 @@ fn block_search_and_pairwise_reports_with_the_cut_are_the_reports_without_it() {
         blocks_of_the_cut(&db, 4),
         "block search",
     );
-    let one_thread = blastp("blastp", &db, 1, &[], &[], "0");
-    let counts = same_reports("blastp", &db, 2, &[], &[], "0", &one_thread);
-    assert_engaged(&counts, 1, blocks_of_the_cut(&db, 2), "pairwise report");
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
-// At one thread the blocks keep 1 MiB: the shadow compares the same blocks.
+// At one thread the blocks keep 1 MiB: the shadow mode, which runs the switch, compares the same
+// blocks.
 #[test]
 fn the_cut_does_not_act_at_one_thread() {
     let db = subject_database("one");
     let run = blastp("blastp", &db, 1, &[SHADOW], &[], "6");
+    assert!(!run.stdout.is_empty(), "the fixture pair has rows");
     let counts = run.shadow();
     assert_eq!(counts["searches"], 1, "{counts:?}");
     assert_eq!(counts["blocks"], 1, "{counts:?}");
     assert_eq!(counts["blocks_ref"], 1, "{counts:?}");
-    assert!(
-        run.stdout == blastp("blastp", &db, 1, &[], &[], "6").stdout,
-        "the report differs"
-    );
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 

@@ -1,17 +1,16 @@
 //! The read-once pool fill of the megablast lookup table (`LOSAT_X_MBLUTONCE`,
 //! `src/algorithm/blastn/x_mb_lookup_once.rs`) on whole searches.
 //!
-//! The switch is in the strict set since 2026-10-18 (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set). Where PAIRPAR (which has no variable) fills the contiguous megablast table
-//! on a pool of two threads or more it chooses between two LOSAT code paths with the same tables:
-//! each worker reads every word (`x_mb_lookup_par.rs`), or each position is read once and each word
-//! applied by the owner of its cell. So the property under test is that the report does not depend
-//! on it, and that the read-once fill really runs where the switch says: with `LOSAT_TIMING`,
-//! `[TIMING] x_mb_lookup_build` counts `once=` builds equal to its `parallel=` builds (more than
-//! 0) at 4 threads with the switch, also with `LOSAT_X_DEFAULT=0` (which does not turn the pool
-//! fill off), with `[TIMING] x_mb_lookup_once` giving as many fills, and so without the variable
-//! (the default); 0 with `LOSAT_X_MBLUTONCE=0` and at one thread (no pool). That the bytes equal
-//! NCBI's is the business of the blastn fixtures.
+//! The switch is in the strict set since 2026-10-18 (on unless it is `0`). Where PAIRPAR (which has
+//! no variable) fills the contiguous megablast table on a pool of two threads or more it chooses
+//! between two LOSAT code paths with the same tables: each worker reads every word
+//! (`x_mb_lookup_par.rs`), or each position is read once and each word applied by the owner of its
+//! cell. So the property under test is that the report does not depend on it, and that the
+//! read-once fill really runs where the switch says: with `LOSAT_TIMING`, `[TIMING]
+//! x_mb_lookup_build` counts `once=` builds equal to its `parallel=` builds (more than
+//! 0) at 4 threads with the switch, with `[TIMING] x_mb_lookup_once` giving as many fills, and so
+//! without the variable (the default); 0 with `LOSAT_X_MBLUTONCE=0` and at one thread (no pool).
+//! That the bytes equal NCBI's is the business of the blastn fixtures.
 //!
 //! The prefault round of the read-once fill (`LOSAT_X_MBLUTPREFAULT`, in the strict set since
 //! 2026-10-19) runs where the first chunk has at least 8 positions per 1,024 cells of the table:
@@ -26,7 +25,6 @@ use std::process::Command;
 
 const SWITCH: (&str, &str) = ("LOSAT_X_MBLUTONCE", "1");
 const OFF: (&str, &str) = ("LOSAT_X_MBLUTONCE", "0");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 const PREFAULT_OFF: (&str, &str) = ("LOSAT_X_MBLUTPREFAULT", "0");
 
@@ -98,14 +96,14 @@ fn field(stderr: &str, prefix: &str, name: &str) -> u64 {
 const BUILD: &str = "[TIMING] x_mb_lookup_build: ";
 const ONCE: &str = "[TIMING] x_mb_lookup_once: ";
 
-/// For one search: the same report with the switch off, with it, by default, with it and
-/// `LOSAT_X_DEFAULT=0`, with `LOSAT_TIMING`, and at one thread; the read-once fill counted where
+/// For one search: the same report with the switch off, with it, by default, with
+/// `LOSAT_TIMING`, and at one thread; the read-once fill counted where
 /// it ran.
 fn check(task: &str, query: &str, subject: &str) {
     let (reference, stderr) = blastn(task, query, subject, 4, &[OFF]);
     assert!(!reference.is_empty(), "{task}: no hits");
     assert_eq!(stderr, "", "{task}");
-    for switches in [&[SWITCH][..], &[], &[SWITCH, DEFAULT_OFF]] {
+    for switches in [&[SWITCH][..], &[]] {
         let (report, stderr) = blastn(task, query, subject, 4, switches);
         assert!(
             report == reference,
@@ -121,16 +119,6 @@ fn check(task: &str, query: &str, subject: &str) {
     assert!(parallel > 0, "{task}: no table on the pool:\n{stderr}");
     assert_eq!(field(&stderr, BUILD, "once="), 0, "{task}: {stderr}");
     assert!(!stderr.contains(ONCE), "{task}: {stderr}");
-    // `LOSAT_X_DEFAULT=0` no longer turns the pool fill off: as many tables on the pool, and with
-    // the switch set every one read once.
-    let (report, stderr) = blastn(task, query, subject, 4, &[SWITCH, DEFAULT_OFF, TIMING]);
-    assert!(report == reference, "{task}");
-    assert_eq!(
-        field(&stderr, BUILD, "parallel="),
-        parallel,
-        "{task}: {stderr}"
-    );
-    assert_eq!(field(&stderr, BUILD, "once="), parallel, "{task}: {stderr}");
 
     for switches in [&[SWITCH, TIMING][..], &[TIMING]] {
         let (report, stderr) = blastn(task, query, subject, 4, switches);

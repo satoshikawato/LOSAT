@@ -4097,8 +4097,9 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_TBNUNITXLATE=1` tblastn (speed and memory; in the strict set from the pull request that added it,
   2026-10-23; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_packed_lean_plan`, `x_unit_residues`,
   `tblastn/search_gapped.rs` `X_UNIT_RESIDUES`): the plan of a packed subject (every `-db` sequence, `-subject`
-  with `TBNSTORE`) whose first frame has 1 MiB or more (3,145,722 bases) and which is made for one search (not
-  a plan `TBNSSIDE` keeps for 4+ query batches) has no residues: its frames have their lengths and its units
+  with `TBNSTORE`) whose first frame has 1 MiB or more (3,145,722 bases) and which is made for its search alone
+  (a search that keeps no subject plans: not one of 4+ query batches with `TBNSSIDE`, whose plans, kept or made
+  per use, keep their frames) has no residues: its frames have their lengths and its units
   their chunks, and each (frame, chunk) unit translates the residues it reads, from the chunk's first to 4,096
   past its last (or the frame's end sentinel), into a buffer its thread keeps, from the packed bytes of its
   phase and strand with the tables and loops of `TBNXLATESIMD` (32 codons with AVX2, else eight from one word).
@@ -4108,9 +4109,12 @@ Scheduling (each value computed by one thread with the original function; order 
   reads its chunk and nothing else and its residues are the frame's bytes, so the reports are the same (unit
   tests `x_one_strand_of_a_phase_is_that_strand_of_both`, `x_frame_residues_of_a_range_are_the_frames`,
   `x_lean_plans_are_the_plans_without_residues`, `x_units_of_a_frame_of_three_chunks_read_the_frames_residues`;
-  `tests/tblastn_unit_xlate.rs`). The buffer is taken from the thread for the unit and given back after it, so a
-  unit the thread runs while it waits (`TBNFLOWHELP`) makes its own. Subjects with shorter frames keep frames
-  of the plan (reused by `TBNFRAMEREUSE`). Shadow: `LOSAT_X_TBNUNITXLATESHADOW=1` (any value) keeps the frames,
+  `long_packed_subject_chunk_wordfinder_hsps_match_ncbi`, NCBI's initial HSPs of a subject of two chunks per
+  frame; `tests/tblastn_unit_xlate.rs`). The buffer is taken from the thread for the unit and given back after
+  it, so a unit the thread runs while it waits (`TBNFLOWHELP`) makes its own; it only grows, and a thread keeps
+  it (up to a chunk and the margin, about 5 MB) until it ends. The units' codons count in `[X_STATS]
+  TBNXLATESIMD`. Subjects with shorter frames keep the frames of their plans (those of 256 KiB or less reused
+  by `TBNFRAMEREUSE`). Shadow: `LOSAT_X_TBNUNITXLATESHADOW=1` (any value) keeps the frames,
   translates the residues of every unit of every packed subject with and without the vector loop, stops
   (panic) at the first that differs from the frame's and prints `[X_SHADOW] TBNUNITXLATE units_compared=
   residues_compared=` at exit. With `LOSAT_X_STATS=1` `[X_STATS] TBNUNITXLATE plans= units= residues=` counts

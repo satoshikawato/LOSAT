@@ -35,11 +35,12 @@
 //! eight at a time from one word). With `LOSAT_X_STATS` set, `main` prints `[X_STATS]
 //! TBNXLATESIMD codons_vector= codons_scalar=` at exit, when a packed subject was translated.
 //!
-//! A long packed subject searched by one query batch (`LOSAT_X_TBNUNITXLATE`, in the strict set:
-//! on unless it is `0`) gets a plan without residues (`x_packed_lean_plan`): its frames have
-//! their lengths only, and each (frame, chunk) unit translates the residues it reads into a
-//! buffer of its thread (`x_unit_residues`), one strand of one phase from the packed bytes, by
-//! the same tables and loops (32 codons with AVX2, else eight from one word). With
+//! A long packed subject whose plan is made for its search alone (the search keeps no subject
+//! plans for several query batches) gets a plan without residues (`x_packed_lean_plan`;
+//! `LOSAT_X_TBNUNITXLATE`, in the strict set: on unless it is `0`): its frames have their lengths
+//! only, and each (frame, chunk) unit translates the residues it reads into a buffer of its thread
+//! (`x_unit_residues`), one strand of one phase from the packed bytes, by the same tables and loops
+//! (32 codons with AVX2, else eight from one word; counted in `[X_STATS] TBNXLATESIMD`). With
 //! `LOSAT_X_TBNUNITXLATESHADOW` set (any value) the plans keep their frames and every unit of a
 //! packed subject translates its residues with both loops and compares them with the frame's
 //! (`x_unit_shadow`); `main` prints `[X_SHADOW] TBNUNITXLATE units_compared= residues_compared=`
@@ -1057,8 +1058,10 @@ pub(super) fn x_unit_shadow_on() -> bool {
 // 16 threads: 5.2 GiB at most, most of it the frames of the chromosomes searched at the same
 // time). A unit reads its chunk and nothing else.
 /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): whether the plan of a packed subject of `length` bases
-/// made for one search (not kept for several query batches) is made without residues
-/// (`x_packed_lean_plan`): with the switch, when its first frame would be mapped.
+/// made for its search alone (a search that keeps no subject plans, `XSubjectSide`) is made
+/// without residues (`x_packed_lean_plan`): with the switch, when its first frame has
+/// `X_MAPPED_FRAME` bytes or more (the frames that are mapped on Linux with glibc; the rule is the
+/// same everywhere).
 pub(super) fn x_units_translate(length: usize) -> bool {
     x_unit_xlate() == XUnitXlate::Units && length / 3 + 2 >= X_MAPPED_FRAME
 }
@@ -1125,13 +1128,16 @@ pub(super) fn x_packed_lean_plan(
 }
 
 // No NCBI counterpart for the margin: NCBI's scan reads the letters of its chunk
-// (aa_ungapped.c:496-501), and the scan loops here choose their last block from the length of the
-// slice they are given (x_scan_byte, x_scan_bf). With a margin past the chunk (or the frame's end
-// sentinel when it is nearer) the slice a unit gives them makes the choices the frame's slice
-// makes; 4,096 residues are 0.08 % of a chunk of 5,000,000.
+// (aa_ungapped.c:496-501), as the scan loops here do (their blocks follow the scan range); one of
+// them (x_scan_byte) also looks at the length of the slice it is given before its last block.
+// With a margin past the chunk, or the frame's end sentinel when it is nearer, a unit's slice is
+// longer than every read and makes that choice as the frame's slice does; 4,096 residues are
+// 0.08 % of a chunk of 5,000,000.
 /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the residues a unit's translation runs past its chunk.
 const X_UNIT_MARGIN: usize = 4096;
 
+// No NCBI counterpart: the range of a unit's translation (`X_UNIT_MARGIN`); it computes no value
+// NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): positions `from..to` of the frame's `aa_seq` that the unit
 /// of `chunk` reads: from the chunk's first residue to `X_UNIT_MARGIN` past its end, or to the
 /// end sentinel.
@@ -1140,6 +1146,12 @@ fn x_unit_range(aa_len: usize, chunk: TranslatedChunk) -> (usize, usize) {
     (from, (aa_len + 2).min(from + chunk.length + X_UNIT_MARGIN))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812
+// ```c
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// The part of `subject->sequence` a unit reads, made when the unit runs.
 /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the residues of `frame` (of a plan without residues) that
 /// the unit of `chunk` reads, made into `buffer`; returns the range of `buffer` that holds them,
 /// from the chunk's first residue on (see `x_unit_range`).
@@ -1152,7 +1164,7 @@ pub(super) fn x_unit_residues(
 ) -> Result<std::ops::Range<usize>> {
     let tables = x_codon_tables(db_gencode)?;
     let (from, to) = x_unit_range(frame.aa_len, chunk);
-    let range = x_frame_residues(
+    let (range, codons, vector) = x_frame_residues(
         store,
         tables,
         frame.frame,
@@ -1165,6 +1177,8 @@ pub(super) fn x_unit_residues(
     if x_stats() {
         UNIT_RESIDUES[1].fetch_add(1, Ordering::Relaxed);
         UNIT_RESIDUES[2].fetch_add(range.len() as u64, Ordering::Relaxed);
+        PACKED_CODONS[0].fetch_add(vector as u64, Ordering::Relaxed);
+        PACKED_CODONS[1].fetch_add((codons - vector) as u64, Ordering::Relaxed);
     }
     Ok(range)
 }
@@ -1185,7 +1199,7 @@ pub(super) fn x_unit_shadow(
     let want = &frame.aa_seq[from..to];
     let mut buffer = Vec::new();
     for simd in [true, false] {
-        let range = x_frame_residues(
+        let (range, _, _) = x_frame_residues(
             store,
             tables,
             frame.frame,
@@ -1222,7 +1236,9 @@ pub(super) fn x_unit_shadow(
 // the byte, which the loops do not take) the codon before it is read too and left out.
 /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): positions `from..to` (`1 <= from <= to <= aa_len + 2`) of
 /// frame `frame` of `store` (`aa_len` residues), made into `buffer` by one strand of one phase;
-/// returns the range of `buffer` that holds them. `simd`: the vector loop where the CPU has it.
+/// returns the range of `buffer` that holds them, the codons read and those the vector loop read.
+/// `simd`: the vector loop where the CPU has it. The buffer only grows (its other bytes are left
+/// as they are), so a thread's buffer is filled with zeros once.
 #[allow(clippy::too_many_arguments)]
 fn x_frame_residues(
     store: &crate::sequence::packed_subject::PackedNucleotide,
@@ -1233,18 +1249,21 @@ fn x_frame_residues(
     to: usize,
     buffer: &mut Vec<u8>,
     simd: bool,
-) -> std::ops::Range<usize> {
+) -> (std::ops::Range<usize>, usize, usize) {
     let seq_len = store.len();
     assert!(1 <= from && from <= to && to <= aa_len + 2);
     // residues `i0..i1`; position `aa_len + 1` is the end sentinel
     let (i0, i1) = (from - 1, (to - 1).min(aa_len));
     let sentinel = from < to && to == aa_len + 2;
     if i0 >= i1 {
-        buffer.clear();
-        if sentinel {
-            buffer.push(SENTINEL_BYTE);
+        if !sentinel {
+            return (0..0, 0, 0);
         }
-        return 0..buffer.len();
+        if buffer.is_empty() {
+            buffer.push(0);
+        }
+        buffer[0] = SENTINEL_BYTE;
+        return (0..1, 0, 0);
     }
     let r = usize::from(frame.unsigned_abs()) - 1;
     let phase = if frame > 0 { r } else { (seq_len - r) % 3 };
@@ -1265,13 +1284,16 @@ fn x_frame_residues(
     let end = packed
         .len()
         .min(byte + (first_base % 4 + 3 * count).div_ceil(4) + 32);
-    buffer.resize(count + 2, 0);
-    let bytes = &packed[byte..end];
-    if frame > 0 {
-        x_phase_one::<false>(bytes, first_base % 4, count, tables, buffer, simd);
-    } else {
-        x_phase_one::<true>(bytes, first_base % 4, count, tables, buffer, simd);
+    if buffer.len() < count + 2 {
+        buffer.resize(count + 2, 0);
     }
+    let bytes = &packed[byte..end];
+    let out = &mut buffer[..count + 2];
+    let vector = if frame > 0 {
+        x_phase_one::<false>(bytes, first_base % 4, count, tables, out, simd)
+    } else {
+        x_phase_one::<true>(bytes, first_base % 4, count, tables, out, simd)
+    };
     // codon `j` read is at `buffer[1 + j]` (plus) or `buffer[count - j]` (minus)
     let start = if frame > 0 { 1 + back } else { 1 };
     let mut length = i1 - i0;
@@ -1279,13 +1301,14 @@ fn x_frame_residues(
         buffer[start + length] = SENTINEL_BYTE;
         length += 1;
     }
-    start..start + length
+    (start..start + length, count, vector)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
 // `x_phase_words`)
 /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): [`x_phase_residues`] for one strand: codon `j` at
-/// `out[1 + j]` (forward table) or, with `MINUS`, at `out[codons - j]` (reverse table).
+/// `out[1 + j]` (forward table) or, with `MINUS`, at `out[codons - j]` (reverse table). Returns
+/// the codons the vector loop read.
 fn x_phase_one<const MINUS: bool>(
     packed: &[u8],
     phase: usize,
@@ -1293,7 +1316,7 @@ fn x_phase_one<const MINUS: bool>(
     tables: &XCodonTables,
     out: &mut [u8],
     simd: bool,
-) {
+) -> usize {
     assert!(phase < 3 && out.len() == codons + 2);
     let mut j = 0;
     #[cfg(target_arch = "x86_64")]
@@ -1303,6 +1326,7 @@ fn x_phase_one<const MINUS: bool>(
     }
     #[cfg(not(target_arch = "x86_64"))]
     let _ = simd;
+    let vector = j;
     let table = if MINUS {
         &tables.reverse
     } else {
@@ -1333,6 +1357,7 @@ fn x_phase_one<const MINUS: bool>(
             out[1 + j] = table[codon];
         }
     }
+    vector
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
@@ -2217,7 +2242,7 @@ mod tests {
                     for &from in &points {
                         for &to in points.iter().filter(|&&to| to >= from) {
                             for simd in [false, true] {
-                                let range = x_frame_residues(
+                                let (range, _, _) = x_frame_residues(
                                     &store,
                                     tables,
                                     frame.frame,
@@ -2253,7 +2278,7 @@ mod tests {
     fn x_lean_plans_are_the_plans_without_residues() {
         use crate::sequence::packed_subject::PackedNucleotide;
         let mut buffer = Vec::new();
-        for length in (0..=40).chain([1_000, 4_999, 4_096 * 3 + 7, 100_003]) {
+        for length in (0..=40).chain([1_000, 4_999, 100_003]) {
             let subject = letters(b"ACGTMRSVWYHKDBN-acgtn", length, length as u64 + 17);
             let store = PackedNucleotide::from_subject_letters(&subject).expect("letters");
             for db_gencode in [1, 11] {
@@ -2298,8 +2323,9 @@ mod tests {
     // A subject whose frames have three chunks each (30 Mb of random bases): the plan without
     // residues has the 18 units of `x_packed_plan`, and each unit's residues, made with and
     // without the vector loop, are the frame's from the chunk's first residue to 4,096 past its
-    // last (the end sentinel for the last chunk). Its first frame is one the plan of a search
-    // leaves out (`x_units_translate`, with the switch).
+    // last: the first chunk of each frame; the second (whose margin passes the short third) and
+    // the third end at the end sentinel. Its first frame is one the plan of a search leaves out
+    // (`x_units_translate`, with the switch).
     #[test]
     fn x_units_of_a_frame_of_three_chunks_read_the_frames_residues() {
         use crate::sequence::packed_subject::PackedNucleotide;
@@ -2334,7 +2360,7 @@ mod tests {
                 sentinel += 1;
             }
             for simd in [true, false] {
-                let range = x_frame_residues(
+                let (range, _, _) = x_frame_residues(
                     &store,
                     tables,
                     frame.frame,

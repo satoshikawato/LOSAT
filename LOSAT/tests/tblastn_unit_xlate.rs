@@ -14,7 +14,8 @@
 //! ```
 //! NCBI translates the six frames of a subject and each unit reads its chunk of a frame. With the
 //! switch, the plan of a packed subject whose first frame has 1 MiB or more (3,145,722 bases)
-//! searched by one query batch has no residues, and each unit translates those of its chunk (and
+//! made for its search alone (the search keeps no subject plans for several query batches) has
+//! no residues, and each unit translates those of its chunk (and
 //! a margin) into a buffer of its thread, so the report does not depend on the switch. It is on
 //! by default and off with `LOSAT_X_TBNUNITXLATE=0`; `LOSAT_X_TBNUNITXLATESHADOW` keeps the frames
 //! and compares every unit's own translation with them. These tests compare the reports and read
@@ -163,7 +164,12 @@ const SHADOW: (&str, &str) = ("LOSAT_X_TBNUNITXLATESHADOW", "1");
 fn the_report_does_not_depend_on_where_the_units_read_their_residues() {
     let [long, genome] = inputs().2;
     let (expected, stderr) = tblastn(1, &[OFF]);
-    assert!(!expected.is_empty(), "the search must report hits");
+    assert!(
+        String::from_utf8_lossy(&expected)
+            .lines()
+            .any(|line| line.split('\t').nth(1) == Some("long")),
+        "the search must report hits in the long subject"
+    );
     assert_eq!(stats(&stderr), None);
     assert_eq!(shadow(&stderr), None);
     for threads in [1, 4] {

@@ -3,7 +3,7 @@
 //! blocks of outfmt 7, and the data of the pairwise report.
 
 use std::io::{self, Write};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -66,6 +66,104 @@ fn display_base(base: u8) -> u8 {
     }
 }
 
+// No NCBI counterpart (the arrangement): `display_base` of every byte, on the plus strand and
+// complemented for the minus strand (the bits reversed, as in `display_residue_scan`), for the
+// display table (`LOSAT_X_DISPTABLE`). NCBI's `sm_BaseToIdx` (above) is the plus-strand table.
+const fn display_base_table(minus: bool) -> [u8; 256] {
+    let codes = b"-ACMGRSVTWYHKDBN";
+    let mut table = [0u8; 256];
+    let mut byte = 0;
+    while byte < 256 {
+        let upper = (byte as u8).to_ascii_uppercase();
+        let mut mask = 0;
+        if upper == b'U' {
+            mask = 8;
+        } else if upper == b'X' {
+            mask = 15;
+        } else {
+            let mut code = 0;
+            while code < codes.len() {
+                if codes[code] == upper {
+                    mask = code as u8;
+                    break;
+                }
+                code += 1;
+            }
+        }
+        if minus {
+            mask = ((mask & 1) << 3) | ((mask & 2) << 1) | ((mask & 4) >> 1) | ((mask & 8) >> 3);
+        }
+        table[byte] = mask;
+        byte += 1;
+    }
+    table
+}
+
+const DISPLAY_BASE_PLUS: [u8; 256] = display_base_table(false);
+const DISPLAY_BASE_MINUS: [u8; 256] = display_base_table(true);
+
+// No NCBI counterpart: reads the LOSAT_X_DISPTABLE variable once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_DISPTABLE): a switch of the strict set (`utils/xswitch.rs`): on unless it
+/// is `0`.
+fn x_display_table() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DISPTABLE"))
+}
+
+// NCBI reference: c++/src/objects/seqfeat/Genetic_code_table.cpp:155-160,228-231 (quoted at
+// `blastx::report::display_codon`): NCBI's display reads the residue of a codon's state from a
+// table (`m_AminoAcid`) that it fills once per code; `alnvec.cpp:911-918` (at
+// `display_residue`) steps the state by the three bases.
+/// The display's residue of each codon of 4-bit codes, at `(first << 8) | (second << 4) |
+/// third`: `display_codon` of the 4,096 codons of `code`, made at the first use of the code and
+/// kept for the process (`GeneticCode::display_slot`).
+fn display_table(code: &GeneticCode) -> &'static [u8; 4096] {
+    code.display_slot().get_or_init(|| {
+        Box::new(std::array::from_fn(|codon| {
+            let masks = [
+                (codon >> 8) as u8,
+                ((codon >> 4) & 15) as u8,
+                (codon & 15) as u8,
+            ];
+            crate::algorithm::blastx::report::display_codon(masks, code)
+        }))
+    })
+}
+
+/// A genetic code as the display translates with it (`display_residue`): with
+/// `LOSAT_X_DISPTABLE` the code's table (`display_table`), looked up once for many residues.
+#[derive(Clone, Copy)]
+pub(crate) struct DisplayCode<'a> {
+    code: &'a GeneticCode,
+    table: Option<&'static [u8; 4096]>,
+}
+
+impl<'a> DisplayCode<'a> {
+    pub(crate) fn new(code: &'a GeneticCode) -> Self {
+        Self {
+            code,
+            table: x_display_table().then(|| display_table(code)),
+        }
+    }
+
+    /// `display_residue` with this code.
+    pub(crate) fn residue(&self, sequence: &[u8], frame: i8, offset: usize) -> u8 {
+        let Some(table) = self.table else {
+            return display_residue_scan(sequence, frame, offset, self.code);
+        };
+        let first = 3 * offset + frame.unsigned_abs() as usize - 1;
+        let base = |i: usize| -> usize {
+            if frame > 0 {
+                DISPLAY_BASE_PLUS[sequence[first + i] as usize] as usize
+            } else {
+                DISPLAY_BASE_MINUS[sequence[sequence.len() - first - i - 1] as usize] as usize
+            }
+        };
+        table[(base(0) << 8) | (base(1) << 4) | base(2)]
+    }
+}
+
 // NCBI reference: c++/src/objtools/alnmgr/alnvec.hpp:292-302
 // ```c++
 //     if (GetWidth(row) == 3) {
@@ -104,6 +202,12 @@ fn display_base(base: u8) -> u8 {
 /// codon's bases read on the frame's strand (the IUPAC complement on the minus strand) and
 /// translated with the display's table (`display_codon`, which merges D/N, E/Q and I/L).
 pub(crate) fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &GeneticCode) -> u8 {
+    DisplayCode::new(code).residue(sequence, frame, offset)
+}
+
+/// `display_residue` without the display table (`LOSAT_X_DISPTABLE=0`): each base's code found
+/// in the IUPAC letters and the codon translated by `display_codon`.
+fn display_residue_scan(sequence: &[u8], frame: i8, offset: usize, code: &GeneticCode) -> u8 {
     let first = 3 * offset + frame.unsigned_abs() as usize - 1;
     let masks = std::array::from_fn(|i| {
         if frame > 0 {
@@ -162,10 +266,12 @@ fn displayed_residues<'r>(
 ) -> (impl Iterator<Item = u8> + 'r, impl Iterator<Item = u8> + 'r) {
     let hit = &hsp.hit;
     let query_frame = hit.query_frame as i8;
+    let (query_display, subject_display) =
+        (DisplayCode::new(query_code), DisplayCode::new(db_code));
     let query_row = (hit.sort_query_offset..hit.sort_query_end)
-        .map(move |offset| display_residue(query, query_frame, offset, query_code));
+        .map(move |offset| query_display.residue(query, query_frame, offset));
     let subject_row = (hit.sort_subject_offset..hit.sort_subject_end).map(move |offset| {
-        display_residue(subject, hsp.subject_frame, offset - subject_first, db_code)
+        subject_display.residue(subject, hsp.subject_frame, offset - subject_first)
     });
     (query_row, subject_row)
 }
@@ -1670,6 +1776,65 @@ mod tests {
         assert_eq!(display_base(b'n'), 15);
         assert_eq!(display_base(b'R'), 5);
         assert_eq!(display_base(b'*'), 0);
+    }
+
+    // The display table (LOSAT_X_DISPTABLE) holds the scan's answers: each byte's code on both
+    // strands, each codon of 4-bit codes of each genetic code, and so each residue of a row.
+    #[test]
+    fn display_table_gives_the_residues_of_the_scan() {
+        let reversed = |mask: u8| {
+            ((mask & 1) << 3) | ((mask & 2) << 1) | ((mask & 4) >> 1) | ((mask & 8) >> 3)
+        };
+        for byte in 0..=255u8 {
+            assert_eq!(DISPLAY_BASE_PLUS[byte as usize], display_base(byte));
+            assert_eq!(
+                DISPLAY_BASE_MINUS[byte as usize],
+                reversed(display_base(byte))
+            );
+        }
+        let letters = b"ACGTUNXRYMKSWBDHVacgtunxry-*";
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let sequence: Vec<u8> = (0..61)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                letters[(state % letters.len() as u64) as usize]
+            })
+            .collect();
+        let mut codes = 0;
+        for id in 0..=255u8 {
+            let Ok(code) = GeneticCode::try_from_id(id) else {
+                continue;
+            };
+            codes += 1;
+            let table = display_table(&code);
+            for (codon, &residue) in table.iter().enumerate() {
+                let masks = [
+                    (codon >> 8) as u8,
+                    ((codon >> 4) & 15) as u8,
+                    (codon & 15) as u8,
+                ];
+                assert_eq!(
+                    residue,
+                    crate::algorithm::blastx::report::display_codon(masks, &code)
+                );
+            }
+            let display = DisplayCode {
+                code: &code,
+                table: Some(table),
+            };
+            for frame in [1i8, 2, 3, -1, -2, -3] {
+                for offset in 0..(sequence.len() + 1 - frame.unsigned_abs() as usize) / 3 {
+                    assert_eq!(
+                        display.residue(&sequence, frame, offset),
+                        display_residue_scan(&sequence, frame, offset, &code),
+                        "code {id} frame {frame} offset {offset}"
+                    );
+                }
+            }
+        }
+        assert!(codes > 20);
     }
 
     // NCBI c++/src/objects/seqfeat/Genetic_code_table.cpp:191-207 merges D/N to B, E/Q

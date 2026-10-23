@@ -63,6 +63,7 @@ LOSAT_X_DEKKER	blastn,blastp,blastx,tblastn,tblastx	platform			wasm32 only
 LOSAT_X_DIAGLV	blastn	conditional	required	required	only the diagonal hash (query block >8000 letters, about >4000 bases); not diagonal array, not scan_range
 LOSAT_X_DISCLUTPAR	blastn	conditional	required	required	-task dc-megablast (or megablast with template options) and a pool of 2+ threads
 LOSAT_X_DPAVX2	blastn,blastp,blastx,tblastn,tblastx	platform			x86_64 CPU with AVX2 only; other targets use 128-bit kernel (usually on x86)
+LOSAT_X_DISPTABLE	tblastn,tblastx	always			displayed residues (outfmt 0 rows, identities, Web hit records) read from a per-code table of 4-bit codons
 LOSAT_X_DPEMASK	blastn,blastp,blastx,tblastn,tblastx	platform			only the 8-bit 256-bit AVX2 kernel (x86 with AVX2)
 LOSAT_X_DPNEON	blastn,blastp,blastx,tblastn,tblastx	platform			aarch64 only
 LOSAT_X_DPW128	blastn,blastp,blastx,tblastn,tblastx	platform			runs where AVX2 kernel does not: wasm, aarch64, non-AVX2 x86; AVX2 has priority

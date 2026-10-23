@@ -60,6 +60,9 @@ mod x_oid_flow;
 mod stage_e_report;
 // TBLASTN's BLAST XML (outfmt 5), once per run, from the final hit lists.
 mod blast_xml;
+// NCBI c++/src/app/blast/tblastn_app.cpp:295 (`WriteArchive`): TBLASTN's BLAST archive (outfmt 11),
+// one Blast4-archive per query batch.
+mod archive;
 // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod seqalign;

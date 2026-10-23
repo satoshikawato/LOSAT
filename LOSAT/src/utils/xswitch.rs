@@ -173,6 +173,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPUNGAP",
     "LOSAT_X_BPUNGAPSENT",
     "LOSAT_X_BXCHUNKFLOW",
+    "LOSAT_X_BXCROSS",
     "LOSAT_X_BXDBSTREAM",
     "LOSAT_X_BXDEFER",
     "LOSAT_X_BXDIAG",

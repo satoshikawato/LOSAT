@@ -183,6 +183,7 @@ fn lowercase_runs(letters: &[u8]) -> Vec<(i32, i32)> {
 /// positions.
 fn query_record_masks(
     queries: &[FastaRecord],
+    first: usize,
     seg: Option<&SegParams>,
     mask_lowercase: bool,
     ranges: &ReportRanges<'_>,
@@ -190,7 +191,8 @@ fn query_record_masks(
     queries
         .iter()
         .enumerate()
-        .map(|(q_idx, query)| {
+        .map(|(offset, query)| {
+            let q_idx = first + offset;
             let letters = query.seq();
             let intervals =
                 super::search_seed::tblastn_report_mask_intervals(letters, seg, mask_lowercase)
@@ -295,7 +297,6 @@ pub(super) fn write_tblastn_archives(
         db_title: data.shown.db_title(),
         gapped: true,
     };
-    let masks = query_record_masks(data.queries, data.seg, data.mask_lowercase, data.ranges);
     // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
     let sequences = matches!(data.shown, ShownSubjects::Fasta { .. });
     let subject_deflines: Vec<Cow<'_, [u8]>> = if sequences {
@@ -342,6 +343,12 @@ pub(super) fn write_tblastn_archives(
             .collect();
         let first = span.start;
         let searched = !data.query_batch_skipped[first];
+        // Only a searched batch has results masks (the search made them): they are computed per batch.
+        let masks = if searched {
+            query_record_masks(records, first, data.seg, data.mask_lowercase, data.ranges)
+        } else {
+            Vec::new()
+        };
 
         // `RequiredStart` / `RequiredEnd`: a `-query_loc` that is not the first query's whole
         // length.
@@ -359,12 +366,12 @@ pub(super) fn write_tblastn_archives(
         // `notset` mask per query with its SEG and lower-case intervals (a protein query).
         let mut results_masks: Vec<MaskEntry> = Vec::new();
         if searched {
-            for index in span.clone() {
-                if !masks[index].is_empty() {
+            for (offset, intervals) in masks.into_iter().enumerate() {
+                if !intervals.is_empty() {
                     results_masks.push(MaskEntry {
-                        id: data.queries[index].local_id.clone(),
+                        id: records[offset].local_id.clone(),
                         frame: Frame::NotSet,
-                        intervals: masks[index].clone(),
+                        intervals,
                     });
                 }
             }

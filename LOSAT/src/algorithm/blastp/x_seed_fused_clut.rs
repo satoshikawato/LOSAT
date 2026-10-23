@@ -11,7 +11,7 @@
 
 use std::cell::Cell;
 
-use super::x_seed_fused::{x_prefetch, x_prefetch_distance, x_test_hit};
+use super::x_seed_fused::{x_prefetch, x_prefetch_distance, x_test_hit, XHitBf};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::XFlatCompressedLookup;
 
@@ -19,6 +19,90 @@ thread_local! {
     // No NCBI counterpart: the scan's list of (subject offset, backbone index), reused across
     // subjects.
     static X_CELLS: Cell<Option<Vec<(i32, u32)>>> = const { Cell::new(None) };
+}
+
+thread_local! {
+    // PROBE (v4-BPF K1): the probe scan's list of (subject offset, slice start, slice end).
+    static X_RANGES: Cell<Option<Vec<(i32, u32, u32)>>> = const { Cell::new(None) };
+}
+
+/// PROBE (v4-BPF K1, not for merge): the arm of `LOSAT_BPF_SEED` (0 = the loop above).
+pub(crate) fn x_bpf_seed() -> u8 {
+    use std::sync::OnceLock;
+    static V: OnceLock<u8> = OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("LOSAT_BPF_SEED")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+/// PROBE (v4-BPF K1, not for merge): `x_scan_two_hit_compressed_flat` with
+/// - V >= 1: the branch-free test `XHitBf::test` first (blastp's per-hit loop, LOSAT_X_BPHITBF),
+///   then `x_test_hit` for a flag-1 entry or a candidate;
+/// - V >= 2: no read-ahead of a later hit's diagonal entry;
+/// - V >= 3: the scan records the slice bounds (`x_for_each_range`).
+/// A subject outside `XHitBf::fits` runs the loop above.
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+pub(crate) fn x_scan_two_hit_compressed_flat_probe<const V: u8, F>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    mut candidate: F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    if !XHitBf::fits(diag_offset, subject_length, window, word_size) {
+        return x_scan_two_hit_compressed_flat(
+            lookup,
+            subject,
+            subject_length,
+            diag_array,
+            diag_mask,
+            diag_offset,
+            window,
+            word_size,
+            candidate,
+        );
+    }
+    assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
+    let bf = XHitBf::in_range(diag_offset, window, word_size);
+    let prefetch_distance = x_prefetch_distance();
+    let mut visit = |s: i32, cell_hits: &[i32]| {
+        let here = bf.here(s);
+        for (i, &query_offset) in cell_hits.iter().enumerate() {
+            if V < 2 {
+                if let Some(&ahead) = cell_hits.get(i + prefetch_distance) {
+                    x_prefetch(diag_array, ((ahead - s) & diag_mask) as usize);
+                }
+            }
+            let diag_coord = ((query_offset - s) & diag_mask) as usize;
+            // SAFETY: diag_coord <= diag_mask < diag_array.len() (asserted above).
+            let entry = unsafe { diag_array.get_unchecked_mut(diag_coord) };
+            if bf.test(entry, here) {
+                continue;
+            }
+            if let Some((last_hit, diff)) = x_test_hit(entry, s, diag_offset, window, word_size) {
+                candidate(query_offset, s, last_hit, diff, entry);
+            }
+        }
+    };
+    if V >= 3 {
+        let mut ranges = X_RANGES.with(Cell::take).unwrap_or_default();
+        lookup.x_for_each_range(subject, subject_length, &mut ranges, &mut visit);
+        X_RANGES.with(|slot| slot.set(Some(ranges)));
+    } else {
+        let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
+        lookup.for_each_cell(subject, subject_length, &mut cells, &mut visit);
+        X_CELLS.with(|slot| slot.set(Some(cells)));
+    }
 }
 
 /// `x_seed_fused_compressed::x_scan_two_hit_compressed` on the flat table (same arguments).

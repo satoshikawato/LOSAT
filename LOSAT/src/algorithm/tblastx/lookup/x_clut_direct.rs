@@ -1097,6 +1097,7 @@ fn x_try_build_flat_with_capacity(
         total += count;
     }
     starts[backbone_size] = total;
+    crate::utils::xstats::add(&crate::utils::xstats::FBP_APPENDS, u64::from(total));
 
     // Fill pass: the appends again in order, each at the next slot of its cell (the starts serve as the
     // cells' cursors), so each cell holds o_0..o_{n-1}; a cursor ends at the next cell's start, so the
@@ -1366,6 +1367,110 @@ impl XFlatCompressedLookup {
     /// The scan of `x_seed_fused_compressed::x_scan_cells` (the rounds of the two-hit scan of a
     /// subject's one range, without the offset-pair array) on the flat table: calls
     /// `visit(subject_offset, hits)` for every cell found, with its slice. `cells` is scratch.
+    /// PROBE (v4-BPF K1, not for merge): `for_each_cell` whose first pass records each found
+    /// cell's slice bounds (the `starts` loads made while the scan runs), and whose second pass
+    /// reads the slices without bound tests. Same cells, same order.
+    pub(crate) fn x_for_each_range<V>(
+        &self,
+        subject: &[u8],
+        subject_length: usize,
+        ranges: &mut Vec<(i32, u32, u32)>,
+        mut visit: V,
+    ) where
+        V: FnMut(i32, &[i32]),
+    {
+        let word_length = usize::try_from(self.word_length).expect("word length");
+        let compressed_alphabet_size =
+            usize::try_from(self.compressed_alphabet_size).expect("alphabet size");
+        let recip = i64::from(self.reciprocal_alphabet_size);
+        let pv_array_bts = usize::try_from(self.pv_array_bts).expect("pv shift");
+        let scaled_compress_table = &self.scaled_compress_table_u8;
+        let pv = &self.pv;
+        let starts = &self.starts;
+        ranges.clear();
+        let mut s_last =
+            i32::try_from(subject_length).expect("subject length must fit Int4") - self.word_length;
+        if s_last < 0 {
+            s_last = 0;
+        }
+        let s_last = s_last as usize;
+        let byte_at = |i: usize| subject.get(i).copied().unwrap_or(0);
+        let mut s = 0usize;
+        let mut index = 0i32;
+        let mut padded_word = [0u8; 8];
+        while s <= s_last {
+            let end = s + word_length - 1;
+            let word = match subject.get(s..end) {
+                Some(word) => word,
+                None => {
+                    let available = subject.get(s..).unwrap_or(&[]);
+                    let word = &mut padded_word[..word_length - 1];
+                    word.fill(0);
+                    word[..available.len()].copy_from_slice(available);
+                    &padded_word[..word_length - 1]
+                }
+            };
+            let (computed, skip) = compute_compressed_index_u8(
+                word_length - 1,
+                word,
+                compressed_alphabet_size,
+                scaled_compress_table,
+            );
+            index = computed;
+            if skip == 0 {
+                break;
+            }
+            s += 1;
+        }
+        let mut next_char = if s <= s_last {
+            byte_at(s + word_length - 1)
+        } else {
+            0
+        };
+        let mut preshift = compressed_reciprocal_divide(index, recip);
+        while s <= s_last {
+            let mut compressed_char = scaled_compress_table[usize::from(next_char)];
+            next_char = byte_at(s + word_length);
+            if compressed_char < 0 {
+                preshift = 0;
+                s += 1;
+                let mut skip = self.word_length - 1;
+                while skip != 0 && s <= s_last {
+                    compressed_char = scaled_compress_table[usize::from(next_char)];
+                    next_char = byte_at(s + word_length);
+                    if compressed_char < 0 {
+                        skip = self.word_length - 1;
+                        preshift = 0;
+                        s += 1;
+                        continue;
+                    }
+                    index = preshift + compressed_char;
+                    preshift = compressed_reciprocal_divide(index, recip);
+                    skip -= 1;
+                    s += 1;
+                }
+                continue;
+            }
+            index = preshift + compressed_char;
+            preshift = compressed_reciprocal_divide(index, recip);
+            if compressed_pv_test(pv, index as usize, pv_array_bts) {
+                let i = index as usize;
+                ranges.push((s as i32, starts[i], starts[i + 1]));
+            }
+            s += 1;
+        }
+        let hits = &self.hits;
+        for (n, &(s, start, end)) in ranges.iter().enumerate() {
+            if let Some(&(_, later, _)) = ranges.get(n + X_HITS_AHEAD) {
+                x_prefetch(hits.as_ptr().wrapping_add(later as usize));
+            }
+            if start != end {
+                // SAFETY: starts are non-decreasing prefix sums with the last entry hits.len().
+                visit(s, unsafe { hits.get_unchecked(start as usize..end as usize) });
+            }
+        }
+    }
+
     pub(crate) fn for_each_cell<V>(
         &self,
         subject: &[u8],

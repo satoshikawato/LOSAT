@@ -67,6 +67,7 @@ counters!(
     FBP_EXT,
     FBP_SAVE,
     FBP_RIGHT,
+    FBP_APPENDS,
 );
 
 #[inline(always)]

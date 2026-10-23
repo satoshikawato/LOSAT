@@ -8783,17 +8783,37 @@ fn run_resolved_in_pool(
                     // EXPERIMENT (LOSAT_X_BPCLUT): the same loop on the flat table, each cell read as one
                     // slice (`x_seed_fused_clut.rs`).
                     BlastpRuntimeLookup::CompressedFlat(flat_lookup) => {
-                        super::x_seed_fused_clut::x_scan_two_hit_compressed_flat(
-                            flat_lookup,
-                            subject_sequence,
-                            subject.aa_len,
-                            &mut scratch.diag_array,
-                            diag_mask,
-                            subject_diag_offset,
-                            window,
-                            word_size,
-                            x_candidate,
-                        )
+                        macro_rules! x_bpf_probe {
+                            ($v:literal) => {
+                                super::x_seed_fused_clut::x_scan_two_hit_compressed_flat_probe::<$v, _>(
+                                    flat_lookup,
+                                    subject_sequence,
+                                    subject.aa_len,
+                                    &mut scratch.diag_array,
+                                    diag_mask,
+                                    subject_diag_offset,
+                                    window,
+                                    word_size,
+                                    x_candidate,
+                                )
+                            };
+                        }
+                        match super::x_seed_fused_clut::x_bpf_seed() {
+                            1 => x_bpf_probe!(1),
+                            2 => x_bpf_probe!(2),
+                            3 => x_bpf_probe!(3),
+                            _ => super::x_seed_fused_clut::x_scan_two_hit_compressed_flat(
+                                flat_lookup,
+                                subject_sequence,
+                                subject.aa_len,
+                                &mut scratch.diag_array,
+                                diag_mask,
+                                subject_diag_offset,
+                                window,
+                                word_size,
+                                x_candidate,
+                            ),
+                        }
                     }
                 }
             }

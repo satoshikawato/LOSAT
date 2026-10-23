@@ -460,6 +460,13 @@ fn x_diag_mode() -> XDiagMode {
         }
         #[cfg(target_arch = "x86_64")]
         if x_avx2_available() {
+            // PROBE (v4-A14 s6, exp/a14-bpmask; not for merging): LOSAT_X_BPMASKPROBE=1 gives
+            // blastp's fused loop blastx's masked batch (LOSAT_X_BXDEFER's cell test).
+            if x_bp_defer()
+                && std::env::var_os("LOSAT_X_BPMASKPROBE").is_some_and(|v| v.as_os_str() == "1")
+            {
+                return XDiagMode::Avx2DeferMasked;
+            }
             return if x_bp_defer() {
                 XDiagMode::Avx2Defer
             } else {

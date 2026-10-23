@@ -900,8 +900,13 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                     // PROTOTYPE (LOSAT_X_BXFLOWLIVE): the cap on the batches spawned and not
                     // sent back instead of on the unwritten ones.
                     let x_live = std::env::var_os("LOSAT_X_BXFLOWLIVE").is_some();
+                    // PROTOTYPE (LOSAT_X_BXFLOWBOUND=N): the unwritten bound under LIVE.
+                    let x_live_bound = std::env::var("LOSAT_X_BXFLOWBOUND")
+                        .ok()
+                        .and_then(|v| v.parse::<usize>().ok())
+                        .unwrap_or(x_wave);
                     let (x_bound, x_lookahead, x_max_live) = match x_cap {
-                        Some(k) if x_live => (x_wave, 1, k),
+                        Some(k) if x_live => (x_live_bound.max(k + 1), 1, k),
                         Some(k) => (k + 1, 1, usize::MAX),
                         None => (x_wave, pool.threads(), usize::MAX),
                     };

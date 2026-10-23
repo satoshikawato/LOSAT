@@ -3387,6 +3387,40 @@ Scheduling (each value computed by one thread with the original function; order 
   those rounds: dc-megablast of 31,168 cDNAs +39 MiB and plain blastn of 1,775 cDNAs +48 MiB at 16 threads (the latter
   beside the earlier budget's `LOSAT_X_QBATCHPAR` slots, which the budget rule now keeps off for that file), below
   NCBI `-db` in every cell (494 vs 700 MiB; plain blastn 122 vs 136 MiB under the budget rule).
+- `LOSAT_X_PAIRPARHOME=1` (in the strict set since 2026-10-23 (perf/dc-fold-sync, evidence at the end of this entry): on
+  unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) blastn, in the partitioned stages of `LOSAT_X_PAIRPARFOLD`
+  (above; the strips paths of PAIRPAR, `LOSAT_X_PAIRPARDISC` and `LOSAT_X_PAIRPARNA` with the diagonal hash): how the
+  participants share the folds (`seed_stage_home` in `blastn/blast_engine/x_pair_seed_part.rs`). Partition p is the
+  home of participant `p % threads`, which folds p's strips as they become ready, every ready strip from p's next one
+  on in one lock (a run), and scans a strip within the window between runs. Another participant folds p only while
+  p has no participant at home in the stage (its helper job has not started, returned at once on a participant's
+  thread, or left a stalled stage), when p is the slowest partition and it has nothing else to do, or once every
+  strip is handed out. Without the switch any participant folds the next strip of any partition it can lock
+  (`try_lock` on every partition in every turn), one strip per lock: a stage of 64 x threads strips has 64 x
+  threads^2 fold units (65,536 at 32 threads), the partitions move from core to core unit by unit, and every unit
+  takes the strip slot's lock and a shared pointer and adds to a per-strip and a stage-wide shared count. With the
+  switch a strip's buffer goes back once the slowest partition has passed it (no per-strip count), the strips are
+  read under a read lock, the helpers' stall test sums the cursor and the partitions' next strips (no stage-wide
+  count), and the partitions' next strips and states lie on cache lines of their own. Each partition keeps its
+  strips' order and one folder at a time (its lock), so the output is the same (the module comment's argument
+  holds as it stands; only who folds which run changes); the owner alone can still scan every strip and fold every
+  partition. The shadows `LOSAT_X_PAIRPARDISCSHADOW` / `LOSAT_X_PAIRPARNASHADOW` run the partitioned stage, with this
+  switch, against the reference. With LOSAT_TIMING the `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` /
+  `x_pairparna_seed` lines end with `runs= steals=` (the runs folded, and those folded by participants that had
+  nothing else to do). Tests: the unit tests of `x_pair_seed_part.rs` run both ways (alternating stages, the nested
+  parallel call, the panicking participant, the table changed between stages), and `LOSAT/tests/blastn_pairpar_fold.rs`
+  (the field names of the `[TIMING]` lines).
+  Default ON since 2026-10-23 (perf/dc-fold-sync; workstation (2x Xeon Gold 6338, node 1 booked through its FIFO,
+  8 / 16 / 32 physical cores with the siblings idle, `numactl --membind 1`, rotated rounds, every output the
+  expected one; v4-D `results/v4d11_w1`); a ratio is the median of the per-round with / without, c7a29e25 against
+  origin/dev 299721bb, both built on that machine): dc-megablast of 31,168 D. melanogaster cDNAs against 3 Mb of
+  chromosome 2L (`-subject`) in the batch loop (`LOSAT_X_QBATCHPAR=0`) x0.949 / 0.897 / 0.842 at 8 / 16 / 32 threads
+  (4 / 6 / 6 rounds; cycles x0.948 / 0.867 / 0.745, instructions x0.97-0.98; the folds' CPU time summed over the
+  participants 8.25 -> 6.72 s at 16 threads and 11.56 -> 8.25 s at 32, where 58,671 runs folded the 1,769,472 fold
+  units of the 27 stages, 2,612 of them by idle participants), by default (QBATCHPAR slots) x0.968 / 0.971 / 0.974;
+  1,775 cDNAs (the batch loop by default) x0.979 / 0.942 / 0.901 at 8 / 16 / 32 threads; blastn of the 31,168 cDNAs at
+  16 threads in the batch loop x0.947, megablast x0.986 (rounds 0.918-1.013), megablast of E. coli genome pieces
+  against LC738868 x1.002 (0.995-1.014). Max RSS unchanged in every cell.
 - `LOSAT_X_QBATCHPAR=1` (BLASTN, all tasks, `-subject` with two or more threads; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) NCBI's query batches are searched side by
   side ahead of the batch loop of `run_in_pool` (`blastn/blast_engine/x_qbatch_par.rs`). The size of each
   batch after the first comes from the successful initial extensions of the batch before (NCBI's

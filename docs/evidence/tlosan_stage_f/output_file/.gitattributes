@@ -1,2 +1,0 @@
-# NCBI/LOSAT report output is a byte-exact fixture, including trailing spaces.
-*.out binary

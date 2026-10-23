@@ -67,19 +67,55 @@
 //!   cells, their scores, the column gaps written from them and the extension are the reference's.
 //!   A row gap that continues into a cell and opens again from it is never larger than the row gap
 //!   carried on (`gap_open >= 0`), which is why `H0` may stand for the score.
-//! - The values are 32-bit integers as in the reference: no lanes of 8 or 16 bits, no rebasing,
-//!   no saturation. The matrix row is read from a table of 16-bit entries built from the
-//!   reference's own score function (`blastp_score_from_row`), so every score is the reference's
-//!   (BLOSUM62's `BLAST_SCORE_MIN` = -32768 for the gap letter fits). A matrix with an entry
-//!   outside 16 bits, a letter code of 28 or more, a negative gap cost, a gap cost above 65,536 or
-//!   an X-drop above 2^28 are not handled here; the reference function runs instead.
+//! - The values of these rows are 32-bit integers as in the reference: no rebasing, no saturation
+//!   (the sixteen-bit rows below are a separate kernel). The matrix row is read from a table of
+//!   16-bit entries built from the reference's own score function (`blastp_score_from_row`), so
+//!   every score is the reference's (BLOSUM62's `BLAST_SCORE_MIN` = -32768 for the gap letter
+//!   fits). A matrix with an entry outside 16 bits, a letter code of 28 or more, a negative gap
+//!   cost, a gap cost above 65,536 or an X-drop above 2^28 are not handled here; the reference
+//!   function runs instead.
+//! - Sixteen-bit rows (`LOSAT_X_BPGAP16`, `restricted_rows16_avx2`). The same rows with the cells,
+//!   the column gaps (`e16`, one entry per column; the columns that are not multiples of
+//!   `RESTRICT_SIZE` hold `i16::MIN` and are never written) and the row gap in 16-bit lanes,
+//!   sixteen cells per step, with saturating adds and subtracts; `i16::MIN` stands where the
+//!   32-bit rows store `MININT`. They run where `fits16` holds (X-drop and `gap_open_extend` at
+//!   most 4,096, `gap_extend` at most 256, largest matrix entry `max` at most 4,096) and hold the
+//!   32-bit rows' values:
+//!   1. Upward: let `best` be `best_score` at the start of a row. A cell of the previous row is
+//!      at most `max(best, max)`: a kept cell is at most `best`; a row gap, and so a cell of the
+//!      band extension of a row where a gap opens, is at most a cell of its row minus
+//!      `gap_open_extend`; the band extension of a row without one starts from the cell before
+//!      `b_size` of the row before it, which is the `MININT` cell that row wrote (or there is no
+//!      extension, `b_size > N`), except after row 0, which writes none: row 1's extension is at
+//!      most row 0's last cell (at most 0) plus an entry. So the row computes nothing above
+//!      `max(best, max) + max` (a diagonal adds an entry to a cell, a column gap is a cell minus
+//!      `gap_open_extend`), and the row gap's lanes add at most `16 * gap_extend` before they
+//!      subtract it again. A row starts only while `best` is at most `limit16` =
+//!      `i16::MAX - max - 16 * gap_extend - 1` (and `2 * max + 16 * gap_extend <= 12,288` under
+//!      `fits16`), so no lane saturates upward. When
+//!      `best` is above it, the sixteen-bit rows stop and the 32-bit rows compute the alignment
+//!      again from row 0 (the sixteen-bit rows wrote only their own arrays and `col`, which the
+//!      32-bit rows fill again from cell 0).
+//!   2. Downward: every value the 32-bit rows store is `MININT` or at least
+//!      `-(x_dropoff + gap_open_extend) >= -8,192` (a kept cell is at least `best - x_dropoff`,
+//!      a cell of row 0 or of the band extension at least `-x_dropoff`, a column gap is written as
+//!      at least a kept or extension cell minus `gap_open_extend`), so it is stored as is. A sum
+//!      whose true value is below `i16::MIN` saturates there; a lane derived from `i16::MIN` by
+//!      adding an entry and a gap ramp stays at most `i16::MIN + 8,192`, below
+//!      `-x_dropoff <= best_score - x_dropoff` = `thr`, as its true value is. A value below `thr`
+//!      changes nothing (the argument above): it loses every `max` against a kept cell's value,
+//!      its cell is dropped and stored as `i16::MIN`, a column gap is written only for kept cells,
+//!      whose `score - gap_open_extend >= -8,192` wins the `max`, and a row gap whose true value
+//!      is below `i16::MIN` leaves the row at most `i16::MIN + 8,192` (`MININT` for `i16::MIN`),
+//!      below `thr`, so it starts no band extension, as the 32-bit value does not.
 //! - The scalar rows (`row_nogap_scalar`, `row_gap_scalar`) are the reference's loops on these
 //!   arrays, cell by cell. They were slower than the reference function, so a CPU without AVX2
 //!   runs the reference function; the tests run them to check the arrays apart from the vector
 //!   code.
 //!
 //! The variables are read once. `LOSAT_X_BPGAP` (a strict-set switch, `utils/xswitch.rs`: on
-//! unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) runs this module;
+//! unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) runs this module, and
+//! `LOSAT_X_BPGAP16` (another strict-set switch) its sixteen-bit rows first where they fit;
 //! `LOSAT_X_BPGAPSHADOW` runs both for every restricted alignment and panics if they differ, and
 //! `main` prints one `[X_SHADOW] BPGAP` line.
 
@@ -139,6 +175,13 @@ pub(super) fn x_bpgap() -> XBpGap {
     })
 }
 
+// No NCBI counterpart: reads the strict-set switch LOSAT_X_BPGAP16 once (the 16-bit rows of this
+// module); it does not change any value NCBI computes.
+pub(super) fn x_bpgap16() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPGAP16"))
+}
+
 // No NCBI counterpart: counters of the shadow summary and of LOSAT_X_STATS; they do not change any
 // value NCBI computes.
 /// Restricted alignments computed by this module (in shadow mode, those compared).
@@ -176,6 +219,12 @@ pub(super) struct XRestrictedScratch {
     e10: Vec<i32>,
     /// `col[c]`: the subject letter whose score cell `c` adds (`c >= 1`).
     col: Vec<u8>,
+    /// LOSAT_X_BPGAP16: `best` of the previous and the current row in 16 bits (`PAD` cells before
+    /// cell 0; `i16::MIN` stands for `MININT`).
+    h16: [Vec<i16>; 2],
+    /// LOSAT_X_BPGAP16: `best_gap` per column in 16 bits; `i16::MIN` in every column that is not
+    /// a multiple of `RESTRICT_SIZE` (never written there).
+    e16: Vec<i16>,
 }
 
 impl XRestrictedScratch {
@@ -185,6 +234,8 @@ impl XRestrictedScratch {
             h: [Vec::new(), Vec::new()],
             e10: Vec::new(),
             col: Vec::new(),
+            h16: [Vec::new(), Vec::new()],
+            e16: Vec::new(),
         }
     }
 }
@@ -206,6 +257,8 @@ impl XRestrictedScratch {
 struct XScoreTables {
     rows: [[i32; 32]; 28],
     lut: [[u8; 64]; 28],
+    /// The largest entry (LOSAT_X_BPGAP16's overflow bound).
+    max: i32,
 }
 
 // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1078-1083
@@ -223,6 +276,7 @@ fn x_score_tables(score_matrix: BlastpScoreMatrix<'_>) -> Option<&'static XScore
         let mut t = Box::new(XScoreTables {
             rows: [[0; 32]; 28],
             lut: [[0; 64]; 28],
+            max: i32::MIN,
         });
         for q in 0..28u8 {
             let matrix_row = blastp_score_row_for_query::<BLOSUM62>(score_matrix, q);
@@ -230,6 +284,7 @@ fn x_score_tables(score_matrix: BlastpScoreMatrix<'_>) -> Option<&'static XScore
                 let v = blastp_score_from_row::<BLOSUM62>(score_matrix, matrix_row, q, s);
                 let v16 = i16::try_from(v).ok()?;
                 t.rows[q as usize][s as usize] = v;
+                t.max = t.max.max(v);
                 let [lo, hi] = v16.to_le_bytes();
                 let half = (s as usize / 16) * 32;
                 t.lut[q as usize][half + s as usize % 16] = lo;
@@ -318,6 +373,7 @@ pub(super) fn restricted_gapped_align_protein_x(
                 reverse,
                 &mut scratch.x_restricted,
                 true,
+                x_bpgap16(),
             )
         } else {
             None
@@ -441,7 +497,8 @@ struct XBand {
 //     for (a_index = 1; a_index <= M; a_index++) {
 // ```
 /// `s_RestrictedGappedAlign` on the arrays of `sc`. `use_avx2` selects the vector rows (only
-/// when the CPU has AVX2). None: the problem is not taken (module comment); nothing outside
+/// when the CPU has AVX2); with it, `narrow` (LOSAT_X_BPGAP16) runs the sixteen-bit rows first
+/// where `fits16` holds, and the 32-bit rows when they stop. None: the problem is not taken (module comment); nothing outside
 /// `sc` has been changed.
 fn restricted_fast(
     query: &[u8],
@@ -457,6 +514,7 @@ fn restricted_fast(
     reverse: bool,
     sc: &mut XRestrictedScratch,
     use_avx2: bool,
+    narrow: bool,
 ) -> Option<(usize, usize, i32)> {
     if !(0..=MAX_GAP_COST).contains(&gap_open)
         || !(0..=MAX_GAP_COST).contains(&gap_extend)
@@ -488,6 +546,43 @@ fn restricted_fast(
         gap_open_extend,
         gap_extend,
     };
+    #[cfg(target_arch = "x86_64")]
+    if use_avx2 && narrow {
+        let narrow_result = if fits16(&p, tables) {
+            for h in sc.h16.iter_mut() {
+                if h.len() < cells {
+                    h.resize(cells, i16::MIN);
+                }
+            }
+            if sc.e16.len() < cells {
+                sc.e16.resize(cells, i16::MIN);
+            }
+            // SAFETY: as for the 32-bit rows below; the 16-bit arrays were sized for `len2` here.
+            // None: a score came near the 16-bit bound, and the 32-bit rows start again from row 0.
+            unsafe {
+                restricted_rows16_avx2(
+                    query,
+                    query_base,
+                    subject,
+                    subject_base,
+                    len1,
+                    len2,
+                    reverse,
+                    tables,
+                    &p,
+                    sc,
+                )
+            }
+        } else {
+            None
+        };
+        crate::utils::xreach::x_reach!("LOSAT_X_BPGAP16", narrow_result.is_some());
+        if narrow_result.is_some() {
+            return narrow_result;
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = narrow;
     #[cfg(target_arch = "x86_64")]
     if use_avx2 {
         // SAFETY: `use_avx2` is true only when the CPU has AVX2, BMI1 and LZCNT (`cpu_has_avx2`,
@@ -644,7 +739,7 @@ fn restricted_rows<const AVX2: bool>(
         let need = (band.b_size + 9).min(col_cap);
         if col_ready < need {
             let upto = (need + 56).min(col_cap);
-            if !fill_col(col, col_ready, upto, subject, subject_base, len2, reverse) {
+            if !fill_col::<false>(col, col_ready, upto, subject, subject_base, len2, reverse) {
                 return None;
             }
             col_ready = upto;
@@ -744,7 +839,11 @@ struct XParams {
 /// are one slice copy (forward: `subject[subject_base + c]`; reverse: `subject[subject_base + len2
 /// - c]`, the indices that function computes); the others go through that function. False: a
 /// letter code of 28 or more (not taken).
-fn fill_col(
+///
+/// `NARROW`: one instance per row kernel (false: the 32-bit rows, true: the sixteen-bit rows), each
+/// with one caller. Shared by both, fat LTO kept it out of line, which changed the machine code of
+/// the 32-bit rows that `LOSAT_X_BPGAP16=0` runs; they keep the code of the build before the switch.
+fn fill_col<const NARROW: bool>(
     col: &mut [u8],
     from: usize,
     to: usize,
@@ -1307,6 +1406,412 @@ mod x_avx2 {
     }
 }
 
+// No NCBI counterpart: the bound under which the 16-bit rows (LOSAT_X_BPGAP16) hold the values of
+// the 32-bit rows. A row computes nothing above `max(best, max) + max` (`max` the largest matrix
+// entry; module comment, "Sixteen-bit rows", item 1), and the row gap's intermediate adds at most
+// `16 * gap_extend`; both stay below `i16::MAX` while `best` at the start of the row is at most this
+// bound (`fits16` keeps `2 * max + 16 * gap_extend` at most 12,288).
+#[cfg(target_arch = "x86_64")]
+fn limit16(p: &XParams, tables: &XScoreTables) -> i32 {
+    i16::MAX as i32 - tables.max.max(0) - 16 * p.gap_extend - 1
+}
+
+// No NCBI counterpart: the costs the 16-bit rows take. With them, a value that saturates at
+// `i16::MIN` (or `i16::MIN` plus a gap ramp or an entry) stays below `best - x_dropoff >=
+// -x_dropoff`, the threshold below which no value changes what the reference keeps (module
+// comment). They also keep `limit16` above 24,000.
+#[cfg(target_arch = "x86_64")]
+fn fits16(p: &XParams, tables: &XScoreTables) -> bool {
+    p.x_dropoff <= 4096 && p.gap_open_extend <= 4096 && p.gap_extend <= 256 && tables.max <= 4096
+}
+
+// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1053-1067,1076-1098,1250-1287
+// ```c
+//     for (i = 1; i <= N; i++) {
+//         if (score < -x_dropoff)
+//             break;
+//
+//         score_array[i].best = score;
+//         score_array[i].best_gap = score - gap_open_extend;
+//         score -= gap_extend;
+//     }
+// ...
+//         if (last_b_index < b_size - 1) {
+//             b_size = last_b_index + 1;
+//         }
+//         else {
+//             while (score_gap_row >= (best_score - x_dropoff) && b_size <= N) {
+// ...
+//         if (b_size <= N) {
+//             score_array[b_size].best = MININT;
+//             score_array[b_size].best_gap = MININT;
+//             b_size++;
+//         }
+// ```
+/// LOSAT_X_BPGAP16: `restricted_rows` with the rows, the column gaps and the row gap
+/// in 16 bits, sixteen cells per step (`x_avx2_16::row`). `i16::MIN` stands for `MININT`; every
+/// other stored value is the 32-bit rows' value (module comment, "Sixteen-bit rows"). None: `best`
+/// passed `limit16` at the start of a row, or a letter code of 28 or more (the caller then runs the
+/// 32-bit rows from row 0; nothing outside `sc` has been changed).
+///
+/// # Safety
+/// AVX2, BMI1 and LZCNT; the arrays of `sc` (16-bit ones included) sized for `len2`; `fits16`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,bmi1,lzcnt")]
+unsafe fn restricted_rows16_avx2(
+    query: &[u8],
+    query_base: usize,
+    subject: &[u8],
+    subject_base: usize,
+    len1: usize,
+    len2: usize,
+    reverse: bool,
+    tables: &XScoreTables,
+    p: &XParams,
+    sc: &mut XRestrictedScratch,
+) -> Option<(usize, usize, i32)> {
+    let x_dropoff = p.x_dropoff;
+    let gap_open_extend = p.gap_open_extend;
+    let gap_extend = p.gap_extend;
+    let limit = limit16(p, tables);
+    let col_cap = len2 + 2 + TAIL;
+    let mut col_ready = 0usize;
+
+    let [row0, row1] = &mut sc.h16;
+    let e16 = &mut sc.e16[..];
+    let col = &mut sc.col[..];
+    let mut score = -gap_open_extend;
+    row0[PAD] = 0;
+    e16[0] = -gap_open_extend as i16;
+    let mut b_size = 1usize;
+    for i in 1..=len2 {
+        if score < -x_dropoff {
+            break;
+        }
+        row0[PAD + i] = score as i16;
+        if i % RESTRICT_SIZE == 0 {
+            e16[i] = (score - gap_open_extend) as i16;
+        }
+        score -= gap_extend;
+        b_size = i + 1;
+    }
+
+    let mut band = XBand {
+        first: 0,
+        b_size,
+        last: 0,
+        best: 0,
+        a_offset: 0,
+        b_offset: 0,
+    };
+
+    for a_index in 1..=len1 {
+        if band.best > limit {
+            return None;
+        }
+        let qc = if reverse {
+            blastp_query_residue::<true>(query, query_base, len1, a_index)
+        } else {
+            blastp_query_residue::<false>(query, query_base, len1, a_index)
+        };
+        if qc >= 28 {
+            return None;
+        }
+        let need = (band.b_size + 17).min(col_cap);
+        if col_ready < need {
+            let upto = (need + 56).min(col_cap);
+            if !fill_col::<true>(col, col_ready, upto, subject, subject_base, len2, reverse) {
+                return None;
+            }
+            col_ready = upto;
+        }
+        let (prev, cur): (&[i16], &mut [i16]) = if a_index % 2 == 1 {
+            (&row0[..], &mut row1[..])
+        } else {
+            (&row1[..], &mut row0[..])
+        };
+        let mut score_gap_row = if a_index % RESTRICT_SIZE == 0 {
+            x_avx2_16::row::<true>(
+                &mut band,
+                p,
+                a_index,
+                &tables.rows[qc as usize],
+                &tables.lut[qc as usize],
+                prev,
+                cur,
+                col,
+                e16,
+            )
+        } else {
+            x_avx2_16::row::<false>(
+                &mut band,
+                p,
+                a_index,
+                &tables.rows[qc as usize],
+                &tables.lut[qc as usize],
+                prev,
+                cur,
+                col,
+                e16,
+            )
+        };
+
+        if band.first == band.b_size {
+            break;
+        }
+        if band.last < band.b_size.saturating_sub(1) {
+            band.b_size = band.last + 1;
+        } else {
+            // Written values are at least `best - x_dropoff` and at most `best + max`: 16 bits.
+            while score_gap_row >= band.best - x_dropoff && band.b_size <= len2 {
+                cur[PAD + band.b_size] = score_gap_row as i16;
+                if band.b_size % RESTRICT_SIZE == 0 {
+                    e16[band.b_size] = (score_gap_row - gap_open_extend) as i16;
+                }
+                score_gap_row -= gap_extend;
+                band.b_size += 1;
+            }
+        }
+        if band.b_size <= len2 {
+            cur[PAD + band.b_size] = i16::MIN;
+            if band.b_size % RESTRICT_SIZE == 0 {
+                e16[band.b_size] = i16::MIN;
+            }
+            band.b_size += 1;
+        }
+    }
+
+    Some((band.a_offset, band.b_offset, band.best))
+}
+
+// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1112-1247
+// ```c
+//             for (b_index = first_b_index; b_index < b_size; b_index++) {
+//
+//                 b_ptr += b_increment;
+//                 next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+// ...
+//                     if (best_score - score > x_dropoff) {
+//                         score_array[b_index].best = MININT;
+//                         if (b_index == first_b_index)
+//                             first_b_index++;
+//                     }
+//                     else {
+//                         last_b_index = b_index;
+//                         if (score > best_score) {
+//                             best_score = score;
+// ...
+//                         score_gap_row -= gap_extend;
+//                         score_gap_row = MAX(score - gap_open_extend,
+//                                             score_gap_row);
+// ```
+// The two row loops sixteen 16-bit cells at a time (AVX2); the module comment ("Sixteen-bit rows")
+// gives the argument.
+#[cfg(target_arch = "x86_64")]
+mod x_avx2_16 {
+    use super::{XBand, XParams, MININT, PAD, RESTRICT_SIZE};
+    use core::arch::x86_64::*;
+
+    // `GAPCOL16` and the step of `r10` in `row` are written for columns of ten.
+    const _: () = assert!(RESTRICT_SIZE == 10);
+    // No NCBI counterpart: the stand-in for `MININT` and lane masks; they hold no value NCBI
+    // computes.
+    const M16: i16 = i16::MIN;
+    /// `VALID16[16 - n..]`: the first `n` lanes set.
+    static VALID16: [i16; 32] = [
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0,
+    ];
+    /// `GAPCOL16[r..]`: the lanes `i` with `(r + i) % RESTRICT_SIZE == 0` (`r < 10`).
+    static GAPCOL16: [i16; 26] = [
+        -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0,
+    ];
+
+    /// Inclusive prefix maximum over the sixteen lanes (lanes left of lane 0 count as `M16`).
+    #[inline(always)]
+    unsafe fn prefix_max(v: __m256i) -> __m256i {
+        let f1 = _mm256_setr_epi16(M16, 0, 0, 0, 0, 0, 0, 0, M16, 0, 0, 0, 0, 0, 0, 0);
+        let f2 = _mm256_setr_epi16(M16, M16, 0, 0, 0, 0, 0, 0, M16, M16, 0, 0, 0, 0, 0, 0);
+        let f4 = _mm256_setr_epi16(
+            M16, M16, M16, M16, 0, 0, 0, 0, M16, M16, M16, M16, 0, 0, 0, 0,
+        );
+        let mut t = _mm256_max_epi16(v, _mm256_or_si256(_mm256_slli_si256::<2>(v), f1));
+        t = _mm256_max_epi16(t, _mm256_or_si256(_mm256_slli_si256::<4>(t), f2));
+        t = _mm256_max_epi16(t, _mm256_or_si256(_mm256_slli_si256::<8>(t), f4));
+        // Lane 7 (the low half's maximum) into every lane of the high half; M16 in the low half.
+        let b7 = _mm256_setr_epi8(
+            14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15,
+            14, 15, 14, 15, 14, 15, 14, 15, 14, 15,
+        );
+        let low_min = _mm256_setr_epi16(
+            M16, M16, M16, M16, M16, M16, M16, M16, 0, 0, 0, 0, 0, 0, 0, 0,
+        );
+        let carry = _mm256_or_si256(
+            _mm256_shuffle_epi8(_mm256_permute2x128_si256::<0x08>(t, t), b7),
+            low_min,
+        );
+        _mm256_max_epi16(t, carry)
+    }
+
+    /// Lane `i` = `max(carry, p[i - 1])`, lane 0 = `carry` (exclusive prefix from an inclusive one).
+    #[inline(always)]
+    unsafe fn exclusive(p: __m256i, carry: __m256i) -> __m256i {
+        // [0 | low half of p], then each half shifted up one lane, the lane below it filling lane 0.
+        let x = _mm256_permute2x128_si256::<0x08>(p, p);
+        let up = _mm256_alignr_epi8::<14>(p, x);
+        let lane0 = _mm256_setr_epi16(M16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        _mm256_max_epi16(_mm256_or_si256(up, lane0), carry)
+    }
+
+    /// One row of `s_RestrictedGappedAlign` (as `x_avx2::row`), sixteen 16-bit cells per step, with
+    /// saturating sums. The column gaps are a vector of `e16` (`i16::MIN` outside the columns that
+    /// are multiples of `RESTRICT_SIZE`), updated for the kept cells of those columns by a lane mask.
+    /// Reads the cells `first - 1 .. b_size + 15` of `prev`, `col[first .. b_size + 16]` and
+    /// `e16[first .. b_size + 16]`; writes the cells `first .. b_size + 16` of `cur` (cells from
+    /// `b_size` on get `M16`) and `e16` (lanes outside the kept gap columns keep their value).
+    /// Returns `score_gap_row` after the row in 32 bits (`MININT` for `M16`).
+    ///
+    /// # Safety
+    /// Inlined into code compiled for AVX2, BMI1 and LZCNT (`restricted_rows16_avx2`); `prev`,
+    /// `cur` at least `PAD + b_size + 16` long, `col` and `e16` at least `b_size + 16`; `fits16`
+    /// and `best <= limit16`.
+    #[inline(always)]
+    pub(super) unsafe fn row<const GAP: bool>(
+        band: &mut XBand,
+        p: &XParams,
+        a_index: usize,
+        row: &[i32; 32],
+        lut: &[u8; 64],
+        prev: &[i16],
+        cur: &mut [i16],
+        col: &[u8],
+        e16: &mut [i16],
+    ) -> i32 {
+        let first0 = band.first;
+        let end = band.b_size;
+        debug_assert!(first0 < end);
+        debug_assert!(prev.len() >= PAD + end + 16 && cur.len() >= PAD + end + 16);
+        debug_assert!(col.len() >= end + 16 && e16.len() >= end + 16);
+        let prev_p = prev.as_ptr().add(PAD);
+        let cur_p = cur.as_mut_ptr().add(PAD);
+        let col_p = col.as_ptr();
+        let e_p = e16.as_mut_ptr();
+        let minv = _mm256_set1_epi16(M16);
+        let xv = _mm256_set1_epi16(p.x_dropoff as i16);
+        let goev = _mm256_set1_epi16(p.gap_open_extend as i16);
+        let gev = _mm256_set1_epi16(p.gap_extend as i16);
+        let t0l = _mm_loadu_si128(lut.as_ptr() as *const __m128i);
+        let t0h = _mm_loadu_si128(lut.as_ptr().add(16) as *const __m128i);
+        let t1l = _mm_loadu_si128(lut.as_ptr().add(32) as *const __m128i);
+        let t1h = _mm_loadu_si128(lut.as_ptr().add(48) as *const __m128i);
+        let k15 = _mm_set1_epi8(15);
+        let ramp0 = _mm256_mullo_epi16(
+            _mm256_setr_epi16(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
+            gev,
+        );
+        let ramp1 = _mm256_add_epi16(ramp0, gev);
+        let lane0 = _mm256_setr_epi16(-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
+        let mut best = band.best;
+        let mut rv = _mm256_set1_epi16(best as i16);
+        let mut thr = _mm256_subs_epi16(rv, xv);
+        let mut leading = true;
+        let mut first = first0;
+        let mut last = first0;
+        let mut f_in = M16;
+        let mut r10 = first0 % RESTRICT_SIZE;
+
+        let mut b0 = first0;
+        while b0 < end {
+            let n = (end - b0).min(16);
+            let idx = _mm_loadu_si128(col_p.add(b0) as *const __m128i);
+            let sel = _mm_cmpgt_epi8(idx, k15);
+            let lo = _mm_blendv_epi8(_mm_shuffle_epi8(t0l, idx), _mm_shuffle_epi8(t1l, idx), sel);
+            let hi = _mm_blendv_epi8(_mm_shuffle_epi8(t0h, idx), _mm_shuffle_epi8(t1h, idx), sel);
+            let m = _mm256_set_m128i(_mm_unpackhi_epi8(lo, hi), _mm_unpacklo_epi8(lo, hi));
+            let mut h0 = _mm256_adds_epi16(
+                _mm256_loadu_si256(prev_p.add(b0).sub(1) as *const __m256i),
+                m,
+            );
+            if b0 == first0 {
+                h0 = _mm256_blendv_epi8(h0, minv, lane0);
+            }
+            let e = _mm256_loadu_si256(e_p.add(b0) as *const __m256i);
+            h0 = _mm256_max_epi16(h0, e);
+            let valid = _mm256_loadu_si256(VALID16.as_ptr().add(16 - n) as *const __m256i);
+            let mut s = h0;
+            if GAP {
+                let w = _mm256_blendv_epi8(
+                    minv,
+                    _mm256_adds_epi16(_mm256_subs_epi16(h0, goev), ramp1),
+                    valid,
+                );
+                let pw = prefix_max(w);
+                let f = _mm256_subs_epi16(exclusive(pw, _mm256_set1_epi16(f_in)), ramp0);
+                s = _mm256_max_epi16(s, f);
+                // Lanes from n on are M16 in w, so lane 15 of the prefix is lane n - 1.
+                let pl = _mm256_extract_epi16::<15>(pw) as i16;
+                f_in = (pl.max(f_in) as i32 - n as i32 * p.gap_extend).max(M16 as i32) as i16;
+            }
+            s = _mm256_blendv_epi8(minv, s, valid);
+            let above = _mm256_movemask_epi8(_mm256_cmpgt_epi16(s, rv));
+            let dropped = if above == 0 {
+                _mm256_cmpgt_epi16(thr, s)
+            } else {
+                let ps = prefix_max(s);
+                let ex = exclusive(ps, rv);
+                let block_max = _mm256_extract_epi16::<15>(ps) as i16;
+                let eq = _mm256_cmpeq_epi16(s, _mm256_set1_epi16(block_max));
+                let lane = (_mm256_movemask_epi8(eq) as u32).trailing_zeros() as usize / 2;
+                best = block_max as i32;
+                band.a_offset = a_index;
+                band.b_offset = b0 + lane;
+                rv = _mm256_set1_epi16(block_max);
+                thr = _mm256_subs_epi16(rv, xv);
+                _mm256_cmpgt_epi16(_mm256_subs_epi16(ex, xv), s)
+            };
+            _mm256_storeu_si256(
+                cur_p.add(b0) as *mut __m256i,
+                _mm256_blendv_epi8(s, minv, dropped),
+            );
+            let gap_cols = _mm256_loadu_si256(GAPCOL16.as_ptr().add(r10) as *const __m256i);
+            let e_new = _mm256_max_epi16(_mm256_subs_epi16(s, goev), _mm256_subs_epi16(e, gev));
+            _mm256_storeu_si256(
+                e_p.add(b0) as *mut __m256i,
+                _mm256_blendv_epi8(e, e_new, _mm256_andnot_si256(dropped, gap_cols)),
+            );
+            // Two mask bits per lane; lanes from n on are M16, below the threshold, so dropped.
+            let kept = !(_mm256_movemask_epi8(dropped) as u32);
+            let any = kept != 0;
+            let last_c = b0 + (31 - (kept | 1).leading_zeros() as usize) / 2;
+            last = if any { last_c } else { last };
+            let first_c = if any {
+                b0 + kept.trailing_zeros() as usize / 2
+            } else {
+                b0 + n
+            };
+            first = if leading { first_c } else { first };
+            leading &= !any;
+            r10 = if r10 >= 4 { r10 - 4 } else { r10 + 6 };
+            b0 += 16;
+        }
+        band.best = best;
+        band.first = first;
+        band.last = last;
+        if GAP {
+            if f_in == M16 {
+                MININT
+            } else {
+                f_in as i32
+            }
+        } else {
+            // score after the loop: next_score of cell b_size - 1.
+            let v = prev[PAD + end - 1];
+            (if v == M16 { MININT } else { v as i32 }) + row[col[end] as usize]
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1373,12 +1878,12 @@ mod tests {
         scratch: &mut GapAlignScratch,
     ) -> (usize, usize, i32) {
         let want = reference(q, qb, s, sb, len1, len2, m, go, ge, x, rev, scratch);
-        let kernels: &[bool] = if cpu_has_avx2() {
-            &[false, true]
+        let kernels: &[(bool, bool)] = if cpu_has_avx2() {
+            &[(false, false), (true, false), (true, true)]
         } else {
-            &[false]
+            &[(false, false)]
         };
-        for &avx2 in kernels {
+        for &(avx2, narrow) in kernels {
             let got = restricted_fast(
                 q,
                 qb,
@@ -1393,11 +1898,12 @@ mod tests {
                 rev,
                 &mut scratch.x_restricted,
                 avx2,
+                narrow,
             )
             .expect("problem taken");
             assert_eq!(
                 got, want,
-                "avx2={avx2} len1={len1} len2={len2} qb={qb} sb={sb} go={go} ge={ge} x={x} rev={rev}"
+                "avx2={avx2} narrow={narrow} len1={len1} len2={len2} qb={qb} sb={sb} go={go} ge={ge} x={x} rev={rev}"
             );
         }
         want
@@ -1478,6 +1984,172 @@ mod tests {
         BlastpScoreMatrix::Standard(ScoringMatrix::Blosum45),
         BlastpScoreMatrix::Standard(ScoringMatrix::Blosum80),
     ];
+
+    /// LOSAT_X_BPGAP16: the sixteen-bit rows alone, set up as `restricted_fast` sets them up.
+    /// None: `fits16` does not hold (or the problem is not taken at all); Some(None): the rows
+    /// stopped at the 16-bit bound. Only on x86_64 with AVX2 (`cpu_has_avx2`).
+    #[cfg(target_arch = "x86_64")]
+    fn narrow16(
+        q: &[u8],
+        qb: usize,
+        s: &[u8],
+        sb: usize,
+        len1: usize,
+        len2: usize,
+        m: BlastpScoreMatrix<'_>,
+        go: i32,
+        ge: i32,
+        x: i32,
+        rev: bool,
+        scratch: &mut GapAlignScratch,
+    ) -> Option<Option<(usize, usize, i32)>> {
+        assert!(cpu_has_avx2() && len1 > 0 && len2 > 0);
+        // The 32-bit rows alone size `h`, `e10` and `col`.
+        let sc = &mut scratch.x_restricted;
+        restricted_fast(q, qb, s, sb, len1, len2, m, go, ge, x, rev, sc, true, false)?;
+        let tables = x_score_tables(m)?;
+        let p = XParams {
+            x_dropoff: x.max(go + ge),
+            gap_open_extend: go + ge,
+            gap_extend: ge,
+        };
+        if !fits16(&p, tables) {
+            return None;
+        }
+        let cells = PAD + len2 + 2 + TAIL;
+        for h in sc.h16.iter_mut() {
+            if h.len() < cells {
+                h.resize(cells, i16::MIN);
+            }
+        }
+        if sc.e16.len() < cells {
+            sc.e16.resize(cells, i16::MIN);
+        }
+        // SAFETY: AVX2, BMI1 and LZCNT (asserted above); the arrays are sized for `len2`; `fits16`.
+        Some(unsafe { restricted_rows16_avx2(q, qb, s, sb, len1, len2, rev, tables, &p, sc) })
+    }
+
+    /// LOSAT_X_BPGAP16 at its bound: long alignments of W against W (BLOSUM62's largest entry,
+    /// 11) score just below `limit16`, where the sixteen-bit rows finish, and above `i16::MAX`,
+    /// where they stop and the 32-bit rows give the reference's result; forward and reverse, with
+    /// gap_extend 1 and 256 (the `16 * gap_extend` headroom).
+    #[test]
+    fn x_bpgap16_falls_back_past_the_16_bit_bound() {
+        let mut scratch = GapAlignScratch::new();
+        for (go, ge, x, lens) in [
+            (11, 1, 38, [2_900usize, 2_990, 3_100, 4_000]),
+            (3840, 256, 4096, [2_560, 2_640, 2_800, 3_100]),
+        ] {
+            let limit = i16::MAX as i32 - 11 - 16 * ge - 1;
+            let (mut finished, mut stopped) = (0, 0);
+            for len in lens {
+                let mut q = vec![20u8; len];
+                let mut s = vec![20u8; len];
+                // A few differences so the band and the gap rows do some work.
+                for k in (37..len).step_by(301) {
+                    q[k] = 1;
+                    if ge == 1 {
+                        s.insert(k / 2, 5);
+                    }
+                }
+                let (ql, sl) = (q.len(), s.len());
+                for rev in [false, true] {
+                    // As `check_seed`: reverse from a seed at the last letters, forward from one
+                    // at the first.
+                    let (l1, l2) = if rev { (ql, sl) } else { (ql - 1, sl - 1) };
+                    let want = check(
+                        &q,
+                        0,
+                        &s,
+                        0,
+                        l1,
+                        l2,
+                        MATRICES[0],
+                        go,
+                        ge,
+                        x,
+                        rev,
+                        &mut scratch,
+                    );
+                    #[cfg(target_arch = "x86_64")]
+                    if cpu_has_avx2() {
+                        let got = narrow16(
+                            &q,
+                            0,
+                            &s,
+                            0,
+                            l1,
+                            l2,
+                            MATRICES[0],
+                            go,
+                            ge,
+                            x,
+                            rev,
+                            &mut scratch,
+                        )
+                        .expect("fits16");
+                        let case = format!("go={go} ge={ge} len={len} rev={rev} want={want:?}");
+                        if want.2 <= limit {
+                            assert_eq!(got, Some(want), "{case}");
+                            finished += 1;
+                        } else if want.2 > i16::MAX as i32 {
+                            assert_eq!(got, None, "{case}");
+                            stopped += 1;
+                        } else {
+                            assert!(got.is_none() || got == Some(want), "{case}");
+                        }
+                    }
+                }
+            }
+            if cfg!(target_arch = "x86_64") && cpu_has_avx2() {
+                assert!(
+                    finished > 0 && stopped > 0,
+                    "go={go} ge={ge}: {finished} {stopped}"
+                );
+            }
+        }
+    }
+
+    /// LOSAT_X_BPGAP16 at the edges of `fits16`: X-drop and `gap_open_extend` of 4,096 and
+    /// `gap_extend` of 256 (the sixteen-bit rows run), one more (they do not), with gap and stop
+    /// letters, whose entries (down to -32,768) saturate the 16-bit sums.
+    #[test]
+    fn x_bpgap16_matches_at_the_edges_of_its_costs() {
+        let mut rng = Rng(0x0BAD_5EED_1616_0001);
+        let mut scratch = GapAlignScratch::new();
+        let (mut taken, mut declined) = (0, 0);
+        for round in 0..240 {
+            let len = 20 + rng.below(300) as usize;
+            let q = random_seq(&mut rng, len, 20, round % 3 == 0);
+            let s = mutate(&mut rng, &q, [5, 30][round % 2]);
+            if s.is_empty() {
+                continue;
+            }
+            let m = MATRICES[round % 4];
+            let (go, ge) = [(3840, 256), (3841, 256), (4095, 1), (0, 257), (11, 1)][round % 5];
+            let x = [4096, 4097, 38][rng.below(3) as usize];
+            let fits = x.max(go + ge) <= 4096 && go + ge <= 4096 && ge <= 256;
+            let qs = rng.below(q.len() as u64) as usize;
+            let ss = qs.min(s.len() - 1);
+            let (ql, sl) = (qs + 1, ss + 1);
+            let want = check(&q, 0, &s, 0, ql, sl, m, go, ge, x, true, &mut scratch);
+            check_seed(&q, &s, qs, ss, m, go, ge, x, &mut scratch);
+            #[cfg(target_arch = "x86_64")]
+            if cpu_has_avx2() {
+                let got = narrow16(&q, 0, &s, 0, ql, sl, m, go, ge, x, true, &mut scratch);
+                if fits {
+                    assert_eq!(got, Some(Some(want)), "round {round} go={go} ge={ge} x={x}");
+                    taken += 1;
+                } else {
+                    assert_eq!(got, None, "round {round} go={go} ge={ge} x={x}");
+                    declined += 1;
+                }
+            }
+        }
+        if cfg!(target_arch = "x86_64") && cpu_has_avx2() {
+            assert!(taken > 0 && declined > 0, "{taken} {declined}");
+        }
+    }
 
     #[test]
     fn x_bpgap_matches_reference_on_random_problems() {
@@ -1680,7 +2352,8 @@ mod tests {
             let from = rng.below(len2 as u64 + 30) as usize;
             let to = from + rng.below(100) as usize;
             for reverse in [false, true] {
-                let ok = fill_col(&mut col, from, to, &subject, subject_base, len2, reverse);
+                let ok =
+                    fill_col::<false>(&mut col, from, to, &subject, subject_base, len2, reverse);
                 for (c, &v) in col.iter().enumerate().take(to).skip(from) {
                     let want = if c == 0 || c > len2 + 1 {
                         0
@@ -1704,23 +2377,34 @@ mod tests {
         let mut scratch = GapAlignScratch::new();
         let q = [1u8, 2, 3, 4];
         let s = [1u8, 2, 30, 4];
-        // A letter code of 28 or more.
-        assert!(restricted_fast(
-            &q,
-            0,
-            &s,
-            0,
-            3,
-            3,
-            MATRICES[0],
-            11,
-            1,
-            38,
-            false,
-            &mut scratch.x_restricted,
-            false
-        )
-        .is_none());
+        let kernels: &[(bool, bool)] = if cpu_has_avx2() {
+            &[(false, false), (true, false), (true, true)]
+        } else {
+            &[(false, false)]
+        };
+        // A letter code of 28 or more, in the subject and in the query.
+        let q30 = [1u8, 30, 3, 4];
+        for &(avx2, narrow) in kernels {
+            for (a, b) in [(&q, &s), (&q30, &q)] {
+                assert!(restricted_fast(
+                    a,
+                    0,
+                    b,
+                    0,
+                    3,
+                    3,
+                    MATRICES[0],
+                    11,
+                    1,
+                    38,
+                    false,
+                    &mut scratch.x_restricted,
+                    avx2,
+                    narrow
+                )
+                .is_none());
+            }
+        }
         // Gap costs and X-drop outside the checked ranges.
         for (go, ge, x) in [
             (-1, 1, 38),
@@ -1741,6 +2425,7 @@ mod tests {
                 x,
                 false,
                 &mut scratch.x_restricted,
+                false,
                 false
             )
             .is_none());
@@ -1791,7 +2476,8 @@ mod tests {
                             38,
                             rev,
                             &mut scratch.x_restricted,
-                            kernel == 2,
+                            kernel >= 2,
+                            kernel == 3,
                         )
                         .unwrap()
                     };
@@ -1801,7 +2487,11 @@ mod tests {
             }
             (n, sum)
         };
-        let kernels: &[u8] = if cpu_has_avx2() { &[0, 1, 2] } else { &[0, 1] };
+        let kernels: &[u8] = if cpu_has_avx2() {
+            &[0, 1, 2, 3]
+        } else {
+            &[0, 1]
+        };
         for round in 0..3 {
             for &k in kernels {
                 let t = std::time::Instant::now();
@@ -1809,7 +2499,7 @@ mod tests {
                 let ns = t.elapsed().as_nanos() as f64;
                 eprintln!(
                     "round {round} kernel {} calls {n} {:.1} ns/call checksum {sum}",
-                    ["reference", "scalar", "avx2"][k as usize],
+                    ["reference", "scalar", "avx2", "avx2-16"][k as usize],
                     ns / n as f64
                 );
             }

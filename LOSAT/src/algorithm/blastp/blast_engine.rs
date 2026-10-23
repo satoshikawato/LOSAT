@@ -2433,13 +2433,18 @@ fn blastp_xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind>
     crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(choice.number)?)
 }
 
-/// Whether the block search takes this XML2 / JSON document: outfmt 15 and 16 only. Outfmt 13 and
-/// 14 (`Files13`, `Files14`) write side files and a master file; they join by widening this match
-/// together with the checks of the side files' names and of their opening, which the block
-/// search does not make. No NCBI counterpart: chooses LOSAT's path.
+/// Whether the block search takes this XML2 / JSON document: all four (outfmt 13 to 16). Outfmt 13
+/// and 14 (`Files13`, `Files14`) write one side file per report and a master file at `-out`; the
+/// side files are made by the same `Xml2Document` as the single-stream forms, whose only state
+/// that outlives a report (`written`, which numbers the side file and the master's list, `started`
+/// and the held report of a `-subject` run) is in `Xml2Carry`, and `FsSideFiles` keeps nothing
+/// between calls (`x_query_blocks.rs`, module doc). No NCBI counterpart: chooses LOSAT's path.
 fn x_xml2_kind_takes_blocks(kind: crate::report::blast_xml2::Xml2Kind) -> bool {
     use crate::report::blast_xml2::Xml2Kind;
-    matches!(kind, Xml2Kind::Single15 | Xml2Kind::Single16)
+    matches!(
+        kind,
+        Xml2Kind::Single15 | Xml2Kind::Single16 | Xml2Kind::Files13 | Xml2Kind::Files14
+    )
 }
 
 // NCBI blast_args.cpp:2657-2660; tabular.cpp:1100-1108:
@@ -6265,7 +6270,7 @@ fn search(
     // format 6, or with LOSAT_X_BPQBLOCKFMT outfmt 0 or 7 (the outfmt 0 prolog with the first
     // block, the epilog and outfmt 7's count of the queries with the last), with
     // LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with LOSAT_X_BPQBLOCKXML outfmt 5 (the header with the
-    // first block, the end with the last), with LOSAT_X_BPQBLOCKXML2 outfmt 15 or 16 (as outfmt 5,
+    // first block, the end with the last), with LOSAT_X_BPQBLOCKXML2 outfmt 13 to 16 (as outfmt 5,
     // the framing state handed from block to block, `Xml2Carry`; not in a call of several outputs,
     // hit records or an observer, see `x_query_block_plan`), with LOSAT_X_BPQBLOCKWEB also several
     // of the other reports, the hit records and an observer (`run_local`); otherwise the search of
@@ -6295,7 +6300,7 @@ fn search(
     }
     if let Some((x_kinds, blocks)) = x_plan {
         use super::x_query_blocks::{
-            XBlockReport, XBlockSink, XCopyWriter, XOffsetObserver, XShadowObserver,
+            XBlockReport, XBlockSink, XCopyWriter, XOffsetObserver, XShadowDir, XShadowObserver,
         };
         let reader_warnings = &batches.warnings;
         let ReportOutputs {
@@ -6327,6 +6332,10 @@ fn search(
         let mut x_records: Option<Vec<PairwiseHit>> = x_want_records.then(Vec::new);
         let mut x_recorder =
             (x_shadow && observer.is_some()).then(|| XShadowObserver::new(&output_copies));
+        // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state that the blocks of an outfmt 13 to 16
+        // run hand on (such a run has one output, `x_query_block_plan`); the shadow reads the
+        // number of side files from it after the last block.
+        let x_xml2_carry = std::sync::Mutex::new(crate::report::blast_xml2::Xml2Carry::default());
         let searched_in_blocks =
             crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
                 // The last checks of the block search, on the pool; when one fails, nothing has
@@ -6397,10 +6406,6 @@ fn search(
                     x_bp_encode_block_subjects(&subjects.records, args.num_threads, pool)?;
                 crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
                 let pool = &pool.x_with_ext(&x_subjects);
-                // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state that the blocks of an
-                // outfmt 15 or 16 run hand on (such a run has one output, `x_query_block_plan`).
-                let x_xml2_carry =
-                    std::sync::Mutex::new(crate::report::blast_xml2::Xml2Carry::default());
                 let mut sinks: Vec<XBlockSink<'_>> = formats
                     .iter_mut()
                     .map(|format| XBlockSink::new(&mut format.sink))
@@ -6524,6 +6529,23 @@ fn search(
                         copy: Some(copy),
                     })
                     .collect();
+                // The side files of an outfmt 13 or 14 run: the search of all queries writes its
+                // own into a fresh directory under TMPDIR with `-out`'s file name (the master lists
+                // the names without the directory), so that the run's files are not rewritten.
+                let side_kind = outfmts
+                    .first()
+                    .and_then(|outfmt| blastp_xml2_kind(outfmt))
+                    .filter(|kind| kind.is_files());
+                let side_files = side_kind
+                    .map(|_| x_xml2_carry.lock().expect("the carry").written())
+                    .unwrap_or(0);
+                let shadow_dir = side_kind
+                    .zip(args.out.as_deref())
+                    .map(|(_, out)| XShadowDir::new(out));
+                let mut reference_args = args.clone();
+                if let Some(dir) = &shadow_dir {
+                    reference_args.out = Some(dir.out.clone());
+                }
                 let mut reference_warnings = Vec::new();
                 let mut reference_diagnostics = super::x_query_blocks::XFeedWriter {
                     inner: &mut reference_warnings,
@@ -6556,10 +6578,10 @@ fn search(
                 if let Some(database) = subject_source.database() {
                     database.x_reset_taxdb();
                 }
-                let mut run_reference = || {
+                let run_reference = || {
                     crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
                         search_batches(
-                            args.clone(),
+                            reference_args,
                             &mut reference_outputs,
                             pool,
                             batches.input_done,
@@ -6603,6 +6625,29 @@ fn search(
                     .map(|copy| copy.into_inner().expect("the shadow's copy"))
                     .collect();
                 let warned = warning_copy.into_inner().expect("the shadow's copy");
+                // Side file n of the blocks (next to `-out`) and of the search of all queries (in
+                // the shadow directory), n in 1..=written; an unreadable file reads as empty text
+                // that differs from the other's.
+                let mut side_texts: Vec<(String, Vec<u8>, Vec<u8>)> = Vec::new();
+                if let (Some(kind), Some(out), Some(dir)) =
+                    (side_kind, args.out.as_deref(), &shadow_dir)
+                {
+                    let blocks_files = crate::report::blast_xml2::FsSideFiles::new(out, kind);
+                    let reference_files =
+                        crate::report::blast_xml2::FsSideFiles::new(&dir.out, kind);
+                    for n in 1..=side_files {
+                        let read = |path: std::path::PathBuf| {
+                            std::fs::read(&path)
+                                .unwrap_or_else(|error| format!("unreadable: {error}").into_bytes())
+                        };
+                        side_texts.push((
+                            format!("side file {n}"),
+                            read(blocks_files.path(n)),
+                            read(reference_files.path(n)),
+                        ));
+                    }
+                }
+                drop(shadow_dir);
                 let mut streams: Vec<(String, &[u8], &[u8])> = written
                     .iter()
                     .zip(&reference)
@@ -6617,6 +6662,11 @@ fn search(
                     })
                     .collect();
                 streams.push(("stderr".to_string(), &warned, &reference_warnings));
+                streams.extend(
+                    side_texts.iter().map(|(name, blocks, reference)| {
+                        (name.clone(), &blocks[..], &reference[..])
+                    }),
+                );
                 if x_records.is_some() {
                     streams.push(("hit records".to_string(), &block_hits, &reference_hits));
                 }
@@ -6635,6 +6685,7 @@ fn search(
                     &streams,
                     block_records.len(),
                     events,
+                    side_files as usize,
                 );
             }
             return Ok(());
@@ -6756,11 +6807,11 @@ fn x_bp_encode_block_subjects(
 // queries. The block search is taken only where the blocks' reports written one after the other
 // are the report of the search of all queries: one output, tabular format 6 (or with
 // LOSAT_X_BPQBLOCKFMT outfmt 0 or 7, with LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with
-// LOSAT_X_BPQBLOCKXML outfmt 5, LOSAT_X_BPQBLOCKXML2 outfmt 15 and 16, `x_query_blocks.rs`; the
+// LOSAT_X_BPQBLOCKXML outfmt 5, LOSAT_X_BPQBLOCKXML2 outfmt 13 to 16, `x_query_blocks.rs`; the
 // kind of report of each output is returned with the blocks), with LOSAT_X_BPQBLOCKWEB also several
 // outputs, the hit records and an observer (`run_local`, ABI v2 of the Web build) where every
 // output is a writer of the caller, no `-db` is searched and an observer comes with the hit
-// records (an outfmt 15 or 16 output is not taken in such a call: see the arm below), no
+// records (an outfmt 13 to 16 output is not taken in such a call: see the arm below), no
 // `-query_loc` (every record is
 // searched whole), every batch read, more than one block, no subject whose tabular ID the
 // reference path rejects before it writes any row (`tabular_subject_ids`, for outfmt 6 and 7;
@@ -6866,7 +6917,7 @@ fn x_query_block_plan(
             x_formats.push(XBlockFormat::Xml);
             Some(XBlockReport::Xml)
         }
-        // Outfmt 15 and 16 only (`x_xml2_kind_takes_blocks`; 13 and 14 write side files). Only in a
+        // Outfmt 13 to 16 (`x_xml2_kind_takes_blocks`; 13 and 14 write side files). Only in a
         // call of one output without hit records and observer (the CLI's shape): the run-level
         // frame and carry of the XML2 document (`Xml2Carry`) were checked for that call only. In a
         // call of several outputs, hit records or an observer (LOSAT_X_BPQBLOCKWEB) the format is
@@ -7337,7 +7388,7 @@ struct BlastpReports<'a> {
     /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): the queries of the blocks before this one, which outfmt
     /// 7's last line counts with this call's (0 outside the block search).
     x_queries_before: usize,
-    /// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state of an outfmt 15 or 16 run that the
+    /// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state of an outfmt 13 to 16 run that the
     /// blocks hand on (the count of reports, the start of the document, a `-subject` run's held
     /// report; `None` outside the block search).
     x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
@@ -12152,17 +12203,16 @@ mod tests {
     use super::*;
     use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
 
-    // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): only the documents on the output stream (outfmt 15 and 16)
-    // get a block plan; the ones with side files (13 and 14) never do, whatever `blastp_xml2_kind`
-    // reads for them, so that a later widening of that function cannot admit them unchecked.
+    // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): all four documents (outfmt 13 to 16) get a block plan; a
+    // kind added to `Xml2Kind` is not admitted until `x_xml2_kind_takes_blocks` names it.
     #[test]
-    fn xml2_block_plan_admits_only_outfmt_15_and_16() {
+    fn xml2_block_plan_admits_outfmt_13_to_16() {
         use crate::report::blast_xml2::Xml2Kind;
         assert!(x_xml2_kind_takes_blocks(Xml2Kind::Single15));
         assert!(x_xml2_kind_takes_blocks(Xml2Kind::Single16));
-        assert!(!x_xml2_kind_takes_blocks(Xml2Kind::Files13));
-        assert!(!x_xml2_kind_takes_blocks(Xml2Kind::Files14));
-        for (outfmt, taken) in [("15", true), ("16", true), ("13", false), ("14", false)] {
+        assert!(x_xml2_kind_takes_blocks(Xml2Kind::Files13));
+        assert!(x_xml2_kind_takes_blocks(Xml2Kind::Files14));
+        for (outfmt, taken) in [("15", true), ("16", true), ("13", true), ("14", true)] {
             assert_eq!(
                 blastp_xml2_kind(outfmt).is_some_and(x_xml2_kind_takes_blocks),
                 taken,

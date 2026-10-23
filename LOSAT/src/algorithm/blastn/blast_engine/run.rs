@@ -61,6 +61,7 @@ use super::super::alignment::{
 };
 // No NCBI counterpart: dispatch of the preliminary greedy alignment
 // (NCBI reference: blast_gapalign.c:4019-4025, BLAST_GreedyGappedAlignment with compressed_subject).
+use super::super::alignment::x_fence;
 use super::super::alignment::x_greedy_prelim;
 use super::super::archive;
 use super::super::args::{BlastnArgs, QueryStrand};
@@ -261,6 +262,12 @@ pub fn x_db_cut_print_summary() {
 /// counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_db_stream_print_summary() {
     database::x_db_stream_print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BNTBRANGELOG): the summary line `main` prints at exit. No NCBI
+/// counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_tb_range_print_summary() {
+    database::x_tb_range_print_summary();
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:160-161
@@ -3117,6 +3124,28 @@ struct UngappedHit {
 fn x_bn_mapped() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
+}
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNTBRANGE) the traceback of a database search decodes
+/// a sequence of at least `x_tb_range_min` bases in the ranges of its HSPs only, as NCBI's partial
+/// fetch does (`database::traceback_listed`).
+pub(super) fn x_bn_tb_range() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNTBRANGE"))
+}
+
+/// No NCBI counterpart: the shortest sequence that LOSAT_X_BNTBRANGE decodes in ranges, 1 Mi
+/// bases (below it the whole BLASTNA is small, and an allocation below glibc's mmap threshold
+/// may come from an arena that writes it); LOSAT_X_BNTBRANGEMIN=<bases> sets it (0 = every
+/// sequence, for the tests: the fixtures' sequences are short).
+pub(super) fn x_tb_range_min() -> usize {
+    static MIN: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *MIN.get_or_init(|| {
+        std::env::var("LOSAT_X_BNTBRANGEMIN")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(crate::utils::x_mapped::X_MAPPED_FROM)
+    })
 }
 
 /// No NCBI counterpart: records for `LOSAT_X_REACH` whether a buffer of `bytes` takes
@@ -7917,6 +7946,10 @@ struct BlastnSubjectRef<'a> {
     /// EXPERIMENT (LOSAT_X_BNSTORE): the packed subject of a subject set's record that keeps
     /// no letters: its lowercase masks and the traceback's BLASTNA letters come from it.
     store: Option<&'a PackedNucleotide>,
+    /// EXPERIMENT (LOSAT_X_BNTBRANGE): with `blastna` decoded in ranges only, set when a
+    /// traceback alignment met a fence (`alignment::x_fence`): the traceback stops, and
+    /// `database::traceback_listed` traces the sequence again whole. `None` otherwise.
+    x_fenced: Option<&'a std::sync::atomic::AtomicBool>,
 }
 
 impl<'a> BlastnSubjectRef<'a> {
@@ -7928,6 +7961,7 @@ impl<'a> BlastnSubjectRef<'a> {
             letters: Some(record.seq()),
             blastna: None,
             store: None,
+            x_fenced: None,
         }
     }
 
@@ -7940,6 +7974,7 @@ impl<'a> BlastnSubjectRef<'a> {
             letters: None,
             blastna: None,
             store: Some(store),
+            x_fenced: None,
         }
     }
 }
@@ -11197,6 +11232,8 @@ fn search_query_batch(
         // BlastInitHitListReset(init_hitlist);
         // ```
         let s_len_full = subject.length;
+        // EXPERIMENT (LOSAT_X_BNTBRANGE): set when a traceback alignment met a fence.
+        let x_fenced = subject.x_fenced;
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
         // ```c
         // typedef struct BlastHSPList {
@@ -15899,6 +15936,10 @@ fn search_query_batch(
                     let p = &prelim_hits[x_index];
                     let prepared = prepare_traceback(p)?;
                     let (qs, _, shift, slen, ss) = prepared;
+                    if x_fence::x_fenced(x_fenced) {
+                        return None;
+                    }
+                    let x_mark = x_fence::x_fence_mark(x_fenced);
                     if !use_dp {
                         let result = greedy_gapped_alignment_with_traceback(
                             &encoded_queries_blastna[p.context_idx as usize],
@@ -15913,6 +15954,7 @@ fn search_query_batch(
                             x_drop_final,
                             &mut *x_scratch.greedy,
                         );
+                        x_fence::x_fence_note(x_fenced, x_mark);
                         return Some((prepared, XSpecTraceback::Greedy(result)));
                     }
                     let result = extend_gapped_heuristic_with_traceback_with_scratch(
@@ -15929,6 +15971,7 @@ fn search_query_batch(
                         x_drop_final,
                         &mut *x_scratch.gap,
                     );
+                    x_fence::x_fence_note(x_fenced, x_mark);
                     Some((prepared, XSpecTraceback::Dp(result)))
                 };
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375
@@ -16094,6 +16137,10 @@ fn search_query_batch(
                                                         // Keep the exact preparation with its speculative DP.
                                                         let prepared = prepare_traceback(p)?;
                                                         let (qs, _, shift, slen, ss) = prepared;
+                                                        if x_fence::x_fenced(x_fenced) {
+                                                            return None;
+                                                        }
+                                                        let x_mark = x_fence::x_fence_mark(x_fenced);
                                                         if !use_dp {
                                                             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
                                                             // ```c
@@ -16123,6 +16170,7 @@ fn search_query_batch(
                                                                     x_drop_final,
                                                                     x_greedy_scratch,
                                                                 );
+                                                            x_fence::x_fence_note(x_fenced, x_mark);
                                                             return Some((
                                                                 index,
                                                                 (
@@ -16147,6 +16195,7 @@ fn search_query_batch(
                                                         x_drop_final,
                                                         scratch,
                                                     );
+                                                        x_fence::x_fence_note(x_fenced, x_mark);
                                                         Some((
                                                             index,
                                                             (prepared, XSpecTraceback::Dp(result)),
@@ -16440,7 +16489,11 @@ fn search_query_batch(
                                     // ```
                                     // Endpoint replacement can invalidate batch-start containment. A newly eligible
                                     // HSP therefore runs the unchanged DP here, at its original sequential position.
-                                    match precomputed {
+                                    if x_fence::x_fenced(x_fenced) {
+                                        continue;
+                                    }
+                                    let x_mark = x_fence::x_fence_mark(x_fenced);
+                                    let x_result = match precomputed {
                                         Some((_, XSpecTraceback::Dp(result))) => result,
                                         _ => extend_gapped_heuristic_with_traceback_with_scratch(
                                             q_seq_blastna,
@@ -16456,7 +16509,15 @@ fn search_query_batch(
                                             x_drop_trace,
                                             gap_scratch,
                                         ),
+                                    };
+                                    // EXPERIMENT (LOSAT_X_BNTBRANGE): an alignment that met a
+                                    // fence (here or ahead) makes no HSP; the sequence is traced
+                                    // again whole (NCBI breaks its loop, blast_traceback.c:516-520).
+                                    x_fence::x_fence_note(x_fenced, x_mark);
+                                    if x_fence::x_fenced(x_fenced) {
+                                        continue;
                                     }
+                                    x_result
                                 };
                                 let aln_len = matches + mismatches + gap_letters;
                                 (
@@ -16485,6 +16546,10 @@ fn search_query_batch(
                                 // value of the same call made ahead on another scratch.
                                 // No NCBI counterpart: the same call, already made
                                 // for this HSP on another scratch, or made here.
+                                if x_fence::x_fenced(x_fenced) {
+                                    continue;
+                                }
+                                let x_mark = x_fence::x_fence_mark(x_fenced);
                                 let x_greedy_result = match precomputed {
                                     Some((_, XSpecTraceback::Greedy(result))) => result,
                                     _ => greedy_gapped_alignment_with_traceback(
@@ -16501,6 +16566,11 @@ fn search_query_batch(
                                         &mut *greedy_align_scratch,
                                     ),
                                 };
+                                // EXPERIMENT (LOSAT_X_BNTBRANGE): as for the DP traceback above.
+                                x_fence::x_fence_note(x_fenced, x_mark);
+                                if x_fence::x_fenced(x_fenced) {
+                                    continue;
+                                }
                                 match x_greedy_result {
                                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-597
                                     // ```c
@@ -17458,7 +17528,11 @@ fn search_query_batch(
                     );
                     let (list, s1, s2, s3, s4) = x_post_purge(hits.drain(..).collect());
                     let (slow, s5) = x_final_list(list, &mut interval_tree);
-                    x_qgroup_par::compare(x_qgroup_par::Stage::Traceback, &slow, &fast);
+                    // EXPERIMENT (LOSAT_X_BNTBRANGE): a subject that met a fence is traced again
+                    // whole (`database::traceback_listed`), and compared there.
+                    if !x_fence::x_fenced(x_fenced) {
+                        x_qgroup_par::compare(x_qgroup_par::Stage::Traceback, &slow, &fast);
+                    }
                     (slow, [s1, s2, s3, s4, s5])
                 } else {
                     (fast, steps)
@@ -17878,6 +17952,11 @@ fn search_query_batch(
                         &mut prelim_hits,
                     );
                     subject_hits
+                },
+                &|kept: &Vec<PrelimHit>| {
+                    kept.iter()
+                        .map(|hit| (hit.prelim_ss, hit.prelim_se))
+                        .collect()
                 },
             )
             .map_err(|error| {

@@ -100,6 +100,19 @@ fn output_error(_: io::Error) -> anyhow::Error {
     }
     .into()
 }
+/// The error of writing one batch's archive: the encoder's refusal of a byte NCBI writes as `#`
+/// (`SerialError`, after the query titles were checked before the search; reachable only when
+/// the query file changes between that read and the search) is LOSAT's refusal, not an error of
+/// NCBI's engine, so it gets no `BLAST engine error:` and no error archive (`archive::error_lines`
+/// takes `NativeError`s only), as `XmlRefusal` gets none from `report_error`.
+fn archive_error(error: anyhow::Error) -> anyhow::Error {
+    if error.is::<crate::report::serial::encoder::SerialError>() {
+        error
+    } else {
+        report_error(error)
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 // ```c++
 //         } else {                                                            \
@@ -841,7 +854,7 @@ fn run_inner(
                 },
                 writer,
             )
-            .map_err(report_error);
+            .map_err(archive_error);
         }
         match (&database, &pairwise_database) {
             (Some(database), Some(pairwise)) => {
@@ -1746,4 +1759,23 @@ pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
         args.num_alignments,
     )
     .warnings("blastx", outfmt, args.num_descriptions.is_some())
+}
+
+#[cfg(test)]
+mod archive_error_tests {
+    use super::*;
+    use crate::report::serial::encoder::SerialError;
+
+    /// The encoder's refusal stays LOSAT's own error: no `BLAST engine error:` text and no
+    /// error archive. NCBI's engine errors still become both.
+    #[test]
+    fn the_encoders_refusal_gets_no_error_archive() {
+        let refusal = archive_error(SerialError::NonVisibleChar(0xc3).into());
+        assert!(refusal.is::<SerialError>());
+        assert!(archive::error_lines(&refusal, false).is_none());
+        assert!(archive::error_lines(&refusal, true).is_none());
+        let engine_error = archive_error(anyhow::anyhow!("something else"));
+        assert!(engine_error.downcast_ref::<NativeError>().is_some());
+        assert!(archive::error_lines(&engine_error, false).is_some());
+    }
 }

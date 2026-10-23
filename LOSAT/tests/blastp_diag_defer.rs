@@ -217,29 +217,25 @@ fn deferred_calls_give_the_reports_and_counts_of_the_batches() {
                 blastp(query, subject, threads, BATCHES, &["-outfmt", "6"]);
             assert!(batched == reference, "{what}: the batches differ");
             let b = one_line(&batched_counts, &what);
-            // The run with the deferred calls (`true`), by default.
-            let runs = [(DEFAULT, true)];
-            for (vars, deferred_calls) in runs {
-                let what = format!("{what} {vars:?}");
-                let (rows, counts, _) = blastp(query, subject, threads, vars, &["-outfmt", "6"]);
-                assert!(rows == reference, "{what}: the report differs");
-                let d = one_line(&counts, &what);
-                if avx2() {
-                    assert_eq!(b.mode, "avx2", "{what}");
-                    let expected = if deferred_calls { "avx2-defer" } else { "avx2" };
-                    assert_eq!(d.mode, expected, "{what}");
-                    assert!(d.cells > 0 && d.candidates > 0, "{what}: {d:?}");
-                } else {
-                    // Without AVX2 there is no AVX2 batch to defer: the per-hit loop runs.
-                    assert_eq!((b.mode.as_str(), d.mode.as_str()), ("per-hit", "per-hit"));
-                }
-                // The same cells, hits and candidates: only the time of the calls moved.
-                assert_eq!(
-                    (b.cells, b.hits, b.candidates),
-                    (d.cells, d.hits, d.candidates),
-                    "{what}: counts"
-                );
+            // The run with the deferred calls, by default.
+            let what = format!("{what} {DEFAULT:?}");
+            let (rows, counts, _) = blastp(query, subject, threads, DEFAULT, &["-outfmt", "6"]);
+            assert!(rows == reference, "{what}: the report differs");
+            let d = one_line(&counts, &what);
+            if avx2() {
+                assert_eq!(b.mode, "avx2", "{what}");
+                assert_eq!(d.mode, "avx2-defer", "{what}");
+                assert!(d.cells > 0 && d.candidates > 0, "{what}: {d:?}");
+            } else {
+                // Without AVX2 there is no AVX2 batch to defer: the per-hit loop runs.
+                assert_eq!((b.mode.as_str(), d.mode.as_str()), ("per-hit", "per-hit"));
             }
+            // The same cells, hits and candidates: only the time of the calls moved.
+            assert_eq!(
+                (b.cells, b.hits, b.candidates),
+                (d.cells, d.hits, d.candidates),
+                "{what}: counts"
+            );
         }
     }
     // The pairwise report too, on the fixture pair, by default.

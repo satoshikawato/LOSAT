@@ -2,9 +2,10 @@
 //! `src/algorithm/tblastx/x_tbx_extbatch.rs`, module doc) on whole searches.
 //!
 //! The switch is a value switch of the strict set (`src/utils/xswitch.rs`): on unless it is `0`;
-//! its number is the smallest largest-unit query-group span, in Ki letters, of a subject whose units
-//! take the path (built-in 256; `2` takes every unit of 2 Ki letters or more). It acts on x86-64 only (on other targets `=2` compares the old path with
-//! itself); its shadow (`LOSAT_X_TBXEXTBATCHSHADOW`) runs on every target, whatever the size rule.
+//! its number is the smallest largest-unit query-group span, in Ki letters, of a subject whose
+//! units take the path (built-in 256; `2` takes every unit of 2 Ki letters or more). It acts on
+//! x86-64 only (on other targets `=2` compares the old path with itself); its shadow
+//! (`LOSAT_X_TBXEXTBATCHSHADOW`) runs on every target, whatever the size rule.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-605
 //! ```c

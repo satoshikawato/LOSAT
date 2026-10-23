@@ -15,7 +15,8 @@
 //! each one off and with both off, at one and several threads, against the one-thread search with
 //! both off, on a set laid out as a genome database is (two long records first, then many short
 //! ones), with ambiguity codes in the long records (N blocks, single IUPAC codes, one of them in a
-//! run across a translation window), through `-subject` and through a database of the same records (`losat makedb`).
+//! run across a translation window), through `-subject` and through a database of the same records
+//! (`losat makedb`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

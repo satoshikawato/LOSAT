@@ -1,15 +1,16 @@
 //! The read-once pool fill of the megablast lookup table (`LOSAT_X_MBLUTONCE`,
 //! `src/algorithm/blastn/x_mb_lookup_once.rs`) on whole searches.
 //!
-//! The switch is in the strict set since 2026-10-18 (on unless it is `0`). Where PAIRPAR (which has no variable) fills the contiguous megablast table
-//! on a pool of two threads or more it chooses between two LOSAT code paths with the same tables:
-//! each worker reads every word (`x_mb_lookup_par.rs`), or each position is read once and each word
-//! applied by the owner of its cell. So the property under test is that the report does not depend
-//! on it, and that the read-once fill really runs where the switch says: with `LOSAT_TIMING`,
-//! `[TIMING] x_mb_lookup_build` counts `once=` builds equal to its `parallel=` builds (more than
-//! 0) at 4 threads with the switch, with `[TIMING] x_mb_lookup_once` giving as many fills, and so without the variable
-//! (the default); 0 with `LOSAT_X_MBLUTONCE=0` and at one thread (no pool). That the bytes equal
-//! NCBI's is the business of the blastn fixtures.
+//! The switch is in the strict set since 2026-10-18 (on unless it is `0`). Where PAIRPAR (which has
+//! no variable) fills the contiguous megablast table on a pool of two threads or more it chooses
+//! between two LOSAT code paths with the same tables: each worker reads every word
+//! (`x_mb_lookup_par.rs`), or each position is read once and each word applied by the owner of its
+//! cell. So the property under test is that the report does not depend on it, and that the
+//! read-once fill really runs where the switch says: with `LOSAT_TIMING`, `[TIMING]
+//! x_mb_lookup_build` counts `once=` builds equal to its `parallel=` builds (more than
+//! 0) at 4 threads with the switch, with `[TIMING] x_mb_lookup_once` giving as many fills, and so
+//! without the variable (the default); 0 with `LOSAT_X_MBLUTONCE=0` and at one thread (no pool).
+//! That the bytes equal NCBI's is the business of the blastn fixtures.
 //!
 //! The prefault round of the read-once fill (`LOSAT_X_MBLUTPREFAULT`, in the strict set since
 //! 2026-10-19) runs where the first chunk has at least 8 positions per 1,024 cells of the table:

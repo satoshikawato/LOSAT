@@ -472,8 +472,8 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
         ("LOSAT_X_BXDEFER", "0", false),
         ("LOSAT_X_BXDEFER", "0", true),
     ] {
-        let what = format!("{name}={value}");
         let diag = if named { "1" } else { "" };
+        let what = format!("{name}={value} LOSAT_X_BXDIAG={diag:?}");
         let run = blastx(
             &args,
             &[

@@ -222,7 +222,7 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
         (fixture("MeenMJNV.faa"), fixture("MejoMJNV.faa")),
     ];
     // The fused per-hit loop: the switch off in the default.
-    let per_hit: [&[(&str, &str)]; 1] = [&[("LOSAT_X_BPDIAG", "0")]];
+    let per_hit: &[(&str, &str)] = &[("LOSAT_X_BPDIAG", "0")];
     // The batches, with the `LOSAT_X_BPDIAG_SIMD` value each runs with and whether
     // `LOSAT_X_BPDEFER` is on: the default (the CPU's path, the AVX2 batch with the deferred calls
     // or the per-hit loop without AVX2), its scalar batch, and its AVX2 batch without the deferred
@@ -238,18 +238,16 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
                 blastp(query, subject, threads, REFERENCE, &["-outfmt", "6"]);
             assert!(!reference.is_empty(), "the pair has a report");
             assert!(reference_counts.is_empty(), "no line with the switch off");
-            for vars in per_hit {
-                let (fused, fused_counts, _) =
-                    blastp(query, subject, threads, vars, &["-outfmt", "6"]);
-                assert!(
-                    fused == reference,
-                    "{vars:?} threads {threads}: the fused loop differs"
-                );
-                assert!(
-                    fused_counts.is_empty(),
-                    "{vars:?}: no line with the switch off"
-                );
-            }
+            let (fused, fused_counts, _) =
+                blastp(query, subject, threads, per_hit, &["-outfmt", "6"]);
+            assert!(
+                fused == reference,
+                "{per_hit:?} threads {threads}: the fused loop differs"
+            );
+            assert!(
+                fused_counts.is_empty(),
+                "{per_hit:?}: no line with the switch off"
+            );
             for (vars, simd, defer) in batched {
                 let (rows, counts, _) = blastp(query, subject, threads, vars, &["-outfmt", "6"]);
                 let what = format!("{} threads {threads} {vars:?}", query.display());

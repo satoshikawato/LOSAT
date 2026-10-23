@@ -4,11 +4,11 @@
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_SEEDCOMPACT`
 //! is `0`. With it on, the units of the unit path keep their saved init HSPs as 28-byte records,
-//! copied out of a per-thread vector at their exact length; the merge expands them into the same init lists, converts each
-//! chunk's list into a list of its exact length and moves the first chunk's list into the empty
-//! frame list. Every test reads the `[X_STATS] SEEDCOMPACT` line, which is printed only while the
-//! switch is on, to check that the compact lists were made (or, where no unit path runs, that
-//! none was), not only that the report is equal.
+//! copied out of a per-thread vector at their exact length; the merge expands them into the same
+//! init lists, converts each chunk's list into a list of its exact length and moves the first
+//! chunk's list into the empty frame list. Every test reads the `[X_STATS] SEEDCOMPACT` line, which
+//! is printed only while the switch is on, to check that the compact lists were made (or, where no
+//! unit path runs, that none was), not only that the report is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:367-372
 //! ```c

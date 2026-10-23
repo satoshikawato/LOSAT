@@ -1,5 +1,6 @@
 //! The SEG of a TBLASTX query batch's frames on the search pool (`LOSAT_X_TBXQFRAMES`, in the
-//! strict set: on unless `=0`; `src/algorithm/tblastx/x_query_frames.rs`) on whole runs of the binary.
+//! strict set: on unless `=0`; `src/algorithm/tblastx/x_query_frames.rs`) on whole runs of the
+//! binary.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1281
 //! ```c

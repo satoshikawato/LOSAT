@@ -1,20 +1,20 @@
 //! The megablast hashtable kept from batch to batch of blastn's batch loop (`LOSAT_X_MBLUTKEEP`,
 //! `src/algorithm/blastn/x_mb_lut_keep.rs`) on whole searches.
 //!
-//! The switch is in the strict set since 2026-10-19 (on unless it is `0`). It chooses between two LOSAT code paths with the same tables: each batch
-//! allocates a zeroed table and frees it, or the loop keeps the largest table and the next build of
-//! that size zeroes and fills it. So the property under test is that the report does not depend on
-//! it, and that the kept path really runs where the switch says: with `LOSAT_TIMING`, `[TIMING]
-//! x_mb_lut_keep` counts `kept=` builds (at least one) and `fresh=` builds that add up to the
-//! search's builds (`[TIMING] x_mb_lookup_build: builds=`), at 4 threads (zeroing and fill on the
-//! pool) and at one thread; the prefault round of `LOSAT_X_MBLUTPREFAULT` runs only on the fresh
-//! tables (`prefault_rounds=` of `[TIMING] x_mb_lookup_once` equals `fresh=` where every first
-//! chunk is dense enough, and the builds without the switch); with `LOSAT_X_MBLUTKEEPSHADOW` every
-//! build on a kept table is compared with a fresh build (`[X_SHADOW] MBLUTKEEP tables=` = `kept=`,
-//! `diffs=0 identical`); no line with `LOSAT_X_MBLUTKEEP=0`, kept builds
-//! with `LOSAT_X_MBLUTONCE=0` and `LOSAT_X_MBFILL=0` (the original fill loops); and no table is kept while
-//! `LOSAT_X_QBATCHPAR`'s slots may search batches. That the bytes equal NCBI's is the business of
-//! the blastn fixtures.
+//! The switch is in the strict set since 2026-10-19 (on unless it is `0`). It chooses between two
+//! LOSAT code paths with the same tables: each batch allocates a zeroed table and frees it, or the
+//! loop keeps the largest table and the next build of that size zeroes and fills it. So the
+//! property under test is that the report does not depend on it, and that the kept path really runs
+//! where the switch says: with `LOSAT_TIMING`, `[TIMING] x_mb_lut_keep` counts `kept=` builds (at
+//! least one) and `fresh=` builds that add up to the search's builds (`[TIMING] x_mb_lookup_build:
+//! builds=`), at 4 threads (zeroing and fill on the pool) and at one thread; the prefault round of
+//! `LOSAT_X_MBLUTPREFAULT` runs only on the fresh tables (`prefault_rounds=` of `[TIMING]
+//! x_mb_lookup_once` equals `fresh=` where every first chunk is dense enough, and the builds
+//! without the switch); with `LOSAT_X_MBLUTKEEPSHADOW` every build on a kept table is compared with
+//! a fresh build (`[X_SHADOW] MBLUTKEEP tables=` = `kept=`, `diffs=0 identical`); no line with
+//! `LOSAT_X_MBLUTKEEP=0`, kept builds with `LOSAT_X_MBLUTONCE=0` and `LOSAT_X_MBFILL=0` (the
+//! original fill loops); and no table is kept while `LOSAT_X_QBATCHPAR`'s slots may search
+//! batches. That the bytes equal NCBI's is the business of the blastn fixtures.
 //!
 //! The query file holds four genomes of 292-306 kb (LC738868 306,008 letters, LC738869 300,002,
 //! LC738870 294,144, LC738873 291,934) and `BATCH_SIZE=4000` puts each in a batch of its own (a

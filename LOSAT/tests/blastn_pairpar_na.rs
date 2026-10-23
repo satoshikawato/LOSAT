@@ -2,16 +2,16 @@
 //! (`LOSAT_X_PAIRPARNA`, `src/algorithm/blastn/blast_engine/x_pair_seed_na.rs`) on whole
 //! searches.
 //!
-//! The switch is in the strict set (on unless it is `0`). It chooses between two LOSAT code paths with the same result: the subject scan cut
-//! into strips that the pool threads scan, and the diagonal-hash fold in the scan order (by the
-//! owner, or split by diagonal-hash bucket with `LOSAT_X_PAIRPARFOLD`), or the scan and fold of
-//! the reference code. So the property under test is that the report does not depend on it:
-//! `-task blastn-short` (word 7) and word sizes 6 and 8 with the switch at 1, 2 and 4 threads
-//! give the bytes of the search at one thread (where the stage does not act), and so do the
-//! switch at `0` at 4 threads, and the shadow run (`LOSAT_X_PAIRPARNASHADOW`,
-//! which computes the stage on copies and compares the hit list and the whole diagonal hash
-//! with the reference code for every chunk) gives them too and compares at least one chunk.
-//! That those bytes equal NCBI's is the business of the blastn-short fixtures
+//! The switch is in the strict set (on unless it is `0`). It chooses between two LOSAT code paths
+//! with the same result: the subject scan cut into strips that the pool threads scan, and the
+//! diagonal-hash fold in the scan order (by the owner, or split by diagonal-hash bucket with
+//! `LOSAT_X_PAIRPARFOLD`), or the scan and fold of the reference code. So the property under test
+//! is that the report does not depend on it: `-task blastn-short` (word 7) and word sizes 6 and 8
+//! with the switch at 1, 2 and 4 threads give the bytes of the search at one thread (where the
+//! stage does not act), and so do the switch at `0` at 4 threads, and the shadow run
+//! (`LOSAT_X_PAIRPARNASHADOW`, which computes the stage on copies and compares the hit list and the
+//! whole diagonal hash with the reference code for every chunk) gives them too and compares at
+//! least one chunk. That those bytes equal NCBI's is the business of the blastn-short fixtures
 //! (`tests/blastn_regression_fixtures.py`).
 //!
 //! The input is one subject (the stage takes a search of one subject by the owner of a pool of

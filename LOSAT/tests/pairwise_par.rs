@@ -250,10 +250,14 @@ fn check_with(name: &str, args: &[&str], extra: &[(&str, &str)]) -> Vec<[u64; 4]
             at_two = counts;
         }
     }
-    let previous = losat(args, 4, &with(&[OFF]));
-    assert!(previous.status.success(), "{name}: {}", stderr(&previous));
+    let off_at_four = losat(args, 4, &with(&[OFF]));
+    assert!(
+        off_at_four.status.success(),
+        "{name}: {}",
+        stderr(&off_at_four)
+    );
     assert_eq!(
-        previous.stdout, off.stdout,
+        off_at_four.stdout, off.stdout,
         "{name}, LOSAT_X_PAIRWISEPAR=0 at 4 threads"
     );
     at_two

@@ -11,8 +11,8 @@
 //!         return retval;
 //! ```
 //! NCBI keeps the subjects in its scope and makes each one's search forms from it. With
-//! `LOSAT_X_TBNSTORE` on (a switch of the strict set: on unless it is `0`) the reader's records keep their
-//! deflines and the letters are held packed (2 bits per base, the runs of ambiguous
+//! `LOSAT_X_TBNSTORE` on (a switch of the strict set: on unless it is `0`) the reader's records
+//! keep their deflines and the letters are held packed (2 bits per base, the runs of ambiguous
 //! letters, the lower-case intervals): a subject is translated from its packed bases, and the
 //! letters of a window are made again when the redo, the traceback of composition mode 0 or a
 //! report reads it.

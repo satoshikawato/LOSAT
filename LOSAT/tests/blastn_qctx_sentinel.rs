@@ -29,9 +29,10 @@ fn engine(path: &str) -> PathBuf {
 
 /// One search of a `qctx_*` query against LC738868 at `threads` threads; the report must be the
 /// frozen NCBI output of `case`, with nothing on standard error. `LOSAT_*` variables other than
-/// `LOSAT_BLASTX_WORKER_LOG` are dropped. A binary built with the `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs
-/// `LOSAT_BLASTX_WORKER_LOG` as soon as a search has more than one thread; it selects nothing, so
-/// a file in the temporary directory is given when it is not set.
+/// `LOSAT_BLASTX_WORKER_LOG` are dropped. A binary built with the `blastx-worker-probe` feature
+/// (`cargo test --all-features`, as in CI) needs `LOSAT_BLASTX_WORKER_LOG` as soon as a search has
+/// more than one thread; it selects nothing, so a file in the temporary directory is given when it
+/// is not set.
 fn check(case: &str, query: &str, threads: u32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {

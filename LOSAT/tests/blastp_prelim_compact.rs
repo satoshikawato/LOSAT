@@ -7,8 +7,8 @@
 //! from them. Every test states the default it runs with: the reference is the search of all
 //! queries with the switch off (`LOSAT_X_BPQBLOCK=0 LOSAT_X_BPPCOMPACT=0`), and the search with
 //! the switch on is the default (with `LOSAT_X_BPQBLOCK=0` where one line per search is
-//! counted); `LOSAT_X_BPPCOMPACT=0` gives no line. These tests compare the reports: with one and four
-//! threads, with `LOSAT_X_BPPFREE`, in the blocks of `LOSAT_X_BPQBLOCK` and with query chunks
+//! counted); `LOSAT_X_BPPCOMPACT=0` gives no line. These tests compare the reports: with one and
+//! four threads, with `LOSAT_X_BPPFREE`, in the blocks of `LOSAT_X_BPQBLOCK` and with query chunks
 //! (`CHUNK_SIZE`); they check from the `[TIMING] x_bppcompact: expanded_lists=<n>` lines that
 //! compact lists were expanded, and that the shadow mode (`LOSAT_X_BPPCOMPACT=shadow`) compared
 //! lists (`[X_SHADOW] BPPCOMPACT compared=<n>`; it panics on a difference).

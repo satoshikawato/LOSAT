@@ -844,13 +844,13 @@ fn a_database_search_gives_the_off_bytes() {
 }
 
 /// The switch is on by default (an empty value): with LOSAT_X_RPTSTREAM it reads the batches
-/// again (its `[X_STATS]` line with `off=none`); with `LOSAT_X_QSTREAM=0` the records are read before the search (no line). Its rule, where the line says
-/// why and the shadow still reads the batches again: `-task megablast` (`off=megablast`); a file
-/// shorter than twice the largest batch (`off=batch`; here `BATCH_SIZE` half the file's bytes plus
-/// one, and half the file's bytes on); where the slots of LOSAT_X_QBATCHPAR may run, a file
-/// shorter than twice what their budget holds (`off=slots`; a budget set by
-/// `LOSAT_X_QBATCHPARMEM` for a small file at 2 threads, none at one thread). The bytes are the
-/// same.
+/// again (its `[X_STATS]` line with `off=none`); with `LOSAT_X_QSTREAM=0` the records are read
+/// before the search (no line). Its rule, where the line says why and the shadow still reads the
+/// batches again: `-task megablast` (`off=megablast`); a file shorter than twice the largest batch
+/// (`off=batch`; here `BATCH_SIZE` half the file's bytes plus one, and half the file's bytes on);
+/// where the slots of LOSAT_X_QBATCHPAR may run, a file shorter than twice what their budget holds
+/// (`off=slots`; a budget set by `LOSAT_X_QBATCHPARMEM` for a small file at 2 threads, none at one
+/// thread). The bytes are the same.
 #[test]
 fn the_switch_is_on_by_default() {
     let dir = TempDir::new("default");

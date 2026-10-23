@@ -3,14 +3,15 @@
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_SEEDUNMAP`
 //! is `0`. It acts on Linux with glibc only, where transparent huge pages do not round mapped
-//! blocks up (THP "madvise" or "never", or disabled for the process), at two or more threads (the search pool; at one thread nothing is retained), on
-//! the units of the unit path whose query-group span and subject chunk both have at least
-//! 65,536 letters: their split's diagonal table and record vector, and a unit's copy of its records
-//! of at least 128 KiB, get a capacity glibc always maps. It changes capacities, never a value.
-//! Every test compares the report with the report of the same search with `LOSAT_X_SEEDUNMAP=0`
-//! and reads the `[X_STATS] SEEDUNMAP` line, which is printed only while the switch is on: its
-//! `active` field says whether the switch acts in that process (it is 0 on a machine whose THP
-//! setting is "always"), and the counters say where blocks were given the mapped capacity.
+//! blocks up (THP "madvise" or "never", or disabled for the process), at two or more threads (the
+//! search pool; at one thread nothing is retained), on the units of the unit path whose query-group
+//! span and subject chunk both have at least 65,536 letters: their split's diagonal table and
+//! record vector, and a unit's copy of its records of at least 128 KiB, get a capacity glibc always
+//! maps. It changes capacities, never a value. Every test compares the report with the report of
+//! the same search with `LOSAT_X_SEEDUNMAP=0` and reads the `[X_STATS] SEEDUNMAP` line, which is
+//! printed only while the switch is on: its `active` field says whether the switch acts in that
+//! process (it is 0 on a machine whose THP setting is "always"), and the counters say where blocks
+//! were given the mapped capacity.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
 //! ```c

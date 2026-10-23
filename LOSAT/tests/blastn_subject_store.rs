@@ -12,12 +12,12 @@
 //! ```
 //! NCBI keeps the subjects in its scope and makes each one's search forms from it. With
 //! `LOSAT_X_BNSTORE` on (the strict set since 2026-10-18: on unless it is `0`) the reader's
-//! records keep their deflines and the letters are held packed (2 bits per base, the runs of ambiguous
-//! letters, the lower-case intervals): the preliminary stage reads the packed bases, the traceback
-//! makes the blastna letters of a subject, the pairwise report the letters of each row. The switch
-//! must change nothing a user sees, so the tests compare the report and the messages with those of
-//! a run with `LOSAT_X_BNSTORE=0`, and read the `[X_STATS] BNSTORE` line to check that the
-//! subjects were held packed.
+//! records keep their deflines and the letters are held packed (2 bits per base, the runs of
+//! ambiguous letters, the lower-case intervals): the preliminary stage reads the packed bases, the
+//! traceback makes the blastna letters of a subject, the pairwise report the letters of each row.
+//! The switch must change nothing a user sees, so the tests compare the report and the messages
+//! with those of a run with `LOSAT_X_BNSTORE=0`, and read the `[X_STATS] BNSTORE` line to check
+//! that the subjects were held packed.
 //!
 //! The subjects are pieces of `tests/fasta/MelaMJNV.fasta` with what the packed form keeps apart
 //! from the bases: lower-case runs (soft masking with `-lcase_masking`, lower-case rows in the
@@ -346,10 +346,11 @@ fn the_subjects_are_held_packed_by_default() {
 
 // No NCBI counterpart: where the switch acts. A subject range (`-subject_loc`) keeps the
 // letters (the records are cut before the search), so the variable changes nothing there and no
-// subject is held packed. With `LOSAT_X_BNUNGAPCOUNT=0` (the ported ungapped loops) the subjects are still
-// held packed and the report is the same.
+// subject is held packed. With `LOSAT_X_BNUNGAPCOUNT=0` (the ported ungapped loops) the subjects
+// are still held packed and the report is the same.
 #[test]
-fn a_subject_range_keeps_the_letters_and_the_reference_loops_read_the_packed_subjects() {
+fn a_subject_range_keeps_the_letters_and_the_ported_ungapped_count_loops_read_the_packed_subjects()
+{
     let (queries, subjects) = inputs();
     let long = long_subjects(subjects);
     let ranged = ["-outfmt", "0", "-subject_loc", "100-5000", "-lcase_masking"];

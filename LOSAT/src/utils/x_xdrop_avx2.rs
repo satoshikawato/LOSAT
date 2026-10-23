@@ -491,7 +491,7 @@ unsafe fn fill_cols(
     ncols: usize,
     check_fence: bool,
 ) {
-    // lane k holds column k + sh (band window, `XdropScratch::x_shift`)
+    // `sb` lane k + 1 holds column k + sh (band window, `XdropScratch::x_shift`)
     let sh = sc.x_sh;
     let mut k = sc.sb_filled;
     if ncols > 0 && (s.step == 1 || s.step == -1) {
@@ -1823,8 +1823,8 @@ mod tests {
         // [width 8 / 16][tb][reverse]
         let mut handled = [[[0usize; 2]; 2]; 2];
         let (mut fences, mut ops_total, mut declined, mut wide) = (0usize, 0usize, 0usize, 0usize);
-        // calls whose rows were moved: [width 8 / 16][128-bit / 256-bit]
-        let mut moved = [[0usize; 2]; 2];
+        // calls whose rows were moved: [width 8 / 16][128-bit / 256-bit / 256-bit without EM]
+        let mut moved = [[0usize; 3]; 2];
         for case in 0..cases {
             // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
             let win_at = [128, 320, usize::MAX][case % 3];
@@ -2046,6 +2046,9 @@ mod tests {
                         handled[usize::from(!wide8)][usize::from(tb)][usize::from(reverse)] += 1;
                         moved[usize::from(!wide8)][0] += usize::from(sc128.x_sh > 0);
                         moved[usize::from(!wide8)][1] += usize::from(sc256.x_sh > 0);
+                        // on 16-bit lanes V256Z is the `align16` call of `sc256`
+                        let z = if wide8 { &sc256z } else { &sc256 };
+                        moved[usize::from(!wide8)][2] += usize::from(z.x_sh > 0);
                         fences += usize::from(r.fence_hit);
                         ops_total += sc256.ops.len();
                         if !wide8 && r.cells > 256 * len1.min(len2) as u64 && len1.min(len2) > 500 {
@@ -2057,7 +2060,7 @@ mod tests {
         }
         eprintln!(
             "avx2 fuzz: cases={cases} handled[w8/w16][so/tb][fwd/rev]={handled:?} fences={fences} \
-             wide={wide} declined={declined} moved[w8/w16][128/256]={moved:?}"
+             wide={wide} declined={declined} moved[w8/w16][128/256/256z]={moved:?}"
         );
         if cases >= 200 {
             for (w, by_tb) in handled.iter().enumerate() {

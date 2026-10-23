@@ -818,7 +818,7 @@ pub(super) unsafe fn fill_cols(
     ncols: usize,
     check_fence: bool,
 ) {
-    // lane k holds column k + sh (band window, `XdropScratch::x_shift`)
+    // `sb` lane k + 1 holds column k + sh (band window, `XdropScratch::x_shift`)
     let sh = sc.x_sh;
     let mut k = sc.sb_filled;
     if ncols > 0 && (s.step == 1 || s.step == -1) {

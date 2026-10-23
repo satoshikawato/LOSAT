@@ -669,7 +669,8 @@ pub(crate) fn x_dp_window_at() -> usize {
     use std::sync::OnceLock;
     static AT: OnceLock<usize> = OnceLock::new();
     *AT.get_or_init(|| {
-        crate::utils::xswitch::value("LOSAT_X_DPWINDOW", 128..=1 << 40, 1024).unwrap_or(usize::MAX)
+        crate::utils::xswitch::value("LOSAT_X_DPWINDOW", 128..=usize::MAX, 1024)
+            .unwrap_or(usize::MAX)
     })
 }
 
@@ -3442,17 +3443,19 @@ mod tests {
                 if moved > 0 {
                     shifted += 1;
                     assert!(
-                        rows_len <= 4096,
+                        rows_len <= 2048,
                         "case {case}: rows of {rows_len} lanes after moving {moved} columns"
                     );
                 }
             }
         }
+        // the opt-in NEON2 kernels (LOSAT_X_DPNEON2) never move their rows
         if cfg!(any(
             target_arch = "x86_64",
             all(target_arch = "wasm32", target_feature = "simd128"),
             target_arch = "aarch64"
-        )) {
+        )) && std::env::var_os("LOSAT_X_DPNEON2").is_none()
+        {
             assert!(
                 handled > 40 && shifted > 20,
                 "handled {handled}, moved {shifted}"

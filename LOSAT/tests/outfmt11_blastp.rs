@@ -221,6 +221,9 @@ const CASES: &[Case] = &[
     ),
 ];
 
+/// The cases that the query-block search can take: more than one batch, no reader `stop`.
+const MULTI_BATCH: &[&str] = &["batches_sub", "batches_sub_bin", "warn_sub", "invbatch_sub"];
+
 fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     let mut env: Vec<(&str, &str)> = case.env.to_vec();
     env.extend_from_slice(extra_env);
@@ -240,11 +243,13 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
         want.len()
     );
     // The shadow's summary line (`LOSAT_X_BPQBLOCKFMTSHADOW`) must say the bytes were identical.
+    let mut shadow_lines = 0;
     let stderr: Vec<u8> = output
         .stderr
         .split_inclusive(|&byte| byte == b'\n')
         .filter(|line| {
             if line.starts_with(b"[X_SHADOW]") {
+                shadow_lines += 1;
                 assert!(
                     line.ends_with(b" identical\n"),
                     "{label}: {}",
@@ -259,6 +264,15 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
         .copied()
         .collect();
     assert_eq!(stderr, frozen(case.name, "err"), "{label}: stderr");
+    let shadow_run = extra_env
+        .iter()
+        .any(|&(name, _)| name == "LOSAT_X_BPQBLOCKFMTSHADOW");
+    if shadow_run {
+        assert_eq!(
+            shadow_lines, 1,
+            "{label}: one shadow line, ending in identical"
+        );
+    }
 }
 
 #[test]
@@ -276,7 +290,9 @@ fn archives_equal_ncbis_at_one_and_four_threads() {
 /// queries; `LOSAT_X_BPQBLOCKSA=0` keeps the search of all queries.
 #[test]
 fn query_blocks_do_not_change_the_archives() {
-    for case in CASES {
+    // Only these cases run more than one batch to a searched end: the others have one batch, or
+    // stop or fail before a search, so the plan of blocks refuses them.
+    for case in CASES.iter().filter(|case| MULTI_BATCH.contains(&case.name)) {
         for extra in [
             &[("LOSAT_X_BPQBLOCK", "1")][..],
             &[

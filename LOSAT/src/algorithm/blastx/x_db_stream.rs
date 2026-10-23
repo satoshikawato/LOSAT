@@ -295,6 +295,18 @@ impl XBlock {
         }
         unreachable!("sequence {oid} is outside its block")
     }
+
+    /// The residues of `oid` (in the block) between the sentinel bytes of the volume.
+    fn x_residues_with_sentinels(&self, oid: usize) -> &[u8] {
+        let mut i = oid - self.first;
+        for part in &self.parts {
+            if i < part.len() {
+                return part.protein_with_sentinels(i);
+            }
+            i -= part.len();
+        }
+        unreachable!("sequence {oid} is outside its block")
+    }
 }
 
 /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the subjects of a `-db` search read in blocks
@@ -313,6 +325,21 @@ impl<'a> XStream<'a> {
         match self.block {
             Some(block) if block.contains(oid) => Cow::Borrowed(block.residues_with_sentinel(oid)),
             _ => Cow::Owned(self.db.outside_block(oid)),
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `encoded_with_sentinel` with the sentinel byte before the
+    /// residues too.
+    pub(crate) fn x_encoded_with_sentinels(&self, oid: usize) -> Cow<'a, [u8]> {
+        match self.block {
+            Some(block) if block.contains(oid) => {
+                Cow::Borrowed(block.x_residues_with_sentinels(oid))
+            }
+            _ => {
+                let mut residues = vec![0];
+                residues.extend_from_slice(&self.db.outside_block(oid));
+                Cow::Owned(residues)
+            }
         }
     }
 

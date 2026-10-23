@@ -115,6 +115,24 @@ impl<'a> Subjects<'a> {
         }
     }
 
+    /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `encoded_with_sentinel` with the byte 0 before the
+    /// residues too (a database's bytes as they are stored: the sentinel of the sequence before).
+    pub(crate) fn x_encoded_with_sentinels(&self, oid: usize) -> Cow<'a, [u8]> {
+        match *self {
+            Subjects::Fasta(records) => {
+                let record = &records[oid];
+                let mut encoded = Vec::with_capacity(record.sequence.len() + 2);
+                encoded.push(0);
+                encoded.extend(record.sequence.iter().copied().map(aa_char_to_ncbistdaa));
+                encoded.push(0);
+                Cow::Owned(encoded)
+            }
+            Subjects::Database(stores) => Cow::Borrowed(stores.x_residues_with_sentinels(oid)),
+            Subjects::Stream(stream) => stream.x_encoded_with_sentinels(oid),
+            Subjects::Unreadable => unreachable!("no subject is read from an unreadable database"),
+        }
+    }
+
     /// The NCBIstdaa residues of subject `oid` (what the linking, the redo and the
     /// traceback read), as `encoded_with_sentinel` without the byte 0.
     pub(crate) fn encoded(&self, oid: usize) -> Cow<'a, [u8]> {

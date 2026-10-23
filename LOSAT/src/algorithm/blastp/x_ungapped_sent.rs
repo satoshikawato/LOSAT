@@ -176,6 +176,12 @@ impl<'a> XSentSubject<'a> {
             && aa_seq.iter().fold(0u8, |a, &c| a | c) < CODES;
         ok.then_some(Self { aa_seq })
     }
+
+    /// The buffer, `[0, subject.., 0]`.
+    #[inline]
+    pub(crate) fn with_sentinels(self) -> &'a [u8] {
+        self.aa_seq
+    }
 }
 
 /// One walk of `s_BlastAaExtendRight` (`RIGHT`) or `s_BlastAaExtendLeft` from `qp`, `sp`, until
@@ -247,17 +253,48 @@ pub(crate) unsafe fn two_hit(
     q_right_off: usize,
     dropoff: i32,
 ) -> Option<BlastpTwoHitUngappedResult> {
+    two_hit_in::<2>(
+        query.table,
+        &query.padded,
+        subject.aa_seq,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        dropoff,
+    )
+}
+
+/// [`two_hit`] on two buffers that start with a sentinel and end with one: the reference's
+/// sequences are `query[1..query.len() - TAIL + 1]` and the same of `subject` (`TAIL` 2: blastp's
+/// query block and `subject_raw`, without the last sentinel; 1: BLASTX's six-frame query and
+/// subject, which keep it). A const per caller keeps each caller's instance its own.
+///
+/// SAFETY: `1 <= dropoff <= 127`; both buffers have a sentinel (code 0) at index 0 and at their
+/// last index, at most `i32::MAX / 16` letters in `query`, fewer than `i32::MAX` bytes in
+/// `subject`, and `TAIL` is 1 or 2.
+// NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
+#[inline(always)]
+pub(crate) unsafe fn two_hit_in<const TAIL: usize>(
+    table: &Table,
+    query: &[u8],
+    subject: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    dropoff: i32,
+) -> Option<BlastpTwoHitUngappedResult> {
     debug_assert!((1..=MAX_DROPOFF).contains(&dropoff));
-    let qlen = query.padded.len() - 2;
-    let slen = subject.aa_seq.len() - 2;
+    debug_assert!(TAIL == 1 || TAIL == 2);
+    let qlen = query.len() - TAIL;
+    let slen = subject.len() - TAIL;
     // The early return of the reference wrapper (a word that does not fit).
     if q_right_off + WORD_SIZE > qlen || s_right_off + WORD_SIZE > slen {
         return None;
     }
-    let tab = query.table.as_ptr();
-    // offset 0 of the query block and of `subject_raw`; one sentinel before each
-    let qb = query.padded.as_ptr().add(1);
-    let sb = subject.aa_seq.as_ptr().add(1);
+    let tab = table.as_ptr();
+    // offset 0 of the reference's sequences; one sentinel before each
+    let qb = query.as_ptr().add(1);
+    let sb = subject.as_ptr().add(1);
     let mut q_right_off = q_right_off as i32;
     let s_left_off = s_left_off as i32;
     let mut s_right_off = s_right_off as i32;
@@ -299,8 +336,11 @@ pub(crate) unsafe fn two_hit(
     let mut right_d = 0i32;
     if left_d >= (s_right_off - s_left_off) {
         right_extend = true;
-        // SAFETY: q_right_off <= qlen and s_right_off <= slen, and both have a sentinel at
-        // offset qlen / slen.
+        // SAFETY: with TAIL 2, q_right_off <= qlen and s_right_off <= slen, and both have a
+        // sentinel at offset qlen / slen. With TAIL 1 the last sentinel is at offset qlen - 1 /
+        // slen - 1, and the walk starts at or before it: the word ends at that offset at most, and
+        // a word whose last letter is a sentinel has right_d < 3 (that letter scores -128, the
+        // other two 11 each at most), so the start is past it only when it is not in the word.
         let (best, len, end) = walk::<true>(
             tab,
             qb.add(q_right_off as usize),

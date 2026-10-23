@@ -60,6 +60,9 @@ pub struct PreparedQueryBatch {
     pub sequence_start_nomask: Vec<u8>,
     pub lookup_segments: Vec<(i32, i32)>,
     pub split_eligible: bool,
+    /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): whether `sequence_start` is on the path of the seed
+    /// loops' sentinel walks (`seed/x_ungap_sent.rs`, `query_fits`; false with the switch off).
+    pub(crate) x_ungap_sent: bool,
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:123-136
 // ```c++
@@ -472,6 +475,7 @@ pub fn prepare_queries(
         );
     }
     let lookup_segments = complement_masks(&contexts);
+    let x_ungap_sent = super::seed::x_ungap_sent::query_fits(&buffer);
     Ok(PreparedQueryBatch {
         original_lengths: records.iter().map(|r| r.sequence.len()).collect(),
         contexts,
@@ -482,6 +486,7 @@ pub fn prepare_queries(
         sequence_start_nomask: nomask,
         lookup_segments,
         split_eligible: records.len() == 1 && options.gapped,
+        x_ungap_sent,
     })
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:923-929

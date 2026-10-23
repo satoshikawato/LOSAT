@@ -1399,7 +1399,16 @@ fn compute_subject(
     #[cfg(feature = "blastx-worker-probe")]
     worker_probe("start", oid);
     let mut containment = Vec::new();
-    let encoded = subjects.encoded_with_sentinel(oid);
+    // EXPERIMENT (LOSAT_X_BXUNGAPSENT): for a batch on the path of the seed loops' sentinel walks,
+    // the subject with the sentinel before its residues too (`seed/x_ungap_sent.rs`); `encoded` is
+    // the same bytes either way.
+    let x_lead = batch.x_ungap_sent;
+    let x_buffer = if x_lead {
+        subjects.x_encoded_with_sentinels(oid)
+    } else {
+        subjects.encoded_with_sentinel(oid)
+    };
+    let encoded: &[u8] = &x_buffer[usize::from(x_lead)..];
     // `subjects.length(oid)` for every kind of subjects: the residues before the sentinel byte (a
     // database read in blocks then looks the subject up once, LOSAT_X_BXDBSTREAM).
     let subject_length = encoded.len() - 1;
@@ -1477,8 +1486,18 @@ fn compute_subject(
         && (super::seed::x_seed_scan::x_bxscan_mode() != 0
             || super::seed::x_seed_diag::x_bxdiag_mode() != 0)
     {
+        let x_sent = if x_lead {
+            super::seed::x_ungap_sent::XSent::new(
+                &batch.sequence_start,
+                x_lead,
+                options.word_size,
+                &x_buffer,
+            )
+        } else {
+            None
+        };
         super::seed::x_seed_scan::x_word_finder_scan(
-            batch, params, options, &encoded, lookup, diagonals,
+            batch, params, options, encoded, lookup, diagonals, x_sent,
         )?
     } else {
         word_finder(

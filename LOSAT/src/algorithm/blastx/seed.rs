@@ -40,6 +40,13 @@ pub mod x_seed_scan;
 #[path = "x_seed_diag.rs"]
 pub mod x_seed_diag;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1155
+// `s_BlastAaExtendTwoHit`.
+// EXPERIMENT (LOSAT_X_BXUNGAPSENT): the two-hit extension of the seed loops with the walks that
+// the sentinels stop.
+#[path = "x_ungap_sent.rs"]
+pub(crate) mod x_ungap_sent;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65
 // ```c++
 //         Int4 diag_array_length;

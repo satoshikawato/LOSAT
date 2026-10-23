@@ -370,6 +370,7 @@ pub(crate) fn x_word_finder_diag(
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
+    sent: Option<super::x_ungap_sent::XSent<'_>>,
 ) -> Result<Option<Vec<InitHsp>>> {
     let Lookup::Standard(table) = lookup else {
         if x_bxdiag_mode() != 2 {
@@ -406,6 +407,7 @@ pub(crate) fn x_word_finder_diag(
             subject,
             table,
             diagonals,
+            sent,
         )?;
         x_add_counts(counts);
         return Ok(Some(hits));
@@ -433,6 +435,7 @@ pub(crate) fn x_word_finder_diag(
         subject,
         table,
         diagonals,
+        sent,
     )?;
     x_add_counts(counts);
     if fused != reference {
@@ -486,6 +489,8 @@ fn x_add_counts(counts: [u64; 3]) {
 /// the branch-free scan with `branch_free`, LOSAT_X_BXSCANBF); also returns the cells tested in
 /// batches, their hits and the candidates.
 /// `subject` starts at the first residue and keeps the sentinel after the last one.
+/// EXPERIMENT (LOSAT_X_BXUNGAPSENT): with `sent` the two-hit extension is its sentinel walks
+/// (`x_ungap_sent.rs`), in a closure of its own (the closure without it keeps its code).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
 // ```c
 //         wordsize = lookup->word_length;
@@ -513,6 +518,7 @@ fn x_word_finder_fused(
     subject: &[u8],
     table: &BlastAaLookupTable,
     diagonals: &mut Diagonals,
+    sent: Option<super::x_ungap_sent::XSent<'_>>,
 ) -> Result<(Vec<InitHsp>, [u64; 3])> {
     let query = &batch.sequence_start[1..];
     let word = options.word_size;
@@ -524,110 +530,131 @@ fn x_word_finder_fused(
     let length = subject.len().saturating_sub(1);
     let mut hits = Vec::new();
     let counts = x_with_context_table(batch, |contexts| {
-        x_scan_two_hit_with(
-            mode,
-            branch_free,
-            table,
-            subject,
-            length,
-            &mut diagonals.entries,
-            mask,
-            offset,
-            options.window_size,
-            word,
-            |q, s, previous, diff, entry| {
-                // From here to the end of the closure: the statements of x_word_finder_direct after
-                // the diagonal tests (`previous` = last_hit - diag_offset, `diff` = s - previous).
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560
-                // ```c
-                //                 curr_context = BSearchContextInfo(query_offset, query_info);
-                // ```
-                // The table's index is the binary search's (x_with_context_table); an offset outside
-                // the table (none from the lookup) takes the binary search.
-                let context = contexts.get(q).unwrap_or_else(|| {
-                    batch
-                        .contexts
-                        .partition_point(|c| c.offset as i32 <= q)
-                        .saturating_sub(1)
-                });
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
-                // ```c
-                //                 if (query_offset - diff <
-                //                     query_info->contexts[curr_context].query_offset) {
-                //
-                //                     /* there was no last hit for this diagnol; start a new hit */
-                //                     diag_array[diag_coord].last_hit =
-                //                         subject_offset + diag_offset;
-                //                     continue;
-                //                 }
-                // ```
-                if q - diff < batch.contexts[context].offset as i32 {
-                    entry.set_last_hit(s.wrapping_add(offset));
-                    return;
-                }
-                let p = &parameters[context];
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
-                // ```c
-                //                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
-                //                                               last_hit + wordsize,
-                //                                               subject_offset, query_offset,
-                //                                               cutoffs->x_dropoff,
-                //                                               &hsp_q, &hsp_s,
-                //                                               &hsp_len, use_pssm,
-                //                                               wordsize, &right_extend,
-                // ```
-                let Some(result) = extend_two_hit_blosum62(
-                    query,
+        // The candidate closure with the extension `$extend` (`extend_two_hit_blosum62`'s
+        // arguments and result).
+        macro_rules! scan {
+            ($extend:expr) => {
+                x_scan_two_hit_with(
+                    mode,
+                    branch_free,
+                    table,
                     subject,
-                    (previous + word) as usize,
-                    s as usize,
-                    q as usize,
-                    p.word_xdrop,
-                    word as usize,
-                ) else {
-                    return;
+                    length,
+                    &mut diagonals.entries,
+                    mask,
+                    offset,
+                    options.window_size,
+                    word,
+                    |q, s, previous, diff, entry| {
+                        // From here to the end of the closure: the statements of x_word_finder_direct after
+                        // the diagonal tests (`previous` = last_hit - diag_offset, `diff` = s - previous).
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560
+                        // ```c
+                        //                 curr_context = BSearchContextInfo(query_offset, query_info);
+                        // ```
+                        // The table's index is the binary search's (x_with_context_table); an offset outside
+                        // the table (none from the lookup) takes the binary search.
+                        let context = contexts.get(q).unwrap_or_else(|| {
+                            batch
+                                .contexts
+                                .partition_point(|c| c.offset as i32 <= q)
+                                .saturating_sub(1)
+                        });
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
+                        // ```c
+                        //                 if (query_offset - diff <
+                        //                     query_info->contexts[curr_context].query_offset) {
+                        //
+                        //                     /* there was no last hit for this diagnol; start a new hit */
+                        //                     diag_array[diag_coord].last_hit =
+                        //                         subject_offset + diag_offset;
+                        //                     continue;
+                        //                 }
+                        // ```
+                        if q - diff < batch.contexts[context].offset as i32 {
+                            entry.set_last_hit(s.wrapping_add(offset));
+                            return;
+                        }
+                        let p = &parameters[context];
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
+                        // ```c
+                        //                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
+                        //                                               last_hit + wordsize,
+                        //                                               subject_offset, query_offset,
+                        //                                               cutoffs->x_dropoff,
+                        //                                               &hsp_q, &hsp_s,
+                        //                                               &hsp_len, use_pssm,
+                        //                                               wordsize, &right_extend,
+                        // ```
+                        let Some(result) = $extend(
+                            query,
+                            subject,
+                            (previous + word) as usize,
+                            s as usize,
+                            q as usize,
+                            p.word_xdrop,
+                            word as usize,
+                        ) else {
+                            return;
+                        };
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-606
+                        // ```c
+                        //                 if (score >= cutoffs->cutoff_score)
+                        //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+                        //                                      query_offset, subject_offset, hsp_len,
+                        //                                      score);
+                        //
+                        //                 /* If an extension to the right happened, reset the last hit
+                        //                    so that future hits to this diagonal must start over. */
+                        //
+                        //                 if (right_extend) {
+                        //                     diag_array[diag_coord].flag = 1;
+                        //                     diag_array[diag_coord].last_hit =
+                        //                         s_last_off - (wordsize - 1) + diag_offset;
+                        //                 }
+                        //                 /* Otherwise, make the present hit into the previous hit for
+                        //                    this diagonal */
+                        //                 else {
+                        //                     diag_array[diag_coord].last_hit =
+                        //                         subject_offset + diag_offset;
+                        //                 }
+                        // ```
+                        let u = result.ungapped_data;
+                        if u.score >= p.word_cutoff {
+                            hits.push(InitHsp {
+                                q_seed: q,
+                                s_seed: s,
+                                q_start: u.q_start,
+                                s_start: u.s_start,
+                                length: u.length,
+                                score: u.score,
+                            });
+                        }
+                        if result.right_extend {
+                            entry.set_flag(1);
+                            entry.set_last_hit((result.s_last_off - (word - 1)).wrapping_add(offset));
+                        } else {
+                            entry.set_last_hit(s.wrapping_add(offset));
+                        }
+                    },
+                )
+            };
+        }
+        match sent {
+            None => scan!(extend_two_hit_blosum62),
+            Some(sent) if sent.shadow() => {
+                let extend = |_: &[u8], _: &[u8], s_left, s_right, q_right, dropoff, _: usize| {
+                    sent.two_hit::<true>(s_left, s_right, q_right, dropoff)
                 };
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-606
-                // ```c
-                //                 if (score >= cutoffs->cutoff_score)
-                //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                //                                      query_offset, subject_offset, hsp_len,
-                //                                      score);
-                //
-                //                 /* If an extension to the right happened, reset the last hit
-                //                    so that future hits to this diagonal must start over. */
-                //
-                //                 if (right_extend) {
-                //                     diag_array[diag_coord].flag = 1;
-                //                     diag_array[diag_coord].last_hit =
-                //                         s_last_off - (wordsize - 1) + diag_offset;
-                //                 }
-                //                 /* Otherwise, make the present hit into the previous hit for
-                //                    this diagonal */
-                //                 else {
-                //                     diag_array[diag_coord].last_hit =
-                //                         subject_offset + diag_offset;
-                //                 }
-                // ```
-                let u = result.ungapped_data;
-                if u.score >= p.word_cutoff {
-                    hits.push(InitHsp {
-                        q_seed: q,
-                        s_seed: s,
-                        q_start: u.q_start,
-                        s_start: u.s_start,
-                        length: u.length,
-                        score: u.score,
-                    });
-                }
-                if result.right_extend {
-                    entry.set_flag(1);
-                    entry.set_last_hit((result.s_last_off - (word - 1)).wrapping_add(offset));
-                } else {
-                    entry.set_last_hit(s.wrapping_add(offset));
-                }
-            },
-        )
+                scan!(extend)
+            }
+            Some(sent) => {
+                let extend = |_: &[u8], _: &[u8], s_left, s_right, q_right, dropoff, _: usize| {
+                    sent.two_hit::<false>(s_left, s_right, q_right, dropoff)
+                };
+                scan!(extend)
+            }
+        }
     });
     // The rest of word_finder, unchanged.
     diagonals.finish_subject(length)?;
@@ -781,6 +808,7 @@ mod tests {
                 subject,
                 table,
                 &mut fused,
+                None,
             )
             .unwrap();
             let run = format!("{mode:?} branch_free={branch_free} subject {i}");

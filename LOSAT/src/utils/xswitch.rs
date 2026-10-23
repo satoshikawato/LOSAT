@@ -119,6 +119,10 @@ use std::sync::OnceLock;
 /// `LOSAT_X_TBNFLOWHELP` (a thread that waits in TBLASTN's subject flow runs the pool's jobs
 /// meanwhile, `tblastn/x_oid_flow.rs`) joined the set in the pull request that added it, after it
 /// was verified and timed with it on and off.
+/// `LOSAT_X_TBNUNITXLATE` (a long packed TBLASTN subject searched by one query batch gets a plan
+/// without residues, and each unit translates the residues it reads,
+/// `tblastn/x_subject_translate.rs`) joined the set in the pull request that added it, after it
+/// was verified and timed with it on and off.
 /// `LOSAT_X_BXSUBJFLOW` (BLASTX's subject loop of a query chunk as a flow of tasks of 64 subjects
 /// searched ahead by the pool's other threads, `blastx/x_subject_flow.rs`) joined the set in the
 /// pull request that added it (Owner 2026-10-17: speed-ups land default ON), after it was
@@ -220,6 +224,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNSCANBF",
     "LOSAT_X_TBNSCANBYTE",
     "LOSAT_X_TBNSTORE",
+    "LOSAT_X_TBNUNITXLATE",
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXBAND",
     "LOSAT_X_TBXEXTBATCH",

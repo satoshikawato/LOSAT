@@ -358,6 +358,7 @@ export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNSCANBF=1
 export LOSAT_X_TBNSCANBYTE=1
 export LOSAT_X_TBNSTORE=1
+export LOSAT_X_TBNUNITXLATE=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXBAND=1
 export LOSAT_X_TBXEXTBATCH=256
@@ -4093,6 +4094,27 @@ Scheduling (each value computed by one thread with the original function; order 
   reference frame loop, which scans each subject frame once with the batch's table: 0.99 (47.33 ->
   46.91 s). Joined the strict set on these timings (no case slower; Owner decision of 2026-10-17 that
   the branch-free scans of blastp / blastx / tblastx join the set once each shows no loss).
+- `LOSAT_X_TBNUNITXLATE=1` tblastn (speed and memory; in the strict set from the pull request that added it,
+  2026-10-23; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_packed_lean_plan`, `x_unit_residues`,
+  `tblastn/search_gapped.rs` `X_UNIT_RESIDUES`): the plan of a packed subject (every `-db` sequence, `-subject`
+  with `TBNSTORE`) whose first frame has 1 MiB or more (3,145,722 bases) and which is made for one search (not
+  a plan `TBNSSIDE` keeps for 4+ query batches) has no residues: its frames have their lengths and its units
+  their chunks, and each (frame, chunk) unit translates the residues it reads, from the chunk's first to 4,096
+  past its last (or the frame's end sentinel), into a buffer its thread keeps, from the packed bytes of its
+  phase and strand with the tables and loops of `TBNXLATESIMD` (32 codons with AVX2, else eight from one word).
+  Before, the thread that took a chromosome translated its six frames (up to 83 MB each on the human genome)
+  before the chromosome's units started, glibc mapped them fresh and unmapped them after the subject
+  (`x_frame_capacity`), and the frames of the chromosomes searched at the same time made the peak memory. A unit
+  reads its chunk and nothing else and its residues are the frame's bytes, so the reports are the same (unit
+  tests `x_one_strand_of_a_phase_is_that_strand_of_both`, `x_frame_residues_of_a_range_are_the_frames`,
+  `x_lean_plans_are_the_plans_without_residues`, `x_units_of_a_frame_of_three_chunks_read_the_frames_residues`;
+  `tests/tblastn_unit_xlate.rs`). The buffer is taken from the thread for the unit and given back after it, so a
+  unit the thread runs while it waits (`TBNFLOWHELP`) makes its own. Subjects with shorter frames keep frames
+  of the plan (reused by `TBNFRAMEREUSE`). Shadow: `LOSAT_X_TBNUNITXLATESHADOW=1` (any value) keeps the frames,
+  translates the residues of every unit of every packed subject with and without the vector loop, stops
+  (panic) at the first that differs from the frame's and prints `[X_SHADOW] TBNUNITXLATE units_compared=
+  residues_compared=` at exit. With `LOSAT_X_STATS=1` `[X_STATS] TBNUNITXLATE plans= units= residues=` counts
+  the plans without residues and the units' residues. MEASURED.
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject`: each subject record's letters are packed as soon as the
   reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST database volume: ncbi2na 4
   bases per byte with the remainder count in the last byte, the runs of letters other than `ACGT`

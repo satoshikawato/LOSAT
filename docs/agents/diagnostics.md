@@ -2644,12 +2644,12 @@ Scheduling (each value computed by one thread with the original function; order 
   `hashtable`, `next_pos`, `pv_array`, the helper counters, the words of a two-stage table and the debug counters (a
   difference panics; at exit `[X_SHADOW] MBFILL compared=N`).
   Measured 2026-10-23 on the workstation (node 1, one pinned core, HT sibling idle, warmed 3 s; 5 rounds, the arm order
-  reversed every other round; `perf stat` cycles against the binary before, `dev` d375e527; outputs and max RSS
-  identical in every arm): megablast of Sakai against MG1655 x0.904 (0.681 -> 0.621 s; the fill 0.189 -> 0.130 s under
-  `LOSAT_TIMING`, 0.6 G fewer instructions), of 31,168 D. melanogaster cDNAs against dmel_dna_3M x0.877 (5.66 -> 5.01 s,
-  37 table builds), blastn of the cDNAs against MG1655 x0.987 (91 two-stage builds); megablast of Sakai at 8 threads
-  (pool fill) x0.999. `=0` x0.983-1.000 of the binary before (0.3-0.8 % fewer instructions: the queued loop sits
-  behind the dispatch now).
+  reversed every other round; `perf stat` cycles against the binary before, `dev` ceaef53e; outputs and max RSS
+  identical in every arm): megablast of Sakai against MG1655 x0.906 (0.683 -> 0.623 s; the fill 0.189 -> 0.131 s under
+  `LOSAT_TIMING`, 9 % fewer instructions), of 31,168 D. melanogaster cDNAs against dmel_dna_3M x0.874 (5.73 -> 5.06 s,
+  37 table builds), of Sakai with every 20th letter N (runs of 19 letters, 8 words a run) x0.907, blastn of the cDNAs
+  against MG1655 x0.985 (91 two-stage builds); megablast of Sakai at 8 threads (pool fill) x1.001. `=0` x0.976-0.999
+  of the binary before (0.2-2.4 % fewer instructions: the queued loop sits behind the dispatch now).
 - `LOSAT_X_MBLUTKEEP=1` (BLASTN megablast and blastn, the contiguous megablast lookup table of `build_mb_lookup`; in the
   strict set since 2026-10-19 (perf/mb-lut-keep, evidence at the end of this entry): on unless it is `0`, or
   `LOSAT_X_DEFAULT=0` and it is not set) the batch loop keeps the table's `hashtable` from one query batch to the next

@@ -100,6 +100,8 @@ pub struct OptionInputs {
     /// `-max_target_seqs`, else `-num_alignments`, else 500.
     pub hitlist_size: i32,
     pub comp_based_stats: i32,
+    /// `-comp_based_stats 2u` (BLASTP, an adjusting mode): `SetUnifiedP(1)`.
+    pub unified_p: bool,
     pub use_sw_tback: bool,
 }
 
@@ -138,25 +140,16 @@ impl OptionInputs {
             db_gencode: 1,
             hitlist_size: 500,
             comp_based_stats: 2,
+            unified_p: false,
             use_sw_tback: false,
         }
     }
 }
 
-/// The `(gap open, gap extend)` that `-matrix` implies (`CBlastOptionsFactory` /
-/// `BlastScoringOptionsNew`'s tables, blast_stat.c).
+/// The `(gap open, gap extend)` that `-matrix` implies (`BLAST_GetProteinGapExistenceExtendParams`:
+/// the matrix's default row, which BLOSUM45 puts at 14 / 2).
 fn matrix_gaps(matrix: &str) -> (i32, i32) {
-    match matrix {
-        "BLOSUM62" => (11, 1),
-        "BLOSUM80" => (10, 1),
-        "PAM30" => (9, 1),
-        "BLOSUM45" => (15, 2),
-        "PAM70" => (10, 1),
-        "BLOSUM50" => (13, 2),
-        "BLOSUM90" => (10, 1),
-        "PAM250" => (14, 2),
-        _ => (11, 1),
-    }
+    crate::stats::protein_options::protein_gap_existence_extend_params(matrix).unwrap_or((11, 1))
 }
 
 /// The word threshold the matrix suggests (`BLAST_GetSuggestedThreshold`,
@@ -358,6 +351,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
         .to_string()
     });
     let protein_query = matches!(program, Program::Blastp | Program::Tblastn);
+    let mut threshold_set_by_word_size = false;
     for &class in class_order(program) {
         match class {
             Class::Db => {
@@ -387,6 +381,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 }
                 if let Some(word_size) = inputs.word_size {
                     if protein_query && word_size > 4 {
+                        threshold_set_by_word_size = true;
                         list.set("WordThreshold", Integer(19));
                         if word_size > 5 {
                             list.set("WordThreshold", Integer(21));
@@ -482,8 +477,14 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                     list.set("WordThreshold", Integer(threshold));
                 } else {
                     let current = list.get("WordThreshold").cloned();
+                    // The threshold that `blastp-short` records (16) is not the options'
+                    // value (the handle's 11) until a word size above 4 sets one: the class
+                    // then replaces it with the matrix's suggestion (probe `opt_short_matrix`).
                     let is_default = match current {
                         None => true,
+                        Some(_) if inputs.task == "blastp-short" && !threshold_set_by_word_size => {
+                            true
+                        }
                         Some(ParamValue::Integer(value)) => value == default_threshold(program),
                         Some(_) => false,
                     };
@@ -520,6 +521,9 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             Class::Formatting => list.set("HitlistSize", Integer(inputs.hitlist_size)),
             Class::Cbs => {
                 list.set("CompositionBasedStats", Integer(inputs.comp_based_stats));
+                if inputs.unified_p && inputs.comp_based_stats != 0 {
+                    list.set("UnifiedP", Integer(1));
+                }
                 list.set("SmithWatermanMode", Boolean(inputs.use_sw_tback));
             }
         }

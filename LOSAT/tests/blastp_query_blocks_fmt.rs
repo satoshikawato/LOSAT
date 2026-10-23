@@ -53,7 +53,7 @@ fn family_off(spec: &str) -> (&'static str, &'static str) {
     match spec {
         "5" => XML_OFF,
         "15" | "16" => XML2_OFF,
-        "8" | "9" | "12" => SA_OFF,
+        "8" | "9" | "11" | "12" => SA_OFF,
         _ => FMT_OFF,
     }
 }
@@ -87,6 +87,7 @@ fn blastp(
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
             || text == "BATCH_SIZE"
+            || text == "ARCHIVE_FORMAT"
             || text == "CHUNK_SIZE"
             || text == "OVERLAP_CHUNK_SIZE"
             || text.starts_with("NCBI")
@@ -106,6 +107,7 @@ fn blastp(
         );
     }
     let output = command
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
         .arg("blastp")
         .arg("-query")
         .arg(query)
@@ -345,7 +347,7 @@ fn outfmt_5_8_9_12_15_16_blocks_write_the_report_of_the_search_of_all_queries() 
         [OsStr::new("-subject"), fasta.as_os_str()],
         [OsStr::new("-db"), db.as_os_str()],
     ] {
-        for spec in ["5", "8", "9", "12", "15", "16"] {
+        for spec in ["5", "8", "9", "11", "12", "15", "16"] {
             let fmt = outfmt(spec);
             for (threads, letters) in [(1, "1"), (2, "1"), (4, "20000")] {
                 let what = format!("{:?} outfmt {spec} threads {threads}", subject[0]);
@@ -391,7 +393,7 @@ fn the_default_writes_outfmt_5_8_9_12_15_16_in_blocks() {
     let query = fixture("MeenMJNV.faa");
     let fasta = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), fasta.as_os_str()];
-    for spec in ["5", "8", "9", "12", "15", "16"] {
+    for spec in ["5", "8", "9", "11", "12", "15", "16"] {
         let fmt = outfmt(spec);
         let family = match spec {
             "5" => ("LOSAT_X_BPQBLOCKXML", "1"),
@@ -464,7 +466,7 @@ fn query_warnings_keep_their_place_before_each_report() {
     let query = write_file(&dir, "queries.faa", &text);
     let fasta = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), fasta.as_os_str()];
-    for spec in ["0", "7", "6", "5", "8", "12", "15", "16"] {
+    for spec in ["0", "7", "6", "5", "8", "11", "12", "15", "16"] {
         let fmt = outfmt(spec);
         for threads in THREADS {
             let what = format!("outfmt {spec} threads {threads}");
@@ -482,7 +484,7 @@ fn query_warnings_keep_their_place_before_each_report() {
                     );
                     assert!(reference.stderr.is_empty(), "{what}: {}", reference.stderr);
                 }
-                "8" | "12" => {
+                "8" | "11" | "12" => {
                     assert!(reference.stderr.is_empty(), "{what}: {}", reference.stderr);
                 }
                 _ => assert!(
@@ -590,7 +592,7 @@ fn the_out_file_and_the_shadow() {
         [OsStr::new("-subject"), fasta.as_os_str()],
         [OsStr::new("-db"), db.as_os_str()],
     ] {
-        for spec in ["0", "6", "7", "5", "8", "9", "12", "15", "16"] {
+        for spec in ["0", "6", "7", "5", "8", "9", "11", "12", "15", "16"] {
             let fmt = outfmt(spec);
             let what = format!("{:?} outfmt {spec}", subject[0]);
             let reference = blastp(&query, &subject, 4, &[BATCH, SWITCH_OFF], &os(&fmt));
@@ -721,7 +723,7 @@ fn queries_without_hits_at_the_edges_of_blocks() {
         [OsStr::new("-subject"), fasta.as_os_str()],
         [OsStr::new("-db"), db.as_os_str()],
     ] {
-        for spec in ["5", "8", "9", "12", "15", "16"] {
+        for spec in ["5", "8", "9", "11", "12", "15", "16"] {
             let fmt = outfmt(spec);
             for threads in THREADS {
                 let what = format!("{:?} outfmt {spec} threads {threads}", subject[0]);
@@ -1411,4 +1413,78 @@ fn queries_of_an_unsearched_batch_are_written_by_the_block_that_holds_them() {
     }
     std::fs::remove_dir_all(db.parent().unwrap()).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// The BLAST archive (outfmt 11) in blocks, on the fixture pair of the frozen `db.sa.bpqb.*` rows
+// (`tests/db_search/paja`, 30 queries of 11,940 letters): `db.sa.arch.bp.paja.11` (two NCBI batches,
+// two archives) and `db.sa.arch.bp.pajab.11` (`BATCH_SIZE=3000`, several). With `LOSAT_X_BPQBLOCK=80`
+// every NCBI batch is a block of its own: the blocks' bytes equal the search of all queries
+// (`LOSAT_X_BPQBLOCK=0`) and NCBI's frozen bytes (standard error included, the option warning of
+// `-max_target_seqs 2` in the first archive), the shadow reports `identical`, `LOSAT_X_BPQBLOCKSA=0`
+// keeps the search of all queries, and `ARCHIVE_FORMAT=bin` gives the same documents as ASN.1
+// binary in blocks and out of them.
+#[test]
+fn the_archive_of_two_or_more_batches_is_written_by_blocks_as_by_the_search_of_all_queries() {
+    let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let frozen = engine.join("tests/fixtures/db_search");
+    // Relative to LOSAT/ (the helper runs there): the archive writes the `-db` name as typed.
+    let query = PathBuf::from("tests/db_search/bpqb_q.faa");
+    let database = PathBuf::from("tests/db_search/paja");
+    let extra: Vec<OsString> = ["-evalue", "0.1", "-max_target_seqs", "2", "-max_hsps", "1"]
+        .iter()
+        .map(OsString::from)
+        .collect();
+    let mut fmt = outfmt("11").to_vec();
+    fmt.extend(extra.iter().cloned());
+    let subject = [OsStr::new("-db"), database.as_os_str()];
+    let rows = [
+        ("db.sa.arch.bp.paja.11", None),
+        ("db.sa.arch.bp.pajab.11", Some(("BATCH_SIZE", "3000"))),
+    ];
+    for (row, batch) in rows {
+        let want = std::fs::read(frozen.join(format!("{row}.out"))).unwrap();
+        let want_err = std::fs::read_to_string(frozen.join(format!("{row}.err"))).unwrap();
+        for threads in THREADS {
+            let what = format!("{row} threads {threads}");
+            let mut vars: Vec<(&str, &str)> = batch.into_iter().collect();
+            // The -evalue of the helper is the fixture's: the row's own arguments follow.
+            let reference_vars: Vec<(&str, &str)> =
+                vars.iter().copied().chain([SWITCH_OFF]).collect();
+            let reference = blastp(&query, &subject, threads, &reference_vars, &os(&fmt));
+            assert!(reference.success, "{what}: {}", reference.stderr);
+            assert!(
+                reference.stdout == want,
+                "{what}: the search of all queries is not NCBI's"
+            );
+            assert_eq!(reference.stderr, want_err, "{what}: standard error");
+            vars.push(("LOSAT_X_BPQBLOCK", "80"));
+            let blocks = blastp(&query, &subject, threads, &vars, &os(&fmt));
+            assert_same(&blocks, &reference, true, &format!("{what} blocks"));
+            assert!(
+                blocks.stdout == want,
+                "{what}: blocks differ from NCBI's bytes"
+            );
+            vars.push(SHADOW);
+            let shadow = blastp(&query, &subject, threads, &vars, &os(&fmt));
+            assert!(shadow.success && shadow.stdout == want, "{what} shadow");
+            assert_eq!(shadow.shadow.len(), 1, "{what}: {:?}", shadow.shadow);
+            assert!(
+                shadow.shadow[0].ends_with(" identical"),
+                "{what}: {}",
+                shadow.shadow[0]
+            );
+            assert_eq!(shadow.stderr, want_err, "{what} shadow: standard error");
+            vars.pop();
+            vars.push(SA_OFF);
+            let off = blastp(&query, &subject, threads, &vars, &os(&fmt));
+            assert_same(&off, &reference, false, &format!("{what} family off"));
+            // The binary archive: blocks and search of all queries agree.
+            vars.pop();
+            vars.push(("ARCHIVE_FORMAT", "bin"));
+            let binary = blastp(&query, &subject, threads, &vars, &os(&fmt));
+            vars.retain(|(name, _)| *name != "LOSAT_X_BPQBLOCK");
+            let binary_reference = blastp(&query, &subject, threads, &vars, &os(&fmt));
+            assert_same(&binary, &binary_reference, true, &format!("{what} binary"));
+        }
+    }
 }

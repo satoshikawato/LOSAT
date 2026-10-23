@@ -440,6 +440,9 @@ pub(crate) struct XFlatCompressedLookup {
     pub(crate) compressed_alphabet_size: i32,
     pub(crate) reciprocal_alphabet_size: i32,
     pub(crate) longest_chain: i32,
+    /// The cells with hits (`finalize`'s `count`). EXPERIMENT (LOSAT_X_BPSCANBF): chooses how
+    /// `for_each_cell` lists the offsets ([`XFlatCompressedLookup::x_scan_bf_pays`]).
+    pub(crate) used_cells: usize,
     pub(crate) pv: Vec<u32>,
     pub(crate) pv_array_bts: i32,
     pub(crate) scaled_compress_table_u8: [i32; 256],
@@ -1136,6 +1139,7 @@ fn x_try_build_flat_with_capacity(
         compressed_alphabet_size: header.alphabet as i32,
         reciprocal_alphabet_size: header.reciprocal_alphabet_size,
         longest_chain,
+        used_cells: nonempty_count,
         pv,
         pv_array_bts: pv_array_bts as i32,
         scaled_compress_table_u8: build_scaled_compress_table_u8(&header.scaled_compress_table),
@@ -1367,20 +1371,59 @@ impl XFlatCompressedLookup {
     /// subject's one range, without the offset-pair array) on the flat table: calls
     /// `visit(subject_offset, hits)` for every cell found, with its slice. `cells` is scratch.
     ///
-    /// EXPERIMENT (LOSAT_X_BPSCANBF): with `BRANCH_FREE` the offsets are listed without a branch on
-    /// the presence bit, as `x_seed_fused::x_scan_cells_bf` lists them: every offset that reaches
-    /// `PV_TEST` is written at the list's end, and the list's length advances by the bit. The list
-    /// holds the same offsets and indices in the same order, so the calls are the same; `cells`
-    /// then reserves a place for every offset of the subject.
-    pub(crate) fn for_each_cell<const BRANCH_FREE: bool, V>(
+    /// EXPERIMENT (LOSAT_X_BPSCANBF): `branch_free` lists the offsets without a branch on the
+    /// presence bit ([`XFlatCompressedLookup::x_list_cells`]); the list, and so the calls, are the
+    /// same.
+    pub(crate) fn for_each_cell<V>(
         &self,
         subject: &[u8],
         subject_length: usize,
-        cells: &mut Vec<(i32, u32)>,
+        branch_free: bool,
+        cells: &mut Vec<u64>,
         mut visit: V,
     ) where
         V: FnMut(i32, &[i32]),
     {
+        if branch_free {
+            self.x_list_cells::<true>(subject, subject_length, cells);
+        } else {
+            self.x_list_cells::<false>(subject, subject_length, cells);
+        }
+        let starts = &self.starts;
+        for (n, &cell) in cells.iter().enumerate() {
+            // Cache hints only: the slice bounds of a cell X_STARTS_AHEAD cells ahead, and the hits of
+            // the cell X_HITS_AHEAD ahead (whose bounds were read ahead before).
+            if let Some(&later) = cells.get(n + X_STARTS_AHEAD) {
+                x_prefetch(starts.as_ptr().wrapping_add(x_listed_index(later)));
+            }
+            if let Some(&later) = cells.get(n + X_HITS_AHEAD) {
+                let start = starts[x_listed_index(later)] as usize;
+                x_prefetch(self.hits.as_ptr().wrapping_add(start));
+            }
+            let hits = self.cell(x_listed_index(cell));
+            if !hits.is_empty() {
+                visit(x_listed_offset(cell), hits);
+            }
+        }
+    }
+
+    /// The offsets of [`XFlatCompressedLookup::for_each_cell`]'s scan whose index passes
+    /// `PV_TEST`, in scan order, written to `cells` as [`x_listed`] (`cells` is cleared first).
+    /// Out of line: the loop then keeps its state in registers (inlined into the search's closure,
+    /// the branch-free loop kept the list's length and pointer on the stack).
+    ///
+    /// EXPERIMENT (LOSAT_X_BPSCANBF): with `BRANCH_FREE` the offsets are listed as
+    /// `x_seed_fused::x_scan_cells_bf` lists them: every offset that reaches `PV_TEST` is written at
+    /// the list's end, and the list's length advances by the presence bit. The list holds the same
+    /// offsets and indices in the same order; `cells` then reserves a place for every offset of
+    /// the subject.
+    #[inline(never)]
+    fn x_list_cells<const BRANCH_FREE: bool>(
+        &self,
+        subject: &[u8],
+        subject_length: usize,
+        cells: &mut Vec<u64>,
+    ) {
         let word_length = usize::try_from(self.word_length)
             .expect("NCBI BLAST compressed word length must fit usize");
         let compressed_alphabet_size = usize::try_from(self.compressed_alphabet_size)
@@ -1479,10 +1522,10 @@ impl XFlatCompressedLookup {
                 // SAFETY: each offset tested adds at most one to `listed`, so with `s0` the offset
                 // at the reserve, `listed <= s - s0 < s_last + 1 - s0`: inside the reserve of the
                 // empty `cells`.
-                unsafe { list.add(listed).write((s as i32, index as u32)) };
+                unsafe { list.add(listed).write(x_listed(s, index)) };
                 listed += bit as usize;
             } else if compressed_pv_test(pv, index as usize, pv_array_bts) {
-                cells.push((s as i32, index as u32));
+                cells.push(x_listed(s, index));
             }
             s += 1;
         }
@@ -1490,24 +1533,51 @@ impl XFlatCompressedLookup {
             // SAFETY: the first `listed` places were written above, within the reserve.
             unsafe { cells.set_len(listed) };
         }
-
-        let starts = &self.starts;
-        for (n, &(s, index)) in cells.iter().enumerate() {
-            // Cache hints only: the slice bounds of a cell X_STARTS_AHEAD cells ahead, and the hits of
-            // the cell X_HITS_AHEAD ahead (whose bounds were read ahead before).
-            if let Some(&(_, later)) = cells.get(n + X_STARTS_AHEAD) {
-                x_prefetch(starts.as_ptr().wrapping_add(later as usize));
-            }
-            if let Some(&(_, later)) = cells.get(n + X_HITS_AHEAD) {
-                let start = starts[later as usize] as usize;
-                x_prefetch(self.hits.as_ptr().wrapping_add(start));
-            }
-            let cell = self.cell(index as usize);
-            if !cell.is_empty() {
-                visit(s, cell);
-            }
-        }
     }
+
+    // No NCBI counterpart: chooses LOSAT's list form; both list the same offsets.
+    /// EXPERIMENT (LOSAT_X_BPSCANBF): whether [`XFlatCompressedLookup::for_each_cell`] lists this
+    /// table's offsets without a branch: at least [`x_scan_bf_min`] of every 10,000 backbone cells
+    /// have hits. With fewer, few offsets pass `PV_TEST` and the branch is mostly predicted.
+    pub(crate) fn x_scan_bf_pays(&self) -> bool {
+        x_dense_enough(self.used_cells, self.starts.len() - 1, x_scan_bf_min())
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BPSCANBF): `used` of `cells` backbone cells reach `min` per 10,000.
+fn x_dense_enough(used: usize, cells: usize, min: u64) -> bool {
+    used as u64 * 10_000 >= min * cells as u64
+}
+
+// No NCBI counterpart: reads LOSAT_X_BPSCANBFMIN once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPSCANBFMIN): the fewest backbone cells with hits, per 10,000, for which
+/// blastp-fast's scan lists the offsets without a branch (built-in 200); `0` every table; a value
+/// that is not a number takes the built-in one.
+fn x_scan_bf_min() -> u64 {
+    static MIN: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *MIN.get_or_init(|| {
+        std::env::var("LOSAT_X_BPSCANBFMIN")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(200)
+    })
+}
+
+/// A listed offset of [`XFlatCompressedLookup::x_list_cells`]: `subject_offset` in the low half,
+/// the backbone `index` in the high half (one store).
+#[inline(always)]
+fn x_listed(subject_offset: usize, index: i32) -> u64 {
+    subject_offset as u64 | u64::from(index as u32) << 32
+}
+
+#[inline(always)]
+fn x_listed_offset(listed: u64) -> i32 {
+    listed as u32 as i32
+}
+
+#[inline(always)]
+fn x_listed_index(listed: u64) -> usize {
+    (listed >> 32) as usize
 }
 
 // No NCBI counterpart: how many cells ahead `for_each_cell` reads the slice bounds and the hits. Tuning
@@ -1719,6 +1789,7 @@ pub(crate) fn x_assert_same_flat_tables_as(
             && got.compressed_alphabet_size == want.compressed_alphabet_size
             && got.reciprocal_alphabet_size == want.reciprocal_alphabet_size
             && got.longest_chain == want.longest_chain
+            && got.used_cells == want.used_cells
             && got.pv_array_bts == want.pv_array_bts
             && got.scaled_compress_table_u8 == want.scaled_compress_table_u8,
         "{what} table header differs"
@@ -2155,7 +2226,8 @@ mod tests {
     // ```
     // The scans: on random subjects (letters outside the alphabet none, rare, frequent; short
     // subjects), the flat `scan_subject` gives the reference's hits and rounds for arrays from the
-    // longest cell up, and `for_each_cell` gives the same hits.
+    // longest cell up, and `for_each_cell` gives the same hits, with the branch-free list too
+    // (LOSAT_X_BPSCANBF); `used_cells` counts the cells with hits.
     #[test]
     fn flat_scans_give_the_reference_scans_hits() {
         let mut rng = XorShift(0x3c6e_f372_fe94_f82b);
@@ -2175,6 +2247,8 @@ mod tests {
                 5, threshold, &query, &locations, &tables,
             ));
             assert!(reference.longest_chain > 5, "cells with overflow lists");
+            let used = flat.starts.windows(2).filter(|w| w[1] > w[0]).count();
+            assert!(used > 0 && flat.used_cells == used, "used cells");
             let longest = reference.longest_chain as usize;
             let mut subjects = Vec::new();
             for outside_one_in in [0usize, 50, 6, 2] {
@@ -2210,14 +2284,14 @@ mod tests {
                     expected.get_or_insert(want);
                 }
                 let mut fused = Vec::new();
-                flat.for_each_cell::<false, _>(subject, length, &mut cells, |s, hits| {
+                flat.for_each_cell(subject, length, false, &mut cells, |s, hits| {
                     fused.extend(hits.iter().map(|&q| (s as u32, q as u32)));
                 });
                 assert_eq!(Some(fused), expected, "subject {n}: for_each_cell");
                 // LOSAT_X_BPSCANBF: the branch-free list, on the used scratch and on a new one.
                 for mut scratch in [std::mem::take(&mut cells), Vec::new()] {
                     let mut fused = Vec::new();
-                    flat.for_each_cell::<true, _>(subject, length, &mut scratch, |s, hits| {
+                    flat.for_each_cell(subject, length, true, &mut scratch, |s, hits| {
                         fused.extend(hits.iter().map(|&q| (s as u32, q as u32)));
                     });
                     assert_eq!(
@@ -2229,5 +2303,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    // LOSAT_X_BPSCANBFMIN: a table takes the branch-free list from `min` used cells per 10,000 up;
+    // `0` takes it for every table, an empty one included.
+    #[test]
+    fn the_branch_free_list_starts_at_min_used_cells_per_ten_thousand() {
+        assert!(x_dense_enough(200, 10_000, 200));
+        assert!(!x_dense_enough(199, 10_000, 200));
+        assert!(x_dense_enough(15_188, 759_376, 200));
+        assert!(!x_dense_enough(15_187, 759_376, 200));
+        assert!(x_dense_enough(0, 759_376, 0));
     }
 }

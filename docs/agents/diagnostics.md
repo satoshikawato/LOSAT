@@ -4673,7 +4673,8 @@ Scheduling (each value computed by one thread with the original function; order 
   cells= batched_hits= candidates= min_hits_per_cell= tables_fused= tables_other= hits_per_cell=LEAST-MOST
   defer_min_hits_per_cell= tables_avx2=` (these two: `LOSAT_X_BXDEFER`'s rule), and with `mode=avx2-cross`
   `cross_splits=` (`LOSAT_X_BXCROSS`'s windows tested in parts). A query batch whose
-  lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 900,
+  lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 670
+  with `LOSAT_X_BXCROSS`'s cell test and 900 with the others; a number set is the cutoff of every cell test,
   `0` fuses every batch) is scanned by the direct loop instead, which is faster there; the
   choice is made once per thread and table and changes only the speed (the timing line counts the choices and
   gives the least and most hits per cell, in hundredths). The built-in value is 900 since the pull request
@@ -4692,7 +4693,15 @@ Scheduling (each value computed by one thread with the original function; order 
   x0.942, 8.38 x0.967, 8.63 x0.997, 8.92 x1.005, the cDNA x Swiss-Prot x0.847 (7.14 -> 6.06 s), 8.92 x
   Swiss-Prot x0.987, and x0.993-1.004 on the tables of 9 or more (the same loop as before).
   At 8 threads (node 1, 8 physical cores, 5 rounds): 6.77 x0.885 (0.125 -> 0.116 s), 8.38 x0.964, 8.92
-  x1.007, 9.85 x0.999. The measurements below came before `LOSAT_X_BXHITBF`. Where the two loops break even (one thread, `-db`
+  x1.007, 9.85 x0.999. With `LOSAT_X_BXCROSS`'s cell test (the default since 2026-10-23 on CPUs with
+  POPCNT) the two loops break even lower, and the built-in value for it is 670 since the pull request
+  perf/bx-diag-min-cross (2026-10-24; `LOSAT_X_BXDIAGMIN=900` gives the rule before; `LOSAT_X_BXCROSS=0` and
+  CPUs without POPCNT keep 900). The fused loop with the cross cell test against the direct loop (the same
+  setup, dev 0030a116, load 8-33; one cDNA or two of the 50 x the fly proteome, 8 rounds): 4.05 x1.135, 4.73
+  x1.120, 5.34 x1.063, 5.79 x1.050, 6.33 x1.011, 6.63 x0.986, 6.77 x0.978, 7.34 x0.947, 7.64 x0.928, 8.38
+  x0.902; against Swiss-Prot (4 rounds): 4.73 x1.157, 5.34 x1.109, 5.79 x1.079, 6.33 x1.040, 6.77 x1.013,
+  7.64 x0.951. They break even at about 6.46 against the fly proteome and 6.95 against Swiss-Prot; 670 lies
+  between, within 2 % of the faster loop on either side. CROSS_AB_PLACEHOLDER The measurements below came before `LOSAT_X_BXHITBF`. Where the two loops break even (one thread, `-db`
   UniRef50 2026_03 volume 00, both with `LOSAT_X_BXSCANBF=1`, every batch fused against the direct loop, 2
   rounds each; pieces of one 2.1-kb fly cDNA): hits per used cell 1.76 (300 nt) x1.20 the direct loop's
   time, 2.34 (600 nt; 41.48-41.66 s against 34.49-34.74 s) x1.20, 3.56 (1,000 nt; 68.62-68.86 / 63.55-64.06)
@@ -4738,7 +4747,8 @@ Scheduling (each value computed by one thread with the original function; order 
   cell about 106), so its last batch weighs more than in blastp. On a table with few hits per cell the masked
   batch and the buffer cost more than they save, so a fused table below `LOSAT_X_BXDEFERMIN` takes the AVX2
   batch (`XDiagMode::Avx2`); the choice is made with `LOSAT_X_BXDIAGMIN`'s, once per thread and table. Since
-  `LOSAT_X_BXDIAGMIN`'s built-in value became 900 (above 700; perf/bx-diag-min) every fused table that takes
+  `LOSAT_X_BXDIAGMIN`'s built-in value became 900 (above 700; perf/bx-diag-min; 900 still where `LOSAT_X_BXCROSS`'s
+  cell test does not run, 670 where it does) every fused table that takes
   `LOSAT_X_BXDEFER`'s choice takes its masked batch, and the rule acts where `LOSAT_X_BXDIAGMIN` is set below 700. With the
   fused loop and the cell test forced on every table (`LOSAT_X_BXDIAGMIN=0` on the binary before the rule,
   the same as `LOSAT_X_BXDEFERMIN=0`; one core, medians of 3-8 per-round ratios against `=0`) the cycles were
@@ -4786,7 +4796,7 @@ Scheduling (each value computed by one thread with the original function; order 
   that loop takes, in place of `LOSAT_X_BXDEFER` and its
   `LOSAT_X_BXDEFERMIN` rule; off, or without POPCNT, the fused loop takes `LOSAT_X_BXDEFER`'s choice as before.
   Which query batches the fused loop takes is `LOSAT_X_BXDIAGMIN`'s rule, a separate cutoff against the direct
-  loop that this switch does not change) the cell test of blastx's fused seed loop cuts its batches of eight
+  loop, whose built-in value is 670 with this cell test and 900 without) the cell test of blastx's fused seed loop cuts its batches of eight
   across the cells' borders (`blastp/x_seed_fused.rs`, `x_scan_cells_avx2_cross`, exactness argument in its
   header): the scan's call for a cell only stages the cell's hits (coordinate and subject offset, in two arrays
   of one allocation; three masked 8-lane loads per 24 hits), and every 1,024 staged hits and at the end of the
@@ -4820,9 +4830,10 @@ Scheduling (each value computed by one thread with the original function; order 
   Against the `dev` before `LOSAT_X_BXDIAGMIN` 900 and `LOSAT_X_BXUNGAPSENT` (32a63700, the same setting),
   where every one of these tables was fused: x0.886, x0.916, x0.973, x0.882, the one cDNA x0.846, the two
   x0.847. `LOSAT_X_BXDIAGMIN`'s built-in 900 (perf/bx-diag-min) was set against `LOSAT_X_BXDEFER`'s cell
-  test, so a table below 9 hits per used cell, such as the one cDNA's (6.77), still takes the direct loop;
-  with this cell test the fused loop breaks even with the direct loop lower (near 6.6 with this pull request's
-  first prototype, v4-A10 bdm1), and line A10 measures the cutoff again with it. Timings: v4-A14 results/fab2
+  test, so in these runs a table below 9 hits per used cell, such as the one cDNA's (6.77), still took the
+  direct loop; with this cell test the fused loop breaks even with the direct loop lower, and the pull
+  request perf/bx-diag-min-cross (2026-10-24, v4-A10 bdm5) set the built-in value to 670 for it (the
+  `LOSAT_X_BXDIAG` item). Timings: v4-A14 results/fab2
   (and results/fab against 32a63700). Design and timings: v4-A14 results/p2 (DESIGN_cross.md), results/p3
   (DESIGN_s3.md: round 2) and results/p4 (DESIGN_s4.md: round 3, r1's loops with a constant chunk, two arrays,
   the windows with a repeated entry out of line).

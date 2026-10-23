@@ -51,25 +51,32 @@
 //! there the masked batch and the buffer cost more than they save (the fused loop forced on the
 //! first 1,500 nt of a 2.1-kb fly cDNA x the fly proteome, 4.91 hits per used cell: x1.033
 //! cycles; the whole cDNA, 6.77: x0.996). The choice is made with LOSAT_X_BXDIAGMIN's, once per
-//! thread and table; as LOSAT_X_BXDIAGMIN's built-in value is above 700, no fused table falls under
-//! the rule by default (only with LOSAT_X_BXDIAGMIN set below 700). The timing line then also gives
-//! `defer_min_hits_per_cell=` and `tables_avx2=` (the fused tables that took the AVX2 batch).
+//! thread and table; as LOSAT_X_BXDIAGMIN's built-in value with this cell test (900) is above
+//! 700, no fused table falls under the rule by default (only with LOSAT_X_BXDIAGMIN set below
+//! 700). The timing line then also gives `defer_min_hits_per_cell=` and `tables_avx2=` (the fused
+//! tables that took the AVX2 batch).
 //! `LOSAT_X_BXDIAGSHADOW` compares it with the reference like the other cell tests, on the tables
 //! the rule gives it.
 //!
 //! A query batch whose lookup table has fewer hits per used backbone cell than
-//! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 900; `0` fuses every batch) is scanned by the
-//! direct loop instead: with few hits per cell the fused loop's per-cell work costs more
-//! than the copy it saves. Since LOSAT_X_BXHITBF made the direct loop faster, the two break even
+//! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 670 with LOSAT_X_BXCROSS's cell test and 900 with
+//! the others; `0` fuses every batch, a number set is the cutoff of every cell test) is scanned
+//! by the direct loop instead: with few hits per cell the fused loop's per-cell work costs more
+//! than the copy it saves. Since LOSAT_X_BXHITBF made the direct loop faster, the fused loop with
+//! LOSAT_X_BXDEFER's cell test and the direct loop break even
 //! near 9 hits per used cell (about 8.75 against the fly proteome, 10.7 against Swiss-Prot; one
 //! core, user-space cycles of the fused loop with the cell test it takes against the direct loop,
 //! fly cDNAs x the fly proteome: 4.91 hits per used cell x1.20, 6.77 x1.13, 8.38 x1.03, 9.37
 //! x0.98, 13.32 x0.90); the built-in value was 500 before (measured against the direct loop
 //! without LOSAT_X_BXHITBF: 1.76 x1.20, 4.91 x1.00, 6.77 x0.94, 800 cDNAs x yeast x0.72), and
-//! `LOSAT_X_BXDIAGMIN=500` gives that rule. Both loops give the reference's hits and table, so the
-//! choice changes only the speed; it is made once per thread and table ([`x_fused_pays`]). The
-//! timing line then also gives `min_hits_per_cell=`, `tables_fused=` and `tables_other=` (the
-//! choices made) and `hits_per_cell=LEAST-MOST` (hundredths).
+//! `LOSAT_X_BXDIAGMIN=500` gives that rule. With LOSAT_X_BXCROSS's cell test they break even near
+//! 6.7 (about 6.46 against the fly proteome, 6.95 against Swiss-Prot; the cross test against the
+//! direct loop: 4.05 x1.13, 5.34 x1.06, 6.33 x1.01, 6.63 x0.99, 7.34 x0.95, 8.38 x0.90), hence 670
+//! for it (`LOSAT_X_BXDIAGMIN=900` gives the rule before). Both loops give the reference's hits
+//! and table, so the choice changes only the speed; it is made once per thread and table
+//! ([`x_fused_pays`]). The timing line then also gives `min_hits_per_cell=` (the cutoff of the
+//! cell test that ran), `tables_fused=` and `tables_other=` (the choices made) and
+//! `hits_per_cell=LEAST-MOST` (hundredths).
 //!
 //! EXPERIMENT (LOSAT_X_BXCROSS): the AVX2 batch is `XCellTest::Cross`:
 //! the subject's hits staged and tested in windows of eight cut across the cells' borders, a
@@ -86,12 +93,12 @@
 //! of every table the fused loop takes where the CPU has AVX2 and POPCNT, in place of
 //! LOSAT_X_BXDEFER's and of LOSAT_X_BXDEFERMIN's rule (`tables_avx2=0`); without POPCNT the fused
 //! loop takes LOSAT_X_BXDEFER's choice. `LOSAT_X_BXDIAGMIN` still chooses the tables (its cutoff
-//! against the direct loop is a rule of its own, its built-in value measured with LOSAT_X_BXDEFER's
-//! cell test; with this one the fused loop breaks even with the direct loop lower, near 6.6 hits
-//! per used cell with its first prototype), and `LOSAT_X_BXDIAGSHADOW` compares it with the
-//! reference like the other cell tests. The batches run at 1,024 staged hits. The timing line
-//! names `mode=avx2-cross` and ends with `cross_splits=N` (the windows of eight staged hits with
-//! a repeated entry, tested in parts; counted per subject scan like the other counts).
+//! against the direct loop is a rule of its own; with this cell test the two loops break even
+//! lower, and its built-in value is 670 instead of 900: above), and `LOSAT_X_BXDIAGSHADOW`
+//! compares it with the reference like the other cell tests. The batches run at 1,024 staged
+//! hits. The timing line names `mode=avx2-cross` and ends with `cross_splits=N` (the windows of
+//! eight staged hits with a repeated entry, tested in parts; counted per subject scan like the
+//! other counts).
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF, `x_seed_scan.rs`): with that switch the fused loop finds the
 //! cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`'s
@@ -231,17 +238,22 @@ fn x_cell_mode() -> XCellTest {
 
 // No NCBI counterpart: reads LOSAT_X_BXDIAGMIN once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): the fewest hits per used lookup cell, in hundredths, for
-/// which the fused loop scans a query batch's subjects (built-in 900, near where the two loops
-/// take the same time since LOSAT_X_BXHITBF; 500 before it); a batch whose table has fewer is
-/// scanned by the direct loop.
-/// `0` fuses every batch; a value that is not a number takes the built-in one.
-fn x_min_hits_per_cell() -> u64 {
-    static MIN: OnceLock<u64> = OnceLock::new();
-    *MIN.get_or_init(|| {
+/// which the fused loop with the cell test `mode` scans a query batch's subjects; a batch whose
+/// table has fewer is scanned by the direct loop. Built-in, near where the two loops take the
+/// same time: 670 with LOSAT_X_BXCROSS's cell test, 900 with the others (since LOSAT_X_BXHITBF;
+/// 500 before it). A number set is the cutoff of every cell test, `0` fuses every batch; a value
+/// that is not a number takes the built-in one.
+fn x_min_hits_per_cell(mode: XCellTest) -> u64 {
+    static MIN: OnceLock<Option<u64>> = OnceLock::new();
+    let set = *MIN.get_or_init(|| {
         std::env::var("LOSAT_X_BXDIAGMIN")
             .ok()
             .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(900)
+    });
+    set.unwrap_or(match mode {
+        #[cfg(target_arch = "x86_64")]
+        XCellTest::Cross => 670,
+        XCellTest::Diag(_) => 900,
     })
 }
 
@@ -285,12 +297,12 @@ fn x_table_ratio(table: &BlastAaLookupTable) -> (u64, bool) {
 
 // No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's hits and table.
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): whether the fused loop scans the subjects of `table`'s query
-/// batch: its hits per used cell are at least [`x_min_hits_per_cell`]. Counted for the timing line
-/// once per table and thread, with the cell test `mode` would take for it (LOSAT_X_BXDEFERMIN,
-/// [`x_table_mode`]).
+/// batch: its hits per used cell are at least [`x_min_hits_per_cell`] of `mode`. Counted for the
+/// timing line once per table and thread, with the cell test `mode` would take for it
+/// (LOSAT_X_BXDEFERMIN, [`x_table_mode`]).
 fn x_fused_pays(table: &BlastAaLookupTable, mode: XCellTest) -> bool {
     let (ratio, first) = x_table_ratio(table);
-    let fused = ratio >= x_min_hits_per_cell();
+    let fused = ratio >= x_min_hits_per_cell(mode);
     if first {
         X_TABLES[usize::from(!fused)].fetch_add(1, Relaxed);
         X_RATIO_MIN.fetch_min(ratio, Relaxed);
@@ -364,7 +376,7 @@ pub(crate) fn x_write_timing(out: &mut dyn std::io::Write) -> std::io::Result<()
             X_CELLS.load(Relaxed),
             X_HITS.load(Relaxed),
             X_CANDIDATES.load(Relaxed),
-            x_min_hits_per_cell(),
+            x_min_hits_per_cell(x_cell_mode()),
             X_TABLES[0].load(Relaxed),
             X_TABLES[1].load(Relaxed),
             X_RATIO_MIN.load(Relaxed).min(X_RATIO_MAX.load(Relaxed)),

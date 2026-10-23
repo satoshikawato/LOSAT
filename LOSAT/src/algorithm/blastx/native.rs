@@ -1675,6 +1675,12 @@ impl ReaderBatchResults {
     ) -> Option<Vec<BatchResults>> {
         for results in &mut unit {
             results.query_ordinal += start;
+            // The report reads the contexts of the prepared queries and nothing of their
+            // residues, which are not needed once the unit is searched; the results of a unit
+            // wait here for the last unit of the batch.
+            results.prepared.sequence_start = Vec::new();
+            results.prepared.sequence_start_nomask = Vec::new();
+            results.prepared.lookup_segments = Vec::new();
         }
         self.results.append(&mut unit);
         if !last {

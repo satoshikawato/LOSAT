@@ -1371,20 +1371,57 @@ impl XFlatCompressedLookup {
     /// subject's one range, without the offset-pair array) on the flat table: calls
     /// `visit(subject_offset, hits)` for every cell found, with its slice. `cells` is scratch.
     ///
-    /// EXPERIMENT (LOSAT_X_BPSCANBF): with `BRANCH_FREE` the offsets are listed without a branch on
-    /// the presence bit, as `x_seed_fused::x_scan_cells_bf` lists them: every offset that reaches
-    /// `PV_TEST` is written at the list's end, and the list's length advances by the bit. The list
-    /// holds the same offsets and indices in the same order, so the calls are the same; `cells`
-    /// then reserves a place for every offset of the subject.
-    pub(crate) fn for_each_cell<const BRANCH_FREE: bool, V>(
+    /// EXPERIMENT (LOSAT_X_BPSCANBF): `branch_free` lists the offsets without a branch on the
+    /// presence bit ([`XFlatCompressedLookup::x_list_cells`]); the list, and so the calls, are the
+    /// same. Both lists are formed here and the cells visited by one loop, so `visit` has one call.
+    pub(crate) fn for_each_cell<V>(
         &self,
         subject: &[u8],
         subject_length: usize,
+        branch_free: bool,
         cells: &mut Vec<(i32, u32)>,
         mut visit: V,
     ) where
         V: FnMut(i32, &[i32]),
     {
+        if branch_free {
+            self.x_list_cells::<true>(subject, subject_length, cells);
+        } else {
+            self.x_list_cells::<false>(subject, subject_length, cells);
+        }
+        let starts = &self.starts;
+        for (n, &(s, index)) in cells.iter().enumerate() {
+            // Cache hints only: the slice bounds of a cell X_STARTS_AHEAD cells ahead, and the hits of
+            // the cell X_HITS_AHEAD ahead (whose bounds were read ahead before).
+            if let Some(&(_, later)) = cells.get(n + X_STARTS_AHEAD) {
+                x_prefetch(starts.as_ptr().wrapping_add(later as usize));
+            }
+            if let Some(&(_, later)) = cells.get(n + X_HITS_AHEAD) {
+                let start = starts[later as usize] as usize;
+                x_prefetch(self.hits.as_ptr().wrapping_add(start));
+            }
+            let cell = self.cell(index as usize);
+            if !cell.is_empty() {
+                visit(s, cell);
+            }
+        }
+    }
+
+    /// The offsets of [`XFlatCompressedLookup::for_each_cell`]'s scan whose index passes
+    /// `PV_TEST`, in scan order, with their indices (`cells` is cleared first).
+    ///
+    /// EXPERIMENT (LOSAT_X_BPSCANBF): with `BRANCH_FREE` the offsets are listed as
+    /// `x_seed_fused::x_scan_cells_bf` lists them: every offset that reaches `PV_TEST` is written at
+    /// the list's end, and the list's length advances by the presence bit. The list holds the same
+    /// offsets and indices in the same order; `cells` then reserves a place for every offset of
+    /// the subject.
+    #[inline(always)]
+    fn x_list_cells<const BRANCH_FREE: bool>(
+        &self,
+        subject: &[u8],
+        subject_length: usize,
+        cells: &mut Vec<(i32, u32)>,
+    ) {
         let word_length = usize::try_from(self.word_length)
             .expect("NCBI BLAST compressed word length must fit usize");
         let compressed_alphabet_size = usize::try_from(self.compressed_alphabet_size)
@@ -1494,28 +1531,11 @@ impl XFlatCompressedLookup {
             // SAFETY: the first `listed` places were written above, within the reserve.
             unsafe { cells.set_len(listed) };
         }
-
-        let starts = &self.starts;
-        for (n, &(s, index)) in cells.iter().enumerate() {
-            // Cache hints only: the slice bounds of a cell X_STARTS_AHEAD cells ahead, and the hits of
-            // the cell X_HITS_AHEAD ahead (whose bounds were read ahead before).
-            if let Some(&(_, later)) = cells.get(n + X_STARTS_AHEAD) {
-                x_prefetch(starts.as_ptr().wrapping_add(later as usize));
-            }
-            if let Some(&(_, later)) = cells.get(n + X_HITS_AHEAD) {
-                let start = starts[later as usize] as usize;
-                x_prefetch(self.hits.as_ptr().wrapping_add(start));
-            }
-            let cell = self.cell(index as usize);
-            if !cell.is_empty() {
-                visit(s, cell);
-            }
-        }
     }
 
     // No NCBI counterpart: chooses LOSAT's list form; both list the same offsets.
     /// EXPERIMENT (LOSAT_X_BPSCANBF): whether blastp-fast lists this table's offsets without a
-    /// branch (`for_each_cell::<true, _>`): at least [`x_scan_bf_min`] of every 10,000 backbone
+    /// branch (`x_list_cells::<true>`): at least [`x_scan_bf_min`] of every 10,000 backbone
     /// cells have hits. With fewer, few offsets pass `PV_TEST` and the branch is mostly predicted.
     pub(crate) fn x_scan_bf_pays(&self) -> bool {
         x_dense_enough(self.used_cells, self.starts.len() - 1, x_scan_bf_min())
@@ -2245,14 +2265,14 @@ mod tests {
                     expected.get_or_insert(want);
                 }
                 let mut fused = Vec::new();
-                flat.for_each_cell::<false, _>(subject, length, &mut cells, |s, hits| {
+                flat.for_each_cell(subject, length, false, &mut cells, |s, hits| {
                     fused.extend(hits.iter().map(|&q| (s as u32, q as u32)));
                 });
                 assert_eq!(Some(fused), expected, "subject {n}: for_each_cell");
                 // LOSAT_X_BPSCANBF: the branch-free list, on the used scratch and on a new one.
                 for mut scratch in [std::mem::take(&mut cells), Vec::new()] {
                     let mut fused = Vec::new();
-                    flat.for_each_cell::<true, _>(subject, length, &mut scratch, |s, hits| {
+                    flat.for_each_cell(subject, length, true, &mut scratch, |s, hits| {
                         fused.extend(hits.iter().map(|&q| (s as u32, q as u32)));
                     });
                     assert_eq!(

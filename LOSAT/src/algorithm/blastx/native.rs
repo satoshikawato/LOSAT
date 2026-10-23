@@ -1027,6 +1027,13 @@ fn run_inner(
                 let x_failed = std::cell::Cell::new(false);
                 let mut pending = ReaderBatchResults::default();
                 let x_wave = pool.threads() * 4;
+                // A unit of more than two search units' letters ends in a query that is longer than
+                // one: it is searched with the pool inside, never queued with others. The query
+                // is split into chunks that use the pool when it is the only query of its reader
+                // batch; in a reader batch of several queries (NCBI splits none) its subjects use
+                // the pool. Measured (2 queries of 280 kb, `BATCH_SIZE=1000000`, 4 and 35
+                // subjects, 8 and 16 threads): 0.10-0.16 s, against 0.17-0.26 s for the same
+                // queries split.
                 let x_large = |queries: &[super::input::FastaRecord]| {
                     queries.iter().map(|q| q.sequence.len()).sum::<usize>() > 2 * BATCH_SIZE
                 };

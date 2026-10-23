@@ -2567,8 +2567,8 @@ Scheduling (each value computed by one thread with the original function; order 
   `Delay` queue was 16 deep). The loop over a run is a function of its own, so the tables and the queue stay in
   registers; the indexes are checked once per build instead of per word, and the presence bit comes from a table, so the
   shift by `pv_array_bts` keeps `cl` (x86-64 without BMI2). Where: x86_64 (the queue needs a prefetch instruction), a
-  table built off a pool of two threads or more (`LOSAT_X_PAIRPAR` fills the others), without `-limit_lookup` (database
-  word counts). R10 (line R, megablast Sakai x MG1655 at one thread): the queued loop spent 0.190 s, about 87
+  table built off a pool of two threads or more (`LOSAT_X_PAIRPAR` fills the others), without database word counts
+  (`limit_lookup`, which the command line does not offer). R10 (line R, megablast Sakai x MG1655 at one thread): the queued loop spent 0.190 s, about 87
   instructions and 42 cycles a word, on 10.9 M words (NCBI 45.5 cycles); the loop shape of R10's probe (a closure and a
   queue 32 deep) gained 11 ms, and a branch-free update of the presence bit and helper counter lost here as in R10
   (megablast of the cDNAs below x1.004: about 21 more instructions a word for few saved misses). Shadow:

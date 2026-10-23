@@ -10,9 +10,10 @@
 //! difference) give the same bytes, and the default run prints nothing on standard error (the
 //! `[X_SHADOW] MBFILL` line is printed only with `LOSAT_X_MBFILLSHADOW`). Two searches build the
 //! table on one thread: megablast (the contiguous megablast table) and blastn (word size 11 on a
-//! short query: the two-stage table with its cells in the order of indexing) of a query cut from
-//! LC738874 with runs of N, against LC738868; at four threads the pool builds the table and the
-//! report is the same. That those bytes equal NCBI's is the business of the fixture suites.
+//! query of 4,000 letters, fewer than 12,000 on both strands: the small table's two-stage form,
+//! with its cells in the order of indexing) of a query cut from LC738874 with runs of N, against
+//! LC738868; at four threads the pool builds the table and the report is the same. That those
+//! bytes equal NCBI's is the business of the fixture suites.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -57,7 +58,7 @@ fn letters(path: &Path) -> String {
 }
 
 /// The two queries: the first 60,000 letters of LC738874 with runs of 1 to 7 N every 7,000
-/// letters (words stop at them), for megablast; its first 9,000 letters, for blastn.
+/// letters (words stop at them), for megablast; its first 4,000 letters, for blastn.
 fn queries(dir: &TestDir) -> [(&'static str, PathBuf); 2] {
     let genome = letters(&fasta("LC738874.fasta"));
     let mut long: Vec<u8> = genome.as_bytes()[..60_000].to_vec();
@@ -69,8 +70,8 @@ fn queries(dir: &TestDir) -> [(&'static str, PathBuf); 2] {
     let long = String::from_utf8(long).unwrap();
     let mb = dir.0.join("q60000n.fna");
     std::fs::write(&mb, format!(">q60000n\n{long}\n")).expect("write the query");
-    let bn = dir.0.join("q9000.fna");
-    std::fs::write(&bn, format!(">q9000\n{}\n", &long[..9_000])).expect("write the query");
+    let bn = dir.0.join("q4000n.fna");
+    std::fs::write(&bn, format!(">q4000n\n{}\n", &long[..4_000])).expect("write the query");
     [("megablast", mb), ("blastn", bn)]
 }
 

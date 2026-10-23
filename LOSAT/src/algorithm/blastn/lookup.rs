@@ -45,7 +45,7 @@ pub(crate) mod x_mb_lut_keep;
 //          }
 // ```
 // EXPERIMENT (LOSAT_X_MBFILL): the one-thread fill of the megablast table with the words read
-// run by run and the update queued 32 words.
+// run by run and the update queued 64 words.
 #[path = "x_mb_fill.rs"]
 mod x_mb_fill;
 

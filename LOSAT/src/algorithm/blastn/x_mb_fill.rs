@@ -32,7 +32,8 @@
 //!
 //! Where it runs. `build_mb_lookup` calls `fill` where it would call `x_fill_mb_queued`: the
 //! table is built on one thread (no pool of two threads or more, or LOSAT_X_PAIRPAR off), without
-//! database word counts (`-limit_lookup`), on x86_64 (the queue needs a prefetch instruction).
+//! database word counts (`limit_lookup`, which the command line does not offer), on x86_64 (the
+//! queue needs a prefetch instruction).
 //!
 //! Why the table is the same. A word is the `lut_word_length` bases that end at a position, and
 //! NCBI counts a word only after that many unambiguous bases in a row (`pos` is moved past each
@@ -45,15 +46,16 @@
 //! before it applies it). `fill` checks once that every index into the tables is in range, so the
 //! loop reads them without a check:
 //!
-//! - the cell is the code masked with `table_size - 1`;
+//! - `lut_word_length >= 1` and the cell is the code masked with `table_size - 1 = 4^lut_word_length - 1`;
 //! - `query_offset + seq.len() < next_pos.len()` for every query (`next_pos` has one more element
 //!   than the longest `query_offset + seq.len()`), and an index is at most
 //!   `query_offset + seq.len()`;
 //! - `(table_size - 1) >> pv_array_bts` is a presence-vector word (NCBI sizes the array so; the
 //!   bound check of `pv_set_shift` never fails) and `(table_size - 1) / kCompressionFactor` a
 //!   helper counter;
-//! - fewer than 2^32 words, since `next_pos` has at most `u32::MAX` elements, so a helper counter
-//!   stays below 2^32 and `+ 1` equals `x_mb_apply`'s `saturating_add(1)`.
+//! - `next_pos` has at most `u32::MAX` elements, so an index fits its `u32`, and the queries have
+//!   at most `u32::MAX` letters, so there are fewer than 2^32 words: a helper counter stays below
+//!   2^32 and `+ 1` equals `x_mb_apply`'s `saturating_add(1)`.
 //!
 //! Why it is faster. The queued loop counted the unambiguous bases of every position, carried the
 //! database-count test and the bound checks of every index, and kept the queue's state in memory:
@@ -151,11 +153,19 @@ pub(super) fn fill(
 
 /// The bounds the loop relies on (module documentation).
 fn in_range(words: &Words<'_>, t: &XMbTables<'_>) -> bool {
+    let lut_word_length = words.lut_word_length;
     let last_cell = words.kmer_mask as usize;
-    t.hashtable.len() == last_cell.wrapping_add(1)
+    let letters = words
+        .queries_blastna
+        .iter()
+        .fold(0usize, |sum, seq| sum.saturating_add(seq.len()));
+    (1..=16).contains(&lut_word_length)
+        && words.kmer_mask == (1u64 << (2 * lut_word_length)) - 1
+        && t.hashtable.len() == last_cell.wrapping_add(1)
         && (last_cell >> t.pv_array_bts) < t.pv_array.len()
         && (last_cell >> K_COMPRESSION_FACTOR_SHIFT) < t.helper_array.len()
         && t.next_pos.len() <= u32::MAX as usize
+        && letters <= u32::MAX as usize
         && words
             .queries_blastna
             .iter()
@@ -490,12 +500,27 @@ mod tests {
 
     /// Both cell orders build the arrays and counters of `x_fill_mb_queued` on random queries
     /// (ambiguity codes, masks, several queries, `lut_word_length` 4..12, runs shorter and longer
-    /// than the queue) and on long repeats (long chains, helper counts).
+    /// than the queue), on single queries with fewer words than the queue holds (`lut_word_length`
+    /// 6, 7, 10, 12) and on long repeats (long chains, helper counts).
     #[test]
     fn the_run_loop_builds_the_queued_loops_arrays() {
         let mut rng = Lcg(0x4D42_F111);
         for case in 0..60 {
-            let (queries, offsets, masks, word_length, lut_word_length) = if case % 6 == 5 {
+            let (queries, offsets, masks, word_length, lut_word_length) = if case % 6 == 4 {
+                // fewer words than the queue holds, at the table widths `random_case` leaves out
+                let lut = [6usize, 7, 10, 12][(case / 6) % 4];
+                let len = lut + rng.below(60) as usize;
+                let seq: Vec<u8> = (0..len)
+                    .map(|_| {
+                        if rng.below(30) == 0 {
+                            14
+                        } else {
+                            rng.below(4) as u8
+                        }
+                    })
+                    .collect();
+                (vec![seq], vec![0], vec![Vec::new()], lut, lut)
+            } else if case % 6 == 5 {
                 let lut = [11usize, 12][case % 2];
                 (
                     vec![repeat_case(&mut rng, 9000)],
@@ -533,7 +558,7 @@ mod tests {
                         t,
                     )
                 });
-                assert!(reference.total_positions > 0 || queries.iter().all(|q| q.len() < 40));
+                assert!(reference.total_positions > 0 || queries.iter().all(|q| q.len() < 80));
                 let got = build(&words, |t| {
                     assert!(in_range(&words, t));
                     // SAFETY: checked above.

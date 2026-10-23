@@ -20,8 +20,9 @@
 //! branch-free list, a sparser one keeps the branch, and `LOSAT_X_BPCLUTSCANBFMIN=0` takes the list
 //! on every table. Exact blastp builds no compressed table and records no side.
 //!
-//! The dense query is the first 30 proteins of AP027131 (9,948 residues), the sparse one its
-//! first protein (455 residues); the subjects are the first 150 proteins of the related AP027133.
+//! The dense query is the first 30 proteins of AP027131 (9,948 residues; its table uses 30.9 % of
+//! the cells), the sparse one its first protein (455 residues; 1.66 %, a third of the built-in
+//! threshold); the subjects are the first 150 proteins of the related AP027133.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

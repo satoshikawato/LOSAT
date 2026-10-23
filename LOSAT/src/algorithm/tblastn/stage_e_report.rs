@@ -435,6 +435,11 @@ pub(super) fn render(
         }
         writer.flush()?;
     }
+    // The messages that `search` writes after the formats (the stop messages) are the archive's
+    // again, whichever format came last (as in blastn and blastp).
+    if let Some(archive) = archive {
+        archive.handle.set_muted(false);
+    }
     Ok(())
 }
 

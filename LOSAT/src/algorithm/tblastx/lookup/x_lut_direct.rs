@@ -177,8 +177,12 @@ fn x_pool_lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-// No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them).
+// No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them); one
+// short of room is replaced by one of `n + n / 4` (not the doubling of `resize`).
 fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize) -> Vec<T> {
+    if vector.capacity() < n {
+        vector = Vec::with_capacity(n + n / 4);
+    }
     vector.clear();
     vector.resize(n, T::default());
     vector

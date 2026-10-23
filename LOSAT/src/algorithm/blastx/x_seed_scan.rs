@@ -24,10 +24,11 @@
 //!
 //! The reference (`Lookup::scan` + `word_finder`, which the diagnostic stages run) allocates and
 //! zero-fills a buffer of `capacity()` pairs per (chunk, subject) and copies every batch into a
-//! new `(i32, i32)` vector before the diagonal loop reads it. `x_word_finder_scan` is `word_finder` with the
-//! scan loop of `Lookup::scan` inlined: the same `scan_range` state machine, the same
-//! `array_size` (`capacity()`), the scanner writing into a per-thread buffer (grown when a table
-//! needs more, never shrunk), and the diagonal statements reading the pairs in place.
+//! new `(i32, i32)` vector before the diagonal loop reads it. `x_word_finder_scan` is
+//! `word_finder` with the scan loop of `Lookup::scan` inlined: the same `scan_range` state
+//! machine, the same `array_size` (`capacity()`), the scanner writing into a per-thread buffer
+//! (grown when a table needs more, never shrunk), and the diagonal statements reading the pairs in
+//! place.
 //!
 //! Identity argument: the scanners (`s_blast_aa_scan_subject_one_range`, the compressed
 //! `scan_subject`) only write the buffer and return the number of pairs written, and only
@@ -126,8 +127,8 @@ pub(crate) fn x_bxhitbf() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXHITBF"))
 }
 
-/// The shadow-mode summary of the S-C switches that still have a shadow mode (printed by `main` at
-/// exit, one line per switch in shadow mode).
+/// The `[X_SHADOW]` summaries of the BXDIAG, BXSUBJFLOW, BXDBSTREAM and BXEVALEMPTY switches
+/// (printed by `main` at exit, one line per switch that ran in shadow mode).
 // No NCBI counterpart: prints the shadow-mode counters; it does not change any value NCBI computes.
 pub fn print_shadow_stats() {
     super::x_seed_diag::x_print_shadow_summary();

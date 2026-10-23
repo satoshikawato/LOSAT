@@ -394,9 +394,8 @@ pub fn split_queries(
             prepared: full.clone(),
         }]);
     }
-    // A chunk's query setup (translation, SEG) reads
-    // only its own slice of the query, so the chunks can be prepared on the
-    // search pool; the corrections below still run in chunk order.
+    // A chunk's query setup (translation, SEG) reads only its own slice of the query, so the chunks
+    // can be prepared on the search pool; the corrections below still run in chunk order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-249
     // ```c
     //         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {

@@ -1155,9 +1155,8 @@ impl KappaState {
     // Each NCBI thread owns an NRrecord (composition workspace), a redo_align_params and a matrix.
     // This builds the same per-thread objects for one more Rust thread; the query information is
     // shared because it is read-only.
-    /// A second state for another thread, as NCBI
-    /// c++/src/algo/blast/core/blast_kappa.c:3244-3340 allocates per thread
-    /// (`redo_align_params_tld`, `gap_align_tld`, `NRrecord_tld`); the query
+    /// A second state for another thread, as NCBI c++/src/algo/blast/core/blast_kappa.c:3244-3340
+    /// allocates per thread (`redo_align_params_tld`, `gap_align_tld`, `NRrecord_tld`); the query
     /// information is read-only and shared.
     pub(crate) fn x_for_thread(
         &self,

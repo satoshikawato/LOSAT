@@ -18,8 +18,8 @@ use crate::utils::matrix::{blosum62_ncbistdaa_score_row, protein_score};
 
 pub const AA_HITS_PER_CELL: usize = 3;
 
-// The BLASTX table filled in place, see
-// x_lut_direct.rs (a child module, so that it uses this file's private builder pieces).
+// The BLASTX table filled in place, see x_lut_direct.rs (a child module, so that it uses this
+// file's private builder pieces).
 #[path = "x_lut_direct.rs"]
 mod x_lut_direct;
 // EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): BLASTP's table built in place

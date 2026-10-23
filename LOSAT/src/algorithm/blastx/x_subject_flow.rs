@@ -1,9 +1,8 @@
-//! EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0` or `LOSAT_X_DEFAULT=0`): the subject loop
-//! of a query chunk as a flow of tasks of `k` consecutive subjects (`search::X_BX_CHUNK` = 64, the waves' subjects per worker, when
-//! the variable is `1` or not a number from 2 to 65,536), searched ahead by the other threads of
-//! the pool and handed
-//! to the sink in subject order by the thread that runs the loop. Shadow:
-//! `LOSAT_X_BXSUBJFLOWSHADOW`.
+//! EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0` or `LOSAT_X_DEFAULT=0`):
+//! the subject loop of a query chunk as a flow of tasks of `k` consecutive subjects
+//! (`search::X_BX_CHUNK` = 64, the waves' subjects per worker, when the variable is `1` or not a
+//! number from 2 to 65,536), searched ahead by the other threads of the pool and handed to the sink
+//! in subject order by the thread that runs the loop. Shadow: `LOSAT_X_BXSUBJFLOWSHADOW`.
 //!
 //! The waves of `search::search_core` search `threads x X_BX_CHUNK` (= 64) subjects, wait for
 //! the slowest worker of the wave, then hand the wave's subjects to the sink on one thread while

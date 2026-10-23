@@ -16,14 +16,14 @@
 //!   limit), and keeps nothing but the length of the longest sequence. Its error is the error of
 //!   `read_stores`, which fails the same query batch with the same text.
 //! - The preliminary search reads the sequences of each pass over the database in ascending order
-//!   (`XPass`): a serial pass and a query chunk (chunks searched side by side at 2+ threads) read blocks of `block_bytes`
-//!   (`SeqDb::next_block`) and drop each block before the next. A task of the subject flow
-//!   (`x_subject_flow.rs`) reads its own subjects with one read per volume, and a wave of the pool
-//!   (where the flow is not chosen: `LOSAT_X_BXSUBJFLOW=0`, at most `k` subjects, the 2^28 bound;
-//!   a wave of 64 subjects per worker) reads its subjects before its fork
-//!   (`XStreamDb::read_range`). The passes that run at the same time (the query batches
-//!   searched side by side at 2+ threads, the query chunks searched side by side, the tasks of the flow) each read their own
-//!   blocks: nothing is shared or waited for between them.
+//!   (`XPass`): a serial pass and a query chunk (chunks searched side by side at 2+ threads) read
+//!   blocks of `block_bytes` (`SeqDb::next_block`) and drop each block before the next. A task of
+//!   the subject flow (`x_subject_flow.rs`) reads its own subjects with one read per volume, and a
+//!   wave of the pool (where the flow is not chosen: `LOSAT_X_BXSUBJFLOW=0`, at most `k` subjects,
+//!   the 2^28 bound; a wave of 64 subjects per worker) reads its subjects before its fork
+//!   (`XStreamDb::read_range`). The passes that run at the same time (the query batches searched
+//!   side by side at 2+ threads, the query chunks searched side by side, the tasks of the flow)
+//!   each read their own blocks: nothing is shared or waited for between them.
 //! - The sink reads the lengths of the subjects in its order from the index (`XCursor`, a window of
 //!   `LENGTH_WINDOW` sequences per read): the gapped sink evaluates every subject with its length,
 //!   with or without HSPs. The `-ungapped` sink reads the residues of the subjects with HSPs, which

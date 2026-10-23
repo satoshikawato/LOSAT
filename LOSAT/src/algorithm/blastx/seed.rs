@@ -19,8 +19,8 @@ use anyhow::{ensure, Result};
 //     aux_struct->offset_pairs =
 //       (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
 // ```
-// The seed loop on a per-thread offset-pair buffer, read in place
-// (a child module, so that it uses the diagonal table's fields).
+// The seed loop on a per-thread offset-pair buffer, read in place (a child module, so that it uses
+// the diagonal table's fields).
 #[path = "x_seed_scan.rs"]
 pub mod x_seed_scan;
 
@@ -658,8 +658,8 @@ pub fn word_finder(
         |seeds| {
             trace(seeds);
             for &(q, s) in seeds {
-                // The context of a seed is only needed once the diagonal tests let it
-                // through (the lookup has no side effect).
+                // The context of a seed is only needed once the diagonal tests let it through (the
+                // lookup has no side effect).
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,783-784
                 // ```c
                 //                 curr_context = BSearchContextInfo(query_offset, query_info);

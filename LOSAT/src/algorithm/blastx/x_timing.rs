@@ -18,8 +18,8 @@
 //!   with `-db`), and `input = loop - search - render` the reader's own time (and the queueing of
 //!   batches at 2+ threads).
 //! - `[TIMING] blastx_waves: waves=N batches=N wall ..s busy ..s threads=N idle ..s tail=N
-//!   tail_wall ..s`: with 2+ threads and several query batches, the waves of batches searched side by side.
-//!   `wall` is their wall time, `busy` the searches' own times added over the threads,
+//!   tail_wall ..s`: with 2+ threads and several query batches, the waves of batches searched side
+//!   by side. `wall` is their wall time, `busy` the searches' own times added over the threads,
 //!   `idle = wall x threads - busy` the thread time the waves left unused (a wave ends when its
 //!   last batch does). `tail` counts the batches searched one after another, each with the whole
 //!   pool, because fewer than the threads were queued (the end of the input, or a long query,
@@ -31,12 +31,13 @@
 //!   waits count as `search` of `blastx_run`.
 //! - `[TIMING] blastx_subject_waves: waves=N tasks=N wall ..s busy ..s longest ..s latest_start ..s
 //!   last_end ..s threads=N idle ..s`: the parallel subject waves of `search::search_core` (the
-//!   `scan_par` stage). A task is the subjects one worker searches in a wave (`search::X_BX_CHUNK`
-//!   of them at 2+ threads, or one). `wall` adds the waves' wall times, `busy` the tasks' own times, `longest`
-//!   each wave's longest task, `latest_start` each wave's latest task start and `last_end` each
-//!   wave's latest task end, both after the wave began; `idle = wall x threads - busy`. A wave
-//!   ends with its last task: `longest` near `wall` with `busy` well below `wall x threads` is
-//!   uneven work, `latest_start` the time workers take to begin, `wall - last_end` the join.
+//!   `scan_par` stage). A task is the subjects one worker searches in a wave (up to
+//!   `search::X_BX_CHUNK`). `wall` adds the waves' wall times, `busy` the tasks' own times,
+//!   `longest` each wave's longest task, `latest_start` each wave's latest task start and
+//!   `last_end` each wave's latest task end, both after the wave began; `idle = wall x threads -
+//!   busy`. A wave ends with its last task: `longest` near `wall` with `busy` well below `wall x
+//!   threads` is uneven work, `latest_start` the time workers take to begin, `wall - last_end` the
+//!   join.
 //! - `[TIMING] blastx_subject_flow: loops=N tasks=N ahead=N taken=N wall ..s`: with
 //!   `LOSAT_X_BXSUBJFLOW` (instead of the waves), the subject loops run as a flow, their tasks,
 //!   the tasks searched ahead of the loop (by a helper, or by the loop's thread while it waited

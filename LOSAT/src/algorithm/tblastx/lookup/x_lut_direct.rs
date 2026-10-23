@@ -1,6 +1,6 @@
-//! The BLASTX protein lookup table filled in
-//! place, with the neighbour-word sets memoised per thread (LOSAT_X_BPLKPAHEAD: or kept by the
-//! blastp block search for its builds ahead, `XAaSpares`).
+//! The BLASTX protein lookup table filled in place, with the neighbour-word sets memoised per
+//! thread (LOSAT_X_BPLKPAHEAD: or kept by the blastp block search for its builds ahead,
+//! `XAaSpares`).
 //!
 //! NCBI builds the table in two steps: `s_AddNeighboringWords` appends, for every distinct
 //! query word in ascending backbone index, the word's query offsets to the chain of every
@@ -733,16 +733,9 @@ pub(crate) fn x_bplut_shadow_tables() -> Option<u64> {
     (x_bplut_mode() == 2).then(|| X_BPLUT_SHADOW_TABLES.load(std::sync::atomic::Ordering::Relaxed))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see `build_ncbi_lookup_from_prepared`)
-// ```c
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         if (exact_backbone[i] != NULL) {
-//             s_AddWordHits(lookup, matrix, query->sequence,
-//                           exact_backbone[i], query_bias, row_max);
-//             sfree(exact_backbone[i]);
-//         }
-//     }
-// ```
+// No NCBI counterpart: the BLASTP choice between the reference builder and the in-place builder
+// (`build_ncbi_lookup_from_prepared` in backbone.rs carries the NCBI code); it changes no value
+// NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): `build_ncbi_lookup` for BLASTP. Mode 0 calls
 /// it; mode 1 prepares the query as `build_ncbi_lookup_for_profile(.., Blosum62,
 /// LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`] (the same table without

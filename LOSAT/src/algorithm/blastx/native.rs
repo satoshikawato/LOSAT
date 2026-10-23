@@ -318,15 +318,13 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         (None, Some(path)) => Some(File::open(path).map_err(|_| inaccessible("subject", path))?),
         (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
     };
-    // With 2+ threads batches are searched on other
-    // threads while this function runs. A diagnostic or a panic message
-    // written there must not wait for a lock this thread keeps for the whole
-    // run, so the handle is used unlocked: the same bytes, the lock taken for
-    // each write.
+    // With 2+ threads batches are searched on other threads while this function runs. A diagnostic
+    // or a panic message written there must not wait for a lock this thread keeps for the whole
+    // run, so the handle is used unlocked: the same bytes, the lock taken for each write.
     // No NCBI counterpart: only the stderr lock is taken per write instead of once for the run, so
     // that other threads can write diagnostics (the bytes and their order are unchanged); it does
     // not change any value NCBI computes.
-    let mut stderr: Box<dyn Write> = Box::new(io::stderr());
+    let mut stderr = io::stderr();
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
     let x_t_read_fasta = crate::utils::xtiming::clock();
@@ -795,8 +793,8 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         // The reader and formatter use the same diagnostic stream at distinct
         // times. RefCell only serializes Rust borrows; it does not defer events.
         let diagnostics = std::cell::RefCell::new(&mut stderr);
-        // The batch loop as a function of the pool
-        // its searches run on, so that one pool can serve all batches.
+        // The batch loop as a function of the pool its searches run on, so that one pool can serve
+        // all batches.
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
         // ```c
         //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -1192,7 +1190,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     super::x_timing::run(XRun::Total, x_t_run);
     // Diagnostic (LOSAT_TIMING): the run's share of the common line (x_timing.rs).
     super::x_timing::common_run();
-    super::x_timing::write(&mut *stderr, options.num_threads as usize)?;
+    super::x_timing::write(&mut stderr, options.num_threads as usize)?;
     Ok(())
 }
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:989-1013

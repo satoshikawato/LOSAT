@@ -263,8 +263,8 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
     fn early(&mut self, _evalue: f64, _queries: usize, _decision: bool) {}
     // No NCBI counterpart: tells the search whether any observer callback records something; it
     // does not change any value NCBI computes.
-    /// True when no callback records anything, so
-    /// that work may be done out of order (and some of it twice).
+    /// True when no callback records anything, so that work may be done out of order (and some of
+    /// it twice).
     fn x_passive(&self) -> bool {
         false
     }
@@ -304,10 +304,9 @@ pub(crate) fn x_bx_par_rule(rule: impl FnOnce() -> bool) -> bool {
 // ```
 // One XKappaWorker is the Rust counterpart of the per-thread state NCBI keeps in NRrecord_tld,
 // redo_align_params_tld and matrix_tld. It is used by one thread at a time.
-// One pool slot's Kappa state.  SAFETY of `Send`: the only non-Send field is the
-// `context` cell of the gapping parameters, which `redo_context_observed` fills
-// for one synchronous call and restores before returning; the state is only
-// reached through its mutex.
+// One pool slot's Kappa state.  SAFETY of `Send`: the only non-Send field is the `context` cell of
+// the gapping parameters, which `redo_context_observed` fills for one synchronous call and restores
+// before returning; the state is only reached through its mutex.
 #[cfg(feature = "parallel")]
 struct XKappaWorker(KappaState);
 #[cfg(feature = "parallel")]
@@ -328,9 +327,8 @@ unsafe impl Send for XKappaWorker {}
 // subject only when hsp_index == 0 (line 1233), so a match can read the matrix its predecessor left
 // behind. X_REDO_PROBE records whether that happened; if it did the result is dropped and the match
 // is redone in stream order.
-/// Redo one match without knowing the matrix its
-/// predecessor leaves behind.  `None` when the match would have used that
-/// matrix (it is then redone in order); otherwise the finished list, its best
+/// Redo one match without knowing the matrix its predecessor leaves behind.  `None` when the match
+/// would have used that matrix (it is then redone in order); otherwise the finished list, its best
 /// score, and the matrix this match leaves (`None` if it leaves the old one).
 #[cfg(feature = "parallel")]
 #[allow(clippy::type_complexity)]
@@ -385,8 +383,8 @@ pub fn search_internal<'a>(
 ) -> Result<Vec<BatchResults>> {
     search_internal_observed(records, subjects, options, &mut Noop)
 }
-// No NCBI counterpart: when the queued batches (2+ threads, several query batches) are searched (as a flow instead
-// of waves); the reports, their order and the values in them are those of the waves.
+// No NCBI counterpart: when the queued batches (2+ threads, several query batches) are searched (as
+// a flow instead of waves); the reports, their order and the values in them are those of the waves.
 /// EXPERIMENT (LOSAT_X_BXFLOW): a switch of the strict set, on unless `LOSAT_X_BXFLOW=0`, or
 /// `LOSAT_X_DEFAULT=0` and it is not set (acts with several query batches at 2+ threads).
 pub(crate) fn x_bx_flow() -> bool {
@@ -398,8 +396,7 @@ pub(crate) fn x_bx_flow() -> bool {
 thread_local! {
     // No NCBI counterpart: flag for the batched search (a thread that runs one whole batch must not
     // start parallel work of its own); it does not change any value NCBI computes.
-    // Set while this thread runs a search that
-    // must not start parallel work of its own.
+    // Set while this thread runs a search that must not start parallel work of its own.
     static X_INNER_SERIAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -436,9 +433,8 @@ impl Drop for XInnerSerial {
 // NCBI runs the single-threaded search (CPrelimSearchRunner) when IsMultiThreaded() is false. This
 // is search_internal run on one thread, whatever thread that is, so that several batches can run
 // side by side.
-/// `search_internal` as the one-thread search,
-/// whatever thread it is called on. The caller runs several of these side by
-/// side; each takes the serial path of every stage.
+/// `search_internal` as the one-thread search, whatever thread it is called on. The caller runs
+/// several of these side by side; each takes the serial path of every stage.
 pub fn x_search_internal_serial<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
@@ -461,8 +457,7 @@ pub fn x_search_internal_serial<'a>(
 // ```
 // The search of one query batch (lcl_blast.Run()) on a pool that the caller keeps. The search
 // itself is search_internal.
-/// `search_internal` on a pool that the caller
-/// keeps for all its query batches.
+/// `search_internal` on a pool that the caller keeps for all its query batches.
 pub fn x_search_internal_in_pool<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
@@ -1705,11 +1700,10 @@ impl PreliminarySink for Runtime<'_> {
                 matches.push(list);
             }
             super::x_timing::end(XEnd::Read, x_t);
-            // Redo the matches of one batch on the
-            // search pool before walking them in stream order.  A match is a
-            // function of its own HSP list and of the matrix left by the match
-            // before it; `x_speculate_match` returns a result only when the
-            // latter was never read, and reports the matrix the match leaves.
+            // Redo the matches of one batch on the search pool before walking them in stream order.
+            // A match is a function of its own HSP list and of the matrix left by the match before
+            // it; `x_speculate_match` returns a result only when the latter was never read, and
+            // reports the matrix the match leaves.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451,3499-3502
             // ```c
             // #pragma omp for schedule(static)

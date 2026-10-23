@@ -108,9 +108,8 @@ pub(crate) trait PreliminarySink {
     // only reports that test to an observer. This method says whether the callback reads its
     // arguments, so that the search can skip the copy of every candidate HSP kept for it. No value
     // NCBI computes changes.
-    /// False when `containment` ignores its
-    /// arguments, so that the search need not keep a copy of every candidate
-    /// HSP for it.
+    /// False when `containment` ignores its arguments, so that the search need not keep a copy of
+    /// every candidate HSP for it.
     fn x_wants_containment(&self) -> bool {
         true
     }
@@ -826,11 +825,11 @@ pub(crate) fn search_core(
             // utils::threading owns the search pool; each slot retains its own
             // diagonal table across bounded O(worker-count) reduction windows.
             // Caller/collector/Kappa state remains serial in the original OID order.
-            // With a pool of 2+ threads a wave is `X_BX_CHUNK` consecutive subjects
-            // per worker, and a worker scans its k subjects one after another
-            // on its own diagonal table, as the serial loop does on the single
-            // table. One subject per worker per wave means a fork-join for
-            // every `threads` subjects, each shorter than the fork-join itself.
+            // With a pool of 2+ threads a wave is `X_BX_CHUNK` consecutive subjects per worker,
+            // and a worker scans its `X_BX_CHUNK` subjects one after another on its own diagonal
+            // table, as the serial loop does on the single table. One subject per worker per wave
+            // would mean a fork-join for every `threads` subjects, each shorter than the
+            // fork-join itself.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
             // ```c
             //     /* iterate over all subject sequences */
@@ -1212,9 +1211,8 @@ pub(crate) fn search_core(
 // x_compute_chunk is everything the serial chunk loop does for one chunk before it writes to the
 // sink: the chunk's scoring parameters, lookup table, diagonal table, subject parameters and the
 // subject loop. The code is the same; it returns the results instead of writing them to the sink.
-/// Everything the chunk loop computes before it
-/// talks to the sink, for one chunk; `None` when no context of the chunk has
-/// valid Karlin parameters (the loop then skips the chunk).
+/// Everything the chunk loop computes before it talks to the sink, for one chunk; `None` when no
+/// context of the chunk has valid Karlin parameters (the loop then skips the chunk).
 #[cfg(feature = "parallel")]
 #[allow(clippy::type_complexity)]
 fn x_compute_chunk(
@@ -1288,7 +1286,8 @@ struct SubjectComputation {
 
 #[cfg(feature = "parallel")]
 impl SubjectComputation {
-    /// A subject without anything for the sink (the chunks searched side by side keep only the others).
+    /// A subject without anything for the sink (the chunks searched side by side keep only the
+    /// others).
     fn empty() -> Self {
         Self {
             seeds: Vec::new(),
@@ -1408,10 +1407,11 @@ fn compute_subject(
     //             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
     //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
     // ```
-    // Dispatch point of LOSAT_X_BXDIAG / LOSAT_X_BXDIAGSHADOW: when nothing traces the seeds (not
-    // the diagnostic stages), the seed loop reads the scanner's per-thread buffer in place
-    // (x_seed_scan.rs), or with LOSAT_X_BXDIAG reads the lookup cells in place (x_seed_diag.rs);
-    // otherwise the reference word finder below runs.
+    // Dispatch point between the fast seed loops and the diagnostic stages: when nothing traces the
+    // seeds (not the diagnostic stages), the seed loop reads the scanner's per-thread buffer in
+    // place (x_seed_scan.rs; LOSAT_X_BXDIAG, chosen inside `x_word_finder_scan`, reads the lookup
+    // cells in place instead, x_seed_diag.rs); otherwise the reference word finder below runs and
+    // collects the seeds.
     let initial = if !diagnostics {
         super::seed::x_seed_scan::x_word_finder_scan(
             batch, params, options, &encoded, lookup, diagonals,
@@ -1434,11 +1434,7 @@ fn compute_subject(
             //
             //             if (init_hitlist->total == 0) continue;
             // ```
-            |pairs| {
-                if diagnostics {
-                    seeds.extend_from_slice(pairs);
-                }
-            },
+            |pairs| seeds.extend_from_slice(pairs),
         )?
     };
     let raw = if options.gapped {

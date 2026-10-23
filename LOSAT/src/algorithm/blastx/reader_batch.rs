@@ -236,11 +236,11 @@ pub(crate) fn prepare_reader_batch(
         for unit in &mut units {
             unit.prepared.reader_shape = Some(Arc::clone(&partial));
         }
-        let mut word_cutoff_min: Option<i32> = None;
-        let mut redo_cutoff_min: Option<i32> = None;
-        for unit in &units {
+        // The two minima of one unit; the units are independent, so they are reduced side by
+        // side on the pool (a reader batch of many small queries has thousands of contexts).
+        let unit_minima = |unit: &UnitPrep| -> Result<(Option<i32>, Option<i32>)> {
             if !unit.params.iter().any(|p| p.valid) {
-                continue;
+                return Ok((None, None));
             }
             let mut params = unit.params.clone();
             subject_parameters(
@@ -252,17 +252,32 @@ pub(crate) fn prepare_reader_batch(
                 min_subject_length,
                 None,
             )?;
-            for p in params.iter().filter(|p| p.valid) {
-                if ungapped_link {
-                    word_cutoff_min =
-                        Some(word_cutoff_min.map_or(p.word_cutoff, |m| m.min(p.word_cutoff)));
-                }
-                if kappa {
-                    redo_cutoff_min =
-                        Some(redo_cutoff_min.map_or(p.hit_cutoff, |m| m.min(p.hit_cutoff)));
-                }
-            }
-        }
+            let valid = || params.iter().filter(|p| p.valid);
+            Ok((
+                ungapped_link
+                    .then(|| valid().map(|p| p.word_cutoff).min())
+                    .flatten(),
+                kappa.then(|| valid().map(|p| p.hit_cutoff).min()).flatten(),
+            ))
+        };
+        #[cfg(feature = "parallel")]
+        let minima: Vec<(Option<i32>, Option<i32>)> = if pool.enabled() {
+            use rayon::prelude::*;
+            pool.install(|| {
+                units
+                    .par_iter()
+                    .with_max_len(1)
+                    .map(unit_minima)
+                    .collect::<Result<Vec<_>>>()
+            })?
+        } else {
+            units.iter().map(unit_minima).collect::<Result<Vec<_>>>()?
+        };
+        #[cfg(not(feature = "parallel"))]
+        let minima: Vec<(Option<i32>, Option<i32>)> =
+            units.iter().map(unit_minima).collect::<Result<Vec<_>>>()?;
+        let word_cutoff_min = minima.iter().filter_map(|m| m.0).min();
+        let redo_cutoff_min = minima.iter().filter_map(|m| m.1).min();
         for unit in &mut units {
             unit.prepared.reader_shape = None;
         }

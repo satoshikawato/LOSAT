@@ -695,7 +695,10 @@ pub(crate) fn search_core(
             let x_cap = x_bx_mem::chunk_unit_cap(pool, options, subjects);
             let mut x_next = 0;
             while x_next < chunks.len() {
-                let wave = x_cap.map_or(pool.threads().max(2), x_bx_mem::chunk_wave);
+                let x_wave = x_cap.map(x_bx_mem::chunk_wave);
+                let wave = x_wave
+                    .as_ref()
+                    .map_or(pool.threads().max(2), x_bx_mem::XChunkWave::size);
                 let wave_chunks = &chunks[x_next..chunks.len().min(x_next + wave)];
                 x_next += wave_chunks.len();
                 let computed: Vec<_> = pool.install(|| {

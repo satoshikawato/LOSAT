@@ -1390,6 +1390,8 @@ fn x_flow(
         batches: VecDeque<(usize, Arc<Vec<FastaRecord>>)>,
         live: usize,
         ended: bool,
+        // The writing ended (at the end, at an error, or at a panic it raises again): spawn no more.
+        stopped: bool,
     }
     struct XLaunch<'f> {
         held: std::sync::Mutex<XHeld>,
@@ -1398,6 +1400,14 @@ fn x_flow(
         search: &'f (dyn Fn(&[FastaRecord], bool) -> Result<Vec<BatchResults>> + Sync),
     }
     impl XLaunch<'_> {
+        // The held batches; a panic elsewhere cannot leave them unusable (nothing panics while
+        // they are locked, and a search's result must still be sent).
+        fn held(&self) -> std::sync::MutexGuard<'_, XHeld> {
+            self.held
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        }
+
         // Spawns the held batches beyond the newest `lookahead` (all of them at the end of the
         // input, then searched alone) while fewer than `max_live` are spawned and unsearched.
         // Each search sends its result (or panic) once and then spawns again, so a place freed
@@ -1409,9 +1419,9 @@ fn x_flow(
         ) {
             loop {
                 let next = {
-                    let mut held = self.held.lock().expect("held batches");
+                    let mut held = self.held();
                     let keep = if held.ended { 0 } else { self.lookahead };
-                    if held.batches.len() > keep && held.live < self.max_live {
+                    if !held.stopped && held.batches.len() > keep && held.live < self.max_live {
                         held.live += 1;
                         let alone = held.ended;
                         held.batches
@@ -1432,7 +1442,7 @@ fn x_flow(
                     let searched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         (self.search)(&queries, alone)
                     }));
-                    self.held.lock().expect("held batches").live -= 1;
+                    self.held().live -= 1;
                     // The receiver is gone only when the run already ended at an error.
                     let _ = sender.send((index, searched));
                     self.release(scope, &sender);
@@ -1447,12 +1457,22 @@ fn x_flow(
             batches: VecDeque::new(),
             live: 0,
             ended: false,
+            stopped: false,
         }),
         lookahead,
         max_live,
         search,
     };
+    // Marks the writing ended when the scope's body returns or unwinds, before the scope waits
+    // for the searches it spawned: the searches that end then spawn no more.
+    struct XStop<'a, 'f>(&'a XLaunch<'f>);
+    impl Drop for XStop<'_, '_> {
+        fn drop(&mut self) {
+            self.0.held().stopped = true;
+        }
+    }
     rayon::in_place_scope(|scope| {
+        let _stop = XStop(&launch);
         let (sender, receiver) = mpsc::channel::<(usize, XSearched)>();
         let state = RefCell::new(XState {
             events: VecDeque::new(),
@@ -1553,7 +1573,7 @@ fn x_flow(
                     state
                         .events
                         .push_back(XEvent::Batch(index, Arc::clone(&queries)));
-                    let mut held = launch.held.lock().expect("held batches");
+                    let mut held = launch.held();
                     held.batches.push_back((index, queries));
                 }
                 super::x_timing::run_add(XRun::FlowBatches, 1);
@@ -1574,7 +1594,7 @@ fn x_flow(
         if !failed.get() {
             // The end of the input: the held batches (the last of the input) are searched alone,
             // side by side.
-            launch.held.lock().expect("held batches").ended = true;
+            launch.held().ended = true;
             release();
             write(true)?;
         }

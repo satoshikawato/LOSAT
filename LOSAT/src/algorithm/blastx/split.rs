@@ -380,6 +380,7 @@ pub fn split_queries(
     full: &PreparedQueryBatch,
     options: &ResolvedOptions,
 ) -> Result<Vec<QueryChunk>> {
+    let _probe = crate::utils::probe_mem::tag(crate::utils::probe_mem::NG as u8 - 1);
     let mut size = CHUNK_SIZE;
     let length = records.iter().map(|r| r.sequence.len()).sum();
     let mut count = calculate_num_chunks(&mut size, length, records.len());

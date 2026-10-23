@@ -707,6 +707,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         results: &mut Vec<BatchResults>,
                         queries_before: usize|
      -> Result<()> {
+        let _probe = crate::utils::probe_mem::tag(crate::utils::probe_mem::REPORT);
         match (&database, &pairwise_database) {
             (Some(database), Some(pairwise)) => {
                 let reported = match search_subjects {

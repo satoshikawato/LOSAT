@@ -4,7 +4,7 @@ use super::{
     args::ResolvedOptions,
     input::FastaRecord,
     parameters::{score_block, subject_parameters, ContextParameters},
-    query_setup::{prepare_queries, PreparedQueryBatch},
+    query_setup::{context_frame, prepare_queries, PreparedQueryBatch},
     subjects::Subjects,
 };
 use crate::stats::tables::KarlinParams;
@@ -37,6 +37,10 @@ pub(crate) struct ReaderBatchShape {
 pub(crate) struct UnitPrep {
     pub(crate) prepared: PreparedQueryBatch,
     pub(crate) params: Vec<ContextParameters>,
+    /// The unit's part of the batch's `word_cutoff_min` and `redo_cutoff_min` (its valid
+    /// contexts, with the batch's average length), when the search reads them.
+    word_cutoff_min: Option<i32>,
+    redo_cutoff_min: Option<i32>,
 }
 
 impl PreparedQueryBatch {
@@ -67,17 +71,6 @@ impl PreparedQueryBatch {
             None => self.contexts.len(),
         }
     }
-}
-
-// No NCBI counterpart: the offset at which the context after the last of a unit would start in
-// the concatenation (every context of positive length takes its length and one separator).
-fn concatenated_span(prepared: &PreparedQueryBatch) -> usize {
-    prepared
-        .contexts
-        .iter()
-        .filter(|context| context.length > 0)
-        .map(|context| context.length + 1)
-        .sum()
 }
 
 impl ReaderBatchShape {
@@ -124,30 +117,51 @@ impl ReaderBatchShape {
     //         qinfo->contexts[index].query_offset = prev_loc + shift;
     // ```
     // The reader batch is one query info: its contexts follow one another through the units, a
-    // context of positive length taking its length and a separator. The smallest lambda is the
-    // first strict minimum over the contexts in order, as above. The two cutoff minima are
-    // filled in by `prepare_reader_batch`.
-    fn reduce(records: usize, units: &[UnitPrep]) -> Self {
+    // context of positive length taking its length and a separator. The layout of the contexts
+    // follows from the records alone (`context_frame`, as `prepare_queries` lays them out), so
+    // it is known before any unit is prepared. The smallest lambda is the first strict minimum
+    // over the contexts in order, as above; the two cutoff minima are the minima over the units'.
+    /// The values of a reader batch that follow from its records: the query count, the
+    /// concatenated length and the context count (phase 1 starts with these; the units' cutoff
+    /// minima are taken with the average length they give).
+    pub(crate) fn layout(records: &[FastaRecord], options: &ResolvedOptions) -> Self {
+        let (mut offset, mut concatenated_length, mut contexts) = (0, 0, 0);
+        for record in records {
+            for i in 0..6 {
+                let (len, enabled) = context_frame(record.sequence.len(), i, &options.strand);
+                let length = if enabled { len } else { 0 };
+                concatenated_length = offset + length;
+                contexts += 1;
+                if length > 0 {
+                    offset += length + 1;
+                }
+            }
+        }
+        ReaderBatchShape {
+            query_count: records.len(),
+            concatenated_length,
+            contexts,
+            smallest_lambda: None,
+            word_cutoff_min: None,
+            redo_cutoff_min: None,
+        }
+    }
+
+    /// The shape of a reader batch of `layout` from its units' preparations, in order (phase 1
+    /// ends with it).
+    pub(crate) fn reduce<'u>(
+        layout: &ReaderBatchShape,
+        units: impl IntoIterator<Item = &'u UnitPrep>,
+    ) -> Self {
         let mut shape = ReaderBatchShape {
-            query_count: records,
-            concatenated_length: 0,
-            contexts: 0,
+            query_count: layout.query_count,
+            concatenated_length: layout.concatenated_length,
+            contexts: layout.contexts,
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
         };
-        let mut before = 0;
-        for (index, unit) in units.iter().enumerate() {
-            shape.contexts += unit.prepared.contexts.len();
-            if index + 1 == units.len() {
-                shape.concatenated_length = before
-                    + unit
-                        .prepared
-                        .contexts
-                        .last()
-                        .map_or(0, |last| last.offset + last.length);
-            }
-            before += concatenated_span(&unit.prepared);
+        for unit in units {
             for p in unit.params.iter().filter(|p| p.valid) {
                 if p.ungapped.lambda > 0.0
                     && shape
@@ -157,6 +171,14 @@ impl ReaderBatchShape {
                     shape.smallest_lambda = Some(p.ungapped);
                 }
             }
+            shape.word_cutoff_min = [shape.word_cutoff_min, unit.word_cutoff_min]
+                .into_iter()
+                .flatten()
+                .min();
+            shape.redo_cutoff_min = [shape.redo_cutoff_min, unit.redo_cutoff_min]
+                .into_iter()
+                .flatten()
+                .min();
         }
         shape
     }
@@ -185,10 +207,62 @@ impl ReaderBatchShape {
 // NCBI sets up and searches a reader batch (one `BATCH_SIZE` query batch) as a whole, so these
 // values are taken over all its contexts. LOSAT searches the batch in units of at most 10002
 // letters. Phase 1 prepares every unit (translation, filtering, the statistical blocks of the
-// contexts), reduces the batch's values, and hands each unit its preparation with the shape
-// attached; phase 2 searches the units as before, from these. With a pool of 2+ threads the
-// units are prepared side by side.
-/// Phase 1 of the search of a reader batch of `ranges.len()` > 1 units.
+// contexts, and the unit's cutoff minima with the batch's average length, which the layout of the
+// records gives), reduces the batch's values, and hands each unit its preparation with the shape
+// attached; phase 2 searches the units as before, from these. A batch with no valid context is
+// not searched, and subjects that cannot be read end the search before they are used, so the
+// minima are not taken then.
+/// Phase 1 for one unit (`queries`) of a reader batch of `layout`. The unit's preparation has
+/// the layout attached; `attach` replaces it with the reduced shape.
+pub(crate) fn prepare_unit(
+    queries: &[FastaRecord],
+    layout: &Arc<ReaderBatchShape>,
+    options: &ResolvedOptions,
+    subjects: Subjects<'_>,
+) -> Result<UnitPrep> {
+    let mut prepared = prepare_queries(queries, options)?;
+    let params = score_block(&prepared);
+    prepared.reader_shape = Some(Arc::clone(layout));
+    let kappa = options.composition == 2 && options.gapped;
+    let ungapped_link = !options.gapped && options.sum_stats;
+    let (mut word_cutoff_min, mut redo_cutoff_min) = (None, None);
+    if (kappa || ungapped_link)
+        && params.iter().any(|p| p.valid)
+        && !subjects.is_unreadable()
+        && !subjects.is_empty()
+    {
+        let mut minima = params.clone();
+        subject_parameters(
+            &prepared,
+            &mut minima,
+            options,
+            subjects.total_length()?,
+            i64::try_from(subjects.len())?,
+            subjects.shortest_length(),
+            None,
+        )?;
+        let valid = || minima.iter().filter(|p| p.valid);
+        word_cutoff_min = ungapped_link
+            .then(|| valid().map(|p| p.word_cutoff).min())
+            .flatten();
+        redo_cutoff_min = kappa.then(|| valid().map(|p| p.hit_cutoff).min()).flatten();
+    }
+    Ok(UnitPrep {
+        prepared,
+        params,
+        word_cutoff_min,
+        redo_cutoff_min,
+    })
+}
+
+/// The end of phase 1 for one unit: the batch's shape replaces the layout.
+pub(crate) fn attach(unit: &mut UnitPrep, shape: &Arc<ReaderBatchShape>) {
+    unit.prepared.reader_shape = Some(Arc::clone(shape));
+}
+
+/// Phase 1 of the search of a reader batch of `ranges.len()` > 1 units, all at once (with a pool
+/// of 2+ threads the units are prepared side by side). The flow of `native.rs` runs the same
+/// steps as tasks of its own.
 pub(crate) fn prepare_reader_batch(
     records: &[FastaRecord],
     ranges: &[Range<usize>],
@@ -197,10 +271,9 @@ pub(crate) fn prepare_reader_batch(
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<Vec<UnitPrep>> {
     let x_t = super::x_timing::lap();
+    let layout = Arc::new(ReaderBatchShape::layout(records, options));
     let prepare = |range: &Range<usize>| -> Result<UnitPrep> {
-        let prepared = prepare_queries(&records[range.clone()], options)?;
-        let params = score_block(&prepared);
-        Ok(UnitPrep { prepared, params })
+        prepare_unit(&records[range.clone()], &layout, options, subjects)
     };
     #[cfg(feature = "parallel")]
     let mut units: Vec<UnitPrep> = if pool.enabled() {
@@ -221,73 +294,9 @@ pub(crate) fn prepare_reader_batch(
         ranges.iter().map(prepare).collect::<Result<Vec<_>>>()?
     };
     super::x_timing::batch(super::x_timing::Batch::QuerySetup, x_t);
-    let mut shape = ReaderBatchShape::reduce(records.len(), &units);
-    // The two cutoff minima follow from the units' contexts and the batch's average length
-    // (the unit's `subject_parameters`, with the shape so far). A batch with no valid context
-    // is not searched, and subjects that cannot be read end the search before they are used.
-    let any_valid = shape.smallest_lambda.is_some();
-    let kappa = options.composition == 2 && options.gapped;
-    let ungapped_link = !options.gapped && options.sum_stats;
-    if any_valid && (kappa || ungapped_link) && !subjects.is_unreadable() && !subjects.is_empty() {
-        let db_length = subjects.total_length()?;
-        let db_count = i64::try_from(subjects.len())?;
-        let min_subject_length = subjects.shortest_length();
-        let partial = Arc::new(shape);
-        for unit in &mut units {
-            unit.prepared.reader_shape = Some(Arc::clone(&partial));
-        }
-        // The two minima of one unit; the units are independent, so they are reduced side by
-        // side on the pool (a reader batch of many small queries has thousands of contexts).
-        let unit_minima = |unit: &UnitPrep| -> Result<(Option<i32>, Option<i32>)> {
-            if !unit.params.iter().any(|p| p.valid) {
-                return Ok((None, None));
-            }
-            let mut params = unit.params.clone();
-            subject_parameters(
-                &unit.prepared,
-                &mut params,
-                options,
-                db_length,
-                db_count,
-                min_subject_length,
-                None,
-            )?;
-            let valid = || params.iter().filter(|p| p.valid);
-            Ok((
-                ungapped_link
-                    .then(|| valid().map(|p| p.word_cutoff).min())
-                    .flatten(),
-                kappa.then(|| valid().map(|p| p.hit_cutoff).min()).flatten(),
-            ))
-        };
-        #[cfg(feature = "parallel")]
-        let minima: Vec<(Option<i32>, Option<i32>)> = if pool.enabled() {
-            use rayon::prelude::*;
-            pool.install(|| {
-                units
-                    .par_iter()
-                    .with_max_len(1)
-                    .map(unit_minima)
-                    .collect::<Result<Vec<_>>>()
-            })?
-        } else {
-            units.iter().map(unit_minima).collect::<Result<Vec<_>>>()?
-        };
-        #[cfg(not(feature = "parallel"))]
-        let minima: Vec<(Option<i32>, Option<i32>)> =
-            units.iter().map(unit_minima).collect::<Result<Vec<_>>>()?;
-        let word_cutoff_min = minima.iter().filter_map(|m| m.0).min();
-        let redo_cutoff_min = minima.iter().filter_map(|m| m.1).min();
-        for unit in &mut units {
-            unit.prepared.reader_shape = None;
-        }
-        shape = Arc::try_unwrap(partial).expect("the units' shapes are dropped");
-        shape.word_cutoff_min = word_cutoff_min;
-        shape.redo_cutoff_min = redo_cutoff_min;
-    }
-    let shape = Arc::new(shape);
+    let shape = Arc::new(ReaderBatchShape::reduce(&layout, &units));
     for unit in &mut units {
-        unit.prepared.reader_shape = Some(Arc::clone(&shape));
+        attach(unit, &shape);
     }
     Ok(units)
 }
@@ -318,37 +327,45 @@ mod tests {
     }
 
     /// The shape of a reader batch of several units is the shape of the batch prepared as one
-    /// unit: the concatenation, the context count and the smallest lambda do not depend on where
-    /// the batch is cut.
+    /// unit: the concatenation and the context count (from the records' layout), the smallest
+    /// lambda and the composition redo's minimum cutoff do not depend on where the batch is cut,
+    /// with either strand or both.
     #[test]
     fn the_shape_of_the_units_is_the_shape_of_the_batch_as_one_unit() {
-        let options = super::super::stage_c_tests::options();
         let records: Vec<_> = [3000, 301, 7000, 2, 5000, 1, 4999, 90].map(record).to_vec();
         let ranges = super::super::query_setup::batch_ranges(&records, 6000);
         assert!(ranges.len() > 2);
         let pool = crate::utils::threading::SearchPool::x_serial();
-        let units =
-            prepare_reader_batch(&records, &ranges, &options, (&records[..1]).into(), &pool)
-                .unwrap();
-        let whole = prepare_queries(&records, &options).unwrap();
-        let whole_params = score_block(&whole);
-        let shape = units[0].prepared.reader_shape.as_ref().unwrap();
-        assert_eq!(shape.query_count, records.len());
-        assert_eq!(shape.contexts, whole.contexts.len());
-        assert_eq!(shape.concatenated_length, whole.batch_concatenated_length());
-        let smallest = whole_params
-            .iter()
-            .filter(|p| p.valid)
-            .map(|p| p.ungapped.lambda)
-            .fold(f64::INFINITY, f64::min);
-        assert_eq!(shape.smallest_lambda.unwrap().lambda, smallest);
-        // Every unit sees the one shape.
-        for unit in &units {
-            assert_eq!(
-                unit.prepared.batch_concatenated_length(),
-                whole.batch_concatenated_length()
-            );
-            assert_eq!(unit.prepared.batch_context_count(), whole.contexts.len());
+        for strand in ["both", "plus", "minus"] {
+            let mut options = super::super::stage_c_tests::options();
+            options.strand = strand.into();
+            options.composition = 2;
+            let subjects: Subjects<'_> = (&records[..1]).into();
+            let units = prepare_reader_batch(&records, &ranges, &options, subjects, &pool).unwrap();
+            let layout = Arc::new(ReaderBatchShape::layout(&records, &options));
+            let whole = prepare_unit(&records, &layout, &options, subjects).unwrap();
+            let shape = units[0].prepared.reader_shape.as_ref().unwrap();
+            assert_eq!(shape.query_count, records.len());
+            assert_eq!(shape.contexts, whole.prepared.contexts.len());
+            let last = whole.prepared.contexts.last().unwrap();
+            assert_eq!(shape.concatenated_length, last.offset + last.length);
+            let smallest = whole
+                .params
+                .iter()
+                .filter(|p| p.valid)
+                .map(|p| p.ungapped.lambda)
+                .fold(f64::INFINITY, f64::min);
+            assert_eq!(shape.smallest_lambda.unwrap().lambda, smallest);
+            assert!(shape.redo_cutoff_min.is_some());
+            assert_eq!(shape.redo_cutoff_min, whole.redo_cutoff_min);
+            // Every unit sees the one shape.
+            for unit in &units {
+                assert_eq!(
+                    unit.prepared.batch_concatenated_length(),
+                    shape.concatenated_length
+                );
+                assert_eq!(unit.prepared.batch_context_count(), shape.contexts);
+            }
         }
     }
 

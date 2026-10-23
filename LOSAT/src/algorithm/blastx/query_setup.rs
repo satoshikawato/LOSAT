@@ -130,6 +130,19 @@ pub fn batch_ranges(records: &[FastaRecord], batch_size: usize) -> Vec<std::ops:
     }
     result
 }
+// No NCBI counterpart of its own: context `i` (frames 1, 2, 3, -1, -2, -3) of a query of `letters`
+// nucleotides as `prepare_queries` lays the contexts out (blast_setup_cxx.cpp:191-219, cited
+// there): the frame's protein length, and whether the context's strand is searched (a context
+// of a strand not searched has length 0).
+pub(crate) fn context_frame(letters: usize, i: usize, strand: &str) -> (usize, bool) {
+    let len = letters.saturating_sub(i % 3) / 3;
+    let enabled = match strand {
+        "plus" => i < 3,
+        "minus" => i >= 3,
+        _ => true,
+    };
+    (len, enabled)
+}
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:71-88
 // ```c++
 //     if (index) {
@@ -254,14 +267,9 @@ pub fn prepare_queries(
             } else {
                 -((i - 2) as i8)
             };
-            let len = record.sequence.len().saturating_sub(i % 3) / 3;
+            let (len, enabled) = context_frame(record.sequence.len(), i, &options.strand);
             max_length = max_length.max(len);
             min_length = min_length.min(len);
-            let enabled = match options.strand.as_str() {
-                "plus" => i < 3,
-                "minus" => i >= 3,
-                _ => true,
-            };
             let length = if enabled { len } else { 0 };
             let lowercase_masks = if enabled {
                 dna_to_protein_masks(&record.lowercase_masks, record.sequence.len(), frame)

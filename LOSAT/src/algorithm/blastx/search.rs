@@ -573,7 +573,9 @@ pub(crate) fn search_core(
         let x_t = x_t_batch;
         let queries = &records[range.clone()];
         let (mut full, mut full_params) = match preps.pop_front() {
-            Some(UnitPrep { prepared, params }) => (prepared, params),
+            Some(UnitPrep {
+                prepared, params, ..
+            }) => (prepared, params),
             None => {
                 let full = prepare_queries(queries, options)?;
                 let params = score_block(&full);

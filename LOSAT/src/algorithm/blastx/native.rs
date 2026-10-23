@@ -486,7 +486,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
         // FIFO) cannot be read a second time: the read before the search would take every
         // byte (DECISIONS 22). Refused as `-query -` is (`args.rs`), before the search.
-        if !query_file.metadata().is_ok_and(|m| m.is_file()) {
+        if !query_file.metadata().is_ok_and(|m| m.is_file())
+            || !crate::blastinput::input_files::has_stream_position(&query_file)
+        {
             bail!(
                 "unsupported BLASTX query input for -outfmt {}: use a regular file",
                 choice.number

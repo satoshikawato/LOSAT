@@ -1035,12 +1035,24 @@ pub(super) fn x_scan_plan(
     // subject (tblastn/x_subject_translate.rs). Graduated 2026-10-22 (was LOSAT_X_TBNXLATE).
     // EXPERIMENT (LOSAT_X_TBNSTORE): a packed subject is translated from its packed bases
     // (x_packed_subject_plan); a stage that reads the case of a subject with lower-case letters
-    // gets the letters instead.
+    // gets the letters instead. The letters of a subject searched from its letters (the records
+    // `run_local` is given, or a set that keeps its letters for a byte without an ncbi4na code)
+    // are packed for the plan (`x_plan_store`), and the plan is made from them as for a packed
+    // subject.
     let x_build_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
         use crate::sequence::packed_subject::SubjectNt;
         match subject {
             SubjectNt::Letters(letters) => {
-                super::x_subject_translate::x_subject_plan(letters, db_gencode, mask_lowercase)
+                match super::x_subject_store::x_plan_store(letters, mask_lowercase) {
+                    Some(store) => {
+                        super::x_subject_translate::x_packed_subject_plan(&store, db_gencode)
+                    }
+                    None => super::x_subject_translate::x_subject_plan(
+                        letters,
+                        db_gencode,
+                        mask_lowercase,
+                    ),
+                }
             }
             SubjectNt::Packed(store) => {
                 anyhow::ensure!(

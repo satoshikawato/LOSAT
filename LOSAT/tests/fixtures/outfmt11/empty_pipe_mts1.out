@@ -1,0 +1,15 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 1,
+      message "Warning: [blastn] Examining 5 or more matches is recommended"
+    }
+  }
+}

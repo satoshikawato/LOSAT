@@ -26,9 +26,16 @@
 //! without letters (its warning comes from the length the store keeps). The queries are proteins
 //! of `tests/fasta/PemoMJNVA.faa`: ten of them (one query batch), or all 115 (four batches).
 
+#[allow(dead_code)]
+mod run_local_support;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
+
+use LOSAT::api::local_blast::run_local_tblastn;
+use LOSAT::blastinput::fasta_reader::ReaderConfig;
+use LOSAT::cli::{try_parse_from, Cli, Commands};
 
 const PIECE: usize = 6_000;
 
@@ -192,6 +199,39 @@ fn run(
         .envs(variables.iter().copied())
         .output()
         .expect("run LOSAT")
+}
+
+/// One `run_local` search (LOSAT Web's and the library's entry) in this process: the records as
+/// the CLI's reader reads them, `options` as on the command line with `-outfmt <n>` first.
+/// Returns the report and the messages.
+fn run_local(query: &Path, subjects: &Path, options: &[&str]) -> (Vec<u8>, String) {
+    assert_eq!(options[0], "-outfmt", "{options:?}");
+    let (query_name, subject_name) = (query.display().to_string(), subjects.display().to_string());
+    let mut argv = vec![
+        "losat",
+        "tblastn",
+        "-query",
+        &query_name,
+        "-subject",
+        &subject_name,
+    ];
+    argv.extend_from_slice(&options[2..]);
+    let cli: Cli = try_parse_from(argv).expect("tblastn argv");
+    let args = match cli.command {
+        Commands::Tblastn(args) => args,
+        _ => unreachable!("tblastn subcommand"),
+    };
+    let queries =
+        run_local_support::reader_records(query, ReaderConfig::query("TBLASTN", true, true));
+    let records =
+        run_local_support::reader_records(subjects, ReaderConfig::subject("TBLASTN", false, true));
+    let mut run = run_local_support::run_formats(&[options[1]], false, |outputs| {
+        run_local_tblastn(args, &queries, &records, outputs)
+    });
+    (
+        run.outputs.remove(0),
+        String::from_utf8_lossy(&run.diagnostics).into_owned(),
+    )
 }
 
 /// The number after `field=` in a `[X_STATS]` line.
@@ -414,4 +454,37 @@ fn a_subject_range_is_cut_and_held_packed_and_the_default_off_still_translates_t
     // the preliminary stage (the unit path, which `LOSAT_X_DEFAULT=0` no longer turns off)
     // translates the packed bases of the subjects
     assert!(counter(&stats, "packed_plans") >= 6, "{stats}");
+}
+
+// No NCBI counterpart: the switch in `run_local` (LOSAT Web, the library), whose caller keeps the
+// records and their letters. The worker that makes a subject's plan packs its letters
+// (`x_plan_store`) and makes the plan from the packed bases. The report and the messages equal
+// those of the CLI run that reads the letters (`LOSAT_X_TBNSTORE=0`): every ambiguous letter and
+// runs of `N` (the draws of the packing), another genetic code, lower-case letters with
+// `-lcase_masking` (those subjects keep their letters), a subject range (`run_local` cuts the
+// records before the search), and three threads (the plans made on the pool's threads). The
+// in-process search inherits the test's variables: with `LOSAT_X_DEFAULT=0` both sides read the
+// letters, and `a_plan_packs_its_letters_unless_it_reads_their_case_or_cannot`
+// (x_subject_store.rs) checks when the letters are packed.
+#[test]
+fn run_local_packs_the_callers_letters_for_the_plans_and_reports_as_the_letters() {
+    let (ten, _, subjects) = inputs();
+    let long = long_subjects(subjects);
+    let cases: [(&Path, &[&str]); 5] = [
+        (subjects, &["-outfmt", "6"]),
+        (subjects, &["-outfmt", "6", "-db_gencode", "4"]),
+        (subjects, &["-outfmt", "0", "-num_threads", "3"]),
+        (
+            subjects,
+            &["-outfmt", "6", "-lcase_masking", "-num_threads", "3"],
+        ),
+        (&long, &["-outfmt", "6", "-subject_loc", "100-5000"]),
+    ];
+    for (subject_file, options) in cases {
+        let (expected, messages, _) = tblastn(ten, subject_file, options, &[NO_STORE]);
+        assert!(!expected.is_empty(), "{options:?}: no report");
+        let (report, local_messages) = run_local(ten, subject_file, options);
+        assert!(report == expected, "{options:?}: the report");
+        assert_eq!(local_messages, messages, "{options:?}");
+    }
 }

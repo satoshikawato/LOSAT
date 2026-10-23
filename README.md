@@ -61,7 +61,7 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `8` | Seqalign (Text ASN.1) | all five | all five programs |
 | `9` | Seqalign (Binary ASN.1) | all five | all five programs |
 | `10` | Comma-separated values | all five | not yet |
-| `11` | BLAST archive (ASN.1) | all five | not yet |
+| `11` | BLAST archive (ASN.1) | all five | `blastn` (with `-subject` and `-db`; `ARCHIVE_FORMAT` text and `bin`, as NCBI reads it; `xml` is refused for now); the other programs: not yet |
 | `12` | Seqalign (JSON) | all five | all five programs |
 | `13` | Multiple-file BLAST JSON | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
 | `14` | Multiple-file BLAST XML2 | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
@@ -220,7 +220,7 @@ losat blastx \
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX; section 6) |
 | `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp`, `blastp-fast` or `blastp-short` (for `blastp`); `blastx` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`) |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out` (every program), `15`=BLAST JSON and `16`=BLAST XML2 (every program), `17`=SAM (BLASTN only); custom tabular fields in BLASTP and BLASTX only |
+| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `11`=BLAST archive (`blastn` only so far), `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out` (every program), `15`=BLAST JSON and `16`=BLAST XML2 (every program), `17`=SAM (BLASTN only); custom tabular fields in BLASTP and BLASTX only |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |

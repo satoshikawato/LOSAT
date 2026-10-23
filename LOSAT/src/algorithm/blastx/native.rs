@@ -58,6 +58,15 @@ fn engine(message: impl fmt::Display) -> anyhow::Error {
     }
     .into()
 }
+
+/// The error of the database's sequences (`BlastxDatabase::read_stores`, or a read of
+/// `LOSAT_X_BXDBSTREAM`): NCBI's engine error of a reader error, or LOSAT's refusal as it is.
+fn database_error(kept: anyhow::Error) -> anyhow::Error {
+    match kept.downcast::<PreliminaryReadError>() {
+        Ok(PreliminaryReadError(text)) => engine(text),
+        Err(refusal) => refusal,
+    }
+}
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184
 // ```c++
 //     catch (const CObjReaderParseException& e) {                             \
@@ -611,17 +620,58 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     let x_t = super::x_timing::lap();
     // The database's sequences, read once for every batch; an error belongs to the first
     // batch with a valid context (`Subjects::Unreadable`, `search_error`).
-    let (stores, unreadable) = match database.as_ref().map(BlastxDatabase::read_stores) {
-        Some(Ok(stores)) => (Some(stores), None),
-        Some(Err(error)) => (None, Some(error)),
-        None => (None, None),
+    // EXPERIMENT (LOSAT_X_BXDBSTREAM): with the switch, the sequences are checked once here and
+    // read in blocks where they are searched (`x_db_stream.rs`); the copy is made only in its
+    // shadow mode. No NCBI counterpart: NCBI maps the volume files.
+    let x_stream_bytes = database
+        .as_ref()
+        .and_then(|_| super::x_db_stream::x_block_bytes());
+    let (stores, x_longest, unreadable) = match (&database, x_stream_bytes) {
+        (None, _) => (None, None, None),
+        (Some(database), None) => match database.read_stores() {
+            Ok(stores) => (Some(stores), None, None),
+            Err(error) => (None, None, Some(error)),
+        },
+        (Some(database), Some(_)) => {
+            let checked = database.x_check_stores();
+            let copy = super::x_db_stream::x_shadow().then(|| database.read_stores());
+            if let Some(copy) = &copy {
+                let says = |result: Result<(), &anyhow::Error>| {
+                    result.map_or_else(|error| format!("error {error}"), |()| "read".to_string())
+                };
+                let (of_check, of_copy) = (
+                    says(checked.as_ref().map(|_| ())),
+                    says(copy.as_ref().map(|_| ())),
+                );
+                super::x_db_stream::x_shadow_assert(of_check == of_copy, || {
+                    format!("the check gives {of_check:?}, the copy {of_copy:?}")
+                });
+            }
+            match checked {
+                Ok(longest) => (copy.and_then(Result::ok), Some(longest), None),
+                Err(error) => (None, None, Some(error)),
+            }
+        }
+    };
+    let x_stream = match (&database, x_stream_bytes, x_longest) {
+        (Some(database), Some(bytes), Some(longest)) => Some(super::x_db_stream::XStreamDb::new(
+            database.x_seqdb(),
+            longest,
+            bytes,
+            stores.as_ref(),
+        )),
+        _ => None,
     };
     super::x_timing::run(XRun::ReadStores, x_t);
     let unreadable = std::cell::RefCell::new(unreadable);
-    let search_subjects = match (&database, &stores) {
-        (None, _) => Subjects::Fasta(&subjects),
-        (Some(_), Some(stores)) => Subjects::Database(stores),
-        (Some(_), None) => Subjects::Unreadable,
+    let search_subjects = match (&database, &x_stream, &stores) {
+        (None, _, _) => Subjects::Fasta(&subjects),
+        (Some(_), Some(stream), _) => Subjects::Stream(super::x_db_stream::XStream {
+            db: stream,
+            block: None,
+        }),
+        (Some(_), None, Some(stores)) => Subjects::Database(stores),
+        (Some(_), None, None) => Subjects::Unreadable,
     };
     let search_error = |error: anyhow::Error| -> anyhow::Error {
         // LOSAT's refusal, not an error of NCBI's engine.
@@ -633,12 +683,14 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                 .borrow_mut()
                 .take()
                 .expect("the database's error, raised once");
-            return match kept.downcast::<PreliminaryReadError>() {
-                Ok(PreliminaryReadError(text)) => engine(text),
-                Err(refusal) => refusal,
-            };
+            return database_error(kept);
         }
-        engine(error)
+        // EXPERIMENT (LOSAT_X_BXDBSTREAM): a read of the database that failed during the search,
+        // reported as the check's error for the same read.
+        match error.downcast::<super::x_db_stream::XReadError>() {
+            Ok(super::x_db_stream::XReadError(kept)) => database_error(kept),
+            Err(error) => engine(error),
+        }
     };
     // The reports of one query batch: with `-db`, the titles of its reported sequences are
     // read first and its hit lists renamed to ranks (`ReportedSubjects::for_batch`); NCBI's
@@ -661,12 +713,13 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
      -> Result<()> {
         match (&database, &pairwise_database) {
             (Some(database), Some(pairwise)) => {
-                let reported = match &stores {
-                    Some(stores) => {
+                let reported = match search_subjects {
+                    Subjects::Unreadable => ReportedSubjects::default(),
+                    search_subjects => {
                         let x_t = super::x_timing::lap();
                         let reported = ReportedSubjects::for_batch(
                             database,
-                            stores,
+                            search_subjects,
                             results,
                             options.gapped,
                             matches!(options.outfmt, 6 | 7),
@@ -677,7 +730,15 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         reported
                             .map_err(|error| match error.downcast::<HeaderReadError>() {
                                 Ok(header) => header.error,
-                                Err(error) => error,
+                                // EXPERIMENT (LOSAT_X_BXDBSTREAM): a failed read of a record's residues.
+                                Err(error) => {
+                                    match error.downcast::<super::x_db_stream::XReadError>() {
+                                        Ok(super::x_db_stream::XReadError(kept)) => {
+                                            database_error(kept)
+                                        }
+                                        Err(error) => error,
+                                    }
+                                }
                             })
                             .inspect_err(|error| {
                                 // A refusal of the XML2 document drops what the run holds.
@@ -688,7 +749,6 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                                 }
                             })?
                     }
-                    None => ReportedSubjects::default(),
                 };
                 report::render_queries(
                     writer,

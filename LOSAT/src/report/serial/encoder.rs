@@ -55,6 +55,9 @@ pub enum SerialError {
     /// A call that the XML stream does not write for outfmt 5 (a BOOLEAN, an ENUMERATED
     /// value or a CHOICE).
     XmlUnsupported(&'static str),
+    /// An OCTET STRING in a stream that does not write one (the archive of outfmt 11 is the
+    /// only document with one, written as ASN.1 text or binary).
+    OctetString,
 }
 
 impl std::fmt::Display for SerialError {
@@ -74,6 +77,9 @@ impl std::fmt::Display for SerialError {
             ),
             SerialError::XmlUnsupported(what) => {
                 write!(f, "an XML {what} is not supported by LOSAT")
+            }
+            SerialError::OctetString => {
+                f.write_str("an OCTET STRING in this serialized format is not supported by LOSAT")
             }
         }
     }
@@ -122,6 +128,29 @@ pub trait Encoder {
     fn visible_str(&mut self, value: &[u8]);
     /// `WriteDouble` of a REAL.
     fn real(&mut self, value: f64);
+    /// `WriteBytes` of an OCTET STRING (`Seq-data` `ncbi2na` and `ncbi4na`): in ASN.1 text
+    /// `'` then two upper-case hex digits per byte, an end of line without indentation before
+    /// a digit pair whenever the line holds 78 bytes or more, then `'H`; in ASN.1 binary the
+    /// tag 0x04, the length and the bytes.
+    fn octets(&mut self, value: &[u8]);
+    /// `WriteStringStore` of a StringStore (`Seq-data` `ncbieaa`): a VisibleString in ASN.1
+    /// text; the application tag 0x41, the length and the bytes in ASN.1 binary.
+    fn string_store(&mut self, value: &[u8]) {
+        self.visible_str(value);
+    }
+    /// The bytes that `flush_to` would hand over (0 for an encoder that cannot flush).
+    fn buffered(&self) -> usize {
+        0
+    }
+    /// Hands the bytes that are final to `sink` and drops them from the encoder's buffer, so
+    /// that a document of any size is written element by element: the ASN.1 text encoder keeps
+    /// the line that it is writing and the end of line before it (the string wrap looks back
+    /// no further), the binary encoder keeps nothing. With `all` (the document is complete)
+    /// every byte goes. The default keeps everything.
+    fn flush_to(&mut self, sink: &mut dyn std::io::Write, all: bool) -> std::io::Result<()> {
+        let _ = (sink, all);
+        Ok(())
+    }
     /// A CHOICE value of the type `type_name` whose variant `name` (position `tag`) is a
     /// SEQUENCE OF VisibleString: the strings of `items` in order. The default is `variant`,
     /// a list of string elements and `end_variant`; the XML stream in its standard-XML mode

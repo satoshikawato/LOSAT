@@ -2274,6 +2274,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
             crate::utils::xstats::add(&crate::utils::xstats::DP_FAST_CALLS, 1);
             crate::utils::xstats::add(&crate::utils::xstats::NT_TB_CELLS, r.cells);
             let out = if r.fence_hit {
+                super::x_fence::x_fence_met();
                 (r.a_offset, r.b_offset, r.score, 0, 0, 0, 0, Vec::new())
             } else if r.score <= 0 {
                 (0, 0, 0, 0, 0, 0, 0, Vec::new())
@@ -2736,6 +2737,7 @@ fn extend_gapped_one_direction_with_traceback_scalar(
     // if (fence_hit && *fence_hit) goto done;
     // ```
     if fence_hit {
+        super::x_fence::x_fence_met();
         return (a_offset, b_offset, best_score, 0, 0, 0, 0, Vec::new());
     }
 
@@ -3039,6 +3041,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             &mut gap_scratch.fast,
         ) {
             let out = if r.fence_hit {
+                super::x_fence::x_fence_met();
                 (r.a_offset, r.b_offset, r.score, 0, 0, 0, 0, Vec::new())
             } else if r.score <= 0 {
                 (0, 0, 0, 0, 0, 0, 0, Vec::new())
@@ -3412,6 +3415,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     // if (fence_hit && *fence_hit) goto done;
     // ```
     if fence_hit {
+        super::x_fence::x_fence_met();
         return (a_offset, b_offset, best_score, 0, 0, 0, 0, Vec::new());
     }
 

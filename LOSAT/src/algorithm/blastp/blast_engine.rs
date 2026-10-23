@@ -34,7 +34,7 @@ use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_si
 use crate::algorithm::tblastx::lookup::{x_bp_build_ncbi_lookup, BlastAaLookupTable, QueryContext};
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
-use crate::api::local_blast::{FormatProbe, OutputSink, ReportOutputs};
+use crate::api::local_blast::{FormatObserver, FormatProbe, HspIndex, OutputSink, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
 use crate::common::{GapEditOp, Hit};
@@ -105,8 +105,8 @@ use super::x_prelim_compact::{
     x_shadow_compare, XPrelimCompact, XPrelimHsp,
 };
 use crate::core::blast_hits::reap_by_query_coverage;
-// No NCBI counterpart: matches per LOSAT_X_NEWTONLANES prefetch in the BLASTP redo loops; it does
-// not change any value NCBI computes.
+// No NCBI counterpart: matches per Newton lanes prefetch in the BLASTP redo loops; it does not
+// change any value NCBI computes.
 const X_NEWTON_LANES_MATCHES: usize = 16;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:142-154
 // ```c
@@ -2413,17 +2413,22 @@ fn blastp_is_xml(outfmt: &str) -> bool {
     })
 }
 
-/// The XML2 / JSON document of a `-outfmt` value (outfmt 15 and 16), read as NCBI reads it;
-/// `None` for the other formats.
+/// The XML2 / JSON document of a `-outfmt` value (outfmt 13 to 16), read as NCBI reads it;
+/// `None` for the other formats. Outfmt 13 and 14 write files next to `-out`: only the command
+/// line reaches them (`resolve_for_formats` stops the other callers at NCBI's XInclude check).
 fn blastp_xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
     use crate::blastinput::app::ReportFormat;
-    use crate::report::blast_xml2::Xml2Kind;
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
-    match ReportFormat::from_number(choice.number)? {
-        ReportFormat::Xml2S => Some(Xml2Kind::Single16),
-        ReportFormat::JsonS => Some(Xml2Kind::Single15),
-        _ => None,
-    }
+    crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(choice.number)?)
+}
+
+/// Whether the block search takes this XML2 / JSON document: outfmt 15 and 16 only. Outfmt 13 and
+/// 14 (`Files13`, `Files14`) write side files and a master file; they join by widening this match
+/// together with the checks of the side files' names and of their opening, which the block
+/// search does not make. No NCBI counterpart: chooses LOSAT's path.
+fn x_xml2_kind_takes_blocks(kind: crate::report::blast_xml2::Xml2Kind) -> bool {
+    use crate::report::blast_xml2::Xml2Kind;
+    matches!(kind, Xml2Kind::Single15 | Xml2Kind::Single16)
 }
 
 // NCBI blast_args.cpp:2657-2660; tabular.cpp:1100-1108:
@@ -5551,6 +5556,10 @@ fn search_cli(
         QueryEnd::EofError => QueryReading::BlankLines,
         QueryEnd::Error { error, warnings } => QueryReading::Error { error, warnings },
     };
+    let choice_to_standard_output = resolved
+        .out
+        .as_deref()
+        .is_none_or(|path| path.as_os_str() == "-");
     search(
         resolved,
         &records,
@@ -5559,7 +5568,9 @@ fn search_cli(
         database.as_ref(),
         "",
         outputs,
-        Some(&choice),
+        // The XInclude formats fail only on standard output; to a file they take its name as
+        // the base of their side files.
+        choice_to_standard_output.then_some(&choice),
         None,
     )
 }
@@ -6072,6 +6083,7 @@ fn search(
             v1_titles: v1.is_some(),
             x_prolog: true,
             x_queries_before: 0,
+            x_xml2_carry: None,
         };
         let result = run_resolved_in_pool(
             args,
@@ -6096,16 +6108,20 @@ fn search(
     // format 6, or with LOSAT_X_BPQBLOCKFMT outfmt 0 or 7 (the outfmt 0 prolog with the first
     // block, the epilog and outfmt 7's count of the queries with the last), with
     // LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with LOSAT_X_BPQBLOCKXML outfmt 5 (the header with the
-    // first block, the end with the last); otherwise the search of
+    // first block, the end with the last), with LOSAT_X_BPQBLOCKXML2 outfmt 15 or 16 (as outfmt 5,
+    // the framing state handed from block to block, `Xml2Carry`; not in a call of several outputs,
+    // hit records or an observer, see `x_query_block_plan`), with LOSAT_X_BPQBLOCKWEB also several
+    // of the other reports, the hit records and an observer (`run_local`); otherwise the search of
     // all queries below. With `-db` the blocks are searched only when no definition line of the
     // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, or
-    // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, read
+    // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, `x_titles_taxids_allow_blocks` for 15
+    // and 16 (the titles and the taxids in one pass), read
     // in the block search's pool before the first block), and with outfmt 0 and `-subject` only
     // when no subject's title is refused where the report shows it
-    // (`x_block_shown_titles_allowed`), with outfmt 5 only when the names of the database, the
+    // (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the database, the
     // queries and the subjects can be written (`x_query_blocks.rs` `x_block_xml_*_allowed`);
     // otherwise the search of all queries below.
-    let mut x_format = super::x_query_blocks::XBlockFormat::Unknown;
+    let mut x_formats = Vec::new();
     let x_plan = x_query_block_plan(
         &args,
         &searched_queries,
@@ -6115,25 +6131,42 @@ fn search(
         outputs,
         batch_size,
         v1.is_some(),
-        &mut x_format,
+        &mut x_formats,
     );
     if x_plan.is_none() {
-        super::x_query_blocks::x_reach_block_search(x_format, false);
+        super::x_query_blocks::x_reach_block_search(&x_formats, false);
     }
-    if let Some((x_kind, blocks)) = x_plan {
+    if let Some((x_kinds, blocks)) = x_plan {
+        use super::x_query_blocks::{
+            XBlockReport, XBlockSink, XCopyWriter, XOffsetObserver, XShadowObserver,
+        };
         let reader_warnings = &batches.warnings;
         let ReportOutputs {
             formats,
             diagnostics,
-            ..
+            hits,
+            observer,
         } = &mut *outputs;
-        let outfmt = formats[0].outfmt;
-        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT, LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the report the
+        // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the outputs' `-outfmt` values, in request order.
+        let outfmts: Vec<&str> = formats.iter().map(|format| format.outfmt).collect();
+        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT, LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML,
+        // LOSAT_X_BPQBLOCKXML2): the reports the
         // blocks write, whose titles are checked below.
-        let x_pairwise = x_kind == super::x_query_blocks::XBlockReport::Pairwise;
+        let x_pairwise = x_kinds.contains(&XBlockReport::Pairwise);
         // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): copies of what the blocks write, compared below
         // with the search of all queries.
         let x_shadow = super::x_query_blocks::x_bp_qblock_fmt() == 2;
+        let output_copies: Vec<std::sync::Mutex<Vec<u8>>> =
+            outfmts.iter().map(|_| Default::default()).collect();
+        let warning_copy = std::sync::Mutex::new(Vec::new());
+        // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the hit records of all blocks, each with the index of its
+        // query among the call's queries (the block's index plus the block's first query), handed to
+        // the caller's sink once, after the last block: one call with the final list of all
+        // queries, as the search of all queries makes it.
+        let x_want_records = hits.is_some();
+        let mut x_records: Option<Vec<PairwiseHit>> = x_want_records.then(Vec::new);
+        let mut x_recorder =
+            (x_shadow && observer.is_some()).then(|| XShadowObserver::new(&output_copies));
         let searched_in_blocks =
             crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
                 // The last checks of the block search, on the pool; when one fails, nothing has
@@ -6143,17 +6176,23 @@ fn search(
                 // `database::x_titles_read_allow_blocks`), with outfmt 0 and `-subject` the
                 // subjects' titles (`x_block_shown_titles_allowed`), and with outfmt 5 the
                 // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
-                // name and queries' names (`x_block_xml_run_allowed`).
+                // name and queries' names (`x_block_xml_run_allowed`); with several outputs, the
+                // checks of every kind of report among them (LOSAT_X_BPQBLOCKWEB).
                 if !x_block_words_fit(&args, &searched_queries, &query_input, batch_size, pool) {
-                    super::x_query_blocks::x_reach_block_search(x_format, false);
-                    return Ok(None);
+                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
+                    return Ok(false);
                 }
-                use super::x_query_blocks::XBlockReport;
-                let titles_allowed = match (database, x_kind) {
+                let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
                     // Outfmt 8, 9, 12 and 5 write no tabular id: only the definition lines' reading
                     // and bytes can fail (`x_titles_read_allow_blocks`).
                     (Some(database), XBlockReport::Seqalign | XBlockReport::Xml) => {
                         database::x_titles_read_allow_blocks(database, pool)
+                    }
+                    // Outfmt 15 and 16 also read each subject's taxid and the taxonomy
+                    // database's name of it, in the same pass over the headers
+                    // (`x_titles_taxids_allow_blocks`).
+                    (Some(database), XBlockReport::Xml2) => {
+                        database::x_titles_taxids_allow_blocks(database, pool)
                     }
                     (Some(database), _) => {
                         database::x_titles_allow_blocks(database, x_pairwise, pool)
@@ -6161,28 +6200,34 @@ fn search(
                     (None, XBlockReport::Pairwise) => {
                         x_block_shown_titles_allowed(&subjects.records, v1.is_some(), pool)
                     }
-                    (None, XBlockReport::Xml) => {
+                    (None, XBlockReport::Xml | XBlockReport::Xml2) => {
                         super::x_query_blocks::x_block_xml_subjects_allowed(&subjects.records, pool)
                     }
                     (None, _) => true,
                 };
-                if !titles_allowed {
-                    super::x_query_blocks::x_reach_block_search(x_format, false);
-                    return Ok(None);
+                if !x_kinds
+                    .iter()
+                    .enumerate()
+                    .filter(|&(index, x_kind)| !x_kinds[..index].contains(x_kind))
+                    .all(|(_, &x_kind)| titles_allowed(x_kind))
+                {
+                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
+                    return Ok(false);
                 }
-                // EXPERIMENT (LOSAT_X_BPQBLOCKXML): the XML report's refusals of the database
-                // name and of the queries' names, which it makes before its first byte.
-                if x_kind == XBlockReport::Xml
+                // EXPERIMENT (LOSAT_X_BPQBLOCKXML, LOSAT_X_BPQBLOCKXML2): the XML report's refusals
+                // of the database name and of the queries' names, which it makes before its first
+                // byte.
+                if x_kinds.iter().any(|x_kind| x_kind.is_xml())
                     && !super::x_query_blocks::x_block_xml_run_allowed(
                         database.map_or("", |database| database.name()),
                         query_records,
                         pool,
                     )
                 {
-                    super::x_query_blocks::x_reach_block_search(x_format, false);
-                    return Ok(None);
+                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
+                    return Ok(false);
                 }
-                super::x_query_blocks::x_reach_block_search(x_format, true);
+                super::x_query_blocks::x_reach_block_search(&x_formats, true);
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks
                 // (`x_query_blocks::XBlockSubjects`), on the search's pool.
                 // Diagnostic (LOSAT_TIMING): the blocks' shared subject encoding for the common
@@ -6192,15 +6237,29 @@ fn search(
                     x_bp_encode_block_subjects(&subjects.records, args.num_threads, pool)?;
                 crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
                 let pool = &pool.x_with_ext(&x_subjects);
-                let mut sink = super::x_query_blocks::XBlockSink::new(&mut formats[0].sink);
-                let mut x_output = super::x_query_blocks::XCopyWriter {
-                    inner: &mut sink,
-                    copy: x_shadow.then(Vec::new),
-                };
-                let mut x_warnings = super::x_query_blocks::XCopyWriter {
+                // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state that the blocks of an
+                // outfmt 15 or 16 run hand on (such a run has one output, `x_query_block_plan`).
+                let x_xml2_carry =
+                    std::sync::Mutex::new(crate::report::blast_xml2::Xml2Carry::default());
+                let mut sinks: Vec<XBlockSink<'_>> = formats
+                    .iter_mut()
+                    .map(|format| XBlockSink::new(&mut format.sink))
+                    .collect();
+                let mut x_outputs: Vec<XCopyWriter<'_, XBlockSink<'_>>> = sinks
+                    .iter_mut()
+                    .zip(&output_copies)
+                    .map(|(sink, copy)| XCopyWriter {
+                        inner: sink,
+                        copy: x_shadow.then_some(copy),
+                    })
+                    .collect();
+                let mut x_warnings = XCopyWriter {
                     inner: &mut **diagnostics,
-                    copy: x_shadow.then(Vec::new),
+                    copy: x_shadow.then_some(&warning_copy),
                 };
+                // The HSPs of the blocks before: the first index of the block's HSPs in the list
+                // of all queries.
+                let mut x_hsps_before: HspIndex = 0;
                 // EXPERIMENT (LOSAT_X_BPLKPAHEAD): each block's search builds the next block's lookup
                 // table beside it, on the pool (`blast_engine/x_lookup_ahead.rs`).
                 let mut x_ahead = x_lookup_ahead::XLookupAhead::new(&args, pool, batch_size);
@@ -6210,14 +6269,40 @@ fn search(
                         .get(index + 1)
                         .map(|next| &searched_queries[next.clone()]);
                     let block_input = seq_range::QueryInput::whole(block_queries);
+                    let records_before = x_records.as_ref().map_or(0, Vec::len);
+                    let x_first_query =
+                        u32::try_from(block.start).expect("a query index of the call fits q_idx");
+                    let mut x_collect = |found: &[PairwiseHit]| {
+                        if let Some(records) = x_records.as_mut() {
+                            records.extend(found.iter().map(|record| {
+                                let mut record = record.clone();
+                                record.hit.q_idx += x_first_query;
+                                record
+                            }));
+                        }
+                    };
+                    // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the caller's observer with the block's HSP
+                    // indices moved past the blocks before (and the shadow's record of the events).
+                    let mut x_offset = observer.as_deref_mut().map(|inner| XOffsetObserver {
+                        inner,
+                        base: x_hsps_before,
+                        shadow: x_recorder.as_mut(),
+                    });
                     let mut block_outputs = ReportOutputs {
-                        formats: vec![crate::api::local_blast::FormatOutput {
-                            outfmt,
-                            sink: OutputSink::Writer(&mut x_output),
-                        }],
+                        formats: x_outputs
+                            .iter_mut()
+                            .zip(&outfmts)
+                            .map(|(output, &outfmt)| crate::api::local_blast::FormatOutput {
+                                outfmt,
+                                sink: OutputSink::Writer(output),
+                            })
+                            .collect(),
                         diagnostics: &mut x_warnings,
-                        hits: None,
-                        observer: None,
+                        hits: x_want_records
+                            .then_some(&mut x_collect as &mut (dyn FnMut(&[PairwiseHit]) + Send)),
+                        observer: x_offset
+                            .as_mut()
+                            .map(|offset| offset as &mut (dyn FormatObserver + Send)),
                     };
                     let result = x_ahead.run_block(x_next_queries, |x_block| {
                         run_resolved_in_pool(
@@ -6241,6 +6326,9 @@ fn search(
                                 v1_titles: v1.is_some(),
                                 x_prolog: index == 0,
                                 x_queries_before: block.start,
+                                x_xml2_carry: x_kinds
+                                    .contains(&XBlockReport::Xml2)
+                                    .then_some(&x_xml2_carry),
                             },
                             x_block,
                         )
@@ -6248,25 +6336,62 @@ fn search(
                     // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
                     super::x_bp_redo_par_shadow_error(&result);
                     result?;
+                    drop(block_outputs);
+                    x_hsps_before += x_records.as_ref().map_or(0, Vec::len) - records_before;
                 }
-                x_output.flush()?;
-                Ok(Some((x_output.copy, x_warnings.copy)))
+                for output in &mut x_outputs {
+                    output.flush()?;
+                }
+                Ok(true)
             })?;
-        if let Some(x_copies) = searched_in_blocks {
-            // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): the search of all queries, its report and
-            // warnings written into memory, against the blocks' bytes.
-            if let (Some(written), Some(warned)) = x_copies {
-                let mut reference = Vec::new();
+        if searched_in_blocks {
+            // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the hit records of all queries, once.
+            if let (Some(sink), Some(records)) = (hits.as_mut(), x_records.as_ref()) {
+                sink(records);
+            }
+            // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): the search of all queries, its reports,
+            // warnings, hit records and observer events written into memory, against the blocks'.
+            if x_shadow {
+                let reference_copies: Vec<std::sync::Mutex<Vec<u8>>> =
+                    outfmts.iter().map(|_| Default::default()).collect();
+                let mut reference_sinks: Vec<std::io::Sink> =
+                    outfmts.iter().map(|_| std::io::sink()).collect();
+                let mut reference_writers: Vec<XCopyWriter<'_, std::io::Sink>> = reference_sinks
+                    .iter_mut()
+                    .zip(&reference_copies)
+                    .map(|(sink, copy)| XCopyWriter {
+                        inner: sink,
+                        copy: Some(copy),
+                    })
+                    .collect();
                 let mut reference_warnings = Vec::new();
-                let mut reference_outputs = ReportOutputs {
-                    formats: vec![crate::api::local_blast::FormatOutput {
-                        outfmt,
-                        sink: OutputSink::Writer(&mut reference),
-                    }],
-                    diagnostics: &mut reference_warnings,
-                    hits: None,
-                    observer: None,
+                let mut reference_records: Vec<String> = Vec::new();
+                let mut record_reference = |found: &[PairwiseHit]| {
+                    reference_records.extend(found.iter().map(|record| format!("{record:?}")));
                 };
+                let mut reference_recorder = XShadowObserver::new(&reference_copies);
+                let mut reference_outputs = ReportOutputs {
+                    formats: reference_writers
+                        .iter_mut()
+                        .zip(&outfmts)
+                        .map(|(writer, &outfmt)| crate::api::local_blast::FormatOutput {
+                            outfmt,
+                            sink: OutputSink::Writer(writer),
+                        })
+                        .collect(),
+                    diagnostics: &mut reference_warnings,
+                    hits: x_records.is_some().then_some(
+                        &mut record_reference as &mut (dyn FnMut(&[PairwiseHit]) + Send),
+                    ),
+                    observer: x_recorder
+                        .is_some()
+                        .then_some(&mut reference_recorder as &mut (dyn FormatObserver + Send)),
+                };
+                // The taxonomy database's open and lookup messages (outfmt 15 and 16) belong to the
+                // first search of a run: the blocks wrote them, so the second starts them over.
+                if let Some(database) = subject_source.database() {
+                    database.x_reset_taxdb();
+                }
                 crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
                     search_batches(
                         args.clone(),
@@ -6278,10 +6403,65 @@ fn search(
                     )
                 })?;
                 drop(reference_outputs);
+                drop(reference_writers);
+                let block_records: Vec<String> = x_records
+                    .iter()
+                    .flatten()
+                    .map(|record| format!("{record:?}"))
+                    .collect();
+                let as_lines = |records: &[String]| {
+                    records
+                        .iter()
+                        .flat_map(|record| [record.as_bytes(), b"\n"].concat())
+                        .collect::<Vec<u8>>()
+                };
+                let (block_hits, reference_hits) =
+                    (as_lines(&block_records), as_lines(&reference_records));
+                let events = x_recorder.as_ref().map_or(0, XShadowObserver::count);
+                let block_events = x_recorder.take().map(|recorder| recorder.text());
+                let reference_events = block_events.is_some().then(|| reference_recorder.text());
+                drop(reference_recorder);
+                let written: Vec<Vec<u8>> = output_copies
+                    .into_iter()
+                    .map(|copy| copy.into_inner().expect("the shadow's copy"))
+                    .collect();
+                let reference: Vec<Vec<u8>> = reference_copies
+                    .into_iter()
+                    .map(|copy| copy.into_inner().expect("the shadow's copy"))
+                    .collect();
+                let warned = warning_copy.into_inner().expect("the shadow's copy");
+                let mut streams: Vec<(String, &[u8], &[u8])> = written
+                    .iter()
+                    .zip(&reference)
+                    .enumerate()
+                    .map(|(format, (written, reference))| {
+                        let name = if format == 0 {
+                            "output".to_string()
+                        } else {
+                            format!("output {format}")
+                        };
+                        (name, &written[..], &reference[..])
+                    })
+                    .collect();
+                streams.push(("stderr".to_string(), &warned, &reference_warnings));
+                if x_records.is_some() {
+                    streams.push(("hit records".to_string(), &block_hits, &reference_hits));
+                }
+                if let (Some(block_events), Some(reference_events)) =
+                    (block_events.as_ref(), reference_events.as_ref())
+                {
+                    for (format, (written, reference)) in
+                        block_events.iter().zip(reference_events).enumerate()
+                    {
+                        streams.push((format!("observer {format}"), written, reference));
+                    }
+                }
                 super::x_query_blocks::x_block_shadow_compare(
                     blocks.len(),
-                    (&written, &warned),
-                    (&reference, &reference_warnings),
+                    outfmts.len(),
+                    &streams,
+                    block_records.len(),
+                    events,
                 );
             }
             return Ok(());
@@ -6403,14 +6583,19 @@ fn x_bp_encode_block_subjects(
 // queries. The block search is taken only where the blocks' reports written one after the other
 // are the report of the search of all queries: one output, tabular format 6 (or with
 // LOSAT_X_BPQBLOCKFMT outfmt 0 or 7, with LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with
-// LOSAT_X_BPQBLOCKXML outfmt 5, `x_query_blocks.rs`; the kind of report is returned with the
-// blocks), no `-query_loc` (every record is
+// LOSAT_X_BPQBLOCKXML outfmt 5, LOSAT_X_BPQBLOCKXML2 outfmt 15 and 16, `x_query_blocks.rs`; the
+// kind of report of each output is returned with the blocks), with LOSAT_X_BPQBLOCKWEB also several
+// outputs, the hit records and an observer (`run_local`, ABI v2 of the Web build) where every
+// output is a writer of the caller, no `-db` is searched and an observer comes with the hit
+// records (an outfmt 15 or 16 output is not taken in such a call: see the arm below), no
+// `-query_loc` (every record is
 // searched whole), every batch read, more than one block, no subject whose tabular ID the
 // reference path rejects before it writes any row (`tabular_subject_ids`, for outfmt 6 and 7;
 // with `-db`, the definition lines are checked where the blocks are searched,
 // `database::x_titles_allow_blocks` (outfmt 8, 9, 12 and 5: `x_titles_read_allow_blocks`); outfmt
 // 0's titles also there, `x_block_shown_titles_allowed`; outfmt 5's names too,
-// `x_query_blocks::x_block_xml_subjects_allowed` and `x_block_xml_run_allowed`),
+// `x_query_blocks::x_block_xml_subjects_allowed` and `x_block_xml_run_allowed`; each check where any
+// output is of its kind),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
 // (`blastp_database_search_space`, with `-db` or `-dbsize`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
@@ -6427,62 +6612,101 @@ fn x_query_block_plan(
     outputs: &ReportOutputs<'_>,
     batch_size: u32,
     v1: bool,
-    x_format: &mut super::x_query_blocks::XBlockFormat,
+    x_formats: &mut Vec<super::x_query_blocks::XBlockFormat>,
 ) -> Option<(
-    super::x_query_blocks::XBlockReport,
+    Vec<super::x_query_blocks::XBlockReport>,
     Vec<std::ops::Range<usize>>,
 )> {
     use super::x_query_blocks::{XBlockFormat, XBlockReport};
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
     if args.query_range.is_some()
-        || outputs.formats.len() != 1
-        || outputs.hits.is_some()
-        || outputs.observer.is_some()
+        || outputs.formats.is_empty()
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
         || batches.input_done != queries.len()
     {
         return None;
     }
+    // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): several outputs, the hit records or an observer. Each
+    // output of several is a writer of the caller (a sink the block search opens itself would be
+    // flushed by every block, and a stream that two outputs share would get each block's formats in
+    // turn); no `-db` (the records' `s_idx` of a database search rank the subjects that the call's
+    // lists name); an observer only with the hit records, which count the HSPs of each block for
+    // the observer's indices (`XOffsetObserver`).
+    let x_web = outputs.formats.len() > 1 || outputs.hits.is_some() || outputs.observer.is_some();
+    if x_web {
+        x_formats.push(XBlockFormat::Web);
+    }
+    if x_web
+        && (!super::x_query_blocks::x_bp_qblock_web()
+            || subject_source.database().is_some()
+            || (outputs.observer.is_some() && outputs.hits.is_none())
+            || (outputs.formats.len() > 1
+                && !outputs
+                    .formats
+                    .iter()
+                    .all(|format| matches!(format.sink, OutputSink::Writer(_)))))
+    {
+        return None;
+    }
     // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): outfmt 0 and 7 too. EXPERIMENT (LOSAT_X_BPQBLOCKSA,
-    // LOSAT_X_BPQBLOCKXML): outfmt 8, 9, 12 and 5, which `OutputFormat::parse` does not know.
-    let kind = match OutputFormat::parse(outputs.formats[0].outfmt) {
-        Ok((OutputFormat::Tabular, _)) => XBlockReport::Tabular,
+    // LOSAT_X_BPQBLOCKXML, LOSAT_X_BPQBLOCKXML2): outfmt 8, 9, 12, 5, 15 and 16, which
+    // `OutputFormat::parse` does not know.
+    let mut kind_of = |outfmt: &str| match OutputFormat::parse(outfmt) {
+        Ok((OutputFormat::Tabular, _)) => Some(XBlockReport::Tabular),
         Ok((OutputFormat::TabularWithComments, _))
             if super::x_query_blocks::x_bp_qblock_fmt() > 0 =>
         {
-            *x_format = XBlockFormat::Fmt;
-            XBlockReport::Tabular
+            x_formats.push(XBlockFormat::Fmt);
+            Some(XBlockReport::Tabular)
         }
         // ABI v1's outfmt 0 titles of a database are not argued here.
         Ok((OutputFormat::Pairwise, _))
             if super::x_query_blocks::x_bp_qblock_fmt() > 0
                 && !(v1 && subject_source.database().is_some()) =>
         {
-            *x_format = XBlockFormat::Fmt;
-            XBlockReport::Pairwise
+            x_formats.push(XBlockFormat::Fmt);
+            Some(XBlockReport::Pairwise)
         }
         Ok((OutputFormat::TabularWithComments | OutputFormat::Pairwise, _)) => {
-            *x_format = XBlockFormat::Fmt;
-            return None;
+            x_formats.push(XBlockFormat::Fmt);
+            None
         }
         Err(_)
             if super::x_query_blocks::x_bp_qblock_sa()
-                && blastp_seqalign_format(outputs.formats[0].outfmt).is_some() =>
+                && blastp_seqalign_format(outfmt).is_some() =>
         {
-            *x_format = XBlockFormat::Seqalign;
-            XBlockReport::Seqalign
+            x_formats.push(XBlockFormat::Seqalign);
+            Some(XBlockReport::Seqalign)
         }
+        Err(_) if super::x_query_blocks::x_bp_qblock_xml() && blastp_is_xml(outfmt) => {
+            x_formats.push(XBlockFormat::Xml);
+            Some(XBlockReport::Xml)
+        }
+        // Outfmt 15 and 16 only (`x_xml2_kind_takes_blocks`; 13 and 14 write side files). Only in a
+        // call of one output without hit records and observer (the CLI's shape): the run-level
+        // frame and carry of the XML2 document (`Xml2Carry`) were checked for that call only. In a
+        // call of several outputs, hit records or an observer (LOSAT_X_BPQBLOCKWEB) the format is
+        // recorded for the reach check as usual, and the plan is refused (Owner-delegated
+        // 2026-10-22).
         Err(_)
-            if super::x_query_blocks::x_bp_qblock_xml()
-                && blastp_is_xml(outputs.formats[0].outfmt) =>
+            if super::x_query_blocks::x_bp_qblock_xml2()
+                && blastp_xml2_kind(outfmt).is_some_and(x_xml2_kind_takes_blocks) =>
         {
-            *x_format = XBlockFormat::Xml;
-            XBlockReport::Xml
+            x_formats.push(XBlockFormat::Xml2);
+            (!x_web).then_some(XBlockReport::Xml2)
         }
-        _ => return None,
+        _ => None,
     };
-    let tabular = kind == XBlockReport::Tabular;
+    // Every output's format switch is recorded (`x_reach_block_search`), also after one refuses.
+    let kinds = outputs
+        .formats
+        .iter()
+        .map(|format| kind_of(format.outfmt))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .collect::<Option<Vec<_>>>()?;
+    let tabular = kinds.contains(&XBlockReport::Tabular);
     match subject_source {
         BlastpSubjectSource::Fasta(subjects) => {
             if tabular
@@ -6522,7 +6746,7 @@ fn x_query_block_plan(
     let query_batches = query_input.batches(batch_size);
     let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, block_letters)?;
     (blocks.len() > 1 && x_block_search_refuses_nothing(args, queries, &query_batches, &lengths))
-        .then_some((kind, blocks))
+        .then_some((kinds, blocks))
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): whether the search of all queries passes the checks that refuse
@@ -6794,7 +7018,8 @@ fn write_reports_without_queries(
         if let Some(kind) = blastp_xml2_kind(format.outfmt) {
             let mut writer = format.sink.open()?;
             let mut bytes = Vec::new();
-            crate::report::blast_xml2::Xml2Document::new(kind, false).epilog(&mut bytes)?;
+            crate::report::blast_xml2::Xml2Document::for_run(kind, false, args.out.as_deref())
+                .epilog(&mut bytes)?;
             writer.write_all(&bytes)?;
             writer.flush()?;
             continue;
@@ -6928,6 +7153,10 @@ struct BlastpReports<'a> {
     /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): the queries of the blocks before this one, which outfmt
     /// 7's last line counts with this call's (0 outside the block search).
     x_queries_before: usize,
+    /// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state of an outfmt 15 or 16 run that the
+    /// blocks hand on (the count of reports, the start of the document, a `-subject` run's held
+    /// report; `None` outside the block search).
+    x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
 }
 
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
@@ -7069,6 +7298,7 @@ fn search_split_query_batches(
                     v1_titles: false,
                     x_prolog,
                     x_queries_before: 0,
+                    x_xml2_carry: None,
                 },
                 x_lookup_ahead::XAheadBlock::none(),
             )?;
@@ -7928,6 +8158,17 @@ fn run_resolved_in_pool(
 
     let window = args.window_size as i32;
     let word_size = lookup.word_length();
+    // EXPERIMENT (LOSAT_X_BPUNGAPSENT): this block made ready for the inlined two-hit extension of
+    // the fused loop (`x_ungapped_sent.rs`); None when the switch is off or a check fails.
+    let x_ungap_sent = super::x_ungapped_sent::XSentQuery::new(
+        &concatenated_query,
+        &x_dropoff_per_context,
+        word_size,
+        args.word_size,
+    );
+    if x_ungap_sent.is_none() && super::x_ungapped_sent::on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
+    }
     let offset_array_size = blastp_offset_array_size(lookup.longest_chain());
     let query_length = blastp_concatenated_query_length(&contexts);
     crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP")?;
@@ -8138,36 +8379,142 @@ fn run_resolved_in_pool(
             //         lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
             //     }
             // ```
-            match &lookup {
-                BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
-                    aa_lookup,
-                    subject_sequence,
-                    subject.aa_len,
-                    &mut scratch.diag_array,
-                    diag_mask,
-                    subject_diag_offset,
-                    window,
-                    word_size,
-                    x_candidate,
-                ),
-                BlastpRuntimeLookup::Compressed(compressed_lookup) => {
-                    super::x_seed_fused_compressed::x_scan_two_hit_compressed(
-                        compressed_lookup,
-                        subject_sequence,
-                        subject.aa_len,
-                        &mut scratch.diag_array,
-                        diag_mask,
-                        subject_diag_offset,
-                        window,
-                        word_size,
-                        x_candidate,
-                    )
+            // EXPERIMENT (LOSAT_X_BPUNGAPSENT / LOSAT_X_BPUNGAPSENTSHADOW): the closure above with the
+            // two-hit extension of `x_ungapped_sent.rs` inlined (word size 3, walks stopped by the
+            // sentinels), for the table of single letters, on a block and a subject that pass the
+            // path's checks; with the shadow variable the closure above's extension runs as well and
+            // the two results are compared. Each use of the macro is a closure type of its own, so the
+            // loops of the closure above keep their own instances.
+            macro_rules! x_candidate_sent {
+                ($sent_query:expr, $sent_subject:expr, $shadow:literal) => {
+                    |query_offset: i32,
+                     subject_offset: i32,
+                     last_hit: i32,
+                     diff: i32,
+                     diag_entry: &mut DiagStruct| {
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:551-570
+                        // (as in the closure above)
+                        let ctx_idx = x_context_table
+                            .as_ref()
+                            .and_then(|table| table.get(query_offset))
+                            .unwrap_or_else(|| {
+                                blastp_context_idx_for_query_offset_with_bounds(
+                                    &contexts,
+                                    context_lookup_bounds,
+                                    query_offset,
+                                )
+                            });
+                        let ctx = &contexts[ctx_idx];
+                        if query_offset - diff < ctx.frame_base {
+                            diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                            return;
+                        }
+                        let x_drop = x_dropoff_per_context[ctx_idx];
+                        let cutoff = word_cutoff_scores[ctx_idx];
+                        let s_left_off = usize::try_from(last_hit + word_size)
+                            .expect("NCBI BLAST two-hit seed boundary must be non-negative");
+                        let s_right_off = usize::try_from(subject_offset)
+                            .expect("NCBI BLAST two-hit subject offset must be non-negative");
+                        let q_right_off = usize::try_from(query_offset)
+                            .expect("NCBI BLAST two-hit query offset must be non-negative");
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1155
+                        // (`x_ungapped_sent::two_hit`)
+                        // SAFETY: x_drop is a context's X-drop, which `XSentQuery::new` checked.
+                        let extended = unsafe {
+                            super::x_ungapped_sent::two_hit(
+                                $sent_query,
+                                $sent_subject,
+                                s_left_off,
+                                s_right_off,
+                                q_right_off,
+                                x_drop,
+                            )
+                        };
+                        if $shadow {
+                            let expected = extend_two_hit_blosum62(
+                                &concatenated_query,
+                                subject_raw,
+                                s_left_off,
+                                s_right_off,
+                                q_right_off,
+                                x_drop,
+                                args.word_size,
+                            );
+                            assert_eq!(
+                                extended, expected,
+                                "[X_SHADOW] BPUNGAPSENT two-hit mismatch: s_left_off={s_left_off} s_right_off={s_right_off} q_right_off={q_right_off} dropoff={x_drop}"
+                            );
+                            super::x_ungapped_sent::count_shadow();
+                        }
+                        let Some(ungapped_hit) = extended else {
+                            return;
+                        };
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-588
+                        // (as in the closure above)
+                        if ungapped_hit.ungapped_data.score >= cutoff {
+                            blastp_save_init_hsp(
+                                &mut init_hsps,
+                                ungapped_hit.ungapped_data.q_start,
+                                ungapped_hit.ungapped_data.s_start,
+                                query_offset,
+                                subject_offset,
+                                ungapped_hit.ungapped_data.length,
+                                ungapped_hit.ungapped_data.score,
+                            );
+                        }
+                        if ungapped_hit.right_extend {
+                            diag_entry.set_flag(1);
+                            diag_entry.set_last_hit(
+                                ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,
+                            );
+                        } else {
+                            diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                        }
+                    }
+                };
+            }
+            let x_sent = match (&x_ungap_sent, &lookup) {
+                (Some(sent_query), BlastpRuntimeLookup::Aa(aa_lookup)) => {
+                    let sent_subject = super::x_ungapped_sent::XSentSubject::new(subject.aa_seq);
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", sent_subject.is_some());
+                    sent_subject.map(|sent_subject| (sent_query, sent_subject, aa_lookup))
                 }
-                // EXPERIMENT (LOSAT_X_BPCLUT): the same loop on the flat table, each cell read as one
-                // slice (`x_seed_fused_clut.rs`).
-                BlastpRuntimeLookup::CompressedFlat(flat_lookup) => {
-                    super::x_seed_fused_clut::x_scan_two_hit_compressed_flat(
-                        flat_lookup,
+                (Some(_), _) => {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
+                    None
+                }
+                (None, _) => None,
+            };
+            if let Some((sent_query, sent_subject, aa_lookup)) = x_sent {
+                if sent_query.shadow() {
+                    super::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate_sent!(sent_query, sent_subject, true),
+                    );
+                } else {
+                    super::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate_sent!(sent_query, sent_subject, false),
+                    );
+                }
+            } else {
+                match &lookup {
+                    BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
                         subject_sequence,
                         subject.aa_len,
                         &mut scratch.diag_array,
@@ -8176,7 +8523,35 @@ fn run_resolved_in_pool(
                         window,
                         word_size,
                         x_candidate,
-                    )
+                    ),
+                    BlastpRuntimeLookup::Compressed(compressed_lookup) => {
+                        super::x_seed_fused_compressed::x_scan_two_hit_compressed(
+                            compressed_lookup,
+                            subject_sequence,
+                            subject.aa_len,
+                            &mut scratch.diag_array,
+                            diag_mask,
+                            subject_diag_offset,
+                            window,
+                            word_size,
+                            x_candidate,
+                        )
+                    }
+                    // EXPERIMENT (LOSAT_X_BPCLUT): the same loop on the flat table, each cell read as one
+                    // slice (`x_seed_fused_clut.rs`).
+                    BlastpRuntimeLookup::CompressedFlat(flat_lookup) => {
+                        super::x_seed_fused_clut::x_scan_two_hit_compressed_flat(
+                            flat_lookup,
+                            subject_sequence,
+                            subject.aa_len,
+                            &mut scratch.diag_array,
+                            diag_mask,
+                            subject_diag_offset,
+                            window,
+                            word_size,
+                            x_candidate,
+                        )
+                    }
                 }
             }
         }
@@ -9494,14 +9869,6 @@ fn run_resolved_in_pool(
         })
     };
 
-    // EXPERIMENT (LOSAT_X_NEWTONLANES): the serial and the query-parallel redo loops below solve
-    // the first Newton problems of the next `X_NEWTON_LANES_MATCHES` matches ahead.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3449-3449
-    // ```c
-    //         for (b = 0; b < numMatches; ++b) {
-    // ```
-    // No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
-    let x_newton_lanes_on = crate::core::composition_adjustment::x_newton_lanes::mode() != 0;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-260,274-276
     // ```c++
     //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -9745,21 +10112,19 @@ fn run_resolved_in_pool(
         (use_parallel_kappa_match_redo, use_parallel_kappa_redo)
     };
 
-    // EXPERIMENT (LOSAT_X_SEGSHARE, LOSAT_X_NEWTONLANES): the query-parallel redo and the windows of
-    // `x_redo_par` share the masked ranges; the match-parallel redo shares none and solves no
-    // Newton problems ahead, and the one-thread loop shares none.
-    if crate::algorithm::blastp::kappa::x_seg_share() != 0 {
-        crate::utils::xreach::x_reach!(
-            "LOSAT_X_SEGSHARE",
-            x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
-        );
-    }
-    if x_newton_lanes_on {
-        crate::utils::xreach::x_reach!(
-            "LOSAT_X_NEWTONLANES",
-            x_redo_par_run || !use_parallel_kappa_match_redo
-        );
-    }
+    // Graduated 2026-10-22 (was `LOSAT_X_SEGSHARE`): the query-parallel redo and the windows of
+    // `x_redo_par` share the masked ranges; the match-parallel redo shares none, and the
+    // one-thread loop shares none.
+    // The serial and the query-parallel redo loops solve the first Newton problems of the next
+    // `X_NEWTON_LANES_MATCHES` matches ahead (Newton lanes); the match-parallel redo solves none.
+    crate::utils::xreach::x_reach!(
+        "LOSAT_X_SEGSHARE",
+        x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
+    );
+    crate::utils::xreach::x_reach!(
+        "LOSAT_X_NEWTONLANES",
+        x_redo_par_run || !use_parallel_kappa_match_redo
+    );
     if x_redo_par_run {
         #[cfg(all(
             feature = "parallel",
@@ -9978,11 +10343,10 @@ fn run_resolved_in_pool(
             // Dispatch point: NCBI SEGs the subject range inside the per-match loop (omp for over
             // matches). Here the masked ranges are kept in one store for all queries, as the serial
             // redo already does. Reuse of an identical result only.
-            // EXPERIMENT (LOSAT_X_SEGSHARE): one store of masked subject
-            // ranges for all queries, as in the serial redo below.
-            let x_shared_ranges = (crate::algorithm::blastp::kappa::x_seg_share() != 0).then(|| {
-                std::sync::Arc::new(crate::algorithm::blastp::kappa::XSharedSubjectRanges::new())
-            });
+            // One store of masked subject ranges for all queries, as in the serial redo below.
+            let x_shared_ranges = Some(std::sync::Arc::new(
+                crate::algorithm::blastp::kappa::XSharedSubjectRanges::new(),
+            ));
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
             // ```c
             //                 if (BlastCompo_EarlyTermination(
@@ -10025,7 +10389,7 @@ fn run_resolved_in_pool(
             //   the test and the heap insertions are replayed in stream order after the parallel
             //   loop, when the heaps of the other queries of the batch are complete.
             //
-            // A heap that no match has reached, for the LOSAT_X_NEWTONLANES prefetch: the
+            // A heap that no match has reached, for the Newton lanes prefetch: the
             // prefetch leaves out the matches that the test ends for the heaps it is given, and
             // a query that does not test its own heap redoes every match.
             let x_untouched_heap = BlastCompoHeap::new(args.max_target_seqs, PSI_INCLUSION_ETHRESH);
@@ -10042,7 +10406,7 @@ fn run_resolved_in_pool(
                         let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
                         let mut kappa_preliminary_hits = Vec::new();
                         let mut kappa_gap_scratch = GapAlignScratch::new();
-                        // EXPERIMENT (LOSAT_X_SEGSHARE): see XSharedSubjectRanges.
+                        // See XSharedSubjectRanges.
                         let mut kappa_subject_range_cache =
                             BlastpKappaSubjectRangeCache::x_with_shared(x_shared_ranges.clone());
                         let mut redone_match =
@@ -10073,7 +10437,7 @@ fn run_resolved_in_pool(
                         // last_hsplist_index = hit_list->hsplist_count - 1;
                         // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
                         // ```
-                        // No NCBI counterpart: position of the next LOSAT_X_NEWTONLANES prefetch.
+                        // No NCBI counterpart: position of the next Newton lanes prefetch.
                         let mut x_next_prefetch = 0usize;
                         for (match_position, local_match) in preliminary_hit_list
                             .hsplist_array
@@ -10112,11 +10476,11 @@ fn run_resolved_in_pool(
                             {
                                 continue;
                             }
-                            // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of this
+                            // No NCBI counterpart: the Newton lanes solve the first Newton problems of this
                             // and the next matches ahead, four per vector (kappa::x_newton_lanes_prefetch_matches);
                             // a result is used only by a call with the same input bits. It does not change any value
                             // NCBI computes.
-                            if x_newton_lanes_on && match_position >= x_next_prefetch {
+                            if match_position >= x_next_prefetch {
                                 x_next_prefetch = match_position + X_NEWTON_LANES_MATCHES;
                                 x_newton_lanes_prefetch_matches(
                                     &preliminary_hit_list.hsplist_array[match_position
@@ -10338,7 +10702,7 @@ fn run_resolved_in_pool(
             // HSPList. Use the sorted preliminary hitlist directly instead of
             // draining an unordered map, so `localMatch->best_evalue` and the
             // admission order match NCBI.
-            // No NCBI counterpart: position of the next LOSAT_X_NEWTONLANES prefetch.
+            // No NCBI counterpart: position of the next Newton lanes prefetch.
             let mut x_next_prefetch = 0usize;
             for (x_match_position, local_match) in preliminary_hit_list
                 .hsplist_array
@@ -10389,11 +10753,11 @@ fn run_resolved_in_pool(
                 //                         numQueries
                 //                 )) {
                 // ```
-                // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of this
+                // No NCBI counterpart: the Newton lanes solve the first Newton problems of this
                 // and the next matches ahead, four per vector (kappa::x_newton_lanes_prefetch_matches);
                 // a result is used only by a call with the same input bits. It does not change any value
                 // NCBI computes.
-                if x_newton_lanes_on && x_match_position >= x_next_prefetch {
+                if x_match_position >= x_next_prefetch {
                     x_next_prefetch = x_match_position + X_NEWTON_LANES_MATCHES;
                     x_newton_lanes_prefetch_matches(
                         &preliminary_hit_list.hsplist_array[x_match_position
@@ -11007,8 +11371,12 @@ fn run_resolved_in_pool(
                             // No report data is made without a query: the prolog and
                             // the epilog alone.
                             let mut bytes = Vec::new();
-                            crate::report::blast_xml2::Xml2Document::new(kind, false)
-                                .epilog(&mut bytes)?;
+                            crate::report::blast_xml2::Xml2Document::for_run(
+                                kind,
+                                false,
+                                args.out.as_deref(),
+                            )
+                            .epilog(&mut bytes)?;
                             writer.write_all(&bytes)?;
                         }
                         writer.flush()?;
@@ -11227,14 +11595,30 @@ fn run_resolved_in_pool(
                             query_gencode: None,
                             db_gencode: None,
                         };
+                        let mut document = crate::report::blast_xml2::Xml2Writer::for_run(
+                            kind,
+                            params,
+                            args.out.as_deref(),
+                        );
+                        // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): a block continues the document
+                        // of the blocks before it and hands its state on.
+                        if let Some(carry) = reports.x_xml2_carry {
+                            document
+                                .document_mut()
+                                .resume(std::mem::take(&mut *carry.lock().expect("the carry")));
+                        }
                         super::blast_xml::write_blastp_xml(
                             &xml,
-                            &mut crate::report::blast_xml2::Xml2Writer::new(kind, params),
+                            &mut document,
                             &hit_lists,
                             &mut xml_rows,
                             &mut writer,
                             warnings.as_mut(),
                         )?;
+                        if let Some(carry) = reports.x_xml2_carry {
+                            *carry.lock().expect("the carry") =
+                                document.document_mut().take_carry();
+                        }
                     }
                 }
                 // Flushed when written, as the other reports are.
@@ -11497,6 +11881,25 @@ fn run_resolved_in_pool(
 mod tests {
     use super::*;
     use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): only the documents on the output stream (outfmt 15 and 16)
+    // get a block plan; the ones with side files (13 and 14) never do, whatever `blastp_xml2_kind`
+    // reads for them, so that a later widening of that function cannot admit them unchecked.
+    #[test]
+    fn xml2_block_plan_admits_only_outfmt_15_and_16() {
+        use crate::report::blast_xml2::Xml2Kind;
+        assert!(x_xml2_kind_takes_blocks(Xml2Kind::Single15));
+        assert!(x_xml2_kind_takes_blocks(Xml2Kind::Single16));
+        assert!(!x_xml2_kind_takes_blocks(Xml2Kind::Files13));
+        assert!(!x_xml2_kind_takes_blocks(Xml2Kind::Files14));
+        for (outfmt, taken) in [("15", true), ("16", true), ("13", false), ("14", false)] {
+            assert_eq!(
+                blastp_xml2_kind(outfmt).is_some_and(x_xml2_kind_takes_blocks),
+                taken,
+                "outfmt {outfmt}"
+            );
+        }
+    }
 
     // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): a stored residue reads as the letter that
     // `ListedSubjects::read_titles` writes into its record (`ncbistdaa_to_ascii`), for every code

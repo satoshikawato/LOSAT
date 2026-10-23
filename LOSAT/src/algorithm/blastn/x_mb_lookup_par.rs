@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_PAIRPAR, shadow LOSAT_X_PAIRPARSHADOW): the megablast lookup table of
+//! EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the megablast lookup table of
 //! `build_mb_lookup` filled by the threads of the search pool, each thread owning a fixed set
 //! of table cells.
 //!
@@ -40,7 +40,7 @@
 //! its chain (`hashtable` and the `next_pos` links of its words), its presence bit and its
 //! counter; `longest_chain` is then computed from the same counters by the original code.
 //! The words of a worker are applied in reading order (a first-in first-out delay of 16
-//! words on x86_64, for a prefetch, as LOSAT_X_MBDELAY does). Workers write disjoint
+//! words on x86_64, for a prefetch, as `x_fill_mb_queued` does). Workers write disjoint
 //! elements, so the number of workers changes the running time only.
 //!
 //! The re-threading of `ascending_cells` (blast_lookup.c:74-76 order, see `build_mb_lookup`)
@@ -135,17 +135,10 @@ use std::sync::OnceLock;
 /// `kCompressionFactor`, the number of cells that share one counter.
 pub(super) const K_COMPRESSION_FACTOR_SHIFT: usize = 11;
 
-/// No NCBI counterpart: reads the switches once; they do not change any value NCBI computes.
-/// (LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARSHADOW, LOSAT_X_MBLUTONCE)
-fn switches() -> (bool, bool, bool) {
-    static SWITCHES: OnceLock<(bool, bool, bool)> = OnceLock::new();
-    *SWITCHES.get_or_init(|| {
-        (
-            crate::utils::xswitch::on("LOSAT_X_PAIRPAR"),
-            std::env::var_os("LOSAT_X_PAIRPARSHADOW").is_some(),
-            crate::utils::xswitch::on("LOSAT_X_MBLUTONCE"),
-        )
-    })
+/// No NCBI counterpart: reads LOSAT_X_MBLUTONCE once; it does not change any value NCBI computes.
+fn once() -> bool {
+    static ONCE: OnceLock<bool> = OnceLock::new();
+    *ONCE.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBLUTONCE"))
 }
 
 /// No NCBI counterpart: LOSAT_TIMING is set (read once).
@@ -155,7 +148,7 @@ pub(super) fn timing_on() -> bool {
 }
 
 // No NCBI counterpart (LOSAT_TIMING only): the `[TIMING] x_mb_lookup_*` counters of every megablast
-// table build of the process (not the shadow's second build).
+// table build of the process.
 static BUILD_NANOS: AtomicU64 = AtomicU64::new(0);
 static ALLOC_NANOS: AtomicU64 = AtomicU64::new(0);
 static LOOP_NANOS: AtomicU64 = AtomicU64::new(0);
@@ -224,29 +217,13 @@ impl BuildClock {
     }
 }
 
-/// No NCBI counterpart: shadow counters of LOSAT_X_MBLUTONCE (tables whose second build was the
-/// read-once fill, and their elements).
-static SHADOW_ONCE_TABLES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_ONCE_CELLS: AtomicU64 = AtomicU64::new(0);
-
-/// No NCBI counterpart: printed by `main` at exit. With LOSAT_X_MBLUTONCE and
-/// LOSAT_X_PAIRPARSHADOW, for the tables whose second build was the read-once fill, `[X_SHADOW]
-/// MBLUTONCE tables=<compared> cells=<elements compared> diffs=0 identical` (a difference panics
-/// in `shadow_check`, so the line only ever says 0). With LOSAT_TIMING, when at
+/// No NCBI counterpart: printed by `main` at exit. With LOSAT_TIMING, when at
 /// least one megablast table was built, the `[TIMING] x_mb_lookup_build` and `[TIMING]
 /// x_mb_lookup_split` lines (`x_`: end-of-run counters of an experiment, as `[TIMING]
 /// x_pairpar_seed`), and `[TIMING] x_mb_lookup_once` when the read-once fill built one
 /// (`x_mb_lookup_once::print_timing`). They print counters and change no value NCBI computes.
 pub(super) fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
-    let (_, shadow, once) = switches();
-    if shadow && once {
-        eprintln!(
-            "[X_SHADOW] MBLUTONCE tables={} cells={} diffs=0 identical",
-            load(&SHADOW_ONCE_TABLES),
-            load(&SHADOW_ONCE_CELLS)
-        );
-    }
     if !timing_on() || load(&BUILDS) == 0 {
         return;
     }
@@ -267,11 +244,6 @@ pub(super) fn print_summary() {
     );
     super::x_mb_lookup_once::print_timing();
 }
-
-/// No NCBI counterpart: shadow counters for the summary line (tables compared).
-pub(crate) static SHADOW_TABLES: AtomicU64 = AtomicU64::new(0);
-/// No NCBI counterpart: shadow counters for the summary line (cells compared).
-pub(crate) static SHADOW_CELLS: AtomicU64 = AtomicU64::new(0);
 
 /// No NCBI counterpart: the number of threads of the search pool this thread runs in, when
 /// there is one with two threads or more (scheduling only). Also the dispatch test of
@@ -300,17 +272,15 @@ pub(super) fn pool_threads() -> Option<usize> {
 ///              if (!(ecode & 1)) {
 ///                  if ((counts[ecode / 2] >> 4) >= max_word_count) {
 /// ```
-/// Dispatch test of `build_mb_lookup`: the number of workers when the switch is on, the
-/// search runs on a pool of two threads or more, and the table is the plain one (`eligible`:
-/// no database word counts, no debug counters). `None` runs the original loops.
+/// Dispatch test of `build_mb_lookup`: the number of workers when the search runs on a pool of
+/// two threads or more and the table is the plain one (`eligible`: no database word counts, no
+/// debug counters). `None` runs the original loops.
 pub(super) fn parts(eligible: bool) -> Option<usize> {
-    let (on, shadow, once) = switches();
-    if !on || shadow || !eligible {
-        if on && !shadow {
-            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
-            if once {
-                crate::utils::xreach::x_reach!("LOSAT_X_MBLUTONCE", false);
-            }
+    let once = once();
+    if !eligible {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+        if once {
+            crate::utils::xreach::x_reach!("LOSAT_X_MBLUTONCE", false);
         }
         return None;
     }
@@ -320,11 +290,6 @@ pub(super) fn parts(eligible: bool) -> Option<usize> {
         crate::utils::xreach::x_reach!("LOSAT_X_MBLUTONCE", parts.is_some());
     }
     parts
-}
-
-/// No NCBI counterpart: LOSAT_X_PAIRPARSHADOW is set.
-pub(super) fn shadow() -> bool {
-    switches().1
 }
 
 /// The tables `build_mb_lookup` fills (NCBI `BlastMBLookupTable` fields and its local
@@ -587,7 +552,7 @@ impl Private<'_> {
 
 /// No NCBI counterpart (scheduling only): what one fill did. `once`: the read-once fill
 /// (LOSAT_X_MBLUTONCE, `x_mb_lookup_once.rs`) made the table; for `[TIMING] x_mb_lookup_build`'s
-/// `once=` and the shadow's counters.
+/// `once=`.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct FillStats {
     pub(super) once: bool,
@@ -836,9 +801,10 @@ pub(super) fn plan(table_size: usize, pv_array_bts: usize, parts: usize) -> (usi
 ///          mb_lt->hashtable[ecode] = index;
 /// ```
 /// Fills the tables as the word loop of `build_mb_lookup` does, with `parts` workers on the
-/// search pool (or one after another, `in_pool == false`, for the shadow without a pool).
-/// Returns what the fill did (the read-once fill of LOSAT_X_MBLUTONCE or not). `resident`: `hashtable` is a kept table whose pages are mapped
-/// (LOSAT_X_MBLUTKEEP), on which the read-once fill skips its prefault round.
+/// search pool (or one after another, `in_pool == false`, where the unit tests run it without a
+/// pool). Returns what the fill did (the read-once fill of LOSAT_X_MBLUTONCE or not). `resident`:
+/// `hashtable` is a kept table whose pages are mapped (LOSAT_X_MBLUTKEEP), on which the read-once
+/// fill skips its prefault round.
 pub(super) fn fill(
     parts: usize,
     words: &Words<'_>,
@@ -846,13 +812,12 @@ pub(super) fn fill(
     in_pool: bool,
     resident: bool,
 ) -> FillStats {
-    let (_, _, once) = switches();
-    fill_mode(once, true, parts, words, tables, in_pool, resident)
+    fill_mode(once(), true, parts, words, tables, in_pool, resident)
 }
 
-/// No NCBI counterpart: `fill` with LOSAT_X_MBLUTONCE given as `once` (the tests take each). `timed`: a build of the search (not the shadow's second build),
-/// whose read-once phases LOSAT_TIMING's `[TIMING] x_mb_lookup_once` line counts. `resident`:
-/// as `fill`'s.
+/// No NCBI counterpart: `fill` with LOSAT_X_MBLUTONCE given as `once` (the tests take each).
+/// `timed`: a build of the search, whose read-once phases LOSAT_TIMING's `[TIMING]
+/// x_mb_lookup_once` line counts. `resident`: as `fill`'s.
 fn fill_mode(
     once: bool,
     timed: bool,
@@ -913,108 +878,6 @@ fn fill_with(parts: usize, words: &Words<'_>, tables: Tables<'_>, in_pool: bool)
         }
     }
     FillStats { once: false }
-}
-
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091,1104-1106
-/// ```c
-///          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-///          mb_lt->hashtable[ecode] = index;
-/// ...
-///    longest_chain = 2;
-///    for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-///        longest_chain = MAX(longest_chain, helper_array[index]);
-/// ```
-/// LOSAT_X_PAIRPARSHADOW: builds the tables again with the partitioned fill (on the pool when
-/// there is one, otherwise with four parts one after another) and stops at the first element
-/// that differs from the tables the original loop built.
-/// With LOSAT_X_MBLUTONCE the second build is the read-once fill; otherwise the fill of this
-/// module.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn shadow_check(
-    words: &Words<'_>,
-    pv_array_bts: usize,
-    hashtable: &[u32],
-    next_pos: &[u32],
-    pv_array: &[PvArrayType],
-    helper_array: &[u32],
-    longest_chain: usize,
-) {
-    let (_, _, once) = switches();
-    shadow_check_mode(
-        once,
-        words,
-        pv_array_bts,
-        hashtable,
-        next_pos,
-        pv_array,
-        helper_array,
-        longest_chain,
-    );
-}
-
-/// No NCBI counterpart: `shadow_check` with LOSAT_X_MBLUTONCE given as `once`.
-#[allow(clippy::too_many_arguments)]
-fn shadow_check_mode(
-    once: bool,
-    words: &Words<'_>,
-    pv_array_bts: usize,
-    hashtable: &[u32],
-    next_pos: &[u32],
-    pv_array: &[PvArrayType],
-    helper_array: &[u32],
-    longest_chain: usize,
-) {
-    let mut x_hashtable = vec![0u32; hashtable.len()];
-    let mut x_next_pos = vec![0u32; next_pos.len()];
-    let mut x_pv_array = vec![0 as PvArrayType; pv_array.len()];
-    let mut x_helper_array = vec![0u32; helper_array.len()];
-    let (parts, in_pool) = match pool_threads() {
-        Some(threads) => (threads, true),
-        None => (4, false),
-    };
-    let x_stats = fill_mode(
-        once,
-        false,
-        parts,
-        words,
-        Tables {
-            hashtable: &mut x_hashtable,
-            next_pos: &mut x_next_pos,
-            pv_array: &mut x_pv_array,
-            pv_array_bts,
-            helper_array: &mut x_helper_array,
-        },
-        in_pool,
-        false,
-    );
-    let mut x_longest_chain = 2usize;
-    for &value in &x_helper_array {
-        x_longest_chain = x_longest_chain.max(value as usize);
-    }
-    for (name, reference, partitioned) in [
-        ("hashtable", hashtable, x_hashtable.as_slice()),
-        ("next_pos", next_pos, x_next_pos.as_slice()),
-        ("pv_array", pv_array, x_pv_array.as_slice()),
-        ("helper_array", helper_array, x_helper_array.as_slice()),
-    ] {
-        if let Some(i) = (0..reference.len()).find(|&i| reference[i] != partitioned[i]) {
-            panic!(
-                "LOSAT_X_PAIRPARSHADOW: megablast lookup {name}[{i}] differs: reference {} partitioned {} (parts {parts}, lut_word_length {}, ascending_cells {}, once {once})",
-                reference[i], partitioned[i], words.lut_word_length, words.ascending_cells
-            );
-        }
-    }
-    assert_eq!(
-        longest_chain, x_longest_chain,
-        "LOSAT_X_PAIRPARSHADOW: megablast lookup longest_chain differs (parts {parts}, once {once})"
-    );
-    SHADOW_TABLES.fetch_add(1, Ordering::Relaxed);
-    let cells = (hashtable.len() + next_pos.len() + pv_array.len() + helper_array.len()) as u64;
-    SHADOW_CELLS.fetch_add(cells, Ordering::Relaxed);
-    if x_stats.once {
-        SHADOW_ONCE_TABLES.fetch_add(1, Ordering::Relaxed);
-        SHADOW_ONCE_CELLS.fetch_add(cells, Ordering::Relaxed);
-    }
 }
 
 #[cfg(test)]
@@ -1656,94 +1519,5 @@ pub(super) mod tests {
             }
         }
         assert!(shapes > 1000, "{shapes}");
-    }
-
-    // The shadow (`LOSAT_X_PAIRPARSHADOW`) with the second build of this module's fill: equal
-    // tables pass, and a difference in any one of the four arrays or the longest chain stops it.
-    #[test]
-    fn shadow_compares_every_array() {
-        let mut rng = Lcg(0xC0FF_EE11);
-        let q = repeat_case(&mut rng, 20_000);
-        let queries = vec![q];
-        let query_refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-        let offsets = vec![0i32];
-        let masks = vec![Vec::new()];
-        let lut = 11usize;
-        let reference = build_two_stage_lookup(
-            &query_refs,
-            &offsets,
-            16,
-            lut,
-            &masks,
-            None,
-            0,
-            1_000_000,
-            false,
-        );
-        let mb = &reference.mb_lookup;
-        let shape = (
-            mb.hashtable.len(),
-            mb.next_pos.len(),
-            mb.pv_array.len(),
-            mb.pv_array_bts,
-        );
-        let words = Words {
-            queries_blastna: &query_refs,
-            query_offsets: &offsets,
-            query_masks: &masks,
-            word_length: 16,
-            lut_word_length: lut,
-            kmer_mask: (1u64 << (2 * lut)) - 1,
-            ascending_cells: false,
-        };
-        let helper_len = (mb.hashtable.len() >> 11).max(1);
-        let b = build_with(
-            1,
-            false,
-            &words,
-            shape,
-            &vec![0u32; helper_len],
-            &vec![0 as PvArrayType; mb.pv_array.len()],
-        );
-        let chain = b
-            .helper_array
-            .iter()
-            .fold(2usize, |m, &v| m.max(v as usize));
-        let check = |b: &Built, chain: usize| {
-            shadow_check_mode(
-                false,
-                &words,
-                mb.pv_array_bts,
-                &b.hashtable,
-                &b.next_pos,
-                &b.pv_array,
-                &b.helper_array,
-                chain,
-            )
-        };
-        check(&b, chain);
-        let h = b.helper_array.iter().position(|&v| v > 0).unwrap();
-        let w = b.pv_array.iter().position(|&v| v != 0).unwrap();
-        let cell = b.hashtable.iter().position(|&v| v != 0).unwrap();
-        let q = b.next_pos.iter().position(|&v| v != 0).unwrap();
-        for which in 0..5 {
-            let mut c = Built {
-                hashtable: b.hashtable.clone(),
-                next_pos: b.next_pos.clone(),
-                pv_array: b.pv_array.clone(),
-                helper_array: b.helper_array.clone(),
-                stats: b.stats,
-            };
-            let mut c_chain = chain;
-            match which {
-                0 => c.hashtable[cell] += 1,
-                1 => c.next_pos[q] += 1,
-                2 => c.pv_array[w] ^= 1,
-                3 => c.helper_array[h] -= 1,
-                _ => c_chain += 1,
-            }
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(&c, c_chain)));
-            assert!(r.is_err(), "difference {which} not caught");
-        }
     }
 }

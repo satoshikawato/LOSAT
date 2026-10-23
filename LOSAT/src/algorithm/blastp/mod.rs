@@ -18,6 +18,10 @@ pub(crate) mod extension;
 // walks of aa_ungapped.c:804-883 with a byte score table, same results (`pub` for the summary line
 // of `main`).
 pub mod x_ungapped_fast;
+// EXPERIMENT (LOSAT_X_BPUNGAPSENT / LOSAT_X_BPUNGAPSENTSHADOW): blastp's two-hit extension for word
+// size 3 inlined into the fused loop's candidate closure, walks stopped by the sentinels, same
+// results (`pub` for the summary line of `main`).
+pub mod x_ungapped_sent;
 // NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
 // max_offset = BlastGetStartForGappedAlignment(...);
 // status = s_BlastProtGappedAlignment(...);

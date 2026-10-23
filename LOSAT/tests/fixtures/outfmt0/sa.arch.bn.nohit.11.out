@@ -1,0 +1,161 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">n1 no hits"
+                  }
+                }
+              },
+              title "n1 no hits"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 120,
+              seq-data ncbi2na '29ADBEFAD0CBFE3813C82144CD7207643E0E61D799123D
+0A140BB3F9577A'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">n2 no hits"
+                  }
+                }
+              },
+              title "n2 no hits"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 80,
+              seq-data ncbi2na '98CAFC4E42A42A58A4C29F820CB1647AE01559BD'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sn1 subject nucleotide alpha"
+                }
+              }
+            },
+            title "sn1 subject nucleotide alpha"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 488,
+            seq-data ncbi2na 'EFE7BED928FD49E4F6C028CEE8E811D6E72090FFE5B9F6C0
+B8E86158031A8EA54E9E4382A7A881CF9E95983309E80B5F382FE2FF5D633515F90FCE4FE7970A
+33A4054A3ED821A31BE4CAD243AB7BA293093742ACEEEC1BAE20D12343775A4F90170538670798
+80FC237D4413AEAD3A88124DE2A41BAE1A7F82C9'H
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sn2 subject nucleotide beta reverse"
+                }
+              }
+            },
+            title "sn2 subject nucleotide beta reverse"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 477,
+            seq-data ncbi2na 'EFADCF303F2746F3BC7C95D279EF754E1514ECBA28DF0BF7
+44BC9B4E9C3FD4F94888B0FEE0D117B111F11FA8C7CE4D4685BFDE146CF61F550D7A8B94DC7CA8
+D89025103E426E8CDA380150070131A1FD49D23C9A9A90CB9D4E57D3C494FA54C7B3FEA36D4D1F
+47095A403F9FF2468BBD4D8C6FCD071831C0'H
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 103950
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 103950",
+      "Effective search space used: 103950",
+      "Length adjustment: 10"
+    }
+  }
+}

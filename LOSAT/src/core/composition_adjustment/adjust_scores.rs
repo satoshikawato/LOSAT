@@ -1433,23 +1433,6 @@ fn factor_ltriang_pos_def(a: &mut [Vec<f64>], n: usize) {
     }
 }
 
-// EXPERIMENT (LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW): 0 = original loops, 1 = reordered loops,
-// 2 = reordered loops checked bit-for-bit against the original on every call.
-// No NCBI counterpart: reads LOSAT_X_COMPFAST and LOSAT_X_COMPSHADOW once. It chooses, for each function below that has a reordered variant, between the original loops, the reordered loops, or both with a bitwise comparison; it does not change any value NCBI computes.
-pub(crate) fn x_comp_mode() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_COMPSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_COMPFAST") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:725-727
 // ```c
 //     n  = alphsize * alphsize;
@@ -1767,19 +1750,10 @@ fn step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     //     }
     //     return alpha;
     // ```
-    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is
-    // `step_bound_reference`, the port of this function.
-    let mode = x_comp_mode();
-    if mode != 0 && x.len() <= 400 && x.len() == step_x.len() {
-        let fast = x_step_bound(x, step_x, max);
-        if mode == 2 {
-            let reference = step_bound_reference(x, step_x, max);
-            assert!(
-                fast.to_bits() == reference.to_bits(),
-                "x_step_bound differs from the reference"
-            );
-        }
-        return fast;
+    // The quotients first, then the scan (`x_step_bound`), for the 400 values of the Newton
+    // iteration; the port of this function (`step_bound_reference`) for any other length.
+    if x.len() <= 400 && x.len() == step_x.len() {
+        return x_step_bound(x, step_x, max);
     }
     step_bound_reference(x, step_x, max)
 }
@@ -1796,7 +1770,7 @@ fn step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
 //     return alpha;
 // ```
 // The quotients are computed first and then scanned in the original order with the same test.
-// EXPERIMENT: `Nlm_StepBound`. The quotients do not depend on each other;
+// `Nlm_StepBound`. The quotients do not depend on each other;
 // compute them first, then scan them in the original order.
 fn x_step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     let mut ratio = [0.0f64; 400];
@@ -1828,7 +1802,8 @@ fn x_step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
 //     }
 //     return alpha;
 // ```
-// The original `step_bound`, renamed; it is the port of this function.
+// The port of this function, for a vector longer than 400 values or of a different length than
+// `step_x`.
 fn step_bound_reference(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     let mut alpha = max;
     for (&x_i, &step_i) in x.iter().zip(step_x.iter()) {
@@ -2513,22 +2488,10 @@ fn x_adjmemo_record(
     entry.0 += 1;
     entry.1.insert(key);
 }
-// No NCBI counterpart: counter of the shadow comparisons; it does not change any value NCBI computes.
-/// Calls compared with the reference by LOSAT_X_NEWTONEXACTSHADOW.
-pub(crate) static X_NEWTONEXACT_SHADOWED: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-// No NCBI counterpart: prints the shadow counter; it does not change any value NCBI computes.
-/// Shadow-mode summary (printed by `main` at exit).
+// No NCBI counterpart: prints the LOSAT_X_STATS counters of the Newton lanes; it does not change any
+// value NCBI computes.
+/// Counter summary of the Newton lanes (printed by `main` at exit).
 pub fn x_newtonexact_print_stats() {
-    if super::x_newton_exact::mode() == 2 {
-        eprintln!(
-            "[X_SHADOW] NEWTONEXACT calls_compared={} (status and all 400 target frequencies bit-identical)",
-            X_NEWTONEXACT_SHADOWED.load(std::sync::atomic::Ordering::Relaxed)
-        );
-    }
-    // No NCBI counterpart: LOSAT_X_NEWTONLANES shadow and LOSAT_X_STATS counters; it does not change any
-    // value NCBI computes.
     super::x_newton_lanes::print_stats();
 }
 
@@ -2565,33 +2528,15 @@ fn scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: us
     //             }
     //         }
     // ```
-    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is
-    // `scaled_symmetric_product_a_reference`, the port of this function.
-    match x_comp_mode() {
-        1 if alphsize <= COMPO_NUM_TRUE_AA => {
-            return x_scaled_symmetric_product_a(w, diagonal, alphsize)
-        }
-        2 if alphsize <= COMPO_NUM_TRUE_AA => {
-            let mut check: Vec<Vec<f64>> = w.to_vec();
-            x_scaled_symmetric_product_a(&mut check, diagonal, alphsize);
-            scaled_symmetric_product_a_reference(w, diagonal, alphsize);
-            let m = 2 * alphsize - 1;
-            for i in 0..m {
-                for k in 0..=i {
-                    assert!(
-                        check[i][k].to_bits() == w[i][k].to_bits(),
-                        "x_scaled_symmetric_product_a differs at ({i},{k})"
-                    );
-                }
-            }
-            return;
-        }
-        _ => {}
+    // The register-accumulator form (`x_scaled_symmetric_product_a`) for `alphsize` up to 20; the port
+    // of this function (`scaled_symmetric_product_a_reference`) for a larger alphabet.
+    if alphsize <= COMPO_NUM_TRUE_AA {
+        return x_scaled_symmetric_product_a(w, diagonal, alphsize);
     }
     scaled_symmetric_product_a_reference(w, diagonal, alphsize)
 }
 
-// EXPERIMENT: `ScaledSymmetricProductA` with register accumulators.
+// `ScaledSymmetricProductA` with register accumulators.
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:108-125
 // ```c
@@ -2665,7 +2610,7 @@ fn x_scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: 
 //         }
 //     }
 // ```
-// The original `scaled_symmetric_product_a`, renamed; it is the port of this function.
+// The port of this function, for an alphabet larger than `COMPO_NUM_TRUE_AA`.
 fn scaled_symmetric_product_a_reference(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: usize) {
     let m = 2 * alphsize - 1;
     for (row_idx, row) in w.iter_mut().enumerate().take(m) {
@@ -2685,8 +2630,12 @@ fn scaled_symmetric_product_a_reference(w: &mut [Vec<f64>], diagonal: &[f64], al
     }
 }
 
-// EXPERIMENT: `MultiplyByA` with the same additions per element in the same
-// order, arranged so that independent elements advance together.
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:138-165
+// ```c
+// static void MultiplyByA(double beta, double y[], int alphsize, double alpha, const double x[])
+// ```
+// The same additions per element in the same order, arranged so that independent elements
+// advance together.
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:155-164
 // ```c
@@ -2715,7 +2664,7 @@ fn scaled_symmetric_product_a_reference(w: &mut [Vec<f64>], diagonal: &[f64], al
 //     }
 // ```
 // (The line numbers in the older comment above are for a different revision; these are the pinned ones.)
-fn x_multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
+fn multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
     if beta == 0.0 {
         for value in y.iter_mut() {
             *value = 0.0;
@@ -2767,7 +2716,12 @@ fn x_multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f
     }
 }
 
-// EXPERIMENT: `MultiplyByAtranspose`, same two additions per element.
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:176-205
+// ```c
+// static void MultiplyByAtranspose(double beta, double y[], int alphsize,
+//                                  double alpha, const double x[])
+// ```
+// The same two additions per element.
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:195-204
 // ```c
@@ -2794,7 +2748,7 @@ fn x_multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f
 //     }
 // ```
 // (The line numbers in the older comment above are for a different revision; these are the pinned ones.)
-fn x_multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
+fn multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
     if beta == 0.0 {
         for value in y.iter_mut() {
             *value = 0.0;
@@ -2817,165 +2771,6 @@ fn x_multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[
         } else {
             for (yk, &xj) in row.iter_mut().zip(head) {
                 *yk += alpha * xj;
-            }
-        }
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:138-165
-// ```c
-// static void MultiplyByA(double beta, double y[], int alphsize, double alpha, const double x[])
-// ```
-fn multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:170-179
-    // ```c
-    //     for (i = 0;  i < alphsize;  i++) {
-    //         for (j = 0;  j < alphsize;  j++) {
-    //             y[j] += alpha * x[i * alphsize + j];
-    //         }
-    //     }
-    //     for (i = 1;  i < alphsize;  i++) {
-    //         for (j = 0;  j < alphsize;  j++) {
-    //             y[i + alphsize - 1] += alpha * x[i * alphsize + j];
-    //         }
-    //     }
-    // ```
-    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is
-    // `multiply_by_a_reference`, the port of this function.
-    match x_comp_mode() {
-        1 => return x_multiply_by_a(beta, y, alphsize, alpha, x),
-        2 => {
-            let mut check = y.to_vec();
-            x_multiply_by_a(beta, &mut check, alphsize, alpha, x);
-            multiply_by_a_reference(beta, y, alphsize, alpha, x);
-            assert!(
-                check
-                    .iter()
-                    .zip(y.iter())
-                    .all(|(a, b)| a.to_bits() == b.to_bits()),
-                "x_multiply_by_a differs from the reference"
-            );
-            return;
-        }
-        _ => {}
-    }
-    multiply_by_a_reference(beta, y, alphsize, alpha, x)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:154-157,170-179
-// ```c
-// static void
-// MultiplyByA(double beta, double y[], int alphsize,
-//             double alpha, const double x[])
-// {
-// ...
-//     for (i = 0;  i < alphsize;  i++) {
-//         for (j = 0;  j < alphsize;  j++) {
-//             y[j] += alpha * x[i * alphsize + j];
-//         }
-//     }
-//     for (i = 1;  i < alphsize;  i++) {
-//         for (j = 0;  j < alphsize;  j++) {
-//             y[i + alphsize - 1] += alpha * x[i * alphsize + j];
-//         }
-//     }
-// ```
-// The original `multiply_by_a`, renamed; it is the port of this function.
-fn multiply_by_a_reference(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
-    if beta == 0.0 {
-        for value in y.iter_mut() {
-            *value = 0.0;
-        }
-    } else if beta != 1.0 {
-        for value in y.iter_mut() {
-            *value *= beta;
-        }
-    }
-    for i in 0..alphsize {
-        for j in 0..alphsize {
-            y[j] += alpha * x[i * alphsize + j];
-        }
-    }
-    for i in 1..alphsize {
-        for j in 0..alphsize {
-            y[i + alphsize - 1] += alpha * x[i * alphsize + j];
-        }
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:176-205
-// ```c
-// static void MultiplyByAtranspose(double beta, double y[], int alphsize,
-//                                  double alpha, const double x[])
-// ```
-fn multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:214-223
-    // ```c
-    //     for (i = 0;  i < alphsize;  i++) {
-    //         for (j = 0;  j < alphsize;  j++) {
-    //             k = i * alphsize + j;
-    //             y[k] += alpha * x[j];
-    //             if (i > 0) {
-    //                 y[k] += alpha * x[i + alphsize - 1];
-    //             }
-    //         }
-    //     }
-    // ```
-    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is
-    // `multiply_by_at_reference`, the port of this function.
-    match x_comp_mode() {
-        1 => return x_multiply_by_at(beta, y, alphsize, alpha, x),
-        2 => {
-            let mut check = y.to_vec();
-            x_multiply_by_at(beta, &mut check, alphsize, alpha, x);
-            multiply_by_at_reference(beta, y, alphsize, alpha, x);
-            assert!(
-                check
-                    .iter()
-                    .zip(y.iter())
-                    .all(|(a, b)| a.to_bits() == b.to_bits()),
-                "x_multiply_by_at differs from the reference"
-            );
-            return;
-        }
-        _ => {}
-    }
-    multiply_by_at_reference(beta, y, alphsize, alpha, x)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:195-197,214-223
-// ```c
-// static void
-// MultiplyByAtranspose(double beta, double y[], int alphsize,
-//                      double alpha, const double x[])
-// ...
-//     for (i = 0;  i < alphsize;  i++) {
-//         for (j = 0;  j < alphsize;  j++) {
-//             k = i * alphsize + j;
-//             y[k] += alpha * x[j];
-//             if (i > 0) {
-//                 y[k] += alpha * x[i + alphsize - 1];
-//             }
-//         }
-//     }
-// ```
-// The original `multiply_by_at`, renamed; it is the port of this function.
-fn multiply_by_at_reference(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
-    if beta == 0.0 {
-        for value in y.iter_mut() {
-            *value = 0.0;
-        }
-    } else if beta != 1.0 {
-        for value in y.iter_mut() {
-            *value *= beta;
-        }
-    }
-    for i in 0..alphsize {
-        for j in 0..alphsize {
-            let k = i * alphsize + j;
-            y[k] += alpha * x[j];
-            if i > 0 {
-                y[k] += alpha * x[i + alphsize - 1];
             }
         }
     }
@@ -3062,7 +2857,7 @@ fn calculate_residuals(
 struct ReNewtonSystem {
     alphsize: usize,
     constrain_rel_entropy: bool,
-    // EXPERIMENT: column-major copy of the factor (see x_factor_ltriang_pos_def_cols).
+    // Column-major copy of the factor (see x_factor_ltriang_pos_def_cols).
     // No NCBI counterpart: a column-major copy of the lower triangle of `W` after the factorisation, and a flag that says whether it is current; it does not change any value NCBI computes.
     x_wc: Vec<f64>,
     x_wc_valid: bool,
@@ -3079,12 +2874,8 @@ fn re_newton_system_new(alphsize: usize) -> ReNewtonSystem {
     ReNewtonSystem {
         alphsize,
         constrain_rel_entropy: true,
-        // No NCBI counterpart: the copy is allocated only when LOSAT_X_COMPFAST or LOSAT_X_COMPSHADOW is set; it does not change any value NCBI computes.
-        x_wc: if x_comp_mode() != 0 {
-            vec![0.0; X_WC_STRIDE * X_WC_STRIDE]
-        } else {
-            Vec::new()
-        },
+        // No NCBI counterpart: the column-major copy of the factor; it does not change any value NCBI computes.
+        x_wc: vec![0.0; X_WC_STRIDE * X_WC_STRIDE],
         x_wc_valid: false,
         w: ltriang_matrix_new(2 * alphsize),
         dinv: vec![0.0; alphsize * alphsize],
@@ -3122,18 +2913,11 @@ fn factor_re_newton_system(
         //             Dinv[i] = x[i] / (1 - eta);
         //         }
         // ```
-        // Dispatch point of LOSAT_X_COMPFAST: the reference path is the loop in the `else` branch. The
-        // divisor `1 - eta` is the same value for every element, so computing it once gives the same quotients.
-        if x_comp_mode() == 1 {
-            // Same quotient per element; the divisor is the same value each time.
-            let divisor = 1.0 - eta;
-            for (out, &xi) in newton_system.dinv[..n].iter_mut().zip(&x[..n]) {
-                *out = xi / divisor;
-            }
-        } else {
-            for i in 0..n {
-                newton_system.dinv[i] = x[i] / (1.0 - eta);
-            }
+        // The divisor `1 - eta` is the same value for every element, so computing it once gives the
+        // same quotients.
+        let divisor = 1.0 - eta;
+        for (out, &xi) in newton_system.dinv[..n].iter_mut().zip(&x[..n]) {
+            *out = xi / divisor;
         }
     } else {
         newton_system.dinv.copy_from_slice(x);
@@ -3159,8 +2943,8 @@ fn factor_re_newton_system(
     // ```c
     //     Nlm_FactorLtriangPosDef(W, m);
     // ```
-    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is the
-    // `factor_ltriang_pos_def` call at the end of this function.
+    // The column-major form (`x_factor_ltriang_pos_def_cols`) for `m` up to `X_WC_STRIDE`; the port
+    // of this function (`factor_ltriang_pos_def`) for a larger system.
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:143-149
     // ```c
     //     for (i = 0;  i < n;  i++) {
@@ -3173,29 +2957,9 @@ fn factor_re_newton_system(
     // ```
     newton_system.x_wc_valid = false;
     if m <= X_WC_STRIDE {
-        match x_comp_mode() {
-            1 => {
-                x_factor_ltriang_pos_def_cols(&mut newton_system.w, m, &mut newton_system.x_wc);
-                newton_system.x_wc_valid = true;
-                return;
-            }
-            2 => {
-                let mut check = newton_system.w.clone();
-                x_factor_ltriang_pos_def_cols(&mut check, m, &mut newton_system.x_wc);
-                factor_ltriang_pos_def(&mut newton_system.w, m);
-                for i in 0..m {
-                    for k in 0..=i {
-                        assert!(
-                            check[i][k].to_bits() == newton_system.w[i][k].to_bits(),
-                            "x_factor_ltriang_pos_def_cols differs at ({i},{k})"
-                        );
-                    }
-                }
-                newton_system.x_wc_valid = true;
-                return;
-            }
-            _ => {}
-        }
+        x_factor_ltriang_pos_def_cols(&mut newton_system.w, m, &mut newton_system.x_wc);
+        newton_system.x_wc_valid = true;
+        return;
     }
     factor_ltriang_pos_def(&mut newton_system.w, m);
 }
@@ -3233,8 +2997,8 @@ fn solve_re_newton_system(
     // ```c
     //     Nlm_SolveLtriangPosDef(z, m, W);
     // ```
-    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is the
-    // `solve_ltriang_pos_def` call in the `else` branch.
+    // The column-major form (`x_solve_ltriang_pos_def_cols`) where the factor made a column-major
+    // copy; the port of this function (`solve_ltriang_pos_def`) otherwise.
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:171-177
     // ```c
     //     for (i = 0;  i < n;  i++) {
@@ -3246,20 +3010,7 @@ fn solve_re_newton_system(
     //     }
     // ```
     if newton_system.x_wc_valid {
-        if x_comp_mode() == 2 {
-            let mut check = z[..m].to_vec();
-            x_solve_ltriang_pos_def_cols(&mut check, m, &newton_system.w, &newton_system.x_wc);
-            solve_ltriang_pos_def(z, m, &newton_system.w);
-            assert!(
-                check
-                    .iter()
-                    .zip(z.iter())
-                    .all(|(a, b)| a.to_bits() == b.to_bits()),
-                "x_solve_ltriang_pos_def_cols differs from the reference"
-            );
-        } else {
-            x_solve_ltriang_pos_def_cols(z, m, &newton_system.w, &newton_system.x_wc);
-        }
+        x_solve_ltriang_pos_def_cols(z, m, &newton_system.w, &newton_system.x_wc);
     } else {
         solve_ltriang_pos_def(z, m, &newton_system.w);
     }
@@ -3333,8 +3084,7 @@ fn optimize_target_frequencies(
     constrain_rel_entropy: bool,
     relative_entropy: f64,
 ) -> i32 {
-    // EXPERIMENT (LOSAT_X_NEWTONEXACT): the same iteration, bit for bit, in
-    // fixed-size storage (see x_newton_exact.rs).
+    // The same iteration, bit for bit, in fixed-size storage (see x_newton_exact.rs).
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
     // ```c
     // int
@@ -3345,12 +3095,11 @@ fn optimize_target_frequencies(
     //                                 double tol,
     //                                 int maxits)
     // ```
-    // Dispatch point of LOSAT_X_NEWTONEXACT / LOSAT_X_NEWTONEXACTSHADOW: the reference path is
-    // `optimize_target_frequencies_reference`, the port of this function. The exact module handles only
-    // `alphsize == 20` with `constrain_rel_entropy`.
+    // The port of this function is `optimize_target_frequencies_reference`. The exact module handles
+    // only `alphsize == 20` with `constrain_rel_entropy`; the port runs the other problems.
     if constrain_rel_entropy && alphsize == COMPO_NUM_TRUE_AA {
-        // EXPERIMENT (LOSAT_X_NEWTONLANES / LOSAT_X_NEWTONLANESSHADOW): a result computed ahead
-        // (four problems per vector, x_newton_lanes.rs) for exactly this input.
+        // A result computed ahead (four problems per vector, eight on aarch64, x_newton_lanes.rs)
+        // for exactly this input.
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
         // ```c
         // int
@@ -3362,102 +3111,26 @@ fn optimize_target_frequencies(
         //                                 int maxits)
         // ```
         // No NCBI counterpart: the stored result was computed by the operations of this function on an
-        // input with the same bits (q, row and column sums, relative entropy); the shadow mode runs the
-        // port of this function as well and compares status and all 400 values by bits. It does not
-        // change any value NCBI computes.
-        let x_lanes_mode = super::x_newton_lanes::mode();
-        if x_lanes_mode != 0 {
-            if let Some(status) =
-                super::x_newton_lanes::take(x, q, row_sums, col_sums, relative_entropy)
-            {
-                if x_lanes_mode == 2 {
-                    let mut x_reference = vec![0.0f64; x.len()];
-                    let status_reference = optimize_target_frequencies_reference(
-                        &mut x_reference,
-                        alphsize,
-                        q,
-                        row_sums,
-                        col_sums,
-                        constrain_rel_entropy,
-                        relative_entropy,
-                    );
-                    assert_eq!(
-                        status, status_reference,
-                        "LOSAT_X_NEWTONLANESSHADOW: convergence status differs"
-                    );
-                    for (k, (a, b)) in x.iter().zip(x_reference.iter()).enumerate() {
-                        assert!(
-                            a.to_bits() == b.to_bits(),
-                            "LOSAT_X_NEWTONLANESSHADOW: x[{k}] differs: {a:e} vs {b:e}"
-                        );
-                    }
-                    super::x_newton_lanes::SHADOWED
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-                return status;
-            }
+        // input with the same bits (q, row and column sums, relative entropy). It does not change any
+        // value NCBI computes.
+        if let Some(status) =
+            super::x_newton_lanes::take(x, q, row_sums, col_sums, relative_entropy)
+        {
+            return status;
         }
-        match super::x_newton_exact::mode() {
-            1 => {
-                // No NCBI counterpart: call counter and timer of the xstats report; it does not change any value NCBI computes.
-                let x_t0 = crate::utils::xstats::now();
-                crate::utils::xstats::add(&crate::utils::xstats::COMPO_ADJ_CALLS, 1);
-                let status = super::x_newton_exact::optimize_target_frequencies_exact(
-                    x,
-                    q,
-                    row_sums,
-                    col_sums,
-                    relative_entropy,
-                );
-                // No NCBI counterpart: timer of the xstats report; it does not change any value NCBI computes.
-                crate::utils::xstats::add_ns(&crate::utils::xstats::COMPO_NS, x_t0);
-                return status;
-            }
-            2 => {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
-                // ```c
-                // int
-                // Blast_OptimizeTargetFrequencies(double x[],
-                // ...
-                //                                 int constrain_rel_entropy,
-                //                                 double relative_entropy,
-                //                                 double tol,
-                //                                 int maxits)
-                // ```
-                // Shadow mode runs the exact module and the reference port on the same input and compares status
-                // and every target frequency by bits.
-                X_NEWTONEXACT_SHADOWED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let mut x_fast = vec![0.0f64; x.len()];
-                let status_fast = super::x_newton_exact::optimize_target_frequencies_exact(
-                    &mut x_fast,
-                    q,
-                    row_sums,
-                    col_sums,
-                    relative_entropy,
-                );
-                let status = optimize_target_frequencies_reference(
-                    x,
-                    alphsize,
-                    q,
-                    row_sums,
-                    col_sums,
-                    constrain_rel_entropy,
-                    relative_entropy,
-                );
-                assert_eq!(
-                    status_fast, status,
-                    "LOSAT_X_NEWTONEXACTSHADOW: convergence status differs"
-                );
-                for (k, (a, b)) in x_fast.iter().zip(x.iter()).enumerate() {
-                    assert!(
-                        a.to_bits() == b.to_bits(),
-                        "LOSAT_X_NEWTONEXACTSHADOW: x[{k}] differs: {a:e} vs {b:e}"
-                    );
-                }
-                return status;
-            }
-            _ => {}
-        }
+        // No NCBI counterpart: call counter and timer of the xstats report; it does not change any value NCBI computes.
+        let x_t0 = crate::utils::xstats::now();
+        crate::utils::xstats::add(&crate::utils::xstats::COMPO_ADJ_CALLS, 1);
+        let status = super::x_newton_exact::optimize_target_frequencies_exact(
+            x,
+            q,
+            row_sums,
+            col_sums,
+            relative_entropy,
+        );
+        // No NCBI counterpart: timer of the xstats report; it does not change any value NCBI computes.
+        crate::utils::xstats::add_ns(&crate::utils::xstats::COMPO_NS, x_t0);
+        return status;
     }
     optimize_target_frequencies_reference(
         x,
@@ -3516,7 +3189,8 @@ pub(super) fn x_optimize_reference_for_test(
 //     /* Use q as the initial value for x */
 //     memcpy(x, q, n * sizeof(double));
 // ```
-// The original `optimize_target_frequencies`, renamed; it is the port of this function.
+// The port of this function, for the problems the exact module does not take (`alphsize != 20` or
+// no relative-entropy constraint) and the reference of the bitwise tests of `x_newton_lanes`.
 fn optimize_target_frequencies_reference(
     x: &mut [f64],
     alphsize: usize,
@@ -3895,7 +3569,7 @@ pub(crate) fn blast_adjust_scores(
 //                                         (desired_re > 0.0),
 //                                         desired_re,
 // ```
-// EXPERIMENT (LOSAT_X_NEWTONLANES): the prefix of `blast_adjust_scores` and `composition_matrix_adjust`
+// Newton lanes: the prefix of `blast_adjust_scores` and `composition_matrix_adjust`
 // up to the `optimize_target_frequencies` call, with the same helpers, arguments and order, returning
 // that call's input. `None` where the call would not reach the relative-entropy-constrained Newton
 // iteration (a composition without true amino acids, position-based or `CompositionBasedStats`,
@@ -4426,7 +4100,7 @@ mod tests {
     // The ignored test times the port of this function against `optimize_target_frequencies_exact`
     // and checks the last result bit for bit.
     /// Timing of the Newton kernels on realistic inputs (run with --ignored --nocapture;
-    /// LOSAT_X_COMPFAST selects the reference variant, LOSAT_X_NEWTONEXACT_LEVEL the exact one).
+    /// LOSAT_X_NEWTONEXACT_LEVEL selects the vector width of the exact one).
     #[test]
     #[ignore]
     fn x_bench_newton_kernels() {

@@ -6,7 +6,7 @@
 //! order (by the owner, or split by diagonal-hash bucket over the pool with
 //! LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`). The scheduling (`plan_strips`, `run_strips`,
 //! `part::seed_stage_part`) and the scan kernels (`scan_kernel`) are those of
-//! `LOSAT_X_PAIRPAR` in the parent module.
+//! PAIRPAR in the parent module.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
 //! ```c
@@ -531,19 +531,22 @@ fn fold_na<const PT: bool>(
         }
 
         // NCBI architecture: Collect ungapped hit for batch processing
-        ungapped_hits.push(UngappedHit {
-            context_idx: q_idx,
-            query_idx: ctx.query_idx,
-            query_frame: ctx.frame,
-            query_context_offset: ctx.query_offset,
-            seed_q_off: q_off,
-            seed_s_off: s_off,
-            qs,
-            qe,
-            ss,
-            se: ungapped_se,
-            score: ungapped_score,
-        });
+        super::super::x_push_ungapped(
+            ungapped_hits,
+            UngappedHit {
+                context_idx: q_idx,
+                query_idx: ctx.query_idx,
+                query_frame: ctx.frame,
+                query_context_offset: ctx.query_offset,
+                seed_q_off: q_off,
+                seed_s_off: s_off,
+                qs,
+                qe,
+                ss,
+                se: ungapped_se,
+                score: ungapped_score,
+            },
+        );
         if PT {
             out.hit_keys.push(x_key);
         }

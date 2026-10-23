@@ -3,18 +3,23 @@
 
 #[cfg(test)]
 use super::search_seed::resolve_local_subject_ncbi2na;
+#[cfg(test)]
 use super::search_seed::{
     encode_tblastn_lookup_query, scan_protein_words_by_chunk, Seed, SeedScanEvent, TranslatedChunk,
 };
+#[cfg(test)]
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::extension::extend_two_hit;
 #[cfg(test)]
 use crate::algorithm::tblastx::translation::generate_frames;
+#[cfg(test)]
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::config::ScoringMatrix;
 #[cfg(test)]
 use crate::utils::genetic_code::GeneticCode;
+#[cfg(test)]
 use crate::utils::seg::SegParams;
+#[cfg(test)]
 use anyhow::{ensure, Result};
 
 // NCBI reference: c++/include/algo/blast/core/blast_extend.h:142-163
@@ -78,7 +83,7 @@ impl Diagonals {
 // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
 // for (i = 0; i < hits; ++i) { /* two-hit diagonal state and extension */ }
 // Blast_ExtendWordExit(ewp, subject->length);
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn find_blosum62_word3_init_hsps(
     query: &[u8],
     subject: &[u8],
@@ -112,7 +117,7 @@ pub(super) fn find_blosum62_word3_init_hsps(
 // NCBI c++/src/algo/blast/core/blast_extend.c:46-65:
 // while (diag_array_length < (qlen+window_size)) diag_array_length <<= 1;
 // Keep one diagonal table for the concatenated protein queries.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn find_blosum62_word3_init_hsps_multi(
     queries: &[&[u8]],
     subject: &[u8],
@@ -142,7 +147,7 @@ pub(super) fn find_blosum62_word3_init_hsps_multi(
 // NCBI c++/src/algo/blast/core/aa_ungapped.c:516-614:
 // diff < wordsize controls the second hit; s_BlastAaExtendTwoHit uses
 // wordsize and score_params->matrix before saving/sorting each HSP list.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn find_protein_init_hsps_multi(
     queries: &[&[u8]],
     subject: &[u8],
@@ -182,6 +187,7 @@ pub(super) fn find_protein_init_hsps_multi(
 // NCBI c++/src/algo/blast/core/blast_engine.c:478-552,840-850:
 // WordFinder and GetGappedScore operate on one chunk; the frame's
 // HSPListAppend occurs before scanning the next translated frame.
+#[cfg(test)]
 pub(super) enum InitStageEvent<'a> {
     Chunk(&'a QueryFrame, TranslatedChunk, &'a [Seed], &'a [InitHsp]),
     FrameEnd(&'a QueryFrame),
@@ -192,6 +198,7 @@ pub(super) enum InitStageEvent<'a> {
 // if (init_hitlist->total == 0) continue;
 // GetGappedScore(..., init_hitlist, &hsp_list, ...);
 // Deliver each score-sorted initial HSP list before the next chunk scan.
+#[cfg(test)]
 pub(super) fn find_protein_init_hsps_by_chunk(
     queries: &[&[u8]],
     subject: &[u8],
@@ -229,6 +236,7 @@ pub(super) fn find_protein_init_hsps_by_chunk(
 // BLAST_ComplementMaskLocations(..., filter_maskloc, lookup_segments);
 // Soft masking retains the unmasked WordFinder query while lookup still
 // excludes the SEG intervals used by the candidate scanner.
+#[cfg(test)]
 pub(super) fn find_protein_init_hsps_by_chunk_with_mask_mode(
     queries: &[&[u8]],
     subject: &[u8],
@@ -439,7 +447,7 @@ pub(super) fn find_protein_init_hsps_by_chunk_with_mask_mode(
 // unit. Each unit starts from the state of a fresh table, which is what the offset update at the
 // end of the previous WordFinder call gives (see the comment above), so units can run in any order
 // or at the same time.
-// EXPERIMENT (LOSAT_X_TBNPAR): the two-hit pass of one (frame, chunk) unit on its
+// The two-hit pass of one (frame, chunk) unit on its
 // own diagonal array.  NCBI c++/src/algo/blast/core/blast_extend.c:162-175 ends a
 // WordFinder call with `diag_table->offset += subject_length + window`, which
 // makes every entry of the previous call older than a full window: the first hit
@@ -458,6 +466,7 @@ pub(super) struct XTwoHit<'a> {
 }
 
 impl<'a> XTwoHit<'a> {
+    #[cfg(test)]
     pub(super) fn new(
         query_sequence: &'a [u8],
         context_offsets: &'a [i32],
@@ -523,22 +532,6 @@ impl<'a> XTwoHit<'a> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:63-64,145-146
-    // ```c
-    //                 diag_table->offset = window_size;
-    //                 diag_table->window = window_size;
-    // ...
-    //         diag_table->hit_level_array = (DiagStruct *)
-    //             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-    // ```
-    // A new unit starts from the state of a freshly allocated table: offset = window_size and all
-    // entries zero (calloc).
-    /// Start a new unit (the state of `Diagonals::new`).
-    pub(super) fn reset(&mut self) {
-        self.diagonals.offset = self.window;
-        self.diagonals.entries.fill((0, false));
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:608-609
     // ```c
     //     /* increment the offset in the diagonal array */
@@ -556,8 +549,8 @@ impl<'a> XTwoHit<'a> {
     // The end of NCBI's WordFinder call for one (frame, chunk). Every entry the unit wrote holds
     // at most `offset + subject_length - 1`, so after the step each one lies more than a window
     // behind any hit of the next unit: its first hit on a diagonal only records `last_hit` and
-    // clears `flag` (the tests of `pairs`), as on the table `reset` gives. Instead of `reset`
-    // before the next unit, this is what the next unit sees.
+    // clears `flag` (the tests of `pairs`), as on a table made afresh by `Diagonals::new`. The
+    // next unit sees this instead of a new table.
     /// End a unit of `subject_length` residues as NCBI does (the table is kept).
     pub(super) fn exit(&mut self, subject_length: usize) {
         self.diagonals.finish_frame(subject_length);
@@ -1521,12 +1514,12 @@ mod tests {
     //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
     //         }
     // ```
-    // LOSAT_X_TBNSTATE: one table carried through many units with `exit` after each, as NCBI's
-    // thread carries it through its subjects, gives every unit the hits of a cleared table
-    // (`reset`): from a new table, across the clear near INT4_MAX / 4, and when `with_table`
-    // takes it over for another query set of the same table length. The units are fragments of
-    // the queries with substitutions, so that two-hit extensions (and the `flag` path after a
-    // right extension) happen on many diagonals.
+    // The unit path's kept state: one table carried through many units with `exit` after each, as
+    // NCBI's thread carries it through its subjects, gives every unit the hits of a cleared table
+    // (a table made afresh): from a new table, across the clear near INT4_MAX / 4, and when
+    // `with_table` takes it over for another query set of the same table length. The units are
+    // fragments of the queries with substitutions, so that two-hit extensions (and the `flag` path
+    // after a right extension) happen on many diagonals.
     #[test]
     fn x_two_hit_table_kept_across_units_gives_the_hits_of_a_cleared_table() {
         let mut seed = 0x2545_f491_u64;
@@ -1567,25 +1560,33 @@ mod tests {
         let x_dropoffs = [16, 16, 16];
         let cutoffs = [24, 24, 24];
         let window = 40;
-        /// The hits of every unit in turn: on a cleared table (`reset` first) or on the kept one
-        /// (`exit` after).
-        fn hits_of(
-            two_hit: &mut XTwoHit<'_>,
+        /// The hits of every unit in turn, each on a table made afresh by `fresh` (a cleared table).
+        fn cleared_hits<'q>(
+            fresh: impl Fn() -> XTwoHit<'q>,
             query: &[u8],
             units: &[Vec<u8>],
-            keep: bool,
         ) -> Vec<Vec<InitHsp>> {
             units
                 .iter()
                 .map(|unit| {
-                    if !keep {
-                        two_hit.reset();
-                    }
+                    let mut hits = Vec::new();
+                    fresh().pairs(1, 0, unit, &x_word_pairs(query, unit), &mut hits);
+                    hits
+                })
+                .collect()
+        }
+        /// The hits of every unit in turn on one kept table (`exit` after each unit).
+        fn kept_hits(
+            two_hit: &mut XTwoHit<'_>,
+            query: &[u8],
+            units: &[Vec<u8>],
+        ) -> Vec<Vec<InitHsp>> {
+            units
+                .iter()
+                .map(|unit| {
                     let mut hits = Vec::new();
                     two_hit.pairs(1, 0, unit, &x_word_pairs(query, unit), &mut hits);
-                    if keep {
-                        two_hit.exit(unit.len());
-                    }
+                    two_hit.exit(unit.len());
                     hits
                 })
                 .collect()
@@ -1604,13 +1605,13 @@ mod tests {
                 3,
             )
         };
-        let cleared = hits_of(&mut new_a(None), &query_a, &units, false);
+        let cleared = cleared_hits(|| new_a(None), &query_a, &units);
         let found: usize = cleared.iter().map(Vec::len).sum();
         assert!(found >= 60, "the units must give hits ({found})");
 
         let mut kept = new_a(None);
         assert_eq!(
-            hits_of(&mut kept, &query_a, &units, true),
+            kept_hits(&mut kept, &query_a, &units),
             cleared,
             "kept table"
         );
@@ -1619,7 +1620,7 @@ mod tests {
         let start = i32::MAX / 4 - 5_000;
         near_limit.diagonals.offset = start;
         assert_eq!(
-            hits_of(&mut near_limit, &query_a, &units, true),
+            kept_hits(&mut near_limit, &query_a, &units),
             cleared,
             "across the clear"
         );
@@ -1644,7 +1645,7 @@ mod tests {
                 3,
             )
         };
-        let cleared_b = hits_of(&mut new_b(None), &query_b, &units, false);
+        let cleared_b = cleared_hits(|| new_b(None), &query_b, &units);
         let table = near_limit.into_table();
         let entries = table.entries.as_ptr();
         let mut taken_over = new_b(Some(table));
@@ -1654,7 +1655,7 @@ mod tests {
             "the table must be taken over"
         );
         assert_eq!(
-            hits_of(&mut taken_over, &query_b, &units, true),
+            kept_hits(&mut taken_over, &query_b, &units),
             cleared_b,
             "taken over"
         );
@@ -1752,8 +1753,8 @@ mod tests {
                 }
                 for (u, unit) in units.iter().enumerate() {
                     if mode == "cleared" {
-                        reference.reset();
-                        branch_free.reset();
+                        reference = new();
+                        branch_free = new();
                     }
                     let pairs = x_word_pairs(&query, unit);
                     // The reference one hit at a time, its outcomes counted from the cell before.

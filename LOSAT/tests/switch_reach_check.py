@@ -3,11 +3,13 @@
 
 A conditional switch of the strict set (LOSAT/src/utils/xswitch.rs STRICT_SET) takes its own path
 only where a rule holds (input sizes, thread count, options, memory); elsewhere the reference path
-runs although the switch is on. Runs with LOSAT_X_REACH=<directory> write one file per LOSAT process
-(LOSAT/src/utils/xreach.rs). This script folds the files of a directory and compares them with
-switch_reach_expected.tsv, one row per switch of the set:
+runs although the switch is on. A conditional or platform switch that graduated (GRADUATED in the
+same file) has no variable any more but keeps its rule. Runs with LOSAT_X_REACH=<directory> write
+one file per LOSAT process (LOSAT/src/utils/xreach.rs). This script folds the files of a directory
+and compares them with switch_reach_expected.tsv, one row per switch of the set and per graduated
+switch:
 
-  switch    the variable, as in STRICT_SET
+  switch    the variable, as in STRICT_SET or GRADUATED
   programs  the LOSAT subcommands whose runs reach it (comma-separated)
   class     always   acts on every run of its programs; not recorded
             platform chooses a kernel by CPU or target only; covered by the platform-checks matrix
@@ -16,8 +18,8 @@ switch_reach_expected.tsv, one row per switch of the set:
             reaches it yet; the note says why)
   note      free text
 
-It fails when a switch of the set has no row, a row names no switch of the set, or a required side
-of a conditional switch was not reached. A conditional row is checked only when every program it
+It fails when a switch of the set or a graduated one has no row, a row names neither, a graduated
+switch's row says always, or a required side of a conditional switch was not reached. A conditional row is checked only when every program it
 names was run (--programs); a gap that was reached is reported, so the row can say required.
 
 Usage:
@@ -40,12 +42,20 @@ CLASSES = ("always", "platform", "conditional")
 SIDES = ("required", "gap")
 
 
-def strict_set() -> list[str]:
+def names_of(list_name: str) -> list[str]:
     text = XSWITCH.read_text()
-    body = re.search(r"STRICT_SET: &\[&str\] = &\[(.*?)\];", text, re.S)
+    body = re.search(list_name + r": &\[&str\] = &\[(.*?)\];", text, re.S)
     if body is None:
-        raise SystemExit(f"STRICT_SET not found in {XSWITCH}")
+        raise SystemExit(f"{list_name} not found in {XSWITCH}")
     return re.findall(r'"(LOSAT_X_[A-Z0-9_]+)"', body.group(1))
+
+
+def strict_set() -> list[str]:
+    return names_of("STRICT_SET")
+
+
+def graduated() -> list[str]:
+    return names_of("GRADUATED")
 
 
 def read_expected(path: Path) -> list[dict[str, str]]:
@@ -66,9 +76,11 @@ def read_reach(directory: Path) -> dict[str, dict[str, set[str]]]:
     return reached
 
 
-def check(names: list[str], rows: list[dict[str, str]], reached, programs: set[str]) -> tuple[list[str], list[str]]:
+def check(names: list[str], rows: list[dict[str, str]], reached, programs: set[str],
+          graduated_names: tuple[str, ...] = ()) -> tuple[list[str], list[str]]:
     failures: list[str] = []
     notes: list[str] = []
+    names = [*names, *graduated_names]
     by_name = {}
     for row in rows:
         name = row["switch"]
@@ -76,7 +88,9 @@ def check(names: list[str], rows: list[dict[str, str]], reached, programs: set[s
             failures.append(f"{name}: two rows")
         by_name[name] = row
         if name not in names:
-            failures.append(f"{name}: row for a variable that is not in STRICT_SET (remove the row)")
+            failures.append(f"{name}: row for a switch in neither STRICT_SET nor GRADUATED (remove the row)")
+        if name in graduated_names and row["class"] == "always":
+            failures.append(f"{name}: graduated with class always (an always-on switch leaves the file when it graduates)")
         if row["class"] not in CLASSES:
             failures.append(f"{name}: class {row['class']!r} is not one of {CLASSES}")
         listed = {p for p in row["programs"].split(",") if p}
@@ -106,7 +120,7 @@ def check(names: list[str], rows: list[dict[str, str]], reached, programs: set[s
                              "the row can say required")
     unknown = sorted(set(reached) - set(names))
     for name in unknown:
-        failures.append(f"{name}: recorded but not in STRICT_SET")
+        failures.append(f"{name}: recorded but in neither STRICT_SET nor GRADUATED")
     return failures, notes
 
 
@@ -123,7 +137,8 @@ def main() -> int:
     if not args.dir.is_dir():
         print(f"switch_reach_check: {args.dir} is not a directory (no LOSAT run wrote a reach file)")
         return 1
-    failures, notes = check(strict_set(), read_expected(args.expected), read_reach(args.dir), programs)
+    failures, notes = check(strict_set(), read_expected(args.expected), read_reach(args.dir), programs,
+                            tuple(graduated()))
     for note in notes:
         print(f"note: {note}")
     for failure in failures:

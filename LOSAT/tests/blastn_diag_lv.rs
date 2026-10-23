@@ -15,19 +15,18 @@
 //! use the diagonal hash. The folds reached: at one thread the reference fold
 //! (`process_offset_pairs`: its first retrieve for megablast, blastn and dc-megablast, whose
 //! tables have a word extension or a template; its second for blastn-short, whose table has
-//! none); at four threads with one subject the strips folds (`LOSAT_X_PAIRPAR`, on by default,
-//! for megablast and blastn; `LOSAT_X_PAIRPARDISC` for dc-megablast when it is set), and with
-//! many subjects the reference fold on every worker, whose hash offset moves on from subject to
-//! subject.
+//! none); at four threads with one subject the strips folds (PAIRPAR, which has no
+//! variable, for megablast and blastn; `LOSAT_X_PAIRPARDISC` for dc-megablast when it is set), and
+//! with many subjects the reference fold on every worker, whose hash offset moves on from subject
+//! to subject.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and on
-/// 2026-10-18 the one whose shadow line `LOSAT_X_PAIRPARSHADOW` adds (`LOSAT_X_MBLUTONCE`,
-/// perf/bn-memory-rules), each `0`, the default before, unless the search sets it: every search
-/// here runs as it was written, with the switches off that it does not name (the default runs in
-/// `default_bundle.rs`).
+/// 2026-10-18 `LOSAT_X_MBLUTONCE` (perf/bn-memory-rules), each `0`, the default before, unless the
+/// search sets it: every search here runs as it was written, with the switches off that it does not
+/// name (the default runs in `default_bundle.rs`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),
@@ -217,43 +216,31 @@ fn one_subject_gives_the_same_report_with_the_level_bounds() {
     check(&dir, &query, &subject, "dc-megablast", &[PAIRPARDISC]);
 }
 
-// With the strips folds at 4 threads, their own shadows compare the hit list and the whole
-// diagonal hash of every chunk, the level bounds included, with the reference fold, both with
+// With the strips fold of dc-megablast at 4 threads, its own shadow compares the hit list and the
+// whole diagonal hash of every chunk, the level bounds included, with the reference fold, with
 // the switch.
 #[test]
 fn the_strips_shadows_compare_the_tables_with_the_level_bounds() {
     let dir = TestDir::new("strips");
     let query = fasta("LC738874.fasta");
     let subject = fasta("LC738868.fasta");
-    for (task, strips_shadow, prefix) in [
-        (
-            "megablast",
-            ("LOSAT_X_PAIRPARSHADOW", "1"),
-            "[X_PAIRPARSHADOW] blastn:",
-        ),
-        (
-            "dc-megablast",
-            ("LOSAT_X_PAIRPARDISCSHADOW", "1"),
-            "[X_PAIRPARDISCSHADOW] blastn:",
-        ),
-    ] {
-        let (expected, _) = blastn(&dir, &query, &subject, task, 1, &[]);
-        let (report, stderr) = blastn(&dir, &query, &subject, task, 4, &[SHADOW, strips_shadow]);
-        assert!(report == expected, "{task}: the report differs");
-        let at = format!("{task} with {strips_shadow:?}");
-        // (`LOSAT_X_PAIRPARSHADOW` also names the shadow of TBLASTX's own `PAIRPAR`, whose
-        // line says it compared nothing)
-        let (_, skipped) = shadow_counts(&stderr, &[prefix, "[X_SHADOW] PAIRPAR "], &at);
-        assert!(skipped > 0, "{at}: {stderr}");
-        let line = stderr
-            .lines()
-            .find(|line| line.starts_with(prefix))
-            .unwrap_or_else(|| panic!("{at}: no strips shadow line:\n{stderr}"));
-        assert!(
-            !line.contains("seed chunks equal=0 "),
-            "{at}: no chunk compared: {line}"
-        );
-    }
+    let task = "dc-megablast";
+    let strips_shadow = ("LOSAT_X_PAIRPARDISCSHADOW", "1");
+    let prefix = "[X_PAIRPARDISCSHADOW] blastn:";
+    let (expected, _) = blastn(&dir, &query, &subject, task, 1, &[]);
+    let (report, stderr) = blastn(&dir, &query, &subject, task, 4, &[SHADOW, strips_shadow]);
+    assert!(report == expected, "{task}: the report differs");
+    let at = format!("{task} with {strips_shadow:?}");
+    let (_, skipped) = shadow_counts(&stderr, &[prefix], &at);
+    assert!(skipped > 0, "{at}: {stderr}");
+    let line = stderr
+        .lines()
+        .find(|line| line.starts_with(prefix))
+        .unwrap_or_else(|| panic!("{at}: no strips shadow line:\n{stderr}"));
+    assert!(
+        !line.contains("seed chunks equal=0 "),
+        "{at}: no chunk compared: {line}"
+    );
 }
 
 // blastn-short: a lookup table of the word size (7) without the two-stage word extension, so

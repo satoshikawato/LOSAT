@@ -177,7 +177,7 @@ authoritative, current guidance for agent behavior in LOSAT.
   values and the order that reach the output: work may run earlier, in another
   order or on other threads when every value and every decision the output
   depends on is the same, as in the default unit path of TBLASTX
-  (`LOSAT_X_PAIRPAR`: units of one subject searched in parallel, results put
+  (`tblastx/x_pair_par.rs`: units of one subject searched in parallel, results put
   back in scan order). Owner approval 2026-10-15.
 - Rule 9's "preserving ... Big O complexity" means not making it worse: a path
   may do less work than NCBI's, as the default incremental TBLASTX linking
@@ -376,6 +376,18 @@ outputs; it therefore does not carry NCBI reference comments, and application fe
 permitted by that decision are not "unauthorized features" under requirement 5. Every
 change under `LOSAT/`, including one made for LOSAT Web, remains subject to all the
 requirements above.
+
+---
+
+## Evidence and Run Output
+
+- `docs/evidence/` keeps summaries, scripts, and small records (manifests, hashes, short logs).
+  Output of one run (a gate, sweep, capture, or benchmark) that is over 1 MiB in total or has
+  over 100 files goes to a GitHub release asset with a manifest, not into the tree; the evidence
+  directory keeps `README.md` (release, asset name, asset sha256, file count, bytes) and
+  `MANIFEST.tsv` (path, bytes, sha256 per file). Owner, 2026-10-22: evidence that nothing reads
+  goes to release assets (first release: `evidence-archive-20261022`). Files that code, tests,
+  CI, scripts, or skills read stay in the tree.
 
 ---
 

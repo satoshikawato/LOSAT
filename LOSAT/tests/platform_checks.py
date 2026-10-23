@@ -6,8 +6,8 @@ Standard library only; it runs with the stock Python of the Linux, Windows and m
 run: for each case of platform_check_cases.json, run the binary with the performance switches on
 (the default) and with LOSAT_X_DEFAULT=0 (the reference paths), at 1 and 4 threads, and require
 exit code 0 and one output (one SHA-256) over all four runs.  Each --extra-mode NAME=VAR=VALUE
-adds a mode: the default plus that one variable (such as LOSAT_X_DPNEON=0 on aarch64, which keeps
-the other switches on and runs the scalar X-drop), whose outputs must equal the others too.  Writes DIR/rows.tsv with
+adds a mode: the default plus that one variable (such as LOSAT_X_DPNEON2=1 on aarch64, which runs
+the NEON kernels in register pairs), whose outputs must equal the others too.  Writes DIR/rows.tsv with
 the columns case, threads, mode, exit_code, sha256, seconds.  Exit code 1 on any difference or
 failure.
 

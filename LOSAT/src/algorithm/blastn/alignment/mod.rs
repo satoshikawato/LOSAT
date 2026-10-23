@@ -10,8 +10,8 @@ pub mod gapped;
 pub mod greedy;
 pub mod statistics;
 pub mod utilities;
-// EXPERIMENT (LOSAT_X_GREEDYPRELIM): the preliminary greedy alignment on a one-byte copy of the
-// packed subject (no NCBI counterpart as a module; see its doc for the NCBI references).
+// No NCBI counterpart: the preliminary greedy alignment on a one-byte copy of the
+// packed subject (see its doc for the NCBI references).
 pub mod x_greedy_prelim;
 
 // Re-export public APIs
@@ -19,7 +19,6 @@ pub use greedy::{
     greedy_align_one_direction,
     greedy_align_one_direction_ex,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
-    greedy_gapped_alignment_score_only,
     greedy_gapped_alignment_with_traceback,
     GreedyAlignMem,
     GreedyAlignScratch,

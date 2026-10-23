@@ -9,7 +9,7 @@ pub struct SearchPool<'a> {
     requested: &'a usize,
     #[cfg(feature = "parallel")]
     pool: Option<&'a rayon::ThreadPool>,
-    // EXPERIMENT (LOSAT_X_TBNSSIDE): state the owner of the search attaches for
+    // TBLASTN subject plans (was LOSAT_X_TBNSSIDE): state the owner of the search attaches for
     // the stages below it, which all receive the pool.
     // No NCBI counterpart: read-only shared state (for example a subject translation) that the
     // owner of the search attaches for the stages below. It only lets stages share a value instead
@@ -45,7 +45,7 @@ impl SearchPool<'static> {
 impl<'a> SearchPool<'a> {
     // No NCBI counterpart: it returns the same pool (same thread count, same rayon pool) with a
     // reference to shared state attached. It does not change any value NCBI computes.
-    /// EXPERIMENT (LOSAT_X_TBNSSIDE): this pool with `ext` attached.
+    /// TBLASTN subject plans (was LOSAT_X_TBNSSIDE): this pool with `ext` attached.
     pub fn x_with_ext<'b>(&'b self, ext: &'b (dyn std::any::Any + Send + Sync)) -> SearchPool<'b>
     where
         'a: 'b,
@@ -60,7 +60,7 @@ impl<'a> SearchPool<'a> {
 
     // No NCBI counterpart: reads back the shared state attached above; it does not change any value
     // NCBI computes.
-    /// EXPERIMENT (LOSAT_X_TBNSSIDE): the attached state, if it is a `T`.
+    /// TBLASTN subject plans (was LOSAT_X_TBNSSIDE): the attached state, if it is a `T`.
     pub fn x_ext<T: std::any::Any>(&self) -> Option<&'a T> {
         self.x_ext.and_then(|ext| ext.downcast_ref::<T>())
     }

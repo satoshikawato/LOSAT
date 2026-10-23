@@ -1,0 +1,183 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">g1"
+                  }
+                }
+              },
+              title "g1"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 72,
+              seq-data ncbi2na '1B1B1B1B1B1B1B1B1B1B1B1B1B1B1B1B1B1B'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">g2"
+                  }
+                }
+              },
+              title "g2"
+            },
+            inst {
+              repr virtual,
+              mol na,
+              length 0
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">g3"
+                  }
+                }
+              },
+              title "g3"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 51,
+              seq-data ncbi2na '1B1B0000000000000000000000'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/arch_snucl",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 59661
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 0,
+                  to 71,
+                  id local str "Query_1"
+                },
+                {
+                  from 0,
+                  to 71,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame plus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 8,
+                  to 50,
+                  id local str "Query_3"
+                },
+                {
+                  from 8,
+                  to 50,
+                  id local str "Query_3"
+                }
+              }
+            },
+            frame plus1
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 8,
+              to 50,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame plus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 59661",
+      "Effective search space used: 59661",
+      "Length adjustment: 9"
+    }
+  }
+}

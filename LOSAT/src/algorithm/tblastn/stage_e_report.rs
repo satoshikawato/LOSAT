@@ -104,19 +104,16 @@ pub(super) fn format_number(outfmt: &str) -> i32 {
     crate::blastinput::app::parse_formatting_string(outfmt).map_or(-1, |choice| choice.number)
 }
 
-/// The XML2 / JSON document of a checked `-outfmt` value (16 or 15; `None` for the others).
+/// The XML2 / JSON document of a checked `-outfmt` value (16, 15, 14 or 13; `None` for the
+/// others). Outfmt 13 and 14 write side files next to `-out`: only the command line reaches them
+/// (`run_local` stops at NCBI's XInclude check).
 pub(super) fn xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
     use crate::blastinput::app::ReportFormat;
-    use crate::report::blast_xml2::Xml2Kind;
-    match ReportFormat::from_number(format_number(outfmt)) {
-        Some(ReportFormat::Xml2S) => Some(Xml2Kind::Single16),
-        Some(ReportFormat::JsonS) => Some(Xml2Kind::Single15),
-        _ => None,
-    }
+    crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(format_number(outfmt))?)
 }
 
 /// Whether a checked `-outfmt` value is a format of the structured XML family that takes the
-/// path of outfmt 5: BLAST XML (5), XML2 (16) and JSON (15).
+/// path of outfmt 5: BLAST XML (5) and the XML2 and JSON documents (16, 15, 14, 13).
 pub(super) fn is_structured_xml(outfmt: &str) -> bool {
     format_number(outfmt) == 5 || xml2_kind(outfmt).is_some()
 }
@@ -153,6 +150,7 @@ pub(super) fn render(
     ranges: &ReportRanges<'_>,
     xml_values: super::blast_xml::XmlValues,
     xml_taxa: super::database::XmlTaxa,
+    out: Option<&std::path::Path>,
 ) -> Result<()> {
     ensure!(
         query_records.len() == hitlists.len(),
@@ -332,15 +330,16 @@ pub(super) fn render(
                     ranges,
                     warnings.as_mut(),
                 )?,
-            // The XML2 and JSON documents (outfmt 16 and 15): the same records, written by
+            // The XML2 and JSON documents (outfmt 16 and 15, and 14 and 13 as side files next to
+            // `out` with this output as the master file): the same records, written by
             // `Xml2Writer`.
-            15 | 16 => {
+            13..=16 => {
                 let kind = xml2_kind(format.outfmt).expect("a checked XML2 or JSON format");
                 let xml = xml
                     .as_ref()
-                    .expect("XML prepared for TBLASTN outfmt 15 and 16");
+                    .expect("XML prepared for TBLASTN outfmt 13 to 16");
                 xml.write(
-                    &mut crate::report::blast_xml2::Xml2Writer::new(kind, xml.xml2_run()),
+                    &mut crate::report::blast_xml2::Xml2Writer::for_run(kind, xml.xml2_run(), out),
                     &mut writer,
                     query_records,
                     subject_letters,
@@ -694,18 +693,18 @@ mod tests {
     // Outfmt 5 and the XML2 and JSON documents (16 and 15) take the structured-XML path of
     // `render`; no other format does.
     #[test]
-    fn the_xml_family_is_5_15_and_16() {
+    fn the_xml_family_is_5_and_13_to_16() {
         use crate::report::blast_xml2::Xml2Kind;
         for (outfmt, kind, structured) in [
             ("5", None, true),
+            ("13", Some(Xml2Kind::Files13), true),
+            ("14", Some(Xml2Kind::Files14), true),
             ("15", Some(Xml2Kind::Single15), true),
             ("16", Some(Xml2Kind::Single16), true),
             (" 16 std", Some(Xml2Kind::Single16), true),
             ("0", None, false),
             ("6", None, false),
             ("12", None, false),
-            ("13", None, false),
-            ("14", None, false),
         ] {
             assert_eq!(xml2_kind(outfmt), kind, "{outfmt}");
             assert_eq!(is_structured_xml(outfmt), structured, "{outfmt}");
@@ -820,6 +819,7 @@ mod tests {
                     db_gencode: 1,
                 },
                 Default::default(),
+                None,
             )
             .unwrap();
             drop(outputs);

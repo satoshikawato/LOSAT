@@ -116,7 +116,7 @@ pub(crate) fn seqalign_evalue(evalue: f64) -> f64 {
         evalue
     }
 }
-const GAP_VALUE: i32 = -1;
+pub(crate) const GAP_VALUE: i32 = -1;
 const BLAST_ALIGNMENT_DIM: i32 = 2;
 
 /// `CODON_LENGTH` (include/algo/blast/core/blast_def.h:62-63: `#define CODON_LENGTH 3`).
@@ -192,6 +192,50 @@ pub struct Segments {
     starts: Vec<i32>,
     lens: Vec<i32>,
     strands: Vec<Strand>,
+}
+
+impl Segments {
+    /// The numbers of the segments' rows: `starts` (2 per segment, query then subject,
+    /// `GAP_VALUE` for a gap; in the searched letters, before the remaps of the query's and
+    /// the subject's ranges), `lens` and `strands` (2 per segment).
+    pub(crate) fn starts(&self) -> &[i32] {
+        &self.starts
+    }
+
+    pub(crate) fn lens(&self) -> &[i32] {
+        &self.lens
+    }
+
+    pub(crate) fn strands(&self) -> &[Strand] {
+        &self.strands
+    }
+}
+
+/// The Dense-seg segments of a gapped HSP of a non-translated search as the Seq-align holds
+/// them after `RemapToQueryLoc` and `s_RemapToSubjectLoc` (for a `-subject` search), minus the
+/// range starts that the caller adds (`QueryRecord::offset`, `SubjectRecord::offset`): what
+/// `write_seq_align_gapped` writes into the Dense-seg. The SAM formatter reads them
+/// (`report::sam`).
+pub(crate) fn gapped_segments(
+    run: &RunRecord<'_>,
+    query: &QueryRecord<'_>,
+    subject: &SubjectRecord<'_>,
+    hsp: &HspRecord<'_>,
+    segments: &mut Segments,
+) {
+    let translate1 = query_is_translated(run.program);
+    let translate2 = subject_is_translated(run.program);
+    collect_seq_align_data(
+        hsp,
+        query.searched_length,
+        subject.searched_length,
+        translate1,
+        translate2,
+        segments,
+    );
+    if run.remaps_subjects() && !(translate1 || translate2) {
+        remap_strands(segments);
+    }
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:89-100
@@ -1694,6 +1738,33 @@ fn has_alignments(run: &RunRecord<'_>, hsps: &[HspRecord<'_>]) -> bool {
     }
 }
 
+/// The Seq-aligns of one query's HSPs, as the elements of the list that the caller opened
+/// (`Seq-annot` `data align` of outfmt 8, `alignments` of the archive of outfmt 11).
+/// `after_each` is called after each Seq-align (the archive hands the encoder's final bytes to
+/// its sink there).
+pub(crate) fn write_seq_aligns<E: Encoder>(
+    enc: &mut E,
+    run: &RunRecord<'_>,
+    query: &QueryRecord<'_>,
+    subjects: &[SubjectRecord<'_>],
+    hsps: &[HspRecord<'_>],
+    segments: &mut Segments,
+    mut after_each: impl FnMut(&mut E),
+) {
+    if run.gapped {
+        for hsp in hsps.iter().filter(|hsp| hsp.score != 0) {
+            let subject = &subjects[hsp.subject as usize];
+            write_seq_align_gapped(enc, run, query, subject, hsp, segments);
+            after_each(enc);
+        }
+    } else {
+        for list in hsps.chunk_by(|a, b| a.subject == b.subject) {
+            write_seq_align_diags(enc, query, &subjects[list[0].subject as usize], list);
+            after_each(enc);
+        }
+    }
+}
+
 /// The Seq-annot of one query's Seq-aligns: the `desc` user objects and `data align` with,
 /// subject by subject in the order of `hsps`, one Seq-align per HSP of score other than 0
 /// (a gapped search) or one `diags` Seq-align per subject (an ungapped search).
@@ -1758,16 +1829,7 @@ fn write_seq_annot<E: Encoder>(
     enc.member("data", 4);
     enc.variant("Seq-annot_data", "align", 1);
     enc.begin_list(true);
-    if run.gapped {
-        for hsp in hsps.iter().filter(|hsp| hsp.score != 0) {
-            let subject = &subjects[hsp.subject as usize];
-            write_seq_align_gapped(enc, run, query, subject, hsp, &mut segments);
-        }
-    } else {
-        for list in hsps.chunk_by(|a, b| a.subject == b.subject) {
-            write_seq_align_diags(enc, query, &subjects[list[0].subject as usize], list);
-        }
-    }
+    write_seq_aligns(enc, run, query, subjects, hsps, &mut segments, |_| {});
     enc.end_list();
     enc.end_variant();
     enc.end_member();

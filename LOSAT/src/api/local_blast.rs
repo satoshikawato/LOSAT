@@ -281,10 +281,53 @@ pub struct ReportOutputs<'a> {
     pub formats: Vec<FormatOutput<'a>>,
     /// Receives the warnings that the CLI writes to standard error, each once.
     pub diagnostics: &'a mut (dyn Write + Send),
-    /// Receives the final, sorted hit list with rendered alignments.
+    /// Receives the final, sorted hit list with rendered alignments, once per call. It may come
+    /// before or after the reports are written (blastp's query blocks hand it over after the
+    /// last block, `LOSAT_X_BPQBLOCKWEB`).
     pub hits: Option<&'a mut (dyn FnMut(&[PairwiseHit]) + Send)>,
-    /// Receives the row and section boundaries of each HSP in each format.
+    /// Receives the row and section boundaries of each HSP in each format. The events of one
+    /// format come in that format's write order; those of different formats may interleave in
+    /// any order (blastp's query blocks write every format block by block).
     pub observer: Option<&'a mut (dyn FormatObserver + Send)>,
+}
+
+impl ReportOutputs<'_> {
+    /// Runs `f` with the same outputs and a diagnostics stream that also saves what it
+    /// writes as the messages of the BLAST archive (outfmt 11) of `handle`.
+    pub(crate) fn with_archive_diagnostics<R>(
+        &mut self,
+        handle: crate::report::archive::ArchiveHandle,
+        f: impl FnOnce(&mut ReportOutputs<'_>) -> R,
+    ) -> R {
+        let ReportOutputs {
+            formats,
+            diagnostics,
+            hits,
+            observer,
+        } = self;
+        let mut tee = crate::report::archive::DiagTee::new(&mut **diagnostics, handle);
+        let mut view = ReportOutputs {
+            formats: formats
+                .iter_mut()
+                .map(|format| FormatOutput {
+                    outfmt: format.outfmt,
+                    sink: match &mut format.sink {
+                        OutputSink::Stdout => OutputSink::Stdout,
+                        OutputSink::File(path) => OutputSink::File(path),
+                        OutputSink::Writer(writer) => OutputSink::Writer(&mut **writer),
+                    },
+                })
+                .collect(),
+            diagnostics: &mut tee,
+            hits: hits
+                .as_mut()
+                .map(|hits| &mut **hits as &mut (dyn FnMut(&[PairwiseHit]) + Send)),
+            observer: observer
+                .as_mut()
+                .map(|observer| &mut **observer as &mut (dyn FormatObserver + Send)),
+        };
+        f(&mut view)
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:225-226

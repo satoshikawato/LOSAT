@@ -526,15 +526,6 @@ fn hsp_for_handle(hsp_storage: &[Option<BlastnHsp>], handle: HspHandle) -> Optio
 // ...
 //    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
 // ```
-// This function only reads the LOSAT_X_PURGEFAST switch once. It selects between two
-// ways to run the purge passes of `purge_hsps_for_subject_ex` below; it is not an NCBI
-// computation.
-fn x_purge_fast() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PURGEFAST"))
-}
-
 /// Purge HSPs with common endpoints for a single subject.
 ///
 /// NCBI reference: blast_hits.c:2455-2535
@@ -614,117 +605,31 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     //         }
     //         hsp_array[hsp_count] = hsp;
     // ```
-    // Dispatch point of LOSAT_X_PURGEFAST (pass 1, common start). The `else` branch below
-    // ports the C loop above. The fast branch makes the same keep/trim/delete decisions on
-    // the same pairs. It writes the survivors in order and the removed entries to the tail
-    // slots the C shifts would leave them in. By construction the result is the same
-    // array; it only avoids the repeated left shifts.
-    // EXPERIMENT (LOSAT_X_PURGEFAST): the same removals without the
-    // per-removal shift. NCBI removes hsp_array[i+1], shifts the rest of the
-    // active prefix left and parks the removed pointer at the shrinking end:
-    //   for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
-    //   hsp_array[hsp_count] = hsp;
-    // so the k-th removal of a pass ends at index (count at pass start - 1 - k)
-    // and the survivors stay in order. This loop compares the current keeper
-    // with the next unprocessed entry exactly as NCBI does, writes survivors
-    // to the front and the removed entries to those tail slots.
-    if x_purge_fast() {
-        let n0 = hsp_count;
-        if n0 > 0 {
-            let mut w = 0usize;
-            let mut tails: Vec<HspHandle> = Vec::new();
-            for r in 1..n0 {
-                if same_common_start(&hsp_storage, &hsp_array, w, r) {
-                    let (keeper_q_end, keeper_s_end) = {
-                        let keeper = hsp_for_handle(&hsp_storage, hsp_array[w])
-                            .expect("same_common_start requires a keeper HSP");
-                        (keeper.internal_q_end_0, keeper.internal_s_end_0)
-                    };
-                    let removed = hsp_array[r].take();
-                    let mut tail_hsp = None;
-
-                    if let Some(handle) = removed {
-                        let removed_hit = hsp_for_handle(&hsp_storage, Some(handle))
-                            .expect("removed handle requires a live HSP");
-                        let keeper = hsp_for_handle(&hsp_storage, hsp_array[w])
-                            .expect("common endpoint requires a keeper HSP");
-                        if !purge && removed_hit.internal_q_end_0 > keeper_q_end {
-                            trace_common_endpoint_purge_decision(
-                                "common_start",
-                                "trim_begin",
-                                purge,
-                                keeper,
-                                removed_hit,
-                                keeper_q_end,
-                                keeper_s_end,
-                            );
-                            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2490-2492,2516-2518
-                            // s_CutOffGapEditScript(hsp, hsp_array[w]->query.end,
-                            //                      hsp_array[w]->subject.end, TRUE);
-                            // End immutable keeper/removed borrows before editing this one slot.
-                            let removed_hit = hsp_storage[handle.get() - 1]
-                                .as_mut()
-                                .expect("trimmed handle requires a live HSP");
-                            let _ = cut_off_gap_edit_script(
-                                removed_hit,
-                                keeper_q_end,
-                                keeper_s_end,
-                                true,
-                            );
-                            tail_hsp = Some(handle);
-                            start_trimmed += 1;
-                        } else {
-                            trace_common_endpoint_purge_decision(
-                                "common_start",
-                                "delete",
-                                purge,
-                                keeper,
-                                removed_hit,
-                                keeper_q_end,
-                                keeper_s_end,
-                            );
-                            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2494,2520
-                            // hsp = Blast_HSPFree(hsp);
-                            // Release owned script storage now, before shifting handles.
-                            drop(
-                                hsp_storage[handle.get() - 1]
-                                    .take()
-                                    .expect("deleted handle requires a live HSP"),
-                            );
-                        }
-                        start_removed += 1;
-                    }
-                    tails.push(tail_hsp);
-                } else {
-                    w += 1;
-                    if w != r {
-                        hsp_array[w] = hsp_array[r];
-                    }
-                }
-            }
-            hsp_count = w + 1;
-            for (k, tail) in tails.into_iter().enumerate() {
-                hsp_array[n0 - 1 - k] = tail;
-            }
-        }
-    } else {
-        let mut i = 0usize;
-        while i < hsp_count {
-            let j = 1usize;
-            while i + j < hsp_count && same_common_start(&hsp_storage, &hsp_array, i, i + j) {
+    // No NCBI counterpart: LOSAT makes the same keep/trim/delete decisions on the same pairs as the C
+    // loop above. It writes the survivors in order and the removed entries to the tail slots the C
+    // shifts would leave them in, so the array is the same; it only avoids the repeated left shifts.
+    // NCBI removes hsp_array[i+1], shifts the rest of the active prefix left and parks the removed
+    // pointer at the shrinking end, so the k-th removal of a pass ends at index (count at pass
+    // start - 1 - k) and the survivors stay in order. This loop compares the current keeper
+    // with the next unprocessed entry exactly as NCBI does.
+    let n0 = hsp_count;
+    if n0 > 0 {
+        let mut w = 0usize;
+        let mut tails: Vec<HspHandle> = Vec::new();
+        for r in 1..n0 {
+            if same_common_start(&hsp_storage, &hsp_array, w, r) {
                 let (keeper_q_end, keeper_s_end) = {
-                    let keeper = hsp_for_handle(&hsp_storage, hsp_array[i])
+                    let keeper = hsp_for_handle(&hsp_storage, hsp_array[w])
                         .expect("same_common_start requires a keeper HSP");
                     (keeper.internal_q_end_0, keeper.internal_s_end_0)
                 };
-                hsp_count -= 1;
-                let removed = hsp_array[i + j].take();
+                let removed = hsp_array[r].take();
                 let mut tail_hsp = None;
 
                 if let Some(handle) = removed {
                     let removed_hit = hsp_for_handle(&hsp_storage, Some(handle))
                         .expect("removed handle requires a live HSP");
-                    let keeper = hsp_for_handle(&hsp_storage, hsp_array[i])
+                    let keeper = hsp_for_handle(&hsp_storage, hsp_array[w])
                         .expect("common endpoint requires a keeper HSP");
                     if !purge && removed_hit.internal_q_end_0 > keeper_q_end {
                         trace_common_endpoint_purge_decision(
@@ -737,8 +642,8 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
                             keeper_s_end,
                         );
                         // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2490-2492,2516-2518
-                        // s_CutOffGapEditScript(hsp, hsp_array[i]->query.end,
-                        //                      hsp_array[i]->subject.end, TRUE);
+                        // s_CutOffGapEditScript(hsp, hsp_array[w]->query.end,
+                        //                      hsp_array[w]->subject.end, TRUE);
                         // End immutable keeper/removed borrows before editing this one slot.
                         let removed_hit = hsp_storage[handle.get() - 1]
                             .as_mut()
@@ -768,14 +673,23 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
                     }
                     start_removed += 1;
                 }
-
-                // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2496-2499,2522-2525
-                // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
-                // Move the same pointer-sized handles, including an empty last-slot range.
-                hsp_array.copy_within(i + j + 1..hsp_count + 1, i + j);
-                hsp_array[hsp_count] = tail_hsp;
+                tails.push(tail_hsp);
+            } else {
+                w += 1;
+                if w != r {
+                    hsp_array[w] = hsp_array[r];
+                }
             }
-            i += j;
+        }
+        hsp_count = w + 1;
+        // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2496-2499,2522-2525
+        // ```c
+        // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
+        // hsp_array[hsp_count] = hsp;
+        // ```
+        // The removed handles go to the tail slots, the first removal to the last slot.
+        for (k, tail) in tails.into_iter().enumerate() {
+            hsp_array[n0 - 1 - k] = tail;
         }
     }
 
@@ -825,115 +739,31 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     //         }
     //         hsp_array[hsp_count] = hsp;
     // ```
-    // Dispatch point of LOSAT_X_PURGEFAST (pass 2, common end). Same relation as in pass 1:
-    // the `else` branch ports the C loop, and the fast branch gives the same array without
-    // the repeated left shifts.
-    // EXPERIMENT (LOSAT_X_PURGEFAST): the same removals without the
-    // per-removal shift. NCBI removes hsp_array[i+1], shifts the rest of the
-    // active prefix left and parks the removed pointer at the shrinking end:
-    //   for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
-    //   hsp_array[hsp_count] = hsp;
-    // so the k-th removal of a pass ends at index (count at pass start - 1 - k)
-    // and the survivors stay in order. This loop compares the current keeper
-    // with the next unprocessed entry exactly as NCBI does, writes survivors
-    // to the front and the removed entries to those tail slots.
-    if x_purge_fast() {
-        let n0 = hsp_count;
-        if n0 > 0 {
-            let mut w = 0usize;
-            let mut tails: Vec<HspHandle> = Vec::new();
-            for r in 1..n0 {
-                if same_common_end(&hsp_storage, &hsp_array, w, r) {
-                    let (keeper_q_offset, keeper_s_offset) = {
-                        let keeper = hsp_for_handle(&hsp_storage, hsp_array[w])
-                            .expect("same_common_end requires a keeper HSP");
-                        (keeper.internal_q_offset_0, keeper.internal_s_offset_0)
-                    };
-                    let removed = hsp_array[r].take();
-                    let mut tail_hsp = None;
-
-                    if let Some(handle) = removed {
-                        let removed_hit = hsp_for_handle(&hsp_storage, Some(handle))
-                            .expect("removed handle requires a live HSP");
-                        let keeper = hsp_for_handle(&hsp_storage, hsp_array[w])
-                            .expect("common endpoint requires a keeper HSP");
-                        if !purge && removed_hit.internal_q_offset_0 < keeper_q_offset {
-                            trace_common_endpoint_purge_decision(
-                                "common_end",
-                                "trim_end",
-                                purge,
-                                keeper,
-                                removed_hit,
-                                keeper_q_offset,
-                                keeper_s_offset,
-                            );
-                            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2490-2492,2516-2518
-                            // s_CutOffGapEditScript(hsp, hsp_array[w]->query.offset,
-                            //                      hsp_array[w]->subject.offset, FALSE);
-                            // End immutable keeper/removed borrows before editing this one slot.
-                            let removed_hit = hsp_storage[handle.get() - 1]
-                                .as_mut()
-                                .expect("trimmed handle requires a live HSP");
-                            let _ = cut_off_gap_edit_script(
-                                removed_hit,
-                                keeper_q_offset,
-                                keeper_s_offset,
-                                false,
-                            );
-                            tail_hsp = Some(handle);
-                            end_trimmed += 1;
-                        } else {
-                            trace_common_endpoint_purge_decision(
-                                "common_end",
-                                "delete",
-                                purge,
-                                keeper,
-                                removed_hit,
-                                keeper_q_offset,
-                                keeper_s_offset,
-                            );
-                            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2494,2520
-                            // hsp = Blast_HSPFree(hsp);
-                            // Release owned script storage now, before shifting handles.
-                            drop(
-                                hsp_storage[handle.get() - 1]
-                                    .take()
-                                    .expect("deleted handle requires a live HSP"),
-                            );
-                        }
-                        end_removed += 1;
-                    }
-                    tails.push(tail_hsp);
-                } else {
-                    w += 1;
-                    if w != r {
-                        hsp_array[w] = hsp_array[r];
-                    }
-                }
-            }
-            hsp_count = w + 1;
-            for (k, tail) in tails.into_iter().enumerate() {
-                hsp_array[n0 - 1 - k] = tail;
-            }
-        }
-    } else {
-        let mut i = 0usize;
-        while i < hsp_count {
-            let j = 1usize;
-            while i + j < hsp_count && same_common_end(&hsp_storage, &hsp_array, i, i + j) {
+    // No NCBI counterpart: LOSAT makes the same keep/trim/delete decisions on the same pairs as the C
+    // loop above. It writes the survivors in order and the removed entries to the tail slots the C
+    // shifts would leave them in, so the array is the same; it only avoids the repeated left shifts.
+    // NCBI removes hsp_array[i+1], shifts the rest of the active prefix left and parks the removed
+    // pointer at the shrinking end, so the k-th removal of a pass ends at index (count at pass
+    // start - 1 - k) and the survivors stay in order. This loop compares the current keeper
+    // with the next unprocessed entry exactly as NCBI does.
+    let n0 = hsp_count;
+    if n0 > 0 {
+        let mut w = 0usize;
+        let mut tails: Vec<HspHandle> = Vec::new();
+        for r in 1..n0 {
+            if same_common_end(&hsp_storage, &hsp_array, w, r) {
                 let (keeper_q_offset, keeper_s_offset) = {
-                    let keeper = hsp_for_handle(&hsp_storage, hsp_array[i])
+                    let keeper = hsp_for_handle(&hsp_storage, hsp_array[w])
                         .expect("same_common_end requires a keeper HSP");
                     (keeper.internal_q_offset_0, keeper.internal_s_offset_0)
                 };
-                hsp_count -= 1;
-                let removed = hsp_array[i + j].take();
+                let removed = hsp_array[r].take();
                 let mut tail_hsp = None;
 
                 if let Some(handle) = removed {
                     let removed_hit = hsp_for_handle(&hsp_storage, Some(handle))
                         .expect("removed handle requires a live HSP");
-                    let keeper = hsp_for_handle(&hsp_storage, hsp_array[i])
+                    let keeper = hsp_for_handle(&hsp_storage, hsp_array[w])
                         .expect("common endpoint requires a keeper HSP");
                     if !purge && removed_hit.internal_q_offset_0 < keeper_q_offset {
                         trace_common_endpoint_purge_decision(
@@ -946,8 +776,8 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
                             keeper_s_offset,
                         );
                         // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2490-2492,2516-2518
-                        // s_CutOffGapEditScript(hsp, hsp_array[i]->query.offset,
-                        //                      hsp_array[i]->subject.offset, FALSE);
+                        // s_CutOffGapEditScript(hsp, hsp_array[w]->query.offset,
+                        //                      hsp_array[w]->subject.offset, FALSE);
                         // End immutable keeper/removed borrows before editing this one slot.
                         let removed_hit = hsp_storage[handle.get() - 1]
                             .as_mut()
@@ -981,14 +811,23 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
                     }
                     end_removed += 1;
                 }
-
-                // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2496-2499,2522-2525
-                // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
-                // Move the same pointer-sized handles, including an empty last-slot range.
-                hsp_array.copy_within(i + j + 1..hsp_count + 1, i + j);
-                hsp_array[hsp_count] = tail_hsp;
+                tails.push(tail_hsp);
+            } else {
+                w += 1;
+                if w != r {
+                    hsp_array[w] = hsp_array[r];
+                }
             }
-            i += j;
+        }
+        hsp_count = w + 1;
+        // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2496-2499,2522-2525
+        // ```c
+        // for (k=i+j; k<hsp_count; k++) hsp_array[k] = hsp_array[k+1];
+        // hsp_array[hsp_count] = hsp;
+        // ```
+        // The removed handles go to the tail slots, the first removal to the last slot.
+        for (k, tail) in tails.into_iter().enumerate() {
+            hsp_array[n0 - 1 - k] = tail;
         }
     }
 

@@ -115,38 +115,13 @@ pub(crate) fn write_blastn_seqalign(
         let Some(hit_list) = hit_list else {
             continue;
         };
-        subject_records.clear();
-        hsp_records.clear();
-        for hsp_list in &hit_list.hsplist_array {
-            if hsp_list.hsps.is_empty() {
-                continue;
-            }
-            let s_idx = hsp_list.hsps[0].s_idx as usize;
-            let subject = subject_records.len() as u32;
-            // A database sequence's length is not read: BLASTN's subject row is the plus
-            // strand (`s_GetAlignmentStart`).
-            subject_records.push(subjects.record(s_idx, subject_placements.offset(s_idx), 0));
-            for hsp in &hsp_list.hsps {
-                debug_assert_eq!(hsp.s_idx as usize, s_idx, "one subject per HSP list");
-                hsp_records.push(HspRecord {
-                    subject,
-                    q_offset: hsp.internal_q_offset_0 as i32,
-                    q_end: hsp.internal_q_end_0 as i32,
-                    s_offset: hsp.internal_s_offset_0 as i32,
-                    s_end: hsp.internal_s_end_0 as i32,
-                    q_frame: if hsp.query_frame < 0 { -1 } else { 1 },
-                    s_frame: 1,
-                    score: hsp.raw_score,
-                    num: 0,
-                    evalue: hsp.e_value,
-                    bit_score: hsp.bit_score,
-                    num_ident: hsp.num_ident as i32,
-                    num_positives: 0,
-                    comp_adjust: 0,
-                    ops: hsp.gap_info.as_deref().unwrap_or(&[]),
-                });
-            }
-        }
+        query_records(
+            hit_list,
+            &subjects,
+            subject_placements,
+            &mut subject_records,
+            &mut hsp_records,
+        );
         buf.clear();
         if write_query(
             format,
@@ -160,4 +135,47 @@ pub(crate) fn write_blastn_seqalign(
         }
     }
     Ok(())
+}
+
+/// The subject and HSP records of one query's hit list (what `write_query` and the archive
+/// write), replacing the contents of `subject_records` and `hsp_records`.
+pub(crate) fn query_records<'a>(
+    hit_list: &'a BlastnHitList,
+    subjects: &SubjectNames<'a>,
+    subject_placements: &Placements,
+    subject_records: &mut Vec<SubjectRecord<'a>>,
+    hsp_records: &mut Vec<HspRecord<'a>>,
+) {
+    subject_records.clear();
+    hsp_records.clear();
+    for hsp_list in &hit_list.hsplist_array {
+        if hsp_list.hsps.is_empty() {
+            continue;
+        }
+        let s_idx = hsp_list.hsps[0].s_idx as usize;
+        let subject = subject_records.len() as u32;
+        // A database sequence's length is not read: BLASTN's subject row is the plus
+        // strand (`s_GetAlignmentStart`).
+        subject_records.push(subjects.record(s_idx, subject_placements.offset(s_idx), 0));
+        for hsp in &hsp_list.hsps {
+            debug_assert_eq!(hsp.s_idx as usize, s_idx, "one subject per HSP list");
+            hsp_records.push(HspRecord {
+                subject,
+                q_offset: hsp.internal_q_offset_0 as i32,
+                q_end: hsp.internal_q_end_0 as i32,
+                s_offset: hsp.internal_s_offset_0 as i32,
+                s_end: hsp.internal_s_end_0 as i32,
+                q_frame: if hsp.query_frame < 0 { -1 } else { 1 },
+                s_frame: 1,
+                score: hsp.raw_score,
+                num: 0,
+                evalue: hsp.e_value,
+                bit_score: hsp.bit_score,
+                num_ident: hsp.num_ident as i32,
+                num_positives: 0,
+                comp_adjust: 0,
+                ops: hsp.gap_info.as_deref().unwrap_or(&[]),
+            });
+        }
+    }
 }

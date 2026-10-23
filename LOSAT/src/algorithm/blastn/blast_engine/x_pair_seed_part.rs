@@ -1,5 +1,5 @@
 //! EXPERIMENT (LOSAT_X_PAIRPARFOLD; a strict-set switch since 2026-10-17): the
-//! diagonal-hash fold of the strips paths of `LOSAT_X_PAIRPAR` (blastn's one-hit fold, the
+//! diagonal-hash fold of the strips paths of PAIRPAR (blastn's one-hit fold, the
 //! parent's `fold`) and `LOSAT_X_PAIRPARDISC` (dc-megablast's two-hit fold,
 //! `disc::fold_two_hit`) split by diagonal-hash bucket over the threads of the search pool,
 //! instead of done by the owner thread alone. No NCBI counterpart (scheduling only).
@@ -130,7 +130,8 @@ fn switch_on() -> bool {
 /// thread (the owner folds).
 pub(super) fn partitions(threads: usize) -> Option<usize> {
     if switch_on() {
-        // A stage on a pool has two threads or more; one thread only in the PAIRPARSHADOW runs.
+        // A stage on a pool has two threads or more; one thread only in the PAIRPARDISCSHADOW and
+        // PAIRPARNASHADOW runs.
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARFOLD", threads >= 2);
     }
     (switch_on() && threads >= 2).then(|| threads.min(DIAGHASH_NUM_BUCKETS))

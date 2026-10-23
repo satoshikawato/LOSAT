@@ -202,3 +202,47 @@ fn documents_are_concatenated() {
     }
     assert_eq!(buf, [0x30, 0x80, 0x00, 0x00, 0x30, 0x80, 0x00, 0x00]);
 }
+
+/// `BeginBytes`: tag 0x04 and the length, then the bytes; `WriteStringStore`: the application
+/// tag 0x41 (`ncbieaa`), the length and the bytes (objostrasnb.cpp:874-879, 1704-1708).
+#[test]
+fn octet_strings_and_string_stores_have_their_own_tags() {
+    assert_eq!(
+        bytes(|enc| enc.octets(&[0x04, 0x91, 0x31])),
+        [0x04, 0x03, 0x04, 0x91, 0x31]
+    );
+    assert_eq!(bytes(|enc| enc.octets(&[])), [0x04, 0x00]);
+    let long = vec![0xa5; 200];
+    let mut expected = vec![0x04, 0x81, 200];
+    expected.extend_from_slice(&long);
+    assert_eq!(bytes(|enc| enc.octets(&long)), expected);
+    assert_eq!(
+        bytes(|enc| enc.string_store(b"MKV")),
+        [0x41, 0x03, b'M', b'K', b'V']
+    );
+    // A VisibleString keeps its own tag.
+    assert_eq!(
+        bytes(|enc| enc.visible_str(b"MKV")),
+        [0x1a, 0x03, b'M', b'K', b'V']
+    );
+}
+
+/// `WriteInt8` of a BigInt with the fewest two's-complement bytes (objostrasnb.cpp:716-724,
+/// `m_CStyleBigInt` false); the archive's `EffectiveSearchSpace` is one.
+#[test]
+fn big_integers_use_the_fewest_bytes() {
+    for (value, expected) in [
+        (0i64, &[0x02, 0x01, 0x00][..]),
+        (127, &[0x02, 0x01, 0x7f]),
+        (128, &[0x02, 0x02, 0x00, 0x80]),
+        (438513, &[0x02, 0x03, 0x06, 0xb0, 0xf1]),
+        (-1, &[0x02, 0x01, 0xff]),
+        (-129, &[0x02, 0x02, 0xff, 0x7f]),
+        (
+            1_000_000_000_000,
+            &[0x02, 0x06, 0x00, 0xe8, 0xd4, 0xa5, 0x10, 0x00][..],
+        ),
+    ] {
+        assert_eq!(bytes(|enc| enc.big_int(value)), expected, "{value}");
+    }
+}

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use super::file::DbFile;
-use super::header::{decode_defline_set, decode_defline_taxids, Defline};
+use super::header::{decode_defline_taxids, decode_deflines_as, Defline};
 use super::index::{self, IndexFile};
 use super::{SeqDbError, SeqType, XDbIdxRead};
 
@@ -413,10 +413,17 @@ impl Volume {
     /// The definition lines of the sequence `oid` (volume-relative), with
     /// their ordinal ids still relative to the volume.
     pub fn deflines(&self, oid: u32) -> Result<Vec<Defline>, SeqDbError> {
+        self.deflines_as(oid, false)
+    }
+
+    /// `deflines`, with the `taxid` of each definition line decoded when `want_taxid` (the
+    /// decode of `defline_taxids`, which also gives the titles).
+    pub fn deflines_as(&self, oid: u32, want_taxid: bool) -> Result<Vec<Defline>, SeqDbError> {
         let record = self.header_bytes(oid)?;
-        decode_defline_set(
+        decode_deflines_as(
             &record,
             &with_extension(&self.base, self.index.seqtype, "hr"),
+            want_taxid,
         )
     }
 
@@ -640,12 +647,25 @@ impl Volume {
         piece_bytes: u64,
         visit: &mut dyn FnMut(u32, Result<Vec<Defline>, SeqDbError>) -> bool,
     ) -> bool {
+        self.visit_deflines_as(first, end, piece_bytes, false, visit)
+    }
+
+    /// `visit_deflines`, with the `taxid` of each definition line decoded when `want_taxid`
+    /// (the results of `deflines_as`): one pass over the headers gives the titles and the taxids.
+    pub(super) fn visit_deflines_as(
+        &self,
+        first: u32,
+        end: u32,
+        piece_bytes: u64,
+        want_taxid: bool,
+        visit: &mut dyn FnMut(u32, Result<Vec<Defline>, SeqDbError>) -> bool,
+    ) -> bool {
         self.visit_headers(
             first,
             end,
             piece_bytes,
-            &|oid| self.deflines(oid),
-            &decode_defline_set,
+            &|oid| self.deflines_as(oid, want_taxid),
+            &|record, path| decode_deflines_as(record, path, want_taxid),
             visit,
         )
     }

@@ -1,7 +1,7 @@
 //! EXPERIMENT (LOSAT_X_BNFEWSUBJ, a strict-set switch): a `-subject` search whose longest 5 Mb
 //! work unit is a large part of its letters searches its subjects one at a time, and a subject's
 //! batch of chunks the same way its chunks one at a time, each on the whole pool with the subject
-//! scan in strips (`x_pair_seed.rs`, LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARDISC and
+//! scan in strips (`x_pair_seed.rs`, PAIRPAR, LOSAT_X_PAIRPARDISC and
 //! LOSAT_X_PAIRPARDISCARR).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426

@@ -16,8 +16,8 @@
 //! `x_packed_frames_read_from_the_bytes_are_the_frames_of_the_codes`), so the report does not
 //! depend on the switch. It is on by default, off with `LOSAT_X_TBNXLATESIMD=0`, and off with
 //! `LOSAT_X_DEFAULT=0` unless its variable is set; it acts on packed subjects (`LOSAT_X_TBNSTORE`,
-//! here `-subject` without `-subject_loc`) and only where the CPU has AVX2. These tests compare the reports and read the `[X_STATS] TBNXLATESIMD
-//! codons_vector= codons_scalar=` line (`LOSAT_X_STATS=1`).
+//! here `-subject`) and only where the CPU has AVX2. These tests compare the reports and read the
+//! `[X_STATS] TBNXLATESIMD codons_vector= codons_scalar=` line (`LOSAT_X_STATS=1`).
 //!
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` and all 115 of them; the
 //! subject is `tests/fasta/MelaMJNV.fasta`.

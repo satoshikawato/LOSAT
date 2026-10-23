@@ -969,7 +969,6 @@ mod tests {
                 .collect();
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts),
-                shadow: false,
                 stub: false,
                 sliced: None,
                 mask_rule: None,

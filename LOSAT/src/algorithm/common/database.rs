@@ -716,8 +716,32 @@ mod tests {
 /// them for both; the ABI callers that ask for both do not see them twice.
 #[derive(Default)]
 pub(crate) struct TaxdbRun {
-    lazy: std::sync::OnceLock<crate::seqdb::taxdb::LazyTaxDb>,
+    lazy: std::sync::Mutex<Option<std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>>>,
     volume_lookups: std::sync::Mutex<std::collections::HashSet<(usize, i32)>>,
+}
+
+impl TaxdbRun {
+    /// The run's taxonomy database, a handle that opens it at its first name asked for.
+    fn taxdb(
+        &self,
+        search_path: &crate::seqdb::SearchPath,
+    ) -> std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb> {
+        let mut lazy = self.lazy.lock().expect("the taxonomy database");
+        std::sync::Arc::clone(lazy.get_or_insert_with(|| {
+            std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(search_path.clone()))
+        }))
+    }
+
+    /// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): forgets the opened taxonomy database and the taxids
+    /// looked up, so that a second search of the same queries (the shadow's search of all queries)
+    /// writes the messages of opening and of the volumes' lookups as the first search did.
+    pub(crate) fn x_reset(&self) {
+        *self.lazy.lock().expect("the taxonomy database") = None;
+        self.volume_lookups
+            .lock()
+            .expect("the volume lookups")
+            .clear();
+    }
 }
 
 /// LOSAT's refusal of a taxonomy database name or record (`read_reported_taxids`): a scientific
@@ -786,7 +810,6 @@ pub(crate) fn read_reported_taxids(
     TaxdbNotes,
 )> {
     use crate::report::blast_xml::HitTaxonomy;
-    use crate::seqdb::taxdb::LazyTaxDb;
     let mut taxids = vec![0; ordinals.len()];
     for &rank in reported {
         let defline_taxids = db
@@ -801,7 +824,7 @@ pub(crate) fn read_reported_taxids(
     let Some(search_path) = db.search_path() else {
         return Ok((taxids, Vec::new(), TaxdbNotes::default()));
     };
-    let taxdb = run.lazy.get_or_init(|| LazyTaxDb::new(search_path.clone()));
+    let taxdb = run.taxdb(search_path);
     let mut notes = TaxdbNotes {
         program: program.to_ascii_lowercase(),
         ..TaxdbNotes::default()

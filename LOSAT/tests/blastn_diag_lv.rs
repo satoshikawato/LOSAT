@@ -16,20 +16,19 @@
 //! use the diagonal hash. The folds reached: at one thread the reference fold
 //! (`process_offset_pairs`: its first retrieve for megablast, blastn and dc-megablast, whose
 //! tables have a word extension or a template; its second for blastn-short, whose table has
-//! none); at four threads with one subject the strips folds (`LOSAT_X_PAIRPAR`, on by default,
-//! for megablast and blastn; `LOSAT_X_PAIRPARDISC` for dc-megablast when it is set), and with
-//! many subjects the reference fold on every worker, whose hash offset moves on from subject to
-//! subject.
+//! none); at four threads with one subject the strips folds (PAIRPAR, which has no
+//! variable, for megablast and blastn; `LOSAT_X_PAIRPARDISC` for dc-megablast when it is set), and
+//! with many subjects the reference fold on every worker, whose hash offset moves on from subject
+//! to subject.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), on
-/// 2026-10-18 the one whose shadow line `LOSAT_X_PAIRPARSHADOW` adds (`LOSAT_X_MBLUTONCE`,
-/// perf/bn-memory-rules), and on 2026-10-22 `LOSAT_X_DIAGLV2` and `LOSAT_X_FOLDLEAN`
-/// (perf/dc-fold-lean), each `0`, the default before, unless the search sets it: every search
-/// here runs as it was written, with the switches off that it does not name (the default runs in
-/// `default_bundle.rs`).
+/// 2026-10-18 `LOSAT_X_MBLUTONCE` (perf/bn-memory-rules), and on 2026-10-22 `LOSAT_X_DIAGLV2` and
+/// `LOSAT_X_FOLDLEAN` (perf/dc-fold-lean), each `0`, the default before, unless the search sets
+/// it: every search here runs as it was written, with the switches off that it does not name (the
+/// default runs in `default_bundle.rs`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),
@@ -222,8 +221,8 @@ fn one_subject_gives_the_same_report_with_the_level_bounds() {
     check(&dir, &query, &subject, "dc-megablast", &[PAIRPARDISC]);
 }
 
-// With the strips folds at 4 threads, their own shadows compare the hit list and the whole
-// diagonal hash of every chunk, the level bounds included, with the reference fold, both with
+// With the strips fold of dc-megablast at 4 threads, its own shadow compares the hit list and the
+// whole diagonal hash of every chunk, the level bounds included, with the reference fold, with
 // the switch.
 #[test]
 fn the_strips_shadows_compare_the_tables_with_the_level_bounds() {
@@ -233,39 +232,29 @@ fn the_strips_shadows_compare_the_tables_with_the_level_bounds() {
     // (dc-megablast with the memo, LOSAT_X_DIAGLV2, and the lean folds, LOSAT_X_FOLDLEAN: the
     // strips shadow compares the hits and the tables, not the memo, which the reference fold
     // does not keep; LOSAT_X_DIAGLVSHADOW, on in this arm, checks every memo answer)
-    for (task, strips_shadow, prefix, more) in [
-        (
-            "megablast",
-            ("LOSAT_X_PAIRPARSHADOW", "1"),
-            "[X_PAIRPARSHADOW] blastn:",
-            &[][..],
-        ),
-        (
-            "dc-megablast",
-            ("LOSAT_X_PAIRPARDISCSHADOW", "1"),
-            "[X_PAIRPARDISCSHADOW] blastn:",
-            &[("LOSAT_X_DIAGLV2", "1"), ("LOSAT_X_FOLDLEAN", "1")][..],
-        ),
-    ] {
-        let (expected, _) = blastn(&dir, &query, &subject, task, 1, &[]);
-        let mut on = vec![SHADOW, strips_shadow];
-        on.extend_from_slice(more);
-        let (report, stderr) = blastn(&dir, &query, &subject, task, 4, &on);
-        assert!(report == expected, "{task}: the report differs");
-        let at = format!("{task} with {strips_shadow:?}");
-        // (`LOSAT_X_PAIRPARSHADOW` also names the shadow of TBLASTX's own `PAIRPAR`, whose
-        // line says it compared nothing)
-        let (_, skipped) = shadow_counts(&stderr, &[prefix, "[X_SHADOW] PAIRPAR "], &at);
-        assert!(skipped > 0, "{at}: {stderr}");
-        let line = stderr
-            .lines()
-            .find(|line| line.starts_with(prefix))
-            .unwrap_or_else(|| panic!("{at}: no strips shadow line:\n{stderr}"));
-        assert!(
-            !line.contains("seed chunks equal=0 "),
-            "{at}: no chunk compared: {line}"
-        );
-    }
+    let task = "dc-megablast";
+    let strips_shadow = ("LOSAT_X_PAIRPARDISCSHADOW", "1");
+    let prefix = "[X_PAIRPARDISCSHADOW] blastn:";
+    let (expected, _) = blastn(&dir, &query, &subject, task, 1, &[]);
+    let on = [
+        SHADOW,
+        strips_shadow,
+        ("LOSAT_X_DIAGLV2", "1"),
+        ("LOSAT_X_FOLDLEAN", "1"),
+    ];
+    let (report, stderr) = blastn(&dir, &query, &subject, task, 4, &on);
+    assert!(report == expected, "{task}: the report differs");
+    let at = format!("{task} with {strips_shadow:?}");
+    let (_, skipped) = shadow_counts(&stderr, &[prefix], &at);
+    assert!(skipped > 0, "{at}: {stderr}");
+    let line = stderr
+        .lines()
+        .find(|line| line.starts_with(prefix))
+        .unwrap_or_else(|| panic!("{at}: no strips shadow line:\n{stderr}"));
+    assert!(
+        !line.contains("seed chunks equal=0 "),
+        "{at}: no chunk compared: {line}"
+    );
 }
 
 /// The `memo=` and `memofound=` counters of the shadow's line (`LOSAT_X_DIAGLV2`).

@@ -401,6 +401,11 @@ impl Encoder for XmlEncoder<'_> {
         }
     }
 
+    /// The XML stream writes no OCTET STRING yet (the archive in XML is line OF8c).
+    fn octets(&mut self, _value: &[u8]) {
+        self.fail(SerialError::OctetString);
+    }
+
     /// `WriteDouble`: `WriteDouble2(data, DBL_DIG)`, `NStr::DoubleToStringPosix(data, 15)`
     /// (`real::write_xml_double`).
     fn real(&mut self, value: f64) {

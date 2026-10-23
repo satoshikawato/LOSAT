@@ -149,4 +149,10 @@ export interface EnginePrepareHint {
   readonly requestedThreads: number | 'auto';
   /** About the query and subject bytes of the search. */
   readonly inputBytes: number;
+  /**
+   * The argv of the search (program first, without -num_threads), when known: the engine may
+   * run it once on small sequences of its own, so that the browser compiles the engine code
+   * that the search calls before it comes.
+   */
+  readonly argv?: readonly string[];
 }

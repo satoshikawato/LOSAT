@@ -232,7 +232,39 @@ impl Xml2Document<RunSideFiles> {
     }
 }
 
+/// The framing state that one report call hands to the next when a run's reports are written by
+/// several calls (the BLASTP block search, `x_query_blocks.rs`): the count of reports written, whether
+/// the start of the document has been written, and the held report of a `-subject` run.
+#[derive(Default)]
+pub struct Xml2Carry {
+    written: u32,
+    started: bool,
+    pending: Vec<u8>,
+    has_pending: bool,
+}
+
 impl<F: SideFiles> Xml2Document<F> {
+    /// Takes the state of the run so far, leaving the document as new. A later call's document
+    /// takes it up with [`Xml2Document::resume`].
+    pub fn take_carry(&mut self) -> Xml2Carry {
+        Xml2Carry {
+            written: std::mem::take(&mut self.written),
+            started: std::mem::take(&mut self.started),
+            pending: std::mem::take(&mut self.pending),
+            has_pending: std::mem::take(&mut self.has_pending),
+        }
+    }
+
+    /// Continues the run whose state `carry` holds (from [`Xml2Document::take_carry`]): the document
+    /// is then the one the earlier calls wrote, so its start is not written again, a report
+    /// is numbered after the written ones, and a held report is written when the next arrives.
+    pub fn resume(&mut self, carry: Xml2Carry) {
+        self.written = carry.written;
+        self.started = carry.started;
+        self.pending = carry.pending;
+        self.has_pending = carry.has_pending;
+    }
+
     pub fn with_files(kind: Xml2Kind, delayed: bool, files: F) -> Self {
         Self {
             kind,

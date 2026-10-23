@@ -275,6 +275,13 @@ pub(super) struct Stream {
     queries: usize,
     one_batch: bool,
     check_seconds: f64,
+    /// The BLAST archive of the run (outfmt 11) and what it carried when the streaming
+    /// started: the shadow writes the archives of the batches before an error a second time
+    /// from that state.
+    archive: Option<(
+        crate::report::archive::ArchiveHandle,
+        crate::report::archive::ArchiveSeed,
+    )>,
 }
 
 impl Stream {
@@ -346,6 +353,10 @@ impl Stream {
             queries: 0,
             one_batch,
             check_seconds,
+            archive: args
+                .archive
+                .as_ref()
+                .map(|handle| (handle.clone(), handle.seed())),
         }
     }
 
@@ -450,6 +461,18 @@ impl Stream {
         let mut formats: Vec<Vec<u8>> = vec![Vec::new(); shadow.outfmts.len()];
         let mut diagnostics = Vec::new();
         let result = {
+            // The archives of the batches before are written again from the state of the run
+            // when the streaming started; the diagnostics of this writing are saved as the
+            // archives' messages (`ArchiveHandle::scratch`).
+            let mut archive_tee;
+            let memory_diagnostics: &mut (dyn Write + Send) = match &self.archive {
+                Some((handle, _)) => {
+                    archive_tee =
+                        crate::report::archive::DiagTee::new(&mut diagnostics, handle.clone());
+                    &mut archive_tee
+                }
+                None => &mut diagnostics,
+            };
             let mut memory = ReportOutputs {
                 formats: shadow
                     .outfmts
@@ -460,11 +483,14 @@ impl Stream {
                         sink: OutputSink::Writer(bytes),
                     })
                     .collect(),
-                diagnostics: &mut diagnostics,
+                diagnostics: memory_diagnostics,
                 hits: None,
                 observer: None,
             };
-            write_old(&mut memory)
+            match &self.archive {
+                Some((handle, seed)) => handle.scratch(seed, || write_old(&mut memory)),
+                None => write_old(&mut memory),
+            }
         };
         shadow.checks += 1;
         let difference = match result {
@@ -906,6 +932,7 @@ mod tests {
             title: title.to_vec(),
             sequence: b"ACGTTGCA".iter().copied().cycle().take(letters).collect(),
             warnings: Vec::new(),
+            source: Default::default(),
         }
     }
 

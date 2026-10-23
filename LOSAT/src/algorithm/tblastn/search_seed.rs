@@ -1,5 +1,5 @@
-//! Internal TBLASTN protein lookup and translated-subject seed stage.
-//! The public search remains unsupported; this is a bounded Stage C diagnostic.
+//! Internal TBLASTN protein lookup and translated-subject seed stage: the scan plan and the
+//! per-unit scan of the preliminary search.
 
 use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
@@ -165,7 +165,6 @@ pub(super) struct TranslatedChunk {
 // NCBI c++/src/algo/blast/core/blast_engine.c:246-264:
 // backup->offset = backup->next;
 // while (backup->next < backup->full_range.right) { s_GetNextSubjectChunk(...); }
-#[allow(dead_code)]
 pub(super) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedChunk> {
     const MAX_DBSEQ_LEN: usize = 5_000_000;
     const DBSEQ_CHUNK_OVERLAP: usize = 100;
@@ -187,37 +186,6 @@ pub(super) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedC
         }
     }
     chunks
-}
-
-// NCBI reference: c++/src/algo/blast/core/blast_encoding.c:95-103 and
-// c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474,515-520
-// static unsigned char ctable[16] = {0xFF,0,1,0xFF,2,0xFF,0xFF,0xFF,
-//                                    3,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-// CRandom random(base_length);
-// if (b == 0 || b == 0x0F) ncbi2na[i] = random.GetRand() & 0x3;
-// else { int pick = random.GetRand() % bitcount; /* pick a set bit */ }
-// The uncompressed ncbi4na sequence is retained by SetupSubjects_OMF for
-// traceback reevaluation; these resolved bases are preliminary-search input.
-#[cfg(test)]
-pub(super) fn resolve_local_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
-    u32::try_from(subject.len())?;
-    let ncbi4na = subject
-        .iter()
-        .map(|&base| {
-            // TBLASTN reads the IUPAC letters without `U`.
-            crate::core::blast_encoding::iupacna_to_ncbi4na(base)
-                .filter(|_| !base.eq_ignore_ascii_case(&b'U'))
-                .ok_or_else(|| {
-                    anyhow::anyhow!("TBLASTN subject base '{}' is not implemented", base as char)
-                })
-        })
-        .collect::<Result<Vec<u8>>>()?;
-    Ok(
-        crate::core::blast_encoding::resolve_ncbi4na_to_ncbi2na(&ncbi4na)
-            .into_iter()
-            .map(|code| b"ACGT"[code as usize])
-            .collect(),
-    )
 }
 
 // NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
@@ -350,222 +318,6 @@ pub(super) fn translated_chunk_scan_ranges(
     Ok(calls)
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_engine.c:747-775,804-812,835-844
-// BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-//                          backup.full_range.right, subject->gen_code_string,
-//                          &translation_buffer, &frame_offsets, NULL);
-// for (context=first_context; context<=last_context; context++) {
-//     subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-//     subject->sequence = translation_buffer + frame_offsets[context] + 1;
-//     subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-//     status = s_BlastSearchEngineOneContext(...);
-//     Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
-// }
-// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1023-1050
-// BlastChooseProteinScanSubject(lookup_wrap);
-// aux_struct->WordFinder = BlastAaWordFinder;
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:492-505
-// scan_range[1] = subject->seq_ranges[0].left;
-// scan_range[2] = subject->seq_ranges[0].right - wordsize;
-// while (scan_range[1] <= scan_range[2]) {
-//     hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-// }
-// This entry admits IUPAC DNA. NCBI resolves ambiguities during
-// ncbi2na encoding (blast_objmgr_tools.cpp:428-473) and preserves ncbi4na for
-// later reevaluation (blast_setup_cxx.cpp:742-745,830-853). The optional
-// lowercase scan ranges follow the local -lcase_masking path above.
-#[cfg(test)]
-pub(super) fn scan_unambiguous_blosum62_words(
-    query: &[u8],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    mask_lowercase: bool,
-) -> Result<Vec<Seed>> {
-    scan_unambiguous_blosum62_words_multi(
-        &[query],
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        mask_lowercase,
-    )
-}
-
-// NCBI c++/src/algo/blast/core/blast_query_info.c:68-96:
-// retval->last_context = retval->num_queries * kNumContexts - 1;
-// contexts[i].query_index = Blast_GetQueryIndexFromContext(i, program);
-// NCBI c++/src/algo/blast/core/aa_ungapped.c:478-505:
-// scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-// The lookup receives all protein contexts before each subject frame scan;
-// scan order must retain the global query offsets from that shared lookup.
-#[cfg(test)]
-pub(super) fn scan_unambiguous_blosum62_words_multi(
-    queries: &[&[u8]],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    mask_lowercase: bool,
-) -> Result<Vec<Seed>> {
-    scan_unambiguous_protein_words_multi(
-        queries,
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        mask_lowercase,
-        ScoringMatrix::Blosum62,
-        3,
-    )
-}
-
-// NCBI c++/src/algo/blast/core/blast_aalookup.c:227-245:
-// lookup->word_length = opt->word_size;
-// lookup->threshold = (Int4)opt->threshold;
-// NCBI c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432:
-// return word_length * 3 + 2; reject shorter nucleotide subjects.
-#[cfg(test)]
-pub(super) fn scan_unambiguous_protein_words_multi(
-    queries: &[&[u8]],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    mask_lowercase: bool,
-    matrix: ScoringMatrix,
-    word_length: usize,
-) -> Result<Vec<Seed>> {
-    let mut seeds = Vec::new();
-    scan_protein_words_by_chunk(
-        queries,
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        mask_lowercase,
-        matrix,
-        word_length,
-        |event| {
-            if let SeedScanEvent::Chunk(_, _, chunk_seeds) = event {
-                seeds.extend_from_slice(chunk_seeds);
-            }
-            Ok(())
-        },
-    )?;
-    Ok(seeds)
-}
-
-// NCBI c++/src/algo/blast/core/blast_engine.c:478-493,804-850:
-// WordFinder is called for each available chunk, then HSPListAppend is
-// called once at the end of every subject frame, including empty frames.
-#[cfg(test)]
-pub(super) enum SeedScanEvent<'a> {
-    Chunk(&'a QueryFrame, TranslatedChunk, &'a [Seed]),
-    FrameEnd(&'a QueryFrame),
-}
-
-// NCBI c++/src/algo/blast/core/blast_engine.c:478-493,804-850:
-// for each frame, s_BlastSearchEngineOneContext calls WordFinder for each
-// chunk before GetGappedScore; the frame HSP list is appended afterward.
-// NCBI c++/src/algo/blast/core/aa_ungapped.c:492-505:
-// hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-// Deliver one ordered candidate stream at that exact chunk boundary.
-#[cfg(test)]
-pub(super) fn scan_protein_words_by_chunk(
-    queries: &[&[u8]],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    mask_lowercase: bool,
-    matrix: ScoringMatrix,
-    word_length: usize,
-    mut on_event: impl FnMut(SeedScanEvent<'_>) -> Result<()>,
-) -> Result<()> {
-    let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432
-    // return word_length * 3 + 2;
-    // if (seq_arg.seq->length < min_subj_seq_length) { ... continue; }
-    if subject.len() < word_length * 3 + 2 {
-        return Ok(());
-    }
-    let resolved_subject = resolve_local_subject_ncbi2na(subject)?;
-    let query_frames: Vec<_> = queries
-        .iter()
-        // NCBI blast_filter.c:1241-1255 merges lowercase query and SEG masks.
-        .map(|query| vec![encode_tblastn_lookup_query(query, seg, mask_lowercase)])
-        .collect();
-    // NCBI c++/src/algo/blast/core/lookup_wrap.c:91-100:
-    // BlastAaLookupTableNew(...); BlastAaLookupIndexQuery(..., sbp->matrix->data, ...);
-    let karlin = lookup_protein_params_ungapped(matrix);
-    let (lookup, _contexts) = build_ncbi_lookup_for_profile(
-        &query_frames,
-        threshold,
-        &karlin,
-        false,
-        matrix,
-        word_length,
-    );
-    let mut pairs = vec![BlastOffsetPair::default(); (lookup.longest_chain.max(1) as usize) * 1024];
-    let pair_capacity = i32::try_from(pairs.len()).expect("NCBI offset array fits Int4");
-
-    let frames = generate_frames(&resolved_subject, &code);
-    let negative_first_length = frames
-        .iter()
-        .find(|frame| frame.frame == -1)
-        .map(|frame| frame.aa_len)
-        .unwrap_or(0);
-    for frame in frames {
-        // NCBI c++/src/algo/blast/core/blast_engine.c:478-500:
-        // SUBJECT_SPLIT_NO_RANGE skips WordFinder for this chunk.
-        for (chunk, ranges) in translated_chunk_scan_ranges(
-            subject,
-            frame.frame,
-            frame.aa_len,
-            negative_first_length,
-            mask_lowercase,
-        )? {
-            let mut chunk_seeds = Vec::new();
-            for (range_index, (left, right)) in ranges.into_iter().enumerate() {
-                // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:496-501
-                // scan_range[1] = subject->seq_ranges[0].left;
-                // scan_range[2] = subject->seq_ranges[0].right - wordsize;
-                // if (scan_range[2] < scan_range[1])
-                //     scan_range[2] = scan_range[1];
-                let mut end = right - lookup.word_length as i32;
-                if range_index == 0 && end < left {
-                    end = left;
-                }
-                let mut scan_range = [0, left, end];
-                while scan_range[1] <= scan_range[2] {
-                    let hits = s_blast_aa_scan_subject_one_range(
-                        &lookup,
-                        &frame.aa_seq[1 + chunk.offset..],
-                        &mut pairs,
-                        pair_capacity,
-                        &mut scan_range,
-                    );
-                    for pair in pairs.iter().take(hits as usize) {
-                        chunk_seeds.push(Seed {
-                            frame: frame.frame,
-                            chunk_offset: u32::try_from(chunk.offset)?,
-                            query_offset: pair.q_off,
-                            subject_offset: pair.s_off,
-                        });
-                    }
-                }
-            }
-            on_event(SeedScanEvent::Chunk(&frame, chunk, &chunk_seeds))?;
-        }
-        // NCBI c++/src/algo/blast/core/blast_engine.c:840-850:
-        // Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
-        on_event(SeedScanEvent::FrameEnd(&frame))?;
-    }
-    Ok(())
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
 // ```c
 //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
@@ -586,8 +338,7 @@ pub(super) fn scan_protein_words_by_chunk(
 // chunk with a read-only lookup table. XScanPlan holds what those calls need (the lookup table and
 // the translated frames with their chunks and scan ranges) so that every unit can be scanned on its
 // own.
-// The subject-side state of
-// `scan_protein_words_by_chunk`, built once so that each (frame, chunk) unit can
+// The scan state of the preliminary search, built once so that each (frame, chunk) unit can
 // be scanned on its own.  NCBI c++/src/algo/blast/core/blast_engine.c:478-500,
 // 804-841 calls WordFinder once per unit; the lookup table is read-only there.
 pub(super) struct XScanPlan {
@@ -1100,6 +851,9 @@ pub(super) fn x_scan_plan(
     // The query-side lookup table: BlastAaLookupTableNew and BlastAaLookupIndexQuery on the masked
     // query. The table-only variant (`x_lookup_table_for_profile`, graduated 2026-10-22, was
     // LOSAT_X_LUTSPLIT) skips the per-context Karlin blocks, which the table does not read.
+    // NCBI c++/src/algo/blast/core/blast_aalookup.c:227-245:
+    // lookup->word_length = opt->word_size;
+    // lookup->threshold = (Int4)opt->threshold;
     let x_build_lookup = || {
         let query_frames: Vec<_> = queries
             .iter()
@@ -1164,6 +918,10 @@ pub(super) fn x_scan_unit(
     let frame = &plan.subject.frames[*frame_index];
     // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan on presence bytes, for a table of tblastn's shape
     // (without AVX2 a sparse one); it writes up to X_SCAN_BYTE_SLACK entries after the capacity.
+    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1023-1050
+    // BlastChooseProteinScanSubject(lookup_wrap);
+    // aux_struct->WordFinder = BlastAaWordFinder;
+    // The scan variant of the unit is chosen once per table, as NCBI picks one scansub.
     let scan_byte = super::x_scan_byte::x_scan_byte();
     let presence = super::x_scan_byte::x_presence(scan_byte, &plan.lookup);
     // EXPERIMENT (LOSAT_X_TBNSCANBF): the branch-free scan writes up to X_SCAN_BF_SLACK entries
@@ -1236,6 +994,8 @@ pub(super) fn x_scan_unit(
 mod tests {
     use super::*;
     use crate::algorithm::blastp::encoding::ncbistdaa_to_ascii;
+    use crate::algorithm::tblastn::search_gapped::{preliminary_stages, scan_profile};
+    use crate::sequence::packed_subject::SubjectNt;
     use std::collections::HashMap;
     use std::fs;
 
@@ -1321,8 +1081,14 @@ mod tests {
                 }
             })
             .collect();
-        let actual =
-            scan_unambiguous_blosum62_words_multi(&refs, subject, 1, None, 13, false).unwrap();
+        let actual = preliminary_stages(
+            &refs,
+            subject,
+            1,
+            scan_profile(refs.len(), None, 13, false, ScoringMatrix::Blosum62, 3),
+        )
+        .unwrap()
+        .seeds;
         if actual != expected {
             let first = actual
                 .iter()
@@ -1394,17 +1160,14 @@ mod tests {
                 }
             })
             .collect();
-        let actual = scan_unambiguous_protein_words_multi(
+        let actual = preliminary_stages(
             &refs,
             subject,
             1,
-            None,
-            16,
-            false,
-            ScoringMatrix::Blosum45,
-            2,
+            scan_profile(refs.len(), None, 16, false, ScoringMatrix::Blosum45, 2),
         )
-        .unwrap();
+        .unwrap()
+        .seeds;
         if actual != expected {
             let first = actual
                 .iter()
@@ -1430,15 +1193,37 @@ mod tests {
         );
         let records = read_fasta(&format!("{root}subjects.fna"));
         let by_id: HashMap<_, _> = records.iter().map(|(id, dna)| (id.as_str(), dna)).collect();
+        let query = &read_fasta(&format!("{root}query.faa"))[0].1;
+        let mut plans = HashMap::new();
         let trace = fs::read_to_string(format!("{root}ncbi_frame_trace.tsv")).unwrap();
         let mut compared = 0;
         for line in trace.lines().skip(1) {
             let columns: Vec<_> = line.split('\t').collect();
             let subject_id = columns[1];
             let frame: i8 = columns[2].parse().unwrap();
-            let resolved = resolve_local_subject_ncbi2na(by_id[subject_id]).unwrap();
-            let translated = generate_frames(&resolved, &GeneticCode::from_id(1));
-            let actual = translated.iter().find(|f| f.frame == frame).unwrap();
+            // The frames the search translates: the unit path's plan.
+            let plan = plans.entry(subject_id).or_insert_with(|| {
+                x_scan_plan(
+                    &[query],
+                    SubjectNt::Letters(by_id[subject_id]),
+                    1,
+                    None,
+                    13,
+                    false,
+                    ScoringMatrix::Blosum62,
+                    3,
+                    &std::sync::OnceLock::new(),
+                    None,
+                )
+                .unwrap()
+                .unwrap()
+            });
+            let actual = plan
+                .subject
+                .frames
+                .iter()
+                .find(|f| f.frame == frame)
+                .unwrap();
             let actual_hex: String = actual.aa_seq[1..actual.aa_seq.len() - 1]
                 .iter()
                 .map(|base| format!("{base:02x}"))
@@ -1483,8 +1268,14 @@ mod tests {
             .collect();
         let mut actual = Vec::new();
         for (id, subject) in &records {
-            let seeds =
-                scan_unambiguous_blosum62_words(query, subject, 1, None, 13, false).unwrap();
+            let seeds = preliminary_stages(
+                &[query],
+                subject,
+                1,
+                scan_profile(1, None, 13, false, ScoringMatrix::Blosum62, 3),
+            )
+            .unwrap()
+            .seeds;
             for seed in seeds {
                 actual.push((
                     id.clone(),
@@ -1527,7 +1318,14 @@ mod tests {
             .collect();
         let mut actual = Vec::new();
         for (id, subject) in &records {
-            for seed in scan_unambiguous_blosum62_words(query, subject, 1, None, 13, true).unwrap()
+            for seed in preliminary_stages(
+                &[query],
+                subject,
+                1,
+                scan_profile(1, None, 13, true, ScoringMatrix::Blosum62, 3),
+            )
+            .unwrap()
+            .seeds
             {
                 actual.push((
                     id.clone(),
@@ -1560,8 +1358,22 @@ mod tests {
         );
         let query = &read_fasta(&format!("{root}query.faa"))[0].1;
         let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
-        let resolved = resolve_local_subject_ncbi2na(subject).unwrap();
-        let actual_frames = generate_frames(&resolved, &GeneticCode::from_id(1));
+        // The frames the search translates: the unit path's plan.
+        let plan = x_scan_plan(
+            &[query],
+            SubjectNt::Letters(subject),
+            1,
+            None,
+            13,
+            false,
+            ScoringMatrix::Blosum62,
+            3,
+            &std::sync::OnceLock::new(),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        let actual_frames = &plan.subject.frames;
         let frame_trace = fs::read_to_string(format!("{root}ncbi_frame_trace.tsv")).unwrap();
         for line in frame_trace.lines().skip(1) {
             let f: Vec<_> = line.split('\t').collect();
@@ -1586,11 +1398,17 @@ mod tests {
                 )
             })
             .collect();
-        let actual: Vec<_> = scan_unambiguous_blosum62_words(query, subject, 1, None, 13, false)
-            .unwrap()
-            .into_iter()
-            .map(|x| (x.frame, x.query_offset, x.subject_offset))
-            .collect();
+        let actual: Vec<_> = preliminary_stages(
+            &[query],
+            subject,
+            1,
+            scan_profile(1, None, 13, false, ScoringMatrix::Blosum62, 3),
+        )
+        .unwrap()
+        .seeds
+        .into_iter()
+        .map(|x| (x.frame, x.query_offset, x.subject_offset))
+        .collect();
         assert_eq!(actual, expected);
         assert_eq!(actual.len(), 181);
     }
@@ -1619,8 +1437,25 @@ mod tests {
             }
             let expected_frame: i8 = fields[7].parse().unwrap();
             let subject = by_id[subject_id];
-            let frame = generate_frames(subject, &GeneticCode::from_id(1))
-                .into_iter()
+            // The frames the search translates: the unit path's plan.
+            let plan = x_scan_plan(
+                &[query],
+                SubjectNt::Letters(subject),
+                1,
+                None,
+                13,
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+                &std::sync::OnceLock::new(),
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            let frame = plan
+                .subject
+                .frames
+                .iter()
                 .find(|f| f.frame == expected_frame)
                 .unwrap();
             let translated: String = frame.aa_seq[1..frame.aa_seq.len() - 1]
@@ -1628,8 +1463,14 @@ mod tests {
                 .map(|&aa| ncbistdaa_to_ascii(aa))
                 .collect();
             assert!(translated.contains(fields[9]), "{subject_id}: {translated}");
-            let seeds =
-                scan_unambiguous_blosum62_words(query, subject, 1, None, 13, false).unwrap();
+            let seeds = preliminary_stages(
+                &[query],
+                subject,
+                1,
+                scan_profile(1, None, 13, false, ScoringMatrix::Blosum62, 3),
+            )
+            .unwrap()
+            .seeds;
             assert!(
                 seeds.iter().any(|seed| seed.frame == expected_frame
                     && seed.query_offset == 0
@@ -1666,9 +1507,14 @@ mod tests {
             let frame: i8 = fields[2].parse().unwrap();
             let q_seed: u32 = fields[4].parse().unwrap();
             let s_seed: u32 = fields[5].parse().unwrap();
-            let seeds =
-                scan_unambiguous_blosum62_words(query, by_id[subject_id], 1, None, 13, false)
-                    .unwrap();
+            let seeds = preliminary_stages(
+                &[query],
+                by_id[subject_id],
+                1,
+                scan_profile(1, None, 13, false, ScoringMatrix::Blosum62, 3),
+            )
+            .unwrap()
+            .seeds;
             assert!(
                 seeds.iter().any(|seed| seed.frame == frame
                     && seed.query_offset == q_seed
@@ -1691,16 +1537,29 @@ mod tests {
         );
         let query = &read_fasta(&format!("{root}query_low.faa"))[0].1;
         let subject = &read_fasta(&format!("{root}low_subject.fna"))[0].1;
-        let unmasked = scan_unambiguous_blosum62_words(query, subject, 1, None, 13, false).unwrap();
-        let masked = scan_unambiguous_blosum62_words(
-            query,
+        let unmasked = preliminary_stages(
+            &[query],
             subject,
             1,
-            Some(&SegParams::default()),
-            13,
-            false,
+            scan_profile(1, None, 13, false, ScoringMatrix::Blosum62, 3),
         )
-        .unwrap();
+        .unwrap()
+        .seeds;
+        let masked = preliminary_stages(
+            &[query],
+            subject,
+            1,
+            scan_profile(
+                1,
+                Some(&SegParams::default()),
+                13,
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
+        )
+        .unwrap()
+        .seeds;
         println!(
             "fixture=low_complexity seg_off_seeds={} seg_on_seeds={}",
             unmasked.len(),
@@ -1746,11 +1605,17 @@ mod tests {
                 )
             })
             .collect();
-        let actual: Vec<_> = scan_unambiguous_blosum62_words(query, subject, 32, None, 13, false)
-            .unwrap()
-            .into_iter()
-            .map(|x| (x.frame, x.query_offset, x.subject_offset))
-            .collect();
+        let actual: Vec<_> = preliminary_stages(
+            &[query],
+            subject,
+            32,
+            scan_profile(1, None, 13, false, ScoringMatrix::Blosum62, 3),
+        )
+        .unwrap()
+        .seeds
+        .into_iter()
+        .map(|x| (x.frame, x.query_offset, x.subject_offset))
+        .collect();
         assert_eq!(actual, expected);
         assert_eq!(actual.len(), 199);
     }
@@ -1765,8 +1630,22 @@ mod tests {
         );
         let query = &read_fasta(&format!("{root}query.faa"))[0].1;
         let subject = &read_fasta(&format!("{root}subject_code32.fna"))[0].1;
-        let code1 = scan_unambiguous_blosum62_words(query, subject, 1, None, 13, false).unwrap();
-        let code32 = scan_unambiguous_blosum62_words(query, subject, 32, None, 13, false).unwrap();
+        let code1 = preliminary_stages(
+            &[query],
+            subject,
+            1,
+            scan_profile(1, None, 13, false, ScoringMatrix::Blosum62, 3),
+        )
+        .unwrap()
+        .seeds;
+        let code32 = preliminary_stages(
+            &[query],
+            subject,
+            32,
+            scan_profile(1, None, 13, false, ScoringMatrix::Blosum62, 3),
+        )
+        .unwrap()
+        .seeds;
         println!(
             "fixture=code32 code1_seeds={} code32_seeds={}",
             code1.len(),
@@ -1776,8 +1655,20 @@ mod tests {
         assert!(code32
             .iter()
             .any(|seed| seed.frame == 1 && seed.query_offset == 0 && seed.subject_offset == 0));
-        assert!(scan_unambiguous_blosum62_words(query, b"ATN", 32, None, 13, false).is_ok());
-        assert!(scan_unambiguous_blosum62_words(query, b"atg", 32, None, 13, false).is_ok());
+        assert!(preliminary_stages(
+            &[query],
+            b"ATN",
+            32,
+            scan_profile(1, None, 13, false, ScoringMatrix::Blosum62, 3)
+        )
+        .is_ok());
+        assert!(preliminary_stages(
+            &[query],
+            b"atg",
+            32,
+            scan_profile(1, None, 13, false, ScoringMatrix::Blosum62, 3)
+        )
+        .is_ok());
     }
     // NCBI c++/src/algo/blast/core/blast_query_info.c:68-96:
     // each protein query receives one context; offsets advance length + 1,
@@ -1921,8 +1812,14 @@ mod tests {
             assert_eq!(*row, (call, candidate_counts[call]));
         }
         assert!(expected.iter().all(|seed| seed.query_offset < 192));
-        let actual =
-            scan_unambiguous_blosum62_words_multi(&refs, &subject, 1, None, 13, false).unwrap();
+        let actual = preliminary_stages(
+            &refs,
+            &subject,
+            1,
+            scan_profile(refs.len(), None, 13, false, ScoringMatrix::Blosum62, 3),
+        )
+        .unwrap()
+        .seeds;
         if actual != expected {
             let first = actual
                 .iter()
@@ -2000,15 +1897,14 @@ mod tests {
                     }
                 })
                 .collect();
-            let actual = scan_unambiguous_blosum62_words_multi(
+            let actual = preliminary_stages(
                 &[query.as_slice()],
                 &subject,
                 1,
-                None,
-                13,
-                mask_lowercase,
+                scan_profile(1, None, 13, mask_lowercase, ScoringMatrix::Blosum62, 3),
             )
-            .unwrap();
+            .unwrap()
+            .seeds;
             if actual != expected {
                 let first = actual
                     .iter()
@@ -2103,15 +1999,14 @@ mod tests {
                     }
                 })
                 .collect();
-            let actual = scan_unambiguous_blosum62_words_multi(
+            let actual = preliminary_stages(
                 &[query.as_slice()],
                 &subject,
                 1,
-                None,
-                13,
-                true,
+                scan_profile(1, None, 13, true, ScoringMatrix::Blosum62, 3),
             )
-            .unwrap();
+            .unwrap()
+            .seeds;
             if actual != expected {
                 let first = actual
                     .iter()

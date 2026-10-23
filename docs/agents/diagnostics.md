@@ -3392,24 +3392,31 @@ Scheduling (each value computed by one thread with the original function; order 
   (above; the strips paths of PAIRPAR, `LOSAT_X_PAIRPARDISC` and `LOSAT_X_PAIRPARNA` with the diagonal hash): how the
   participants share the folds (`seed_stage_home` in `blastn/blast_engine/x_pair_seed_part.rs`). Partition p is the
   home of participant `p % threads`, which folds p's strips as they become ready, every ready strip from p's next one
-  on in one lock (a run), and scans a strip within the window between runs. Another participant folds p only while
-  p has no participant at home in the stage (its helper job has not started, returned at once on a participant's
-  thread, or left a stalled stage), when p is the slowest partition and it has nothing else to do, or once every
-  strip is handed out. Without the switch any participant folds the next strip of any partition it can lock
-  (`try_lock` on every partition in every turn), one strip per lock: a stage of 64 x threads strips has 64 x
-  threads^2 fold units (65,536 at 32 threads), the partitions move from core to core unit by unit, and every unit
-  takes the strip slot's lock and a shared pointer and adds to a per-strip and a stage-wide shared count. With the
-  switch a strip's buffer goes back once the slowest partition has passed it (no per-strip count), the strips are
-  read under a read lock, the helpers' stall test sums the cursor and the partitions' next strips (no stage-wide
-  count), and the partitions' next strips and states lie on cache lines of their own. Each partition keeps its
-  strips' order and one folder at a time (its lock), so the output is the same (the module comment's argument
-  holds as it stands; only who folds which run changes); the owner alone can still scan every strip and fold every
-  partition. The shadows `LOSAT_X_PAIRPARDISCSHADOW` / `LOSAT_X_PAIRPARNASHADOW` run the partitioned stage, with this
-  switch, against the reference. With LOSAT_TIMING the `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` /
-  `x_pairparna_seed` lines end with `runs= steals=` (the runs folded, and those folded by participants that had
-  nothing else to do). Tests: the unit tests of `x_pair_seed_part.rs` run both ways (alternating stages, the nested
-  parallel call, the panicking participant, the table changed between stages), and `LOSAT/tests/blastn_pairpar_fold.rs`
-  (the field names of the `[TIMING]` lines).
+  on in one lock (a run), and scans a strip within the window between runs. Another participant folds p only
+  (`Run`): while p has no participant at home in the stage (its helper job has not started, returned at once on a
+  participant's thread, or left a stalled stage), until that participant comes; one strip when p is the slowest
+  partition and the participant has nothing else to do (the window is closed); and every ready strip when the
+  participant has nothing else to do once every strip is handed out. Without the switch any participant folds the
+  next strip of any partition it can lock (`try_lock` on every partition in every turn), one strip per lock: a stage
+  of PAIRPAR or PAIRPARDISC has 64 x threads strips and so 64 x threads^2 fold units (65,536 at 32 threads; PAIRPARNA
+  512 x max(threads, 4) strips), the partitions move from core to core unit by unit, and every unit takes the strip
+  slot's lock and a shared pointer and adds to a per-strip and a stage-wide shared count. With the switch a strip's
+  buffer goes back once the slowest partition has passed it (no per-strip count; the participant that sees the
+  slowest partition move gives the passed strips back under the spare list's lock, and an idle participant only
+  reads), the strips are read under a read lock, the helpers' stall test sums the cursor and the partitions' next
+  strips (no stage-wide count), and the partitions' next strips and states lie on cache lines of their own. Each
+  partition keeps its strips' order and one folder at a time (its lock), so the output is the same (the module
+  comment's argument holds as it stands; only who folds which run changes); the owner alone can still scan every
+  strip and fold every partition. The shadows `LOSAT_X_PAIRPARDISCSHADOW` / `LOSAT_X_PAIRPARNASHADOW` run the
+  partitioned stage, with this switch, against the reference. With LOSAT_TIMING the `[TIMING] x_pairpar_seed` /
+  `x_pairpardisc_seed` / `x_pairparna_seed` lines end with `runs= away= units=` (the runs folded, the strips of
+  partitions folded away from home, and the stages' fold units, strips x partitions). Tests: the unit tests of
+  `x_pair_seed_part.rs` run both ways (random op streams in alternating stages, with the strip buffers held within
+  the window; the nested parallel call; the panicking participant; the table changed between stages; a stage that
+  stalls past `HELPER_STALL`, so that the helpers leave), `home_partitions_are_folded_away_from_home` (a participant
+  with slow scans, and more participants than the pool has threads), and `LOSAT/tests/blastn_pairpar_fold.rs` (the
+  reports at 2, 4 and 8 threads also with `LOSAT_X_PAIRPARHOME=0`, and the field names of the `[TIMING]` lines with
+  and without it).
   Default ON since 2026-10-23 (perf/dc-fold-sync; workstation (2x Xeon Gold 6338, node 1 booked through its FIFO,
   8 / 16 / 32 physical cores with the siblings idle, `numactl --membind 1`, rotated rounds, every output the
   expected one; v4-D `results/v4d11_w1`); a ratio is the median of the per-round with / without, c7a29e25 against

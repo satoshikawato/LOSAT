@@ -239,8 +239,9 @@ fn dc_megablast_without_its_strips_path_is_not_taken() {
 
 // LOSAT_TIMING: the strips paths' `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` lines end
 // with the partitioned fold's fields (`partitions= merges= merge= helpers_left=`, and `runs=
-// away= units=` of LOSAT_X_PAIRPARHOME, on by default) only with the switch; without it they end with
-// `owner_wait=`, as before the switch existed. (Names and counts only; no duration is compared.)
+// away= units=` of LOSAT_X_PAIRPARHOME, on by default, not with `LOSAT_X_PAIRPARHOME=0`) only
+// with the switch; without it they end with `owner_wait=`, as before the switch existed. (Names
+// and counts only; no duration is compared.)
 #[test]
 fn timing_lines_have_the_fold_fields_only_with_the_switch() {
     let dir = TestDir::new("timing");
@@ -253,13 +254,16 @@ fn timing_lines_have_the_fold_fields_only_with_the_switch() {
             "[TIMING] x_pairpardisc_seed:",
         ),
     ] {
-        for on in [false, true] {
+        for (on, home) in [(false, true), (true, false), (true, true)] {
             let mut switches = extra.to_vec();
             switches.push(timing);
             if on {
                 switches.push(SWITCH);
             }
-            let at = format!("{task} switch {on}");
+            if !home {
+                switches.push(HOME_OFF);
+            }
+            let at = format!("{task} switch {on} home {home}");
             let (_, stderr) = blastn(&dir, task, 4, &switches);
             let line = stderr
                 .lines()
@@ -280,15 +284,10 @@ fn timing_lines_have_the_fold_fields_only_with_the_switch() {
                 "owner_wait",
             ];
             if on {
-                expected.extend([
-                    "partitions",
-                    "merges",
-                    "merge",
-                    "helpers_left",
-                    "runs",
-                    "away",
-                    "units",
-                ]);
+                expected.extend(["partitions", "merges", "merge", "helpers_left"]);
+                if home {
+                    expected.extend(["runs", "away", "units"]);
+                }
             }
             assert_eq!(names, expected, "{at}: {line}");
             if on {
@@ -301,10 +300,12 @@ fn timing_lines_have_the_fold_fields_only_with_the_switch() {
                 assert_eq!(number("partitions="), 4, "{at}: {line}");
                 assert!(number("chunks=") > 0, "{at}: {line}");
                 assert_eq!(number("merges="), number("chunks="), "{at}: {line}");
-                // every partition of every stage folds one run or more, and no more strips than
-                // the stages have are folded away from home
-                assert!(number("runs=") >= 4 * number("merges="), "{at}: {line}");
-                assert!(number("units=") >= number("away="), "{at}: {line}");
+                if home {
+                    // every partition of every stage folds one run or more, and no more strips
+                    // than the stages have are folded away from home
+                    assert!(number("runs=") >= 4 * number("merges="), "{at}: {line}");
+                    assert!(number("units=") >= number("away="), "{at}: {line}");
+                }
             }
         }
     }

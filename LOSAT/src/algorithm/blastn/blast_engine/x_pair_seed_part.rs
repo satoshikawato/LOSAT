@@ -67,7 +67,8 @@
 //! partition, so no participant waits for a job that may never start. A helper job that starts
 //! on a participant's thread (a thread that waits inside a nested parallel call of its own scan
 //! or fold) returns at once; a helper on any other thread that finds nothing to do leaves once
-//! the whole stage has made no progress (no strip scanned, no partition folded) for
+//! the whole stage has made no progress (no strip scanned, no partition folded; with
+//! LOSAT_X_PAIRPARHOME no strip handed out, no strip folded by any partition) for
 //! `HELPER_STALL` (the owner never leaves). A thread that waits inside a piece of a
 //! participant's nested call that it stole may run a helper job above the work it interrupted;
 //! that helper waits for the stage while the stage waits for that work (the pattern that hung
@@ -385,7 +386,8 @@ impl Drop for Failing<'_> {
 }
 
 /// No NCBI counterpart (scheduling only): how long a helper that finds nothing to do waits for
-/// the stage to make progress before it leaves. A helper waits while a partition that lags
+/// the stage to make progress (a strip scanned or a partition's strip folded; with
+/// LOSAT_X_PAIRPARHOME a strip handed out or a partition's strip folded) before it leaves. A helper waits while a partition that lags
 /// holds back the window of strips; as long as the stage makes progress, the helper stays.
 /// The stage stops making progress for this long in three cases:
 /// - the work it needs runs below a waiting helper on that helper's own thread: a thread that
@@ -467,8 +469,9 @@ where
     )
 }
 
-/// `seed_stage_part` with the sharing of the folds given (`home`: LOSAT_X_PAIRPARHOME,
-/// `seed_stage_home`; else any participant folds any partition it can lock).
+/// No NCBI counterpart (scheduling only): `seed_stage_part` with the sharing of the folds given
+/// (`home`: LOSAT_X_PAIRPARHOME, `seed_stage_home`; else any participant folds any partition it
+/// can lock).
 #[allow(clippy::too_many_arguments)]
 fn seed_stage_in<FS, FF>(
     home: bool,
@@ -776,11 +779,11 @@ enum Run {
 /// after `rebuild`, with the folds shared by home partitions. Partition p is the home of
 /// participant `p % threads`, which folds p's strips as they become ready, every ready strip
 /// from p's next one on in one lock (a run); it scans a strip within the window between runs.
-/// Another participant folds p only while p has no participant at home in the stage (its
-/// helper job has not started, started on a participant's thread and returned, or left a
-/// stalled stage), when p is the slowest partition and the participant has nothing else to do
-/// (the window is closed, or every strip is handed out and its home partitions wait), or once
-/// every strip is handed out. Partition p keeps its strips' order and one folder at a time
+/// Another participant folds p only (`Run`) while p has no participant at home in the stage
+/// (its helper job has not started, started on a participant's thread and returned, or left a
+/// stalled stage), until that participant comes; one strip when p is the slowest partition
+/// and the participant has nothing else to do (the window is closed); and every ready strip
+/// when the participant has nothing else to do once every strip is handed out. Partition p keeps its strips' order and one folder at a time
 /// (its lock) as in the stage without the switch, so the output is the same (module comment);
 /// only who folds which run changes. A strip's buffer is given back once every partition has
 /// folded it (the slowest partition's next strip is past it; `freed`), without a count per
@@ -836,14 +839,21 @@ where
             .map(|lane| lane.0.load(Ordering::Acquire))
             .min()
             .unwrap_or(n);
-        let f = freed.fetch_max(min_next, Ordering::Relaxed);
-        if f < min_next {
-            // (this participant moved `freed` from f: the strips f..min_next are its to give back)
-            let bufs: Vec<StripBuf> = slots[f..min_next]
-                .iter()
-                .filter_map(|slot| write(slot).take())
-                .collect();
-            lock(&spare).extend(bufs);
+        // (a load first: idle participants call this in every turn, and a write would take the
+        // line from all of them; `freed` moves only under the spare lock, and the buffers move
+        // into the spare list under it, so that a producer that waits for the lock finds them;
+        // lock order: the spare list, then a slot)
+        if freed.load(Ordering::Relaxed) < min_next {
+            let mut spare = lock(&spare);
+            let f = freed.load(Ordering::Relaxed);
+            if f < min_next {
+                freed.store(min_next, Ordering::Relaxed);
+                for slot in &slots[f..min_next] {
+                    if let Some(buf) = write(slot).take() {
+                        spare.push(buf);
+                    }
+                }
+            }
         }
         min_next
     };
@@ -1470,10 +1480,10 @@ mod tests {
 
     /// The same ops as a partitioned stage: strips cut at `cuts`, `parts` partitions on
     /// `threads` threads (in a pool of that many). `nested` runs a parallel iterator inside
-    /// every scan and fold call. With `owner_waits` a fold on the owner's thread first sleeps
-    /// 100 us while no helper has folded yet in this stage, so that the helpers get to fold on
-    /// any machine (even on one CPU, where the owner could otherwise fold the whole stage
-    /// before a helper job starts). `home`: LOSAT_X_PAIRPARHOME's way of sharing the folds.
+    /// every scan and fold call. With `owner_waits` a fold on the owner's thread first waits
+    /// until a helper has folded in this stage (100 us at a time, 200 ms at most in the stage),
+    /// so that the helpers get to fold on any machine (even on one CPU, or on a loaded one,
+    /// where the owner could otherwise fold the whole stage before a helper job starts). `home`: LOSAT_X_PAIRPARHOME's way of sharing the folds.
     /// Returns the hits (op indices), the stage's counters and the number of threads that
     /// folded.
     #[allow(clippy::too_many_arguments)]
@@ -1510,13 +1520,22 @@ mod tests {
         )
     }
 
+    /// How `partitioned_on` slows a participant down.
+    #[derive(Clone, Copy, Debug)]
+    enum Slow {
+        /// every scan call on this pool thread sleeps 1 ms first
+        Scans(usize),
+        /// the first scan on the owner's thread sleeps 60 ms (well past `HELPER_STALL`)
+        OwnerFirstScan,
+    }
+
     /// `partitioned` with the stage's thread count given (`threads` participants whatever the
-    /// pool's size) and, with `slow`, every fold call on that pool thread sleeping 1 ms first.
+    /// pool's size) and a participant slowed down as `slow` says.
     #[allow(clippy::too_many_arguments)]
     fn partitioned_on(
         pool: &rayon::ThreadPool,
         threads: usize,
-        slow: Option<usize>,
+        slow: Option<Slow>,
         hash: &mut DiagHashTable,
         scratch: &mut PartScratch,
         ops: &[Op],
@@ -1531,9 +1550,24 @@ mod tests {
     ) -> (Vec<usize>, PartStats, usize) {
         let folders = Mutex::new(std::collections::BTreeSet::new());
         let helper_folded = AtomicBool::new(false);
+        let owner_waited = AtomicUsize::new(0);
+        let owner_scanned = AtomicBool::new(false);
         pool.install(|| {
             let owner = rayon::current_thread_index();
+            let slow_scans = match slow {
+                Some(Slow::Scans(t)) => Some(t),
+                _ => None,
+            };
             let scan = |i: usize, out: &mut Vec<Seed>| {
+                if slow_scans.is_some() && rayon::current_thread_index() == slow_scans {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                if matches!(slow, Some(Slow::OwnerFirstScan))
+                    && rayon::current_thread_index() == owner
+                    && !owner_scanned.swap(true, Ordering::Relaxed)
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(60));
+                }
                 if nested {
                     use rayon::prelude::*;
                     let sum: u64 = (0..64u64).into_par_iter().map(|v| v * v).sum();
@@ -1551,14 +1585,17 @@ mod tests {
                 }
                 let here = rayon::current_thread_index();
                 lock(&folders).insert(here);
-                if slow.is_some() && here == slow {
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
                 if owner_waits {
                     if here != owner {
                         helper_folded.store(true, Ordering::Relaxed);
-                    } else if !helper_folded.load(Ordering::Relaxed) {
-                        std::thread::sleep(std::time::Duration::from_micros(100));
+                    } else {
+                        // (200 ms at most in a stage: on a loaded machine a helper may start late)
+                        while !helper_folded.load(Ordering::Relaxed)
+                            && owner_waited.load(Ordering::Relaxed) < 2000
+                        {
+                            std::thread::sleep(std::time::Duration::from_micros(100));
+                            owner_waited.fetch_add(1, Ordering::Relaxed);
+                        }
                     }
                 }
                 for (k, seed) in seeds.iter().enumerate() {
@@ -1784,11 +1821,10 @@ mod tests {
                             assert_eq!(stats.counts.seeds, n as u64, "{at}");
                             // the strips' buffers stay within the window: the strips claimed
                             // past the slowest partition (the window and the claims that passed
-                            // its test at the same time), and for a moment as many again that a
-                            // participant is giving back while others claim (a strip given back
-                            // never to the spare buffers would make one buffer per strip)
+                            // its test at the same time; a strip given back never to the spare
+                            // buffers would make one buffer per strip)
                             assert!(
-                                scratch.spare.len() <= 2 * (most_ahead + threads),
+                                scratch.spare.len() <= most_ahead + threads,
                                 "{at}: {} strip buffers, window {most_ahead}",
                                 scratch.spare.len()
                             );
@@ -1857,6 +1893,7 @@ mod tests {
                     40,
                     true,
                     false,
+                    // both ways of sharing the folds (LOSAT_X_PAIRPARHOME): stage 1 without
                     stage != 1,
                 );
                 assert_eq!(got, expected, "threads {threads} stage {stage}");
@@ -1974,11 +2011,14 @@ mod tests {
         }
     }
 
-    // LOSAT_X_PAIRPARHOME: a home participant whose folds are slow (1 ms each on one pool
-    // thread) has its partition folded by the others (`Run::Slowest`, and at the tail
+    // LOSAT_X_PAIRPARHOME: a home participant whose scans are slow (1 ms each on one pool
+    // thread; its partition lags while it scans, and it does not hold its partition's lock
+    // then) has its partition folded by the others (`Run::Slowest`, and at the tail
     // `Run::Tail`), and a stage on more participants than the pool has threads (the helper jobs
     // start only after the owner finished the stage alone) has its partitions folded without a
-    // participant at home (`Run::Orphan`). Both give the reference's hits and table.
+    // participant at home (`Run::Orphan`). Both give the reference's hits and table. (Who folds
+    // what depends on the timing: the slow cases get up to five stages to fold a strip away
+    // from home.)
     #[test]
     fn home_partitions_are_folded_away_from_home() {
         let mut rng = Lcg(0x4053_A11D);
@@ -1988,13 +2028,14 @@ mod tests {
                 .build()
                 .unwrap();
             let owner = pool.install(rayon::current_thread_index);
-            let slow = slow.then(|| (owner.unwrap_or(0) + 1) % pool_threads);
+            let slow = slow.then(|| Slow::Scans((owner.unwrap_or(0) + 1) % pool_threads));
             let mut reference_hash = DiagHashTable::new(16);
             let mut hash = copy_hash(&reference_hash);
             let mut scratch = PartScratch::default();
             let mut s = 50i32;
             let mut first = 0usize;
-            for stage in 0..2 {
+            let mut away = false;
+            for stage in 0..if slow.is_some() { 5 } else { 2 } {
                 let at =
                     format!("pool {pool_threads} threads {threads} slow {slow:?} stage {stage}");
                 let n = 3000;
@@ -2023,12 +2064,86 @@ mod tests {
                     hash_state(&reference_hash),
                     "{at}: table"
                 );
-                assert!(stats.away > 0, "{at}: no partition folded away from home");
                 if pool_threads == 1 {
                     // the owner alone, every partition but its own without a participant at home
                     assert_eq!(stats.away, 60 * (threads as u64 - 1), "{at}");
                 }
                 first += n;
+                away |= stats.away > 0;
+                if away && slow.is_some() {
+                    break;
+                }
+            }
+            assert!(
+                away,
+                "pool {pool_threads} threads {threads} slow {slow:?}: no strip folded away from home"
+            );
+        }
+    }
+
+    // A stage that stalls for longer than `HELPER_STALL` (the owner's first scan sleeps 60 ms,
+    // and no partition can fold past that strip) makes the idle helpers leave
+    // (`helpers_left`); the owner finishes the stage alone, with LOSAT_X_PAIRPARHOME folding the
+    // helpers' home partitions away from home (they have no participant at home any more).
+    // Both ways give the reference's hits and table. (On a loaded machine the helper jobs may
+    // start only after the owner's sleep, and then nothing stalls, so each way gets up to five
+    // stages to see a helper leave.)
+    #[test]
+    fn a_stalled_stage_lets_the_helpers_leave() {
+        let mut rng = Lcg(0x57A1_1ED0);
+        for threads in [2usize, 4] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            for home in [false, true] {
+                let mut reference_hash = DiagHashTable::new(16);
+                let mut hash = copy_hash(&reference_hash);
+                let mut scratch = PartScratch::default();
+                let mut s = 50i32;
+                let mut first = 0usize;
+                let mut left = false;
+                for attempt in 0..5 {
+                    let at = format!("threads {threads} home {home} attempt {attempt}");
+                    let n = 2000;
+                    let ops = random_ops(&mut rng, n, &mut s, 300);
+                    let expected = reference(&mut reference_hash, &ops, first, 40);
+                    let cuts: Vec<usize> = (0..=40).map(|k| k * n / 40).collect();
+                    let (got, stats, _) = partitioned_on(
+                        &pool,
+                        threads,
+                        Some(Slow::OwnerFirstScan),
+                        &mut hash,
+                        &mut scratch,
+                        &ops,
+                        first,
+                        &cuts,
+                        threads,
+                        2 * threads,
+                        40,
+                        false,
+                        false,
+                        home,
+                    );
+                    assert_eq!(got, expected, "{at}: hits");
+                    assert_eq!(
+                        hash_state(&hash),
+                        hash_state(&reference_hash),
+                        "{at}: table"
+                    );
+                    first += n;
+                    if stats.helpers_left > 0 {
+                        if home {
+                            assert!(stats.away > 0, "{at}: no strip folded away from home");
+                        }
+                        left = true;
+                        break;
+                    }
+                }
+                assert!(
+                    left,
+                    "threads {threads} home {home}: no helper left a stalled stage in five stages"
+                );
             }
         }
     }

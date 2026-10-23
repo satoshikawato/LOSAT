@@ -19,8 +19,8 @@ use anyhow::{ensure, Result};
 //     aux_struct->offset_pairs =
 //       (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
 // ```
-// EXPERIMENT (LOSAT_X_BXSCAN): the seed loop on a per-thread offset-pair buffer, read in place
-// (a child module, so that it uses the diagonal table's fields).
+// The seed loop on a per-thread offset-pair buffer, read in place (a child module, so that it uses
+// the diagonal table's fields).
 #[path = "x_seed_scan.rs"]
 pub mod x_seed_scan;
 
@@ -634,8 +634,8 @@ pub(crate) fn x_scan_bytes<'a>(
 //                     diag_array[diag_coord].last_hit =
 //                         s_last_off - (wordsize - 1) + diag_offset;
 // ```
-// word_finder is the original port of this loop for one subject (it is unchanged except that
-// the context lookup can be moved after the diagonal tests, see LOSAT_X_BXLAZYCTX).
+// word_finder is the original port of this loop for one subject; the diagnostic stages run it
+// (they trace the seeds), and the unit tests of the faster loops compare with it.
 /// The reference word finder (the loop of NCBI's BlastAaWordFinder_TwoHit /
 /// _OneHit for one subject), kept verbatim.
 pub fn word_finder(
@@ -651,13 +651,6 @@ pub fn word_finder(
     let word = options.word_size;
     let mask = diagonals.entries.len() as i32 - 1;
     let mut hits = Vec::new();
-    // No NCBI counterpart: reads the LOSAT_X_BXLAZYCTX switch once; it does not change any value
-    // NCBI computes.
-    let lazy_context = {
-        use std::sync::OnceLock;
-        static ON: OnceLock<bool> = OnceLock::new();
-        *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLAZYCTX"))
-    };
     lookup.scan(
         subject,
         subject.len().saturating_sub(1),
@@ -665,9 +658,8 @@ pub fn word_finder(
         |seeds| {
             trace(seeds);
             for &(q, s) in seeds {
-                // EXPERIMENT (LOSAT_X_BXLAZYCTX): the context of a seed is only
-                // needed once the diagonal tests let it through; looking it up
-                // has no side effect, so doing it later changes nothing.
+                // The context of a seed is only needed once the diagonal tests let it through (the
+                // lookup has no side effect).
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,783-784
                 // ```c
                 //                 curr_context = BSearchContextInfo(query_offset, query_info);
@@ -677,17 +669,12 @@ pub fn word_finder(
                 // ```
                 // The two-hit path looks up the context (BSearchContextInfo) only after the
                 // diagonal tests have let the pair through, and the one-hit path only when diff >=
-                // 0. LOSAT_X_BXLAZYCTX does the same here; the lookup has no side effect.
+                // 0. The same here.
                 let context_of = |q: i32| {
                     batch
                         .contexts
                         .partition_point(|c| c.offset as i32 <= q)
                         .saturating_sub(1)
-                };
-                let eager_context = if lazy_context {
-                    usize::MAX
-                } else {
-                    context_of(q)
                 };
                 let context;
                 let index = if options.window_size == 0 {
@@ -700,11 +687,7 @@ pub fn word_finder(
                     if s.wrapping_sub(entry.last_hit().wrapping_sub(diagonals.offset)) < 0 {
                         continue;
                     }
-                    context = if lazy_context {
-                        context_of(q)
-                    } else {
-                        eager_context
-                    };
+                    context = context_of(q);
                     let p = &parameters[context];
                     let Some(result) = extend_one_hit_blosum62(
                         query,
@@ -735,11 +718,7 @@ pub fn word_finder(
                     if diff < word {
                         continue;
                     }
-                    context = if lazy_context {
-                        context_of(q)
-                    } else {
-                        eager_context
-                    };
+                    context = context_of(q);
                     let p = &parameters[context];
                     if q - diff < batch.contexts[context].offset as i32 {
                         entry.set_last_hit(s.wrapping_add(diagonals.offset));

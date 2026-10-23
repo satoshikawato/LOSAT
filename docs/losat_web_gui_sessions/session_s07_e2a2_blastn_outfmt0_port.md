@@ -28,7 +28,7 @@ S07 は reactor を作り直して full の V-ABI を再実行するので、S05
 
 移植の順（`AUTHORITY.md` §F。各項目の NCBI の根拠は §A〜§D）：
 
-1. **BLASTN の panic を直す**（§D.2）。`blast_get_start_for_gapped_alignment_nucl` の後ろ向きの走査を subject の先頭で、前向きの走査を subject の長さで止める（NCBI は subject の両端の番兵で止まる。`blast_gapalign.c:3340-3349`、`seqsrc_multiseq.cpp:353-358`、`blast_encoding.c:121`）。S06 で試した差分は `docs/evidence/losat_web_e2a/run-20260929T000046Z/probe-gapped-start-bound.diff`。独立したエンジンの変更とし、回帰試験は `multi.ws7_e1000.blastn` の入力（`-task blastn -word_size 7`）で outfmt 6 が NCBI と一致すること。BLASTN の既存のゲート（`compare_blastn_parity.py`、Gate A）が変わらないこと。
+1. **BLASTN の panic を直す**（§D.2）。`blast_get_start_for_gapped_alignment_nucl` の後ろ向きの走査を subject の先頭で、前向きの走査を subject の長さで止める（NCBI は subject の両端の番兵で止まる。`blast_gapalign.c:3340-3349`、`seqsrc_multiseq.cpp:353-358`、`blast_encoding.c:121`）。S06 で試した差分は `docs/evidence/losat_web_e2a/run-20260929T000046Z/probe-gapped-start-bound.diff`（2026-10-23 にリリース資産へ移動：[ARCHIVED.md](../evidence/losat_web_e2a/ARCHIVED.md)）。独立したエンジンの変更とし、回帰試験は `multi.ws7_e1000.blastn` の入力（`-task blastn -word_size 7`）で outfmt 6 が NCBI と一致すること。BLASTN の既存のゲート（`compare_blastn_parity.py`、Gate A）が変わらないこと。
 2. **座標の桁数の関数**（§D.1）。`showalign.cpp:1366-1367` の規則（両方の行の 0 始まりの start / stop の最大値の桁数）の関数を 1 つ作り、BLASTP の `write_alignment_with_sequences` と TBLASTN の `write_tblastn_alignment` から使う。BLASTX の `write_blastx_alignment` は変えない（DW-10）。`width.blastp` と `width.tblastn` が一致すること。`capture_outputs.py` で、ハッシュが変わる凍結出力をすべて列挙し、それぞれが NCBI の出力と一致することを示す（一致しなければ止める）。
 3. `write_alignment_with_sequences` の引数化：`eBar` の中線、0 始まりの桁数、subject の向き（±1）、空の行の規則、マスクの前の文字での比較。
 4. `write_hsp_info` の ` Strand=` の行。program は両方の task で `"blastn"` とする（`"megablast"` は Positives を出してしまう）。

@@ -395,8 +395,10 @@ fn archives_equal_ncbis_at_one_and_four_threads() {
     }
 }
 
-/// The strict-set paths (the batches searched side by side, the flow of batches, the streamed
-/// database, the deferred and lean hit lists, ...) write the archives the plain loop writes.
+/// The strict-set paths (the flow of batches, the streamed database, the deferred and lean hit
+/// lists, ...) write the archives the plain paths write. `LOSAT_X_DEFAULT=0` no longer turns
+/// `BXBATCH` / `BXPOOL` off (they graduated); it still turns off `BXFLOW`, so the multi-batch cases
+/// are compared between the flow and the waves.
 #[test]
 fn the_strict_set_does_not_change_the_archives() {
     for case in cases()

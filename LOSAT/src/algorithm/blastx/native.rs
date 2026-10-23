@@ -337,11 +337,9 @@ fn run_inner(
         ),
         (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
     };
-    // EXPERIMENT (LOSAT_X_BXBATCH): batches are then searched on other
-    // threads while this function runs. A diagnostic or a panic message
-    // written there must not wait for a lock this thread keeps for the whole
-    // run, so the handle is used unlocked: the same bytes, the lock taken for
-    // each write.
+    // With 2+ threads batches are searched on other threads while this function runs. A diagnostic
+    // or a panic message written there must not wait for a lock this thread keeps for the whole
+    // run, so the handle is used unlocked: the same bytes, the lock taken for each write.
     // No NCBI counterpart: only the stderr lock is taken per write instead of once for the run, so
     // that other threads can write diagnostics (the bytes and their order are unchanged); it does
     // not change any value NCBI computes.
@@ -354,8 +352,7 @@ fn run_inner(
             archive_tee = crate::report::archive::DiagTee::new(&mut archive_stderr, handle.clone());
             Box::new(&mut archive_tee)
         }
-        None if super::runtime::x_bx_batch() => Box::new(io::stderr()),
-        None => Box::new(io::stderr().lock()),
+        None => Box::new(io::stderr()),
     };
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
@@ -930,8 +927,8 @@ fn run_inner(
         // The reader and formatter use the same diagnostic stream at distinct
         // times. RefCell only serializes Rust borrows; it does not defer events.
         let diagnostics = std::cell::RefCell::new(&mut stderr);
-        // EXPERIMENT (LOSAT_X_BXPOOL): the batch loop as a function of the pool
-        // its searches run on, so that one pool can serve all batches.
+        // The batch loop as a function of the pool its searches run on, so that one pool can serve
+        // all batches.
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
         // ```c
         //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -951,7 +948,7 @@ fn run_inner(
         // body) as a closure over the pool its searches run on, so that one pool can serve all
         // batches.
         let mut x_run_batches = |x_pool: Option<&crate::utils::threading::SearchPool<'_>>| {
-            // EXPERIMENT (LOSAT_X_BXBATCH): search several query batches at a time.
+            // With a pool of 2+ threads: search several query batches at a time.
             //
             // A batch (`BATCH_SIZE` bases of queries) is searched on its own:
             // nothing is carried from one batch to the next except the order of
@@ -986,22 +983,18 @@ fn run_inner(
             // loop above.
             #[cfg(feature = "parallel")]
             {
-                // Without a pool of 2+ threads (LOSAT_X_BXPOOL, 2+ threads) the batches are searched
-                // one at a time; LOSAT_X_BXFLOW acts only with the queued batches.
+                // Without a pool of 2+ threads the batches are searched one at a time;
+                // LOSAT_X_BXFLOW acts only with the queued batches.
                 let x_pooled = x_pool.is_some_and(|pool| pool.enabled());
-                if super::runtime::x_bx_batch() && !x_pooled {
+                if !x_pooled {
                     crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", false);
                 }
                 if super::runtime::x_bx_flow() {
-                    crate::utils::xreach::x_reach!(
-                        "LOSAT_X_BXFLOW",
-                        x_pooled && super::runtime::x_bx_batch()
-                    );
+                    crate::utils::xreach::x_reach!("LOSAT_X_BXFLOW", x_pooled);
                 }
             }
             #[cfg(feature = "parallel")]
-            if let Some(pool) = x_pool.filter(|pool| super::runtime::x_bx_batch() && pool.enabled())
-            {
+            if let Some(pool) = x_pool.filter(|pool| pool.enabled()) {
                 use rayon::prelude::*;
                 enum XEvent {
                     Warn(Vec<u8>),
@@ -1296,12 +1289,10 @@ fn run_inner(
         //                 results = lcl_blast.Run();
         // ```
         // Dispatch point: NCBI builds a CLocalBlast, and so its worker threads, for every batch.
-        // With LOSAT_X_BXPOOL one pool is built for the whole run and every batch is searched on
+        // With 2+ threads one pool is built for the whole run and every batch is searched on
         // it. Reuse of threads only.
-        if super::runtime::x_bx_pool() {
-            crate::utils::xreach::x_reach!("LOSAT_X_BXPOOL", options.num_threads > 1);
-        }
-        let x_batches = if super::runtime::x_bx_pool() && options.num_threads > 1 {
+        crate::utils::xreach::x_reach!("LOSAT_X_BXPOOL", options.num_threads > 1);
+        let x_batches = if options.num_threads > 1 {
             // A pool that cannot be built is the engine error it was when each
             // batch built its own.
             match crate::utils::threading::x_with_search_pool_local(

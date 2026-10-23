@@ -310,10 +310,14 @@ pub(super) fn chunk_subjects_on_pool(
     let length = last.offset + last.length;
     let n = subjects.len();
     let k = UNIT_CAP_SUBJECTS_PER_TASK;
+    // The fused loop's choice for the chunk's table, worked out once for every task (a thread
+    // takes tasks of the wave's chunks in turn).
+    let ratio = crate::algorithm::blastx::seed::x_seed_diag::x_shared_table_ratio(lookup, options);
     let parts: Vec<Result<Vec<(usize, SubjectComputation)>>> = (0..n.div_ceil(k))
         .into_par_iter()
         .with_max_len(1)
         .map(|task| {
+            crate::algorithm::blastx::seed::x_seed_diag::x_take_table_ratio(lookup, ratio);
             let (first, end) = (task * k, n.min((task + 1) * k));
             // EXPERIMENT (LOSAT_X_BXDBSTREAM): the task's subjects read as one block.
             let block = subjects.x_read_range(first, end)?;

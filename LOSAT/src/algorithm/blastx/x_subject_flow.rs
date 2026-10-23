@@ -285,7 +285,12 @@ pub(super) fn run(
     sink: &mut impl PreliminarySink,
 ) -> Result<usize> {
     let tasks = subjects.len().div_ceil(k);
+    // The fused loop's choice for the lookup table, worked out here once for every helper (a
+    // helper's thread may have searched another table's tasks in between).
+    let x_ratio =
+        crate::algorithm::blastx::seed::x_seed_diag::x_shared_table_ratio(lookup, options);
     let compute = |task: usize, scratch: &mut super::x_bx_mem::XScratch<'_>| {
+        crate::algorithm::blastx::seed::x_seed_diag::x_take_table_ratio(lookup, x_ratio);
         let table = match scratch.get() {
             Ok(table) => table,
             Err(error) => return (Vec::new(), Some((task * k, error))),

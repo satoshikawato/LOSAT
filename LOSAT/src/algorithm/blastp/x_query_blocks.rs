@@ -68,7 +68,8 @@
 //! The shadow (LOSAT_X_BPQBLOCKFMTSHADOW, implies the switch) keeps a copy of the bytes that the
 //! blocks write to the output and to standard error (`XCopyWriter`), then searches all queries
 //! again, writes their report and warnings into memory and compares both streams
-//! (`x_block_shadow_compare`), for every format the block search takes.
+//! (`x_block_shadow_compare`), for every format the block search takes; with outfmt 13 and 14 also each
+//! side file (the search of all queries writes its own into a fresh directory under TMPDIR).
 //!
 //! With `-db` the kernel runs over the database's subjects one after the other on one diagonal
 //! table (`blast_engine/database.rs` `search_blocks`, whose blocks start at the one-thread
@@ -145,7 +146,8 @@
 //!   only a subject with hits), and with `-db` the definition lines as for outfmt 8
 //!   (`database::x_titles_read_allow_blocks`). Otherwise the search of all queries refuses where
 //!   it does today; the file sink is not created before then.
-//! - outfmt 15 and 16 (LOSAT_X_BPQBLOCKXML2, strict set, `x_bp_qblock_xml2`; BLAST JSON and XML2):
+//! - outfmt 13 to 16 (LOSAT_X_BPQBLOCKXML2, strict set, `x_bp_qblock_xml2`; BLAST JSON and XML2, single
+//!   stream (15, 16) or side files and a master file (13, 14)):
 //!   NCBI writes one complete document per query (`x_PrintXML2Report`), `PrintProlog` the start of the
 //!   whole document and `PrintEpilog` its end; JSON joins the documents with `,\n`; a `-subject`
 //!   run (`m_IsBl2Seq`) holds each document until the next arrives and writes the last in
@@ -166,9 +168,29 @@
 //!   that needs them (`TaxdbNotes`): the run's `TaxdbRun` (the database opened once, the (volume,
 //!   taxid) lookups already made) lives on the `-db` database, so a block writes the messages
 //!   that no block before it wrote, at the `Hit` that first needs them, which is the place in
-//!   the search of all queries. Outfmt 13 and 14 (side files and a master file) are excluded by
-//!   the plan arm (`Some(Single15 | Single16)` only); they join by widening that match and adding
-//!   the checks of the side files' names and of the files' opening, which are not made here.
+//!   the search of all queries.
+//!   Outfmt 13 and 14 write the n-th report to the side file `<base>_<n>.json` / `.xml` next to `-out`
+//!   (`FsSideFiles`) and, in the epilog, the master file on `-out` that lists files `1..=written`.
+//!   The side files and the master are made by the same `Xml2Document` as outfmt 15 and 16, and the
+//!   only state of it that outlives a report (the number `written`, which numbers the next side file
+//!   and ends the master's list, `started`, and the held report of a `-subject` run) is in `Xml2Carry`;
+//!   `FsSideFiles` keeps nothing between calls (`create(n)` truncates `<base>_<n>.ext`, `listed(n)`
+//!   drops the directory, both from `-out`, which is the run's). So the blocks' side files are those of
+//!   the search of all queries, numbered over the run (a held `-subject` report is written as the next
+//!   number when the next report arrives, in the next block), and the last block's epilog writes the
+//!   same master. The refusals before the first byte are those of outfmt 15 and 16 (the report bytes
+//!   are the same); the names of the side files depend on `-out` only, not on the hits. The failures
+//!   are the same in both searches because the reports are written one after the other in query order
+//!   and a report's write is the only place that opens or writes a side file: a side file n that cannot
+//!   be opened stops the run at report n ("Command line argument error: Cannot open output file",
+//!   status 1), and a write error on it ("BLAST failed to write output", status 6, DECISIONS 35), with
+//!   side files `1..n-1` written and the master empty (it is written in the epilog only); nothing else
+//!   reaches standard error between the reports (the taxonomy database's messages come at the `Hit` that
+//!   needs them, in query order; a query's warnings before its report). The input files (queries,
+//!   subjects, lists) are read before the first block, so a side file that has the name of one of
+//!   them does not change what a later block reads. The shadow compares each side file `1..=written`
+//!   of the blocks with the search of all queries' (written into a fresh directory under TMPDIR with
+//!   `-out`'s file name, so that the run's files are not rewritten and the master lists the same names).
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
 //! ```c++
 //!         if (results.HasAlignments()) {
@@ -223,7 +245,7 @@
 //!   each format's events apart (the ABI orders the events within a stream only).
 //! The shadow also compares, with these, the records (`Debug` text) and each format's events with
 //! their positions in that format's bytes (`XShadowObserver`).
-//! An outfmt 15 or 16 output (LOSAT_X_BPQBLOCKXML2) does not take blocks in such a call: the
+//! An outfmt 13 to 16 output (LOSAT_X_BPQBLOCKXML2) does not take blocks in such a call: the
 //! document's run-level frame and `Xml2Carry` were argued and checked for a call of one output
 //! (the CLI's shape) only, so `x_query_block_plan` records `XBlockFormat::Xml2` for the reach check
 //! and then refuses the plan when the call has several outputs, hit records or an observer; the
@@ -434,7 +456,7 @@ pub(crate) fn x_bp_qblock_xml() -> bool {
 }
 
 /// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): whether the block search also takes one XML2 or JSON report
-/// (outfmt 15 or 16; 13 and 14 join with the side files' check). Acts only with `LOSAT_X_BPQBLOCK`.
+/// (outfmt 13 to 16). Acts only with `LOSAT_X_BPQBLOCK`.
 pub(crate) fn x_bp_qblock_xml2() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -474,10 +496,8 @@ pub(crate) enum XBlockReport {
     Seqalign,
     /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
     Xml,
-    /// Outfmt 15 and 16 (LOSAT_X_BPQBLOCKXML2). Outfmt 13 and 14 are excluded by the plan arm
-    /// (`Single15 | Single16` only); they join by widening that match and adding the driver's
-    /// checks (the side files' names, their opening, the master file). The framing state
-    /// already moves from block to block (`Xml2Carry`).
+    /// Outfmt 13 to 16 (LOSAT_X_BPQBLOCKXML2). The framing state (the count of reports, which
+    /// numbers the side files of 13 and 14) moves from block to block (`Xml2Carry`).
     Xml2,
 }
 
@@ -503,7 +523,7 @@ pub(crate) enum XBlockFormat {
     Seqalign,
     /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
     Xml,
-    /// Outfmt 15 and 16 (LOSAT_X_BPQBLOCKXML2).
+    /// Outfmt 13 to 16 (LOSAT_X_BPQBLOCKXML2).
     Xml2,
     /// Several outputs, the hit records or an observer (LOSAT_X_BPQBLOCKWEB).
     Web,
@@ -745,6 +765,41 @@ impl FormatObserver for XShadowObserver<'_> {
     }
 }
 
+// No NCBI counterpart: the directory of the shadow's side files (LOSAT_X_BPQBLOCKFMTSHADOW).
+/// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): a fresh directory under the temporary directory (TMPDIR)
+/// for the side files of the search of all queries (outfmt 13 and 14), so that it does not rewrite
+/// the files the blocks wrote. `out` is a path in it with the file name of the run's `-out`: the
+/// master lists the side files by that name without a directory, so its bytes are the same. The
+/// directory and its files are removed when it is dropped.
+pub(crate) struct XShadowDir {
+    dir: std::path::PathBuf,
+    pub(crate) out: std::path::PathBuf,
+}
+
+impl XShadowDir {
+    pub(crate) fn new(out: &std::path::Path) -> Self {
+        static COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "losat_bpqbshadow_{}_{}",
+            std::process::id(),
+            COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir)
+            .expect("LOSAT_X_BPQBLOCKFMTSHADOW: the side files' directory");
+        let name = out.file_name().unwrap_or(out.as_os_str());
+        Self {
+            out: dir.join(name),
+            dir,
+        }
+    }
+}
+
+impl Drop for XShadowDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
 // No NCBI counterpart: the check of the shadow (LOSAT_X_BPQBLOCKFMTSHADOW); it does not change any
 // value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): compares what the block search wrote with what the search
@@ -752,14 +807,16 @@ impl FormatObserver for XShadowObserver<'_> {
 /// warnings, and with LOSAT_X_BPQBLOCKWEB the hit records (`Debug`, one per line) and each format's
 /// observer events (`XShadowObserver::text`)). On a difference it prints
 /// `[X_SHADOW] BPQBLOCKFMT <stream> DIFFERENT ...` and panics; otherwise
-/// `[X_SHADOW] BPQBLOCKFMT blocks= formats= bytes= stderr_bytes= hits= events= identical` (`bytes` of
-/// all outputs, `hits` the records, `events` of all formats).
+/// `[X_SHADOW] BPQBLOCKFMT blocks= formats= bytes= stderr_bytes= hits= events= side_files= identical`
+/// (`bytes` of all outputs, `hits` the records, `events` of all formats, `side_files` the number of
+/// side files of an outfmt 13 or 14 run, each compared as the stream `side file <n>`).
 pub(crate) fn x_block_shadow_compare(
     blocks: usize,
     formats: usize,
     streams: &[(String, &[u8], &[u8])],
     hits: usize,
     events: usize,
+    side_files: usize,
 ) {
     let mut bytes = 0;
     let mut stderr_bytes = 0;
@@ -784,7 +841,7 @@ pub(crate) fn x_block_shadow_compare(
         }
     }
     eprintln!(
-        "[X_SHADOW] BPQBLOCKFMT blocks={blocks} formats={formats} bytes={bytes} stderr_bytes={stderr_bytes} hits={hits} events={events} identical"
+        "[X_SHADOW] BPQBLOCKFMT blocks={blocks} formats={formats} bytes={bytes} stderr_bytes={stderr_bytes} hits={hits} events={events} side_files={side_files} identical"
     );
 }
 

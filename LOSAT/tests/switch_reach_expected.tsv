@@ -28,7 +28,7 @@ LOSAT_X_BPQBLOCKFMT	blastp	conditional	required	required	outfmt 0 or 7 only, wit
 LOSAT_X_BPQBLOCKSA	blastp	conditional	gap	required	outfmt 8/9/12 only, with BPQBLOCK rules (>50,000 letters, 2+ blocks); -db titles must be plain; new gap: needs outfmt 8/9/12 with a query > 50,000 letters in 2+ blocks
 LOSAT_X_BPQBLOCKWEB	blastp	conditional	gap	gap	run_local only (Web ABI v2, library): several outputs, the hit records or an observer, no -db, with BPQBLOCK rules; new and ref gap: the CI fixtures run the CLI (one output, no records); tests/run_local_blastp_blocks.rs and V-ABI blastp_fast_query_blocks cover it
 LOSAT_X_BPQBLOCKXML	blastp	conditional	gap	required	outfmt 5 only, with BPQBLOCK rules; fallback if writer would refuse; new gap: needs outfmt 5 with a query > 50,000 letters in 2+ blocks
-LOSAT_X_BPQBLOCKXML2	blastp	conditional	gap	required	outfmt 15 or 16 only (13 and 14 never take blocks), with BPQBLOCK rules; fallback if the writer or the taxonomy database would refuse (-db: titles, taxids, taxdb_may_refuse); new gap: needs outfmt 15 or 16 with a query > 50,000 letters in 2+ blocks
+LOSAT_X_BPQBLOCKXML2	blastp	conditional	gap	required	outfmt 13, 14, 15 or 16, with BPQBLOCK rules; fallback if the writer or the taxonomy database would refuse (-db: titles, taxids, taxdb_may_refuse); new gap: needs outfmt 13 to 16 with a query > 50,000 letters in 2+ blocks
 LOSAT_X_BPREDODBSUBJ	blastp	always			redo reads each match's subject from the database; every -db run (-subject keeps no listed copy)
 LOSAT_X_BPREDOFIT	blastp	always			Composition-based redo HSP lists allocated at exact size
 LOSAT_X_BPREDOLPT	blastp	conditional	required	required	only with BPREDOPAR, more than one thread, window of 2+ jobs

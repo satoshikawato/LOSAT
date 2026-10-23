@@ -1,0 +1,68 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_17",
+          "query_title": "BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 480,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|33",
+                  "accession": "33",
+                  "title": "BDT63531.1 wsv282-like protein [Pasiphaea japonica whispovirus]"
+                }
+              ],
+              "len": 586,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 146.362,
+                  "score": 368,
+                  "evalue": 2.56833e-40,
+                  "identity": 89,
+                  "positive": 151,
+                  "query_from": 200,
+                  "query_to": 473,
+                  "hit_from": 301,
+                  "hit_to": 578,
+                  "align_len": 279,
+                  "gaps": 6,
+                  "qseq": "FRKEIILILQLYANLRCRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMTGPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVIPNILSVLNRTRSICQTLDFSISDHAKINITLCLLSE----IAEKKPNNLILATILYLFPRSLKLIKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDW-VKDECTLKLFKKQCCDTKFAAISLLVQQQMKKQ",
+                  "hseq": "FYREIHSVISLYLSLVYVQRAMNNDNTNSSGYTEGMVTKILNIIGKIPYNEMSREKYISVGRDALYLYQNIITDMTGPKHYKRLRTPQQQADFCYIIAMLVNDVPIMSDLTLSG-KATNLVQFASATVDPAYHLAVHKMACVFNSSYSVYKILMLDRRTLIRANMILTILSARNKYLSERKPRTVTQSVFLYLQPSLRDRLRASGLTSEESSLGTAVKLVSQQLLYDGIMRQTIEDGCSIMSGGYEGEDGVTLKCLGAGVKDIKTVGLSALFTDRLRKR",
+                  "midline": "F +EI  ++ LY +L   Q+ + + NTNS  Y++ M+ K+++II +I  N MS +KY +V R+ALY+Y  ++T MTGPKH KRLRTP+   ++C +IA+L ++V I   ++    + TNL+QF SA   P Y   +  +  V N + S+ + L        + N+ L +LS     ++E+KP  +  +  LYL P     ++  GL  +E+++    K +S+ L    I    I    +++ G +  +D  TLK       D K   +S L   +++K+"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 68,
+            "eff_space": 25086680,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+}

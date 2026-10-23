@@ -663,6 +663,26 @@ Same values, faster computation:
   traceback calls whose scores fit 8 bits (blastn; protein traceback with an unscaled matrix, for
   example `-comp_based_stats 0`). The 16-bit kernel (the traceback of the composition-based
   redo, whose matrix is scaled) is unchanged: the same change there measured x0.98-1.01.
+- `LOSAT_X_DPWINDOW=1` (every program's vector X-drop DP, memory; in the strict set from the pull request
+  that added it, 2026-10-23; a value switch: `=<n>`, 128 or more, is the band start at which the rows move,
+  built-in 1024; `=0` or `LOSAT_X_DEFAULT=0` returns to rows that hold every column) the vector kernels
+  (`utils/xdrop_simd.rs`, `x_xdrop_avx2.rs`, `x_xdrop_w128.rs`) kept their DP rows (`H` and `E` on 8- and
+  16-bit lanes and the column letters, 10 bytes per column) indexed by column, as NCBI's `score_array` is,
+  so a scratch grew, zero-filled, to the last column its longest band reached: 524,288 lanes (5 MiB) on
+  Sakai x EDL933, and a search grows one scratch per worker and stage (blastn `-subject` 16 threads: 92).
+  Now a kernel whose band start reaches the bound moves the lanes from `first - 64`, rounded down to a
+  multiple of 64, to lane 0 and lowers every column it keeps by the same amount (`XdropScratch::x_shift`:
+  the band, the buffers' write ends, the filled column letters, the fence and bad-letter columns); the best
+  cell and the traceback rows keep absolute columns. The lanes keep their values and the freed lanes are
+  zero as lanes never written are, so every score, drop decision, script byte and cell count is the same.
+  The fuzz tests against the scalar NCBI loops run each kernel with the bound at 128, 320 and off, and
+  every family and lane width moves rows there (20,000 cases); `band_window_keeps_every_result` compares
+  long problems on and off. The opt-in NEON2 kernels never move their rows. Memory on the workstation
+  (dev cd8e0f89 / this switch / `=0`, max RSS MiB, `v4-B/results/b16c/mem1/`, same output): Sakai x
+  EDL933 `-subject` blastn 16 threads 592-597 / 526-550 / 575-622, dc-megablast 16 threads 689-736 /
+  614-630 / 651-684, 4 threads 289-292 / 268-272 / 296-303 (blastn 4 threads and 1 thread, the D.
+  melanogaster `-db` cells and blastp unchanged within 15 MiB); NCBI `-subject` (one thread) 164-177. The
+  rest of the genome-pair excess is the traceback rows of the long alignments, one per worker.
 - DPW128 (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED`) the
   128-bit X-drop DP kernels with the per-row savings of the 256-bit AVX2 kernels (first and last
   survivor kept while the row runs,

@@ -1,0 +1,1 @@
+- Long gapped alignments keep less memory: the X-drop DP keeps its rows over the band instead of over every column up to it. Sakai x EDL933 `-subject` at 16 threads: blastn max RSS 592-597 -> 526-550 MiB, dc-megablast 689-736 -> 614-630 MiB; same results (`LOSAT_X_DPWINDOW`, one of the switches above; `=0` turns it off).

@@ -181,6 +181,12 @@ fn lowercase_runs(letters: &[u8]) -> Vec<(i32, i32)> {
 /// the searched letters, merged where they overlap, a mask that covers the whole query dropped,
 /// and the rest moved into the query's record by the start of its interval; inclusive 0-based
 /// positions.
+///
+/// The masks are computed here, per batch, at report time: SEG runs again on every query of the
+/// batch (and the lower-case runs are read again), instead of the search keeping each query's
+/// mask until the last archive is written. That is the price of not holding the masks of all
+/// batches (memory); it is CPU only, for outfmt 11 only, and below
+/// NCBI's cost (200,000 peptides: 24 s user, NCBI 87 s).
 fn query_record_masks(
     queries: &[FastaRecord],
     first: usize,

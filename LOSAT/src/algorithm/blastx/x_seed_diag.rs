@@ -64,8 +64,9 @@
 //! x0.98, 13.32 x0.90); the built-in value was 500 before (measured against the direct loop
 //! without LOSAT_X_BXHITBF: 1.76 x1.20, 4.91 x1.00, 6.77 x0.94, 800 cDNAs x yeast x0.72), and
 //! `LOSAT_X_BXDIAGMIN=500` gives that rule. Both loops give the reference's hits and table, so the
-//! choice changes only the speed; it is made once per thread and table ([`x_fused_pays`]). The timing line then also gives `min_hits_per_cell=`,
-//! `tables_fused=` and `tables_other=` (the choices made) and `hits_per_cell=LEAST-MOST` (hundredths).
+//! choice changes only the speed; it is made once per thread and table ([`x_fused_pays`]). The
+//! timing line then also gives `min_hits_per_cell=`, `tables_fused=` and `tables_other=` (the
+//! choices made) and `hits_per_cell=LEAST-MOST` (hundredths).
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF, `x_seed_scan.rs`): with that switch the fused loop finds the
 //! cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`'s

@@ -48,7 +48,7 @@ LOSAT_X_BXDEFER	blastx	conditional	required	gap	x86-64 AVX2, where BXDIAG fused 
 LOSAT_X_BXDIAG	blastx	conditional	required	required	x86-64 AVX2; word size 3 standard table; only batches with >=9 hits per used cell (short queries use direct loop)
 LOSAT_X_BXEVALEMPTY	blastx	always			Gapped evaluation of a subject without preliminary HSPs returns at once
 LOSAT_X_BXFLOW	blastx	conditional	required	required	2+ threads, native only (Web keeps waves), several query batches
-LOSAT_X_BXHITBF	blastx	conditional	required	gap	direct loop only: no-AVX2 CPUs, aarch64, Wasm, or short queries (<5 hits per cell) on x86; ref gap: needs -window_size 0 or <= 3 (or a diagonal offset near 2^30)
+LOSAT_X_BXHITBF	blastx	conditional	required	gap	direct loop only: no-AVX2 CPUs, aarch64, Wasm, or short queries (<9 hits per cell, BXDIAGMIN) on x86; ref gap: needs -window_size 0 or <= 3 (or a diagonal offset near 2^30)
 LOSAT_X_BXPAR	blastx	conditional	required	required	2+ threads (1 thread leaves reference code)
 LOSAT_X_BXPOOL	blastx	conditional	required	required	2+ threads
 LOSAT_X_BXSCANBF	blastx	always			Branch-free finding of subject words with lookup hits

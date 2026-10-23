@@ -577,13 +577,13 @@ thread_local! {
 /// `X_REUSED_FRAME` bytes is one this thread kept (`x_reuse_frame`), its bytes not cleared, which
 /// saves the allocation and the zero fill of a new one; otherwise a new zeroed frame of
 /// `x_frame_capacity`. EXPERIMENT (LOSAT_X_TBNDBSTREAM): while a `-db` stream is open, a frame of
-/// `X_MAPPED_FRAME` bytes or more is an idle buffer of `utils::x_mapped::X_BYTES` if it holds one
-/// (its pages resident), zeroed to `length`.
+/// `X_MAPPED_FRAME` bytes or more is an idle buffer of `utils::x_mapped::X_BYTES` that touched at
+/// most twice its bytes, if it holds one (its pages resident), zeroed to `length`.
 fn x_frame_buffer(length: usize) -> Vec<u8> {
     let kept = if length <= X_REUSED_FRAME && x_frame_reuse() {
         X_FRAMES.with(|frames| frames.borrow_mut().pop())
     } else if length >= X_MAPPED_FRAME && super::x_db_stream::x_frames_pooled() {
-        crate::utils::x_mapped::X_BYTES.take(length)
+        crate::utils::x_mapped::X_BYTES.x_take_near(length)
     } else {
         None
     };
@@ -612,12 +612,12 @@ fn x_frame_buffer(length: usize) -> Vec<u8> {
 /// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): keeps `frame`, a frame of a dropped subject plan, for
 /// this thread's next `x_frame_buffer`, if the switch is on, its capacity is at most
 /// `X_REUSED_FRAME` and the thread keeps fewer than `X_REUSED_FRAMES`; drops it otherwise.
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): while a `-db` stream is open, a frame of a capacity of 1 MiB
-/// or more goes to `utils::x_mapped::X_BYTES` instead (which frees the idle buffers beyond its
-/// bound).
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): while a `-db` stream is open, a frame of a capacity of
+/// `X_MAPPED_FRAME` bytes or more goes to `utils::x_mapped::X_BYTES` instead (which frees the idle
+/// buffers beyond its bound).
 pub(super) fn x_reuse_frame(mut frame: Vec<u8>) {
     if frame.capacity() == 0 || frame.capacity() > X_REUSED_FRAME || !x_frame_reuse() {
-        if frame.capacity() > X_REUSED_FRAME && super::x_db_stream::x_frames_pooled() {
+        if frame.capacity() >= X_MAPPED_FRAME && super::x_db_stream::x_frames_pooled() {
             crate::utils::x_mapped::X_BYTES.give(&mut frame);
         }
         return;

@@ -247,7 +247,8 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
 /// same sequence. The bytes are read into a buffer that glibc maps from 1 MiB on, taken from
 /// `utils::x_mapped::X_BYTES` when it holds one (`SeqDb::x_read_sequence_mapped`), and the store
 /// is that buffer cut to the 2-bit data (`PackedNucleotide::x_from_stored_buffer`): a long
-/// sequence read for a while and dropped gives its pages back, or its buffer to the pool.
+/// sequence read for a while and dropped gives its pages back (a store is not given to the pool,
+/// which forgets the buffer).
 pub(crate) fn x_read_nucleotide_store(
     db: &SeqDb,
     ordinal: u32,
@@ -257,10 +258,12 @@ pub(crate) fn x_read_nucleotide_store(
         .x_read_sequence_mapped(ordinal)
         .map_err(|error| search_read_error(error, program))?;
     let (length, runs) = stored_parts(&block, 0, ordinal, program)?;
+    let packed = block.x_into_nucleotide_packed();
+    if crate::utils::x_mapped::x_is_mapped(packed.capacity()) {
+        crate::utils::x_mapped::X_BYTES.x_disown(&packed);
+    }
     Ok(PackedNucleotide::x_from_stored_buffer(
-        block.x_into_nucleotide_packed(),
-        length,
-        &runs,
+        packed, length, &runs,
     ))
 }
 

@@ -1040,12 +1040,12 @@ impl SequenceBlock {
     pub fn x_into_nucleotide_packed(mut self) -> Vec<u8> {
         self.expect(SeqType::Nucleotide);
         assert_eq!(self.len(), 1, "the packed bytes of a block of one sequence");
-        let start = (u64::from(self.seq_offsets[0]) - self.data_start) as usize;
-        let end = (u64::from(self.amb_offsets[0]) - self.data_start) as usize;
         assert_eq!(
-            start, 0,
+            u64::from(self.seq_offsets[0]),
+            self.data_start,
             "a nucleotide block starts with its first sequence"
         );
+        let end = self.nucleotide_packed(0).len();
         self.data.truncate(end);
         self.data
     }

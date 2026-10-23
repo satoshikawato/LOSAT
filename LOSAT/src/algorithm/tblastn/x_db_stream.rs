@@ -34,17 +34,19 @@
 //!   (`x_subject_translate::x_frame_buffer`, `x_reuse_frame`), as BLASTN's database reads do. The
 //!   frames go idle when their subject is searched, after the peak of the preliminary search, so
 //!   the composition redo and the reports read their sequences into them, and at one thread each
-//!   subject's frames are those of the subject before (C. elegans genome: 7 chromosomes of 14 to
-//!   21 Mb, frames of 4.6 to 7 MB). A store read for a plan is not given to the pool: at 8 and
-//!   16 threads the plans are made at once and their stores would stay idle across the peak.
+//!   chromosome's frames are those of the one before (C. elegans genome: 6 chromosomes of 13.8 to
+//!   20.9 Mb, frames of 4.6 to 7 MB). A frame takes an idle buffer that touched at most twice its
+//!   bytes, since the pool does not count the pages of a lent buffer. No store is given to the
+//!   pool: the stores read for the plans of 8 and 16 threads, made at once, would stay idle across
+//!   the peak. When the last stream of the process closes, the idle buffers are freed.
 //!
 //! Every read packs the stored bytes as the copy does (`common::database::x_nucleotide_store_in`,
 //! `x_read_nucleotide_store`: the packing of `PackedNucleotide::from_stored`), so every stage
-//! computes the same values on the same subjects in the same order. A read that fails during the search (a
-//! database changed or damaged after the check, an error of the file system) is an `XReadError`
-//! holding the error that the check gives for the same read: the search of the batches is then
-//! made again one batch at a time, so that the batch that reads it fails after the reports of the
-//! batches before, as with the check's error (`args.rs`).
+//! computes the same values on the same subjects in the same order. A read that fails during the
+//! search (a database changed or damaged after the check, an error of the file system) is an
+//! `XReadError` holding the error that the check gives for the same read: the search of the
+//! batches is then made again one batch at a time, so that the batch that reads it fails after the
+//! reports of the batches before, as with the check's error (`args.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:374-376 (the sequence of
 //! the search is the mapped volume's bytes, not a copy)
@@ -308,16 +310,20 @@ impl Drop for XDbStream<'_> {
     /// stream. The pool's other threads end with the pool.
     fn drop(&mut self) {
         let _ = X_PLAN_BLOCK.try_with(std::cell::Cell::take);
-        X_OPEN_STREAMS.fetch_sub(1, Ordering::Relaxed);
+        if X_OPEN_STREAMS.fetch_sub(1, Ordering::Relaxed) == 1 {
+            crate::utils::x_mapped::X_BYTES.x_clear_idle();
+        }
     }
 }
 
 /// The streams open in the process (`XDbStream::new` to its drop).
 static X_OPEN_STREAMS: AtomicUsize = AtomicUsize::new(0);
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): whether a `-db` stream is open: then the large frames of a
-/// dropped subject plan go to `utils::x_mapped::X_BYTES`, from which the next frames and reads
-/// take them (module header). No NCBI counterpart: only where the buffers go.
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): whether a `-db` stream is open in the process: then the large
+/// frames of a dropped subject plan go to `utils::x_mapped::X_BYTES`, from which the next frames
+/// and reads take them (module header). A `-subject` search that runs at the same time (library
+/// use) pools its frames too; a frame taken from the pool is zero-filled before it is written, so
+/// no report changes. No NCBI counterpart: only where the buffers go.
 pub(super) fn x_frames_pooled() -> bool {
     X_OPEN_STREAMS.load(Ordering::Relaxed) > 0
 }

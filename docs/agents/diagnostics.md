@@ -237,7 +237,7 @@ their variables mean
   vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPGAP16` acts only
   in `BPGAP`'s vector alignment, where its costs fit 16 bits; `BPLUT` declines in
   diagnostics mode; `BPQBLOCK` takes the block path only for one `-outfmt 6` report (with
-  `BPQBLOCKFMT`, one outfmt 0, 6 or 7 report; with `BPQBLOCKSA`, one outfmt 8, 9 or 12 report; with
+  `BPQBLOCKFMT`, one outfmt 0, 6 or 7 report; with `BPQBLOCKSA`, one outfmt 8, 9, 11 or 12 report; with
   `BPQBLOCKXML`, one outfmt 5 report; with `BPQBLOCKXML2`, one outfmt 13, 14, 15 or 16 report; with `BPQBLOCKWEB`, also a
   `run_local` call with several of these reports (not outfmt 13 to 16), the hit records or an observer) with more than
   one block (see its entry), and
@@ -2105,7 +2105,7 @@ Rebuilding less:
   batch at a time. Both lookup tables take it: the default one, and the compressed one of `-task blastp-fast`
   (word size 5), whose table each block builds for its own batches and tests for NCBI's overflow banks with
   them. Taken only where a block's report is its rows: one output in tabular format 6 (with
-  `LOSAT_X_BPQBLOCKFMT`, below, also outfmt 0 or 7; `LOSAT_X_BPQBLOCKSA` outfmt 8, 9 or 12; `LOSAT_X_BPQBLOCKXML` outfmt 5; `LOSAT_X_BPQBLOCKXML2` outfmt 13, 14, 15 or 16), no `-query_loc`, every batch read, more than one block, no subject whose tabular ID the reference path rejects, and none of the
+  `LOSAT_X_BPQBLOCKFMT`, below, also outfmt 0 or 7; `LOSAT_X_BPQBLOCKSA` outfmt 8, 9, 11 or 12; `LOSAT_X_BPQBLOCKXML` outfmt 5; `LOSAT_X_BPQBLOCKXML2` outfmt 13, 14, 15 or 16), no `-query_loc`, every batch read, more than one block, no subject whose tabular ID the reference path rejects, and none of the
   reference path's other refusals that come before its rows (a `-window_size` whose diagonal table with all
   queries passes 2^30, a query split that LOSAT rejects, or with the compressed table a query batch whose
   offsets add more than four times NCBI's overflow cells, about 859 million words, counted before the search);
@@ -2143,8 +2143,8 @@ Rebuilding less:
   1 %. A query set of one block (BP-q100 x Swiss-Prot, 35,048 letters) is unchanged.
 - `LOSAT_X_BPQBLOCKSA=1` (BLASTP, speed and memory; in the strict set from the pull request that added it,
   on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search of `LOSAT_X_BPQBLOCK` also for one
-  outfmt 8, 9 or 12 report (the Seq-annot of Seq-aligns as ASN.1 text, BER or JSON; `blastp/x_query_blocks.rs`,
-  exactness argument in its header): each block writes its queries' Seq-annots before the next block is
+  outfmt 8, 9, 11 or 12 report (the Seq-annot of Seq-aligns as ASN.1 text, BER or JSON, or, for 11, the BLAST
+  archive of one Bioseq-set per NCBI batch; `blastp/x_query_blocks.rs`, exactness argument in its header): each block writes its queries' Seq-annots before the next block is
   searched; NCBI writes one self-contained Seq-annot per query and no prolog or epilog for these formats, and
   nothing in LOSAT's writer is kept from one query to the next. With `-db` the blocks are searched only when every
   definition line of the database reads, is one line and holds no byte outside ' ' ..= '~'
@@ -2155,6 +2155,8 @@ Rebuilding less:
   bp_hsap -db, median of 3 pairs; NCBI 2.17.0 one run in the same job): max RSS at 1 / 16 threads, on 32.5 / 48.6
   MiB (outfmt 8), 32.5 / 48.6 (9), 32.0 / 48.6 (12), off 212.8 / 351.9, NCBI 76.0 / 139.9 (8), 73.8 / 131.0 (9),
   75.2 / 151.2 (12); wall on/off x0.81-0.83 at 1 thread, x0.64-0.66 at 16; outputs equal NCBI's -num_threads 1.
+  Outfmt 11 (2026-10-23, `-db`, 2,200 queries of 120 letters, one thread, `/usr/bin/time`): max RSS 23.2 MiB with
+  blocks, 53.9 MiB with `LOSAT_X_BPQBLOCKSA=0`, NCBI 71.2 MiB; the archive equals NCBI's bytes.
 - `LOSAT_X_BPQBLOCKXML=1` (BLASTP, speed and memory; in the strict set from the pull request that added it,
   on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search of `LOSAT_X_BPQBLOCK` also for one outfmt 5
   (BLAST XML) report: block 0 writes the header (from the first query of the input) and its Iterations, each

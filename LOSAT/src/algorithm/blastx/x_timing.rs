@@ -16,9 +16,9 @@
 //!   start and end included). Inside `loop`: `search` is the time the loop waits for searches,
 //!   `render` the time it writes reports (of which `titles` reads the reported sequences' titles
 //!   with `-db`), and `input = loop - search - render` the reader's own time (and the queueing of
-//!   batches with `LOSAT_X_BXBATCH`).
+//!   batches at 2+ threads).
 //! - `[TIMING] blastx_waves: waves=N batches=N wall ..s busy ..s threads=N idle ..s tail=N
-//!   tail_wall ..s`: with `LOSAT_X_BXBATCH`, the waves of batches searched side by side.
+//!   tail_wall ..s`: with 2+ threads and several query batches, the waves of batches searched side by side.
 //!   `wall` is their wall time, `busy` the searches' own times added over the threads,
 //!   `idle = wall x threads - busy` the thread time the waves left unused (a wave ends when its
 //!   last batch does). `tail` counts the batches searched one after another, each with the whole
@@ -31,8 +31,8 @@
 //!   waits count as `search` of `blastx_run`.
 //! - `[TIMING] blastx_subject_waves: waves=N tasks=N wall ..s busy ..s longest ..s latest_start ..s
 //!   last_end ..s threads=N idle ..s`: the parallel subject waves of `search::search_core` (the
-//!   `scan_par` stage). A task is the subjects one worker searches in a wave (`LOSAT_X_BXCHUNK`
-//!   of them, or one). `wall` adds the waves' wall times, `busy` the tasks' own times, `longest`
+//!   `scan_par` stage). A task is the subjects one worker searches in a wave (`search::X_BX_CHUNK`
+//!   of them at 2+ threads, or one). `wall` adds the waves' wall times, `busy` the tasks' own times, `longest`
 //!   each wave's longest task, `latest_start` each wave's latest task start and `last_end` each
 //!   wave's latest task end, both after the wave began; `idle = wall x threads - busy`. A wave
 //!   ends with its last task: `longest` near `wall` with `busy` well below `wall x threads` is
@@ -50,7 +50,7 @@
 //!   are added over the threads. Mode `alone` is a batch searched by itself, with the pool if
 //!   there is one: its times are the wall times of the thread that runs it. `query_setup`
 //!   translates and masks the queries; `setup` is the batch's statistics and query chunks;
-//!   `chunks_par` the parallel chunk path of a long query (`LOSAT_X_BXPAR`); `lookup` builds a
+//!   `chunks_par` the parallel chunk path of a long query (2+ threads); `lookup` builds a
 //!   chunk's lookup table and diagonal tables; `scan_par` is the wall time of the parallel
 //!   subject waves (scan, ungapped and preliminary gapped extension); `replay` is the loop that
 //!   hands the subjects to the batch's sink in subject order (linking, reaping, the HSP
@@ -60,7 +60,7 @@
 //! - `[TIMING] blastx_batch_end_<mode>: init .. read .. kappa_spec .. kappa_serial .. loop ..
 //!   finish .. (matches=N reused=N serial=N)`: inside `batch_end`. `init` is up to the
 //!   composition state, `read` takes the matches from the stream, `loop` is the in-order loop
-//!   over the matches, of which `kappa_spec` is the parallel redo made ahead (`LOSAT_X_BXPAR`)
+//!   over the matches, of which `kappa_spec` is the parallel redo made ahead (2+ threads)
 //!   and `kappa_serial` the redo of the matches done in the loop itself; `finish` is from the
 //!   heaps to the batch's results (hit lists, culling, sorting, the copy of the batch).
 //!   `matches` counts the matches, `reused` those whose redo was made ahead and `serial` those
@@ -344,7 +344,7 @@ fn n(counter: &AtomicU64) -> u64 {
 // No NCBI counterpart: the run's share of the common line (utils/xtiming.rs), once at the end of
 // `native::run`: the reports (`prolog`, `render`, `epilog`) are `output`; the queries' reader is
 // `read_fasta`, taken as `input` of `blastx_run` is (`loop - search - render`: it includes the
-// pool's start and end and, with LOSAT_X_BXBATCH, the queueing of batches).
+// pool's start and end and, at 2+ threads, the queueing of batches).
 pub(crate) fn common_run() {
     if !on() {
         return;

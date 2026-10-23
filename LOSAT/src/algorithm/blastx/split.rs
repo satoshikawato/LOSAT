@@ -394,7 +394,7 @@ pub fn split_queries(
             prepared: full.clone(),
         }]);
     }
-    // EXPERIMENT (LOSAT_X_BXPAR): a chunk's query setup (translation, SEG) reads
+    // A chunk's query setup (translation, SEG) reads
     // only its own slice of the query, so the chunks can be prepared on the
     // search pool; the corrections below still run in chunk order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-249
@@ -471,7 +471,7 @@ pub fn split_queries(
     //                 CRef<ILocalQueryData> query_data(
     //                         chunk_qf->MakeLocalQueryData( &*m_Options ) );
     // ```
-    // Dispatch point: with LOSAT_X_BXPAR on and inside the search pool, the chunks are prepared in
+    // Dispatch point: inside the search pool of 2+ threads, the chunks are prepared in
     // parallel; otherwise the loop below prepares them one after another as NCBI does. The chunks
     // are collected in index order and the corrections that follow still run in chunk order.
     #[cfg(feature = "parallel")]

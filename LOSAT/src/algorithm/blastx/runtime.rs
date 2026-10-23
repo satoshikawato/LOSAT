@@ -263,7 +263,7 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
     fn early(&mut self, _evalue: f64, _queries: usize, _decision: bool) {}
     // No NCBI counterpart: tells the search whether any observer callback records something; it
     // does not change any value NCBI computes.
-    /// EXPERIMENT (LOSAT_X_BXPAR): true when no callback records anything, so
+    /// True when no callback records anything, so
     /// that work may be done out of order (and some of it twice).
     fn x_passive(&self) -> bool {
         false
@@ -277,35 +277,12 @@ impl RuntimeObserver for Noop {
     }
 }
 
-// No NCBI counterpart: reads the LOSAT_X_BXLEAN switch once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BXLEAN): leave out work whose result nothing reads: the
-/// copy of every candidate HSP kept for an observer when there is none, and
-/// the tree and DP scratch of a (chunk, subject) pair without an initial HSP.
-pub(crate) fn x_bx_lean() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLEAN"))
-}
-
-// No NCBI counterpart: reads the LOSAT_X_BXPAR switch once; it does not change any value NCBI
-// computes.
-// EXPERIMENT (LOSAT_X_BXPAR): parallel BLASTX stages.
-pub(crate) fn x_bx_parallel() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXPAR"))
-}
-
-// No NCBI counterpart: `LOSAT_X_BXPAR` and the rule of one parallel stage, and the record of the side
-// the stage took (`LOSAT_X_REACH`); it does not change any value NCBI computes.
-/// Whether a parallel stage runs: `LOSAT_X_BXPAR` is on and `rule` holds (`rule` is not evaluated
-/// with the switch off). While the switch is on, records the side taken.
+// No NCBI counterpart: the rule of one parallel BLASTX stage and the record of the side the stage
+// took (`LOSAT_X_REACH`); it does not change any value NCBI computes.
+/// Whether a parallel stage runs: `rule` holds. Records the side taken. The stages that do not
+/// run (one thread, no pool, a small batch) run the serial reference code.
 #[cfg(feature = "parallel")]
 pub(crate) fn x_bx_par_rule(rule: impl FnOnce() -> bool) -> bool {
-    if !x_bx_parallel() {
-        return false;
-    }
     let own = rule();
     crate::utils::xreach::x_reach!("LOSAT_X_BXPAR", own);
     own
@@ -351,7 +328,7 @@ unsafe impl Send for XKappaWorker {}
 // subject only when hsp_index == 0 (line 1233), so a match can read the matrix its predecessor left
 // behind. X_REDO_PROBE records whether that happened; if it did the result is dropped and the match
 // is redone in stream order.
-/// EXPERIMENT (LOSAT_X_BXPAR): redo one match without knowing the matrix its
+/// Redo one match without knowing the matrix its
 /// predecessor leaves behind.  `None` when the match would have used that
 /// matrix (it is then redone in order); otherwise the finished list, its best
 /// score, and the matrix this match leaves (`None` if it leaves the old one).
@@ -408,46 +385,10 @@ pub fn search_internal<'a>(
 ) -> Result<Vec<BatchResults>> {
     search_internal_observed(records, subjects, options, &mut Noop)
 }
-// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
-// ```c
-//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                 results = lcl_blast.Run();
-// ```
-// NCBI builds a CLocalBlast, and so its worker threads, for every query batch. LOSAT_X_BXPOOL keeps
-// one pool for all batches. Reuse of threads only.
-/// EXPERIMENT (LOSAT_X_BXPOOL): `LOSAT_X_BXPOOL` set.
-pub(crate) fn x_bx_pool() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXPOOL"))
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262,289-291
-// ```c
-//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-// ...
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-// ...
-//             	ITERATE(CSearchResultSet, result, *results) {
-//                	    formatter.PrintOneResultSet(**result, query_batch);
-//             	}
-// ```
-// NCBI searches one query batch and prints its results before it takes the next. With
-// LOSAT_X_BXBATCH several small batches are searched together and printed in input order
-// afterwards.
-/// EXPERIMENT (LOSAT_X_BXBATCH): `LOSAT_X_BXBATCH` set (needs LOSAT_X_BXPOOL).
-pub(crate) fn x_bx_batch() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXBATCH"))
-}
-
-// No NCBI counterpart: when the queued batches of LOSAT_X_BXBATCH are searched (as a flow instead
+// No NCBI counterpart: when the queued batches (2+ threads, several query batches) are searched (as a flow instead
 // of waves); the reports, their order and the values in them are those of the waves.
 /// EXPERIMENT (LOSAT_X_BXFLOW): a switch of the strict set, on unless `LOSAT_X_BXFLOW=0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set (acts with LOSAT_X_BXBATCH and LOSAT_X_BXPOOL).
+/// `LOSAT_X_DEFAULT=0` and it is not set (acts with several query batches at 2+ threads).
 pub(crate) fn x_bx_flow() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -457,13 +398,13 @@ pub(crate) fn x_bx_flow() -> bool {
 thread_local! {
     // No NCBI counterpart: flag for the batched search (a thread that runs one whole batch must not
     // start parallel work of its own); it does not change any value NCBI computes.
-    // EXPERIMENT (LOSAT_X_BXBATCH): set while this thread runs a search that
+    // Set while this thread runs a search that
     // must not start parallel work of its own.
     static X_INNER_SERIAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 // No NCBI counterpart: reads the flag above; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BXBATCH): true inside `x_search_internal_serial`.
+/// True inside `x_search_internal_serial`.
 pub(crate) fn x_inner_serial() -> bool {
     X_INNER_SERIAL.with(std::cell::Cell::get)
 }
@@ -495,7 +436,7 @@ impl Drop for XInnerSerial {
 // NCBI runs the single-threaded search (CPrelimSearchRunner) when IsMultiThreaded() is false. This
 // is search_internal run on one thread, whatever thread that is, so that several batches can run
 // side by side.
-/// EXPERIMENT (LOSAT_X_BXBATCH): `search_internal` as the one-thread search,
+/// `search_internal` as the one-thread search,
 /// whatever thread it is called on. The caller runs several of these side by
 /// side; each takes the serial path of every stage.
 pub fn x_search_internal_serial<'a>(
@@ -520,7 +461,7 @@ pub fn x_search_internal_serial<'a>(
 // ```
 // The search of one query batch (lcl_blast.Run()) on a pool that the caller keeps. The search
 // itself is search_internal.
-/// EXPERIMENT (LOSAT_X_BXPOOL): `search_internal` on a pool that the caller
+/// `search_internal` on a pool that the caller
 /// keeps for all its query batches.
 pub fn x_search_internal_in_pool<'a>(
     records: &[FastaRecord],
@@ -781,7 +722,7 @@ impl PreliminarySink for Runtime<'_> {
     // No NCBI counterpart: tells the search whether the containment callback is read; it does not
     // change any value NCBI computes.
     fn x_wants_containment(&self) -> bool {
-        !(x_bx_lean() && self.observer.x_passive())
+        !self.observer.x_passive()
     }
     fn preliminary_purge(
         &mut self,
@@ -1764,7 +1705,7 @@ impl PreliminarySink for Runtime<'_> {
                 matches.push(list);
             }
             super::x_timing::end(XEnd::Read, x_t);
-            // EXPERIMENT (LOSAT_X_BXPAR): redo the matches of one batch on the
+            // Redo the matches of one batch on the
             // search pool before walking them in stream order.  A match is a
             // function of its own HSP list and of the matrix left by the match
             // before it; `x_speculate_match` returns a result only when the
@@ -1832,14 +1773,12 @@ impl PreliminarySink for Runtime<'_> {
             // No NCBI counterpart: stage report for the thread-use statistics; it does not change
             // any value NCBI computes.
             #[cfg(feature = "parallel")]
-            if x_bx_parallel() {
-                crate::utils::threading::report_stage(
-                    "blastx",
-                    "kappa_redo",
-                    matches.len(),
-                    !x_workers.is_empty(),
-                );
-            }
+            crate::utils::threading::report_stage(
+                "blastx",
+                "kappa_redo",
+                matches.len(),
+                !x_workers.is_empty(),
+            );
             // No NCBI counterpart: counters of speculative results used and matches redone in
             // order; it does not change any value NCBI computes.
             let mut x_reused = 0usize;

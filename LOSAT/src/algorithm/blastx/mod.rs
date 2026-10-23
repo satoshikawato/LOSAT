@@ -335,7 +335,7 @@ pub mod kappa;
 //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
 //                                              subject_maybe_biased);
 // ```
-// EXPERIMENT (LOSAT_X_BXSEGMEMO): the redo-stage subject SEG memoised per subject.
+// The redo-stage subject SEG memoised per subject.
 mod x_seg_memo;
 
 // Diagnostic (LOSAT_TIMING): the stage times of a BLASTX run. No NCBI counterpart.

@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BXLUT / LOSAT_X_BXLUTSHADOW): the BLASTX protein lookup table filled in
+//! The BLASTX protein lookup table filled in
 //! place, with the neighbour-word sets memoised per thread (LOSAT_X_BPLKPAHEAD: or kept by the
 //! blastp block search for its builds ahead, `XAaSpares`).
 //!
@@ -77,22 +77,6 @@ use std::cell::RefCell;
 // it is used only when one of its switches is set.
 #[path = "x_pair_lut.rs"]
 pub(crate) mod x_pair_lut;
-
-/// EXPERIMENT (LOSAT_X_BXLUT): 0 = off (reference builder), 1 = in-place builder,
-/// 2 = shadow (`LOSAT_X_BXLUTSHADOW`: both builders, compared).
-pub(super) fn x_bxlut_mode() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BXLUTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_BXLUT") {
-            1
-        } else {
-            0
-        }
-    })
-}
 
 /// Neighbour lists of one (matrix, threshold, word length, alphabet) setting, by source cell.
 struct XNeighborMemo {
@@ -276,7 +260,7 @@ impl XAaSpares {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
-    // `x_dispatch`)
+    // `build_ncbi_lookup_from_prepared`)
     // ```c
     //     for (i = 0; i < lookup->backbone_size; i++) {
     //         if (exact_backbone[i] != NULL) {
@@ -513,9 +497,9 @@ fn x_target_list(
 //             for (j=0; j <lookup->thin_backbone[i][1]; j++)
 //                 dest[j] = lookup->thin_backbone[i][j + 2];
 // ```
-/// EXPERIMENT (LOSAT_X_BXLUT): the table `build_lookup_from_prepared` returns, built without
-/// chains (see the module comment). `Err(prepared)` when the reference builder must run
-/// (diagnostics mode, or a backbone index wider than 16 bits).
+/// The table `build_lookup_from_prepared` returns, built without chains (see the module
+/// comment). `Err(prepared)` when the reference builder must run (diagnostics mode, or a
+/// backbone index wider than 16 bits).
 pub(super) fn x_build_direct(
     prepared: PreparedLookupQuery,
     threshold: i32,
@@ -722,47 +706,6 @@ fn x_build_direct_in(
 //         }
 //     }
 // ```
-/// EXPERIMENT (LOSAT_X_BXLUT / LOSAT_X_BXLUTSHADOW): the switch's dispatch for
-/// `build_ncbi_lookup_from_prepared`. `Ok(table)` when this module produced the table (with
-/// the shadow switch: the reference table, after comparing it with the in-place one);
-/// `Err(prepared)` hands the input back to the reference builder (switch off, or not
-/// applicable).
-pub(super) fn x_dispatch(
-    prepared: PreparedLookupQuery,
-    threshold: i32,
-    matrix: ScoringMatrix,
-    word_length: usize,
-) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
-    match x_bxlut_mode() {
-        0 => Err(prepared),
-        1 => x_build_direct(prepared, threshold, matrix, word_length),
-        _ => {
-            let copy = PreparedLookupQuery {
-                concat_query: prepared.concat_query.clone(),
-                lookup_locations: prepared.lookup_locations.clone(),
-                frame_bases: prepared.frame_bases.clone(),
-                contexts: prepared.contexts.clone(),
-                skipped_seg_mask: prepared.skipped_seg_mask,
-            };
-            let reference = build_lookup_from_prepared(prepared, threshold, matrix, word_length).0;
-            if let Ok(direct) = x_build_direct(copy, threshold, matrix, word_length) {
-                x_assert_same_table(&direct, &reference);
-                X_SHADOW_TABLES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
-            Ok(reference)
-        }
-    }
-}
-
-/// EXPERIMENT (LOSAT_X_BXLUTSHADOW): tables compared so far.
-pub(crate) static X_SHADOW_TABLES: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-/// EXPERIMENT (LOSAT_X_BXLUTSHADOW): `Some(tables compared)` in shadow mode, for the exit summary.
-pub(crate) fn x_shadow_tables() -> Option<u64> {
-    (x_bxlut_mode() == 2).then(|| X_SHADOW_TABLES.load(std::sync::atomic::Ordering::Relaxed))
-}
-
 /// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): 0 = off (`build_ncbi_lookup`),
 /// 1 = BLASTP's table built in place by [`x_build_direct`], 2 = shadow (both builders, compared).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
@@ -790,7 +733,7 @@ pub(crate) fn x_bplut_shadow_tables() -> Option<u64> {
     (x_bplut_mode() == 2).then(|| X_BPLUT_SHADOW_TABLES.load(std::sync::atomic::Ordering::Relaxed))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see `x_dispatch`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see `build_ncbi_lookup_from_prepared`)
 // ```c
 //     for (i = 0; i < lookup->backbone_size; i++) {
 //         if (exact_backbone[i] != NULL) {
@@ -950,9 +893,10 @@ fn x_build_ncbi_lookup_counted(
     reference
 }
 
-/// EXPERIMENT (LOSAT_X_BXLUTSHADOW): assert that two tables are equal field by field.
+/// Assert that two tables are equal field by field (the shadow modes of BPLUT and TBXLUT, and the
+/// unit tests).
 pub(super) fn x_assert_same_table(direct: &BlastAaLookupTable, reference: &BlastAaLookupTable) {
-    x_assert_same_table_as("LOSAT_X_BXLUTSHADOW:", direct, reference);
+    x_assert_same_table_as("lookup table:", direct, reference);
 }
 
 // No NCBI counterpart: a check of the shadow modes; it changes no value NCBI computes.

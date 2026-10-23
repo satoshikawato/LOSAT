@@ -2549,12 +2549,12 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
 //                 if ( !adjust_search_failed ) {
 //                     newAlign = callbacks->redo_one_alignment(
 // ```
-// No NCBI counterpart: LOSAT_X_BXPAR probe. It records, per match, whether `Blast_AdjustScores`
+// No NCBI counterpart: probe of the BLASTX parallel redo. It records, per match, whether `Blast_AdjustScores`
 // ran (bit 0) and whether an alignment was redone first (bit 1), so a caller that redoes matches
 // out of order can tell which matrix a redo used. It is read by the BLASTX parallel redo and
 // does not change any value NCBI computes.
 thread_local! {
-    /// EXPERIMENT (LOSAT_X_BXPAR): what one match did with the matrix it was
+    /// What one match did with the matrix it was
     /// handed.  Bit 0: an adjustment succeeded (the matrix was replaced); bit 1:
     /// an alignment was redone before that, i.e. with the matrix left behind by
     /// an earlier match (redo_alignment.c:1232-1259 skips `Blast_AdjustScores`

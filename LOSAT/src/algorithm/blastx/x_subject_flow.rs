@@ -1,11 +1,11 @@
 //! EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0` or `LOSAT_X_DEFAULT=0`): the subject loop
-//! of a query chunk as a flow of tasks of `k` consecutive subjects (64, as `LOSAT_X_BXCHUNK`, when
+//! of a query chunk as a flow of tasks of `k` consecutive subjects (`search::X_BX_CHUNK` = 64, the waves' subjects per worker, when
 //! the variable is `1` or not a number from 2 to 65,536), searched ahead by the other threads of
 //! the pool and handed
 //! to the sink in subject order by the thread that runs the loop. Shadow:
 //! `LOSAT_X_BXSUBJFLOWSHADOW`.
 //!
-//! The waves of `search::search_core` (`LOSAT_X_BXCHUNK`) search `threads x 64` subjects, wait for
+//! The waves of `search::search_core` search `threads x X_BX_CHUNK` (= 64) subjects, wait for
 //! the slowest worker of the wave, then hand the wave's subjects to the sink on one thread while
 //! the other threads wait for the next wave. Here the helpers of `utils::xahead` search the tasks
 //! up to a window ahead of the owner (the thread of the loop) without stopping between waves; the
@@ -53,7 +53,9 @@ type Task = (
 /// EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k]): subjects per task; `None` when the switch is off.
 pub(super) fn subjects_per_task() -> Option<usize> {
     static K: OnceLock<Option<usize>> = OnceLock::new();
-    *K.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXSUBJFLOW", 2..=65_536, 64))
+    *K.get_or_init(|| {
+        crate::utils::xswitch::value("LOSAT_X_BXSUBJFLOW", 2..=65_536, super::X_BX_CHUNK)
+    })
 }
 
 /// No NCBI counterpart: reads the shadow switch; it does not change any value NCBI computes.
@@ -98,7 +100,7 @@ const CHUNK_FLOW_MIN_SUBJECTS: usize = 2_048;
 
 /// EXPERIMENT (LOSAT_X_BXCHUNKFLOW, in the strict set: on unless `=0` or `LOSAT_X_DEFAULT=0`): whether
 /// the chunks of a split query are searched one after another, each chunk's subjects as the flow
-/// on the whole pool, instead of side by side, one chunk per thread (`LOSAT_X_BXPAR`). It holds
+/// on the whole pool, instead of side by side, one chunk per thread. It holds
 /// where the flow runs in each chunk (`chosen`) and there are at least
 /// `CHUNK_FLOW_SUBJECTS_PER_THREAD` subjects per thread and `CHUNK_FLOW_MIN_SUBJECTS` subjects.
 /// With fewer subjects per thread the flow leaves threads idle in every chunk; with fewer subjects

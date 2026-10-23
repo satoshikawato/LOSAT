@@ -30,7 +30,7 @@ impl SearchPool<'static> {
     // NCBI runs a search without the thread launch when it is not multithreaded. This pool is what a
     // search that is itself one task of a parallel loop gets: it runs on one thread, in the NCBI
     // order. Scheduling only.
-    /// EXPERIMENT (LOSAT_X_BXBATCH): the pool a one-thread search gets, for a
+    /// The pool a one-thread search gets, for a
     /// search that is itself one task of a parallel loop.
     pub fn x_serial() -> Self {
         SearchPool {
@@ -257,7 +257,7 @@ where
 // the next chunk. Here one pool is built for the whole loop of query batches instead of one per
 // batch. Each batch is still searched by the same function with the same inputs, and the results
 // are used in the input order, so only the placement of work on threads changes.
-/// EXPERIMENT (LOSAT_X_BXPOOL): `with_search_pool` for work that is not `Send`
+/// `with_search_pool` for work that is not `Send`
 /// (it borrows the caller's output stream, for instance), so that one pool can
 /// span a whole loop of query batches instead of being rebuilt, threads and
 /// all, for every batch.

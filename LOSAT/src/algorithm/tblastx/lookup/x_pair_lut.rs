@@ -3,7 +3,7 @@
 //! from the query instead of being filtered out of the batch's full table.
 //!
 //! This file is a child module of `x_lut_direct.rs` (declared there with `#[path]`, as that file
-//! is for `backbone.rs`), so it uses the neighbour lists of LOSAT_X_BXLUT (`x_target_list`, the
+//! is for `backbone.rs`), so it uses the neighbour lists of the in-place builder (`x_target_list`, the
 //! per-thread memo) and the reference builder pieces of `backbone.rs` (`prepare_lookup_query`,
 //! `blast_lookup_index_query_exact_matches`) without changing them.
 //!

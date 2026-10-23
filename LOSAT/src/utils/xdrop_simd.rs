@@ -462,6 +462,12 @@ pub(crate) struct XdropScratch {
     surv: Vec<u64>,
     /// Traceback operations in walk order (alignment end -> start), run-length encoded.
     pub ops: Vec<(u8, u32)>,
+    /// The column of lane 0 of the rows (`ha` .. `e8`, `sb`): a kernel moves its lanes down when
+    /// the band moves right (`x_shift`), so the rows hold the band and not every column before it.
+    x_sh: usize,
+    /// The band start, in lanes, at which a kernel moves its rows (`LOSAT_X_DPWINDOW`); `usize::MAX`
+    /// when they hold every column.
+    x_win_at: usize,
 }
 
 impl XdropScratch {
@@ -492,6 +498,8 @@ impl XdropScratch {
             rows: Vec::new(),
             surv: Vec::new(),
             ops: Vec::new(),
+            x_sh: 0,
+            x_win_at: x_dp_window_at(),
         }
     }
 
@@ -523,6 +531,8 @@ impl XdropScratch {
             rows: Vec::new(),
             surv: vec![0; 64],
             ops: Vec::new(),
+            x_sh: 0,
+            x_win_at: x_dp_window_at(),
         }
     }
 
@@ -589,7 +599,78 @@ impl XdropScratch {
         self.trace.clear();
         self.rows.clear();
         self.ops.clear();
+        self.x_sh = 0;
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:641-649
+    // ```c
+    //         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
+    //
+    //             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
+    //                                           2 * gap_align->dp_mem_alloc);
+    // ```
+    // NCBI's `score_array` is indexed by column and grows to the last column of the band, like
+    // these rows before `LOSAT_X_DPWINDOW`. Here a kernel whose band start `first` reached
+    // `x_win_at` moves the lanes from `d` on down to lane 0 (`d` a multiple of 64 with at least 64
+    // lanes left below `first`) and lowers every column it keeps by `d`; `x_sh` adds `d` back
+    // where a column leaves the kernel (the best cell, the start of a traceback row). The lanes
+    // keep their values, the `d` lanes freed at the top are zero as lanes never written are, and
+    // the lanes below `first` are not read, so the DP is the same; only the rows' length changes.
+    // `wide`: the 16-bit rows (`ha`, `hb`, `e`), else the 8-bit ones (`h8a`, `h8b`, `e8`).
+    #[cold]
+    #[inline(never)]
+    fn x_shift(&mut self, d: usize, wide: bool) {
+        crate::utils::xreach::x_reach!("LOSAT_X_DPWINDOW", true);
+        if wide {
+            let n = self.dirty + 2 * PAD + 32;
+            x_shift_lanes(&mut self.ha, d, n);
+            x_shift_lanes(&mut self.hb, d, n);
+            x_shift_lanes(&mut self.e, d, n);
+            self.dirty = self.dirty.saturating_sub(d);
+        } else {
+            let n = self.dirty8 + 2 * PAD + 32;
+            x_shift_lanes(&mut self.h8a, d, n);
+            x_shift_lanes(&mut self.h8b, d, n);
+            x_shift_lanes(&mut self.e8, d, n);
+            self.dirty8 = self.dirty8.saturating_sub(d);
+        }
+        // `sb[PAD + k + 1]` holds column `k + x_sh`; lanes past `sb_filled` are filled before use
+        let n = (PAD + self.sb_filled + 1 + 32).min(self.sb.len());
+        if PAD + d < n {
+            self.sb.copy_within(PAD + d..n, PAD);
+        }
+        self.sb_filled = self.sb_filled.saturating_sub(d);
+        if self.fence_k != usize::MAX {
+            self.fence_k = self.fence_k.saturating_sub(d);
+        }
+        if self.bad_k != usize::MAX {
+            self.bad_k = self.bad_k.saturating_sub(d);
+        }
+        self.x_sh += d;
+    }
+}
+
+// No NCBI counterpart: lanes `PAD + d .. n` of one row move to `PAD ..`, and the `d` lanes at the
+// top become zero (`x_shift`).
+fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
+    let n = n.min(v.len());
+    if PAD + d < n {
+        v.copy_within(PAD + d..n, PAD);
+        v[n - d..n].fill(T::default());
+    } else if PAD < n {
+        v[PAD..n].fill(T::default());
+    }
+}
+
+/// No NCBI counterpart: `LOSAT_X_DPWINDOW` (strict set, a value switch): the band start, in
+/// lanes, at which the vector kernels move their rows down (`XdropScratch::x_shift`); built-in
+/// 1024, at least 128. Off: the rows hold every column up to the band's end, as before.
+pub(crate) fn x_dp_window_at() -> usize {
+    use std::sync::OnceLock;
+    static AT: OnceLock<usize> = OnceLock::new();
+    *AT.get_or_init(|| {
+        crate::utils::xswitch::value("LOSAT_X_DPWINDOW", 128..=1 << 40, 1024).unwrap_or(usize::MAX)
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:612-613,732
@@ -1497,12 +1578,26 @@ mod kernel {
         let mut wend = [b_size, 0usize];
         let mut cur = 0usize; // buffer holding the previous row
 
+        // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
+        // `sc.x_sh`
+        let win_at = sc.x_win_at;
+        let mut len2 = len2;
         for a in 1..=len1 {
+            if first >= win_at {
+                let d = (first - 64) & !63;
+                sc.x_shift(d, true);
+                first -= d;
+                b_size -= d;
+                len2 -= d;
+                wend[0] = wend[0].saturating_sub(d);
+                wend[1] = wend[1].saturating_sub(d);
+            }
             sc.ensure(b_size + num_extra + 64);
             if sc.sb_filled < b_size {
                 let to = (b_size + 64).min(len2 + 1);
+                let sh = sc.x_sh;
                 for k in sc.sb_filled..to {
-                    let ch = s.get(k);
+                    let ch = s.get(k + sh);
                     if ch as usize >= ncols {
                         if check_fence && ch == FENCE_SENTRY {
                             if sc.fence_k == usize::MAX {
@@ -1646,14 +1741,17 @@ mod kernel {
             wend[wi] = proc_end;
             cur = wi;
             if rs.slow != 0 {
-                b_off = rs.rec_b;
+                b_off = rs.rec_b + sc.x_sh;
                 a_off = a;
                 best_rel = lane0(rs.bestv) - bias;
             }
             if TB {
                 sc.trace.set_len(row_off + proc_end - first);
-                sc.rows
-                    .push((row_off as u32, first as u32, (proc_end - first) as u32));
+                sc.rows.push((
+                    row_off as u32,
+                    (first + sc.x_sh) as u32,
+                    (proc_end - first) as u32,
+                ));
             }
             if fence_row {
                 fence_hit = true;
@@ -1946,12 +2044,26 @@ mod kernel {
         let mut wend = [b_size, 0usize];
         let mut cur = 0usize;
 
+        // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
+        // `sc.x_sh`
+        let win_at = sc.x_win_at;
+        let mut len2 = len2;
         for a in 1..=len1 {
+            if first >= win_at {
+                let d = (first - 64) & !63;
+                sc.x_shift(d, false);
+                first -= d;
+                b_size -= d;
+                len2 -= d;
+                wend[0] = wend[0].saturating_sub(d);
+                wend[1] = wend[1].saturating_sub(d);
+            }
             sc.ensure(b_size + num_extra + 64);
             if sc.sb_filled < b_size {
                 let to = (b_size + 64).min(len2 + 1);
+                let sh = sc.x_sh;
                 for k in sc.sb_filled..to {
-                    let ch = s.get(k);
+                    let ch = s.get(k + sh);
                     if ch as usize >= ncols {
                         if check_fence && ch == FENCE_SENTRY {
                             if sc.fence_k == usize::MAX {
@@ -2090,14 +2202,17 @@ mod kernel {
             wend[wi] = proc_end;
             cur = wi;
             if rs.slow != 0 {
-                b_off = rs.rec_b;
+                b_off = rs.rec_b + sc.x_sh;
                 a_off = a;
                 best_rel = lane0_u8(rs.bestv) - bias;
             }
             if TB {
                 sc.trace.set_len(row_off + proc_end - first);
-                sc.rows
-                    .push((row_off as u32, first as u32, (proc_end - first) as u32));
+                sc.rows.push((
+                    row_off as u32,
+                    (first + sc.x_sh) as u32,
+                    (proc_end - first) as u32,
+                ));
             }
             if fence_row {
                 fence_hit = true;
@@ -3177,6 +3292,8 @@ mod tests {
         let mut sc = XdropScratch::new();
         let (mut handled, mut fences, mut ops_total) = (0usize, 0usize, 0usize);
         for case in 0..cases {
+            // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
+            sc.x_win_at = [128, 320, usize::MAX][case % 3];
             let n = if rng.below(2) == 0 { 16 } else { 28 };
             let scale = if rng.below(3) == 0 { 32 } else { 1 };
             let max_len = if rng.below(5) == 0 { 2500 } else { 300 };
@@ -3261,6 +3378,85 @@ mod tests {
                 "the SIMD kernel handled {handled} of {cases} cases"
             );
             assert!(fences > 0 && ops_total > 0);
+        }
+    }
+
+    // No NCBI counterpart: the band window of the vector kernels (`XdropScratch::x_shift`,
+    // `LOSAT_X_DPWINDOW`). Long problems whose band moves right (both scores of the blastn task
+    // and a protein matrix, score-only and traceback, forward columns) run with the rows moved
+    // from band start 128 on and with every column held: the offsets, score, fence flag, edit
+    // script and cell count are equal, equal to the scalar loops, and the moved rows stay short.
+    #[test]
+    fn band_window_keeps_every_result() {
+        let mut rng = Rng(0x5851_F42D_4C95_7F2D);
+        let (mut on, mut off) = (XdropScratch::new(), XdropScratch::new());
+        (on.x_win_at, off.x_win_at) = (128, usize::MAX);
+        let (mut shifted, mut handled) = (0usize, 0usize);
+        for case in 0..40 {
+            let n = if case % 2 == 0 { 16 } else { 28 };
+            let len = 1500 + rng.below(2500) as usize;
+            let p = random_problem(&mut rng, n, 1, len);
+            let (go, ge, x) = if case % 4 < 2 {
+                (5, 2, 110)
+            } else {
+                (11, 1, 38)
+            };
+            let (len1, len2) = (p.q.len(), p.s.len());
+            if len2 == 0 {
+                continue;
+            }
+            let rows = RowSeq::Bytes {
+                data: &p.q,
+                base: -1,
+                step: 1,
+            };
+            let cols = ColSeq {
+                data: &p.s,
+                base: 0,
+                step: 1,
+                zero_from: len2,
+            };
+            let scores = Scores::Flat { data: &p.m, n };
+            for tb in [false, true] {
+                let expected = reference(&p, len1, len2, go, ge, x, tb, false);
+                let a = xdrop_align(
+                    &rows, &cols, &scores, len1, len2, go, ge, x, tb, tb, &mut on,
+                );
+                let moved = on.x_sh;
+                let rows_len = on.h8a.len().max(on.ha.len());
+                let b = xdrop_align(
+                    &rows, &cols, &scores, len1, len2, go, ge, x, tb, tb, &mut off,
+                );
+                let (Some(a), Some(b)) = (a, b) else {
+                    continue;
+                };
+                handled += 1;
+                assert_eq!(a, b, "case {case} tb={tb} len1={len1} len2={len2}");
+                assert_eq!(on.ops, off.ops, "case {case} tb={tb} traceback");
+                assert_eq!(
+                    (a.a_offset, a.b_offset, a.score, a.fence_hit),
+                    (expected.0, expected.1, expected.2, expected.3),
+                    "case {case} tb={tb} against the scalar loops"
+                );
+                assert_eq!(on.ops, expected.4, "case {case} tb={tb} scalar traceback");
+                if moved > 0 {
+                    shifted += 1;
+                    assert!(
+                        rows_len <= 4096,
+                        "case {case}: rows of {rows_len} lanes after moving {moved} columns"
+                    );
+                }
+            }
+        }
+        if cfg!(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128"),
+            target_arch = "aarch64"
+        )) {
+            assert!(
+                handled > 40 && shifted > 20,
+                "handled {handled}, moved {shifted}"
+            );
         }
     }
 }

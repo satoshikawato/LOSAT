@@ -491,6 +491,8 @@ unsafe fn fill_cols(
     ncols: usize,
     check_fence: bool,
 ) {
+    // lane k holds column k + sh (band window, `XdropScratch::x_shift`)
+    let sh = sc.x_sh;
     let mut k = sc.sb_filled;
     if ncols > 0 && (s.step == 1 || s.step == -1) {
         let lim = _mm256_set1_epi8((ncols - 1) as i8);
@@ -499,17 +501,17 @@ unsafe fn fill_cols(
             6, 5, 4, 3, 2, 1, 0,
         );
         let dl = s.data.len() as isize;
-        while k + 32 <= to && k + 32 <= s.zero_from {
+        while k + 32 <= to && k + sh + 32 <= s.zero_from {
             let v = if s.step == 1 {
                 // columns k..k+32 are s.data[i..i + 32]
-                let i = s.base + k as isize;
+                let i = s.base + (k + sh) as isize;
                 if i < 0 || i + 32 > dl {
                     break;
                 }
                 ld(s.data.as_ptr().offset(i))
             } else {
                 // columns k..k+32 are s.data[i], s.data[i - 1], ..., s.data[i - 31]
-                let i = s.base - k as isize;
+                let i = s.base - (k + sh) as isize;
                 if i - 31 < 0 || i >= dl {
                     break;
                 }
@@ -526,7 +528,7 @@ unsafe fn fill_cols(
         }
     }
     for k in k..to {
-        let ch = s.get(k);
+        let ch = s.get(k + sh);
         if ch as usize >= ncols {
             if check_fence && ch == FENCE_SENTRY {
                 if sc.fence_k == usize::MAX {
@@ -795,7 +797,20 @@ unsafe fn align16<const TB: bool>(
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize; // buffer holding the previous row
 
+    // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
+    // `sc.x_sh`
+    let win_at = sc.x_win_at;
+    let mut len2 = len2;
     for a in 1..=len1 {
+        if first >= win_at {
+            let d = (first - 64) & !63;
+            sc.x_shift(d, true);
+            first -= d;
+            b_size -= d;
+            len2 -= d;
+            wend[0] = wend[0].saturating_sub(d);
+            wend[1] = wend[1].saturating_sub(d);
+        }
         sc.ensure(b_size + num_extra + 64);
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
@@ -997,14 +1012,17 @@ unsafe fn align16<const TB: bool>(
         wend[wi] = proc_end;
         cur = wi;
         if rs.slow {
-            b_off = rs.rec_b;
+            b_off = rs.rec_b + sc.x_sh;
             a_off = a;
             best_rel = (_mm256_cvtsi256_si32(rs.bestv) as i16 as i32) - bias;
         }
         if TB {
             sc.trace.set_len(row_off + proc_end - first);
-            sc.rows
-                .push((row_off as u32, first as u32, (proc_end - first) as u32));
+            sc.rows.push((
+                row_off as u32,
+                (first + sc.x_sh) as u32,
+                (proc_end - first) as u32,
+            ));
         }
         if fence_row {
             fence_hit = true;
@@ -1349,7 +1367,20 @@ unsafe fn align8<const TB: bool, const EM: bool>(
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize;
 
+    // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
+    // `sc.x_sh`
+    let win_at = sc.x_win_at;
+    let mut len2 = len2;
     for a in 1..=len1 {
+        if first >= win_at {
+            let d = (first - 64) & !63;
+            sc.x_shift(d, false);
+            first -= d;
+            b_size -= d;
+            len2 -= d;
+            wend[0] = wend[0].saturating_sub(d);
+            wend[1] = wend[1].saturating_sub(d);
+        }
         sc.ensure(b_size + num_extra + 64);
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
@@ -1523,14 +1554,17 @@ unsafe fn align8<const TB: bool, const EM: bool>(
         wend[wi] = proc_end;
         cur = wi;
         if slow {
-            b_off = rec_b;
+            b_off = rec_b + sc.x_sh;
             a_off = a;
             best_rel = (_mm_cvtsi128_si32(rx.bestv) & 0xFF) - bias;
         }
         if TB {
             sc.trace.set_len(row_off + proc_end - first);
-            sc.rows
-                .push((row_off as u32, first as u32, (proc_end - first) as u32));
+            sc.rows.push((
+                row_off as u32,
+                (first + sc.x_sh) as u32,
+                (proc_end - first) as u32,
+            ));
         }
         if fence_row {
             fence_hit = true;
@@ -1789,7 +1823,12 @@ mod tests {
         // [width 8 / 16][tb][reverse]
         let mut handled = [[[0usize; 2]; 2]; 2];
         let (mut fences, mut ops_total, mut declined, mut wide) = (0usize, 0usize, 0usize, 0usize);
+        // calls whose rows were moved: [width 8 / 16][128-bit / 256-bit]
+        let mut moved = [[0usize; 2]; 2];
         for case in 0..cases {
+            // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
+            let win_at = [128, 320, usize::MAX][case % 3];
+            (sc128.x_win_at, sc256.x_win_at, sc256z.x_win_at) = (win_at, win_at, win_at);
             let n = if rng.below(2) == 0 { 16 } else { 28 };
             let scale = if rng.below(3) == 0 { 32 } else { 1 };
             let long = rng.below(6) == 0;
@@ -2005,6 +2044,8 @@ mod tests {
                             assert_eq!(r.cells, expected.5, "{tag}: cells");
                         }
                         handled[usize::from(!wide8)][usize::from(tb)][usize::from(reverse)] += 1;
+                        moved[usize::from(!wide8)][0] += usize::from(sc128.x_sh > 0);
+                        moved[usize::from(!wide8)][1] += usize::from(sc256.x_sh > 0);
                         fences += usize::from(r.fence_hit);
                         ops_total += sc256.ops.len();
                         if !wide8 && r.cells > 256 * len1.min(len2) as u64 && len1.min(len2) > 500 {
@@ -2016,7 +2057,7 @@ mod tests {
         }
         eprintln!(
             "avx2 fuzz: cases={cases} handled[w8/w16][so/tb][fwd/rev]={handled:?} fences={fences} \
-             wide={wide} declined={declined}"
+             wide={wide} declined={declined} moved[w8/w16][128/256]={moved:?}"
         );
         if cases >= 200 {
             for (w, by_tb) in handled.iter().enumerate() {
@@ -2030,6 +2071,10 @@ mod tests {
                 }
             }
             assert!(fences > 0 && ops_total > 0 && wide > 0);
+            assert!(
+                moved.iter().flatten().all(|&n| n > 0),
+                "moved rows {moved:?}"
+            );
         }
     }
 

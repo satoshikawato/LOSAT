@@ -18,7 +18,7 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::XFlatCompresse
 thread_local! {
     // No NCBI counterpart: the scan's list of (subject offset, backbone index), reused across
     // subjects.
-    static X_CELLS: Cell<Option<Vec<u64>>> = const { Cell::new(None) };
+    static X_CELLS: Cell<Option<Vec<(i32, u32)>>> = const { Cell::new(None) };
 }
 
 /// `x_seed_fused_compressed::x_scan_two_hit_compressed` on the flat table (same arguments).
@@ -48,33 +48,102 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
 ) where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
+    // EXPERIMENT (LOSAT_X_BPSCANBF): on a table with enough cells used (LOSAT_X_BPSCANBFMIN), the
+    // offsets listed without a branch on the presence bit (`for_each_cell`).
+    if x_bp_scan_bf() && lookup.x_scan_bf_pays() {
+        x_scan_flat_bf(
+            lookup,
+            subject,
+            subject_length,
+            diag_array,
+            diag_mask,
+            diag_offset,
+            window,
+            word_size,
+            &mut candidate,
+        );
+        return;
+    }
+    x_scan_flat_in::<false, F>(
+        lookup,
+        subject,
+        subject_length,
+        diag_array,
+        diag_mask,
+        diag_offset,
+        window,
+        word_size,
+        &mut candidate,
+    );
+}
+
+/// EXPERIMENT (LOSAT_X_BPSCANBF): [`x_scan_two_hit_compressed_flat`] with the offsets listed
+/// without a branch on the presence bit. Out of line, and with a closure of its own type, so that
+/// the instance with the branch is compiled as without this one (`x_seed_fused::x_scan_two_hit_bf`).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_scan_flat_bf<F>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let mut own = |query_offset, subject_offset, last_hit, diff, entry: &mut DiagStruct| {
+        candidate(query_offset, subject_offset, last_hit, diff, entry)
+    };
+    x_scan_flat_in::<true, _>(
+        lookup,
+        subject,
+        subject_length,
+        diag_array,
+        diag_mask,
+        diag_offset,
+        window,
+        word_size,
+        &mut own,
+    );
+}
+
+/// The loop of [`x_scan_two_hit_compressed_flat`]; `BRANCH_FREE` is `for_each_cell`'s.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn x_scan_flat_in<const BRANCH_FREE: bool, F>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
     assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
     let prefetch_distance = x_prefetch_distance();
     let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
-    // EXPERIMENT (LOSAT_X_BPSCANBF): the offsets listed without a branch on the presence bit, on
-    // tables with enough cells used (LOSAT_X_BPSCANBFMIN).
-    let branch_free = x_bp_scan_bf() && lookup.x_scan_bf_pays();
-    lookup.for_each_cell(
-        subject,
-        subject_length,
-        branch_free,
-        &mut cells,
-        |s, cell_hits| {
-            for (i, &query_offset) in cell_hits.iter().enumerate() {
-                // Read ahead the entry of a later hit of this cell (a cache hint; see `x_scan_two_hit`).
-                if let Some(&ahead) = cell_hits.get(i + prefetch_distance) {
-                    x_prefetch(diag_array, ((ahead - s) & diag_mask) as usize);
-                }
-                let diag_coord = ((query_offset - s) & diag_mask) as usize;
-                // SAFETY: diag_coord <= diag_mask < diag_array.len() (asserted above).
-                let entry = unsafe { diag_array.get_unchecked_mut(diag_coord) };
-                if let Some((last_hit, diff)) = x_test_hit(entry, s, diag_offset, window, word_size)
-                {
-                    candidate(query_offset, s, last_hit, diff, entry);
-                }
+    lookup.for_each_cell::<BRANCH_FREE, _>(subject, subject_length, &mut cells, |s, cell_hits| {
+        for (i, &query_offset) in cell_hits.iter().enumerate() {
+            // Read ahead the entry of a later hit of this cell (a cache hint; see `x_scan_two_hit`).
+            if let Some(&ahead) = cell_hits.get(i + prefetch_distance) {
+                x_prefetch(diag_array, ((ahead - s) & diag_mask) as usize);
             }
-        },
-    );
+            let diag_coord = ((query_offset - s) & diag_mask) as usize;
+            // SAFETY: diag_coord <= diag_mask < diag_array.len() (asserted above).
+            let entry = unsafe { diag_array.get_unchecked_mut(diag_coord) };
+            if let Some((last_hit, diff)) = x_test_hit(entry, s, diag_offset, window, word_size) {
+                candidate(query_offset, s, last_hit, diff, entry);
+            }
+        }
+    });
     X_CELLS.with(|slot| slot.set(Some(cells)));
 }
 

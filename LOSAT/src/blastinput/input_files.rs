@@ -107,14 +107,12 @@ pub fn has_stream_position(file: &std::fs::File) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;
-        const FILE_TYPE_DISK: u32 = 1;
-        const FILE_TYPE_CHAR: u32 = 2;
-        #[link(name = "kernel32")]
-        extern "system" {
-            fn GetFileType(handle: *mut std::ffi::c_void) -> u32;
-            fn GetConsoleMode(handle: *mut std::ffi::c_void, mode: *mut u32) -> i32;
-        }
-        let handle: *mut std::ffi::c_void = file.as_raw_handle().cast();
+        use windows_sys::Win32::Foundation::HANDLE;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileType, FILE_TYPE_CHAR, FILE_TYPE_DISK,
+        };
+        use windows_sys::Win32::System::Console::GetConsoleMode;
+        let handle: HANDLE = file.as_raw_handle().cast();
         // SAFETY: `GetFileType` only reads the type of the handle it is given; the handle comes
         // from `file`, which is open for the call. A failure returns FILE_TYPE_UNKNOWN (0),
         // which has no position.

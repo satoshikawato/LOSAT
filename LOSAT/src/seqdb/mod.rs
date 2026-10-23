@@ -67,8 +67,8 @@ pub(crate) enum XDbIdxRead {
 
 // No NCBI counterpart: reads the LOSAT_X_DBIDXREAD / LOSAT_X_DBIDXREADSHADOW switches once; it does
 // not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_DBIDXREAD): a strict-set switch, on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-/// and it is not set; `LOSAT_X_DBIDXREADSHADOW` (any value) selects the shadow mode.
+/// EXPERIMENT (LOSAT_X_DBIDXREAD): a strict-set switch, on unless it is `0`;
+/// `LOSAT_X_DBIDXREADSHADOW` (any value) selects the shadow mode.
 pub(crate) fn x_dbidxread() -> XDbIdxRead {
     static MODE: OnceLock<XDbIdxRead> = OnceLock::new();
     *MODE.get_or_init(|| {

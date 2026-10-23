@@ -13,7 +13,7 @@ use super::coordination::collect_lowercase_masks;
 // No NCBI counterpart: reads the LOSAT_X_BNSTORE variable once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BNSTORE): a switch of the strict set (`utils/xswitch.rs`): on unless it
-/// is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+/// is `0`.
 pub(crate) fn x_bnstore() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNSTORE"))

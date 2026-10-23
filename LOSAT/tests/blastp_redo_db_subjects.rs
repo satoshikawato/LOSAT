@@ -1,7 +1,7 @@
 //! blastp `-db` searches with `LOSAT_X_BPREDODBSUBJ` (`src/algorithm/blastp/x_redo_subjects.rs`).
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): on unless its variable is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. With it on, the composition redo reads the subject of each
+//! The switch is in the strict set (`src/utils/xswitch.rs`): on unless its variable is `0`.
+//! With it on, the composition redo reads the subject of each
 //! match from the database when it redoes the match, instead of a copy of every subject of the
 //! preliminary hit lists made before the redo, and the reports read the subjects of the final hit
 //! lists again. These tests compare the reports with the switch off and on on every redo path (the

@@ -1,9 +1,8 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp `-db` reports with `LOSAT_X_BPLISTEDLEAN`
 //! (`src/algorithm/blastp/blast_engine/database/x_listed_lean.rs`) on whole searches.
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): on unless its variable is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. With it on, the reports of a `-db` search hold the titles
+//! The switch is in the strict set (`src/utils/xswitch.rs`): on unless its variable is `0`.
+//! With it on, the reports of a `-db` search hold the titles
 //! of the reported subjects only and read the letters of the listed subjects from their stored
 //! residues, instead of one record (ASCII letters and title) per listed subject. These tests
 //! compare the reports with the switch off and on (one search of all queries and the block search

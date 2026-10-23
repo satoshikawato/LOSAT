@@ -22,9 +22,9 @@
 //! ...
 //! diag_table->diag_mask = diag_array_length-1;
 //! ```
-//! The switch is in the strict set (on unless `LOSAT_X_TBXBAND=0`, or `LOSAT_X_DEFAULT=0` and it is
-//! not set). The tests compare the reports of the default and of `LOSAT_X_TBXBAND=0`, read
-//! `[X_STATS] PAIRPAR ... units= fallback_guard= fallback_cost= band=`.
+//! The switch is in the strict set (on unless `LOSAT_X_TBXBAND=0`). The tests compare the reports
+//! of the default and of `LOSAT_X_TBXBAND=0`, read `[X_STATS] PAIRPAR ... units= fallback_guard=
+//! fallback_cost= band=`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

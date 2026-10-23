@@ -11,7 +11,7 @@
 //!     ...
 //!         right_score = s_BlastAaExtendRight(matrix, subject, query, ...);
 //! ```
-//! The switch is in the strict set (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set).
+//! The switch is in the strict set (on unless it is `0`).
 //! The path gives the reference extension's result (the module's argument), so the property under
 //! test is that the report does not depend on it, for subjects read from FASTA (`-subject`) and
 //! from a database (`-db`, read in blocks and, with `LOSAT_X_BXDBSTREAM=0`, from the store), whose
@@ -38,7 +38,6 @@ const NO_HITBF: (&str, &str) = ("LOSAT_X_BXHITBF", "0");
 const NO_STREAM: (&str, &str) = ("LOSAT_X_BXDBSTREAM", "0");
 /// The fused loop on every CPU and every table (the per-hit cell test without AVX2).
 const FUSED: [(&str, &str); 2] = [("LOSAT_X_BXDIAG", "1"), ("LOSAT_X_BXDIAGMIN", "0")];
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -231,8 +230,7 @@ fn blastx_reach(args: &[&str], env: &[(&str, &str)]) -> (Run, PathBuf) {
 }
 
 /// Default, `=0`, the shadow (by default, in the fused loop, in the direct loop with and without
-/// LOSAT_X_BXHITBF, and for `-db` from the store) and `LOSAT_X_DEFAULT=0` give the same report, on
-/// `-subject` and `-db`; at 2 threads the default and the shadow. The shadow compares extensions
+/// LOSAT_X_BXHITBF, and for `-db` from the store) give the same report, on `-subject` and `-db`; at 2 threads the default and the shadow. The shadow compares extensions
 /// and records the switch's new side (and LOSAT_X_BXDIAG's in the fused loop).
 #[test]
 fn reports_do_not_depend_on_the_sentinel_extension() {
@@ -267,7 +265,6 @@ fn reports_do_not_depend_on_the_sentinel_extension() {
                     ("off", &[OFF][..]),
                     ("shadow direct", &[SHADOW, DIRECT][..]),
                     ("shadow direct no-bf", &[SHADOW, DIRECT, NO_HITBF][..]),
-                    ("LOSAT_X_DEFAULT=0", &[DEFAULT_OFF][..]),
                 ]);
                 if source == "-db" {
                     arms.push(("shadow store", &[SHADOW, NO_STREAM][..]));

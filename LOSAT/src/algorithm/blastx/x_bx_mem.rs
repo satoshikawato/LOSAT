@@ -1,15 +1,46 @@
-//! PROTOTYPE (v4-A s6, blastx memory at many threads; switches read as plain variables, opt-in):
+//! BLASTX's memory at many threads: the diagonal tables of the pool's workers kept one per thread
+//! (`LOSAT_X_BXDIAGKEEP`), and at most K query batches or chunks searched at a time
+//! (`LOSAT_X_BXUNITCAP[=K]`). Both are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`);
+//! the third part, the lookup tables' neighbour lists shared by all threads and their vectors
+//! kept between builds, is `LOSAT_X_BXLUTPOOL` (`tblastx/lookup/x_lut_direct.rs`).
 //!
-//! - `LOSAT_X_BXDIAGTLS=1`: the diagonal tables of the pool's workers (subject waves, the subject
-//!   flow's helpers, the chunks' subject tasks below) are one table per thread, kept by the thread
-//!   between searches, instead of `threads` new tables made by the searching thread for each query
-//!   batch or chunk searched with the pool inside.
-//! - `LOSAT_X_BXUNITCAP=K`: at more than K threads, at most K query batches (`LOSAT_X_BXFLOW`) or
-//!   chunks of a split query are searched at a time, each with the pool inside (its subjects as
-//!   tasks), instead of one batch or chunk per thread.
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-271
+//! ```c
+//!         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
+//! ...
+//!                 if (IsMultiThreaded()) {
+//!                      x_LaunchMultiThreadedSearch(*chunk_data);
+//!                 } else {
+//!                     retval =
+//!                         CPrelimSearchRunner(*chunk_data, opts_memento.get())();
+//! ```
+//! NCBI builds one lookup table per query chunk and searches the chunks one after another; with
+//! `-subject` it runs one thread. LOSAT searches query batches (`LOSAT_X_BXFLOW`) and the chunks of
+//! a split query (`LOSAT_X_BXPAR`) side by side, one per thread, each with a lookup table of its
+//! own (about 3-4 MiB for a batch of 10,002 bases), and a batch searched with the pool inside makes
+//! one diagonal table per pool thread. Every thread that ever built a table keeps that much in its
+//! glibc arena after the table is freed, so the maximum RSS grew by 4-9 MiB per thread and passed
+//! NCBI's `-subject` maximum at 17-20 threads (v4-MEM REPORT §9.3, §10.3).
 //!
-//! A table's history does not change what a subject computes while no diagonal offset passes
-//! 2^30 (`x_subject_flow` module comment); both apply only where `x_subject_flow` allows that.
+//! - `LOSAT_X_BXDIAGKEEP`: where the subject flow (`x_subject_flow.rs`) searches a chunk's
+//!   subjects, each helper takes the diagonal table its thread keeps (one of the chunk's length and
+//!   window, else a new one) and gives it back when it ends, instead of a table per helper made by
+//!   the searching thread for each chunk; the chunks' subject tasks of `LOSAT_X_BXUNITCAP` do the
+//!   same.
+//! - `LOSAT_X_BXUNITCAP[=K]` (built-in K = 8): with more than K threads, at most K query batches are
+//!   searched at a time by the batch flow, each with the pool inside (the subject flow), instead of
+//!   one batch per thread; the chunks of a split query are searched in waves of K chunks, each
+//!   chunk's subjects as tasks of `UNIT_CAP_SUBJECTS_PER_TASK` on the pool, instead of waves of one
+//!   chunk per thread. The lookup tables alive at once are then at most K (and K more for the
+//!   chunks of a split query inside a batch of the flow), whatever the number of threads.
+//!
+//! Exactness. A subject's computation depends on the subject and the query chunk alone, not on the
+//! diagonal table it runs on, while no diagonal offset passes 2^30 (`x_subject_flow.rs`, module
+//! comment); both switches act only where `x_subject_flow::offsets_stay_below_2_30` holds. The batch
+//! flow writes each batch's reports in the reader's order, and a capped batch is searched by the
+//! same function as the batches the flow searches with the pool inside; the chunk waves hand the
+//! sink every chunk and subject in the order of the serial chunk loop, as before. Only which thread
+//! computes what, and when, changes.
 
 use super::{compute_subject, SubjectComputation};
 use crate::algorithm::blastx::{
@@ -23,43 +54,42 @@ use anyhow::Result;
 use std::cell::RefCell;
 use std::sync::OnceLock;
 
-// No NCBI counterpart: reads an experiment switch.
-fn env_on(name: &str) -> bool {
-    std::env::var_os(name).is_some_and(|v| !v.is_empty() && v != "0")
-}
-
-/// PROTOTYPE (LOSAT_X_BXDIAGTLS): whether the workers keep one diagonal table per thread.
-pub(crate) fn diag_tls(options: &ResolvedOptions, subjects: Subjects<'_>) -> bool {
+/// No NCBI counterpart: whether the pool's workers keep one diagonal table per thread
+/// (`LOSAT_X_BXDIAGKEEP`, module comment), and so may run on a table another chunk or batch used.
+pub(crate) fn diag_keep(options: &ResolvedOptions, subjects: Subjects<'_>) -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| env_on("LOSAT_X_BXDIAGTLS"))
-        && super::x_subject_flow::offsets_stay_below_2_30(
-            options.window_size,
-            subjects.longest_length(),
-        )
+    if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXDIAGKEEP")) {
+        return false;
+    }
+    let own = super::x_subject_flow::offsets_stay_below_2_30(
+        options.window_size,
+        subjects.longest_length(),
+    );
+    crate::utils::xreach::x_reach!("LOSAT_X_BXDIAGKEEP", own);
+    own
 }
 
-/// PROTOTYPE (LOSAT_X_BXUNITCAP=K): `Some(K)` where more than K threads search.
-pub(crate) fn unit_cap(threads: usize) -> Option<usize> {
+/// No NCBI counterpart: the built-in K of `LOSAT_X_BXUNITCAP` (units searched at a time).
+const UNIT_CAP: usize = 8;
+
+/// No NCBI counterpart: subjects per task of a chunk searched with the pool inside under
+/// `LOSAT_X_BXUNITCAP`; 543 subjects make 34 tasks, enough for the threads a chunk is left.
+const UNIT_CAP_SUBJECTS_PER_TASK: usize = 16;
+
+/// No NCBI counterpart: `Some(K)` where `LOSAT_X_BXUNITCAP[=K]` caps the units searched at a time:
+/// the switch is on, there are more than K threads, and the workers keep their diagonal tables
+/// (`diag_keep`; else each of the K units would make a table per thread).
+pub(crate) fn unit_cap(
+    threads: usize,
+    options: &ResolvedOptions,
+    subjects: Subjects<'_>,
+) -> Option<usize> {
     static K: OnceLock<Option<usize>> = OnceLock::new();
-    K.get_or_init(|| {
-        std::env::var("LOSAT_X_BXUNITCAP")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .filter(|k| (2..=4096).contains(k))
-    })
-    .filter(|&k| threads > k)
-}
-
-/// PROTOTYPE (LOSAT_X_BXUNITCAP): subjects per task of a chunk searched with the pool inside.
-fn subjects_per_task() -> usize {
-    static K: OnceLock<usize> = OnceLock::new();
-    *K.get_or_init(|| {
-        std::env::var("LOSAT_X_BXUNITCAPTASK")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .filter(|k| (1..=65_536).contains(k))
-            .unwrap_or(16)
-    })
+    let k = (*K
+        .get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXUNITCAP", 2..=4_096, UNIT_CAP)))?;
+    let own = threads > k && diag_keep(options, subjects);
+    crate::utils::xreach::x_reach!("LOSAT_X_BXUNITCAP", own);
+    own.then_some(k)
 }
 
 thread_local! {
@@ -67,9 +97,9 @@ thread_local! {
     static X_DIAG: RefCell<Option<Diagonals>> = const { RefCell::new(None) };
 }
 
-/// No NCBI counterpart (buffer reuse): a worker's diagonal table, taken on first use from the
-/// thread that uses it (its kept table where the length and window fit, else a new one) and given
-/// back to the thread that drops it.
+/// No NCBI counterpart (buffer reuse, `LOSAT_X_BXDIAGKEEP`): a worker's diagonal table, taken on
+/// first use from the thread that uses it (the table that thread keeps where its length and window
+/// are the chunk's, else a new one) and given back to the thread that drops it.
 pub(crate) struct XDiagSlot {
     table: Option<Diagonals>,
     length: usize,
@@ -105,8 +135,8 @@ impl Drop for XDiagSlot {
     }
 }
 
-/// No NCBI counterpart (buffer reuse): the diagonal table a subject-flow task runs on: the
-/// owner's, a helper's own, or a helper's thread's (`XDiagSlot`).
+/// No NCBI counterpart (buffer reuse): the diagonal table a task of the subject flow runs on: the
+/// loop thread's own, a helper's own (made for the chunk), or a helper's thread's (`XDiagSlot`).
 pub(crate) enum XScratch<'a> {
     Borrowed(&'a mut Diagonals),
     Owned(Diagonals),
@@ -129,12 +159,14 @@ impl XScratch<'_> {
 //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //            != BLAST_SEQSRC_EOF) {
 // ```
-/// PROTOTYPE (LOSAT_X_BXUNITCAP): `x_compute_chunk`'s subject loop as tasks of
-/// `subjects_per_task()` consecutive subjects on the pool, each on its thread's diagonal table; the
-/// subjects with something for the sink, in subject order, or the error of the first subject that
-/// failed.
+// NCBI scans a chunk's subjects one after another on one diagonal table. Here they are tasks of
+// consecutive subjects on the pool, each task on its thread's table (module comment: the table's
+// history does not change a subject's computation), and the results are kept in subject order.
+/// `search::x_compute_chunk`'s subject loop as tasks of `UNIT_CAP_SUBJECTS_PER_TASK` consecutive
+/// subjects on the pool (`LOSAT_X_BXUNITCAP`): the subjects with something for the sink, in subject
+/// order, or the error of the first subject that failed.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn chunk_subjects_par(
+pub(super) fn chunk_subjects_on_pool(
     subjects: Subjects<'_>,
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
@@ -148,12 +180,13 @@ pub(super) fn chunk_subjects_par(
     let last = batch.contexts.last().expect("BLASTX contexts");
     let length = last.offset + last.length;
     let n = subjects.len();
-    let k = subjects_per_task();
+    let k = UNIT_CAP_SUBJECTS_PER_TASK;
     let parts: Vec<Result<Vec<(usize, SubjectComputation)>>> = (0..n.div_ceil(k))
         .into_par_iter()
         .with_max_len(1)
         .map(|task| {
             let (first, end) = (task * k, n.min((task + 1) * k));
+            // EXPERIMENT (LOSAT_X_BXDBSTREAM): the task's subjects read as one block.
             let block = subjects.x_read_range(first, end)?;
             let subjects = subjects.x_with_block(block.as_ref());
             let mut slot = XDiagSlot::new(length, options.window_size);

@@ -160,7 +160,7 @@ impl Diagonals {
     //     return 0;
     // }
     // ```
-    // No NCBI counterpart: buffer reuse only (LOSAT_X_BXDIAGTLS, x_bx_mem.rs).
+    // No NCBI counterpart: buffer reuse only (LOSAT_X_BXDIAGKEEP, search/x_bx_mem.rs).
     /// Whether this table has the length and window `new(query_length, window)` gives.
     pub(crate) fn x_fits(&self, query_length: usize, window: i32) -> bool {
         let n = usize::try_from(window)
@@ -259,8 +259,8 @@ pub enum Lookup {
     Compressed(BlastCompressedAaLookupTable),
 }
 
-// PROTOTYPE (LOSAT_X_BXLUTPOOL): a dropped table's vectors are kept for the next build (buffer
-// reuse only; no NCBI counterpart).
+// No NCBI counterpart: buffer reuse only (LOSAT_X_BXLUTPOOL, tblastx/lookup/x_lut_direct.rs): a
+// dropped table's vectors are kept for the next build instead of freed.
 impl Drop for Lookup {
     fn drop(&mut self) {
         if let Self::Standard(table) = self {

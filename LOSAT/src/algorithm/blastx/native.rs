@@ -891,10 +891,15 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                 // above x_flush) also searches several query batches at once and prints them in
                 // order; the flow changes only LOSAT's scheduling of the searches above.
                 if super::runtime::x_bx_flow() {
-                    // PROTOTYPE (LOSAT_X_BXUNITCAP=K): at most K batches searched at a time, each
-                    // with the pool inside.
-                    let x_cap = super::search::x_bx_mem::unit_cap(pool.threads())
-                        .filter(|_| super::search::x_bx_mem::diag_tls(&options, search_subjects));
+                    // Dispatch point (LOSAT_X_BXUNITCAP=K, in the strict set): each batch searched
+                    // with the pool inside (the subject flow) instead of one batch per thread, and
+                    // at most K at a time: the flow spawns a batch once one batch follows it and
+                    // reads on while fewer than K + 1 are unwritten (search/x_bx_mem.rs).
+                    let x_cap = super::search::x_bx_mem::unit_cap(
+                        pool.threads(),
+                        &options,
+                        search_subjects,
+                    );
                     let (x_bound, x_lookahead) = match x_cap {
                         Some(k) => (k + 1, 1),
                         None => (x_wave, pool.threads()),

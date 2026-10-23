@@ -88,16 +88,22 @@ thread_local! {
     static X_MEMO: RefCell<Option<XNeighborMemo>> = const { RefCell::new(None) };
 }
 
-// PROTOTYPE (LOSAT_X_BXLUTPOOL, v4-A s6): BLASTX tables built with one set of neighbour lists for
-// all threads, and on vectors kept between builds (the table's when it is dropped, the build's
-// counts and exact backbone after the build), instead of new vectors on each building thread
-// (whose glibc arena keeps them resident after they are freed). Buffer reuse only.
-/// PROTOTYPE (LOSAT_X_BXLUTPOOL): whether BLASTX builds its tables pooled.
+// No NCBI counterpart (buffer reuse and one memo for all threads; the table is the one
+// `x_build_direct` builds): LOSAT_X_BXLUTPOOL, in the strict set (on unless `=0` or
+// `LOSAT_X_DEFAULT=0`). NCBI builds a BLASTX table with calloc'd vectors and frees them with the
+// search (blast_aalookup.c BlastAaLookupTableNew / BlastAaLookupFinalize, cited above). LOSAT builds
+// one per query batch or chunk searched side by side; a thread's glibc arena keeps what the thread
+// allocated after it is freed, so every building thread kept a table's worth (3-6 MiB with the
+// build's counts, exact backbone and its own neighbour memo). Pooled builds read one set of
+// neighbour lists shared by all threads (`XSharedMemo`, filled as the per-thread memo is), take the
+// table's vectors from the tables dropped before (`x_give_back_pooled`) and the build's counts and
+// exact backbone from the builds before (`XBuildTemps`), each cleared and zero-filled to the sizes
+// of the new table as calloc gives them; the pool holds as many sets as builds and tables were alive
+// at once. The values written are those of `x_build_direct`.
+/// Whether BLASTX builds its tables pooled (`LOSAT_X_BXLUTPOOL`).
 pub(crate) fn x_bx_lut_pool() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var_os("LOSAT_X_BXLUTPOOL").is_some_and(|v| !v.is_empty() && v != "0")
-    })
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLUTPOOL"))
 }
 
 /// No NCBI counterpart (memoised neighbour lists shared by threads, `XNeighborMemo` otherwise).
@@ -163,8 +169,10 @@ struct XBuildTemps {
     chains: Option<LookupBackboneChains>,
 }
 
-// SAFETY-free note: the exact backbone's raw block pointers point into its own slabs, which move
-// with it; a kept backbone is reset (every cell empty) before the next build.
+// SAFETY: the exact backbone's block pointers point into slabs it owns (boxes, which do not move
+// when the backbone moves) and are only read through it; a kept backbone is reset (every cell
+// empty, every slab spare) before the next build, so no pointer outlives its build. The kept
+// temporaries are moved between threads under the pool's lock, never shared.
 unsafe impl Send for XBuildTemps {}
 
 static X_BX_TEMPS: std::sync::Mutex<Vec<XBuildTemps>> = std::sync::Mutex::new(Vec::new());
@@ -188,8 +196,7 @@ fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize) -> Vec<T> {
     vector
 }
 
-/// PROTOTYPE (LOSAT_X_BXLUTPOOL): [`x_build_direct`] with the shared neighbour lists and kept
-/// vectors.
+/// [`x_build_direct`] with the shared neighbour lists and kept vectors (`LOSAT_X_BXLUTPOOL`).
 pub(super) fn x_build_direct_pooled(
     prepared: PreparedLookupQuery,
     threshold: i32,
@@ -209,8 +216,9 @@ pub(super) fn x_build_direct_pooled(
     .map(|table| table.expect("pooled vectors grow to any table"))
 }
 
-/// PROTOTYPE (LOSAT_X_BXLUTPOOL): keeps `table`'s backbone, overflow and pv vectors for the next
-/// pooled build (the table is left empty).
+// No NCBI counterpart: buffer reuse (`LOSAT_X_BXLUTPOOL`); NCBI frees the vectors.
+/// Keeps `table`'s backbone, overflow and pv vectors for the next pooled build (the table is left
+/// empty).
 pub(crate) fn x_give_back_pooled(table: &mut BlastAaLookupTable) {
     let vectors = XAaVectors {
         backbone: std::mem::take(&mut table.backbone),
@@ -1255,6 +1263,58 @@ mod tests {
     //             /* set the corresponding bit in the pv_array */
     //             PV_SET(pv, i, PV_ARRAY_BTS);
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:321-336
+    // ```c
+    //       lookup->thick_backbone =
+    //             calloc(lookup->backbone_size, sizeof(AaLookupBackboneCell));
+    // ```
+    // LOSAT_X_BXLUTPOOL: a table built on vectors another table and another build left (cleared
+    // and zero-filled as calloc gives them) and with the neighbour lists shared by all threads is
+    // the reference table: after a smaller and a larger table, with two tables alive at once, and
+    // after the shared lists change key.
+    #[test]
+    fn pooled_tables_equal_the_reference_on_kept_vectors() {
+        let mut seed = 23u64;
+        let mut low_complexity = vec![1u8; 400];
+        low_complexity.extend(residues(&mut seed, 60));
+        let small = vec![vec![frame(residues(&mut seed, 300), vec![], 1)]];
+        let large = vec![
+            vec![
+                frame(residues(&mut seed, 2_500), vec![(100, 140)], 1),
+                frame(low_complexity, vec![(350, 399)], -1),
+            ],
+            vec![frame(residues(&mut seed, 1_800), vec![], 2)],
+        ];
+        let pooled = |queries: &[Vec<QueryFrame>], threshold: i32, matrix: ScoringMatrix| {
+            let reference =
+                build_lookup_from_prepared(prepared(queries, matrix), threshold, matrix, 3).0;
+            let table = match x_build_direct_pooled(prepared(queries, matrix), threshold, matrix, 3)
+            {
+                Ok(table) => table,
+                Err(_) => panic!("in-place builder declined"),
+            };
+            x_assert_same_table(&table, &reference);
+            table
+        };
+        for (queries, threshold) in [(&small, 12), (&large, 11), (&small, 13), (&large, 12)] {
+            let mut table = pooled(queries, threshold, ScoringMatrix::Blosum62);
+            x_give_back_pooled(&mut table);
+            assert!(table.backbone.is_empty() && table.overflow.is_empty() && table.pv.is_empty());
+        }
+        let mut first = pooled(&large, 12, ScoringMatrix::Blosum62);
+        let mut second = pooled(&small, 12, ScoringMatrix::Blosum62);
+        x_give_back_pooled(&mut first);
+        x_give_back_pooled(&mut second);
+        for (queries, threshold, matrix) in [
+            (&small, 12, ScoringMatrix::Blosum45),
+            (&large, 11, ScoringMatrix::Pam30),
+            (&large, 12, ScoringMatrix::Blosum62),
+        ] {
+            let mut table = pooled(queries, threshold, matrix);
+            x_give_back_pooled(&mut table);
+        }
+    }
+
     #[test]
     fn in_place_table_of_an_all_masked_query_is_empty() {
         let mut seed = 11u64;

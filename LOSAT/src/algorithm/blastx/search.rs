@@ -500,8 +500,9 @@ const X_BX_CHUNK: usize = 64;
 #[path = "x_subject_flow.rs"]
 pub(crate) mod x_subject_flow;
 
-// PROTOTYPE (LOSAT_X_BXDIAGTLS, LOSAT_X_BXUNITCAP): blastx memory at many threads (a child module,
-// so that it uses compute_subject and SubjectComputation).
+// LOSAT_X_BXDIAGKEEP, LOSAT_X_BXUNITCAP: the workers' diagonal tables kept one per thread, and at
+// most K units searched at a time (a child module, so that it uses compute_subject and
+// SubjectComputation).
 #[cfg(feature = "parallel")]
 #[path = "x_bx_mem.rs"]
 pub(crate) mod x_bx_mem;
@@ -688,8 +689,9 @@ pub(crate) fn search_core(
         let chunks = if x_chunks_par {
             use rayon::prelude::*;
             crate::utils::threading::report_stage("blastx", "query_chunks", chunks.len(), true);
-            let x_cap = x_bx_mem::unit_cap(pool.threads())
-                .filter(|_| x_bx_mem::diag_tls(options, subjects));
+            // Dispatch point (LOSAT_X_BXUNITCAP, in the strict set): waves of K chunks, each
+            // chunk's subjects as tasks on the pool (x_bx_mem.rs).
+            let x_cap = x_bx_mem::unit_cap(pool.threads(), options, subjects);
             let wave = x_cap.unwrap_or(pool.threads()).max(2);
             for wave_chunks in chunks.chunks(wave) {
                 let computed: Vec<_> = pool.install(|| {
@@ -854,13 +856,14 @@ pub(crate) fn search_core(
             };
             #[cfg(feature = "parallel")]
             let x_flow_k = x_subject_flow::chosen(pool, diagnostics, options, subjects);
-            // PROTOTYPE (LOSAT_X_BXDIAGTLS): only where the flow searches the subjects (the waves
-            // below then have nothing to do).
+            // Dispatch point (LOSAT_X_BXDIAGKEEP, in the strict set): the flow's helpers run on the
+            // tables their threads keep (x_bx_mem.rs); only where the flow searches the subjects
+            // (the waves below then have nothing to do).
             #[cfg(feature = "parallel")]
-            let x_tls =
-                pool.enabled() && x_flow_k.is_some() && x_bx_mem::diag_tls(options, subjects);
+            let x_keep =
+                pool.enabled() && x_flow_k.is_some() && x_bx_mem::diag_keep(options, subjects);
             #[cfg(feature = "parallel")]
-            let mut worker_diagonals = if pool.enabled() && !x_tls {
+            let mut worker_diagonals = if pool.enabled() && !x_keep {
                 (0..subjects.len().min(pool.threads()))
                     .map(|_| Diagonals::new(last.offset + last.length, options.window_size))
                     .collect::<Result<Vec<_>>>()?
@@ -876,7 +879,7 @@ pub(crate) fn search_core(
             #[cfg(feature = "parallel")]
             let x_flowed = if let Some(x_k) = x_flow_k {
                 let x_t = super::x_timing::lap();
-                let helper_tables = if x_tls {
+                let helper_tables = if x_keep {
                     (1..pool.threads())
                         .map(|_| {
                             x_bx_mem::XScratch::Slot(x_bx_mem::XDiagSlot::new(
@@ -1271,7 +1274,7 @@ fn x_compute_chunk(
             min_subject_length,
             Some(fixed_spaces),
         )?;
-        let results = x_bx_mem::chunk_subjects_par(
+        let results = x_bx_mem::chunk_subjects_on_pool(
             subjects,
             batch,
             &params,

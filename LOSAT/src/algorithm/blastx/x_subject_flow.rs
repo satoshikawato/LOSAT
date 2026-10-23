@@ -266,8 +266,9 @@ fn x_shadow_check(kept: &[(usize, SubjectComputation)], failed_at: Option<usize>
 /// ```
 /// The subject loop of one query chunk: every subject of `subjects` in oid order, with the sink
 /// calls of the waves' replay loop (`subject_start`, `containment`, `preliminary_purge`,
-/// `subject`); `diagonals` is the owner's table, `helper_tables` one table per helper. Returns the
-/// number of subjects handed to the sink.
+/// `subject`); `diagonals` is the owner's table, `helper_tables` one table per helper (its own, or
+/// with `LOSAT_X_BXDIAGKEEP` the one its thread keeps, `x_bx_mem::XScratch`). Returns the number of
+/// subjects handed to the sink.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     k: usize,

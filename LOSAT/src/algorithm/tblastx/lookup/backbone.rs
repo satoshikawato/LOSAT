@@ -32,7 +32,7 @@ pub(crate) use x_lut_direct::{x_tbxlut_reach_stub, x_tbxlut_shadow_tables};
 // the comparison of its shadow mode (x_lut_direct.rs); no NCBI counterpart for the re-export
 // itself.
 pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table, XAaSpares};
-// PROTOTYPE (LOSAT_X_BXLUTPOOL): the BLASTX table's vectors given back for the next build.
+// LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build.
 pub(crate) use x_lut_direct::{x_bx_lut_pool, x_give_back_pooled};
 // EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
 // path's group tables (x_pair_lut.rs, a child module of x_lut_direct.rs), used by
@@ -246,7 +246,7 @@ struct XChainArena {
     remaining: usize,
     /// Blocks chains have left, by size class (`1 << class` ints).
     free: Vec<Vec<std::ptr::NonNull<i32>>>,
-    /// PROTOTYPE (LOSAT_X_BXLUTPOOL): slabs of `SLAB_INTS` kept by `x_reset` for the next build.
+    /// Slabs of `SLAB_INTS` kept by `x_reset` for the next build (`LOSAT_X_BXLUTPOOL`).
     spare: Vec<Box<[i32]>>,
 }
 
@@ -264,7 +264,8 @@ impl XChainArena {
         }
     }
 
-    // No NCBI counterpart (buffer reuse): every block given up at once, the slabs kept.
+    // No NCBI counterpart (buffer reuse, `LOSAT_X_BXLUTPOOL`): every block given up at once, the
+    // slabs kept.
     fn x_reset(&mut self) {
         for slab in self.slabs.drain(..) {
             if slab.len() == Self::SLAB_INTS {

@@ -270,7 +270,12 @@ impl Opening {
             return off(Off::StandardInput);
         }
         let bytes = match file.metadata() {
-            Ok(metadata) if metadata.is_file() => metadata.len(),
+            Ok(metadata)
+                if metadata.is_file()
+                    && crate::blastinput::input_files::has_stream_position(file) =>
+            {
+                metadata.len()
+            }
             Ok(_) => return off(Off::NotAFile),
             Err(_) => return off(Off::Io),
         };

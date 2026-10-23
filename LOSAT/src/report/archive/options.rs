@@ -69,7 +69,8 @@ pub struct OptionInputs {
     pub evalue: Option<f64>,
     pub gapopen: Option<i32>,
     pub gapextend: Option<i32>,
-    /// The upper-cased `-matrix` name when given.
+    /// The `-matrix` name as typed when given (NCBI records it so, `blosum62` included; the
+    /// suggestions below compare it without case, as NCBI's `strcasecmp` does).
     pub matrix: Option<String>,
     pub xdrop_gap: Option<f64>,
     pub xdrop_gap_final: Option<f64>,
@@ -155,7 +156,7 @@ fn matrix_gaps(matrix: &str) -> (i32, i32) {
 /// The word threshold the matrix suggests (`BLAST_GetSuggestedThreshold`,
 /// blast_options.c:1174-1209).
 fn suggested_threshold(matrix: &str) -> i32 {
-    match matrix {
+    match matrix.to_ascii_uppercase().as_str() {
         "BLOSUM62" => 11,
         "BLOSUM45" => 14,
         "BLOSUM62_20" => 100,
@@ -170,7 +171,7 @@ fn suggested_threshold(matrix: &str) -> i32 {
 /// The window size the matrix suggests (`BLAST_GetSuggestedWindowSize`,
 /// blast_options.c:1211-1236).
 fn suggested_window(matrix: &str) -> i32 {
-    match matrix {
+    match matrix.to_ascii_uppercase().as_str() {
         "BLOSUM62" => 40,
         "BLOSUM45" => 60,
         "BLOSUM80" => 25,
@@ -582,6 +583,42 @@ mod tests {
             list.iter().filter(|p| p.name == "EvalueThreshold").count(),
             1
         );
+    }
+
+    #[test]
+    fn matrix_gaps_are_the_default_rows_of_the_matrices() {
+        // `BLAST_GetProteinGapExistenceExtendParams`: the row that the matrix's table prefers.
+        for (matrix, want) in [
+            ("BLOSUM62", (11, 1)),
+            ("BLOSUM45", (14, 2)),
+            ("BLOSUM50", (13, 2)),
+            ("BLOSUM90", (10, 1)),
+            ("PAM250", (15, 2)),
+            ("pam250", (15, 2)),
+        ] {
+            assert_eq!(matrix_gaps(matrix), want, "{matrix}");
+        }
+    }
+
+    #[test]
+    fn the_matrix_suggestions_ignore_the_case_of_the_name() {
+        // NCBI compares the names with `strcasecmp` (blast_options.c:1174-1236).
+        for (matrix, threshold, window) in [
+            ("BLOSUM62", 11, 40),
+            ("blosum62", 11, 40),
+            ("BLOSUM45", 14, 60),
+            ("Blosum45", 14, 60),
+            ("BLOSUM80", 12, 25),
+            ("blosum80", 12, 25),
+            ("PAM30", 16, 15),
+            ("pam30", 16, 15),
+            ("Pam70", 14, 20),
+        ] {
+            assert_eq!(suggested_threshold(matrix), threshold, "{matrix}");
+            assert_eq!(suggested_window(matrix), window, "{matrix}");
+        }
+        assert_eq!(suggested_threshold("Identity"), 27);
+        assert_eq!(suggested_threshold("blosum62_20"), 100);
     }
 
     #[test]

@@ -2311,7 +2311,12 @@ Rebuilding less:
   than `threads x 64` subjects past the last one handed over, so at most that many subjects' results wait
   (`x_bnstream::search_in_order`, called from `search_query_batch` in `blastn/blast_engine/run.rs`; each
   thread runs its loop as one `rayon::broadcast` job, so that a thread waiting inside a nested parallel stage
-  of a search never starts a second loop), in both passes: the preliminary HSPs to the preliminary hit lists
+  of a search never starts a second loop, and since 2026-10-23 no subject is searched before every thread
+  has started its loop: rayon runs a thread's own broadcast job inside a wait for a nested job too, so a
+  thread that had taken a nested job of a search before its loop started ran the loop above that job and the
+  pass hung, rarely, on a loaded host; the ignored probe `probe_b17_many_passes_with_a_nested_first_item` of
+  `x_bnstream.rs`, 20,000 passes on more threads than CPUs, hung in 12 of 12 runs before and in none of 12
+  after), in both passes: the preliminary HSPs to the preliminary hit lists
   (`PrelimHitCollector`, which keeps those of at most `prelim_hitlist_size` subjects per query) and the
   traceback's HSPs to the final hit lists (`update_hitlists_with_subject_hits`). Without it two or more threads
   search every subject of the batch and then hand all results over, so the HSPs of every subject are held at

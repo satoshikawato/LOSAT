@@ -44,6 +44,7 @@ pub mod input;
 //                                          & buf.get()[offset], gc);
 // ```
 pub mod query_setup;
+pub(crate) mod reader_batch;
 pub use args::BlastxArgs;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:960-985

@@ -59,7 +59,10 @@ pub struct PreparedQueryBatch {
     pub sequence_start: Vec<u8>,
     pub sequence_start_nomask: Vec<u8>,
     pub lookup_segments: Vec<(i32, i32)>,
-    pub split_eligible: bool,
+    /// The values NCBI takes of the query batch (reader batch) that this unit is a part of, when
+    /// the batch is searched in several units (`reader_batch.rs`); `None` when the unit is the
+    /// whole batch.
+    pub(crate) reader_shape: Option<std::sync::Arc<super::reader_batch::ReaderBatchShape>>,
     /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): whether `sequence_start` is on the path of the seed
     /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`; false with the switch off).
     pub(crate) x_ungap_sent: bool,
@@ -485,7 +488,7 @@ pub fn prepare_queries(
         sequence_start: buffer,
         sequence_start_nomask: nomask,
         lookup_segments,
-        split_eligible: records.len() == 1 && options.gapped,
+        reader_shape: None,
         x_ungap_sent,
     })
 }

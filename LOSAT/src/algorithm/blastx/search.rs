@@ -5,6 +5,7 @@ use super::{
     parameters::{effective_lengths, score_block, subject_parameters, ContextParameters},
     preliminary::{gapped, purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
     query_setup::{batch_ranges, prepare_queries, PreparedQueryBatch, BATCH_SIZE},
+    reader_batch::{prepare_reader_batch, UnitPrep},
     seed::{word_finder, Diagonals, InitHsp, Lookup},
     split::{adjust_chunk_hsps, merge_chunk_hsps, split_queries, QueryChunk},
     subjects::Subjects,
@@ -438,6 +439,7 @@ pub fn search_preliminary(
             true,
             &mut DiagnosticOnly,
             pool,
+            None,
         )
     })
 }
@@ -507,6 +509,7 @@ pub(crate) fn search_core(
     diagnostics: bool,
     sink: &mut impl PreliminarySink,
     pool: &crate::utils::threading::SearchPool<'_>,
+    prep: Option<UnitPrep>,
 ) -> Result<Vec<BatchStage>> {
     ensure!(
         !subjects.is_empty() || subjects.is_unreadable(),
@@ -548,14 +551,35 @@ pub(crate) fn search_core(
     // it does not change any value NCBI computes.
     let x_containment = diagnostics || sink.x_wants_containment();
     use super::x_timing::Batch as XBatch;
-    for range in batch_ranges(records, BATCH_SIZE) {
+    let ranges = batch_ranges(records, BATCH_SIZE);
+    // The units of a reader batch (`records`) are prepared first, together, and the values NCBI
+    // takes of the whole query batch are reduced (`reader_batch.rs`); each unit is then searched
+    // from its preparation. A caller that searches the units one by one has prepared them
+    // already (`prep`, the only unit of `records`). A batch of one unit is its own batch.
+    let mut preps: std::collections::VecDeque<UnitPrep> = match prep {
+        Some(prep) => {
+            ensure!(ranges.len() == 1, "a prepared unit is searched alone");
+            std::collections::VecDeque::from([prep])
+        }
+        None if ranges.len() > 1 => {
+            prepare_reader_batch(records, &ranges, options, subjects, pool)?.into()
+        }
+        None => std::collections::VecDeque::new(),
+    };
+    for range in ranges {
         // Diagnostic (LOSAT_TIMING): the clocks of the batch's stages (x_timing.rs). No NCBI
         // counterpart.
         let x_t_batch = super::x_timing::lap();
         let x_t = x_t_batch;
         let queries = &records[range.clone()];
-        let mut full = prepare_queries(queries, options)?;
-        let mut full_params = score_block(&full);
+        let (mut full, mut full_params) = match preps.pop_front() {
+            Some(UnitPrep { prepared, params }) => (prepared, params),
+            None => {
+                let full = prepare_queries(queries, options)?;
+                let params = score_block(&full);
+                (full, params)
+            }
+        };
         super::x_timing::batch(XBatch::QuerySetup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
         // ```c++

@@ -161,12 +161,21 @@ pub fn redo_params(
     let scaled_lambda = ka.lambda / scale;
     let ideal = compute_blosum62_ideal_karlin_params().map_err(anyhow::Error::msg)?;
     let do_link = link_parameters(options).is_some();
-    let cutoff = parameters
-        .iter()
-        .filter(|p| p.valid)
-        .map(|p| p.hit_cutoff)
-        .min()
-        .context("BLASTX Kappa requires a valid context")?;
+    // `hit_params->cutoff_score_min` is that of the query batch: the reader batch when the unit
+    // is a part of one (`reader_batch.rs`).
+    let cutoff = match batch
+        .reader_shape
+        .as_deref()
+        .and_then(|shape| shape.redo_cutoff_min)
+    {
+        Some(batch_min) => batch_min,
+        None => parameters
+            .iter()
+            .filter(|p| p.valid)
+            .map(|p| p.hit_cutoff)
+            .min()
+            .context("BLASTX Kappa requires a valid context")?,
+    };
     let extension_final = (options.gap_x_dropoff_final * std::f64::consts::LN_2 / ka.lambda)
         .max(options.gap_x_dropoff * std::f64::consts::LN_2 / ka.lambda)
         as i32;

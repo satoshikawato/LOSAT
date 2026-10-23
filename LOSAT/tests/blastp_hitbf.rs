@@ -1,4 +1,3 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The branch-free two-hit test of BLASTP's per-hit seed loop (`LOSAT_X_BPHITBF`,
 //! `src/algorithm/blastp/x_seed_fused.rs`, module header) on whole searches.
 //!
@@ -19,7 +18,7 @@
 //!                     continue;
 //!                 }
 //! ```
-//! The switch is in the strict set (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set).
+//! The switch is in the strict set (on unless it is `0`).
 //! The per-hit loop takes these two outcomes without a branch where its range holds and hands the
 //! others to the reference's statements, with the same entries and the same calls of the
 //! extension (the module's argument), so the property under test is that the report does not
@@ -42,9 +41,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const PER_HIT: (&str, &str) = ("LOSAT_X_BPDIAG", "0");
 const OFF: (&str, &str) = ("LOSAT_X_BPHITBF", "0");
 const ON: (&str, &str) = ("LOSAT_X_BPHITBF", "1");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
-/// The fused loop (`LOSAT_X_DEFAULT=0` turns it off with the rest of the strict set).
-const SEED: (&str, &str) = ("LOSAT_X_BPSEED", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_BPSEEDSHADOW", "1");
 
 fn fixture(name: &str) -> PathBuf {
@@ -249,20 +245,17 @@ fn the_branch_free_test_gives_the_reports_of_the_loop_without_it() {
             assert_eq!(reference.code, Some(0), "{what}: {}", reference.stderr);
             assert!(!reference.stdout.is_empty(), "{what}: no report");
             // The per-hit loop with the test; the default (the AVX2 batch where the CPU has it, else
-            // the per-hit loop); the switch alone, without the rest of the strict set.
-            let alone = blastp(&args, &[DEFAULT_OFF, SEED]);
+            // the per-hit loop).
             for (arm, run, against) in [
                 ("on", blastp(&args, &[PER_HIT]), &reference),
                 ("named", blastp(&args, &[PER_HIT, ON]), &reference),
                 ("default", blastp(&args, &[]), &reference),
                 ("default off", blastp(&args, &[OFF]), &reference),
-                ("alone", blastp(&args, &[DEFAULT_OFF, SEED, ON]), &alone),
             ] {
                 assert_eq!(run.code, against.code, "{what} {arm}: {}", run.stderr);
                 assert!(run.stdout == against.stdout, "{what} {arm}: report differs");
                 assert_eq!(run.messages(), against.messages(), "{what} {arm}");
             }
-            assert!(alone.stdout == reference.stdout, "{what}: alone differs");
         }
     }
 }

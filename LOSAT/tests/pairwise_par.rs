@@ -1,11 +1,10 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The pairwise reports (outfmt 0) formatted on the search's pool (`LOSAT_X_PAIRWISEPAR`,
 //! `src/report/x_pairwise_par.rs`) on whole searches: BLASTN (the blastn and megablast tasks,
 //! `-subject` and `-db`), TBLASTX (`-subject` and `-db`) and BLASTP (`-subject` and `-db`, in one
 //! search and in LOSAT_X_BPQBLOCK's query blocks).
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_PAIRWISEPAR`
-//! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it on and two or more threads, each
+//! is `0`. With it on and two or more threads, each
 //! query's head, runs of its subjects' alignments and its footer are formatted into buffers by the
 //! pool's threads and written in order; `LOSAT_X_PAIRWISEPARSHADOW=1` also writes the report by the
 //! serial writer into memory and compares the two.
@@ -21,7 +20,6 @@ use std::process::{Command, Output};
 
 const OFF: (&str, &str) = ("LOSAT_X_PAIRWISEPAR", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_PAIRWISEPARSHADOW", "1");
-const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const THREADS: [u32; 4] = [1, 2, 4, 16];
 
 fn manifest(path: &str) -> PathBuf {
@@ -252,9 +250,12 @@ fn check_with(name: &str, args: &[&str], extra: &[(&str, &str)]) -> Vec<[u64; 4]
             at_two = counts;
         }
     }
-    let previous = losat(args, 4, &with(&[PREVIOUS]));
+    let previous = losat(args, 4, &with(&[OFF]));
     assert!(previous.status.success(), "{name}: {}", stderr(&previous));
-    assert_eq!(previous.stdout, off.stdout, "{name}, LOSAT_X_DEFAULT=0");
+    assert_eq!(
+        previous.stdout, off.stdout,
+        "{name}, LOSAT_X_PAIRWISEPAR=0 at 4 threads"
+    );
     at_two
 }
 

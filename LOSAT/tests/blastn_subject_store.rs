@@ -11,9 +11,8 @@
 //!         return retval;
 //! ```
 //! NCBI keeps the subjects in its scope and makes each one's search forms from it. With
-//! `LOSAT_X_BNSTORE` on (the strict set since 2026-10-18: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set) the reader's records
-//! keep their deflines and the letters are held packed (2 bits per base, the runs of ambiguous
+//! `LOSAT_X_BNSTORE` on (the strict set since 2026-10-18: on unless it is `0`) the reader's
+//! records keep their deflines and the letters are held packed (2 bits per base, the runs of ambiguous
 //! letters, the lower-case intervals): the preliminary stage reads the packed bases, the traceback
 //! makes the blastna letters of a subject, the pairwise report the letters of each row. The switch
 //! must change nothing a user sees, so the tests compare the report and the messages with those of
@@ -329,7 +328,7 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
 }
 
 // No NCBI counterpart: the switch is on by default (an empty value, as unset): the six subjects
-// are held packed; with `LOSAT_X_DEFAULT=0` and no value they are not; the report and the
+// are held packed; with `LOSAT_X_BNSTORE=0` they are not; the report and the
 // messages are the same.
 #[test]
 fn the_subjects_are_held_packed_by_default() {
@@ -338,12 +337,8 @@ fn the_subjects_are_held_packed_by_default() {
     let default = ("LOSAT_X_BNSTORE", "");
     let (report, messages, stats) = blastn(queries, subjects, &options, &[default]);
     assert_eq!(counter(&stats, "subjects"), 6, "{stats}");
-    let (old_report, old_messages, old_stats) = blastn(
-        queries,
-        subjects,
-        &options,
-        &[default, ("LOSAT_X_DEFAULT", "0")],
-    );
+    let (old_report, old_messages, old_stats) =
+        blastn(queries, subjects, &options, &[("LOSAT_X_BNSTORE", "0")]);
     assert_eq!(counter(&old_stats, "subjects"), 0, "{old_stats}");
     assert!(report == old_report, "the default changes the report");
     assert_eq!(messages, old_messages);
@@ -351,7 +346,7 @@ fn the_subjects_are_held_packed_by_default() {
 
 // No NCBI counterpart: where the switch acts. A subject range (`-subject_loc`) keeps the
 // letters (the records are cut before the search), so the variable changes nothing there and no
-// subject is held packed. With `LOSAT_X_DEFAULT=0` (the reference loops) the subjects are still
+// subject is held packed. With `LOSAT_X_BNUNGAPCOUNT=0` (the ported ungapped loops) the subjects are still
 // held packed and the report is the same.
 #[test]
 fn a_subject_range_keeps_the_letters_and_the_reference_loops_read_the_packed_subjects() {
@@ -368,7 +363,7 @@ fn a_subject_range_keeps_the_letters_and_the_reference_loops_read_the_packed_sub
 
     let options = ["-outfmt", "0", "-num_threads", "1"];
     let (expected, messages, _) = blastn(queries, subjects, &options, &[]);
-    let previous = ("LOSAT_X_DEFAULT", "0");
+    let previous = ("LOSAT_X_BNUNGAPCOUNT", "0");
     let (report, store_messages, stats) = blastn(queries, subjects, &options, &[previous, STORE]);
     assert!(report == expected);
     assert_eq!(store_messages, messages);

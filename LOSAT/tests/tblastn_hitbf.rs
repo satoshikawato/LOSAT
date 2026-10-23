@@ -1,8 +1,8 @@
 //! The branch-free two-hit loop of tblastn's unit path (`LOSAT_X_TBNHITBF`,
 //! `src/algorithm/tblastn/x_tbn_hitbf.rs`, module doc) on whole searches.
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. It acts on every offset array the unit path's scan fills;
+//! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`.
+//! It acts on every offset array the unit path's scan fills;
 //! its shadow (`LOSAT_X_TBNHITBFSHADOW`) turns it on and compares it with the loop before the switch
 //! on every array.
 //!
@@ -27,9 +27,8 @@
 //! with the same cell states and the same saved init HSPs (the module's argument), so the property
 //! under test is that the report does not depend on it. That reports equal NCBI's is the business of
 //! the fixture comparisons. The input (the first 40 proteins of AvCLPV against its genome) gives
-//! extensions, flag-1 cells and HSPs. The tests compare the default, `LOSAT_X_DEFAULT=0` with the
-//! switch alone, and the shadow (which also shows that the loop ran on every offset array and that
-//! none fell outside its range) with `=0`.
+//! extensions, flag-1 cells and HSPs. The tests compare the default and the shadow (which also
+//! shows that the loop ran on every offset array and that none fell outside its range) with `=0`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -42,7 +41,6 @@ fn fasta(name: &str) -> PathBuf {
 
 const OFF: (&str, &str) = ("LOSAT_X_TBNHITBF", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBNHITBFSHADOW", "1");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 /// The `[X_STATS] TBNSCANBF` and `[X_STATS] TBNSCANBYTE` lines: the scan calls of the unit path,
 /// one offset array each.
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
@@ -198,22 +196,6 @@ fn the_shadow_compares_every_offset_array() {
             );
         }
     }
-}
-
-// No NCBI counterpart: where the switch acts. `LOSAT_X_DEFAULT=0` turns the switch off with the
-// rest of the strict set (the unit path itself always runs): the report of the loop before the
-// switch and no shadow line; the shadow variable alone still turns the comparison on.
-#[test]
-fn the_default_off_gives_the_report_of_the_off_switch_and_the_shadow_still_compares() {
-    let inputs = Inputs::new("unit");
-    let (off, _) = inputs.tblastn(1, &[OFF]);
-    let (report, stderr) = inputs.tblastn(1, &[DEFAULT_OFF]);
-    assert_eq!(report, off, "against =0");
-    assert!(lines(&stderr, "[X_SHADOW] TBNHITBF").is_empty(), "{stderr}");
-    let (report, stderr) = inputs.tblastn(1, &[DEFAULT_OFF, SHADOW]);
-    assert_eq!(report, off, "the unit path with the shadow");
-    assert!(field(&stderr, "[X_SHADOW] TBNHITBF", "arrays_compared") > 0);
-    assert!(field(&stderr, "[X_SHADOW] TBNHITBF", "hits_compared") > 0);
 }
 
 #[test]

@@ -1,9 +1,7 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The megablast hashtable kept from batch to batch of blastn's batch loop (`LOSAT_X_MBLUTKEEP`,
 //! `src/algorithm/blastn/x_mb_lut_keep.rs`) on whole searches.
 //!
-//! The switch is in the strict set since 2026-10-19 (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set). It chooses between two LOSAT code paths with the same tables: each batch
+//! The switch is in the strict set since 2026-10-19 (on unless it is `0`). It chooses between two LOSAT code paths with the same tables: each batch
 //! allocates a zeroed table and frees it, or the loop keeps the largest table and the next build of
 //! that size zeroes and fills it. So the property under test is that the report does not depend on
 //! it, and that the kept path really runs where the switch says: with `LOSAT_TIMING`, `[TIMING]
@@ -13,8 +11,8 @@
 //! tables (`prefault_rounds=` of `[TIMING] x_mb_lookup_once` equals `fresh=` where every first
 //! chunk is dense enough, and the builds without the switch); with `LOSAT_X_MBLUTKEEPSHADOW` every
 //! build on a kept table is compared with a fresh build (`[X_SHADOW] MBLUTKEEP tables=` = `kept=`,
-//! `diffs=0 identical`); no line with `LOSAT_X_MBLUTKEEP=0` or `LOSAT_X_DEFAULT=0`, kept builds
-//! with the switch set and `LOSAT_X_DEFAULT=0` (the original fill loop); and no table is kept while
+//! `diffs=0 identical`); no line with `LOSAT_X_MBLUTKEEP=0`, kept builds
+//! with `LOSAT_X_MBLUTONCE=0` and `LOSAT_X_MBFILL=0` (the original fill loops); and no table is kept while
 //! `LOSAT_X_QBATCHPAR`'s slots may search batches. That the bytes equal NCBI's is the business of
 //! the blastn fixtures.
 //!
@@ -34,7 +32,8 @@ use std::sync::OnceLock;
 
 const OFF: (&str, &str) = ("LOSAT_X_MBLUTKEEP", "0");
 const SWITCH: (&str, &str) = ("LOSAT_X_MBLUTKEEP", "1");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
+const ONCE_OFF: (&str, &str) = ("LOSAT_X_MBLUTONCE", "0");
+const FILL_OFF: (&str, &str) = ("LOSAT_X_MBFILL", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_MBLUTKEEPSHADOW", "1");
 const BATCH: (&str, &str) = ("BATCH_SIZE", "4000");
@@ -149,18 +148,14 @@ fn field(stderr: &str, prefix: &str, name: &str) -> u64 {
         .unwrap_or_else(|| panic!("no {name} in: {line}"))
 }
 
-/// For one task: the same report with the switch off, by default, with it, with it and
-/// `LOSAT_X_DEFAULT=0`, with `LOSAT_TIMING` and with the shadow at 4 threads and one; the kept
+/// For one task: the same report with the switch off, by default, with it, with
+/// `LOSAT_TIMING` and with the shadow at 4 threads and one; the kept
 /// builds counted where they ran.
 fn check(task: &str) {
     let (reference, stderr) = blastn(task, genomes(), 4, &[OFF, BATCH]);
     assert!(!reference.is_empty(), "{task}: no hits");
     assert_eq!(stderr, "", "{task}");
-    for switches in [
-        &[BATCH][..],
-        &[SWITCH, BATCH],
-        &[SWITCH, DEFAULT_OFF, BATCH],
-    ] {
+    for switches in [&[BATCH][..], &[SWITCH, BATCH]] {
         let (report, stderr) = blastn(task, genomes(), 4, switches);
         assert!(
             report == reference,
@@ -188,15 +183,12 @@ fn check(task: &str) {
         let (report, stderr) = blastn(task, genomes(), threads, &[OFF, BATCH, TIMING]);
         assert!(report == reference, "{task} threads {threads}");
         assert!(!stderr.contains(KEEP), "{task}: {stderr}");
-        let (report, stderr) = blastn(task, genomes(), threads, &[DEFAULT_OFF, BATCH, TIMING]);
-        assert!(report == reference, "{task} threads {threads}");
-        assert!(!stderr.contains(KEEP), "{task}: {stderr}");
-        // Set, the switch keeps the table with `LOSAT_X_DEFAULT=0` too.
+        // Set, the switch keeps the table on the original fill loops too.
         let (report, stderr) = blastn(
             task,
             genomes(),
             threads,
-            &[SWITCH, DEFAULT_OFF, BATCH, TIMING],
+            &[SWITCH, ONCE_OFF, FILL_OFF, BATCH, TIMING],
         );
         assert!(report == reference, "{task} threads {threads}");
         assert_eq!(field(&stderr, KEEP, "kept="), kept, "{task}: {stderr}");

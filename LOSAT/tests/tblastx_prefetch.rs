@@ -1,10 +1,9 @@
 //! The prefetch of the TBLASTX unit scan (`LOSAT_X_TBXPREFETCH`, `src/algorithm/tblastx/x_pair_par.rs`,
 //! module doc) on whole searches.
 //!
-//! The switch is a value switch of the strict set (`src/utils/xswitch.rs`): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set; its number is the smallest largest-unit table, in KiB, of
-//! a subject whose units scan with the hint (built-in 1,536; `2` takes every table). It acts on
-//! x86-64 only. A prefetch has no architectural effect, so the report, and the counts the probes of
+//! The switch is a value switch of the strict set (`src/utils/xswitch.rs`): on unless it is `0`;
+//! its number is the smallest largest-unit table, in KiB, of a subject whose units scan with the
+//! hint (built-in 1,536; `2` takes every table). It acts on x86-64 only. A prefetch has no architectural effect, so the report, and the counts the probes of
 //! `LOSAT_TIMING` and `LOSAT_X_STATS` take, do not depend on it.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-516

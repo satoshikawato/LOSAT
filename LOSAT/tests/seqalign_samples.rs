@@ -47,10 +47,7 @@ fn losat() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy();
-        if name_text.starts_with("LOSAT_")
-            && name != "LOSAT_X_DEFAULT"
-            && name != "LOSAT_BLASTX_WORKER_LOG"
-        {
+        if name_text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
         }
     }

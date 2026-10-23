@@ -11,8 +11,8 @@
 //!         return retval;
 //! ```
 //! NCBI keeps the subjects in its scope and makes each one's search forms from it. With
-//! `LOSAT_X_TBNSTORE` on (a switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set) the reader's records keep their deflines and the letters are held packed (2 bits per base, the runs of ambiguous
+//! `LOSAT_X_TBNSTORE` on (a switch of the strict set: on unless it is `0`) the reader's records keep their
+//! deflines and the letters are held packed (2 bits per base, the runs of ambiguous
 //! letters, the lower-case intervals): a subject is translated from its packed bases, and the
 //! letters of a window are made again when the redo, the traceback of composition mode 0 or a
 //! report reads it.
@@ -252,7 +252,6 @@ fn hit_subjects(report: &[u8]) -> std::collections::BTreeSet<String> {
         .collect()
 }
 
-const STORE: (&str, &str) = ("LOSAT_X_TBNSTORE", "1");
 const NO_STORE: (&str, &str) = ("LOSAT_X_TBNSTORE", "0");
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
@@ -368,11 +367,8 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
 // (the packing thread), `-lcase_masking` with an interval that holds lower-case letters, an
 // interval without letters in one record (the warning of an empty subject), and an interval that
 // starts past the ends (the error, its exit code and the messages before it).
-// `LOSAT_X_DEFAULT=0` turns the switch off; with it set as well the subjects are still held packed
-// and the report is the same.
 #[test]
-fn a_subject_range_is_cut_and_held_packed_and_the_default_off_still_translates_the_packed_subjects()
-{
+fn a_subject_range_is_cut_and_held_packed() {
     let (ten, _, subjects) = inputs();
     let long = long_subjects(subjects);
     for ranged in [
@@ -435,25 +431,6 @@ fn a_subject_range_is_cut_and_held_packed_and_the_default_off_still_translates_t
     assert_eq!(output.status.code(), expected.status.code());
     assert_eq!(output.stdout, expected.stdout);
     assert_eq!(output.stderr, expected.stderr);
-
-    let options = ["-outfmt", "6", "-num_threads", "1"];
-    let (expected, messages, stats) = tblastn(ten, subjects, &options, &[]);
-    assert_eq!(counter(&stats, "subjects"), 8, "on by default: {stats}");
-    let previous = ("LOSAT_X_DEFAULT", "0");
-    let (report, _, stats) = tblastn(ten, subjects, &options, &[previous]);
-    assert!(report == expected);
-    assert_eq!(
-        counter(&stats, "subjects"),
-        0,
-        "off with the default off: {stats}"
-    );
-    let (report, store_messages, stats) = tblastn(ten, subjects, &options, &[previous, STORE]);
-    assert!(report == expected);
-    assert_eq!(store_messages, messages);
-    assert_eq!(counter(&stats, "subjects"), 8);
-    // the preliminary stage (the unit path, which `LOSAT_X_DEFAULT=0` no longer turns off)
-    // translates the packed bases of the subjects
-    assert!(counter(&stats, "packed_plans") >= 6, "{stats}");
 }
 
 // No NCBI counterpart: the switch in `run_local` (LOSAT Web, the library), whose caller keeps the
@@ -463,9 +440,9 @@ fn a_subject_range_is_cut_and_held_packed_and_the_default_off_still_translates_t
 // runs of `N` (the draws of the packing), another genetic code, lower-case letters with
 // `-lcase_masking` (those subjects keep their letters), a subject range (`run_local` cuts the
 // records before the search), and three threads (the plans made on the pool's threads). The
-// in-process search inherits the test's variables: with `LOSAT_X_DEFAULT=0` both sides read the
-// letters, and `a_plan_packs_its_letters_unless_it_reads_their_case_or_cannot`
-// (x_subject_store.rs) checks when the letters are packed.
+// in-process search inherits the test's variables;
+// `a_plan_packs_its_letters_unless_it_reads_their_case_or_cannot` (x_subject_store.rs) checks when
+// the letters are packed.
 #[test]
 fn run_local_packs_the_callers_letters_for_the_plans_and_reports_as_the_letters() {
     let (ten, _, subjects) = inputs();

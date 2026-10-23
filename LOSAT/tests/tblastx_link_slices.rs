@@ -45,8 +45,7 @@ const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const THREADS: [u32; 2] = [1, 4];
 
 /// One TBLASTX run of the fixture pair (`-outfmt 6` on standard output) with the given
-/// variables as its only `LOSAT_*` variables that choose a code path. `LOSAT_X_DEFAULT` of the
-/// test's own environment is dropped as well: every test states the default it runs with.
+/// variables as its only `LOSAT_*` variables that choose a code path.
 /// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more
 /// than one thread, and it selects nothing. The run must exit with 0. Returns the report and

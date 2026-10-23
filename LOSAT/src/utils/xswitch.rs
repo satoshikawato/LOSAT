@@ -2,29 +2,26 @@
 //! docs/agents/diagnostics.md, "Performance switches").
 //!
 //! Until main 62102f7a every switch of the strict set was off unless its variable was set to any
-//! value. The set is now on by default. Each switch keeps its variable, and one variable,
-//! `LOSAT_X_DEFAULT`, returns all of them to the previous default:
+//! value. The set is now on by default. Each switch keeps its variable, and `0` turns it off:
 //!
-//! | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
-//! | --- | --- | --- |
-//! | `0` | any | off |
-//! | any other non-empty value | any | on (for a value switch, the number given or the built-in value) |
-//! | not set, or empty | `0` | off, the default before the change |
-//! | not set, or empty | not set, empty, or any other value | on |
+//! | `LOSAT_X_<NAME>` | the switch is |
+//! | --- | --- |
+//! | `0` | off |
+//! | not set, empty, or any other value | on (for a value switch, the number given or the built-in value) |
 //!
-//! White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `),
+//! White space around a value is ignored (`set LOSAT_X_BPSEED=0 && ...` in cmd.exe stores `0 `),
 //! so a value of spaces only counts as empty. Only `0` means off: `00`, `false` or `off` are "any
 //! other value".
 //!
-//! `LOSAT_X_DEFAULT=0` alone runs the previous paths. `LOSAT_X_DEFAULT=0` with some variables set
-//! gives the run that those variables gave before the change. The shadow and verify switches, the
-//! counters and the tuning variables are not part of the set and keep "set to any value".
+//! `LOSAT_X_DEFAULT`, which turned every switch of the set off at once (the previous paths), was
+//! removed on 2026-10-23 (switch-tidy item 3); a run ignores it. The shadow and verify switches,
+//! the counters and the tuning variables are not part of the set and keep "set to any value".
 //!
-//! A switch that graduated has no variable any more, so neither of the two variables reaches its
-//! previous path: an always-on switch lost that code, and a conditional or platform switch
-//! (`GRADUATED`) runs its fallback only where its rule sends the work.
+//! A switch that graduated has no variable any more, so its previous path is not reachable: an
+//! always-on switch lost that code, and a conditional or platform switch (`GRADUATED`) runs its
+//! fallback only where its rule sends the work.
 //!
-//! Every switch of the set gives the reference result by construction, so none of these variables
+//! Every switch of the set gives the reference result by construction, so no variable of the set
 //! changes the output.
 //!
 //! No NCBI counterpart: these are LOSAT variables that choose between two LOSAT code paths with
@@ -33,7 +30,6 @@
 
 use std::ffi::OsStr;
 use std::ops::RangeInclusive;
-use std::sync::OnceLock;
 
 /// No NCBI counterpart: the switches of the strict set, the variables that are on by default,
 /// sorted by name. A switch joins the set with its name in order here and its `export` line in
@@ -269,19 +265,8 @@ pub(crate) const GRADUATED: &[&str] = &[
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that
 /// is not UTF-8 is "any other value".
-fn state(value: Option<&OsStr>, default_on: bool) -> bool {
-    match value.map(|v| v.to_str().map(str::trim)) {
-        Some(Some("0")) => false,
-        Some(Some("")) | None => default_on,
-        Some(_) => true,
-    }
-}
-
-/// No NCBI counterpart: reads `LOSAT_X_DEFAULT` once; `0` makes the switches that are not set
-/// off.
-fn default_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| state(std::env::var_os("LOSAT_X_DEFAULT").as_deref(), true))
+fn state(value: Option<&OsStr>) -> bool {
+    !matches!(value.map(|v| v.to_str().map(str::trim)), Some(Some("0")))
 }
 
 /// No NCBI counterpart: whether the strict-set switch `name` is on. Reads the environment on
@@ -291,7 +276,7 @@ pub(crate) fn on(name: &str) -> bool {
         STRICT_SET.contains(&name),
         "{name} is not a strict-set switch"
     );
-    state(std::env::var_os(name).as_deref(), default_on())
+    state(std::env::var_os(name).as_deref())
 }
 
 /// No NCBI counterpart: a strict-set switch that carries a number. `None` when the switch is off;
@@ -303,7 +288,7 @@ pub(crate) fn value(name: &str, range: RangeInclusive<usize>, builtin: usize) ->
         "{name} is not a strict-set switch"
     );
     let raw = std::env::var_os(name);
-    if !state(raw.as_deref(), default_on()) {
+    if !state(raw.as_deref()) {
         return None;
     }
     Some(given(raw.as_deref(), &range).unwrap_or(builtin))
@@ -328,20 +313,14 @@ mod tests {
     }
 
     #[test]
-    fn a_switch_follows_its_variable_then_the_default() {
-        for default_on in [true, false] {
-            assert!(!state(os("0"), default_on));
-            assert!(!state(os("0 "), default_on));
-            assert!(!state(os(" 0\t"), default_on));
-            assert!(state(os("1"), default_on));
-            assert!(state(os("16"), default_on));
-            assert!(state(os("on"), default_on));
-            assert!(state(os("00"), default_on));
-            assert!(state(os("false"), default_on));
-            assert_eq!(state(os(""), default_on), default_on);
-            assert_eq!(state(os("  "), default_on), default_on);
-            assert_eq!(state(None, default_on), default_on);
+    fn a_switch_follows_its_variable() {
+        for off in ["0", "0 ", " 0\t"] {
+            assert!(!state(os(off)), "{off:?}");
         }
+        for on in ["1", "16", "on", "00", "false", "", "  "] {
+            assert!(state(os(on)), "{on:?}");
+        }
+        assert!(state(None));
     }
 
     #[test]

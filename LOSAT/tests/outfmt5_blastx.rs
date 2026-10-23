@@ -40,7 +40,7 @@ fn run_str(args: &[&str]) -> Output {
 fn run_env(args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
+        if name.to_string_lossy().starts_with("LOSAT_") {
             command.env_remove(name);
         }
     }
@@ -527,7 +527,7 @@ fn run_dev_stdin(text: &[u8], subject: &Path, format: &str) -> Output {
     use std::process::Stdio;
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
+        if name.to_string_lossy().starts_with("LOSAT_") {
             command.env_remove(name);
         }
     }

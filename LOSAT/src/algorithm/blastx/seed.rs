@@ -119,6 +119,18 @@ impl Diagonals {
             window,
         })
     }
+    // No NCBI counterpart: buffer reuse only (LOSAT_X_BXDIAGKEEP, blastx/x_bx_mem.rs). The same
+    // window and the same power-of-two length give the same mask, so the table's diagonals collide
+    // as those of a table `new(query_length, window)` makes.
+    /// Whether this table has the length and window `new(query_length, window)` gives.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn x_fits(&self, query_length: usize, window: i32) -> bool {
+        let n = usize::try_from(window)
+            .ok()
+            .and_then(|w| query_length.checked_add(w))
+            .and_then(|n| n.max(1).checked_next_power_of_two());
+        self.window == window && n == Some(self.entries.len())
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
     // ```c++
     // Blast_ExtendWordExit(Blast_ExtendWord * ewp, Int4 subject_length)
@@ -248,6 +260,20 @@ pub struct InitHsp {
 pub enum Lookup {
     Standard(BlastAaLookupTable),
     Compressed(BlastCompressedAaLookupTable),
+}
+
+// No NCBI counterpart: buffer reuse only (LOSAT_X_BXLUTPOOL, tblastx/lookup/x_lut_direct.rs): a
+// dropped table's vectors are kept for the next build instead of freed, where the builds are pooled
+// (not in diagnostics mode, whose reference builder makes the tables, nor while a panic unwinds).
+impl Drop for Lookup {
+    fn drop(&mut self) {
+        if let Self::Standard(table) = self {
+            if crate::algorithm::tblastx::lookup::x_bx_pooled_builds() && !std::thread::panicking()
+            {
+                crate::algorithm::tblastx::lookup::x_give_back_pooled(table);
+            }
+        }
+    }
 }
 impl Lookup {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469

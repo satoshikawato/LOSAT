@@ -80,7 +80,7 @@ pub(super) fn chosen(
 }
 
 /// No NCBI counterpart: `chosen`'s rule for tasks of `k` subjects, without recording a side.
-fn fits(
+pub(super) fn fits(
     k: usize,
     pool: &crate::utils::threading::SearchPool<'_>,
     diagnostics: bool,
@@ -129,7 +129,7 @@ pub(super) fn chunks_in_order(
 
 /// No NCBI counterpart: whether `-window_size` plus twice the longest subject is at most 2^28,
 /// so that no diagonal offset of any table history passes 2^30 (module comment).
-fn offsets_stay_below_2_30(window_size: i32, longest: usize) -> bool {
+pub(super) fn offsets_stay_below_2_30(window_size: i32, longest: usize) -> bool {
     u64::try_from(window_size)
         .ok()
         .and_then(|window| window.checked_add(2 * longest as u64))
@@ -266,8 +266,9 @@ fn x_shadow_check(kept: &[(usize, SubjectComputation)], failed_at: Option<usize>
 /// ```
 /// The subject loop of one query chunk: every subject of `subjects` in oid order, with the sink
 /// calls of the waves' replay loop (`subject_start`, `containment`, `preliminary_purge`,
-/// `subject`); `diagonals` is the owner's table, `helper_tables` one table per helper. Returns the
-/// number of subjects handed to the sink.
+/// `subject`); `diagonals` is the owner's table, `helper_tables` one table per helper (its own, or
+/// with `LOSAT_X_BXDIAGKEEP` the one its thread keeps, `x_bx_mem::XScratch`). Returns the number of
+/// subjects handed to the sink.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     k: usize,
@@ -277,14 +278,18 @@ pub(super) fn run(
     options: &ResolvedOptions,
     lookup: &Lookup,
     diagonals: &mut Diagonals,
-    helper_tables: Vec<Diagonals>,
+    helper_tables: Vec<super::x_bx_mem::XScratch<'_>>,
     xdrop: i32,
     db_length: i64,
     x_containment: bool,
     sink: &mut impl PreliminarySink,
 ) -> Result<usize> {
     let tasks = subjects.len().div_ceil(k);
-    let compute = |task: usize, table: &mut Diagonals| {
+    let compute = |task: usize, scratch: &mut super::x_bx_mem::XScratch<'_>| {
+        let table = match scratch.get() {
+            Ok(table) => table,
+            Err(error) => return (Vec::new(), Some((task * k, error))),
+        };
         search_task(
             task,
             k,
@@ -301,15 +306,22 @@ pub(super) fn run(
     };
     // Four tasks per thread ahead of the owner: a helper always finds one while the owner hands a
     // task to the sink, and the tasks held at once stay few (only subjects with hits are kept).
-    let ahead = crate::utils::xahead::Ahead::new(4 * (helper_tables.len() + 1));
+    // Inside the capped batch flow (LOSAT_X_BXUNITCAP), the helpers leave once every task is
+    // claimed: the other batches searched at the time want the threads (x_bx_mem.rs).
+    let ahead = if super::x_bx_mem::in_capped_batch() {
+        crate::utils::xahead::Ahead::x_new_leaving(4 * (helper_tables.len() + 1))
+    } else {
+        crate::utils::xahead::Ahead::new(4 * (helper_tables.len() + 1))
+    };
     let x_t = super::super::x_timing::lap();
     let mut call = 0usize;
+    let mut own = super::x_bx_mem::XScratch::Borrowed(diagonals);
     let result = crate::utils::xahead::with_helpers(Some(&ahead), helper_tables, &compute, || {
         for task in 0..tasks {
             ahead.announce(task, tasks, |_| true);
-            let (kept, error) = match ahead.take(task, diagonals, &compute) {
+            let (kept, error) = match ahead.take(task, &mut own, &compute) {
                 Some(value) => value,
-                None => compute(task, diagonals),
+                None => compute(task, &mut own),
             };
             if shadow() {
                 // The owner searches the task again on its own table (one that has seen other
@@ -317,7 +329,7 @@ pub(super) fn run(
                 x_shadow_check(
                     &kept,
                     error.as_ref().map(|(oid, _)| *oid),
-                    &compute(task, diagonals),
+                    &compute(task, &mut own),
                 );
             }
             let end = error

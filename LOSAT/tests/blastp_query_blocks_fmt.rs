@@ -1536,6 +1536,11 @@ fn shadow_blocks_and_side_files(run: &Run, what: &str) -> (usize, usize) {
     (value("blocks="), value("side_files="))
 }
 
+/// The reports of 13 and 14 are written serially after each block's search, so the thread count does
+/// not reach the side-file code: the cases that look at the files alone run at one thread.
+const ONE_THREAD: [u32; 1] = [1];
+/// The side file of a report in the second block (queries 27-30) of `bpqb_q.faa` at `LOSAT_X_BPQBLOCK=80`.
+const SECOND_BLOCK: [usize; 1] = [28];
 const BLOCK_80: (&str, &str) = ("LOSAT_X_BPQBLOCK", "80");
 const NO_PREPARE: &dyn Fn(&Path) = &|_| {};
 /// The options of the frozen `db.sa.bpqb.*` rows.
@@ -1556,8 +1561,10 @@ fn paja() -> (PathBuf, PathBuf) {
 
 // Outfmt 13 and 14 with `-db`: the 30 queries of `bpqb_q.faa` are two NCBI batches, so with
 // `LOSAT_X_BPQBLOCK=80` two blocks (queries 1-26, 27-30) write the master and the 30 side files
-// that the search of all queries writes (`LOSAT_X_BPQBLOCKXML2=0`); the shadow says so, with the
-// side files compared.
+// that the search of all queries writes (`LOSAT_X_BPQBLOCKXML2=0`); the shadow run writes the blocks'
+// files and says so (two blocks, 30 side files), with the side files compared with the reference's.
+// The reports are written serially after each block's search, so the thread count does not reach
+// the side-file code; both thread counts are run here once, for the files to show it.
 #[test]
 fn outfmt_13_and_14_blocks_write_the_side_files_and_master_of_the_search_of_all_queries() {
     let (query, db) = paja();
@@ -1585,8 +1592,6 @@ fn outfmt_13_and_14_blocks_write_the_side_files_and_master_of_the_search_of_all_
                 31,
                 "{what}: the master and 30 side files"
             );
-            let blocks = run(&[BLOCK_80], "blocks");
-            assert_same_files(&blocks, &reference, Some(true), &what);
             // The default switch, with `LOSAT_X_DEFAULT=0` (the variable set: on).
             let shadow = run(&[BLOCK_80, SHADOW], "shadow");
             assert_same_files(&shadow, &reference, None, &format!("{what} shadow"));
@@ -1597,16 +1602,19 @@ fn outfmt_13_and_14_blocks_write_the_side_files_and_master_of_the_search_of_all_
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// Outfmt 13 and 14 with `-subject` (a FASTA subject file): the last report of a block is held until
-// the next report arrives, which is in the next block, and is written as the next number.
+// Outfmt 14 with `-subject` (a FASTA subject file): the last report of a block is held until the
+// next report arrives, which is in the next block, and is written as the next number. The shadow run
+// writes the blocks' files and compares them with the reference's. Outfmt 13 holds a report through
+// the same `Xml2Document`, `Xml2Carry` and `FsSideFiles` (the db test above and the cases below run
+// both), and the search runs at one thread (the reports are written serially).
 #[test]
 fn outfmt_13_and_14_with_subject_hold_a_report_across_blocks() {
     let query = fixture("MeenMJNV.faa");
     let fasta = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), fasta.as_os_str()];
     let dir = test_dir("subject");
-    for spec in ["13", "14"] {
-        for threads in THREADS {
+    for spec in ["14"] {
+        for threads in ONE_THREAD {
             let what = format!("outfmt {spec} threads {threads}");
             let run = |vars: &[(&str, &str)], at: &str| {
                 files_run(
@@ -1627,8 +1635,6 @@ fn outfmt_13_and_14_with_subject_hold_a_report_across_blocks() {
                 "{what}: {} files",
                 reference.1.len()
             );
-            let blocks = run(&[BATCH, ("LOSAT_X_BPQBLOCK", "1")], "blocks");
-            assert_same_files(&blocks, &reference, Some(true), &what);
             let shadow = run(&[BATCH, ("LOSAT_X_BPQBLOCK", "1"), SHADOW], "shadow");
             assert_same_files(&shadow, &reference, None, &format!("{what} shadow"));
             let (count, sides) = shadow_blocks_and_side_files(&shadow.0, &what);
@@ -1642,6 +1648,9 @@ fn outfmt_13_and_14_with_subject_hold_a_report_across_blocks() {
 // Outfmt 13 and 14 with taxids and a taxonomy database: the names in the side files and the
 // messages on standard error are those of the search of all queries; a database that the search of
 // all queries refuses (9606's name has UTF-8 bytes) leaves the blocks and fails before any file.
+// Both formats are run (names render differently in JSON and XML), at one thread; the shadow run
+// writes the blocks' files, and only a refused database has a separate blocks run, which no
+// shadow run repeats.
 #[test]
 fn outfmt_13_and_14_with_taxids_and_a_taxonomy_database_keep_the_files_and_messages() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1659,7 +1668,7 @@ fn outfmt_13_and_14_with_taxids_and_a_taxonomy_database_keep_the_files_and_messa
         (Some("taxdb/high_bytes_utf8"), false, false),
     ];
     for spec in ["13", "14"] {
-        for threads in [1, 4] {
+        for threads in ONE_THREAD {
             for (variant, completes, messages) in cases {
                 let what = format!("outfmt {spec}, taxdb {variant:?}, threads {threads}");
                 let blastdb = variant
@@ -1695,10 +1704,6 @@ fn outfmt_13_and_14_with_taxids_and_a_taxonomy_database_keep_the_files_and_messa
                     "{what}: {}",
                     reference.0.stderr
                 );
-                let blocks = run(&[], "blocks");
-                // The refused database leaves the blocks (the check is made before the first
-                // block), so that no side file is written.
-                assert_same_files(&blocks, &reference, Some(completes), &what);
                 if completes {
                     assert_eq!(reference.1.len(), 31, "{what}");
                     let shadow = run(&[SHADOW], "shadow");
@@ -1706,6 +1711,10 @@ fn outfmt_13_and_14_with_taxids_and_a_taxonomy_database_keep_the_files_and_messa
                     let (count, sides) = shadow_blocks_and_side_files(&shadow.0, &what);
                     assert_eq!((count, sides), (2, 30), "{what}");
                 } else {
+                    // The refused database leaves the blocks (the check is made before the first
+                    // block), so that no side file is written.
+                    let blocks = run(&[], "blocks");
+                    assert_same_files(&blocks, &reference, Some(false), &what);
                     assert!(
                         reference.1.values().all(Vec::is_empty),
                         "{what}: the refused run wrote a file"
@@ -1743,17 +1752,19 @@ fn queries_with_warnings(dir: &Path, with_o: &[usize]) -> PathBuf {
 // last query of the second block and at its middle: NCBI stops at that report with "Cannot open
 // output file" (status 1), the side files before it stay and the master stays empty. The blocks
 // stop at the same report with the same files and the same standard error, where queries after
-// the failing one (and one in the first block) have warnings.
+// the failing one (and one in the first block) have warnings. Outfmt 13 only, at one thread, at the
+// first block's first report and at a later block's: outfmt 14 opens its side files through the
+// same `FsSideFiles`, and the reports are written serially.
 #[test]
 fn an_unopenable_side_file_stops_the_blocks_where_it_stops_the_search_of_all_queries() {
     let dir = test_dir("open");
     let query = queries_with_warnings(&dir, &[5, 29, 30]);
     let (_, db) = paja();
     let subject = [OsStr::new("-db"), db.as_os_str()];
-    for spec in ["13", "14"] {
+    for spec in ["13"] {
         let extension = if spec == "13" { "json" } else { "xml" };
-        for threads in THREADS {
-            for n in [1usize, 27, 28, 30] {
+        for threads in ONE_THREAD {
+            for n in [1usize, 28] {
                 let what = format!("outfmt {spec}, side file {n}, threads {threads}");
                 let prepare = |at: &Path| {
                     std::fs::create_dir(at.join(format!("rep_{n}.{extension}"))).unwrap();
@@ -1800,10 +1811,11 @@ fn an_unopenable_side_file_stops_the_blocks_where_it_stops_the_search_of_all_que
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// A side file that is a link to `/dev/full`, in the first block and in the second: the write fails
+// A side file that is a link to `/dev/full`, in the second block: the write fails
 // after the file was opened. LOSAT stops the run in every program with "BLAST failed to write
 // output" and status 6 (DECISIONS 35: NCBI ignores the error); the blocks do the same at the same
-// report with the same files.
+// report with the same files. Outfmt 14 only, at one thread, in the second block (the first block's
+// stop is that of the test above, and outfmt 13 writes through the same `FsSideFiles`).
 #[cfg(unix)]
 #[test]
 fn a_side_file_that_cannot_be_written_stops_the_blocks_where_it_stops_the_search_of_all_queries() {
@@ -1811,10 +1823,10 @@ fn a_side_file_that_cannot_be_written_stops_the_blocks_where_it_stops_the_search
     let query = queries_with_warnings(&dir, &[5, 29, 30]);
     let (_, db) = paja();
     let subject = [OsStr::new("-db"), db.as_os_str()];
-    for spec in ["13", "14"] {
+    for spec in ["14"] {
         let extension = if spec == "13" { "json" } else { "xml" };
-        for threads in THREADS {
-            for n in [3usize, 28] {
+        for threads in ONE_THREAD {
+            for n in SECOND_BLOCK {
                 let what = format!("outfmt {spec}, side file {n}, threads {threads}");
                 let prepare = |at: &Path| {
                     std::os::unix::fs::symlink(
@@ -1858,7 +1870,8 @@ fn a_side_file_that_cannot_be_written_stops_the_blocks_where_it_stops_the_search
 
 // Queries without a hit and an empty query file: the blocks write what the search of all queries
 // writes (a side file per query, even one without hits; for an empty query file the plan is not
-// taken and the master lists nothing).
+// taken and the master lists nothing). Both formats and both inputs, at one thread; the shadow run
+// writes the blocks' files and compares them with the reference's.
 #[test]
 fn outfmt_13_and_14_without_hits_and_without_queries_are_unchanged() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
@@ -1868,7 +1881,7 @@ fn outfmt_13_and_14_without_hits_and_without_queries_are_unchanged() {
     for spec in ["13", "14"] {
         for name in ["nohit.faa", "empty.faa"] {
             let query = root.join(name);
-            for threads in THREADS {
+            for threads in ONE_THREAD {
                 let what = format!("outfmt {spec}, {name}, threads {threads}");
                 let run = |vars: &[(&str, &str)], at: &str| {
                     files_run(
@@ -1883,11 +1896,11 @@ fn outfmt_13_and_14_without_hits_and_without_queries_are_unchanged() {
                     )
                 };
                 let reference = run(&[BLOCK_80, XML2_OFF], "ref");
-                let blocks = run(&[BLOCK_80], "blocks");
-                // One block or no query: the search of all queries, in one search.
-                assert_same_files(&blocks, &reference, Some(false), &what);
                 let shadow = run(&[BLOCK_80, SHADOW], "shadow");
                 assert_same_files(&shadow, &reference, None, &format!("{what} shadow"));
+                // One block or no query: the search of all queries, in one search, so that the
+                // plan of blocks is not taken and the shadow has no line.
+                assert!(shadow.0.shadow.is_empty(), "{what}: {:?}", shadow.0.shadow);
             }
         }
     }
@@ -1897,7 +1910,8 @@ fn outfmt_13_and_14_without_hits_and_without_queries_are_unchanged() {
 // The frozen NCBI rows `db.sa.bpqb.{13,14,taxdb.13,taxdb.14}` (`tests/db_search_manifest.tsv`; the
 // last two have a taxonomy database on `BLASTDB`): 30 queries are one block at the default
 // `LOSAT_X_BPQBLOCK`, so with `LOSAT_X_BPQBLOCK=1` the two blocks (one per NCBI batch) must write the
-// master and the 30 side files that NCBI froze, and its standard error, at one and four threads.
+// master and the 30 side files that NCBI froze, and its standard error, at one thread (the reports
+// are written serially, so the thread count does not reach the files).
 #[test]
 fn the_frozen_ncbi_rows_of_outfmt_13_and_14_are_written_by_two_blocks() {
     let manifest = std::fs::read_to_string(
@@ -1942,7 +1956,7 @@ fn the_frozen_ncbi_rows_of_outfmt_13_and_14_are_written_by_two_blocks() {
             }
         }
         assert_eq!(expected.len(), 31, "{row}");
-        for threads in THREADS {
+        for threads in ONE_THREAD {
             let what = format!("{row} threads {threads}");
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();

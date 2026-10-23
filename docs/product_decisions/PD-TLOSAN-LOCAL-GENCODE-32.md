@@ -29,7 +29,8 @@ do not compare `-subject` and `-db` raw bytes as if they were equivalent.
   `CObjMgr_QueryFactory`; `blast_setup_cxx.cpp:800-810` takes the genetic code
   from the subject source. `tblastn_app.cpp:242-265` passes the option's DB
   code to the formatter. The pinned CLI results are in
-  `docs/evidence/tlosan_stage_a/cli_20260923_verified/`.
+  `docs/evidence/tlosan_stage_a/cli_20260923_verified/` (moved to a release asset on 2026-10-23
+  except the checksum lists: [ARCHIVED.md](../evidence/tlosan_stage_a/ARCHIVED.md)).
 - On the code-4 fixture, NCBI `-subject -db_gencode 4` kept the code-1
   score of 231 bits and E-value 1.75e-85 while showing 100% identity;
   `-db` with code 4 produced 251 bits, E-value 3.39e-93, and an

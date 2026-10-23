@@ -1,26 +1,10 @@
-//! Internal NCBI TBLASTN two-hit WordFinder path for the BLOSUM62/word-3 profile.
-//! The public search remains unsupported; this is a bounded Stage C diagnostic.
+//! Internal NCBI TBLASTN two-hit WordFinder of the (frame, chunk) units of the preliminary search
+//! (`XTwoHit`).
 
 #[cfg(test)]
-use super::search_seed::resolve_local_subject_ncbi2na;
-#[cfg(test)]
-use super::search_seed::{
-    encode_tblastn_lookup_query, scan_protein_words_by_chunk, Seed, SeedScanEvent, TranslatedChunk,
-};
-#[cfg(test)]
-use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
+use super::search_seed::encode_tblastn_lookup_query;
 use crate::algorithm::blastp::extension::extend_two_hit;
-#[cfg(test)]
-use crate::algorithm::tblastx::translation::generate_frames;
-#[cfg(test)]
-use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::config::ScoringMatrix;
-#[cfg(test)]
-use crate::utils::genetic_code::GeneticCode;
-#[cfg(test)]
-use crate::utils::seg::SegParams;
-#[cfg(test)]
-use anyhow::{ensure, Result};
 
 // NCBI reference: c++/include/algo/blast/core/blast_extend.h:142-163
 // typedef struct BlastUngappedData { Int4 q_start, s_start, length, score; } ...;
@@ -71,351 +55,6 @@ impl Diagonals {
             self.offset += subject_length as i32 + self.window;
         }
     }
-}
-
-// NCBI reference: c++/src/algo/blast/core/blast_engine.c:804-841
-// for (context=first_context; context<=last_context; context++) {
-//     subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-//     status = s_BlastSearchEngineOneContext(...);
-// }
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:478-614
-// scansub = (TAaScanSubjectFunction)(lookup->scansub_callback);
-// hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-// for (i = 0; i < hits; ++i) { /* two-hit diagonal state and extension */ }
-// Blast_ExtendWordExit(ewp, subject->length);
-#[cfg(test)]
-pub(super) fn find_blosum62_word3_init_hsps(
-    query: &[u8],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    window: i32,
-    x_dropoff: i32,
-    cutoff_score: i32,
-    mask_lowercase: bool,
-) -> Result<Vec<InitHsp>> {
-    find_blosum62_word3_init_hsps_multi(
-        &[query],
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        window,
-        &[x_dropoff],
-        &[cutoff_score],
-        mask_lowercase,
-    )
-}
-
-// NCBI c++/src/algo/blast/core/aa_ungapped.c:547-583:
-// curr_context = BSearchContextInfo(query_offset, query_info);
-// if (query_offset - diff <
-//     query_info->contexts[curr_context].query_offset) { ... continue; }
-// cutoffs = word_params->cutoffs + curr_context;
-// s_BlastAaExtendTwoHit(..., query, ..., query_offset, ...);
-// NCBI c++/src/algo/blast/core/blast_extend.c:46-65:
-// while (diag_array_length < (qlen+window_size)) diag_array_length <<= 1;
-// Keep one diagonal table for the concatenated protein queries.
-#[cfg(test)]
-pub(super) fn find_blosum62_word3_init_hsps_multi(
-    queries: &[&[u8]],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    window: i32,
-    x_dropoffs: &[i32],
-    cutoff_scores: &[i32],
-    mask_lowercase: bool,
-) -> Result<Vec<InitHsp>> {
-    find_protein_init_hsps_multi(
-        queries,
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        window,
-        x_dropoffs,
-        cutoff_scores,
-        mask_lowercase,
-        ScoringMatrix::Blosum62,
-        3,
-    )
-}
-
-// NCBI c++/src/algo/blast/core/aa_ungapped.c:516-614:
-// diff < wordsize controls the second hit; s_BlastAaExtendTwoHit uses
-// wordsize and score_params->matrix before saving/sorting each HSP list.
-#[cfg(test)]
-pub(super) fn find_protein_init_hsps_multi(
-    queries: &[&[u8]],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    window: i32,
-    x_dropoffs: &[i32],
-    cutoff_scores: &[i32],
-    mask_lowercase: bool,
-    matrix: ScoringMatrix,
-    word_size: usize,
-) -> Result<Vec<InitHsp>> {
-    let mut all_hits = Vec::new();
-    find_protein_init_hsps_by_chunk(
-        queries,
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        window,
-        x_dropoffs,
-        cutoff_scores,
-        mask_lowercase,
-        matrix,
-        word_size,
-        |event| {
-            if let InitStageEvent::Chunk(_, _, _, chunk_hits) = event {
-                all_hits.extend_from_slice(chunk_hits);
-            }
-            Ok(())
-        },
-    )?;
-    Ok(all_hits)
-}
-
-// NCBI c++/src/algo/blast/core/blast_engine.c:478-552,840-850:
-// WordFinder and GetGappedScore operate on one chunk; the frame's
-// HSPListAppend occurs before scanning the next translated frame.
-#[cfg(test)]
-pub(super) enum InitStageEvent<'a> {
-    Chunk(&'a QueryFrame, TranslatedChunk, &'a [Seed], &'a [InitHsp]),
-    FrameEnd(&'a QueryFrame),
-}
-
-// NCBI c++/src/algo/blast/core/blast_engine.c:478-552,804-841:
-// BlastInitHitListReset(init_hitlist); WordFinder(..., init_hitlist, ...);
-// if (init_hitlist->total == 0) continue;
-// GetGappedScore(..., init_hitlist, &hsp_list, ...);
-// Deliver each score-sorted initial HSP list before the next chunk scan.
-#[cfg(test)]
-pub(super) fn find_protein_init_hsps_by_chunk(
-    queries: &[&[u8]],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    window: i32,
-    x_dropoffs: &[i32],
-    cutoff_scores: &[i32],
-    mask_lowercase: bool,
-    matrix: ScoringMatrix,
-    word_size: usize,
-    on_event: impl FnMut(InitStageEvent<'_>) -> Result<()>,
-) -> Result<()> {
-    find_protein_init_hsps_by_chunk_with_mask_mode(
-        queries,
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        window,
-        x_dropoffs,
-        cutoff_scores,
-        mask_lowercase,
-        matrix,
-        word_size,
-        false,
-        on_event,
-    )
-}
-
-// NCBI c++/src/algo/blast/core/blast_setup.c:614-638:
-// mask_at_hash = SBlastFilterOptionsMaskAtHash(filter_options);
-// if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
-// BLAST_ComplementMaskLocations(..., filter_maskloc, lookup_segments);
-// Soft masking retains the unmasked WordFinder query while lookup still
-// excludes the SEG intervals used by the candidate scanner.
-#[cfg(test)]
-pub(super) fn find_protein_init_hsps_by_chunk_with_mask_mode(
-    queries: &[&[u8]],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    window: i32,
-    x_dropoffs: &[i32],
-    cutoff_scores: &[i32],
-    mask_lowercase: bool,
-    matrix: ScoringMatrix,
-    word_size: usize,
-    soft_masking: bool,
-    mut on_event: impl FnMut(InitStageEvent<'_>) -> Result<()>,
-) -> Result<()> {
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:547-583:
-    // cutoffs = word_params->cutoffs + curr_context;
-    // Require one cutoff per protein query for the indexed read.
-    ensure!(
-        x_dropoffs.len() == queries.len() && cutoff_scores.len() == queries.len(),
-        "one WordFinder x-drop and cutoff per query context"
-    );
-    // NCBI c++/src/algo/blast/core/blast_query_info.c:246-250:
-    // last context's query_offset + query_length is the sequence length;
-    // each preceding protein context ends with one NULLB separator.
-    let mut query_sequence = Vec::new();
-    let mut context_offsets = Vec::with_capacity(queries.len());
-    for query in queries {
-        context_offsets.push(i32::try_from(query_sequence.len())?);
-        // NCBI c++/src/algo/blast/core/blast_setup.c:614-625:
-        // if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
-        let frame = if soft_masking {
-            encode_protein_query_frame_with_seg(query, None)
-        } else {
-            encode_tblastn_lookup_query(query, seg, mask_lowercase)
-        };
-        query_sequence.extend_from_slice(&frame.aa_seq[1..]);
-    }
-    let mut diagonals = Diagonals::new(query_sequence.len().saturating_sub(1), window);
-    let word_size_i32 = i32::try_from(word_size)?;
-
-    scan_protein_words_by_chunk(
-        queries,
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        mask_lowercase,
-        matrix,
-        word_size,
-        |scan_event| {
-            let (frame, chunk, seeds) = match scan_event {
-                SeedScanEvent::FrameEnd(frame) => {
-                    on_event(InitStageEvent::FrameEnd(frame))?;
-                    return Ok(());
-                }
-                SeedScanEvent::Chunk(frame, chunk, seeds) => (frame, chunk, seeds),
-            };
-            // NCBI c++/src/algo/blast/core/blast_engine.c:478-552:
-            // WordFinder and GetGappedScore run before the next chunk scan.
-            let mut hits = Vec::new();
-            let subject_sequence = &frame.aa_seq[1 + chunk.offset..1 + chunk.offset + chunk.length];
-            for &seed in seeds {
-                let q = seed.query_offset as i32;
-                let s = seed.subject_offset as i32;
-                // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:516-547
-                // diag_coord = (query_offset - subject_offset) & diag_mask;
-                // if (diag_array[diag_coord].flag) {
-                //     if (subject_offset + diag_offset < last_hit) continue;
-                //     last_hit = subject_offset + diag_offset; flag = 0;
-                // } else {
-                //     last_hit = diag_array[diag_coord].last_hit - diag_offset;
-                //     diff = subject_offset - last_hit;
-                //     if (diff >= window) { last_hit = subject_offset + diag_offset; continue; }
-                //     if (diff < wordsize) continue;
-                // }
-                let index = ((q - s) & diagonals.mask) as usize;
-                let (last_hit, flag) = &mut diagonals.entries[index];
-                if *flag {
-                    if s + diagonals.offset < *last_hit {
-                        continue;
-                    }
-                    *last_hit = s + diagonals.offset;
-                    *flag = false;
-                    continue;
-                }
-                let previous = *last_hit - diagonals.offset;
-                let diff = s - previous;
-                if diff >= window {
-                    *last_hit = s + diagonals.offset;
-                    continue;
-                }
-                if diff < word_size_i32 {
-                    continue;
-                }
-                // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:550-588
-                // if (query_offset - diff < query_info->contexts[curr_context].query_offset)
-                //     { last_hit = subject_offset + diag_offset; continue; }
-                // score = s_BlastAaExtendTwoHit(matrix, subject, query,
-                //         last_hit + wordsize, subject_offset, query_offset,
-                //         cutoffs->x_dropoff, ..., wordsize, &right_extend, &s_last_off);
-                // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
-                // NCBI c++/src/algo/blast/core/aa_ungapped.c:562-579:
-                // curr_context = BSearchContextInfo(query_offset, query_info);
-                // if (query_offset - diff <
-                //     query_info->contexts[curr_context].query_offset) continue;
-                let context = context_offsets.partition_point(|&offset| offset <= q) - 1;
-                if q - diff < context_offsets[context] {
-                    *last_hit = s + diagonals.offset;
-                    continue;
-                }
-                // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
-                // s_BlastAaExtendTwoHit(matrix, ..., wordsize, ...);
-                let result = extend_two_hit(
-                    matrix,
-                    &query_sequence,
-                    subject_sequence,
-                    (previous + word_size_i32) as usize,
-                    s as usize,
-                    q as usize,
-                    x_dropoffs[context],
-                    word_size,
-                );
-                let Some(result) = result else {
-                    continue;
-                };
-                // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
-                // cutoffs = word_params->cutoffs + curr_context;
-                // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
-                if result.ungapped_data.score >= cutoff_scores[context] {
-                    hits.push(InitHsp {
-                        frame: frame.frame,
-                        chunk_offset: seed.chunk_offset,
-                        q_seed: seed.query_offset,
-                        s_seed: seed.subject_offset,
-                        q_start: result.ungapped_data.q_start,
-                        s_start: result.ungapped_data.s_start,
-                        length: result.ungapped_data.length,
-                        score: result.ungapped_data.score,
-                    });
-                }
-                // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:588-607
-                // if (right_extend) {
-                //     diag_array[diag_coord].flag = 1;
-                //     diag_array[diag_coord].last_hit =
-                //         s_last_off - (wordsize - 1) + diag_offset;
-                // } else { last_hit = subject_offset + diag_offset; }
-                if result.right_extend {
-                    *flag = true;
-                    *last_hit = result.s_last_off - (word_size_i32 - 1) + diagonals.offset;
-                } else {
-                    *last_hit = s + diagonals.offset;
-                }
-            }
-            // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
-            // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
-            // Blast_InitHitListSortByScore(init_hitlist);
-            // NCBI c++/src/algo/blast/core/blast_extend.c:273-313:
-            // compare score DESC, subject start ASC, length DESC, query start ASC.
-            // NCBI reference: c++/src/algo/blast/core/blast_extend.c:306-310
-            // ```c
-            //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-            //           sizeof(BlastInitHSP), score_compare_match);
-            // ```
-            // Stable, as glibc's qsort under the pinned NCBI BLAST+ (TN-5).
-            hits.sort_by(|a, b| {
-                b.score
-                    .cmp(&a.score)
-                    .then(a.s_start.cmp(&b.s_start))
-                    .then(b.length.cmp(&a.length))
-                    .then(a.q_start.cmp(&b.q_start))
-            });
-            // NCBI c++/src/algo/blast/core/aa_ungapped.c:609-614:
-            // Blast_ExtendWordExit(ewp, subject->length);
-            diagonals.finish_frame(chunk.length);
-            on_event(InitStageEvent::Chunk(frame, chunk, seeds, &hits))?;
-            Ok(())
-        },
-    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-547
@@ -583,9 +222,8 @@ impl<'a> XTwoHit<'a> {
     //                         s_last_off - (wordsize - 1) + diag_offset;
     // ```
     // The body is the per-hit loop of the two-hit word finder (the same tests, extension and HSP
-    // saving as in find_protein_init_hsps_by_chunk_with_mask_mode), run on one filled offset array.
-    /// The loop body of `find_protein_init_hsps_by_chunk_with_mask_mode` for one
-    /// filled offset array.
+    // saving of aa_ungapped.c:516-606), run on one filled offset array.
+    /// The loop body of the two-hit word finder for one filled offset array.
     #[inline]
     pub(super) fn pairs(
         &mut self,
@@ -788,6 +426,8 @@ impl<'a> XTwoHit<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::tblastn::search_gapped::{preliminary_stages, word_finder_profile};
+    use crate::sequence::packed_subject::SubjectNt;
     use std::fs;
 
     // NCBI c++/src/algo/blast/core/blast_engine.c:259-310,478-487:
@@ -880,20 +520,23 @@ mod tests {
                 }
             })
             .collect();
-        let actual = find_protein_init_hsps_multi(
+        let actual = preliminary_stages(
             &refs,
             subject,
             1,
-            None,
-            16,
-            60,
-            &[21, 21, 0],
-            &[0, 0, i32::MAX],
-            false,
-            ScoringMatrix::Blosum45,
-            2,
+            word_finder_profile(
+                None,
+                16,
+                60,
+                &[21, 21, 0],
+                &[0, 0, i32::MAX],
+                false,
+                ScoringMatrix::Blosum45,
+                2,
+            ),
         )
-        .unwrap();
+        .unwrap()
+        .initial;
         if actual != expected {
             let first = actual
                 .iter()
@@ -941,18 +584,23 @@ mod tests {
                 }
             })
             .collect();
-        let actual = find_blosum62_word3_init_hsps_multi(
+        let actual = preliminary_stages(
             &refs,
             subject,
             1,
-            None,
-            13,
-            40,
-            &[16, 16, 0],
-            &[0, 0, i32::MAX],
-            false,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16, 16, 0],
+                &[0, 0, i32::MAX],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
         )
-        .unwrap();
+        .unwrap()
+        .initial;
         if actual != expected {
             let first = actual
                 .iter()
@@ -983,34 +631,44 @@ mod tests {
         let queries = read_fasta(&format!("{root}query.faa"));
         let refs: Vec<&[u8]> = queries.iter().map(|(_, seq)| seq.as_slice()).collect();
         let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
-        let equal = find_blosum62_word3_init_hsps_multi(
+        let equal = preliminary_stages(
             &refs,
             subject,
             1,
-            None,
-            13,
-            40,
-            &[16, 16, 0],
-            &[20, 393, i32::MAX],
-            false,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16, 16, 0],
+                &[20, 393, i32::MAX],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
         )
-        .unwrap();
+        .unwrap()
+        .initial;
         assert!(equal.iter().any(|h| h.score == 20 && h.q_seed < 121));
         assert!(equal
             .iter()
             .any(|h| h.score == 393 && (121..192).contains(&h.q_seed)));
-        let above = find_blosum62_word3_init_hsps_multi(
+        let above = preliminary_stages(
             &refs,
             subject,
             1,
-            None,
-            13,
-            40,
-            &[16, 16, 0],
-            &[21, 394, i32::MAX],
-            false,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16, 16, 0],
+                &[21, 394, i32::MAX],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
         )
-        .unwrap();
+        .unwrap()
+        .initial;
         assert!(!above.iter().any(|h| h.score == 20 && h.q_seed < 121));
         assert!(!above
             .iter()
@@ -1059,18 +717,23 @@ mod tests {
             })
             .collect();
         assert_eq!(expected.len(), 32);
-        let actual = find_blosum62_word3_init_hsps_multi(
+        let actual = preliminary_stages(
             &refs,
             subject,
             1,
-            None,
-            13,
-            40,
-            &[16, 1, 0],
-            &[0, 0, i32::MAX],
-            false,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16, 1, 0],
+                &[0, 0, i32::MAX],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
         )
-        .unwrap();
+        .unwrap()
+        .initial;
         if actual != expected {
             let first = actual
                 .iter()
@@ -1117,8 +780,14 @@ mod tests {
             .collect();
         let mut actual = Vec::new();
         for (id, subject) in &subjects {
-            for hit in
-                find_blosum62_word3_init_hsps(query, subject, 1, None, 13, 40, 16, 0, true).unwrap()
+            for hit in preliminary_stages(
+                &[query],
+                subject,
+                1,
+                word_finder_profile(None, 13, 40, &[16], &[0], true, ScoringMatrix::Blosum62, 3),
+            )
+            .unwrap()
+            .initial
             {
                 actual.push((id.clone(), hit));
             }
@@ -1155,8 +824,14 @@ mod tests {
                 }
             })
             .collect();
-        let actual =
-            find_blosum62_word3_init_hsps(query, subject, 1, None, 13, 40, 16, 0, false).unwrap();
+        let actual = preliminary_stages(
+            &[query],
+            subject,
+            1,
+            word_finder_profile(None, 13, 40, &[16], &[0], false, ScoringMatrix::Blosum62, 3),
+        )
+        .unwrap()
+        .initial;
         assert_eq!(actual, expected);
     }
 
@@ -1196,8 +871,23 @@ mod tests {
                 }
             })
             .collect();
-        let actual =
-            find_blosum62_word3_init_hsps(query, subject, 32, None, 13, 40, 16, 13, false).unwrap();
+        let actual = preliminary_stages(
+            &[query],
+            subject,
+            32,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16],
+                &[13],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
+        )
+        .unwrap()
+        .initial;
         assert_eq!(actual, expected);
     }
 
@@ -1246,8 +936,14 @@ mod tests {
         assert!(observed.iter().all(|pair| *pair == (16, 0)));
         let mut actual = Vec::new();
         for (id, subject) in &subjects {
-            for hit in find_blosum62_word3_init_hsps(query, subject, 1, None, 13, 40, 16, 0, false)
-                .unwrap()
+            for hit in preliminary_stages(
+                &[query],
+                subject,
+                1,
+                word_finder_profile(None, 13, 40, &[16], &[0], false, ScoringMatrix::Blosum62, 3),
+            )
+            .unwrap()
+            .initial
             {
                 actual.push((id.clone(), hit));
             }
@@ -1300,8 +996,23 @@ mod tests {
         // cutoffs = word_params->cutoffs + curr_context;
         // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
         // Retained long-fixture PARAM rows give cutoff 28.
-        let actual =
-            find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 28, false).unwrap();
+        let actual = preliminary_stages(
+            &[query],
+            &subject,
+            1,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16],
+                &[28],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
+        )
+        .unwrap()
+        .initial;
         assert_eq!(actual, expected);
     }
     // NCBI c++/src/algo/blast/core/blast_engine.c:283-310:
@@ -1325,23 +1036,31 @@ mod tests {
             subject.extend_from_slice(b"ATG");
         }
         subject[14_999_700..15_000_000].make_ascii_lowercase();
-        let resolved = resolve_local_subject_ncbi2na(&subject).unwrap();
-        let code = GeneticCode::try_from_id(1).unwrap();
-        let frames = generate_frames(&resolved, &code);
-        let negative_first_length = frames.iter().find(|f| f.frame == -1).unwrap().aa_len;
-        let actual_ranges: Vec<_> = frames
+        // The (frame, chunk, scan ranges) units the search runs: the unit path's plan.
+        let plan = super::super::search_seed::x_scan_plan(
+            &[query],
+            SubjectNt::Letters(&subject),
+            1,
+            None,
+            13,
+            true,
+            ScoringMatrix::Blosum62,
+            3,
+            &std::sync::OnceLock::new(),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        let actual_ranges: Vec<_> = plan
+            .subject
+            .units
             .iter()
-            .flat_map(|frame| {
-                super::super::search_seed::translated_chunk_scan_ranges(
-                    &subject,
-                    frame.frame,
-                    frame.aa_len,
-                    negative_first_length,
-                    true,
+            .map(|(frame_index, chunk, ranges)| {
+                (
+                    plan.subject.frames[*frame_index].frame,
+                    chunk.length,
+                    ranges.clone(),
                 )
-                .unwrap()
-                .into_iter()
-                .map(|(chunk, ranges)| (frame.frame, chunk.length, ranges))
             })
             .collect();
         assert_eq!(
@@ -1350,8 +1069,7 @@ mod tests {
                 "{root}masked_chunk_boundary_20260924/chunk_ranges.tsv"
             ))
         );
-        drop(frames);
-        drop(resolved);
+        drop(plan);
         let trace = fs::read_to_string(format!(
             "{root}masked_chunk_boundary_20260924/frame_chunks.tsv"
         ))
@@ -1378,8 +1096,14 @@ mod tests {
         // cutoffs = word_params->cutoffs + curr_context;
         // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
         // Retained long-fixture PARAM rows give cutoff 28.
-        let actual =
-            find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 28, true).unwrap();
+        let actual = preliminary_stages(
+            &[query],
+            &subject,
+            1,
+            word_finder_profile(None, 13, 40, &[16], &[28], true, ScoringMatrix::Blosum62, 3),
+        )
+        .unwrap()
+        .initial;
         assert_eq!(actual, expected);
     }
     // NCBI c++/src/algo/blast/core/blast_engine.c:283-310,478-500:
@@ -1414,23 +1138,31 @@ mod tests {
                 (f[2].parse().unwrap(), f[3].parse().unwrap())
             })
             .collect();
-        let resolved = resolve_local_subject_ncbi2na(&subject).unwrap();
-        let code = GeneticCode::try_from_id(1).unwrap();
-        let frames = generate_frames(&resolved, &code);
-        let negative_first_length = frames.iter().find(|f| f.frame == -1).unwrap().aa_len;
-        let actual_ranges: Vec<_> = frames
+        // The (frame, chunk, scan ranges) units the search runs: the unit path's plan.
+        let plan = super::super::search_seed::x_scan_plan(
+            &[query],
+            SubjectNt::Letters(&subject),
+            1,
+            None,
+            13,
+            true,
+            ScoringMatrix::Blosum62,
+            3,
+            &std::sync::OnceLock::new(),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        let actual_ranges: Vec<_> = plan
+            .subject
+            .units
             .iter()
-            .flat_map(|frame| {
-                super::super::search_seed::translated_chunk_scan_ranges(
-                    &subject,
-                    frame.frame,
-                    frame.aa_len,
-                    negative_first_length,
-                    true,
+            .map(|(frame_index, chunk, ranges)| {
+                (
+                    plan.subject.frames[*frame_index].frame,
+                    chunk.length,
+                    ranges.clone(),
                 )
-                .unwrap()
-                .into_iter()
-                .map(|(chunk, ranges)| (frame.frame, chunk.length, ranges))
             })
             .collect();
         assert_eq!(
@@ -1444,8 +1176,7 @@ mod tests {
             actual_ranges,
             ncbi_chunk_range_rows(&format!("{root}no_range_middle_20260924/chunk_ranges.tsv"))
         );
-        drop(frames);
-        drop(resolved);
+        drop(plan);
         let expected: Vec<_> = trace
             .lines()
             .filter(|line| line.starts_with("INIT\t"))
@@ -1468,8 +1199,14 @@ mod tests {
         // cutoffs = word_params->cutoffs + curr_context;
         // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
         // Retained long-fixture PARAM rows give cutoff 30.
-        let actual =
-            find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 30, true).unwrap();
+        let actual = preliminary_stages(
+            &[query],
+            &subject,
+            1,
+            word_finder_profile(None, 13, 40, &[16], &[30], true, ScoringMatrix::Blosum62, 3),
+        )
+        .unwrap()
+        .initial;
         assert_eq!(actual, expected);
     }
 

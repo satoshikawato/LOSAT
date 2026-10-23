@@ -4,6 +4,7 @@
 //! using NCBI BLAST as the behavioral reference.
 
 mod alignment;
+pub(crate) mod archive;
 pub mod args;
 pub mod blast_engine;
 // NCBI c++/src/algo/blast/core/blast_setup.c:382-385:

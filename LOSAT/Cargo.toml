@@ -12,7 +12,6 @@ exclude = [
     ".tmp/",
     "tests/",
     "losat_out/",
-    "LOSAT/",
     "**/*.pyc",
     "**/*.tmp",
     "**/*.orig",

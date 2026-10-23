@@ -30,7 +30,7 @@
 //!
 //! A packed subject (`LOSAT_X_TBNSTORE`, every `-db` sequence) is translated from its packed
 //! bytes (`x_packed_frames`), 32 codons of a phase at a time with AVX2 (`LOSAT_X_TBNXLATESIMD`,
-//! in the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; elsewhere
+//! in the strict set: on unless it is `0`; elsewhere
 //! eight at a time from one word). With `LOSAT_X_STATS` set, `main` prints `[X_STATS]
 //! TBNXLATESIMD codons_vector= codons_scalar=` at exit, when a packed subject was translated.
 
@@ -551,7 +551,7 @@ fn x_frame_capacity(length: usize) -> usize {
 // No NCBI counterpart: reads the LOSAT_X_TBNFRAMEREUSE variable once; it does not change any value
 // NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it a thread keeps the frames of a
+/// it is `0`. With it a thread keeps the frames of a
 /// dropped subject plan (`x_reuse_frame`) for the next plan it translates from a packed subject
 /// (`x_frame_buffer`).
 fn x_frame_reuse() -> bool {
@@ -799,7 +799,7 @@ fn x_phase_words<const PHASE: usize>(
 // computes.
 /// EXPERIMENT (LOSAT_X_TBNXLATESIMD): whether a packed subject's frames are read with the
 /// vector loop (AVX2 on x86_64; elsewhere the variable changes nothing); a switch of the strict
-/// set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+/// set, on unless it is `0`.
 fn x_xlate_simd() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNXLATESIMD"))

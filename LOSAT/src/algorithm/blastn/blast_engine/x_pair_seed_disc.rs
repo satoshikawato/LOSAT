@@ -78,7 +78,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: reads the switches once (LOSAT_X_PAIRPARDISC, a strict-set switch since
-/// 2026-10-17: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set;
+/// 2026-10-17: on unless it is `0`;
 /// LOSAT_X_PAIRPARDISCSHADOW, off unless set to any value); they do not change any value NCBI
 /// computes.
 fn switches() -> (bool, bool) {
@@ -104,8 +104,8 @@ pub(super) fn arr_on() -> bool {
 }
 
 /// No NCBI counterpart: reads the switches of the diagonal-array stage once
-/// (LOSAT_X_PAIRPARDISCARR, a strict-set switch since 2026-10-20: on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set; LOSAT_X_PAIRPARDISCARRSHADOW, off unless set to any
+/// (LOSAT_X_PAIRPARDISCARR, a strict-set switch since 2026-10-20: on unless it is `0`;
+/// LOSAT_X_PAIRPARDISCARRSHADOW, off unless set to any
 /// value); they do not change any value NCBI computes.
 fn arr_switches() -> (bool, bool) {
     static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();

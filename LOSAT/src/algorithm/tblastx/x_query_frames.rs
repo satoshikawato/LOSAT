@@ -67,7 +67,7 @@ use crate::utils::threading::SearchPool;
 use rayon::prelude::*;
 
 // No NCBI counterpart: reads the switches once (LOSAT_X_TBXQFRAMES is a strict-set switch: on
-// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; the shadow, off unless set to any
+// unless it is `0`; the shadow, off unless set to any
 // value, implies the switch). They choose between two LOSAT code paths with the same result and
 // change no value NCBI computes.
 /// 0 = off, 1 = LOSAT_X_TBXQFRAMES, 2 = LOSAT_X_TBXQFRAMESSHADOW.

@@ -99,8 +99,7 @@ use anyhow::Result;
 
 // No NCBI counterpart: the variable is read once per process; it chooses when a batch's search
 // starts, not a value NCBI computes.
-/// LOSAT_X_TBXPIPE: a strict-set switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is
-/// not set; `utils/xswitch.rs`).
+/// LOSAT_X_TBXPIPE: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
 pub(super) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXPIPE"))

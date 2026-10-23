@@ -69,8 +69,8 @@
 //! keeps the 31-bit field's truncation (memory `losat-no-ncbi-bug-reproduction`, 2026-10-12); the
 //! batch guard `last_hit_fits` already keeps the units of the unit path inside it.
 //!
-//! The rule: the switch is in the strict set (on unless `LOSAT_X_TBXHITBF` is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set); the probes of LOSAT_TIMING / LOSAT_X_STATS run the
+//! The rule: the switch is in the strict set (on unless `LOSAT_X_TBXHITBF` is `0`);
+//! the probes of LOSAT_TIMING / LOSAT_X_STATS run the
 //! reference loop (they count every outcome). `LOSAT_X_TBXHITBFSHADOW=1` (turns the path on) runs
 //! the reference loop and this one on each unit inside `fits`, each on a fresh table, and stops at
 //! the first difference of the saved records or of the final table.

@@ -853,9 +853,9 @@ pub(crate) fn search_core(
             };
             super::x_timing::batch(XBatch::Lookup, x_t);
             let mut subject_stages = Vec::new();
-            // Dispatch point (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0` or
-            // `LOSAT_X_DEFAULT=0`): the subjects as a flow of
-            // tasks of k consecutive subjects, handed to the sink in subject order by this thread
+            // Dispatch point (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0`): the
+            // subjects as a flow of tasks of k consecutive subjects, handed to the sink in subject
+            // order by this thread
             // (x_subject_flow.rs); the waves below then have nothing left to do.
             #[cfg(feature = "parallel")]
             let x_flowed =

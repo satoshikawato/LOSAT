@@ -75,7 +75,7 @@
 //! `code * 16 + base` is in the 256-cell matrix.
 //!
 //! The variables are read once. `LOSAT_X_BNUNGAPCOUNT` (a switch of the strict set,
-//! `utils/xswitch.rs`: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) runs this
+//! `utils/xswitch.rs`: on unless it is `0`) runs this
 //! module. `LOSAT_X_BNUNGAPCOUNTSHADOW` (set to any value; not in the strict set; implies it)
 //! runs this module and the ported loops on every call and panics unless the four results are
 //! equal; `main` prints one `[X_SHADOW] BNUNGAPCOUNT compared=N` line.
@@ -91,8 +91,8 @@ const BLASTNA_SIZE: usize = 16;
 static X_SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
 
 /// No NCBI counterpart: reads LOSAT_X_BNUNGAPCOUNT / LOSAT_X_BNUNGAPCOUNTSHADOW once.
-/// `LOSAT_X_BNUNGAPCOUNT` is a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and
-/// it is not set. `LOSAT_X_BNUNGAPCOUNTSHADOW` is not: it counts when set to any value. 0 = the
+/// `LOSAT_X_BNUNGAPCOUNT` is a strict-set switch: on unless it is `0`.
+/// `LOSAT_X_BNUNGAPCOUNTSHADOW` is not: it counts when set to any value. 0 = the
 /// ported loops, 1 = this module, 2 = both and compare; SHADOW wins. It chooses a LOSAT code path
 /// and changes no value NCBI computes.
 #[inline(always)]

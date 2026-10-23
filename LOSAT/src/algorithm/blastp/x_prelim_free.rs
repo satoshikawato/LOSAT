@@ -21,8 +21,8 @@
 //! `redone_matches`, not the preliminary lists). The parallel redo paths are unchanged (they read
 //! the lists again when they replay the kept matches).
 //!
-//! `LOSAT_X_BPPFREE` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_TIMING=1` a search
+//! `LOSAT_X_BPPFREE` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`.
+//! With `LOSAT_TIMING=1` a search
 //! with the switch prints `[TIMING] x_bppfree: freed_lists=<n>` (the lists the serial redo freed).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399
@@ -40,8 +40,7 @@
 
 // No NCBI counterpart: reads the LOSAT_X_BPPFREE switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPPFREE): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set.
+/// EXPERIMENT (LOSAT_X_BPPFREE): a strict-set switch, on unless it is `0`.
 pub(crate) fn x_bp_prelim_free() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();

@@ -721,7 +721,7 @@ impl XSubjectSide {
     pub(super) const KEEP_FROM_BATCHES: usize = 4;
 
     /// EXPERIMENT (LOSAT_X_TBNKEEPFEW): a switch of the strict set (`utils/xswitch.rs`), on
-    /// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it a search of
+    /// unless it is `0`. With it a search of
     /// `KEEP_FROM_BATCHES` or more batches keeps its plans only when `kept_within_threads`
     /// holds or it searches batches side by side (`stage_d_pipeline::x_searched_side_by_side`).
     /// `LOSAT_X_TBNKEEPFEWSHADOW` (`shadow`) keeps them as with `=0`.

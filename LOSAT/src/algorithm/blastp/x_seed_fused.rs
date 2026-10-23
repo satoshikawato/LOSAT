@@ -16,8 +16,7 @@
 //! The buffer's capacity (`array_size`) only cuts the reference's scan into rounds; it changes
 //! neither the order nor the set of hits.
 //!
-//! `LOSAT_X_BPSEED` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set.
+//! `LOSAT_X_BPSEED` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`.
 //!
 //! EXPERIMENT (LOSAT_X_BPDIAG): with the fused loop on, the hits of one subject offset (one lookup
 //! cell) are tested in batches of eight instead of one after the other: for every hit of a batch
@@ -39,8 +38,8 @@
 //! - The values are the bit-field's (31-bit `last_hit`, sign-extended on read, truncated on
 //!   write) and the i32 arithmetic of `x_test_hit`, which wraps (see there).
 //!
-//! `LOSAT_X_BPDIAG` is a switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set. It needs `LOSAT_X_BPSEED` (or `LOSAT_X_BPSEEDSHADOW`, which then compares
+//! `LOSAT_X_BPDIAG` is a switch of the strict set: on unless it is `0`.
+//! It needs `LOSAT_X_BPSEED` (or `LOSAT_X_BPSEEDSHADOW`, which then compares
 //! the batched loop with the reference). Without AVX2
 //! (another architecture, or an x86-64 CPU without it) the switch keeps the per-hit loop: the
 //! scalar batch was slower than the per-hit loop on both machines it was timed on (2026-10-14,
@@ -64,8 +63,8 @@
 //! candidate neither read nor write what its call reads or writes, and the calls keep their order
 //! (the batches' order, then the lanes'); a candidate's entry still holds the value its test read.
 //! A cell's last batch of fewer than eight hits is the scalar batch, called after the buffer.
-//! `LOSAT_X_BPDEFER` is a switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set. It acts only where the AVX2 batch runs (`LOSAT_X_BPDIAG` with AVX2, not
+//! `LOSAT_X_BPDEFER` is a switch of the strict set: on unless it is `0`.
+//! It acts only where the AVX2 batch runs (`LOSAT_X_BPDIAG` with AVX2, not
 //! with `LOSAT_X_BPDIAG_SIMD=0`). `LOSAT_X_BPSEEDSHADOW` compares it with the reference like the
 //! other modes.
 //!
@@ -86,7 +85,7 @@
 //! batches', then the last batch's lanes'). The two changes come from line R's probes of blastp's
 //! cell test (v4-R R2, 2026-10-18); blastp's loops keep their code (the masked batch has a scan
 //! function of its own, never inlined, and a cell test of its own). `LOSAT_X_BXDEFER` is a switch of
-//! the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; off, blastx's
+//! the strict set: on unless it is `0`; off, blastx's
 //! fused loop takes the AVX2 batch ([`XDiagMode::Avx2`]). It acts only where that loop runs the AVX2
 //! batch, on tables with at least `LOSAT_X_BXDEFERMIN` hits per used cell (`blastx/x_seed_diag.rs`).
 //!
@@ -156,7 +155,7 @@
 //! table holds the same range of flag-0 values).
 //!
 //! The switch is read once; it is in the strict set (`utils/xswitch.rs`): on unless
-//! `LOSAT_X_BPHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. The loop with the test is its own
+//! `LOSAT_X_BPHITBF=0`. The loop with the test is its own
 //! function, never inlined and with a closure of its own type (`x_scan_two_hit_hitbf`), so the loops
 //! without it keep their code; the AVX2 and scalar batches keep their own tests, and so do
 //! blastp-fast's loops (`x_seed_fused_compressed.rs`, `x_seed_fused_clut.rs`: the test there gave a
@@ -177,8 +176,7 @@ use std::mem::MaybeUninit;
 
 // No NCBI counterpart: reads the LOSAT_X_BPSEED switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPSEED): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set.
+/// EXPERIMENT (LOSAT_X_BPSEED): a strict-set switch, on unless it is `0`.
 pub(crate) fn x_bp_seed() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -217,8 +215,8 @@ pub(super) fn x_prefetch(diag_array: &[DiagStruct], index: usize) {
 
 // No NCBI counterpart: reads the LOSAT_X_BPDIAG switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPDIAG): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set. It acts in the fused loop only.
+/// EXPERIMENT (LOSAT_X_BPDIAG): a strict-set switch, on unless it is `0`.
+/// It acts in the fused loop only.
 pub(crate) fn x_bp_diag() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -227,8 +225,8 @@ pub(crate) fn x_bp_diag() -> bool {
 
 // No NCBI counterpart: reads the LOSAT_X_BPDEFER switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPDEFER): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set. It acts on the AVX2 batches only.
+/// EXPERIMENT (LOSAT_X_BPDEFER): a strict-set switch, on unless it is `0`.
+/// It acts on the AVX2 batches only.
 pub(crate) fn x_bp_defer() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -238,8 +236,7 @@ pub(crate) fn x_bp_defer() -> bool {
 // No NCBI counterpart: reads the LOSAT_X_BPSCANBF switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPSCANBF): blastp's fused loop finds the cells with [`x_scan_cells_bf`]
-/// (module header). A strict-set switch, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is
-/// not set.
+/// (module header). A strict-set switch, on unless it is `0`.
 pub(crate) fn x_bp_scan_bf() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -250,7 +247,7 @@ pub(crate) fn x_bp_scan_bf() -> bool {
 // computes.
 /// EXPERIMENT (LOSAT_X_BPHITBF): whether blastp's per-hit loop takes the too-far and overlap
 /// outcomes without a branch where [`XHitBf::new`] finds the subject in range (module header); a
-/// switch of the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+/// switch of the strict set, on unless it is `0`.
 pub(crate) fn x_bp_hit_bf() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();

@@ -897,13 +897,18 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                     // reads on while fewer than K + 1 are unwritten (blastx/x_bx_mem.rs).
                     let x_cap =
                         super::search::x_bx_mem::flow_unit_cap(pool, &options, search_subjects);
-                    let (x_bound, x_lookahead) = match x_cap {
-                        Some(k) => (k + 1, 1),
-                        None => (x_wave, pool.threads()),
+                    // PROTOTYPE (LOSAT_X_BXFLOWLIVE): the cap on the batches spawned and not
+                    // sent back instead of on the unwritten ones.
+                    let x_live = std::env::var_os("LOSAT_X_BXFLOWLIVE").is_some();
+                    let (x_bound, x_lookahead, x_max_live) = match x_cap {
+                        Some(k) if x_live => (x_wave, 1, k),
+                        Some(k) => (k + 1, 1, usize::MAX),
+                        None => (x_wave, pool.threads(), usize::MAX),
                     };
                     return x_flow(
                         x_bound,
                         x_lookahead,
+                        x_max_live,
                         &mut query_stream,
                         args.lcase_masking,
                         &|queries: &[super::input::FastaRecord], alone: bool| {
@@ -1356,6 +1361,7 @@ pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> 
 fn x_flow(
     bound: usize,
     lookahead: usize,
+    max_live: usize,
     query_stream: &mut FastaStream<File>,
     lcase_masking: bool,
     search: &(dyn Fn(&[FastaRecord], bool) -> Result<Vec<BatchResults>> + Sync),
@@ -1380,6 +1386,9 @@ fn x_flow(
         held: VecDeque<(usize, Arc<Vec<FastaRecord>>)>,
         read: usize,
         unwritten: usize,
+        // Batches spawned and not yet sent back; at most `max_live`.
+        live: usize,
+        ended: bool,
     }
     debug_assert!(rayon::current_thread_index().is_some());
     debug_assert!(lookahead < bound);
@@ -1391,6 +1400,8 @@ fn x_flow(
             held: VecDeque::new(),
             read: 0,
             unwritten: 0,
+            live: 0,
+            ended: false,
         });
         let failed = Cell::new(false);
         // Spawns one batch's search; its result (or panic) is sent to `receiver` once.
@@ -1407,6 +1418,25 @@ fn x_flow(
                 let _ = sender.send((index, searched));
             });
         };
+        // Spawns the held batches beyond the newest `lookahead` (all of them at the end of the
+        // input, then searched alone) while fewer than `max_live` are spawned and not sent back.
+        let release = || loop {
+            let next = {
+                let mut state = state.borrow_mut();
+                let keep = if state.ended { 0 } else { lookahead };
+                if state.held.len() > keep && state.live < max_live {
+                    state.live += 1;
+                    let alone = state.ended;
+                    state.held.pop_front().map(|(index, queries)| (index, queries, alone))
+                } else {
+                    None
+                }
+            };
+            match next {
+                Some((index, queries, alone)) => spawn(index, queries, alone),
+                None => break,
+            }
+        };
         // Writes the events at the front whose batches are searched; then, until fewer than
         // `bound` batches are unwritten (or, with `all`, until every event is written), runs a
         // pending task or waits for a result, and writes again.
@@ -1416,8 +1446,10 @@ fn x_flow(
                     let mut state = state.borrow_mut();
                     while let Ok((index, searched)) = receiver.try_recv() {
                         state.searched.insert(index, searched);
+                        state.live -= 1;
                     }
                 }
+                release();
                 loop {
                     let event = {
                         let mut state = state.borrow_mut();
@@ -1468,7 +1500,9 @@ fn x_flow(
                     // search as it goes.
                     match receiver.recv_timeout(std::time::Duration::from_millis(1)) {
                         Ok((index, searched)) => {
-                            state.borrow_mut().searched.insert(index, searched);
+                            let mut state = state.borrow_mut();
+                            state.searched.insert(index, searched);
+                            state.live -= 1;
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => {}
                         Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -1490,7 +1524,7 @@ fn x_flow(
                     return Err(engine("Empty CBlastQueryVector"));
                 }
                 let queries = Arc::new(queries.to_vec());
-                let ready = {
+                {
                     let mut state = state.borrow_mut();
                     let index = state.read;
                     state.read += 1;
@@ -1499,16 +1533,9 @@ fn x_flow(
                         .events
                         .push_back(XEvent::Batch(index, Arc::clone(&queries)));
                     state.held.push_back((index, queries));
-                    if state.held.len() > lookahead {
-                        state.held.pop_front()
-                    } else {
-                        None
-                    }
-                };
-                super::x_timing::run_add(XRun::FlowBatches, 1);
-                if let Some((index, queries)) = ready {
-                    spawn(index, queries, false);
                 }
+                super::x_timing::run_add(XRun::FlowBatches, 1);
+                release();
                 let written = write(false);
                 if written.is_err() {
                     failed.set(true);
@@ -1525,10 +1552,8 @@ fn x_flow(
         if !failed.get() {
             // The end of the input: the held batches (the last of the input) are searched alone,
             // side by side.
-            let held = std::mem::take(&mut state.borrow_mut().held);
-            for (index, queries) in held {
-                spawn(index, queries, true);
-            }
+            state.borrow_mut().ended = true;
+            release();
             write(true)?;
         }
         parsed

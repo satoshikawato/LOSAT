@@ -52,6 +52,26 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
     let prefetch_distance = x_prefetch_distance();
     let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
     lookup.for_each_cell(subject, subject_length, &mut cells, |s, cell_hits| {
+        {
+            use crate::utils::xstats as xs;
+            let n = cell_hits.len() as u64;
+            xs::add(&xs::FBP_CELLS, 1);
+            xs::add(&xs::FBP_HITS, n);
+            xs::add(
+                match n {
+                    1 => &xs::FBP_CELL_H1,
+                    2 => &xs::FBP_CELL_H2,
+                    3..=4 => &xs::FBP_CELL_H3_4,
+                    5..=8 => &xs::FBP_CELL_H5_8,
+                    9..=16 => &xs::FBP_CELL_H9_16,
+                    _ => &xs::FBP_CELL_H17P,
+                },
+                1,
+            );
+            if n >= 8 {
+                xs::add(&xs::FBP_HITS_IN_GE8, n);
+            }
+        }
         for (i, &query_offset) in cell_hits.iter().enumerate() {
             // Read ahead the entry of a later hit of this cell (a cache hint; see `x_scan_two_hit`).
             if let Some(&ahead) = cell_hits.get(i + prefetch_distance) {
@@ -61,6 +81,7 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
             // SAFETY: diag_coord <= diag_mask < diag_array.len() (asserted above).
             let entry = unsafe { diag_array.get_unchecked_mut(diag_coord) };
             if let Some((last_hit, diff)) = x_test_hit(entry, s, diag_offset, window, word_size) {
+                crate::utils::xstats::add(&crate::utils::xstats::FBP_CANDS, 1);
                 candidate(query_offset, s, last_hit, diff, entry);
             }
         }

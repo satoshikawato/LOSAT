@@ -8544,9 +8544,11 @@ fn run_resolved_in_pool(
                     });
                 let ctx = &contexts[ctx_idx];
                 if query_offset - diff < ctx.frame_base {
+                    crate::utils::xstats::add(&crate::utils::xstats::FBP_CTXREJ, 1);
                     diag_entry.set_last_hit(subject_offset + subject_diag_offset);
                     return;
                 }
+                crate::utils::xstats::add(&crate::utils::xstats::FBP_EXT, 1);
                 let x_drop = x_dropoff_per_context[ctx_idx];
                 let cutoff = word_cutoff_scores[ctx_idx];
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
@@ -8587,6 +8589,7 @@ fn run_resolved_in_pool(
                 // }
                 // ```
                 if ungapped_hit.ungapped_data.score >= cutoff {
+                    crate::utils::xstats::add(&crate::utils::xstats::FBP_SAVE, 1);
                     blastp_save_init_hsp(
                         &mut init_hsps,
                         ungapped_hit.ungapped_data.q_start,
@@ -8598,6 +8601,7 @@ fn run_resolved_in_pool(
                     );
                 }
                 if ungapped_hit.right_extend {
+                    crate::utils::xstats::add(&crate::utils::xstats::FBP_RIGHT, 1);
                     diag_entry.set_flag(1);
                     diag_entry.set_last_hit(
                         ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,

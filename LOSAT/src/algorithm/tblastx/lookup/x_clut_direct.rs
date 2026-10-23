@@ -1465,6 +1465,8 @@ impl XFlatCompressedLookup {
             s += 1;
         }
 
+        crate::utils::xstats::add(&crate::utils::xstats::FBP_SCAN_POS, s_last as u64 + 1);
+        crate::utils::xstats::add(&crate::utils::xstats::FBP_PV_POS, cells.len() as u64);
         let starts = &self.starts;
         for (n, &(s, index)) in cells.iter().enumerate() {
             // Cache hints only: the slice bounds of a cell X_STARTS_AHEAD cells ahead, and the hits of

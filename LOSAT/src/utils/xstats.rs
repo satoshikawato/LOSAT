@@ -51,6 +51,22 @@ counters!(
     AHEAD_PRELIM_TAKEN,
     AHEAD_TRACE_EVALUATED,
     AHEAD_TRACE_TAKEN,
+    FBP_SCAN_POS,
+    FBP_PV_POS,
+    FBP_CELLS,
+    FBP_HITS,
+    FBP_CELL_H1,
+    FBP_CELL_H2,
+    FBP_CELL_H3_4,
+    FBP_CELL_H5_8,
+    FBP_CELL_H9_16,
+    FBP_CELL_H17P,
+    FBP_HITS_IN_GE8,
+    FBP_CANDS,
+    FBP_CTXREJ,
+    FBP_EXT,
+    FBP_SAVE,
+    FBP_RIGHT,
 );
 
 #[inline(always)]

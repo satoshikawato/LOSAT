@@ -440,7 +440,7 @@ pub(crate) struct XFlatCompressedLookup {
     pub(crate) compressed_alphabet_size: i32,
     pub(crate) reciprocal_alphabet_size: i32,
     pub(crate) longest_chain: i32,
-    /// The cells with hits (`finalize`'s `count`). EXPERIMENT (LOSAT_X_BPSCANBF): chooses how
+    /// The cells with hits (`finalize`'s `count`). EXPERIMENT (LOSAT_X_BPCLUTSCANBF): chooses how
     /// `for_each_cell` lists the offsets ([`XFlatCompressedLookup::x_scan_bf_pays`]).
     pub(crate) used_cells: usize,
     pub(crate) pv: Vec<u32>,
@@ -1371,7 +1371,7 @@ impl XFlatCompressedLookup {
     /// subject's one range, without the offset-pair array) on the flat table: calls
     /// `visit(subject_offset, hits)` for every cell found, with its slice. `cells` is scratch.
     ///
-    /// EXPERIMENT (LOSAT_X_BPSCANBF): with `BRANCH_FREE` the offsets are listed without a branch on
+    /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): with `BRANCH_FREE` the offsets are listed without a branch on
     /// the presence bit, as `x_seed_fused::x_scan_cells_bf` lists them: every offset that reaches
     /// `PV_TEST` is written at the list's end, and the list's length advances by the bit. The list
     /// holds the same offsets and indices in the same order, so the calls are the same; `cells`
@@ -1440,12 +1440,14 @@ impl XFlatCompressedLookup {
         };
         let mut preshift = compressed_reciprocal_divide(index, recip);
 
-        // EXPERIMENT (LOSAT_X_BPSCANBF): a place for every offset from `s` to `s_last` (`s <= s_last
-        // + 1` here), written through `list`; `listed` of them are the list.
-        if BRANCH_FREE {
+        // EXPERIMENT (LOSAT_X_BPCLUTSCANBF): a place for every offset from `s` to `s_last` (`s <=
+        // s_last + 1` here), written through `list`; `listed` of them are the list.
+        let list = if BRANCH_FREE {
             cells.reserve(s_last + 1 - s);
-        }
-        let list = cells.as_mut_ptr();
+            cells.as_mut_ptr()
+        } else {
+            std::ptr::null_mut()
+        };
         let mut listed = 0usize;
         while s <= s_last {
             let mut compressed_char = scaled_compress_table[usize::from(next_char)];
@@ -1514,7 +1516,7 @@ impl XFlatCompressedLookup {
     }
 
     // No NCBI counterpart: chooses LOSAT's list form; both list the same offsets.
-    /// EXPERIMENT (LOSAT_X_BPSCANBF): whether blastp-fast lists this table's offsets without a
+    /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): whether blastp-fast lists this table's offsets without a
     /// branch (`for_each_cell::<true, _>`): at least [`x_scan_bf_min`] of every 10,000 backbone
     /// cells have hits. With fewer, few offsets pass `PV_TEST`, the branch is mostly predicted and
     /// the list's store at every offset costs more than the mispredicts it saves.
@@ -1523,20 +1525,23 @@ impl XFlatCompressedLookup {
     }
 }
 
-/// EXPERIMENT (LOSAT_X_BPSCANBF): `used` of `cells` backbone cells reach `min` per 10,000.
+// No NCBI counterpart: the rule of LOSAT_X_BPCLUTSCANBFMIN; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): `used` of `cells` backbone cells reach `min` per 10,000 (a
+/// `min` above 10,000 takes no table).
 fn x_dense_enough(used: usize, cells: usize, min: u64) -> bool {
-    used as u64 * 10_000 >= min * cells as u64
+    u128::from(used as u64) * 10_000 >= u128::from(min) * cells as u128
 }
 
-// No NCBI counterpart: reads LOSAT_X_BPSCANBFMIN once; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPSCANBFMIN): the fewest backbone cells with hits, per 10,000, for which
+// No NCBI counterpart: reads LOSAT_X_BPCLUTSCANBFMIN once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPCLUTSCANBFMIN): the fewest backbone cells with hits, per 10,000, for which
 /// blastp-fast's scan lists the offsets without a branch (built-in 500: on the workstation the
 /// branch-free list cost x1.07 the cycles at 234, x1.00 at 442, x0.96 at 728 and x0.80 at 2,260);
 /// `0` every table; a value that is not a number takes the built-in one.
 fn x_scan_bf_min() -> u64 {
     static MIN: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
     *MIN.get_or_init(|| {
-        std::env::var("LOSAT_X_BPSCANBFMIN")
+        std::env::var("LOSAT_X_BPCLUTSCANBFMIN")
             .ok()
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(500)
@@ -2190,7 +2195,7 @@ mod tests {
     // The scans: on random subjects (letters outside the alphabet none, rare, frequent; short
     // subjects), the flat `scan_subject` gives the reference's hits and rounds for arrays from the
     // longest cell up, and `for_each_cell` gives the same hits, with the branch-free list too
-    // (LOSAT_X_BPSCANBF); `used_cells` counts the cells with hits.
+    // (LOSAT_X_BPCLUTSCANBF); `used_cells` counts the cells with hits.
     #[test]
     fn flat_scans_give_the_reference_scans_hits() {
         let mut rng = XorShift(0x3c6e_f372_fe94_f82b);
@@ -2251,7 +2256,7 @@ mod tests {
                     fused.extend(hits.iter().map(|&q| (s as u32, q as u32)));
                 });
                 assert_eq!(Some(fused), expected, "subject {n}: for_each_cell");
-                // LOSAT_X_BPSCANBF: the branch-free list, on the used scratch and on a new one.
+                // LOSAT_X_BPCLUTSCANBF: the branch-free list, on the used scratch and on a new one.
                 for mut scratch in [std::mem::take(&mut cells), Vec::new()] {
                     let mut fused = Vec::new();
                     flat.for_each_cell::<true, _>(subject, length, &mut scratch, |s, hits| {
@@ -2268,7 +2273,7 @@ mod tests {
         }
     }
 
-    // LOSAT_X_BPSCANBFMIN: a table takes the branch-free list from `min` used cells per 10,000 up;
+    // LOSAT_X_BPCLUTSCANBFMIN: a table takes the branch-free list from `min` used cells per 10,000 up;
     // `0` takes it for every table, an empty one included.
     #[test]
     fn the_branch_free_list_starts_at_min_used_cells_per_ten_thousand() {
@@ -2277,5 +2282,6 @@ mod tests {
         assert!(x_dense_enough(37_969, 759_376, 500));
         assert!(!x_dense_enough(37_968, 759_376, 500));
         assert!(x_dense_enough(0, 759_376, 0));
+        assert!(!x_dense_enough(759_376, 759_376, u64::MAX));
     }
 }

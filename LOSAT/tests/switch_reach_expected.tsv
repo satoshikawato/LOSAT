@@ -34,7 +34,7 @@ LOSAT_X_BPREDOFIT	blastp	always			Composition-based redo HSP lists allocated at 
 LOSAT_X_BPREDOLPT	blastp	conditional	required	required	only with BPREDOPAR, more than one thread, window of 2+ jobs
 LOSAT_X_BPREDOPAR	blastp	conditional	required	required	more than one thread and at least two matches
 LOSAT_X_BPREDOWINEXPAND	blastp	always			acts wherever BPREDOPAR's windowed redo runs (its sides are BPREDOPAR's)
-LOSAT_X_BPSCANBF	blastp	always			Branch-free finding of lookup cells with hits in fused loop
+LOSAT_X_BPSCANBF	blastp	conditional	required	required	fused loop on the standard table always; blastp-fast flat table with >= BPSCANBFMIN used cells per 10,000 (a short query keeps the PV branch), reference compressed table never
 LOSAT_X_BPSEED	blastp	always			Fused two-hit seed stage: scan and diagonal test in one loop
 LOSAT_X_BPSUBJMETA	blastp	conditional	required	gap	-subject with query-block path (BPQBLOCK: >50,000 query letters, several blocks, supported outfmt); not -db; ref gap: needs blastp -db with a query > 50,000 letters, outfmt 6, 2+ blocks
 LOSAT_X_BPSUBJRUN	blastp	conditional	required	required	-subject only, 2+ threads and more than one subject; not -db, not 1 thread

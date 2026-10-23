@@ -7867,6 +7867,22 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPLKPAHEAD): this block's table is ready; the build of the next block's
     // starts now, on the pool, beside this block's search (`blast_engine/x_lookup_ahead.rs`).
     x_ahead.lookup_ready(&lookup);
+    // EXPERIMENT (LOSAT_X_BPSCANBF): whether the fused loop lists this block's cells without a
+    // branch on the presence bit: on the standard table always, on the flat compressed table when
+    // enough of its cells are used (LOSAT_X_BPSCANBFMIN), on the reference compressed table never.
+    if args.window_size != 0
+        && (super::x_seed_fused::x_bp_seed() || super::x_seed_fused::x_bp_seed_shadow())
+        && super::x_seed_fused::x_bp_scan_bf()
+    {
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_BPSCANBF",
+            match &lookup {
+                BlastpRuntimeLookup::Aa(_) => true,
+                BlastpRuntimeLookup::Compressed(_) => false,
+                BlastpRuntimeLookup::CompressedFlat(table) => table.x_scan_bf_pays(),
+            }
+        );
+    }
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
     let concatenated_query = build_blastp_concatenated_query(&contexts);
     // EXPERIMENT (LOSAT_X_BPSEED): the context of every query offset, for the candidates of the

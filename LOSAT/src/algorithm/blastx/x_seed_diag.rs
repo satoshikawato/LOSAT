@@ -47,23 +47,24 @@
 //! (hundredths, built-in 700; `0` every table); a fused table with fewer takes the AVX2 batch, as
 //! there the masked batch and the buffer cost more than they save (the fused loop forced on the
 //! first 1,500 nt of a 2.1-kb fly cDNA x the fly proteome, 4.91 hits per used cell: x1.033
-//! cycles; the whole cDNA, 6.77: x0.996). The choice is made with LOSAT_X_BXDIAGMIN's, once per thread and table; as
-//! LOSAT_X_BXDIAGMIN's built-in value is above 700, the rule acts by default on no table (only with
-//! LOSAT_X_BXDIAGMIN set below it). The timing line then also gives `defer_min_hits_per_cell=` and `tables_avx2=` (the fused tables that took
-//! the AVX2 batch). `LOSAT_X_BXDIAGSHADOW` compares it with the reference like the other cell
-//! tests, on the tables the rule gives it.
+//! cycles; the whole cDNA, 6.77: x0.996). The choice is made with LOSAT_X_BXDIAGMIN's, once per
+//! thread and table; as LOSAT_X_BXDIAGMIN's built-in value is above 700, no fused table falls under
+//! the rule by default (only with LOSAT_X_BXDIAGMIN set below 700). The timing line then also gives
+//! `defer_min_hits_per_cell=` and `tables_avx2=` (the fused tables that took the AVX2 batch).
+//! `LOSAT_X_BXDIAGSHADOW` compares it with the reference like the other cell tests, on the tables
+//! the rule gives it.
 //!
 //! A query batch whose lookup table has fewer hits per used backbone cell than
 //! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 900; `0` fuses every batch) is scanned by the loop
 //! LOSAT_X_BXSCAN chooses instead: with few hits per cell the fused loop's per-cell work costs more
 //! than the copy it saves. Since LOSAT_X_BXHITBF made the direct loop faster, the two break even
-//! near 9 hits per used cell (one core, user-space cycles of the fused loop with the cell test it
-//! takes against the direct loop, cDNAs x the fly proteome: 4.91 hits per used cell x1.20, 6.77
-//! x1.13, 9.85 x0.975, 13.32 x0.90); the built-in value was 500 before (measured against the
-//! direct loop without LOSAT_X_BXHITBF: 1.76 x1.20, 4.91 x1.00, 6.77 x0.94, 800 cDNAs x yeast
-//! x0.72), and `LOSAT_X_BXDIAGMIN=500` gives that rule. Both
-//! loops give the reference's hits and table, so the choice changes only the speed; it is made once
-//! per thread and table ([`x_fused_pays`]). The timing line then also gives `min_hits_per_cell=`,
+//! near 9 hits per used cell (about 8.75 against the fly proteome, 10.7 against Swiss-Prot; one
+//! core, user-space cycles of the fused loop with the cell test it takes against the direct loop,
+//! fly cDNAs x the fly proteome: 4.91 hits per used cell x1.20, 6.77 x1.13, 8.38 x1.03, 9.37
+//! x0.98, 13.32 x0.90); the built-in value was 500 before (measured against the direct loop
+//! without LOSAT_X_BXHITBF: 1.76 x1.20, 4.91 x1.00, 6.77 x0.94, 800 cDNAs x yeast x0.72), and
+//! `LOSAT_X_BXDIAGMIN=500` gives that rule. Both loops give the reference's hits and table, so the
+//! choice changes only the speed; it is made once per thread and table ([`x_fused_pays`]). The timing line then also gives `min_hits_per_cell=`,
 //! `tables_fused=` and `tables_other=` (the choices made) and `hits_per_cell=LEAST-MOST` (hundredths).
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF, `x_seed_scan.rs`): with that switch the fused loop finds the

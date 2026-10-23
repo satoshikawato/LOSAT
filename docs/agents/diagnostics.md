@@ -4641,9 +4641,17 @@ Scheduling (each value computed by one thread with the original function; order 
   cell test it takes (the AVX2 batch below `LOSAT_X_BXDEFERMIN`, `LOSAT_X_BXDEFER`'s above) against the direct
   loop, user-space cycles, one core (workstation node 1, HT sibling idle, warmed 3 s, 8 rounds with the arm
   order reversed every other round, medians, dev cd8e0f89; every output the same bytes): 4.91 hits per used
-  cell (the first 1,500 nt of a 2.1-kb fly cDNA x the fly proteome) x1.198, 6.77 (the whole cDNA) x1.133,
-  9.85 (the first two of 50 fly cDNAs) x0.975, 13.32 (the first three) x0.899, 50 cDNAs x yeast (20-33)
-  x0.781. The measurements below came before `LOSAT_X_BXHITBF`. Where the two loops break even (one thread, `-db`
+  cell (the first 1,500 nt of a 2.1-kb fly cDNA x the fly proteome) x1.198, 5.79 (another cDNA) x1.187,
+  6.77 (the whole cDNA) x1.133, then sets of two or three of 50 fly cDNAs: 7.34 x1.073, 8.38 x1.030, 8.63
+  x1.006, 8.92 x0.994, 9.37 x0.981, 9.85 x0.975, 10.52 x0.965, 11.46 x0.946, 13.32 x0.899; 50 cDNAs x yeast
+  (20-33 per batch) x0.781. Against Swiss-Prot (`-db`, 3 rounds) the loops break even later: 6.77 x1.178,
+  8.92 x1.012, 9.81 x1.020, 11.46 x0.968, 13.32 x0.916; 900 lies between the fly proteome's break-even (about
+  8.75) and Swiss-Prot's (about 10.7), within 2 % of the faster loop on either side. Against dev's default
+  (the same runs; one thread): 5.79 x0.846 cycles (0.655 -> 0.555 s), 6.77 x0.883, 7.34 x0.931, 7.64
+  x0.942, 8.38 x0.967, 8.63 x0.997, 8.92 x1.005, the cDNA x Swiss-Prot x0.847 (7.14 -> 6.06 s), 8.92 x
+  Swiss-Prot x0.987, and x0.993-1.004 on the tables of 9 or more (the same loop as before).
+  At 8 threads (node 1, 8 physical cores, 5 rounds): 6.77 x0.885 (0.125 -> 0.116 s), 8.38 x0.964, 8.92
+  x1.007, 9.85 x0.999. The measurements below came before `LOSAT_X_BXHITBF`. Where the two loops break even (one thread, `-db`
   UniRef50 2026_03 volume 00, both with `LOSAT_X_BXSCANBF=1`, every batch fused against the direct loop, 2
   rounds each; pieces of one 2.1-kb fly cDNA): hits per used cell 1.76 (300 nt) x1.20 the direct loop's
   time, 2.34 (600 nt; 41.48-41.66 s against 34.49-34.74 s) x1.20, 3.56 (1,000 nt; 68.62-68.86 / 63.55-64.06)

@@ -828,11 +828,38 @@ where
     let runs = AtomicU64::new(0);
     let away = AtomicU64::new(0);
 
+    // The slowest partition's next strip (every partition has folded the strips below it); the
+    // strips below it go back to the spare buffers, by the participant that moves `freed`.
+    let slowest = || -> usize {
+        let min_next = lanes
+            .iter()
+            .map(|lane| lane.0.load(Ordering::Acquire))
+            .min()
+            .unwrap_or(n);
+        let f = freed.fetch_max(min_next, Ordering::Relaxed);
+        if f < min_next {
+            // (this participant moved `freed` from f: the strips f..min_next are its to give back)
+            let bufs: Vec<StripBuf> = slots[f..min_next]
+                .iter()
+                .filter_map(|slot| write(slot).take())
+                .collect();
+            lock(&spare).extend(bufs);
+        }
+        min_next
+    };
+
     // A strip's seeds, cut by partition with a stable counting sort.
     let produce = |i: usize, raw: &mut Vec<Seed>, fill: &mut Vec<u32>| {
         raw.clear();
         scan(i, raw);
-        let mut buf = lock(&spare).pop().unwrap_or_default();
+        // (no spare buffer: first the strips every partition has passed, which wait for the
+        // next participant that reads the slowest partition)
+        let mut buf = lock(&spare).pop();
+        if buf.is_none() {
+            slowest();
+            buf = lock(&spare).pop();
+        }
+        let mut buf = buf.unwrap_or_default();
         let StripBuf { seeds, pos, offs } = &mut buf;
         offs.clear();
         offs.resize(parts + 1, 0);
@@ -863,26 +890,6 @@ where
         }
         *write(&slots[i]) = Some(buf);
         ready[i].store(true, Ordering::Release);
-    };
-
-    // The slowest partition's next strip (every partition has folded the strips below it); the
-    // strips below it go back to the spare buffers, by the participant that moves `freed`.
-    let slowest = || -> usize {
-        let min_next = lanes
-            .iter()
-            .map(|lane| lane.0.load(Ordering::Acquire))
-            .min()
-            .unwrap_or(n);
-        let f = freed.fetch_max(min_next, Ordering::Relaxed);
-        if f < min_next {
-            // (this participant moved `freed` from f: the strips f..min_next are its to give back)
-            let bufs: Vec<StripBuf> = slots[f..min_next]
-                .iter()
-                .filter_map(|slot| write(slot).take())
-                .collect();
-            lock(&spare).extend(bufs);
-        }
-        min_next
     };
 
     // (the owner's time in scans, in waits and in the ungapped extensions of its folds)
@@ -1775,10 +1782,13 @@ mod tests {
                             most_folders = most_folders.max(folders);
                             assert_eq!(got, expected, "{at}: hits");
                             assert_eq!(stats.counts.seeds, n as u64, "{at}");
-                            // the strips' buffers stay within the window (and the claims that
-                            // passed its test at the same time)
+                            // the strips' buffers stay within the window: the strips claimed
+                            // past the slowest partition (the window and the claims that passed
+                            // its test at the same time), and for a moment as many again that a
+                            // participant is giving back while others claim (a strip given back
+                            // never to the spare buffers would make one buffer per strip)
                             assert!(
-                                scratch.spare.len() <= most_ahead + threads,
+                                scratch.spare.len() <= 2 * (most_ahead + threads),
                                 "{at}: {} strip buffers, window {most_ahead}",
                                 scratch.spare.len()
                             );

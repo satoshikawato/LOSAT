@@ -4632,10 +4632,18 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2-defer-masked|avx2|scalar|per-hit> subjects= cells=
   batched_hits= candidates= min_hits_per_cell= tables_fused= tables_other= hits_per_cell=LEAST-MOST
   defer_min_hits_per_cell= tables_avx2=` (the last two: `LOSAT_X_BXDEFER`'s rule). A query batch whose
-  lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 500,
+  lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 900,
   `0` fuses every batch) is scanned by `LOSAT_X_BXSCAN`'s direct loop instead, which is faster there; the
   choice is made once per thread and table and changes only the speed (the timing line counts the choices and
-  gives the least and most hits per cell, in hundredths). Where the two loops break even (one thread, `-db`
+  gives the least and most hits per cell, in hundredths). The built-in value is 900 since the pull request
+  perf/bx-diag-min (2026-10-23; 500 before, which `LOSAT_X_BXDIAGMIN=500` gives): with `LOSAT_X_BXHITBF`'s
+  branch-free hit test the direct loop is faster up to about 9 hits per used cell. The fused loop with the
+  cell test it takes (the AVX2 batch below `LOSAT_X_BXDEFERMIN`, `LOSAT_X_BXDEFER`'s above) against the direct
+  loop, user-space cycles, one core (workstation node 1, HT sibling idle, warmed 3 s, 8 rounds with the arm
+  order reversed every other round, medians, dev cd8e0f89; every output the same bytes): 4.91 hits per used
+  cell (the first 1,500 nt of a 2.1-kb fly cDNA x the fly proteome) x1.198, 6.77 (the whole cDNA) x1.133,
+  9.85 (the first two of 50 fly cDNAs) x0.975, 13.32 (the first three) x0.899, 50 cDNAs x yeast (20-33)
+  x0.781. The measurements below came before `LOSAT_X_BXHITBF`. Where the two loops break even (one thread, `-db`
   UniRef50 2026_03 volume 00, both with `LOSAT_X_BXSCANBF=1`, every batch fused against the direct loop, 2
   rounds each; pieces of one 2.1-kb fly cDNA): hits per used cell 1.76 (300 nt) x1.20 the direct loop's
   time, 2.34 (600 nt; 41.48-41.66 s against 34.49-34.74 s) x1.20, 3.56 (1,000 nt; 68.62-68.86 / 63.55-64.06)
@@ -4678,7 +4686,9 @@ Scheduling (each value computed by one thread with the original function; order 
   blastp's cell test (v4-R R2); a tested blastx cell holds about 19 hits on the dense tables below (a blastp
   cell about 106), so its last batch weighs more than in blastp. On a table with few hits per cell the masked
   batch and the buffer cost more than they save, so a fused table below `LOSAT_X_BXDEFERMIN` takes the AVX2
-  batch (`XDiagMode::Avx2`); the choice is made with `LOSAT_X_BXDIAGMIN`'s, once per thread and table. With the
+  batch (`XDiagMode::Avx2`); the choice is made with `LOSAT_X_BXDIAGMIN`'s, once per thread and table. Since
+  `LOSAT_X_BXDIAGMIN`'s built-in value became 900 (above 700; perf/bx-diag-min) every fused table takes
+  `LOSAT_X_BXDEFER`'s cell test by default, and the rule acts where `LOSAT_X_BXDIAGMIN` is set below 700. With the
   fused loop and the cell test forced on every table (`LOSAT_X_BXDIAGMIN=0` on the binary before the rule,
   the same as `LOSAT_X_BXDEFERMIN=0`; one core, medians of 3-8 per-round ratios against `=0`) the cycles were
   x1.256 at 1.76 hits per used cell (a 300-nt

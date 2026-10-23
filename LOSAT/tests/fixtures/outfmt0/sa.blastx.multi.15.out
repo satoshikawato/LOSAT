@@ -1,0 +1,1675 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "LvMJNV_93001_98000 window 1 of LvMJNV",
+            "query_len": 5000,
+            "query_masking": [
+              {
+                "from": 204,
+                "to": 477
+              },
+              {
+                "from": 486,
+                "to": 543
+              },
+              {
+                "from": 639,
+                "to": 669
+              },
+              {
+                "from": 762,
+                "to": 852
+              },
+              {
+                "from": 876,
+                "to": 1125
+              },
+              {
+                "from": 1140,
+                "to": 1212
+              },
+              {
+                "from": 1254,
+                "to": 1305
+              },
+              {
+                "from": 1419,
+                "to": 1458
+              },
+              {
+                "from": 1464,
+                "to": 1506
+              },
+              {
+                "from": 1776,
+                "to": 1836
+              },
+              {
+                "from": 1959,
+                "to": 1992
+              },
+              {
+                "from": 2256,
+                "to": 2265
+              },
+              {
+                "from": 3339,
+                "to": 3378
+              },
+              {
+                "from": 3543,
+                "to": 3576
+              },
+              {
+                "from": 3627,
+                "to": 3663
+              },
+              {
+                "from": 3777,
+                "to": 3813
+              },
+              {
+                "from": 3873,
+                "to": 3918
+              },
+              {
+                "from": 3954,
+                "to": 3990
+              },
+              {
+                "from": 4635,
+                "to": 4689
+              },
+              {
+                "from": 4899,
+                "to": 4926
+              },
+              {
+                "from": 184,
+                "to": 328
+              },
+              {
+                "from": 361,
+                "to": 400
+              },
+              {
+                "from": 436,
+                "to": 457
+              },
+              {
+                "from": 469,
+                "to": 544
+              },
+              {
+                "from": 625,
+                "to": 694
+              },
+              {
+                "from": 718,
+                "to": 754
+              },
+              {
+                "from": 793,
+                "to": 862
+              },
+              {
+                "from": 922,
+                "to": 1120
+              },
+              {
+                "from": 1162,
+                "to": 1192
+              },
+              {
+                "from": 1240,
+                "to": 1315
+              },
+              {
+                "from": 1420,
+                "to": 1450
+              },
+              {
+                "from": 1480,
+                "to": 1522
+              },
+              {
+                "from": 1576,
+                "to": 1636
+              },
+              {
+                "from": 1648,
+                "to": 1705
+              },
+              {
+                "from": 1936,
+                "to": 2005
+              },
+              {
+                "from": 2035,
+                "to": 2101
+              },
+              {
+                "from": 2167,
+                "to": 2218
+              },
+              {
+                "from": 2533,
+                "to": 2578
+              },
+              {
+                "from": 3313,
+                "to": 3352
+              },
+              {
+                "from": 3514,
+                "to": 3556
+              },
+              {
+                "from": 3586,
+                "to": 3601
+              },
+              {
+                "from": 3667,
+                "to": 3706
+              },
+              {
+                "from": 4660,
+                "to": 4687
+              },
+              {
+                "from": 4876,
+                "to": 4933
+              },
+              {
+                "from": 302,
+                "to": 323
+              },
+              {
+                "from": 350,
+                "to": 458
+              },
+              {
+                "from": 488,
+                "to": 545
+              },
+              {
+                "from": 632,
+                "to": 668
+              },
+              {
+                "from": 779,
+                "to": 836
+              },
+              {
+                "from": 848,
+                "to": 911
+              },
+              {
+                "from": 1025,
+                "to": 1082
+              },
+              {
+                "from": 1097,
+                "to": 1112
+              },
+              {
+                "from": 1163,
+                "to": 1184
+              },
+              {
+                "from": 1418,
+                "to": 1454
+              },
+              {
+                "from": 1565,
+                "to": 1655
+              },
+              {
+                "from": 1787,
+                "to": 1856
+              },
+              {
+                "from": 1889,
+                "to": 1940
+              },
+              {
+                "from": 1967,
+                "to": 2006
+              },
+              {
+                "from": 2024,
+                "to": 2102
+              },
+              {
+                "from": 2171,
+                "to": 2201
+              },
+              {
+                "from": 2543,
+                "to": 2597
+              },
+              {
+                "from": 3023,
+                "to": 3059
+              },
+              {
+                "from": 3230,
+                "to": 3272
+              },
+              {
+                "from": 3293,
+                "to": 3380
+              },
+              {
+                "from": 3584,
+                "to": 3602
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT63274.1",
+                    "title": "BDT63274.1"
+                  }
+                ],
+                "len": 1046,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 19.2458,
+                    "score": 38,
+                    "evalue": 5.49455,
+                    "identity": 8,
+                    "positive": 12,
+                    "query_from": 4094,
+                    "query_to": 4153,
+                    "query_frame": 2,
+                    "hit_from": 894,
+                    "hit_to": 913,
+                    "align_len": 20,
+                    "gaps": 0,
+                    "qseq": "ILVSDFKHKEKTSRRRCVKK",
+                    "hseq": "IVVSPSGKRKQNDERECVKK",
+                    "midline": "I+VS    +++   R CVKK"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 18.4754,
+                    "score": 36,
+                    "evalue": 9.83577,
+                    "identity": 13,
+                    "positive": 17,
+                    "query_from": 3368,
+                    "query_to": 3496,
+                    "query_frame": 2,
+                    "hit_from": 116,
+                    "hit_to": 142,
+                    "align_len": 43,
+                    "gaps": 16,
+                    "qseq": "YYYYYSTASQKEIMLKFILFGIGLVVLCYIIFYFRIFISNYFS",
+                    "hseq": "YNYYYKNPLQKSMME----------------YYFKIYSSKYTS",
+                    "midline": "Y YYY    QK +M                 +YF+I+ S Y S"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 53,
+              "eff_space": 2921143,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "LvMJNV_143001_152000 window 2 of LvMJNV",
+            "query_len": 9000,
+            "query_masking": [
+              {
+                "from": 3,
+                "to": 159
+              },
+              {
+                "from": 177,
+                "to": 267
+              },
+              {
+                "from": 300,
+                "to": 372
+              },
+              {
+                "from": 513,
+                "to": 558
+              },
+              {
+                "from": 1557,
+                "to": 1608
+              },
+              {
+                "from": 2361,
+                "to": 2388
+              },
+              {
+                "from": 2544,
+                "to": 2589
+              },
+              {
+                "from": 2781,
+                "to": 2820
+              },
+              {
+                "from": 2964,
+                "to": 3006
+              },
+              {
+                "from": 3063,
+                "to": 3180
+              },
+              {
+                "from": 3579,
+                "to": 3663
+              },
+              {
+                "from": 4107,
+                "to": 4131
+              },
+              {
+                "from": 4446,
+                "to": 4527
+              },
+              {
+                "from": 4575,
+                "to": 4593
+              },
+              {
+                "from": 5193,
+                "to": 5229
+              },
+              {
+                "from": 5262,
+                "to": 5295
+              },
+              {
+                "from": 5313,
+                "to": 5364
+              },
+              {
+                "from": 5430,
+                "to": 5484
+              },
+              {
+                "from": 6672,
+                "to": 6702
+              },
+              {
+                "from": 7056,
+                "to": 7107
+              },
+              {
+                "from": 7947,
+                "to": 7983
+              },
+              {
+                "from": 8535,
+                "to": 8595
+              },
+              {
+                "from": 82,
+                "to": 127
+              },
+              {
+                "from": 172,
+                "to": 244
+              },
+              {
+                "from": 301,
+                "to": 370
+              },
+              {
+                "from": 502,
+                "to": 598
+              },
+              {
+                "from": 682,
+                "to": 697
+              },
+              {
+                "from": 814,
+                "to": 871
+              },
+              {
+                "from": 1000,
+                "to": 1036
+              },
+              {
+                "from": 1348,
+                "to": 1384
+              },
+              {
+                "from": 1390,
+                "to": 1429
+              },
+              {
+                "from": 1642,
+                "to": 1681
+              },
+              {
+                "from": 2056,
+                "to": 2140
+              },
+              {
+                "from": 2314,
+                "to": 2356
+              },
+              {
+                "from": 2536,
+                "to": 2569
+              },
+              {
+                "from": 2782,
+                "to": 2794
+              },
+              {
+                "from": 2932,
+                "to": 2962
+              },
+              {
+                "from": 2968,
+                "to": 3028
+              },
+              {
+                "from": 3226,
+                "to": 3274
+              },
+              {
+                "from": 4006,
+                "to": 4060
+              },
+              {
+                "from": 4219,
+                "to": 4252
+              },
+              {
+                "from": 4351,
+                "to": 4378
+              },
+              {
+                "from": 4429,
+                "to": 4498
+              },
+              {
+                "from": 4522,
+                "to": 4561
+              },
+              {
+                "from": 4648,
+                "to": 4672
+              },
+              {
+                "from": 4678,
+                "to": 4726
+              },
+              {
+                "from": 5194,
+                "to": 5269
+              },
+              {
+                "from": 5281,
+                "to": 5326
+              },
+              {
+                "from": 5638,
+                "to": 5671
+              },
+              {
+                "from": 6061,
+                "to": 6094
+              },
+              {
+                "from": 6448,
+                "to": 6478
+              },
+              {
+                "from": 6520,
+                "to": 6571
+              },
+              {
+                "from": 7426,
+                "to": 7465
+              },
+              {
+                "from": 7813,
+                "to": 7840
+              },
+              {
+                "from": 8293,
+                "to": 8344
+              },
+              {
+                "from": 8773,
+                "to": 8809
+              },
+              {
+                "from": 5,
+                "to": 161
+              },
+              {
+                "from": 173,
+                "to": 248
+              },
+              {
+                "from": 299,
+                "to": 371
+              },
+              {
+                "from": 536,
+                "to": 569
+              },
+              {
+                "from": 581,
+                "to": 614
+              },
+              {
+                "from": 815,
+                "to": 848
+              },
+              {
+                "from": 917,
+                "to": 959
+              },
+              {
+                "from": 1346,
+                "to": 1370
+              },
+              {
+                "from": 1643,
+                "to": 1655
+              },
+              {
+                "from": 1670,
+                "to": 1682
+              },
+              {
+                "from": 2588,
+                "to": 2627
+              },
+              {
+                "from": 2747,
+                "to": 2822
+              },
+              {
+                "from": 2963,
+                "to": 3011
+              },
+              {
+                "from": 3068,
+                "to": 3104
+              },
+              {
+                "from": 3227,
+                "to": 3269
+              },
+              {
+                "from": 3620,
+                "to": 3656
+              },
+              {
+                "from": 4019,
+                "to": 4085
+              },
+              {
+                "from": 4286,
+                "to": 4319
+              },
+              {
+                "from": 4448,
+                "to": 4529
+              },
+              {
+                "from": 4571,
+                "to": 4592
+              },
+              {
+                "from": 4643,
+                "to": 4685
+              },
+              {
+                "from": 5126,
+                "to": 5156
+              },
+              {
+                "from": 5261,
+                "to": 5318
+              },
+              {
+                "from": 5555,
+                "to": 5588
+              },
+              {
+                "from": 5639,
+                "to": 5687
+              },
+              {
+                "from": 6002,
+                "to": 6035
+              },
+              {
+                "from": 6164,
+                "to": 6197
+              },
+              {
+                "from": 6446,
+                "to": 6467
+              },
+              {
+                "from": 6884,
+                "to": 6932
+              },
+              {
+                "from": 8774,
+                "to": 8807
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT63274.1",
+                    "title": "BDT63274.1"
+                  }
+                ],
+                "len": 1046,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 21.9422,
+                    "score": 45,
+                    "evalue": 1.48002,
+                    "identity": 10,
+                    "positive": 14,
+                    "query_from": 2446,
+                    "query_to": 2541,
+                    "query_frame": 1,
+                    "hit_from": 237,
+                    "hit_to": 268,
+                    "align_len": 32,
+                    "gaps": 0,
+                    "qseq": "SNSKLSDLLMSVLPMIGCFTPEADIVVDGSEI",
+                    "hseq": "SNSERKDLKKDSPPVIGGRKKQTTSKSEESEA",
+                    "midline": "SNS+  DL     P+IG    +     + SE "
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 19.631,
+                    "score": 39,
+                    "evalue": 7.03118,
+                    "identity": 7,
+                    "positive": 12,
+                    "query_from": 5404,
+                    "query_to": 5451,
+                    "query_frame": -1,
+                    "hit_from": 757,
+                    "hit_to": 772,
+                    "align_len": 16,
+                    "gaps": 0,
+                    "qseq": "YLQSDKDTIIPQFSTD",
+                    "hseq": "FLQTKKGNLILQFSSN",
+                    "midline": "+LQ+ K  +I QFS++"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 57,
+              "eff_space": 5306229,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_3",
+            "query_title": "LvMJNV_160001_165000 window 3 of LvMJNV",
+            "query_len": 5000,
+            "query_masking": [
+              {
+                "from": 159,
+                "to": 198
+              },
+              {
+                "from": 1104,
+                "to": 1134
+              },
+              {
+                "from": 1410,
+                "to": 1611
+              },
+              {
+                "from": 1758,
+                "to": 1821
+              },
+              {
+                "from": 1827,
+                "to": 1866
+              },
+              {
+                "from": 2010,
+                "to": 2082
+              },
+              {
+                "from": 2772,
+                "to": 2811
+              },
+              {
+                "from": 3030,
+                "to": 3066
+              },
+              {
+                "from": 3105,
+                "to": 3126
+              },
+              {
+                "from": 3522,
+                "to": 3555
+              },
+              {
+                "from": 3804,
+                "to": 3867
+              },
+              {
+                "from": 4221,
+                "to": 4257
+              },
+              {
+                "from": 4299,
+                "to": 4401
+              },
+              {
+                "from": 4659,
+                "to": 4749
+              },
+              {
+                "from": 1090,
+                "to": 1144
+              },
+              {
+                "from": 1354,
+                "to": 1387
+              },
+              {
+                "from": 1402,
+                "to": 1609
+              },
+              {
+                "from": 1759,
+                "to": 1813
+              },
+              {
+                "from": 2278,
+                "to": 2329
+              },
+              {
+                "from": 2569,
+                "to": 2605
+              },
+              {
+                "from": 2680,
+                "to": 2722
+              },
+              {
+                "from": 3175,
+                "to": 3202
+              },
+              {
+                "from": 3523,
+                "to": 3562
+              },
+              {
+                "from": 3799,
+                "to": 3859
+              },
+              {
+                "from": 3976,
+                "to": 4015
+              },
+              {
+                "from": 4174,
+                "to": 4222
+              },
+              {
+                "from": 4300,
+                "to": 4402
+              },
+              {
+                "from": 4657,
+                "to": 4747
+              },
+              {
+                "from": 41,
+                "to": 74
+              },
+              {
+                "from": 101,
+                "to": 131
+              },
+              {
+                "from": 683,
+                "to": 731
+              },
+              {
+                "from": 848,
+                "to": 878
+              },
+              {
+                "from": 1100,
+                "to": 1184
+              },
+              {
+                "from": 1229,
+                "to": 1265
+              },
+              {
+                "from": 1406,
+                "to": 1610
+              },
+              {
+                "from": 1760,
+                "to": 1790
+              },
+              {
+                "from": 1829,
+                "to": 1874
+              },
+              {
+                "from": 2024,
+                "to": 2066
+              },
+              {
+                "from": 3029,
+                "to": 3065
+              },
+              {
+                "from": 3164,
+                "to": 3203
+              },
+              {
+                "from": 3542,
+                "to": 3596
+              },
+              {
+                "from": 3800,
+                "to": 3842
+              },
+              {
+                "from": 4217,
+                "to": 4250
+              },
+              {
+                "from": 4277,
+                "to": 4412
+              },
+              {
+                "from": 4658,
+                "to": 4748
+              }
+            ],
+            "hits": [
+            ],
+            "stat": {
+              "hsp_len": 53,
+              "eff_space": 2921143,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            },
+            "message": "No hits found"
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_4",
+            "query_title": "LvMJNV_199001_206000 window 4 of LvMJNV",
+            "query_len": 7000,
+            "query_masking": [
+              {
+                "from": 264,
+                "to": 312
+              },
+              {
+                "from": 684,
+                "to": 738
+              },
+              {
+                "from": 798,
+                "to": 831
+              },
+              {
+                "from": 978,
+                "to": 1011
+              },
+              {
+                "from": 1257,
+                "to": 1314
+              },
+              {
+                "from": 1584,
+                "to": 1626
+              },
+              {
+                "from": 1863,
+                "to": 1902
+              },
+              {
+                "from": 2247,
+                "to": 2262
+              },
+              {
+                "from": 3183,
+                "to": 3228
+              },
+              {
+                "from": 3435,
+                "to": 3525
+              },
+              {
+                "from": 3546,
+                "to": 3594
+              },
+              {
+                "from": 3627,
+                "to": 3687
+              },
+              {
+                "from": 3729,
+                "to": 3840
+              },
+              {
+                "from": 3873,
+                "to": 3927
+              },
+              {
+                "from": 3957,
+                "to": 3978
+              },
+              {
+                "from": 4584,
+                "to": 4653
+              },
+              {
+                "from": 4749,
+                "to": 4779
+              },
+              {
+                "from": 5727,
+                "to": 5754
+              },
+              {
+                "from": 5991,
+                "to": 6099
+              },
+              {
+                "from": 6240,
+                "to": 6267
+              },
+              {
+                "from": 268,
+                "to": 304
+              },
+              {
+                "from": 697,
+                "to": 718
+              },
+              {
+                "from": 877,
+                "to": 931
+              },
+              {
+                "from": 1267,
+                "to": 1288
+              },
+              {
+                "from": 2356,
+                "to": 2395
+              },
+              {
+                "from": 3373,
+                "to": 3403
+              },
+              {
+                "from": 3469,
+                "to": 3526
+              },
+              {
+                "from": 3592,
+                "to": 3619
+              },
+              {
+                "from": 3739,
+                "to": 3838
+              },
+              {
+                "from": 3937,
+                "to": 3973
+              },
+              {
+                "from": 4324,
+                "to": 4345
+              },
+              {
+                "from": 4465,
+                "to": 4507
+              },
+              {
+                "from": 4603,
+                "to": 4651
+              },
+              {
+                "from": 4753,
+                "to": 4777
+              },
+              {
+                "from": 5314,
+                "to": 5389
+              },
+              {
+                "from": 5890,
+                "to": 5911
+              },
+              {
+                "from": 5986,
+                "to": 6073
+              },
+              {
+                "from": 6217,
+                "to": 6244
+              },
+              {
+                "from": 263,
+                "to": 314
+              },
+              {
+                "from": 731,
+                "to": 782
+              },
+              {
+                "from": 857,
+                "to": 905
+              },
+              {
+                "from": 932,
+                "to": 959
+              },
+              {
+                "from": 1181,
+                "to": 1235
+              },
+              {
+                "from": 1244,
+                "to": 1286
+              },
+              {
+                "from": 1979,
+                "to": 2045
+              },
+              {
+                "from": 2357,
+                "to": 2393
+              },
+              {
+                "from": 2474,
+                "to": 2507
+              },
+              {
+                "from": 3335,
+                "to": 3407
+              },
+              {
+                "from": 3422,
+                "to": 3446
+              },
+              {
+                "from": 3461,
+                "to": 3524
+              },
+              {
+                "from": 3728,
+                "to": 3839
+              },
+              {
+                "from": 3872,
+                "to": 3929
+              },
+              {
+                "from": 4004,
+                "to": 4049
+              },
+              {
+                "from": 4490,
+                "to": 4520
+              },
+              {
+                "from": 4532,
+                "to": 4571
+              },
+              {
+                "from": 4610,
+                "to": 4640
+              },
+              {
+                "from": 4754,
+                "to": 4769
+              },
+              {
+                "from": 5480,
+                "to": 5504
+              },
+              {
+                "from": 5858,
+                "to": 5900
+              },
+              {
+                "from": 6023,
+                "to": 6089
+              },
+              {
+                "from": 6491,
+                "to": 6542
+              },
+              {
+                "from": 6656,
+                "to": 6686
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT63275.1",
+                    "title": "BDT63275.1"
+                  }
+                ],
+                "len": 871,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 26.5646,
+                    "score": 57,
+                    "evalue": 0.0460773,
+                    "identity": 13,
+                    "positive": 23,
+                    "query_from": 570,
+                    "query_to": 683,
+                    "query_frame": 3,
+                    "hit_from": 476,
+                    "hit_to": 513,
+                    "align_len": 38,
+                    "gaps": 0,
+                    "qseq": "KLAHVYPLVLKSVVFSNLCSIEYLIDPNASVATMKASF",
+                    "hseq": "KIAAILKPLIKTQVFASLCTFSILNNPNAVVVFSEVHF",
+                    "midline": "K+A +   ++K+ VF++LC+   L +PNA V   +  F"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 20.4014,
+                    "score": 41,
+                    "evalue": 3.5051,
+                    "identity": 12,
+                    "positive": 18,
+                    "query_from": 1936,
+                    "query_to": 2031,
+                    "query_frame": -2,
+                    "hit_from": 818,
+                    "hit_to": 849,
+                    "align_len": 32,
+                    "gaps": 0,
+                    "qseq": "LIKLPLSFSLVLFNEAQERVSAAL*HIFKRMV",
+                    "hseq": "LIKTILRDDLISYEDAFERVAFEIREDFKNIV",
+                    "midline": "LIK  L   L+ + +A ERV+  +   FK +V"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 55,
+              "eff_space": 4116346,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_5",
+            "query_title": "LvMJNV_242001_247000 window 5 of LvMJNV",
+            "query_len": 5000,
+            "query_masking": [
+              {
+                "from": 60,
+                "to": 105
+              },
+              {
+                "from": 234,
+                "to": 258
+              },
+              {
+                "from": 303,
+                "to": 354
+              },
+              {
+                "from": 378,
+                "to": 435
+              },
+              {
+                "from": 510,
+                "to": 543
+              },
+              {
+                "from": 612,
+                "to": 657
+              },
+              {
+                "from": 1047,
+                "to": 1089
+              },
+              {
+                "from": 1239,
+                "to": 1266
+              },
+              {
+                "from": 1353,
+                "to": 1395
+              },
+              {
+                "from": 1467,
+                "to": 1569
+              },
+              {
+                "from": 1656,
+                "to": 1686
+              },
+              {
+                "from": 1971,
+                "to": 2037
+              },
+              {
+                "from": 2148,
+                "to": 2181
+              },
+              {
+                "from": 2199,
+                "to": 2253
+              },
+              {
+                "from": 2412,
+                "to": 2454
+              },
+              {
+                "from": 2844,
+                "to": 2877
+              },
+              {
+                "from": 3009,
+                "to": 3051
+              },
+              {
+                "from": 3294,
+                "to": 3384
+              },
+              {
+                "from": 4185,
+                "to": 4215
+              },
+              {
+                "from": 4755,
+                "to": 4782
+              },
+              {
+                "from": 52,
+                "to": 112
+              },
+              {
+                "from": 484,
+                "to": 538
+              },
+              {
+                "from": 571,
+                "to": 607
+              },
+              {
+                "from": 616,
+                "to": 670
+              },
+              {
+                "from": 976,
+                "to": 1003
+              },
+              {
+                "from": 1048,
+                "to": 1087
+              },
+              {
+                "from": 1138,
+                "to": 1189
+              },
+              {
+                "from": 1468,
+                "to": 1516
+              },
+              {
+                "from": 1564,
+                "to": 1621
+              },
+              {
+                "from": 1651,
+                "to": 1702
+              },
+              {
+                "from": 1831,
+                "to": 1861
+              },
+              {
+                "from": 1870,
+                "to": 1918
+              },
+              {
+                "from": 2008,
+                "to": 2041
+              },
+              {
+                "from": 2086,
+                "to": 2128
+              },
+              {
+                "from": 2215,
+                "to": 2278
+              },
+              {
+                "from": 2320,
+                "to": 2416
+              },
+              {
+                "from": 3313,
+                "to": 3361
+              },
+              {
+                "from": 3538,
+                "to": 3574
+              },
+              {
+                "from": 3940,
+                "to": 3955
+              },
+              {
+                "from": 4102,
+                "to": 4138
+              },
+              {
+                "from": 4171,
+                "to": 4222
+              },
+              {
+                "from": 4774,
+                "to": 4807
+              },
+              {
+                "from": 59,
+                "to": 113
+              },
+              {
+                "from": 299,
+                "to": 341
+              },
+              {
+                "from": 602,
+                "to": 671
+              },
+              {
+                "from": 983,
+                "to": 1007
+              },
+              {
+                "from": 1076,
+                "to": 1088
+              },
+              {
+                "from": 1106,
+                "to": 1184
+              },
+              {
+                "from": 1478,
+                "to": 1523
+              },
+              {
+                "from": 1526,
+                "to": 1547
+              },
+              {
+                "from": 1583,
+                "to": 1616
+              },
+              {
+                "from": 1964,
+                "to": 2036
+              },
+              {
+                "from": 2210,
+                "to": 2252
+              },
+              {
+                "from": 2321,
+                "to": 2399
+              },
+              {
+                "from": 3422,
+                "to": 3452
+              },
+              {
+                "from": 3857,
+                "to": 3929
+              },
+              {
+                "from": 4103,
+                "to": 4142
+              },
+              {
+                "from": 4160,
+                "to": 4226
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT63274.1",
+                    "title": "BDT63274.1"
+                  }
+                ],
+                "len": 1046,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 20.0162,
+                    "score": 40,
+                    "evalue": 3.09536,
+                    "identity": 10,
+                    "positive": 23,
+                    "query_from": 3757,
+                    "query_to": 3903,
+                    "query_frame": 1,
+                    "hit_from": 305,
+                    "hit_to": 345,
+                    "align_len": 49,
+                    "gaps": 8,
+                    "qseq": "IYSYSL**RQRKIIYHENFRSVYRSLNYRYQFCPANLLDGISSFRHLCC",
+                    "hseq": "VTKYKIFLKENKILYEKDL--------FRFQNIEKNILDVFNALRNTTT",
+                    "midline": "+  Y +  ++ KI+Y ++         +R+Q    N+LD  ++ R+   "
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 18.4754,
+                    "score": 36,
+                    "evalue": 9.11644,
+                    "identity": 11,
+                    "positive": 15,
+                    "query_from": 2079,
+                    "query_to": 2174,
+                    "query_frame": -1,
+                    "hit_from": 366,
+                    "hit_to": 393,
+                    "align_len": 32,
+                    "gaps": 4,
+                    "qseq": "MESLSDYKISHESYVNSKRGWQKETIHSRHRI",
+                    "hseq": "MEDFKDRK----RYLNNLLGWLKATTLSPNTL",
+                    "midline": "ME   D K     Y+N+  GW K T  S + +"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 53,
+              "eff_space": 2921143,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

@@ -85,7 +85,7 @@ fn subject_database(dir: &Path) -> PathBuf {
 /// `name`.
 fn protein_database(fasta: &Path, name: &Path) -> PathBuf {
     let name = name.to_path_buf();
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makedb")
         .arg("-in")
         .arg(fasta)
@@ -124,7 +124,7 @@ fn one_query(dir: &Path) -> PathBuf {
 /// stays: a binary built with the `blastx-worker-probe` feature (`cargo test --all-features`, as in
 /// CI) needs that file name as soon as a search has more than one thread, and it selects nothing.
 fn blastp(query: &Path, db: &Path, threads: u32, vars: &[(&str, &str)], outfmt: &str) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")

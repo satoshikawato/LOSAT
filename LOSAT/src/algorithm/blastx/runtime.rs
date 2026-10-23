@@ -297,6 +297,20 @@ pub(crate) fn x_bx_parallel() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXPAR"))
 }
 
+// No NCBI counterpart: `LOSAT_X_BXPAR` and the rule of one parallel stage, and the record of the side
+// the stage took (`LOSAT_X_REACH`); it does not change any value NCBI computes.
+/// Whether a parallel stage runs: `LOSAT_X_BXPAR` is on and `rule` holds (`rule` is not evaluated
+/// with the switch off). While the switch is on, records the side taken.
+#[cfg(feature = "parallel")]
+pub(crate) fn x_bx_par_rule(rule: impl FnOnce() -> bool) -> bool {
+    if !x_bx_parallel() {
+        return false;
+    }
+    let own = rule();
+    crate::utils::xreach::x_reach!("LOSAT_X_BXPAR", own);
+    own
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3499-3502
 // ```c
 //         if ((int) compo_adjust_mode > 1 && !positionBased) {
@@ -1790,13 +1804,13 @@ impl PreliminarySink for Runtime<'_> {
             // One Kappa state per pool thread, as NCBI keeps one NRrecord, redo_align_params and
             // matrix per thread.
             #[cfg(feature = "parallel")]
-            let x_workers = if x_bx_parallel()
-                && self.observer.x_passive()
-                && !x_inner_serial()
-                && rayon::current_thread_index().is_some()
-                && rayon::current_num_threads() > 1
-                && matches.len() > 1
-            {
+            let x_workers = if x_bx_par_rule(|| {
+                self.observer.x_passive()
+                    && !x_inner_serial()
+                    && rayon::current_thread_index().is_some()
+                    && rayon::current_num_threads() > 1
+                    && matches.len() > 1
+            }) {
                 (0..rayon::current_num_threads())
                     .map(|_| {
                         Ok(std::sync::Mutex::new(XKappaWorker(state.x_for_thread(

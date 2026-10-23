@@ -17,7 +17,7 @@
 //! in the order of the one-thread loop:
 //! 1. the matches in stream order: for each query, each position of its preliminary hit list whose
 //!    list has HSPs (the one-thread loop skips the others before any test); a job is up to four
-//!    consecutive of them of one query (one vector of `LOSAT_X_NEWTONLANES`);
+//!    consecutive of them of one query (one vector of the Newton lanes);
 //! 2. windows of consecutive jobs, each computed on the pool (one `pool.install`) and then
 //!    replayed. A window holds at most 64 jobs per thread (`LOSAT_X_BPREDOPARWINDOW` sets another
 //!    number, for tests) and at most a cap of jobs at risk per query (below), and it may end inside
@@ -30,12 +30,12 @@
 //!    (`build_redo_align_params`), which it uses for its matches one after another as the one-thread
 //!    loop uses a query's parameters for all its matches: the `Cell` they hold is set during a call
 //!    and set back to its previous value at the end of it;
-//! 4. with `LOSAT_X_NEWTONLANES`, the job prefetches the first Newton problems of its own matches
+//! 4. the job prefetches the first Newton problems of its own matches
 //!    against the heaps of its query's batch as the window's start left them
 //!    (`x_newton_lanes_prefetch_matches`, as the one-thread loop calls it for the next matches);
 //!    then each match runs `postprocess_preliminary_hits` with the arguments of the one-thread loop,
 //!    with per-worker scratch (composition workspace, gapped-alignment scratch, and the
-//!    subject-range SEG cache backed by one `LOSAT_X_SEGSHARE` store for the search);
+//!    subject-range SEG cache backed by one shared store for the search);
 //! 5. the replay, per match in order: the early termination test (`BlastCompo_EarlyTermination`)
 //!    on the heaps of the query's batch; then the match's error, if it has one (the first error of
 //!    a match that the test does not end is the one the one-thread loop reports); then
@@ -174,7 +174,7 @@ use super::hsp::{
 };
 use super::kappa::{
     build_query_workspace, postprocess_preliminary_hits, x_newton_lanes_prefetch_matches,
-    x_seg_share, BlastRedoAlignParams, BlastpKappaQueryWorkspace, BlastpKappaSubjectRangeCache,
+    BlastRedoAlignParams, BlastpKappaQueryWorkspace, BlastpKappaSubjectRangeCache,
     BlastpPostprocessResult, XSharedSubjectRanges,
 };
 use super::x_prelim_compact::{x_expand_hit_list, XPrelimHsp};
@@ -261,7 +261,7 @@ fn x_window_jobs_per_thread() -> usize {
     })
 }
 
-// No NCBI counterpart: matches per job, one vector of LOSAT_X_NEWTONLANES (four problems); it
+// No NCBI counterpart: matches per job, one vector of the Newton lanes (four problems); it
 // changes no value NCBI computes.
 /// Matches of one query per job at most.
 const X_JOB_MATCHES: usize = 4;
@@ -904,7 +904,7 @@ fn x_compute_window<P>(
     lists: &[Option<BlastpHitList>],
     heaps: &[BlastCompoHeap],
     window: &XWindow,
-    shared: &Option<Arc<XSharedSubjectRanges>>,
+    shared: &Arc<XSharedSubjectRanges>,
     lpt: bool,
 ) -> (XWindowResults, bool)
 where
@@ -928,8 +928,6 @@ where
     // Built by the first job of the query that needs it; the others wait for the same value.
     let workspaces: Vec<OnceLock<BlastpKappaQueryWorkspace>> =
         queries.clone().map(|_| OnceLock::new()).collect();
-    // EXPERIMENT (LOSAT_X_NEWTONLANES): read as the one-thread loop reads it.
-    let newton_lanes = crate::core::composition_adjustment::x_newton_lanes::mode() != 0;
     // One job's results in match order, with one set of scratch; both ways of running the jobs
     // below call it.
     let run_job = |scratch: &mut XScratch, job: &Range<usize>| -> XWindowResults {
@@ -960,13 +958,13 @@ where
         //                         numQueries
         //                 )) {
         // ```
-        // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of the job's
+        // No NCBI counterpart: the Newton lanes solve the first Newton problems of the job's
         // matches, four per vector (kappa::x_newton_lanes_prefetch_matches); a result is used
         // only by a call on this thread with the same input bits. It does not change any value
         // NCBI computes. Given the heaps of the batch as the window's start left them, as the
         // one-thread loop gives its heaps, it leaves out the matches the test ends on them: those
         // not computed here.
-        if newton_lanes {
+        {
             let list = lists[q_idx]
                 .as_ref()
                 .expect("a match's query has its preliminary hit list");
@@ -998,8 +996,16 @@ where
             })
             .collect()
     };
-    let new_scratch = || XScratch::new(BlastpKappaSubjectRangeCache::x_with_shared(shared.clone()));
-    let lpt = lpt && search.pool.enabled() && search.threads > 1 && window.jobs.len() > 1;
+    let new_scratch = || {
+        XScratch::new(BlastpKappaSubjectRangeCache::x_with_shared(Some(
+            shared.clone(),
+        )))
+    };
+    let lpt = lpt && {
+        let acts = search.pool.enabled() && search.threads > 1 && window.jobs.len() > 1;
+        crate::utils::xreach::x_reach!("LOSAT_X_BPREDOLPT", acts);
+        acts
+    };
     let per_job: Vec<XWindowResults> = if lpt {
         let order = x_lpt_order(&x_job_costs(search, lists, window));
         x_compute_window_lpt(
@@ -1362,9 +1368,9 @@ where
     // (the initial matrix, kept once for the search) is the same for every query, so it is
     // reported here, before any match, as there.
     (search.build_redo_align_params)(0)?;
-    // EXPERIMENT (LOSAT_X_SEGSHARE): one store of masked subject ranges for the search, as in
-    // the query-parallel redo (`XSharedSubjectRanges`).
-    let shared = (x_seg_share() != 0).then(|| Arc::new(XSharedSubjectRanges::new()));
+    // One store of masked subject ranges for the search, as in the query-parallel redo
+    // (`XSharedSubjectRanges`).
+    let shared = Arc::new(XSharedSubjectRanges::new());
     let threads = search.threads.max(1);
     let limits = XWindowLimits {
         jobs: x_window_jobs_per_thread().saturating_mul(threads),
@@ -3104,8 +3110,8 @@ mod tests {
 
     /// `x_compute_window` with the switch gives the results of the `par_iter` path, match for
     /// match (error or not, scores, E-value bits, every HSP field), on windows from random starts
-    /// with random job budgets and matches ended at random, at 1, 2, 3 and 7 threads, with and
-    /// without the search's SEG store, and when the parameters of one query fail.
+    /// with random job budgets and matches ended at random, at 1, 2, 3 and 7 threads, with the
+    /// search's SEG store, and when the parameters of one query fail.
     #[test]
     fn windows_computed_with_jobs_largest_first_equal_the_par_iter_windows() {
         let fixture = redo_fixture();
@@ -3136,7 +3142,7 @@ mod tests {
         let (mut compared, mut with_list, mut errors, mut lpt_windows) = (0, 0, 0, 0);
         for threads in [1, 2, 3, 7] {
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
-                for (fail, seg_share) in [(None, true), (Some(failing), false)] {
+                for fail in [None, Some(failing)] {
                     let build = |q_idx: usize| -> Result<BlastRedoAlignParams> {
                         if Some(q_idx) == fail {
                             anyhow::bail!("no parameters for query {q_idx}");
@@ -3161,7 +3167,7 @@ mod tests {
                         timing: false,
                         engine_positives: false,
                     };
-                    let shared = || seg_share.then(|| Arc::new(XSharedSubjectRanges::new()));
+                    let shared = || Arc::new(XSharedSubjectRanges::new());
                     for window in &windows {
                         let (reference, ran) = x_compute_window(
                             &search,

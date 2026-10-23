@@ -51,9 +51,9 @@
 //! `OnceLock` that every caller initialises to the same 256 bytes. The Karlin block of a context
 //! is a function of the context's bytes, `reward` and `penalty` only: `query_ungapped_karlin_blastna`
 //! counts the letters into a local array, builds the BLASTNA matrix and the score frequency
-//! profile as locals and calls `compute_karlin_params_ungapped`, whose only global is the
-//! `LOSAT_X_KARLINFAST` flag (`OnceLock`, read once, never written again). Neither uses a cache,
-//! a memo table, a counter or the random generator, and no `LOSAT_X_ENVCACHE` path. Every block is
+//! profile as locals and calls `compute_karlin_params_ungapped`, which has no global
+//! state of its own. Neither uses a cache, a memo table, a counter or the random generator, and
+//! no environment-variable path. Every block is
 //! computed whole by one thread from its own context, in the operation order of the serial code, and the
 //! blocks are collected in context order, so no floating-point operation changes order (the sums
 //! are inside one context, never across contexts). The verbose lines, the totals and the empty
@@ -453,6 +453,9 @@ fn buffer_with_probe<P: Fn() + Sync>(
     mode: u8,
     probe: &P,
 ) -> Vec<u8> {
+    if mode != 0 {
+        crate::utils::xreach::x_reach!("LOSAT_X_QPREPPAR", on_pool(pool, query_letters.len()));
+    }
     if mode == 0 || !on_pool(pool, query_letters.len()) {
         return serial_buffer(query_letters, context_offsets, query_concat_length);
     }
@@ -508,6 +511,9 @@ fn blocks_with_probe<P: Fn() + Sync>(
     mode: u8,
     probe: &P,
 ) -> Vec<Option<KarlinParams>> {
+    if mode != 0 {
+        crate::utils::xreach::x_reach!("LOSAT_X_QPREPPAR", on_pool(pool, contexts.len()));
+    }
     if mode == 0 || !on_pool(pool, contexts.len()) {
         return serial_blocks(contexts, spec);
     }

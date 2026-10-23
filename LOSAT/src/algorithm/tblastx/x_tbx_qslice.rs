@@ -177,7 +177,9 @@ pub(super) fn partition(
         return None;
     }
     let min_len = rule.min_span_threads.div_ceil(threads.max(1) as u64);
-    x_partition(&x_group_spans(contexts, starts), rule.letters, min_len)
+    let parts = x_partition(&x_group_spans(contexts, starts), rule.letters, min_len);
+    crate::utils::xreach::x_reach!("LOSAT_X_TBXQSLICE", parts.is_some());
+    parts
 }
 
 // No NCBI counterpart: the rule alone (module doc), without the conditions of `partition` that
@@ -353,7 +355,7 @@ fn x_slice_locations(
 //                                       lookup->charsize, lookup->word_length,
 //                                       query, location);
 // ```
-// The slices' tables at the lookup build site (LOSAT_X_PAIRLUT), each by `x_build_group` from the
+// The slices' tables at the lookup build site (PAIRLUT), each by `x_build_group` from the
 // slice's locations (module doc, item 5), on the calling thread or the pool as the groups are.
 /// The groups of `starts` cut at `parts`, built directly from the query. None when a lookup
 /// location does not lie inside one group (the reference builder must run).
@@ -394,24 +396,26 @@ pub(super) fn build_sliced(lookup: &BlastAaLookupTable, parts: &[Vec<i32>]) -> V
     x_assemble(parts, build_tables(lookup, &bounds))
 }
 
-// No NCBI counterpart: LOSAT_X_PAIRLUTSHADOW's comparison (x_pair_par.rs) of the slices built
-// directly with those filtered out of the reference builder's table.
+// No NCBI counterpart: the unit tests' comparison (x_pair_par.rs) of the slices built directly
+// with those filtered out of the reference builder's table.
 /// Asserts that both builders cut the same groups into the same slices with the same tables.
+#[cfg(test)]
 pub(super) fn lut_shadow_compare(direct: Option<&[XSliced]>, reference: Option<&[XSliced]>) {
+    use crate::algorithm::tblastx::lookup::x_pair_lut::x_assert_same_group;
     match (direct, reference) {
         (None, None) => {}
         (Some(direct), Some(reference)) => {
             assert_eq!(
                 direct.len(),
                 reference.len(),
-                "LOSAT_X_PAIRLUTSHADOW: number of cut groups differs (direct vs reference)"
+                "number of cut groups differs (direct vs reference)"
             );
             let mut t = 0usize;
             for (g, (a, b)) in direct.iter().zip(reference).enumerate() {
                 assert_eq!(
                     (a.q_min, a.q_max, a.slices.len()),
                     (b.q_min, b.q_max, b.slices.len()),
-                    "LOSAT_X_PAIRLUTSHADOW: group {g}: bounds or slices differ (direct vs reference)"
+                    "group {g}: bounds or slices differ (direct vs reference)"
                 );
                 // `t` numbers the slice tables of the batch ("group" in the messages).
                 for (x, y) in a.slices.iter().zip(&b.slices) {
@@ -425,10 +429,8 @@ pub(super) fn lut_shadow_compare(direct: Option<&[XSliced]>, reference: Option<&
                     t += 1;
                 }
             }
-            // The slice tables count as the groups compared (`[X_SHADOW] PAIRLUT groups_compared=`).
-            LUT_SHADOW_GROUPS.fetch_add(t as u64, AtomicOrdering::Relaxed);
         }
-        _ => panic!("LOSAT_X_PAIRLUTSHADOW: one builder cut the groups and the other did not"),
+        _ => panic!("one builder cut the groups and the other did not"),
     }
 }
 
@@ -1106,7 +1108,6 @@ mod tests {
                 .collect();
             let pp = XPairPar {
                 groups,
-                shadow: false,
                 stub: false,
                 sliced: Some(direct),
                 mask_rule: None,

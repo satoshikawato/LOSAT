@@ -3,6 +3,7 @@
 //! the contexts of the batch and merges them (`run.rs`), and then runs the traceback on the
 //! whole batch.
 
+use super::args::QueryStrand;
 use crate::utils::dust::MaskedInterval;
 
 /// The query chunk size of the task when the environment variable `CHUNK_SIZE` is not set
@@ -124,11 +125,12 @@ impl ChunkQuery {
 
 /// A query chunk of a split batch (`CSplitQueryBlk`): its query parts in query order, and
 /// for each of its contexts (two per part, the plus strand first) the context of the batch
-/// and the offset that NCBI adds to the query coordinates of the chunk's HSPs in it.
+/// (`None` for a strand that is not searched: `kInvalidContext`) and the offset that NCBI adds
+/// to the query coordinates of the chunk's HSPs in it (`i32::MAX` for `None`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueryChunk {
     pub queries: Vec<ChunkQuery>,
-    pub contexts: Vec<usize>,
+    pub contexts: Vec<Option<usize>>,
     pub context_offsets: Vec<i32>,
 }
 
@@ -290,7 +292,7 @@ pub fn chunk_would_be_split(chunks: &[QueryChunk], sizes: SplitSizes) -> bool {
 /// ```
 /// The query location of a FASTA query starts at 0, so `query_offset` is 0.
 ///
-/// The contexts of a chunk (both strands, as LOSAT has no `-strand`):
+/// The contexts of a chunk (the strand that is not searched is `None`):
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:392-410
 /// ```c
@@ -309,7 +311,11 @@ pub fn chunk_would_be_split(chunks: &[QueryChunk], sizes: SplitSizes) -> bool {
 ///                                               static_cast<Int4>(kNumContexts*queries[i]+ctx));
 /// ```
 /// The offsets are `context_offsets`.
-pub fn split_query_batch(lengths: &[usize], sizes: SplitSizes) -> Option<Vec<QueryChunk>> {
+pub fn split_query_batch(
+    lengths: &[usize],
+    sizes: SplitSizes,
+    strand: QueryStrand,
+) -> Option<Vec<QueryChunk>> {
     let total_length: usize = lengths.iter().sum();
     let (num_chunks, chunk_size) = calculate_num_chunks(sizes, total_length);
     if num_chunks <= 1 {
@@ -357,8 +363,9 @@ pub fn split_query_batch(lengths: &[usize], sizes: SplitSizes) -> Option<Vec<Que
                     chunk_to - query_from
                 };
                 queries.push(ChunkQuery { query, from, to });
-                contexts.push(2 * query);
-                contexts.push(2 * query + 1);
+                let (plus, minus) = strand.searched();
+                contexts.push(plus.then_some(2 * query));
+                contexts.push(minus.then_some(2 * query + 1));
             }
             QueryChunk {
                 queries,
@@ -399,7 +406,7 @@ fn context_in_chunk(chunk: &QueryChunk, absolute_context: usize) -> Option<usize
     chunk
         .contexts
         .iter()
-        .position(|&context| context == absolute_context)
+        .position(|&context| context == Some(absolute_context))
 }
 
 /// The length of a batch context in a chunk (0 when the chunk does not have it).
@@ -531,7 +538,18 @@ fn context_offsets(
     chunks[chunk_num]
         .contexts
         .iter()
-        .map(|&absolute_context| {
+        .map(|&context| {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:604-626
+            // ```c
+            //             if (absolute_context == kInvalidContext ||
+            //                 starting_chunk == kInvalidContext) {
+            //                 // INT4_MAX is the sentinel value for invalid contexts
+            //                 m_SplitBlk->AddContextOffsetToChunk(chunk_num, INT4_MAX);
+            //                 continue;
+            // ```
+            let Some(absolute_context) = context else {
+                return i32::MAX;
+            };
             let starting = starting_chunk(chunks, chunk_num, absolute_context);
             let mut correction = 0usize;
             if absolute_context % 2 == 0 {
@@ -690,8 +708,12 @@ mod tests {
     // ```
     #[test]
     fn a_query_over_two_chunks_is_mapped_onto_its_contexts() {
-        let chunks =
-            split_query_batch(&[1_999_800], SplitSizes::default_for(false)).expect("split");
+        let chunks = split_query_batch(
+            &[1_999_800],
+            SplitSizes::default_for(false),
+            QueryStrand::Both,
+        )
+        .expect("split");
         assert_eq!(chunks.len(), 2);
         assert_eq!(
             chunks[0].queries,
@@ -709,7 +731,7 @@ mod tests {
                 to: 1_999_800
             }]
         );
-        assert_eq!(chunks[0].contexts, vec![0, 1]);
+        assert_eq!(chunks[0].contexts, vec![Some(0), Some(1)]);
         assert_eq!(chunks[0].context_offsets, vec![0, 1_999_800 - 999_951]);
         assert_eq!(chunks[1].context_offsets, vec![999_851, 0]);
     }
@@ -718,8 +740,12 @@ mod tests {
     fn parts_that_end_or_start_in_an_overlap_keep_their_starts() {
         // Chunks of 1,000,059 overlapping by 100: the first query ends 58 residues into the
         // overlap of the second and third chunks, and the second query starts there.
-        let chunks = split_query_batch(&[1_999_976, 1_000_000], SplitSizes::default_for(false))
-            .expect("split");
+        let chunks = split_query_batch(
+            &[1_999_976, 1_000_000],
+            SplitSizes::default_for(false),
+            QueryStrand::Both,
+        )
+        .expect("split");
         assert_eq!(chunks.len(), 3);
         assert_eq!(
             chunks[1].queries,
@@ -751,7 +777,7 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(chunks[1].contexts, vec![0, 1, 2, 3]);
+        assert_eq!(chunks[1].contexts, vec![Some(0), Some(1), Some(2), Some(3)]);
         assert_eq!(
             chunks[1].context_offsets,
             vec![999_959, 0, 0, 1_000_000 - 42]
@@ -889,7 +915,8 @@ mod tests {
     #[test]
     fn small_chunks_cover_the_queries_with_the_overlap() {
         let sizes = SplitSizes::new(false, Some(1200), Some(50));
-        let chunks = split_query_batch(&[1000, 1500, 700], sizes).expect("split");
+        let chunks =
+            split_query_batch(&[1000, 1500, 700], sizes, QueryStrand::Both).expect("split");
         assert!(chunks.len() > 1);
         for chunk in &chunks {
             assert!(!chunk.queries.is_empty());
@@ -915,13 +942,58 @@ mod tests {
     #[test]
     fn a_chunk_that_ncbi_would_split_again() {
         let fails = SplitSizes::new(false, Some(3000), Some(1526));
-        let chunks = split_query_batch(&[30_000], fails).expect("split");
+        let chunks = split_query_batch(&[30_000], fails, QueryStrand::Both).expect("split");
         assert!(chunk_would_be_split(&chunks, fails));
         let runs = SplitSizes::new(false, Some(3000), Some(1525));
-        let chunks = split_query_batch(&[30_000], runs).expect("split");
+        let chunks = split_query_batch(&[30_000], runs, QueryStrand::Both).expect("split");
         assert!(!chunk_would_be_split(&chunks, runs));
         let default = SplitSizes::default_for(false);
-        let chunks = split_query_batch(&[1_999_800], default).expect("split");
+        let chunks = split_query_batch(&[1_999_800], default, QueryStrand::Both).expect("split");
         assert!(!chunk_would_be_split(&chunks, default));
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:392-410,604-626
+    // ```c
+    //                         if (kStrand == eNa_strand_minus) {
+    //                             m_SplitBlk->AddContextToChunk(chunk_num,
+    //                                                           kInvalidContext);
+    //     ...
+    //                 // INT4_MAX is the sentinel value for invalid contexts
+    //                 m_SplitBlk->AddContextOffsetToChunk(chunk_num, INT4_MAX);
+    // ```
+    // A strand that is not searched has no chunk context and the offset INT4_MAX; the other
+    // strand's offsets are those of the split with both strands.
+    #[test]
+    fn a_single_strand_split_keeps_the_offsets_of_the_strand_it_searches() {
+        let lengths = [1_999_976, 1_000_000];
+        let sizes = SplitSizes::default_for(false);
+        let both = split_query_batch(&lengths, sizes, QueryStrand::Both).expect("split");
+        for (strand, keep) in [(QueryStrand::Plus, 0usize), (QueryStrand::Minus, 1)] {
+            let one = split_query_batch(&lengths, sizes, strand).expect("split");
+            assert_eq!(one.len(), both.len());
+            for (one, both) in one.iter().zip(&both) {
+                assert_eq!(one.queries, both.queries);
+                assert_eq!(one.contexts.len(), both.contexts.len());
+                for (position, (&context, &offset)) in
+                    one.contexts.iter().zip(&one.context_offsets).enumerate()
+                {
+                    if position % 2 == keep {
+                        assert_eq!(context, both.contexts[position]);
+                        assert_eq!(offset, both.context_offsets[position]);
+                    } else {
+                        assert_eq!(context, None);
+                        assert_eq!(offset, i32::MAX);
+                    }
+                }
+            }
+        }
+        let plus = split_query_batch(&lengths, sizes, QueryStrand::Plus).expect("split");
+        assert_eq!(plus[1].contexts, vec![Some(0), None, Some(2), None]);
+        let minus = split_query_batch(&lengths, sizes, QueryStrand::Minus).expect("split");
+        assert_eq!(minus[1].contexts, vec![None, Some(1), None, Some(3)]);
+        assert_eq!(
+            minus[1].context_offsets,
+            vec![i32::MAX, 0, i32::MAX, 1_000_000 - 42]
+        );
     }
 }

@@ -89,7 +89,11 @@ const SUBJECT: &str = concat!(
 fn inputs() -> &'static (PathBuf, PathBuf) {
     static FILES: OnceLock<(PathBuf, PathBuf)> = OnceLock::new();
     FILES.get_or_init(|| {
-        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("blastp_hsp_tie_order");
+        // One directory per process: nextest runs each test in a process of its own, and a
+        // process that wrote these files again while another one's search read them cut its input.
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join("blastp_hsp_tie_order")
+            .join(std::process::id().to_string());
         std::fs::create_dir_all(&dir).expect("work directory");
         let files = (dir.join("query.faa"), dir.join("subject.faa"));
         std::fs::write(&files.0, QUERY).expect("query file");

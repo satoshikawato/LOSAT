@@ -94,6 +94,15 @@
 //! them); `-verbose` and the debug output (`x_debug_output`, the list LOSAT_X_QBATCHPAR uses); and
 //! the refusals above. The command line (`-out` file or standard output) and ABI v1 are streamed.
 //!
+//! Outfmt 17 (SAM) streams also where a stored title or ambiguity data of the database could be
+//! refused in a later batch (`Off::Titles`, `Off::Ambiguity`; `Ready::sam_despite`): the document
+//! is written only by `SamDocument::finish`, which no refusal of LOSAT's follows, and a SAM report
+//! call writes nothing to standard error (`writes_query_warnings`), so a refusal in a later batch
+//! still finds nothing written, as in the one call after the loop (the shadow compares both).
+//! `finish_sam` at NCBI's five error sites writes the document of the batches before as in the off
+//! path. Memory: the records of the batches before are rendered text, and each batch's lists are
+//! dropped, as for any streamed search.
+//!
 //! Memory: a batch's lists, flags, masks, Karlin-Altschul blocks and search spaces are dropped
 //! after its write, and so are its queries' warnings. Kept for the whole search, as without the
 //! switch: one (empty) warnings slot per query, and with `-db` the stored title of every distinct
@@ -129,6 +138,7 @@ use anyhow::Result;
 use crate::api::local_blast::{FormatOutput, OutputSink, ReportOutputs};
 use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
 use crate::config::NuclScoringSpec;
+use crate::report::sam::SamDocument;
 use crate::stats::NuclValues;
 use crate::utils::dust::MaskedInterval;
 use crate::utils::threading::SearchPool;
@@ -183,9 +193,11 @@ pub(super) enum Off {
     SearchSpace,
     /// A subject of the set whose tabular id LOSAT refuses.
     SubjectIds,
-    /// A database whose definition lines do not all read as the reports read them.
+    /// A database whose definition lines do not all read as the reports read them (outfmt 17
+    /// streams all the same).
     Titles,
-    /// A database sequence whose ambiguity data the traceback cannot decode.
+    /// A database sequence whose ambiguity data the traceback cannot decode (outfmt 17 streams
+    /// all the same).
     Ambiguity,
 }
 
@@ -217,12 +229,14 @@ pub(super) struct SubjectCache {
 }
 
 /// What the report calls of a search wrote before a call (`write_reports`): the number of
-/// queries whose reports were written, and the subject values made once. The default is the
-/// off path's single call.
-#[derive(Clone, Copy, Default)]
+/// queries whose reports were written, the subject values made once, and the SAM document that
+/// the calls add to (outfmt 17 writes its document at the end: `SamDocument`). The default is
+/// the off path's single call.
+#[derive(Default)]
 pub(super) struct Written<'a> {
     pub(super) queries: usize,
     pub(super) subjects: Option<&'a SubjectCache>,
+    pub(super) sam: Option<&'a mut SamDocument>,
 }
 
 /// The bytes that the batch writes sent to each format and to standard error, and the
@@ -240,6 +254,9 @@ struct Shadow {
 struct Ready {
     cache: Option<SubjectCache>,
     one_batch: bool,
+    /// Outfmt 17 streams although the stored data of a later batch could be refused by LOSAT
+    /// (`Off::Titles` or `Off::Ambiguity`; the module doc has the reason).
+    sam_despite: Option<Off>,
 }
 
 /// The streaming of one search's reports: whether it acts (`off`), what it has written, and the
@@ -247,11 +264,24 @@ struct Ready {
 pub(super) struct Stream {
     off: Option<Off>,
     cache: Option<SubjectCache>,
+    /// The SAM document of the run (outfmt 17 joins the streaming: its records are held as
+    /// rendered bytes until the last call, or an NCBI error, writes it).
+    sam: Option<SamDocument>,
     shadow: Option<Shadow>,
+    /// Why the stored data of the database could be refused in a later batch, where outfmt 17
+    /// streams all the same (`Ready::sam_despite`).
+    sam_despite: Option<Off>,
     batches: u64,
     queries: usize,
     one_batch: bool,
     check_seconds: f64,
+    /// The BLAST archive of the run (outfmt 11) and what it carried when the streaming
+    /// started: the shadow writes the archives of the batches before an error a second time
+    /// from that state.
+    archive: Option<(
+        crate::report::archive::ArchiveHandle,
+        crate::report::archive::ArchiveSeed,
+    )>,
 }
 
 impl Stream {
@@ -284,10 +314,17 @@ impl Stream {
             pool,
         );
         let check_seconds = started.elapsed().as_secs_f64();
-        let (off, cache, one_batch) = match checked {
-            Ok(Ready { cache, one_batch }) => (None, cache, one_batch),
-            Err(off) => (Some(off), None, false),
+        let (off, cache, one_batch, sam_despite) = match checked {
+            Ok(Ready {
+                cache,
+                one_batch,
+                sam_despite,
+            }) => (None, cache, one_batch, sam_despite),
+            Err(off) => (Some(off), None, false, None),
         };
+        if mode() != 0 {
+            crate::utils::xreach::x_reach!("LOSAT_X_RPTSTREAM", off.is_none());
+        }
         let shadow = (mode() == 2 && off.is_none()).then(|| Shadow {
             outfmts: outputs
                 .formats
@@ -299,14 +336,27 @@ impl Stream {
             checks: 0,
             compared: 0,
         });
+        // NCBI writes the document when its formatter is destroyed, whatever the number of
+        // batches (`CBlast_SAM_Formatter`): the stream holds it for the calls.
+        let sam = output_formats
+            .iter()
+            .find_map(|format| format.sam_spec())
+            .filter(|_| off.is_none())
+            .map(|spec| sam_document(args, spec));
         Stream {
             off,
             cache,
+            sam,
             shadow,
+            sam_despite,
             batches: 0,
             queries: 0,
             one_batch,
             check_seconds,
+            archive: args
+                .archive
+                .as_ref()
+                .map(|handle| (handle.clone(), handle.seed())),
         }
     }
 
@@ -336,6 +386,7 @@ impl Stream {
         let written = Written {
             queries: self.queries,
             subjects: self.cache.as_ref(),
+            sam: self.sam.as_mut(),
         };
         let result = match self.shadow.as_mut() {
             None => write(outputs, written),
@@ -378,6 +429,25 @@ impl Stream {
         result
     }
 
+    /// Writes the SAM document of the batches taken so far, if it holds a record: NCBI's
+    /// formatter is destroyed when an error leaves the `try` block that holds it, so the
+    /// records of the batches before the error are written before the error's lines
+    /// (`blastn_app.cpp:186-327`). The off path does the same in its `write_before_failed_batch`
+    /// call.
+    pub(super) fn finish_sam(&mut self, outputs: &mut ReportOutputs<'_>) -> Result<()> {
+        if !self.sam.as_ref().is_some_and(SamDocument::has_records) {
+            return Ok(());
+        }
+        self.write(outputs, 0, true, |outputs, written| {
+            let document = written.sam.expect("the stream holds a SAM document");
+            // One format: more are never streamed (`Off::Outputs`).
+            let mut writer = outputs.formats[0].sink.open()?;
+            document.finish(&mut writer)?;
+            writer.flush()?;
+            Ok(())
+        })
+    }
+
     /// The shadow: writes with `write_old` (the off path's call) into memory and compares the
     /// bytes with those that the batch writes sent (`what` names the place in a difference).
     /// Without the shadow nothing runs.
@@ -391,6 +461,18 @@ impl Stream {
         let mut formats: Vec<Vec<u8>> = vec![Vec::new(); shadow.outfmts.len()];
         let mut diagnostics = Vec::new();
         let result = {
+            // The archives of the batches before are written again from the state of the run
+            // when the streaming started; the diagnostics of this writing are saved as the
+            // archives' messages (`ArchiveHandle::scratch`).
+            let mut archive_tee;
+            let memory_diagnostics: &mut (dyn Write + Send) = match &self.archive {
+                Some((handle, _)) => {
+                    archive_tee =
+                        crate::report::archive::DiagTee::new(&mut diagnostics, handle.clone());
+                    &mut archive_tee
+                }
+                None => &mut diagnostics,
+            };
             let mut memory = ReportOutputs {
                 formats: shadow
                     .outfmts
@@ -401,11 +483,14 @@ impl Stream {
                         sink: OutputSink::Writer(bytes),
                     })
                     .collect(),
-                diagnostics: &mut diagnostics,
+                diagnostics: memory_diagnostics,
                 hits: None,
                 observer: None,
             };
-            write_old(&mut memory)
+            match &self.archive {
+                Some((handle, seed)) => handle.scratch(seed, || write_old(&mut memory)),
+                None => write_old(&mut memory),
+            }
         };
         shadow.checks += 1;
         let difference = match result {
@@ -458,11 +543,12 @@ impl Drop for Stream {
         let off = self.off.map_or("none", Off::name);
         if std::env::var_os("LOSAT_X_STATS").is_some() {
             eprintln!(
-                "[X_STATS] RPTSTREAM batches={} queries={} off={off} one_batch={} check_s={:.4}",
+                "[X_STATS] RPTSTREAM batches={} queries={} off={off} one_batch={} check_s={:.4} sam_despite={}",
                 self.batches,
                 self.queries,
                 u8::from(self.one_batch),
-                self.check_seconds
+                self.check_seconds,
+                self.sam_despite.map_or("none", Off::name)
             );
         }
         if mode() == 2 {
@@ -476,6 +562,16 @@ impl Drop for Stream {
             );
         }
     }
+}
+
+/// The SAM document of an outfmt 17 report with `spec`: `args` give the command line that its
+/// `@PG` line shows (`BlastnArgs::command_line`).
+pub(super) fn sam_document(args: &BlastnArgs, spec: crate::report::sam::SamSpec) -> SamDocument {
+    SamDocument::new(
+        spec,
+        crate::algorithm::blastn::hsp::NCBI_BLASTN_VERSION,
+        args.command_line.clone(),
+    )
 }
 
 /// The query input of the searched queries `searched` (a batch's), numbered from 0 as the batch's
@@ -626,6 +722,7 @@ fn check(
         return Ok(Ready {
             cache: None,
             one_batch: true,
+            sam_despite: None,
         });
     }
     // The scoring of `search_query_batch` (`context_blocks`: `NuclValues::gapped` fails exactly
@@ -695,13 +792,31 @@ fn check(
             Ok(Ready {
                 cache: Some(SubjectCache { ids, titles, masks }),
                 one_batch: false,
+                sam_despite: None,
             })
         }
         SubjectSource::Database(db) => match database::x_streaming_refusal(db, pool) {
+            // Outfmt 17 writes no byte before its end (`SamDocument::finish`, which no refusal of
+            // LOSAT's follows) and nothing to standard error with its report calls (a SAM format
+            // writes no query warnings, `writes_query_warnings`; the shadow compares them), so a
+            // refusal in a later batch (a stored title, ambiguity data) still finds nothing
+            // written, as in the one call after the loop: the stream acts.
+            Some(off @ (Off::Titles | Off::Ambiguity))
+                if output_formats
+                    .iter()
+                    .any(|format| format.sam_spec().is_some()) =>
+            {
+                Ok(Ready {
+                    cache: None,
+                    one_batch: false,
+                    sam_despite: Some(off),
+                })
+            }
             Some(off) => Err(off),
             None => Ok(Ready {
                 cache: None,
                 one_batch: false,
+                sam_despite: None,
             }),
         },
     }
@@ -817,6 +932,7 @@ mod tests {
             title: title.to_vec(),
             sequence: b"ACGTTGCA".iter().copied().cycle().take(letters).collect(),
             warnings: Vec::new(),
+            source: Default::default(),
         }
     }
 

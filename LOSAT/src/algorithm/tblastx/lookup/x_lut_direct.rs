@@ -59,7 +59,7 @@
 use super::*;
 use std::cell::RefCell;
 
-// EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the per-group tables of the TBLASTX unit
+// EXPERIMENT (PAIRLUT): the per-group tables of the TBLASTX unit
 // path built by this file's count, layout and fill passes on the lookup locations of one group; a
 // child module so that it uses `x_target_list` and the memo below unchanged (see x_pair_lut.rs).
 //
@@ -820,6 +820,7 @@ pub(super) fn x_bp_build_lookup(
         threshold,
         karlin_params,
         check_ideal,
+        |_| {},
     )
 }
 
@@ -841,6 +842,15 @@ pub(super) fn x_tbxlut_mode() -> u8 {
             0
         }
     })
+}
+
+// No NCBI counterpart: records the side the switch took (`LOSAT_X_REACH`).
+/// EXPERIMENT (LOSAT_X_TBXLUT): a batch whose unit path builds its group tables directly
+/// (PAIRLUT) builds no full table, so the switch is not used for it.
+pub(crate) fn x_tbxlut_reach_stub() {
+    if x_tbxlut_mode() == 1 {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXLUT", false);
+    }
 }
 
 /// EXPERIMENT (LOSAT_X_TBXLUTSHADOW): TBLASTX full tables compared so far.
@@ -869,6 +879,7 @@ pub(super) fn x_tbx_build_lookup(
         threshold,
         karlin_params,
         check_ideal,
+        |direct| crate::utils::xreach::x_reach!("LOSAT_X_TBXLUT", direct),
     )
 }
 
@@ -895,6 +906,7 @@ fn x_bp_prepared_query(queries: &[Vec<QueryFrame>], check_ideal: bool) -> Prepar
 /// Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`], falling back
 /// to the reference builder where that declines; mode 2 builds both, compares them field by field
 /// (panics on a difference), counts the table in `shadow_tables` and returns the reference's.
+/// `reach` is called in mode 1 with whether the direct builder built the table (`LOSAT_X_REACH`).
 fn x_build_ncbi_lookup_counted(
     mode: u8,
     shadow_tables: &std::sync::atomic::AtomicU64,
@@ -902,6 +914,7 @@ fn x_build_ncbi_lookup_counted(
     threshold: i32,
     karlin_params: &KarlinParams,
     check_ideal: bool,
+    reach: fn(bool),
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     if mode == 0 {
         return build_ncbi_lookup(queries, threshold, karlin_params, check_ideal);
@@ -912,8 +925,12 @@ fn x_build_ncbi_lookup_counted(
         // build_lookup_from_prepared returns the prepared contexts unchanged.
         let contexts = prepared.contexts.clone();
         return match x_build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
-            Ok(table) => (table, contexts),
+            Ok(table) => {
+                reach(true);
+                (table, contexts)
+            }
             Err(prepared) => {
+                reach(false);
                 build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH)
             }
         };

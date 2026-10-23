@@ -44,6 +44,8 @@ const PROGRAM: &str = "TBLASTN";
 pub(super) struct TblastnDatabase {
     db: SeqDb,
     name: String,
+    /// The taxonomy database of the run, opened by the XML2 and JSON formats only.
+    taxdb: shared::TaxdbRun,
 }
 
 impl TblastnDatabase {
@@ -74,6 +76,7 @@ impl TblastnDatabase {
         Ok(Self {
             db,
             name: name.to_string(),
+            taxdb: shared::TaxdbRun::default(),
         })
     }
 
@@ -104,6 +107,35 @@ impl TblastnDatabase {
     /// (`algorithm::common::database::pairwise_database`).
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {
         shared::pairwise_database(&self.db, &self.name)
+    }
+
+    /// The Blast-def-line taxid of each reported sequence by rank and what the taxonomy
+    /// database says about it, for the XML2 and JSON formats
+    /// (`algorithm::common::database::read_reported_taxids`); the sequences of `hitlists` with
+    /// HSPs are the reported ones (their subject index is the rank, `reported_subjects`).
+    pub(super) fn read_taxids(
+        &self,
+        reported: &ReportedSubjects,
+        hitlists: &[KappaResultHitList],
+    ) -> Result<XmlTaxa> {
+        let ranks: std::collections::BTreeSet<usize> = hitlists
+            .iter()
+            .flat_map(KappaResultHitList::lists)
+            .filter(|list| !list.hsps.hsps.is_empty())
+            .map(|list| list.oid as usize)
+            .collect();
+        let (taxids, taxonomy, notes) = shared::read_reported_taxids(
+            &self.db,
+            &self.taxdb,
+            &reported.ordinals,
+            &ranks,
+            PROGRAM,
+        )?;
+        Ok(XmlTaxa {
+            taxids,
+            taxonomy,
+            notes,
+        })
     }
 
     /// Every sequence of the database by ordinal id, packed
@@ -149,6 +181,17 @@ pub(super) fn read_titles(
         }
     }
     Ok(())
+}
+
+/// What the XML2 and JSON formats show of a database sequence beyond its title: its
+/// Blast-def-line taxid and the taxonomy database's answer, by rank (empty for the other
+/// formats and for `-subject`: every taxid is then 0), and NCBI's messages about the taxonomy
+/// database, which are written at the first `Hit` that needs them.
+#[derive(Default)]
+pub(super) struct XmlTaxa {
+    pub(super) taxids: Vec<i32>,
+    pub(super) taxonomy: Vec<crate::report::blast_xml::HitTaxonomy>,
+    pub(super) notes: shared::TaxdbNotes,
 }
 
 /// The database sequences that the reports show, by rank (`reported_subjects`).
@@ -202,6 +245,7 @@ pub(super) fn reported_subjects(
             title: stored.title.clone(),
             sequence: Vec::new(),
             warnings: Vec::new(),
+            source: Default::default(),
         });
         kept.push(
             stores

@@ -37,9 +37,7 @@
 //! and a threshold table from the three parameters and keeps no other state; every call of
 //! `mask_subsequence` makes its own `NcbiLfgRandom` (the random numbers that resolve `N`),
 //! windows and perfect-interval lists as locals, which is the reset of NCBI's fresh
-//! `CSymDustMasker` for each query. The statics of `utils/dust.rs` are the switches
-//! `LOSAT_X_DUSTFAST`, `LOSAT_X_DUSTRING` and `LOSAT_X_DUSTSHADOW`, which are read once and never
-//! written again. So no query's mask depends on another query or on the order in which they are
+//! `CSymDustMasker` for each query. `utils/dust.rs` has no statics that a call writes. So no query's mask depends on another query or on the order in which they are
 //! masked, and the results are collected in query order. The verbose lines, the totals and the
 //! empty case stay in `apply_dust_masking`, in the same order. No floating-point operation
 //! changes order.
@@ -174,6 +172,9 @@ fn masks_with_probe<P: Fn() + Sync>(
     mode: u8,
     probe: &P,
 ) -> Vec<Vec<MaskedInterval>> {
+    if mode != 0 {
+        crate::utils::xreach::x_reach!("LOSAT_X_QDUSTPAR", on_pool(pool, seqs.len()));
+    }
     if mode == 0 || !on_pool(pool, seqs.len()) {
         return serial(seqs, level, window, linker);
     }

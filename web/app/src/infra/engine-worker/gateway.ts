@@ -45,8 +45,8 @@ interface Generation {
   readonly faults: BroadcastChannel;
   /** Set after a search whose instance must be renewed before the next one. */
   renew: string | undefined;
-  /** The threads of the last preparation posted since the last search (prepare). */
-  prepared: number | undefined;
+  /** The threads and argv of the last preparation posted since the last search (prepare). */
+  prepared: string | undefined;
 }
 
 interface ActiveRun {
@@ -92,7 +92,8 @@ export class WasmEngine implements EngineGateway {
   /**
    * Starts the runtime of a search like `hint` before it comes (EngineGateway.prepare): the
    * modules, the Engine worker, the instance and the thread workers that the search would
-   * start, and a renewal that the next search would make. Nothing happens while a search runs.
+   * start, a renewal that the next search would make, and with the hint's argv the warm-up
+   * of that search (warm-up.ts). Nothing happens while a search runs.
    */
   prepare(hint: EnginePrepareHint): void {
     if (this.active !== undefined) return;
@@ -107,9 +108,15 @@ export class WasmEngine implements EngineGateway {
         if (this.active !== undefined) return;
         if (this.current?.renew !== undefined) this.retire();
         const generation = this.current ?? this.startGeneration(modules);
-        if (generation.prepared === threads) return;
-        generation.prepared = threads;
-        this.post(generation.worker, { type: 'prepare', generation: generation.id, threads });
+        const prepared = [threads, ...(hint.argv ?? [])].join('\0');
+        if (generation.prepared === prepared) return;
+        generation.prepared = prepared;
+        this.post(generation.worker, {
+          type: 'prepare',
+          generation: generation.id,
+          threads,
+          ...(hint.argv === undefined ? {} : { argv: hint.argv }),
+        });
       })
       // The next search loads the modules (or starts the worker) again and reports the failure.
       .catch(() => undefined);

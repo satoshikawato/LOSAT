@@ -45,7 +45,9 @@ const TAG_BOOLEAN: u8 = 0x01;
 const TAG_INTEGER: u8 = 0x02;
 const TAG_REAL: u8 = 0x09;
 const TAG_ENUMERATED: u8 = 0x0a;
+const TAG_OCTET_STRING: u8 = 0x04;
 const TAG_VISIBLE_STRING: u8 = 0x1a;
+const TAG_STRING_STORE: u8 = 0x41;
 const TAG_SEQUENCE: u8 = 0x30;
 const TAG_SET: u8 = 0x31;
 /// A constructed context-specific tag (`[i]`, i < 31): `0xa0 | i`.
@@ -293,6 +295,46 @@ impl Encoder for AsnBinaryEncoder<'_> {
     ///         WriteByte(type);
     ///     }
     /// ```
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1704-1708
+    /// ```c++
+    /// void CObjectOStreamAsnBinary::BeginBytes(const ByteBlock& block)
+    /// {
+    ///     WriteSysTag(eOctetString);
+    ///     WriteLength(block.GetLength());
+    /// }
+    /// ```
+    fn octets(&mut self, value: &[u8]) {
+        self.out.push(TAG_OCTET_STRING);
+        self.length(value.len());
+        self.out.extend_from_slice(value);
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:874-879
+    /// ```c++
+    /// void CObjectOStreamAsnBinary::WriteStringStore(const string& str)
+    /// {
+    ///     WriteShortTag(eApplication, ePrimitive, eStringStore);
+    ///     size_t length = str.size();
+    ///     WriteLength(length);
+    ///     WriteBytes(str.data(), length);
+    /// }
+    /// ```
+    fn string_store(&mut self, value: &[u8]) {
+        self.out.push(TAG_STRING_STORE);
+        self.length(value.len());
+        self.out.extend_from_slice(value);
+    }
+
+    fn buffered(&self) -> usize {
+        self.out.len()
+    }
+
+    fn flush_to(&mut self, sink: &mut dyn std::io::Write, _all: bool) -> std::io::Result<()> {
+        sink.write_all(self.out)?;
+        self.out.clear();
+        Ok(())
+    }
+
     fn real(&mut self, value: f64) {
         if !value.is_finite() {
             if self.error.is_none() {

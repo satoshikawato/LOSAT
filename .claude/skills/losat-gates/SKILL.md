@@ -18,7 +18,8 @@ stays in a log file.
 NCBI divergences remain open. App commits follow `web/AGENTS.md`.
 
 Notation: `$N` = the LOSAT release binary under test; all cargo calls use
-`RUSTUP_TOOLCHAIN=1.92.0` and `--target-dir "$BUILD_ROOT/<purpose>"`; run from the worktree root.
+`RUSTUP_TOOLCHAIN=1.92.0` and the worktree's `--target-dir "$BUILD_ROOT/wt-<topic>"` (skill
+`losat-worktree`); run from the worktree root.
 
 ## Which tier
 
@@ -36,10 +37,10 @@ Engine:
 
 ```bash
 cd LOSAT && cargo fmt --check                                                   # ~12 s
-cargo build --release --locked --target-dir "$BUILD_ROOT/native"                # ~1 min incremental
+cargo build --release --locked --target-dir "$BUILD_ROOT/wt-<topic>"            # ~1 min warm
 export LOSAT_BLASTX_WORKER_LOG="$BUILD_ROOT/blastx-worker.log"
-cargo test --locked --all-features --lib --target-dir "$BUILD_ROOT/test" <module path>   # inline tests
-cargo test --locked --all-features --test <binary> --target-dir "$BUILD_ROOT/test" <filter>   # integration
+cargo test --locked --all-features --lib --target-dir "$BUILD_ROOT/wt-<topic>" <module path>   # inline tests
+cargo test --locked --all-features --test <binary> --target-dir "$BUILD_ROOT/wt-<topic>" <filter>   # integration
 cd .. && python3 docs/evidence/losat_web_e2a/check_losat.py --losat "$N" --threads 1 --programs <touched>   # ~26 s
 ```
 
@@ -94,7 +95,7 @@ below only when its condition holds:
 
 ## GitHub CI
 
-A PR runs `ci.yml` (`rust` 2.9 min; `fast output regressions` 4.5 min with all programs) and,
-when `web/**` or `LOSAT/src/**` changed, `web.yml` (about 20 min; the `adapter` job reruns V-ABI
-quick). Nightly runs `--all-cases` and the WASI matrix (median 120 min). Do not rerun locally
-what CI runs for the same commit.
+A PR runs `ci.yml` (`rust` about 35 min: lint and two cargo-nextest shards; `fast output
+regressions` 4.5 min with all programs) and, when `web/**` or `LOSAT/src/**` changed, `web.yml`
+(about 20 min; the `adapter` job reruns V-ABI quick). Nightly runs `--all-cases` and the WASI
+matrix (median 120 min). Do not rerun locally what CI runs for the same commit.

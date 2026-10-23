@@ -66,8 +66,11 @@ twice per improvement).
 ## Watch CI
 
 - `ci.yml` (`rust`, `fast output regressions`) runs on every PR; `web.yml` runs when `web/**`,
-  `LOSAT/src/**`, `LOSAT/Cargo.*`, or the WASI test files changed. Expect 5-20 minutes. A PR into
+  `LOSAT/src/**`, `LOSAT/Cargo.*`, or the WASI test files changed. `rust` takes about 35 minutes
+  (it waits for `rust lint` and the two `cargo test (k/2)` shards), the others 5-20. A PR into
   `dev` needs these (`rust`, `fast output regressions`, `web result`) and merges by auto-merge.
+  On a PR into `dev` the two `LOSAT_X_DEFAULT=0` steps are skipped; they run on the promotion PR
+  into `main` (and the default run must reach the reference sides `switch_reach_expected.tsv` requires).
 - `platform-checks.yml` (`platform checks result`) runs its platform jobs only on a PR into
   `main` (the promotion PR), when `LOSAT/src/**`, `LOSAT/Cargo.*`, `LOSAT/build.rs` or its own
   files changed and the PR is not a draft: outputs on Linux x64, Linux arm64, Windows x64 and

@@ -265,3 +265,55 @@ writes (`Error: [blastn] ...`).
   `LOSAT_X_BPQBLOCK` of 50,000 letters and two with a value of at most 10,000, which
   `tests/blastp_query_blocks_fmt.rs` runs against these frozen bytes), the first 30 of that length in file order. Rows `db.sa.bpqb.{5,8,9,12}`: `blastp -db paja -evalue 0.1
   -max_target_seqs 2 -max_hsps 1` (9 rows of outfmt 6: some queries have hits, some do not).
+- OF-BPQB2 (outfmt 15 and 16 in the same block search): rows `db.sa.bpqb.15` and `db.sa.bpqb.16`, the same search as
+  `db.sa.bpqb.8` (65 KB at most). `paja_taxid` is `paja` built with a taxid (`make_paja_taxid.py MAKEBLASTDB OUTDIR`: `makeblastdb
+  -in tests/fasta/PajaWSV.faa -dbtype prot -blastdb_version 4 -taxid 10090`, then the taxid of BDT63547.1 patched to 9606 in
+  the header file, the same length); BDT63547.1 is one of the two subjects that only the second NCBI query batch of `bpqb_q.faa`
+  hits, so the row `db.sa.bpqb.taxdb.16` (`BLASTDB=tests/seqdb/taxdb/good`) writes `Mus musculus` in the first block and
+  `Homo sapiens` in the second. `tests/seqdb/taxdb_xml2/last_10090_past_end` is `make_taxdb.py all` of a two-entry TSV (9606, 10090),
+  variant `offset_last_past_end` (the last entry, 10090, has its offset past the end of `taxdb.btd`); the row
+  `db.sa.bpqb.taxdb.lastoff.15` freezes NCBI's messages across the two query batches (the volume's lookup once, the `Hit`'s each time).
+
+OF6 (SAM, outfmt 17, BLASTN): the rows `db.sa.sam.*` (stems `mega`, `dc`, `tb`, `mv`, `short`, `ambrc`, `mts1`, `maxhsps1`,
+`cull1`, `qloc`, `nohit`, `b100`; suffix `.17p` = `-outfmt 17`, `.17q` = `17 SQ`, `.17r` = `17 SR`, `.17b` = `17 SQ SR`, `.5` = the
+outfmt 5 sibling that `S/scripts/check_sam_layout.py` predicts the document from) search `nslice` with `nslice_q.fna`
+(`mega`, `dc`, `tb`, `short`, the option rows and `b100`: `BATCH_SIZE=100`, one query per batch), `nucl_mv` with
+`tests/seqdb/nucl.fna` (`mv`) and `sam_ambrc` with `tests/fasta/outfmt0/sam_ambig_q.fna` (`ambrc`: ambiguity letters in
+the stored data of a minus-strand hit). `sam_ambrc` is built from `tests/fasta/outfmt0/sam_ambig_rc_s.fna` (only
+`.nhr .nin .nsq` are kept):
+
+    makeblastdb -in tests/fasta/outfmt0/sam_ambig_rc_s.fna -dbtype nucl -out tests/db_search/sam_ambrc \
+        -title "sam ambiguity letters on a minus strand" -blastdb_version 4
+
+The frozen documents are NCBI's bytes, including the `CL:` tag of the `@PG` line (the path of the NCBI binary that
+froze them); the check removes that tag from both sides (`db_search_fixtures.py strip_sam_cl`).
+
+OF5b part 1 (XML2 and JSON of BLASTX): `make_x16_blastx_inputs.py` writes the inputs (run from `LOSAT/`):
+`x16_bx_taxid_q.fna` (three nucleotide queries for `x16_taxid`: a minus frame, a plus frame, one without hits) and
+`x16_bx_taxid_q2.fna` (two queries of 10,003 bases, each its own NCBI query batch of 10,002 bases, that both hit
+`x16_taxid_99990`), `tests/fasta/outfmt0/x16_bx_q_unsearched.fna` (a 10,003-base slice with lower-case stretches, then a
+300-N query and a 2-base query: a batch NCBI does not search) and, in `tests/fixtures/outfmt16`, `qnx_bad.fna`,
+`qnx_firstbad.fna`, `qnx_late.fna`. BLASTX does not read `BATCH_SIZE`, hence the padding to 10,003 bases. The rows
+`db.x16.blastx.*` (bslice) and `db.x16_bx_taxid.*` (taxid and `BLASTDB=` variants, as in the BLASTP rows) are frozen from NCBI
+BLAST+ 2.17.0; `tests/fixtures/outfmt16/db/sprot_tax` is `sprot.faa` built with `makeblastdb -dbtype prot -blastdb_version 4
+-taxid 9606` (only `.phr .pin .psq` kept).
+
+OF5b part 1 fix (DECISIONS 32, BLASTX `-db` 15/16 with a taxonomy database): `tests/fixtures/outfmt16/db/sprot_mixtax.pal` lists
+`sprot_tax10090` (`sprot.faa`, `makeblastdb -dbtype prot -blastdb_version 4 -taxid 10090`) and `other_tax9606` (`other.faa`, one protein
+nothing hits, `-taxid 9606`; only `.phr .pin .psq` kept). `mixtax_blastx_{good,badname}_{15,16}` are NCBI BLAST+ 2.17.0
+`blastx -query qnx_late.fna -db db/sprot_mixtax -num_threads 1` with `BLASTDB=tests/seqdb/taxdb/good` and `.../high_bytes_utf8` (the name of
+9606 has bytes >= 0x80; 9606 is in the database and never reported, so NCBI writes the same bytes as with `good`).
+
+- `x16_ttaxid_q.faa`, `x16_ttaxid_qwarn.faa`, `x16_ttaxid_qwarn2.faa` (OF5b part 2, TBLASTN outfmt 15 and 16): protein queries
+  translated from `sn1` (frame +1) and `sn2` (frame -3) of `x16_ntaxid.fna`, and an unrelated one without hits; the `qwarn` files
+  add a title that ends in 60 amino-acid letters (the reader's warning) and the `qwarn2` order puts the query without hits
+  first. They search the existing nucleotide databases `x16_ntaxid` (taxid 9606) and `x16_ntaxid_99990`: rows
+  `db.sa.x16_ttaxid.*` (`BLASTDB=DIR` and `BATCH_SIZE=N` tokens as in the BLASTP and BLASTN rows; the messages on standard
+  error name `tblastn`).
+
+- `x16_xtaxid_q.fna`, `x16_xtaxid_qwarn.fna`, `x16_xtaxid_qwarn2.fna` (OF5b part 3, TBLASTX outfmt 15 and 16): nucleotide queries made
+  from `sn1` (its first 150 bases, `xq1`) and `sn2` (the reverse complement of its first 150 bases, `xq2`) of `x16_ntaxid.fna`, and an
+  unrelated one without hits (`xq3`); the `qwarn` files add a title that ends in 28 nucleotide letters (the reader's warning) to `xq2`
+  and the `qwarn2` order puts the query without hits first. With `-evalue 1e-20` each query hits its own subject only. They search the
+  existing databases `x16_ntaxid` (taxid 9606) and `x16_ntaxid_99990`: rows `db.sa.x16_xtaxid.*` (`BLASTDB=DIR` and `BATCH_SIZE=N`
+  tokens as in the BLASTP, BLASTN and TBLASTN rows, the other tokens are options; the messages on standard error name `tblastx`).

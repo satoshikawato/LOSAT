@@ -2,6 +2,70 @@ use crate::blastinput::value_parsers::*;
 use clap::Args;
 use std::path::PathBuf;
 
+/// The strand(s) of the query that a search covers (`-strand`): the strand of the query's
+/// Seq-loc. A strand that is not searched has a context of length 0 and, in a split search, a
+/// chunk context of `None` (`kInvalidContext`).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:394-410
+/// ```c
+///                     if (ctx % NUM_STRANDS == 0) {
+///                         if (kStrand == eNa_strand_minus) {
+///                             m_SplitBlk->AddContextToChunk(chunk_num,
+///                                                           kInvalidContext);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueryStrand {
+    Both,
+    Plus,
+    Minus,
+}
+
+impl QueryStrand {
+    /// The value of `-strand`: `both`, `plus` or `minus`, anything else is NCBI's argument
+    /// error (the command line checks it at parsing, `run_local` with this function).
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
+    /// ```c
+    ///         arg_desc.AddDefaultKey(kArgStrand, "strand",
+    ///                      "Query strand(s) to search against database/subject",
+    ///                                CArgDescriptions::eString, kDfltArgStrand);
+    /// ```
+    pub fn parse(value: &str) -> anyhow::Result<Self> {
+        match value {
+            "both" => Ok(Self::Both),
+            "plus" => Ok(Self::Plus),
+            "minus" => Ok(Self::Minus),
+            _ => anyhow::bail!(
+                "Argument \"strand\". Illegal value, expected `both', `minus', `plus':  `{value}'"
+            ),
+        }
+    }
+
+    /// The value of `-strand` of arguments that have passed `parse` (clap's value parser, or
+    /// `run_local`'s check): a value that is none of the three would be a bug of the caller.
+    pub fn from_option(value: &str) -> Self {
+        Self::parse(value).expect("-strand was checked when the arguments were read")
+    }
+
+    /// The first valid context of a query (1 for the minus strand).
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:146-149
+    /// ```c
+    ///     // Adjust the first context if the requested strand is the minus strand
+    ///     if (strand == eNa_strand_minus) {
+    ///         query_info->first_context = translate ? 3 : 1;
+    ///     }
+    /// ```
+    pub fn first_context(self) -> usize {
+        usize::from(self == Self::Minus)
+    }
+
+    /// Whether the plus (context 0) and minus (context 1) strand of a query is searched.
+    pub fn searched(self) -> (bool, bool) {
+        (self != Self::Minus, self != Self::Plus)
+    }
+}
+
 // CLI v2 names/defaults: NCBI c++/src/algo/blast/blastinput/blast_args.cpp:
 // 166-170,203-207,332-349,2657-2660,3158-3163; cmdline_flags.cpp:46-94.
 // arg_desc.AddOptionalKey(kArgMaxHSPsPerSubject, "int_value", ..., eInteger);
@@ -137,8 +201,8 @@ pub struct BlastnArgs {
     ///         align_length * hit_options->percent_identity) ||
     ///         align_length < hit_options->min_hit_length) ;
     /// ```
-    #[arg(long = "perc_identity", default_value_t = 0.0, value_parser = blastn_percentage)]
-    pub percent_identity: f64,
+    #[arg(long = "perc_identity", value_parser = blastn_percentage)]
+    pub percent_identity: Option<f64>,
     /// Minimum hit length for filtering HSPs (Blast_HSPTest).
     ///
     /// Default: 0 (disabled, matches NCBI BLAST default from calloc initialization).
@@ -278,6 +342,14 @@ pub struct BlastnArgs {
     // ```
     #[arg(long = "lcase_masking", default_value_t = false)]
     pub lcase_masking: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
+    // ```c++
+    //         arg_desc.AddDefaultKey(kArgStrand, "strand",
+    //                      "Query strand(s) to search against database/subject",
+    //                                CArgDescriptions::eString, kDfltArgStrand);
+    // ```
+    #[arg(long, default_value = "both", value_parser = ["both", "plus", "minus"])]
+    pub strand: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // ```c++
     //     // query location
@@ -323,8 +395,8 @@ pub struct BlastnArgs {
     // ```
     /// If the query range of a hit is enveloped by that of at least this many
     /// higher-scoring hits, delete the hit (default: 0, no culling).
-    #[arg(long, default_value_t = 0, value_parser = nonnegative_ncbi_integer)]
-    pub culling_limit: i32,
+    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: Option<i32>,
     // NCBI blastn has no such option (the LOSAT-only option was removed, AGENTS.md rule 5).
     #[arg(skip = false)]
     pub verbose: bool,
@@ -364,6 +436,30 @@ pub struct BlastnArgs {
     // are set (`blastinput/app.rs` `parse_formatting_string` and `report_format`).
     #[arg(long, default_value = "0", value_name = "SPEC")]
     pub outfmt: String,
+
+    /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search
+    /// reads the arguments (`archive::handle_for`).
+    #[arg(skip)]
+    pub archive: Option<crate::report::archive::ArchiveHandle>,
+
+    /// The command line of the run as the SAM `@PG` line shows it: every argument followed by
+    /// one space, raw bytes (`GetCmdlineArgs`); `None` where there is no command line (the
+    /// library, ABI v1). Set by `run` from the process's arguments.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:878-885
+    /// ```c++
+    /// string
+    /// GetCmdlineArgs(const CNcbiArguments & a)
+    /// {
+    /// 	string cmd = kEmptyStr;
+    /// 	for(unsigned int i=0; i < a.Size(); i++) {
+    /// 		cmd += a[i] + " ";
+    /// 	}
+    /// 	return cmd;
+    /// }
+    /// ```
+    #[arg(skip)]
+    pub command_line: Option<Vec<u8>>,
 }
 
 impl BlastnArgs {
@@ -399,6 +495,18 @@ impl BlastnArgs {
     /// ```c++
     ///     SetDbLength(0);
     /// ```
+    /// `-perc_identity`, 0 (disabled) when it is not given. The BLAST archive records whether
+    /// it was given (`percent_identity`).
+    pub fn percent_identity_value(&self) -> f64 {
+        self.percent_identity.unwrap_or(0.0)
+    }
+
+    /// `-culling_limit`, 0 (no culling) when it is not given. The BLAST archive records
+    /// whether it was given (`culling_limit`).
+    pub fn culling_limit_value(&self) -> i32 {
+        self.culling_limit.unwrap_or(0)
+    }
+
     pub fn db_length(&self) -> i64 {
         self.dbsize.unwrap_or(0)
     }
@@ -443,5 +551,30 @@ impl BlastnArgs {
             })?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::QueryStrand;
+
+    #[test]
+    fn the_strand_option_is_read_once() {
+        assert_eq!(QueryStrand::from_option("both").searched(), (true, true));
+        assert_eq!(QueryStrand::from_option("plus").searched(), (true, false));
+        assert_eq!(QueryStrand::from_option("minus").searched(), (false, true));
+    }
+
+    #[test]
+    fn an_unknown_strand_is_an_argument_error() {
+        for value in ["foo", "", "Plus", "PLUS", "both "] {
+            let error = QueryStrand::parse(value).unwrap_err().to_string();
+            assert_eq!(
+                error,
+                format!(
+                    "Argument \"strand\". Illegal value, expected `both', `minus', `plus':  `{value}'"
+                )
+            );
+        }
     }
 }

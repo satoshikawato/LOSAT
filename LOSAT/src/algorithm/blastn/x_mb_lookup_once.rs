@@ -1,6 +1,5 @@
 //! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set since 2026-10-18: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set, which also turns `LOSAT_X_PAIRPAR` off and with it this
-//! fill): `LOSAT_X_PAIRPAR`'s pool fill of the megablast lookup table of
+//! `LOSAT_X_DEFAULT=0` and it is not set): PAIRPAR's pool fill of the megablast lookup table of
 //! `build_mb_lookup` (`x_mb_lookup_par.rs`) with each query position read once. In the fill of
 //! `x_mb_lookup_par` every worker reads every word of the query and applies those of its own
 //! cells, so each worker pays the whole read (0.65 s of each worker's time at 16 threads for
@@ -45,7 +44,7 @@
 //! - B (update, job = owner `o`): owner `o` takes the sub-ranges `(0, o)`, `(1, o)`, ...,
 //!   `(P-1, o)` and makes the loop's update for each word: `head = hashtable[cell]`; the presence
 //!   bit in its private copy of `pv_array` when `head == 0`, otherwise a saturating `+1` of the
-//!   cell's counter in its private copy of `helper_array` (the copies of LOSAT_X_MBLUTPAD,
+//!   cell's counter in its private copy of `helper_array` (the copies of
 //!   `x_mb_lookup_par::Copies`, zeroed by the owner in its first job); then `hashtable[cell] =
 //!   q_off_1`. It keeps `head` in the entry. On x86_64 it prefetches the cell 16 entries ahead.
 //! - C (link, job = reader `a`): reader `a` writes `next_pos[q_off_1] = head` for the entries of
@@ -111,23 +110,21 @@
 //! is freed at the end of the fill. The ranges of the stream (`segments`) are a `Vec` of the
 //! calling thread with one `Segment` (48 bytes on 64-bit targets) per unmasked range read (0.1-0.3
 //! MB for the megablast tables of 31,168 cDNAs; a query masked into tens of thousands of ranges
-//! takes more), freed at the end of the fill. The private copies are those of LOSAT_X_MBLUTPAD
-//! (`x_mb_lookup_par::Copies`, kept from fill to fill on glibc), one set per worker of each fill.
+//! takes more), freed at the end of the fill. The private copies are those of
+//! `x_mb_lookup_par::Copies` (kept from fill to fill on glibc), one set per worker of each fill.
 //! The per-range list of the loop's re-threading of `ascending_cells` (8 bytes a word) is not
 //! needed.
 //!
-//! The pool. As LOSAT_X_PAIRPAR's fill (`x_mb_lookup_par::parts`): a LOSAT search pool of two
+//! The pool. As PAIRPAR's fill (`x_mb_lookup_par::parts`): a LOSAT search pool of two
 //! threads or more (a LOSAT_X_QBATCHPAR slot of `m >= 2` threads fills on its own pool with P = m),
-//! no `LOSAT_X_PAIRPARSHADOW`, no database word counts, no `BLEMIR_DEBUG`. Without the `parallel`
+//! no database word counts, no `BLEMIR_DEBUG`. Without the `parallel`
 //! feature, or on wasm32 without `wasm-threads`, the loop runs; with `wasm-threads` the scopes run
 //! on the search pool, which this module never builds (memory losat-wasm-threads-main-only).
 //!
-//! Shadow and timing: with `LOSAT_X_PAIRPARSHADOW` the second build of `x_mb_lookup_par`'s shadow
-//! is this fill (`[X_SHADOW] MBLUTONCE tables= cells= diffs=0 identical` at exit); with
-//! LOSAT_TIMING `[TIMING] x_mb_lookup_build` counts `once=<n>` (the builds this fill made) and
-//! `[TIMING] x_mb_lookup_once: fills= chunks= read_wall= read_max= read_sum= read_late= update_...
-//! last_... prefault_... arena= prefault_rounds= prefault_touches=` gives, per phase summed over
-//! the chunks of the search's fills (not the shadow's): the calling worker's wall time from before
+//! Timing: with LOSAT_TIMING `[TIMING] x_mb_lookup_build` counts `once=<n>` (the builds this fill
+//! made) and `[TIMING] x_mb_lookup_once: fills= chunks= read_wall= read_max= read_sum= read_late=
+//! update_... last_... prefault_... arena= prefault_rounds= prefault_touches=` gives, per phase
+//! summed over the chunks of the search's fills: the calling worker's wall time from before
 //! the phase's first job to the return of its last, the longest job, the jobs' summed time and the
 //! latest start of a job; `read` is the scope of A (with C of the chunk before), `update` that of B,
 //! `last` the scope that links the last chunk and flushes the copies and `prefault` the prefault
@@ -146,7 +143,7 @@
 //! the middle element of each marked page whose middle element lies in a block of owner `j` (one
 //! job per page). Phase B writes the cell of every word, so a marked page is a page the fill
 //! writes; and before the first phase B every element of `hashtable` still holds the 0 it was
-//! allocated with (NCBI's `calloc`: `build_mb_lookup` and the shadow allocate the table zeroed),
+//! allocated with (NCBI's `calloc`: `build_mb_lookup` allocates the table zeroed),
 //! so the round writes 0 over 0 and every array is what it is without it. Why: phase B reads a cell
 //! before it writes it (`head = hashtable[cell]`), so on a page the process has not touched yet
 //! the read maps the kernel's shared zero page and the write then replaces it with a page of the
@@ -454,7 +451,7 @@ impl SharedArena {
 }
 
 /// No NCBI counterpart (scheduling only): one owner's private copies of `helper_array` and
-/// `pv_array` (LOSAT_X_MBLUTPAD's), zeroed by the owner in its first phase-B job.
+/// `pv_array`, zeroed by the owner in its first phase-B job.
 struct OwnerCopies<'c> {
     unready: Option<Unready<'c>>,
     private: Option<Private<'c>>,
@@ -929,10 +926,10 @@ pub(super) struct OnceStats {
 /// ```
 /// Fills the tables as the word loop of `build_mb_lookup` does (with its re-threading for
 /// `ascending_cells`), each query position read once, with `parts` workers on the search pool (or
-/// one after another, `in_pool == false`, for the shadow without a pool); the module documentation
-/// gives the phases and why every element of the four arrays is the loop's. `timed`: a build of
-/// the search (LOSAT_TIMING's `[TIMING] x_mb_lookup_once` counts it), not the shadow's. `hashtable`
-/// must be zeroed (as `build_mb_lookup` and the shadow allocate it, NCBI's `calloc`): the loop's
+/// one after another, `in_pool == false`, where the unit tests run it without a pool); the module
+/// documentation gives the phases and why every element of the four arrays is the loop's. `timed`:
+/// a build of the search (LOSAT_TIMING's `[TIMING] x_mb_lookup_once` counts it). `hashtable`
+/// must be zeroed (as `build_mb_lookup` allocates it, NCBI's `calloc`): the loop's
 /// empty cells, and the premise of the prefault round (LOSAT_X_MBLUTPREFAULT). `resident`: a table
 /// kept by LOSAT_X_MBLUTKEEP and zeroed, whose pages are mapped: no prefault round
 /// (`x_mb_lut_keep.rs`, "The prefault round").
@@ -944,6 +941,9 @@ pub(super) fn fill(
     timed: bool,
     resident: bool,
 ) -> OnceStats {
+    if resident && prefault_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_MBLUTPREFAULT", false);
+    }
     fill_chunked(
         parts,
         words,
@@ -997,7 +997,7 @@ fn fill_chunked(
         pv_array_bts: tables.pv_array_bts,
         helper_array: Shared::new(tables.helper_array),
     };
-    let mut copies = Copies::new(true, parts, shared.helper_array.len, shared.pv_array.len);
+    let mut copies = Copies::new(parts, shared.helper_array.len, shared.pv_array.len);
     let slots = Slots(
         copies
             .parts()
@@ -1030,6 +1030,9 @@ fn fill_chunked(
     let pages = pages_of(offset, table_size);
     let (first_start, first_end) = bounds(0);
     let round_on = prefault && prefault_gate(first_end - first_start, table_size);
+    if prefault {
+        crate::utils::xreach::x_reach!("LOSAT_X_MBLUTPREFAULT", round_on);
+    }
     let mut marks = PageBits::new(if round_on { pages } else { 0 }, parts);
     let touched = Slots(
         (0..parts)
@@ -1240,7 +1243,7 @@ mod tests {
             )
         }
 
-        /// The loop's counters: the unpadded fill of `x_mb_lookup_par` in one part, which applies
+        /// The loop's counters: the fill of `x_mb_lookup_par` in one part, which applies
         /// the loop's statements in reading order.
         fn helper_of(&self, cells: usize, pv_len: usize, bts: usize) -> Vec<u32> {
             let refs = self.refs();
@@ -1637,7 +1640,7 @@ mod tests {
 
     // From start values other than 0 (production starts at 0): counters at u32::MAX - k and
     // others, presence-vector words with bits set; the flush's `saturating_add` and OR give the
-    // loop's saturating increments and kept bits (the loop's values: `x_mb_lookup_par`'s unpadded
+    // loop's saturating increments and kept bits (the loop's values: `x_mb_lookup_par`'s
     // fill in one part from the same start values).
     #[test]
     fn once_flush_matches_the_loop_from_any_start() {

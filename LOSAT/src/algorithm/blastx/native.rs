@@ -25,6 +25,7 @@ use super::{
     subjects::{Subjects, UnreadableSubjects},
 };
 use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
+use crate::report::blast_xml2::{FsSideFiles, NoSideFiles, RunSideFiles, Xml2Kind};
 use anyhow::{bail, Result};
 use std::{
     fmt,
@@ -128,6 +129,13 @@ fn report_error(error: anyhow::Error) -> anyhow::Error {
     // ```
     if error.is::<super::blast_xml::XmlRefusal>() {
         // LOSAT's refusal of a title NCBI's XML cannot write, not an error of NCBI's engine.
+        error
+    } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
+        (e.exit == 1 && e.message.starts_with("Command line argument error"))
+            || (e.exit == 6 && e.message == "BLAST failed to write output\n")
+    }) {
+        // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), or a
+        // write to one that fails (`framing::side_file_write_error`).
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
@@ -356,10 +364,25 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         Some(path) => Box::new(File::create(path).map_err(|_| inaccessible("out", path))?),
         None => Box::new(io::stdout().lock()),
     };
-    // BLAST XML (outfmt 5): the output can hold the whole document in memory
-    // (`blast_xml::HeldOutput`), decided below before the search.
-    let (destination, held) = if choice.number == 5 {
-        let held = super::blast_xml::HeldOutput::new(destination);
+    // BLAST XML (outfmt 5) and the XML2 and JSON documents (outfmt 13 to 16): the output can
+    // hold the whole document in memory (`blast_xml::HeldOutput`), decided below before the
+    // search.
+    // Outfmt 13 and 14 write side files next to `-out` and the master file at `-out`: with no
+    // file name they stop at NCBI's `xinclude_check` below (`Please provide a file name`).
+    let out_file = args.out.as_deref().filter(|p| *p != Path::new("-"));
+    let structured_xml = match choice.number {
+        5 | 15 | 16 => true,
+        13 | 14 => out_file.is_some(),
+        _ => false,
+    };
+    // The hold of the side files of outfmt 13 and 14 follows the master file's.
+    let side_files = out_file.and_then(|out| {
+        let kind = app::ReportFormat::from_number(choice.number).and_then(Xml2Kind::of)?;
+        kind.is_files()
+            .then(|| super::blast_xml::HeldSideFiles::new(FsSideFiles::new(out, kind)))
+    });
+    let (destination, held) = if structured_xml {
+        let held = super::blast_xml::HeldOutput::new(destination, side_files.clone());
         (Box::new(held.clone()) as Box<dyn Write>, Some(held))
     } else {
         (destination, None)
@@ -448,28 +471,43 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
             Program::Blastx,
         )?;
     }
-    // LOSAT's refusal of a database name that BLAST XML (outfmt 5) cannot write, before the
-    // search (`blast_xml::check_database_name`).
-    if let (Some(database), 5) = (database.as_ref(), choice.number) {
+    // LOSAT's refusal of a database name that BLAST XML (outfmt 5, 15 and 16) cannot write,
+    // before the search (`blast_xml::check_database_name`).
+    if let (Some(database), true) = (database.as_ref(), structured_xml) {
         super::blast_xml::check_database_name(database.name())?;
     }
     // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
     // come before the first byte, though the query file is read batch by batch: the query
     // titles are checked by a read of the file before the search, and a run in which a
     // `-subject` title (or the message of a query) could still be refused later holds the
-    // document in memory until its epilog (`blast_xml::HeldOutput`). Only with outfmt 5; the
-    // other formats read the file once.
+    // document in memory until its epilog (`blast_xml::HeldOutput`; outfmt 13 and 14: the side files
+    // too). Only with outfmt 5 and 13 to 16; the other formats read the file once.
     if let Some(held) = &held {
         // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
         // FIFO) cannot be read a second time: the read before the search would take every
         // byte (DECISIONS 22). Refused as `-query -` is (`args.rs`), before the search.
         if !query_file.metadata().is_ok_and(|m| m.is_file()) {
-            bail!("unsupported BLASTX query input for -outfmt 5: use a regular file");
+            bail!(
+                "unsupported BLASTX query input for -outfmt {}: use a regular file",
+                choice.number
+            );
         }
         let query_file = File::open(&args.query).map_err(|_| inaccessible("query", &args.query))?;
         let messages_may_be_refused =
             super::blast_xml::prescan_queries(query_file, args.lcase_masking)?;
-        if messages_may_be_refused || super::blast_xml::subjects_may_be_refused(&subjects) {
+        // The XML2 and JSON documents of a `-db` search with a taxonomy database on the search
+        // path: a later batch can still refuse the scientific name of a taxid, or the damaged
+        // database (`read_reported_taxids`, which needs the batch's hits). The taxids of every
+        // sequence are looked up here, once, and the output is held only when one of them would
+        // be refused (DECISIONS 32); the usual run, in which none is, writes batch by batch.
+        let taxdb_may_refuse = choice.number != 5
+            && database
+                .as_ref()
+                .is_some_and(|database| database.taxdb_found() && database.taxdb_may_refuse());
+        if messages_may_be_refused
+            || taxdb_may_refuse
+            || super::blast_xml::subjects_may_be_refused(&subjects)
+        {
             held.hold();
         }
     }
@@ -540,7 +578,12 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     // ```
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file is LOSAT's rejection, above).
-    app::xinclude_check(&choice)?;
+    app::xinclude_check_for(&choice, args.out.as_deref())?;
+    // LOSAT_X_DBIDXREAD acts on a database's index files only; the new side is marked where a
+    // volume is opened (`seqdb::Volume::open`).
+    if database.is_none() && crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
+        crate::utils::xreach::x_reach!("LOSAT_X_DBIDXREAD", false);
+    }
     let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
     let no_reported = ReportedSubjects::default();
     let shown_run = match (&database, &pairwise_database) {
@@ -555,7 +598,21 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     };
     super::x_timing::run(XRun::Startup, x_t_run);
     let x_t = super::x_timing::lap();
+    // The writer of the XML2 or JSON document (outfmt 15 and 16), which the run keeps across the
+    // query batches; its start is written with the prolog, as NCBI writes `PrintProlog`'s.
+    let xml2 = std::cell::RefCell::new(super::blast_xml::xml2_kind(options.outfmt).map(|kind| {
+        let files: RunSideFiles = match &side_files {
+            Some(side_files) => Box::new(side_files.clone()),
+            None => Box::new(NoSideFiles),
+        };
+        super::blast_xml::xml2_writer(kind, &options, &subjects, &shown_run, files)
+    }));
     report::write_prolog(&mut writer, &options, &subjects, &shown_run).map_err(report_error)?;
+    if let Some(xml2) = xml2.borrow_mut().as_mut() {
+        let mut start = Vec::new();
+        xml2.start(&mut start);
+        writer.write_all(&start).map_err(output_error)?;
+    }
     // NCBI writes the prolog out before it searches the first batch, so the warnings of the
     // batch come after it when both streams go to one place.
     writer.flush().map_err(output_error)?;
@@ -667,20 +724,30 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                             options.gapped,
                             matches!(options.outfmt, 6 | 7),
                             options.outfmt == 0,
+                            matches!(options.outfmt, 13..=16),
                         );
                         super::x_timing::run(XRun::Titles, x_t);
-                        reported.map_err(|error| match error.downcast::<HeaderReadError>() {
-                            Ok(header) => header.error,
-                            // EXPERIMENT (LOSAT_X_BXDBSTREAM): a failed read of a record's residues.
-                            Err(error) => {
-                                match error.downcast::<super::x_db_stream::XReadError>() {
-                                    Ok(super::x_db_stream::XReadError(kept)) => {
-                                        database_error(kept)
+                        reported
+                            .map_err(|error| match error.downcast::<HeaderReadError>() {
+                                Ok(header) => header.error,
+                                // EXPERIMENT (LOSAT_X_BXDBSTREAM): a failed read of a record's residues.
+                                Err(error) => {
+                                    match error.downcast::<super::x_db_stream::XReadError>() {
+                                        Ok(super::x_db_stream::XReadError(kept)) => {
+                                            database_error(kept)
+                                        }
+                                        Err(error) => error,
                                     }
-                                    Err(error) => error,
                                 }
-                            }
-                        })?
+                            })
+                            .inspect_err(|error| {
+                                // A refusal of the XML2 document drops what the run holds.
+                                if error.is::<super::blast_xml::XmlRefusal>() {
+                                    if let Some(held) = &held {
+                                        held.discard();
+                                    }
+                                }
+                            })?
                     }
                 };
                 report::render_queries(
@@ -696,6 +763,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                     },
                     results,
                     queries_before,
+                    xml2.borrow_mut().as_mut(),
                 )
                 .map_err(refused)
             }
@@ -708,6 +776,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                 &shown_run,
                 results,
                 queries_before,
+                xml2.borrow_mut().as_mut(),
             )
             .map_err(refused),
         }
@@ -783,6 +852,21 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
             // replayed in input order; the results printed are those of the one-batch-at-a-time
             // loop above.
             #[cfg(feature = "parallel")]
+            {
+                // Without a pool of 2+ threads (LOSAT_X_BXPOOL, 2+ threads) the batches are searched
+                // one at a time; LOSAT_X_BXFLOW acts only with the queued batches.
+                let x_pooled = x_pool.is_some_and(|pool| pool.enabled());
+                if super::runtime::x_bx_batch() && !x_pooled {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", false);
+                }
+                if super::runtime::x_bx_flow() {
+                    crate::utils::xreach::x_reach!(
+                        "LOSAT_X_BXFLOW",
+                        x_pooled && super::runtime::x_bx_batch()
+                    );
+                }
+            }
+            #[cfg(feature = "parallel")]
             if let Some(pool) = x_pool.filter(|pool| super::runtime::x_bx_batch() && pool.enabled())
             {
                 use rayon::prelude::*;
@@ -821,7 +905,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         &mut query_stream,
                         args.lcase_masking,
                         &|queries: &[super::input::FastaRecord], alone: bool| {
-                            if alone || x_large(queries) {
+                            let large = alone || x_large(queries);
+                            crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !large);
+                            if large {
                                 super::runtime::x_search_internal_in_pool(
                                     queries,
                                     search_subjects,
@@ -886,6 +972,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                     // uses the pool inside, as the unbatched loop does.
                     let x_t = super::x_timing::lap();
                     let x_tail = batches.len() < pool.threads();
+                    crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !x_tail);
                     let searched = if x_tail {
                         batches
                             .iter()
@@ -1074,6 +1161,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         // Dispatch point: NCBI builds a CLocalBlast, and so its worker threads, for every batch.
         // With LOSAT_X_BXPOOL one pool is built for the whole run and every batch is searched on
         // it. Reuse of threads only.
+        if super::runtime::x_bx_pool() {
+            crate::utils::xreach::x_reach!("LOSAT_X_BXPOOL", options.num_threads > 1);
+        }
         let x_batches = if super::runtime::x_bx_pool() && options.num_threads > 1 {
             // A pool that cannot be built is the engine error it was when each
             // batch built its own.
@@ -1092,12 +1182,19 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     }
     super::x_timing::run(XRun::Loop, x_t_loop);
     let x_t = super::x_timing::lap();
-    report::write_epilog(&mut writer, &options, &subjects, &shown_run, processed)
-        .map_err(report_error)?;
+    report::write_epilog(
+        &mut writer,
+        &options,
+        &subjects,
+        &shown_run,
+        processed,
+        xml2.borrow_mut().as_mut(),
+    )
+    .map_err(report_error)?;
     writer.flush().map_err(output_error)?;
     // The document a hold kept: written at the end of the run, with the epilog.
     if let Some(held) = &held {
-        held.release().map_err(output_error)?;
+        held.release().map_err(report_error)?;
     }
     super::x_timing::run(XRun::Epilog, x_t);
     super::x_timing::run(XRun::Total, x_t_run);

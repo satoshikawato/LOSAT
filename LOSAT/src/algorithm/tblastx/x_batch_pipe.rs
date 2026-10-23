@@ -31,9 +31,9 @@
 //! 2. The loop searches a batch itself when it reaches it, unless the batch before already
 //!    started it. A batch starts the next one at its *seed-stage end*: when the last of its
 //!    subjects has ended its seed stage (`XSeedEnd`, at dispatch point 5 of `process_subject`,
-//!    where LOSAT_X_SEEDRELEASE has freed the batch's lookup and unit tables), if the admission
-//!    rule lets it. That search is a job of the loop's scope (`rayon::in_place_scope`) and runs
-//!    on the pool like any other.
+//!    where the seed release (`x_seed_release.rs`) has freed the batch's lookup and unit tables),
+//!    if the admission rule lets it. That search is a job of the loop's scope
+//!    (`rayon::in_place_scope`) and runs on the pool like any other.
 //! 3. The loop takes a started batch's result from its slot. Until the slot is filled the loop's
 //!    thread runs the pool's jobs (`rayon::yield_now`), and sleeps 50 us when there is none, so
 //!    no thread waits for a condition outside rayon's latches and no job waits at all (plan v4
@@ -80,8 +80,7 @@
 //! Off (the loop as before): the switch off; a build without `parallel`, or wasm32 (the loop is
 //! kept there); one thread, or a loop not on a thread of its pool; fewer than two planned
 //! batches; any debugging output of the search (`LOSAT_DEBUG*`, the HSP trace, the diagnostics,
-//! the stage dumps), whose lines would interleave; `LOSAT_X_SEEDRELEASE` off (a batch would keep
-//! its tables while the next one builds its own).
+//! the stage dumps), whose lines would interleave.
 //!
 //! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXPIPE planned= taken= early= loop= waited=
 //! key_mismatch= max_held_hsps=` at the end of the search (early: started at the batch before's
@@ -334,6 +333,7 @@ impl<'s, R: Send> XPipe<'s, R> {
         limit: u64,
     ) -> Option<Self> {
         if plan.len() < 2 {
+            crate::utils::xreach::x_reach!("LOSAT_X_TBXPIPE", false);
             return None;
         }
         let n = plan.len();
@@ -425,13 +425,18 @@ impl<'s, R: Send> XPipe<'s, R> {
     /// and nothing started it yet.
     fn seed_ended(&'s self, scope: &rayon::Scope<'s>, i: usize) {
         let next = i + 1;
-        if !self.held.room()
-            || next >= self.plan.len()
-            || self.stop.load(Ordering::SeqCst)
-            || self.started[next].swap(true, Ordering::SeqCst)
-        {
+        if next >= self.plan.len() {
             return;
         }
+        if !self.held.room() {
+            // The HSPs held leave no room: the loop starts the next batch itself.
+            crate::utils::xreach::x_reach!("LOSAT_X_TBXPIPE", false);
+            return;
+        }
+        if self.stop.load(Ordering::SeqCst) || self.started[next].swap(true, Ordering::SeqCst) {
+            return;
+        }
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXPIPE", true);
         self.counts.early.fetch_add(1, Ordering::Relaxed);
         scope.spawn(move |scope| {
             // The loop waits for this slot: a panic fills it too (item 5).

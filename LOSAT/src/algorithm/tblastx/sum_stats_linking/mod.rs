@@ -44,7 +44,7 @@ pub use linking::{
     apply_sum_stats_even_gap_linking, apply_sum_stats_even_gap_linking_with_parallel,
 };
 
-// EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW): the in-place HSP list path
+// The in-place HSP list path
 // (tblastx/x_hsp_inplace.rs, a child module of `linking`). `ungapped_hit_sort.rs` calls its sort
 // dispatch, `main` its summary.
 //
@@ -56,7 +56,7 @@ pub use linking::{
 pub(crate) use linking::x_hsp_inplace;
 pub use linking::x_hsp_inplace_print_summary;
 
-// EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW): the summary of the index sorts of the
+// The summary of the index sorts of the
 // in-place path (tblastx/x_link_sort.rs, a child module of `linking`), for `main`.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:993-994
@@ -67,7 +67,7 @@ pub use linking::x_hsp_inplace_print_summary;
 // No NCBI counterpart for the summary: it prints counters.
 pub use linking::x_link_sort_print_summary;
 
-// EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW): the summary of the groups linked as
+// The summary of the groups linked as
 // sub-slices of the sorted list (tblastx/x_link_slices.rs, a child module of `linking`), for
 // `main`.
 //

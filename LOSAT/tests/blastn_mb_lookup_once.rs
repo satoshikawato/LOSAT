@@ -2,37 +2,32 @@
 //! `src/algorithm/blastn/x_mb_lookup_once.rs`) on whole searches.
 //!
 //! The switch is in the strict set since 2026-10-18 (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set). Where `LOSAT_X_PAIRPAR` fills the contiguous megablast table on
-//! a pool of two threads or more it chooses between two LOSAT code paths with the same tables: each
-//! worker reads every word (`x_mb_lookup_par.rs`), or each position is read once and each word
+//! and it is not set). Where PAIRPAR (which has no variable) fills the contiguous megablast table
+//! on a pool of two threads or more it chooses between two LOSAT code paths with the same tables:
+//! each worker reads every word (`x_mb_lookup_par.rs`), or each position is read once and each word
 //! applied by the owner of its cell. So the property under test is that the report does not depend
 //! on it, and that the read-once fill really runs where the switch says: with `LOSAT_TIMING`,
 //! `[TIMING] x_mb_lookup_build` counts `once=` builds equal to its `parallel=` builds (more than
-//! 0) at 4 threads with the switch (also with `LOSAT_X_MBLUTPAD`, which it takes precedence over),
-//! with `[TIMING] x_mb_lookup_once` giving as many fills, and so without the variable (the
-//! default); 0 with `LOSAT_X_MBLUTONCE=0`, with `LOSAT_X_DEFAULT=0`
-//! (which turns `LOSAT_X_PAIRPAR` off) and at one thread (no pool); with `LOSAT_X_PAIRPARSHADOW`,
-//! the shadow builds the second table of its comparison with the read-once fill and says so
-//! (`[X_SHADOW] MBLUTONCE tables=` more than 0, `diffs=0 identical`), and says nothing with
-//! `LOSAT_X_MBLUTONCE=0`. That the bytes equal NCBI's is the business of the blastn fixtures.
+//! 0) at 4 threads with the switch, also with `LOSAT_X_DEFAULT=0` (which does not turn the pool
+//! fill off), with `[TIMING] x_mb_lookup_once` giving as many fills, and so without the variable
+//! (the default); 0 with `LOSAT_X_MBLUTONCE=0` and at one thread (no pool). That the bytes equal
+//! NCBI's is the business of the blastn fixtures.
 //!
 //! The prefault round of the read-once fill (`LOSAT_X_MBLUTPREFAULT`, in the strict set since
 //! 2026-10-19) runs where the first chunk has at least 8 positions per 1,024 cells of the table:
 //! here megablast of LC738868 (306 kb, a table of 4^12 cells: at least 131,072 positions, on 16,384
 //! pages, 16,385 where the table starts inside a page) at 8 threads (chunks of 262,144 positions),
 //! counted by `prefault_rounds=` / `prefault_touches=` of `[TIMING] x_mb_lookup_once`; not at 2
-//! threads (65,536 positions), nor with `LOSAT_X_MBLUTPREFAULT=0`; the report is the same either way,
-//! and the shadow's read-once table equals the loop's with it.
+//! threads (65,536 positions), nor with `LOSAT_X_MBLUTPREFAULT=0`; the report is the same either
+//! way.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const SWITCH: (&str, &str) = ("LOSAT_X_MBLUTONCE", "1");
 const OFF: (&str, &str) = ("LOSAT_X_MBLUTONCE", "0");
-const PAD: (&str, &str) = ("LOSAT_X_MBLUTPAD", "1");
 const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_PAIRPARSHADOW", "1");
 const PREFAULT_OFF: (&str, &str) = ("LOSAT_X_MBLUTPREFAULT", "0");
 
 fn fasta(name: &str) -> PathBuf {
@@ -102,16 +97,15 @@ fn field(stderr: &str, prefix: &str, name: &str) -> u64 {
 
 const BUILD: &str = "[TIMING] x_mb_lookup_build: ";
 const ONCE: &str = "[TIMING] x_mb_lookup_once: ";
-const SHADOW_LINE: &str = "[X_SHADOW] MBLUTONCE ";
 
 /// For one search: the same report with the switch off, with it, by default, with it and
-/// `LOSAT_X_DEFAULT=0`, with `LOSAT_TIMING`, with the shadow, and at one thread; the read-once fill
-/// counted where it ran.
+/// `LOSAT_X_DEFAULT=0`, with `LOSAT_TIMING`, and at one thread; the read-once fill counted where
+/// it ran.
 fn check(task: &str, query: &str, subject: &str) {
     let (reference, stderr) = blastn(task, query, subject, 4, &[OFF]);
     assert!(!reference.is_empty(), "{task}: no hits");
     assert_eq!(stderr, "", "{task}");
-    for switches in [&[SWITCH][..], &[], &[SWITCH, DEFAULT_OFF], &[SWITCH, PAD]] {
+    for switches in [&[SWITCH][..], &[], &[SWITCH, DEFAULT_OFF]] {
         let (report, stderr) = blastn(task, query, subject, 4, switches);
         assert!(
             report == reference,
@@ -127,13 +121,18 @@ fn check(task: &str, query: &str, subject: &str) {
     assert!(parallel > 0, "{task}: no table on the pool:\n{stderr}");
     assert_eq!(field(&stderr, BUILD, "once="), 0, "{task}: {stderr}");
     assert!(!stderr.contains(ONCE), "{task}: {stderr}");
-    // `LOSAT_X_DEFAULT=0` turns `LOSAT_X_PAIRPAR` off, so no table is filled on the pool.
+    // `LOSAT_X_DEFAULT=0` no longer turns the pool fill off: as many tables on the pool, and with
+    // the switch set every one read once.
     let (report, stderr) = blastn(task, query, subject, 4, &[SWITCH, DEFAULT_OFF, TIMING]);
     assert!(report == reference, "{task}");
-    assert_eq!(field(&stderr, BUILD, "parallel="), 0, "{task}: {stderr}");
-    assert_eq!(field(&stderr, BUILD, "once="), 0, "{task}: {stderr}");
+    assert_eq!(
+        field(&stderr, BUILD, "parallel="),
+        parallel,
+        "{task}: {stderr}"
+    );
+    assert_eq!(field(&stderr, BUILD, "once="), parallel, "{task}: {stderr}");
 
-    for switches in [&[SWITCH, TIMING][..], &[TIMING], &[SWITCH, PAD, TIMING]] {
+    for switches in [&[SWITCH, TIMING][..], &[TIMING]] {
         let (report, stderr) = blastn(task, query, subject, 4, switches);
         assert!(report == reference, "{task} {switches:?}");
         assert_eq!(field(&stderr, BUILD, "parallel="), parallel, "{task}");
@@ -142,7 +141,6 @@ fn check(task: &str, query: &str, subject: &str) {
             parallel,
             "{task} {switches:?}: every table on the pool read once:\n{stderr}"
         );
-        assert_eq!(field(&stderr, BUILD, "padded="), 0, "{task}: {stderr}");
         assert_eq!(field(&stderr, ONCE, "fills="), parallel, "{task}: {stderr}");
         assert!(
             field(&stderr, ONCE, "chunks=") >= parallel,
@@ -155,28 +153,6 @@ fn check(task: &str, query: &str, subject: &str) {
     assert_eq!(field(&stderr, BUILD, "parallel="), 0, "{task}: {stderr}");
     assert_eq!(field(&stderr, BUILD, "once="), 0, "{task}: {stderr}");
     assert!(!stderr.contains(ONCE), "{task}: {stderr}");
-
-    let (report, stderr) = blastn(task, query, subject, 4, &[SWITCH, SHADOW]);
-    assert!(report == reference, "{task} with the shadow");
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with(SHADOW_LINE))
-        .unwrap_or_else(|| panic!("{task}: no shadow line:\n{stderr}"));
-    assert!(line.ends_with(" diffs=0 identical"), "{line}");
-    assert!(
-        field(&stderr, SHADOW_LINE, "tables=") > 0,
-        "{task}: the shadow compared no read-once table: {line}"
-    );
-    assert!(field(&stderr, SHADOW_LINE, "cells=") > 0, "{line}");
-    assert!(
-        !stderr.contains("[X_SHADOW] MBLUTPAD"),
-        "{task}: no padded build:\n{stderr}"
-    );
-    let (_, stderr) = blastn(task, query, subject, 4, &[OFF, SHADOW]);
-    assert!(
-        !stderr.contains(SHADOW_LINE),
-        "{task}: the line needs the switch:\n{stderr}"
-    );
 }
 
 #[test]
@@ -213,12 +189,4 @@ fn megablast_prefaults_the_table_where_the_first_chunk_is_dense() {
     let (report, stderr) = blastn(task, query, query, 2, &[TIMING]);
     assert!(report == reference, "the report differs at 2 threads");
     assert_eq!(field(&stderr, ONCE, "prefault_rounds="), 0, "{stderr}");
-    let (report, stderr) = blastn(task, query, query, 8, &[SHADOW]);
-    assert!(report == reference, "the report differs with the shadow");
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with(SHADOW_LINE))
-        .unwrap_or_else(|| panic!("no shadow line:\n{stderr}"));
-    assert!(line.ends_with(" diffs=0 identical"), "{line}");
-    assert!(field(&stderr, SHADOW_LINE, "tables=") > 0, "{line}");
 }

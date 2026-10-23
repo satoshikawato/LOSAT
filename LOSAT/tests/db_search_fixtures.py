@@ -2,7 +2,9 @@
 """Frozen `blastp -db`, `blastn -db`, `tblastn -db`, `blastx -db` and `tblastx -db` fixtures: LOSAT against the bytes NCBI BLAST+ 2.17.0 wrote (comparison only).
 
 LOSAT/tests/db_search_manifest.tsv lists the rows (columns: row_id, program, kind, db, query, extra_args,
-outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers). Every row runs from LOSAT/ as
+outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers, and for the rows of outfmt 13 and 14 two more:
+files, side_sha256; xinclude_fixtures.py says what they mean: the run gets `-out <tmp>/<row_id>.out`, the frozen
+master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells). Every row runs from LOSAT/ as
 `PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
 (`blastp`, `blastn`, `tblastn`, `blastx` or `tblastx`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
 argument `-db ""`; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom
@@ -20,7 +22,7 @@ LOSAT/tests/db_search (README.md there says how they were built).
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
 the default is every program). It runs NCBI in a cleaned environment (see `check`), because each
 variable and file that is cleaned changes NCBI's result: BLASTDB, NCBI*, BLAST*, BATCH_SIZE, CHUNK_SIZE,
-OLD_FSC, BL2SEQ_LEGACY, and `~/.ncbirc` (HOME is an empty directory).
+ARCHIVE_FORMAT, OLD_FSC, BL2SEQ_LEGACY, and `~/.ncbirc` (HOME is an empty directory).
 
 `check --losat BIN [--threads N] [--program NAME] [--only PREFIX] [--out TSV]` runs LOSAT with `-num_threads N`
 (default 1) in the same cleaned environment (no NCBI*, BLAST*, LOSAT_*, BATCH_SIZE, CHUNK_SIZE, OLD_FSC or
@@ -44,41 +46,60 @@ from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parents[1]
 TESTS = ENGINE / "tests"
+sys.path.insert(0, str(TESTS))
+import xinclude_fixtures as xinclude  # noqa: E402  (the rows of outfmt 13 and 14)
+
 MANIFEST = TESTS / "db_search_manifest.tsv"
 FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
 PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx")
-NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY")
+NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY", "ARCHIVE_FORMAT")
 TIMEOUT = 600
 # The `NAME=VALUE` tokens of `extra_args` that are environment variables of both programs: BLASTDB
-# (the directory of a `taxdb.bti`) and the two that cut a query file into batches.
-ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE")
+# (the directory of a `taxdb.bti`), the two that cut a query file into batches, and ARCHIVE_FORMAT
+# (how outfmt 11 writes its archive: unset text, `bin...` binary).
+ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "ARCHIVE_FORMAT")
 
 
 def read_manifest() -> tuple[list[str], list[dict[str, str]]]:
     comments, rows = [], []
-    header_seen = False
+    header: list[str] = []
     for line in MANIFEST.read_text().split("\n"):
         if line.startswith("#"):
             comments.append(line)
-        elif line and not header_seen:
-            if line.split("\t") != COLUMNS:
+        elif line and not header:
+            header = line.split("\t")
+            if header not in (COLUMNS, COLUMNS + xinclude.FILES_COLUMNS):
                 raise SystemExit(f"{MANIFEST.name}: unexpected header {line!r}")
-            header_seen = True
         elif line:
             cells = line.split("\t")
-            if len(cells) != len(COLUMNS):
+            if not len(COLUMNS) <= len(cells) <= len(header):
                 raise SystemExit(f"{MANIFEST.name}: {len(cells)} cells in {line[:60]!r}")
-            row = dict(zip(COLUMNS, cells))
+            row = {column: "" for column in header}
+            row.update(zip(header, cells))
             if row["program"] not in PROGRAMS:
                 raise SystemExit(f"{MANIFEST.name}: unknown program {row['program']!r} in {row['row_id']}")
             rows.append(row)
     return comments, rows
 
 
+def row_cells(row: dict[str, str]) -> list[str]:
+    """The cells of a row in the manifest: the `files` columns are left out when they are empty."""
+    cells = [row[column] for column in COLUMNS]
+    if row.get("files") or row.get("side_sha256"):
+        cells += [row.get(column, "") for column in xinclude.FILES_COLUMNS]
+    return cells
+
+
+def header_cells(rows: list[dict[str, str]]) -> list[str]:
+    """The header: the `files` columns when some row has them."""
+    files = any(row.get("files") or row.get("side_sha256") for row in rows)
+    return COLUMNS + xinclude.FILES_COLUMNS if files else COLUMNS
+
+
 def write_manifest(comments: list[str], rows: list[dict[str, str]]) -> None:
-    lines = comments + ["\t".join(COLUMNS)] + ["\t".join(row[c] for c in COLUMNS) for row in rows]
+    lines = comments + ["\t".join(header_cells(rows))] + ["\t".join(row_cells(row)) for row in rows]
     MANIFEST.write_text("\n".join(lines) + "\n")
 
 
@@ -109,15 +130,41 @@ def row_env(row: dict[str, str], base: dict[str, str]) -> dict[str, str]:
 
 def clean_env(base: dict[str, str], home: str) -> dict[str, str]:
     """`base` without what changes a result (NCBI*, BLAST*, LOSAT_*, `NCBI_ENV`), HOME and USERPROFILE
-    set to the empty directory `home` (`$HOME/.ncbirc` is read by both programs)."""
+    set to the empty directory `home` (`$HOME/.ncbirc` is read by both programs). LOSAT_X_REACH is kept
+    (LOSAT/src/utils/xreach.rs): it records LOSAT's switch paths and changes no output."""
     env = {k: v for k, v in base.items()
-           if not k.startswith(("NCBI", "BLAST", "LOSAT_")) and k not in NCBI_ENV}
+           if k == "LOSAT_X_REACH"
+           or (not k.startswith(("NCBI", "BLAST", "LOSAT_")) and k not in NCBI_ENV)}
     env["HOME"] = env["USERPROFILE"] = home
     return env
 
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def is_sam_outfmt(outfmt: str) -> bool:
+    """Whether `outfmt` (the `-outfmt` argument, a spec included) asks for SAM (17)."""
+    return outfmt.split()[:1] == ["17"]
+
+
+_SAM_PG = b"\n@PG\tID:0\tVN:2.17.0+"
+
+
+def strip_sam_cl(data: bytes) -> bytes:
+    """The SAM document without the CL tag of its @PG line: the bytes from the `\tCL:` that follows
+    `\n@PG\tID:0\tVN:2.17.0+` up to, not including, the first following `\tPN:blastn\n`.
+
+    The one rule that the SAM (outfmt 17) rows of every fixture compare with, on the frozen NCBI bytes and on
+    LOSAT's (DECISIONS 7 of the outfmt line): LOSAT writes its own command line (its program path, the `blastn`
+    sub-command word and the arguments a harness adds, such as `-num_threads N`) where NCBI writes its argv.
+    Every other byte must be equal. A document without the tag (no command line) is returned as it is."""
+    head = data.find(_SAM_PG + b"\tCL:")
+    if head < 0:
+        return data
+    start = head + len(_SAM_PG)
+    end = data.find(b"\tPN:blastn\n", start + len(b"\tCL:"))
+    return data if end < 0 else data[:start] + data[end:]
 
 
 def first_difference(expected: bytes, actual: bytes) -> str:
@@ -147,9 +194,17 @@ def freeze(args: argparse.Namespace) -> int:
     for row in rows:
         if row["kind"] != "ncbi" or not selected(row, args):
             continue
-        run = subprocess.run([str(Path(args.ncbi_bin) / row["program"]), *search_argv(row), "-num_threads", "1"],
-                             cwd=ENGINE, capture_output=True, timeout=TIMEOUT, env=row_env(row, env))
-        (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
+        command = [str(Path(args.ncbi_bin) / row["program"]), *search_argv(row), "-num_threads", "1"]
+        files = xinclude.wants_files(row)
+        if files:
+            written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
+                                              timeout=TIMEOUT, env=row_env(row, env))
+            run = written.run
+            xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
+        else:
+            run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
+                                 env=row_env(row, env))
+            (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
         err = FROZEN / f"{row['row_id']}.err"
         if run.stderr:
             err.write_bytes(run.stderr)
@@ -157,14 +212,23 @@ def freeze(args: argparse.Namespace) -> int:
             err.unlink(missing_ok=True)
         row.update(rc=str(run.returncode), stdout_sha256=sha256(run.stdout), stdout_bytes=str(len(run.stdout)),
                    stderr_sha256=sha256(run.stderr) if run.stderr else "")
-        print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(run.stdout)}\tstderr={len(run.stderr)}")
+        if files:
+            row.update(xinclude.observed(written))
+        print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(run.stdout)}\tstderr={len(run.stderr)}"
+              + (f"\tsides={len(written.sides)}" if files else ""))
     write_manifest(comments, rows)
     return 0
 
 
 def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str]) -> tuple[str, str]:
-    run = subprocess.run([str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)],
-                         cwd=ENGINE, capture_output=True, env=row_env(row, env), timeout=TIMEOUT)
+    command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
+    files = xinclude.wants_files(row)
+    if files:
+        written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
+                                          env=row_env(row, env), timeout=TIMEOUT)
+        run = written.run
+    else:
+        run = subprocess.run(command, cwd=ENGINE, capture_output=True, env=row_env(row, env), timeout=TIMEOUT)
     if row["kind"] == "losat-rejection":
         problems = []
         if run.returncode != int(row["rc"]):
@@ -178,14 +242,21 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     err_path = FROZEN / f"{row['row_id']}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
     problems = []
-    if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
+    if files:
+        problems += xinclude.problems(written, row, FROZEN, first_difference)
+    elif sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
         problems.append("frozen .out does not match the manifest")
     if (sha256(err) if err else "") != row["stderr_sha256"] or err_path.exists() != bool(row["stderr_sha256"]):
         problems.append("frozen .err does not match the manifest")
     if run.returncode != int(row["rc"]):
         problems.append(f"exit {run.returncode}, expected {row['rc']}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
-    if run.stdout != out:
-        problems.append("stdout " + first_difference(out, run.stdout))
+    # A SAM row differs in the command line of the @PG line only (`strip_sam_cl`).
+    if not files:
+        expected_out, observed_out = (out, run.stdout)
+        if is_sam_outfmt(row["outfmt"]):
+            expected_out, observed_out = strip_sam_cl(out), strip_sam_cl(run.stdout)
+        if observed_out != expected_out:
+            problems.append("stdout " + first_difference(expected_out, observed_out))
     if run.stderr != err:
         problems.append("stderr " + first_difference(err, run.stderr))
     return ("differs", "; ".join(problems)) if problems else ("same", "")

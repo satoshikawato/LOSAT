@@ -6,7 +6,7 @@
 //! order (by the owner, or split by diagonal-hash bucket over the pool with
 //! LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`). The scheduling (`plan_strips`, `run_strips`,
 //! `part::seed_stage_part`) and the scan kernels (`scan_kernel`) are those of
-//! `LOSAT_X_PAIRPAR` in the parent module.
+//! PAIRPAR in the parent module.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
 //! ```c
@@ -531,19 +531,22 @@ fn fold_na<const PT: bool>(
         }
 
         // NCBI architecture: Collect ungapped hit for batch processing
-        ungapped_hits.push(UngappedHit {
-            context_idx: q_idx,
-            query_idx: ctx.query_idx,
-            query_frame: ctx.frame,
-            query_context_offset: ctx.query_offset,
-            seed_q_off: q_off,
-            seed_s_off: s_off,
-            qs,
-            qe,
-            ss,
-            se: ungapped_se,
-            score: ungapped_score,
-        });
+        super::super::x_push_ungapped(
+            ungapped_hits,
+            UngappedHit {
+                context_idx: q_idx,
+                query_idx: ctx.query_idx,
+                query_frame: ctx.frame,
+                query_context_offset: ctx.query_offset,
+                seed_q_off: q_off,
+                seed_s_off: s_off,
+                qs,
+                qe,
+                ss,
+                se: ungapped_se,
+                score: ungapped_score,
+            },
+        );
         if PT {
             out.hit_keys.push(x_key);
         }
@@ -712,14 +715,23 @@ pub(in super::super) fn run(
         STASH.with(|s| s.borrow_mut().take());
     }
     if !in_scope(x) {
+        if !shadow {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", false);
+        }
         return false;
     }
     let threads = match pool_threads() {
         Some(threads) => threads,
         // the shadow also runs without a pool (strips on this thread)
         None if shadow => 1,
-        None => return false,
+        None => {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", false);
+            return false;
+        }
     };
+    if !shadow {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", true);
+    }
     let timing = if shadow { None } else { x.timing };
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
     let t_start = timed.then(std::time::Instant::now);
@@ -954,7 +966,7 @@ mod tests {
                     masks: masks[c].clone(),
                 })
                 .collect();
-            let index = QueryContextIndex::new(&contexts);
+            let index = QueryContextIndex::new(&contexts, false);
             let score_matrix = build_blastna_matrix(1, -3);
             let nucl_score_table = build_nucl_score_table(1, -3);
             let seq_ranges = [(0i32, s_len as i32)];

@@ -2,7 +2,7 @@
 //! `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0`; shadow LOSAT_X_DISCLUTPARSHADOW): the
 //! discontiguous megablast tables of `build_disc_mb_lookup` (`s_FillDiscMBTable`) filled by the
 //! threads of the search pool, each thread owning a fixed set of table cells of both templates'
-//! tables. The plan of the cells and the pool test are those of LOSAT_X_PAIRPAR's megablast table
+//! tables. The plan of the cells and the pool test are those of PAIRPAR's megablast table
 //! (`x_mb_lookup_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:754-767,775-786,788-804
@@ -283,7 +283,11 @@ fn parts_for(on: bool) -> Option<usize> {
 /// No NCBI counterpart: dispatch test of `build_disc_mb_lookup` (the switch, or its shadow, and
 /// a search pool of two threads or more).
 pub(super) fn parts() -> Option<usize> {
-    parts_for(switches().0)
+    let parts = parts_for(switches().0);
+    if switches().0 {
+        crate::utils::xreach::x_reach!("LOSAT_X_DISCLUTPAR", parts.is_some());
+    }
+    parts
 }
 
 /// No NCBI counterpart: LOSAT_X_DISCLUTPARSHADOW is set.
@@ -2071,7 +2075,7 @@ pub(super) fn nonzero_pages(v: &[u32]) -> std::collections::BTreeSet<usize> {
 }
 
 /// No NCBI counterpart (scheduling only): the parts of the shadow's partitioned build when no
-/// pool built the tables (as `x_mb_lookup_par::shadow_check`).
+/// pool built the tables.
 const SHADOW_PARTS_OFF_POOL: usize = 4;
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786,803-804,808-824

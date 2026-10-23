@@ -30,6 +30,7 @@ use super::runtime::BatchResults;
 use super::subjects::Subjects;
 use crate::algorithm::common::database::{self as shared, PreliminaryReadError, StoredProteins};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::report::blast_xml::HitTaxonomy;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{SeqDb, SeqType};
 
@@ -54,6 +55,9 @@ const NCBISTDAA_TO_AMINOACID: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
 pub(crate) struct BlastxDatabase {
     db: SeqDb,
     name: String,
+    /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
+    /// JSON only), kept across the query batches of the run.
+    taxdb: shared::TaxdbRun,
 }
 
 impl BlastxDatabase {
@@ -64,12 +68,26 @@ impl BlastxDatabase {
         Ok(Self {
             db,
             name: name.to_string(),
+            taxdb: shared::TaxdbRun::default(),
         })
     }
 
     /// The `-db` value as NCBI keeps it.
     pub(crate) fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Whether `taxdb.bti` resolves on NCBI's search path, so that the XML2 and JSON formats
+    /// write the scientific name of a taxid (`SeqDb::taxdb_found`).
+    pub(crate) fn taxdb_found(&self) -> bool {
+        self.db.taxdb_found()
+    }
+
+    /// Whether a later query batch of an XML2 or JSON run could still refuse a taxonomy
+    /// database name or record (`algorithm::common::database::taxdb_may_refuse`: every
+    /// sequence's taxid looked up once, before the first byte).
+    pub(crate) fn taxdb_may_refuse(&self) -> bool {
+        shared::taxdb_may_refuse(&self.db)
     }
 
     /// What the `Database:` lines of outfmt 0 show (title, date, real totals).
@@ -151,6 +169,12 @@ pub(crate) struct ReportedSubjects {
     /// The ordinal id of each rank, ascending (the Seq-ids of the Seq-annots,
     /// `general { db "BL_ORD_ID", tag id <oid> }`).
     ordinals: Vec<u32>,
+    /// By rank: the Blast-def-line taxid and what the taxonomy database says of it, and the
+    /// taxonomy database's messages of the batch (XML2 and JSON with `-db` only; empty
+    /// otherwise, which reads as no taxid).
+    taxids: Vec<i32>,
+    taxonomy: Vec<HitTaxonomy>,
+    taxdb_notes: shared::TaxdbNotes,
 }
 
 impl ReportedSubjects {
@@ -176,6 +200,7 @@ impl ReportedSubjects {
         gapped: bool,
         tabular: bool,
         pairwise: bool,
+        taxids: bool,
     ) -> Result<Self> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -253,6 +278,28 @@ impl ReportedSubjects {
                 }
             }
         }
+        if taxids {
+            // The taxid of each reported sequence, read apart from the titles for the XML2 and
+            // JSON formats only (`algorithm::common::database::read_reported_taxids`); the
+            // sequences with a title are the reported ones.
+            let shown: std::collections::BTreeSet<usize> = listed
+                .values()
+                .enumerate()
+                .filter(|(_, title)| title.is_some())
+                .map(|(rank, _)| rank)
+                .collect();
+            // A scientific name NCBI cannot write, or a taxonomy database LOSAT cannot read as NCBI
+            // does, is LOSAT's refusal of the XML2 document (a run that holds its output drops it).
+            (reported.taxids, reported.taxonomy, reported.taxdb_notes) =
+                shared::read_reported_taxids(
+                    &database.db,
+                    &database.taxdb,
+                    &reported.ordinals,
+                    &shown,
+                    PROGRAM,
+                )
+                .map_err(super::blast_xml::XmlRefusal::of_taxonomy)?;
+        }
         Ok(reported)
     }
 
@@ -264,6 +311,23 @@ impl ReportedSubjects {
     /// The ordinal id of rank `rank`.
     pub(crate) fn ordinal(&self, rank: usize) -> u32 {
         self.ordinals[rank]
+    }
+
+    /// The Blast-def-line taxid of the sequence of rank `rank` (0 for none, and for a run that
+    /// does not read taxids).
+    pub(crate) fn taxid(&self, rank: usize) -> i32 {
+        self.taxids.get(rank).copied().unwrap_or(0)
+    }
+
+    /// What the taxonomy database says of that taxid (`HitTaxonomy::Unnamed` when nothing).
+    pub(crate) fn taxonomy(&self, rank: usize) -> HitTaxonomy {
+        self.taxonomy.get(rank).cloned().unwrap_or_default()
+    }
+
+    /// NCBI's messages about the taxonomy database that come before the `Hit`s' own, for the
+    /// batch.
+    pub(crate) fn taxdb_notes(&self) -> &shared::TaxdbNotes {
+        &self.taxdb_notes
     }
 
     /// The tabular subject id of rank `rank` (only with `tabular` in `for_batch`).

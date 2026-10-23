@@ -1,5 +1,5 @@
 //! TBLASTN subjects held packed (`LOSAT_X_TBNSTORE`, `src/algorithm/tblastn/x_subject_store.rs`,
-//! `src/sequence/packed_subject.rs`), on whole searches.
+//! `src/sequence/packed_subject.rs`), on whole searches and with a subject range.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
 //! ```c
@@ -14,7 +14,8 @@
 //! `LOSAT_X_TBNSTORE` on (a switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
 //! and it is not set) the reader's records keep their deflines and the letters are held packed (2 bits per base, the runs of ambiguous
 //! letters, the lower-case intervals): a subject is translated from its packed bases, and the
-//! letters of a window are made again when the redo or a report reads it.
+//! letters of a window are made again when the redo, the traceback of composition mode 0 or a
+//! report reads it.
 //! The switch must change nothing a user sees, so the tests compare the report and the messages
 //! with those of a run with `LOSAT_X_TBNSTORE=0`, and read the `[X_STATS] TBNSTORE` line to check that
 //! the subjects were held packed.
@@ -25,9 +26,16 @@
 //! without letters (its warning comes from the length the store keeps). The queries are proteins
 //! of `tests/fasta/PemoMJNVA.faa`: ten of them (one query batch), or all 115 (four batches).
 
+#[allow(dead_code)]
+mod run_local_support;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
+
+use LOSAT::api::local_blast::run_local_tblastn;
+use LOSAT::blastinput::fasta_reader::ReaderConfig;
+use LOSAT::cli::{try_parse_from, Cli, Commands};
 
 const PIECE: usize = 6_000;
 
@@ -53,7 +61,11 @@ fn inputs() -> &'static (PathBuf, PathBuf, PathBuf) {
     static FILES: OnceLock<(PathBuf, PathBuf, PathBuf)> = OnceLock::new();
     FILES.get_or_init(|| {
         let fasta = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
-        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("tblastn_subject_store");
+        // One directory per process: nextest runs each test in a process of its own, and a
+        // process that wrote these files again while another one's search read them cut its input.
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join("tblastn_subject_store")
+            .join(std::process::id().to_string());
         std::fs::create_dir_all(&dir).expect("work directory");
         let proteins = records(&fasta.join("PemoMJNVA.faa"));
         let mut ten = String::new();
@@ -139,28 +151,7 @@ fn tblastn(
     options: &[&str],
     variables: &[(&str, &str)],
 ) -> (Vec<u8>, String, String) {
-    const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
-    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
-    for (name, _) in std::env::vars_os() {
-        let name_text = name.to_string_lossy();
-        if name_text.starts_with("LOSAT_") && name_text != WORKER_LOG {
-            command.env_remove(name);
-        }
-    }
-    if std::env::var_os(WORKER_LOG).is_none() {
-        command.env(WORKER_LOG, query.with_file_name("worker.log"));
-    }
-    let output = command
-        .arg("tblastn")
-        .arg("-query")
-        .arg(query)
-        .arg("-subject")
-        .arg(subjects)
-        .args(options)
-        .env("LOSAT_X_STATS", "1")
-        .envs(variables.iter().copied())
-        .output()
-        .expect("run LOSAT");
+    let output = run(query, subjects, options, variables);
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(
         output.status.success(),
@@ -177,6 +168,70 @@ fn tblastn(
         .collect();
     assert_eq!(stats.len(), 1, "one TBNSTORE line:\n{stderr}");
     (output.stdout, messages, stats[0].to_string())
+}
+
+/// The process of one TBLASTN run (see `tblastn`).
+fn run(
+    query: &Path,
+    subjects: &Path,
+    options: &[&str],
+    variables: &[(&str, &str)],
+) -> std::process::Output {
+    const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    for (name, _) in std::env::vars_os() {
+        let name_text = name.to_string_lossy();
+        if name_text.starts_with("LOSAT_") && name_text != WORKER_LOG {
+            command.env_remove(name);
+        }
+    }
+    if std::env::var_os(WORKER_LOG).is_none() {
+        command.env(WORKER_LOG, query.with_file_name("worker.log"));
+    }
+    command
+        .arg("tblastn")
+        .arg("-query")
+        .arg(query)
+        .arg("-subject")
+        .arg(subjects)
+        .args(options)
+        .env("LOSAT_X_STATS", "1")
+        .envs(variables.iter().copied())
+        .output()
+        .expect("run LOSAT")
+}
+
+/// One `run_local` search (LOSAT Web's and the library's entry) in this process: the records as
+/// the CLI's reader reads them, `options` as on the command line with `-outfmt <n>` first.
+/// Returns the report and the messages.
+fn run_local(query: &Path, subjects: &Path, options: &[&str]) -> (Vec<u8>, String) {
+    assert_eq!(options[0], "-outfmt", "{options:?}");
+    let (query_name, subject_name) = (query.display().to_string(), subjects.display().to_string());
+    let mut argv = vec![
+        "losat",
+        "tblastn",
+        "-query",
+        &query_name,
+        "-subject",
+        &subject_name,
+    ];
+    argv.extend_from_slice(&options[2..]);
+    let cli: Cli = try_parse_from(argv).expect("tblastn argv");
+    let args = match cli.command {
+        Commands::Tblastn(args) => args,
+        _ => unreachable!("tblastn subcommand"),
+    };
+    let queries =
+        run_local_support::reader_records(query, ReaderConfig::query("TBLASTN", true, true));
+    let records =
+        run_local_support::reader_records(subjects, ReaderConfig::subject("TBLASTN", false, true));
+    let mut run = run_local_support::run_formats(&[options[1]], false, |outputs| {
+        run_local_tblastn(args, &queries, &records, outputs)
+    });
+    (
+        run.outputs.remove(0),
+        String::from_utf8_lossy(&run.diagnostics).into_owned(),
+    )
 }
 
 /// The number after `field=` in a `[X_STATS]` line.
@@ -214,7 +269,7 @@ const NO_STORE: (&str, &str) = ("LOSAT_X_TBNSTORE", "0");
 // reports, the default options and `-lcase_masking` at one and three threads, another genetic
 // code, composition mode 0, and four query batches. With the switch on the eight subjects are held
 // packed and translated from their packed bases (their letters made again only where a stage
-// reads the case or composition mode 0 traces back); with it off none.
+// reads the case; the traceback of composition mode 0 reads windows); with it off none.
 #[test]
 fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
     let (ten, all, subjects) = inputs();
@@ -294,40 +349,92 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
         assert!(counter(&stats, "stored_bytes") > 0, "{options:?}");
         // the preliminary stage translates the packed bases of the six subjects long enough to
         // search unless it reads the case of a subject with lower-case letters (lower, ambiguous,
-        // runs, few_codons; then it reads the letters); the redo and the reports read windows of
-        // the packed subjects, and only the traceback of composition mode 0 reads the letters of
-        // the subjects with hits
+        // runs, few_codons; then it reads the letters); the redo, the traceback of composition
+        // mode 0 and the reports read windows of the packed subjects
         if options.contains(&"-lcase_masking") {
             assert!(counter(&stats, "letters_made") >= 4, "{options:?}: {stats}");
             assert!(counter(&stats, "packed_plans") >= 1, "{options:?}: {stats}");
         } else {
             assert!(counter(&stats, "packed_plans") >= 6, "{options:?}: {stats}");
-            if options.contains(&"-comp_based_stats") {
-                assert!(counter(&stats, "letters_made") >= 4, "{options:?}: {stats}");
-            } else {
-                assert_eq!(counter(&stats, "letters_made"), 0, "{options:?}: {stats}");
-            }
+            assert_eq!(counter(&stats, "letters_made"), 0, "{options:?}: {stats}");
         }
-        assert_eq!(counter(&stats, "resolved_made"), 0, "{options:?}");
     }
 }
 
-// No NCBI counterpart: where the switch acts. A subject range (`-subject_loc`) keeps the
-// letters (the records are cut before the search), so the switch changes nothing there and no
-// subject is held packed. `LOSAT_X_DEFAULT=0` turns the switch off; with it set as well (the
-// reference loops) the subjects are still held packed and the report is the same.
+// No NCBI counterpart: where the switch acts. With a subject range (`-subject_loc`) each record is
+// cut to its interval as it is read and then held packed, and the report and the messages are
+// those of the records cut from the letters (`LOSAT_X_TBNSTORE=0`): tabular and pairwise reports
+// (the frames and coordinates from each record's length and its interval's start), three threads
+// (the packing thread), `-lcase_masking` with an interval that holds lower-case letters, an
+// interval without letters in one record (the warning of an empty subject), and an interval that
+// starts past the ends (the error, its exit code and the messages before it).
+// `LOSAT_X_DEFAULT=0` turns the switch off; with it set as well the subjects are still held packed
+// and the report is the same.
 #[test]
-fn a_subject_range_keeps_the_letters_and_the_reference_loops_read_the_packed_subjects() {
+fn a_subject_range_is_cut_and_held_packed_and_the_default_off_still_translates_the_packed_subjects()
+{
     let (ten, _, subjects) = inputs();
     let long = long_subjects(subjects);
-    let ranged = ["-outfmt", "6", "-subject_loc", "100-5000"];
+    for ranged in [
+        &["-outfmt", "6", "-subject_loc", "100-5000"][..],
+        &[
+            "-outfmt",
+            "0",
+            "-subject_loc",
+            "1001-6000",
+            "-num_threads",
+            "3",
+        ],
+        &[
+            "-outfmt",
+            "6",
+            "-subject_loc",
+            "100-6000",
+            "-num_threads",
+            "3",
+            "-lcase_masking",
+        ],
+    ] {
+        let (expected, messages, _) = tblastn(ten, &long, ranged, &[NO_STORE]);
+        let (report, store_messages, stats) = tblastn(ten, &long, ranged, &[]);
+        assert!(report == expected, "{ranged:?}");
+        assert_eq!(store_messages, messages, "{ranged:?}");
+        assert_eq!(counter(&stats, "subjects"), 4, "{ranged:?}: {stats}");
+        if ranged.contains(&"-lcase_masking") {
+            // the stage reads the letters of the subject with lower-case letters in its interval
+            assert!(counter(&stats, "letters_made") >= 1, "{ranged:?}: {stats}");
+        } else {
+            assert_eq!(counter(&stats, "letters_made"), 0, "{ranged:?}: {stats}");
+        }
+        assert!(!expected.is_empty(), "{ranged:?}: no report");
+    }
+    // an interval that starts at the end of the shortest piece (the reader drops `-`): a subject
+    // without letters, whose warning the pairwise report writes
+    let shortest = records(&long)
+        .iter()
+        .map(|(_, letters)| letters.bytes().filter(|&letter| letter != b'-').count())
+        .min()
+        .expect("pieces");
+    let empty = format!("{}-6000", shortest + 1);
+    let ranged = ["-outfmt", "0", "-subject_loc", empty.as_str()];
     let (expected, messages, _) = tblastn(ten, &long, &ranged, &[NO_STORE]);
     let (report, store_messages, stats) = tblastn(ten, &long, &ranged, &[]);
     assert!(report == expected);
     assert_eq!(store_messages, messages);
-    assert_eq!(counter(&stats, "subjects"), 0);
-    assert_eq!(counter(&stats, "letters_made"), 0);
-    assert_eq!(counter(&stats, "resolved_made"), 0);
+    assert_eq!(counter(&stats, "subjects"), 4, "{stats}");
+    assert!(
+        String::from_utf8_lossy(&expected).contains("Subject sequence contains no data")
+            || messages.contains("Subject sequence contains no data"),
+        "no warning of an empty subject"
+    );
+    // the pieces hold at most 6,000 letters
+    let past_end = ["-outfmt", "6", "-subject_loc", "6001-7000"];
+    let expected = run(ten, &long, &past_end, &[NO_STORE]);
+    let output = run(ten, &long, &past_end, &[]);
+    assert!(!expected.status.success());
+    assert_eq!(output.status.code(), expected.status.code());
+    assert_eq!(output.stdout, expected.stdout);
+    assert_eq!(output.stderr, expected.stderr);
 
     let options = ["-outfmt", "6", "-num_threads", "1"];
     let (expected, messages, stats) = tblastn(ten, subjects, &options, &[]);
@@ -344,7 +451,40 @@ fn a_subject_range_keeps_the_letters_and_the_reference_loops_read_the_packed_sub
     assert!(report == expected);
     assert_eq!(store_messages, messages);
     assert_eq!(counter(&stats, "subjects"), 8);
-    // the reference loops read letters: the resolved bases of the packed subjects
-    assert!(counter(&stats, "resolved_made") >= 7, "{stats}");
-    assert_eq!(counter(&stats, "packed_plans"), 0, "{stats}");
+    // the preliminary stage (the unit path, which `LOSAT_X_DEFAULT=0` no longer turns off)
+    // translates the packed bases of the subjects
+    assert!(counter(&stats, "packed_plans") >= 6, "{stats}");
+}
+
+// No NCBI counterpart: the switch in `run_local` (LOSAT Web, the library), whose caller keeps the
+// records and their letters. The worker that makes a subject's plan packs its letters
+// (`x_plan_store`) and makes the plan from the packed bases. The report and the messages equal
+// those of the CLI run that reads the letters (`LOSAT_X_TBNSTORE=0`): every ambiguous letter and
+// runs of `N` (the draws of the packing), another genetic code, lower-case letters with
+// `-lcase_masking` (those subjects keep their letters), a subject range (`run_local` cuts the
+// records before the search), and three threads (the plans made on the pool's threads). The
+// in-process search inherits the test's variables: with `LOSAT_X_DEFAULT=0` both sides read the
+// letters, and `a_plan_packs_its_letters_unless_it_reads_their_case_or_cannot`
+// (x_subject_store.rs) checks when the letters are packed.
+#[test]
+fn run_local_packs_the_callers_letters_for_the_plans_and_reports_as_the_letters() {
+    let (ten, _, subjects) = inputs();
+    let long = long_subjects(subjects);
+    let cases: [(&Path, &[&str]); 5] = [
+        (subjects, &["-outfmt", "6"]),
+        (subjects, &["-outfmt", "6", "-db_gencode", "4"]),
+        (subjects, &["-outfmt", "0", "-num_threads", "3"]),
+        (
+            subjects,
+            &["-outfmt", "6", "-lcase_masking", "-num_threads", "3"],
+        ),
+        (&long, &["-outfmt", "6", "-subject_loc", "100-5000"]),
+    ];
+    for (subject_file, options) in cases {
+        let (expected, messages, _) = tblastn(ten, subject_file, options, &[NO_STORE]);
+        assert!(!expected.is_empty(), "{options:?}: no report");
+        let (report, local_messages) = run_local(ten, subject_file, options);
+        assert!(report == expected, "{options:?}: the report");
+        assert_eq!(local_messages, messages, "{options:?}");
+    }
 }

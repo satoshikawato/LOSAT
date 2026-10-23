@@ -32,11 +32,11 @@ On certified pairwise profiles and fixtures, LOSAT is checked against declared N
 
 | Program | Supported Tasks | Output Formats (`-outfmt`) | Description |
 |:---|:---|:---|:---|
-| **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `15`, `16` (see [Output formats](#output-formats)) | Nucleotide vs. nucleotide alignment |
-| **`blastx`** | `blastx`; native and Wasm entry points | `0`, `5`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
-| **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `15`, `16` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
-| **`tblastx`** | `tblastx` | `0`, `5`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
-| **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0`, `5`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
+| **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16`, `17` (see [Output formats](#output-formats)) | Nucleotide vs. nucleotide alignment |
+| **`blastx`** | `blastx`; native and Wasm entry points | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
+| **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
+| **`tblastx`** | `tblastx` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
+| **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
 
 > **Note**: Tabular output (`-outfmt 6` and `7`) writes the 12 standard BLAST fields:  
 > `qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore`.  
@@ -61,17 +61,19 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `8` | Seqalign (Text ASN.1) | all five | all five programs |
 | `9` | Seqalign (Binary ASN.1) | all five | all five programs |
 | `10` | Comma-separated values | all five | not yet |
-| `11` | BLAST archive (ASN.1) | all five | not yet |
+| `11` | BLAST archive (ASN.1) | all five | `blastn` (with `-subject` and `-db`; `ARCHIVE_FORMAT` text and `bin`, as NCBI reads it; `xml` is refused for now); the other programs: not yet |
 | `12` | Seqalign (JSON) | all five | all five programs |
-| `13` | Multiple-file BLAST JSON | all five, with `-out FILE` only | not yet |
-| `14` | Multiple-file BLAST XML2 | all five, with `-out FILE` only | not yet |
-| `15` | Single-file BLAST JSON | all five | `blastp`, `blastn` (with `-subject` and `-db`) |
-| `16` | Single-file BLAST XML2 | all five | `blastp`, `blastn` (with `-subject` and `-db`) |
-| `17` | Sequence Alignment/Map (SAM) | `blastn` only | not yet |
+| `13` | Multiple-file BLAST JSON | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
+| `14` | Multiple-file BLAST XML2 | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
+| `15` | Single-file BLAST JSON | all five | all five (with `-subject` and `-db`) |
+| `16` | Single-file BLAST XML2 | all five | all five (with `-subject` and `-db`) |
+| `17` | Sequence Alignment/Map (SAM) | `blastn` only | `blastn` (with `-subject` and `-db`; `SQ` and `SR` as in NCBI) |
 | `18` | Organism Report | all five | not yet |
 | `20` | Comma-separated values with header lines | all five | not yet |
 
-Outfmt `15` and `16` with `-db` write the scientific name of a sequence's taxid (`sciname`) when `taxdb.bti` is found as NCBI finds it: in the current directory, in `BLASTDB` (the environment variable, `~/.ncbirc` or `NCBI_CONFIG__BLAST__BLASTDB`), not in the `-db` directory. The other output formats never read it.
+Outfmt `17` (SAM, `blastn` only) is NCBI's document byte for byte except the `CL:` tag of its `@PG` line, which holds LOSAT's own command line (every argument followed by one space, as NCBI writes its own); a run without a command line (the library) has no `CL:` tag. NCBI writes the whole document when the search ends, and so does LOSAT, which holds the records as text until then. `-outfmt "17 SQ"` writes the target's letters in SEQ and `-outfmt "17 SR"` makes the subject the reference; other words are ignored, as in NCBI.
+
+Outfmt `13` and `14` write the report of the n-th query to `<base>_<n>.json` / `<base>_<n>.xml` next to `-out FILE` and a master file at `FILE` that lists them, with NCBI's names: the base is `FILE` without its extension if that is `.json` (13) or `.xml` (14), and the master file always uses the `.xml` rule and drops the directory (`-out o.json` with `-outfmt 13` lists `o.json_1.json`); `blastx` holds the side files in memory, like the document of `-outfmt 5`, 15 and 16, in the rare run in which a later query batch could still be refused. Outfmt `13` to `16` with `-db` write the scientific name of a sequence's taxid (`sciname`) when `taxdb.bti` is found as NCBI finds it: in the current directory, in `BLASTDB` (the environment variable, `~/.ncbirc` or `NCBI_CONFIG__BLAST__BLASTDB`), not in the `-db` directory. The other output formats never read it.
 
 ---
 
@@ -218,7 +220,7 @@ losat blastx \
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX; section 6) |
 | `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp`, `blastp-fast` or `blastp-short` (for `blastp`); `blastx` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`) |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `12`=Seq-align (JSON), `15`=BLAST JSON and `16`=BLAST XML2 (BLASTP and BLASTN only); custom tabular fields in BLASTP and BLASTX only |
+| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `11`=BLAST archive (`blastn` only so far), `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out` (every program), `15`=BLAST JSON and `16`=BLAST XML2 (every program), `17`=SAM (BLASTN only); custom tabular fields in BLASTP and BLASTX only |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |
@@ -321,7 +323,7 @@ LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](ht
 ## Documentation & Verification
 
 - [TLOSAN v0.2.0 release readiness and scope](docs/release/v0.2.0.md)
-- [v0.1.0 historical release scope](docs/v0.1.0_scope.md)
+- [v0.1.0 historical release scope](docs/archive/v0.1.0_scope.md)
 - [Verification & Parity Specifications](docs/release/pure_rust_runtime_v0.1.0_certification.md)
 - [CLI Migration Details](docs/cli_v2_migration.md)
 - [Developer & Contributor Guidelines](AGENTS.md)

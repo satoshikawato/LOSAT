@@ -73,10 +73,57 @@ pub(super) fn chosen(
     subjects: Subjects<'_>,
 ) -> Option<usize> {
     let k = subjects_per_task()?;
-    if diagnostics || !pool.enabled() || pool.threads() < 2 || subjects.len() <= k {
-        return None;
+    let own = fits(k, pool, diagnostics, options, subjects);
+    crate::utils::xreach::x_reach!("LOSAT_X_BXSUBJFLOW", own);
+    own.then_some(k)
+}
+
+/// No NCBI counterpart: `chosen`'s rule for tasks of `k` subjects, without recording a side.
+fn fits(
+    k: usize,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    diagnostics: bool,
+    options: &ResolvedOptions,
+    subjects: Subjects<'_>,
+) -> bool {
+    !(diagnostics || !pool.enabled() || pool.threads() < 2 || subjects.len() <= k)
+        && offsets_stay_below_2_30(options.window_size, subjects.longest_length())
+}
+
+/// No NCBI counterpart: the fewest subjects per pool thread with which `LOSAT_X_BXCHUNKFLOW`
+/// searches the chunks of a split query one after another (`chunks_in_order`): four tasks of 64.
+const CHUNK_FLOW_SUBJECTS_PER_THREAD: usize = 256;
+/// No NCBI counterpart: the fewest subjects in all for `chunks_in_order`: 32 tasks of 64.
+const CHUNK_FLOW_MIN_SUBJECTS: usize = 2_048;
+
+/// EXPERIMENT (LOSAT_X_BXCHUNKFLOW, in the strict set: on unless `=0` or `LOSAT_X_DEFAULT=0`): whether
+/// the chunks of a split query are searched one after another, each chunk's subjects as the flow
+/// on the whole pool, instead of side by side, one chunk per thread (`LOSAT_X_BXPAR`). It holds
+/// where the flow runs in each chunk (`chosen`) and there are at least
+/// `CHUNK_FLOW_SUBJECTS_PER_THREAD` subjects per thread and `CHUNK_FLOW_MIN_SUBJECTS` subjects.
+/// With fewer subjects per thread the flow leaves threads idle in every chunk; with fewer subjects
+/// in all, each chunk's setup on the loop's thread (its lookup table, the helpers' start)
+/// outweighs the flow at two to four threads. There the chunks side by side are faster. The rule
+/// counts subjects, not tasks, so that `LOSAT_X_BXSUBJFLOW=k` does not move it. No NCBI
+/// counterpart: it chooses between two schedules of the same chunk loop and changes no value NCBI
+/// computes (the sink sees the chunks in order either way, `search::search_core`).
+pub(super) fn chunks_in_order(
+    pool: &crate::utils::threading::SearchPool<'_>,
+    diagnostics: bool,
+    options: &ResolvedOptions,
+    subjects: Subjects<'_>,
+) -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCHUNKFLOW")) {
+        return false;
     }
-    offsets_stay_below_2_30(options.window_size, subjects.longest_length()).then_some(k)
+    let own = subjects_per_task().is_some_and(|k| {
+        fits(k, pool, diagnostics, options, subjects)
+            && subjects.len()
+                >= CHUNK_FLOW_MIN_SUBJECTS.max(CHUNK_FLOW_SUBJECTS_PER_THREAD * pool.threads())
+    });
+    crate::utils::xreach::x_reach!("LOSAT_X_BXCHUNKFLOW", own);
+    own
 }
 
 /// No NCBI counterpart: whether `-window_size` plus twice the longest subject is at most 2^28,

@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastOutput2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>YP_009220551.1 ICP11/P9 [White spot syndrome virus]</query-title>
+              <query-len>82</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|81</id>
+                      <accession>81</accession>
+                      <title>BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>4023</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>19.631</bit-score>
+                      <score>39</score>
+                      <evalue>3.19625</evalue>
+                      <identity>11</identity>
+                      <positive>15</positive>
+                      <query-from>19</query-from>
+                      <query-to>49</query-to>
+                      <hit-from>2753</hit-from>
+                      <hit-to>2777</hit-to>
+                      <align-len>31</align-len>
+                      <gaps>6</gaps>
+                      <qseq>RYEEVMKTFDTVEAVRKSDLDDRVYMVCLKQ</qseq>
+                      <hseq>KNKEVDTTLTALHAVRK------CYMCCVDQ</hseq>
+                      <midline>+ +EV  T   + AVRK       YM C+ Q</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|70</id>
+                      <accession>70</accession>
+                      <title>BDT63568.1 hypothetical protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>578</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>18.4754</bit-score>
+                      <score>36</score>
+                      <evalue>7.69336</evalue>
+                      <identity>6</identity>
+                      <positive>7</positive>
+                      <query-from>3</query-from>
+                      <query-to>9</query-to>
+                      <hit-from>137</hit-from>
+                      <hit-to>143</hit-to>
+                      <align-len>7</align-len>
+                      <gaps>0</gaps>
+                      <qseq>TFQTDAD</qseq>
+                      <hseq>SFQTDAD</hseq>
+                      <midline>+FQTDAD</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>50</hsp-len>
+                  <eff-space>1998016</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>

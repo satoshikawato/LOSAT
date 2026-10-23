@@ -19,7 +19,57 @@ use LOSAT::api::local_blast::{run_local_blastn, FormatOutput, OutputSink, Report
 use LOSAT::blastinput::fasta_reader::ReaderConfig;
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 9] = ["0", "6", "7", "8", "9", "12", "5", "15", "16"];
+const FORMATS: [&str; 12] = [
+    "0", "6", "7", "8", "9", "12", "5", "15", "16", "11", "17", "17 SQ SR",
+];
+
+/// The SAM document without the CL tag of its @PG line: the bytes from the `\tCL:` that follows
+/// `\n@PG\tID:0\tVN:2.17.0+` up to, not including, the first following `\tPN:blastn\n`; a
+/// document without the tag stays as it is (the rule of `db_search_fixtures.py strip_sam_cl`).
+fn without_sam_cl(document: &[u8]) -> Vec<u8> {
+    let find = |haystack: &[u8], needle: &[u8], from: usize| {
+        haystack[from..]
+            .windows(needle.len())
+            .position(|window| window == needle)
+            .map(|at| at + from)
+    };
+    let head: &[u8] = b"\n@PG\tID:0\tVN:2.17.0+";
+    let Some(at) = find(document, &[head, b"\tCL:"].concat(), 0) else {
+        return document.to_vec();
+    };
+    let start = at + head.len();
+    let Some(end) = find(document, b"\tPN:blastn\n", start + 4) else {
+        return document.to_vec();
+    };
+    [&document[..start], &document[end..]].concat()
+}
+
+#[test]
+fn the_sam_cl_rule_hides_the_command_line_and_nothing_else() {
+    let with: &[u8] =
+        b"@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:2.17.0+\tCL:/x/blastn -a \tPN:blastn\nr\t0\n";
+    let without: &[u8] =
+        b"@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:2.17.0+\tPN:blastn\nr\t0\n";
+    let other_cl: &[u8] =
+        b"@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:2.17.0+\tCL:losat blastn -b \tPN:blastn\nr\t0\n";
+    assert_eq!(without_sam_cl(with), without);
+    assert_eq!(without_sam_cl(other_cl), without);
+    assert_eq!(without_sam_cl(without), without);
+    // Any other byte is compared: a record, the header, the program name.
+    let changed_record = with
+        .iter()
+        .map(|&b| if b == b'r' { b's' } else { b })
+        .collect::<Vec<u8>>();
+    assert_ne!(without_sam_cl(&changed_record), without);
+    let changed_sq = String::from_utf8(with.to_vec())
+        .unwrap()
+        .replace("LN:3", "LN:4");
+    assert_ne!(without_sam_cl(changed_sq.as_bytes()), without);
+    let changed_pn = String::from_utf8(with.to_vec())
+        .unwrap()
+        .replace("PN:blastn", "PN:blastx");
+    assert_ne!(without_sam_cl(changed_pn.as_bytes()), without);
+}
 
 /// Three queries against four subjects cut from two genomes. The first query overlaps
 /// two subjects, so `-max_target_seqs 1` removes a subject from its hit list.
@@ -68,18 +118,35 @@ impl Inputs {
     }
 
     fn run(&self, formats: &[&str], extra: &[&str], observe: bool) -> Run {
-        let queries = reader_records(&self.query.0, ReaderConfig::query("BLASTN", false, true));
+        let queries = reader_records(
+            &self.query.0,
+            ReaderConfig::query("BLASTN", false, true).with_defline(true),
+        );
         let subjects = reader_records(
             &self.subject.0,
-            ReaderConfig::subject("BLASTN", false, true),
+            ReaderConfig::subject("BLASTN", false, true).with_defline(true),
         );
         run_formats(formats, observe, |outputs| {
             run_local_blastn(self.args(extra), &queries, &subjects, outputs)
         })
     }
 
-    /// The CLI output file and standard error of one single-format run.
+    /// The CLI output file and standard error of one single-format run, with a SAM document's
+    /// CL tag removed (`without_sam_cl`).
     fn cli(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
+        let (bytes, stderr) = self.cli_raw(outfmt, extra);
+        // A SAM document of the CLI shows its command line in the @PG line, which `run_local`
+        // has not: the one rule of the SAM rows removes the tag (`without_sam_cl`).
+        let bytes = if outfmt.split_whitespace().next() == Some("17") {
+            without_sam_cl(&bytes)
+        } else {
+            bytes
+        };
+        (bytes, stderr)
+    }
+
+    /// The CLI output file and standard error of one single-format run, as written.
+    fn cli_raw(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
         let out = self.query.0.with_extension(format!("cli{outfmt}.out"));
         let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("blastn")
@@ -99,6 +166,52 @@ impl Inputs {
         let bytes = std::fs::read(&out).expect("CLI output");
         let _ = std::fs::remove_file(&out);
         (bytes, output.stderr)
+    }
+}
+
+/// The frozen fixtures and the oracle compare a SAM document without its CL tag (both sides), so
+/// they cannot see a CLI that drops the tag or a library that writes one: the CLI document has
+/// `CL:` with its own command line (the program path first), a `run_local` document has none.
+#[test]
+fn the_cli_writes_a_cl_tag_and_the_library_none() {
+    let inputs = Inputs::new();
+    let head: &[u8] = b"\n@PG\tID:0\tVN:2.17.0+";
+    let tag = |document: &[u8]| -> Option<String> {
+        let at = document
+            .windows(head.len())
+            .position(|window| window == head)?
+            + head.len();
+        let line = document[at..].split(|&byte| byte == b'\n').next()?;
+        line.starts_with(b"\tCL:")
+            .then(|| String::from_utf8_lossy(line).into_owned())
+    };
+    for outfmt in ["17", "17 SQ SR"] {
+        let (cli, _) = inputs.cli_raw(outfmt, &[]);
+        let line =
+            tag(&cli).unwrap_or_else(|| panic!("the CLI document of {outfmt} has no CL tag"));
+        let query = inputs.query.0.display().to_string();
+        assert!(
+            line.starts_with(&format!(
+                "\tCL:{} blastn -query {query} -subject ",
+                env!("CARGO_BIN_EXE_losat")
+            )) && line.ends_with(&format!(
+                " -outfmt {outfmt} -out {} \tPN:blastn",
+                inputs
+                    .query
+                    .0
+                    .with_extension(format!("cli{outfmt}.out"))
+                    .display()
+            )),
+            "{line}"
+        );
+        let library = inputs.run(&[outfmt], &[], false);
+        assert!(
+            tag(&library.outputs[0]).is_none()
+                && library.outputs[0]
+                    .windows(head.len() + 11)
+                    .any(|window| window == [head, b"\tPN:blastn\n"].concat()),
+            "the library document of {outfmt} has a CL tag or no @PG line"
+        );
     }
 }
 
@@ -198,10 +311,13 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
-    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let queries = reader_records(
+        &inputs.query.0,
+        ReaderConfig::query("BLASTN", false, true).with_defline(true),
+    );
     let subjects = reader_records(
         &inputs.subject.0,
-        ReaderConfig::subject("BLASTN", false, true),
+        ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
     // NCBI ignores a custom specification with outfmt 0 (blast_args.cpp:2845-2851).
     for outfmt in ["10", "6 qseqid", "abc"] {
@@ -238,10 +354,13 @@ fn unsupported_formats_fail_before_searching() {
 #[test]
 fn formats_needing_different_hit_list_sizes_are_refused() {
     let inputs = Inputs::new();
-    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let queries = reader_records(
+        &inputs.query.0,
+        ReaderConfig::query("BLASTN", false, true).with_defline(true),
+    );
     let subjects = reader_records(
         &inputs.subject.0,
-        ReaderConfig::subject("BLASTN", false, true),
+        ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
     let attempt = |formats: &[&str], extra: &[&str]| {
         let mut sinks: Vec<Vec<u8>> = formats.iter().map(|_| Vec::new()).collect();
@@ -322,10 +441,13 @@ fn an_invalid_query_after_the_first_batch_is_reported_with_its_batch() {
         );
         let subject = TempFasta::new("blastn_batches_subject.fna", &[("s", &genome[0..20_000])]);
         let inputs = Inputs { query, subject };
-        let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+        let queries = reader_records(
+            &inputs.query.0,
+            ReaderConfig::query("BLASTN", false, true).with_defline(true),
+        );
         let subjects = reader_records(
             &inputs.subject.0,
-            ReaderConfig::subject("BLASTN", false, true),
+            ReaderConfig::subject("BLASTN", false, true).with_defline(true),
         );
         for outfmt in FORMATS {
             let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
@@ -499,10 +621,13 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
         query: write("q.fna", b"q1", segment),
         subject: write("s.fna", unknown, &subject_sequence),
     };
-    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let queries = reader_records(
+        &inputs.query.0,
+        ReaderConfig::query("BLASTN", false, true).with_defline(true),
+    );
     let subjects = reader_records(
         &inputs.subject.0,
-        ReaderConfig::subject("BLASTN", false, true),
+        ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
     for outfmt in ["6", "7"] {
         let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
@@ -543,10 +668,13 @@ fn run_local_outputs(
     formats: &[&str],
     extra: &[&str],
 ) -> (Vec<Vec<u8>>, Vec<u8>, anyhow::Result<()>) {
-    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let queries = reader_records(
+        &inputs.query.0,
+        ReaderConfig::query("BLASTN", false, true).with_defline(true),
+    );
     let subjects = reader_records(
         &inputs.subject.0,
-        ReaderConfig::subject("BLASTN", false, true),
+        ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
     let mut sinks: Vec<Vec<u8>> = vec![Vec::new(); formats.len()];
     let mut diagnostics = Vec::new();
@@ -675,7 +803,10 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
     for (index, outfmt) in FORMATS.into_iter().enumerate() {
         let (cli_output, cli_stderr) = inputs.cli(outfmt, &[]);
         assert_eq!(run.outputs[index], cli_output, "outfmt {outfmt}");
-        if matches!(outfmt, "5" | "8" | "9" | "12" | "15" | "16") {
+        if matches!(
+            outfmt,
+            "5" | "8" | "9" | "11" | "12" | "15" | "16" | "17" | "17 SQ SR"
+        ) {
             let alone = inputs.run(&[outfmt], &[], false);
             assert_eq!(
                 String::from_utf8_lossy(&alone.diagnostics),
@@ -816,4 +947,52 @@ fn intervals_without_letters_are_records_without_residues() {
         report.contains("# Query: q2 short\n") && report.contains("# BLAST processed 2 queries\n"),
         "{report}"
     );
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
+// ```c++
+//         arg_desc.AddDefaultKey(kArgStrand, "strand",
+//                      "Query strand(s) to search against database/subject",
+//                                CArgDescriptions::eString, kDfltArgStrand);
+// ```
+// The command line checks `-strand` at parsing; `run_local` takes the arguments as a struct, so
+// it checks the value itself: an unknown strand is an argument error and nothing is written,
+// while `plus` and `minus` search and `both` is the plain search.
+#[test]
+fn run_local_rejects_an_unknown_strand() {
+    let inputs = Inputs::new();
+    let queries = reader_records(
+        &inputs.query.0,
+        ReaderConfig::query("BLASTN", false, true).with_defline(true),
+    );
+    let subjects = reader_records(
+        &inputs.subject.0,
+        ReaderConfig::subject("BLASTN", false, true).with_defline(true),
+    );
+    for strand in ["foo", "", "PLUS", "plus "] {
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs =
+            ReportOutputs::single("6", OutputSink::Writer(&mut sink), &mut diagnostics);
+        let mut args = inputs.args(&[]);
+        args.strand = strand.to_string();
+        let result = run_local_blastn(args, &queries, &subjects, &mut outputs);
+        drop(outputs);
+        let error = result
+            .expect_err("an unknown strand is an error")
+            .to_string();
+        assert_eq!(
+            error,
+            format!(
+                "Argument \"strand\". Illegal value, expected `both', `minus', `plus':  `{strand}'"
+            )
+        );
+        assert!(sink.is_empty() && diagnostics.is_empty(), "{strand:?}");
+    }
+    let both = inputs.run(&["6"], &["-strand", "both"], false);
+    let plain = inputs.run(&["6"], &[], false);
+    assert_eq!(both.outputs, plain.outputs);
+    for strand in ["plus", "minus"] {
+        let run = inputs.run(&["6"], &["-strand", strand], false);
+        assert!(!run.outputs[0].is_empty(), "{strand}");
+    }
 }

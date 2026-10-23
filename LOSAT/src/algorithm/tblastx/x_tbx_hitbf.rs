@@ -131,13 +131,26 @@ fn unit_mode(m: u8, chunk_length: usize, window: i32, wordsize: i32) -> u8 {
     if m == 0 {
         return 0;
     }
-    if !fits(chunk_length, window, wordsize) {
+    let inside = fits(chunk_length, window, wordsize);
+    if m == 1 {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXHITBF", inside);
+    }
+    if !inside {
         if m == 2 {
             HB_OUTSIDE.fetch_add(1, AtomicOrdering::Relaxed);
         }
         return 0;
     }
     m
+}
+
+// No NCBI counterpart: records that a batch left with the reference loop (the unit path does not
+// run for it) has the switch on and does not use it (`LOSAT_X_REACH`).
+/// LOSAT_X_TBXHITBF: a batch the unit path does not take runs the reference loop.
+pub(super) fn x_reach_not_taken() {
+    if mode() == 1 {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXHITBF", false);
+    }
 }
 
 /// The summary line of the shadow.
@@ -1039,7 +1052,6 @@ mod tests {
                 .collect();
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts),
-                shadow: false,
                 stub: false,
                 sliced: None,
                 mask_rule: None,
@@ -1201,7 +1213,6 @@ mod tests {
         let x_dropoff_per_context = vec![16; contexts.len()];
         let pp = XPairPar {
             groups: build_groups(&lookup, &contexts),
-            shadow: false,
             stub: false,
             sliced: None,
             mask_rule: None,

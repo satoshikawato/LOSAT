@@ -1,0 +1,6 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_2	LN:9000
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/micromamba/bin/blastn -query tests/fasta/outfmt0/dc_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task dc-megablast -evalue 1e-200 -outfmt 17 	PN:blastn
+Subject_2	16	Query_2	2660	255	1424H13M1I114M2I642M4804H	*	0	0	*	*	AS:i:1522	EV:f:0	NM:i:3	PI:f:100.00	BS:f:1373.65
+Subject_2	16	Query_2	3428	255	2481H773M1I4M1I6M1I8M1D6M3719H	*	0	0	*	*	AS:i:1546	EV:f:0	NM:i:4	PI:f:99.50	BS:f:1395.29
+Subject_2	16	Query_2	6119	255	3305H289M20D904M1I1081M1420H	*	0	0	*	*	AS:i:4446	EV:f:0	NM:i:21	PI:f:99.56	BS:f:4010.18

@@ -46,16 +46,22 @@
 //! x0.98-0.99 where most words are candidates (many proteins x a genome, 55 proteins x 16S); the
 //! plain loops take x0.79 and x0.83 (the LOSAT Web serial reactor, one protein x E. coli) of the
 //! time where few words are candidates, but x1.01-1.06 where most are: their copy of a cell's hits
-//! costs more than the copy before. So by default the switch scans this way where the CPU has
-//! AVX2 only.
+//! costs more than the copy before. So by default the switch takes the AVX2 forms where the CPU
+//! has AVX2, and elsewhere the plain loops for sparse tables only: those where at most three tenths
+//! of the backbone cells have hits (`X_SPARSE_TENTHS`; known when the presence bytes are built).
+//! The first k proteins of AP027131 x E. coli (one core): the plain loops against the scan before
+//! took x0.84-0.95 in the LOSAT Web serial reactor and cycles x0.84-0.90 on x86-64 at a fill of
+//! 0.09-0.24 (k = 1-8), x1.00 and x0.95 at 0.34 (k = 16), and x1.02-1.03 and x0.99-1.00 at 0.42-0.46.
 //!
 //! The switch is read once. It is in the strict set (`utils/xswitch.rs`): on unless
 //! `LOSAT_X_TBNSCANBYTE=0`, or `LOSAT_X_DEFAULT=0` and it is not set; on, it takes the AVX2 forms
-//! of both stages on x86-64 with AVX2, and changes nothing elsewhere. `LOSAT_X_TBNSCANBYTE=2` takes
-//! the plain loops on any CPU. A table of another shape is scanned as before (LOSAT_X_TBNSCANBF or
-//! NCBI's loop). With `LOSAT_X_TBNSCANBYTESHADOW` set (any value; it turns the path on) every scan call
-//! (the AVX2 forms where the CPU has AVX2 unless `LOSAT_X_TBNSCANBYTE=2`, else the plain loops)
-//! also runs NCBI's loop on a second offset array and the count, the pairs and `s_range` must be
+//! of both stages on x86-64 with AVX2, the plain loops for sparse tables on x86-64 without AVX2 and
+//! in WebAssembly, and changes nothing elsewhere (aarch64: not timed). `LOSAT_X_TBNSCANBYTE=2`
+//! takes the plain loops on any CPU for every table, `=3` the plain loops for sparse tables on any
+//! CPU. A table of another shape, and without AVX2 a table that is not sparse, is scanned as before
+//! (LOSAT_X_TBNSCANBF or NCBI's loop). With `LOSAT_X_TBNSCANBYTESHADOW` set (any value; it turns
+//! the path on) every scan call of every table (the AVX2 forms where the CPU has AVX2 unless
+//! `LOSAT_X_TBNSCANBYTE=2` or `3`, else the plain loops) also runs NCBI's loop on a second offset array and the count, the pairs and `s_range` must be
 //! equal; `main` prints `[X_SHADOW] TBNSCANBYTE calls_compared= pairs_compared=` at exit when the
 //! unit path scanned any range this way. With `LOSAT_X_STATS` set, `main` prints
 //! `[X_STATS] TBNSCANBYTE units= calls= avx2=` (the units scanned this way, their scan calls, and
@@ -80,6 +86,14 @@ const X_MASK: usize = (1 << 15) - 1;
 /// to `AA_HITS_PER_CELL` hits is written as `AA_HITS_PER_CELL + 1` pairs).
 pub(super) const X_SCAN_BYTE_SLACK: usize = AA_HITS_PER_CELL + 1;
 
+/// A table is sparse when at most `X_SPARSE_TENTHS` tenths of its backbone cells have hits
+/// (presence bytes of 1): the plain loops then win (`XScanByte::Sparse`).
+const X_SPARSE_TENTHS: usize = 3;
+
+/// Whether CPUs without AVX2 take the plain loops for sparse tables by default: on the targets they
+/// were timed on (x86-64 without AVX2, WebAssembly); elsewhere (aarch64) only with `=3`.
+const X_SPARSE_DEFAULT: bool = cfg!(any(target_arch = "x86_64", target_arch = "wasm32"));
+
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): how the unit path scans a table that `fits`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum XScanByte {
@@ -87,6 +101,9 @@ pub(super) enum XScanByte {
     Off,
     /// `x_scan_one_range_byte`; `avx2` = the AVX2 forms of both stages.
     On { avx2: bool },
+    /// `x_scan_one_range_byte` with the plain loops for a sparse table (`presence_bytes`), as
+    /// before for the others.
+    Sparse,
     /// `x_scan_one_range_byte` and NCBI's loop on every call, compared
     /// (LOSAT_X_TBNSCANBYTESHADOW).
     Shadow { avx2: bool },
@@ -103,19 +120,23 @@ impl XScanByte {
 // AVX2; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan of the unit path. LOSAT_X_TBNSCANBYTE is a switch of
 /// the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. On, it takes the
-/// AVX2 forms where the CPU has AVX2 and is off elsewhere (the plain loops lose where most words
-/// are candidates, see the module text); `2` takes the plain loops on any CPU. The shadow wins: it
-/// runs the AVX2 forms where AVX2 is there (unless `2`), else the plain loops.
+/// AVX2 forms where the CPU has AVX2, and elsewhere the plain loops for sparse tables only (the
+/// plain loops lose where most words are candidates, see the module text; on aarch64 nothing);
+/// `2` takes the plain loops on any CPU and table, `3` the plain loops for sparse tables on any
+/// CPU. The shadow wins: it runs the AVX2 forms where AVX2 is there (unless `2` or `3`), else the
+/// plain loops, for every table.
 pub(super) fn x_scan_byte() -> XScanByte {
     static MODE: std::sync::OnceLock<XScanByte> = std::sync::OnceLock::new();
     *MODE.get_or_init(|| {
         let shadow = std::env::var_os("LOSAT_X_TBNSCANBYTESHADOW").is_some();
-        let value = crate::utils::xswitch::value("LOSAT_X_TBNSCANBYTE", 1..=2, 1);
-        let avx2 = value != Some(2) && avx2_detected();
+        let value = crate::utils::xswitch::value("LOSAT_X_TBNSCANBYTE", 1..=3, 1);
+        let avx2 = !matches!(value, Some(2 | 3)) && avx2_detected();
         if shadow {
             XScanByte::Shadow { avx2 }
         } else if value == Some(2) || (value.is_some() && avx2) {
             XScanByte::On { avx2 }
+        } else if value == Some(3) || (value == Some(1) && X_SPARSE_DEFAULT) {
+            XScanByte::Sparse
         } else {
             XScanByte::Off
         }
@@ -161,24 +182,45 @@ fn build_presence(lookup: &BlastAaLookupTable) -> Arc<[u8]> {
 }
 
 thread_local! {
-    /// The table `presence_bytes` built last on this thread and its bytes. The `Weak` keeps the
-    /// table's allocation, so no other table can have its address while the entry is kept.
-    static PRESENCE: std::cell::RefCell<(std::sync::Weak<BlastAaLookupTable>, Arc<[u8]>)> =
-        std::cell::RefCell::new((std::sync::Weak::new(), Arc::from(Vec::new())));
+    /// The table `presence_bytes` built last on this thread, its bytes and whether it is sparse.
+    /// The `Weak` keeps the table's allocation, so no other table can have its address while the
+    /// entry is kept.
+    #[allow(clippy::type_complexity)]
+    static PRESENCE: std::cell::RefCell<(std::sync::Weak<BlastAaLookupTable>, Arc<[u8]>, bool)> =
+        std::cell::RefCell::new((std::sync::Weak::new(), Arc::from(Vec::new()), false));
 }
 
 // No NCBI counterpart: the presence vector in another layout, made once per table and thread; it
 // does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the presence bytes of `lookup` (see `build_presence`), built
 /// on this thread when it last saw another table. The table must `fit`.
-pub(super) fn presence_bytes(lookup: &Arc<BlastAaLookupTable>) -> Arc<[u8]> {
+pub(super) fn presence_bytes(lookup: &Arc<BlastAaLookupTable>) -> (Arc<[u8]>, bool) {
     PRESENCE.with(|kept| {
         let mut kept = kept.borrow_mut();
         if kept.0.as_ptr() != Arc::as_ptr(lookup) {
-            *kept = (Arc::downgrade(lookup), build_presence(lookup));
+            let bytes = build_presence(lookup);
+            let sparse = sparse(&bytes, lookup);
+            *kept = (Arc::downgrade(lookup), bytes, sparse);
         }
-        Arc::clone(&kept.1)
+        (Arc::clone(&kept.1), kept.2)
     })
+}
+
+/// Whether at most `X_SPARSE_TENTHS` tenths of the backbone cells of `lookup` have hits.
+fn sparse(presence: &[u8], lookup: &BlastAaLookupTable) -> bool {
+    let ones = presence.iter().filter(|&&b| b == 1).count();
+    ones * 10 <= lookup.backbone.len() * X_SPARSE_TENTHS
+}
+
+/// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the presence bytes for `x_scan_one_range_byte` when `mode`
+/// scans `lookup` this way (it is on, the table `fits`, and it is sparse if `mode` asks), else
+/// `None` (the scan before).
+pub(super) fn x_presence(mode: XScanByte, lookup: &Arc<BlastAaLookupTable>) -> Option<Arc<[u8]>> {
+    if !mode.on() || !fits(lookup) {
+        return None;
+    }
+    let (bytes, sparse) = presence_bytes(lookup);
+    (mode != XScanByte::Sparse || sparse).then_some(bytes)
 }
 
 thread_local! {
@@ -246,8 +288,8 @@ pub(super) fn x_scan_one_range_byte(
     s_range: &mut [i32; 3],
 ) -> i32 {
     match mode {
-        XScanByte::On { avx2 } => scan(
-            avx2,
+        XScanByte::On { .. } | XScanByte::Sparse => scan(
+            mode == XScanByte::On { avx2: true },
             lookup,
             presence,
             subject,
@@ -1082,11 +1124,41 @@ mod tests {
     fn presence_bytes_are_rebuilt_for_another_table() {
         let one = Arc::new(lookup_for(&[b"MKTAYIAKQRQISFVKSHFSRQ".to_vec()], 11));
         let two = Arc::new(lookup_for(&[b"WWWWCCCCHHHHMMMM".to_vec()], 11));
-        assert_eq!(*presence_bytes(&one), *build_presence(&one));
-        assert_eq!(*presence_bytes(&two), *build_presence(&two));
-        assert_eq!(*presence_bytes(&one), *build_presence(&one));
+        assert_eq!(*presence_bytes(&one).0, *build_presence(&one));
+        assert_eq!(*presence_bytes(&two).0, *build_presence(&two));
+        assert_eq!(*presence_bytes(&one).0, *build_presence(&one));
         drop(one);
         let three = Arc::new(lookup_for(&[b"PPPPGGGGAAAA".to_vec()], 11));
-        assert_eq!(*presence_bytes(&three), *build_presence(&three));
+        assert_eq!(*presence_bytes(&three).0, *build_presence(&three));
+    }
+
+    // No NCBI counterpart: a table is sparse when at most three tenths of its backbone cells have
+    // hits; the table of one random protein of 400 letters is (0.21 at threshold 13), that of 64 is
+    // not (0.54), and `XScanByte::Sparse` scans only the sparse one this way.
+    #[test]
+    fn one_protein_makes_a_sparse_table_and_many_do_not() {
+        let mut rng = XorShift(0x0bad_5eed_1234_5678);
+        let mut protein =
+            || -> Vec<u8> { (0..400).map(|_| AMINO[rng.below(AMINO.len())]).collect() };
+        let one = Arc::new(lookup_for(&[protein()], 13));
+        let many = Arc::new(lookup_for(
+            &(0..64).map(|_| protein()).collect::<Vec<_>>(),
+            11,
+        ));
+        for (table, want) in [(&one, true), (&many, false)] {
+            let bytes = build_presence(table);
+            let ones = bytes.iter().filter(|&&b| b == 1).count();
+            let cells = table.backbone.len();
+            assert_eq!(sparse(&bytes, table), ones * 10 <= cells * X_SPARSE_TENTHS);
+            assert_eq!(presence_bytes(table).1, want, "{ones} of {cells} cells");
+            assert_eq!(x_presence(XScanByte::Sparse, table).is_some(), want);
+            for mode in [
+                XScanByte::On { avx2: false },
+                XScanByte::Shadow { avx2: false },
+            ] {
+                assert!(x_presence(mode, table).is_some(), "{mode:?}");
+            }
+            assert!(x_presence(XScanByte::Off, table).is_none());
+        }
     }
 }

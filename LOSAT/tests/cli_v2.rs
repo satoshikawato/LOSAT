@@ -715,7 +715,6 @@ fn numeric_values_are_validated_before_io() {
     // NCBI's other blastn tasks and options are rejected explicitly (AGENTS.md rule 2).
     for extra in [
         &["-task", "rmblastn"][..],
-        &["-strand", "plus"],
         &["-ungapped"],
         &["-h"],
         &["-version"],
@@ -729,6 +728,34 @@ fn numeric_values_are_validated_before_io() {
         );
     }
     assert!(parse("blastn", &["-outfmt", "6", "-task", "BLASTN"]).is_err());
+    // `-strand` is NCBI's (blast_args.cpp:1953-1955): plus, minus and both are accepted, any
+    // other value is a clap error (LOSAT's rule for argument errors, rc 2).
+    for (value, want) in [("plus", "plus"), ("minus", "minus"), ("both", "both")] {
+        let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-strand", value])
+            .unwrap()
+            .command
+        else {
+            unreachable!("blastn")
+        };
+        assert_eq!(args.strand, want);
+    }
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6"]).unwrap().command else {
+        unreachable!("blastn")
+    };
+    assert_eq!(args.strand, "both");
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-strand=minus"])
+        .unwrap()
+        .command
+    else {
+        unreachable!("blastn")
+    };
+    assert_eq!(args.strand, "minus");
+    for value in ["foo", "PLUS", "Both", "", "1"] {
+        assert!(
+            parse("blastn", &["-outfmt", "6", "-strand", value]).is_err(),
+            "{value:?}"
+        );
+    }
     // NCBI blast_input_aux.hpp:79-87 (CDirEntry::GetName, ncbifile.cpp:298-312,358-363,
     // 465-472): the name after the trailing separators are removed.
     let dotted = format!("{}/.", "o".repeat(256));
@@ -924,7 +951,6 @@ const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 const CUSTOM: &[&str] = &["blastp", "blastx"];
 const NO_CUSTOM: &[&str] = &["blastn", "tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
-const NOT_BLASTP_BLASTN: &[&str] = &["blastx", "tblastn", "tblastx"];
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
     "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
@@ -984,6 +1010,7 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "0 delim", None, INVALID_DELIMITER),
         (ALL, "abc delim", None, INVALID_DELIMITER),
         (ALL, "99 delimiter qaccver", None, INVALID_DELIMITER),
+        (ALL, "17 delim SQ", None, INVALID_DELIMITER),
         // NCBI's errors after the inputs are opened: the formats of other programs, and the
         // XInclude formats written to standard output.
         (NOT_BLASTN, "17", None, NcbiLater("SAM format is only applicable to blastn")),
@@ -1002,7 +1029,7 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "18", None, UNSUPPORTED),
         (ALL, "20", None, UNSUPPORTED),
         // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c), 5 in
-        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in BLASTP and BLASTN (OF5a), NCBI dropping a custom specification
+        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in every program (BLASTP and BLASTN: OF5a; BLASTX, TBLASTN and TBLASTX: OF5b), NCBI dropping a custom specification
         // (blast_args.cpp:2844-2851); the others not yet.
         (ALL, "8", None, Writes(AsnText)),
         (ALL, "12", None, Writes(JsonSeqalign)),
@@ -1012,16 +1039,24 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, " 5 std", None, Writes(Xml)),
         (ALL, "9", None, Writes(AsnBinary)),
         (ALL, " 9 std", None, Writes(AsnBinary)),
-        (ALL, "11", None, UNSUPPORTED),
-        (ALL, "13", Some("o.json"), UNSUPPORTED),
-        (ALL, "14", Some("o.xml"), UNSUPPORTED),
-        (&["blastp", "blastn"], "15", None, Writes(JsonS)),
-        (&["blastp", "blastn"], "16", None, Writes(Xml2S)),
-        (&["blastp", "blastn"], " 16 std", None, Writes(Xml2S)),
-        (NOT_BLASTP_BLASTN, "15", None, UNSUPPORTED),
-        (NOT_BLASTP_BLASTN, "16", None, UNSUPPORTED),
-        (&["blastn"], "17", None, UNSUPPORTED),
-        (&["blastn"], "17 qseqid", None, UNSUPPORTED),
+        // 11 (the BLAST archive, OF8a): BLASTN so far; NCBI ignores a specification after it.
+        (&["blastn"], "11", None, Writes(ArchiveFormat)),
+        (&["blastn"], " 11 qseqid", None, Writes(ArchiveFormat)),
+        (NOT_BLASTN, "11", None, UNSUPPORTED),
+        // 13 and 14 (BLAST JSON and XML2 as side files and a master file at `-out`): every
+        // program (BLASTP and BLASTN: OF5c part 1; BLASTX, TBLASTN and TBLASTX: part 2).
+        (ALL, "13", Some("o.json"), Writes(Json)),
+        (ALL, "14", Some("o.xml"), Writes(Xml2)),
+        (ALL, " 14 std", Some("o"), Writes(Xml2)),
+        (ALL, "15", None, Writes(JsonS)),
+        (ALL, "16", None, Writes(Xml2S)),
+        (ALL, " 16 std", None, Writes(Xml2S)),
+        // SAM (OF6): BLASTN alone writes it, reading the words SQ and SR and ignoring the rest and a
+        // delimiter (`CBlast_SAM_Formatter::x_ProcessCustomSpec`).
+        (&["blastn"], "17", None, Writes(Sam)),
+        (&["blastn"], "17 qseqid", None, Writes(Sam)),
+        (&["blastn"], " 17 SQ SR ", None, Writes(Sam)),
+        (&["blastn"], "17 delim=, SQ", None, Writes(Sam)),
     ]
 };
 
@@ -1136,7 +1171,7 @@ fn blastn_accepts_culling_limit_as_ncbi_does() {
     let limit = |words: &[&str]| -> Result<i32, String> {
         match parse("blastn", words) {
             Ok(cli) => match cli.command {
-                Commands::Blastn(args) => Ok(args.culling_limit),
+                Commands::Blastn(args) => Ok(args.culling_limit_value()),
                 _ => unreachable!("blastn"),
             },
             Err(error) => Err(LOSAT::cli::render_message(&error)),

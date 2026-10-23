@@ -32,7 +32,7 @@
 //! Why the frames are the same: `mask_frame` reads and writes only the frame it is given (its
 //! letters, its interval list and its unmasked copy) and the `SegMasker`, which it only reads (the
 //! window, the cut-offs, the alphabet; no interior mutability). SEG keeps two caches, the
-//! entropy memo of `LOSAT_X_SEGMEMO` and the histogram memo of `LOSAT_X_SEGFAST`, both
+//! entropy memo of `entropy_from_state_vector` and the histogram memo of the fast SEG path, both
 //! `thread_local!`, so each pool thread has its own; both store the value of a pure function of
 //! their key (the sorted letter counts of a window), computed by the same reference function on a
 //! miss, so a frame masked on any thread, with a warm or a cold cache, gets the same intervals as in
@@ -223,7 +223,11 @@ fn mask_with_probe<P: Fn() + Sync>(
     probe: &P,
 ) {
     let frame_count = masked_frame_count(query_frames);
-    if mode == 0 || !on_pool(pool, frame_count) {
+    let pooled = on_pool(pool, frame_count);
+    if mode == 1 {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXQFRAMES", pooled);
+    }
+    if mode == 0 || !pooled {
         serial(query_frames, seg);
         return;
     }

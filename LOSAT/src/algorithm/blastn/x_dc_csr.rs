@@ -192,13 +192,19 @@ pub(super) enum Layout {
 /// No NCBI counterpart: the layout of a table with `cells` cells (module comment, scope).
 pub(super) fn plan(words: &DiscWords<'_>, cells: usize) -> Layout {
     let (on, shadow) = switches();
-    if !on || words.two_templates {
+    if !on {
+        return Layout::Chains;
+    }
+    if words.two_templates {
+        crate::utils::xreach::x_reach!("LOSAT_X_DCCSR", false);
         return Layout::Chains;
     }
     if shadow {
         return Layout::Shadow;
     }
-    if wanted(positions(words), cells) {
+    let csr = wanted(positions(words), cells);
+    crate::utils::xreach::x_reach!("LOSAT_X_DCCSR", csr);
+    if csr {
         Layout::Csr
     } else {
         Layout::Chains

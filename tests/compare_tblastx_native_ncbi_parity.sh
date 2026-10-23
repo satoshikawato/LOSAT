@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Diagnostic comparison for docs/tblastx_native_ncbi_parity_plan.md Phase 0.
+# Diagnostic comparison for docs/archive/tblastx_native_ncbi_parity_plan.md Phase 0.
 # NCBI BLAST+ is used only as a validation oracle here, never by LOSAT runtime
 # code. Reference-only allowance: AGENTS.md "Testing Expectations".
 #

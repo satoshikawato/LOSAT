@@ -3,7 +3,7 @@
 //! diagonal hash, with the subject scan cut into strips that the threads of the search pool
 //! scan, and the diagonal-hash fold done by the owner thread in the original pair order.
 //! The scheduling (`plan_strips`, `run_strips`) and the per-pair word step (`seed_of_pair`)
-//! are those of `LOSAT_X_PAIRPAR` in the parent module.
+//! are those of PAIRPAR in the parent module.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1624-1634,1673-1684
 //! ```c
@@ -791,19 +791,22 @@ fn fold_two_hit<const PT: bool>(
         //                 *final_data = *ungapped_data;
         //                 BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
         // ```
-        ungapped_hits.push(UngappedHit {
-            context_idx: q_idx,
-            query_idx: ctx.query_idx,
-            query_frame: ctx.frame,
-            query_context_offset: ctx.query_offset,
-            seed_q_off: q_off - q_context_start,
-            seed_s_off: s_off,
-            qs,
-            qe,
-            ss,
-            se: ungapped_se,
-            score: ungapped_score,
-        });
+        super::super::x_push_ungapped(
+            ungapped_hits,
+            UngappedHit {
+                context_idx: q_idx,
+                query_idx: ctx.query_idx,
+                query_frame: ctx.frame,
+                query_context_offset: ctx.query_offset,
+                seed_q_off: q_off - q_context_start,
+                seed_s_off: s_off,
+                qs,
+                qe,
+                ss,
+                se: ungapped_se,
+                score: ungapped_score,
+            },
+        );
         if PT {
             out.hit_keys.push(x_key);
         }
@@ -981,14 +984,23 @@ pub(super) fn run(
         return false;
     };
     if !in_scope(x) {
+        if !shadow {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
+        }
         return false;
     }
     let threads = match pool_threads() {
         Some(threads) => threads,
         // the shadow also runs without a pool (strips on this thread)
         None if shadow => 1,
-        None => return false,
+        None => {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
+            return false;
+        }
     };
+    if !shadow {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", true);
+    }
     let timing = if shadow { None } else { x.timing };
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
     let t_start = timed.then(std::time::Instant::now);
@@ -1451,19 +1463,22 @@ fn fold_two_hit_array(
         //                 *final_data = *ungapped_data;
         //                 BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
         // ```
-        ungapped_hits.push(UngappedHit {
-            context_idx: q_idx,
-            query_idx: ctx.query_idx,
-            query_frame: ctx.frame,
-            query_context_offset: ctx.query_offset,
-            seed_q_off: q_off - q_context_start,
-            seed_s_off: s_off,
-            qs,
-            qe,
-            ss,
-            se: ungapped_se,
-            score: ungapped_score,
-        });
+        super::super::x_push_ungapped(
+            ungapped_hits,
+            UngappedHit {
+                context_idx: q_idx,
+                query_idx: ctx.query_idx,
+                query_frame: ctx.frame,
+                query_context_offset: ctx.query_offset,
+                seed_q_off: q_off - q_context_start,
+                seed_s_off: s_off,
+                qs,
+                qe,
+                ss,
+                se: ungapped_se,
+                score: ungapped_score,
+            },
+        );
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:768-772
         // ```c
@@ -1568,14 +1583,23 @@ fn run_array(
         return false;
     };
     if !in_scope_array(x) {
+        if !shadow {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", false);
+        }
         return false;
     }
     let threads = match pool_threads() {
         Some(threads) => threads,
         // the shadow also runs without a pool (strips on this thread)
         None if shadow => 1,
-        None => return false,
+        None => {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", false);
+            return false;
+        }
     };
+    if !shadow {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", true);
+    }
     let timing = if shadow { None } else { x.timing };
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
     let t_start = timed.then(std::time::Instant::now);
@@ -1893,7 +1917,7 @@ mod tests {
                 masks: masks[c].clone(),
             })
             .collect();
-        let index = QueryContextIndex::new(&contexts);
+        let index = QueryContextIndex::new(&contexts, false);
         Case {
             contexts,
             index,

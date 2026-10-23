@@ -241,7 +241,7 @@ pub fn x_bplut_print_summary() {
 }
 // EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): TBLASTX's full table built in place
 // (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export itself.
-pub(crate) use backbone::x_tbx_build_ncbi_lookup;
+pub(crate) use backbone::{x_tbx_build_ncbi_lookup, x_tbxlut_reach_stub};
 
 /// EXPERIMENT (LOSAT_X_TBXLUTSHADOW): the shadow mode's line (printed by `main` at exit).
 // No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
@@ -250,7 +250,7 @@ pub fn x_tbxlut_print_summary() {
         eprintln!("[X_SHADOW] TBXLUT tables_compared={tables} (lookup tables identical)");
     }
 }
-// EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the direct builder of the TBLASTX unit
+// EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
 // path's group tables (lookup/x_pair_lut.rs); no NCBI counterpart for the re-export itself.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456

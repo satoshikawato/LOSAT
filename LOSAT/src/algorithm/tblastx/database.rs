@@ -44,6 +44,8 @@ const PROGRAM: &str = "TBLASTX";
 pub(crate) struct TblastxDatabase {
     db: SeqDb,
     name: String,
+    /// The taxonomy database of the run, opened by the XML2 and JSON formats only.
+    taxdb: shared::TaxdbRun,
 }
 
 impl TblastxDatabase {
@@ -64,6 +66,7 @@ impl TblastxDatabase {
         Ok(Self {
             db,
             name: name.to_string(),
+            taxdb: shared::TaxdbRun::default(),
         })
     }
 
@@ -101,10 +104,37 @@ impl TblastxDatabase {
         shared::pairwise_database(&self.db, &self.name)
     }
 
+    /// The Blast-def-line taxid of each reported sequence by rank (`ordinals`: the ordinal id of
+    /// each rank, `ReportedSubjects::ordinals`; every rank is reported, a rank is made from a
+    /// hit) and what the taxonomy database says about it, for the XML2 and JSON formats
+    /// (`common::database::read_reported_taxids`: the taxid, `sciname`, the taxonomy database's
+    /// refusals and the non-ASCII refusal come before any byte).
+    pub(crate) fn read_taxids(&self, ordinals: &[u32]) -> Result<XmlTaxa> {
+        let reported: std::collections::BTreeSet<usize> = (0..ordinals.len()).collect();
+        let (taxids, taxonomy, notes) =
+            shared::read_reported_taxids(&self.db, &self.taxdb, ordinals, &reported, PROGRAM)?;
+        Ok(XmlTaxa {
+            taxids,
+            taxonomy,
+            notes,
+        })
+    }
+
     /// The database's sequences by ordinal id (`common::database::read_nucleotide_stores`).
     pub(crate) fn read_stores(&self) -> Result<Vec<PackedNucleotide>> {
         shared::read_nucleotide_stores(&self.db, PROGRAM)
     }
+}
+
+/// What the XML2 and JSON formats show of a database sequence beyond its title: its
+/// Blast-def-line taxid and the taxonomy database's answer, by rank (empty for outfmt 5 and
+/// for `-subject`: every taxid is then 0), and NCBI's messages about the taxonomy database,
+/// which are written at the first `Hit` that needs them.
+#[derive(Default)]
+pub(crate) struct XmlTaxa {
+    pub(crate) taxids: Vec<i32>,
+    pub(crate) taxonomy: Vec<crate::report::blast_xml::HitTaxonomy>,
+    pub(crate) notes: shared::TaxdbNotes,
 }
 
 /// The stored titles of the database sequences that the reported hits of the query batches
@@ -192,6 +222,7 @@ pub(crate) fn reported_subjects(
             title: stored.title.clone(),
             sequence: Vec::new(),
             warnings: Vec::new(),
+            source: Default::default(),
         });
     }
     Ok(ReportedSubjects { ordinals, records })

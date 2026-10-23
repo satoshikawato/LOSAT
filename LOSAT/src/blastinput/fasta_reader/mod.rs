@@ -85,9 +85,17 @@ pub struct ReaderConfig {
     /// The program and role named in LOSAT's rejections.
     pub program: &'static str,
     pub role: &'static str,
+    /// Keep the defline line of each record (`FastaRecord::source`), for the BLAST archive.
+    pub keep_defline: bool,
 }
 
 impl ReaderConfig {
+    /// The same reader, keeping the defline lines (`-outfmt 11`).
+    pub fn with_defline(mut self, keep: bool) -> Self {
+        self.keep_defline = keep;
+        self
+    }
+
     /// The query reader of `program`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:66-74
@@ -108,6 +116,7 @@ impl ReaderConfig {
             data_loaders,
             program,
             role: "query",
+            keep_defline: false,
         }
     }
 
@@ -131,6 +140,7 @@ impl ReaderConfig {
             data_loaders,
             program,
             role: "subject",
+            keep_defline: false,
         }
     }
 }
@@ -150,6 +160,21 @@ pub struct FastaRecord {
     /// The reader's messages written while the record was read, in order (each one a
     /// line; NCBI writes them to standard error as it reads).
     pub warnings: Vec<u8>,
+    /// What the BLAST archive (outfmt 11) writes besides the letters; `None` (8 bytes, no
+    /// allocation) unless the reader was configured to keep it (`ReaderConfig::keep_defline`).
+    pub source: Option<Box<RecordSource>>,
+}
+
+/// The parts of a record that only the BLAST archive writes.
+///
+/// NCBI keeps the defline line as read in the Bioseq's `CFastaReader` user object, and the
+/// whole sequence in the Bioseq of a query that `-query_loc` cuts.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct RecordSource {
+    /// The defline line as read, with its `>`, without its line end (empty when not kept).
+    pub defline: Vec<u8>,
+    /// The record's letters before a cut to a range (`FastaRecord::cut`).
+    pub uncut: Option<Vec<u8>>,
 }
 
 impl FastaRecord {
@@ -160,6 +185,7 @@ impl FastaRecord {
             title: title.to_vec(),
             sequence: sequence.to_vec(),
             warnings: Vec::new(),
+            source: None,
         }
     }
 
@@ -215,12 +241,44 @@ impl FastaRecord {
             title: self.title.clone(),
             sequence: self.sequence[from..to_exclusive].to_vec(),
             warnings: Vec::new(),
+            source: self.source.as_ref().map(|source| {
+                Box::new(RecordSource {
+                    defline: source.defline.clone(),
+                    uncut: Some(
+                        source
+                            .uncut
+                            .clone()
+                            .unwrap_or_else(|| self.sequence.clone()),
+                    ),
+                })
+            }),
         }
     }
 
+    /// The defline line as read (with its `>`), when the reader kept it and the record has one.
+    pub fn archive_defline(&self) -> Option<&[u8]> {
+        self.source
+            .as_ref()
+            .map(|source| source.defline.as_slice())
+            .filter(|defline| !defline.is_empty())
+    }
+
+    /// The letters of the record as the archive's Bioseq holds them: the whole record
+    /// even when a range cut it.
+    pub fn archive_letters(&self) -> &[u8] {
+        self.source
+            .as_ref()
+            .and_then(|source| source.uncut.as_deref())
+            .unwrap_or(&self.sequence)
+    }
+
     /// The record `cut` makes, in place: the letters before `from` and from `to_exclusive` on are
-    /// dropped (the room of the whole letters stays until the sequence is replaced).
+    /// dropped (the room of the whole letters stays until the sequence is replaced). A record that
+    /// keeps its source for outfmt 11 keeps the whole letters there first, as `cut` does.
     pub fn cut_in_place(&mut self, from: usize, to_exclusive: usize) {
+        if let Some(source) = self.source.as_mut() {
+            source.uncut.get_or_insert_with(|| self.sequence.clone());
+        }
         self.sequence.truncate(to_exclusive);
         self.sequence.drain(..from);
         self.warnings = Vec::new();

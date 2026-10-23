@@ -222,6 +222,7 @@ pub(crate) fn reported_subjects(
             title: stored.title.clone(),
             sequence: Vec::new(),
             warnings: Vec::new(),
+            source: Default::default(),
         });
     }
     Ok(ReportedSubjects { ordinals, records })

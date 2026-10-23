@@ -1,0 +1,598 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "tblastn",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qp1 query protein one"
+                  }
+                }
+              },
+              title "qp1 query protein one"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 140,
+              seq-data ncbieaa "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSW
+KVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKL
+KIFHYMVGHGRTASEG"
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qp2 unrelated protein (no hits expected)"
+                  }
+                }
+              },
+              title "qp2 unrelated protein (no hits expected)"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 45,
+              seq-data ncbieaa "IRRNWKMVCRYVPYLEEDMEAWMLWKEHLTFQWCNYFWTDVVKSE"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sn1 plus strand gene"
+                }
+              }
+            },
+            title "sn1 plus strand gene"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 501,
+            seq-data ncbi2na '4842B5FEAA0C65892B0D3C3640C94D3BA3A04C9B9C025BBF
+96E29A0AC3A38D600C661AD4826BCE0AAEA2071E7A5E60CEDFA0ADF8E1B18BF24B8CC457EBAEFA
+3D40A0492155ABAE8012117E44E9603A873A3910B1580E4EEED3AE6B31A34B5F0847A88F0C5865
+0FD88D74031C4533ACA13AD91E7260AFD4E31AE073C07240'H
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sn2 minus strand gene"
+                }
+              }
+            },
+            title "sn2 minus strand gene"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 471,
+            seq-data ncbi2na '289DCE1129C085F4FA59DE54FA45EB0A039FD0FDD80F1237
+4FCDF52E5E2E6E6CBF668533A44CA764393530553F4744DCBBB7BB245256B1653B3F6835246D4F
+AF10ABA31677A074C7D38A1BB9D533F9CF8BB2CC010CA3D5317D34594EAD4D983FCAB4D4D17F68
+9E41E3797E2847B9D4D4B2781827549C'H
+          }
+        },
+        {
+          id {
+            local str "Subject_3"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sn3 no hits"
+                }
+              }
+            },
+            title "sn3 no hits"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 150,
+            seq-data ncbi2na 'F7C61384618166375B6669F3CCF5515B9D8BE60EB8B1BD19
+79FC318617C8E60C4F205DFC8140'H
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "DbGeneticCode",
+          value integer 1
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 13
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 0
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 37009
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 679
+          },
+          {
+            id str "blast_score",
+            value int 679
+          },
+          {
+            id str "e_value",
+            value real { 42124193832951, 10, -112 }
+          },
+          {
+            id str "bit_score",
+            value real { 266158744327927, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 121
+          },
+          {
+            id str "num_positives",
+            value int 124
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 0,
+                to 59,
+                strand unknown,
+                id local str "Query_1"
+              },
+              int {
+                from 60,
+                to 239,
+                strand plus,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 60,
+                to 62,
+                strand unknown,
+                id local str "Query_1"
+              },
+              empty local str "Subject_1"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 63,
+                to 139,
+                strand unknown,
+                id local str "Query_1"
+              },
+              int {
+                from 240,
+                to 470,
+                strand plus,
+                id local str "Subject_1"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 36
+          },
+          {
+            id str "blast_score",
+            value int 36
+          },
+          {
+            id str "e_value",
+            value real { 459184786431753, 10, -16 }
+          },
+          {
+            id str "bit_score",
+            value real { 184754170130687, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 7
+          },
+          {
+            id str "num_positives",
+            value int 12
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 183571428571429, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 110,
+                to 116,
+                strand unknown,
+                id local str "Query_1"
+              },
+              int {
+                from 129,
+                to 149,
+                strand minus,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 117,
+                to 122,
+                strand unknown,
+                id local str "Query_1"
+              },
+              empty local str "Subject_1"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 123,
+                to 134,
+                strand unknown,
+                id local str "Query_1"
+              },
+              int {
+                from 93,
+                to 128,
+                strand minus,
+                id local str "Subject_1"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 497
+          },
+          {
+            id str "blast_score",
+            value int 497
+          },
+          {
+            id str "e_value",
+            value real { 230103210927874, 10, -85 }
+          },
+          {
+            id str "bit_score",
+            value real { 196052421510969, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 98
+          },
+          {
+            id str "num_positives",
+            value int 104
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 992857142857143, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_2"
+            },
+            loc {
+              int {
+                from 1,
+                to 40,
+                strand unknown,
+                id local str "Query_1"
+              },
+              int {
+                from 328,
+                to 447,
+                strand minus,
+                id local str "Subject_2"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_2"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 316,
+                to 327,
+                strand minus,
+                id local str "Subject_2"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_2"
+            },
+            loc {
+              int {
+                from 41,
+                to 95,
+                strand unknown,
+                id local str "Query_1"
+              },
+              int {
+                from 151,
+                to 315,
+                strand minus,
+                id local str "Subject_2"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_2"
+            },
+            loc {
+              int {
+                from 96,
+                to 97,
+                strand unknown,
+                id local str "Query_1"
+              },
+              empty local str "Subject_2"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_2"
+            },
+            loc {
+              int {
+                from 98,
+                to 139,
+                strand unknown,
+                id local str "Query_1"
+              },
+              int {
+                from 25,
+                to 150,
+                strand minus,
+                id local str "Subject_2"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 29
+          },
+          {
+            id str "blast_score",
+            value int 29
+          },
+          {
+            id str "e_value",
+            value real { 101022203563427, 10, -15 }
+          },
+          {
+            id str "bit_score",
+            value real { 157790199816472, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 4
+          },
+          {
+            id str "num_positives",
+            value int 4
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 138333333333333, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 32,
+                to 37,
+                strand unknown,
+                id local str "Query_2"
+              },
+              int {
+                from 162,
+                to 179,
+                strand plus,
+                id local str "Subject_1"
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 325013364158469, 10, -15 },
+        k { 135426412808585, 10, -15 },
+        h { 500333171621042, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 37009",
+      "Effective search space used: 37009",
+      "Length adjustment: 21"
+    }
+  }
+}

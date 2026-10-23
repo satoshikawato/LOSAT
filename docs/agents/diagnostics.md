@@ -280,6 +280,7 @@ export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
+export LOSAT_X_BNTBRANGE=1
 export LOSAT_X_BNUNGAPCOUNT=1
 export LOSAT_X_BPCLUT=1
 export LOSAT_X_BPCOMPOREUSE=1
@@ -1268,7 +1269,8 @@ Rebuilding less:
   `mem9.tsv` with the max RSS of the timed runs `ab8.tsv`, `ab9.tsv`; 5-23 runs per arm), max RSS median with /
   without the switch (NCBI): 1,500 D. melanogaster 2L cDNAs x the D. melanogaster genome `-db`, blastn at 16 threads
   321 / 624 MiB (372), at 8 threads 272 / 343 (336); dc-megablast at 8 threads 186 / 222 (193), at 16 threads 268 / 284
-  (191; above NCBI either way: the traceback decodes whole chromosome arms, NCBI fetches only the HSPs' ranges); the
+  (191; above NCBI either way: the traceback decoded whole chromosome arms, NCBI fetches only the HSPs' ranges, as
+  `LOSAT_X_BNTBRANGE` below now does); the
   Sakai genome x EDL933 `-subject` (blastn at 4 threads hit lists of 1.0-11.4 MiB, dc-megablast below 1 MiB), blastn at
   4 threads 264 / 264, at 16 threads 585 / 586, dc-megablast at 4 threads 294 / 292, at 16 threads 686 / 697 (equal
   within the run-to-run spread of 20-60 MiB; NCBI 177 / 164 MiB on its one `-subject` thread: the long tracebacks of
@@ -1293,6 +1295,50 @@ Rebuilding less:
   without a message. The output does not depend on it. Sakai x EDL933 blastn at 4 threads (above), per-pair against
   16: 8 x1.009 (6 of 8 pairs slower; the scratches of 9.6-11.4 MiB are mapped again at every sort), 0 x1.009-1.027,
   for 10 MiB less max RSS (median 251 against 261 MiB); elsewhere no change in memory.
+- `LOSAT_X_BNTBRANGE=1` (BLASTN `-db`, every task, memory and time; in the strict set from the pull request that added
+  it (perf/bn-tb-range, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not
+  set) the traceback of a database search (`blastn/blast_engine/database.rs` `traceback_listed`) decodes a sequence of
+  1 Mi bases or more to BLASTNA only in the ranges of the HSPs the preliminary stage kept of it, as NCBI's partial fetch
+  does: each HSP widened by 1024 bases on both sides within the sequence, sorted by start, and merged into the range
+  before unless it starts more than 1024 bases after its end (`x_partial_ranges`; `BLAST_SetupPartialFetching`,
+  blast_traceback.c:1320-1370, blast_seqsrc.c:467-519), with `FENCE_SENTRY` (201) before and after each range inside
+  the sequence (`seqdb` `x_nucleotide_blastna_ranges`; `GetAmbigPartialSeq`, seqdbvol.cpp:1541-1600). The buffer has
+  the whole length and is zeroed by the allocator; with 64-bit glibc its capacity is above the mmap ceiling, so it is
+  mapped and its pages outside the ranges are never written or resident (other allocators may zero it whole; Wasm's
+  dlmalloc does, so there the switch saves the decoding only). The traceback kernels stop at a fence as NCBI's do; their
+  fence branches count on the thread (`blastn/alignment/x_fence.rs`), every traceback call compares the count around
+  it and marks the sequence (`BlastnSubjectRef::x_fenced`, also from the look-ahead helpers and the `LOSAT_X_QGROUPPAR`
+  tasks), the traceback loop makes no HSP once it is marked, and `traceback_listed` decodes the whole sequence and traces
+  it again from the same kept HSPs (NCBI refetches the whole sequence and traces the list again from its copy,
+  blast_traceback.c:307-310, 516-520, 1651-1688). An alignment that met no fence read only decoded bytes, which are the
+  whole decode's (the ambiguity runs applied in stored order, each to the ranges it overlaps), so values and order never
+  change. NCBI turns partial fetching on per database (longest sequence at least 5000, mean length at least 2048,
+  seqsrc_seqdb.cpp:234-260); LOSAT decides per sequence (a shorter one is decoded whole: its BLASTNA is small). Test
+  variables (not in the strict set, read once): `LOSAT_X_BNTBRANGEMIN=<bases>` the shortest sequence decoded in ranges
+  (0 = every sequence; default 1,048,576), `LOSAT_X_BNTBRANGEPAD=<bases>` NCBI's 1024 (16 to 1,048,576: the start of a
+  gapped alignment reads up to 11 bases on each side of the seed outside the kernels' fence tests), so that the tests
+  meet fences; `LOSAT_X_BNTBRANGESHADOW=1` traces every sequence decoded in ranges also whole and prints a stderr line on
+  a difference; `LOSAT_X_BNTBRANGELOG=1` prints one line at exit (sequences in ranges, traced again whole, their bases,
+  the bases of their ranges). Tests: the unit tests of `database.rs` (NCBI's ranges; the decode in ranges against the
+  whole decode on the `nucl_mv` fixture) and `seqdb/volume.rs` (the runs over ranges against the whole decode with
+  shuffled runs, offsets of 2^31 and more and runs past the end); the gate runs every BLASTN fixture, the `-db` fixtures
+  at 1 and 4 threads, `check_losat` and the capture with `LOSAT_X_BNTBRANGEMIN=0` (all sequences in ranges, no
+  sequence traced again) and with `LOSAT_X_BNTBRANGEPAD=16` too (279 of the 371 sequences of the `-db` fixtures meet a
+  fence and are traced again), all equal to NCBI 2.17.0's bytes; the shadow found no difference.
+  Measured on the workstation (v4-B session 14, `results/b16b/`; every output equal to NCBI 2.17.0's, the same with
+  and without the switch). 1,500 D. melanogaster 2L cDNAs x the D. melanogaster genome `-db` (62 of its sequences of
+  1 Mi bases or more traced by blastn, 1,236.6 M bases, 79.9 M of them in ranges; dc-megablast 10, 216.7 M, 5.0 M; no
+  sequence traced again). Max RSS (node 0, untimed, v4-MEM's `mem_run.py`, rotated order, 3 runs each, `mem1.tsv`),
+  median with / without the switch (NCBI): dc-megablast at 16 threads 129 / 281 MiB (188), at 8 threads 111 / 187 (193);
+  blastn at 16 threads 205 / 331 (388), at 8 threads 146 / 273 (361); megablast and dc-megablast of 100 16S x 28,036 16S
+  `-db` at 16 threads (no sequence of 1 Mi bases) 84 / 81 (139) and 66 / 66 (120). Time (node 1; 16 or 8 booked cores
+  with their siblings idle, a 3 s warm-up before each run, alternating order, against `LOSAT_X_BNTBRANGE=0` with the
+  same binary, `ab1.tsv`), per-pair median: dc-megablast at 16 threads x0.918 (8 pairs, 0.903-0.953), at 8 x0.904 (8,
+  0.868-0.957); blastn at 16 x0.854 (6, 0.834-0.865), at 8 x0.866 (6, 0.861-0.886); megablast of the 16S cells at 16
+  x0.995 (4, 0.979-1.017); again on the pull request's code (`ab2.tsv`): megablast of the D. melanogaster cells at
+  16 threads x0.815 (8, 0.788-0.844; max RSS 263 against 313 MiB), at 8 x0.845 (6, 0.806-0.886; 263 against 308),
+  dc-megablast at 16 x0.928 (6, 0.865-0.946). User-space instructions x0.958-0.968 (megablast x0.73): the whole
+  sequences' decoding is gone.
 - `LOSAT_X_DBIDXREAD=1` (every program's `-db`, memory; in the strict set since 2026-10-19 (perf/db-index-pread, evidence
   at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the index file of each volume
   (`.pin` / `.nin`) stays open after the volume is opened, and the reader reads the ranges of its offset arrays that it

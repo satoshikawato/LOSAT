@@ -46,8 +46,8 @@
 //! NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:328-350, quoted
 //! above `SeqDb::next_block`: NCBI's threads read the database in chunks of consecutive ordinal ids.
 //!
-//! `LOSAT_X_BXDBSTREAM` is a value switch of the strict set: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. Its value is the size of a pass's block in KiB, 2 to
+//! `LOSAT_X_BXDBSTREAM` is a value switch of the strict set: on unless it is `0`.
+//! Its value is the size of a pass's block in KiB, 2 to
 //! 1,048,576, 256 when it is not set or holds anything else (`1` among them). It acts for every
 //! task of BLASTX with `-db`.
 //!

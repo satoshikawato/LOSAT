@@ -1,11 +1,10 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The run-based one-thread fill of the megablast table (`LOSAT_X_MBFILL`,
 //! `src/algorithm/blastn/x_mb_fill.rs`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is
-//! `0`, or `LOSAT_X_DEFAULT=0` and its variable is not set. It chooses between two LOSAT code
+//! `0`. It chooses between two LOSAT code
 //! paths that build the same table, so the property under test is that the report does not
-//! depend on it: the default run, `LOSAT_X_MBFILL=0`, `LOSAT_X_DEFAULT=0` and the shadow run
+//! depend on it: the default run, `LOSAT_X_MBFILL=0` and the shadow run
 //! (which builds each one-thread table again with the queued loop and stops on the first
 //! difference) give the same bytes, and the default run prints nothing on standard error (the
 //! `[X_SHADOW] MBFILL` line is printed only with `LOSAT_X_MBFILLSHADOW`). Two searches build the
@@ -19,7 +18,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_MBFILL", "0");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_MBFILLSHADOW", "1");
 
 fn fasta(name: &str) -> PathBuf {
@@ -107,8 +105,8 @@ fn search(task: &str, query: &Path, threads: u32, switches: &[(&str, &str)]) -> 
     (output.stdout, stderr)
 }
 
-// The default one-thread search runs the run-based fill; `LOSAT_X_MBFILL=0` and
-// `LOSAT_X_DEFAULT=0` run the queued loop, and at four threads the pool fills the table. The
+// The default one-thread search runs the run-based fill; `LOSAT_X_MBFILL=0`
+// runs the queued loop, and at four threads the pool fills the table. The
 // reports are equal, and no run prints a line on standard error.
 #[test]
 fn the_report_does_not_depend_on_the_run_based_fill() {
@@ -117,19 +115,16 @@ fn the_report_does_not_depend_on_the_run_based_fill() {
         let (default, default_stderr) = search(task, &query, 1, &[]);
         assert!(!default.is_empty(), "{task}: no hits");
         assert_eq!(default_stderr, "", "{task}");
-        for off in [SWITCH_OFF, DEFAULT_OFF] {
-            let (report, stderr) = search(task, &query, 1, &[off]);
-            assert_eq!(report, default, "{task} {off:?}");
-            assert_eq!(stderr, "", "{task} {off:?}");
-        }
+        let (report, stderr) = search(task, &query, 1, &[SWITCH_OFF]);
+        assert_eq!(report, default, "{task} {SWITCH_OFF:?}");
+        assert_eq!(stderr, "", "{task} {SWITCH_OFF:?}");
         let (report, stderr) = search(task, &query, 4, &[]);
         assert_eq!(report, default, "{task} threads 4");
         assert_eq!(stderr, "", "{task} threads 4");
     }
 }
 
-// `LOSAT_X_DEFAULT=0` with the variable set to 1 (the run-based fill again) gives the default
-// report. The shadow (set to any value, not in the set; it implies the switch) builds each
+// The shadow (set to any value, not in the set; it implies the switch) builds each
 // one-thread table again with the queued loop and compares every array, prints its summary line
 // with a count above 0, and does not change the report.
 #[test]
@@ -137,19 +132,16 @@ fn the_shadow_compares_the_two_fills_and_the_report_is_unchanged() {
     let dir = TestDir::new("shadow");
     for (task, query) in queries(&dir) {
         let (expected, _) = search(task, &query, 1, &[]);
-        let (report, _) = search(task, &query, 1, &[DEFAULT_OFF, ("LOSAT_X_MBFILL", "1")]);
-        assert_eq!(report, expected, "{task}");
-        for switches in [&[SHADOW][..], &[DEFAULT_OFF, SHADOW][..]] {
-            let (report, stderr) = search(task, &query, 1, switches);
-            assert_eq!(report, expected, "{task} {switches:?}");
-            let line = stderr
-                .lines()
-                .find(|line| line.starts_with("[X_SHADOW] MBFILL compared="))
-                .unwrap_or_else(|| panic!("{task} {switches:?}: no summary line:\n{stderr}"));
-            assert!(
-                !line.starts_with("[X_SHADOW] MBFILL compared=0 "),
-                "{task} {switches:?}: {line}"
-            );
-        }
+        let switches = &[SHADOW][..];
+        let (report, stderr) = search(task, &query, 1, switches);
+        assert_eq!(report, expected, "{task} {switches:?}");
+        let line = stderr
+            .lines()
+            .find(|line| line.starts_with("[X_SHADOW] MBFILL compared="))
+            .unwrap_or_else(|| panic!("{task} {switches:?}: no summary line:\n{stderr}"));
+        assert!(
+            !line.starts_with("[X_SHADOW] MBFILL compared=0 "),
+            "{task} {switches:?}: {line}"
+        );
     }
 }

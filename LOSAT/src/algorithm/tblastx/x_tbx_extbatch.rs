@@ -99,7 +99,7 @@ const X_EXTBATCH_MAX_KI: usize = 1 << 22;
 // No NCBI counterpart: which scan the units of the unit path use (scheduling only). Read once per
 // process, as the other modes of x_pair_par.rs.
 /// LOSAT_X_TBXEXTBATCH: a strict-set value switch (`utils/xswitch.rs`). `None` when it is off
-/// (`0`, or `LOSAT_X_DEFAULT=0` and it is not set) and on targets other than x86-64; otherwise the
+/// (`0`) and on targets other than x86-64; otherwise the
 /// smallest largest-unit query-group span, in Ki letters, of a subject whose units take the path.
 fn min_span_ki() -> Option<usize> {
     static MIN: OnceLock<Option<usize>> = OnceLock::new();

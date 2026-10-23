@@ -1,7 +1,7 @@
 //! The discontiguous megablast tables filled by the search pool (`LOSAT_X_DISCLUTPAR`,
 //! `src/algorithm/blastn/x_disc_lookup_par.rs`) on whole searches.
 //!
-//! The switch is in the strict set: on unless `LOSAT_X_DISCLUTPAR=0` (or `LOSAT_X_DEFAULT=0`). It
+//! The switch is in the strict set: on unless `LOSAT_X_DISCLUTPAR=0`. It
 //! chooses between two LOSAT code paths with the same result: the tables of `s_FillDiscMBTable`
 //! filled by one loop, or by the threads of the search pool, each owning whole blocks of cells of
 //! both templates' tables. So the property under test is that the report does not depend on it:
@@ -457,7 +457,7 @@ fn megablast_with_and_without_a_template() {
 
 // With LOSAT_TIMING the builds print their summed wall time at exit, with or without the switch,
 // and how many were built on a pool: all of them with the switch at 4 threads (by default and set
-// to 1), none with it off (`=0`, or `LOSAT_X_DEFAULT=0`) or at 1 thread; and the split line: the
+// to 1), none with it off (`=0`) or at 1 thread; and the split line: the
 // chunks and phases of the pool fills (and its prefault rounds, at most one per fill), or the time
 // of the original loop.
 #[test]
@@ -471,11 +471,6 @@ fn timing_line_is_printed() {
         (4, &[("LOSAT_TIMING", "1"), SWITCH][..], true),
         (4, &[("LOSAT_TIMING", "1")][..], true),
         (4, &[("LOSAT_TIMING", "1"), OFF][..], false),
-        (
-            4,
-            &[("LOSAT_TIMING", "1"), ("LOSAT_X_DEFAULT", "0")][..],
-            false,
-        ),
         (1, &[("LOSAT_TIMING", "1"), SWITCH][..], false),
     ] {
         let (report, stderr) = blastn(&queries, &subject, &extra, threads, vars);

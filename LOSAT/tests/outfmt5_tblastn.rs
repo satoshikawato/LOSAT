@@ -36,7 +36,7 @@ fn temp_dir(stem: &str) -> PathBuf {
 fn run_str(args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
+        if name.to_string_lossy().starts_with("LOSAT_") {
             command.env_remove(name);
         }
     }
@@ -368,7 +368,7 @@ fn an_empty_seekable_query_input_writes_nothing() {
     for threads in ["1", "4"] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
         for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
+            if name.to_string_lossy().starts_with("LOSAT_") {
                 command.env_remove(name);
             }
         }

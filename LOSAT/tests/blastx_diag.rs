@@ -450,24 +450,21 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
         }
         None => assert!(!avx2, "default with AVX2: no timing line: {}", run.stderr),
     }
-    // LOSAT_X_BXCROSS=0 and LOSAT_X_BXDEFER=0 (LOSAT_X_BXDIAG not set), and LOSAT_X_DEFAULT=0 with
-    // LOSAT_X_BXDIAG set: the fused loop with the AVX2 batch where the CPU has AVX2.
-    for (env, named) in [
-        (
-            &[("LOSAT_X_BXCROSS", "0"), ("LOSAT_X_BXDEFER", "0")][..],
-            false,
-        ),
-        (&[("LOSAT_X_DEFAULT", "0")][..], true),
-    ] {
-        let what = format!("{env:?}");
+    // LOSAT_X_BXCROSS=0 and LOSAT_X_BXDEFER=0, with LOSAT_X_BXDIAG not set and set: the fused loop
+    // with the AVX2 batch where the CPU has AVX2 (set: the per-hit test elsewhere).
+    for named in [false, true] {
         let diag = if named { "1" } else { "" };
-        let mut env = env.to_vec();
-        env.extend([
-            ("LOSAT_X_BXDIAG", diag),
-            ("LOSAT_X_BXDIAGMIN", "0"),
-            ("LOSAT_TIMING", "1"),
-        ]);
-        let run = blastx(&args, &env);
+        let what = format!("LOSAT_X_BXCROSS=0 LOSAT_X_BXDEFER=0 LOSAT_X_BXDIAG={diag:?}");
+        let run = blastx(
+            &args,
+            &[
+                ("LOSAT_X_BXCROSS", "0"),
+                ("LOSAT_X_BXDEFER", "0"),
+                ("LOSAT_X_BXDIAG", diag),
+                ("LOSAT_X_BXDIAGMIN", "0"),
+                ("LOSAT_TIMING", "1"),
+            ],
+        );
         assert_eq!(run.code, Some(0), "{what}: {}", run.stderr);
         assert!(run.stdout == reference.stdout, "{what}: report differs");
         let line = run
@@ -591,8 +588,8 @@ fn the_cross_cell_batches_give_the_reports_of_the_reference() {
 }
 
 // EXPERIMENT (LOSAT_X_BXCROSS): the shadow compares the batches across the cells' borders with the
-// reference for every subject, and `0` (white space around it ignored), or `LOSAT_X_DEFAULT=0`
-// without the variable, leaves LOSAT_X_BXDEFER's cell test; an empty value is the default.
+// reference for every subject, and `0` (white space around it ignored) leaves LOSAT_X_BXDEFER's
+// cell test; an empty value is the default.
 #[test]
 fn the_shadow_compares_the_cross_cell_batches_and_zero_turns_them_off() {
     let inputs = Inputs::new();
@@ -628,7 +625,6 @@ fn the_shadow_compares_the_cross_cell_batches_and_zero_turns_them_off() {
     for env in [
         &[("LOSAT_X_BXCROSS", "0")][..],
         &[("LOSAT_X_BXCROSS", " 0 ")][..],
-        &[("LOSAT_X_DEFAULT", "0"), ("LOSAT_X_BXDEFER", "1")][..],
     ] {
         let what = format!("{env:?}");
         let mut env = env.to_vec();

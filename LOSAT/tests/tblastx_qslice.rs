@@ -1,10 +1,10 @@
 //! The unit scan of TBLASTX in slices of the query group (`LOSAT_X_TBXQSLICE`,
 //! `src/algorithm/tblastx/x_tbx_qslice.rs`, module doc) on whole searches.
 //!
-//! The switch is a value switch of the strict set (`src/utils/xswitch.rs`): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set; its number is the most letters of a slice (`1` gives the
-//! built-in). It acts on x86-64 only (on other targets every search runs the unsliced scan, and the
-//! shadow, `LOSAT_X_TBXQSLICESHADOW`, which compares the units of a cut batch, compares none).
+//! The switch is a value switch of the strict set (`src/utils/xswitch.rs`): on unless it is `0`;
+//! its number is the most letters of a slice (`1` gives the built-in). It acts on x86-64 only (on
+//! other targets every search runs the unsliced scan, and the shadow, `LOSAT_X_TBXQSLICESHADOW`,
+//! which compares the units of a cut batch, compares none).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-516
 //! ```c
@@ -20,7 +20,7 @@
 //! PemoMJNVA) has frames of about 50,000 letters, below the built-in, so the default cuts nothing
 //! and `=4096` cuts each group into about 13 slices: the tests compare `=4096` (with the compact
 //! records and with today's lists, with the reference table builder, with `LOSAT_X_TBXEXTBATCH` and
-//! `LOSAT_X_TBXPREFETCH` on every unit), the default, `LOSAT_X_DEFAULT=0` and the shadow with `=0`.
+//! `LOSAT_X_TBXPREFETCH` on every unit), the default and the shadow with `=0`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -34,7 +34,6 @@ fn fasta(name: &str) -> PathBuf {
 const SLICES: (&str, &str) = ("LOSAT_X_TBXQSLICE", "4096");
 const OFF: (&str, &str) = ("LOSAT_X_TBXQSLICE", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBXQSLICESHADOW", "1");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 /// Today's `InitHSP` lists instead of the compact records (`run_unit_sliced`).
 const FULL_LISTS: (&str, &str) = ("LOSAT_X_SEEDCOMPACT", "0");
 /// The batched extensions on every unit of 2 Ki letters or more.
@@ -171,7 +170,6 @@ fn sliced_units_give_the_same_report() {
             &[SLICES, BATCHED][..],
             &[SLICES, PREFETCH][..],
             &[][..],
-            &[DEFAULT_OFF][..],
         ] {
             let (report, _) = inputs.tblastx(threads, switches);
             assert_eq!(report, off, "threads {threads} {switches:?}: against =0");

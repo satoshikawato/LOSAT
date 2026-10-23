@@ -18,7 +18,7 @@
 //!                     continue;
 //!                 }
 //! ```
-//! The switch is in the strict set (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set).
+//! The switch is in the strict set (on unless it is `0`).
 //! The direct loop takes these two outcomes without a branch where its range holds and hands the
 //! others to the statements of the reference word finder, with the same cell states and the same
 //! init HSPs (the module's argument), so the property under test is that the report does not
@@ -39,8 +39,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const DIRECT: (&str, &str) = ("LOSAT_X_BXDIAG", "0");
 const OFF: (&str, &str) = ("LOSAT_X_BXHITBF", "0");
 const ON: (&str, &str) = ("LOSAT_X_BXHITBF", "1");
-/// The rest of the strict set off (the direct loop runs on every subject).
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
+/// The branch-free candidate scan off: the switch alone on the scan before it.
+const SCAN_OFF: (&str, &str) = ("LOSAT_X_BXSCANBF", "0");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -230,13 +230,13 @@ fn the_branch_free_test_gives_the_reports_of_the_loop_without_it() {
             assert_eq!(reference.code, Some(0), "{what}: {}", reference.stderr);
             assert!(!reference.stdout.is_empty(), "{what}: no report");
             // The direct loop with the test; the default (the fused loop where it pays, the direct
-            // loop elsewhere); the switch alone, without the rest of the strict set.
-            let alone = blastx(&args, &[DEFAULT_OFF]);
+            // loop elsewhere); the switch alone, on the scan before `LOSAT_X_BXSCANBF`.
+            let alone = blastx(&args, &[DIRECT, SCAN_OFF, OFF]);
             for (arm, run, against) in [
                 ("on", blastx(&args, &[DIRECT]), &reference),
                 ("named", blastx(&args, &[DIRECT, ON]), &reference),
                 ("default", blastx(&args, &[]), &reference),
-                ("alone", blastx(&args, &[DEFAULT_OFF, ON]), &alone),
+                ("alone", blastx(&args, &[DIRECT, SCAN_OFF, ON]), &alone),
             ] {
                 assert_eq!(run.code, against.code, "{what} {arm}: {}", run.stderr);
                 assert!(run.stdout == against.stdout, "{what} {arm}: report differs");

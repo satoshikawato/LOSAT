@@ -21,8 +21,8 @@
 //! 2 and 5 kb (presence density 0.16-0.29 of the cells), 0.81 at 10 kb (0.37), 0.91 at 20 kb
 //! (0.44), 0.98 at 40 kb (0.49), 1.000 at 80 kb (0.51), 1.004-1.007 from 160 kb (0.53).
 //!
-//! The switch is read once; it is in the strict set (`utils/xswitch.rs`: on by default, `=0` or
-//! `LOSAT_X_DEFAULT=0` turns it off). It acts on the scans of the unit path (`x_pair_par.rs`)
+//! The switch is read once; it is in the strict set (`utils/xswitch.rs`: on by default, `=0`
+//! turns it off). It acts on the scans of the unit path (`x_pair_par.rs`)
 //! and of the reference frame loop (`blast_engine/run_impl.rs`).
 
 use super::blast_aascan::{determine_scanning_offsets, s_blast_aa_scan_subject, BlastOffsetPair};

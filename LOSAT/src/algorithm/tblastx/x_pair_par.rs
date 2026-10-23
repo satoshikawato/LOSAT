@@ -110,8 +110,8 @@
 //! boundaries. Units depend only on the inputs, never on the thread count; with one thread they
 //! run in order on the calling thread.
 //!
-//! `LOSAT_X_TBXBAND` (in the strict set: on unless `LOSAT_X_TBXBAND` is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set): `decide` does not apply `guard` (item 3) to a batch whose longest subject
+//! `LOSAT_X_TBXBAND` (in the strict set: on unless `LOSAT_X_TBXBAND` is `0`)
+//! : `decide` does not apply `guard` (item 3) to a batch whose longest subject
 //! chunk has at most as many letters as the reference table has cells (`x_band_fits`, a memory
 //! rule: the units' tables grow with the subject chunk). The batches the guard let through change
 //! nothing. The ones it rejected have a longest context and a longest subject chunk both longer than
@@ -136,7 +136,7 @@
 //! `build_groups` (the fallback).
 //!
 //! `LOSAT_X_SEEDCOMPACT` (in the strict set, `utils/xswitch.rs`: on unless `LOSAT_X_SEEDCOMPACT` is
-//! `0`, or `LOSAT_X_DEFAULT=0` and it is not set): a unit keeps its saved init HSPs
+//! `0`): a unit keeps its saved init HSPs
 //! as 28-byte records, NCBI's own record shape, copied out of a per-thread vector at their exact
 //! length; the merge expands them into today's `InitHSP`s, converts each chunk's list into a list
 //! of its exact length and moves the first chunk's list into the empty frame list. The section
@@ -146,8 +146,8 @@
 //! compared with `masked_reference`. The unit path against the frame loop is checked only through
 //! the frozen NCBI bytes, at 1 thread (frame loop) and 4 threads (units).
 //!
-//! `LOSAT_X_SEEDUNMAP` (in the strict set: on unless `LOSAT_X_SEEDUNMAP` is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set; it acts on Linux with glibc only, where transparent huge
+//! `LOSAT_X_SEEDUNMAP` (in the strict set: on unless `LOSAT_X_SEEDUNMAP` is `0`;
+//! it acts on Linux with glibc only, where transparent huge
 //! pages do not round mapped blocks up (`x_thp_rounds_up`), and only on the search pool, at two or
 //! more threads): where a unit's query-group span and subject chunk are both at least
 //! `X_MAPPED_MIN_SIDE` letters (`x_unit_mapped`), the unit diagonal table and the record vector of
@@ -156,8 +156,8 @@
 //! through the linking call. Only capacities change; the section above `X_MAPPED_BYTES` gives the
 //! reason, the three rules (sides, huge pages, one thread) and why no value changes.
 //!
-//! `LOSAT_X_TBXPREFETCH` (in the strict set, a value switch: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set; x86-64 only): the units of a subject whose largest unit
+//! `LOSAT_X_TBXPREFETCH` (in the strict set, a value switch: on unless it is `0`;
+//! x86-64 only): the units of a subject whose largest unit
 //! diagonal table has at least the switch's number of KiB (built-in 1,536, `X_PREFETCH_MIN_KIB`)
 //! run the scan with a prefetch of the cell of the hit `X_PREFETCH_AHEAD` entries ahead in the
 //! batch (`scan_unit` with `PF`). A prefetch reads nothing into the program and has no
@@ -165,8 +165,8 @@
 //! subjects run the scan without the hint (`PF` false), whose machine code is the one before the
 //! switch.
 //!
-//! `LOSAT_X_TBXQSLICE` (in the strict set, a value switch: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set; x86-64 only): unset (or `=1`), a context group of more than
+//! `LOSAT_X_TBXQSLICE` (in the strict set, a value switch: on unless it is `0`;
+//! x86-64 only): unset (or `=1`), a context group of more than
 //! 128 Ki letters whose span times the search's threads reaches 6 Mi letters is cut into slices of
 //! at most 128 Ki consecutive query offsets; `=N` cuts every group of more than N letters into
 //! slices of at most N (at most 64 slices a group). Each slice has its own lookup table, and the
@@ -176,8 +176,8 @@
 //! the same order, so the table and the chunk's sorted init HSPs are those of `scan_unit`. A batch
 //! with no cut group runs `scan_unit`, whose machine code is the one before the switch.
 //!
-//! `LOSAT_X_TBXUNITMASK` (in the strict set, a value switch: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set; unset or `=1` the built-in 256, `=N` N KiB): a unit takes
+//! `LOSAT_X_TBXUNITMASK` (in the strict set, a value switch: on unless it is `0`;
+//! unset or `=1` the built-in 256, `=N` N KiB): a unit takes
 //! a table of P cells, P the smallest power of two of at least its group's extent G (the query
 //! offsets from the group's first context to the next group's, the last group to the end of its
 //! last context, `x_group_extents`) plus the window, and the cell of hit (q, s) is
@@ -305,8 +305,7 @@ const OFFSET_ARRAY_SIZE: i32 = 4096;
 // ```
 // No NCBI counterpart: a LOSAT variable that chooses, per batch, between two LOSAT paths with the
 // same result (the unit path and the reference frame loop, module doc items 1-4); NCBI has one path.
-/// LOSAT_X_PAIRPARGATE: a strict-set switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is
-/// not set; `utils/xswitch.rs`).
+/// LOSAT_X_PAIRPARGATE: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
 pub(super) fn cost_gate() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRPARGATE"))
@@ -315,8 +314,8 @@ pub(super) fn cost_gate() -> bool {
 // No NCBI counterpart: a LOSAT variable that chooses, per batch, between two LOSAT paths with the
 // same result (the unit path and the reference frame loop, module doc item 3); NCBI has one path.
 // Read once per process, as the other modes of this file.
-/// LOSAT_X_TBXBAND: a strict-set switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not
-/// set; `utils/xswitch.rs`). With it `decide` does not apply `guard` (module doc item 3).
+/// LOSAT_X_TBXBAND: a strict-set switch (on unless it is `0`;
+/// `utils/xswitch.rs`). With it `decide` does not apply `guard` (module doc item 3).
 fn tbx_band() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXBAND"))
@@ -325,8 +324,8 @@ fn tbx_band() -> bool {
 // No NCBI counterpart: a LOSAT variable that chooses, per unit, between two tables with the same
 // result (module doc, LOSAT_X_TBXUNITMASK); NCBI has one table per thread. Read once per process,
 // as the other modes of this file.
-/// LOSAT_X_TBXUNITMASK: a strict-set value switch (`utils/xswitch.rs`). `None` when it is off (`0`,
-/// or `LOSAT_X_DEFAULT=0` and it is not set); otherwise the largest masked table, in KiB, that a
+/// LOSAT_X_TBXUNITMASK: a strict-set value switch (`utils/xswitch.rs`). `None` when it is off (`0`);
+/// otherwise the largest masked table, in KiB, that a
 /// unit takes for its size alone at `X_UNITMASK_MANY_THREADS` threads or more (`x_mask_max_cells`,
 /// module doc).
 fn unit_mask_kib() -> Option<usize> {
@@ -496,8 +495,7 @@ fn x_group_extents(contexts: &[QueryContext]) -> Vec<usize> {
 // No NCBI counterpart: chooses how LOSAT holds a unit's saved init HSPs between the units and the
 // merge (as NCBI's own record, `XUnitHsp`, or as today's `InitHSP`); it does not change any value
 // NCBI computes. Read once per process, as the other modes of this file.
-/// A strict-set switch (on unless `LOSAT_X_SEEDCOMPACT` is `0`, or `LOSAT_X_DEFAULT=0` and it is
-/// not set; `utils/xswitch.rs`).
+/// A strict-set switch (on unless `LOSAT_X_SEEDCOMPACT` is `0`; `utils/xswitch.rs`).
 fn seed_compact() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_SEEDCOMPACT"))
@@ -506,8 +504,8 @@ fn seed_compact() -> bool {
 // No NCBI counterpart: chooses the capacity LOSAT gives three blocks of the unit path so that glibc
 // maps them (section above `X_MAPPED_BYTES`); it does not change any value NCBI computes. Read once
 // per process, as the other modes of this file.
-/// A strict-set switch (on unless `LOSAT_X_SEEDUNMAP` is `0`, or `LOSAT_X_DEFAULT=0` and it is
-/// not set; `utils/xswitch.rs`). It joined the set on 2026-10-17 in the change that added it, on by
+/// A strict-set switch (on unless `LOSAT_X_SEEDUNMAP` is `0`;
+/// `utils/xswitch.rs`). It joined the set on 2026-10-17 in the change that added it, on by
 /// default under the Owner's rule of 2026-10-17 (a speed-up or memory reduction lands on by default).
 fn seed_unmap() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
@@ -549,8 +547,8 @@ const X_PREFETCH_MAX_KIB: usize = 1 << 22;
 // No NCBI counterpart: a cache hint in LOSAT's unit scan (module doc); NCBI's loop gives none, and
 // a prefetch has no architectural effect, so no value NCBI computes changes. Read once per process,
 // as the other modes of this file.
-/// LOSAT_X_TBXPREFETCH: a strict-set value switch (`utils/xswitch.rs`). `None` when it is off (`0`,
-/// or `LOSAT_X_DEFAULT=0` and it is not set) and on targets other than x86-64; otherwise the
+/// LOSAT_X_TBXPREFETCH: a strict-set value switch (`utils/xswitch.rs`). `None` when it is off (`0`)
+/// and on targets other than x86-64; otherwise the
 /// smallest largest-unit table, in KiB, of a subject whose units prefetch (2 to 4,194,304; the
 /// built-in `X_PREFETCH_MIN_KIB` when the variable is not set or holds anything else).
 fn tbx_prefetch_min_kib() -> Option<usize> {

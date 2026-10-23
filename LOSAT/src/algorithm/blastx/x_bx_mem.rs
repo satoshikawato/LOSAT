@@ -33,12 +33,13 @@
 //!   split query are searched in waves of at most K chunks, each chunk's subjects as tasks of
 //!   `UNIT_CAP_SUBJECTS_PER_TASK` on the pool (`chunk_unit_cap`), instead of waves of one chunk per
 //!   thread. A wave of a split batch's chunks inside the capped batch flow has K + 1 chunks less the
-//!   capped batches searched at its start (at least one, `chunk_wave`), so the lookup tables alive at
-//!   once stay near K (at most about 2K) whatever the number of threads. The capped flow keeps the
+//!   capped batches searched and the chunks other waves hold at its start (at least one; it holds its
+//!   chunks until it ends, `chunk_wave`), so the lookup tables alive at once stay near K (at most
+//!   about 2K) whatever the number of threads. The capped flow keeps the
 //!   threads busy: it counts the batches being searched, not the batches not yet written (up to
 //!   `flow_bound` of those, so a slow batch at the head of the output does not stop the others), a
 //!   search that ends starts the next batch itself, and the subject flow's helpers inside a capped
-//!   batch leave once every task of the chunk is offered (`in_capped_batch`) instead of waiting for
+//!   batch leave once every task of the chunk is claimed (`in_capped_batch`) instead of waiting for
 //!   the batch's thread to finish.
 //!
 //! Exactness. A subject's computation depends on the subject and the query chunk alone, not on the
@@ -157,12 +158,43 @@ impl Drop for XCappedBatch {
     }
 }
 
-/// No NCBI counterpart: chunks in the next wave of a split query under the cap K: K + 1 less the
-/// capped batches searched now (the batch itself among them), at least one, at most K.
-pub(crate) fn chunk_wave(k: usize) -> usize {
-    (k + 1)
-        .saturating_sub(X_CAPPED_BATCHES.load(Ordering::Relaxed))
-        .clamp(1, k)
+// No NCBI counterpart: the chunks the waves of split queries hold now (scheduling only).
+static X_WAVE_CHUNKS: AtomicUsize = AtomicUsize::new(0);
+
+/// No NCBI counterpart: the chunks of one wave of a split query, held until the wave ends.
+pub(crate) struct XChunkWave(usize);
+
+impl XChunkWave {
+    pub(crate) fn size(&self) -> usize {
+        self.0
+    }
+}
+
+impl Drop for XChunkWave {
+    fn drop(&mut self) {
+        X_WAVE_CHUNKS.fetch_sub(self.0, Ordering::Relaxed);
+    }
+}
+
+/// No NCBI counterpart: the next wave of a split query under the cap K: K + 1 chunks less the capped
+/// batches searched now (the batch itself among them) and the chunks other waves hold, at least
+/// one, at most K. Waves that start at once take their chunks one after another, and a wave keeps
+/// its chunks until it ends, so a batch that starts later does not take K as well.
+pub(crate) fn chunk_wave(k: usize) -> XChunkWave {
+    let batches = X_CAPPED_BATCHES.load(Ordering::Relaxed);
+    let mut held = X_WAVE_CHUNKS.load(Ordering::Relaxed);
+    loop {
+        let size = (k + 1).saturating_sub(batches + held).clamp(1, k);
+        match X_WAVE_CHUNKS.compare_exchange_weak(
+            held,
+            held + size,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return XChunkWave(size),
+            Err(now) => held = now,
+        }
+    }
 }
 
 /// No NCBI counterpart: whether a batch of the capped batch flow is being searched now (on this
@@ -272,6 +304,8 @@ pub(super) fn chunk_subjects_on_pool(
     x_containment: bool,
 ) -> Result<Vec<(usize, SubjectComputation)>> {
     use rayon::prelude::*;
+    // The cap acts only where the workers keep their tables (`unit_cap`).
+    crate::utils::xreach::x_reach!("LOSAT_X_BXDIAGKEEP", true);
     let last = batch.contexts.last().expect("BLASTX contexts");
     let length = last.offset + last.length;
     let n = subjects.len();
@@ -315,4 +349,18 @@ pub(super) fn chunk_subjects_on_pool(
         results.extend(part?);
     }
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    // No NCBI counterpart (scheduling only). Other tests may hold waves at the same time, so only
+    // the bounds are checked.
+    #[test]
+    fn a_wave_holds_its_chunks_until_it_ends() {
+        let first = super::chunk_wave(8);
+        assert!((1..=8).contains(&first.size()));
+        let second = super::chunk_wave(8);
+        assert!(second.size() <= 9usize.saturating_sub(first.size()).max(1));
+        drop((first, second));
+    }
 }

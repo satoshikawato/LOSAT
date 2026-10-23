@@ -736,6 +736,20 @@ mod tests {
                     assert_eq!(out, &blastna[1..=length], "{name} {i}: blastna");
                     let codes = ncbi_letters(packed, length, &runs);
                     assert_stored_forms(&store, packed, &codes, &format!("{name} {i}"));
+                    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): the store of the sequence read alone, in
+                    // the buffer of its read, is the same.
+                    let alone = db
+                        .x_read_sequence_mapped(range.first_ordinal + i as u32)
+                        .unwrap();
+                    assert_eq!(
+                        PackedNucleotide::x_from_stored_buffer(
+                            alone.x_into_nucleotide_packed(),
+                            length,
+                            &runs
+                        ),
+                        store,
+                        "{name} {i}: the store of the read buffer"
+                    );
                     checked += 1;
                 }
             }

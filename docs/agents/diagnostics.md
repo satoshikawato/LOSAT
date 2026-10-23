@@ -315,8 +315,10 @@ export LOSAT_X_BPUNGAPSENT=1
 export LOSAT_X_BXBATCH=1
 export LOSAT_X_BXCHUNK=64
 export LOSAT_X_BXCHUNKFLOW=1
+export LOSAT_X_BXDBSTREAM=256
 export LOSAT_X_BXDEFER=1
 export LOSAT_X_BXDIAG=1
+export LOSAT_X_BXEVALEMPTY=1
 export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
 export LOSAT_X_BXLAZYCTX=1
@@ -380,7 +382,8 @@ export LOSAT_X_TBXUNGAP=1
 export LOSAT_X_TBXUNITMASK=256
 ```
 
-Value switches: `LOSAT_X_BXCHUNK` (1 or more, built-in 64), `LOSAT_X_TBXPREFETCH` (2 to
+Value switches: `LOSAT_X_BXCHUNK` (1 or more, built-in 64), `LOSAT_X_BXDBSTREAM` (2 to
+1,048,576, built-in 256: KiB of a block of BLASTX `-db`), `LOSAT_X_TBXPREFETCH` (2 to
 4,194,304, built-in 1,536: KiB of a subject's largest unit table), `LOSAT_X_TBXEXTBATCH` (2 to
 4,194,304, built-in 256: Ki letters of a subject's largest unit query-group span), `LOSAT_X_TBXQSLICE`
 (2 to 1,073,741,824: letters of a query slice, on every group longer than that; `1` or unset: the
@@ -4512,6 +4515,42 @@ Scheduling (each value computed by one thread with the original function; order 
   x1.004 with the same instructions; with one chunk per batch (the 10 transcripts of BX-t10 against Swiss-Prot at 8
   and 16 threads, 1,000 short reads against Swiss-Prot at 16) x0.996-1.000; the `-subject` case above x0.988-1.002
   (kept on the waves).
+- `LOSAT_X_BXDBSTREAM=1` or `=KiB` (BLASTX `-db`, memory; in the strict set from the pull request that added it:
+  on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, `KiB` from 2 to 1,048,576, otherwise 256): the search reads
+  the database's sequences where it searches them, a block at a time, instead of the copy of the whole database that
+  `BlastxDatabase::read_stores` makes before the first query batch (`blastx/x_db_stream.rs`, exactness argument in its
+  header). The database is checked once before the first batch with the reads and checks of the copy
+  (`x_check_stores`: the same error fails the same batch with the same text) and nothing of it is kept but the length
+  of its longest sequence. Each pass of the preliminary search over the database (a query chunk searched on one
+  thread, a chunk of `LOSAT_X_BXPAR`) reads blocks of `KiB` in ordinal order and drops each before the next; a task of
+  `LOSAT_X_BXSUBJFLOW` reads its subjects with one read per volume, a wave of the pool reads its subjects before its
+  fork. The sink reads the lengths of the subjects in its order from the index (16,384 per read) and, for `-ungapped`,
+  their residues in blocks. The composition redo (speculated and serial), the traceback of `-comp_based_stats 0` and
+  the reports' records read each subject they need with one read. Every read gives the stored bytes of the copy, so
+  every report is the same. Shadow: `LOSAT_X_BXDBSTREAMSHADOW=1` also makes the copy and compares every block, window of
+  lengths and read with it (and the check's error with the copy's), stopping at the first difference; at exit
+  `[X_SHADOW] BXDBSTREAM blocks= sequences= residues= lengths= reads= identical` (`tests/blastx_db_stream.rs`).
+  Measured 2026-10-22 (workstation, every report identical): peak RssAnon of `uniref50.03` x 201 reads at 8
+  threads 49.3 MiB against 2,888.2 MiB with `=0` (NCBI: 61 MiB at 1 thread), untimed. Timed on node 1, warmed 3 s,
+  8 alternated pairs: against `=0` alone, Swiss-Prot x 201 reads x0.992 at 8 threads and x0.974 at 16,
+  `uniref50.03` x 201 x0.996 and x0.992, but x1.0067 at 1 thread (7 of 8 pairs above 1: cycles:u +0.8 to +1.2 %
+  at blocks of 16 KiB to 1 MiB, in the scan kernels, not in the new code). With `LOSAT_X_BXEVALEMPTY`, against the
+  binary before both: Swiss-Prot x 201 x0.980 / x0.975 / x0.966 at 1 / 8 / 16 threads, `uniref50.03` x 201 x0.969 /
+  x0.950 at 8 / 16, no pair above 1. Max RSS there: Swiss-Prot 15.6 / 31.3 / 38.4 MiB against 219.4 / 231.4 /
+  239.9, `uniref50.03` 52.3 / 63.1 MiB against 2,825.7 / 2,835.7.
+- `LOSAT_X_BXEVALEMPTY=1` (BLASTX, speed; in the strict set from the pull request that added it, with
+  `LOSAT_X_BXDBSTREAM`: on unless `=0` or `LOSAT_X_DEFAULT=0`): the gapped evaluation of a subject without
+  preliminary HSPs (`statistics::evaluate_gapped`, which the sink calls for every subject, and the composition redo
+  and the traceback call for theirs) returns at once the list that both of its ways give for no input
+  (`link_uneven`'s first lines, and its loop: no HSP, best e-value 0), without the Karlin and Gumbel lookups and the
+  per-context vectors it built first. Most subjects of a database have no HSP: on Swiss-Prot x 201 reads at one
+  thread the evaluation was 2.1 % of the run's user cycles (`perf record`, workstation). Shadow:
+  `LOSAT_X_BXEVALEMPTYSHADOW=1` also evaluates every empty input the full way; at exit, after at least one
+  comparison, `[X_SHADOW] BXEVALEMPTY lists_compared=N identical` (`tests/blastx_db_stream.rs`). At a difference the
+  same line, with the lists compared before it, comes just before the panic. Measured 2026-10-22 (workstation, with
+  `LOSAT_X_BXDBSTREAM`, against the binary before both): Swiss-Prot x 201 reads `-db` at one thread, instructions:u
+  x0.9877 and cycles:u x0.9835 (`perf stat`, 3 runs each; x0.9873 and x0.9878 against both switches `=0`), wall
+  x0.980 (node 1, 8 alternated pairs, none above 1); `-subject` (201 reads x PemoMJNVA) instructions:u x0.9993.
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

@@ -931,10 +931,20 @@ pub(crate) fn search_core(
             } else {
                 subjects.len().div_ceil(wave_size)
             };
+            // EXPERIMENT (LOSAT_X_BXDBSTREAM): the blocks of the serial pass.
+            let mut x_pass = subjects.x_pass();
             for wave_index in 0..x_waves {
                 let wave_start = wave_index * wave_size;
                 let wave: Vec<usize> =
                     (wave_start..subjects.len().min(wave_start + wave_size)).collect();
+                // EXPERIMENT (LOSAT_X_BXDBSTREAM): the subjects of a wave that the pool searches,
+                // read before its fork.
+                let x_wave_block = if pool.enabled() {
+                    subjects.x_read_range(wave_start, wave_start + wave.len())?
+                } else {
+                    None
+                };
+                let x_wave_subjects = subjects.x_with_block(x_wave_block.as_ref());
                 let x_t = super::x_timing::lap();
                 // Diagnostic (LOSAT_TIMING): the wave's tasks (x_timing::SubjectWave). No NCBI
                 // counterpart.
@@ -976,7 +986,7 @@ pub(crate) fn search_core(
                                                                 + x_within
                                                         );
                                                         compute_subject(
-                                                            subjects,
+                                                            x_wave_subjects,
                                                             batch,
                                                             &params,
                                                             options,
@@ -1001,7 +1011,7 @@ pub(crate) fn search_core(
                                         debug_assert_eq!(oid, wave_index * wave_size + within);
                                         x_wave.task(|| {
                                             compute_subject(
-                                                subjects,
+                                                x_wave_subjects,
                                                 batch,
                                                 &params,
                                                 options,
@@ -1035,8 +1045,13 @@ pub(crate) fn search_core(
                         computed?
                     } else {
                         let x_t = super::x_timing::lap();
+                        let x_subjects = if x_wave_block.is_some() {
+                            x_wave_subjects
+                        } else {
+                            x_pass.view(oid)?
+                        };
                         let computed = compute_subject(
-                            subjects,
+                            x_subjects,
                             batch,
                             &params,
                             options,
@@ -1295,9 +1310,11 @@ fn x_compute_chunk(
     // without a hit. The sink gets the others as empty computations (`SubjectComputation::
     // empty`), so it sees the same calls as from the serial chunk loop.
     let mut results = Vec::new();
+    // EXPERIMENT (LOSAT_X_BXDBSTREAM): the blocks of the chunk's pass.
+    let mut x_pass = subjects.x_pass();
     for oid in 0..subjects.len() {
         let mut computed = compute_subject(
-            subjects,
+            x_pass.view(oid)?,
             batch,
             &params,
             options,
@@ -1383,7 +1400,9 @@ fn compute_subject(
     worker_probe("start", oid);
     let mut containment = Vec::new();
     let encoded = subjects.encoded_with_sentinel(oid);
-    let subject_length = subjects.length(oid);
+    // `subjects.length(oid)` for every kind of subjects: the residues before the sentinel byte (a
+    // database read in blocks then looks the subject up once, LOSAT_X_BXDBSTREAM).
+    let subject_length = encoded.len() - 1;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
     // ```c++
     //       if (hit_params->link_hsp_params && !kNucleotide &&

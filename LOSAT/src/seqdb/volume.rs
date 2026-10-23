@@ -376,6 +376,29 @@ impl Volume {
         Ok(block)
     }
 
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the numbers of residues of the proteins `first..end`
+    /// (volume-relative, non-empty), read from the index alone with one read of their offsets:
+    /// `read_block(first, end, _)`'s `protein(i).len()`.
+    pub fn x_protein_lengths(&self, first: u32, end: u32) -> Result<Vec<u32>, SeqDbError> {
+        assert!(
+            self.index.seqtype == SeqType::Protein,
+            "protein lengths of a nucleotide volume"
+        );
+        self.check_range(first, end)?;
+        let offsets = self.index.sequence_offsets(first, end)?;
+        // The residues end before the sentinel byte at the start of the next sequence's offset;
+        // read from the file, the entries can break that only if the file changed after the open.
+        offsets
+            .windows(2)
+            .map(|pair| {
+                pair[1]
+                    .checked_sub(pair[0])
+                    .and_then(|bytes| bytes.checked_sub(1))
+            })
+            .collect::<Option<Vec<u32>>>()
+            .ok_or_else(|| self.index.sequence_changed(first, offsets.len()))
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2316
     // ```c++
     // CTempString

@@ -133,10 +133,11 @@ impl<'a> XDbStream<'a> {
                     );
                     SHADOW_SEQUENCES.store(lengths.len() as u64, Ordering::Relaxed);
                 }
-                (Err(check), Err(copy)) => shadow_assert(
-                    format!("{check:#}") == format!("{copy:#}"),
-                    || format!("the check's error ({check:#}) differs from the copy's ({copy:#})"),
-                ),
+                (Err(check), Err(copy)) => {
+                    shadow_assert(format!("{check:#}") == format!("{copy:#}"), || {
+                        format!("the check's error ({check:#}) differs from the copy's ({copy:#})")
+                    })
+                }
                 _ => shadow_assert(false, || {
                     "the check and the copy differ in success".to_string()
                 }),

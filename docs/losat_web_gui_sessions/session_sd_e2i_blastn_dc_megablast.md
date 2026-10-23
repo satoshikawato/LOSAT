@@ -19,10 +19,10 @@ NCBI の経路（固定 commit 598d8ae6 のソースで確かめ、表にする�
 - 検査：`c++/src/algo/blast/core/blast_options.c:1242-1270`（`s_DiscWordOptionsValidate`：word size 11・12、template の長さ）と `:1400-1406` の呼び出し。
 - lookup：`c++/src/algo/blast/core/blast_nalookup.c`（`GetDiscTemplateType`（606-642）、discontiguous の megablast の表の作り方、2 つの template）、`mb_lookup` の構造（`blast_nalookup.h`）。
 - 走査：`c++/src/algo/blast/core/blast_nascan.c:2202-2626`（`s_MB_DiscWordScanSubject_1`、`_TwoTemplates_1`、`_11_18_1`、`_11_21_1`、選び方）。
-- 拡張と以後：discontiguous の hit の ungapped 拡張（`na_ungapped.c`）、two-hit の窓、gapped の段階、traceback、報告。BLASTN の既存の移植（megablast と blastn）と違う分岐だけを、E2g の棚卸し（`docs/evidence/losat_web_e2g/INVENTORY.tsv`）の行に照らして洗い出す。
+- 拡張と以後：discontiguous の hit の ungapped 拡張（`na_ungapped.c`）、two-hit の窓、gapped の段階、traceback、報告。BLASTN の既存の移植（megablast と blastn）と違う分岐だけを、E2g の棚卸し（`docs/evidence/losat_web_e2g/INVENTORY.tsv`。2026-10-23 にリリース資産へ移動：[ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md)）の行に照らして洗い出す。
 - 報告：outfmt 0 の prolog と epilog、outfmt 7 の見出しの program と task の表記、`Method:` の有無。
 
-1. **棚卸し（計画 DW-12）**：NCBI の dc-megablast の経路の関数を、E2g の棚卸しと同じ方式（`docs/evidence/losat_web_e2g/` の `inventory_refs.py`・`build_inventory.py`・`stage2/`）で表にする（`docs/evidence/losat_web_e2i/INVENTORY.tsv`）。megablast・blastn と共有で E2g が faithful とした行は、dc-megablast で通る分岐が同じかだけを確かめる。読み取り専用の sonnet の agent に範囲ごとに分けてよい。
+1. **棚卸し（計画 DW-12）**：NCBI の dc-megablast の経路の関数を、E2g の棚卸しと同じ方式（`docs/evidence/losat_web_e2g/` の `inventory_refs.py`・`build_inventory.py`・`stage2/`）で表にする（`docs/evidence/losat_web_e2i/INVENTORY.tsv`。2026-10-23 にリリース資産へ移動：[ARCHIVED.md](../evidence/losat_web_e2i/ARCHIVED.md)）。megablast・blastn と共有で E2g が faithful とした行は、dc-megablast で通る分岐が同じかだけを確かめる。読み取り専用の sonnet の agent に範囲ごとに分けてよい。
 2. **一括の移植**：未移植と差のある移植を、NCBI の関数ごとに簡略化せずに transpile する。Rust の移植箇所の直上に NCBI のファイル・行と断片を書く。速度のための LOSAT の方式（詰めた配列の走査、並列化）は、出力が同じなら使ってよい。`blastn_task` で `dc-megablast` と `blastn-short` を受け付け、`-template_type`・`-template_length` を NCBI と同じ制約と依存で足す（`cli.rs` の拒否の一覧から外す）。`rmblastn`（行列の得点と masklevel）は明示的な拒否のまま。
 3. **fixture**：NCBI BLAST+ 2.17.0 の出力を oracle として固定する（`LOSAT/tests/outfmt0_manifest.tsv` と `LOSAT/tests/blastn_regression_fixtures.py` の方式。outfmt 0/6/7、スレッド 1/2/4）。dc-megablast は template の種類（coding・optimal・両方）× 長さ（16・18・21）× word size（11・12）、blastn-short は 50 塩基より短い query（primer の長さ）と既定値の上書き（`-word_size`・`-reward`・`-penalty`・`-evalue`・`-dust`）、両方の鎖、複数の query の batch、曖昧な文字、`-lcase_masking`、`-dust`、遠い種どうしの組（`LOSAT/tests/fasta` の genome の窓）、ヒット無し。変更前の実行ファイルでも `check` して、fixture が分岐を区別することを記録する。
 4. **sweep**：E2c の `scoring_sweep.py`・`word_size_sweep.py`・`check_inputs.py`、E2f の batch の sweep を `-task dc-megablast` と `-task blastn-short` に広げ、NCBI と同じ拒否、outfmt 0/6/7 のバイト一致、明示的な拒否のどれかになることを確かめる。
@@ -30,7 +30,7 @@ NCBI の経路（固定 commit 598d8ae6 のソースで確かめ、表にする�
 6. **ゲート**：BLASTN の既存のゲート（Gate A、S02 の capture、E2c・E2f・E2g の sweep と fixture、CI の速い検査）に退行なし、v1 の WASI の行列、V-ABI quick と full、`cargo fmt --check`・clippy・`cargo test --all-features`。V-PERF は megablast と blastn の case が非退行であること（dc-megablast は新しい経路なので、NCBI との時間の比を記録する）。
 7. **独立監査**：観点ごとに sonnet の agent（読み取り専用）で、経路の網羅、移植の忠実さ、拒否の理由、ABI を確かめる（S08 の `~/.cache/losat-web-gui-target/s08-audit/` の指示の形）。4 つとも supported になるまで続ける。
 
-完了条件は計画 §7 の SD の行による。記録は `docs/evidence/losat_web_e2i/README.md`（ゲート記録、`AUTHORITY.md`、`INVENTORY.tsv`、`evidence.sha256`、run の directory）。
+完了条件は計画 §7 の SD の行による。記録は `docs/evidence/losat_web_e2i/README.md`（ゲート記録、`AUTHORITY.md`、`INVENTORY.tsv`、`evidence.sha256`、run の directory。`INVENTORY.tsv` と run の directory の大半のファイルは 2026-10-23 にリリース資産へ移動：[ARCHIVED.md](../evidence/losat_web_e2i/ARCHIVED.md)）。
 
 ## 進め方
 

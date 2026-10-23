@@ -106,47 +106,16 @@ pub(crate) fn write_blastp_seqalign(
         let Some(hit_list) = hit_list else {
             continue;
         };
-        subject_records.clear();
-        hsp_records.clear();
-        let q_shift = queries.placements.offset(q_idx) as i32;
-        for (list_index, hsp_list) in hit_list
-            .hsplist_array
-            .iter()
-            .take(hit_list.hsplist_count)
-            .enumerate()
-        {
-            if hsp_list.hsps.is_empty() {
-                continue;
-            }
-            let s_idx = hsp_list.hsps[0].s_idx as usize;
-            let subject = subject_records.len() as u32;
-            // A protein subject row (strand unknown) does not read its length.
-            subject_records.push(subjects.record(s_idx, subject_placements.offset(s_idx), 0));
-            let s_shift = subject_placements.offset(s_idx) as i32;
-            for (hsp_index, hsp) in hsp_list.hsps.iter().enumerate() {
-                debug_assert_eq!(hsp.s_idx as usize, s_idx, "one subject per HSP list");
-                let (num_ident, num_positives) = engine_counts
-                    .get((q_idx as u32, list_index as u32, hsp_index as u32))
-                    .unwrap_or((hsp.num_ident, hsp.num_positives));
-                hsp_records.push(HspRecord {
-                    subject,
-                    q_offset: hsp.q_start as i32 - 1 - q_shift,
-                    q_end: hsp.q_end as i32 - q_shift,
-                    s_offset: hsp.s_start as i32 - 1 - s_shift,
-                    s_end: hsp.s_end as i32 - s_shift,
-                    q_frame: 0,
-                    s_frame: 0,
-                    score: hsp.raw_score,
-                    num: 0,
-                    evalue: hsp.e_value,
-                    bit_score: hsp.bit_score,
-                    num_ident: num_ident as i32,
-                    num_positives: num_positives as i32,
-                    comp_adjust: hsp.comp_adjustment_method,
-                    ops: hsp.gap_info.as_deref().unwrap_or(&[]),
-                });
-            }
-        }
+        query_records(
+            hit_list,
+            q_idx,
+            &subjects,
+            subject_placements,
+            engine_counts,
+            queries.placements.offset(q_idx) as i32,
+            &mut subject_records,
+            &mut hsp_records,
+        );
         buf.clear();
         if write_query(
             format,
@@ -160,4 +129,60 @@ pub(crate) fn write_blastp_seqalign(
         }
     }
     Ok(())
+}
+
+/// The subject and HSP records of query `q_idx`'s hit list (what `write_query` and the archive
+/// write), replacing the contents of `subject_records` and `hsp_records`. `q_shift` is the start
+/// of the query's interval in its record (the HSPs' coordinates are the record's, less the shift).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn query_records<'a>(
+    hit_list: &'a BlastpHitList,
+    q_idx: usize,
+    subjects: &SubjectNames<'a>,
+    subject_placements: &Placements,
+    engine_counts: &EngineCounts,
+    q_shift: i32,
+    subject_records: &mut Vec<SubjectRecord<'a>>,
+    hsp_records: &mut Vec<HspRecord<'a>>,
+) {
+    subject_records.clear();
+    hsp_records.clear();
+    for (list_index, hsp_list) in hit_list
+        .hsplist_array
+        .iter()
+        .take(hit_list.hsplist_count)
+        .enumerate()
+    {
+        if hsp_list.hsps.is_empty() {
+            continue;
+        }
+        let s_idx = hsp_list.hsps[0].s_idx as usize;
+        let subject = subject_records.len() as u32;
+        // A protein subject row (strand unknown) does not read its length.
+        subject_records.push(subjects.record(s_idx, subject_placements.offset(s_idx), 0));
+        let s_shift = subject_placements.offset(s_idx) as i32;
+        for (hsp_index, hsp) in hsp_list.hsps.iter().enumerate() {
+            debug_assert_eq!(hsp.s_idx as usize, s_idx, "one subject per HSP list");
+            let (num_ident, num_positives) = engine_counts
+                .get((q_idx as u32, list_index as u32, hsp_index as u32))
+                .unwrap_or((hsp.num_ident, hsp.num_positives));
+            hsp_records.push(HspRecord {
+                subject,
+                q_offset: hsp.q_start as i32 - 1 - q_shift,
+                q_end: hsp.q_end as i32 - q_shift,
+                s_offset: hsp.s_start as i32 - 1 - s_shift,
+                s_end: hsp.s_end as i32 - s_shift,
+                q_frame: 0,
+                s_frame: 0,
+                score: hsp.raw_score,
+                num: 0,
+                evalue: hsp.e_value,
+                bit_score: hsp.bit_score,
+                num_ident: num_ident as i32,
+                num_positives: num_positives as i32,
+                comp_adjust: hsp.comp_adjustment_method,
+                ops: hsp.gap_info.as_deref().unwrap_or(&[]),
+            });
+        }
+    }
 }

@@ -1,20 +1,17 @@
 name: Platform checks
 
 # LOSAT on Linux x64, Linux arm64, Windows x64, macOS arm64 and macOS x64, with the performance
-# switches on (the default, LOSAT/src/utils/xswitch.rs) and off (LOSAT_X_DEFAULT=0, the reference
-# paths):
-#  - outputs: release binary, 49 cases (all five programs) at 1 and 4 threads in both modes; the
-#    outputs of the two modes must be byte-identical and the exit codes 0 (LOSAT/tests/platform_checks.py);
+# switches as they are by default (LOSAT/src/utils/xswitch.rs):
+#  - outputs: release binary, 49 cases (all five programs) at 1 and 4 threads; the outputs of the
+#    two thread counts must be byte-identical and the exit codes 0 (LOSAT/tests/platform_checks.py);
 #    on Linux arm64 the release binary also passes the floating-point contract check
 #    (LOSAT/tests/check_fp_contract.py binary; ci.yml checks the Linux x64 binary);
 #    on the two arm64 platforms one more mode, LOSAT_X_DPNEON2=1 (the NEON kernels in register
 #    pairs, off unless set), must give the same outputs as well;
 #  - compare: the hashes of the platforms of the run must equal each other (no expected hash is
 #    stored; the frozen hashes are checked on Linux x64 by ci.yml);
-#  - tests: cargo test --all-features (cargo-nextest) in both modes, built once per platform, on the
-#    platforms other than Linux x64 (ci.yml runs both modes on Linux x64); the reference mode leaves
-#    out the test files whose runs set every LOSAT_* variable themselves
-#    (LOSAT/tests/reference_step_targets.sh).
+#  - tests: cargo test --all-features (cargo-nextest), built once per platform, on the platforms
+#    other than Linux x64 (ci.yml runs them on Linux x64).
 #
 # Two sets of platforms (job `changes` chooses):
 #  - pull-request (a pull request into main, normally the promotion of dev): outputs on Linux
@@ -45,7 +42,6 @@ on:
       - '.github/workflows/platform-checks.yml'
       - 'LOSAT/tests/platform_checks.py'
       - 'LOSAT/tests/platform_check_cases.json'
-      - 'LOSAT/tests/reference_step_targets.sh'
   schedule:
     - cron: '23 19 * * 0'
   workflow_dispatch:
@@ -97,7 +93,7 @@ jobs:
         run: |
           set -euo pipefail
           # The platforms. `extra` adds the mode of the arm64 platforms (LOSAT_X_DPNEON2 is off
-          # unless set); the entries without it run the two standard modes.
+          # unless set); the entries without it run the standard mode.
           neon='--extra-mode dpneon2=LOSAT_X_DPNEON2=1'
           o_linux_x64='{"runner":"ubuntu-24.04","id":"linux-x64","python":"python3"}'
           o_linux_arm64='{"runner":"ubuntu-24.04-arm","id":"linux-arm64","python":"python3","extra":"'"$neon"'"}'
@@ -139,7 +135,7 @@ jobs:
             else
               # Pattern = the former `pull_request: paths:` list (the `on.push.paths` list above), as
               # anchored extended regular expressions (`**` = .*, `*` = [^/]*).
-              pattern='^(LOSAT/src/.*|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/build\.rs|\.github/workflows/platform-checks\.yml|LOSAT/tests/platform_checks\.py|LOSAT/tests/platform_check_cases\.json|LOSAT/tests/reference_step_targets\.sh)$'
+              pattern='^(LOSAT/src/.*|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/build\.rs|\.github/workflows/platform-checks\.yml|LOSAT/tests/platform_checks\.py|LOSAT/tests/platform_check_cases\.json)$'
               files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" -q '.[].filename')
               echo "Changed files:"
               printf '%s\n' "$files"
@@ -164,7 +160,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   outputs:
-    name: default = LOSAT_X_DEFAULT=0 (${{ matrix.id }})
+    name: outputs (${{ matrix.id }})
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
     strategy:
@@ -198,7 +194,7 @@ jobs:
       - name: Floating-point contract (release binary)
         if: matrix.id == 'linux-arm64'
         run: mkdir -p platform-check && python3 LOSAT/tests/check_fp_contract.py binary --losat LOSAT/target/release/losat --out platform-check/fp-contract.txt
-      - name: Default against LOSAT_X_DEFAULT=0, 49 cases, 1 and 4 threads
+      - name: Outputs, 49 cases, 1 and 4 threads
         run: ${{ matrix.python }} LOSAT/tests/platform_checks.py run --losat LOSAT/target/release/losat --out platform-check ${{ matrix.extra }}
       - uses: actions/upload-artifact@v4
         if: always()
@@ -234,7 +230,7 @@ jobs:
           python3 LOSAT/tests/platform_checks.py compare "${args[@]}"
 
   tests:
-    name: cargo test, default and reference (${{ matrix.id }})
+    name: cargo test (${{ matrix.id }})
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
     strategy:
@@ -242,11 +238,9 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.changes.outputs.tests_matrix) }}
     runs-on: ${{ matrix.runner }}
-    # Two full cargo test runs in debug. On Windows x64 the default run took 49 min and the
-    # reference run did not finish within the former 90 min (2026-10-17, dev with the eight blastp
-    # default switches: their integration tests take 2-6 min each there). On 2026-10-18 the job
-    # took 82-130 min, and on macOS x64 it hit this limit; since then the reference run leaves out
-    # the files that would repeat the default run (90 % of its time on Linux x64, 2026-10-21).
+    # One cargo nextest run per platform. Until 2026-10 the job also ran the tests with every switch off;
+    # then (2026-10-18, two cargo test runs) it took 82-130 min and hit this limit on macOS x64. The
+    # limit stays until two full runs show the time of one run.
     timeout-minutes: 150
     env:
       # Optimized test code; the test profile keeps the dev profile's debug assertions and
@@ -273,25 +267,12 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest@0.9.148
-      # The switches are read at run time (LOSAT/src/utils/xswitch.rs), so one build serves both
-      # modes; the second step runs the test binaries the first one built.
-      - name: cargo nextest run --all-features, default
+      - name: cargo nextest run --all-features
         run: |
           cd LOSAT
           cargo nextest run --locked --all-features --no-fail-fast
           cargo test --locked --all-features --doc
         env:
-          LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
-      # Without the test files marked "CI reference step: skipped": each of their runs sets its own
-      # LOSAT_* variables, so it would repeat the default step (LOSAT/tests/reference_step_targets.sh).
-      - name: cargo nextest run --all-features, reference (LOSAT_X_DEFAULT=0)
-        if: ${{ !cancelled() }}
-        run: |
-          cd LOSAT
-          targets=$(bash tests/reference_step_targets.sh)
-          cargo nextest run --locked --all-features --no-fail-fast $targets
-        env:
-          LOSAT_X_DEFAULT: '0'
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
 
   # The check to require in the ruleset: it always runs and fails only if a job failed or was

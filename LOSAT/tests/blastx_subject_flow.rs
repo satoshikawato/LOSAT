@@ -271,7 +271,7 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
     // 30,000 letters: three query chunks (blastx/split.rs), each against 3,422 subjects (the 1,711
     // proteins twice), 54 tasks of 64. LOSAT_X_BXCHUNKFLOW needs at least 2,048 subjects and 256
     // per thread: up to 8 threads the chunks run one after another, each with the flow; at 16
-    // they run side by side (LOSAT_X_BXPAR).
+    // they run side by side.
     let (query, set, db) = inputs_of(&dir, 30_000, 2);
     let args = ["-db", db.as_str(), "-outfmt", "6"];
     let (reference, _) = blastx(&query, &args, 1, &[]);
@@ -280,8 +280,8 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         "too few hits to test"
     );
     // (threads, environment, flow loops): in order at 2 and 8 threads; side by side at 16 threads
-    // and with the switch off; LOSAT_X_DEFAULT=0 (LOSAT_X_BXPAR off too) runs the serial chunk
-    // loop with the waves.
+    // and with the switch off; LOSAT_X_DEFAULT=0 (LOSAT_X_BXSUBJFLOW off too) runs the chunks side
+    // by side (2 threads) with the waves.
     for (threads, env, loops) in [
         (2, &[][..], 3),
         (8, &[][..], 3),

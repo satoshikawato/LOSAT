@@ -69,7 +69,8 @@ pub struct OptionInputs {
     pub evalue: Option<f64>,
     pub gapopen: Option<i32>,
     pub gapextend: Option<i32>,
-    /// The upper-cased `-matrix` name when given.
+    /// The `-matrix` name as typed when given (NCBI records it so, `blosum62` included; the
+    /// suggestions below compare it without case, as NCBI's `strcasecmp` does).
     pub matrix: Option<String>,
     pub xdrop_gap: Option<f64>,
     pub xdrop_gap_final: Option<f64>,
@@ -100,6 +101,8 @@ pub struct OptionInputs {
     /// `-max_target_seqs`, else `-num_alignments`, else 500.
     pub hitlist_size: i32,
     pub comp_based_stats: i32,
+    /// `-comp_based_stats 2u` (BLASTP, an adjusting mode): `SetUnifiedP(1)`.
+    pub unified_p: bool,
     pub use_sw_tback: bool,
 }
 
@@ -138,31 +141,22 @@ impl OptionInputs {
             db_gencode: 1,
             hitlist_size: 500,
             comp_based_stats: 2,
+            unified_p: false,
             use_sw_tback: false,
         }
     }
 }
 
-/// The `(gap open, gap extend)` that `-matrix` implies (`CBlastOptionsFactory` /
-/// `BlastScoringOptionsNew`'s tables, blast_stat.c).
+/// The `(gap open, gap extend)` that `-matrix` implies (`BLAST_GetProteinGapExistenceExtendParams`:
+/// the matrix's default row, which BLOSUM45 puts at 14 / 2).
 fn matrix_gaps(matrix: &str) -> (i32, i32) {
-    match matrix {
-        "BLOSUM62" => (11, 1),
-        "BLOSUM80" => (10, 1),
-        "PAM30" => (9, 1),
-        "BLOSUM45" => (15, 2),
-        "PAM70" => (10, 1),
-        "BLOSUM50" => (13, 2),
-        "BLOSUM90" => (10, 1),
-        "PAM250" => (14, 2),
-        _ => (11, 1),
-    }
+    crate::stats::protein_options::protein_gap_existence_extend_params(matrix).unwrap_or((11, 1))
 }
 
 /// The word threshold the matrix suggests (`BLAST_GetSuggestedThreshold`,
 /// blast_options.c:1174-1209).
 fn suggested_threshold(matrix: &str) -> i32 {
-    match matrix {
+    match matrix.to_ascii_uppercase().as_str() {
         "BLOSUM62" => 11,
         "BLOSUM45" => 14,
         "BLOSUM62_20" => 100,
@@ -177,7 +171,7 @@ fn suggested_threshold(matrix: &str) -> i32 {
 /// The window size the matrix suggests (`BLAST_GetSuggestedWindowSize`,
 /// blast_options.c:1211-1236).
 fn suggested_window(matrix: &str) -> i32 {
-    match matrix {
+    match matrix.to_ascii_uppercase().as_str() {
         "BLOSUM62" => 40,
         "BLOSUM45" => 60,
         "BLOSUM80" => 25,
@@ -358,6 +352,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
         .to_string()
     });
     let protein_query = matches!(program, Program::Blastp | Program::Tblastn);
+    let mut threshold_set_by_word_size = false;
     for &class in class_order(program) {
         match class {
             Class::Db => {
@@ -387,6 +382,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 }
                 if let Some(word_size) = inputs.word_size {
                     if protein_query && word_size > 4 {
+                        threshold_set_by_word_size = true;
                         list.set("WordThreshold", Integer(19));
                         if word_size > 5 {
                             list.set("WordThreshold", Integer(21));
@@ -482,8 +478,14 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                     list.set("WordThreshold", Integer(threshold));
                 } else {
                     let current = list.get("WordThreshold").cloned();
+                    // The threshold that `blastp-short` records (16) is not the options'
+                    // value (the handle's 11) until a word size above 4 sets one: the class
+                    // then replaces it with the matrix's suggestion (probe `opt_short_matrix`).
                     let is_default = match current {
                         None => true,
+                        Some(_) if inputs.task == "blastp-short" && !threshold_set_by_word_size => {
+                            true
+                        }
                         Some(ParamValue::Integer(value)) => value == default_threshold(program),
                         Some(_) => false,
                     };
@@ -520,6 +522,9 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             Class::Formatting => list.set("HitlistSize", Integer(inputs.hitlist_size)),
             Class::Cbs => {
                 list.set("CompositionBasedStats", Integer(inputs.comp_based_stats));
+                if inputs.unified_p && inputs.comp_based_stats != 0 {
+                    list.set("UnifiedP", Integer(1));
+                }
                 list.set("SmithWatermanMode", Boolean(inputs.use_sw_tback));
             }
         }
@@ -578,6 +583,42 @@ mod tests {
             list.iter().filter(|p| p.name == "EvalueThreshold").count(),
             1
         );
+    }
+
+    #[test]
+    fn matrix_gaps_are_the_default_rows_of_the_matrices() {
+        // `BLAST_GetProteinGapExistenceExtendParams`: the row that the matrix's table prefers.
+        for (matrix, want) in [
+            ("BLOSUM62", (11, 1)),
+            ("BLOSUM45", (14, 2)),
+            ("BLOSUM50", (13, 2)),
+            ("BLOSUM90", (10, 1)),
+            ("PAM250", (15, 2)),
+            ("pam250", (15, 2)),
+        ] {
+            assert_eq!(matrix_gaps(matrix), want, "{matrix}");
+        }
+    }
+
+    #[test]
+    fn the_matrix_suggestions_ignore_the_case_of_the_name() {
+        // NCBI compares the names with `strcasecmp` (blast_options.c:1174-1236).
+        for (matrix, threshold, window) in [
+            ("BLOSUM62", 11, 40),
+            ("blosum62", 11, 40),
+            ("BLOSUM45", 14, 60),
+            ("Blosum45", 14, 60),
+            ("BLOSUM80", 12, 25),
+            ("blosum80", 12, 25),
+            ("PAM30", 16, 15),
+            ("pam30", 16, 15),
+            ("Pam70", 14, 20),
+        ] {
+            assert_eq!(suggested_threshold(matrix), threshold, "{matrix}");
+            assert_eq!(suggested_window(matrix), window, "{matrix}");
+        }
+        assert_eq!(suggested_threshold("Identity"), 27);
+        assert_eq!(suggested_threshold("blosum62_20"), 100);
     }
 
     #[test]

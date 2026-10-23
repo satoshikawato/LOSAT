@@ -1334,7 +1334,10 @@ Rebuilding less:
   with their siblings idle, a 3 s warm-up before each run, alternating order, against `LOSAT_X_BNTBRANGE=0` with the
   same binary, `ab1.tsv`), per-pair median: dc-megablast at 16 threads x0.918 (8 pairs, 0.903-0.953), at 8 x0.904 (8,
   0.868-0.957); blastn at 16 x0.854 (6, 0.834-0.865), at 8 x0.866 (6, 0.861-0.886); megablast of the 16S cells at 16
-  x0.995 (4, 0.979-1.017). User-space instructions x0.958-0.968: the whole sequences' decoding is gone.
+  x0.995 (4, 0.979-1.017); again on the pull request's code (`ab2.tsv`): megablast of the D. melanogaster cells at
+  16 threads x0.815 (8, 0.788-0.844; max RSS 263 against 313 MiB), at 8 x0.845 (6, 0.806-0.886; 263 against 308),
+  dc-megablast at 16 x0.928 (6, 0.865-0.946). User-space instructions x0.958-0.968 (megablast x0.73): the whole
+  sequences' decoding is gone.
 - `LOSAT_X_DBIDXREAD=1` (every program's `-db`, memory; in the strict set since 2026-10-19 (perf/db-index-pread, evidence
   at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the index file of each volume
   (`.pin` / `.nin`) stays open after the volume is opened, and the reader reads the ranges of its offset arrays that it

@@ -37,9 +37,9 @@ impl DiagStruct {
     //    unsigned int flag      : 1 ; /**< Reset the next extension? */
     // } DiagStruct;
     // ```
-    // No computation: it returns the packed (last_hit, flag) word of one cell so that the
-    // LOSAT_X_SEEDBUCKETSHADOW mode can compare two diagonal tables cell by cell. It does not change
-    // any value NCBI computes.
+    // No computation: it returns the packed (last_hit, flag) word of one cell so that the hit loops
+    // and the shadow modes of other switches can read and compare diagonal tables cell by cell. It
+    // does not change any value NCBI computes.
     /// The packed cell, for comparisons.
     #[inline]
     pub fn raw_bits(&self) -> u32 {

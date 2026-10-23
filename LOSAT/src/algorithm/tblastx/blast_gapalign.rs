@@ -28,7 +28,7 @@ use std::cmp::Ordering;
 //                                          ungapped alignment information */
 // } BlastInitHSP;
 // ```
-// The added PartialEq, Eq and Debug derives are used by the LOSAT_X_SEEDBUCKETSHADOW mode to
+// The added PartialEq, Eq and Debug derives are used by the shadow modes and unit tests to
 // compare two lists of these initial HSPs field by field. They do not change any value NCBI computes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct InitHSP {

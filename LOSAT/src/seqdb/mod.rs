@@ -983,6 +983,7 @@ impl SeqDb {
                     title: defline.title,
                     bl_ord_id: bl_ord_id as u32,
                     replaced_title_bytes: defline.replaced_title_bytes,
+                    taxid: defline.taxid,
                 })
             })
             .collect()
@@ -1020,6 +1021,27 @@ impl SeqDb {
     pub fn visit_deflines(
         &self,
         range: BlockRange,
+        visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
+    ) -> bool {
+        self.visit_deflines_as(range, false, visit)
+    }
+
+    /// `visit_deflines`, with the `taxid` of each definition line decoded (the decode of
+    /// `defline_taxids`, which also gives the titles): the titles and the taxids of a range in one
+    /// pass over its headers. A record whose taxid does not decode is an `Err`, as in
+    /// `defline_taxids`.
+    pub fn visit_deflines_taxids(
+        &self,
+        range: BlockRange,
+        visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
+    ) -> bool {
+        self.visit_deflines_as(range, true, visit)
+    }
+
+    fn visit_deflines_as(
+        &self,
+        range: BlockRange,
+        want_taxid: bool,
         mut visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
     ) -> bool {
         let Some(vol) = self.volumes.get(range.volume) else {
@@ -1028,15 +1050,23 @@ impl SeqDb {
             });
         };
         let shadow = x_dbidxread() == XDbIdxRead::Shadow;
-        vol.visit_deflines(
+        vol.visit_deflines_as(
             range.first,
             range.end,
             HEADER_PIECE_BYTES,
+            want_taxid,
             &mut |oid, deflines| {
                 let ordinal = range.first_ordinal + (oid - range.first);
                 let deflines = self.ordinal_deflines(range.volume, ordinal, deflines);
                 if shadow {
-                    let expected = self.deflines(ordinal);
+                    let expected = match self.find_volume(ordinal) {
+                        Ok((volume, oid)) if want_taxid => self.ordinal_deflines(
+                            volume,
+                            ordinal,
+                            self.volumes[volume].deflines_as(oid, true),
+                        ),
+                        _ => self.deflines(ordinal),
+                    };
                     if x_result_text(&deflines) != x_result_text(&expected) {
                         index::x_shadow_difference(format!(
                         "the definition lines of sequence {ordinal} read in a range differ: {} \
@@ -1154,4 +1184,7 @@ pub struct OrdinalDefline {
     /// Number of stored title bytes outside ' ' ..= '~' that were read as '#'
     /// (`Defline::replaced_title_bytes`).
     pub replaced_title_bytes: usize,
+    /// `Defline::taxid`: 0 unless the definition lines were read with their taxids
+    /// ([`SeqDb::visit_deflines_taxids`]).
+    pub taxid: i32,
 }

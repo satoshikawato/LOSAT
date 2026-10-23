@@ -31,7 +31,7 @@
 //! ```
 //!
 //! Where it runs. `build_mb_lookup` calls `fill` where it would call `x_fill_mb_queued`: the
-//! table is built on one thread (no pool of two threads or more, or LOSAT_X_PAIRPAR off), without
+//! table is built on one thread (no pool of two threads or more: PAIRPAR fills the others), without
 //! database word counts (`limit_lookup`, which the command line does not offer), on x86_64 (the
 //! queue needs a prefetch instruction).
 //!

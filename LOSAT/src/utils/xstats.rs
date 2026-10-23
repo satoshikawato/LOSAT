@@ -51,7 +51,6 @@ counters!(
     AHEAD_PRELIM_TAKEN,
     AHEAD_TRACE_EVALUATED,
     AHEAD_TRACE_TAKEN,
-    SEG_SHARE_CHECKED,
 );
 
 #[inline(always)]

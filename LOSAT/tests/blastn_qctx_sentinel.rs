@@ -17,8 +17,8 @@
 //! for saved hits. In both searches below such a result starts two letters left of the minus
 //! strand; a build that asserted it before the cutoff test stopped there: `qctx.assert` at one
 //! thread in `search_query_batch`, `qctx.pairpar` (a query longer than 8000) at four threads in
-//! the search pool's seed stage (`x_pair_seed.rs`; with `LOSAT_X_DEFAULT=0`, as in CI's second
-//! run, the same search takes `search_query_batch`). Each report must equal the NCBI BLAST+
+//! the search pool's seed stage (`x_pair_seed.rs`; the strips run with `LOSAT_X_DEFAULT=0` too,
+//! as in CI's second run, so that run takes the same path). Each report must equal the NCBI BLAST+
 //! 2.17.0 output frozen in `tests/fixtures/blastn_regression/` (`blastn_regression_fixtures.py`).
 
 use std::path::{Path, PathBuf};

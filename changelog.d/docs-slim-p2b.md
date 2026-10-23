@@ -1,0 +1,1 @@
+- Documentation: 23 plan documents of closed lines and `docs/losat_wasm_np_plan_20260906/` moved from the `docs/` root to `docs/archive/` (index in `docs/archive/README.md`); links to and from them were rewritten. No change to search behavior or output.

@@ -449,6 +449,7 @@ mod even_gap;
 pub mod report;
 // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
+mod archive;
 mod blast_xml;
 mod seqalign;
 

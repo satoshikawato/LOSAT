@@ -553,7 +553,7 @@ pub(crate) fn search_core(
     // it does not change any value NCBI computes.
     let x_containment = diagnostics || sink.x_wants_containment();
     use super::x_timing::Batch as XBatch;
-    for range in batch_ranges(records) {
+    for range in batch_ranges(records, options.batch_size) {
         // Diagnostic (LOSAT_TIMING): the clocks of the batch's stages (x_timing.rs). No NCBI
         // counterpart.
         let x_t_batch = super::x_timing::lap();

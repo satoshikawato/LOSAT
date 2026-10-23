@@ -369,9 +369,9 @@ impl Program {
             Xml => true,
             AsnText => true,
             AsnBinary => true,
-            // OF8a: the BLAST archive for BLASTN (part 1) and BLASTP (part 2); the other
-            // programs follow in OF8b.
-            ArchiveFormat => matches!(self, Program::Blastn | Program::Blastp),
+            // OF8a: the BLAST archive for BLASTN (part 1) and BLASTP (part 2); OF8b: BLASTX
+            // (part 1); TBLASTN and TBLASTX follow.
+            ArchiveFormat => matches!(self, Program::Blastn | Program::Blastp | Program::Blastx),
             JsonSeqalign => true,
             // 13 and 14 (BLAST JSON and XML2 as side files and a master file): every program
             // (BLASTP and BLASTN: OF5c part 1; BLASTX, TBLASTN, TBLASTX: part 2).
@@ -1127,10 +1127,11 @@ mod tests {
                 .filter(|&format| program.writes(format))
                 .map(ReportFormat::number)
                 .collect();
-            // 11 (the BLAST archive): BLASTN (OF8a part 1) and BLASTP (part 2) so far.
+            // 11 (the BLAST archive): BLASTN (OF8a part 1), BLASTP (part 2) and BLASTX (OF8b
+            // part 1) so far.
             let expected: &[i32] = if program == Program::Blastn {
                 &[0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17]
-            } else if program == Program::Blastp {
+            } else if matches!(program, Program::Blastp | Program::Blastx) {
                 &[0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16]
             } else {
                 &[0, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16]

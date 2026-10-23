@@ -1,5 +1,6 @@
 //! Native serial caller, tested through the internal probe before public dispatch.
 use super::{
+    archive,
     args::{BlastxArgs, SemanticOptionsError},
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
     // ```c++
@@ -10,8 +11,7 @@ use super::{
     // }
     // ```
     input::{
-        parse_fasta_stream_with_warnings, stream_is_empty, FastaParseError, FastaStream,
-        InputWarning,
+        parse_fasta_stream_keeping, stream_is_empty, FastaParseError, FastaStream, InputWarning,
     },
     query_setup::BATCH_SIZE,
     report,
@@ -235,7 +235,11 @@ fn report_error(error: anyhow::Error) -> anyhow::Error {
 //         BLAST_PROF_START( APP.POST );
 //         formatter.PrintEpilog(opt);
 // ```
-pub fn run(args: &BlastxArgs) -> Result<()> {
+fn run_inner(
+    args: &BlastxArgs,
+    output: &mut Option<BufWriter<Box<dyn Write>>>,
+    archive_slot: &mut Option<crate::report::archive::ArchiveHandle>,
+) -> Result<()> {
     // Diagnostic (LOSAT_TIMING): the clock of the run (x_timing.rs). No NCBI counterpart.
     let x_t_run = super::x_timing::lap();
     use super::x_timing::Run as XRun;
@@ -264,9 +268,14 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     // list, `check_custom_fields`).
     use crate::blastinput::app::{self, Program};
     let choice = app::parse_formatting_string(&args.outfmt)?;
-    if app::report_format(&choice, Program::Blastx, args.out.as_deref())?.is_some() {
+    let format = app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
+    if format.is_some() {
         super::args::check_custom_fields(&choice)?;
     }
+    // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
+    // before anything is read or written.
+    let archive = archive::handle_for(args, format == Some(app::ReportFormat::ArchiveFormat))?;
+    archive_slot.clone_from(&archive);
     // Preserve explicit product refusals; defer supported semantic failures
     // until subject and standard query/output streams have been extracted.
     let resolution = args.resolve();
@@ -313,9 +322,19 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     // ```
     // `-db`: the database opens after the options are processed (below).
     let subject_path = args.subject.as_deref();
+    // NCBI opens the `-subject` and `-query` files inside `Run`, after the diagnostics handler
+    // that saves the messages is set: an error archive follows their errors.
+    let early_archive_error = |error: anyhow::Error| -> anyhow::Error {
+        write_run_error_archive(args, archive.as_ref(), &error);
+        error
+    };
     let subject_file = match (&args.db, subject_path) {
         (Some(_), _) => None,
-        (None, Some(path)) => Some(File::open(path).map_err(|_| inaccessible("subject", path))?),
+        (None, Some(path)) => Some(
+            File::open(path)
+                .map_err(|_| inaccessible("subject", path))
+                .map_err(early_archive_error)?,
+        ),
         (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
     };
     // EXPERIMENT (LOSAT_X_BXBATCH): batches are then searched on other
@@ -326,26 +345,39 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     // No NCBI counterpart: only the stderr lock is taken per write instead of once for the run, so
     // that other threads can write diagnostics (the bytes and their order are unchanged); it does
     // not change any value NCBI computes.
-    let mut stderr: Box<dyn Write> = if super::runtime::x_bx_batch() {
-        Box::new(io::stderr())
-    } else {
-        Box::new(io::stderr().lock())
+    // With the BLAST archive the diagnostics also go to its message log (`DiagTee`): the
+    // messages of each archive are the diagnostics posted since the previous one.
+    let mut archive_stderr = io::stderr();
+    let mut archive_tee;
+    let mut stderr: Box<dyn Write + '_> = match &archive {
+        Some(handle) => {
+            archive_tee = crate::report::archive::DiagTee::new(&mut archive_stderr, handle.clone());
+            Box::new(&mut archive_tee)
+        }
+        None if super::runtime::x_bx_batch() => Box::new(io::stderr()),
+        None => Box::new(io::stderr().lock()),
     };
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
     let x_t_read_fasta = crate::utils::xtiming::clock();
     let subjects = match subject_file {
-        Some(subject_file) => parse_fasta_stream_with_warnings(
+        Some(subject_file) => parse_fasta_stream_keeping(
             &mut FastaStream::from_file(subject_file),
             true,
             args.lcase_masking,
             usize::MAX,
+            archive.is_some(),
             &mut |_| Ok(()),
             &mut |warning| reader_warning(warning, &mut stderr),
         )
-        .map_err(input_error)?,
+        .map_err(input_error)
+        .map_err(early_archive_error)?,
         None => Vec::new(),
     };
+    // LOSAT's refusal of a title the archive cannot write, before its first byte.
+    if archive.is_some() {
+        archive::check_titles(&subjects, "subject")?;
+    }
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, x_t_read_fasta);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
     // ```c++
@@ -357,9 +389,11 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     //     }
     // ```
     if args.db.is_none() && subjects.is_empty() {
-        return Err(engine("Empty CBlastQueryVector"));
+        return Err(early_archive_error(engine("Empty CBlastQueryVector")));
     }
-    let query_file = File::open(&args.query).map_err(|_| inaccessible("query", &args.query))?;
+    let query_file = File::open(&args.query)
+        .map_err(|_| inaccessible("query", &args.query))
+        .map_err(early_archive_error)?;
     let destination: Box<dyn Write> = match args.out.as_deref().filter(|p| *p != Path::new("-")) {
         Some(path) => Box::new(File::create(path).map_err(|_| inaccessible("out", path))?),
         None => Box::new(io::stdout().lock()),
@@ -387,7 +421,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     } else {
         (destination, None)
     };
-    let mut writer = BufWriter::new(destination);
+    // The run keeps its output in the caller's slot: an error of NCBI's own is followed by the
+    // error archive in the same output (`run`).
+    let writer = output.insert(BufWriter::new(destination));
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
     // ```c++
     //     if(hitlist_size < 5){
@@ -428,7 +464,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     //         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
     //         exit_code = BLAST_INPUT_ERROR;                                      \
     // ```
-    let options = resolution.map_err(|e| NativeError {
+    let mut options = resolution.map_err(|e| NativeError {
         exit: 1,
         message: format!(
             "BLAST query/options error: {e}\nPlease refer to the BLAST+ user manual.\n"
@@ -537,6 +573,10 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     let mut query_stream = FastaStream::from_file(query_file);
     if stream_is_empty(&mut query_stream) {
         stderr.write_all(b"Warning: [blastx] Query is Empty!\n")?;
+        // NCBI returns before the formatter exists: no archive carries the message.
+        if let Some(handle) = &archive {
+            handle.take_messages();
+        }
         return Ok(());
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:217-218
@@ -544,6 +584,27 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
     //         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:85-91
+    // ```c++
+    //     // used for experimentation purposes
+    //     char* batch_sz_str = getenv("BATCH_SIZE");
+    //     if (batch_sz_str) {
+    //         retval = NStr::StringToInt(batch_sz_str);
+    //         _TRACE("DEBUG: Using query batch size " << retval);
+    //         return retval;
+    //     }
+    // ```
+    // The letters of a query batch: `BATCH_SIZE` when it is set, else 10002 (the search reads the
+    // same size from the options for the batches it splits).
+    let batch_size =
+        crate::blastinput::app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
+    options.batch_size = batch_size;
+    // LOSAT's refusal of a query title the archive cannot write comes before its first byte,
+    // though the query file is read batch by batch: the titles are checked by a read of the
+    // file before the search.
+    if archive.is_some() {
+        archive::prescan_query_titles(&args.query, args.lcase_masking)?;
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
     // ```c++
     //         catch(CBlastException & e ) {
@@ -609,7 +670,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         };
         super::blast_xml::xml2_writer(kind, &options, &subjects, &shown_run, files)
     }));
-    report::write_prolog(&mut writer, &options, &subjects, &shown_run).map_err(report_error)?;
+    report::write_prolog(&mut *writer, &options, &subjects, &shown_run).map_err(report_error)?;
     if let Some(xml2) = xml2.borrow_mut().as_mut() {
         let mut start = Vec::new();
         xml2.start(&mut start);
@@ -713,6 +774,72 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         results: &mut Vec<BatchResults>,
                         queries_before: usize|
      -> Result<()> {
+        if let Some(handle) = &archive {
+            // The BLAST archive (outfmt 11): one document per query batch, written from the
+            // data of outfmt 8's Seq-aligns.
+            for batch in results.iter_mut() {
+                for lists in &mut batch.queries {
+                    for list in lists {
+                        list.sort_evalue();
+                    }
+                }
+            }
+            let reported;
+            let (subject_records, subject_names, call_subjects): (_, _, &[FastaRecord]) =
+                match (&database, &pairwise_database) {
+                    (Some(database), Some(pairwise)) => {
+                        reported = match search_subjects {
+                            Subjects::Unreadable => ReportedSubjects::default(),
+                            search_subjects => ReportedSubjects::for_batch(
+                                database,
+                                search_subjects,
+                                results,
+                                options.gapped,
+                                false,
+                                false,
+                                false,
+                            )
+                            .map_err(|error| match error.downcast::<HeaderReadError>() {
+                                Ok(header) => header.error,
+                                Err(error) => {
+                                    match error.downcast::<super::x_db_stream::XReadError>() {
+                                        Ok(super::x_db_stream::XReadError(kept)) => {
+                                            database_error(kept)
+                                        }
+                                        Err(error) => error,
+                                    }
+                                }
+                            })?,
+                        };
+                        (
+                            None,
+                            super::seqalign::SeqalignSubjects::Database {
+                                reported: &reported,
+                                title: &pairwise.definition,
+                            },
+                            reported.records(),
+                        )
+                    }
+                    _ => (
+                        Some(&subjects[..]),
+                        super::seqalign::SeqalignSubjects::Records,
+                        &subjects[..],
+                    ),
+                };
+            return archive::write_blastx_archive(
+                &archive::ArchiveCall {
+                    handle,
+                    options: &options,
+                    queries,
+                    subjects: call_subjects,
+                    names: subject_names,
+                    subject_records,
+                    batches: results,
+                },
+                writer,
+            )
+            .map_err(report_error);
+        }
         match (&database, &pairwise_database) {
             (Some(database), Some(pairwise)) => {
                 let reported = match search_subjects {
@@ -783,6 +910,10 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
             .map_err(refused),
         }
     };
+    // NCBI: a batch size of 0 makes the first batch empty, and its query factory refuses it.
+    if batch_size == 0 && !query_stream.at_eof() {
+        return Err(engine("Empty CBlastQueryVector"));
+    }
     let mut processed = 0usize;
     let x_t_loop = super::x_timing::lap();
     {
@@ -906,6 +1037,8 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         pool.threads(),
                         &mut query_stream,
                         args.lcase_masking,
+                        batch_size,
+                        archive.is_some(),
                         &|queries: &[super::input::FastaRecord], alone: bool| {
                             let large = alone || x_large(queries);
                             crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !large);
@@ -929,7 +1062,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                          -> Result<()> {
                             let mut results = results.map_err(search_error)?;
                             render_batch(
-                                &mut writer,
+                                &mut *writer,
                                 &mut **diagnostics.borrow_mut(),
                                 queries,
                                 &mut results,
@@ -1038,7 +1171,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                                     .expect("one search per queued batch")
                                     .map_err(search_error)?;
                                 render_batch(
-                                    &mut writer,
+                                    &mut *writer,
                                     &mut **diagnostics.borrow_mut(),
                                     queries,
                                     &mut results,
@@ -1052,11 +1185,12 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                     super::x_timing::run(XRun::Render, x_t);
                     Ok(())
                 };
-                let parsed = parse_fasta_stream_with_warnings(
+                let parsed = parse_fasta_stream_keeping(
                     &mut query_stream,
                     false,
                     args.lcase_masking,
-                    BATCH_SIZE,
+                    batch_size,
+                    archive.is_some(),
                     &mut |queries| {
                         if queries.is_empty() {
                             return Err(engine("Empty CBlastQueryVector"));
@@ -1092,11 +1226,12 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                 }
                 return parsed;
             }
-            parse_fasta_stream_with_warnings(
+            parse_fasta_stream_keeping(
                 &mut query_stream,
                 false,
                 args.lcase_masking,
-                BATCH_SIZE,
+                batch_size,
+                archive.is_some(),
                 &mut |queries| {
                     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262
                     // ```c++
@@ -1140,7 +1275,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                     let x_t = super::x_timing::lap();
                     let mut results = searched.map_err(search_error)?;
                     render_batch(
-                        &mut writer,
+                        &mut *writer,
                         &mut **diagnostics.borrow_mut(),
                         queries,
                         &mut results,
@@ -1185,7 +1320,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     super::x_timing::run(XRun::Loop, x_t_loop);
     let x_t = super::x_timing::lap();
     report::write_epilog(
-        &mut writer,
+        &mut *writer,
         &options,
         &subjects,
         &shown_run,
@@ -1204,6 +1339,59 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     super::x_timing::common_run();
     super::x_timing::write(&mut *stderr, options.num_threads as usize)?;
     Ok(())
+}
+
+/// Runs the search; NCBI writes an error archive after the archives of the batches before when
+/// the application stops with one of its own errors, and when the run ends with messages that no
+/// archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status), into the
+/// output the run opened.
+pub fn run(args: &BlastxArgs) -> Result<()> {
+    let mut output: Option<BufWriter<Box<dyn Write>>> = None;
+    let mut archive: Option<crate::report::archive::ArchiveHandle> = None;
+    let result = run_inner(args, &mut output, &mut archive);
+    if let (Some(handle), Some(writer)) = (&archive, output.as_mut()) {
+        match &result {
+            Err(error) => {
+                if let Some(lines) = archive::error_lines(error, false) {
+                    let _ = crate::report::archive::write_error_archive(handle, &lines, writer);
+                }
+            }
+            Ok(()) => {
+                if handle.has_messages() {
+                    let _ = crate::report::archive::write_error_archive(handle, &[], writer);
+                }
+            }
+        }
+        let _ = writer.flush();
+    }
+    result
+}
+
+/// The error archive of a run that stopped in `Run` before its output was opened (the files of
+/// `-subject` and `-query`, the subjects): into `-out`, or standard output; nothing when that
+/// cannot be opened (NCBI's call swallows that).
+fn write_run_error_archive(
+    args: &BlastxArgs,
+    archive: Option<&crate::report::archive::ArchiveHandle>,
+    error: &anyhow::Error,
+) {
+    let Some(handle) = archive else {
+        return;
+    };
+    let Some(lines) = archive::error_lines(error, true) else {
+        return;
+    };
+    let destination: Option<Box<dyn Write>> =
+        match args.out.as_deref().filter(|p| *p != Path::new("-")) {
+            Some(path) => File::create(path)
+                .ok()
+                .map(|file| Box::new(file) as Box<dyn Write>),
+            None => Some(Box::new(io::stdout().lock())),
+        };
+    if let Some(mut destination) = destination {
+        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut destination);
+        let _ = destination.flush();
+    }
 }
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:989-1013
 // ```c++
@@ -1353,11 +1541,14 @@ pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> 
 // nodes and prints them in order, blastx_app.cpp:345-357, cited in `run`); every value written
 // is computed by the same calls as without the switch, in the same order of writing.
 #[cfg(feature = "parallel")]
+#[allow(clippy::too_many_arguments)]
 fn x_flow(
     bound: usize,
     lookahead: usize,
     query_stream: &mut FastaStream<File>,
     lcase_masking: bool,
+    batch_size: usize,
+    keep_defline: bool,
     search: &(dyn Fn(&[FastaRecord], bool) -> Result<Vec<BatchResults>> + Sync),
     write_batch: &mut dyn FnMut(&[FastaRecord], Result<Vec<BatchResults>>) -> Result<()>,
     write_warning: &mut dyn FnMut(&[u8]) -> Result<()>,
@@ -1480,11 +1671,12 @@ fn x_flow(
                 }
             }
         };
-        let parsed = parse_fasta_stream_with_warnings(
+        let parsed = parse_fasta_stream_keeping(
             query_stream,
             false,
             lcase_masking,
-            BATCH_SIZE,
+            batch_size,
+            keep_defline,
             &mut |queries| {
                 if queries.is_empty() {
                     return Err(engine("Empty CBlastQueryVector"));

@@ -88,44 +88,13 @@ pub(super) fn write_blastx_seqalign(
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
-            subject_records.clear();
-            hsp_records.clear();
-            for list in lists {
-                if list.hsps.is_empty() {
-                    continue;
-                }
-                let subject_index = subject_records.len() as u32;
-                let subject = &subjects[list.oid];
-                subject_records.push(SubjectRecord {
-                    id: match names {
-                        SeqalignSubjects::Records => SeqId::Local(&subject.internal_id),
-                        SeqalignSubjects::Database { reported, .. } => {
-                            SeqId::BlOrdId(reported.ordinal(list.oid))
-                        }
-                    },
-                    searched_length: i32::try_from(subject.sequence.len())?,
-                    offset: 0,
-                });
-                for hsp in &list.hsps {
-                    hsp_records.push(HspRecord {
-                        subject: subject_index,
-                        q_offset: hsp.hsp.q_start,
-                        q_end: hsp.hsp.q_end,
-                        s_offset: hsp.hsp.s_start,
-                        s_end: hsp.hsp.s_end,
-                        q_frame: hsp.hsp.frame,
-                        s_frame: 0,
-                        score: hsp.hsp.score,
-                        num: hsp.num,
-                        evalue: hsp.evalue,
-                        bit_score: hsp.bit_score,
-                        num_ident: i32::try_from(hsp.identity)?,
-                        num_positives: i32::try_from(hsp.positive)?,
-                        comp_adjust: u8::try_from(hsp.composition_method)?,
-                        ops: &hsp.edit_script,
-                    });
-                }
-            }
+            query_records(
+                lists,
+                subjects,
+                names,
+                &mut subject_records,
+                &mut hsp_records,
+            )?;
             let query_record = QueryRecord {
                 id: SeqId::Local(&query.internal_id),
                 searched_length: i32::try_from(query.sequence.len())?,
@@ -145,5 +114,55 @@ pub(super) fn write_blastx_seqalign(
         }
     }
     writer.flush()?;
+    Ok(())
+}
+
+/// The subject and HSP records of one query's hit lists (what `write_query` and the archive
+/// write), replacing the contents of `subject_records` and `hsp_records`.
+pub(super) fn query_records<'a>(
+    lists: &'a [super::results::HspList],
+    subjects: &'a [FastaRecord],
+    names: &SeqalignSubjects<'a>,
+    subject_records: &mut Vec<SubjectRecord<'a>>,
+    hsp_records: &mut Vec<HspRecord<'a>>,
+) -> Result<()> {
+    subject_records.clear();
+    hsp_records.clear();
+    for list in lists {
+        if list.hsps.is_empty() {
+            continue;
+        }
+        let subject_index = subject_records.len() as u32;
+        let subject = &subjects[list.oid];
+        subject_records.push(SubjectRecord {
+            id: match names {
+                SeqalignSubjects::Records => SeqId::Local(&subject.internal_id),
+                SeqalignSubjects::Database { reported, .. } => {
+                    SeqId::BlOrdId(reported.ordinal(list.oid))
+                }
+            },
+            searched_length: i32::try_from(subject.sequence.len())?,
+            offset: 0,
+        });
+        for hsp in &list.hsps {
+            hsp_records.push(HspRecord {
+                subject: subject_index,
+                q_offset: hsp.hsp.q_start,
+                q_end: hsp.hsp.q_end,
+                s_offset: hsp.hsp.s_start,
+                s_end: hsp.hsp.s_end,
+                q_frame: hsp.hsp.frame,
+                s_frame: 0,
+                score: hsp.hsp.score,
+                num: hsp.num,
+                evalue: hsp.evalue,
+                bit_score: hsp.bit_score,
+                num_ident: i32::try_from(hsp.identity)?,
+                num_positives: i32::try_from(hsp.positive)?,
+                comp_adjust: u8::try_from(hsp.composition_method)?,
+                ops: &hsp.edit_script,
+            });
+        }
+    }
     Ok(())
 }

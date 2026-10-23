@@ -260,6 +260,7 @@ impl ReportedSubjects {
                     .collect(),
                 lowercase_masks: Vec::new(),
                 warnings: Vec::new(),
+                source: None,
             });
             reported.titles.push(title);
             reported.ordinals.push(ordinal);
@@ -419,6 +420,7 @@ mod tests {
                 .collect(),
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
+            source: None,
         };
         let records = [record];
         assert_eq!(&*Subjects::Fasta(&records).encoded(0), &bytes[..]);

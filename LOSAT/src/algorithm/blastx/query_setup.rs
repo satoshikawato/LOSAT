@@ -109,13 +109,13 @@ pub const BATCH_SIZE: usize = 10002;
 //         } else {
 //             // programmer error, CBlastInputSource should only return Seq-locs
 // ```
-pub fn batch_ranges(records: &[FastaRecord]) -> Vec<std::ops::Range<usize>> {
+pub fn batch_ranges(records: &[FastaRecord], batch_size: usize) -> Vec<std::ops::Range<usize>> {
     let mut result = Vec::new();
     let mut start = 0;
     while start < records.len() {
         let mut end = start;
         let mut length = 0;
-        while end < records.len() && length < BATCH_SIZE {
+        while end < records.len() && length < batch_size {
             length += records[end].sequence.len();
             end += 1;
         }
@@ -883,12 +883,19 @@ mod tests {
             sequence: vec![b'A'; n],
             lowercase_masks: vec![],
             warnings: vec![],
+            source: None,
         };
         assert_eq!(
-            batch_ranges(&[record(10001), record(1), record(3)]),
+            batch_ranges(&[record(10001), record(1), record(3)], BATCH_SIZE),
             vec![0..2, 2..3]
         );
-        assert_eq!(batch_ranges(&[record(10002), record(3)]), vec![0..1, 1..2]);
-        assert_eq!(batch_ranges(&[record(10003), record(3)]), vec![0..1, 1..2]);
+        assert_eq!(
+            batch_ranges(&[record(10002), record(3)], BATCH_SIZE),
+            vec![0..1, 1..2]
+        );
+        assert_eq!(
+            batch_ranges(&[record(10003), record(3)], BATCH_SIZE),
+            vec![0..1, 1..2]
+        );
     }
 }

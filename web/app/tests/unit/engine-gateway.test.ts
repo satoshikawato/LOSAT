@@ -279,6 +279,20 @@ describe('WasmEngine', () => {
     await prepared(() => workers[0], 3);
   });
 
+  it('passes the argv of the hint to the worker for the warm-up, and prepares again for another argv', async () => {
+    const { engine, workers } = setup();
+    const argv = ['tblastx', '-query', 'q.fa', '-subject', 's.fa'];
+    engine.prepare({ requestedThreads: 2, inputBytes: 10, argv });
+    engine.prepare({ requestedThreads: 2, inputBytes: 10, argv: [...argv] });
+    const worker = await prepared(() => workers[0], 1);
+    engine.prepare({ requestedThreads: 2, inputBytes: 10, argv: [...argv, '-seg', 'no'] });
+    await prepared(() => workers[0], 2);
+    expect(worker.prepares).toEqual([
+      { type: 'prepare', generation: 1, threads: 2, argv },
+      { type: 'prepare', generation: 1, threads: 2, argv: [...argv, '-seg', 'no'] },
+    ]);
+  });
+
   it('does not prepare while a search runs', async () => {
     const { engine, workers } = setup();
     const run = engine.run(request('r1'), output(), () => undefined);

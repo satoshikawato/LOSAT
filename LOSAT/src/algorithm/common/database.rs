@@ -208,21 +208,7 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
             .read_block(range)
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
-            let length = block
-                .nucleotide_len(i)
-                .map_err(|error| search_read_error(error, program))?;
-            // NCBI's preliminary search reads the 2-bit data only; it reads the ambiguity
-            // data in the traceback, of the reported sequences. LOSAT reads them for every
-            // sequence here, so data it cannot read are LOSAT's refusal, not an NCBI error.
-            let runs = block.ambiguity_runs(i).map_err(|error| {
-                refusal(
-                    &format!(
-                        "the ambiguity data of database sequence {} cannot be read ({error})",
-                        range.first_ordinal + i as u32
-                    ),
-                    program,
-                )
-            })?;
+            let (length, runs) = stored_parts(&block, i, range.first_ordinal + i as u32, program)?;
             stores.push(PackedNucleotide::from_stored(
                 block.nucleotide_packed(i),
                 length,
@@ -239,7 +225,7 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
 /// with the same errors in the same order; only the lengths are kept, by ordinal id. A search
 /// that reads its subjects where it searches them (`x_read_nucleotide_store`) fails the query
 /// batch that the copy would fail, with the same text.
-pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<u32>> {
+pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<usize>> {
     let mut lengths = Vec::with_capacity(db.num_seqs() as usize);
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, STORE_BLOCK_BYTES) {
@@ -247,8 +233,8 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
             .read_block(range)
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
-            let (length, _) = x_stored_parts(&block, i, range.first_ordinal + i as u32, program)?;
-            lengths.push(u32::try_from(length).expect("a database sequence length fits Uint4"));
+            let (length, _) = stored_parts(&block, i, range.first_ordinal + i as u32, program)?;
+            lengths.push(length);
         }
         next_ordinal = range.end_ordinal();
     }
@@ -269,7 +255,7 @@ pub(crate) fn x_read_nucleotide_store(
     let block = db
         .x_read_sequence_mapped(ordinal)
         .map_err(|error| search_read_error(error, program))?;
-    let (length, runs) = x_stored_parts(&block, 0, ordinal, program)?;
+    let (length, runs) = stored_parts(&block, 0, ordinal, program)?;
     Ok(PackedNucleotide::x_from_stored_mapped(
         block.nucleotide_packed(0),
         length,
@@ -285,7 +271,7 @@ pub(crate) fn x_nucleotide_store_in(
     ordinal: u32,
     program: &str,
 ) -> Result<PackedNucleotide> {
-    let (length, runs) = x_stored_parts(block, i, ordinal, program)?;
+    let (length, runs) = stored_parts(block, i, ordinal, program)?;
     Ok(PackedNucleotide::from_stored(
         block.nucleotide_packed(i),
         length,
@@ -294,8 +280,11 @@ pub(crate) fn x_nucleotide_store_in(
 }
 
 /// The length and the ambiguity runs of sequence `i` of `block` (ordinal id `ordinal`), with the
-/// errors of `read_nucleotide_stores`.
-fn x_stored_parts(
+/// errors of `read_nucleotide_stores` (which reads every sequence through it). NCBI's preliminary
+/// search reads the 2-bit data only; it reads the ambiguity data in the traceback, of the
+/// reported sequences. LOSAT reads them for every sequence, so data it cannot read are LOSAT's
+/// refusal, not an NCBI error.
+fn stored_parts(
     block: &crate::seqdb::SequenceBlock,
     i: usize,
     ordinal: u32,

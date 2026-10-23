@@ -1267,11 +1267,11 @@ fn run_local_search_with_pool(
         );
     }
     // EXPERIMENT (LOSAT_X_TBNDBSTREAM): with a `-db` stream, the subjects of the lists, each read
-    // once, held until the redo ends.
+    // when first aligned, held until the redo ends.
     let x_stage = super::x_db_stream::XStageSubjects::new(
         subjects,
         preliminary_lists.iter().map(|(_, oid, _)| *oid),
-    )?;
+    );
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2352-2384,2418-2479,
     // 3099-3110,3290-3302:
@@ -1383,7 +1383,7 @@ fn run_local_search_with_pool(
         // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form: the redo and
         // the translations below read windows of it, as NCBI's do. EXPERIMENT (LOSAT_X_TBNDBSTREAM):
         // a `-db` sequence is read once for the redo (`x_stage`).
-        let subject = x_stage.nt(oid);
+        let subject = x_stage.nt(oid)?;
         let incoming: Vec<_> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
         // The matrix that the match's adjustments leave, for the engine positives
         // (`postredo_engine_positives`).
@@ -2730,11 +2730,11 @@ fn finish_local_mode0_no_sum_stats(
         })
         .collect();
     // EXPERIMENT (LOSAT_X_TBNDBSTREAM): with a `-db` stream, the subjects of the lists, each read
-    // once, held until the traceback ends.
+    // when first aligned, held until the traceback ends.
     let x_stage = super::x_db_stream::XStageSubjects::new(
         subjects,
         preliminary_lists.iter().map(|(_, oid, _)| *oid),
-    )?;
+    );
     for (context, oid, preliminary) in preliminary_lists {
         // The subject as the readers of windows take it: the record's letters, or its store (every
         // `-db` sequence; with EXPERIMENT LOSAT_X_TBNSTORE every `-subject` record), whose windows
@@ -2742,7 +2742,7 @@ fn finish_local_mode0_no_sum_stats(
         // letters are made only for a list retried after a fence, whose frames NCBI translates
         // whole (one window for all of them). EXPERIMENT (LOSAT_X_TBNDBSTREAM): a `-db` sequence is
         // read once for the traceback (`x_stage`).
-        let subject = x_stage.nt(oid);
+        let subject = x_stage.nt(oid)?;
         let input: Vec<_> = preliminary.hsps.iter().map(|linked| linked.hsp).collect();
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536:
         // traceback uses the selected scoring matrix and gap costs.

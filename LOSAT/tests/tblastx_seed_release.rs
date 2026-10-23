@@ -49,13 +49,12 @@ const THREADS: [u32; 2] = [1, 4];
 
 /// One TBLASTX run of the fixture query against `subject` (`-outfmt 6` on standard output)
 /// with the given variables as its only `LOSAT_*` variables that choose a code path.
-/// `LOSAT_X_DEFAULT` of the test's own environment is dropped as well: every test states the
-/// default it runs with. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
-/// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name
-/// as soon as a search has more than one thread, and it selects nothing. `LOSAT_X_PAIRPARGATE=0`
-/// comes first (a test's own variables may set it again): the fixture query is short, so the
-/// gate, in the strict set, would send its batch to the reference frame loop, and these tests are
-/// about the unit path. Returns the report and the standard error.
+/// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
+/// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more
+/// than one thread, and it selects nothing. `LOSAT_X_PAIRPARGATE=0` comes first (a test's own
+/// variables may set it again): the fixture query is short, so the gate, in the strict set,
+/// would send its batch to the reference frame loop, and these tests are about the unit path.
+/// Returns the report and the standard error.
 fn tblastx(subject: &Path, threads: u32, switches: &[(&str, &str)]) -> (Vec<u8>, String) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {

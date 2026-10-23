@@ -52,8 +52,8 @@
 //! (blast_engine.c:1409, 1553-1554, quoted above `search_blocks`); the hand-over in ordinal order
 //! keeps the order of its one-thread loop.
 //!
-//! `LOSAT_X_BNDBSTREAM` is a switch of the strict set: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. It acts for every BLASTN task with `-db` at more than
+//! `LOSAT_X_BNDBSTREAM` is a switch of the strict set: on unless it is `0`.
+//! It acts for every BLASTN task with `-db` at more than
 //! one thread; at one thread the blocks are searched one after another, as without it.
 //!
 //! `LOSAT_X_BNDBSTREAMSHADOW=1` (shadow mode, implies the switch): each parallel preliminary stage

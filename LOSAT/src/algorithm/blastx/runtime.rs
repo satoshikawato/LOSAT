@@ -385,8 +385,8 @@ pub fn search_internal<'a>(
 }
 // No NCBI counterpart: when the queued batches (2+ threads, several query batches) are searched (as
 // a flow instead of waves); the reports, their order and the values in them are those of the waves.
-/// EXPERIMENT (LOSAT_X_BXFLOW): a switch of the strict set, on unless `LOSAT_X_BXFLOW=0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set (acts with several query batches at 2+ threads).
+/// EXPERIMENT (LOSAT_X_BXFLOW): a switch of the strict set, on unless `LOSAT_X_BXFLOW=0`
+///  (acts with several query batches at 2+ threads).
 pub(crate) fn x_bx_flow() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();

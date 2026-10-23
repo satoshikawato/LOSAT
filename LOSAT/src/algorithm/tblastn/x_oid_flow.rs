@@ -50,7 +50,7 @@
 //! for the window while that chunk is the one the owner waits for. Once every loop runs,
 //! only units are left for a waiting thread to take.
 //!
-//! `LOSAT_X_TBNFLOWHELP` (on unless `=0` or `LOSAT_X_DEFAULT=0`): a thread that waits for the flow
+//! `LOSAT_X_TBNFLOWHELP` (on unless `=0`): a thread that waits for the flow
 //! after the start (the owner for the next chunk in order, a thread of the pool for the window)
 //! runs the pool's jobs meanwhile instead of sleeping on the flow's condition (no NCBI
 //! counterpart: NCBI's threads do not wait for one another). Those jobs are units of the subjects

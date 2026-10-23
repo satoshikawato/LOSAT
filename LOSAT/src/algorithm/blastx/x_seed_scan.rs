@@ -38,7 +38,7 @@
 //! path only when nothing traces the seeds (not in the diagnostic stages).
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF): with this switch (a switch of the strict set: on unless it is
-//! `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the scan of the standard lookup table is
+//! `0`) the scan of the standard lookup table is
 //! tblastn's branch-free scan (`tblastn/x_scan_bf.rs`, `x_scan_one_range_bf`, LOSAT_X_TBNSCANBF's
 //! loop): the presence bits of a block of words advance a candidate list instead of a branch, and
 //! the listed words' hits are copied in position order with NCBI's stop and resume when the offset
@@ -96,7 +96,7 @@
 //! init HSPs are the same, in the same order.
 //!
 //! The switch is read once; it is in the strict set (`utils/xswitch.rs`): on unless
-//! `LOSAT_X_BXHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. The loop with the test is its own
+//! `LOSAT_X_BXHITBF=0`. The loop with the test is its own
 //! function (`x_word_finder_direct_bf`, never inlined), so the loop without it keeps its code. The
 //! fused loop of LOSAT_X_BXDIAG keeps its own tests.
 //!
@@ -115,7 +115,7 @@ use std::cell::RefCell;
 // computes.
 /// EXPERIMENT (LOSAT_X_BXSCANBF): whether the seed scans (the direct loop and BXDIAG's fused loop)
 /// find the words with hits by the branch-free candidate loop (module header); a switch of the
-/// strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+/// strict set, on unless it is `0`.
 pub(crate) fn x_bxscan_bf() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -126,7 +126,7 @@ pub(crate) fn x_bxscan_bf() -> bool {
 // computes.
 /// EXPERIMENT (LOSAT_X_BXHITBF): whether the direct loop takes the too-far and overlap outcomes
 /// without a branch where [`XHitBf::fits`] holds (module header); a switch of the strict set, on
-/// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+/// unless it is `0`.
 pub(crate) fn x_bxhitbf() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();

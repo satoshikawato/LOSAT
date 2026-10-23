@@ -21,7 +21,7 @@
 //! part of the result.
 //!
 //! The switch is read once. It is in the strict set (`utils/xswitch.rs`): on unless
-//! `LOSAT_X_TBNSCANBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_X_STATS` set,
+//! `LOSAT_X_TBNSCANBF=0`. With `LOSAT_X_STATS` set,
 //! `main` prints `[X_STATS] TBNSCANBF units_bf= calls_bf= units_ref= calls_ref=` at exit (the scan
 //! units of the unit path scanned by this loop and by NCBI's, and the scan calls they took; a call
 //! more than the unit's ranges is a stop and resume), when the search scanned any. blastp keeps the
@@ -46,7 +46,7 @@ pub(crate) const X_SCAN_BF_SLACK: usize = AA_HITS_PER_CELL;
 
 // No NCBI counterpart: reads LOSAT_X_TBNSCANBF once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNSCANBF): whether tblastn scans with `x_scan_one_range_bf`; a switch
-/// of the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+/// of the strict set, on unless it is `0`.
 pub(super) fn x_tbn_scan_bf() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSCANBF"))

@@ -281,7 +281,7 @@
 //!
 //! `LOSAT_X_BPQBLOCK` is a value switch of the strict set (`utils/xswitch.rs`): a positive number
 //! of query letters (the block closes at the first batch end at or past it), 50,000 when it is
-//! not set or is not a positive number. `0`, or `LOSAT_X_DEFAULT=0` with the variable not set,
+//! not set or is not a positive number. `0`,
 //! turns the block path off.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
@@ -428,16 +428,15 @@ use {
 // No NCBI counterpart: reads the LOSAT_X_BPQBLOCK switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): the number of query letters of a block, or `None` (off). A
-/// strict-set value switch: the positive integer given, else 50,000; `None` for `0`, or for
-/// `LOSAT_X_DEFAULT=0` with the variable not set.
+/// strict-set value switch: the positive integer given, else 50,000; `None` for `0`.
 pub(crate) fn x_bp_qblock() -> Option<usize> {
     use std::sync::OnceLock;
     static N: OnceLock<Option<usize>> = OnceLock::new();
     *N.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BPQBLOCK", 1..=usize::MAX, 50_000))
 }
 
-// No NCBI counterpart: reads LOSAT_X_BPQBLOCKFMT (a strict-set switch: on unless it is `0`, or
-// `LOSAT_X_DEFAULT=0` and it is not set) and its shadow LOSAT_X_BPQBLOCKFMTSHADOW (off unless set to
+// No NCBI counterpart: reads LOSAT_X_BPQBLOCKFMT (a strict-set switch: on unless it is `0`)
+// and its shadow LOSAT_X_BPQBLOCKFMTSHADOW (off unless set to
 // any value; it implies the switch) once. They choose which reports the block search writes, not
 // any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): 0 = the block search only for one outfmt 6 report, 1 = for one
@@ -458,7 +457,7 @@ pub(crate) fn x_bp_qblock_fmt() -> u8 {
 }
 
 // No NCBI counterpart: reads LOSAT_X_BPQBLOCKSA and LOSAT_X_BPQBLOCKXML (strict-set switches: on
-// unless `0`, or `LOSAT_X_DEFAULT=0` and not set) once; the shadow (LOSAT_X_BPQBLOCKFMTSHADOW) implies
+// unless `0`) once; the shadow (LOSAT_X_BPQBLOCKFMTSHADOW) implies
 // both, as it implies LOSAT_X_BPQBLOCKFMT. They choose which reports the block search writes, not any
 // value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKSA): whether the block search also takes one Seq-annot report
@@ -494,8 +493,8 @@ pub(crate) fn x_bp_qblock_xml2() -> bool {
     })
 }
 
-// No NCBI counterpart: reads LOSAT_X_BPQBLOCKWEB (a strict-set switch: on unless `0`, or
-// `LOSAT_X_DEFAULT=0` and not set) once; the shadow (LOSAT_X_BPQBLOCKFMTSHADOW) implies it. It
+// No NCBI counterpart: reads LOSAT_X_BPQBLOCKWEB (a strict-set switch: on unless `0`)
+// once; the shadow (LOSAT_X_BPQBLOCKFMTSHADOW) implies it. It
 // chooses which calls the block search takes, not any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKWEB): whether the block search also takes a `run_local` call with
 /// more than one output, the hit records or an observer (ABI v2 of the Web build: outfmt 0, 6 and

@@ -25,7 +25,7 @@
 //!
 //! Where it acts: the two-hit stage (`-window_size` above 0) with the standard lookup table
 //! (`-word_size 3`, the default), when nothing traces the seeds; elsewhere the reference runs. `LOSAT_X_BXDIAG` is a
-//! switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. When it
+//! switch of the strict set: on unless it is `0`. When it
 //! is not set (or empty) it acts only where the cell test is the AVX2 batch (an x86-64 CPU with
 //! AVX2), the cell test it was timed with; set to a value, it runs on any CPU. The cell test is the
 //! AVX2 batch on an x86-64 CPU with AVX2 and the per-hit loop elsewhere, as LOSAT_X_BPDIAG chooses;
@@ -41,8 +41,8 @@
 //! LOSAT_X_BPDEFER (the calls of a cell's candidates after its batches) with the lanes' entry
 //! coordinates from scalar loads and the last batch of fewer than eight hits as a masked AVX2 batch;
 //! the argument that the calls, their order and the table are the AVX2 batch's is in
-//! `x_seed_fused`'s module header. A switch of the strict set: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BXDEFER=0` gives the AVX2 batch (`mode=avx2`).
+//! `x_seed_fused`'s module header. A switch of the strict set: on unless it is `0`;
+//! `LOSAT_X_BXDEFER=0` gives the AVX2 batch (`mode=avx2`).
 //! It acts on the tables with at least `LOSAT_X_BXDEFERMIN` hits per used backbone cell
 //! (hundredths, built-in 700; `0` every table); a fused table with fewer takes the AVX2 batch, as
 //! there the masked batch and the buffer cost more than they save (the fused loop forced on the
@@ -147,7 +147,7 @@ fn x_with_context_table<R>(batch: &PreparedQueryBatch, f: impl FnOnce(&XContextT
 // computes.
 /// EXPERIMENT (LOSAT_X_BXDIAG): 0 = off, 1 = the fused loop, 2 = shadow
 /// (`LOSAT_X_BXDIAGSHADOW`: the fused loop and the reference on a copy of the table, compared).
-/// A switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; on
+/// A switch of the strict set: on unless it is `0`; on
 /// by default (not set, or empty) only with the AVX2 batch ([`x_cell_mode`]).
 pub(crate) fn x_bxdiag_mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
@@ -176,8 +176,7 @@ fn x_avx2_batches() -> bool {
 // No NCBI counterpart: reads the LOSAT_X_BXDEFER switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BXDEFER): whether the AVX2 batch is `XDiagMode::Avx2DeferMasked` (module
-/// header); a switch of the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not
-/// set.
+/// header); a switch of the strict set, on unless it is `0`.
 fn x_bx_defer() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXDEFER"))

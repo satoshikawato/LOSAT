@@ -466,14 +466,14 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
         }
         None => assert!(!avx2, "default with AVX2: no timing line: {}", run.stderr),
     }
-    // LOSAT_X_BXDEFER=0 (LOSAT_X_BXDIAG not set), and LOSAT_X_DEFAULT=0 with LOSAT_X_BXDIAG set:
-    // the fused loop with the AVX2 batch where the CPU has AVX2.
+    // LOSAT_X_BXDEFER=0, with LOSAT_X_BXDIAG not set and set: the fused loop with the AVX2 batch
+    // where the CPU has AVX2 (set: the per-hit test elsewhere).
     for (name, value, named) in [
         ("LOSAT_X_BXDEFER", "0", false),
-        ("LOSAT_X_DEFAULT", "0", true),
+        ("LOSAT_X_BXDEFER", "0", true),
     ] {
-        let what = format!("{name}={value}");
         let diag = if named { "1" } else { "" };
+        let what = format!("{name}={value} LOSAT_X_BXDIAG={diag:?}");
         let run = blastx(
             &args,
             &[

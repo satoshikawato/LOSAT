@@ -385,7 +385,7 @@ pub(super) type XBatchReport = (
 // No NCBI counterpart: reads the LOSAT_X_TBNBATCHRULE variable once; it does not change any value
 // NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNBATCHRULE): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only where query batches are
+/// it is `0`. It acts only where query batches are
 /// searched side by side (`x_side_by_side_batches`).
 #[cfg(feature = "parallel")]
 fn x_tbn_batch_rule() -> bool {
@@ -510,7 +510,7 @@ fn x_searched_side_by_side(subjects: SubjectLetters<'_>, batches: usize, threads
 // No NCBI counterpart: reads the LOSAT_X_TBNOWNPOOLS variable once; it does not change any value
 // NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only together with
+/// it is `0`. It acts only together with
 /// `LOSAT_X_TBNBATCHRULE`, on the batches that are not searched side by side, and only natively: in
 /// WebAssembly only the main thread can start threads (the WASI thread hosts give a thread a
 /// `thread-spawn` that fails, `tests/wasi_thread_host.js` and

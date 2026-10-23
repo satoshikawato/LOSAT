@@ -88,7 +88,7 @@
 //! before its replay only where that replay's test is true.
 //!
 //! `LOSAT_X_BPREDOPAR` is a switch of the strict set (on by default since 2026-10-17): on unless it
-//! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_TIMING=1` each search the path runs
+//! is `0`. With `LOSAT_TIMING=1` each search the path runs
 //! prints
 //! `[TIMING] x_bpredopar: matches=<n> jobs=<j> windows=<w> split=<s> ended=<e> skipped=<k> wasted=<x> par_s=<s> replay_s=<s>`
 //! (`split`: windows that end inside a query; `ended`: the matches the early termination test
@@ -189,8 +189,8 @@ pub(crate) enum XRedoPar {
 
 // No NCBI counterpart: reads the LOSAT_X_BPREDOPAR / LOSAT_X_BPREDOPARSHADOW switches once; it does
 // not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDOPAR): a strict-set switch, on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-/// and it is not set; `LOSAT_X_BPREDOPARSHADOW` (any value) selects the shadow mode.
+/// EXPERIMENT (LOSAT_X_BPREDOPAR): a strict-set switch, on unless it is `0`;
+/// `LOSAT_X_BPREDOPARSHADOW` (any value) selects the shadow mode.
 pub(crate) fn x_bp_redo_par() -> XRedoPar {
     static MODE: OnceLock<XRedoPar> = OnceLock::new();
     *MODE.get_or_init(|| {
@@ -206,8 +206,8 @@ pub(crate) fn x_bp_redo_par() -> XRedoPar {
 
 // No NCBI counterpart: reads the LOSAT_X_BPREDOLPT switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPREDOLPT): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set. It acts only where the redo runs
+/// EXPERIMENT (LOSAT_X_BPREDOLPT): a strict-set switch, on unless it is `0`.
+/// It acts only where the redo runs
 /// in windows (`LOSAT_X_BPREDOPAR` or `LOSAT_X_BPREDOPARSHADOW`).
 pub(crate) fn x_bp_redo_lpt() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
@@ -224,8 +224,8 @@ pub(crate) enum XWinExpand {
 
 // No NCBI counterpart: reads the LOSAT_X_BPREDOWINEXPAND / LOSAT_X_BPREDOWINEXPANDSHADOW switches
 // once; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BPREDOWINEXPANDSHADOW` (any value) selects the
+/// EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): a strict-set switch, on unless it is `0`;
+/// `LOSAT_X_BPREDOWINEXPANDSHADOW` (any value) selects the
 /// shadow mode. It acts only where this path runs with compact lists.
 pub(crate) fn x_bp_redo_win_expand() -> XWinExpand {
     static MODE: OnceLock<XWinExpand> = OnceLock::new();

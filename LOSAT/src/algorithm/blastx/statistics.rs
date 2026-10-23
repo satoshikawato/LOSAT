@@ -19,8 +19,8 @@ use std::sync::OnceLock;
 
 // No NCBI counterpart: reads the LOSAT_X_BXEVALEMPTY / LOSAT_X_BXEVALEMPTYSHADOW switches once; it
 // does not change any value NCBI computes.
-/// LOSAT_X_BXEVALEMPTY (a strict-set switch, on unless `0`, or `LOSAT_X_DEFAULT=0` and it is not
-/// set): `Some(shadow)` when `evaluate_gapped` returns the empty list of a subject without HSPs at
+/// LOSAT_X_BXEVALEMPTY (a strict-set switch, on unless `0`)
+/// : `Some(shadow)` when `evaluate_gapped` returns the empty list of a subject without HSPs at
 /// once, `shadow` with `LOSAT_X_BXEVALEMPTYSHADOW` set (the full evaluation is run too and
 /// compared).
 fn x_eval_empty() -> Option<bool> {

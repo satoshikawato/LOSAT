@@ -1,9 +1,8 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp's parallel `-subject` loop in runs of subjects with `LOSAT_X_BPSUBJRUN`
 //! (`src/algorithm/blastp/blast_engine/x_subject_runs.rs`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on by default, `LOSAT_X_BPSUBJRUN=0`
-//! turns it off, and `LOSAT_X_DEFAULT=0` leaves it off unless it is set. It acts only where the
+//! turns it off. It acts only where the
 //! subjects of a `-subject` search are searched on the pool (more than one thread and more than
 //! one subject). With it on, the subjects are cut into runs of
 //! consecutive subjects, each run searched with one diagonal table that is filled once, at the
@@ -202,8 +201,8 @@ fn assert_engaged(counts: &HashMap<String, u64>, searches: u64, what: &str) {
 }
 
 // blastp and blastp-fast at 2 and 4 threads, the reference loops (the two-hit loop of
-// `blastp_for_each_offset_pair` and the reference compressed scan; `LOSAT_X_DEFAULT=0`, so that they
-// stay the reference loops where the strict set turns `LOSAT_X_BPSEED` on) and the fused loop of
+// `blastp_for_each_offset_pair` and the reference compressed scan; `LOSAT_X_BPSEED=0`, and
+// `LOSAT_X_BPCLUT=0` for blastp-fast) and the fused loop of
 // `LOSAT_X_BPSEED` (with the flat table of `LOSAT_X_BPCLUT` for blastp-fast): one search of all
 // queries, run by the switch.
 #[test]
@@ -211,9 +210,12 @@ fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     for (task, base) in [
-        ("blastp", &[("LOSAT_X_DEFAULT", "0")][..]),
+        ("blastp", &[("LOSAT_X_BPSEED", "0")][..]),
         ("blastp", &[("LOSAT_X_BPSEED", "1")][..]),
-        ("blastp-fast", &[("LOSAT_X_DEFAULT", "0")][..]),
+        (
+            "blastp-fast",
+            &[("LOSAT_X_BPSEED", "0"), ("LOSAT_X_BPCLUT", "0")][..],
+        ),
         (
             "blastp-fast",
             &[("LOSAT_X_BPSEED", "1"), ("LOSAT_X_BPCLUT", "1")][..],
@@ -226,11 +228,10 @@ fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
     }
 }
 
-// The switch is on by default: the report with no variable, with `LOSAT_X_BPSUBJRUN=0`, with
-// `LOSAT_X_DEFAULT=0` (off unless set) and with `LOSAT_X_DEFAULT=0` and the switch set are one
+// The switch is on by default: the report with no variable and with `LOSAT_X_BPSUBJRUN=0` are one
 // report, at 4 threads for blastp and blastp-fast.
 #[test]
-fn the_default_the_switch_off_and_the_global_off_give_one_report() {
+fn the_default_and_the_switch_off_give_one_report() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     for task in ["blastp", "blastp-fast"] {
@@ -239,17 +240,12 @@ fn the_default_the_switch_off_and_the_global_off_give_one_report() {
             !default.stdout.is_empty(),
             "{task}: the fixture pair has rows"
         );
-        for vars in [
-            &[OFF][..],
-            &[("LOSAT_X_DEFAULT", "0")][..],
-            &[("LOSAT_X_DEFAULT", "0"), ON][..],
-        ] {
-            let run = blastp(task, &subject, 4, vars, &[], "6");
-            assert!(
-                run.stdout == default.stdout,
-                "{task} {vars:?}: the report differs from the default's"
-            );
-        }
+        let vars = &[OFF][..];
+        let run = blastp(task, &subject, 4, vars, &[], "6");
+        assert!(
+            run.stdout == default.stdout,
+            "{task} {vars:?}: the report differs from the default's"
+        );
     }
 }
 

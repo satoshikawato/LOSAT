@@ -1,11 +1,10 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The blastp search in blocks of whole query batches (`LOSAT_X_BPQBLOCK`) for outfmt 0 and 7
 //! with `LOSAT_X_BPQBLOCKFMT`, outfmt 8, 9 and 12 with `LOSAT_X_BPQBLOCKSA`, outfmt 5 with
 //! `LOSAT_X_BPQBLOCKXML`, and outfmt 13 to 16 with `LOSAT_X_BPQBLOCKXML2`
 //! (`src/algorithm/blastp/x_query_blocks.rs`) on whole searches.
 //!
-//! The switches are in the strict set (`src/utils/xswitch.rs`): on by default, off with `0` or
-//! with `LOSAT_X_DEFAULT=0` and the variable not set. With them on, a search whose one report is
+//! The switches are in the strict set (`src/utils/xswitch.rs`): on by default, off with `0`.
+//! With them on, a search whose one report is
 //! outfmt 0, 5, 6, 7, 8, 9 or 12 searches its queries block by block and writes each block's report
 //! before it searches the next block: the outfmt 0 prolog and the XML header with the first block,
 //! the epilog, the XML end and outfmt 7's count of the queries with the last. A run that the
@@ -42,7 +41,6 @@ const THREADS: [u32; 2] = [1, 4];
 const BATCH: (&str, &str) = ("BATCH_SIZE", "3000");
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCK", "0");
 const FMT_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKFMT", "0");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_BPQBLOCKFMTSHADOW", "1");
 const SA_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKSA", "0");
 const XML_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKXML", "0");
@@ -76,8 +74,8 @@ struct Run {
 }
 
 /// `blastp -query <query> <subject...> -evalue 0.001 -num_threads <threads> <extra...>` with the
-/// given variables as its only `LOSAT_*` variables that choose a code path (`LOSAT_X_DEFAULT` and
-/// `BATCH_SIZE` of the test's environment are dropped too). `LOSAT_BLASTX_WORKER_LOG` stays: a
+/// given variables as its only `LOSAT_*` variables that choose a code path (`BATCH_SIZE` of the
+/// test's environment is dropped too). `LOSAT_BLASTX_WORKER_LOG` stays: a
 /// binary built with the `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs
 /// that file name as soon as a search has more than one thread, and it selects nothing.
 fn blastp(
@@ -315,8 +313,7 @@ fn outfmt_0_and_7_blocks_write_the_report_of_the_search_of_all_queries() {
 }
 
 // The default: with no variable outfmt 0 and 7 are searched in blocks of 50,000 query letters (the
-// fixture's queries have 77,448: two blocks); `LOSAT_X_DEFAULT=0` searches all queries together,
-// and leaves both variables on when they are set.
+// fixture's queries have 77,448: two blocks).
 #[test]
 fn the_default_writes_outfmt_0_and_7_in_blocks() {
     let query = fixture("MeenMJNV.faa");
@@ -331,31 +328,6 @@ fn the_default_writes_outfmt_0_and_7_in_blocks() {
             run.searches,
             reference.searches + 1,
             "outfmt {spec}: two blocks"
-        );
-        let run = blastp(&query, &subject, 4, &[BATCH, DEFAULT_OFF], &os(&fmt));
-        assert_same(
-            &run,
-            &reference,
-            false,
-            &format!("outfmt {spec} LOSAT_X_DEFAULT=0"),
-        );
-        let run = blastp(
-            &query,
-            &subject,
-            4,
-            &[
-                BATCH,
-                DEFAULT_OFF,
-                ("LOSAT_X_BPQBLOCK", "50000"),
-                ("LOSAT_X_BPQBLOCKFMT", "1"),
-            ],
-            &os(&fmt),
-        );
-        assert_same(
-            &run,
-            &reference,
-            true,
-            &format!("outfmt {spec} LOSAT_X_DEFAULT=0 with the variables set"),
         );
     }
 }
@@ -423,8 +395,7 @@ fn outfmt_5_8_9_12_15_16_blocks_write_the_report_of_the_search_of_all_queries() 
 }
 
 // The default: with no variable outfmt 5, 8, 9, 12, 15 and 16 are searched in blocks of 50,000
-// query letters (two blocks); `LOSAT_X_DEFAULT=0` searches all queries together, and with the
-// variables set (`LOSAT_X_BPQBLOCK` and the family's switch) the blocks are back. One format of
+// query letters (two blocks). One format of
 // each family (XML 5, Seq-annot 12, XML2 15); every format's blocks with the family's switch at
 // its default: above.
 #[test]
@@ -434,11 +405,6 @@ fn the_default_writes_outfmt_5_12_and_15_in_blocks() {
     let subject = [OsStr::new("-subject"), fasta.as_os_str()];
     for spec in ["5", "12", "15"] {
         let fmt = outfmt(spec);
-        let family = match spec {
-            "5" => ("LOSAT_X_BPQBLOCKXML", "1"),
-            "15" | "16" => ("LOSAT_X_BPQBLOCKXML2", "1"),
-            _ => ("LOSAT_X_BPQBLOCKSA", "1"),
-        };
         let reference = blastp(&query, &subject, 4, &[BATCH, SWITCH_OFF], &os(&fmt));
         let run = blastp(&query, &subject, 4, &[BATCH], &os(&fmt));
         assert_same(&run, &reference, true, &format!("outfmt {spec} default"));
@@ -446,26 +412,6 @@ fn the_default_writes_outfmt_5_12_and_15_in_blocks() {
             run.searches,
             reference.searches + 1,
             "outfmt {spec}: two blocks"
-        );
-        let run = blastp(&query, &subject, 4, &[BATCH, DEFAULT_OFF], &os(&fmt));
-        assert_same(
-            &run,
-            &reference,
-            false,
-            &format!("outfmt {spec} LOSAT_X_DEFAULT=0"),
-        );
-        let run = blastp(
-            &query,
-            &subject,
-            4,
-            &[BATCH, DEFAULT_OFF, ("LOSAT_X_BPQBLOCK", "50000"), family],
-            &os(&fmt),
-        );
-        assert_same(
-            &run,
-            &reference,
-            true,
-            &format!("outfmt {spec} LOSAT_X_DEFAULT=0 with the variables set"),
         );
     }
 }
@@ -1741,7 +1687,7 @@ fn outfmt_13_and_14_blocks_write_the_side_files_and_master_of_the_search_of_all_
                 31,
                 "{what}: the master and 30 side files"
             );
-            // The default switch, with `LOSAT_X_DEFAULT=0` (the variable set: on).
+            // The default switch, in the shadow mode.
             let shadow = run(&[BLOCK_80, SHADOW], "shadow");
             assert_same_files(&shadow, &reference, None, &format!("{what} shadow"));
             let (count, sides) = shadow_blocks_and_side_files(&shadow.0, &what);

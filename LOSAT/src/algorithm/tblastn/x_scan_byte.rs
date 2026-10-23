@@ -54,7 +54,7 @@
 //! 0.09-0.24 (k = 1-8), x1.00 and x0.95 at 0.34 (k = 16), and x1.02-1.03 and x0.99-1.00 at 0.42-0.46.
 //!
 //! The switch is read once. It is in the strict set (`utils/xswitch.rs`): on unless
-//! `LOSAT_X_TBNSCANBYTE=0`, or `LOSAT_X_DEFAULT=0` and it is not set; on, it takes the AVX2 forms
+//! `LOSAT_X_TBNSCANBYTE=0`; on, it takes the AVX2 forms
 //! of both stages on x86-64 with AVX2, the plain loops for sparse tables on x86-64 without AVX2 and
 //! in WebAssembly, and changes nothing elsewhere (aarch64: not timed). `LOSAT_X_TBNSCANBYTE=2`
 //! takes the plain loops on any CPU for every table, `=3` the plain loops for sparse tables on any
@@ -119,7 +119,7 @@ impl XScanByte {
 // No NCBI counterpart: reads LOSAT_X_TBNSCANBYTE and LOSAT_X_TBNSCANBYTESHADOW once and detects
 // AVX2; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan of the unit path. LOSAT_X_TBNSCANBYTE is a switch of
-/// the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. On, it takes the
+/// the strict set, on unless it is `0`. On, it takes the
 /// AVX2 forms where the CPU has AVX2, and elsewhere the plain loops for sparse tables only (the
 /// plain loops lose where most words are candidates, see the module text; on aarch64 nothing);
 /// `2` takes the plain loops on any CPU and table, `3` the plain loops for sparse tables on any

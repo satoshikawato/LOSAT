@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_MBLUTKEEP; in the strict set since 2026-10-19: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set): the hashtable of `build_mb_lookup` (the megablast table
+//! EXPERIMENT (LOSAT_X_MBLUTKEEP; in the strict set since 2026-10-19: on unless it is `0`)
+//! : the hashtable of `build_mb_lookup` (the megablast table
 //! of the megablast and blastn tasks) kept from one query batch to the next of the batch loop and
 //! zeroed for the next build, instead of a fresh zeroed allocation per batch that is freed at the
 //! end of its batch.

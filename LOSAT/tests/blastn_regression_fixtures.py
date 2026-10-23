@@ -601,10 +601,9 @@ def sha256(data: bytes) -> str:
 
 
 def clean_env(case_env: str = "") -> dict[str, str]:
-    # LOSAT_X_DEFAULT is kept (LOSAT/src/utils/xswitch.rs): with 0 the fixtures run on the reference paths.
     # LOSAT_X_REACH is kept (LOSAT/src/utils/xreach.rs): it records the switch paths and changes no output.
     env = {key: value for key, value in os.environ.items()
-           if key in ("LOSAT_X_DEFAULT", "LOSAT_X_REACH")
+           if key == "LOSAT_X_REACH"
            or (key not in REPORT_ENV and not key.startswith(("LOSAT_", "RAYON_")))}
     for item in shlex.split(case_env):
         key, _, value = item.partition("=")

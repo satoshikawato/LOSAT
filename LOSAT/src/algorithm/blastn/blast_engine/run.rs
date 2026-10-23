@@ -3108,7 +3108,7 @@ struct UngappedHit {
 
 // No NCBI counterpart: only where LOSAT keeps its buffers (no value changes).
 /// EXPERIMENT (LOSAT_X_BNMAPPED, a switch of the strict set, `utils/xswitch.rs`: on unless it is
-/// `0`, or `LOSAT_X_DEFAULT=0` and it is not set): the large per-subject buffers of BLASTN (the
+/// `0`): the large per-subject buffers of BLASTN (the
 /// blocks and sequences read from a database and their BLASTNA letters, `database.rs`; the
 /// ungapped hits of a subject as the seed stages push them, `x_push_ungapped`, and the scratch of
 /// their sort by score, outside the per-query groups of `LOSAT_X_QGROUPPAR` and the merge of the
@@ -3895,8 +3895,8 @@ fn collect_prelim_hit_lists(
     collector.hit_lists
 }
 
-/// EXPERIMENT (LOSAT_X_BNSTREAM, a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-/// and it is not set): with two or more threads, the subjects of a
+/// EXPERIMENT (LOSAT_X_BNSTREAM, a strict-set switch: on unless it is `0`)
+/// : with two or more threads, the subjects of a
 /// query batch are claimed by the threads in OID order and their results go to the hit lists in
 /// OID order while the threads search the next subjects (`x_bnstream::search_in_order`); a
 /// thread claims a subject only while it is fewer than `X_BNSTREAM_SUBJECTS_PER_THREAD`

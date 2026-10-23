@@ -746,7 +746,7 @@ mod tests {
         //     localMatch->hsp_array, localMatch->hspcnt, ...);
         // ```
         use crate::algorithm::tblastn::search_gapped::{
-            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile,
+            preliminary_hsps_of_letters, PreliminaryProfile,
         };
         use crate::algorithm::tblastn::stage_d_linking::{link_preliminary_hsps, reap_by_evalue};
         use crate::algorithm::tblastn::stage_d_stats::{
@@ -817,9 +817,8 @@ mod tests {
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
         };
-        let (stage_c_hsps, _) =
-            preliminary_protein_hsps_in_ncbi_order(&[&search_query], &subject_nt, 1, profile)
-                .unwrap();
+        let stage_c_hsps =
+            preliminary_hsps_of_letters(&[&search_query], &subject_nt, 1, profile).unwrap();
         assert_eq!(stage_c_hsps, vec![(0, hsp)]);
         let mut preliminary_linked = link_preliminary_hsps(
             &stage_c_hsps,
@@ -1074,7 +1073,7 @@ mod tests {
         //     localMatch->hsp_array, localMatch->hspcnt, ...);
         // ```
         use crate::algorithm::tblastn::search_gapped::{
-            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile,
+            preliminary_hsps_of_letters, PreliminaryProfile,
         };
         use crate::utils::seg::SegParams;
         let search_query: Vec<_> = query_fasta
@@ -1102,9 +1101,8 @@ mod tests {
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
         };
-        let (stage_c_hsps, _) =
-            preliminary_protein_hsps_in_ncbi_order(&[&search_query], &subject_nt, 32, profile)
-                .unwrap();
+        let stage_c_hsps =
+            preliminary_hsps_of_letters(&[&search_query], &subject_nt, 32, profile).unwrap();
         assert_eq!(
             stage_c_hsps,
             ncbi_preliminary
@@ -1480,7 +1478,7 @@ mod tests {
         // Exercise the natural Stage C output through the same preliminary
         // link/reap before passing its retained HSPs to Kappa.
         use crate::algorithm::tblastn::search_gapped::{
-            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile,
+            preliminary_hsps_of_letters, PreliminaryProfile,
         };
         use crate::utils::seg::SegParams;
         let word_xdrop: Vec<_> = parameters.cutoffs.iter().map(|p| p.word_xdrop).collect();
@@ -1520,8 +1518,8 @@ mod tests {
             }
         }
         let query_refs: Vec<_> = search_queries.iter().map(Vec::as_slice).collect();
-        let (stage_c_hsps, _) =
-            preliminary_protein_hsps_in_ncbi_order(&query_refs, &subject_nt, 1, profile).unwrap();
+        let stage_c_hsps =
+            preliminary_hsps_of_letters(&query_refs, &subject_nt, 1, profile).unwrap();
         assert_eq!(stage_c_hsps.len(), 21);
         let mut preliminary_linked = link_preliminary_hsps(
             &stage_c_hsps,
@@ -2149,7 +2147,7 @@ mod tests {
     #[test]
     fn multi_subject_stage_c_lists_enter_kappa_in_ncbi_stream_order() {
         use crate::algorithm::tblastn::search_gapped::{
-            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile,
+            preliminary_hsps_of_letters, PreliminaryProfile,
         };
         use crate::algorithm::tblastn::stage_d_linking::{
             compare_preliminary_lists_for_kappa, link_preliminary_hsps, reap_by_evalue,
@@ -2275,8 +2273,7 @@ mod tests {
         };
         let mut retained: Vec<(usize, LinkedHspList)> = Vec::new();
         for (oid, (_, subject)) in subjects.iter().enumerate() {
-            let (preliminary, _) =
-                preliminary_protein_hsps_in_ncbi_order(&[&query], subject, 1, profile).unwrap();
+            let preliminary = preliminary_hsps_of_letters(&[&query], subject, 1, profile).unwrap();
             let expected = before.get(&oid).map(Vec::as_slice).unwrap_or(&[]);
             assert_eq!(preliminary.len(), expected.len(), "OID {oid} prelink count");
             for ((context, hsp), row) in preliminary.iter().zip(expected) {

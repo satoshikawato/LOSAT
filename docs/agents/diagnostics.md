@@ -4701,7 +4701,13 @@ Scheduling (each value computed by one thread with the original function; order 
   x1.120, 5.34 x1.063, 5.79 x1.050, 6.33 x1.011, 6.63 x0.986, 6.77 x0.978, 7.34 x0.947, 7.64 x0.928, 8.38
   x0.902; against Swiss-Prot (4 rounds): 4.73 x1.157, 5.34 x1.109, 5.79 x1.079, 6.33 x1.040, 6.77 x1.013,
   7.64 x0.951. They break even at about 6.46 against the fly proteome and 6.95 against Swiss-Prot; 670 lies
-  between, within 2 % of the faster loop on either side. CROSS_AB_PLACEHOLDER The measurements below came before `LOSAT_X_BXHITBF`. Where the two loops break even (one thread, `-db`
+  between, within 2 % of the faster loop on either side. Against dev's default (0030a116, the same setup, load
+  7-28; every output the same bytes), 1 thread, cycles: 6.77 x0.979 (0.578 -> 0.565 s), 7.34 x0.949, 7.64
+  x0.927, 8.38 x0.898 (0.738 -> 0.663 s), 8.63 x0.885 (0.886 -> 0.784 s); against Swiss-Prot 6.77 x1.013, 7.64
+  x0.953, 8.38 x0.920 (7.17 -> 6.61 s); at 8 threads (node 1, 8 physical cores, 5 rounds) 6.77 x0.994, 7.34
+  x0.960, 8.38 x0.911. Tables that take the same loop as before: 6.33 x0.999 and 6.63 x1.001 (the direct loop),
+  9.81 x0.999 and 50 cDNAs x yeast x0.991 (fused; one node-0 core), the same instructions (x1.0000). The
+  measurements below came before `LOSAT_X_BXHITBF`. Where the two loops break even (one thread, `-db`
   UniRef50 2026_03 volume 00, both with `LOSAT_X_BXSCANBF=1`, every batch fused against the direct loop, 2
   rounds each; pieces of one 2.1-kb fly cDNA): hits per used cell 1.76 (300 nt) x1.20 the direct loop's
   time, 2.34 (600 nt; 41.48-41.66 s against 34.49-34.74 s) x1.20, 3.56 (1,000 nt; 68.62-68.86 / 63.55-64.06)

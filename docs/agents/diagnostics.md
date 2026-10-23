@@ -4186,7 +4186,21 @@ Scheduling (each value computed by one thread with the original function; order 
   translates the residues of every unit of every packed subject with and without the vector loop, stops
   (panic) at the first that differs from the frame's and prints `[X_SHADOW] TBNUNITXLATE units_compared=
   residues_compared=` at exit. With `LOSAT_X_STATS=1` `[X_STATS] TBNUNITXLATE plans= units= residues=` counts
-  the plans without residues and the units' residues. MEASURED.
+  the plans without residues and the units' residues. Measured 2026-10-23/24 on the workstation (physical cores
+  of node 1 with their HT siblings idle, `--membind=1`, cores warmed 3 s before each run, pairs with the order
+  alternated, `perf stat` walls; node 0 busy, load 13-54), the pull request's binary against its base, one protein
+  against a genome (`-db -evalue 1e-5 -max_target_seqs 5`), every output of a case the same bytes across arms (the
+  human genome's equal to NCBI BLAST+ 2.17.0 `-db -num_threads 1`): the human genome at 1 / 8 / 16 / 32 threads
+  15.71 -> 13.33 s (x0.848), 2.82 -> 2.41 (x0.854), 2.10 -> 1.64 (x0.783), 2.06 -> 1.36 (x0.663), max RSS 1,264 /
+  3,725 / 5,349 / 6,685 -> 849 / 916 / 985 / 1,094 MiB (NCBI 1,089 / 3,657 / 5,529 MiB at 1 / 8 / 16), page faults
+  1.71 M -> 0.20-0.27 M, instructions +2.3 %, cycles -2.6 %; the zebrafish genome x0.881 / 0.865 / 0.798 / 0.663, max
+  RSS 517 / 1,295 / 1,919 / 2,942 -> 427 / 494 / 562 / 679 MiB; the fly genome (one batch of proteins) x0.992 at one
+  thread, x0.994 at 8, x0.976-1.001 at 16 (three runs), max RSS 324 / 352 / 398 -> 155 / 227 / 356 MiB at 8 / 16 / 32, and at 32
+  threads x1.011 (median of 28 pairs over five runs whose medians were x0.983-1.020; 11 of 28 faster; the same
+  cycles and user time, the flow's tail: 21-22 of 32 CPUs busy in both). E. coli x 16 protein batches (the plans of
+  `TBNSSIDE`) and fly proteins against 5,000 16S sequences (frames below 1 MiB) take the frames as before
+  (x1.000-1.006, the same instructions). With `=0` the binary ran as its base (the human genome at one thread
+  x1.002, the same instructions).
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject`: each subject record's letters are packed as soon as the
   reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST database volume: ncbi2na 4
   bases per byte with the remainder count in the last byte, the runs of letters other than `ACGT`

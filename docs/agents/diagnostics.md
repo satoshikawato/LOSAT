@@ -3860,7 +3860,19 @@ Scheduling (each value computed by one thread with the original function; order 
   most 32,767 - largest entry - 16 x `gap_extend` - 1 (32,739 for BLOSUM62 with 11/1), and past that
   the 32-bit rows compute the alignment again from row 0. x86_64 with AVX2, BMI1 and LZCNT only:
   aarch64 and WebAssembly keep the reference function (no AVX-512 on the default path).
-  `LOSAT_X_BPGAPSHADOW=1` compares these rows with the reference function too.
+  `LOSAT_X_BPGAPSHADOW=1` compares these rows with the reference function too. Measured 2026-10-23
+  on the workstation (node 1, CPU 40 for one thread and CPUs 40-47 for eight, their HT siblings
+  idle, warmed 3 s before every run, arm order reversed every other round, medians of the per-round
+  ratios against dev 7cfec941, the binary before the switch; every report identical between the arms
+  and equal to NCBI BLAST+ 2.17.0's). OrthoFinder jobs of 7 species at one thread (`-subject`,
+  `-evalue 0.001`, 4 rounds): Blast0_6 x0.959 (54.56 -> 52.35 s, 4 of 4 rounds below 1; cycles
+  x0.959, instructions x0.974), Blast6_6 x0.957 (18.32 -> 17.55 s). With the prototype of the same
+  rows (8 rounds at one thread, 2 at eight): Blast0_6 x0.957, Blast6_6 x0.956, 5,000 x 5,000
+  UniRef50 proteins (`-db`, `-evalue 0.001`, 8 threads) x0.962, a 42-letter UniRef50 query against
+  the first UniRef50 volume (`-evalue 1e-5`, one thread, few restricted alignments) x1.001. In
+  Blast0_6 the restricted rows went from 20.1 to 13.3 G cycles (11.6 % of dev's cycles in `perf
+  record`). With `=0` the instruction counts equal dev's (x1.00006) at x1.002-1.003 of its time. Max
+  RSS within the spread of repeated runs of one binary.
 - `LOSAT_X_PAIRPAR=1` TBLASTX seed stage (scan, two-hit test, ungapped extension) of each subject
   as units of (subject frame, chunk, query context), 36 per one-query pair, on the search pool (in
   order on the calling thread with one thread); each unit scans with a lookup table holding only its

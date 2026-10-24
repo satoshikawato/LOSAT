@@ -80,6 +80,15 @@ pub fn encode_protein_sequence(seq: &[u8]) -> EncodedProtein {
 // query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
 // query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
 // ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:311-315
+// ```c
+// query_offset = 0;
+// for (index = 0; index < query_info->last_context; ++index) {
+//     query_info->contexts[index].query_offset = query_offset;
+//     query_offset += query_info->contexts[index].query_length + 1;
+// }
+// ```
 pub fn encode_protein_query_frame_with_seg(seq: &[u8], seg: Option<&SegParams>) -> QueryFrame {
     encode_query_frame(seq, seg, false)
 }
@@ -138,18 +147,6 @@ fn encode_query_frame(seq: &[u8], seg: Option<&SegParams>, timed: bool) -> Query
         orig_len: encoded.aa_len,
         seg_masks,
     }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:311-315
-// ```c
-// query_offset = 0;
-// for (index = 0; index < query_info->last_context; ++index) {
-//     query_info->contexts[index].query_offset = query_offset;
-//     query_offset += query_info->contexts[index].query_length + 1;
-// }
-// ```
-pub fn encode_protein_query_frame(seq: &[u8]) -> QueryFrame {
-    encode_protein_query_frame_with_seg(seq, None)
 }
 
 #[cfg(test)]

@@ -804,8 +804,7 @@ Same values, faster computation:
   query repeat the whole query's segments: 51 % of the trim work). TBLASTX d04 would repeat 2 %, and
   the other maskers keep no table. A thread keeps at most 32,768 segments and 1 MiB of letters
   (table up to 768 KiB), then clears the table; segments over 127 letters are not kept (line C,
-  v4-C DECISIONS 31-34). Shadow: `LOSAT_X_SEGTRIMMEMOSHADOW=1` trims every hit again and stops on
-  a difference; with `LOSAT_X_STATS=1` as well it prints `[X_SHADOW] SEGTRIMMEMO memo_hits_compared=`.
+  v4-C DECISIONS 31-34).
   Workstation, one core or eight, 8 rounds (2026-10-19): TBLASTN AP027131 x AP027133 n1 0.924 of
   the time (pairs 0.921-0.926), n8 0.971; BLASTX AP027131 x AP027133 n1 0.927, n8 0.985 (memo on
   every masker, e91c8864); with the two maskers of this version (cc7306b2, load 12-45) n1 0.932 /
@@ -860,8 +859,7 @@ Same values, faster computation:
   there, and ErfImpl of 6 or more is below 2.2e-17 (a fifth of 2^-53; the bound is argued at
   `erfc_ncbi` in `stats/spouge.rs`), so the difference rounds to 2.0. The unit test
   `x_erfc_below_minus_six_is_two_and_the_switched_function_has_the_reference_bits` checks the
-  reference on a grid, on random arguments and on the doubles next to -6. Shadow:
-  `LOSAT_X_ERFABSORBSHADOW=1` evaluates the reference as well and stops on a difference.
+  reference on a grid, on random arguments and on the doubles next to -6.
   ErfImpl's long-double `expl` (double-double, 40 series terms and nine squarings) costs about
   5,000 cycles a call; on WSSV x PajaWSV (blastp, one thread) 13,046 of the 18,964 calls that
   reached it had an argument below -6 (line C, v4-C DECISIONS 25). Workstation, one core, 8
@@ -1430,13 +1428,7 @@ Rebuilding less:
   and blastn's ambiguity check reads the offsets of the same ranges at once (`SeqDb::visit_ambiguity`), the ambiguity
   data of the sequences that have any as before. Every value read is the one of the held arrays, so blocks, reports and
   errors do not change; a read of the index file that fails after the volume was opened is a LOSAT error of the read of
-  the block (or title) that needs it. Shadow: `LOSAT_X_DBIDXREADSHADOW=1` (implies the switch) also reads the whole file
-  as without the switch and holds the arrays: the two opens are compared (every value, or the two error texts), every
-  read of the arrays is compared with the held entries, every block end with the one the held arrays give, and every
-  definition line or ambiguity check read in a range with the one read for its sequence alone; the first difference
-  prints the line otherwise printed at exit and panics: `[X_SHADOW] DBIDXREAD volumes= reads= words= block_ends=
-  run_records= identical` (`reads` / `words`: reads of the arrays and the entries they read; `run_records`: records
-  decoded from the ranges' reads). After the open, every range of the arrays read again must keep the order the open
+  the block (or title) that needs it. After the open, every range of the arrays read again must keep the order the open
   checked (the header and sequence offsets ascending, each ambiguity offset inside its sequence's data): an index file
   changed in place during a run is a database format error ("... differ from those checked at open (the file changed)")
   instead of a subtraction that underflows. Like NCBI (which keeps the index file mapped, `seqdbfile.hpp` `m_Lease`), a
@@ -4202,12 +4194,9 @@ Scheduling (each value computed by one thread with the original function; order 
   Web serial reactor x0.84-0.95 and x86-64 cycles x0.84-0.90 at a fill of 0.09-0.24 (k = 1-8), x1.00
   and x0.95 at 0.34 (k = 16), x1.02-1.03 and x0.99-1.00 at 0.42-0.46. Tables of other shapes, tables
   that are not sparse without AVX2, aarch64 and `LOSAT_X_TBNSCANBYTE=0` keep the scans before
-  (`TBNSCANBF`, NCBI's loop). Shadow: `LOSAT_X_TBNSCANBYTESHADOW=1` also runs NCBI's loop on every
-  scan call of every table (the AVX2 forms where AVX2 is there unless `=2` or `=3`, else the plain
-  loops) and stops (panic) if the count, a pair or the scan range
-  differs; one `[X_SHADOW] TBNSCANBYTE calls_compared= pairs_compared=` line at the end. With
-  `LOSAT_X_STATS=1` a line `[X_STATS] TBNSCANBYTE units= calls= avx2=` gives the units and scan calls
-  taken this way (`tests/tblastn_scan_byte.rs` reads both). Timed on the workstation (one booked
+  (`TBNSCANBF`, NCBI's loop).
+  With `LOSAT_X_STATS=1` a line `[X_STATS] TBNSCANBYTE units= calls= avx2=` gives the units and scan
+  calls taken this way (`tests/tblastn_scan_byte.rs` reads it). Timed on the workstation (one booked
   core, against `TBNSCANBF`, same output): one protein x the human genome `-db` x0.754 (20.75 ->
   15.65 s; cycles x0.720), fly proteins x the fly genome `-db` x0.988-0.990, 16 batches x E. coli
   `-db` x0.993-0.995, AP027131 x MG1655 x0.978-0.980, 55 proteins x 16S x0.984. At 8 threads (8 booked cores, warmed 3 s,
@@ -4235,11 +4224,6 @@ Scheduling (each value computed by one thread with the original function; order 
   before the switch (x1.000), time x0.98-1.01. The 2026-10-17 conditional-move form of these tests
   (perf-si-20261012 decision 180, not kept) added 7 % instructions on HsG_p1 and removed 2.5 % of the
   mispredicted branches; this one keeps the instruction count and removes 68 % there.
-- `LOSAT_X_TBNHITBFSHADOW=1` shadow of `LOSAT_X_TBNHITBF` (any value; turns the path on): each offset
-  array runs `pairs` on a copy of the table and then the branch-free loop, and the init HSPs and every
-  cell of the table must be equal; a difference panics with the frame and chunk. It copies the table for
-  every array that is not empty, so it is slow on long query sets. One line at exit, when the unit path
-  filled any offset array (one per scan call, empty ones included): `[X_SHADOW] TBNHITBF arrays_compared= hits_compared= outside=`.
 - `LOSAT_X_TBNKEEPFEW=1` tblastn (memory; in the strict set from the pull request that added it,
   2026-10-19, with `TBNFRAMEREUSE`; `=0` turns it off; `tblastn/search_seed.rs`
   `XSubjectSide::kept_within_threads`, `tblastn/stage_d_pipeline.rs` `x_searched_side_by_side`): a
@@ -4265,12 +4249,6 @@ Scheduling (each value computed by one thread with the original function; order 
   every subject, about 800), the 16S set 134 -> 19 and 152 -> 38 MiB (NCBI 9 and 11), the 5,000
   cDNAs at 8 threads 70 -> 37 MiB (NCBI 16). Before (dev 23db0a4f, `TBNSSIDE=0` (a variable that graduated 2026-10-22) against the
   default, 38 pairs): x0.980-0.994 at 4, 8 and 16 threads on the two large sets, no pair slower.
-- `LOSAT_X_TBNKEEPFEWSHADOW=1` shadow of `LOSAT_X_TBNKEEPFEW` (any value): the plans are kept as
-  with `=0`, and every read of a kept plan also makes the plan of that use, as a search that keeps
-  none makes it; a frame or a unit that differs panics. One line at exit:
-  `[X_SHADOW] TBNKEEPFEW kept_plan_reads_compared= residues_compared=` (nothing compared below
-  four query batches, or for
-  plans beyond `KEEP_LIMIT`).
 - `LOSAT_X_TBNLINKWIN=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule of
   that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns it
   off; `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list
@@ -4285,10 +4263,9 @@ Scheduling (each value computed by one thread with the original function; order 
   and the candidates are tested in NCBI's order with NCBI's tests; a window with no more HSPs than
   the subject starts looked up is tested whole, as NCBI does, so every link, number and E-value is
   NCBI's (unit test `x_chosen_candidates_give_the_links_of_the_whole_window` against the whole
-  window on random lists). Shadow: `LOSAT_X_TBNLINKWINSHADOW=1` (opt-in, with the switch) tests each
-  head's whole window as well and stops (panic) if an admissible candidate was not chosen. With
-  `LOSAT_X_STATS=1` a line `[X_STATS] TBNLINKWIN heads= window= chosen= shadow_heads=` gives the
-  heads, the candidates of their windows and the candidates tested. blastx keeps its own linking.
+  window on random lists).
+  With `LOSAT_X_STATS=1` a line `[X_STATS] TBNLINKWIN heads= window= chosen=` gives the heads, the
+  candidates of their windows and the candidates tested. blastx keeps its own linking.
   Timed on the workstation (perf-si-20261012 session 21, node 1, NCBI BLAST+ 2.17.0 `-db` and LOSAT
   with `LOSAT_X_TBNSCANBF` without and with the switch in turn, three rounds, one hash per case;
   time with the switch / without): zebrafish genome x one protein 0.60 at one thread (24.8 -> 14.8
@@ -4368,10 +4345,7 @@ Scheduling (each value computed by one thread with the original function; order 
   it, so a unit the thread runs while it waits (`TBNFLOWHELP`) makes its own; it only grows, and a thread keeps
   it (up to a chunk and the margin, about 5 MB) until it ends. The units' codons count in `[X_STATS]
   TBNXLATESIMD`. Subjects with shorter frames keep the frames of their plans (those of 256 KiB or less reused
-  by `TBNFRAMEREUSE`). Shadow: `LOSAT_X_TBNUNITXLATESHADOW=1` (any value) keeps the frames,
-  translates the residues of every unit of every packed subject with and without the vector loop, stops
-  (panic) at the first that differs from the frame's and prints `[X_SHADOW] TBNUNITXLATE units_compared=
-  residues_compared=` at exit. With `LOSAT_X_STATS=1` `[X_STATS] TBNUNITXLATE plans= units= residues=` counts
+  by `TBNFRAMEREUSE`). With `LOSAT_X_STATS=1` `[X_STATS] TBNUNITXLATE plans= units= residues=` counts
   the plans without residues and the units' residues. Measured 2026-10-23/24 on the workstation (physical cores
   of node 1 with their HT siblings idle, `--membind=1`, cores warmed 3 s before each run, pairs with the order
   alternated, `perf stat` walls; node 0 busy, load 13-54), the pull request's binary against its base, one protein

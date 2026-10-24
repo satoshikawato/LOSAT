@@ -17,10 +17,8 @@
 //! made for its search alone (the search keeps no subject plans for several query batches) has
 //! no residues, and each unit translates those of its chunk (and
 //! a margin) into a buffer of its thread, so the report does not depend on the switch. It is on
-//! by default and off with `LOSAT_X_TBNUNITXLATE=0`; `LOSAT_X_TBNUNITXLATESHADOW` keeps the frames
-//! and compares every unit's own translation with them. These tests compare the reports and read
-//! the `[X_STATS] TBNUNITXLATE plans= units= residues=` and
-//! `[X_SHADOW] TBNUNITXLATE units_compared= residues_compared=` lines.
+//! by default and off with `LOSAT_X_TBNUNITXLATE=0`. This test compares the reports and reads
+//! the `[X_STATS] TBNUNITXLATE plans= units= residues=` line.
 //!
 //! The query is the first protein of `tests/fasta/PemoMJNVA.faa`; the subjects are eleven copies
 //! of `tests/fasta/MelaMJNV.fasta`, forward and reverse complement in turn (one long subject),
@@ -29,10 +27,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The query file and the subject file (written once per test process), and the lengths of the
-/// two subjects.
-fn inputs() -> &'static (PathBuf, PathBuf, [usize; 2]) {
-    static FILES: std::sync::OnceLock<(PathBuf, PathBuf, [usize; 2])> = std::sync::OnceLock::new();
+/// The query file and the subject file (written once per test process), and the length of the
+/// long subject.
+fn inputs() -> &'static (PathBuf, PathBuf, usize) {
+    static FILES: std::sync::OnceLock<(PathBuf, PathBuf, usize)> = std::sync::OnceLock::new();
     FILES.get_or_init(|| {
         let fasta = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
         let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("tblastn_unit_xlate");
@@ -77,7 +75,7 @@ fn inputs() -> &'static (PathBuf, PathBuf, [usize; 2]) {
         }
         let subject = dir.join(format!("subjects.{pid}.fna"));
         std::fs::write(&subject, file).expect("subject file");
-        (query, subject, [long.len(), genome.len()])
+        (query, subject, long.len())
     })
 }
 
@@ -139,14 +137,6 @@ fn stats(stderr: &str) -> Option<[u64; 3]> {
     )
 }
 
-fn shadow(stderr: &str) -> Option<[u64; 2]> {
-    fields(
-        stderr,
-        "[X_SHADOW] TBNUNITXLATE ",
-        ["units_compared", "residues_compared"],
-    )
-}
-
 /// The residues the six units of a subject of `length` bases with one chunk per frame read: each
 /// frame's residues and its end sentinel.
 fn unit_residues(length: usize) -> u64 {
@@ -154,15 +144,14 @@ fn unit_residues(length: usize) -> u64 {
 }
 
 const OFF: (&str, &str) = ("LOSAT_X_TBNUNITXLATE", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBNUNITXLATESHADOW", "1");
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812 (above). The
-// default, `=0` and the shadow give the same report at one and four threads. By default the long
-// subject's plan has no residues and its six units (one chunk per frame) translate their frames;
-// with `=0` no plan is made so; the shadow compares the units of both subjects.
+// default and `=0` give the same report at one and four threads. By default the long subject's
+// plan has no residues and its six units (one chunk per frame) translate their frames, and the
+// short subject's plan keeps its frames; with `=0` no plan is made so.
 #[test]
 fn the_report_does_not_depend_on_where_the_units_read_their_residues() {
-    let [long, genome] = inputs().2;
+    let long = inputs().2;
     let (expected, stderr) = tblastn(1, &[OFF]);
     assert!(
         String::from_utf8_lossy(&expected)
@@ -171,7 +160,6 @@ fn the_report_does_not_depend_on_where_the_units_read_their_residues() {
         "the search must report hits in the long subject"
     );
     assert_eq!(stats(&stderr), None);
-    assert_eq!(shadow(&stderr), None);
     for threads in [1, 4] {
         let (report, stderr) = tblastn(threads, &[]);
         assert!(
@@ -181,18 +169,6 @@ fn the_report_does_not_depend_on_where_the_units_read_their_residues() {
         assert_eq!(
             stats(&stderr),
             Some([1, 6, unit_residues(long)]),
-            "{threads} threads"
-        );
-        assert_eq!(shadow(&stderr), None);
-        let (report, stderr) = tblastn(threads, &[SHADOW]);
-        assert!(
-            report == expected,
-            "{threads} threads: the shadow changes the report"
-        );
-        assert_eq!(stats(&stderr), None);
-        assert_eq!(
-            shadow(&stderr),
-            Some([12, unit_residues(long) + unit_residues(genome)]),
             "{threads} threads"
         );
     }

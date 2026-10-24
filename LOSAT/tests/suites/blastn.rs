@@ -51,6 +51,8 @@ mod blastn_strand;
 mod blastn_subject_store;
 #[path = "../blastn_subject_stream.rs"]
 mod blastn_subject_stream;
+#[path = "../blastn_tab_par.rs"]
+mod blastn_tab_par;
 #[path = "../blastn_ungap_count.rs"]
 mod blastn_ungap_count;
 #[path = "../megablast_xdrop.rs"]

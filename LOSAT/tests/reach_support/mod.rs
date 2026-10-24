@@ -14,13 +14,19 @@ pub struct Reach {
 }
 
 impl Reach {
-    /// A new empty directory per call: `temp_dir()/losat-reach-<label>-<pid>-<n>`. The tests of
-    /// one binary run at the same time, so no two calls share a directory.
+    /// A new empty directory per call:
+    /// `temp_dir()/losat-reach-<label>-<module path>-<pid>-<n>`. The tests of one binary run at the
+    /// same time, so no two calls share a directory. A suite binary holds one copy of this module
+    /// per file that declares it, each with its own counter, so the module path (`::` written as
+    /// `-`) is part of the name.
     pub fn new(label: &str) -> Reach {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir =
-            std::env::temp_dir().join(format!("losat-reach-{label}-{}-{n}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "losat-reach-{label}-{}-{}-{n}",
+            module_path!().replace("::", "-"),
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("reach directory");
         Reach { dir }

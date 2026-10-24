@@ -56,6 +56,11 @@ git switch --no-track -c <prefix>/<topic> origin/dev   # fix, feature, perf, doc
   only and no incremental cache (a full `cargo test --no-run`, default and `--all-features`:
   5.0 GB -> 1.7 GB, same build time); release is unchanged. Do not override it.
 - `cargo test --all-features` needs `LOSAT_BLASTX_WORKER_LOG` set to a writable file, as in CI.
+- The integration tests are eight binaries. `--test <suite> <file>::` runs one file. A new file under
+  `LOSAT/tests/` goes into its program's suite root `LOSAT/tests/suites/<program>.rs` (`common` for the
+  command line, the output formats and the shared parts); `tests/suite_layout.rs` checks it. A file
+  that changes the process environment or process-wide state (panic hook, rayon's global pool) gets
+  its own `[[test]]` instead.
 - Logs, probes, sweeps, and captures go to `$TASK_DIR` or `$BUILD_ROOT/<task>/`, never into the
   worktree. Set `TMPDIR` to the task folder's `tmp/`; `/tmp` is wiped by a WSL restart.
 - Do not run `git stash`. Every worktree of the clone shares one stash list.

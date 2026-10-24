@@ -2,6 +2,7 @@
 name = "LOSAT"
 version = "0.2.0"
 edition = "2021"
+autotests = false
 description = "Pure-Rust local BLAST with NCBI-verified fixtures, genetic-code exceptions, and command-WASI support"
 license = "MIT"
 repository = "https://github.com/satoshikawato/LOSAT"
@@ -24,6 +25,41 @@ crate-type = ["rlib", "cdylib"]
 [[bin]]
 name = "losat"
 path = "src/main.rs"
+
+# The files of tests/ are modules of six suite binaries (tests/suites/<name>.rs, one `#[path]` module per
+# file) instead of one binary each; the two files that change the process environment stay alone.
+# tests/suite_layout.rs checks that every file is in exactly one test binary.
+[[test]]
+name = "blastn"
+path = "tests/suites/blastn.rs"
+
+[[test]]
+name = "blastp"
+path = "tests/suites/blastp.rs"
+
+[[test]]
+name = "blastx"
+path = "tests/suites/blastx.rs"
+
+[[test]]
+name = "tblastn"
+path = "tests/suites/tblastn.rs"
+
+[[test]]
+name = "tblastx"
+path = "tests/suites/tblastx.rs"
+
+[[test]]
+name = "common"
+path = "tests/suites/common.rs"
+
+[[test]]
+name = "blastn_report_stream_api"
+path = "tests/blastn_report_stream_api.rs"
+
+[[test]]
+name = "unit_tests"
+path = "tests/unit_tests.rs"
 
 [dependencies]
 anyhow = "1.0"

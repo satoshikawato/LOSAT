@@ -116,8 +116,11 @@ pub(crate) static PROF: [AtomicU64; 12] = [
 ];
 // No NCBI counterpart: reads LOSAT_X_NEWTONEXACT_PROF once; it does not change any value NCBI computes.
 pub(crate) fn prof_enabled() -> bool {
+    if !crate::utils::xdiag::ON {
+        return false;
+    }
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_NEWTONEXACT_PROF").is_some())
+    *ON.get_or_init(|| crate::utils::xdiag::var_os("LOSAT_X_NEWTONEXACT_PROF").is_some())
 }
 // No NCBI counterpart: reads the time-stamp counter for the profile output; it does not change any value NCBI computes.
 #[inline(always)]

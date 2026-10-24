@@ -11,6 +11,7 @@ pub mod x_logclone;
 pub(crate) mod x_mapped;
 pub mod x_seg_trim_memo;
 pub(crate) mod xahead;
+pub mod xdiag;
 pub(crate) mod xdrop_simd;
 pub(crate) mod xenv;
 pub mod xreach;

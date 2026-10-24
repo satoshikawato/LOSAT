@@ -32,8 +32,11 @@ static TRACE_HSP_TARGET: OnceLock<Option<TraceHspTarget>> = OnceLock::new();
 /// Get the trace target from environment variable, if set.
 #[inline(always)]
 pub fn trace_hsp_target() -> Option<TraceHspTarget> {
+    if !crate::utils::xdiag::ON {
+        return None;
+    }
     *TRACE_HSP_TARGET.get_or_init(|| {
-        let raw = std::env::var("LOSAT_TRACE_HSP").ok()?;
+        let raw = crate::utils::xdiag::var("LOSAT_TRACE_HSP").ok()?;
         let parts: Vec<&str> = raw
             .split(|c: char| c == ',' || c == ':' || c == ';' || c.is_whitespace())
             .filter(|p| !p.is_empty())

@@ -701,6 +701,30 @@ Same values, faster computation:
   (8; user x0.838), 4 threads x0.985 (6); D. melanogaster cDNAs x genome `-db` dc-megablast 16 threads
   x1.011 (4 pairs, 0.993-1.015; user x1.000, instructions x0.9995); blastp sp4 `-subject` x1.000 (6),
   yeast `-db` x1.001 (4); user-space instructions x0.970-0.9995 in every cell.
+- `LOSAT_X_DPNIBBLE=1` (every program's vector X-drop traceback, memory; in the strict set from the
+  pull request that added it, 2026-10-24; `=0` or `LOSAT_X_DEFAULT=0` returns to one byte per cell) the
+  traceback rows of the vector kernels (`XdropScratch::trace`, NCBI's `edit_script`) held one byte of
+  `SCRIPT_*` bits per DP cell of the band, so a long gapped alignment kept one byte per cell: up to 36 MiB
+  for one Sakai x EDL933 traceback, and each worker keeps its largest. Now the kernels store a code of
+  four bits per cell (bits 0-1 the operation: 0 `SCRIPT_GAP_IN_A`, 1 `SCRIPT_SUB`, 2 `SCRIPT_GAP_IN_B`;
+  bit 2 extend A, bit 3 extend B), two adjacent cells per byte, packed in registers before a store of half
+  the size (x86 `pmaddubsw` + `packuswb`, wasm32 a shift, an or and a byte shuffle, aarch64 `usra` +
+  `xtn` / `uzp1`), and the walk (`kernel::finish`) follows the codes with the same state machine and
+  pushes each operation's NCBI value. A code comes from the same comparisons as the byte, so every script,
+  edit operation, score and offset is the same. All eight kernels (256-bit AVX2, 128-bit DPW128 and base,
+  NEON2); the fuzz tests against the scalar NCBI loops run every family in both layouts (20,000 cases),
+  and `nibble_trace_keeps_every_result` compares long problems in both. The rule (conditional): a
+  search's scratch takes the codes when it is made on a thread of a Rayon pool, that is in a search on
+  two threads or more (also the one-thread pools of the blastn query-batch slots); a one-thread search
+  (no pool) keeps one byte per cell, because there the packing cost time and the saving is one trace.
+  Workstation, node 1, against dev a806eaa5 (per-pair median wall, max RSS MiB, `v4-B/results/b16e/`,
+  same output): Sakai x EDL933 `-subject` dc-megablast 16 threads x0.962 (8 pairs), 613 -> 414; blastn 16
+  threads x0.980 (8), 529 -> 373; dc-megablast 4 threads x0.987 (6), 277 -> 208; blastn 4 threads x1.002
+  (6, 0.993-1.004), 244 -> 197; with the codes at one thread both tasks took x1.009 (cycles x1.010-1.012)
+  for 140 -> 123 and 137 -> 121 MiB, hence the rule. D. melanogaster cDNAs x genome `-db` dc-megablast 16
+  threads x1.014 (6 pairs, 0.985-1.045; user x0.996, cycles x0.994: steps of `time %e`), blastp sp4
+  `-subject` 16 threads x1.002, 1,000 proteins 1 thread x1.002, yeast `-db` x0.997, blastx 50 kb x dmel
+  proteome `-db` x1.000. NCBI `-subject` (one thread) 164-177 MiB.
 - DPW128 (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED`) the
   128-bit X-drop DP kernels with the per-row savings of the 256-bit AVX2 kernels (first and last
   survivor kept while the row runs,

@@ -577,7 +577,8 @@ pub(crate) struct XdropScratch {
     /// when they hold every column.
     x_win_at: usize,
     /// Whether the kernels write `trace` as four-bit codes, two cells per byte (`LOSAT_X_DPNIBBLE`;
-    /// `NIB_SUB`); the walk reads the rows the same way.
+    /// `NIB_SUB`; a search's scratch follows `x_dp_nibble_here`); the walk reads the rows the same
+    /// way.
     x_nib: bool,
 }
 
@@ -588,7 +589,9 @@ impl XdropScratch {
     /// The scratch of a search: empty unless the vector kernels are compiled for the target.
     pub(crate) fn for_search() -> Self {
         if KERNEL_COMPILED {
-            return Self::new();
+            let mut sc = Self::new();
+            sc.x_nib = x_dp_nibble_here();
+            return sc;
         }
         Self {
             ha: Rows::new(0),
@@ -793,6 +796,38 @@ pub(crate) fn x_dp_nibble() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DPNIBBLE"))
+}
+
+/// No NCBI counterpart: the rule of `LOSAT_X_DPNIBBLE` for the scratch of a search
+/// (`XdropScratch::for_search`): four-bit codes when the scratch is made on a thread of a Rayon
+/// pool, that is in a search on two threads or more (its pool, or the one-thread pools of the
+/// blastn query-batch slots); one byte per cell on the calling thread of a one-thread search,
+/// which has no pool. One thread keeps the bytes because there the codes' packing cost time
+/// (Sakai x EDL933 x1.009) and the memory they save is one trace. Memory only: both layouts give
+/// every script NCBI gives.
+fn x_dp_nibble_here() -> bool {
+    if !x_dp_nibble() {
+        return false;
+    }
+    let pooled = x_in_pool();
+    crate::utils::xreach::x_reach!("LOSAT_X_DPNIBBLE", pooled);
+    pooled
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_in_pool() -> bool {
+    rayon::current_thread_index().is_some()
+}
+
+#[cfg(any(
+    not(feature = "parallel"),
+    all(target_arch = "wasm32", not(feature = "wasm-threads"))
+))]
+fn x_in_pool() -> bool {
+    false
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:612-613,732

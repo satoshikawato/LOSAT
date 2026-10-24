@@ -1850,14 +1850,19 @@ Rebuilding less:
   the loop without them; reading the hits 4 or 16 cells ahead instead of 8, the slice bounds 8 or 32 ahead instead
   of 16, and slices without bound tests changed nothing measurable. In WebAssembly (the serial WASI command in
   Node 26, one process, 3 rounds) the loop took x1.055-1.086 the time of 3 proteins x UniRef50 (x0.945-0.979 for 10
-  proteins, x0.99 for 42 residues), so wasm32 keeps `x_scan_flat_bf`. Timed 2026-10-24 on the workstation (node 0,
-  one physical core, its HT sibling idle, warmed 3 s before every run, arm order rotating; other lines' gates ran on
-  node 0, load 23-40; dev a806eaa5; every report identical between the arms; probe round, 4 rounds, medians against
-  dev): OrthoFinder's 1/10 of the Arabidopsis proteins x the zebrafish proteome (`-db`, `-evalue 0.001`) cycles
-  x0.909 (27.00 s; mispredicted branches x0.705), the 1/10 of the human proteins x the yeast proteome x0.989 (7.85
-  s, x0.914-1.065), 3 proteins x UniRef50 volume 00 (`-evalue 1e-5`) x0.968 (9.88 s); a 42-residue protein (the
-  list with the branch) x1.003 with instructions x0.9998, and `=0` instructions x1.0000. In the strict set from
-  its first pull request (no measured case slower natively; AGENTS.md "Speed-up switches").
+  proteins, x0.99 for 42 residues), so wasm32 keeps `x_scan_flat_bf`. Timed 2026-10-24 on the workstation (node 0, one physical core, its
+  HT sibling idle, warmed 3 s before every run, 8 rounds of the pairs in alternating order; other lines' gates ran on
+  node 0, load 22-88, so the cycle and instruction counts are the firmer measure; dev a806eaa5; every report
+  identical between the arms; medians, `cycles:u`): OrthoFinder's 1/10 of the Arabidopsis proteins x the zebrafish
+  proteome (`-db`, `-evalue 0.001`) x0.901 (instructions x0.989, mispredicted branches x0.701), the 1/10 of the human
+  proteins x the yeast proteome x0.939, the 1/10 of the yeast proteins x the yeast proteome x0.935; UniRef50 volume 00
+  (`-db`, `-evalue 1e-5`) 3 proteins x0.957, 10 proteins x0.912; once each, the whole human proteome x the yeast
+  proteome 74.16 -> 69.63 s (cycles x0.937) and the whole Arabidopsis proteome x the zebrafish proteome 256.49 ->
+  235.51 s (x0.915), max RSS 93.1 -> 94.9 MiB and 75.6 -> 75.7 MiB (one run each). Where the switch does not act the
+  instructions are those of dev: proteins of 42 and 357 residues x UniRef50 (the list with the branch) x0.9998 with
+  cycles x1.003 (the `=0` arm read x1.009 in a probe round: code layout), exact blastp (1/10 of the Arabidopsis
+  proteins x the yeast proteome) x1.0000. In the strict set from its first pull request (no measured case slower
+  natively; AGENTS.md "Speed-up switches").
 - `LOSAT_X_BPLKPFLAT=1` (BLASTP `-task blastp-fast`, speed; in the strict set since 2026-10-17, on by default
   together with `LOSAT_X_BPCLUT`; acts only where the search's pool builds the flat table of
   `LOSAT_X_BPCLUT` or `LOSAT_X_BPCLUTSHADOW`, with more than one thread) changes how that build is scheduled

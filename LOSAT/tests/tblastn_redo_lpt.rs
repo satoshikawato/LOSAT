@@ -3,9 +3,9 @@
 //! searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`. It acts where
-//! the redo runs on the search pool (two or more threads, two or more (query, subject) matches),
-//! on each chunk with two or more matches to redo; at one thread the redo stays on the calling
-//! thread.
+//! the redo runs on the search pool with 2 to 16 threads (`X_REDO_LPT_MAX_THREADS`) and two or
+//! more (query, subject) matches, on each chunk with two or more matches to redo; at one thread
+//! the redo stays on the calling thread, and a pool of more than 16 keeps the `par_iter`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
 //! ```c
@@ -138,8 +138,8 @@ impl Drop for Inputs {
     }
 }
 
-/// At 2 and 4 threads the redo takes the new path, at 1 thread the reference; every report is
-/// the one-thread report of `=0`, and `=0` records no side.
+/// At 2 and 4 threads the redo takes the new path, at 1 and 17 threads the reference; every
+/// report is the one-thread report of `=0`, and `=0` records no side.
 #[test]
 fn the_redo_largest_first_gives_the_same_report() {
     let proteins: Vec<usize> = (0..40).collect();
@@ -147,7 +147,12 @@ fn the_redo_largest_first_gives_the_same_report() {
     for targets in [500, 1] {
         let (reference, _) = inputs.tblastn(targets, 1, &[OFF]);
         assert!(!reference.is_empty(), "targets {targets}: no hits");
-        for (threads, side) in [(1, (false, true)), (2, (true, false)), (4, (true, false))] {
+        for (threads, side) in [
+            (1, (false, true)),
+            (2, (true, false)),
+            (4, (true, false)),
+            (17, (false, true)),
+        ] {
             let (off, off_side) = inputs.tblastn(targets, threads, &[OFF]);
             assert_eq!(
                 off_side,

@@ -1527,6 +1527,23 @@ impl XFlatCompressedLookup {
         subject: &[u8],
         subject_length: usize,
         ranges: &mut Vec<(i32, u32, u32)>,
+        visit: V,
+    ) where
+        V: FnMut(i32, &[i32]),
+    {
+        self.x_for_each_range_arm::<BRANCH_FREE, 0, V>(subject, subject_length, ranges, visit)
+    }
+
+    /// PROBE (v4-BPF K2, not for merge): `x_for_each_range` with arm `ARM` (LOSAT_BPF_K2):
+    /// 1 = the branch-free list holds (s, index, 0) and the visits read `starts` (with the
+    /// read-ahead of `for_each_cell`); 2 = slices without bound checks; 3 / 4 / 5 = hits read ahead
+    /// 4 / 16 / no cells; 6 = the branch-free list advances by `end != start`, no PV load.
+    #[inline(always)]
+    pub(crate) fn x_for_each_range_arm<const BRANCH_FREE: bool, const ARM: u8, V>(
+        &self,
+        subject: &[u8],
+        subject_length: usize,
+        ranges: &mut Vec<(i32, u32, u32)>,
         mut visit: V,
     ) where
         V: FnMut(i32, &[i32]),
@@ -1626,7 +1643,15 @@ impl XFlatCompressedLookup {
 
             // index = preshift + compressed_char >= 0: both terms are (from) non-negative letters.
             let ix = index as usize;
-            if BRANCH_FREE {
+            if BRANCH_FREE && ARM == 1 {
+                let bit = (pv[ix >> pv_array_bts] >> (ix & PV_ARRAY_MASK)) & 1;
+                unsafe { list.add(listed).write((s as i32, index as u32, 0)) };
+                listed += bit as usize;
+            } else if BRANCH_FREE && ARM == 6 {
+                let (a, b) = (starts[ix], starts[ix + 1]);
+                unsafe { list.add(listed).write((s as i32, a, b)) };
+                listed += usize::from(a != b);
+            } else if BRANCH_FREE {
                 // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
                 let bit = (pv[ix >> pv_array_bts] >> (ix & PV_ARRAY_MASK)) & 1;
                 let entry = (s as i32, starts[ix], starts[ix + 1]);
@@ -1645,12 +1670,39 @@ impl XFlatCompressedLookup {
         }
 
         let hits = &self.hits;
+        if BRANCH_FREE && ARM == 1 {
+            for (n, &(s, index, _)) in ranges.iter().enumerate() {
+                if let Some(&(_, later, _)) = ranges.get(n + X_STARTS_AHEAD) {
+                    x_prefetch(starts.as_ptr().wrapping_add(later as usize));
+                }
+                if let Some(&(_, later, _)) = ranges.get(n + X_HITS_AHEAD) {
+                    let start = starts[later as usize] as usize;
+                    x_prefetch(hits.as_ptr().wrapping_add(start));
+                }
+                visit(s, self.cell(index as usize));
+            }
+            return;
+        }
+        let ahead = match ARM {
+            3 => 4,
+            4 => 16,
+            5 => usize::MAX,
+            _ => X_HITS_AHEAD,
+        };
         for (n, &(s, start, end)) in ranges.iter().enumerate() {
             // A cache hint only: the hits of the cell X_HITS_AHEAD ahead.
-            if let Some(&(_, later, _)) = ranges.get(n + X_HITS_AHEAD) {
-                x_prefetch(hits.as_ptr().wrapping_add(later as usize));
+            if ahead != usize::MAX {
+                if let Some(&(_, later, _)) = ranges.get(n + ahead) {
+                    x_prefetch(hits.as_ptr().wrapping_add(later as usize));
+                }
             }
-            visit(s, &hits[start as usize..end as usize]);
+            if ARM == 2 {
+                visit(s, unsafe {
+                    hits.get_unchecked(start as usize..end as usize)
+                });
+            } else {
+                visit(s, &hits[start as usize..end as usize]);
+            }
         }
     }
 

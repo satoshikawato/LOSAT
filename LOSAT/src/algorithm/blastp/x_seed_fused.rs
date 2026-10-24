@@ -1890,6 +1890,51 @@ fn x_hit_bf<F>(
     }
 }
 
+/// PROBE (v4-BPF K2, not for merge, arm 7): the flat compressed loop of LOSAT_X_BPFSEED with the
+/// cells of eight or more hits through `x_cell_avx2_defer` (BPDIAG + BPDEFER), the others per hit
+/// with the branch-free test.
+#[cfg(target_arch = "x86_64")]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn x_probe_flat_avx2<const BRANCH_FREE: bool, F>(
+    lookup: &crate::algorithm::tblastx::lookup::compressed::x_clut_direct::XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let mut own = |query_offset, subject_offset, last_hit, diff, entry: &mut DiagStruct| {
+        candidate(query_offset, subject_offset, last_hit, diff, entry)
+    };
+    let test = XDiagTest {
+        diag_offset,
+        window,
+        word_size,
+        prefetch: 0,
+    };
+    let bf = XHitBf::in_range(diag_offset, window, word_size);
+    let table = &mut XDiagTable::new(diag_array, diag_mask);
+    let mut buffer = Vec::new();
+    let mut ranges = Vec::new();
+    lookup.x_for_each_range::<BRANCH_FREE, _>(subject, subject_length, &mut ranges, |s, hits| {
+        if hits.len() >= X_DIAG_LANES {
+            // SAFETY: the caller checked AVX2.
+            unsafe { x_cell_avx2_defer(hits, s, table, test, &mut own, &mut buffer) };
+        } else {
+            let here = bf.here(s);
+            for &query_offset in hits {
+                x_hit_bf(query_offset, s, here, table, test, bf, &mut own);
+            }
+        }
+    });
+}
+
 /// EXPERIMENT (LOSAT_X_BPDIAG): the hits of one batch, the lanes of an AVX2 register.
 const X_DIAG_LANES: usize = 8;
 

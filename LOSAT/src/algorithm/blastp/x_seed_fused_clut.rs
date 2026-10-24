@@ -211,9 +211,75 @@ fn x_fseed_fits(diag_offset: i32, subject_length: usize, window: i32, word_size:
 /// without this one (see [`x_scan_flat_bf`]).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
 // `x_scan_two_hit_compressed_flat`)
-#[inline(never)]
+/// PROBE (v4-BPF K2, not for merge): the arm of `LOSAT_BPF_K2` (0 = the production form).
+pub(crate) fn x_bpf_k2() -> u8 {
+    use std::sync::OnceLock;
+    static V: OnceLock<u8> = OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("LOSAT_BPF_K2")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn x_scan_flat_fseed<const BRANCH_FREE: bool, F>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    macro_rules! arm {
+        ($a:literal) => {
+            x_scan_flat_fseed_arm::<BRANCH_FREE, $a, F>(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                candidate,
+            )
+        };
+    }
+    match x_bpf_k2() {
+        1 => arm!(1),
+        2 => arm!(2),
+        3 => arm!(3),
+        4 => arm!(4),
+        5 => arm!(5),
+        6 => arm!(6),
+        #[cfg(target_arch = "x86_64")]
+        7 if std::arch::is_x86_feature_detected!("avx2") => {
+            super::x_seed_fused::x_probe_flat_avx2::<BRANCH_FREE, F>(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                candidate,
+            )
+        }
+        _ => arm!(0),
+    }
+}
+
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_scan_flat_fseed_arm<const BRANCH_FREE: bool, const ARM: u8, F>(
     lookup: &XFlatCompressedLookup,
     subject: &[u8],
     subject_length: usize,
@@ -233,7 +299,7 @@ fn x_scan_flat_fseed<const BRANCH_FREE: bool, F>(
     // The caller checked `XHitBf::fits` for the subject.
     let bf = XHitBf::in_range(diag_offset, window, word_size);
     let mut ranges = X_RANGES.with(Cell::take).unwrap_or_default();
-    lookup.x_for_each_range::<BRANCH_FREE, _>(
+    lookup.x_for_each_range_arm::<BRANCH_FREE, ARM, _>(
         subject,
         subject_length,
         &mut ranges,

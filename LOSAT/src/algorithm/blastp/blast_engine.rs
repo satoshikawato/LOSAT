@@ -8073,14 +8073,24 @@ fn run_resolved_in_pool(
             ),
         }
     }
-    // EXPERIMENT (LOSAT_X_BPFSEED): the reference compressed table keeps its loop; on the flat table
-    // the loop records its side per subject (`x_seed_fused_clut.rs`).
+    // EXPERIMENT (LOSAT_X_BPFSEED): the reference compressed table and a flat table without the
+    // branch-free list keep their loops; on a flat table with the list the loop records its side
+    // per subject (`x_seed_fused_clut.rs`).
     if args.window_size != 0
         && (super::x_seed_fused::x_bp_seed() || super::x_seed_fused::x_bp_seed_shadow())
         && super::x_seed_fused_clut::x_bp_fseed()
-        && matches!(lookup, BlastpRuntimeLookup::Compressed(_))
     {
-        crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false);
+        match &lookup {
+            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Compressed(_) => {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
+            }
+            BlastpRuntimeLookup::CompressedFlat(table) => {
+                if !super::x_seed_fused_clut::x_clut_scan_bf(table) {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
+                }
+            }
+        }
     }
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
     let concatenated_query = build_blastp_concatenated_query(&contexts);

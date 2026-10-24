@@ -17,18 +17,18 @@
 //! the branch, which the other tables take, is compiled as without it. A switch of the strict set
 //! (`utils/xswitch.rs`): on unless it is `0`.
 //!
-//! EXPERIMENT (LOSAT_X_BPFSEED): on a subject where `XHitBf::fits` holds, the loop takes three
-//! changes (`x_scan_flat_fseed`): each hit goes first through blastp's branch-free two-hit test
-//! (`XHitBf::test`, LOSAT_X_BPHITBF, whose argument in `x_seed_fused.rs` holds here: the diagonal
-//! table and the extension's stores are those of blastp's loop), and a flag-1 entry or a
-//! candidate goes on to `x_test_hit`, unchanged; no hit reads ahead a later hit's diagonal entry
-//! (a cache hint); and the scan reads each listed cell's slice bounds as it finds the cell
-//! (`XFlatCompressedLookup::x_for_each_range`), so the visits read no `starts` entry. The cells,
-//! their order, the hits and their order are the same, the table holds after each hit what
-//! `x_test_hit` leaves there, and the extension is called for the same hits with the same values
-//! and entries. The instance is out of line with a closure of its own type, so the loops without
-//! it keep their code; a subject outside `XHitBf::fits` runs them. A switch of the strict set: on
-//! unless it is `0`.
+//! EXPERIMENT (LOSAT_X_BPFSEED): on a table that takes the branch-free list, a subject where
+//! `XHitBf::fits` holds runs the loop of `x_scan_flat_fseed`, which differs in two ways: each hit
+//! goes first through blastp's branch-free two-hit test (`XHitBf::test`, LOSAT_X_BPHITBF; its
+//! argument in `x_seed_fused.rs` holds here, as the diagonal table, its offsets and the
+//! extension's stores are those of blastp's loop), and a flag-1 entry or a candidate goes on to
+//! `x_test_hit`, unchanged; and no hit reads ahead a later hit's diagonal entry (a cache hint).
+//! The cells, their order, the hits and their order are those of `x_scan_flat_bf`, the table
+//! holds after each hit what `x_test_hit` leaves there, and the extension is called for the same
+//! hits with the same values and entries. The loop is out of line with a closure of its own type,
+//! so the loops without it keep their code. A sparser table keeps the loop with the branch: there
+//! few positions have hits, and the test gained nothing on the workstation. A switch of the strict
+//! set: on unless it is `0`.
 
 use std::cell::Cell;
 
@@ -40,12 +40,6 @@ thread_local! {
     // No NCBI counterpart: the scan's list of (subject offset, backbone index), reused across
     // subjects.
     static X_CELLS: Cell<Option<Vec<(i32, u32)>>> = const { Cell::new(None) };
-}
-
-thread_local! {
-    // No NCBI counterpart: LOSAT_X_BPFSEED's list of (subject offset, slice start, slice end),
-    // reused across subjects.
-    static X_RANGES: Cell<Option<Vec<(i32, u32, u32)>>> = const { Cell::new(None) };
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPFSEED switch once; it does not change any value NCBI
@@ -100,40 +94,25 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
 ) where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
-    // EXPERIMENT (LOSAT_X_BPFSEED): the branch-free two-hit test, no read-ahead of the diagonal
-    // entries and the slice bounds read by the scan, where the test gives the reference's
-    // outcomes (module header).
-    if x_bp_fseed() && x_fseed_fits(diag_offset, subject_length, window, word_size) {
-        if x_clut_scan_bf(lookup) {
-            x_scan_flat_fseed::<true, F>(
-                lookup,
-                subject,
-                subject_length,
-                diag_array,
-                diag_mask,
-                diag_offset,
-                window,
-                word_size,
-                &mut candidate,
-            );
-        } else {
-            x_scan_flat_fseed::<false, F>(
-                lookup,
-                subject,
-                subject_length,
-                diag_array,
-                diag_mask,
-                diag_offset,
-                window,
-                word_size,
-                &mut candidate,
-            );
-        }
-        return;
-    }
     // EXPERIMENT (LOSAT_X_BPCLUTSCANBF): on a table with enough cells used, the offsets listed
     // without a branch on the presence bit (`for_each_cell`).
     if x_clut_scan_bf(lookup) {
+        // EXPERIMENT (LOSAT_X_BPFSEED): the branch-free two-hit test and no read-ahead of the
+        // diagonal entries, where the test gives the reference's outcomes (module header).
+        if x_bp_fseed() && x_fseed_fits(diag_offset, subject_length, window, word_size) {
+            x_scan_flat_fseed(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                &mut candidate,
+            );
+            return;
+        }
         x_scan_flat_bf(
             lookup,
             subject,
@@ -195,25 +174,23 @@ fn x_scan_flat_bf<F>(
 }
 
 // No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's outcomes.
-/// EXPERIMENT (LOSAT_X_BPFSEED): whether the subject takes [`x_scan_flat_fseed`] ([`XHitBf::fits`]),
-/// recorded for `LOSAT_X_REACH`.
+/// EXPERIMENT (LOSAT_X_BPFSEED): whether a subject of a table with the branch-free list takes
+/// [`x_scan_flat_fseed`] ([`XHitBf::fits`]), recorded for `LOSAT_X_REACH`.
 fn x_fseed_fits(diag_offset: i32, subject_length: usize, window: i32, word_size: i32) -> bool {
     let fits = XHitBf::fits(diag_offset, subject_length, window, word_size);
     crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", fits);
     fits
 }
 
-/// EXPERIMENT (LOSAT_X_BPFSEED): [`x_scan_two_hit_compressed_flat`] on a subject where
-/// [`XHitBf::fits`] holds, with the branch-free two-hit test first, no read-ahead of the diagonal
-/// entries, and the cells listed with their slice bounds
-/// ([`XFlatCompressedLookup::x_for_each_range`]; `BRANCH_FREE` is its list form, LOSAT_X_BPCLUTSCANBF).
+/// EXPERIMENT (LOSAT_X_BPFSEED): [`x_scan_flat_bf`] with the branch-free two-hit test first and no
+/// read-ahead of the diagonal entries, for a subject where [`XHitBf::fits`] holds (module header).
 /// Out of line, and with a closure of its own type, so that the loops without it are compiled as
 /// without this one (see [`x_scan_flat_bf`]).
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
-// `x_scan_two_hit_compressed_flat`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at
+// `x_seed_fused::x_test_hit`)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_scan_flat_fseed<const BRANCH_FREE: bool, F>(
+fn x_scan_flat_fseed<F>(
     lookup: &XFlatCompressedLookup,
     subject: &[u8],
     subject_length: usize,
@@ -232,28 +209,22 @@ fn x_scan_flat_fseed<const BRANCH_FREE: bool, F>(
     assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
     // The caller checked `XHitBf::fits` for the subject.
     let bf = XHitBf::in_range(diag_offset, window, word_size);
-    let mut ranges = X_RANGES.with(Cell::take).unwrap_or_default();
-    lookup.x_for_each_range::<BRANCH_FREE, _>(
-        subject,
-        subject_length,
-        &mut ranges,
-        |s, cell_hits| {
-            let here = bf.here(s);
-            for &query_offset in cell_hits {
-                let diag_coord = ((query_offset - s) & diag_mask) as usize;
-                // SAFETY: diag_coord <= diag_mask < diag_array.len() (asserted above).
-                let entry = unsafe { diag_array.get_unchecked_mut(diag_coord) };
-                if bf.test(entry, here) {
-                    continue;
-                }
-                if let Some((last_hit, diff)) = x_test_hit(entry, s, diag_offset, window, word_size)
-                {
-                    own(query_offset, s, last_hit, diff, entry);
-                }
+    let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
+    lookup.for_each_cell::<true, _>(subject, subject_length, &mut cells, |s, cell_hits| {
+        let here = bf.here(s);
+        for &query_offset in cell_hits {
+            let diag_coord = ((query_offset - s) & diag_mask) as usize;
+            // SAFETY: diag_coord <= diag_mask < diag_array.len() (asserted above).
+            let entry = unsafe { diag_array.get_unchecked_mut(diag_coord) };
+            if bf.test(entry, here) {
+                continue;
             }
-        },
-    );
-    X_RANGES.with(|slot| slot.set(Some(ranges)));
+            if let Some((last_hit, diff)) = x_test_hit(entry, s, diag_offset, window, word_size) {
+                own(query_offset, s, last_hit, diff, entry);
+            }
+        }
+    });
+    X_CELLS.with(|slot| slot.set(Some(cells)));
 }
 
 /// The loop of [`x_scan_two_hit_compressed_flat`]; `BRANCH_FREE` is `for_each_cell`'s.
@@ -362,7 +333,7 @@ mod tests {
     // loop on the flat table makes the candidates and leaves the diagonal table of the loop of
     // `x_seed_fused_compressed.rs` on the reference's table, subject after subject, with the list
     // of the branch and the branch-free one (LOSAT_X_BPCLUTSCANBF), and so does the loop of
-    // LOSAT_X_BPFSEED with both lists.
+    // LOSAT_X_BPFSEED.
     #[test]
     fn the_flat_loop_is_the_fused_loop_on_the_reference_table() {
         let mut rng = XorShift(0x510e_527f_ade6_82d1);
@@ -422,7 +393,6 @@ mod tests {
                 let mut flat_diag = vec![DiagStruct::default(); diag_len];
                 let mut bf_diag = vec![DiagStruct::default(); diag_len];
                 let mut fseed_diag = vec![DiagStruct::default(); diag_len];
-                let mut fseed_bf_diag = vec![DiagStruct::default(); diag_len];
                 let mut reference_diag = vec![DiagStruct::default(); diag_len];
                 let mut diag_offset = window;
                 let mut total = 0usize;
@@ -457,10 +427,10 @@ mod tests {
                             stand_in(&mut bf_log, diag_offset, q, s, last_hit, diff, entry)
                         },
                     );
-                    // LOSAT_X_BPFSEED, both lists (the subjects are in XHitBf's range).
+                    // LOSAT_X_BPFSEED (the subjects are in XHitBf's range).
                     assert!(XHitBf::fits(diag_offset, length, window, 5));
                     let mut fseed_log = Vec::new();
-                    x_scan_flat_fseed::<false, _>(
+                    x_scan_flat_fseed(
                         &flat,
                         subject,
                         length,
@@ -471,20 +441,6 @@ mod tests {
                         5,
                         &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
                             stand_in(&mut fseed_log, diag_offset, q, s, last_hit, diff, entry)
-                        },
-                    );
-                    let mut fseed_bf_log = Vec::new();
-                    x_scan_flat_fseed::<true, _>(
-                        &flat,
-                        subject,
-                        length,
-                        &mut fseed_bf_diag,
-                        diag_mask,
-                        diag_offset,
-                        window,
-                        5,
-                        &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
-                            stand_in(&mut fseed_bf_log, diag_offset, q, s, last_hit, diff, entry)
                         },
                     );
                     let mut reference_log = Vec::new();
@@ -504,15 +460,10 @@ mod tests {
                     assert_eq!(flat_log, reference_log, "subject {n}: candidates");
                     assert_eq!(bf_log, reference_log, "subject {n}: branch-free candidates");
                     assert_eq!(fseed_log, reference_log, "subject {n}: BPFSEED candidates");
-                    assert_eq!(
-                        fseed_bf_log, reference_log,
-                        "subject {n}: BPFSEED branch-free candidates"
-                    );
                     for (diag, form) in [
                         (&flat_diag, "branch"),
                         (&bf_diag, "branch-free"),
                         (&fseed_diag, "BPFSEED"),
-                        (&fseed_bf_diag, "BPFSEED branch-free"),
                     ] {
                         assert!(
                             diag.iter()

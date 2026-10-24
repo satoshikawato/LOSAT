@@ -1,6 +1,6 @@
-//! blastp-fast's fused loop on the flat compressed table with the branch-free two-hit test, no
-//! read-ahead of the diagonal entries and the slice bounds read by the scan (`LOSAT_X_BPFSEED`,
-//! `src/algorithm/blastp/x_seed_fused_clut.rs` `x_scan_flat_fseed`) on whole searches.
+//! blastp-fast's fused loop on the flat compressed table with the branch-free two-hit test and no
+//! read-ahead of the diagonal entries (`LOSAT_X_BPFSEED`, `src/algorithm/blastp/x_seed_fused_clut.rs`
+//! `x_scan_flat_fseed`) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
 //! ```c
@@ -16,13 +16,13 @@
 //! without it and leaves the same diagonal table (the lib test
 //! `the_flat_loop_is_the_fused_loop_on_the_reference_table`), so the property under test is that
 //! the report does not depend on it, for subjects read from FASTA (`-subject`) and from a database
-//! (`-db`), at 1 and 2 threads, with both lists of the scan (`LOSAT_X_BPCLUTSCANBF`: the dense
-//! query's table takes the branch-free list, the sparse one's the list with the branch, and
-//! `LOSAT_X_BPCLUTSCANBF=0` / `LOSAT_X_BPCLUTSCANBFMIN=0` swap them). That reports equal NCBI's is
-//! the business of the BLASTP fixtures. `LOSAT_X_REACH` shows the side each run took: every subject
-//! here is in the branch-free test's range, so the flat table takes the loop; the reference
-//! compressed table (`LOSAT_X_BPCLUT=0`) keeps its own loop. Exact blastp builds no compressed table
-//! and records no side.
+//! (`-db`), at 1 and 2 threads. That reports equal NCBI's is the business of the BLASTP fixtures.
+//! `LOSAT_X_REACH` shows the side each run took: the loop runs where the scan lists the cells
+//! without a branch (`LOSAT_X_BPCLUTSCANBF`: the dense query's table, and every table with
+//! `LOSAT_X_BPCLUTSCANBFMIN=0`), and every subject here is in the branch-free test's range; the
+//! sparse query's table, every table with `LOSAT_X_BPCLUTSCANBF=0`, and the reference compressed
+//! table (`LOSAT_X_BPCLUT=0`) keep their loops. Exact blastp builds no compressed table and records
+//! no side.
 //!
 //! The dense query is the first 30 proteins of AP027131 (9,948 residues; its table uses 30.9 % of
 //! the cells), the sparse one its first protein (455 residues; 1.66 %); the subjects are the first
@@ -187,8 +187,8 @@ fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
 }
 
 /// Default, `=0`, both lists of the scan and the reference compressed table give the same report
-/// and messages for blastp-fast on `-subject` and `-db` at 1 and 2 threads; the flat table takes the
-/// loop, the reference table keeps its own, and `=0` records nothing.
+/// and messages for blastp-fast on `-subject` and `-db` at 1 and 2 threads; a flat table with the
+/// branch-free list takes the loop, the other tables keep theirs, and `=0` records nothing.
 #[test]
 fn blastp_fast_reports_do_not_depend_on_the_seed_loop() {
     let inputs = Inputs::new();
@@ -216,10 +216,10 @@ fn blastp_fast_reports_do_not_depend_on_the_seed_loop() {
                 let on = blastp(&args, &[]);
                 assert_eq!(on.code, Some(0), "{case}: {}", on.stderr);
                 assert!(!on.stdout.is_empty(), "{case}: no hits");
-                assert_eq!(on.reached, (true, false), "{case}: default's side");
+                assert_eq!(on.reached, (dense, !dense), "{case}: default's side");
                 for (label, env, reached) in [
                     ("off", OFF, (false, false)),
-                    ("branch list", BRANCH_LIST, (true, false)),
+                    ("branch list", BRANCH_LIST, (false, true)),
                     ("every table", EVERY_TABLE, (true, false)),
                     ("reference table", REFERENCE_TABLE, (false, true)),
                 ] {

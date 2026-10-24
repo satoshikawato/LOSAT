@@ -3134,7 +3134,18 @@ Scheduling (each value computed by one thread with the original function; order 
   `SQ` and `SR`; BLASTN takes no custom tabular column) and no caller takes the hits' records, no `-query_loc`, no
   `LOSAT_X_QBATCHPAR` slot may run (the condition `LOSAT_X_QSTREAM`'s rule computes), and the records are read before
   the search (`LOSAT_X_QSTREAM` not acting; not `run_local`, whose caller holds its records). With `LOSAT_TIMING`
-  `[TIMING] x_bn_q_drop: batches= records= letters=` gives the batches, records and letters dropped.
+  `[TIMING] x_bn_q_drop: batches= records= letters=` gives the batches, records and letters dropped. Evidence
+  (workstation node 1, 16 cores with their HT siblings idle, membind 1, cores warmed 3 s before each run; pairs in
+  alternating order; outputs identical; peak `RssAnon` of a 10 ms sample): megablast of E. coli Sakai against MG1655,
+  8 pairs against dev 2683e6c6, `-subject` 131.6 -> 126.4 MiB at one thread and 135.2 -> 129.9 at 16, `-db` 130.9 ->
+  126.3 and 135.5 -> 129.1 (against dev 313fd4e7 131.9 -> 126.5, 135.3 -> 130.2, 130.8 -> 126.4, 134.8 -> 129.8;
+  with outfmt 0, where the rule keeps the letters, 132.0 -> 131.8); megablast of 31,168 D. melanogaster cDNAs against
+  dmel_dna_3M at one thread (37 batches, 89 MB of letters, the peak in the first batches) 219.7 -> 215.3. At 16
+  threads the cDNAs' search keeps its letters (`LOSAT_X_QBATCHPAR`'s slots run); 12 pairs of that unchanged path read
+  wall x1.017 (0.961-1.087, 4 of 12 below 1), cycles:u x1.001 and `RssAnon` 558-621 MiB in both arms. Time elsewhere:
+  wall x0.981-0.999, cycles:u x0.990-1.001, instructions:u x0.998-1.000. Dropping the query chunks' copies before their
+  chunk's scan (an earlier form) saved nothing measurable: blastn of Sakai, whose records `LOSAT_X_QSTREAM` reads,
+  read the same max RSS at one thread.
 - `LOSAT_X_GREEDYROWFUSE=1` (BLASTN megablast, the distances of the non-affine greedy alignment that `x_greedy_row` runs:
   every traceback, and the score-only calls the fused loop GREEDYFUSE declines; speed; in the strict set from the pull
   request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per

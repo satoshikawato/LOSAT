@@ -1532,6 +1532,165 @@ thread_local! {
     static X_CROSS_STAGE: std::cell::Cell<Vec<i32>> = const { std::cell::Cell::new(Vec::new()) };
 }
 
+// ---- PROBE (v4-A14 s8, exp/a14-dprobe, never merged): would deferring the drain's candidate
+// calls to the end of the drain stay exact with few flushes? Counts on the drain's present order.
+// A "unit" is a batch (x_cross_batch) or a part of a window (x_cross_window). Pending = the
+// candidates called since the last flush or drain start. A unit that reads a pending candidate's
+// entry needs the pending calls before it (a flush). Variant B: windows' parts join the deferral
+// like batches. Variant A: a window flushes whatever is pending before it and calls its own
+// candidates at once (only batches defer).
+#[cfg(target_arch = "x86_64")]
+pub(crate) mod defer_probe {
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+
+    pub(crate) const NAMES: [&str; 26] = [
+        "drains",
+        "drains_end",
+        "batches",
+        "batches_cand",
+        "batches_cand2",
+        "batch_cands",
+        "windows",
+        "parts",
+        "window_cands",
+        "tail_cands",
+        "b_flushes",
+        "b_intervals_cand",
+        "b_end_intervals_cand",
+        "b_pending_cands",
+        "b_iv1",
+        "b_iv2",
+        "b_iv3_4",
+        "b_iv5_8",
+        "b_iv9_16",
+        "b_iv17_32",
+        "b_iv33p",
+        "a_flushes",
+        "a_window_flushes",
+        "a_intervals_cand",
+        "a_end_intervals_cand",
+        "a_pending_cands",
+    ];
+    pub(crate) static TOTALS: [AtomicU64; 26] = [const { AtomicU64::new(0) }; 26];
+
+    #[derive(Default)]
+    pub(crate) struct Probe {
+        stamp_b: Vec<u32>,
+        id_b: u32,
+        pend_b: u32,
+        stamp_a: Vec<u32>,
+        id_a: u32,
+        pend_a: u32,
+        pub(crate) c: [u64; 26],
+    }
+
+    thread_local! {
+        pub(crate) static PROBE: std::cell::RefCell<Probe> = std::cell::RefCell::new(Probe {
+            id_b: 1,
+            id_a: 1,
+            ..Default::default()
+        });
+    }
+
+    impl Probe {
+        pub(crate) fn size(&mut self, n: usize) {
+            if self.stamp_b.len() < n {
+                self.stamp_b.resize(n, 0);
+                self.stamp_a.resize(n, 0);
+            }
+        }
+        fn end_b(&mut self, at_end: bool) {
+            if self.pend_b > 0 {
+                self.c[11] += 1;
+                if at_end {
+                    self.c[12] += 1;
+                }
+                self.c[13] += u64::from(self.pend_b);
+                let k = match self.pend_b {
+                    1 => 14,
+                    2 => 15,
+                    3..=4 => 16,
+                    5..=8 => 17,
+                    9..=16 => 18,
+                    17..=32 => 19,
+                    _ => 20,
+                };
+                self.c[k] += 1;
+            }
+            self.id_b = self.id_b.wrapping_add(1).max(1);
+            self.pend_b = 0;
+        }
+        fn end_a(&mut self, at_end: bool) {
+            if self.pend_a > 0 {
+                self.c[23] += 1;
+                if at_end {
+                    self.c[24] += 1;
+                }
+                self.c[25] += u64::from(self.pend_a);
+            }
+            self.id_a = self.id_a.wrapping_add(1).max(1);
+            self.pend_a = 0;
+        }
+        /// A unit about to read the entries `coords`; `batch` = a batch (variant A tracks it).
+        pub(crate) fn reads(&mut self, coords: &[i32], batch: bool) {
+            if coords
+                .iter()
+                .any(|&c| self.stamp_b[c as usize] == self.id_b)
+            {
+                self.c[10] += 1;
+                self.end_b(false);
+            }
+            if batch
+                && coords
+                    .iter()
+                    .any(|&c| self.stamp_a[c as usize] == self.id_a)
+            {
+                self.c[21] += 1;
+                self.end_a(false);
+            }
+        }
+        /// A window starts (variant A flushes).
+        pub(crate) fn window(&mut self) {
+            self.c[6] += 1;
+            if self.pend_a > 0 {
+                self.c[22] += 1;
+                self.end_a(false);
+            }
+        }
+        /// A candidate of a unit (`batch` = of a batch).
+        pub(crate) fn candidate(&mut self, coord: i32, batch: bool) {
+            self.stamp_b[coord as usize] = self.id_b;
+            self.pend_b += 1;
+            if batch {
+                self.stamp_a[coord as usize] = self.id_a;
+                self.pend_a += 1;
+            } else {
+                self.c[8] += 1;
+            }
+        }
+        /// The drain's batches are over (before its tail or move).
+        pub(crate) fn drain_end(&mut self, end: bool) {
+            self.c[0] += 1;
+            if end {
+                self.c[1] += 1;
+            }
+            self.end_b(true);
+            self.end_a(true);
+            for (t, c) in TOTALS.iter().zip(self.c.iter_mut()) {
+                t.fetch_add(std::mem::take(c), Relaxed);
+            }
+        }
+    }
+
+    pub(crate) fn line() -> String {
+        let mut s = String::from(" probe:");
+        for (n, t) in NAMES.iter().zip(TOTALS.iter()) {
+            s.push_str(&format!(" {n}={}", t.load(Relaxed)));
+        }
+        s
+    }
+}
+
 // No NCBI counterpart: NCBI keeps the offset pair of every hit in `offset_pairs`; the stage keeps
 // the entry coordinate and the subject offset of the hits not yet tested.
 /// EXPERIMENT (LOSAT_X_BXCROSS): one subject's view of the stage: two arrays of
@@ -2451,19 +2610,31 @@ where
     let mut candidates = 0u32;
     let mut windows = 0u32;
     let mut b = 0;
+    defer_probe::PROBE.with(|p| p.borrow_mut().size(table.entries.len()));
     while b < full {
         let coords = _mm256_loadu_si256(cross.coord().add(b).cast());
         if x_cross_conflict(coords) {
+            defer_probe::PROBE.with(|p| p.borrow_mut().window());
             candidates += x_cross_window(cross, b, table, test, candidate);
             windows += 1;
         } else {
+            let lane_coords: [i32; X_DIAG_LANES] =
+                std::array::from_fn(|i| *cross.coord().add(b + i));
+            defer_probe::PROBE.with(|p| {
+                let mut p = p.borrow_mut();
+                p.reads(&lane_coords, true);
+                p.c[2] += 1;
+            });
             candidates += x_cross_batch(cross, b, table, test, candidate);
         }
         b += X_DIAG_LANES;
     }
+    defer_probe::PROBE.with(|p| p.borrow_mut().drain_end(end));
     let left = if end {
         for i in full..staged {
-            candidates += x_cross_hit(cross, i, table, test, candidate);
+            let n = x_cross_hit(cross, i, table, test, candidate);
+            defer_probe::PROBE.with(|p| p.borrow_mut().c[9] += u64::from(n));
+            candidates += n;
         }
         0
     } else {
@@ -2681,6 +2852,21 @@ where
     debug_assert!(x_batch_coords_distinct(&lane_coords.map(|c| c as usize)));
     let s = _mm256_loadu_si256(cross.subject().add(b).cast());
     let lanes = x_batch_avx2_lanes(lane_coords, s, table, test);
+    defer_probe::PROBE.with(|p| {
+        let mut p = p.borrow_mut();
+        if lanes != 0 {
+            p.c[3] += 1;
+            if lanes.count_ones() >= 2 {
+                p.c[4] += 1;
+            }
+            p.c[5] += u64::from(lanes.count_ones());
+        }
+        let mut l = lanes;
+        while l != 0 {
+            p.candidate(lane_coords[l.trailing_zeros() as usize] as i32, true);
+            l &= l - 1;
+        }
+    });
     x_cross_calls(cross, b, lanes, table, test, candidate);
     lanes.count_ones()
 }
@@ -2730,7 +2916,20 @@ where
         ));
         let lane_subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| subjects[lane(i)]);
         let s = _mm256_loadu_si256(lane_subjects.as_ptr().cast());
+        defer_probe::PROBE.with(|p| {
+            let mut p = p.borrow_mut();
+            p.reads(&coords[start..end], false);
+            p.c[7] += 1;
+        });
         let lanes = x_batch_avx2_lanes(lane_coords, s, table, test) & ((1u32 << (end - start)) - 1);
+        defer_probe::PROBE.with(|p| {
+            let mut p = p.borrow_mut();
+            let mut l = lanes;
+            while l != 0 {
+                p.candidate(coords[start + l.trailing_zeros() as usize], false);
+                l &= l - 1;
+            }
+        });
         x_cross_calls(cross, b + start, lanes, table, test, candidate);
         candidates += lanes.count_ones();
         start = end;

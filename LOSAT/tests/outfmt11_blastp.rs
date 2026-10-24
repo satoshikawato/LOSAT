@@ -602,7 +602,11 @@ fn an_outfmt_spec_gets_no_error_archive() {
             if written {
                 assert_eq!(output.stdout, frozen("noquery_sub", "out"), "{outfmt:?}");
             } else {
-                assert!(output.stdout.is_empty(), "{outfmt:?}: {} bytes", output.stdout.len());
+                assert!(
+                    output.stdout.is_empty(),
+                    "{outfmt:?}: {} bytes",
+                    output.stdout.len()
+                );
             }
             assert_eq!(output.stderr, frozen("noquery_sub", "err"), "{outfmt:?}");
         }

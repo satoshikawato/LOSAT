@@ -287,7 +287,7 @@ pub fn cutoff_score_from_evalue(
     //               TRUE, gap_decay_rate);
     // ```
     // NCBI computes the cutoff without emitting unconditional diagnostics.
-    if std::env::var_os("LOSAT_DEBUG_CUTOFFS").is_some() && eff_searchsp > 40_000_000_000 {
+    if crate::utils::xenv::debug_cutoffs_is_some() && eff_searchsp > 40_000_000_000 {
         eprintln!("[DEBUG CUTOFF_CALC] eff_searchsp={}", eff_searchsp);
         eprintln!("[DEBUG CUTOFF_CALC] evalue={}, e_clamped={}", evalue, e);
         eprintln!(
@@ -452,7 +452,7 @@ pub fn cutoff_score_for_update_tblastx(
     //                   (Uint8)query_length)*((Uint8)subj_length),
     //               TRUE, gap_decay_rate);
     // ```
-    if std::env::var_os("LOSAT_DEBUG_CUTOFFS").is_some() && subject_len_nucl > 600_000 {
+    if crate::utils::xenv::debug_cutoffs_is_some() && subject_len_nucl > 600_000 {
         eprintln!(
             "[DEBUG CUTOFF_UPDATE] query_len_aa={}, subject_len_nucl={}",
             query_len_aa, subject_len_nucl
@@ -481,7 +481,7 @@ pub fn cutoff_score_for_update_tblastx(
     // new_cutoff = MIN(new_cutoff,
     //                  hit_params->cutoffs[context].cutoff_score_max);
     // ```
-    if std::env::var_os("LOSAT_DEBUG_CUTOFFS").is_some() && subject_len_nucl > 600_000 {
+    if crate::utils::xenv::debug_cutoffs_is_some() && subject_len_nucl > 600_000 {
         eprintln!("[DEBUG CUTOFF_UPDATE] update_cutoff={} (from CUTOFF_E_TBLASTX=1e-300, searchsp={}, gap_decay={})", 
                   new_cutoff, searchsp, gap_decay_rate);
         eprintln!(
@@ -507,7 +507,7 @@ pub fn cutoff_score_for_update_tblastx(
     //                  hit_params->cutoffs[context].cutoff_score_max);
     // curr_cutoffs->cutoff_score = new_cutoff;
     // ```
-    if std::env::var_os("LOSAT_DEBUG_CUTOFFS").is_some() && subject_len_nucl > 600_000 {
+    if crate::utils::xenv::debug_cutoffs_is_some() && subject_len_nucl > 600_000 {
         eprintln!("[DEBUG CUTOFF_UPDATE] final_cutoff={} (MIN(update_cutoff={}, gap_trigger={}, cutoff_score_max={}))", 
                   final_cutoff, new_cutoff, gap_trigger, cutoff_score_max);
     }

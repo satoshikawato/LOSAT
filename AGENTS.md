@@ -300,6 +300,11 @@ authoritative, current guidance for agent behavior in LOSAT.
 
 The `LOSAT_TRACE_*`, `LOSAT_DEBUG_*`, `LOSAT_TIMING`, `LOSAT_DIAGNOSTICS` and related
 variables are listed in [`docs/agents/diagnostics.md`](docs/agents/diagnostics.md).
+A new diagnostic variable that no test, script or CI step sets is read through `utils/xdiag.rs` (the
+`diagnostics` feature) and listed in `xdiag::NAMES` and in the "Diagnostic build" block of
+docs/agents/diagnostics.md; one that
+tests or scripts set is read directly, once per process when it sits on a per-subject or per-hit path,
+unless a test changes it in its own process.
 
 ---
 

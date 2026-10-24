@@ -179,34 +179,33 @@ fn same_reports(
     shadow.shadow("BPLKPFLAT")
 }
 
-// The block search (every block a search with its own table) at 2 and 4 threads, with blocks of
-// one batch and of 20,000 letters: every build is the pool's, compared with the `par_iter` build on
-// fresh vectors, every build after a block's first takes the vectors of the table before it, and
-// every context's Karlin block comes from a task of the build.
+// The block search (every block a search with its own table) at 2 threads, with blocks of one
+// batch: every build is the pool's, compared with the `par_iter` build on fresh vectors, every
+// build after a block's first takes the vectors of the table before it, and every context's Karlin
+// block comes from a task of the build. The thread count only sets how the build is cut into
+// chunks, stripes and tasks (the unit tests of `x_clut_par.rs` build at 1, 2, 3 and 7 threads); the
+// other tests where the pool builds run at 4 threads. Blocks of 20,000 letters run in the database
+// test, which takes the same lookup region per block.
 #[test]
 fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    for threads in [2, 4] {
-        for letters in ["1", "20000"] {
-            let base = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPQBLOCK", letters)];
-            let counts = same_reports(&subject, threads, &base, "6");
-            let what = format!("threads {threads}, blocks of {letters}: {counts:?}");
-            assert!(counts["tables_compared"] > 1, "{what}");
-            assert_eq!(counts["outcomes_compared"], 0, "{what}");
-            assert_eq!(counts["recycled"], counts["tables_compared"] - 1, "{what}");
-            assert_hits_recycled(&counts, &what);
-            assert_eq!(
-                counts["context_sets_compared"], counts["tables_compared"],
-                "{what}"
-            );
-            assert!(counts["contexts_compared"] > 0, "{what}");
-            assert_eq!(
-                counts["contexts_from_tasks"], counts["contexts_compared"],
-                "{what}"
-            );
-        }
-    }
+    let base = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPQBLOCK", "1")];
+    let counts = same_reports(&subject, 2, &base, "6");
+    let what = format!("{counts:?}");
+    assert!(counts["tables_compared"] > 1, "{what}");
+    assert_eq!(counts["outcomes_compared"], 0, "{what}");
+    assert_eq!(counts["recycled"], counts["tables_compared"] - 1, "{what}");
+    assert_hits_recycled(&counts, &what);
+    assert_eq!(
+        counts["context_sets_compared"], counts["tables_compared"],
+        "{what}"
+    );
+    assert!(counts["contexts_compared"] > 0, "{what}");
+    assert_eq!(
+        counts["contexts_from_tasks"], counts["contexts_compared"],
+        "{what}"
+    );
 }
 
 // The search of all queries (a pairwise report with `LOSAT_X_BPQBLOCKFMT=0` is not written in blocks):
@@ -236,21 +235,20 @@ fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
     }
 }
 
-// Where the pool does not build the flat table (one thread, or `LOSAT_X_BPCLUT` off), the switch
-// changes nothing and its shadow compares nothing.
+// Where the pool does not build the flat table (one thread), the switch changes nothing and its
+// shadow compares nothing. The other case, `LOSAT_X_BPCLUT=0` at 4 threads, runs in
+// `the_default_and_the_switches_off_give_one_report` (the same searches, but the switch on by
+// default).
 #[test]
 fn the_switch_does_not_act_without_the_pools_build() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    for (threads, clut) in [(1, true), (4, false)] {
-        let mut base = vec![("LOSAT_X_BPQBLOCK", "1")];
-        base.push(("LOSAT_X_BPCLUT", if clut { "1" } else { "0" }));
-        let counts = same_reports(&subject, threads, &base, "6");
-        assert!(
-            counts.values().all(|&count| count == 0),
-            "threads {threads}, BPCLUT {clut}: {counts:?}"
-        );
-    }
+    let base = [("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPCLUT", "1")];
+    let counts = same_reports(&subject, 1, &base, "6");
+    assert!(
+        counts.values().all(|&count| count == 0),
+        "one thread: {counts:?}"
+    );
 }
 
 // `LOSAT_X_BPCLUTSHADOW` with the switch: the pool's build (one-latch passes, the vectors that the
@@ -294,9 +292,11 @@ fn the_clut_shadow_compares_the_switchs_builds() {
 // chunk of a split batch is a search of its own inside its block's search (its preliminary stage
 // only), whose table the pool builds and which drops that table when it ends. A chunk takes no
 // spare vectors, so the block's table keeps them and the next block reuses them, with the switch,
-// its shadow and `LOSAT_X_BPCLUTSHADOW` (whose pool tables give their vectors back at once): the
-// shadow compares more tables than there are blocks (the chunks' too), and `recycled` is the
-// blocks after the first.
+// its shadow, and its shadow with `LOSAT_X_BPCLUTSHADOW` (whose pool tables give their vectors back
+// at once): the shadow compares more tables than there are blocks (the chunks' too), and `recycled`
+// is the blocks after the first. The shadow first builds each table as the switch does and searches
+// with that build, so the run of both shadows also runs `LOSAT_X_BPCLUTSHADOW` with the switch
+// here; that pair without split batches runs in `the_clut_shadow_compares_the_switchs_builds`.
 #[test]
 fn query_chunks_of_split_batches_take_no_spare() {
     let subject = subject_file();
@@ -314,12 +314,7 @@ fn query_chunks_of_split_batches_take_no_spare() {
     let blocks = off.searches();
     assert!(blocks > 1, "{blocks} blocks");
     let clut_shadow = ("LOSAT_X_BPCLUTSHADOW", "1");
-    for extra in [
-        &[ON][..],
-        &[SHADOW][..],
-        &[clut_shadow, ON][..],
-        &[clut_shadow, SHADOW][..],
-    ] {
+    for extra in [&[ON][..], &[SHADOW][..], &[clut_shadow, SHADOW][..]] {
         let run = blastp_fast(&subject, 4, &with(&base, extra), "6");
         assert!(run.stdout == off.stdout, "{extra:?}: the report differs");
         assert_eq!(run.searches(), blocks, "{extra:?}");
@@ -351,7 +346,8 @@ fn query_chunks_of_split_batches_take_no_spare() {
     }
 }
 
-// `-db`: the database search in blocks runs the same lookup region per block.
+// `-db`: the database search in blocks runs the same lookup region per block. This test also holds
+// the blocks of 20,000 letters (several batches per table) for `-subject`.
 #[test]
 fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
     let db = subject_database();
@@ -359,12 +355,18 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
     let base = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPQBLOCK", "20000")];
     let counts = same_reports(&subject, 4, &base, "6");
     assert!(counts["tables_compared"] > 1, "{counts:?}");
+    assert_eq!(counts["outcomes_compared"], 0, "{counts:?}");
     assert_eq!(
         counts["recycled"],
         counts["tables_compared"] - 1,
         "{counts:?}"
     );
     assert_hits_recycled(&counts, "-db");
+    assert_eq!(
+        counts["context_sets_compared"], counts["tables_compared"],
+        "{counts:?}"
+    );
+    assert!(counts["contexts_compared"] > 0, "{counts:?}");
     assert_eq!(
         counts["contexts_from_tasks"], counts["contexts_compared"],
         "{counts:?}"

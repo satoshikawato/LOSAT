@@ -491,8 +491,9 @@ pub fn subject_parameters(
     } else {
         0.0
     };
-    let last = batch.contexts.last().expect("nonempty contexts");
-    let avg_q = i32::try_from((last.offset + last.length) / batch.contexts.len())?;
+    // The average context length is that of the query batch (a reader batch searched in several
+    // units has one: `reader_batch.rs`, c++/src/algo/blast/core/blast_parameters.c:954-957).
+    let avg_q = i32::try_from(batch.batch_concatenated_length() / batch.batch_context_count())?;
     for (c, p) in batch.contexts.iter().zip(parameters) {
         if !p.valid {
             continue;

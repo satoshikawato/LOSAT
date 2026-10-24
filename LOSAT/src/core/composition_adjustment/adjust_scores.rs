@@ -2387,8 +2387,11 @@ fn scores_std_alphabet_round(
 
 // No NCBI counterpart: reads LOSAT_X_ADJMEMO_STATS once; it does not change any value NCBI computes.
 fn x_adjmemo_enabled() -> bool {
+    if !crate::utils::xdiag::ON {
+        return false;
+    }
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_ADJMEMO_STATS").is_some())
+    *ON.get_or_init(|| crate::utils::xdiag::var_os("LOSAT_X_ADJMEMO_STATS").is_some())
 }
 // No NCBI counterpart: call counter and set of hashed inputs for the LOSAT_X_ADJMEMO_STATS report; it does not change any value NCBI computes.
 static X_ADJMEMO: std::sync::Mutex<Option<(u64, std::collections::HashSet<u64>)>> =

@@ -436,8 +436,8 @@ unsafe fn nib16w(m: W) -> u64 {
 unsafe fn nib8w(m: W) -> u128 {
     nib8(m.0) as u128 | (nib8(m.1) as u128) << 64
 }
-/// The script bytes of 16 lanes of 16 bits: the low byte of each lane (the values are 0..=0x56,
-/// so this is the unsigned saturation `packus_epi16` of the AVX2 file).
+/// The script bytes of 16 lanes of 16 bits: the low byte of each lane (the values are 0..=0x56, or
+/// four-bit codes, so this is the unsigned saturation `packus_epi16` of the AVX2 file).
 #[inline(always)]
 unsafe fn pack16(r: W) -> V {
     vuzp1q_u8(r.0, r.1)
@@ -919,7 +919,7 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
     }
 
     let best = base + best_rel;
-    finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+    finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
 }
 
 // ---------------------------------------------------------------------------
@@ -1413,7 +1413,7 @@ unsafe fn align8<const TB: bool, const NIB: bool>(
     }
 
     let best = base + best_rel;
-    finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+    finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
 }
 
 #[cfg(test)]

@@ -73,8 +73,8 @@ LOSAT_X_DISPTABLE	tblastn,tblastx	always			displayed residues (outfmt 0 rows, id
 LOSAT_X_DPEMASK	blastn,blastp,blastx,tblastn,tblastx	platform			only the 8-bit 256-bit AVX2 kernel (x86 with AVX2)
 LOSAT_X_DPNEON	blastn,blastp,blastx,tblastn,tblastx	platform			aarch64 only
 LOSAT_X_DPNEON2	blastn,blastp,blastx,tblastn,tblastx	platform			aarch64 only; two-register NEON kernels first, DPW128/128-bit NEON kernels where they decline
-LOSAT_X_DPW128	blastn,blastp,blastx,tblastn,tblastx	platform			runs where AVX2 kernel does not: wasm, aarch64, non-AVX2 x86; AVX2 has priority
 LOSAT_X_DPNIBBLE	blastn,blastp,blastx,tblastn	always			vector X-drop kernels, every traceback call: four-bit script codes, two cells per byte (all eight kernels: 256-bit AVX2, 128-bit DPW128 and base, NEON2)
+LOSAT_X_DPW128	blastn,blastp,blastx,tblastn,tblastx	platform			runs where AVX2 kernel does not: wasm, aarch64, non-AVX2 x86; AVX2 has priority
 LOSAT_X_DPWINDOW	blastn,blastp,blastx,tblastn	conditional	required	gap	vector X-drop kernels, a band whose start passes lane 1024 (long gapped alignments: the rows are moved down); ref gap: every other row runs as before and has no mark (a mark per DP call would cost time); all eight kernels move their rows (256-bit AVX2, 128-bit DPW128 and base, NEON2)
 LOSAT_X_ERFABSORB	blastn,blastp,blastx,tblastn,tblastx	always			Spouge ErfC returns 2.0 below -6 without ErfImpl
 LOSAT_X_FOLDLEAN	blastn	conditional	required	required	the dc-megablast strips folds (PAIRPARDISC / PAIRPARDISCARR stages: 2+ threads or 1 with BNDCONE, one unmasked subject); ref = the reference fold where those stages do not run; recorded only at their decision points (nothing while both are off)

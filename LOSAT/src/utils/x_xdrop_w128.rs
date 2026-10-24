@@ -1035,8 +1035,8 @@ unsafe fn body16<const TB: bool>(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
-    if TB && sc.x_nib {
-        body16_rows::<TB, true>(
+    if !TB || sc.x_nib {
+        body16_rows::<TB, TB>(
             q,
             s,
             scores,
@@ -1049,7 +1049,7 @@ unsafe fn body16<const TB: bool>(
             sc,
         )
     } else {
-        body16_rows::<TB, false>(
+        body16_bytes(
             q,
             s,
             scores,
@@ -1062,6 +1062,36 @@ unsafe fn body16<const TB: bool>(
             sc,
         )
     }
+}
+
+// No NCBI counterpart: the traceback of `body16` with one byte per cell (`LOSAT_X_DPNIBBLE=0`). Off
+// x86_64 it is a function of its own, so that the default entry keeps one traceback body.
+#[cfg_attr(target_arch = "x86_64", inline(always))]
+#[cfg_attr(not(target_arch = "x86_64"), inline(never))]
+unsafe fn body16_bytes(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
+    body16_rows::<true, false>(
+        q,
+        s,
+        scores,
+        len1,
+        len2,
+        gap_open,
+        gap_extend,
+        x_drop,
+        check_fence,
+        sc,
+    )
 }
 
 // No NCBI counterpart: the kernel of `body16` for one trace layout (`NIB`: four-bit codes,
@@ -1370,7 +1400,7 @@ unsafe fn body16_rows<const TB: bool, const NIB: bool>(
     }
 
     let best = base + best_rel;
-    finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+    finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
 }
 
 // ---------------------------------------------------------------------------
@@ -1514,8 +1544,8 @@ unsafe fn body8<const TB: bool>(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
-    if TB && sc.x_nib {
-        body8_rows::<TB, true>(
+    if !TB || sc.x_nib {
+        body8_rows::<TB, TB>(
             q,
             s,
             scores,
@@ -1529,7 +1559,7 @@ unsafe fn body8<const TB: bool>(
             sc,
         )
     } else {
-        body8_rows::<TB, false>(
+        body8_bytes(
             q,
             s,
             scores,
@@ -1543,6 +1573,38 @@ unsafe fn body8<const TB: bool>(
             sc,
         )
     }
+}
+
+// No NCBI counterpart: the traceback of `body8` with one byte per cell (`LOSAT_X_DPNIBBLE=0`). Off
+// x86_64 it is a function of its own, so that the default entry keeps one traceback body.
+#[cfg_attr(target_arch = "x86_64", inline(always))]
+#[cfg_attr(not(target_arch = "x86_64"), inline(never))]
+unsafe fn body8_bytes(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    max_m: i32,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
+    body8_rows::<true, false>(
+        q,
+        s,
+        scores,
+        max_m,
+        len1,
+        len2,
+        gap_open,
+        gap_extend,
+        x_drop,
+        check_fence,
+        sc,
+    )
 }
 
 // No NCBI counterpart: the kernel of `body8` for one trace layout (`NIB`: four-bit codes,
@@ -1833,7 +1895,7 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
     }
 
     let best = base + best_rel;
-    finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+    finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
 }
 
 #[cfg(test)]

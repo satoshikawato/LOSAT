@@ -108,7 +108,8 @@
 //! X-drop test are evaluated lane by lane, in blocks of 8 (16-bit) or 16 (8-bit) cells.
 //! The row gap (`score_gap_row`), which the C loop carries from cell to cell, is a decayed
 //! prefix maximum over the lanes. The script bits have the values of the NCBI `SCRIPT_*`
-//! constants, and the traceback walk is the C walk. The argument above is why the cells that
+//! constants (or are the four-bit codes of them, `LOSAT_X_DPNIBBLE`), and the traceback walk is
+//! the C walk. The argument above is why the cells that
 //! are kept have the C values. The random test
 //! (`simd_kernels_match_scalar_loops_on_random_problems`) compares results with the
 //! scalar loop. The module is integer arithmetic only. A problem that does not fit the lanes
@@ -148,25 +149,14 @@ const FENCE_SENTRY: u8 = 201;
 // No NCBI counterpart: the traceback rows at four bits per cell (`LOSAT_X_DPNIBBLE`). NCBI keeps one
 // byte of `SCRIPT_*` bits per cell (`edit_script`). With the switch on, the kernels store a code of
 // four bits instead, two cells per byte (cell 2k in the low half of byte k of the row, cell 2k + 1
-// in the high half), and the walk turns a code back into the NCBI byte (`NIB_BYTE`). Bits 0-1 hold
+// in the high half), and the walk follows the codes (`kernel::finish`), giving each operation its
+// NCBI value. Bits 0-1 hold
 // the operation (0 = `SCRIPT_GAP_IN_A`, 1 = `SCRIPT_SUB`, 2 = `SCRIPT_GAP_IN_B`: the NCBI value / 3),
 // bit 2 `SCRIPT_EXTEND_GAP_A`, bit 3 `SCRIPT_EXTEND_GAP_B`. The kernels compute the code with the
 // same comparisons as the byte, so each cell keeps the script NCBI gives it.
 const NIB_SUB: u8 = 1;
 const NIB_EXTEND_GAP_A: u8 = 4;
 const NIB_EXTEND_GAP_B: u8 = 8;
-/// The NCBI script byte of each four-bit code.
-const NIB_BYTE: [u8; 16] = {
-    let mut t = [0u8; 16];
-    let mut n = 0;
-    while n < 16 {
-        t[n] = (n & 3) as u8 * SCRIPT_SUB
-            | if n & 4 != 0 { SCRIPT_EXTEND_GAP_A } else { 0 }
-            | if n & 8 != 0 { SCRIPT_EXTEND_GAP_B } else { 0 };
-        n += 1;
-    }
-    t
-};
 
 /// No NCBI counterpart: the values a kernel adds up for a cell's script (`SCRIPT_SUB`,
 /// `SCRIPT_EXTEND_GAP_A`, `SCRIPT_EXTEND_GAP_B`), as NCBI bytes or as four-bit codes (`NIB`).
@@ -587,8 +577,8 @@ pub(crate) struct XdropScratch {
     /// when they hold every column.
     x_win_at: usize,
     /// Whether the kernels write `trace` as four-bit codes, two cells per byte (`LOSAT_X_DPNIBBLE`;
-    /// `NIB_BYTE`); the walk reads the rows the same way.
-    pub(crate) x_nib: bool,
+    /// `NIB_SUB`); the walk reads the rows the same way.
+    x_nib: bool,
 }
 
 impl XdropScratch {
@@ -798,7 +788,7 @@ pub(crate) fn x_dp_window_at() -> usize {
 }
 
 /// No NCBI counterpart: `LOSAT_X_DPNIBBLE` (strict set): the vector kernels keep the traceback rows
-/// at four bits per cell, two cells per byte (`NIB_BYTE`). Off: one byte per cell, as before.
+/// at four bits per cell, two cells per byte (`NIB_SUB`). Off: one byte per cell, as before.
 pub(crate) fn x_dp_nibble() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -1651,8 +1641,8 @@ mod kernel {
         check_fence: bool,
         sc: &mut XdropScratch,
     ) -> Option<XdropResult> {
-        if TB && sc.x_nib {
-            align_body_rows::<TB, true>(
+        if !TB || sc.x_nib {
+            align_body_rows::<TB, TB>(
                 q,
                 s,
                 scores,
@@ -1665,7 +1655,7 @@ mod kernel {
                 sc,
             )
         } else {
-            align_body_rows::<TB, false>(
+            align_body_bytes(
                 q,
                 s,
                 scores,
@@ -1678,6 +1668,36 @@ mod kernel {
                 sc,
             )
         }
+    }
+
+    // No NCBI counterpart: the traceback of `align_body` with one byte per cell (`LOSAT_X_DPNIBBLE=0`). Off
+    // x86_64 it is a function of its own, so that the default entry keeps one traceback body.
+    #[cfg_attr(target_arch = "x86_64", inline(always))]
+    #[cfg_attr(not(target_arch = "x86_64"), inline(never))]
+    unsafe fn align_body_bytes(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
+        align_body_rows::<true, false>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
     }
 
     // No NCBI counterpart: the kernel of `align_body` for one trace layout (`NIB`: four-bit codes,
@@ -2003,7 +2023,7 @@ mod kernel {
         }
 
         let best = base + best_rel;
-        finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+        finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
     }
 
     // No NCBI counterpart: shuffle and mask constants of the 8-bit lanes; they do not change any
@@ -2161,8 +2181,8 @@ mod kernel {
         check_fence: bool,
         sc: &mut XdropScratch,
     ) -> Option<XdropResult> {
-        if TB && sc.x_nib {
-            align_body8_rows::<TB, true>(
+        if !TB || sc.x_nib {
+            align_body8_rows::<TB, TB>(
                 q,
                 s,
                 scores,
@@ -2176,7 +2196,7 @@ mod kernel {
                 sc,
             )
         } else {
-            align_body8_rows::<TB, false>(
+            align_body8_bytes(
                 q,
                 s,
                 scores,
@@ -2190,6 +2210,38 @@ mod kernel {
                 sc,
             )
         }
+    }
+
+    // No NCBI counterpart: the traceback of `align_body8` with one byte per cell (`LOSAT_X_DPNIBBLE=0`). Off
+    // x86_64 it is a function of its own, so that the default entry keeps one traceback body.
+    #[cfg_attr(target_arch = "x86_64", inline(always))]
+    #[cfg_attr(not(target_arch = "x86_64"), inline(never))]
+    unsafe fn align_body8_bytes(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        max_m: i32,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
+        align_body8_rows::<true, false>(
+            q,
+            s,
+            scores,
+            max_m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
     }
 
     // No NCBI counterpart: the kernel of `align_body8` for one trace layout (`NIB`: four-bit codes,
@@ -2511,7 +2563,7 @@ mod kernel {
         }
 
         let best = base + best_rel;
-        finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+        finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:682-727
@@ -2530,7 +2582,7 @@ mod kernel {
     ///
     /// Result assembly and traceback walk shared by both lane widths.
     #[inline(always)]
-    pub(super) unsafe fn finish<const TB: bool>(
+    pub(super) unsafe fn finish<const TB: bool, const NIB: bool>(
         sc: &mut XdropScratch,
         a_off: usize,
         b_off: usize,
@@ -2573,9 +2625,22 @@ mod kernel {
         //     GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
         // }
         // ```
+        // the script bits of the rows: NCBI bytes, or four-bit codes (`NIB`, `LOSAT_X_DPNIBBLE`); the
+        // walk below runs on the codes themselves, so a step reads its cell with no table between
+        let (op_mask, ext_a, ext_b, gap_a, gap_b) = if NIB {
+            (3, NIB_EXTEND_GAP_A, NIB_EXTEND_GAP_B, 0, 2)
+        } else {
+            (
+                SCRIPT_OP_MASK,
+                SCRIPT_EXTEND_GAP_A,
+                SCRIPT_EXTEND_GAP_B,
+                SCRIPT_GAP_IN_A,
+                SCRIPT_GAP_IN_B,
+            )
+        };
         let mut a_index = a_off;
         let mut b_index = b_off;
-        let mut script = SCRIPT_SUB;
+        let mut script = script_codes(NIB).0;
         while a_index > 0 || b_index > 0 {
             if a_index >= sc.rows.len() {
                 break;
@@ -2588,39 +2653,40 @@ mod kernel {
             if b_rel >= len as usize {
                 break;
             }
-            let next = if sc.x_nib {
+            let next = if NIB {
                 let pair = *sc.trace.get_unchecked(off as usize + (b_rel >> 1));
-                *NIB_BYTE.get_unchecked(((pair >> ((b_rel & 1) << 2)) & 15) as usize)
+                (pair >> ((b_rel & 1) << 2)) & 15
             } else {
                 *sc.trace.get_unchecked(off as usize + b_rel)
             };
-            match script & SCRIPT_OP_MASK {
-                x if x == SCRIPT_GAP_IN_A => {
-                    script = next & SCRIPT_OP_MASK;
-                    if next & SCRIPT_EXTEND_GAP_A != 0 {
-                        script = SCRIPT_GAP_IN_A;
+            match script & op_mask {
+                x if x == gap_a => {
+                    script = next & op_mask;
+                    if next & ext_a != 0 {
+                        script = gap_a;
                     }
                 }
-                x if x == SCRIPT_GAP_IN_B => {
-                    script = next & SCRIPT_OP_MASK;
-                    if next & SCRIPT_EXTEND_GAP_B != 0 {
-                        script = SCRIPT_GAP_IN_B;
+                x if x == gap_b => {
+                    script = next & op_mask;
+                    if next & ext_b != 0 {
+                        script = gap_b;
                     }
                 }
                 _ => {
-                    script = next & SCRIPT_OP_MASK;
+                    script = next & op_mask;
                 }
             }
-            let op = script & SCRIPT_OP_MASK;
-            if op == SCRIPT_GAP_IN_A {
+            let op = script & op_mask;
+            if op == gap_a {
                 b_index = b_index.saturating_sub(1);
-            } else if op == SCRIPT_GAP_IN_B {
+            } else if op == gap_b {
                 a_index = a_index.saturating_sub(1);
             } else {
                 a_index = a_index.saturating_sub(1);
                 b_index = b_index.saturating_sub(1);
             }
-            push_op(&mut sc.ops, op);
+            // the NCBI operation: a code's operation times SCRIPT_SUB (0, 3, 6)
+            push_op(&mut sc.ops, if NIB { op * SCRIPT_SUB } else { op });
         }
         Some(XdropResult {
             a_offset: a_off,
@@ -3772,7 +3838,7 @@ mod tests {
         for case in 0..40 {
             let n = if case % 2 == 0 { 16 } else { 28 };
             // scale 32 leaves the 8-bit lanes (16-bit kernels)
-            let scale = if case % 8 >= 6 { 32 } else { 1 };
+            let scale = if case % 3 == 2 { 32 } else { 1 };
             let len = 1500 + rng.below(2500) as usize;
             let p = random_problem(&mut rng, n, scale, len);
             let (go, ge, x) = if case % 4 < 2 {
@@ -3803,6 +3869,7 @@ mod tests {
             let b = xdrop_align(
                 &rows, &cols, &scores, len1, len2, go, ge, x, true, true, &mut off,
             );
+            assert_eq!(a.is_some(), b.is_some(), "case {case}: one layout declined");
             let (Some(a), Some(b)) = (a, b) else {
                 continue;
             };
@@ -3851,6 +3918,11 @@ mod tests {
     ))]
     #[test]
     fn nibs_pairs_adjacent_codes() {
+        // the x86_64 `arch` layer runs inside the kernels' SSSE3 / SSE4.1 entries (`x86_entry!`)
+        #[cfg(target_arch = "x86_64")]
+        if !is_x86_feature_detected!("ssse3") {
+            return;
+        }
         let mut rng = Rng(0x0123_4567_89AB_CDEF);
         for _ in 0..1000 {
             let mut v = [0u8; 16];
@@ -3858,8 +3930,8 @@ mod tests {
                 *b = rng.below(16) as u8;
             }
             let mut out = [0xAAu8; 16];
-            // SAFETY: the vector features of the target are compile-time features of this build;
-            // the pointers cover 16 bytes.
+            // SAFETY: SSSE3 was detected above (x86_64); simd128 and NEON are compile-time features
+            // of the wasm32 and aarch64 builds; the pointers cover 16 bytes.
             unsafe {
                 super::arch::store64(
                     out.as_mut_ptr(),

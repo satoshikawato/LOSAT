@@ -1094,7 +1094,7 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
     }
 
     let best = base + best_rel;
-    finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+    finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
 }
 
 // ---------------------------------------------------------------------------
@@ -1643,7 +1643,7 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
     }
 
     let best = base + best_rel;
-    finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+    finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
 }
 
 #[cfg(test)]
@@ -2254,7 +2254,7 @@ mod tests {
             {
                 let sh = &mut shape[usize::from(p.tb)][usize::from(m8.is_some())];
                 sh.0 += sd.rows.len().saturating_sub(1) as u64;
-                sh.1 += (sd.trace.len() - sd.rows.first().map_or(0, |r| r.2 as usize)) as u64;
+                sh.1 += sd.rows.iter().skip(1).map(|r| r.2 as u64).sum::<u64>();
             }
             match r256 {
                 Some(r) => {

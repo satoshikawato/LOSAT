@@ -26,7 +26,8 @@
 //!   lists when they first align it and hold it until the stage ends (`XStageSubjects`); the
 //!   reports read the sequences they show (`database::reported_subjects`), one read each.
 //! - A long sequence (a block of its own) is read once while anything holds it: the stages and
-//!   the query batches that run at the same time share it (`XDbStream::read_shared`). It is read
+//!   the query batches that run at the same time share it, and a thread that asks for it while
+//!   another reads it waits for that read (`XDbStream::read_shared`). It is read
 //!   into a buffer that glibc maps (`utils::x_mapped`), taken from the pool
 //!   `utils::x_mapped::X_BYTES` when it holds one, and its store is that buffer cut to the 2-bit
 //!   data, not a copy; dropped, its pages go back instead of staying in the thread's arena.
@@ -152,6 +153,10 @@ impl std::fmt::Display for XReadError {
 
 impl std::error::Error for XReadError {}
 
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): a sequence of `XDbStream::read_shared`: its store while
+/// something holds it, behind the lock that its one reader holds while it reads.
+type XShared = Mutex<Weak<PackedNucleotide>>;
+
 /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the database of a `-db` search, read where it is searched.
 pub(super) struct XDbStream<'a> {
     db: &'a SeqDb,
@@ -159,8 +164,8 @@ pub(super) struct XDbStream<'a> {
     id: u64,
     /// The length of every sequence, by ordinal id (`x_check_nucleotide_stores`).
     lengths: Vec<usize>,
-    /// The long sequences that something holds (`read_shared`), by ordinal id.
-    shared: Mutex<HashMap<usize, Weak<PackedNucleotide>>>,
+    /// The sequences that something holds or reads (`read_shared`), by ordinal id.
+    shared: Mutex<HashMap<usize, Arc<XShared>>>,
     /// The copy of the shadow mode.
     copy: Option<Vec<PackedNucleotide>>,
 }
@@ -235,23 +240,32 @@ impl<'a> XDbStream<'a> {
     }
 
     /// Sequence `oid` (`read`), shared with whatever holds it already: a stage or a query batch
-    /// that runs at the same time reads it once. It is read again once nothing holds it.
+    /// that runs at the same time reads it once, and a thread that asks for it while another
+    /// reads it waits for that read (the threads of a stage that first align the same subject at
+    /// once made one copy each). It is read again once nothing holds it.
     pub(super) fn read_shared(&self, oid: usize) -> Result<Arc<PackedNucleotide>> {
-        let held = |shared: &HashMap<usize, Weak<PackedNucleotide>>| {
-            shared.get(&oid).and_then(Weak::upgrade)
+        let slot = {
+            let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+            if shared.len() >= 1024 && shared.len().is_power_of_two() {
+                // A slot that only the map holds has no reader; it goes when nothing holds its
+                // store.
+                shared.retain(|_, slot| {
+                    Arc::strong_count(slot) > 1
+                        || slot
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .strong_count()
+                            > 0
+                });
+            }
+            Arc::clone(shared.entry(oid).or_default())
         };
-        if let Some(store) = held(&self.shared.lock().unwrap_or_else(|e| e.into_inner())) {
+        let mut held = slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(store) = held.upgrade() {
             return Ok(store);
         }
         let store = Arc::new(self.read(oid)?);
-        let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(store) = held(&shared) {
-            return Ok(store);
-        }
-        if shared.len() >= 1024 && shared.len().is_power_of_two() {
-            shared.retain(|_, store| store.strong_count() > 0);
-        }
-        shared.insert(oid, Arc::downgrade(&store));
+        *held = Arc::downgrade(&store);
         Ok(store)
     }
 

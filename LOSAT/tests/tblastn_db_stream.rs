@@ -7,7 +7,8 @@
 //! them), in one query batch and in several (`BATCH_SIZE`: the plans kept between batches are not
 //! read again), on a database of several volumes with ambiguity codes and a subject long enough to
 //! be split into units across the threads; the shadow mode (`LOSAT_X_TBNDBSTREAMSHADOW=1`) finds
-//! every read identical to the copy; and a database that cannot be read fails with the same error.
+//! every read identical to the copy, with no more reads at four threads than at one; and a
+//! database that cannot be read fails with the same error.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -154,6 +155,7 @@ fn the_shadow_mode_finds_every_read_identical() {
         copy_env.push(("LOSAT_X_TBNDBSTREAM", "0"));
         let mut shadow_env = batch_env.clone();
         shadow_env.push(("LOSAT_X_TBNDBSTREAMSHADOW", "1"));
+        let mut reads_at = Vec::new();
         for threads in [1, 4] {
             let copy = tblastn(&query, &db, args, threads, &copy_env);
             let shadow = tblastn(&query, &db, args, threads, &shadow_env);
@@ -162,11 +164,17 @@ fn the_shadow_mode_finds_every_read_identical() {
             let reads =
                 shadow_reads(&shadow.2).unwrap_or_else(|| panic!("no shadow line: {}", shadow.2));
             assert!(reads > 0, "{}", shadow.2);
+            reads_at.push(reads);
             // Without the shadow variable, nothing is printed.
             assert!(!tblastn(&query, &db, args, threads, &batch_env)
                 .2
                 .contains("TBNDBSTREAM"));
         }
+        // Threads that ask for a sequence at once share one read (`XDbStream::read_shared`).
+        assert!(
+            reads_at[1] <= reads_at[0],
+            "{args:?}: reads at 1 / 4 threads {reads_at:?}"
+        );
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }

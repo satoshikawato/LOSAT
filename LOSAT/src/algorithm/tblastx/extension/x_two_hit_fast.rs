@@ -467,12 +467,18 @@ unsafe fn walk_sent<const RIGHT: bool>(
 
 /// LOSAT_X_TBXUNGAPSENT: `two_hit(&q_full[1..q_full.len() - 1], &s_full[1..s_full.len() - 1],
 /// s_left_off, s_right_off, q_right_off, x_drop)` with walks that the sentinels stop instead of a
-/// bound, the word loop and both walks in one function. `None` where `two_hit` returns `None`.
+/// bound, inlined with the word loop into the callers' extension code. `None` where `two_hit`
+/// returns `None`.
+///
+/// Inlined, the walks reload the table pointer and the X-drop from the stack (one or two loads
+/// every two steps), and a call costs more: on AP027131 x AP027133 (code 4) at 1 thread the
+/// inlined form ran x0.983 of the same function behind a call (`#[inline(never)]`), with 1.6 %
+/// fewer instructions (workstation, 8 alternating rounds).
 ///
 /// SAFETY: `q_full` is `[0, residues.., 0]` (a context of a batch [`sent_contexts`] accepted) and
 /// `s_full` a buffer [`sent_subject`] returned.
 // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
-#[inline(never)]
+#[inline(always)]
 pub(super) unsafe fn two_hit_sent(
     q_full: &[u8],
     s_full: &[u8],

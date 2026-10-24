@@ -256,6 +256,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastn::x_subject_store_print_summary();
     LOSAT::algorithm::blastn::x_query_dust_par_print_summary();
     LOSAT::algorithm::blastn::x_ungap_count_print_summary();
+    LOSAT::algorithm::blastn::x_greedy_row_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_query_prep_par_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_qgroup_par_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_db_cut_print_summary();

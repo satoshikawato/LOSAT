@@ -16,10 +16,23 @@
 //! instance is out of line with a closure of its own type (`x_scan_flat_bf`), so the instance with
 //! the branch, which the other tables take, is compiled as without it. A switch of the strict set
 //! (`utils/xswitch.rs`): on unless it is `0`.
+//!
+//! EXPERIMENT (LOSAT_X_BPFSEED): on a subject where `XHitBf::fits` holds, the loop takes three
+//! changes (`x_scan_flat_fseed`): each hit goes first through blastp's branch-free two-hit test
+//! (`XHitBf::test`, LOSAT_X_BPHITBF, whose argument in `x_seed_fused.rs` holds here: the diagonal
+//! table and the extension's stores are those of blastp's loop), and a flag-1 entry or a
+//! candidate goes on to `x_test_hit`, unchanged; no hit reads ahead a later hit's diagonal entry
+//! (a cache hint); and the scan reads each listed cell's slice bounds as it finds the cell
+//! (`XFlatCompressedLookup::x_for_each_range`), so the visits read no `starts` entry. The cells,
+//! their order, the hits and their order are the same, the table holds after each hit what
+//! `x_test_hit` leaves there, and the extension is called for the same hits with the same values
+//! and entries. The instance is out of line with a closure of its own type, so the loops without
+//! it keep their code; a subject outside `XHitBf::fits` runs them. A switch of the strict set: on
+//! unless it is `0`.
 
 use std::cell::Cell;
 
-use super::x_seed_fused::{x_prefetch, x_prefetch_distance, x_test_hit};
+use super::x_seed_fused::{x_prefetch, x_prefetch_distance, x_test_hit, XHitBf};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::XFlatCompressedLookup;
 
@@ -27,6 +40,21 @@ thread_local! {
     // No NCBI counterpart: the scan's list of (subject offset, backbone index), reused across
     // subjects.
     static X_CELLS: Cell<Option<Vec<(i32, u32)>>> = const { Cell::new(None) };
+}
+
+thread_local! {
+    // No NCBI counterpart: LOSAT_X_BPFSEED's list of (subject offset, slice start, slice end),
+    // reused across subjects.
+    static X_RANGES: Cell<Option<Vec<(i32, u32, u32)>>> = const { Cell::new(None) };
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BPFSEED switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPFSEED): a strict-set switch, on unless it is `0`.
+pub(crate) fn x_bp_fseed() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPFSEED"))
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPCLUTSCANBF switch once; it does not change any value
@@ -72,6 +100,37 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
 ) where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
+    // EXPERIMENT (LOSAT_X_BPFSEED): the branch-free two-hit test, no read-ahead of the diagonal
+    // entries and the slice bounds read by the scan, where the test gives the reference's
+    // outcomes (module header).
+    if x_bp_fseed() && x_fseed_fits(diag_offset, subject_length, window, word_size) {
+        if x_clut_scan_bf(lookup) {
+            x_scan_flat_fseed::<true, F>(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                &mut candidate,
+            );
+        } else {
+            x_scan_flat_fseed::<false, F>(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                &mut candidate,
+            );
+        }
+        return;
+    }
     // EXPERIMENT (LOSAT_X_BPCLUTSCANBF): on a table with enough cells used, the offsets listed
     // without a branch on the presence bit (`for_each_cell`).
     if x_clut_scan_bf(lookup) {
@@ -133,6 +192,68 @@ fn x_scan_flat_bf<F>(
         word_size,
         &mut own,
     );
+}
+
+// No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's outcomes.
+/// EXPERIMENT (LOSAT_X_BPFSEED): whether the subject takes [`x_scan_flat_fseed`] ([`XHitBf::fits`]),
+/// recorded for `LOSAT_X_REACH`.
+fn x_fseed_fits(diag_offset: i32, subject_length: usize, window: i32, word_size: i32) -> bool {
+    let fits = XHitBf::fits(diag_offset, subject_length, window, word_size);
+    crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", fits);
+    fits
+}
+
+/// EXPERIMENT (LOSAT_X_BPFSEED): [`x_scan_two_hit_compressed_flat`] on a subject where
+/// [`XHitBf::fits`] holds, with the branch-free two-hit test first, no read-ahead of the diagonal
+/// entries, and the cells listed with their slice bounds
+/// ([`XFlatCompressedLookup::x_for_each_range`]; `BRANCH_FREE` is its list form, LOSAT_X_BPCLUTSCANBF).
+/// Out of line, and with a closure of its own type, so that the loops without it are compiled as
+/// without this one (see [`x_scan_flat_bf`]).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
+// `x_scan_two_hit_compressed_flat`)
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_scan_flat_fseed<const BRANCH_FREE: bool, F>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let mut own = |query_offset, subject_offset, last_hit, diff, entry: &mut DiagStruct| {
+        candidate(query_offset, subject_offset, last_hit, diff, entry)
+    };
+    assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
+    // The caller checked `XHitBf::fits` for the subject.
+    let bf = XHitBf::in_range(diag_offset, window, word_size);
+    let mut ranges = X_RANGES.with(Cell::take).unwrap_or_default();
+    lookup.x_for_each_range::<BRANCH_FREE, _>(
+        subject,
+        subject_length,
+        &mut ranges,
+        |s, cell_hits| {
+            let here = bf.here(s);
+            for &query_offset in cell_hits {
+                let diag_coord = ((query_offset - s) & diag_mask) as usize;
+                // SAFETY: diag_coord <= diag_mask < diag_array.len() (asserted above).
+                let entry = unsafe { diag_array.get_unchecked_mut(diag_coord) };
+                if bf.test(entry, here) {
+                    continue;
+                }
+                if let Some((last_hit, diff)) = x_test_hit(entry, s, diag_offset, window, word_size)
+                {
+                    own(query_offset, s, last_hit, diff, entry);
+                }
+            }
+        },
+    );
+    X_RANGES.with(|slot| slot.set(Some(ranges)));
 }
 
 /// The loop of [`x_scan_two_hit_compressed_flat`]; `BRANCH_FREE` is `for_each_cell`'s.

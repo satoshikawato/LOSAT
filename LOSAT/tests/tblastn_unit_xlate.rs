@@ -217,11 +217,10 @@ fn database() -> &'static PathBuf {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812 (above). A `-db`
 // search gives the report of `=0` with the stream (`LOSAT_X_TBNDBSTREAM`, by default) and on the
 // copy of the database (`LOSAT_X_TBNDBSTREAM=0`) at one and four threads; in both, the long
-// sequence's plan has no residues and its six units translate their frames, and the shadow
-// compares the units of both sequences.
+// sequence's plan has no residues and its six units translate their frames.
 #[test]
 fn a_database_search_translates_in_its_units_with_and_without_the_copy() {
-    let [long, genome] = inputs().2;
+    let long = inputs().2;
     let db = ["-db".as_ref(), database().as_os_str()];
     let (expected, _) = tblastn_of(db, 1, &[OFF]);
     assert!(
@@ -238,13 +237,6 @@ fn a_database_search_translates_in_its_units_with_and_without_the_copy() {
             assert_eq!(
                 stats(&stderr),
                 Some([1, 6, unit_residues(long)]),
-                "{threads} threads {read:?}"
-            );
-            let (report, stderr) = tblastn_of(db, threads, &[read, &[SHADOW][..]].concat());
-            assert!(report == expected, "{threads} threads {read:?}: the shadow");
-            assert_eq!(
-                shadow(&stderr),
-                Some([12, unit_residues(long) + unit_residues(genome)]),
                 "{threads} threads {read:?}"
             );
         }

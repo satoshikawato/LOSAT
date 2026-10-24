@@ -364,13 +364,26 @@ pub fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> anyhow:
         .iter()
         .find(|record| !record.title.iter().all(|&byte| is_visible(byte)))
     {
-        anyhow::bail!(
+        return Err(anyhow::Error::new(TitleRefusal(format!(
             "the title of the {role} {} has a character outside the visible ASCII range, which is not supported by LOSAT's {label} with -outfmt 11",
             record.local_id
-        );
+        ))));
     }
     Ok(())
 }
+
+/// The error of `check_titles`, so that a caller can tell this refusal from the others (to
+/// remove an `-out` file it created for nothing).
+#[derive(Debug)]
+pub struct TitleRefusal(String);
+
+impl std::fmt::Display for TitleRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for TitleRefusal {}
 
 /// The error lines of a run that stopped with `error`, when NCBI writes an error archive for
 /// it (`PrintErrorArchive` after its `CATCH_ALL`): the errors of the application's `Run`,

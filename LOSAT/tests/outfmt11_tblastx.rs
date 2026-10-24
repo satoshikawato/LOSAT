@@ -541,6 +541,23 @@ fn non_ascii_titles_and_database_names_are_refused() {
             "{role}: outfmt 8"
         );
     }
+    // With `-out` the refusal leaves no file that the run created (as for `tblastn`), and one
+    // that was there before stays (emptied, as for every other refusal after the open).
+    for (query, subject) in [(&utf8_query, &plain_subject), (&plain_query, &utf8_subject)] {
+        let out = del.join("refused.asn");
+        let _ = std::fs::remove_file(&out);
+        let out_arg = out.to_str().unwrap().to_string();
+        let args = [
+            "-query", query, "-subject", subject, "-outfmt", "11", "-out", &out_arg,
+        ];
+        let output = run(&[], &args, "1");
+        assert_ne!(output.status.code(), Some(0));
+        assert!(!out.exists(), "an empty -out file is left behind");
+        std::fs::write(&out, b"old").unwrap();
+        let output = run(&[], &args, "1");
+        assert_ne!(output.status.code(), Some(0));
+        assert!(out.exists(), "a file that was there is kept");
+    }
     for database in ["caf\u{e9}", "d\u{7f}b"] {
         let output = run(
             &[],
@@ -646,7 +663,11 @@ fn an_outfmt_spec_gets_no_error_archive() {
             if written {
                 assert_eq!(output.stdout, frozen("noquery_sub", "out"), "{outfmt:?}");
             } else {
-                assert!(output.stdout.is_empty(), "{outfmt:?}: {} bytes", output.stdout.len());
+                assert!(
+                    output.stdout.is_empty(),
+                    "{outfmt:?}: {} bytes",
+                    output.stdout.len()
+                );
             }
             assert_eq!(output.stderr, frozen("noquery_sub", "err"), "{outfmt:?}");
         }

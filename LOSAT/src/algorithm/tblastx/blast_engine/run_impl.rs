@@ -778,7 +778,13 @@ pub fn run(
             return Err(error);
         }
     };
+    // Whether this run creates `-out` (a Q3 refusal removes a file it created for nothing).
+    let out_is_new = args
+        .out
+        .as_deref()
+        .is_some_and(|path| path.as_os_str() != "-" && !path.exists());
     let out_file = open_out_file(&args)?;
+    let out_path = args.out.clone();
     let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
     // LOSAT's reports read the format number that NCBI reads.
     let outfmt = choice.normalized();
@@ -815,6 +821,21 @@ pub fn run(
     }
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
     let flushed = std::io::Write::flush(&mut stream);
+    // A title that the archive cannot hold is refused where NCBI would write its Bioseq, which
+    // is known only after the search. BLASTX/TBLASTN refuse before they create `-out`, and so
+    // does this run when the file was not there and nothing was written to it: no empty file is
+    // left behind.
+    let write_failed = stream.failed;
+    drop(stream);
+    if out_is_new
+        && matches!(&result, Err(error) if error.downcast_ref::<crate::report::archive::TitleRefusal>().is_some())
+    {
+        if let Some(path) = out_path.as_deref() {
+            if std::fs::metadata(path).is_ok_and(|meta| meta.len() == 0) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
     // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
     // ```c
     //     catch (const std::ios::failure&) {                                      \
@@ -825,7 +846,7 @@ pub fn run(
     // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119).
     // For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if stream.failed && pairwise {
+    if write_failed && pairwise {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),

@@ -10434,6 +10434,10 @@ fn run_resolved_in_pool(
         x_redo_par_run || !use_parallel_kappa_match_redo
     );
     // EXPERIMENT (LOSAT_X_BPSEGWIN): the store of the redo in windows keeps one window's ranges.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     if super::x_redo_par::x_bp_seg_win() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", x_redo_par_run);
     }

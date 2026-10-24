@@ -741,7 +741,7 @@ Same values, faster computation:
   x1.011 (4 pairs, 0.993-1.015; user x1.000, instructions x0.9995); blastp sp4 `-subject` x1.000 (6),
   yeast `-db` x1.001 (4); user-space instructions x0.970-0.9995 in every cell.
 - `LOSAT_X_DPNIBBLE=1` (every program's vector X-drop traceback, memory; in the strict set from the
-  pull request that added it, 2026-10-24; `=0` or `LOSAT_X_DEFAULT=0` returns to one byte per cell) the
+  pull request that added it, 2026-10-24; `=0` returns to one byte per cell) the
   traceback rows of the vector kernels (`XdropScratch::trace`, NCBI's `edit_script`) held one byte of
   `SCRIPT_*` bits per DP cell of the band, so a long gapped alignment kept one byte per cell: up to 36 MiB
   for one Sakai x EDL933 traceback, and each worker keeps its largest. Now the kernels store a code of

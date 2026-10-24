@@ -2,13 +2,8 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
 //!
-//! This module provides HSP storage, sorting, and management
-//! functionality.
-//!
-//! During migration, this re-exports from the original locations. The filters of
-//! `s_FilterBlastResults` that every program shares (`-max_hsps`, `-qcov_hsp_perc`) are here.
-
-pub use crate::algorithm::tblastx::chaining::*;
+//! The filters of `s_FilterBlastResults` that every program shares (`-max_hsps`,
+//! `-qcov_hsp_perc`).
 
 /// The query coverage of an HSP in percent: its query extent (`offset` to `end`, end
 /// exclusive, in the letters of its context) over the length of its context, plus 0.5 below

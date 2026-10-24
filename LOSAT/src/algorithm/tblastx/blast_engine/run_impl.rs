@@ -716,10 +716,12 @@ pub fn run(
     )?;
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
     // before anything is read or written.
+    // The error archives follow the `-outfmt` text (`writes_error_archive`).
     args.archive = super::super::archive::handle_for(
         &args,
         format == Some(crate::blastinput::app::ReportFormat::ArchiveFormat),
-    )?;
+    )?
+    .map(|handle| handle.with_outfmt_text(&args.outfmt));
     let archive = args.archive.clone();
     crate::utils::threading::validate_threads(args.num_threads)?;
     use crate::blastinput::input_files;

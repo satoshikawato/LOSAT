@@ -6671,7 +6671,9 @@ pub fn run(
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot
     // write, before anything is read or written.
     let archive_requested = output_formats.contains(&BlastnOutputFormat::Archive);
-    args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), archive_requested)?;
+    // The error archives follow the `-outfmt` text (`writes_error_archive`).
+    args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), archive_requested)?
+        .map(|handle| handle.with_outfmt_text(&args.outfmt));
     // LOSAT's thread capability is checked before any input or output, as before.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3631-3636

@@ -289,7 +289,9 @@ fn run_inner(
     }
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
     // before anything is read or written.
-    let archive = archive::handle_for(args, format == Some(app::ReportFormat::ArchiveFormat))?;
+    // The error archives follow the `-outfmt` text (`writes_error_archive`).
+    let archive = archive::handle_for(args, format == Some(app::ReportFormat::ArchiveFormat))?
+        .map(|handle| handle.with_outfmt_text(&args.outfmt));
     archive_slot.clone_from(&archive);
     // Preserve explicit product refusals; defer supported semantic failures
     // until subject and standard query/output streams have been extracted.

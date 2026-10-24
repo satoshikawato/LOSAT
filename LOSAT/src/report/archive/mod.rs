@@ -37,6 +37,7 @@ pub mod writer;
 
 use std::ffi::OsStr;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::blastinput::app::Program;
@@ -86,6 +87,47 @@ impl ArchiveEncoding {
     }
 }
 
+/// Whether NCBI's `PrintErrorArchive` writes the error archive for this `-outfmt` text.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:913-929
+/// ```c++
+/// void PrintErrorArchive(const CArgs & a, const list<CRef<CBlast4_error> > & msg)
+/// {
+///     try {
+///         if(NStr::StringToInt(NStr::TruncateSpaces(a[align_format::kArgOutputFormat].AsString())) == CFormattingArgs::eArchiveFormat) {
+///             ...
+///             CBlastFormat::PrintArchive(archive, a[kArgOutput].AsOutputFile());
+///         }
+///     } catch (...) {}
+/// }
+/// ```
+/// The conversion throws (and nothing is written) for text after the number, such as
+/// `11 qseqid`; the batches' archives accept such a text (`-outfmt "11 <spec>"`), only the
+/// error archive does not. `TruncateSpaces` strips `isspace` characters at both ends,
+/// `StringToInt` takes an optional sign and decimal digits (leading zeros allowed) that fit an
+/// `int`.
+pub fn writes_error_archive(outfmt: &str) -> bool {
+    let is_space = |c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r');
+    let text = outfmt.trim_matches(is_space);
+    let (negative, digits) = match text.as_bytes().first() {
+        Some(b'+') => (false, &text[1..]),
+        Some(b'-') => (true, &text[1..]),
+        _ => (false, text),
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    let mut value: i64 = 0;
+    for b in digits.bytes() {
+        value = value * 10 + i64::from(b - b'0');
+        if value > i64::from(i32::MAX) + 1 {
+            return false;
+        }
+    }
+    let value = if negative { -value } else { value };
+    value == i64::from(crate::blastinput::app::output_format::ARCHIVE_FORMAT)
+}
+
 /// The `queue-search` request of a run, as the options handle and the arguments make it.
 #[derive(Clone, Debug)]
 pub struct ArchiveRequest {
@@ -129,6 +171,9 @@ impl Inner {
 struct Shared {
     encoding: ArchiveEncoding,
     request: ArchiveRequest,
+    /// Whether the error archives are written (`writes_error_archive` of the `-outfmt` text;
+    /// true when the run has no such text).
+    error_archive: AtomicBool,
     state: Mutex<Inner>,
 }
 
@@ -195,12 +240,29 @@ impl ArchiveHandle {
         Self(Arc::new(Shared {
             encoding,
             request,
+            error_archive: AtomicBool::new(true),
             state: Mutex::new(Inner::default()),
         }))
     }
 
     pub fn encoding(&self) -> ArchiveEncoding {
         self.0.encoding
+    }
+
+    /// Ties the error archives to the `-outfmt` text of the command line
+    /// (`writes_error_archive`): NCBI's `PrintErrorArchive` writes none for `11 <spec>`.
+    /// The archives of the batches are not affected.
+    #[must_use]
+    pub fn with_outfmt_text(self, outfmt: &str) -> Self {
+        self.0
+            .error_archive
+            .store(writes_error_archive(outfmt), Ordering::Relaxed);
+        self
+    }
+
+    /// Whether `write_error_archive` writes (see `with_outfmt_text`).
+    pub fn error_archive_enabled(&self) -> bool {
+        self.0.error_archive.load(Ordering::Relaxed)
     }
 
     pub fn request(&self) -> &ArchiveRequest {
@@ -439,5 +501,67 @@ mod tests {
             vec![(1, b"Warning: [blastn] a b".to_vec())]
         );
         assert!(handle.take_messages().is_empty());
+    }
+
+    /// NCBI 2.17.0 (`PrintErrorArchive`): each text below was run with a missing `-query` and
+    /// wrote the error archive (`true`) or nothing (`false`).
+    #[test]
+    fn the_error_archive_follows_the_outfmt_text_like_print_error_archive() {
+        for (text, writes) in [
+            ("11", true),
+            (" 11", true),
+            ("11 ", true),
+            ("\t11\n", true),
+            ("\x0b11\x0c", true),
+            ("011", true),
+            ("+11", true),
+            ("00000000000011", true),
+            ("11 qseqid", false),
+            (" 11 qseqid", false),
+            ("11qseqid", false),
+            ("11.0", false),
+            ("1 1", false),
+            ("-11", false),
+            ("0x0B", false),
+            ("1_1", false),
+            ("11,0", false),
+            ("4294967307", false),
+            ("2147483648", false),
+            ("", false),
+            (" ", false),
+            ("+", false),
+            ("6", false),
+        ] {
+            assert_eq!(writes_error_archive(text), writes, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_handle_tied_to_a_spec_writes_no_error_archive() {
+        let make = || {
+            ArchiveHandle::new(
+                ArchiveEncoding::Text,
+                ArchiveRequest {
+                    program: "tblastx",
+                    service: "plain",
+                    algorithm: Vec::new(),
+                    database: None,
+                },
+            )
+        };
+        let lines = vec![(ERROR, b"Error: x".to_vec())];
+        // No text (the API): the error archive is written.
+        let mut sink = Vec::new();
+        write_error_archive(&make(), &lines, &mut sink).unwrap();
+        assert!(!sink.is_empty());
+        // `11`: written; `11 qseqid`: nothing, and the messages stay unread.
+        let mut sink = Vec::new();
+        write_error_archive(&make().with_outfmt_text(" 11 "), &lines, &mut sink).unwrap();
+        assert!(!sink.is_empty());
+        let mut sink = Vec::new();
+        let spec = make().with_outfmt_text("11 qseqid");
+        assert!(!spec.error_archive_enabled());
+        write_error_archive(&spec, &lines, &mut sink).unwrap();
+        assert!(sink.is_empty());
     }
 }

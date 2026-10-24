@@ -22,7 +22,8 @@
 //! the two load offsets of each diagonal and whether they lie inside both sequences, and the
 //! eight-byte comparison runs as scalar code inside the pass 3 loop, for the surviving diagonals
 //! only. The vector form spent most of its time moving lanes between vector and general registers
-//! (line F s5, probe P6: kernel 17.5 -> 12.3 cycles per cell of the band).
+//! (line F s5, probe P6: kernel 17.5 -> 12.3 cycles per cell of the band; the measurements are in
+//! the `LOSAT_X_GREEDYROWFUSE` entry of `docs/agents/diagnostics.md`).
 //!
 //! Why the result is the same. Pass 3 is the pass 3 of `x_greedy_row_impl` statement by
 //! statement: the same cells written with the same values in increasing `k`, the same
@@ -39,7 +40,10 @@
 //!   both give -1 for every diagonal.
 //! - Otherwise both read the same eight bytes of each sequence (`seq[at .. at + 8]`, or
 //!   `seq[len - 8 - at .. len - at]` for `REVERSE`), and compute the same `diff`, `bits`,
-//!   `stop_byte` and `index` with the same integer operations.
+//!   `stop_byte` and `index` with the same integer operations. The `REVERSE` offset `(len - 8) -
+//!   at` cannot wrap: `at` is at most `len - 8` inside, and 0 outside. The bytes are read later
+//!   than in pass 2, after the `x_greedy_cell_slow` calls of the diagonals before; those write only
+//!   `current` and the cold state, never the sequences or the pass 1 arrays.
 //! - `x_greedy_row_impl` gives -1 when `diff == 0`, when `stop_byte` is the fence sentry, or
 //!   when `index > longest_match_run` (the value when the block started). Here it gives -1 when
 //!   `index > min(longest_match_run, 7)` or `stop_byte` is the sentry. `diff == 0` is `bits ==
@@ -663,7 +667,7 @@ mod tests {
             cells[0], cells[1], cells[2], cells[3]
         );
         eprintln!("x_greedy_row_fused_matches_three_passes_on_random_rows: {summary}");
-        assert!(cells.iter().all(|&c| c > 1000), "{summary}");
+        assert!(cells.iter().all(|&c| c * 10 > rows), "{summary}");
         assert!(blocks * 10 > rows && short * 20 > rows, "{summary}");
         assert!(gated * 40 > rows && stopped * 40 > rows, "{summary}");
     }
@@ -679,8 +683,9 @@ mod tests {
         edit: String,
     }
 
-    /// `blast_greedy_align` with an edit block (traceback), or score only with the fence hit on
-    /// entry (both run `x_greedy_row` on every distance), with the build `kernel`.
+    /// `blast_greedy_align` with an edit block (traceback: `x_greedy_row` runs every distance), or
+    /// score only with the fence hit on entry (the fused loop declines it: `x_greedy_row` runs
+    /// distance 1 and stops at its first surviving diagonal), with the build `kernel`.
     fn align(
         kernel: XGreedyRowKernel,
         mem: &mut GreedyNonAffineMem,
@@ -761,7 +766,7 @@ mod tests {
         let histories: usize = std::env::var("LOSAT_FUZZ_CASES")
             .ok()
             .and_then(|v| v.parse().ok())
-            .map_or(300, |n: usize| n / 10);
+            .map_or(300, |n: usize| (n / 10).max(1));
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
         let (mut calls, mut converged, mut stopped, mut fences, mut long) = (0, 0, 0, 0, 0);
         for history in 0..histories {

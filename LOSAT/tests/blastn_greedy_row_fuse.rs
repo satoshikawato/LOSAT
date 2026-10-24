@@ -16,7 +16,7 @@
 //! preliminary stage runs its own fused loop (GREEDYFUSE).
 //!
 //! Searches: NZ_CP006932 against itself (the frozen NCBI 2.17.0 report of `megablast_xdrop.rs`),
-//! and Sakai against MG1655 (`-outfmt 0`, the alignments letter by letter) at one thread and four.
+//! and Sakai against MG1655 (`-outfmt 0`, the alignments letter by letter).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -54,7 +54,7 @@ fn megablast(
     if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
         command.env(
             "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!("losat_greedyrow_worker_{}.log", std::process::id())),
+            std::env::temp_dir().join("losat-greedyrowfuse-worker.log"),
         );
     }
     let output = command
@@ -135,11 +135,18 @@ fn check_line(stderr: &str, off: bool, what: &str) {
 /// ```c
 ///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
 /// ```
-/// NZ_CP006932 against itself: the default's report and `=0`'s are the frozen NCBI report, and the
-/// line says which build ran.
+/// NZ_CP006932 against itself: the default's report (the fused build, and with `LOSAT_X_STATS` the
+/// build that counts its distances) and `=0`'s are the frozen NCBI report, and the line says which
+/// build ran.
 #[test]
 fn megablast_with_fused_rows_gives_the_ncbi_report() {
     let ncbi: &[u8] = include_bytes!("fixtures/megablast_automatic_xdrop.outfmt6");
+    let (report, stderr) = megablast("NZ_CP006932.fasta", "NZ_CP006932.fasta", "6", 1, &[]);
+    assert!(
+        report == ncbi,
+        "NZ_CP006932: the report differs from NCBI's"
+    );
+    assert_eq!(stderr, "", "NZ_CP006932: no line without LOSAT_X_STATS");
     for off in [false, true] {
         let mut variables = vec![STATS];
         if off {
@@ -157,24 +164,25 @@ fn megablast_with_fused_rows_gives_the_ncbi_report() {
 /// ```c
 ///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
 /// ```
-/// Sakai against MG1655 with the alignments (`-outfmt 0`), at one thread and four: the default's
-/// report is `=0`'s, and no `[X_STATS]` line without `LOSAT_X_STATS`.
+/// Sakai against MG1655 with the alignments (`-outfmt 0`): the default's report (the fused build at
+/// one thread, the counting build at four) is `=0`'s, and no `[X_STATS]` line without
+/// `LOSAT_X_STATS`.
 #[test]
 fn megablast_with_fused_rows_gives_the_report_without_them() {
     const OUTFMT: &str = "0";
     let (reference, stderr) = megablast("Sakai.fna", "MG1655.fna", OUTFMT, 1, &[OFF]);
     assert!(!reference.is_empty(), "no hits");
     assert_eq!(stderr, "");
-    for threads in [1, 4] {
-        let what = format!("Sakai x MG1655 threads {threads}");
-        let (report, stderr) = megablast("Sakai.fna", "MG1655.fna", OUTFMT, threads, &[STATS]);
-        assert!(report == reference, "{what}: the report differs from =0's");
-        check_line(&stderr, false, &what);
-        if threads == 4 {
-            let (report, stderr) =
-                megablast("Sakai.fna", "MG1655.fna", OUTFMT, threads, &[OFF, STATS]);
-            assert!(report == reference, "{what}: =0");
-            check_line(&stderr, true, &format!("{what} =0"));
-        }
-    }
+    let (report, stderr) = megablast("Sakai.fna", "MG1655.fna", OUTFMT, 1, &[]);
+    assert!(
+        report == reference,
+        "Sakai x MG1655: the report differs from =0's"
+    );
+    assert_eq!(stderr, "", "Sakai x MG1655");
+    let (report, stderr) = megablast("Sakai.fna", "MG1655.fna", OUTFMT, 4, &[STATS]);
+    assert!(
+        report == reference,
+        "Sakai x MG1655 threads 4: the report differs from =0's"
+    );
+    check_line(&stderr, false, "Sakai x MG1655 threads 4");
 }

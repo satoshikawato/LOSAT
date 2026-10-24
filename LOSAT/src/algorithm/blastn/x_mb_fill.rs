@@ -48,8 +48,8 @@
 //! and whose `index` is `query_offset + pos - lut_word_length + 2` for the base at `pos`. Those
 //! are NCBI's words in NCBI's order. Each update is the statements above on the same cell and
 //! index, applied in the same order (the queue is first in, first out: it only prefetches, or
-//! reads, the cell of a word before it applies it). `fill` checks once that every index into the tables is in range, so the
-//! loop reads them without a check:
+//! reads, the cell of a word before it applies it). `fill` checks once that every index into the
+//! tables is in range, so the loop reads them without a check:
 //!
 //! - `lut_word_length >= 1` and the cell is the code masked with `table_size - 1 = 4^lut_word_length - 1`;
 //! - `query_offset + seq.len() < next_pos.len()` for every query (`next_pos` has one more element

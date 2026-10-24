@@ -2856,7 +2856,13 @@ Scheduling (each value computed by one thread with the original function; order 
   of the binary before (0.2-2.4 % fewer instructions: the queued loop sits behind the dispatch now).
   Measured on wasm32 2026-10-24 (the serial WASI command in Node 26.8.2, every arm's module in one process, a fresh
   instance per search, 8 rounds, the arm order rotating; `LOSAT_TIMING`; against `dev` b1f09848; outputs identical):
-  WASM_AB_PLACEHOLDER
+  on the workstation (node 0, two pinned cores, HT siblings idle) megablast of Sakai against MG1655 x0.957 (1.403 ->
+  1.340 s; the fill 0.237 -> 0.182 s), of the 31,168 cDNAs against dmel_dna_3M x0.891 (8.37 -> 7.46 s; the fill 3.15
+  -> 2.22 s), of Sakai with every 20th letter N x0.924, of 21,994 150-letter pieces of Sakai against MG1655 x0.975;
+  `=0` x0.987-0.994. On this WSL i9 (a client CPU, loaded) the fill of the same loop read x0.74-0.84 of the queued
+  loop's in every case. Applying each word at once, or batching only the first 64 words of a run, was faster on the
+  workstation for long runs (the cDNAs x0.82) but slower than the queued loop on the i9 (short runs x1.24, Sakai x1.07),
+  so wasm32 takes the batch. The machine code of the x86_64 loops is unchanged.
 - `LOSAT_X_MBLUTKEEP=1` (BLASTN megablast and blastn, the contiguous megablast lookup table of `build_mb_lookup`; in the
   strict set since 2026-10-19 (perf/mb-lut-keep, evidence at the end of this entry): on unless it is `0`)
   the batch loop keeps the table's `hashtable` from one query batch to the next

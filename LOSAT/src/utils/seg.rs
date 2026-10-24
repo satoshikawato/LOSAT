@@ -59,38 +59,6 @@ fn s_lnfact(n: usize) -> f64 {
     }
 }
 
-/// Map NCBISTDAA letter (0-27) to SEG's 20-letter alphabet index.
-///
-/// NCBI SEG uses ncbistdaa codes, but only a 20-letter subset is considered valid;
-/// everything else (including X) is "bogus".
-///
-/// NCBI reference (verbatim, blast_seg.c:2197-2216):
-/// ```c
-/// palpha->alphasize = 20;
-/// ...
-/// for (c=0, i=0; c<kCharSet; c++)
-/// {
-///    if (c == 1 || (c >= 3 && c <= 20) || c == 22) {
-///       alphaflag[c] = FALSE;
-///       alphaindex[c] = i;
-///       ++i;
-///    } else {
-///       alphaflag[c] = TRUE; alphaindex[c] = 20;
-///    }
-/// }
-/// ```
-///
-/// Valid letters (NCBISTDAA codes): A(1), C..W(3..20), Y(22) => 20 letters.
-#[inline]
-fn seg_alpha_index_ncbistdaa(letter: u8) -> Option<usize> {
-    match letter {
-        1 => Some(0),                          // A
-        3..=20 => Some((letter - 2) as usize), // C..W => 1..18
-        22 => Some(19),                        // Y
-        _ => None,                             // bogus: -, B, X, Z, U, *, O, J, etc.
-    }
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1324-1350,2190-2217
 // ```c
 // typedef struct Alpha {
@@ -114,10 +82,10 @@ fn seg_alpha_index_ncbistdaa(letter: u8) -> Option<usize> {
 //    }
 // }
 // ```
+// `lnalphasize` is the constant `K_LN20`, which s_GetProb (below) reads directly.
 #[derive(Debug, Clone)]
 struct SegAlpha {
     alphasize: usize,
-    lnalphasize: f64,
     alphaindex: [i32; 128],
     alphaflag: [bool; 128],
 }
@@ -138,7 +106,6 @@ impl SegAlpha {
 
         Self {
             alphasize: 20,
-            lnalphasize: K_LN20,
             alphaindex,
             alphaflag,
         }
@@ -323,18 +290,6 @@ fn increment_sv(state: &mut [i32], class: i32) {
         }
         index += 1;
     }
-}
-
-/// State vector: sorted amino acid counts (descending order, non-zero only)
-/// Reference: blast_seg.c uses this for entropy calculation
-fn compute_state_vector(counts: &[u32; 20]) -> Vec<i32> {
-    let mut sv: Vec<i32> = counts
-        .iter()
-        .filter(|&&c| c > 0)
-        .map(|&c| c as i32)
-        .collect();
-    sv.sort_by(|a, b| b.cmp(a)); // Sort descending
-    sv
 }
 
 /// Calculate ln(number of permutations) for a given state vector
@@ -725,6 +680,7 @@ impl SegMasker {
     // if (win->bogus > maxbogus) { H[i] = -1.; ... }
     // H[i] = win->entropy;
     // ```
+    #[cfg(test)]
     fn calculate_entropy(&self, window: &[u8]) -> (f64, usize) {
         let Some(mut win) = SegWindow::open(window, 0, window.len(), &self.alpha) else {
             return (0.0, 0);
@@ -826,31 +782,6 @@ impl SegMasker {
             j += 1;
         }
         (j - 1) as usize
-    }
-
-    /// Calculate probability for a subsequence
-    /// Returns the K2 complexity probability (lower = more low-complexity)
-    fn get_subseq_prob(&self, seq: &[u8]) -> f64 {
-        if seq.is_empty() {
-            return 1.0;
-        }
-
-        let mut counts = [0u32; 20];
-        let mut valid_count = 0usize;
-
-        for &aa in seq {
-            if aa < 20 {
-                counts[aa as usize] += 1;
-                valid_count += 1;
-            }
-        }
-
-        if valid_count == 0 {
-            return 1.0;
-        }
-
-        let sv = compute_state_vector(&counts);
-        get_prob(&sv, valid_count as i32)
     }
 
     /// NCBI s_Trim: trim [leftend..=rightend] to minimize s_GetProb.
@@ -1684,7 +1615,7 @@ impl SegMasker {
                     // function of its letters and `maxtrim` (x_seg_trim_memo.rs); for a masker that
                     // asks for it, a segment this thread trimmed before takes the stored offsets.
                     (leftend, rightend) = if masker.x_trim_memo
-                        && crate::utils::x_seg_trim_memo::x_segtrimmemo_mode() != 0
+                        && crate::utils::x_seg_trim_memo::x_segtrimmemo_on()
                         && leftend <= rightend
                         && rightend < seq.len()
                     {
@@ -1962,7 +1893,7 @@ mod tests {
             masked += reference.len();
         }
         assert!(masked > 300, "only {masked} intervals");
-        if crate::utils::x_seg_trim_memo::x_segtrimmemo_mode() != 0 {
+        if crate::utils::x_seg_trim_memo::x_segtrimmemo_on() {
             assert!(
                 crate::utils::x_seg_trim_memo::x_hits() > hits_before + 100,
                 "the windows should repeat segments"

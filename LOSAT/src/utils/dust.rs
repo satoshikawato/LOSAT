@@ -145,8 +145,6 @@ impl PerfectInterval {
 
 /// DUST masker implementation following NCBI BLAST's symmetric DUST algorithm
 pub struct DustMasker {
-    #[allow(dead_code)]
-    level: u32,
     window: usize,
     linker: usize,
     low_k: u8,
@@ -170,7 +168,6 @@ impl DustMasker {
         }
 
         Self {
-            level: params.level,
             window: params.window,
             linker: params.linker,
             low_k,
@@ -181,19 +178,6 @@ impl DustMasker {
     /// Create a DUST masker with default parameters
     pub fn with_defaults() -> Self {
         Self::new(20, 64, 1)
-    }
-
-    /// Convert a nucleotide base to 2-bit encoding (NCBI2NA format)
-    /// A=0, C=1, G=2, T/U=3
-    #[inline]
-    fn encode_base(base: u8) -> Option<u8> {
-        match base {
-            b'A' | b'a' => Some(0),
-            b'C' | b'c' => Some(1),
-            b'G' | b'g' => Some(2),
-            b'T' | b't' | b'U' | b'u' => Some(3),
-            _ => None, // Ambiguous bases
-        }
     }
 
     #[inline]
@@ -216,15 +200,6 @@ impl DustMasker {
             b'N' | b'n' => (rng.next() & 0x3) as u8,
             _ => 0,
         }
-    }
-
-    #[inline]
-    #[allow(dead_code)]
-    fn encode_triplet(b1: u8, b2: u8, b3: u8) -> Option<u8> {
-        let e1 = Self::encode_base(b1)?;
-        let e2 = Self::encode_base(b2)?;
-        let e3 = Self::encode_base(b3)?;
-        Some((e1 << 4) | (e2 << 2) | e3)
     }
 
     /// Mask a sequence and return the list of masked intervals
@@ -1216,27 +1191,6 @@ pub fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usiz
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_encode_base() {
-        assert_eq!(DustMasker::encode_base(b'A'), Some(0));
-        assert_eq!(DustMasker::encode_base(b'a'), Some(0));
-        assert_eq!(DustMasker::encode_base(b'C'), Some(1));
-        assert_eq!(DustMasker::encode_base(b'G'), Some(2));
-        assert_eq!(DustMasker::encode_base(b'T'), Some(3));
-        assert_eq!(DustMasker::encode_base(b'U'), Some(3));
-        assert_eq!(DustMasker::encode_base(b'N'), None);
-    }
-
-    #[test]
-    fn test_encode_triplet() {
-        // AAA = 0b000000 = 0
-        assert_eq!(DustMasker::encode_triplet(b'A', b'A', b'A'), Some(0));
-        // TTT = 0b111111 = 63
-        assert_eq!(DustMasker::encode_triplet(b'T', b'T', b'T'), Some(63));
-        // ACG = 0b000110 = 6
-        assert_eq!(DustMasker::encode_triplet(b'A', b'C', b'G'), Some(6));
-    }
 
     #[test]
     fn test_simple_repeat() {

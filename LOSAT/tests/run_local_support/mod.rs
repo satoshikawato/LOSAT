@@ -29,7 +29,9 @@ pub fn fixture_sequence(name: &str) -> Vec<u8> {
 /// A path in the temporary directory that no other call of this process gets. The tests of
 /// one binary run at the same time and remove their files when they end; the process id and
 /// the clock alone give two of them the same path where the clock ticks in microseconds
-/// (macOS), so a counter of the calls is part of the name.
+/// (macOS), so a counter of the calls is part of the name. A suite binary holds one copy of this
+/// module per file that declares it, each with its own counter, so the module path is part of
+/// the name too.
 pub fn temp_path(name: &str) -> PathBuf {
     static CALLS: AtomicUsize = AtomicUsize::new(0);
     let nanos = SystemTime::now()
@@ -37,7 +39,8 @@ pub fn temp_path(name: &str) -> PathBuf {
         .expect("clock")
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "losat_run_local_{}_{nanos}_{}_{name}",
+        "losat_run_local_{}_{}_{nanos}_{}_{name}",
+        module_path!().replace("::", "-"),
         std::process::id(),
         CALLS.fetch_add(1, Ordering::Relaxed)
     ))

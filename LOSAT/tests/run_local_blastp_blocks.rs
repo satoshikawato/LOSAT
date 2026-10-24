@@ -201,7 +201,7 @@ fn child(
     clean_env(&mut command, vars);
     let output = command
         .args([
-            "child_search",
+            child_test_name().as_str(),
             "--exact",
             "--nocapture",
             "--test-threads",
@@ -279,6 +279,15 @@ impl FormatObserver for CountingObserver {
     }
     fn hsp_end(&mut self, _format: usize, _hsp: HspIndex) {
         self.0 += 1;
+    }
+}
+
+/// `child_search`'s name in this test binary: the harness names a test by its module path below the
+/// crate root, which is `run_local_blastp_blocks::` when this file is a module of a suite binary.
+fn child_test_name() -> String {
+    match module_path!().split_once("::") {
+        Some((_, path)) => format!("{path}::child_search"),
+        None => "child_search".to_string(),
     }
 }
 

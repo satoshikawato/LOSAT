@@ -3130,6 +3130,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
 // BlastGapDP* dp_mem; /**< scratch structures for dynamic programming */
 // Int4 dp_mem_alloc;  /**< current number of structures allocated */
 // ```
+#[cfg(test)]
 pub(crate) fn blastp_score_only_gapped_alignment(
     query: &[u8],
     subject: &[u8],

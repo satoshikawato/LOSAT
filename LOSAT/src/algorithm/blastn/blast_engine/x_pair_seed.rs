@@ -224,7 +224,8 @@ fn chunk_free_scope(
 /// a discontiguous table, or for a discontiguous
 /// table with the diagonal array the scope of `disc::in_scope_array` with LOSAT_X_PAIRPARDISCARR
 /// on. LOSAT_X_BNFEWSUBJ (`x_few_subj.rs`) reads it before it gives a search the shape of a
-/// one-subject search.
+/// one-subject search. (A chunk without a pool is not asked here: for a discontiguous table
+/// LOSAT_X_BNDCONE decides in `disc::run` and `disc::run_array`.)
 pub(super) fn takes_owner_chunks(
     two_stage: Option<&TwoStageLookup>,
     use_array_indexing: bool,

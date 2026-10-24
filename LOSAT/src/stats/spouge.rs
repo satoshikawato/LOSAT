@@ -174,19 +174,8 @@ fn erfc_ncbi(z: f64) -> f64 {
     // 2^-53. The reference's 2.0 - r then rounds to 2.0: the exact difference lies in
     // [2 - 2^-53, 2], and 2 - 2^-53 is the midpoint between 2 - 2^-52 and 2.0, which rounds to
     // the even 2.0. A NaN fails the comparison and takes the reference path.
-    // `LOSAT_X_ERFABSORBSHADOW=1` computes the reference too and stops if its bits differ.
-    if z < -6.0 {
-        let mode = x_erf_absorb();
-        if mode != 0 {
-            if mode == 2 {
-                let reference = erf_impl_ncbi(z, true);
-                assert!(
-                    reference.to_bits() == 2.0f64.to_bits(),
-                    "LOSAT_X_ERFABSORBSHADOW: ErfC({z:e}) = {reference:e}, not 2.0"
-                );
-            }
-            return 2.0;
-        }
+    if z < -6.0 && x_erf_absorb() {
+        return 2.0;
     }
     // Memo (was LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
     // BLAST_SpougeEtoS (blast_stat.c:5236-5282) asks for the same arguments again
@@ -237,21 +226,12 @@ fn erfc_ncbi(z: f64) -> f64 {
 //         else if (z < -0.5) {
 //             return 2.0 - ErfImpl(-z, invert);
 // ```
-// No NCBI counterpart: the switch is read once per process. 0 calls ErfImpl for every argument,
-// 1 returns the reference's 2.0 for z < -6 without it (the argument in `erfc_ncbi`), 2 does so
-// after checking it against ErfImpl (`LOSAT_X_ERFABSORBSHADOW`).
-fn x_erf_absorb() -> u8 {
+// No NCBI counterpart: the switch is read once per process. Off calls ErfImpl for every argument,
+// on returns the reference's 2.0 for z < -6 without it (the argument in `erfc_ncbi`).
+fn x_erf_absorb() -> bool {
     use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if !crate::utils::xswitch::on("LOSAT_X_ERFABSORB") {
-            0
-        } else if std::env::var_os("LOSAT_X_ERFABSORBSHADOW").is_some() {
-            2
-        } else {
-            1
-        }
-    })
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_ERFABSORB"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5248-5254

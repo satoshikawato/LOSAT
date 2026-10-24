@@ -350,50 +350,6 @@ impl<'a> XTwoHit<'a> {
         }
     }
 
-    // No NCBI counterpart: runs `pairs` and `x_pairs_bf` on one offset array and compares them
-    // (LOSAT_X_TBNHITBFSHADOW); the table and init HSPs kept are those of `x_pairs_bf`.
-    /// EXPERIMENT (LOSAT_X_TBNHITBFSHADOW): `pairs` on a copy of the table, then `x_pairs_bf`;
-    /// panics at the first difference of the init HSPs or of the tables.
-    #[inline(never)]
-    pub(super) fn x_pairs_bf_shadow(
-        &mut self,
-        frame: i8,
-        chunk_offset: u32,
-        subject_sequence: &[u8],
-        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
-        hits: &mut Vec<InitHsp>,
-    ) {
-        let outside = !super::x_tbn_hitbf::fits(self.window, self.word_size);
-        super::x_tbn_hitbf::x_shadow_count(pairs.len(), outside);
-        if outside {
-            self.pairs(frame, chunk_offset, subject_sequence, pairs, hits);
-            return;
-        }
-        if pairs.is_empty() {
-            return;
-        }
-        let before = self.diagonals.entries.clone();
-        let mut reference_hits = Vec::new();
-        self.pairs(
-            frame,
-            chunk_offset,
-            subject_sequence,
-            pairs,
-            &mut reference_hits,
-        );
-        let reference_table = std::mem::replace(&mut self.diagonals.entries, before);
-        let start = hits.len();
-        self.x_pairs_bf(frame, chunk_offset, subject_sequence, pairs, hits);
-        super::x_tbn_hitbf::x_shadow_compare(
-            frame,
-            chunk_offset,
-            &hits[start..],
-            &reference_hits,
-            &self.diagonals.entries,
-            &reference_table,
-        );
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:274-309
     // ```c
     //     if (0 == (result = BLAST_CMP(h2->ungapped_data->score,
@@ -1606,37 +1562,5 @@ mod tests {
             outcomes.iter().all(|&count| count > 0),
             "outcomes {outcomes:?}"
         );
-    }
-
-    // LOSAT_X_TBNHITBFSHADOW: the shadow keeps the branch-free run's init HSPs and table, which are
-    // those of `pairs`.
-    #[test]
-    fn x_pairs_bf_shadow_keeps_the_hits_of_pairs() {
-        let raw: &[u8] = b"MKVLAAGIVGLLLAQWERTYIPASDFGHKLCVNM";
-        let (query, offsets) = x_concatenated(&[raw]);
-        let mut encoded =
-            encode_tblastn_lookup_query(raw, None, false).aa_seq[1..=raw.len()].to_vec();
-        encoded.extend_from_within(..);
-        let new = || {
-            XTwoHit::new(
-                &query,
-                &offsets,
-                &[16],
-                &[10],
-                ScoringMatrix::Blosum62,
-                40,
-                3,
-            )
-        };
-        let pairs = x_word_pairs(&query, &encoded);
-        let mut reference = new();
-        let mut expected = Vec::new();
-        reference.pairs(1, 0, &encoded, &pairs, &mut expected);
-        let mut shadow = new();
-        let mut got = Vec::new();
-        shadow.x_pairs_bf_shadow(1, 0, &encoded, &pairs, &mut got);
-        assert!(!expected.is_empty());
-        assert_eq!(got, expected);
-        assert_eq!(shadow.x_table(), reference.x_table());
     }
 }

@@ -13,8 +13,9 @@
 //!
 //! - `XDbStream::new` reads the database once in the blocks of `read_nucleotide_stores`, with its
 //!   checks in its order (`common::database::x_check_nucleotide_stores`), and keeps the length of
-//!   every sequence. Its error is the error of `read_stores`, which fails the same query batch
-//!   with the same text.
+//!   every sequence. A block of one sequence (a long one) is checked without its 2-bit data: its
+//!   last 2-bit byte and its ambiguity data only (`SeqDb::x_nucleotide_check`). Its error is the
+//!   error of `read_stores`, which fails the same query batch with the same text.
 //! - The preliminary stage of a subject reads its sequence when it makes the subject's plan
 //!   (`search_seed::x_scan_plan`, `XPrelimSubject::Stream`) and drops it once the plan is made:
 //!   the frames are translated from it and the stage reads nothing else of the sequence. A plan
@@ -35,8 +36,7 @@
 //! - A sequence whose plan has no residues (LOSAT_X_TBNUNITXLATE: a first frame of 1 MiB or more,
 //!   in a search that keeps no plan of it) is read before its plan and held while its units
 //!   translate it, as a packed subject of the copy is (`search_seed::x_lean_subject`,
-//!   `search_gapped::x_preliminary_protein_hsps_by_unit`); so is every sequence with
-//!   LOSAT_X_TBNUNITXLATESHADOW, whose units are compared with the frames.
+//!   `search_gapped::x_preliminary_protein_hsps_by_unit`).
 //! - While a stream is open (`x_frames_pooled`), the frames of 1 MiB or more of a dropped subject
 //!   plan go to `X_BYTES` and the next frames and long reads take them with their pages resident
 //!   (`x_subject_translate::x_frame_buffer`, `x_reuse_frame`), as BLASTN's database reads do. The

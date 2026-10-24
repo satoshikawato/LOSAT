@@ -41,11 +41,8 @@
 //! only, and each (frame, chunk) unit translates the residues it reads into a buffer of its thread
 //! (`x_unit_residues`), one strand of one phase from the packed bytes, by the same tables and loops
 //! (32 codons with AVX2, else eight from one word; counted in `[X_STATS] TBNXLATESIMD`). With
-//! `LOSAT_X_TBNUNITXLATESHADOW` set (any value) the plans keep their frames and every unit of a
-//! packed subject translates its residues with both loops and compares them with the frame's
-//! (`x_unit_shadow`); `main` prints `[X_SHADOW] TBNUNITXLATE units_compared= residues_compared=`
-//! at exit. With `LOSAT_X_STATS` set it prints `[X_STATS] TBNUNITXLATE plans= units= residues=`
-//! when a plan without residues was made.
+//! `LOSAT_X_STATS` set, `main` prints `[X_STATS] TBNUNITXLATE plans= units= residues=` when a plan
+//! without residues was made.
 
 use super::search_seed::{translated_chunk_scan_ranges, TranslatedChunk, XSubjectPlan};
 use crate::algorithm::tblastx::constants::SENTINEL_BYTE;
@@ -63,13 +60,10 @@ use std::sync::{Arc, OnceLock};
 /// a time (`[1]`).
 static PACKED_CODONS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 
-// No NCBI counterpart: counters for LOSAT_X_STATS and LOSAT_X_TBNUNITXLATESHADOW; they do not
-// change any value NCBI computes.
+// No NCBI counterpart: counters for LOSAT_X_STATS; they do not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the plans without residues, the units that translated their
 /// residues and those residues (with LOSAT_X_STATS).
 static UNIT_RESIDUES: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
-/// EXPERIMENT (LOSAT_X_TBNUNITXLATESHADOW): the units compared and their residues.
-static UNIT_SHADOW: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 
 // No NCBI counterpart: reads LOSAT_X_STATS once; it does not change any value NCBI computes.
 fn x_stats() -> bool {
@@ -77,20 +71,10 @@ fn x_stats() -> bool {
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_STATS").is_some())
 }
 
-/// The summary lines (printed by `main` at exit): the `LOSAT_X_TBNKEEPFEWSHADOW` summary, the
-/// `LOSAT_X_TBNUNITXLATESHADOW` one when a unit was compared, and with LOSAT_X_STATS the codons
-/// of packed subjects read by the vector loop and the units that translated their residues.
+/// The summary lines (printed by `main` at exit) with LOSAT_X_STATS: the codons of packed subjects
+/// read by the vector loop and the units that translated their residues.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
-    super::search_seed::x_keep_few_print_summary();
-    let [units, residues] = UNIT_SHADOW
-        .each_ref()
-        .map(|count| count.load(Ordering::Relaxed));
-    if units > 0 {
-        eprintln!(
-            "[X_SHADOW] TBNUNITXLATE units_compared={units} residues_compared={residues} (unit residues identical)"
-        );
-    }
     if std::env::var_os("LOSAT_X_STATS").is_some() {
         let [vector, scalar] = PACKED_CODONS
             .each_ref()
@@ -480,10 +464,10 @@ fn x_table_plan(subject: &[u8], db_gencode: u8, mask_lowercase: bool) -> Result<
     Ok(XSubjectPlan { frames, units })
 }
 
-// No NCBI counterpart: the comparison of two plans of one subject for the shadow mode; it does
-// not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNKEEPFEWSHADOW): what differs between two plans of one subject, `None`
-/// when nothing does.
+// No NCBI counterpart: the comparison of two plans of one subject for the tests; it does not
+// change any value NCBI computes.
+/// What differs between two plans of one subject, `None` when nothing does.
+#[cfg(test)]
 pub(super) fn x_plan_fields_difference(
     tables: &XSubjectPlan,
     reference: &XSubjectPlan,
@@ -1038,40 +1022,14 @@ pub(super) fn x_packed_bytes_plan(
     x_bytes_plan(packed, length, db_gencode).map(Arc::new)
 }
 
-// No NCBI counterpart: reads LOSAT_X_TBNUNITXLATE and LOSAT_X_TBNUNITXLATESHADOW once; it does not
-// change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): where the units of a long packed subject read their
-/// residues.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum XUnitXlate {
-    /// The frames of the plan (the switch off).
-    Frames,
-    /// Their own translation (`x_packed_lean_plan`, `x_unit_residues`).
-    Units,
-    /// The frames of the plan, and each unit's own translation by both loops compared with them
-    /// (LOSAT_X_TBNUNITXLATESHADOW).
-    Shadow,
-}
-
-/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`; LOSAT_X_TBNUNITXLATESHADOW (any value) wins.
-fn x_unit_xlate() -> XUnitXlate {
-    static MODE: OnceLock<XUnitXlate> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_TBNUNITXLATESHADOW").is_some() {
-            XUnitXlate::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_TBNUNITXLATE") {
-            XUnitXlate::Units
-        } else {
-            XUnitXlate::Frames
-        }
-    })
-}
-
-/// EXPERIMENT (LOSAT_X_TBNUNITXLATESHADOW): whether every unit of a packed subject is compared
-/// (`x_unit_shadow`).
-pub(super) fn x_unit_shadow_on() -> bool {
-    x_unit_xlate() == XUnitXlate::Shadow
+// No NCBI counterpart: reads LOSAT_X_TBNUNITXLATE once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): whether the units of a long packed subject translate their
+/// own residues (`x_packed_lean_plan`, `x_unit_residues`) instead of reading the frames of the
+/// plan. A switch of the strict set (`utils/xswitch.rs`), on unless it is `0`.
+fn x_units_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNUNITXLATE"))
 }
 
 // No NCBI counterpart for the rule: NCBI translates the six frames of every subject into one
@@ -1087,7 +1045,7 @@ pub(super) fn x_unit_shadow_on() -> bool {
 /// `X_MAPPED_FRAME` bytes or more (the frames that are mapped on Linux with glibc; the rule is the
 /// same everywhere).
 pub(super) fn x_units_translate(length: usize) -> bool {
-    x_unit_xlate() == XUnitXlate::Units && length / 3 + 2 >= X_MAPPED_FRAME
+    x_units_on() && length / 3 + 2 >= X_MAPPED_FRAME
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
@@ -1205,49 +1163,6 @@ pub(super) fn x_unit_residues(
         PACKED_CODONS[1].fetch_add((codons - vector) as u64, Ordering::Relaxed);
     }
     Ok(range)
-}
-
-// No NCBI counterpart: compares two LOSAT translations of one unit (LOSAT_X_TBNUNITXLATESHADOW);
-// it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNUNITXLATESHADOW): translates the residues the unit of `chunk` reads
-/// with the vector loop and without it, and panics at the first that differs from `frame`'s
-/// (a frame of a plan with residues); counts the unit otherwise.
-pub(super) fn x_unit_shadow(
-    store: &crate::sequence::packed_subject::PackedNucleotide,
-    db_gencode: u8,
-    frame: &QueryFrame,
-    chunk: TranslatedChunk,
-) -> Result<()> {
-    let tables = x_codon_tables(db_gencode)?;
-    let (from, to) = x_unit_range(frame.aa_len, chunk);
-    let want = &frame.aa_seq[from..to];
-    let mut buffer = Vec::new();
-    for simd in [true, false] {
-        let (range, _, _) = x_frame_residues(
-            store,
-            tables,
-            frame.frame,
-            frame.aa_len,
-            from,
-            to,
-            &mut buffer,
-            simd,
-        );
-        let residues = &buffer[range];
-        if residues != want {
-            let at = residues.iter().zip(want).position(|(a, b)| a != b);
-            panic!(
-                "LOSAT_X_TBNUNITXLATESHADOW: frame {} chunk at {}: residues {from}..{to} of the unit (vector loop {simd}) differ from the frame's at {at:?} (lengths {} / {})",
-                frame.frame,
-                chunk.offset,
-                residues.len(),
-                want.len()
-            );
-        }
-    }
-    UNIT_SHADOW[0].fetch_add(1, Ordering::Relaxed);
-    UNIT_SHADOW[1].fetch_add(want.len() as u64, Ordering::Relaxed);
-    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1080-1090 (see
@@ -2403,14 +2318,8 @@ mod tests {
             }
         }
         assert_eq!((margin, sentinel), (6, 12));
-        assert_eq!(
-            x_units_translate(length),
-            x_unit_xlate() == XUnitXlate::Units
-        );
+        assert_eq!(x_units_translate(length), x_units_on());
         assert!(!x_units_translate(3 * (X_MAPPED_FRAME - 2) - 1));
-        assert_eq!(
-            x_units_translate(3 * (X_MAPPED_FRAME - 2)),
-            x_unit_xlate() == XUnitXlate::Units
-        );
+        assert_eq!(x_units_translate(3 * (X_MAPPED_FRAME - 2)), x_units_on());
     }
 }

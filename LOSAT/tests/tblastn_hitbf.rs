@@ -2,9 +2,7 @@
 //! `src/algorithm/tblastn/x_tbn_hitbf.rs`, module doc) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`.
-//! It acts on every offset array the unit path's scan fills;
-//! its shadow (`LOSAT_X_TBNHITBFSHADOW`) turns it on and compares it with the loop before the switch
-//! on every array.
+//! It acts on every offset array the unit path's scan fills.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
 //! ```c
@@ -27,8 +25,7 @@
 //! with the same cell states and the same saved init HSPs (the module's argument), so the property
 //! under test is that the report does not depend on it. That reports equal NCBI's is the business of
 //! the fixture comparisons. The input (the first 40 proteins of AvCLPV against its genome) gives
-//! extensions, flag-1 cells and HSPs. The tests compare the default and the shadow (which also
-//! shows that the loop ran on every offset array and that none fell outside its range) with `=0`.
+//! extensions, flag-1 cells and HSPs. The test compares the default with `=0`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -40,10 +37,6 @@ fn fasta(name: &str) -> PathBuf {
 }
 
 const OFF: (&str, &str) = ("LOSAT_X_TBNHITBF", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBNHITBFSHADOW", "1");
-/// The `[X_STATS] TBNSCANBF` and `[X_STATS] TBNSCANBYTE` lines: the scan calls of the unit path,
-/// one offset array each.
-const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 /// The proteins of the query.
 const PROTEINS: usize = 40;
 
@@ -111,48 +104,6 @@ impl Drop for Inputs {
     }
 }
 
-/// The lines of `stderr` that start with `prefix`.
-fn lines<'a>(stderr: &'a str, prefix: &str) -> Vec<&'a str> {
-    stderr
-        .lines()
-        .filter(|line| line.starts_with(prefix))
-        .collect()
-}
-
-/// The scan calls of the unit path: those of the `[X_STATS] TBNSCANBF` line (both loops) and of
-/// the `[X_STATS] TBNSCANBYTE` line (LOSAT_X_TBNSCANBYTE), each line counted where it is printed.
-fn scan_calls(stderr: &str) -> u64 {
-    let mut calls = 0;
-    if !lines(stderr, "[X_STATS] TBNSCANBF").is_empty() {
-        calls += field(stderr, "[X_STATS] TBNSCANBF", "calls_bf")
-            + field(stderr, "[X_STATS] TBNSCANBF", "calls_ref");
-    }
-    if !lines(stderr, "[X_STATS] TBNSCANBYTE").is_empty() {
-        calls += field(stderr, "[X_STATS] TBNSCANBYTE", "calls");
-    }
-    assert!(calls > 0, "no scan line in {stderr}");
-    calls
-}
-
-/// The number after `name=` in the first line of `stderr` that starts with `prefix`.
-fn field(stderr: &str, prefix: &str, name: &str) -> u64 {
-    let line = lines(stderr, prefix)
-        .first()
-        .copied()
-        .unwrap_or_else(|| panic!("no {prefix} line in {stderr}"));
-    let key = format!("{name}=");
-    let at = line
-        .find(&key)
-        .unwrap_or_else(|| panic!("no {name} in {line}"))
-        + key.len();
-    line[at..]
-        .split(|c: char| !c.is_ascii_digit())
-        .next()
-        .unwrap()
-        .parse()
-        .unwrap()
-}
-
 #[test]
 fn the_branch_free_loop_gives_the_same_report() {
     let inputs = Inputs::new("same");
@@ -161,51 +112,5 @@ fn the_branch_free_loop_gives_the_same_report() {
         assert!(!off.is_empty(), "threads {threads}: no hits");
         let (report, _) = inputs.tblastn(threads, &[]);
         assert_eq!(report, off, "threads {threads}: against =0");
-    }
-}
-
-#[test]
-fn the_shadow_compares_every_offset_array() {
-    let inputs = Inputs::new("shadow");
-    for threads in [1, 2] {
-        let (off, _) = inputs.tblastn(threads, &[OFF]);
-        for switches in [&[SHADOW][..], &[SHADOW, OFF][..]] {
-            let switches = &[switches, &[STATS][..]].concat();
-            let (shadow, stderr) = inputs.tblastn(threads, switches);
-            assert_eq!(
-                shadow, off,
-                "threads {threads} {switches:?}: shadow against =0"
-            );
-            assert!(
-                field(&stderr, "[X_SHADOW] TBNHITBF", "arrays_compared") > 0,
-                "threads {threads} {switches:?}: no array compared: {stderr}"
-            );
-            assert!(
-                field(&stderr, "[X_SHADOW] TBNHITBF", "hits_compared") > 0,
-                "threads {threads} {switches:?}: no hit compared: {stderr}"
-            );
-            assert_eq!(
-                field(&stderr, "[X_SHADOW] TBNHITBF", "outside"),
-                0,
-                "threads {threads} {switches:?}: an array outside the range: {stderr}"
-            );
-            assert_eq!(
-                field(&stderr, "[X_SHADOW] TBNHITBF", "arrays_compared"),
-                scan_calls(&stderr),
-                "threads {threads} {switches:?}: one offset array per scan call: {stderr}"
-            );
-        }
-    }
-}
-
-#[test]
-fn the_switch_off_prints_no_shadow_line() {
-    let inputs = Inputs::new("quiet");
-    for switches in [&[][..], &[OFF][..]] {
-        let (_, stderr) = inputs.tblastn(1, switches);
-        assert!(
-            lines(&stderr, "[X_SHADOW] TBNHITBF").is_empty(),
-            "{switches:?}: {stderr}"
-        );
     }
 }

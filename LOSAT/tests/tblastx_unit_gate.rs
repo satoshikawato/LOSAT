@@ -173,7 +173,7 @@ fn with_and_without_switches(
 // the units at one thread (the reference loop with `LOSAT_X_PAIRPARN1=0`), the reference loop at
 // several threads.
 #[test]
-fn a_short_query_against_short_subjects_takes_the_reference_loop() {
+fn a_short_query_against_short_subjects_takes_the_units_at_one_thread() {
     let dir = temp_dir("short");
     let q = query(&dir, "MjeNMV.fasta", 6_000);
     let set = pieces(&dir);
@@ -217,7 +217,7 @@ fn a_threshold_below_the_default_keeps_the_units() {
 // The same query against one genome: the units at one thread (the reference loop with
 // `LOSAT_X_PAIRPARN1=0`) and at several (where they split the subject over the pool).
 #[test]
-fn one_long_subject_keeps_the_units_at_several_threads() {
+fn one_long_subject_keeps_the_units() {
     let dir = temp_dir("one");
     let q = query(&dir, "MjeNMV.fasta", 6_000);
     let genome = fasta("PemoMJNVA.fasta");

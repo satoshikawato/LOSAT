@@ -2291,8 +2291,9 @@ Rebuilding less:
   117 -> 120 MiB at 8 threads (NCBI 233 MiB at one thread). The switch-off build runs 0.001 % more
   instructions than dev (`perf stat`, one thread).
   The unit test `compact_check` in `x_pair_par.rs` compares the k-merge with the plain merge (both are the unit
-  path); unit path against frame loop is checked only through the frozen NCBI bytes at 1 thread (frame loop)
-  and 4 threads (units).
+  path); unit path against frame loop is checked only through the frozen NCBI bytes of the fast fixtures (at
+  one thread the frame loop for batches under 5,000 letters, `LOSAT_X_PAIRPARN1`, the units above; the units at
+  4 threads).
 - `LOSAT_X_TBXPIPE=1` (TBLASTX, speed; in the strict set since 2026-10-19, on by default; acts only with
   two or more threads in a native build and two or more query batches, and
   not with debugging output (`LOSAT_DEBUG*`, `LOSAT_TRACE_HSP` (diagnostic build), `LOSAT_DIAGNOSTICS`,
@@ -4742,8 +4743,10 @@ Scheduling (each value computed by one thread with the original function; order 
   loop for every subject, the subject's combined HSP list compared field by field, one `[X_SHADOW]
   PAIRPAR` summary line) went with the variable; the unit tests of `x_pair_par.rs` still compare the
   per-unit hits with `masked_reference`, and unit path against frame loop is checked only through the
-  frozen NCBI bytes at 1 thread (frame loop) and 4 threads (units). The tests that need the frame loop reach it at one thread
-  with `LOSAT_X_PAIRPARGATE=1` (the cost rule), with several subjects without a dominant one, or with
+  frozen NCBI bytes of the fast fixtures (at one thread the frame loop for batches under 5,000 letters,
+  `LOSAT_X_PAIRPARN1`, the units above; the units at 4 threads). The tests that need the frame loop reach it at one thread
+  with `LOSAT_X_PAIRPARGATE=1` (the cost rule; batches under 5,000 letters, or any below 2^18 cells with
+  `LOSAT_X_PAIRPARN1=0`), with several subjects without a dominant one, or with
   `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1`, and assert `units=0`.
 - `LOSAT_X_TBXBAND=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` turns it off; acts where the unit path runs) the unit path no longer applies
@@ -4759,8 +4762,8 @@ Scheduling (each value computed by one thread with the original function; order 
   1.8-2.1 Mb, 3.6-4.2 Mb), and multi-query batches whose letters lie just below a power of two,
   each against a subject frame longer than `slack`. Those whose longest subject chunk has at most
   as many letters as the reference table has cells (subjects of up to about six times the query's
-  bases) now go through `LOSAT_X_PAIRPARGATE` like any other batch (small tables keep the reference
-  loop at one thread). The others keep the reference loop without `LOSAT_X_TBXUNITMASK` (with it,
+  bases) now go through `LOSAT_X_PAIRPARGATE` like any other batch (batches under 5,000 letters keep
+  the reference loop at one thread, `LOSAT_X_PAIRPARN1`). The others keep the reference loop without `LOSAT_X_TBXUNITMASK` (with it,
   masked unit tables; next entry): a memory rule (`x_band_fits`), since a
   unit's diagonal table has a cell for every raw diagonal of its query group and subject chunk, one
   table per thread, against the reference's one table of 2^k cells per subject in flight.
@@ -4857,8 +4860,8 @@ Scheduling (each value computed by one thread with the original function; order 
   genome database at 8 threads (the guard), 80 kb x 3,000 cDNAs, MelaMJNV x PemoMJNVA at 8 threads,
   AP027131 x AP027133 (code 4) at one thread; max RSS equal or lower in every case.
 - `LOSAT_X_PAIRPARN1=1` (TBLASTX, speed; in the strict set from the pull request that added it,
-  2026-10-25; `=0` restores the line below) at one thread `LOSAT_X_PAIRPARGATE` keeps the unit path
-  for a query batch of 5,000 letters or more (`query_length`, the translated frames with their
+  2026-10-25; `=0` restores the one-thread line of 2^18 cells) at one thread `LOSAT_X_PAIRPARGATE`
+  keeps the unit path for a query batch of 5,000 letters or more (`query_length`, the translated frames with their
   sentinels: a nucleotide query of about 2.5 kb; `X_GATE_N1_LETTERS` in `tblastx/x_pair_par.rs`)
   instead of only from a reference diagonal table of 2^18 cells; several threads keep the rule
   above. The 2^18 line was measured before the units' branch-free hit loop and masked tables; timed

@@ -220,10 +220,11 @@
 //! The switch is read once; it is in the strict set (`utils/xswitch.rs`): on unless
 //! `LOSAT_X_BPHITBF=0`. The loop with the test is its own
 //! function, never inlined and with a closure of its own type (`x_scan_two_hit_hitbf`), so the loops
-//! without it keep their code; the AVX2 and scalar batches keep their own tests, and so do
-//! blastp-fast's loops (`x_seed_fused_compressed.rs`, `x_seed_fused_clut.rs`: the test there gave a
-//! scan of 300 yeast proteins x the fly proteome x0.97 on x86-64, with 3-4 % more instructions, and
-//! changed the code of the loops without it). The loop with the test also reads ahead without a
+//! without it keep their code; the AVX2 and scalar batches keep their own tests, and so does
+//! blastp-fast's loop on the reference compressed table (`x_seed_fused_compressed.rs`). blastp-fast's
+//! loop on the flat compressed table takes the test, without the read-ahead, on tables with the
+//! branch-free list, under its own switch (LOSAT_X_BPFSEED, `x_seed_fused_clut.rs`). The loop with
+//! the test also reads ahead without a
 //! bound check per hit (`x_cell_per_hit_bf`). With `LOSAT_X_BPSEEDSHADOW` the loop that runs, this
 //! one where the switch acts, is compared with the reference for every subject, and `main` prints
 //! `[X_SHADOW] BPHITBF subjects_compared=N` at exit beside BPSEED's line, N the subjects the loop

@@ -27,8 +27,9 @@
 //! holds after each hit what `x_test_hit` leaves there, and the extension is called for the same
 //! hits with the same values and entries. The loop is out of line with a closure of its own type,
 //! so the loops without it keep their code. A sparser table keeps the loop with the branch: there
-//! few positions have hits, and the test gained nothing on the workstation. A switch of the strict
-//! set: on unless it is `0`.
+//! few positions have hits, and the test gained nothing on the workstation. WebAssembly keeps
+//! `x_scan_flat_bf` on every table (`x_fseed_on`): in Node the loop took x1.06-1.09 the time of 3
+//! proteins x UniRef50. A switch of the strict set: on unless it is `0`.
 
 use std::cell::Cell;
 
@@ -49,6 +50,13 @@ pub(crate) fn x_bp_fseed() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPFSEED"))
+}
+
+// No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's outcomes.
+/// EXPERIMENT (LOSAT_X_BPFSEED): whether tables with the branch-free list take
+/// [`x_scan_flat_fseed`]: the switch is on and the target is not wasm32 (module header).
+pub(crate) fn x_fseed_on() -> bool {
+    !cfg!(target_arch = "wasm32") && x_bp_fseed()
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPCLUTSCANBF switch once; it does not change any value
@@ -99,7 +107,7 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
     if x_clut_scan_bf(lookup) {
         // EXPERIMENT (LOSAT_X_BPFSEED): the branch-free two-hit test and no read-ahead of the
         // diagonal entries, where the test gives the reference's outcomes (module header).
-        if x_bp_fseed() && x_fseed_fits(diag_offset, subject_length, window, word_size) {
+        if x_fseed_on() && x_fseed_fits(diag_offset, subject_length, window, word_size) {
             x_scan_flat_fseed(
                 lookup,
                 subject,

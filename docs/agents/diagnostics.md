@@ -2052,9 +2052,8 @@ Rebuilding less:
   hits that have a later hit, without a bound check per hit. Acts per subject where `1 <= wordsize < window`,
   `0 <= diag_offset` and `diag_offset + length + 2 window < 2^30` (otherwise the loop without the test runs: a
   window equal to the word size, or a subject of about 2^29 letters or a `-window_size` near 2^29). The
-  AVX2 batches of `LOSAT_X_BPDIAG` (the x86-64 default) and blastp-fast's loops keep their own tests (on
-  blastp-fast the test gave x0.97 on 300 yeast proteins x the fly proteome with 3-4 % more instructions and
-  changed the loops without it; not taken). With `LOSAT_X_BPDIAG=0` 72-74 % of the hits of WSSV x PajaWSV and of 300 yeast
+  AVX2 batches of `LOSAT_X_BPDIAG` (the x86-64 default) and blastp-fast's loop on the reference compressed
+  table keep their own tests; blastp-fast's loop on the flat table takes the test under `LOSAT_X_BPFSEED`. With `LOSAT_X_BPDIAG=0` 72-74 % of the hits of WSSV x PajaWSV and of 300 yeast
   proteins x the fly proteome are too far, 18.6-18.8 % overlap, 2.5-3.7 % meet a flag-1 entry and 4.7-5.3 %
   are candidates (v4-A10 probe bp1). Shadow: `LOSAT_X_BPSEEDSHADOW=1` compares the fused loop that runs, this
   one where it acts, with the reference on every subject, and prints `[X_SHADOW] BPHITBF subjects_compared=N`

@@ -8073,9 +8073,9 @@ fn run_resolved_in_pool(
             ),
         }
     }
-    // EXPERIMENT (LOSAT_X_BPFSEED): the reference compressed table and a flat table without the
-    // branch-free list keep their loops; on a flat table with the list the loop records its side
-    // per subject (`x_seed_fused_clut.rs`).
+    // EXPERIMENT (LOSAT_X_BPFSEED): the reference compressed table, a flat table without the
+    // branch-free list and every table on wasm32 keep their loops; on a flat table with the list
+    // the loop records its side per subject (`x_seed_fused_clut.rs`).
     if args.window_size != 0
         && (super::x_seed_fused::x_bp_seed() || super::x_seed_fused::x_bp_seed_shadow())
         && super::x_seed_fused_clut::x_bp_fseed()
@@ -8086,7 +8086,9 @@ fn run_resolved_in_pool(
                 crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
             }
             BlastpRuntimeLookup::CompressedFlat(table) => {
-                if !super::x_seed_fused_clut::x_clut_scan_bf(table) {
+                if !(super::x_seed_fused_clut::x_fseed_on()
+                    && super::x_seed_fused_clut::x_clut_scan_bf(table))
+                {
                     crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
                 }
             }

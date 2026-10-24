@@ -484,8 +484,9 @@ where
     let mut pad = Vec::new();
     let scanned = x_scan_bytes(subject, range[2], lookup_word, &mut pad);
     let capacity = lookup.capacity();
-    // EXPERIMENT (LOSAT_X_BXSCANBYTE): the presence bytes where the scan on them runs for this
-    // table; the side taken is recorded per subject (LOSAT_X_REACH).
+    // No NCBI counterpart: chooses LOSAT's scan and records the side taken per subject
+    // (LOSAT_X_REACH); both scans give NCBI's pairs. EXPERIMENT (LOSAT_X_BXSCANBYTE): the presence
+    // bytes where the scan on them runs for this table.
     let presence = lookup.x_scan_presence(scan_byte);
     if scan_byte.on() && matches!(lookup, Lookup::Standard(..)) {
         crate::utils::xreach::x_reach!("LOSAT_X_BXSCANBYTE", presence.is_some());
@@ -887,7 +888,10 @@ mod tests {
             let mut reference = Diagonals::new(length, window).unwrap();
             // EXPERIMENT (LOSAT_X_BXSCANBF, LOSAT_X_BXSCANBYTE, LOSAT_X_BXHITBF): the direct loop
             // with and without the branch-free scan, the scan on presence bytes and the
-            // branch-free two-hit test, each on its own table, compared alike.
+            // branch-free two-hit test, each on its own table, compared alike. (This fixture
+            // never fills the offset array, and its `Sparse` arm scans on presence bytes only if
+            // its table is sparse: `x_scan_byte_gives_ncbi_scan_calls_on_blastx_tables` takes the
+            // capacity stops, `the_byte_scan_takes_sparse_tables_...` the rule.)
             let arms = arms();
             let mut tables: Vec<_> = arms
                 .iter()

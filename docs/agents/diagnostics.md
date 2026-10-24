@@ -5346,7 +5346,8 @@ Scheduling (each value computed by one thread with the original function; order 
   (not timed); `=2` the plain loops for every table, `=3` for sparse tables, on any CPU. Elsewhere the scans before
   run (`LOSAT_X_BXSCANBF`, NCBI's loop). The fused loop of `LOSAT_X_BXDIAG` keeps its candidate loop, so on x86-64
   with AVX2 the switch acts on batches with few hits per used cell (`LOSAT_X_BXDIAGMIN`: short queries, one to a
-  few), and without AVX2 (aarch64, WebAssembly) on every batch the direct loop scans. `LOSAT_X_REACH` records per
+  few); without AVX2 the direct loop scans every batch, and the switch acts on its sparse tables on x86-64 and in
+  WebAssembly (on aarch64 not at all). `LOSAT_X_REACH` records per
   subject of the direct loop whether the scan on presence bytes ran (`tests/blastx_scan_byte.rs`: reports equal
   `=0`'s for a 300-nt query (sparse table) and six pieces of 1.5-3.9 kb (not sparse), `-subject` and `-db`, 1 and 3
   threads). TIMINGS_PLACEHOLDER

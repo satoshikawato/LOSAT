@@ -551,7 +551,6 @@ fn x_preliminary_protein_hsps_by_unit(
 ) -> Result<Vec<(usize, GappedHsp)>> {
     use super::search_init::XTwoHit;
     use super::search_seed::{x_scan_plan, x_scan_unit};
-    use super::x_tbn_hitbf::XHitLoop;
     // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
     // cutoff = hit_params->cutoffs[context].cutoff_score;
     // Every query context must supply its own measured cutoff.
@@ -600,7 +599,7 @@ fn x_preliminary_protein_hsps_by_unit(
     // The units end with NCBI's offset step instead of starting on a cleared table, and the
     // sequential path below runs on this thread's kept buffers.
     // EXPERIMENT (LOSAT_X_TBNHITBF): the two-hit loop of the units (tblastn/x_tbn_hitbf.rs).
-    let x_hit_loop = super::x_tbn_hitbf::x_hit_loop();
+    let x_branch_free = super::x_tbn_hitbf::x_branch_free_loop();
     let state_on = |kept: Option<XUnitBuffers>| {
         let (table, pairs, hits, scratch) = match kept {
             Some(kept) => (Some(kept.diagonals), kept.pairs, kept.hits, kept.scratch),
@@ -635,7 +634,7 @@ fn x_preliminary_protein_hsps_by_unit(
         // ```
         // EXPERIMENT (LOSAT_X_TBNUNITXLATE): the frame from the chunk's first residue on: the
         // plan's, or for a plan without residues those the unit reads, translated into this
-        // thread's buffer (with LOSAT_X_TBNUNITXLATESHADOW, translated and compared with the plan's).
+        // thread's buffer.
         let mut x_held = None;
         let subject_residues: &[u8] = if frame.aa_seq.is_empty() {
             let SubjectNt::Packed(store) = subject else {
@@ -651,11 +650,6 @@ fn x_preliminary_protein_hsps_by_unit(
             )?;
             &held.0[range]
         } else {
-            if let SubjectNt::Packed(store) = subject {
-                if super::x_subject_translate::x_unit_shadow_on() {
-                    super::x_subject_translate::x_unit_shadow(store, db_gencode, frame, chunk)?;
-                }
-            }
             &frame.aa_seq[1 + chunk.offset..]
         };
         let subject_sequence = &subject_residues[..chunk.length];
@@ -672,20 +666,10 @@ fn x_preliminary_protein_hsps_by_unit(
         x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
             #[cfg(test)]
             probe_seeds(unit, frame.frame, chunk_offset, filled);
-            match x_hit_loop {
-                XHitLoop::Reference => {
-                    two_hit.pairs(frame.frame, chunk_offset, subject_sequence, filled, hits)
-                }
-                XHitLoop::BranchFree => {
-                    two_hit.x_pairs_bf(frame.frame, chunk_offset, subject_sequence, filled, hits)
-                }
-                XHitLoop::Shadow => two_hit.x_pairs_bf_shadow(
-                    frame.frame,
-                    chunk_offset,
-                    subject_sequence,
-                    filled,
-                    hits,
-                ),
+            if x_branch_free {
+                two_hit.x_pairs_bf(frame.frame, chunk_offset, subject_sequence, filled, hits)
+            } else {
+                two_hit.pairs(frame.frame, chunk_offset, subject_sequence, filled, hits)
             }
         });
         // NCBI c++/src/algo/blast/core/aa_ungapped.c:608-609:

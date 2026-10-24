@@ -1684,7 +1684,7 @@ impl SegMasker {
                     // function of its letters and `maxtrim` (x_seg_trim_memo.rs); for a masker that
                     // asks for it, a segment this thread trimmed before takes the stored offsets.
                     (leftend, rightend) = if masker.x_trim_memo
-                        && crate::utils::x_seg_trim_memo::x_segtrimmemo_mode() != 0
+                        && crate::utils::x_seg_trim_memo::x_segtrimmemo_on()
                         && leftend <= rightend
                         && rightend < seq.len()
                     {
@@ -1962,7 +1962,7 @@ mod tests {
             masked += reference.len();
         }
         assert!(masked > 300, "only {masked} intervals");
-        if crate::utils::x_seg_trim_memo::x_segtrimmemo_mode() != 0 {
+        if crate::utils::x_seg_trim_memo::x_segtrimmemo_on() {
             assert!(
                 crate::utils::x_seg_trim_memo::x_hits() > hits_before + 100,
                 "the windows should repeat segments"

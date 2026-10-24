@@ -1317,8 +1317,8 @@ where
         }
         #[cfg(target_arch = "x86_64")]
         XDiagMode::Avx2DeferMasked => {
-            assert!(x_avx2_available(), "the masked AVX2 batch needs AVX2");
-            // SAFETY: the CPU has AVX2 (asserted above).
+            assert!(x_cross_available(), "the masked AVX2 batch needs AVX2 and POPCNT");
+            // SAFETY: the CPU has AVX2 and POPCNT (asserted above).
             unsafe {
                 x_scan_cells_avx2_defer_masked::<BRANCH_FREE, F>(
                     lookup,
@@ -1475,7 +1475,7 @@ unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, F>(
 /// # Safety
 /// The CPU must have AVX2.
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
+#[target_feature(enable = "avx2,popcnt")]
 #[inline(never)]
 unsafe fn x_scan_cells_avx2_defer_masked<const BRANCH_FREE: bool, F>(
     lookup: &BlastAaLookupTable,
@@ -2232,6 +2232,11 @@ unsafe fn x_batch_avx2_at(
     _mm256_movemask_ps(_mm256_castsi256_ps(candidates)) as u32
 }
 
+/// PROBE (exp/a14-bpcoord): a batch's lane coordinates, 32-byte aligned.
+#[cfg(target_arch = "x86_64")]
+#[repr(C, align(32))]
+struct XCoordSlot([u32; X_DIAG_LANES]);
+
 /// EXPERIMENT (LOSAT_X_BPMASKED, LOSAT_X_BXDEFER): [`x_cell_avx2_defer`] with two changes of the
 /// batches (module header), for blastp's and blastx's fused loops: a batch of eight takes its
 /// lanes' entry coordinates from
@@ -2266,6 +2271,8 @@ where
     let out = buffer.as_mut_ptr();
     let mut packed = 0usize;
     let mask = table.mask;
+    let subject_v = _mm256_set1_epi32(s);
+    let mask_v = _mm256_set1_epi32(mask);
     for batch in &mut batches {
         let p = batch.as_ptr();
         let query = _mm256_loadu_si256(p.cast());
@@ -2274,9 +2281,15 @@ where
         // chain of the entry loads 3-6 cycles later (line R's probe of blastp's cell test,
         // 2026-10-18).
         // i < X_DIAG_LANES = batch.len()
-        let lane_coords: [u32; X_DIAG_LANES] = std::array::from_fn(|i| {
-            (std::ptr::read_volatile(p.add(i)).wrapping_sub(s) & mask) as u32
-        });
+        // PROBE (exp/a14-bpcoord): the coordinates by lane in the register, stored to an aligned
+        // stack slot and read back (volatile, so the compiler does not extract them).
+        let mut coord_slot = XCoordSlot([0; X_DIAG_LANES]);
+        _mm256_store_si256(
+            coord_slot.0.as_mut_ptr().cast(),
+            _mm256_and_si256(_mm256_sub_epi32(query, subject_v), mask_v),
+        );
+        let lane_coords: [u32; X_DIAG_LANES] =
+            std::array::from_fn(|i| std::ptr::read_volatile(coord_slot.0.as_ptr().add(i)));
         debug_assert!(x_batch_coords_distinct(&lane_coords.map(|c| c as usize)));
         let lanes = x_batch_avx2_at(lane_coords, s, table, test);
         let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(

@@ -429,15 +429,16 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
     Some(t)
 }
 
-/// No NCBI counterpart (memory placement only): a row of the vector kernels whose first element
-/// lies on a 64-byte boundary. The 256-bit kernels store 32 bytes at `PAD + first` plus multiples
-/// of 32 bytes and load the same places in the next row; from a buffer at glibc's 16-byte
-/// alignment half of those stores could cross a cache line, and a split store does not forward
-/// to the load after it (an offset set by the heap's history: one more allocation elsewhere made
-/// blastn's 16-thread search 2 % slower with three times the blocked store forwards). The
-/// values and the lengths are those of the `Vec` before. The fields are private to `rows`, so
-/// that only `resize` sets `ptr` and `len`.
+// No NCBI counterpart: `Rows` and the only code that sets its fields.
 mod rows {
+    /// No NCBI counterpart (memory placement only): a row of the vector kernels whose first
+    /// element lies on a 64-byte boundary. The 256-bit kernels store 32 bytes at `PAD + first`
+    /// plus multiples of 32 bytes and load the same places in the next row; from a buffer at
+    /// glibc's 16-byte alignment half of those stores could cross a cache line, and a split store
+    /// does not forward to the load after it (an offset set by the heap's history: one more
+    /// allocation elsewhere made blastn's 16-thread search 2 % slower with three times the blocked
+    /// store forwards). The values and the lengths are those of the `Vec` before. The fields are
+    /// private to `rows`, so that only `new` and `resize` set `ptr` and `len`.
     pub(super) struct Rows<T> {
         v: Vec<T>,
         /// `v`'s element on the boundary (`v` is never pushed to, so its buffer does not move).
@@ -445,7 +446,8 @@ mod rows {
         len: usize,
     }
 
-    // SAFETY: `ptr` points into `v`, which the struct owns; it goes and is shared with `v`.
+    // SAFETY: `ptr` points into `v` (or dangles with `len` 0) and is sent and shared only together
+    // with `v`, so `Rows<T>` is `Send` / `Sync` when `Vec<T>` is.
     unsafe impl<T: Send> Send for Rows<T> {}
     unsafe impl<T: Sync> Sync for Rows<T> {}
 
@@ -468,11 +470,11 @@ mod rows {
             }
             let slack = 64 / std::mem::size_of::<T>();
             let mut v = vec![value; len + slack];
-            // `align_offset` may give no offset (`usize::MAX`, as under Miri's symbolic alignment
-            // check); the rows then start at `v`'s first element, which changes only the speed.
-            let off = Some(v.as_ptr().align_offset(64))
-                .filter(|&off| off <= slack)
-                .unwrap_or(0);
+            // `align_offset` gives `usize::MAX` only for a pointer it cannot align, which `v`'s
+            // buffer (aligned for `T`) never is; if it ever did, the rows would start at `v`'s first
+            // element, which changes only the speed.
+            let off = v.as_ptr().align_offset(64);
+            let off = if off <= slack { off } else { 0 };
             v[off..off + self.len].copy_from_slice(self);
             // SAFETY: `off + len <= v.len()`. `Vec::as_mut_ptr` makes no reference to `v`'s
             // elements, so the pointer may reach all of them.
@@ -483,9 +485,10 @@ mod rows {
 
     impl<T> Rows<T> {
         /// `Vec::as_ptr`: the row's first element without a slice made first, so that a pointer a
-        /// kernel takes stays valid when the row is then read or written through `Deref`, as with
-        /// a `Vec` (the slice's method would take it from a slice that the next `deref_mut`
-        /// retires).
+        /// kernel takes stays valid when the row is then read or written through `Deref` /
+        /// `DerefMut` or another `as_ptr` / `as_mut_ptr` call, as Miri accepts for a `Vec` (a
+        /// pointer from the slice's method comes from a slice that the next `deref` or `deref_mut`
+        /// of the row can invalidate).
         #[inline(always)]
         pub(super) fn as_ptr(&self) -> *const T {
             self.ptr
@@ -502,7 +505,8 @@ mod rows {
         type Target = [T];
         #[inline(always)]
         fn deref(&self) -> &[T] {
-            // SAFETY: `ptr` and `len` lie in `v` (`resize`), and only `resize` changes them.
+            // SAFETY: `ptr .. ptr + len` lies in `v`, or `len` is 0 and `ptr` is dangling (`new`);
+            // only `new` and `resize` set them.
             unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
         }
     }

@@ -604,22 +604,20 @@ impl XSubjectSide {
     ) -> Result<std::sync::Arc<XSubjectPlan>> {
         let mut failed = None;
         let mut own = None;
-        let kept = slot.get_or_init(|| {
-            match build() {
-                Ok(plan) if self.keep(&plan) => {
-                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", true);
-                    Some(plan)
-                }
-                Ok(plan) => {
-                    // Over `KEEP_LIMIT`: the plan is made per use.
-                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", false);
-                    own = Some(plan);
-                    None
-                }
-                Err(error) => {
-                    failed = Some(error);
-                    None
-                }
+        let kept = slot.get_or_init(|| match build() {
+            Ok(plan) if self.keep(&plan) => {
+                crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", true);
+                Some(plan)
+            }
+            Ok(plan) => {
+                // Over `KEEP_LIMIT`: the plan is made per use.
+                crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", false);
+                own = Some(plan);
+                None
+            }
+            Err(error) => {
+                failed = Some(error);
+                None
             }
         });
         if let Some(error) = failed {
@@ -2191,8 +2189,9 @@ mod tests {
         let (kept, read) = (scan(Some(&four)), scan(Some(&four)));
         assert!(std::sync::Arc::ptr_eq(&kept, &read));
         assert_eq!(four.kept_bytes(), XSubjectSide::plan_bytes(&kept));
-        // The kept plan is the plan a use makes for itself, in every field (the residues with
-        // and without the mask, the SEG masks, the lengths, the units).
+        // The kept plan is the plan a use makes for itself, in every field. For subject plans
+        // `aa_seq_nomask` is None and `seg_masks` is empty (and `mask_lowercase` is off here), so
+        // the comparison is trivial for those two; it covers the residues, lengths and units.
         assert_eq!(
             crate::algorithm::tblastn::x_subject_translate::x_plan_fields_difference(&first, &kept),
             None

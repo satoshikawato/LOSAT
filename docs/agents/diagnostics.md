@@ -1827,6 +1827,36 @@ Rebuilding less:
   proteins of 4,639 residues (31.6 %) 34.27 -> 27.95 s (branch misses 1.18 G -> 0.55 G); 100 proteins of 58,139
   residues at 4 threads (two blocks, 91 % and 23 %) 70.92 -> 66.84 s; max RSS unchanged. In the strict set from
   its first pull request (no measured case slower; AGENTS.md "Speed-up switches").
+- `LOSAT_X_BPFSEED=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
+  2026-10-24, line v4-BPF K2-1; `=0` turns it off; acts in the fused loop, `LOSAT_X_BPSEED`, on the flat compressed
+  table of `LOSAT_X_BPCLUT` where the scan lists the cells without a branch, `LOSAT_X_BPCLUTSCANBF`, natively; a
+  sparser table, the reference compressed table and wasm32 keep their loops) the loop on such a table
+  (`blastp/x_seed_fused_clut.rs` `x_scan_flat_fseed`) takes two changes: each hit goes first through blastp's
+  branch-free two-hit test (`XHitBf::test` of `LOSAT_X_BPHITBF`: too far and overlap without a branch, a flag-1
+  entry or a candidate on to `x_test_hit`; exact where `XHitBf::fits` holds for the subject, which is decided and
+  recorded per subject, `LOSAT_X_REACH`), and no hit reads ahead a later hit's diagonal entry (with about 3.5 hits
+  per cell the read-ahead rarely found one, and its bound test stayed). The cells, their order and the hits are
+  `for_each_cell::<true, _>`'s, the diagonal table holds after each hit what `x_test_hit` leaves there, and the
+  extension is called for the same hits with the same values, so the report is the same (the lib test
+  `the_flat_loop_is_the_fused_loop_on_the_reference_table` compares the loop with the reference table's loop, and
+  `tests/blastp_fast_seed_bf.rs` the reports with `=0`'s, with both lists and with the reference table). The loop
+  is out of line with a closure of its own type, so the loops without it keep their code (`=0` and a sparse
+  table run the instructions of the binary before the switch, x1.0000). Not taken (line v4-BPF K2 probes, one
+  core on the workstation): the scan reading each listed cell's slice bounds (a list of (offset, start, end)) took
+  x1.50 the cycles of 3 proteins x UniRef50 volume 00, as the branch-free list then loads the bounds at every
+  offset; on the tables with the branch the loop gained nothing (x0.98-1.01 on a 42-residue protein x UniRef50);
+  AVX2 batches of the cells of eight or more hits (`LOSAT_X_BPDIAG` with `LOSAT_X_BPDEFER`) x1.06 the cycles of
+  the loop without them; reading the hits 4 or 16 cells ahead instead of 8, the slice bounds 8 or 32 ahead instead
+  of 16, and slices without bound tests changed nothing measurable. In WebAssembly (the serial WASI command in
+  Node 26, one process, 3 rounds) the loop took x1.055-1.086 the time of 3 proteins x UniRef50 (x0.945-0.979 for 10
+  proteins, x0.99 for 42 residues), so wasm32 keeps `x_scan_flat_bf`. Timed 2026-10-24 on the workstation (node 0,
+  one physical core, its HT sibling idle, warmed 3 s before every run, arm order rotating; other lines' gates ran on
+  node 0, load 23-40; dev a806eaa5; every report identical between the arms; probe round, 4 rounds, medians against
+  dev): OrthoFinder's 1/10 of the Arabidopsis proteins x the zebrafish proteome (`-db`, `-evalue 0.001`) cycles
+  x0.909 (27.00 s; mispredicted branches x0.705), the 1/10 of the human proteins x the yeast proteome x0.989 (7.85
+  s, x0.914-1.065), 3 proteins x UniRef50 volume 00 (`-evalue 1e-5`) x0.968 (9.88 s); a 42-residue protein (the
+  list with the branch) x1.003 with instructions x0.9998, and `=0` instructions x1.0000. In the strict set from
+  its first pull request (no measured case slower natively; AGENTS.md "Speed-up switches").
 - `LOSAT_X_BPLKPFLAT=1` (BLASTP `-task blastp-fast`, speed; in the strict set since 2026-10-17, on by default
   together with `LOSAT_X_BPCLUT`; acts only where the search's pool builds the flat table of
   `LOSAT_X_BPCLUT` or `LOSAT_X_BPCLUTSHADOW`, with more than one thread) changes how that build is scheduled

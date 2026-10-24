@@ -147,6 +147,7 @@ use std::ops::RangeInclusive;
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNDBSTREAM",
+    "LOSAT_X_BNDCONE",
     "LOSAT_X_BNFEWSUBJ",
     "LOSAT_X_BNMAPPED",
     "LOSAT_X_BNSTORE",

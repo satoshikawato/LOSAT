@@ -271,6 +271,7 @@ count of the set anywhere, so that two pull requests that each add a switch do n
 ```bash
 export LOSAT_X_BNDBCUT=1
 export LOSAT_X_BNDBSTREAM=1
+export LOSAT_X_BNDCONE=1
 export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNSTORE=1
@@ -1264,6 +1265,21 @@ Rebuilding less:
   identical` (`searches`: parallel preliminary stages; `blocks`: their blocks; `merged`: kept results compared; 0 at one
   thread). The stage runs twice, so its `LOSAT_TIMING` and `LOSAT_X_STATS` count double, and its results are held
   twice (megablast of 100 16S x 28,036 16S at 16 threads: max RSS 481 MiB).
+- `LOSAT_X_BNDCONE=1` (BLASTN `-task dc-megablast`, speed; in the strict set from the pull request that added it
+  (perf/dc-one-thread, evidence at the end of this entry): on unless it is `0`; acts only where a search runs on one
+  thread) the seed stages of `LOSAT_X_PAIRPARDISC` (diagonal hash) and `LOSAT_X_PAIRPARDISCARR` (diagonal array) also
+  run without a pool: a chunk in their scope (a subject this thread searches by itself, unmasked, `scan_range` 0, no
+  debug or trace) is scanned in their strips on this thread and folded in strip order, as the runs of their shadows
+  without a pool already were (`blastn/blast_engine/x_pair_seed_disc.rs`). Before, one thread took the reference fold
+  (`process_offset_pairs`), which has none of the strips stages' later gains: the memo of `LOSAT_X_DIAGLV2`, the lean
+  folds of `LOSAT_X_FOLDLEAN`, the CSR scan of `LOSAT_X_DCCSR`. Exact for the stages' reason: the owner folds every
+  pair in the reference order with the reference statements whatever the number of threads (their entries; their
+  shadows compare the hit list and the table per chunk, at one thread too). Many subjects on a pool keep the reference
+  fold in every worker (outside the scope). Reach: recorded where a chunk in the scope has no pool. Tests:
+  `LOSAT/tests/blastn_pairpar_disc.rs` and `blastn_pairpar_disc_arr.rs` (`the_stage_runs_at_one_thread`: the same
+  bytes as the reference, the stage's chunks counted, none with the switch `0`), `blastn_diag_lv.rs` (the memo
+  answers at one thread with the switch).
+  EVIDENCE_ENTRY
 - `LOSAT_X_BNFEWSUBJ=1` (BLASTN `-subject`, every task whose seed stage has strips (PAIRPAR,
   `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARDISCARR`), speed; in the strict set from the pull request that added it
   (perf/bn-few-subj, evidence at the end of this entry): on unless it is `0`;
@@ -3154,7 +3170,7 @@ Scheduling (each value computed by one thread with the original function; order 
   0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
   115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
 - `LOSAT_X_PAIRPARDISC=1` (in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`; it does not depend on PAIRPAR) blastn `-task dc-megablast`, one query-subject pair
-  on a pool of 2+ threads: the two-hit seed stage of a subject chunk with a discontiguous megablast
+  on a pool of 2+ threads (or on one thread: `LOSAT_X_BNDCONE`): the two-hit seed stage of a subject chunk with a discontiguous megablast
   table (one or two templates) and the diagonal hash (query block over 8000 letters, `scan_range`
   0, unmasked subject, one subject, no debug or trace). The pool threads scan strips of the subject
   with the discontiguous scan kernel (both templates' chains in NCBI's order, the query context of
@@ -3178,8 +3194,8 @@ Scheduling (each value computed by one thread with the original function; order 
   cDNAs). Its helpers only yield on wasm32 (`std::thread::sleep` panics under the browser's WASI shim).
 - `LOSAT_X_PAIRPARDISCARR=1` (in the strict set since 2026-10-20 (perf/dc-seed-batch, evidence at the end of this
   entry): on unless it is `0`; it does not depend on `LOSAT_X_PAIRPARDISC`)
-  blastn `-task dc-megablast`, one query-subject pair on a pool of 2+ threads: the two-hit seed stage of a subject
-  chunk whose query block has NCBI's diagonal array instead of the hash (`kQueryLenForHashTable`: at most 8000
+  blastn `-task dc-megablast`, one query-subject pair on a pool of 2+ threads (or on one thread: `LOSAT_X_BNDCONE`):
+  the two-hit seed stage of a subject chunk whose query block has NCBI's diagonal array instead of the hash (`kQueryLenForHashTable`: at most 8000
   letters with both strands, so a query of at most about 4000 bases; `LOSAT_X_PAIRPARDISC` takes the hash only).
   Same scope otherwise (`scan_range` 0, unmasked subject, one subject, no debug or trace). The pool threads scan
   the strips of `LOSAT_X_PAIRPARDISC` (same kernel, same strips), and the owner thread folds the pairs in scan
@@ -3486,7 +3502,7 @@ Scheduling (each value computed by one thread with the original function; order 
   and the merge of `LOSAT_X_PAIRPARFOLD` keep the memo with the chains. Only the strips fold of `LOSAT_X_PAIRPARDISC`
   keeps and reads it: each stage makes it again from `LOSAT_X_DIAGLV`'s bounds at its start (`x_lv2_reset`: no latest
   insert, `other` the bucket's bound, which answers no cell exactly where the bound skips), so the reference fold
-  (`process_offset_pairs`: one thread, and every worker with many subjects) runs the code before the switch
+  (`process_offset_pairs`: one thread without `LOSAT_X_BNDCONE`, and every worker with many subjects) runs the code before the switch
   (`DiagHashTable::insert_plain`, `retrieve_below::<false>`) and may change the table between stages. (Keeping the memo
   in the reference fold made 100 16S queries against a 16S database at 16 threads x1.008 slower, where the walks it
   saves are one cell long.) One-hit tables (megablast, blastn, blastn-short) keep no memo, and the one-hit strips folds
@@ -3506,8 +3522,8 @@ Scheduling (each value computed by one thread with the original function; order 
   pairs in rotated order, every output dev's; v4-A15 ab9 and the many-pair runs fin6; both switches on unless
   named): 31,168 dmel cDNAs
   against 3 Mb of dmel genome with `-subject`, 16 threads 1.842 -> 1.611 s (x0.872, 8 of 8 pairs; cycles:u 69.35
-  -> 59.37 G, instructions 167.81 -> 150.18 G), 8 threads 3.083 -> 2.660 s (x0.862), 1 thread x0.998 (the
-  reference fold, no memo); the same queries against that genome as `-db`, 16 threads 2.065 -> 1.786 s (x0.864);
+  -> 59.37 G, instructions 167.81 -> 150.18 G), 8 threads 3.083 -> 2.660 s (x0.862), 1 thread x0.998 (then the
+  reference fold, no memo; since `LOSAT_X_BNDCONE` one thread runs the strips stage too: see there); the same queries against that genome as `-db`, 16 threads 2.065 -> 1.786 s (x0.864);
   1,775 cDNAs x0.890 (16 threads, 60 pairs) and x0.997 (1 thread); 236 cDNAs (a small table: the memo answers 7 %
   of the retrieves) x0.995 / x0.985 / x0.981 / x1.001 at 16 / 8 / 4 / 1 threads (300 / 150 / 80 / 60 pairs); 100
   16S queries against a 16S `-db` (every worker in the reference fold) x0.996 with dev's instructions; megablast
@@ -3531,7 +3547,7 @@ Scheduling (each value computed by one thread with the original function; order 
   itself (na_ungapped.c:531 `if (word_length == lut_word_length) return 1;`, always so for a discontiguous word: no call, no
   arguments, the offsets unchanged and nothing extended) and inlines the diagonal-hash insert
   (`DiagHashTable::insert_inl`: the statements of `insert_plain`, or of `insert_memo` with the memo). Same statements in the same order. The reference
-  fold (`process_offset_pairs`) is not changed.
+  fold (`process_offset_pairs`) is not changed (one-thread searches reach the strips folds with `LOSAT_X_BNDCONE`).
   Tests: the dc strips stage tests of `x_pair_seed_disc.rs` (both instances on a table with bounds and memo),
   `LOSAT/tests/blastn_diag_lv.rs` (`the_memo_and_the_lean_folds_give_the_same_report`).
   Evidence: with `LOSAT_X_DIAGLV2`'s (above); this switch alone (ab6) x0.957 on 31,168 cDNAs at 16 threads

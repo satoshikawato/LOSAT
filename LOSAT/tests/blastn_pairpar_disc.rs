@@ -14,7 +14,7 @@
 //! fixtures (`tests/blastn_regression_fixtures.py`, `dc.*`).
 //!
 //! The input is one subject (the stage takes a search of one subject by the owner of a pool of
-//! two threads or more) and one query of 287 kb, whose query block is longer than 8000 letters
+//! two threads or more, or with `LOSAT_X_BNDCONE` by a search on one thread) and one query of 287 kb, whose query block is longer than 8000 letters
 //! (the stage takes the diagonal hash only).
 
 use std::path::{Path, PathBuf};
@@ -141,6 +141,30 @@ fn the_stage_runs_when_the_switch_is_set() {
     let (chunks, strips) = stage_counts(&stderr);
     assert!(chunks > 0, "the stage took no chunk:\n{stderr}");
     assert!(strips >= chunks, "{stderr}");
+}
+
+// `LOSAT_X_BNDCONE` (in the strict set): a search on one thread has no pool, and runs the stage
+// on its own thread with the switch (the same bytes as the reference fold, and the stage's
+// LOSAT_TIMING line counts the chunks it took), the reference fold with it at `0` (no chunk).
+#[test]
+fn the_stage_runs_at_one_thread() {
+    let task_args = ["-task", "dc-megablast"];
+    let (expected, _) = blastn(&task_args, 1, &[]);
+    assert!(!expected.is_empty());
+    for (one, taken) in [("1", true), ("0", false)] {
+        let on = [SWITCH, ("LOSAT_X_BNDCONE", one), ("LOSAT_TIMING", "1")];
+        let (report, stderr) = blastn(&task_args, 1, &on);
+        assert!(report == expected, "the report differs with {on:?}");
+        let (chunks, strips) = stage_counts(&stderr);
+        if taken {
+            assert!(
+                chunks > 0 && strips >= chunks,
+                "{on:?}: the stage took no chunk:\n{stderr}"
+            );
+        } else {
+            assert_eq!((chunks, strips), (0, 0), "{on:?}:\n{stderr}");
+        }
+    }
 }
 
 // Strips that start at a subject offset that is not a multiple of 4 (the scan kernels read

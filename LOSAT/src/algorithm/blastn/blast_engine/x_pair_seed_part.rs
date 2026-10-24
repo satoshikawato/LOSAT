@@ -135,8 +135,8 @@ fn switch_on() -> bool {
 /// thread (the owner folds).
 pub(super) fn partitions(threads: usize) -> Option<usize> {
     if switch_on() {
-        // A stage on a pool has two threads or more; one thread only in the PAIRPARDISCSHADOW and
-        // PAIRPARNASHADOW runs.
+        // A stage on a pool has two threads or more; one thread in the dc-megablast stages
+        // without a pool (LOSAT_X_BNDCONE) and in the PAIRPARDISCSHADOW and PAIRPARNASHADOW runs.
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARFOLD", threads >= 2);
     }
     (switch_on() && threads >= 2).then(|| threads.min(DIAGHASH_NUM_BUCKETS))

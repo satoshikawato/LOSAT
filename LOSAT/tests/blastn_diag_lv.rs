@@ -25,11 +25,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), on
-/// 2026-10-18 `LOSAT_X_MBLUTONCE` (perf/bn-memory-rules), and on 2026-10-22 `LOSAT_X_DIAGLV2` and
-/// `LOSAT_X_FOLDLEAN` (perf/dc-fold-lean), each `0`, the default before, unless the search sets
+/// 2026-10-18 `LOSAT_X_MBLUTONCE` (perf/bn-memory-rules), on 2026-10-22 `LOSAT_X_DIAGLV2` and
+/// `LOSAT_X_FOLDLEAN` (perf/dc-fold-lean), and on 2026-10-24 `LOSAT_X_BNDCONE` (perf/dc-one-thread), each `0`, the default before, unless the search sets
 /// it: every search here runs as it was written, with the switches off that it does not name (the
 /// default runs in `default_bundle.rs`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
+    ("LOSAT_X_BNDCONE", "0"),
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
@@ -280,7 +281,8 @@ fn memo_counts(stderr: &str, at: &str) -> (u64, u64) {
 // the search with neither, each switch alone and both, at four threads also with the fold split
 // over partitions (`LOSAT_X_PAIRPARFOLD`); with the shadow, which checks every answer of the memo,
 // the memo answers at four threads, also for the latest insert's diagonal, and never at one (the
-// reference fold does not read it). megablast keeps no memo (a one-hit table).
+// reference fold does not read it) unless `LOSAT_X_BNDCONE` runs the strips stage there too, which
+// reads it. megablast keeps no memo (a one-hit table).
 #[test]
 fn the_memo_and_the_lean_folds_give_the_same_report() {
     let dir = TestDir::new("memo");
@@ -324,6 +326,13 @@ fn the_memo_and_the_lean_folds_give_the_same_report() {
             assert!(memo > 0 && found > 0 && found <= memo, "{at}: {stderr}");
         }
     }
+    let on = [SHADOW, MEMO, LEAN, PAIRPARDISC, ("LOSAT_X_BNDCONE", "1")];
+    let at = format!("{task} {on:?} threads 1");
+    let (report, stderr) = blastn(&dir, &query, &subject, task, 1, &on);
+    assert!(report == expected, "{at}: the report differs");
+    shadow_counts(&stderr, &[], &at);
+    let (memo, found) = memo_counts(&stderr, &at);
+    assert!(memo > 0 && found > 0 && found <= memo, "{at}: {stderr}");
     let on = [SHADOW, MEMO];
     let (_, stderr) = blastn(&dir, &query, &subject, "megablast", 1, &on);
     let at = format!("megablast {on:?}");

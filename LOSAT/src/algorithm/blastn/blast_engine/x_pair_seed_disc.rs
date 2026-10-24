@@ -53,8 +53,10 @@
 //! (query block longer than 8000), `scan_range == 0`, an unmasked subject, no small-query
 //! word extension, no debug, trace or window diagnostics, a subject searched by the owner of a
 //! pool of two threads or more by itself (one subject, or several one at a time under
-//! LOSAT_X_BNFEWSUBJ). A contiguous table in two-hit mode stays with the
-//! reference (the parent module takes one-hit contiguous tables only).
+//! LOSAT_X_BNFEWSUBJ), or with LOSAT_X_BNDCONE by a search on one thread (no pool: the strips are
+//! scanned and folded in order on that thread, as the shadows' runs without a pool are). A
+//! contiguous table in two-hit mode stays with the reference (the parent module takes one-hit
+//! contiguous tables only).
 //!
 //! EXPERIMENT (LOSAT_X_PAIRPARDISCARR, shadow LOSAT_X_PAIRPARDISCARRSHADOW): the same scope
 //! with the diagonal array instead of the hash (a query block of at most 8000 letters) runs
@@ -127,6 +129,17 @@ fn arr_switches() -> (bool, bool) {
 fn lean_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_FOLDLEAN"))
+}
+
+/// No NCBI counterpart: reads LOSAT_X_BNDCONE once (a strict-set switch since 2026-10-24: on unless
+/// it is `0`). With it a chunk in the scope of either stage (`in_scope`, `in_scope_array`) that
+/// has no pool (a search on one thread) runs the stage on this thread: its strips are scanned
+/// and folded in order, as the shadows' runs without a pool are. The owner folds the pairs in
+/// the reference order with the reference statements whatever the number of threads (module
+/// comment), so it does not change any value NCBI computes.
+fn one_thread_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNDCONE"))
 }
 
 /// No NCBI counterpart: LOSAT_X_REACH for LOSAT_X_FOLDLEAN, which acts in the strips folds only:
@@ -1071,6 +1084,11 @@ pub(super) fn run(
         Some(threads) => threads,
         // the shadow also runs without a pool (strips on this thread)
         None if shadow => 1,
+        // LOSAT_X_BNDCONE: and so does the stage itself
+        None if one_thread_on() => {
+            crate::utils::xreach::x_reach!("LOSAT_X_BNDCONE", true);
+            1
+        }
         None => {
             crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
             reach_lean(false);
@@ -1708,6 +1726,11 @@ fn run_array(
         Some(threads) => threads,
         // the shadow also runs without a pool (strips on this thread)
         None if shadow => 1,
+        // LOSAT_X_BNDCONE: and so does the stage itself
+        None if one_thread_on() => {
+            crate::utils::xreach::x_reach!("LOSAT_X_BNDCONE", true);
+            1
+        }
         None => {
             crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", false);
             reach_lean(false);

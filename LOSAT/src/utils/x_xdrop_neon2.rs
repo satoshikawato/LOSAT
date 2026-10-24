@@ -90,9 +90,10 @@
 //!    `x_xdrop_w128.rs` (16 columns at a time; the same bytes as the AVX2 file's 32 at a time).
 //!
 //! 5. Band window (`LOSAT_X_DPWINDOW`, No NCBI counterpart): as in the AVX2 file, a kernel whose
-//!    band start `first` reaches `XdropScratch::x_win_at` moves its rows down (`x_shift`, a
-//!    multiple of 64 lanes, so the 32 / 16 lanes of a register pair and of a block stay on the
-//!    same grid from `first`) and lowers `first`, `b_size`, `len2` and the buffers' write ends by
+//!    band start `first` reaches `XdropScratch::x_win_at` moves its rows down (`x_shift`: by a
+//!    multiple of 64 lanes, so every lane keeps its place within the 64-byte-aligned rows; the
+//!    blocks start at `first` in every row either way, and at least 64 lanes stay below `first`)
+//!    and lowers `first`, `b_size`, `len2` and the buffers' write ends by
 //!    the same amount; the best cell and the traceback rows add `x_sh` back, so they keep absolute
 //!    columns, and the result is the same with the window on and off.
 //!
@@ -1372,8 +1373,9 @@ mod tests {
     //! The two-register kernels against the scalar transliteration of the NCBI loops and against
     //! the 128-bit NEON kernels of `xdrop_simd.rs` (random problems: forward and reversed rows and
     //! columns, both lane widths, traceback and score-only, fences, scale 1 and 32, bands wider than
-    //! 256 cells, gap costs at both row-gap preconditions), and the pair helpers against scalar
-    //! models of their lanes.
+    //! 256 cells, gap costs at both row-gap preconditions; each problem with the rows moved from
+    //! band start 128 / 320 or held, the NEON2 result equal to a scratch that never moves), and the
+    //! pair helpers against scalar models of their lanes.
     use super::super::kernel;
     use super::super::tests::{random_problem, reference, Problem, Rng};
     use super::super::FENCE_SENTRY;
@@ -1591,7 +1593,8 @@ mod tests {
     // kernels of this file, with the rows and columns given forward and reversed (as the call sites
     // pass them for the left extension), on 16-bit lanes and, where the problem fits, 8-bit lanes,
     // with and without traceback. Offsets, score, fence flag, edit script and cell count must be
-    // equal; a call these kernels decline must be one that fails a row-gap precondition.
+    // equal; a call these kernels decline must be one that fails a row-gap precondition. The
+    // rows are moved from band start 128 / 320 or held, and the result is equal either way.
     // `LOSAT_FUZZ_CASES` sets the number of problems.
     #[test]
     fn neon2_kernels_match_scalar_loops_on_random_problems() {
@@ -1865,8 +1868,8 @@ mod tests {
             }
             assert!(fences > 0 && ops_total > 0 && wide > 0);
             assert!(edge_in > 0 && edge_out > 0 && big_ge > 0);
-            // both kernels of this file move their rows, on both lane widths, with and without
-            // the traceback
+            // the kernels of this file and the 128-bit kernels move their rows, on both lane
+            // widths, with and without the traceback
             assert!(
                 moved.iter().flatten().flatten().all(|&n| n > 0),
                 "moved rows {moved:?}"
@@ -1903,12 +1906,13 @@ mod tests {
     }
 
     // No NCBI counterpart: the band window of the NEON2 kernels (`XdropScratch::x_shift`,
-    // `LOSAT_X_DPWINDOW`). Long similar problems (both gap-cost sets, one on 16-bit lanes and one
-    // on 8-bit lanes, forward and reversed columns, score-only and traceback) run `align16` and
-    // `align8` with the rows moved from band start 128 on and with every column held: offsets,
-    // score, fence flag, cell count and edit script are equal to each other, to the 128-bit
-    // kernel and to the scalar loops, and the moved rows stay short (they would hold every column
-    // up to the band's end, 1500 or more lanes, if they were not moved).
+    // `LOSAT_X_DPWINDOW`). Long similar problems (gap costs (5, 2, 110) on 16-bit lanes and
+    // (11, 1, 38) on 8-bit and 16-bit lanes, forward and reversed columns, score-only and
+    // traceback) run `align16` and `align8` with the rows moved from band start 128 on and with
+    // every column held: offsets, score, fence flag, cell count and edit script are equal to each
+    // other, to the 128-bit kernel and to the scalar loops, and the moved rows stay short (they
+    // would hold every column up to the band's end, 1500 or more lanes, if they were not moved).
+    // Every call is inside the preconditions of the kernels, so none may be declined.
     #[test]
     fn neon2_band_window_keeps_every_result() {
         let mut rng = Rng(0x2545_F491_4F6C_DD1D);
@@ -1939,6 +1943,7 @@ mod tests {
             let m8 = fits_8bit(&scores, go, ge, x);
             let rq: Vec<u8> = p.q.iter().rev().copied().collect();
             let rs: Vec<u8> = p.s.iter().rev().copied().collect();
+            let expected = [false, true].map(|tb| reference(&p, len1, len2, go, ge, x, tb, false));
             for reverse in [false, true] {
                 let (rows, cols) = if reverse {
                     (
@@ -1971,7 +1976,7 @@ mod tests {
                 };
                 for tb in [false, true] {
                     // the reversed forms present the same logical sequences
-                    let expected = reference(&p, len1, len2, go, ge, x, tb, false);
+                    let expected = &expected[usize::from(tb)];
                     // 8-bit lanes where the costs fit them, and always 16-bit lanes
                     let widths: &[Option<i32>] = if m8.is_some() { &[m8, None] } else { &[None] };
                     for &m in widths {
@@ -1998,7 +2003,12 @@ mod tests {
                             )
                         };
                         let (Some(a), Some(b), Some(c)) = (a, b, c) else {
-                            continue;
+                            panic!(
+                                "{tag}: declined (window {} / every column {} / 128-bit {})",
+                                a.is_some(),
+                                b.is_some(),
+                                c.is_some()
+                            );
                         };
                         let w = usize::from(m.is_none());
                         handled[w][usize::from(tb)] += 1;
@@ -2015,11 +2025,11 @@ mod tests {
                         assert_eq!(on.ops, expected.4, "{tag}: scalar traceback");
                         if on.x_sh > 0 {
                             shifted[w][usize::from(tb)] += 1;
-                            // the rows grow to the lanes the band needs, at most twice over; a
-                            // band reaches 100 lanes here and the window sits at 128
+                            // the rows start at 1024 lanes and must not grow: with the window at
+                            // 128 the band, its extra lanes and the padding take about 500
                             let rows_len = on.ha.len().max(on.h8a.len());
                             assert!(
-                                rows_len <= 2048,
+                                rows_len <= 1024,
                                 "{tag}: rows of {rows_len} lanes after moving {} columns",
                                 on.x_sh
                             );
@@ -2029,8 +2039,15 @@ mod tests {
             }
         }
         eprintln!("neon2 window: handled[w8/w16][so/tb]={handled:?} moved={shifted:?}");
+        // 48 cases, both column directions each: 24 with (5, 2, 110) on 16-bit lanes, 24 with
+        // (11, 1, 38) on 8-bit and on 16-bit lanes
+        assert_eq!(
+            handled,
+            [[48, 48], [96, 96]],
+            "handled {handled:?}, moved {shifted:?}"
+        );
         assert!(
-            handled.iter().flatten().all(|&n| n > 10) && shifted.iter().flatten().all(|&n| n > 10),
+            shifted.iter().flatten().all(|&n| n > 10),
             "handled {handled:?}, moved {shifted:?}"
         );
     }

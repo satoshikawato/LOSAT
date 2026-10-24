@@ -12,8 +12,9 @@
 //! `LOSAT_X_ENVCACHE`; the variable is gone.)
 //!
 //! No NCBI counterpart: LOSAT_DEBUG_COORDS, LOSAT_DEBUG_COORDS_START, LOSAT_DEBUG_CUTOFFS and
-//! LOSAT_DEBUG_BLASTN are LOSAT debugging variables. NCBI BLAST+ has no equivalent, and this module only changes how often the
-//! environment is read; it does not change any value NCBI computes.
+//! LOSAT_DEBUG_BLASTN are LOSAT debugging variables. NCBI BLAST+ has no equivalent, and this
+//! module only changes how often the environment is read; it does not change any value NCBI
+//! computes.
 
 use std::ffi::OsString;
 use std::sync::OnceLock;

@@ -65,7 +65,7 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
 
 ### Diagnostic build
 
-The 19 trace, debug, dump and profile variables that no test, script or CI step sets are read only by
+The trace, debug, dump and profile variables that no test, script or CI step sets are read only by
 a build with the `diagnostics` cargo feature (`cargo build --release --features diagnostics`; the WASI
 command adds `--target wasm32-wasip1 --no-default-features`). A build without it ignores them and
 writes one stderr line for each that is set (`utils/xdiag.rs`). They take the values their entries below
@@ -94,6 +94,8 @@ LOSAT_X_DPCAPTURE
 LOSAT_X_DPCAPTURE_EVERY
 LOSAT_X_NEWTONEXACT_PROF
 ```
+
+### All debug and trace variables
 
 - `LOSAT_TRACE_HSP="qstart,qend,sstart,send"` (diagnostic build) trace a specific TBLASTX HSP.
 - `LOSAT_TRACE_HSP_MASKS=1` (diagnostic build) print mask coverage for the traced TBLASTX HSP.
@@ -131,6 +133,10 @@ LOSAT_X_NEWTONEXACT_PROF
 - `LOSAT_DEBUG_COORDS_START=<int>` narrow selected BLASTN coordinate diagnostics.
 - `LOSAT_DEBUG_SCAN_SOFF=<int>` (diagnostic build) tblastx scan debug center subject offset.
 - `LOSAT_DEBUG_SCAN_WINDOW=<int>` (diagnostic build) tblastx scan debug window size.
+- `LOSAT_DEBUG_BLASTP_TRACE_HSP="[qidx,sidx,]qstart,qend,sstart,send"` (diagnostic build) trace one
+  BLASTP HSP through the composition-based redo (4 or 6 comma-separated fields).
+- `LOSAT_DEBUG_BLASTP_WSSV=1` (diagnostic build) print the redo's `[BLASTP_WSSV]` line for the one HSP
+  q 78-789 x s 0-665.
 - `LOSAT_TIMING=1` timing breakdown. Every search program prints one line last, after its own lines
   (`utils/xtiming.rs`):
   `[TIMING] common: since_start .. outside_search .. read_fasta .. encode .. translate .. seg .. build_lookup .. search .. output .. (search_sum ..)`.

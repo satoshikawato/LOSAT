@@ -220,6 +220,11 @@ def check_startup_trace_notice(losat: Path) -> list[str]:
     traced = subprocess.run([str(losat), "--version"], capture_output=True,
                             env={**base, "LOSAT_STARTUP_TRACE": "1"})
     failures = []
+    if plain.returncode != 0 or traced.returncode != 0:
+        failures.append(f"`losat --version` exited with {plain.returncode} (plain) and {traced.returncode} "
+                        "(LOSAT_STARTUP_TRACE=1)")
+    if plain.stderr != b"":
+        failures.append(f"`losat --version` wrote to stderr without a diagnostic variable: {plain.stderr!r}")
     if plain.stdout != traced.stdout:
         failures.append("LOSAT_STARTUP_TRACE=1 changed the stdout of `losat --version`")
     if traced.stderr.decode(errors="replace") != STARTUP_TRACE_NOTICE:

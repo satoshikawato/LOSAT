@@ -31,6 +31,8 @@ fn main() -> Result<()> {
     if let Some(cwd) = std::env::var_os("PWD") {
         std::env::set_current_dir(&cwd)?;
     }
+    // No NCBI counterpart: one stderr line per diagnostic variable that a build without the
+    // diagnostics feature ignores (utils/xdiag.rs).
     for line in LOSAT::utils::xdiag::ignored_notices() {
         eprintln!("{line}");
     }

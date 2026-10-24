@@ -530,7 +530,7 @@ impl IncrOptions {
         static OPTIONS: OnceLock<IncrOptions> = OnceLock::new();
         *OPTIONS.get_or_init(|| IncrOptions {
             verify: std::env::var_os("LOSAT_LINK_FAST_VERIFY").is_some(),
-            wide_keys: std::env::var_os("LOSAT_LINK_WIDE_KEYS").is_some(),
+            wide_keys: crate::utils::xdiag::var_os("LOSAT_LINK_WIDE_KEYS").is_some(),
         })
     }
 }

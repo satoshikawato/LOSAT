@@ -702,7 +702,7 @@ fn x_packed_frames_with(
         vector += x_phase_residues(store.packed(), phase, codons, tables, plus, minus, simd);
         all += codons;
     }
-    if all > 0 && std::env::var_os("LOSAT_X_STATS").is_some() {
+    if all > 0 && x_stats() {
         PACKED_CODONS[0].fetch_add(vector as u64, Ordering::Relaxed);
         PACKED_CODONS[1].fetch_add((all - vector) as u64, Ordering::Relaxed);
     }

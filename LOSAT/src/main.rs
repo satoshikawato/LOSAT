@@ -31,7 +31,13 @@ fn main() -> Result<()> {
     if let Some(cwd) = std::env::var_os("PWD") {
         std::env::set_current_dir(&cwd)?;
     }
-    let startup_trace = std::env::var("LOSAT_STARTUP_TRACE").ok().as_deref() == Some("1");
+    for line in LOSAT::utils::xdiag::ignored_notices() {
+        eprintln!("{line}");
+    }
+    let startup_trace = LOSAT::utils::xdiag::var("LOSAT_STARTUP_TRACE")
+        .ok()
+        .as_deref()
+        == Some("1");
     if startup_trace {
         eprintln!("[startup] enter main");
     }

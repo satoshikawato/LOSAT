@@ -63,23 +63,55 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
 
 ## Debug and trace variables
 
-- `LOSAT_TRACE_HSP="qstart,qend,sstart,send"` trace a specific TBLASTX HSP.
-- `LOSAT_TRACE_HSP_MASKS=1` print mask coverage for the traced TBLASTX HSP.
-- `LOSAT_TRACE_CHAIN_HSP="qstart,qend,sstart,send"` trace TBLASTX chain
+### Diagnostic build
+
+The 19 trace, debug, dump and profile variables that no test, script or CI step sets are read only by
+a build with the `diagnostics` cargo feature (`cargo build --release --features diagnostics`; the WASI
+command adds `--target wasm32-wasip1 --no-default-features`). A build without it ignores them and
+writes one stderr line for each that is set (`utils/xdiag.rs`). They take the values their entries below
+give.
+
+The variables of the diagnostic build (the entries marked "(diagnostic build)" below):
+
+```text
+LOSAT_DEBUG_BLASTP_TRACE_HSP
+LOSAT_DEBUG_BLASTP_WSSV
+LOSAT_DEBUG_CHAINING
+LOSAT_DEBUG_CUTOFFS_ALL
+LOSAT_DEBUG_EXTENSION
+LOSAT_DEBUG_HSP_SAVING
+LOSAT_DEBUG_SCAN_SOFF
+LOSAT_DEBUG_SCAN_WINDOW
+LOSAT_DUMP_TBLASTX_STAGE
+LOSAT_LINK_WIDE_KEYS
+LOSAT_STARTUP_TRACE
+LOSAT_TRACE_CHAIN_HSP
+LOSAT_TRACE_HSP
+LOSAT_TRACE_HSP_MASKS
+LOSAT_TRACE_LINK_SELECTIONS
+LOSAT_X_ADJMEMO_STATS
+LOSAT_X_DPCAPTURE
+LOSAT_X_DPCAPTURE_EVERY
+LOSAT_X_NEWTONEXACT_PROF
+```
+
+- `LOSAT_TRACE_HSP="qstart,qend,sstart,send"` (diagnostic build) trace a specific TBLASTX HSP.
+- `LOSAT_TRACE_HSP_MASKS=1` (diagnostic build) print mask coverage for the traced TBLASTX HSP.
+- `LOSAT_TRACE_CHAIN_HSP="qstart,qend,sstart,send"` (diagnostic build) trace TBLASTX chain
   selection for a specific HSP.
-- `LOSAT_TRACE_LINK_SELECTIONS=1` print TBLASTX link-selection details.
+- `LOSAT_TRACE_LINK_SELECTIONS=1` (diagnostic build) print TBLASTX link-selection details.
 - `LOSAT_LINKING_LEGACY=1` TBLASTX sum-statistics linking by the literal port
   `link_hsp_group_ncbi` instead of the default kernel (the incremental kernel of
   `tblastx/sum_stats_linking/linking_incr.rs`; same result). The linking traces
   (`LOSAT_TRACE_HSP`, `LOSAT_TRACE_CHAIN_HSP`, `LOSAT_TRACE_LINK_SELECTIONS`,
-  `LOSAT_DEBUG_CHAINING`) also run the literal port, which prints them.
+  `LOSAT_DEBUG_CHAINING`; all diagnostic build) also run the literal port, which prints them.
 - Checks of the default TBLASTX linking kernel: `LOSAT_LINK_FAST_VERIFY=1` (every
   pass against a pass computed from scratch by NCBI's scans; slow on large
   groups), `LOSAT_LINK_FAST_SHADOW=1` (every group also linked by the literal
-  port, all fields compared), `LOSAT_LINK_WIDE_KEYS=1` (u128 keys for every
+  port, all fields compared), `LOSAT_LINK_WIDE_KEYS=1` (diagnostic build; u128 keys for every
   group, to measure their cost), `LOSAT_LINK_STATS=1` (per-group counters,
   `[LINK_INCR_STATS]` lines).
-- `LOSAT_DUMP_TBLASTX_STAGE=<dir>` append TBLASTX stage snapshots as TSV files.
+- `LOSAT_DUMP_TBLASTX_STAGE=<dir>` (diagnostic build) append TBLASTX stage snapshots as TSV files.
 - `LOSAT_TRACE_BLASTN_HSP="qstart,qend,sstart,send"` trace a specific BLASTN
   HSP.
 - `LOSAT_TRACE_BLASTN_SEED="q,s"` trace a specific BLASTN seed.
@@ -89,16 +121,16 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
 - `LOSAT_TRACE_BLASTN_STAGE=<seed|ungapped|prelim|traceback|purge|hitlist|all>`
   restrict BLASTN tracing by stage.
 - `LOSAT_DEBUG_CUTOFFS=1` cutoff calculations (tblastx + blastn).
-- `LOSAT_DEBUG_CUTOFFS_ALL=1` verbose TBLASTX cutoff diagnostics.
-- `LOSAT_DEBUG_CHAINING=1` chaining debug (legacy; tblastx).
-- `LOSAT_DEBUG_EXTENSION=1` tblastx extension debug.
-- `LOSAT_DEBUG_HSP_SAVING=1` TBLASTX HSP-save diagnostics.
+- `LOSAT_DEBUG_CUTOFFS_ALL=1` (diagnostic build) verbose TBLASTX cutoff diagnostics.
+- `LOSAT_DEBUG_CHAINING=1` (diagnostic build) chaining debug (legacy; tblastx).
+- `LOSAT_DEBUG_EXTENSION=1` (diagnostic build) tblastx extension debug.
+- `LOSAT_DEBUG_HSP_SAVING=1` (diagnostic build) TBLASTX HSP-save diagnostics.
 - `LOSAT_DEBUG_OUTPUT_FILTER=1` TBLASTX output filter diagnostics.
 - `LOSAT_DEBUG_BLASTN=1` blastn hit loss diagnostics.
 - `LOSAT_DEBUG_COORDS=1` blastn coordinate transforms.
 - `LOSAT_DEBUG_COORDS_START=<int>` narrow selected BLASTN coordinate diagnostics.
-- `LOSAT_DEBUG_SCAN_SOFF=<int>` tblastx scan debug center subject offset.
-- `LOSAT_DEBUG_SCAN_WINDOW=<int>` tblastx scan debug window size.
+- `LOSAT_DEBUG_SCAN_SOFF=<int>` (diagnostic build) tblastx scan debug center subject offset.
+- `LOSAT_DEBUG_SCAN_WINDOW=<int>` (diagnostic build) tblastx scan debug window size.
 - `LOSAT_TIMING=1` timing breakdown. Every search program prints one line last, after its own lines
   (`utils/xtiming.rs`):
   `[TIMING] common: since_start .. outside_search .. read_fasta .. encode .. translate .. seg .. build_lookup .. search .. output .. (search_sum ..)`.
@@ -183,7 +215,7 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   side `required` or `gap` with the input that would reach it). CI runs the fast regressions with it and the
   check after them. A new switch of the set adds its row; a conditional one also marks its decision points
   and, where cheap, adds a fixture for each side, or writes `gap` with the reason.
-- `LOSAT_STARTUP_TRACE=1` startup trace.
+- `LOSAT_STARTUP_TRACE=1` (diagnostic build) startup trace.
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.
 - `LOSAT_WASI_PRESPAWN=auto|N` (Node threaded runner; `auto` when unset since
   2026-10-18, `0` boots none) boot N thread workers (`auto`: `-num_threads` - 1)
@@ -771,7 +803,7 @@ Same values, faster computation:
   `solve_ltriang_pos_def`) were deleted. The original-order
   `MultiplyByA` / `MultiplyByAtranspose` loops and the bitwise shadow comparisons were deleted. The unit tests
   compare the exact module and the lanes with the port bitwise. `LOSAT_X_NEWTONEXACT_LEVEL=0|2` (scalar | try
-  AVX-512) and `LOSAT_X_NEWTONEXACT_PROF=1` (cycle counters per phase) are separate variables and stay.
+  AVX-512) and `LOSAT_X_NEWTONEXACT_PROF=1` (diagnostic build; cycle counters per phase) are separate variables and stay.
 - NEWTONLANES, NEWTONLANES8 (graduated 2026-10-22; no variables, no `LOSAT_X_NEWTONLANESSHADOW`; class
   conditional / platform, the names stay in `GRADUATED` as the keys of `x_reach!`) Newton problems of the
   composition adjustment solved ahead, four problems side by side (one per AVX2 lane, each lane with the
@@ -2188,8 +2220,10 @@ Rebuilding less:
   and 4 threads (units).
 - `LOSAT_X_TBXPIPE=1` (TBLASTX, speed; in the strict set since 2026-10-19, on by default; acts only with
   two or more threads in a native build and two or more query batches, and
-  not with debugging output (`LOSAT_DEBUG*`, `LOSAT_TRACE_HSP`, `LOSAT_DIAGNOSTICS`,
-  `LOSAT_WASI_THREADS_DEBUG`, the stage dumps))
+  not with debugging output (`LOSAT_DEBUG*`, `LOSAT_TRACE_HSP` (diagnostic build), `LOSAT_DIAGNOSTICS`,
+  `LOSAT_WASI_THREADS_DEBUG`, the stage dumps (diagnostic build)); in a default build any `LOSAT_DEBUG*`
+  variable still keeps the pipe off (prefix scan in `x_pipe_wanted`), while the other diagnostic-build
+  variables are ignored)
   the next query batch starts when the batch before has ended its seed stage, while that batch still
   links its subjects (`tblastx/x_batch_pipe.rs`, exactness argument in its header). With `LOSAT_X_TBXNEXT`
   every subject of a batch starts at once and its units fill the pool, so after a batch's last unit only
@@ -5316,16 +5350,16 @@ Scheduling (each value computed by one thread with the original function; order 
   query batch and a subject made ready for the path).
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
-`xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (distinct composition-adjustment inputs),
+`xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (diagnostic build; distinct composition-adjustment inputs),
 `LOSAT_FUZZ_CASES=<n>` (random groups of the linking fuzz test; random problems of the X-drop DP
 kernel tests).
 
 X-drop DP capture and replay (diagnostics, not part of the strict set):
 
-- `LOSAT_X_DPCAPTURE=<dir>` records every Nth call of each thread that reaches the vector X-drop
+- `LOSAT_X_DPCAPTURE=<dir>` (diagnostic build) records every Nth call of each thread that reaches the vector X-drop
   DP as a self-contained problem (residues, matrix, gap costs, x_drop, result
   and edit script) in `<dir>/xdp-<pid>-t<k>.xdp`, one file per thread, appended
-  (`utils/x_xdrop_capture.rs`, format in its header). `LOSAT_X_DPCAPTURE_EVERY=<n>` sets N
+  (`utils/x_xdrop_capture.rs`, format in its header). `LOSAT_X_DPCAPTURE_EVERY=<n>` (diagnostic build) sets N
   (default 25). The search output does not change.
 - `LOSAT_X_DPREPLAY=<dir>` input of the ignored test `replay_captured_problems`
   (`cargo test --release replay_captured_problems -- --ignored --nocapture`): every captured

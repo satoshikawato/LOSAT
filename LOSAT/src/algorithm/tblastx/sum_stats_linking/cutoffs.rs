@@ -226,7 +226,7 @@ pub fn calculate_link_hsp_cutoffs_ncbi(
     // link_hsp_params->cutoff_small_gap *= (Int4)sbp->scale_factor;
     // ```
     // NCBI computes these values without unconditional stderr diagnostics.
-    if std::env::var_os("LOSAT_DEBUG_CUTOFFS").is_some() && subject_len_nucl > 600_000 {
+    if crate::utils::xenv::debug_cutoffs_is_some() && subject_len_nucl > 600_000 {
         eprintln!(
             "[DEBUG LINKING_CUTOFF] avg_query_length={}, subject_len_nucl={}",
             avg_query_length, subject_len_nucl

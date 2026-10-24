@@ -390,6 +390,8 @@ mod tests {
                     std::thread::yield_now();
                 }
             };
+            // The block drops the `workers` guard (it holds the lock the probe takes) before the
+            // next run.
             {
                 let mut got = frames_of(&seqs);
                 mask_with_probe(&mut got, &seg, pool, true, &probe);

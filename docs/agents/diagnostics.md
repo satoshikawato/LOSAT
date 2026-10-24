@@ -2215,7 +2215,8 @@ Rebuilding less:
   the report stage after the last query batch (`write_tblastx_outputs`) runs its per-HSP work on the
   search's pool (`tblastx/x_rpt_par.rs`, exactness argument in its header): the displayed identities
   (each HSP's codons translated again), the outfmt 0 rows (translated again, masks lowercased; also the
-  Web adapter's hit records) and the outfmt 6 / 7 rows of a query with more than 1,024 rows, formatted
+  Web adapter's hit records), the Seq-aligns' engine counts (outfmt 8 and 12, in chunks of the HSP
+  list joined in order) and the outfmt 6 / 7 rows of a query with more than 1,024 rows, formatted
   into one buffer per 1,024 rows by the pool's threads, in windows of 4 chunks per thread that the loop's
   thread writes in order before the next window (warnings, outfmt 7 headers and the last line stay on the
   loop's thread). Each value is the serial function of one HSP or row; the list and row order are the

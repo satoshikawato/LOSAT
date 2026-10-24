@@ -22,7 +22,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[allow(clippy::duplicate_mod)]
 mod reach_support;
 
 const OFF: (&str, &str) = ("LOSAT_X_TBXQFRAMES", "0");

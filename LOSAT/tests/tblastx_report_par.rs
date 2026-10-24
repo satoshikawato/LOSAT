@@ -17,7 +17,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-#[allow(clippy::duplicate_mod)]
 mod reach_support;
 
 const OFF: (&str, &str) = ("LOSAT_X_TBXRPTPAR", "0");
@@ -112,7 +111,7 @@ fn check_format(outfmt: &str) {
     let off = tblastx(1, outfmt, &[OFF]);
     assert!(off.status.success(), "{}", stderr(&off));
     assert!(!off.stdout.is_empty(), "the pairs have hits");
-    // The Seq-align report (outfmt 8) has no warnings.
+    // LOSAT writes no warning with outfmt 8.
     assert!(
         outfmt == "8" || stderr(&off).contains("empty record"),
         "the empty record has a warning: {}",

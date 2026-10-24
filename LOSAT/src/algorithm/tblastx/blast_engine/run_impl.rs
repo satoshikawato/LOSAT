@@ -3439,7 +3439,7 @@ fn search_query_batch(
     // batch's last units stage frees the unit path (dispatch point 3) and its last lookup stage
     // the lookup table (dispatch point 5). `x_worker_diag_cells` is the size the workers'
     // diagonal tables are created with: `diag_array_size`, or 0 when the
-    // unit path takes every subject without its shadow, so that the reference frame loop, the
+    // unit path takes every subject, so that the reference frame loop, the
     // only reader of that table, runs for none.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1004

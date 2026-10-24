@@ -28,7 +28,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[allow(clippy::duplicate_mod)]
 mod reach_support;
 
 fn fasta(name: &str) -> PathBuf {
@@ -165,6 +164,10 @@ fn the_branch_free_loop_gives_the_same_report() {
             assert!(
                 sides.0,
                 "threads {threads} {switches:?}: sides {sides:?}: its path did not run"
+            );
+            assert!(
+                !sides.1,
+                "threads {threads} {switches:?}: sides {sides:?}: a subject took the reference path"
             );
         }
         let (batched_off, _) = inputs.tblastx(threads, &[BATCHED, OFF]);

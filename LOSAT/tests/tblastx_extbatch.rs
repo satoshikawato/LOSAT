@@ -23,7 +23,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[allow(clippy::duplicate_mod)]
 mod reach_support;
 
 fn fasta(name: &str) -> PathBuf {

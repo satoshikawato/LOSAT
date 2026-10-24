@@ -757,9 +757,10 @@ Same values, faster computation:
   structured right-looking column Cholesky and AVX2, same element operations
   (`core/composition_adjustment/x_newton_exact.rs`). Both always run. The line-by-line ports stay where
   the default still takes them: `optimize_target_frequencies_reference` for a problem without the
-  relative-entropy constraint (the unconstrained matrix-adjust rule) or with another alphabet size, and
-  `step_bound_reference`, `scaled_symmetric_product_a_reference`, `factor_ltriang_pos_def` and
-  `solve_ltriang_pos_def` for a vector or matrix larger than the fast form's fixed size. The original-order
+  relative-entropy constraint (`desired_re <= 0`: the unconstrained rule, or a relative entropy that could not be computed). `optimize_target_frequencies` asserts
+  that the alphabet size is 20, as NCBI's only caller passes `COMPO_NUM_TRUE_AA`, so the ports for a larger
+  vector or matrix (`step_bound_reference`, `scaled_symmetric_product_a_reference`, `factor_ltriang_pos_def`,
+  `solve_ltriang_pos_def`) were deleted. The original-order
   `MultiplyByA` / `MultiplyByAtranspose` loops and the bitwise shadow comparisons were deleted. The unit tests
   compare the exact module and the lanes with the port bitwise. `LOSAT_X_NEWTONEXACT_LEVEL=0|2` (scalar | try
   AVX-512) and `LOSAT_X_NEWTONEXACT_PROF=1` (cycle counters per phase) are separate variables and stay.

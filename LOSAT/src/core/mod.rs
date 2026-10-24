@@ -49,7 +49,6 @@ pub mod blast_util;
 pub mod gencode_singleton;
 
 // Filtering/Masking
-pub mod blast_filter;
 pub mod blast_seg;
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:49-190

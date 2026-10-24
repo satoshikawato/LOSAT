@@ -393,24 +393,6 @@ pub fn encode_base(base: u8) -> Option<u8> {
     }
 }
 
-/// Encode a single ASCII nucleotide to BLASTNA (IUPAC) code.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93
-/// ```c
-/// const Uint1 IUPACNA_TO_BLASTNA[128]={
-/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-/// 15, 0,10, 1,11,15,15, 2,12,15,15, 7,15, 6,14,15,
-/// 15,15, 4, 9, 3,15,13, 8,15, 5,15,15,15,15,15,15,
-/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-/// 15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15};
-/// ```
-#[inline]
-fn encode_iupac_base_to_blastna(base: u8) -> u8 {
-    IUPACNA_TO_BLASTNA_FULL[base as usize]
-}
-
 /// Encode an ASCII sequence to BLASTNA (IUPAC) codes (one base per byte).
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93
 /// ```c

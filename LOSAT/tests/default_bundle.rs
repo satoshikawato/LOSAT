@@ -15,6 +15,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod reach_support;
+
 /// The blastp switches of the bundle.
 const BLASTP: &[&str] = &[
     "LOSAT_X_BPDBCUT",
@@ -131,21 +133,6 @@ fn counts(stderr: &str, prefix: &str) -> std::collections::HashMap<String, u64> 
         .collect()
 }
 
-/// The search `args` (with `base`) runs each shadow of `shadows` with a nonzero count `field`
-/// on its line `prefix`: the switch's path acts on this input, so the equalities above compare
-/// it (a later change of scope or input would otherwise make them vacuous).
-fn acts(args: &[&str], base: &[(&str, &str)], shadows: &[(&str, &str, &str)]) {
-    for &(shadow, prefix, field) in shadows {
-        let vars: Vec<(&str, &str)> = base.iter().copied().chain([(shadow, "1")]).collect();
-        let (_, stderr) = losat(args, &vars);
-        let value = counts(&stderr, prefix).get(field).copied();
-        assert!(
-            value.is_some_and(|value| value > 0),
-            "{args:?} {shadow}: {field} = {value:?}: {stderr}"
-        );
-    }
-}
-
 /// A protein database of the subject proteome, made with `losat makedb`; returns its name.
 fn protein_database(label: &str) -> PathBuf {
     let name = work_dir(label).join("MejoMJNV");
@@ -222,25 +209,20 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
         "4",
     ];
     one_report(&exact, &[], BLASTP);
-    acts(
-        &fast,
-        &[],
-        &[
-            (
-                "LOSAT_X_BPLKPAHEADSHADOW",
-                "[X_SHADOW] BPLKPAHEAD",
-                "prebuilt",
-            ),
-            (
-                "LOSAT_X_BPSUBJMETASHADOW",
-                "[X_SHADOW] BPSUBJMETA",
-                "subjects_compared",
-            ),
-        ],
+    // BPLKPAHEAD and BPSUBJMETA act on this input (their paths run, so the equalities above
+    // compare them; a later change of scope or input would otherwise make them vacuous).
+    let reach = reach_support::Reach::new("blastp_fast");
+    losat(&fast, &[reach.var()]);
+    for switch in ["LOSAT_X_BPLKPAHEAD", "LOSAT_X_BPSUBJMETA"] {
+        assert!(reach.sides(switch).0, "{switch}: its path did not run");
+    }
+    // BPDBCUT cuts the database into blocks of its own size in the exact search.
+    let reach = reach_support::Reach::new("blastp_db");
+    losat(&exact, &[reach.var()]);
+    assert!(
+        reach.sides("LOSAT_X_BPDBCUT").0,
+        "LOSAT_X_BPDBCUT: its path did not run"
     );
-    let (_, stderr) = losat(&exact, &[("LOSAT_X_BPDBCUTSHADOW", "1")]);
-    let cut = counts(&stderr, "[X_SHADOW] BPDBCUT");
-    assert!(cut["blocks"] > cut["blocks_ref"], "{stderr}");
     // The default runs BPREDOPAR's path (and BPREDOLPT's windows); its switch at 0 does not.
     let timing = [("LOSAT_TIMING", "1")];
     let (_, stderr) = losat(&fast, &timing);
@@ -322,16 +304,17 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
             0,
             "{task}: {stderr}"
         );
-        // DIAGLV, QDUSTPAR and QPREPPAR act on this input (their shadows compare something).
-        acts(
-            &args,
-            &batches,
-            &[
-                ("LOSAT_X_DIAGLVSHADOW", "[X_SHADOW] DIAGLV", "skipped"),
-                ("LOSAT_X_QDUSTPARSHADOW", "[X_SHADOW] QDUSTPAR", "batches"),
-                ("LOSAT_X_QPREPPARSHADOW", "[X_SHADOW] QPREPPAR", "batches"),
-            ],
-        );
+        // DIAGLV, QDUSTPAR and QPREPPAR act on this input (the reach rows show their paths ran).
+        let reach = reach_support::Reach::new(task);
+        let mut vars = batches.to_vec();
+        vars.push(reach.var());
+        losat(&args, &vars);
+        for switch in ["LOSAT_X_DIAGLV", "LOSAT_X_QDUSTPAR", "LOSAT_X_QPREPPAR"] {
+            assert!(
+                reach.sides(switch).0,
+                "{task} {switch}: its path did not run"
+            );
+        }
     }
     // QBATCHPAR runs by default; these query files get no default budget, and the variable
     // still sets one.

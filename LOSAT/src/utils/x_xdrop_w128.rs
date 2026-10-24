@@ -1184,9 +1184,9 @@ unsafe fn body16_rows<const TB: bool, const NIB: bool>(
         ramp1: load(ramp1.as_ptr()),
         xv: splat16(x as i16),
         kb7: load(core::hint::black_box(&KB7).as_ptr()),
-        c3: splat16(script_codes(NIB).0 as i16),
-        c10: splat16(script_codes(NIB).1 as i16),
-        c40: splat16(script_codes(NIB).2 as i16),
+        c3: splat16(const { script_codes(NIB).0 } as i16),
+        c10: splat16(const { script_codes(NIB).1 } as i16),
+        c40: splat16(const { script_codes(NIB).2 } as i16),
     };
     let zero_v = zero();
     let hpm0 = load(HPM16.as_ptr());
@@ -1699,9 +1699,9 @@ unsafe fn body8_rows<const TB: bool, const NIB: bool>(
         ramp1: load(ramp1.as_ptr()),
         xv: splat8(sat(x)),
         kb15: load(core::hint::black_box(&KB15).as_ptr()),
-        c3: splat8(script_codes(NIB).0 as i8),
-        c10: splat8(script_codes(NIB).1 as i8),
-        c40: splat8(script_codes(NIB).2 as i8),
+        c3: splat8(const { script_codes(NIB).0 } as i8),
+        c10: splat8(const { script_codes(NIB).1 } as i8),
+        c40: splat8(const { script_codes(NIB).2 } as i8),
     };
     let zero_v = zero();
     let hpm0 = load(HPM8.as_ptr());

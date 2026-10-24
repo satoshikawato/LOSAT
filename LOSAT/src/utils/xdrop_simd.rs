@@ -160,6 +160,9 @@ const NIB_EXTEND_GAP_B: u8 = 8;
 
 /// No NCBI counterpart: the values a kernel adds up for a cell's script (`SCRIPT_SUB`,
 /// `SCRIPT_EXTEND_GAP_A`, `SCRIPT_EXTEND_GAP_B`), as NCBI bytes or as four-bit codes (`NIB`).
+/// The kernels read them in `const` blocks: a branch on `NIB` that the MIR inliner copies into a
+/// kernel changes its register allocation (one byte per cell: +0.85 % instructions at one
+/// thread).
 #[inline(always)]
 pub(crate) const fn script_codes(nib: bool) -> (u8, u8, u8) {
     if nib {
@@ -170,14 +173,10 @@ pub(crate) const fn script_codes(nib: bool) -> (u8, u8, u8) {
 }
 
 /// No NCBI counterpart: the bytes a traceback row of `cells` cells takes (two cells per byte with
-/// `NIB`).
+/// `NIB`, rounded up), without a branch (`script_codes`).
 #[inline(always)]
 pub(crate) const fn trace_bytes(nib: bool, cells: usize) -> usize {
-    if nib {
-        (cells + 1) >> 1
-    } else {
-        cells
-    }
+    (cells + nib as usize) >> nib as usize
 }
 
 // No NCBI counterpart: lane padding, 16-bit value range and the largest score the vector
@@ -1852,9 +1851,9 @@ mod kernel {
             kcross: load(core::hint::black_box(&KCROSS).as_ptr()),
             kb7: load(core::hint::black_box(&KB7).as_ptr()),
             xv: splat16(x as i16),
-            c3: splat16(script_codes(NIB).0 as i16),
-            c10: splat16(script_codes(NIB).1 as i16),
-            c40: splat16(script_codes(NIB).2 as i16),
+            c3: splat16(const { script_codes(NIB).0 } as i16),
+            c10: splat16(const { script_codes(NIB).1 } as i16),
+            c40: splat16(const { script_codes(NIB).2 } as i16),
         };
         let zero_v = zero();
         let static_tabs: Option<*const u8> = match scores {
@@ -2401,9 +2400,9 @@ mod kernel {
             kcross: load(core::hint::black_box(&KCROSS8).as_ptr()),
             kb15: load(core::hint::black_box(&KB15).as_ptr()),
             xv: splat8(sat(x)),
-            c3: splat8(script_codes(NIB).0 as i8),
-            c10: splat8(script_codes(NIB).1 as i8),
-            c40: splat8(script_codes(NIB).2 as i8),
+            c3: splat8(const { script_codes(NIB).0 } as i8),
+            c10: splat8(const { script_codes(NIB).1 } as i8),
+            c40: splat8(const { script_codes(NIB).2 } as i8),
         };
         let zero_v = zero();
         let static_tabs: Option<*const u8> = match scores {
@@ -2706,7 +2705,7 @@ mod kernel {
         };
         let mut a_index = a_off;
         let mut b_index = b_off;
-        let mut script = script_codes(NIB).0;
+        let mut script = const { script_codes(NIB).0 };
         while a_index > 0 || b_index > 0 {
             if a_index >= sc.rows.len() {
                 break;

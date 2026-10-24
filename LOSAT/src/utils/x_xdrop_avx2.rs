@@ -815,9 +815,9 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
         ramp: ld(ramp.as_ptr()),
         xv: _mm256_set1_epi16(x as i16),
         kb7: ld(KB7X2.as_ptr()),
-        c3: _mm256_set1_epi16(script_codes(NIB).0 as i16),
-        c10: _mm256_set1_epi16(script_codes(NIB).1 as i16),
-        c40: _mm256_set1_epi16(script_codes(NIB).2 as i16),
+        c3: _mm256_set1_epi16(const { script_codes(NIB).0 } as i16),
+        c10: _mm256_set1_epi16(const { script_codes(NIB).1 } as i16),
+        c40: _mm256_set1_epi16(const { script_codes(NIB).2 } as i16),
     };
     let zero = _mm256_setzero_si256();
     let lane0 = _mm256_setr_epi16(-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -1388,9 +1388,9 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
         ramp: ld(ramp.as_ptr()),
         xv: _mm256_set1_epi8(sat(x)),
         kb15: _mm256_set1_epi8(15),
-        c3: _mm256_set1_epi8(script_codes(NIB).0 as i8),
-        c10: _mm256_set1_epi8(script_codes(NIB).1 as i8),
-        c40: _mm256_set1_epi8(script_codes(NIB).2 as i8),
+        c3: _mm256_set1_epi8(const { script_codes(NIB).0 } as i8),
+        c10: _mm256_set1_epi8(const { script_codes(NIB).1 } as i8),
+        c40: _mm256_set1_epi8(const { script_codes(NIB).2 } as i8),
     };
     let zero = _mm256_setzero_si256();
     let lane0 = _mm256_setr_epi8(

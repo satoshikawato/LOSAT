@@ -9,6 +9,7 @@ LOSAT_X_BNLUTDROP	blastn	always			A query batch's lookup tables dropped after it
 LOSAT_X_BNMAPPED	blastn	conditional	required	required	Linux 64-bit glibc and a buffer of 1 MiB or more: a subject's ungapped hits at their sort by score, a -db sequence's BLASTNA letters at traceback (mapped; database buffers and sort scratch pooled); smaller buffers or other allocators keep Vec's capacity
 LOSAT_X_BNSTORE	blastn	conditional	required	required	-subject without -subject_loc; letters kept for subject ranges or bytes without ncbi4na code
 LOSAT_X_BNSTREAM	blastn	conditional	required	required	-subject only, 2+ threads (1 thread hands over at once); -db has own drivers
+LOSAT_X_BNTABPAR	blastn	conditional	required	required	outfmt 6 / 7, 2+ threads, no QBATCHPAR slot in flight; serial for the Web format observer and the BLASTN trace
 LOSAT_X_BNTBRANGE	blastn	conditional	gap	required	-db only, sequences of 1 Mi bases or more (traceback decodes the HSP ranges); new gap: the CI databases hold shorter sequences (the gate runs the blastn fixtures with LOSAT_X_BNTBRANGEMIN=0, and with LOSAT_X_BNTBRANGEPAD=0 for the retraces)
 LOSAT_X_BNUNGAPCOUNT	blastn	always			Exact ungapped extension with step counts worked out first
 LOSAT_X_BPCLUT	blastp	conditional	required	required	-task blastp-fast only; exact blastp builds no compressed table

@@ -370,7 +370,7 @@ fn extend_right_ungapped(
 ///
 /// # Arguments
 /// * `x_drop` - X-drop threshold (LOSAT default: 11, NCBI standard: 7)
-// EXPERIMENT (LOSAT_X_TBXUNGAP / LOSAT_X_TBXUNGAPSHADOW): the same values from the table walks of
+// EXPERIMENT (LOSAT_X_TBXUNGAP): the same values from the table walks of
 // x_two_hit_fast.rs, which hand back to `extend_hit_two_hit_reference` what they do not cover; the
 // debug output (`debug_ext`) stays with the reference.
 #[inline]
@@ -383,31 +383,11 @@ pub fn extend_hit_two_hit(
     x_drop: i32,
     debug_ext: bool,
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
-    if !debug_ext {
-        match x_two_hit_fast::mode() {
-            0 => {}
-            1 => {
-                if let Some(r) = x_two_hit_fast::two_hit(
-                    q_seq,
-                    s_seq,
-                    s_left_off,
-                    s_right_off,
-                    q_right_off,
-                    x_drop,
-                ) {
-                    return r;
-                }
-            }
-            _ => {
-                return x_two_hit_fast::shadow(
-                    q_seq,
-                    s_seq,
-                    s_left_off,
-                    s_right_off,
-                    q_right_off,
-                    x_drop,
-                )
-            }
+    if !debug_ext && x_two_hit_fast::on() {
+        if let Some(r) =
+            x_two_hit_fast::two_hit(q_seq, s_seq, s_left_off, s_right_off, q_right_off, x_drop)
+        {
+            return r;
         }
     }
     extend_hit_two_hit_reference(

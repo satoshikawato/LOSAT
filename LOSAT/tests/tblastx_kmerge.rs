@@ -5,9 +5,8 @@
 //! is `0`. With it on, each unit of the unit path
 //! sorts its own list, a chunk's init list is the k-way merge of its units' lists, the conversion
 //! sorts only the runs of HSPs equal in score and subject range, and each frame list is merged into
-//! the subject's list. `[X_STATS] TBXKMERGE` (printed while the switch or its shadow is on) counts
-//! the subjects, chunks, sorted tie runs and the two fallbacks, which must stay zero;
-//! `LOSAT_X_TBXKMERGESHADOW=1` compares every field of every HSP with the merge of the switch off.
+//! the subject's list. `[X_STATS] TBXKMERGE` (printed while the switch is on) counts
+//! the subjects, chunks, sorted tie runs and the two fallbacks, which must stay zero.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2758-2766
 //! ```c
@@ -39,7 +38,6 @@ fn fasta(name: &str) -> PathBuf {
 }
 
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_TBXKMERGE", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBXKMERGESHADOW", "1");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const THREADS: [u32; 5] = [1, 2, 4, 8, 16];
 
@@ -191,35 +189,20 @@ fn the_switch_follows_its_variable() {
     }
 }
 
-/// The `[X_SHADOW] TBXKMERGE` counters: subjects and HSPs compared.
-fn shadow_counts(stderr: &str) -> [u64; 2] {
-    fields(
-        stderr,
-        "[X_SHADOW] TBXKMERGE ",
-        ["subjects_compared", "hsps_compared"],
-    )
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:844
 // ```c
 // if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
 // ```
-// The shadow on both forms of the units' lists (`LOSAT_X_SEEDCOMPACT` on by default, and off):
-// every HSP compared, the report NCBI's.
+// The switch on the other form of the units' lists (`LOSAT_X_SEEDCOMPACT=0`; the compact records are
+// the default, tested above): the merge ran, the report is NCBI's.
 #[test]
-fn the_shadow_finds_the_lists_of_the_switch_off() {
+fn the_switch_gives_ncbis_report_with_the_units_full_lists() {
     let expected = ncbi_report();
-    for others in [&[][..], &[("LOSAT_X_SEEDCOMPACT", "0")][..]] {
-        for threads in [1, 4, 16] {
-            let what = format!("{others:?} threads {threads}");
-            let mut switches = vec![STATS, SHADOW];
-            switches.extend_from_slice(others);
-            let (report, stderr) = pair(threads, &switches);
-            assert_eq!(report, expected, "{what}");
-            let [subjects, hsps] = shadow_counts(&stderr);
-            assert_eq!(subjects, 1, "{what}:\n{stderr}");
-            assert!(hsps > 0, "{what}:\n{stderr}");
-        }
+    for threads in [1, 4, 16] {
+        let what = format!("full lists, threads {threads}");
+        let (report, stderr) = pair(threads, &[STATS, ("LOSAT_X_SEEDCOMPACT", "0")]);
+        assert_eq!(report, expected, "{what}");
+        assert_kmerge_ran(&stderr, 1, &what);
     }
 }
 
@@ -257,8 +240,8 @@ fn record(defline: &str, letters: &str) -> String {
 // subject hit of X is found in both queries with the same score and subject range; in the
 // concatenated query (the init order) query 1 comes first, in the context (the HSP order) query
 // 2's offset is 300 residues (900 bases) lower. The switch sorts those runs (`tie_runs` > 0) and the
-// report, at 1, 2, 4, 8 and 16 threads, without the statistics (the units' scan without a probe)
-// and with the shadow, is the report of the search with the switch off. With
+// report, at 1, 2, 4, 8 and 16 threads, without the statistics (the units' scan without a probe),
+// is the report of the search with the switch off. With
 // `LOSAT_TBLASTX_TEST_CHUNK_SIZE=700` (debug builds) each 2,000-residue subject frame is searched as
 // three chunks, merged by `merge_tblastx_subject_chunk_hits`: the report is that of the switch off
 // with the same chunks.
@@ -290,10 +273,6 @@ fn tied_hsps_of_two_queries_give_the_report_of_the_switch_off() {
         let (report, _) = tblastx(&query, &subject, threads, &[]);
         assert_eq!(report, expected, "no statistics, threads {threads}");
     }
-    let (report, stderr) = tblastx(&query, &subject, 4, &[STATS, SHADOW]);
-    assert_eq!(report, expected, "shadow");
-    let [subjects, hsps] = shadow_counts(&stderr);
-    assert!(subjects == 1 && hsps > 0, "shadow:\n{stderr}");
     let chunks = ("LOSAT_TBLASTX_TEST_CHUNK_SIZE", "700");
     let (chunked, _) = tblastx(&query, &subject, 1, &[chunks, SWITCH_OFF]);
     assert!(!chunked.is_empty(), "no hits with chunks");
@@ -305,9 +284,5 @@ fn tied_hsps_of_two_queries_give_the_report_of_the_switch_off() {
         let [_, chunks_merged, _, _, _] = kmerge(&stderr);
         assert!(chunks_merged >= 18, "{what}:\n{stderr}");
     }
-    let (report, stderr) = tblastx(&query, &subject, 4, &[STATS, SHADOW, chunks]);
-    assert_eq!(report, chunked, "chunks, shadow");
-    let [subjects, hsps] = shadow_counts(&stderr);
-    assert!(subjects == 1 && hsps > 0, "chunks, shadow:\n{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 }

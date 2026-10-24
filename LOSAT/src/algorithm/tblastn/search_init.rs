@@ -1059,7 +1059,7 @@ mod tests {
                 .expect("letters");
         let plan = super::super::search_seed::x_scan_plan(
             &[&query],
-            SubjectNt::Packed(&store),
+            SubjectNt::Packed(&store).into(),
             1,
             None,
             13,
@@ -1123,7 +1123,7 @@ mod tests {
         // The (frame, chunk, scan ranges) units the search runs: the unit path's plan.
         let plan = super::super::search_seed::x_scan_plan(
             &[query],
-            SubjectNt::Letters(&subject),
+            SubjectNt::Letters(&subject).into(),
             1,
             None,
             13,
@@ -1225,7 +1225,7 @@ mod tests {
         // The (frame, chunk, scan ranges) units the search runs: the unit path's plan.
         let plan = super::super::search_seed::x_scan_plan(
             &[query],
-            SubjectNt::Letters(&subject),
+            SubjectNt::Letters(&subject).into(),
             1,
             None,
             13,

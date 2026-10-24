@@ -380,10 +380,10 @@ LOSAT/                     # Rust crate root
 │   ├── stats/             # Karlin-Altschul and sum statistics
 │   ├── align/             # Alignment utilities/traceback
 │   ├── report/            # Output formatting (outfmt 0/6/7)
-│   ├── format/            # Format helpers
 │   ├── post/              # Post-processing (chaining/filtering)
-│   ├── api/               # Options and API layer
-│   ├── blastinput/        # CLI argument parsing
+│   ├── api/               # Local search entry (`local_blast`)
+│   ├── blastinput/        # Application layer, FASTA input, shared value parsers;
+│   │                      # per-program args in `algorithm/<program>/args.rs`
 │   ├── config/            # Compatibility/config helpers
 │   ├── seed/              # Word finding
 │   ├── sequence/          # Sequence storage/encoding

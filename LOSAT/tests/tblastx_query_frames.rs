@@ -11,20 +11,20 @@
 //! after the other, or one task per frame on the search pool. So the property under test is that
 //! the report does not depend on it: for several queries with low-complexity runs (pieces of
 //! MelaMJNV, a query of four letters, whose four frames hold one residue each, and one of two
-//! letters, which has no frame) at 1 and 4 threads, the searches with the switch off,
-//! by default and with the shadow (`LOSAT_X_TBXQFRAMESSHADOW`, which masks the frames serially
-//! as well and compares them) give the same bytes; with several query
-//! batches (`BATCH_SIZE`) too; and `-seg no` is not acted on. That the frames are masked on the
-//! pool's threads is checked by the unit test `frames_are_masked_on_the_pool_threads`; here the
-//! shadow's counters show that the pool path ran. That those bytes equal NCBI's is the business
-//! of the TBLASTX fixtures.
+//! letters, which has no frame) at 1 and 4 threads, the searches with the switch off and by
+//! default give the same bytes; with several query batches (`BATCH_SIZE`) too; and `-seg no` is not
+//! acted on. That the frames are masked on the pool's threads is checked by the unit test
+//! `frames_are_masked_on_the_pool_threads`; here the reach rows (`LOSAT_X_REACH`,
+//! `tests/reach_support`) show that the pool path ran at 4 threads and not at 1. That those bytes
+//! equal NCBI's is the business of the TBLASTX fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod reach_support;
+
 const OFF: (&str, &str) = ("LOSAT_X_TBXQFRAMES", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBXQFRAMESSHADOW", "1");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -150,56 +150,45 @@ fn tblastx(
     (output.stdout, stderr)
 }
 
-/// The numbers of `[X_SHADOW] TBXQFRAMES batches=B frames=F intervals=I diffs=0 identical` in
-/// `stderr`, which holds nothing else.
-fn shadow_counts(stderr: &str) -> (u64, u64, u64) {
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with("[X_SHADOW] TBXQFRAMES "))
-        .unwrap_or_else(|| panic!("no shadow line:\n{stderr}"));
-    assert!(line.ends_with(" diffs=0 identical"), "{line}");
-    let field = |name: &str| -> u64 {
-        line.split_whitespace()
-            .find_map(|word| word.strip_prefix(name))
-            .and_then(|value| value.parse().ok())
-            .unwrap_or_else(|| panic!("no {name} in: {line}"))
-    };
-    assert_eq!(stderr.lines().count(), 1, "{stderr}");
-    (field("batches="), field("frames="), field("intervals="))
+/// `env` and `more` as one list of variables for `tblastx`.
+fn with<'a>(
+    env: &[(&'static str, &'static str)],
+    more: &[(&'a str, &'a str)],
+) -> Vec<(&'a str, &'a str)> {
+    let mut vars: Vec<(&'a str, &'a str)> = env.to_vec();
+    vars.extend_from_slice(more);
+    vars
 }
 
-/// The search with the switch off at one thread, then off, by default and with the shadow at 1 and
-/// 4 threads, all with the same bytes and no standard error but the shadow's line, which counts
-/// frames masked on the pool only at 4 threads. Returns the shadow's counts at 4 threads.
-fn check(env: &[(&'static str, &'static str)], extra: &[&str]) -> (u64, u64, u64) {
+/// The search with the switch off at one thread, then off and by default at 1 and 4 threads, all
+/// with the same bytes and no standard error. The default runs write the reach rows: the frames
+/// are masked on the pool at 4 threads and not at 1.
+fn check(env: &[(&'static str, &'static str)], extra: &[&str]) {
     let inputs = Inputs::new();
-    let with = |more: &[(&'static str, &'static str)]| -> Vec<(&str, &str)> {
-        env.iter().chain(more).copied().collect()
-    };
-    let (expected, stderr) = tblastx(&inputs, extra, 1, &with(&[OFF]));
+    let (expected, stderr) = tblastx(&inputs, extra, 1, &with(env, &[OFF]));
     assert!(!expected.is_empty(), "{env:?} {extra:?}: no hits");
     assert_eq!(stderr, "", "{env:?} {extra:?}");
-    let mut counts = (0, 0, 0);
     for threads in [1, 4] {
-        for vars in [&[OFF][..], &[]] {
-            let (report, stderr) = tblastx(&inputs, extra, threads, &with(vars));
-            assert!(
-                report == expected,
-                "{env:?} {extra:?} {vars:?} threads {threads}: the report differs"
-            );
-            assert_eq!(stderr, "", "{env:?} {extra:?} {vars:?} threads {threads}");
-        }
-        let (report, stderr) = tblastx(&inputs, extra, threads, &with(&[SHADOW]));
+        let (report, stderr) = tblastx(&inputs, extra, threads, &with(env, &[OFF]));
         assert!(
             report == expected,
-            "{env:?} {extra:?} threads {threads}: the shadow's report differs"
+            "{env:?} {extra:?} {OFF:?} threads {threads}: the report differs"
         );
-        counts = shadow_counts(&stderr);
-        if threads == 1 {
-            assert_eq!(counts, (0, 0, 0), "{env:?} {extra:?}");
-        }
+        assert_eq!(stderr, "", "{env:?} {extra:?} {OFF:?} threads {threads}");
+        let reach = reach_support::Reach::new("qframes");
+        let (report, stderr) = tblastx(&inputs, extra, threads, &with(env, &[reach.var()]));
+        assert!(
+            report == expected,
+            "{env:?} {extra:?} threads {threads}: the report differs"
+        );
+        assert_eq!(stderr, "", "{env:?} {extra:?} threads {threads}");
+        let sides = reach.sides("LOSAT_X_TBXQFRAMES");
+        assert_eq!(
+            sides.0,
+            threads > 1,
+            "{env:?} {extra:?} threads {threads}: sides {sides:?}"
+        );
     }
-    counts
 }
 
 // The default query batches (TBLASTX's 10,002 letters: two batches of the queries' 20 kb): the
@@ -207,31 +196,24 @@ fn check(env: &[(&'static str, &'static str)], extra: &[&str]) -> (u64, u64, u64
 // two) are masked on the pool, some of them with intervals.
 #[test]
 fn query_frames_masked_on_the_pool() {
-    let (batches, frames, intervals) = check(&[], &[]);
-    assert_eq!((batches, frames), (2, 8 * 6 + 4), "{intervals}");
-    assert!(intervals > 0);
+    check(&[], &[]);
 }
 
 // More query batches (`BATCH_SIZE` of 5,000 letters): each batch's frames are masked on the
 // pool.
 #[test]
 fn query_frames_of_several_batches() {
-    let (batches, frames, intervals) = check(&[("BATCH_SIZE", "5000")], &[]);
-    assert!(batches > 2, "{batches}");
-    assert_eq!(frames, 8 * 6 + 4, "{batches}");
-    assert!(intervals > 0);
+    check(&[("BATCH_SIZE", "5000")], &[]);
 }
 
 // Other SEG parameters (`-seg 10 1.8 2.1`): other intervals, the same report with and without
 // the switch.
 #[test]
 fn other_seg_parameters() {
-    let (batches, frames, intervals) = check(&[], &["-seg", "10 1.8 2.1"]);
-    assert_eq!((batches, frames), (2, 8 * 6 + 4));
-    assert!(intervals > 0);
+    check(&[], &["-seg", "10 1.8 2.1"]);
 }
 
-// `-seg no` masks nothing: the shadow has nothing to compare, and the report is the same.
+// `-seg no` masks nothing: the pool path does not act, and the report is the same.
 #[test]
 fn seg_no_is_not_acted_on() {
     let inputs = Inputs::new();
@@ -239,10 +221,10 @@ fn seg_no_is_not_acted_on() {
     let (expected, _) = tblastx(&inputs, &extra, 1, &[OFF]);
     assert!(!expected.is_empty());
     for threads in [1, 4] {
-        let (report, _) = tblastx(&inputs, &extra, threads, &[]);
+        let reach = reach_support::Reach::new("qframes_seg_no");
+        let (report, _) = tblastx(&inputs, &extra, threads, &[reach.var()]);
         assert!(report == expected, "threads {threads}: default differs");
-        let (report, stderr) = tblastx(&inputs, &extra, threads, &[SHADOW]);
-        assert!(report == expected, "threads {threads}: shadow differs");
-        assert_eq!(shadow_counts(&stderr), (0, 0, 0));
+        let sides = reach.sides("LOSAT_X_TBXQFRAMES");
+        assert!(!sides.0, "threads {threads}: sides {sides:?}");
     }
 }

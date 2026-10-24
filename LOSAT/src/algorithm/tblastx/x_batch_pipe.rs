@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBXPIPE, shadow LOSAT_X_TBXPIPESHADOW): the next query batch of a TBLASTX
+//! EXPERIMENT (LOSAT_X_TBXPIPE): the next query batch of a TBLASTX
 //! search starts when the batch before it has ended its seed stage, while that batch still links
 //! its subjects.
 //!
@@ -85,10 +85,7 @@
 //! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXPIPE planned= taken= early= loop= waited=
 //! key_mismatch= max_held_hsps=` at the end of the search (early: started at the batch before's
 //! seed-stage end; loop: searched by the loop when it reached them; waited: taken after the loop
-//! waited for the slot). With the shadow the loop searches every taken batch again itself and
-//! compares the two results (hits with every field, per subject in list order; query statistics;
-//! `searched`); a difference panics, and `[X_SHADOW] TBXPIPE batches= compared= diffs=0` ends the
-//! search.
+//! waited for the slot).
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -103,17 +100,6 @@ use anyhow::Result;
 pub(super) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXPIPE"))
-}
-
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-// No NCBI counterpart: a test mode (module header), off unless set to a value other than `0`.
-/// LOSAT_X_TBXPIPESHADOW.
-pub(super) fn shadow() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var_os("LOSAT_X_TBXPIPESHADOW")
-            .is_some_and(|value| value != "0" && !value.is_empty())
-    })
 }
 
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -282,17 +268,11 @@ struct Counts {
     loop_searched: AtomicU64,
     waited: AtomicU64,
     key_mismatch: AtomicU64,
-    compared: AtomicU64,
 }
 
 /// A batch search: the batch's query range and its seed-stage end, if the pipe follows it.
 pub(super) type XSearch<'s, R> =
     dyn Fn(std::ops::Range<usize>, Option<&XSeedEnd<'_>>) -> Result<R> + Sync + 's;
-
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-/// The shadow's comparison of two results of one batch: `None` when they are the same, else
-/// what differs.
-pub(super) type XCompare<'s, R> = dyn Fn(&R, &R) -> Option<String> + Sync + 's;
 
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 // No NCBI counterpart: see the module header.
@@ -301,7 +281,6 @@ pub(super) struct XPipe<'s, R> {
     plan: Vec<std::ops::Range<usize>>,
     subjects: usize,
     search: &'s XSearch<'s, R>,
-    compare: &'s XCompare<'s, R>,
     started: Vec<AtomicBool>,
     /// A batch's result, or the panic of its search (`run_early`).
     slots: Vec<Mutex<Option<std::thread::Result<Result<R>>>>>,
@@ -319,16 +298,14 @@ impl<'s, R: Send> XPipe<'s, R> {
         plan: Vec<std::ops::Range<usize>>,
         subjects: usize,
         search: &'s XSearch<'s, R>,
-        compare: &'s XCompare<'s, R>,
     ) -> Option<Self> {
-        Self::with_limit(plan, subjects, search, compare, hsp_limit())
+        Self::with_limit(plan, subjects, search, hsp_limit())
     }
 
     fn with_limit(
         plan: Vec<std::ops::Range<usize>>,
         subjects: usize,
         search: &'s XSearch<'s, R>,
-        compare: &'s XCompare<'s, R>,
         limit: u64,
     ) -> Option<Self> {
         if plan.len() < 2 {
@@ -340,7 +317,6 @@ impl<'s, R: Send> XPipe<'s, R> {
             plan,
             subjects,
             search,
-            compare,
             started: (0..n).map(|_| AtomicBool::new(false)).collect(),
             slots: (0..n).map(|_| Mutex::new(None)).collect(),
             next: AtomicUsize::new(0),
@@ -368,16 +344,12 @@ impl<'s, R: Send> XPipe<'s, R> {
             return (self.search)(range, None);
         }
         self.counts.taken.fetch_add(1, Ordering::Relaxed);
-        let result = if self.started[i].swap(true, Ordering::SeqCst) {
+        if self.started[i].swap(true, Ordering::SeqCst) {
             self.wait(i)
         } else {
             self.counts.loop_searched.fetch_add(1, Ordering::Relaxed);
             self.run(scope, i)
-        };
-        if shadow() {
-            self.compare_with_loop(range, &result);
         }
-        result
     }
 
     /// No batch starts early any more (the loop has ended); dropped by the loop's scope.
@@ -450,27 +422,6 @@ impl<'s, R: Send> XPipe<'s, R> {
         });
     }
 
-    /// LOSAT_X_TBXPIPESHADOW: batch `range` searched again on the loop, compared with `taken`.
-    fn compare_with_loop(&self, range: std::ops::Range<usize>, taken: &Result<R>) {
-        let reference = (self.search)(range.clone(), None);
-        let difference = match (taken, &reference) {
-            (Ok(taken), Ok(reference)) => (self.compare)(taken, reference),
-            (Err(taken), Err(reference)) => {
-                let (taken, reference) = (format!("{taken:#}"), format!("{reference:#}"));
-                (taken != reference).then(|| format!("errors differ: {taken} / {reference}"))
-            }
-            (Ok(_), Err(error)) => Some(format!("the loop's search failed: {error:#}")),
-            (Err(error), Ok(_)) => Some(format!("the pipe's search failed: {error:#}")),
-        };
-        if let Some(difference) = difference {
-            panic!(
-                "LOSAT_X_TBXPIPESHADOW: batch of queries {}..{} differs from the loop's search: {difference}",
-                range.start, range.end
-            );
-        }
-        self.counts.compared.fetch_add(1, Ordering::Relaxed);
-    }
-
     /// The diagnostic lines of the module header, as text.
     pub(super) fn lines(&self) -> Vec<String> {
         let c = &self.counts;
@@ -485,13 +436,6 @@ impl<'s, R: Send> XPipe<'s, R> {
                 c.waited.load(Ordering::Relaxed),
                 c.key_mismatch.load(Ordering::Relaxed),
                 self.held.most.load(Ordering::Relaxed),
-            ));
-        }
-        if shadow() {
-            lines.push(format!(
-                "[X_SHADOW] TBXPIPE batches={} compared={} diffs=0",
-                c.taken.load(Ordering::Relaxed),
-                c.compared.load(Ordering::Relaxed),
             ));
         }
         lines
@@ -546,10 +490,6 @@ mod tests {
         }
     }
 
-    fn same(a: &Vec<usize>, b: &Vec<usize>) -> Option<String> {
-        (a != b).then(|| format!("{a:?} / {b:?}"))
-    }
-
     fn run_loop(
         threads: usize,
         batches: usize,
@@ -560,9 +500,7 @@ mod tests {
         let running = AtomicUsize::new(0);
         let most = AtomicUsize::new(0);
         let search = fake_search(&running, &most, 3, fail_at);
-        let compare = same;
-        let pipe = XPipe::with_limit(plan.clone(), 3, &search, &compare, limit)
-            .expect("two batches or more");
+        let pipe = XPipe::with_limit(plan.clone(), 3, &search, limit).expect("two batches or more");
         let results = pool(threads).install(|| {
             rayon::in_place_scope(|scope| {
                 let _closer = pipe.closer();
@@ -629,8 +567,7 @@ mod tests {
         let running = AtomicUsize::new(0);
         let most = AtomicUsize::new(0);
         let search = fake_search(&running, &most, 2, None);
-        let compare = same;
-        let pipe = XPipe::with_limit(plan, 2, &search, &compare, u64::MAX).expect("three batches");
+        let pipe = XPipe::with_limit(plan, 2, &search, u64::MAX).expect("three batches");
         let values = pool(4).install(|| {
             rayon::in_place_scope(|scope| {
                 vec![
@@ -680,9 +617,8 @@ mod tests {
                 assert!(start != 2, "batch {start} panicked");
                 result
             };
-            let compare = same;
-            let pipe = XPipe::with_limit(plan.clone(), 3, &search, &compare, u64::MAX)
-                .expect("three batches");
+            let pipe =
+                XPipe::with_limit(plan.clone(), 3, &search, u64::MAX).expect("three batches");
             let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 pool(threads).install(|| {
                     rayon::in_place_scope(|scope| {
@@ -718,8 +654,7 @@ mod tests {
         let running = AtomicUsize::new(0);
         let most = AtomicUsize::new(0);
         let search = fake_search(&running, &most, 2, None);
-        let compare = same;
-        let pipe = XPipe::with_limit(plan, 2, &search, &compare, u64::MAX).expect("three batches");
+        let pipe = XPipe::with_limit(plan, 2, &search, u64::MAX).expect("three batches");
         pool(2).install(|| {
             rayon::in_place_scope(|scope| {
                 drop(pipe.closer());
@@ -735,7 +670,6 @@ mod tests {
         let running = AtomicUsize::new(0);
         let most = AtomicUsize::new(0);
         let search = fake_search(&running, &most, 2, None);
-        let compare = same;
-        assert!(XPipe::with_limit(vec![0..1], 2, &search, &compare, u64::MAX).is_none());
+        assert!(XPipe::with_limit(vec![0..1], 2, &search, u64::MAX).is_none());
     }
 }

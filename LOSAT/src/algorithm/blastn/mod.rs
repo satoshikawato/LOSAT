@@ -52,6 +52,9 @@ pub(crate) mod x_ungap_count;
 pub mod hsp;
 pub(crate) mod sam;
 pub(crate) mod seqalign;
+// NCBI c++/src/algo/blast/format/blast_format.cpp:828-832: the tabular rows of each alignment, one
+// query after another. EXPERIMENT (LOSAT_X_BNTABPAR): a report's queries formatted on the search pool.
+pub(crate) mod x_tab_par;
 
 pub use args::BlastnArgs;
 pub use blast_engine::run;

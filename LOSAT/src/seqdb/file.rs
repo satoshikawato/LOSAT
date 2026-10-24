@@ -208,6 +208,31 @@ impl DbFile {
         Ok(buf)
     }
 
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the checks of `read_range(start, end)` before its buffer
+    /// is allocated, with the same errors in the same order, without the read.
+    pub fn x_check_range(&self, start: u64, end: u64) -> Result<(), SeqDbError> {
+        if end < start {
+            return Err(SeqDbError::Format {
+                path: self.path.clone(),
+                message: format!("byte range {start}..{end} ends before it starts"),
+            });
+        }
+        if end > self.len {
+            return Err(SeqDbError::Format {
+                path: self.path.clone(),
+                message: format!(
+                    "byte range {start}..{end} passes the end of the file ({} bytes)",
+                    self.len
+                ),
+            });
+        }
+        usize::try_from(end - start).map_err(|_| SeqDbError::Format {
+            path: self.path.clone(),
+            message: format!("byte range {start}..{end} does not fit in memory"),
+        })?;
+        Ok(())
+    }
+
     /// The whole file.
     pub fn read_all(&self) -> Result<Vec<u8>, SeqDbError> {
         self.read_range(0, self.len)

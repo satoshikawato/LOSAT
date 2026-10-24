@@ -69,17 +69,21 @@ fn quoted_value(line: &str, key: &str) -> Option<String> {
     Some(rest[..rest.find('"')?].to_string())
 }
 
-/// `autotests = false`, and the `[[test]]` blocks of `Cargo.toml`, read by lines without comments.
-fn cargo_targets() -> (bool, Vec<Target>) {
+/// `autotests = false` under `[package]`, the `[[test]]` blocks of `Cargo.toml`, and every
+/// `autotests` line found under another header; read by lines without comments.
+fn cargo_targets() -> (bool, Vec<Target>, Vec<String>) {
     let text = read(&manifest_dir().join("Cargo.toml"));
     let mut autotests_off = false;
     let mut targets: Vec<Target> = Vec::new();
     let mut in_test = false;
+    let mut section = String::new();
+    let mut misplaced: Vec<String> = Vec::new();
     for line in text
         .lines()
         .map(|line| line.split('#').next().unwrap_or("").trim())
     {
         if line.starts_with('[') {
+            section = line.to_string();
             in_test = line == "[[test]]";
             if in_test {
                 targets.push(Target {
@@ -88,8 +92,12 @@ fn cargo_targets() -> (bool, Vec<Target>) {
                     keys: Vec::new(),
                 });
             }
-        } else if line.replace(' ', "") == "autotests=false" {
-            autotests_off = true;
+        } else if line.replace(' ', "").starts_with("autotests=") {
+            if section != "[package]" {
+                misplaced.push(format!("`{line}` is in {section}"));
+            } else if line.replace(' ', "") == "autotests=false" {
+                autotests_off = true;
+            }
         } else if let (true, Some((key, _))) = (in_test, line.split_once('=')) {
             let target = targets.last_mut().expect("a [[test]] block");
             target.keys.push(key.trim().to_string());
@@ -101,7 +109,7 @@ fn cargo_targets() -> (bool, Vec<Target>) {
             }
         }
     }
-    (autotests_off, targets)
+    (autotests_off, targets, misplaced)
 }
 
 fn top_level_test_files() -> Vec<String> {
@@ -364,6 +372,19 @@ fn declarations(tokens: &[Token]) -> Vec<Decl> {
     decls
 }
 
+/// The calls of `PROCESS_CALLS` in a token stream, written `name(`.
+fn process_calls(tokens: &[Token]) -> Vec<String> {
+    let mut calls = Vec::new();
+    for pair in tokens.windows(2) {
+        if let [Token::Ident(word), Token::Punct('(')] = pair {
+            if PROCESS_CALLS.contains(&word.as_str()) {
+                calls.push(format!("{word}("));
+            }
+        }
+    }
+    calls
+}
+
 #[derive(Default)]
 struct Walk {
     visited: Vec<PathBuf>,
@@ -388,12 +409,8 @@ fn walk_module_tree(file: &Path, own_dir: bool, walk: &mut Walk) {
         dir.join(file.file_stem().expect("a file stem"))
     };
     let tokens = tokenize(&read(file));
-    for pair in tokens.windows(2) {
-        if let [Token::Ident(word), Token::Punct('(')] = pair {
-            if PROCESS_CALLS.contains(&word.as_str()) {
-                walk.changes.push((file.to_path_buf(), format!("{word}(")));
-            }
-        }
+    for call in process_calls(&tokens) {
+        walk.changes.push((file.to_path_buf(), call));
     }
     for decl in declarations(&tokens) {
         let name = &decl.name;
@@ -496,8 +513,14 @@ fn lines(items: &[String]) -> String {
 
 #[test]
 fn cargo_toml_lists_the_binaries() {
-    let (autotests_off, targets) = cargo_targets();
+    let (autotests_off, targets, misplaced) = cargo_targets();
     let mut problems = Vec::new();
+    for line in &misplaced {
+        problems.push(format!(
+            "LOSAT/Cargo.toml: {line}, but `autotests` must be in [package]: Cargo ignores it anywhere else \
+             and discovers every file of tests/ as a binary of its own"
+        ));
+    }
     if !autotests_off {
         problems.push(
             "LOSAT/Cargo.toml must set `autotests = false` in [package]: with automatic discovery on, \
@@ -545,7 +568,7 @@ fn cargo_toml_lists_the_binaries() {
 
 #[test]
 fn every_test_file_is_in_exactly_one_binary() {
-    let (_, targets) = cargo_targets();
+    let (_, targets, _) = cargo_targets();
     let mut homes: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for member in all_members() {
         if let Some(file) = member_file(&member) {
@@ -587,6 +610,25 @@ fn every_test_file_is_in_exactly_one_binary() {
 #[test]
 fn suite_members_are_top_level_files_named_like_their_module() {
     let mut problems = Vec::new();
+    for root in suite_roots() {
+        let tokens = tokenize(&read(&manifest_dir().join(&root)));
+        for decl in declarations(&tokens)
+            .iter()
+            .filter(|decl| !decl.inline.is_empty())
+        {
+            problems.push(format!(
+                "{root}: `mod {};` is inside `mod {} {{ ... }}`: list members only at the top level",
+                decl.name,
+                decl.inline.join("::")
+            ));
+        }
+        for call in process_calls(&tokens) {
+            problems.push(format!(
+                "{root}: calls {call}...) in the suite root itself, which changes the process environment or \
+                 process-wide state for every test of the suite: a suite root holds only member declarations"
+            ));
+        }
+    }
     for member in all_members() {
         let root = &member.suite_root;
         match member_file(&member) {
@@ -672,7 +714,7 @@ fn suite_members_do_not_change_the_process_environment() {
 /// true, the file no longer needs its own binary and can join a suite.
 #[test]
 fn walk_finds_the_lone_files_changes() {
-    let (_, targets) = cargo_targets();
+    let (_, targets, _) = cargo_targets();
     let mut problems = Vec::new();
     for target in targets.iter().filter(|target| target.lone_file().is_some()) {
         let (name, path) = (&target.name, &target.path);
@@ -682,22 +724,24 @@ fn walk_finds_the_lone_files_changes() {
         }
         if walk.changes.is_empty() {
             problems.push(format!(
-                "{name} ({path}) no longer changes the process environment, or the module walk misses it: \
+                "{name} ({path}) no longer changes the process environment or process-wide state, or the module walk misses it: \
                  if the change is gone, the file can join a suite; otherwise fix the walk in tests/suite_layout.rs"
             ));
         }
-        if name == "unit_tests"
-            && !walk
-                .changes
-                .iter()
-                .any(|(file, _)| shown(file) == "tests/unit/common/diagnostics.rs")
-        {
-            problems.push(
-                "the walk of tests/unit_tests.rs does not reach tests/unit/common/diagnostics.rs through \
-                 `mod unit { pub mod common; }`: fix the inline-module handling of the walk"
-                    .to_string(),
-            );
-        }
+    }
+    // The inline-module handling, checked on the file whose change sits inside `mod unit { ... }`,
+    // whether or not the file still has a binary of its own.
+    let unit_walk = walk_from(&manifest_dir().join("tests/unit_tests.rs"));
+    if !unit_walk
+        .changes
+        .iter()
+        .any(|(file, _)| shown(file) == "tests/unit/common/diagnostics.rs")
+    {
+        problems.push(
+            "the walk of tests/unit_tests.rs does not reach tests/unit/common/diagnostics.rs through \
+             `mod unit { pub mod common; }`: fix the inline-module handling of the walk"
+                .to_string(),
+        );
     }
     assert!(problems.is_empty(), "\n{}\n", lines(&problems));
 }

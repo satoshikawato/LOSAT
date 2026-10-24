@@ -2,19 +2,11 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/api/
 //!
-//! This module provides high-level API for running BLAST searches.
-//! It wraps the core algorithms and provides a user-friendly interface.
+//! The local search entry shared by the command line and both web ABIs: each program's run
+//! function and the routing of its report outputs.
 //!
 //! # Structure
 //!
 //! - `local_blast` - Main entry point for local BLAST searches
-//! - `blast_nucl_options` - BLASTN-specific options
-//! - `tblastx_options` - TBLASTX-specific options
-//! - `blast_results` - Result structures (Hit, HSP)
-//! - `blast_options_handle` - Options handling and validation
 
-pub mod blast_nucl_options;
-pub mod blast_options_handle;
-pub mod blast_results;
 pub mod local_blast;
-pub mod tblastx_options;

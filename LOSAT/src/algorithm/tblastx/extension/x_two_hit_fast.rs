@@ -1,7 +1,7 @@
-//! EXPERIMENT (LOSAT_X_TBXUNGAP / LOSAT_X_TBXUNGAPSHADOW): TBLASTX's two-hit ungapped extension
-//! (`two_hit.rs::extend_hit_two_hit`: the word loop and the `s_BlastAaExtendLeft` /
-//! `s_BlastAaExtendRight` walks of NCBI `s_BlastAaExtendTwoHit`) with the scores read from one
-//! flat byte table.
+//! EXPERIMENT (LOSAT_X_TBXUNGAP / LOSAT_X_TBXUNGAPSHADOW / LOSAT_X_TBXUNGAPSENT): TBLASTX's two-hit
+//! ungapped extension (`two_hit.rs::extend_hit_two_hit`: the word loop and the
+//! `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks of NCBI `s_BlastAaExtendTwoHit`) with the
+//! scores read from one flat byte table.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-866
 //! ```c
@@ -61,7 +61,32 @@
 //! `get_score` for it (scalar steps); with the table the two-hit extension of the LOSAT Web
 //! engine takes 0.77-0.89 of that time (`docs/agents/diagnostics.md`, entry `LOSAT_X_TBXUNGAP`).
 //!
-//! No NCBI counterpart for the switch itself: it chooses between two LOSAT code paths with the
+//! LOSAT_X_TBXUNGAPSENT (native builds; in the strict set, `=0` turns it off): `two_hit_sent`, the
+//! same extension with walks that the sentinels stop instead of a bound, inlined with the word loop
+//! into the callers' extension code (`extend_hit_two_hit_sent`: the unit path's `x_hit` and the
+//! batched `resolve`, the reference frame loops).
+//! * Where. A query context's buffer is `[0, residues.., 0]` and a subject frame's too
+//!   (`translation.rs`, NCBI's NULLB at each end, blast_util.c:438-453); the callers' sequences are
+//!   the residues. A subject frame of more than `MAX_DBSEQ_LEN` (5,000,000) residues is searched in
+//!   overlapping chunks, and a chunk's ends are residues of the frame, so only a chunk that is the
+//!   whole frame takes the path (`sent_subject`, per unit or chunk); the contexts' sentinels are
+//!   checked once per batch (`sent_contexts`). The others take `two_hit`; the debug output of the
+//!   reference frame loops keeps the reference.
+//! * Sentinel. The reference's left walk takes `min(q_r, s_r)` steps and its right walk the room
+//!   left in both sequences; the position one step further is just outside the sequence that set
+//!   the bound, which holds a sentinel. A step on it scores -128 and stops the walk as the bound
+//!   does, with the same best, length and stop position (the argument of the sentinel above: the
+//!   step does not raise the best and makes `best - score >= 128 > x_drop`). Every step before it
+//!   reads the positions the reference reads. The word loop reads the same three positions as in
+//!   `two_hit`, after the same test that they fit.
+//! * Overflow. A walk without a bound would step over a sentinel if its score wrapped. The left walk
+//!   (from 0) and then the right walk (from the left walk's best) read each subject position once at
+//!   most, at +11 at most (`MAX_WORD_SCORE`), so a score stays below `11 * (subject letters + 2)`, and
+//!   it is never below `best - 255` (a step costs 128 at most, and the walk stops once `best - score`
+//!   reaches `x_drop <= 127`); the path takes frames of at most `MAX_SENT_LEN` (`i32::MAX / 16`)
+//!   bytes.
+//!
+//! No NCBI counterpart for the switches themselves: they choose between LOSAT code paths with the
 //! same result.
 
 use super::get_score;
@@ -386,7 +411,14 @@ const _: () = assert!(11 * (MAX_SENT_LEN as i64 + 3) < i32::MAX as i64);
 /// the sentinel walks: the switch is on and every buffer is `[0, residues.., 0]`.
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 pub(crate) fn sent_contexts<'a>(mut contexts: impl Iterator<Item = &'a [u8]>) -> bool {
-    state().sent && contexts.all(|b| b.len() >= 2 && b[0] == 0 && b[b.len() - 1] == 0)
+    if !state().sent {
+        return false;
+    }
+    let ok = contexts.all(|b| b.len() >= 2 && b[0] == 0 && b[b.len() - 1] == 0);
+    if !ok {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXUNGAPSENT", false);
+    }
+    ok
 }
 
 /// LOSAT_X_TBXUNGAPSENT: `frame` (a subject frame's buffer, `[0, residues.., 0]`) when the batch
@@ -396,12 +428,15 @@ pub(crate) fn sent_contexts<'a>(mut contexts: impl Iterator<Item = &'a [u8]>) ->
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 #[inline]
 pub(crate) fn sent_subject(batch: bool, frame: &[u8], offset: usize, len: usize) -> &[u8] {
-    let whole = batch
-        && offset == 0
+    if !batch {
+        return &[];
+    }
+    let whole = offset == 0
         && len.checked_add(2) == Some(frame.len())
         && frame.len() <= MAX_SENT_LEN
         && frame[0] == 0
         && frame[len + 1] == 0;
+    crate::utils::xreach::x_reach!("LOSAT_X_TBXUNGAPSENT", whole);
     if whole {
         frame
     } else {

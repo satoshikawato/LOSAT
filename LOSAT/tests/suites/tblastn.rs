@@ -21,6 +21,8 @@ mod tblastn_scan_bf;
 mod tblastn_scan_byte;
 #[path = "../tblastn_subject_store.rs"]
 mod tblastn_subject_store;
+#[path = "../tblastn_ungap.rs"]
+mod tblastn_ungap;
 #[path = "../tblastn_unit_xlate.rs"]
 mod tblastn_unit_xlate;
 #[path = "../tblastn_xlate_simd.rs"]

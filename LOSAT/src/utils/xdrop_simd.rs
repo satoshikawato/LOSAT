@@ -145,6 +145,51 @@ const SCRIPT_EXTEND_GAP_B: u8 = 0x40;
 // `blast_gapalign.c`).
 const FENCE_SENTRY: u8 = 201;
 
+// No NCBI counterpart: the traceback rows at four bits per cell (`LOSAT_X_DPNIBBLE`). NCBI keeps one
+// byte of `SCRIPT_*` bits per cell (`edit_script`). With the switch on, the kernels store a code of
+// four bits instead, two cells per byte (cell 2k in the low half of byte k of the row, cell 2k + 1
+// in the high half), and the walk turns a code back into the NCBI byte (`NIB_BYTE`). Bits 0-1 hold
+// the operation (0 = `SCRIPT_GAP_IN_A`, 1 = `SCRIPT_SUB`, 2 = `SCRIPT_GAP_IN_B`: the NCBI value / 3),
+// bit 2 `SCRIPT_EXTEND_GAP_A`, bit 3 `SCRIPT_EXTEND_GAP_B`. The kernels compute the code with the
+// same comparisons as the byte, so each cell keeps the script NCBI gives it.
+const NIB_SUB: u8 = 1;
+const NIB_EXTEND_GAP_A: u8 = 4;
+const NIB_EXTEND_GAP_B: u8 = 8;
+/// The NCBI script byte of each four-bit code.
+const NIB_BYTE: [u8; 16] = {
+    let mut t = [0u8; 16];
+    let mut n = 0;
+    while n < 16 {
+        t[n] = (n & 3) as u8 * SCRIPT_SUB
+            | if n & 4 != 0 { SCRIPT_EXTEND_GAP_A } else { 0 }
+            | if n & 8 != 0 { SCRIPT_EXTEND_GAP_B } else { 0 };
+        n += 1;
+    }
+    t
+};
+
+/// No NCBI counterpart: the values a kernel adds up for a cell's script (`SCRIPT_SUB`,
+/// `SCRIPT_EXTEND_GAP_A`, `SCRIPT_EXTEND_GAP_B`), as NCBI bytes or as four-bit codes (`NIB`).
+#[inline(always)]
+pub(crate) const fn script_codes(nib: bool) -> (u8, u8, u8) {
+    if nib {
+        (NIB_SUB, NIB_EXTEND_GAP_A, NIB_EXTEND_GAP_B)
+    } else {
+        (SCRIPT_SUB, SCRIPT_EXTEND_GAP_A, SCRIPT_EXTEND_GAP_B)
+    }
+}
+
+/// No NCBI counterpart: the bytes a traceback row of `cells` cells takes (two cells per byte with
+/// `NIB`).
+#[inline(always)]
+pub(crate) const fn trace_bytes(nib: bool, cells: usize) -> usize {
+    if nib {
+        (cells + 1) >> 1
+    } else {
+        cells
+    }
+}
+
 // No NCBI counterpart: lane padding, 16-bit value range and the largest score the vector
 // path accepts. A problem outside these limits is not handled and the scalar port runs; the
 // limits do not change any value NCBI computes.
@@ -541,6 +586,9 @@ pub(crate) struct XdropScratch {
     /// The band start, in lanes, at which a kernel moves its rows (`LOSAT_X_DPWINDOW`); `usize::MAX`
     /// when they hold every column.
     x_win_at: usize,
+    /// Whether the kernels write `trace` as four-bit codes, two cells per byte (`LOSAT_X_DPNIBBLE`;
+    /// `NIB_BYTE`); the walk reads the rows the same way.
+    pub(crate) x_nib: bool,
 }
 
 impl XdropScratch {
@@ -573,6 +621,7 @@ impl XdropScratch {
             ops: Vec::new(),
             x_sh: 0,
             x_win_at: x_dp_window_at(),
+            x_nib: x_dp_nibble(),
         }
     }
 
@@ -606,6 +655,7 @@ impl XdropScratch {
             ops: Vec::new(),
             x_sh: 0,
             x_win_at: x_dp_window_at(),
+            x_nib: x_dp_nibble(),
         }
     }
 
@@ -747,6 +797,14 @@ pub(crate) fn x_dp_window_at() -> usize {
     })
 }
 
+/// No NCBI counterpart: `LOSAT_X_DPNIBBLE` (strict set): the vector kernels keep the traceback rows
+/// at four bits per cell, two cells per byte (`NIB_BYTE`). Off: one byte per cell, as before.
+pub(crate) fn x_dp_nibble() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DPNIBBLE"))
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:612-613,732
 // ```c
 //                     *a_offset = a_index;
@@ -812,6 +870,17 @@ mod arch {
     #[inline(always)]
     pub unsafe fn store<T>(p: *mut T, v: V) {
         _mm_storeu_si128(p as *mut V, v)
+    }
+    /// 16 four-bit codes (bytes <= 15) to 8 bytes in the low half, byte k = code 2k | code 2k+1 << 4.
+    #[inline(always)]
+    pub unsafe fn nibs(v: V) -> V {
+        let m = _mm_maddubs_epi16(v, _mm_set1_epi16(0x1001));
+        _mm_packus_epi16(m, m)
+    }
+    /// The low 8 bytes of `v`.
+    #[inline(always)]
+    pub unsafe fn store64<T>(p: *mut T, v: V) {
+        _mm_storel_epi64(p as *mut V, v)
     }
     #[inline(always)]
     pub unsafe fn adds16(a: V, b: V) -> V {
@@ -985,6 +1054,17 @@ mod arch {
     #[inline(always)]
     pub unsafe fn store<T>(p: *mut T, v: V) {
         v128_store(p as *mut v128, v)
+    }
+    /// 16 four-bit codes (bytes <= 15) to 8 bytes in the low half, byte k = code 2k | code 2k+1 << 4.
+    #[inline(always)]
+    pub unsafe fn nibs(v: V) -> V {
+        let w = v128_or(v, u16x8_shr(v, 4));
+        i8x16_shuffle::<0, 2, 4, 6, 8, 10, 12, 14, 0, 2, 4, 6, 8, 10, 12, 14>(w, w)
+    }
+    /// The low 8 bytes of `v`.
+    #[inline(always)]
+    pub unsafe fn store64<T>(p: *mut T, v: V) {
+        v128_store64_lane::<0>(v, p as *mut u64)
     }
     #[inline(always)]
     pub unsafe fn adds16(a: V, b: V) -> V {
@@ -1177,6 +1257,18 @@ mod arch {
     #[inline(always)]
     pub unsafe fn store<T>(p: *mut T, v: V) {
         vst1q_u8(p as *mut u8, v)
+    }
+    /// 16 four-bit codes (bytes <= 15) to 8 bytes in the low half, byte k = code 2k | code 2k+1 << 4.
+    #[inline(always)]
+    pub unsafe fn nibs(v: V) -> V {
+        let w = vreinterpretq_u16_u8(v);
+        let n = vmovn_u16(vsraq_n_u16::<4>(w, w));
+        vcombine_u8(n, n)
+    }
+    /// The low 8 bytes of `v`.
+    #[inline(always)]
+    pub unsafe fn store64<T>(p: *mut T, v: V) {
+        vst1_u8(p as *mut u8, vget_low_u8(v))
     }
     #[inline(always)]
     pub unsafe fn adds16(a: V, b: V) -> V {
@@ -1559,6 +1651,50 @@ mod kernel {
         check_fence: bool,
         sc: &mut XdropScratch,
     ) -> Option<XdropResult> {
+        if TB && sc.x_nib {
+            align_body_rows::<TB, true>(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        } else {
+            align_body_rows::<TB, false>(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        }
+    }
+
+    // No NCBI counterpart: the kernel of `align_body` for one trace layout (`NIB`: four-bit codes,
+    // `LOSAT_X_DPNIBBLE`).
+    #[inline(always)]
+    unsafe fn align_body_rows<const TB: bool, const NIB: bool>(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
         sc.ops.clear();
         if len1 == 0 || len2 == 0 {
             return Some(XdropResult {
@@ -1614,7 +1750,7 @@ mod kernel {
         }
         sc.dirty = b_size;
         if TB {
-            sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
+            sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
             sc.rows.push((0, 0, b_size as u32));
         }
 
@@ -1630,9 +1766,9 @@ mod kernel {
             kcross: load(core::hint::black_box(&KCROSS).as_ptr()),
             kb7: load(core::hint::black_box(&KB7).as_ptr()),
             xv: splat16(x as i16),
-            c3: splat16(SCRIPT_SUB as i16),
-            c10: splat16(SCRIPT_EXTEND_GAP_A as i16),
-            c40: splat16(SCRIPT_EXTEND_GAP_B as i16),
+            c3: splat16(script_codes(NIB).0 as i16),
+            c10: splat16(script_codes(NIB).1 as i16),
+            c40: splat16(script_codes(NIB).2 as i16),
         };
         let zero_v = zero();
         let static_tabs: Option<*const u8> = match scores {
@@ -1777,7 +1913,9 @@ mod kernel {
                     (d0, sc0) = block::<TB>(&c, &mut rs, hr, hw, e, b0, s_lo, Some(m0));
                     (d1, sc1) = block::<TB>(&c, &mut rs, hr, hw, e, b0 + 8, s_hi, Some(m1));
                 }
-                if TB {
+                if TB && NIB {
+                    store64(tr.add((b0 - first) >> 1), nibs(packus16(sc0, sc1)));
+                } else if TB {
                     store(tr.add(b0 - first), packus16(sc0, sc1));
                 }
                 // 2 bits per lane, 32 bits per iteration
@@ -1820,7 +1958,8 @@ mod kernel {
                 best_rel = lane0(rs.bestv) - bias;
             }
             if TB {
-                sc.trace.set_len(row_off + proc_end - first);
+                sc.trace
+                    .set_len(row_off + trace_bytes(NIB, proc_end - first));
                 sc.rows.push((
                     row_off as u32,
                     (first + sc.x_sh) as u32,
@@ -2022,6 +2161,53 @@ mod kernel {
         check_fence: bool,
         sc: &mut XdropScratch,
     ) -> Option<XdropResult> {
+        if TB && sc.x_nib {
+            align_body8_rows::<TB, true>(
+                q,
+                s,
+                scores,
+                max_m,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        } else {
+            align_body8_rows::<TB, false>(
+                q,
+                s,
+                scores,
+                max_m,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        }
+    }
+
+    // No NCBI counterpart: the kernel of `align_body8` for one trace layout (`NIB`: four-bit codes,
+    // `LOSAT_X_DPNIBBLE`).
+    #[inline(always)]
+    unsafe fn align_body8_rows<const TB: bool, const NIB: bool>(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        max_m: i32,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
         sc.ops.clear();
         if len1 == 0 || len2 == 0 {
             return Some(XdropResult {
@@ -2073,7 +2259,7 @@ mod kernel {
         }
         sc.dirty8 = b_size;
         if TB {
-            sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
+            sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
             sc.rows.push((0, 0, b_size as u32));
         }
 
@@ -2097,9 +2283,9 @@ mod kernel {
             kcross: load(core::hint::black_box(&KCROSS8).as_ptr()),
             kb15: load(core::hint::black_box(&KB15).as_ptr()),
             xv: splat8(sat(x)),
-            c3: splat8(SCRIPT_SUB as i8),
-            c10: splat8(SCRIPT_EXTEND_GAP_A as i8),
-            c40: splat8(SCRIPT_EXTEND_GAP_B as i8),
+            c3: splat8(script_codes(NIB).0 as i8),
+            c10: splat8(script_codes(NIB).1 as i8),
+            c40: splat8(script_codes(NIB).2 as i8),
         };
         let zero_v = zero();
         let static_tabs: Option<*const u8> = match scores {
@@ -2238,7 +2424,9 @@ mod kernel {
                     let m0 = load(LANE_MASK8.as_ptr().add(16 - n));
                     (d0, sc0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv, Some(m0));
                 }
-                if TB {
+                if TB && NIB {
+                    store64(tr.add((b0 - first) >> 1), nibs(sc0));
+                } else if TB {
                     store(tr.add(b0 - first), sc0);
                 }
                 // 1 bit per lane, 16 bits per iteration
@@ -2281,7 +2469,8 @@ mod kernel {
                 best_rel = lane0_u8(rs.bestv) - bias;
             }
             if TB {
-                sc.trace.set_len(row_off + proc_end - first);
+                sc.trace
+                    .set_len(row_off + trace_bytes(NIB, proc_end - first));
                 sc.rows.push((
                     row_off as u32,
                     (first + sc.x_sh) as u32,
@@ -2399,7 +2588,12 @@ mod kernel {
             if b_rel >= len as usize {
                 break;
             }
-            let next = *sc.trace.get_unchecked(off as usize + b_rel);
+            let next = if sc.x_nib {
+                let pair = *sc.trace.get_unchecked(off as usize + (b_rel >> 1));
+                *NIB_BYTE.get_unchecked(((pair >> ((b_rel & 1) << 2)) & 15) as usize)
+            } else {
+                *sc.trace.get_unchecked(off as usize + b_rel)
+            };
             match script & SCRIPT_OP_MASK {
                 x if x == SCRIPT_GAP_IN_A => {
                     script = next & SCRIPT_OP_MASK;
@@ -3395,6 +3589,8 @@ mod tests {
         for case in 0..cases {
             // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
             sc.x_win_at = [128, 320, usize::MAX][case % 3];
+            // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
+            sc.x_nib = case % 2 == 0;
             let n = if rng.below(2) == 0 { 16 } else { 28 };
             let scale = if rng.below(3) == 0 { 32 } else { 1 };
             let max_len = if rng.below(5) == 0 { 2500 } else { 300 };
@@ -3558,6 +3754,124 @@ mod tests {
             assert!(
                 handled > 40 && shifted > 20,
                 "handled {handled}, moved {shifted}"
+            );
+        }
+    }
+
+    // No NCBI counterpart: the traceback rows at four bits per cell (`LOSAT_X_DPNIBBLE`). Long
+    // tracebacks (both scores of the blastn task and a protein matrix, 8-bit and 16-bit lanes) run
+    // with four-bit codes and with one byte per cell: the offsets, score, fence flag, edit script
+    // and cell count are equal, equal to the scalar loops; the rows have the same bands and each
+    // takes half its cells' bytes, rounded up.
+    #[test]
+    fn nibble_trace_keeps_every_result() {
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let (mut on, mut off) = (XdropScratch::new(), XdropScratch::new());
+        (on.x_nib, off.x_nib) = (true, false);
+        let mut handled = 0usize;
+        for case in 0..40 {
+            let n = if case % 2 == 0 { 16 } else { 28 };
+            // scale 32 leaves the 8-bit lanes (16-bit kernels)
+            let scale = if case % 8 >= 6 { 32 } else { 1 };
+            let len = 1500 + rng.below(2500) as usize;
+            let p = random_problem(&mut rng, n, scale, len);
+            let (go, ge, x) = if case % 4 < 2 {
+                (5 * scale, 2 * scale, 110 * scale)
+            } else {
+                (11 * scale, scale, 38 * scale)
+            };
+            let (len1, len2) = (p.q.len(), p.s.len());
+            if len2 == 0 {
+                continue;
+            }
+            let rows = RowSeq::Bytes {
+                data: &p.q,
+                base: -1,
+                step: 1,
+            };
+            let cols = ColSeq {
+                data: &p.s,
+                base: 0,
+                step: 1,
+                zero_from: len2,
+            };
+            let scores = Scores::Flat { data: &p.m, n };
+            let expected = reference(&p, len1, len2, go, ge, x, true, false);
+            let a = xdrop_align(
+                &rows, &cols, &scores, len1, len2, go, ge, x, true, true, &mut on,
+            );
+            let b = xdrop_align(
+                &rows, &cols, &scores, len1, len2, go, ge, x, true, true, &mut off,
+            );
+            let (Some(a), Some(b)) = (a, b) else {
+                continue;
+            };
+            handled += 1;
+            assert_eq!(a, b, "case {case} len1={len1} len2={len2}");
+            assert_eq!(on.ops, off.ops, "case {case} traceback");
+            assert_eq!(
+                (a.a_offset, a.b_offset, a.score, a.fence_hit),
+                (expected.0, expected.1, expected.2, expected.3),
+                "case {case} against the scalar loops"
+            );
+            assert_eq!(on.ops, expected.4, "case {case} scalar traceback");
+            let bands = |r: &[(u32, u32, u32)]| r.iter().map(|x| (x.1, x.2)).collect::<Vec<_>>();
+            assert_eq!(bands(&on.rows), bands(&off.rows), "case {case} rows");
+            for w in on.rows.windows(2) {
+                assert_eq!(w[1].0 - w[0].0, (w[0].2 + 1) / 2, "case {case} row bytes");
+            }
+            assert_eq!(
+                off.trace.len(),
+                off.rows.iter().map(|r| r.2 as usize).sum::<usize>()
+            );
+            assert_eq!(
+                on.trace.len(),
+                on.rows
+                    .iter()
+                    .map(|r| (r.2 as usize + 1) / 2)
+                    .sum::<usize>(),
+                "case {case} trace bytes"
+            );
+        }
+        if cfg!(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128"),
+            target_arch = "aarch64"
+        )) {
+            assert!(handled > 30, "handled {handled}");
+        }
+    }
+
+    // No NCBI counterpart: `nibs` of the `arch` layer (`LOSAT_X_DPNIBBLE`) against its definition
+    // on random codes: byte k of the low half = code 2k | code 2k+1 << 4.
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn nibs_pairs_adjacent_codes() {
+        let mut rng = Rng(0x0123_4567_89AB_CDEF);
+        for _ in 0..1000 {
+            let mut v = [0u8; 16];
+            for b in v.iter_mut() {
+                *b = rng.below(16) as u8;
+            }
+            let mut out = [0xAAu8; 16];
+            // SAFETY: the vector features of the target are compile-time features of this build;
+            // the pointers cover 16 bytes.
+            unsafe {
+                super::arch::store64(
+                    out.as_mut_ptr(),
+                    super::arch::nibs(super::arch::load(v.as_ptr())),
+                );
+            }
+            for k in 0..8 {
+                assert_eq!(out[k], v[2 * k] | v[2 * k + 1] << 4, "byte {k} of {v:?}");
+            }
+            assert!(
+                out[8..].iter().all(|&b| b == 0xAA),
+                "store64 wrote past 8 bytes"
             );
         }
     }

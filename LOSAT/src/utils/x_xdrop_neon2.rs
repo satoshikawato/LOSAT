@@ -108,8 +108,8 @@ use super::arch::*;
 use super::kernel::finish;
 use super::x_w128::{build_row, fill_cols};
 use super::{
-    fits_8bit, ColSeq, RowSeq, Scores, XdropResult, XdropScratch, MAX_M, PAD, SCRIPT_EXTEND_GAP_A,
-    SCRIPT_EXTEND_GAP_B, SCRIPT_GAP_IN_A, SCRIPT_SUB, TAB, VMAX,
+    fits_8bit, script_codes, trace_bytes, ColSeq, RowSeq, Scores, XdropResult, XdropScratch, MAX_M,
+    PAD, SCRIPT_GAP_IN_A, TAB, VMAX,
 };
 use core::arch::aarch64::*;
 
@@ -170,7 +170,7 @@ pub(super) unsafe fn align(
 ) -> Option<XdropResult> {
     let m8 = fits_8bit(scores, gap_open, gap_extend, x_drop);
     match (tb, m8) {
-        (true, Some(m)) => align8::<true>(
+        (true, Some(m)) if sc.x_nib => align8::<true, true>(
             q,
             s,
             scores,
@@ -183,7 +183,7 @@ pub(super) unsafe fn align(
             check_fence,
             sc,
         ),
-        (false, Some(m)) => align8::<false>(
+        (true, Some(m)) => align8::<true, false>(
             q,
             s,
             scores,
@@ -196,7 +196,20 @@ pub(super) unsafe fn align(
             check_fence,
             sc,
         ),
-        (true, None) => align16::<true>(
+        (false, Some(m)) => align8::<false, false>(
+            q,
+            s,
+            scores,
+            m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        ),
+        (true, None) if sc.x_nib => align16::<true, true>(
             q,
             s,
             scores,
@@ -208,7 +221,19 @@ pub(super) unsafe fn align(
             check_fence,
             sc,
         ),
-        (false, None) => align16::<false>(
+        (true, None) => align16::<true, false>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        ),
+        (false, None) => align16::<false, false>(
             q,
             s,
             scores,
@@ -417,6 +442,17 @@ unsafe fn nib8w(m: W) -> u128 {
 unsafe fn pack16(r: W) -> V {
     vuzp1q_u8(r.0, r.1)
 }
+/// 32 four-bit codes (bytes <= 15) to 16 bytes, byte k = code 2k | code 2k+1 << 4
+/// (`LOSAT_X_DPNIBBLE`; `nibs` of the `arch` layer for 16).
+#[inline(always)]
+unsafe fn nibw(v: W) -> V {
+    let a = vreinterpretq_u16_u8(v.0);
+    let b = vreinterpretq_u16_u8(v.1);
+    vuzp1q_u8(
+        vreinterpretq_u8_u16(vsraq_n_u16::<4>(a, a)),
+        vreinterpretq_u8_u16(vsraq_n_u16::<4>(b, b)),
+    )
+}
 /// Scores of 16 lanes of 16 bits from the low and high byte planes of a row table.
 #[inline(always)]
 unsafe fn scores16(tl: uint8x16x2_t, th: uint8x16x2_t, idx: V) -> W {
@@ -572,7 +608,7 @@ unsafe fn block16<const TB: bool>(
 // The whole DP on 16-bit lanes, the steps of `align16` of the AVX2 file in the same order (row 0,
 // then per row: column residues, fence, row table, rebase, blocks, band update). None for a
 // problem the lanes do not hold (the caller then runs the next dispatch).
-unsafe fn align16<const TB: bool>(
+unsafe fn align16<const TB: bool, const NIB: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -640,7 +676,7 @@ unsafe fn align16<const TB: bool>(
     }
     sc.dirty = b_size;
     if TB {
-        sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
+        sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
         sc.rows.push((0, 0, b_size as u32));
     }
 
@@ -657,9 +693,9 @@ unsafe fn align16<const TB: bool>(
         ramp: ldw(ramp.as_ptr()),
         ramp1: ldw(ramp1.as_ptr()),
         xv: splat16(x as i16),
-        c3: splat16(SCRIPT_SUB as i16),
-        c10: splat16(SCRIPT_EXTEND_GAP_A as i16),
-        c40: splat16(SCRIPT_EXTEND_GAP_B as i16),
+        c3: splat16(script_codes(NIB).0 as i16),
+        c10: splat16(script_codes(NIB).1 as i16),
+        c40: splat16(script_codes(NIB).2 as i16),
     };
     let zero_v = zero();
     let hpm0 = load(HPM16.as_ptr());
@@ -787,7 +823,9 @@ unsafe fn align16<const TB: bool>(
             let (d0, r0) = block16::<TB>(&c, &mut rs, hr, hw, e, b0, s0, None, hpm);
             hpm = zero_v;
             let (d1, r1) = block16::<TB>(&c, &mut rs, hr, hw, e, b0 + 16, s1, mask1, zero_v);
-            if TB {
+            if TB && NIB {
+                store(tr.add((b0 - first) >> 1), nibw(W(pack16(r0), pack16(r1))));
+            } else if TB {
                 store(tr.add(b0 - first), pack16(r0));
                 store(tr.add(b0 - first + 16), pack16(r1));
             }
@@ -818,7 +856,9 @@ unsafe fn align16<const TB: bool>(
             };
             let (d0, r0) = block16::<TB>(&c, &mut rs, hr, hw, e, b0, s0, mask, hpm);
             hpm = zero_v;
-            if TB {
+            if TB && NIB {
+                store64(tr.add((b0 - first) >> 1), nibs(pack16(r0)));
+            } else if TB {
                 store(tr.add(b0 - first), pack16(r0));
             }
             let live = !nib16w(d0);
@@ -849,7 +889,8 @@ unsafe fn align16<const TB: bool>(
             best_rel = lane0(rs.bestv) - bias;
         }
         if TB {
-            sc.trace.set_len(row_off + proc_end - first);
+            sc.trace
+                .set_len(row_off + trace_bytes(NIB, proc_end - first));
             sc.rows.push((
                 row_off as u32,
                 (first + sc.x_sh) as u32,
@@ -1063,7 +1104,7 @@ unsafe fn block8x<const TB: bool>(
 // ```
 // The whole DP on 8-bit lanes, the steps of `align8` of the AVX2 file in the same order. `max_m`
 // is the largest score of the matrix (`fits_8bit`). None for a problem the lanes do not hold.
-unsafe fn align8<const TB: bool>(
+unsafe fn align8<const TB: bool, const NIB: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -1132,7 +1173,7 @@ unsafe fn align8<const TB: bool>(
     }
     sc.dirty8 = b_size;
     if TB {
-        sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
+        sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
         sc.rows.push((0, 0, b_size as u32));
     }
 
@@ -1151,9 +1192,9 @@ unsafe fn align8<const TB: bool>(
         ramp: ldw(ramp.as_ptr()),
         ramp1: ldw(ramp1.as_ptr()),
         xv: splat8(sat(x)),
-        c3: splat8(SCRIPT_SUB as i8),
-        c10: splat8(SCRIPT_EXTEND_GAP_A as i8),
-        c40: splat8(SCRIPT_EXTEND_GAP_B as i8),
+        c3: splat8(script_codes(NIB).0 as i8),
+        c10: splat8(script_codes(NIB).1 as i8),
+        c40: splat8(script_codes(NIB).2 as i8),
     };
     let zero_v = zero();
     let hpm0 = load(HPM8.as_ptr());
@@ -1280,7 +1321,9 @@ unsafe fn align8<const TB: bool>(
             };
             let (d0, r0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
             hpm = zero_v;
-            if TB {
+            if TB && NIB {
+                store(tr.add((b0 - first) >> 1), nibw(r0));
+            } else if TB {
                 stw(tr.add(b0 - first), r0);
             }
             let live = !nib8w(d0);
@@ -1309,7 +1352,9 @@ unsafe fn align8<const TB: bool>(
             };
             let (d0, r0) = block8x::<TB>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
             hpm = zero_v;
-            if TB {
+            if TB && NIB {
+                store64(tr.add((b0 - first) >> 1), nibs(r0));
+            } else if TB {
                 store(tr.add(b0 - first), r0);
             }
             let live = !nib8(d0);
@@ -1339,7 +1384,8 @@ unsafe fn align8<const TB: bool>(
             best_rel = lane0_u8(rs.bestv) - bias;
         }
         if TB {
-            sc.trace.set_len(row_off + proc_end - first);
+            sc.trace
+                .set_len(row_off + trace_bytes(NIB, proc_end - first));
             sc.rows.push((
                 row_off as u32,
                 (first + sc.x_sh) as u32,
@@ -1541,12 +1587,24 @@ mod tests {
             (false, false, None) => {
                 kernel::align_body::<false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             }
-            (true, true, Some(m)) => align8::<true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc),
-            (true, false, Some(m)) => {
-                align8::<false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            (true, true, Some(m)) if sc.x_nib => {
+                align8::<true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
-            (true, true, None) => align16::<true>(q, s, scores, len1, len2, go, ge, x, cf, sc),
-            (true, false, None) => align16::<false>(q, s, scores, len1, len2, go, ge, x, cf, sc),
+            (true, true, Some(m)) => {
+                align8::<true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            }
+            (true, false, Some(m)) => {
+                align8::<false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            }
+            (true, true, None) if sc.x_nib => {
+                align16::<true, true>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+            }
+            (true, true, None) => {
+                align16::<true, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+            }
+            (true, false, None) => {
+                align16::<false, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+            }
         }
     }
 
@@ -1622,6 +1680,9 @@ mod tests {
             // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
             let win_at = [128, 320, usize::MAX][case % 3];
             (sc128.x_win_at, sc2.x_win_at) = (win_at, win_at);
+            // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
+            let nib = case % 2 == 0;
+            (sc128.x_nib, sc2.x_nib) = (nib, nib);
             let n = if rng.below(2) == 0 { 16 } else { 28 };
             let mut scale = if rng.below(3) == 0 { 32 } else { 1 };
             let long = rng.below(6) == 0;

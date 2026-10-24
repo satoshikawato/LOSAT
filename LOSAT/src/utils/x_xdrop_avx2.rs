@@ -142,8 +142,8 @@
 
 use super::kernel::finish;
 use super::{
-    build_row_table, fits_8bit, ColSeq, RowSeq, Scores, XdropResult, XdropScratch, FENCE_SENTRY,
-    MAX_M, PAD, SCRIPT_EXTEND_GAP_A, SCRIPT_EXTEND_GAP_B, SCRIPT_GAP_IN_A, SCRIPT_SUB, TAB, VMAX,
+    build_row_table, fits_8bit, script_codes, trace_bytes, ColSeq, RowSeq, Scores, XdropResult,
+    XdropScratch, FENCE_SENTRY, MAX_M, PAD, SCRIPT_GAP_IN_A, TAB, VMAX,
 };
 use core::arch::x86_64::*;
 
@@ -268,7 +268,7 @@ unsafe fn dispatch<const EM: bool>(
 ) -> Option<XdropResult> {
     let m8 = fits_8bit(scores, gap_open, gap_extend, x_drop);
     match (tb, m8) {
-        (true, Some(m)) => align8::<true, EM>(
+        (true, Some(m)) if sc.x_nib => align8::<true, EM, true>(
             q,
             s,
             scores,
@@ -281,7 +281,7 @@ unsafe fn dispatch<const EM: bool>(
             check_fence,
             sc,
         ),
-        (false, Some(m)) => align8::<false, EM>(
+        (true, Some(m)) => align8::<true, EM, false>(
             q,
             s,
             scores,
@@ -294,7 +294,20 @@ unsafe fn dispatch<const EM: bool>(
             check_fence,
             sc,
         ),
-        (true, None) => align16::<true>(
+        (false, Some(m)) => align8::<false, EM, false>(
+            q,
+            s,
+            scores,
+            m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        ),
+        (true, None) if sc.x_nib => align16::<true, true>(
             q,
             s,
             scores,
@@ -306,7 +319,19 @@ unsafe fn dispatch<const EM: bool>(
             check_fence,
             sc,
         ),
-        (false, None) => align16::<false>(
+        (true, None) => align16::<true, false>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        ),
+        (false, None) => align16::<false, false>(
             q,
             s,
             scores,
@@ -340,6 +365,24 @@ unsafe fn ldx<T>(p: *const T) -> X {
 #[inline(always)]
 unsafe fn stx<T>(p: *mut T, v: X) {
     _mm_storeu_si128(p as *mut X, v)
+}
+/// The low 8 bytes of `v`.
+#[inline(always)]
+unsafe fn stl<T>(p: *mut T, v: X) {
+    _mm_storel_epi64(p as *mut X, v)
+}
+/// 32 four-bit codes (bytes <= 15) to 16 bytes, byte k = code 2k | code 2k+1 << 4
+/// (`LOSAT_X_DPNIBBLE`).
+#[inline(always)]
+unsafe fn nibs32(v: W) -> X {
+    let m = _mm256_maddubs_epi16(v, _mm256_set1_epi16(0x1001));
+    _mm_packus_epi16(_mm256_castsi256_si128(m), _mm256_extracti128_si256::<1>(m))
+}
+/// 16 four-bit codes to 8 bytes in the low half (`nibs32`).
+#[inline(always)]
+unsafe fn nibs16(v: X) -> X {
+    let m = _mm_maddubs_epi16(v, _mm_set1_epi16(0x1001));
+    _mm_packus_epi16(m, m)
 }
 /// 16 bytes to both 128-bit halves.
 #[inline(always)]
@@ -689,7 +732,7 @@ unsafe fn block16<const TB: bool>(
 // then per row: column residues, fence, row table, rebase, blocks, band update). None for a
 // problem the lanes do not hold (the caller then runs the 128-bit dispatch).
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-unsafe fn align16<const TB: bool>(
+unsafe fn align16<const TB: bool, const NIB: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -757,7 +800,7 @@ unsafe fn align16<const TB: bool>(
     }
     sc.dirty = b_size;
     if TB {
-        sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
+        sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
         sc.rows.push((0, 0, b_size as u32));
     }
 
@@ -772,9 +815,9 @@ unsafe fn align16<const TB: bool>(
         ramp: ld(ramp.as_ptr()),
         xv: _mm256_set1_epi16(x as i16),
         kb7: ld(KB7X2.as_ptr()),
-        c3: _mm256_set1_epi16(SCRIPT_SUB as i16),
-        c10: _mm256_set1_epi16(SCRIPT_EXTEND_GAP_A as i16),
-        c40: _mm256_set1_epi16(SCRIPT_EXTEND_GAP_B as i16),
+        c3: _mm256_set1_epi16(script_codes(NIB).0 as i16),
+        c10: _mm256_set1_epi16(script_codes(NIB).1 as i16),
+        c40: _mm256_set1_epi16(script_codes(NIB).2 as i16),
     };
     let zero = _mm256_setzero_si256();
     let lane0 = _mm256_setr_epi16(-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -933,10 +976,12 @@ unsafe fn align16<const TB: bool>(
                 zero,
             );
             if TB {
-                st(
-                    tr.add(b0 - first),
-                    _mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi16(r0, r1)),
-                );
+                let v = _mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi16(r0, r1));
+                if NIB {
+                    stx(tr.add((b0 - first) >> 1), nibs32(v));
+                } else {
+                    st(tr.add(b0 - first), v);
+                }
             }
             // 2 bits per lane
             let live = !((_mm256_movemask_epi8(d0) as u32 as u64)
@@ -982,12 +1027,14 @@ unsafe fn align16<const TB: bool>(
             );
             hpm = zero;
             if TB {
-                stx(
-                    tr.add(b0 - first),
-                    _mm256_castsi256_si128(_mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi16(
-                        r0, r0,
-                    ))),
-                );
+                let v = _mm256_castsi256_si128(_mm256_permute4x64_epi64::<0xD8>(
+                    _mm256_packus_epi16(r0, r0),
+                ));
+                if NIB {
+                    stl(tr.add((b0 - first) >> 1), nibs16(v));
+                } else {
+                    stx(tr.add(b0 - first), v);
+                }
             }
             let live = !(_mm256_movemask_epi8(d0) as u32);
             if live != 0 {
@@ -1017,7 +1064,8 @@ unsafe fn align16<const TB: bool>(
             best_rel = (_mm256_cvtsi256_si32(rs.bestv) as i16 as i32) - bias;
         }
         if TB {
-            sc.trace.set_len(row_off + proc_end - first);
+            sc.trace
+                .set_len(row_off + trace_bytes(NIB, proc_end - first));
             sc.rows.push((
                 row_off as u32,
                 (first + sc.x_sh) as u32,
@@ -1254,7 +1302,7 @@ unsafe fn block8x<const TB: bool, const EM: bool>(
 // The whole DP on 8-bit lanes, the steps of the 128-bit `align_body8` in the same order. `max_m`
 // is the largest score of the matrix (`fits_8bit`). None for a problem the lanes do not hold.
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-unsafe fn align8<const TB: bool, const EM: bool>(
+unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -1323,7 +1371,7 @@ unsafe fn align8<const TB: bool, const EM: bool>(
     }
     sc.dirty8 = b_size;
     if TB {
-        sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
+        sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
         sc.rows.push((0, 0, b_size as u32));
     }
 
@@ -1340,9 +1388,9 @@ unsafe fn align8<const TB: bool, const EM: bool>(
         ramp: ld(ramp.as_ptr()),
         xv: _mm256_set1_epi8(sat(x)),
         kb15: _mm256_set1_epi8(15),
-        c3: _mm256_set1_epi8(SCRIPT_SUB as i8),
-        c10: _mm256_set1_epi8(SCRIPT_EXTEND_GAP_A as i8),
-        c40: _mm256_set1_epi8(SCRIPT_EXTEND_GAP_B as i8),
+        c3: _mm256_set1_epi8(script_codes(NIB).0 as i8),
+        c10: _mm256_set1_epi8(script_codes(NIB).1 as i8),
+        c40: _mm256_set1_epi8(script_codes(NIB).2 as i8),
     };
     let zero = _mm256_setzero_si256();
     let lane0 = _mm256_setr_epi8(
@@ -1472,7 +1520,9 @@ unsafe fn align8<const TB: bool, const EM: bool>(
             };
             let (d0, r0) = block8::<TB, EM>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
             hpm = zero;
-            if TB {
+            if TB && NIB {
+                stx(tr.add((b0 - first) >> 1), nibs32(r0));
+            } else if TB {
                 st(tr.add(b0 - first), r0);
             }
             let live = !(_mm256_movemask_epi8(d0) as u32);
@@ -1526,7 +1576,9 @@ unsafe fn align8<const TB: bool, const EM: bool>(
                 _mm256_castsi256_si128(hpm),
             );
             hpm = zero;
-            if TB {
+            if TB && NIB {
+                stl(tr.add((b0 - first) >> 1), nibs16(r0));
+            } else if TB {
                 stx(tr.add(b0 - first), r0);
             }
             let live = (!(_mm_movemask_epi8(d0) as u32)) & 0xFFFF;
@@ -1559,7 +1611,8 @@ unsafe fn align8<const TB: bool, const EM: bool>(
             best_rel = (_mm_cvtsi128_si32(rx.bestv) & 0xFF) - bias;
         }
         if TB {
-            sc.trace.set_len(row_off + proc_end - first);
+            sc.trace
+                .set_len(row_off + trace_bytes(NIB, proc_end - first));
             sc.rows.push((
                 row_off as u32,
                 (first + sc.x_sh) as u32,
@@ -1650,22 +1703,34 @@ mod tests {
                 kernel::align_avx::<false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             }
             (Kern::V256, true, Some(m)) => {
-                align8::<true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                if sc.x_nib {
+                    align8::<true, true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                } else {
+                    align8::<true, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                }
             }
             (Kern::V256, false, Some(m)) => {
-                align8::<false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<false, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
             (Kern::V256 | Kern::V256Z, true, None) => {
-                align16::<true>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+                if sc.x_nib {
+                    align16::<true, true>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+                } else {
+                    align16::<true, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+                }
             }
             (Kern::V256 | Kern::V256Z, false, None) => {
-                align16::<false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+                align16::<false, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             }
             (Kern::V256Z, true, Some(m)) => {
-                align8::<true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                if sc.x_nib {
+                    align8::<true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                } else {
+                    align8::<true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                }
             }
             (Kern::V256Z, false, Some(m)) => {
-                align8::<false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<false, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
             (Kern::W128, true, Some(m)) => {
                 w128::run8::<true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
@@ -1829,6 +1894,9 @@ mod tests {
             // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
             let win_at = [128, 320, usize::MAX][case % 3];
             (sc128.x_win_at, sc256.x_win_at, sc256z.x_win_at) = (win_at, win_at, win_at);
+            // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
+            let nib = case % 2 == 0;
+            (sc128.x_nib, sc256.x_nib, sc256z.x_nib) = (nib, nib, nib);
             let n = if rng.below(2) == 0 { 16 } else { 28 };
             let scale = if rng.below(3) == 0 { 32 } else { 1 };
             let long = rng.below(6) == 0;

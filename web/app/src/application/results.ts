@@ -516,7 +516,7 @@ export class ResultsBrowser {
       ranges,
       hidden: { subjects: filtered.hiddenSubjects, hsps: filtered.hiddenHsps },
       queryTotals: { subjects: query.subjects.length, hsps: query.hspCount },
-      atSubjectLimit: loaded.limits.maxTargetSeqs !== undefined && query.subjects.length >= loaded.limits.maxTargetSeqs,
+      atSubjectLimit: loaded.limits.maxTargetSeqs !== undefined && query.subjects.length > 0 && query.subjects.length >= loaded.limits.maxTargetSeqs,
       outfmt0Subjects: query.subjects.filter((s) => out0SubjectRange(table, s.rows[0]!) !== undefined).length,
     });
   }

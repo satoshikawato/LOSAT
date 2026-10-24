@@ -30,6 +30,8 @@ const selectedAt = computed(() => ranges.value.findIndex((range) => sameHsp(rang
 const detail = computed(() => props.state.detail);
 const entry = computed(() => props.state.hsps.find((hsp) => sameHsp(hsp.id, detail.value?.id)));
 const limitGiven = computed(() => props.state.loaded?.run.snapshot.argv.includes('-max_target_seqs') ?? false);
+/** What outfmt 0 does with -num_descriptions / -num_alignments; undefined where neither is given. */
+const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
 
 /** The subject's heading in outfmt 0, as written: read with the selected HSP, or for the Descriptions. */
 const heading = computed(() => {
@@ -294,10 +296,18 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             <p v-if="detail.state === 'loading'" class="muted">Reading the alignment…</p>
             <pre v-if="detail.section !== undefined" class="output range-text" data-testid="detail-section">{{ detail.section }}</pre>
           </template>
+          <p v-else-if="outfmt0?.separate" class="notice" data-testid="detail-not-in-outfmt0">
+            outfmt 0 does not show this HSP. Its search has a hit list of its own<template v-if="outfmt0.hitList !== undefined">
+              ({{ outfmt0.hitList }} subjects per query)</template
+            >, because <span class="option-name">-num_descriptions</span> and <span class="option-name">-num_alignments</span> give it another size
+            than outfmt 6 and 7, and that search did not find this HSP as outfmt 6 and 7 did (it may have kept another subject, or other HSPs of
+            this subject). The outfmt 6 row below and outfmt 7 hold the HSP.
+          </p>
           <p v-else class="notice" data-testid="detail-not-in-outfmt0">
             outfmt 0 does not show this HSP. It shows the alignments of the first {{ state.outfmt0Subjects }} subjects of this query
-            (BLAST+'s <span class="option-name">-num_alignments</span>: 250<template v-if="limitGiven"
-              >, here <span class="option-name">-max_target_seqs</span></template
+            (BLAST+'s <span class="option-name">-num_alignments</span>: <template v-if="outfmt0?.alignments !== undefined">{{ outfmt0.alignments }}</template
+            ><template v-else>250</template
+            ><template v-if="limitGiven">, here <span class="option-name">-max_target_seqs</span></template
             >), and this subject comes after them. The outfmt 6 row below and outfmt 7 hold the HSP.
           </p>
           <h5 class="row-label">outfmt 6 row</h5>

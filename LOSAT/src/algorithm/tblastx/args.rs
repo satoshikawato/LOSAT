@@ -86,8 +86,10 @@ pub struct TblastxArgs {
     // (Int4) value and the report prints the double.
     #[arg(long, default_value_t = 13.0, value_parser = tblastx_threshold)]
     pub threshold: f64,
-    #[arg(long, default_value_t = 3, value_parser = protein_word_size)]
-    pub word_size: i32,
+    // Option, not a value with a default: whether it was given is what a BLAST archive (outfmt 11)
+    // records (`WordSize`, NCBI blast_args.cpp:290-292); the search uses `word_size()` (default 3).
+    #[arg(long, value_parser = protein_word_size)]
+    pub word_size: Option<i32>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
 
@@ -198,8 +200,10 @@ pub struct TblastxArgs {
     // ```
     /// If the query range of a hit is enveloped by that of at least this many
     /// higher-scoring hits, delete the hit (default: 0, no culling).
-    #[arg(long, default_value_t = 0, value_parser = nonnegative_ncbi_integer)]
-    pub culling_limit: i32,
+    // Option, not a value with a default: whether it was given (also 0) is what a BLAST archive
+    // (outfmt 11) records (`Culling`); the search uses `culling_limit()`.
+    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: Option<i32>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // ```c++
     //     // query location
@@ -230,9 +234,23 @@ pub struct TblastxArgs {
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
+    /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search
+    /// reads the arguments (`archive::handle_for`).
+    #[arg(skip)]
+    pub archive: Option<crate::report::archive::ArchiveHandle>,
 }
 
 impl TblastxArgs {
+    /// The word size the search uses: the argument, else TBLASTX's default (3).
+    pub fn word_size(&self) -> i32 {
+        self.word_size.unwrap_or(3)
+    }
+
+    /// The culling limit the search uses: the argument, else 0 (no culling).
+    pub fn culling_limit(&self) -> i32 {
+        self.culling_limit.unwrap_or(0)
+    }
+
     /// The -seg value as NCBI's filtering handler reads it (`check_options` reports its
     /// errors first).
     pub fn seg_spec(&self) -> anyhow::Result<SegSpec> {

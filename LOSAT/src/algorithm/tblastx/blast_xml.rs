@@ -422,6 +422,7 @@ mod tests {
                 karlin: Some(karlin.clone()),
                 eff_searchsp: lengths.eff_searchsp,
                 aa_len: 130,
+                context0_search_space: 0,
                 seg_masks: Vec::new(),
             };
             let xml = query_stats(&stats, &numbers);

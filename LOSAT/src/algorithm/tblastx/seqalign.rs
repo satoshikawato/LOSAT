@@ -74,6 +74,63 @@ pub(crate) enum SeqalignSubjects<'a> {
     },
 }
 
+/// The report records of one query's HSPs (`hits`, in report order, with their engine counts):
+/// one subject record per run of HSPs of a subject and one HSP record per HSP, replacing the
+/// contents of `subject_records` and `hsp_records`. The Seq-annot formats (outfmt 8, 9, 12) and
+/// the BLAST archive (outfmt 11) write the Seq-aligns from them.
+pub(crate) fn query_records_of<'a>(
+    hits: &[TblastxHsp],
+    engine: &[(u32, u32)],
+    subjects: &'a SeqalignSubjects<'a>,
+    subject_letters: SubjectLetters<'_>,
+    subject_records: &mut Vec<SubjectRecord<'a>>,
+    hsp_records: &mut Vec<HspRecord<'a>>,
+) -> Result<()> {
+    subject_records.clear();
+    hsp_records.clear();
+    let mut last_subject: Option<u32> = None;
+    for (hsp, &(num_ident, num_positives)) in hits.iter().zip(engine) {
+        let hit = &hsp.hit;
+        if last_subject != Some(hit.s_idx) {
+            last_subject = Some(hit.s_idx);
+            let s_idx = hit.s_idx as usize;
+            subject_records.push(match subjects {
+                SeqalignSubjects::Records {
+                    records,
+                    placements,
+                } => SubjectRecord {
+                    id: SeqId::Local(&records[s_idx].local_id),
+                    searched_length: i32::try_from(subject_letters.length(s_idx))?,
+                    offset: i32::try_from(placements.offset(s_idx))?,
+                },
+                SeqalignSubjects::Database { ordinals, .. } => SubjectRecord {
+                    id: SeqId::BlOrdId(ordinals[s_idx]),
+                    searched_length: i32::try_from(subject_letters.length(s_idx))?,
+                    offset: 0,
+                },
+            });
+        }
+        hsp_records.push(HspRecord {
+            subject: subject_records.len() as u32 - 1,
+            q_offset: i32::try_from(hit.sort_query_offset)?,
+            q_end: i32::try_from(hit.sort_query_end)?,
+            s_offset: i32::try_from(hit.sort_subject_offset)?,
+            s_end: i32::try_from(hit.sort_subject_end)?,
+            q_frame: i8::try_from(hit.query_frame)?,
+            s_frame: hsp.subject_frame,
+            score: hit.raw_score,
+            num: hsp.num,
+            evalue: hit.e_value,
+            bit_score: hit.bit_score,
+            num_ident: i32::try_from(num_ident)?,
+            num_positives: i32::try_from(num_positives)?,
+            comp_adjust: 0,
+            ops: &[],
+        });
+    }
+    Ok(())
+}
+
 /// Writes the documents of every query to `writer`, each query's warnings before it. `hits`
 /// is the final list in report order and `engine` its engine counts by HSP index
 /// (`report::engine_counts`).
@@ -106,53 +163,18 @@ pub(crate) fn write_tblastx_seqalign(
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
         }
-        subject_records.clear();
-        hsp_records.clear();
         let start = next;
         while next < hits.len() && hits[next].hit.q_idx as usize == q_idx {
             next += 1;
         }
-        let mut last_subject: Option<u32> = None;
-        for (hsp, &(num_ident, num_positives)) in hits[start..next].iter().zip(&engine[start..next])
-        {
-            let hit = &hsp.hit;
-            if last_subject != Some(hit.s_idx) {
-                last_subject = Some(hit.s_idx);
-                let s_idx = hit.s_idx as usize;
-                subject_records.push(match subjects {
-                    SeqalignSubjects::Records {
-                        records,
-                        placements,
-                    } => SubjectRecord {
-                        id: SeqId::Local(&records[s_idx].local_id),
-                        searched_length: i32::try_from(subject_letters.length(s_idx))?,
-                        offset: i32::try_from(placements.offset(s_idx))?,
-                    },
-                    SeqalignSubjects::Database { ordinals, .. } => SubjectRecord {
-                        id: SeqId::BlOrdId(ordinals[s_idx]),
-                        searched_length: i32::try_from(subject_letters.length(s_idx))?,
-                        offset: 0,
-                    },
-                });
-            }
-            hsp_records.push(HspRecord {
-                subject: subject_records.len() as u32 - 1,
-                q_offset: i32::try_from(hit.sort_query_offset)?,
-                q_end: i32::try_from(hit.sort_query_end)?,
-                s_offset: i32::try_from(hit.sort_subject_offset)?,
-                s_end: i32::try_from(hit.sort_subject_end)?,
-                q_frame: i8::try_from(hit.query_frame)?,
-                s_frame: hsp.subject_frame,
-                score: hit.raw_score,
-                num: hsp.num,
-                evalue: hit.e_value,
-                bit_score: hit.bit_score,
-                num_ident: i32::try_from(num_ident)?,
-                num_positives: i32::try_from(num_positives)?,
-                comp_adjust: 0,
-                ops: &[],
-            });
-        }
+        query_records_of(
+            &hits[start..next],
+            &engine[start..next],
+            subjects,
+            subject_letters,
+            &mut subject_records,
+            &mut hsp_records,
+        )?;
         let query_record = QueryRecord {
             id: SeqId::Local(&query.local_id),
             searched_length: i32::try_from(query.seq().len())?,

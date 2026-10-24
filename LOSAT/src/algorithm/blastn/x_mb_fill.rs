@@ -1,7 +1,8 @@
 //! EXPERIMENT (LOSAT_X_MBFILL, shadow LOSAT_X_MBFILLSHADOW): the one-thread word loop of
 //! `build_mb_lookup` (the contiguous megablast table and the two-stage table of blastn) with the
 //! words read run by run and the update of each applied `X_DELAY` words after a prefetch of its
-//! cell, as `x_fill_mb_queued`'s `Delay` queue does.
+//! cell, as `x_fill_mb_queued`'s `Delay` queue does (x86_64), or in batches of `X_DELAY` words
+//! whose cells are read first, as its `Batch` queue does (wasm32).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1032-1091
 //! ```c
@@ -32,8 +33,12 @@
 //!
 //! Where it runs. `build_mb_lookup` calls `fill` where it would call `x_fill_mb_queued`: the
 //! table is built on one thread (no pool of two threads or more: PAIRPAR fills the others), without
-//! database word counts (`limit_lookup`, which the command line does not offer), on x86_64 (the
-//! queue needs a prefetch instruction).
+//! database word counts (`limit_lookup`, which the command line does not offer), on x86_64 and
+//! wasm32. On x86_64 the queue prefetches the cell of each word and applies the word `X_DELAY`
+//! words later (`run_words`). wasm32 has no prefetch instruction, so there the queue is a batch
+//! (`run_words_batch`): `X_DELAY` words are collected, their cells read in one loop (the cache
+//! misses overlap), then the words applied in order. Other targets (aarch64) keep the queued loop
+//! and its `Batch` queue: the run loop has not been timed there.
 //!
 //! Why the table is the same. A word is the `lut_word_length` bases that end at a position, and
 //! NCBI counts a word only after that many unambiguous bases in a row (`pos` is moved past each
@@ -42,8 +47,8 @@
 //! whose code is the last `lut_word_length` bases (`kLutMask` keeps `2 * lut_word_length` bits)
 //! and whose `index` is `query_offset + pos - lut_word_length + 2` for the base at `pos`. Those
 //! are NCBI's words in NCBI's order. Each update is the statements above on the same cell and
-//! index, applied in the same order (the queue only prefetches the cell of a word `X_DELAY` words
-//! before it applies it). `fill` checks once that every index into the tables is in range, so the
+//! index, applied in the same order (the queue is first in, first out: it only prefetches, or
+//! reads, the cell of a word before it applies it). `fill` checks once that every index into the tables is in range, so the
 //! loop reads them without a check:
 //!
 //! - `lut_word_length >= 1` and the cell is the code masked with `table_size - 1 = 4^lut_word_length - 1`;
@@ -62,7 +67,10 @@
 //! about 87 instructions a word (line R, R10). Here the loop over a run is a function of its own
 //! (`run_words`), so the tables, the queue position and the code stay in registers; the presence
 //! bit comes from a table, so the only shift by a variable count (`pv_array_bts`) keeps `cl`; the
-//! queue is 64 words deep (32 was 1 % slower, 16 the old depth).
+//! queue is 64 words deep (32 was 1 % slower, 16 the old depth). On wasm32 the batch keeps the
+//! queued loop's order and depth; the gain is the loop over a run and the checks made once. There,
+//! applying each word at once, or batching only the first `X_DELAY` words of a run, was faster on
+//! long runs on a server core but slower than the batch on a client CPU (short runs, long runs).
 //!
 //! The variables are read once. `LOSAT_X_MBFILL` (a switch of the strict set,
 //! `utils/xswitch.rs`: on unless it is `0`) runs this
@@ -80,8 +88,13 @@ use std::sync::OnceLock;
 /// `kCompressionFactor` (2048), the number of cells that share one helper counter, as a shift.
 const K_COMPRESSION_FACTOR_SHIFT: usize = 11;
 
-/// The words between the prefetch of a word's cell and its update.
+/// The words between the prefetch of a word's cell and its update (x86_64), or of a batch
+/// (`X_BATCH`).
 const X_DELAY: usize = 64;
+
+/// The queue is a batch (`run_words_batch`): every target but x86_64, whose queue prefetches
+/// (`run_words`); `fill` takes x86_64 and wasm32 only.
+const X_BATCH: bool = !cfg!(target_arch = "x86_64");
 
 // No NCBI counterpart: the number of builds the shadow compared (relaxed; it orders nothing).
 static X_SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
@@ -130,7 +143,9 @@ pub(super) fn fill(
     if mode == 0 {
         return false;
     }
-    let taken = cfg!(target_arch = "x86_64") && db_word_counts.is_none() && in_range(words, t);
+    let taken = cfg!(any(target_arch = "x86_64", target_arch = "wasm32"))
+        && db_word_counts.is_none()
+        && in_range(words, t);
     crate::utils::xreach::x_reach!("LOSAT_X_MBFILL", taken);
     if !taken {
         return false;
@@ -138,9 +153,9 @@ pub(super) fn fill(
     // SAFETY: `in_range(words, t)` holds.
     let (n_words, ambiguous) = unsafe {
         if words.ascending_cells {
-            fill_runs::<true>(words, t)
+            fill_runs::<true, X_BATCH>(words, t)
         } else {
-            fill_runs::<false>(words, t)
+            fill_runs::<false, X_BATCH>(words, t)
         }
     };
     *t.total_positions += n_words;
@@ -242,16 +257,22 @@ struct Queue {
 }
 
 /// The fill: the words of `build_mb_lookup` in its order, read run by run (module documentation),
-/// each update applied `X_DELAY` words later. Returns the number of words and of ambiguous bases.
+/// each update applied `X_DELAY` words later, or in batches of `X_DELAY` (`BATCH`). Returns the
+/// number of words and of ambiguous bases.
 /// SAFETY: `in_range(words, t)` holds.
 #[inline(never)]
-unsafe fn fill_runs<const ASC: bool>(words: &Words<'_>, t: &mut XMbTables<'_>) -> (usize, usize) {
+unsafe fn fill_runs<const ASC: bool, const BATCH: bool>(
+    words: &Words<'_>,
+    t: &mut XMbTables<'_>,
+) -> (usize, usize) {
     let raw = Raw::new(t);
     let cells = &mut *t.words;
     let mut queue = Queue {
         ring: [(0u32, 0u32); X_DELAY],
         n: 0,
     };
+    // `BATCH`: the cells read ahead, xor-ed (kept so that the reads stay)
+    let mut touched = 0u32;
     let lut_word_length = words.lut_word_length;
     let (mut n_words, mut ambiguous) = (0usize, 0usize);
     for (q_idx, seq) in words.queries_blastna.iter().enumerate() {
@@ -294,16 +315,30 @@ unsafe fn fill_runs<const ASC: bool>(words: &Words<'_>, t: &mut XMbTables<'_>) -
                 let first = i;
                 // SAFETY: `in_range` holds; the words are those of `words`.
                 i = unsafe {
-                    run_words::<ASC>(
-                        s,
-                        i,
-                        code,
-                        words.kmer_mask,
-                        index_base,
-                        &mut queue,
-                        raw,
-                        cells,
-                    )
+                    if BATCH {
+                        run_words_batch::<ASC>(
+                            s,
+                            i,
+                            code,
+                            words.kmer_mask,
+                            index_base,
+                            &mut queue,
+                            &mut touched,
+                            raw,
+                            cells,
+                        )
+                    } else {
+                        run_words::<ASC>(
+                            s,
+                            i,
+                            code,
+                            words.kmer_mask,
+                            index_base,
+                            &mut queue,
+                            raw,
+                            cells,
+                        )
+                    }
                 };
                 n_words += i - first;
                 if i < s.len() {
@@ -314,10 +349,14 @@ unsafe fn fill_runs<const ASC: bool>(words: &Words<'_>, t: &mut XMbTables<'_>) -
             }
         }
     }
+    // (with `BATCH`, `queue.n < X_DELAY`: the words of the last batch, in order)
     for k in queue.n - queue.n.min(X_DELAY)..queue.n {
         let (b, q) = queue.ring[k % X_DELAY];
         // SAFETY: as above.
         unsafe { raw.apply::<ASC>(cells, b as usize, q) };
+    }
+    if BATCH {
+        std::hint::black_box(touched);
     }
     (n_words, ambiguous)
 }
@@ -371,6 +410,52 @@ unsafe fn run_words<const ASC: bool>(
         }
     }
     queue.ring = ring;
+    queue.n = n;
+    i
+}
+
+/// `run_words` with the queue as a batch (`X_BATCH`): each word goes to `queue.ring[queue.n]`;
+/// when `X_DELAY` are there, their cells are read in one loop (so the cache misses overlap without
+/// a prefetch instruction; the values go to `touched`), then the words are applied in order and the
+/// batch starts again. On return `queue.n < X_DELAY`. The ring stays in `queue`: on wasm32 a local
+/// copy would be in memory as well.
+/// SAFETY: as `run_words`.
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+unsafe fn run_words_batch<const ASC: bool>(
+    s: &[u8],
+    mut i: usize,
+    mut code: u64,
+    kmer_mask: u64,
+    index_base: usize,
+    queue: &mut Queue,
+    touched: &mut u32,
+    raw: Raw,
+    cells: &mut Vec<(u32, u32)>,
+) -> usize {
+    let mut n = queue.n;
+    while let Some(&base) = s.get(i) {
+        if (base & BLAST2NA_MASK) != 0 {
+            break;
+        }
+        code = ((code << 2) | base as u64) & kmer_mask;
+        queue.ring[n] = (code as u32, index_base.wrapping_add(i) as u32);
+        n += 1;
+        i += 1;
+        if n == X_DELAY {
+            let mut read = *touched;
+            for &(b, _) in &queue.ring {
+                // SAFETY: `b` is the cell of a word of the fill.
+                read ^= unsafe { *raw.hashtable.add(b as usize) };
+            }
+            *touched = read;
+            for &(b, q) in &queue.ring {
+                // SAFETY: `(b, q)` is a word of the fill.
+                unsafe { raw.apply::<ASC>(cells, b as usize, q) };
+            }
+            n = 0;
+        }
+    }
     queue.n = n;
     i
 }
@@ -498,10 +583,11 @@ mod tests {
         b
     }
 
-    /// Both cell orders build the arrays and counters of `x_fill_mb_queued` on random queries
-    /// (ambiguity codes, masks, several queries, `lut_word_length` 4..12, runs shorter and longer
-    /// than the queue), on single queries with fewer words than the queue holds (`lut_word_length`
-    /// 6, 7, 10, 12) and on long repeats (long chains, helper counts).
+    /// Both queues (prefetch and batch) and both cell orders build the arrays and counters of
+    /// `x_fill_mb_queued` on random queries (ambiguity codes, masks, several queries,
+    /// `lut_word_length` 4..12, runs shorter and longer than the queue), on single queries with
+    /// fewer words than the queue holds (`lut_word_length` 6, 7, 10, 12) and on long repeats (long
+    /// chains, helper counts).
     #[test]
     fn the_run_loop_builds_the_queued_loops_arrays() {
         let mut rng = Lcg(0x4D42_F111);
@@ -559,20 +645,26 @@ mod tests {
                     )
                 });
                 assert!(reference.total_positions > 0 || queries.iter().all(|q| q.len() < 80));
-                let got = build(&words, |t| {
-                    assert!(in_range(&words, t));
-                    // SAFETY: checked above.
-                    let (n, a) = unsafe {
-                        if ascending_cells {
-                            fill_runs::<true>(&words, t)
-                        } else {
-                            fill_runs::<false>(&words, t)
-                        }
-                    };
-                    *t.total_positions += n;
-                    *t.ambiguous_skipped += a;
-                });
-                assert!(got == reference, "case {case} ascending {ascending_cells}");
+                for batch in [false, true] {
+                    let got = build(&words, |t| {
+                        assert!(in_range(&words, t));
+                        // SAFETY: checked above.
+                        let (n, a) = unsafe {
+                            match (ascending_cells, batch) {
+                                (true, false) => fill_runs::<true, false>(&words, t),
+                                (false, false) => fill_runs::<false, false>(&words, t),
+                                (true, true) => fill_runs::<true, true>(&words, t),
+                                (false, true) => fill_runs::<false, true>(&words, t),
+                            }
+                        };
+                        *t.total_positions += n;
+                        *t.ambiguous_skipped += a;
+                    });
+                    assert!(
+                        got == reference,
+                        "case {case} ascending {ascending_cells} batch {batch}"
+                    );
+                }
             }
         }
     }

@@ -774,8 +774,9 @@ Same values, faster computation:
   output hashes. Platform checks hash `=0` on the Linux and macOS arm64 runners (mode `nodpneon2`);
   the mode `dpneon2` was equal to the default on both arm64 runners in every run since 2026-10-15.
 - GREEDYFAST (graduated 2026-10-22; no variable, no `LOSAT_X_GREEDYSHADOW`, no `X_GREEDY_TEST_MODE`
-  hook; always on) megablast greedy alignment, one distance in three passes of 256 cells, match
-  extension 8 bases at a time, on an unpacked subject (`x_greedy_row` in `blastn/alignment/greedy.rs`).
+  hook; always on) megablast greedy alignment, one distance in three passes of 256 cells (two on x86_64 CPUs with
+  AVX2 since `LOSAT_X_GREEDYROWFUSE`), match extension 8 bases at a time, on an unpacked subject (`x_greedy_row` in
+  `blastn/alignment/greedy.rs`).
   `x_greedy_row` runs every traceback call and the score-only calls the fused loop (GREEDYFUSE) declines;
   the ported distance loop stays only for lengths that do not fit the slices (no production call passes
   them). The greedy functions take an unpacked subject only; the packed-subject scans (`rem != 4`) were
@@ -3047,6 +3048,28 @@ Scheduling (each value computed by one thread with the original function; order 
   traceback earlier and that traceback's medium buffers stay in the heap; with the threshold fixed
   (`MALLOC_MMAP_THRESHOLD_=131072`) the run reads 217.2 -> 217.0, and `LOSAT_X_BNLUTDROP=0` reads 217.5 as dev. Time:
   wall x0.997-1.001, cycles:u x0.991-1.000 and instructions:u x0.999-1.000 in every case.
+- `LOSAT_X_GREEDYROWFUSE=1` (BLASTN megablast, the distances of the non-affine greedy alignment that `x_greedy_row` runs:
+  every traceback, and the score-only calls the fused loop GREEDYFUSE declines; speed; in the strict set from the pull
+  request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per
+  block of 256 diagonals instead of three on x86_64 CPUs with AVX2, BMI1, BMI2 and LZCNT
+  (`blastn/alignment/x_greedy_row_fuse.rs`, argument in its header). Pass 1 also keeps each diagonal's eight-byte load
+  offsets and whether either lies outside its sequence; the eight-byte slide test, which pass 2 ran as a vector loop over
+  the block whose lanes went back and forth between vector and general registers (line F s5, probe P6), runs as scalar
+  code inside the pass over the diagonals, for the surviving diagonals only. The same cells, state and
+  `x_greedy_cell_slow` calls in the same order; the unit tests compare the two builds and the plain build on random single
+  distances and on whole traceback alignments. Other CPUs and targets (wasm32, aarch64, x86_64 without AVX2) run the three
+  passes (`x_greedy_row_any`) as before; their machine code is unchanged, as is that of `x_greedy_row_avx2` (only the
+  dispatcher `x_greedy_row` changed). With `LOSAT_X_STATS`, once a greedy row ran, `[X_STATS] GREEDYROWFUSE
+  kernel=fused|avx2|plain fused_rows=N` gives the build every row of the process took and the rows of the fused build
+  (counted only with the variable). Measured 2026-10-24 on the workstation against `dev` 375afb0a (outputs and max RSS
+  identical in every arm; `perf stat` counts `:u`): at one thread (node 0, one pinned core, HT sibling idle, warmed 3 s; 3
+  rounds, the arm order reversed every other round; Sakai x MG1655 also 16 rounds on node 1) megablast of Sakai against
+  MG1655 cycles x0.900-0.908 (pairs 0.894-0.913), instructions x0.964, wall 0.623 -> 0.567 s; of Sakai with every 100th
+  letter N x0.908 (instructions x0.966); of 100 16S rRNAs against the 28,036 of `16s_all` (`-db`) x0.988 (instructions
+  x0.995); of 31,168 D. melanogaster cDNAs against dmel_dna_3M equal to `=0` (instructions x0.998; greedy rows are a small
+  part of that search). At 8 threads (node 1, 16 rounds) Sakai against MG1655 cycles x0.915 (0.909-0.918), wall 0.282 ->
+  0.274 s; at 16 threads cycles x0.920 (0.907-0.941), wall 0.259 -> 0.252 s. `=0` read x1.000-1.009 of `dev` (cycles;
+  instructions x1.001-1.002: the dispatcher). Kernel (P6 on 7e73ec9c): 17.5 -> 12.3 cycles per cell of the band.
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
   `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; in the strict set since 2026-10-17,
   default ON: `LOSAT_X_DISCLUTPAR=0` turns it off; evidence below, "Default ON") the

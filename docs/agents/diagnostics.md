@@ -1291,7 +1291,13 @@ Rebuilding less:
   at `0` x1.0017 (16 pairs each) and dev's instructions (-0.002 %: the code layout, the hot functions 320 to 768 bytes
   further on in their pages). Memory (peak RSS, the same runs): one thread on the 31,168
   cDNAs `-subject` 85.0 -> 86.3 MiB and `-db` 83.3 -> 85.6 MiB (`MALLOC_ARENA_MAX=1`: 85.1 -> 86.7 and 83.6 -> 85.3
-  MiB; NCBI at one thread 313.4 and 151.0 MiB), the other cases within 1 MiB. QBATCH_SHORT
+  MiB; NCBI at one thread 313.4 and 151.0 MiB), the other cases within 1 MiB. After the review fixes (6b9281b6, v4-A15
+  pr7, the same dev): one thread on the 31,168 cDNAs x0.723, 236 cDNAs x0.836, the 7 cDNAs x0.844, 236 cDNAs against
+  15,000 200-bp pieces of the genome as `-subject` x0.994 (16 pairs), megablast with a coding 18 template (a
+  discontiguous table) x1.000; the one-thread slots of `LOSAT_X_QBATCHPAR` (4 threads with `LOSAT_X_QBATCHPARSLOTS=4`)
+  on the 31,168 / 1,775 cDNAs x0.726 / x0.732 (peak RSS +13 MiB on the 31,168, the four slots' strips), by default at
+  4 threads x1.001 / x0.999; megablast at one thread x0.9997 with the switch at `0` x0.9996 (the layout difference
+  above is gone in this binary), 16 threads unchanged.
 - `LOSAT_X_BNFEWSUBJ=1` (BLASTN `-subject`, every task whose seed stage has strips (PAIRPAR,
   `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARDISCARR`), speed; in the strict set from the pull request that added it
   (perf/bn-few-subj, evidence at the end of this entry): on unless it is `0`;

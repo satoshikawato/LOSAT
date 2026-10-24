@@ -197,12 +197,15 @@ impl PartOut {
 ///                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
 ///                           hit_ready, s_off_pos, window_size + Delta + 1);
 /// ```
-/// A fold's insert (`DiagHashTable::insert`). With partitions (`PT`) it also records the
-/// diagonal's bucket and, when the insert appended a cell, the seed's key with the cell's
+/// A fold's insert (`DiagHashTable::insert_memo`; with `LEAN`, LOSAT_X_FOLDLEAN, the same statements
+/// inlined, `insert_inl`). Without `MEMO` the table has no memo (LOSAT_X_DIAGLV2) and the insert
+/// does not test for one: `insert_plain`, the statements before that switch (with `LEAN` inlined,
+/// `insert_inl::<false>`). With partitions (`PT`) it also records
+/// the diagonal's bucket and, when the insert appended a cell, the seed's key with the cell's
 /// number in the partition's table.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub(super) fn insert<const PT: bool>(
+pub(super) fn insert<const PT: bool, const LEAN: bool, const MEMO: bool>(
     hash: &mut DiagHashTable,
     out: &mut PartOut,
     key: u64,
@@ -215,7 +218,13 @@ pub(super) fn insert<const PT: bool>(
 ) {
     if PT {
         let occupancy = hash.occupancy;
-        hash.insert(diag, level, hit_len, hit_saved, s_off, window_size);
+        if LEAN {
+            hash.insert_inl::<MEMO>(diag, level, hit_len, hit_saved, s_off, window_size);
+        } else if MEMO {
+            hash.insert_memo(diag, level, hit_len, hit_saved, s_off, window_size);
+        } else {
+            hash.insert_plain(diag, level, hit_len, hit_saved, s_off, window_size);
+        }
         let bucket = bucket_of_diag(diag);
         if !out.touched[bucket] {
             out.touched[bucket] = true;
@@ -224,10 +233,23 @@ pub(super) fn insert<const PT: bool>(
         if hash.occupancy != occupancy {
             out.appends.push((key, occupancy));
         }
+    } else if LEAN {
+        hash.insert_inl::<MEMO>(diag, level, hit_len, hit_saved, s_off, window_size);
+    } else if MEMO {
+        hash.insert_memo(diag, level, hit_len, hit_saved, s_off, window_size);
     } else {
-        hash.insert(diag, level, hit_len, hit_saved, s_off, window_size);
+        hash.insert_plain(diag, level, hit_len, hit_saved, s_off, window_size);
     }
 }
+
+/// No NCBI counterpart (scheduling only): a partition's state during a stage, on cache lines of
+/// its own. The participants poll every partition's lock (`try_lock`) while one of them folds
+/// into it; without the alignment the lock word and the first fields shared a line with the
+/// fields the folding thread writes, or with the neighbouring partition's, as the size of
+/// `PartState` placed them (DiagHashTable's memo of LOSAT_X_DIAGLV2 made DQ n16 x1.028 slower
+/// with both switches off: memory-ordering machine clears x1.37, same instructions).
+#[repr(align(128))]
+struct OwnLines<T>(T);
 
 /// The fold state of one partition (its allocations kept in the subject scratch between
 /// stages; its contents set by `rebuild` at the start of every stage).
@@ -260,6 +282,9 @@ impl PartState {
                 window: 0,
                 max_level: Vec::new(),
                 x_lv_shadow: false,
+                x_last: Vec::new(),
+                #[cfg(debug_assertions)]
+                x_last_fresh: true,
             },
             hits: Vec::new(),
             out: PartOut {
@@ -502,7 +527,11 @@ where
         );
     }
 
-    let states: Vec<Mutex<PartState>> = scratch.parts.drain(..).map(Mutex::new).collect();
+    let states: Vec<Mutex<OwnLines<PartState>>> = scratch
+        .parts
+        .drain(..)
+        .map(|st| Mutex::new(OwnLines(st)))
+        .collect();
     let spare = Mutex::new(std::mem::take(&mut scratch.spare));
     let raw_spare = Mutex::new(std::mem::take(&mut scratch.raw));
     let part_next: Vec<AtomicUsize> = (0..parts).map(|_| AtomicUsize::new(0)).collect();
@@ -585,9 +614,10 @@ where
                 if i >= n || !ready[i].load(Ordering::Acquire) {
                     continue;
                 }
-                let Ok(mut st) = states[p].try_lock() else {
+                let Ok(mut guard) = states[p].try_lock() else {
                     continue;
                 };
+                let st = &mut guard.0;
                 let i = st.next;
                 if i >= n || !ready[i].load(Ordering::Acquire) {
                     continue;
@@ -598,7 +628,7 @@ where
                     st.out.strip = i as u64;
                     let t0 = timed.then(std::time::Instant::now);
                     let pause0 = st.scan_pause_ns;
-                    fold(&mut st, &strip.seeds[a..b], &strip.pos[a..b]);
+                    fold(st, &strip.seeds[a..b], &strip.pos[a..b]);
                     if let Some(t0) = t0 {
                         st.fold_ns += t0.elapsed().as_nanos() as u64;
                     }
@@ -609,7 +639,7 @@ where
                 drop(strip);
                 st.next = i + 1;
                 part_next[p].store(i + 1, Ordering::Release);
-                drop(st);
+                drop(guard);
                 progress.fetch_add(1, Ordering::Relaxed);
                 if done[i].fetch_add(1, Ordering::AcqRel) + 1 == parts {
                     if let Some(buf) = lock(&slots[i]).take() {
@@ -681,7 +711,7 @@ where
 
     let mut states: Vec<PartState> = states
         .into_iter()
-        .map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner))
+        .map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner).0)
         .collect();
     let t_merge = timed.then(std::time::Instant::now);
     let mut stats = PartStats {
@@ -1170,6 +1200,11 @@ fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize) {
         t.window = hash.window;
         t.max_level.clone_from(&hash.max_level);
         t.x_lv_shadow = hash.x_lv_shadow;
+        t.x_last.clone_from(&hash.x_last);
+        #[cfg(debug_assertions)]
+        {
+            t.x_last_fresh = hash.x_last_fresh;
+        }
     }
 }
 
@@ -1277,6 +1312,14 @@ fn merge(
             if levels {
                 hash.max_level[b] = t.max_level[b];
             }
+            // EXPERIMENT (LOSAT_X_DIAGLV2): the bucket's memo is its partition's.
+            if let Some(last) = hash.x_last.get_mut(b) {
+                *last = t.x_last[b];
+            }
+        }
+        #[cfg(debug_assertions)]
+        {
+            hash.x_last_fresh &= t.x_last_fresh;
         }
     }
 }
@@ -1382,10 +1425,12 @@ mod tests {
         u32,
         i32,
         Vec<i32>,
+        Vec<super::super::super::x_diag_lv::LvLast>,
     );
 
     /// Everything of a table a later seed or the shadow can read: the heads, the cells up to
-    /// the occupancy, the occupancy, the capacity, the offset and the level bounds.
+    /// the occupancy, the occupancy, the capacity, the offset, the level bounds and the memo
+    /// (LOSAT_X_DIAGLV2).
     fn hash_state(h: &DiagHashTable) -> HashState {
         assert_eq!(
             h.chain.len(),
@@ -1402,6 +1447,7 @@ mod tests {
             h.capacity,
             h.offset,
             h.max_level.clone(),
+            h.x_last.clone(),
         )
     }
 
@@ -1428,27 +1474,48 @@ mod tests {
         }
     }
 
-    fn last_hit(hash: &DiagHashTable, op: &Op) -> i32 {
+    fn last_hit<const MEMO: bool>(hash: &DiagHashTable, op: &Op) -> i32 {
         let found = if hash.x_lv_on() {
-            hash.retrieve_below(op.diag, &LvSeeds::new(false, 11, 0), op.s_off_pos as usize)
+            hash.retrieve_below::<MEMO>(op.diag, &LvSeeds::new(false, 11, 0), op.s_off_pos as usize)
         } else {
             hash.retrieve(op.diag)
         };
         found.map_or(0, |(level, _, _)| level)
     }
 
-    /// The reference: op after op on one table; the hits are op indices.
-    fn reference(hash: &mut DiagHashTable, ops: &[Op], first: usize, window: i32) -> Vec<usize> {
+    /// The reference: op after op on one table; the hits are op indices. With `MEMO` it reads
+    /// and keeps the table's memo (LOSAT_X_DIAGLV2) as the folds of a strips stage do, without it
+    /// neither, as the reference fold.
+    fn reference<const MEMO: bool>(
+        hash: &mut DiagHashTable,
+        ops: &[Op],
+        first: usize,
+        window: i32,
+    ) -> Vec<usize> {
+        let insert = if MEMO {
+            DiagHashTable::insert_memo
+        } else {
+            DiagHashTable::insert_plain
+        };
         let mut hits = Vec::new();
         for (k, op) in ops.iter().enumerate() {
-            if op.s_off_pos < last_hit(hash, op) {
+            if op.s_off_pos < last_hit::<MEMO>(hash, op) {
                 continue;
             }
             if op.pass {
                 hits.push(first + k);
-                hash.insert(op.diag, op.ungapped_end, 0, true, op.s_off_pos, window);
+                insert(
+                    hash,
+                    op.diag,
+                    op.ungapped_end,
+                    0,
+                    true,
+                    op.s_off_pos,
+                    window,
+                );
             } else {
-                hash.insert(
+                insert(
+                    hash,
                     op.diag,
                     op.s_end_pos,
                     op.s_end_pos - op.s_off_pos,
@@ -1602,14 +1669,14 @@ mod tests {
                     let op = &ops[index - first];
                     let key = st.out.key(pos, k);
                     st.counts.seeds += 1;
-                    if op.s_off_pos < last_hit(&st.hash, op) {
+                    if op.s_off_pos < last_hit::<true>(&st.hash, op) {
                         st.counts.skipped += 1;
                         continue;
                     }
                     if op.pass {
                         st.hits.push(hit_of(index));
                         st.out.hit_keys.push(key);
-                        insert::<true>(
+                        insert::<true, false, true>(
                             &mut st.hash,
                             &mut st.out,
                             key,
@@ -1621,7 +1688,7 @@ mod tests {
                             window,
                         );
                     } else {
-                        insert::<true>(
+                        insert::<true, false, true>(
                             &mut st.hash,
                             &mut st.out,
                             key,
@@ -1744,9 +1811,14 @@ mod tests {
                 for levels in [false, true] {
                     case += 1;
                     let window = [12, 40, 5000][case % 3];
+                    // the bounds (LOSAT_X_DIAGLV) and the memo (LOSAT_X_DIAGLV2) as `levels` says,
+                    // whatever the environment says
                     let mut reference_hash = DiagHashTable::new(16);
+                    reference_hash.max_level = Vec::new();
+                    reference_hash.x_last = Vec::new();
                     if levels {
                         reference_hash.x_lv_start(false);
+                        reference_hash.x_lv2_start();
                     }
                     let mut hash = copy_hash(&reference_hash);
                     let mut scratch = PartScratch::default();
@@ -1786,11 +1858,24 @@ mod tests {
                             60 + rng.below(600) as usize
                         };
                         let ops = random_ops(&mut rng, n, &mut s, diagonals);
-                        let expected = reference(&mut reference_hash, &ops, first, window);
+                        // as the search: a strips stage makes the memo (LOSAT_X_DIAGLV2) again at
+                        // its start (`seed_stage`) and keeps it; the reference fold (stage 3)
+                        // neither reads nor keeps it
+                        let expected = if stage == 3 {
+                            reference::<false>(&mut reference_hash, &ops, first, window)
+                        } else {
+                            if !reference_hash.x_last.is_empty() {
+                                reference_hash.x_lv2_reset();
+                            }
+                            reference::<true>(&mut reference_hash, &ops, first, window)
+                        };
                         if stage == 3 {
                             // a chunk folded by the reference (the partition tables do not see it)
-                            let _ = reference(&mut hash, &ops, first, window);
+                            let _ = reference::<false>(&mut hash, &ops, first, window);
                         } else {
+                            if !hash.x_last.is_empty() {
+                                hash.x_lv2_reset();
+                            }
                             let stage_parts = if stage == 6 { parts + 1 } else { parts };
                             let cuts = if n == 0 {
                                 vec![0]
@@ -1878,7 +1963,7 @@ mod tests {
             for stage in 0..3 {
                 let n = 2000 + rng.below(2000) as usize;
                 let ops = random_ops(&mut rng, n, &mut s, 400);
-                let expected = reference(&mut reference_hash, &ops, first, 40);
+                let expected = reference::<true>(&mut reference_hash, &ops, first, 40);
                 let cuts = random_cuts(&mut rng, n);
                 let (got, _, _) = partitioned(
                     &pool,
@@ -1928,7 +2013,7 @@ mod tests {
                 let mut s = 50i32;
                 let n = 3000;
                 let ops = random_ops(&mut rng, n, &mut s, 300);
-                let expected = reference(&mut reference_hash, &ops, 0, 40);
+                let expected = reference::<true>(&mut reference_hash, &ops, 0, 40);
                 let cuts = random_cuts(&mut rng, n);
                 let strips = cuts.len() - 1;
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2163,7 +2248,7 @@ mod tests {
         let mut scratch = PartScratch::default();
         let mut s = 50i32;
         let ops = random_ops(&mut rng, 2000, &mut s, 300);
-        let expected = reference(&mut reference_hash, &ops, 0, 40);
+        let expected = reference::<true>(&mut reference_hash, &ops, 0, 40);
         let cuts = random_cuts(&mut rng, ops.len());
         let (got, _, _) = partitioned(
             &pool,
@@ -2195,14 +2280,24 @@ mod tests {
                 ..*op
             })
             .collect();
-        let unchanged = reference(&mut copy_hash(&reference_hash), &more, 2000, 40);
+        let unchanged = reference::<true>(&mut copy_hash(&reference_hash), &more, 2000, 40);
         let occupancy = hash.occupancy;
         for h in [&mut hash, &mut reference_hash] {
             for cell in &mut h.chain[1..occupancy as usize] {
                 cell.level = i32::MAX / 2;
             }
+            // the bounds (LOSAT_X_DIAGLV) and the memo (LOSAT_X_DIAGLV2) describe the cells the
+            // inserts wrote; made again from the changed cells
+            if h.x_lv_on() {
+                let shadow = h.x_lv_shadow;
+                let memo = !h.x_last.is_empty();
+                h.x_lv_start(shadow);
+                if memo {
+                    h.x_lv2_start();
+                }
+            }
         }
-        let expected = reference(&mut reference_hash, &more, 2000, 40);
+        let expected = reference::<true>(&mut reference_hash, &more, 2000, 40);
         assert_ne!(expected, unchanged, "the change does not matter");
         let cuts = random_cuts(&mut rng, more.len());
         let (got, _, _) = partitioned(

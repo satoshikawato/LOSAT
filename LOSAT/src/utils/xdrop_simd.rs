@@ -429,6 +429,79 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
     Some(t)
 }
 
+/// No NCBI counterpart (memory placement only): a row of the vector kernels whose first element
+/// lies on a 64-byte boundary. The 256-bit kernels store 32 bytes at `PAD + first` plus multiples
+/// of 32 bytes and load the same places in the next row; from a buffer at glibc's 16-byte
+/// alignment half of those stores could cross a cache line, and a split store does not forward
+/// to the load after it (an offset set by the heap's history: one more allocation elsewhere made
+/// blastn's 16-thread search 2 % slower with three times the blocked store forwards). The
+/// values and the lengths are those of the `Vec` before.
+struct Rows<T> {
+    v: Vec<T>,
+    /// `v`'s element on the boundary (`v` is never pushed to, so its buffer does not move).
+    ptr: *mut T,
+    len: usize,
+}
+
+// SAFETY: `ptr` points into `v`, which the struct owns; it goes and is shared with `v`.
+unsafe impl<T: Send> Send for Rows<T> {}
+unsafe impl<T: Sync> Sync for Rows<T> {}
+
+impl<T: Copy + Default> Rows<T> {
+    fn new(len: usize) -> Self {
+        let mut r = Rows {
+            v: Vec::new(),
+            ptr: std::ptr::NonNull::dangling().as_ptr(),
+            len: 0,
+        };
+        r.resize(len, T::default());
+        r
+    }
+
+    /// `Vec::resize`: the rows only grow (`grow`).
+    fn resize(&mut self, len: usize, value: T) {
+        if len <= self.len {
+            self.len = len;
+            return;
+        }
+        let mut v = vec![value; len + 64 / std::mem::size_of::<T>()];
+        let off = v.as_ptr().align_offset(64);
+        assert!(off <= 64 / std::mem::size_of::<T>());
+        v[off..off + self.len].copy_from_slice(self);
+        let ptr = v[off..].as_mut_ptr();
+        *self = Rows { v, ptr, len };
+    }
+}
+
+impl<T> std::ops::Deref for Rows<T> {
+    type Target = [T];
+    #[inline(always)]
+    fn deref(&self) -> &[T] {
+        // SAFETY: `ptr` and `len` lie in `v` (`resize`), and `v` is not changed elsewhere.
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
+}
+
+impl<T> std::ops::DerefMut for Rows<T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut [T] {
+        // SAFETY: as `deref`, and `&mut self` borrows `v` uniquely.
+        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
+    }
+}
+
+impl<T: PartialEq> PartialEq for Rows<T> {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+
+impl<T: std::fmt::Debug> std::fmt::Debug for Rows<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (**self).fmt(f)
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:462-468,476-479
 // ```c
 //     if (num_extra_cells > gap_align->dp_mem_alloc) {
@@ -442,15 +515,15 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
 // The vector kernels' rows (`best`, `best_gap` of `score_array`, here `H` and `E`), the traceback
 // rows (`edit_script`) and the operation list. Kept between calls like `gap_align->dp_mem`.
 pub(crate) struct XdropScratch {
-    ha: Vec<i16>,
-    hb: Vec<i16>,
-    e: Vec<i16>,
+    ha: Rows<i16>,
+    hb: Rows<i16>,
+    e: Rows<i16>,
     // 8-bit path
-    h8a: Vec<u8>,
-    h8b: Vec<u8>,
-    e8: Vec<u8>,
+    h8a: Rows<u8>,
+    h8b: Rows<u8>,
+    e8: Rows<u8>,
     dirty8: usize,
-    sb: Vec<u8>,
+    sb: Rows<u8>,
     sb_filled: usize,
     fence_k: usize,
     bad_k: usize,
@@ -480,14 +553,14 @@ impl XdropScratch {
             return Self::new();
         }
         Self {
-            ha: Vec::new(),
-            hb: Vec::new(),
-            e: Vec::new(),
-            h8a: Vec::new(),
-            h8b: Vec::new(),
-            e8: Vec::new(),
+            ha: Rows::new(0),
+            hb: Rows::new(0),
+            e: Rows::new(0),
+            h8a: Rows::new(0),
+            h8b: Rows::new(0),
+            e8: Rows::new(0),
             dirty8: 0,
-            sb: Vec::new(),
+            sb: Rows::new(0),
             sb_filled: 0,
             fence_k: usize::MAX,
             bad_k: usize::MAX,
@@ -513,14 +586,14 @@ impl XdropScratch {
     // The initial allocation, like the first `dp_mem` allocation.
     pub(crate) fn new() -> Self {
         Self {
-            ha: vec![0; 1024],
-            hb: vec![0; 1024],
-            e: vec![0; 1024],
-            h8a: vec![0; 1024],
-            h8b: vec![0; 1024],
-            e8: vec![0; 1024],
+            ha: Rows::new(1024),
+            hb: Rows::new(1024),
+            e: Rows::new(1024),
+            h8a: Rows::new(1024),
+            h8b: Rows::new(1024),
+            e8: Rows::new(1024),
             dirty8: 0,
-            sb: vec![0; 1024],
+            sb: Rows::new(1024),
             sb_filled: 0,
             fence_k: usize::MAX,
             bad_k: usize::MAX,
@@ -3280,6 +3353,33 @@ mod tests {
     //     if (!score_only) {
     //         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
     // ```
+    // `Rows` (memory placement only): the first element on a 64-byte boundary at every length
+    // the scratch takes, the contents kept when the rows grow, as `Vec::resize`.
+    #[test]
+    fn rows_start_on_64_byte_boundaries_and_keep_their_values_when_they_grow() {
+        fn check<T: Copy + Default + PartialEq + std::fmt::Debug + From<u8>>() {
+            let mut r = Rows::<T>::new(1024);
+            assert_eq!(r.len(), 1024);
+            assert_eq!(r.as_ptr() as usize % 64, 0);
+            for (i, x) in r.iter_mut().enumerate() {
+                *x = T::from((i % 251) as u8);
+            }
+            for len in [1030usize, 2100, 4096, 9001] {
+                r.resize(len, T::default());
+                assert_eq!(r.len(), len);
+                assert_eq!(r.as_ptr() as usize % 64, 0, "len {len}");
+                assert!(r[..1024]
+                    .iter()
+                    .enumerate()
+                    .all(|(i, &x)| x == T::from((i % 251) as u8)));
+                assert!(r[1024..].iter().all(|&x| x == T::default()));
+            }
+            assert_eq!(Rows::<T>::new(0).len(), 0);
+        }
+        check::<u8>();
+        check::<i16>();
+    }
+
     // Random problems (matrices of 16 and 28 letters, several gap costs and X-drop values,
     // some with a fence sentinel) are run through `reference` and `xdrop_align`. The
     // offsets, score, fence flag, edit script and cell count are compared.

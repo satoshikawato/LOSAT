@@ -324,10 +324,12 @@ export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
 export LOSAT_X_DIAGLV=1
+export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPWINDOW=1
 export LOSAT_X_ERFABSORB=1
+export LOSAT_X_FOLDLEAN=1
 export LOSAT_X_MBFILL=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
@@ -654,6 +656,14 @@ Same values, faster computation:
   traceback calls whose scores fit 8 bits (blastn; protein traceback with an unscaled matrix, for
   example `-comp_based_stats 0`). The 16-bit kernel (the traceback of the composition-based
   redo, whose matrix is scaled) is unchanged: the same change there measured x0.98-1.01.
+  The rows of the vector kernels (`XdropScratch`: H and E on 16- and 8-bit lanes and the column letters `sb`; the
+  traceback rows stay a `Vec`) start on 64-byte boundaries (`Rows` in `utils/xdrop_simd.rs`, no switch: placement
+  only, the same values and lengths; perf/dc-fold-lean). The 256-bit kernels store 32 bytes at `PAD + first` plus
+  multiples of 32 and load them in the next row, so whether those stores split a cache line now depends on the
+  band start only. From glibc's 16-byte alignment it also depended on the heap's history: one more allocation
+  elsewhere (that branch's) made blastn of 31,168 dmel cDNAs against 3 Mb at 16 threads x1.023 slower, with the
+  same instructions and blocked store forwards x3.1, all in this kernel; with the rows aligned x1.002 against dev
+  [0.999-1.004], dev with the same rows x1.003.
 - `LOSAT_X_DPWINDOW=1` (every program's vector X-drop DP, memory; in the strict set from the pull request
   that added it, 2026-10-23; a value switch: `=<n>`, 128 or more, is the band start at which the rows move,
   built-in 1024; `=0` or `LOSAT_X_DEFAULT=0` returns to rows that hold every column) the vector kernels
@@ -3364,7 +3374,7 @@ Scheduling (each value computed by one thread with the original function; order 
   of its cells lies below the bound and at or below the bucket's bound (the bound invariant), and unless
   the cell the retrieve's walk returns gives the seed's decisions (the `last_hit` test, then with two hits
   the window test) of no cell (the bound's sufficiency); one `[X_SHADOW] DIAGLV retrieves= skipped=
-  verified= decisions= cells= identical` line on stderr at the end of the search (`cells`: skipped
+  verified= decisions= cells= memo= memofound= identical` line (`memo=`, `memofound=`: `LOSAT_X_DIAGLV2`) on stderr at the end of the search (`cells`: skipped
   retrieves whose walk found the diagonal's cell). `LOSAT_X_PAIRPARDISCSHADOW`
   compares the bounds of the two tables too (the one-hit strips fold had `LOSAT_X_PAIRPARSHADOW` until PAIRPAR
   graduated on 2026-10-22).
@@ -3384,6 +3394,70 @@ Scheduling (each value computed by one thread with the original function; order 
   the candidate set on): at 16 threads dc-megablast of 1,775 / 3,492 / 31,168 cDNAs against 3 Mb -8.6 / -8.1 / -12.0
   % wall, of 3,492 at 8 threads -26.5 %; plain blastn -2.0 % (its PR: x0.997 at 16 threads, x1.003 at one); max RSS
   unchanged.
+- `LOSAT_X_DIAGLV2=1` (in the strict set since 2026-10-22 (perf/dc-fold-lean, evidence at the end of this entry): on unless it is `0`)
+  blastn with a two-hit diagonal hash (window above 0: dc-megablast), `-subject` and `-db`, with `LOSAT_X_DIAGLV`
+  on: the table also keeps per bucket the latest insert's `(diag, level, hit_len, hit_saved)` and `other`, an upper
+  bound of the levels of the bucket's other cells (every insert raises `other` to the previous latest level, then
+  becomes the latest). A retrieve that `LOSAT_X_DIAGLV`'s bound does not skip is answered without the walk when
+  `other` lies below the seed's bound: the latest insert's values for its diagonal (the latest insert's cell is the
+  first cell of its diagonal in the chain: an insert stops at the first cell of its diagonal or the first stale
+  cell and writes there, or appends at the head, and no insert of the bucket came after it), no cell for any other
+  diagonal (any cell it would find lies below the bound and makes the decisions of no cell, `LOSAT_X_DIAGLV`'s
+  argument). The insert is unchanged apart from the memo, so the table and the hit list are the reference's
+  (`blastn/blast_engine/x_diag_lv.rs`, (iv) to (vi) in its header). The table clear, `copy_hash`, the stage copy
+  and the merge of `LOSAT_X_PAIRPARFOLD` keep the memo with the chains. Only the strips fold of `LOSAT_X_PAIRPARDISC`
+  keeps and reads it: each stage makes it again from `LOSAT_X_DIAGLV`'s bounds at its start (`x_lv2_reset`: no latest
+  insert, `other` the bucket's bound, which answers no cell exactly where the bound skips), so the reference fold
+  (`process_offset_pairs`: one thread, and every worker with many subjects) runs the code before the switch
+  (`DiagHashTable::insert_plain`, `retrieve_below::<false>`) and may change the table between stages. (Keeping the memo
+  in the reference fold made 100 16S queries against a 16S database at 16 threads x1.008 slower, where the walks it
+  saves are one cell long.) One-hit tables (megablast, blastn, blastn-short) keep no memo, and the one-hit strips folds
+  (PAIRPAR, `LOSAT_X_PAIRPARNA`) take the same memo-free calls. The dc strips stage runs an instance per state
+  of the table's memo (`MEMO`, with `LOSAT_X_FOLDLEAN`'s `LEAN`: see there); with the switch off (or `LOSAT_X_DIAGLV`
+  off) it is the instance without the memo.
+  Shadow: `LOSAT_X_DIAGLVSHADOW=1` also checks every memo answer: the bucket's walk must find the latest insert's
+  values in the first cell of its diagonal and every other cell at or below `other`, and the retrieve's walk must
+  return the memo's cell for that diagonal, or for another diagonal a cell with the decisions of no cell; the
+  `[X_SHADOW] DIAGLV` line counts the answers (`memo=`) and those for the latest insert's diagonal (`memofound=`).
+  Tests: the unit tests of `x_diag_lv.rs` (`the_memo_makes_the_decisions_of_retrieve`,
+  `the_shadow_panics_on_a_memo_that_misses_a_cell`), the dc strips stage test of `x_pair_seed_disc.rs` (the memo
+  on 1 to 8 threads and 2 to 16 partitions), the partition tests of `x_pair_seed_part.rs`,
+  `LOSAT/tests/blastn_diag_lv.rs` (`the_memo_and_the_lean_folds_give_the_same_report`: dc-megablast at 1 and 4
+  threads with each switch, the memo answering under the shadow; megablast keeps no memo).
+  Evidence (ws, node 1 timed, dev f664ceee against perf/dc-fold-lean 33397e4a, medians of the per-pair ratios,
+  pairs in rotated order, every output dev's; v4-A15 ab9 and the many-pair runs fin6; both switches on unless
+  named): 31,168 dmel cDNAs
+  against 3 Mb of dmel genome with `-subject`, 16 threads 1.842 -> 1.611 s (x0.872, 8 of 8 pairs; cycles:u 69.35
+  -> 59.37 G, instructions 167.81 -> 150.18 G), 8 threads 3.083 -> 2.660 s (x0.862), 1 thread x0.998 (the
+  reference fold, no memo); the same queries against that genome as `-db`, 16 threads 2.065 -> 1.786 s (x0.864);
+  1,775 cDNAs x0.890 (16 threads, 60 pairs) and x0.997 (1 thread); 236 cDNAs (a small table: the memo answers 7 %
+  of the retrieves) x0.995 / x0.985 / x0.981 / x1.001 at 16 / 8 / 4 / 1 threads (300 / 150 / 80 / 60 pairs); 100
+  16S queries against a 16S `-db` (every worker in the reference fold) x0.996 with dev's instructions; megablast
+  and blastn (no memo) with dev's instructions: the 31,168 cDNAs with blastn at 16 threads x1.002 [0.999-1.004]
+  (16 pairs, CPU time x0.999), megablast at 1 thread x0.998, 100 16S queries with megablast at 16 threads x0.999.
+  Both switches off: x0.991 (31,168 cDNAs, 16 threads, instructions x0.9996) and x0.990 (236 cDNAs, 16 threads).
+  Each switch alone (ab6, 85bf2fd2 against dev 249c7454, 31,168 cDNAs at 16 threads): this switch x0.927,
+  `LOSAT_X_FOLDLEAN` x0.957. Before the partition states had their own lines, 236 cDNAs at 16 threads were x1.014
+  (both off x1.025: the same instructions, memory-ordering machine clears x1.37). Memory (RssAnon at the peak, the
+  same runs): `-subject` at 16 threads 417,916 -> 415,444 kB (`MALLOC_ARENA_MAX=1`: 382,040 -> 374,184 kB);
+  `-db` at 16 threads with `MALLOC_ARENA_MAX=1` 118,408 -> 118,688 kB, within the runs' spread (with the default
+  arenas it takes two values, by where the arenas lie).
+- `LOSAT_X_FOLDLEAN=1` (in the strict set since 2026-10-22 (perf/dc-fold-lean, evidence at the end of this entry): on unless it is `0`)
+  blastn dc-megablast, the strips folds of `LOSAT_X_PAIRPARDISC` (`fold_two_hit`, diagonal hash) and
+  `LOSAT_X_PAIRPARDISCARR` (`fold_two_hit_array`, diagonal array): the stage runs one instance per state of the
+  switch (`LEAN`) and of the table's memo (`MEMO`, `LOSAT_X_DIAGLV2`), `seed_stage_of::<LEAN, MEMO>` /
+  `seed_stage_array_of::<LEAN>`, so with the switch off on a table without the memo it is the code before the two
+  switches (the same instructions apart from the layout: the field offsets of the table, which gained the memo, and
+  the partition states' indexing). The `LEAN`
+  instance takes `s_TypeOfWord`'s early return
+  itself (na_ungapped.c:531 `if (word_length == lut_word_length) return 1;`, always so for a discontiguous word: no call, no
+  arguments, the offsets unchanged and nothing extended) and inlines the diagonal-hash insert
+  (`DiagHashTable::insert_inl`: the statements of `insert_plain`, or of `insert_memo` with the memo). Same statements in the same order. The reference
+  fold (`process_offset_pairs`) is not changed.
+  Tests: the dc strips stage tests of `x_pair_seed_disc.rs` (both instances on a table with bounds and memo),
+  `LOSAT/tests/blastn_diag_lv.rs` (`the_memo_and_the_lean_folds_give_the_same_report`).
+  Evidence: with `LOSAT_X_DIAGLV2`'s (above); this switch alone (ab6) x0.957 on 31,168 cDNAs at 16 threads
+  (instructions 166.53 -> 152.44 G) and x0.983 on 236 cDNAs at 8 threads.
 - `LOSAT_X_PAIRPARFOLD=1` (in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`) blastn, where the strips paths of PAIRPAR (one-hit fold: megablast, blastn) and
   `LOSAT_X_PAIRPARDISC` (two-hit fold: dc-megablast) run, on a pool of 2+ threads: the diagonal-hash fold
   of the chunk is split by bucket (`bucket % P`, one partition per thread) over the owner and `threads - 1`
@@ -3392,7 +3466,9 @@ Scheduling (each value computed by one thread with the original function; order 
   those strips of seeds held a quarter of its seeds; see `LOSAT_X_BNFEWSUBJ`). Each participant scans the
   next strip when it lies within `2 x threads` strips of the slowest partition, cuts its seeds by
   partition (a stable counting sort) and folds partition p of the next strip of any partition it can
-  lock, into p's own table, with the folds of the strips paths (`fold`, `fold_two_hit`, a const
+  lock (each partition's state on cache lines of its own, 128-byte aligned: the participants poll every
+  partition's lock while one of them folds into it, perf/dc-fold-lean; the same in the one-hit and NA strips stages), into p's own table, with the folds of the
+  strips paths (`fold`, `fold_two_hit`, a const
   parameter and a sink of (strip, position) keys for every pushed hit and every insert that appends a
   cell). The merge puts the hits in key order and gives every appended cell the number `occ0 + rank` of
   its key (links and heads mapped; the capacity of the reference's doublings; the bounds of

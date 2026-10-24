@@ -16,42 +16,19 @@ Blast4-archive ::= {
                 data {
                   {
                     label str "DefLine",
-                    data str ">st1 frame1 all stops"
+                    data str ">st1 frame1 is all X or stop"
                   }
                 }
               },
-              title "st1 frame1 all stops"
+              title "st1 frame1 is all X or stop"
             },
             inst {
               repr raw,
               mol na,
-              length 96,
-              seq-data ncbi2na 'C30C30C30C30C30C30C30C30C30C30C30C30C30C30C309
-E0'H
-            }
-          },
-          seq {
-            id {
-              local str "Query_2"
-            },
-            descr {
-              user {
-                type str "CFastaReader",
-                data {
-                  {
-                    label str "DefLine",
-                    data str ">st2 plain"
-                  }
-                }
-              },
-              title "st2 plain"
-            },
-            inst {
-              repr raw,
-              mol na,
-              length 129,
-              seq-data ncbi2na '17C3A9B3D92D21A0AC3A185408D6E3A553A7BCE02BEA00
-F1E7A50404EEFA7BC4C0'H
+              length 180,
+              seq-data ncbi4na 'F44811F22811F48841F22841F14811F82811F82814F418
+11F48811F22811F12841F81811F24811F18811F14814F14841F18841F22841F88841F28811F118
+14F14814F14841F81841F81811F41811F84814F11814F21841F12811'H
             }
           }
         }
@@ -104,7 +81,156 @@ F1E7A50404EEFA7BC4C0'H
         },
         {
           name "EffectiveSearchSpace",
-          value big-integer 3339
+          value big-integer 0
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 6,
+              to 95,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 313177607642363, 10, -15 },
+        k { 131129917362864, 10, -15 },
+        h { 412181357326286, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { -1, 10, 0 },
+        k { -1, 10, 0 },
+        h { -1, 10, 0 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 7038",
+      "Effective search space used: 7038",
+      "Length adjustment: 13"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "tblastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">st2 plain"
+                  }
+                }
+              },
+              title "st2 plain"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 129,
+              seq-data ncbi2na '17C3A9B3D92D21A0AC3A185408D6E3A553A7BCE02BEA00
+F1E7A50404EEFA7BC4C0'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">st3 minus"
+                  }
+                }
+              },
+              title "st3 minus"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 129,
+              seq-data ncbi2na '6D8BF231F4D206E6674EFA639CECA3824338F54C5F4F1E
+53EB5B560FF6AD058140'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/arch_tbx_snucl",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 13
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "DbGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 4836
         }
       }
     }
@@ -861,180 +987,7 @@ F1E7A50404EEFA7BC4C0'H
             }
           }
         }
-      }
-    },
-    masks {
-      {
-        locations {
-          packed-int {
-            {
-              from 1,
-              to 85,
-              id local str "Query_1"
-            }
-          }
-        },
-        frame plus2
       },
-      {
-        locations {
-          packed-int {
-            {
-              from 2,
-              to 86,
-              id local str "Query_1"
-            }
-          }
-        },
-        frame plus3
-      },
-      {
-        locations {
-          packed-int {
-            {
-              from 3,
-              to 89,
-              id local str "Query_1"
-            }
-          }
-        },
-        frame minus1
-      },
-      {
-        locations {
-          packed-int {
-            {
-              from 5,
-              to 88,
-              id local str "Query_1"
-            }
-          }
-        },
-        frame minus2
-      },
-      {
-        locations {
-          packed-int {
-            {
-              from 4,
-              to 87,
-              id local str "Query_1"
-            }
-          }
-        },
-        frame minus3
-      }
-    },
-    ka-blocks {
-      {
-        lambda { 317605957635731, 10, -15 },
-        k { 133956144488482, 10, -15 },
-        h { 401214524497119, 10, -15 },
-        gapped FALSE
-      },
-      {
-        lambda { -1, 10, 0 },
-        k { -1, 10, 0 },
-        h { -1, 10, 0 },
-        gapped TRUE
-      }
-    },
-    search-stats {
-      "Effective search space: 3339",
-      "Effective search space used: 3339",
-      "Length adjustment: 11"
-    }
-  }
-}
-Blast4-archive ::= {
-  request {
-    ident "2.17.0+",
-    body queue-search {
-      program "tblastx",
-      service "plain",
-      queries bioseq-set {
-        seq-set {
-          seq {
-            id {
-              local str "Query_3"
-            },
-            descr {
-              user {
-                type str "CFastaReader",
-                data {
-                  {
-                    label str "DefLine",
-                    data str ">st3 minus"
-                  }
-                }
-              },
-              title "st3 minus"
-            },
-            inst {
-              repr raw,
-              mol na,
-              length 129,
-              seq-data ncbi2na '6D8BF231F4D206E6674EFA639CECA3824338F54C5F4F1E
-53EB5B560FF6AD058140'H
-            }
-          }
-        }
-      },
-      subject database "tests/db_search/arch_tbx_snucl",
-      algorithm-options {
-        {
-          name "EvalueThreshold",
-          value cutoff e-value { 1, 10, 1 }
-        },
-        {
-          name "LongestIntronLength",
-          value integer 0
-        },
-        {
-          name "MaskAtHash",
-          value boolean FALSE
-        },
-        {
-          name "SegFilteringWindow",
-          value integer 12
-        },
-        {
-          name "SegFilteringLocut",
-          value real { 22, 10, -1 }
-        },
-        {
-          name "SegFilteringHicut",
-          value real { 25, 10, -1 }
-        },
-        {
-          name "WordThreshold",
-          value integer 13
-        },
-        {
-          name "WindowSize",
-          value integer 40
-        },
-        {
-          name "QueryGeneticCode",
-          value integer 1
-        },
-        {
-          name "DbGeneticCode",
-          value integer 1
-        },
-        {
-          name "HitlistSize",
-          value integer 500
-        },
-        {
-          name "EffectiveSearchSpace",
-          value big-integer 4836
-        }
-      }
-    }
-  },
-  results {
-    alignments {
       {
         type diags,
         segs std {

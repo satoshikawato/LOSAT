@@ -6,8 +6,8 @@
   <BlastOutput_reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</BlastOutput_reference>
   <BlastOutput_db></BlastOutput_db>
   <BlastOutput_query-ID>Query_1</BlastOutput_query-ID>
-  <BlastOutput_query-def>st1 frame1 all stops</BlastOutput_query-def>
-  <BlastOutput_query-len>96</BlastOutput_query-len>
+  <BlastOutput_query-def>st1 frame1 is all X or stop</BlastOutput_query-def>
+  <BlastOutput_query-len>180</BlastOutput_query-len>
   <BlastOutput_param>
     <Parameters>
       <Parameters_matrix>BLOSUM62</Parameters_matrix>
@@ -21,19 +21,19 @@
 <Iteration>
   <Iteration_iter-num>1</Iteration_iter-num>
   <Iteration_query-ID>Query_1</Iteration_query-ID>
-  <Iteration_query-def>st1 frame1 all stops</Iteration_query-def>
-  <Iteration_query-len>96</Iteration_query-len>
+  <Iteration_query-def>st1 frame1 is all X or stop</Iteration_query-def>
+  <Iteration_query-len>180</Iteration_query-len>
 <Iteration_hits>
 </Iteration_hits>
   <Iteration_stat>
     <Statistics>
       <Statistics_db-num>0</Statistics_db-num>
       <Statistics_db-len>0</Statistics_db-len>
-      <Statistics_hsp-len>11</Statistics_hsp-len>
-      <Statistics_eff-space>3339</Statistics_eff-space>
-      <Statistics_kappa>0.133956144488482</Statistics_kappa>
-      <Statistics_lambda>0.317605957635731</Statistics_lambda>
-      <Statistics_entropy>0.401214524497119</Statistics_entropy>
+      <Statistics_hsp-len>13</Statistics_hsp-len>
+      <Statistics_eff-space>7038</Statistics_eff-space>
+      <Statistics_kappa>0.131129917362864</Statistics_kappa>
+      <Statistics_lambda>0.313177607642363</Statistics_lambda>
+      <Statistics_entropy>0.412181357326286</Statistics_entropy>
     </Statistics>
   </Iteration_stat>
   <Iteration_message>No hits found</Iteration_message>

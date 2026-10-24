@@ -16,18 +16,19 @@ Blast4-archive ::= {
                 data {
                   {
                     label str "DefLine",
-                    data str ">st1 frame1 all stops"
+                    data str ">st1 frame1 is all X or stop"
                   }
                 }
               },
-              title "st1 frame1 all stops"
+              title "st1 frame1 is all X or stop"
             },
             inst {
               repr raw,
               mol na,
-              length 96,
-              seq-data ncbi2na 'C30C30C30C30C30C30C30C30C30C30C30C30C30C30C309
-E0'H
+              length 180,
+              seq-data ncbi4na 'F44811F22811F48841F22841F14811F82811F82814F418
+11F48811F22811F12841F81811F24811F18811F14814F14841F18841F22841F88841F28811F118
+14F14814F14841F81841F81811F41811F84814F11814F21841F12811'H
             }
           },
           seq {
@@ -201,7 +202,7 @@ D9CC8BA2CE012C1DD511FD30494FA16DDF37CAB6D4C17F688DCC4C4E'H
         },
         {
           name "EffectiveSearchSpace",
-          value big-integer 3339
+          value big-integer 0
         }
       }
     }
@@ -1160,68 +1161,20 @@ D9CC8BA2CE012C1DD511FD30494FA16DDF37CAB6D4C17F688DCC4C4E'H
         locations {
           packed-int {
             {
-              from 1,
-              to 85,
-              id local str "Query_1"
-            }
-          }
-        },
-        frame plus2
-      },
-      {
-        locations {
-          packed-int {
-            {
-              from 2,
-              to 86,
-              id local str "Query_1"
-            }
-          }
-        },
-        frame plus3
-      },
-      {
-        locations {
-          packed-int {
-            {
-              from 3,
-              to 89,
+              from 6,
+              to 95,
               id local str "Query_1"
             }
           }
         },
         frame minus1
-      },
-      {
-        locations {
-          packed-int {
-            {
-              from 5,
-              to 88,
-              id local str "Query_1"
-            }
-          }
-        },
-        frame minus2
-      },
-      {
-        locations {
-          packed-int {
-            {
-              from 4,
-              to 87,
-              id local str "Query_1"
-            }
-          }
-        },
-        frame minus3
       }
     },
     ka-blocks {
       {
-        lambda { 317605957635731, 10, -15 },
-        k { 133956144488482, 10, -15 },
-        h { 401214524497119, 10, -15 },
+        lambda { 313177607642363, 10, -15 },
+        k { 131129917362864, 10, -15 },
+        h { 412181357326286, 10, -15 },
         gapped FALSE
       },
       {
@@ -1232,9 +1185,9 @@ D9CC8BA2CE012C1DD511FD30494FA16DDF37CAB6D4C17F688DCC4C4E'H
       }
     },
     search-stats {
-      "Effective search space: 3339",
-      "Effective search space used: 3339",
-      "Length adjustment: 11"
+      "Effective search space: 7038",
+      "Effective search space used: 7038",
+      "Length adjustment: 13"
     }
   }
 }

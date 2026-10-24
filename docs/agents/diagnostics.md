@@ -315,6 +315,7 @@ export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
+export LOSAT_X_BNTABPAR=1
 export LOSAT_X_BNTBRANGE=1
 export LOSAT_X_BNUNGAPCOUNT=1
 export LOSAT_X_BPCLUT=1
@@ -362,6 +363,7 @@ export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
 export LOSAT_X_BXLUTPOOL=1
 export LOSAT_X_BXSCANBF=1
+export LOSAT_X_BXSCANBYTE=1
 export LOSAT_X_BXSUBJFLOW=1
 export LOSAT_X_BXUNGAPSENT=1
 export LOSAT_X_BXUNITCAP=8
@@ -2513,6 +2515,38 @@ Rebuilding less:
   `hit records`, `observer 0`, ...) and stops the run. One line after the search:
   `[X_SHADOW] BPQBLOCKFMT blocks= formats= bytes= stderr_bytes= hits= events= side_files= identical`. The second search is a search
   of its own: it prints its own `LOSAT_TIMING` block and adds to the other switches' counters and shadow lines.
+- `LOSAT_X_BNTABPAR=1` (BLASTN, all tasks, outfmt 6 / 7, two or more threads, speed; in the strict set since
+  2026-10-24 (perf/bn-tab-par, evidence at the end of this entry): on unless it is `0`) the rows of a report are
+  formatted on the search's pool: they are cut into pieces of at most 512 rows of one query (the first piece of a
+  query with its outfmt 7 header; a query without rows is one piece), the pieces are taken in windows of at least
+  2,048 rows per thread (a piece without rows counts as one), each piece of a window is formatted into a buffer of
+  its own by `write_query_header` and `write_hsp_rows` (the two parts of the serial writer's function of one query,
+  `write_query_rows`, `blastn/hsp.rs`), and the thread of the batch loop writes the window's buffers in order, each
+  query's warnings before its first piece, before the next window is formatted; outfmt 7's last line stays on that
+  thread (`blastn/x_tab_par.rs`, called from `post_process_hits_and_write` in `blastn/blast_engine/run.rs`). Same
+  bytes: a query's pieces in order are its header and its HSP lists' rows in order, which is the serial call for
+  that query, and the serial writer is those calls in query order. Where: the pool that `write_reports` gets while
+  no LOSAT_X_QBATCHPAR slot exists (the batch loop: `LOSAT_X_QBATCHPAR=0`, query files below its budget, `-db`);
+  serial with one thread, while slots exist, with the Web adapter's format observer and with the BLASTN trace.
+  Memory: the rows of one window (about 6 MiB at 32 threads with ~100-byte rows), also for one query of many rows
+  or many queries without rows. `LOSAT_X_REACH` records the decision once per report call of at least one query
+  (`switch_reach_expected.tsv`: conditional). Tests: `x_tab_par` unit tests (random hit lists, outfmt 6 and 7, with
+  and without the epilog, warnings, 2 / 3 / 8 threads, a query larger than a window: the serial writer's report,
+  flushes and warnings in the same order; every row in exactly one piece, in order; a format observer keeps the
+  serial writer), integration test `blastn_tab_par` (default vs `=0` reports equal, the new side reached).
+  Premise (2026-10-24, v4-D s12): 31,168 cDNAs x 3 Mb `-task blastn` `-outfmt 6` (1.02 M rows) with
+  `LOSAT_X_QBATCHPAR=0` on ws spent 0.88 s in the report calls at 8, 16 and 32 threads alike (`[TIMING] common`
+  output 0.879 / 0.886 / 0.884 s), on one thread while the pool waited; local perf: 87 % of the call in
+  `write_hit_fields_bytes`. Evidence (2026-10-24, ws node 1, ratios per round, median): window v4ds13-w2, this
+  code (216ede53) vs dev 499cd95d, 106 runs, one sha per case: AB with `LOSAT_X_QBATCHPAR=0` x0.929 / 0.882 /
+  0.866 at 8 / 16 / 32 threads (10.83 -> 10.12, 7.18 -> 6.33, 5.70 -> 4.93 s; `=0` 0.998 / 0.985 / 0.993 of dev),
+  C5 (5,000 cDNAs) loop n16 x0.884, `-db` (C5's queries x the 3 Mb database) n16 x0.887, A1 (1,775 cDNAs, blastn,
+  by default) n16 x0.909, AB by default (slots: serial) 1.000; cycles and instructions per run equal (0.996-1.011);
+  max RSS AB loop n32 124 -> 127 MiB; `[TIMING] common` output AB loop 0.904 / 0.936 / 0.947 -> 0.241 / 0.230 /
+  0.219 s. Window v4ds13-w1 (the first version, one buffer per query, 10f8aa9e vs dev 7a731a15, 370 runs): the
+  same AB / C5 loop ratios (x0.932 / 0.892 / 0.869, x0.917 / 0.892 / 0.877), A1 by default x0.933 / 0.904 / 0.862,
+  M1 / D1 by default 0.96-1.01, `-db` loop n16 x0.904, and the defaults with slots (G2, MB, C5, AD, AB at 8 / 16 /
+  32 threads) 0.96-1.01.
 - `LOSAT_X_PAIRWISEPAR=1` (BLASTN, TBLASTX, BLASTP, speed; in the strict set from the pull request that added it,
   2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads)) the pairwise
   report (outfmt 0) of BLASTN (every task, `-subject` and `-db`), TBLASTX and BLASTP is formatted on the search's pool
@@ -5389,6 +5423,41 @@ Scheduling (each value computed by one thread with the original function; order 
   NCBI `-db` 32.01 / 32.34 s beside 21.10 / 21.21 s (0.66); one 2.1-kb cDNA 125.24 / 129.20 s against 140.98 /
   144.30 s (x0.89), NCBI 146.17 / 145.90 s beside 124.73 / 124.64 s (0.85); 800 cDNAs x yeast 87.18 / 87.26 s against
   87.76 / 88.12 s (x0.99-1.00).
+- `LOSAT_X_BXSCANBYTE=1` (BLASTX, speed; in the strict set from the pull request that added it, 2026-10-24;
+  `=0` turns it off; `blastx/x_seed_scan.rs` module header, the scan is tblastn's `x_scan_one_range_byte` of
+  `LOSAT_X_TBNSCANBYTE`, `tblastn/x_scan_byte.rs`, exactness argument in its header) the direct seed loop scans the
+  standard lookup table on presence bytes: the table indexes of a block of 256 words made from the letters at once
+  (16 at a time with AVX2), the candidates listed from one byte per index (32 KB, built the first time the direct
+  loop scans with the table and kept with it, in `Lookup::Standard`), the hits of a block copied with one capacity
+  test, NCBI's test where the block could fill the offset array; every call returns NCBI's pairs and scan range
+  (unit test `x_scan_byte_gives_ncbi_scan_calls_on_blastx_tables` against `s_blast_aa_scan_subject_one_range` on
+  `Lookup::new` tables, both forms; the direct-loop test with its arms). The offset array has four entries more.
+  CPU policy of `LOSAT_X_TBNSCANBYTE`: the AVX2 forms where the CPU has AVX2, the plain loops for sparse tables (at
+  most three tenths of the backbone cells with hits) on x86-64 without AVX2 and in WebAssembly, nothing on aarch64
+  (not timed); `=2` the plain loops for every table, `=3` for sparse tables, on any CPU. Elsewhere the scans before
+  run (`LOSAT_X_BXSCANBF`, NCBI's loop). The fused loop of `LOSAT_X_BXDIAG` keeps its candidate loop, so on x86-64
+  with AVX2 the switch acts on batches with few hits per used cell (`LOSAT_X_BXDIAGMIN`: short queries, one to a
+  few); without AVX2 the direct loop scans every batch, and the switch acts on its sparse tables on x86-64 and in
+  WebAssembly (on aarch64 not at all). `LOSAT_X_REACH` records per
+  subject of the direct loop whether the scan on presence bytes ran (`tests/blastx_scan_byte.rs`: reports equal
+  `=0`'s for a 300-nt query (sparse table) and six pieces of 1.5-3.9 kb (not sparse), `-subject` and `-db`, 1 and 3
+  threads). Timed on the workstation (node 1, one booked
+  core with its HT sibling idle (8 for 8 threads), warmed 3 s, perf stat; dev 4c9ba700 against this change, the same
+  output in every arm; medians of the per-round ratios): one 300-nt read x UniRef50 2026_03 volume 00 `-db`
+  (2,178,834 sequences), one thread x0.828 (14.96 -> 12.40 s; cycles x0.815, instructions x0.741), `-evalue 1e-5`
+  x0.833, `=3` (the plain loops) x0.853, 8 threads x0.871 (2.53 -> 2.20 s); batches the fused loop takes keep their
+  time: one 2.1-kb cDNA x fly proteins `-db` x1.002 (instructions x1.000), 200 and 1,000 short reads x SwissProt
+  `-db` x0.998 (one thread) and x0.996 (8 threads); the policy without AVX2 (`=3` with `LOSAT_X_BXDIAG=0` against dev
+  with `LOSAT_X_BXDIAG=0`) x1.004 on the cDNA (its table is not sparse; rounds x0.984-1.019) and x0.994 on 200 reads.
+  Again on dev bf92a834 (the pull request's base): the read x0.822 at one thread and x0.869 at 8, the cDNA x0.999, 200
+  reads x0.983. In WebAssembly (the serial WASI command under Node 26, one booked core, the default and `=0`
+  alternating in one process, 12 rounds, process CPU): the 300-nt read x the first 3,000 UniRef50 records (43.7 M
+  letters) `-db` x0.882 (`-subject` x0.981: there the FASTA parse dominates); 600-nt, 1-kb and 2.1-kb queries
+  x0.997-1.001 (their tables are not sparse, the scan before runs); 50 cDNAs x yeast proteins x1.002, as much as an A/A
+  arm (`=1`) against the default (arm order). With `=2` the plain loops take x0.963 on the 600-nt query's table and
+  x1.026 on the 2.1-kb one there, so blastx keeps tblastn's boundary of three tenths (a boundary of its own is not
+  measured yet).
+  Probe: `exp/a7-probe` bf65e9ba (v4-A s7, `DESIGN_A7.md`).
 - `LOSAT_X_BXHITBF=1` (BLASTX, speed; in the strict set from the pull request that added it, 2026-10-20; `=0`
   turns it off) the direct seed loop (`blastx/x_seed_scan.rs`, exactness argument in its
   header) takes the two outcomes most hits of a flag-0 cell end in, too far (`diff >= window`: `last_hit = s +

@@ -188,9 +188,61 @@ fn x_fseed_fits(diag_offset: i32, subject_length: usize, window: i32, word_size:
 /// without this one (see [`x_scan_flat_bf`]).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at
 // `x_seed_fused::x_test_hit`)
-#[inline(never)]
+/// PROBE (v4-BPF K3, not for merge): the arm of `LOSAT_BPF_K3` (0 = the production form).
+pub(crate) fn x_bpf_k3() -> u8 {
+    use std::sync::OnceLock;
+    static V: OnceLock<u8> = OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("LOSAT_BPF_K3")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn x_scan_flat_fseed<F>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    macro_rules! arm {
+        ($a:literal) => {
+            x_scan_flat_fseed_arm::<$a, F>(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                candidate,
+            )
+        };
+    }
+    match x_bpf_k3() {
+        1 => arm!(1),
+        2 => arm!(2),
+        3 => arm!(3),
+        4 => arm!(4),
+        5 => arm!(5),
+        6 => arm!(6),
+        _ => arm!(0),
+    }
+}
+
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_scan_flat_fseed_arm<const ARM: u8, F>(
     lookup: &XFlatCompressedLookup,
     subject: &[u8],
     subject_length: usize,
@@ -210,7 +262,7 @@ fn x_scan_flat_fseed<F>(
     // The caller checked `XHitBf::fits` for the subject.
     let bf = XHitBf::in_range(diag_offset, window, word_size);
     let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
-    lookup.for_each_cell::<true, _>(subject, subject_length, &mut cells, |s, cell_hits| {
+    let visit = |s: i32, cell_hits: &[i32]| {
         let here = bf.here(s);
         for &query_offset in cell_hits {
             let diag_coord = ((query_offset - s) & diag_mask) as usize;
@@ -223,7 +275,12 @@ fn x_scan_flat_fseed<F>(
                 own(query_offset, s, last_hit, diff, entry);
             }
         }
-    });
+    };
+    if ARM == 0 {
+        lookup.for_each_cell::<true, _>(subject, subject_length, &mut cells, visit);
+    } else {
+        lookup.x_for_each_cell_arm::<ARM, _>(subject, subject_length, &mut cells, visit);
+    }
     X_CELLS.with(|slot| slot.set(Some(cells)));
 }
 

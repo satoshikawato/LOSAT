@@ -332,10 +332,15 @@ cd LOSAT && cargo fmt
   `// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/<dir>/<file>:<lines> <Case>`
   above it and a row in `docs/evidence/ncbi_unit_cases/LEDGER.tsv` (statuses: ported,
   partial, e2e, to-port, n-a, superseded; `python3 LOSAT/tests/ncbi_unit_case_ledger.py`).
-  Do not add integration binaries under `LOSAT/tests/` for unit tests (each links the whole
-  crate and sees only `pub` items) and do not make private items `pub` for a test. Cases that
-  need the object manager, GenBank, BLAST databases, or PSI/RPS/PHI are `n-a`; whole-search
-  cases (bl2seq) become fixture rows, not unit tests.
+  Do not add integration-test files under `LOSAT/tests/` for unit tests (an integration test sees
+  only `pub` items, and each file adds to its suite's build) and do not make private items `pub`
+  for a test. Cases that need the object manager, GenBank, BLAST databases, or PSI/RPS/PHI are
+  `n-a`; whole-search cases (bl2seq) become fixture rows, not unit tests.
+- A new integration-test file `LOSAT/tests/<file>.rs` goes into its program's suite (two lines in
+  `LOSAT/tests/suites/<program>.rs`; run it as `cargo test --test <program> <file>::`). A file that
+  changes the process environment (`set_var`, `remove_var`, `set_current_dir`) gets its own
+  `[[test]]` in `LOSAT/Cargo.toml` instead, since the tests of a suite share one process;
+  `tests/suite_layout.rs` checks both.
 - Integration tests must compare output with NCBI BLAST+ and verify hit counts,
   bit scores, E-values, and coordinates, on real short and long sequences.
 - NCBI BLAST+ execution is allowed only as a comparison oracle during testing

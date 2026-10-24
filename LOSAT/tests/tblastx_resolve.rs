@@ -10,11 +10,11 @@
 //! ```c
 //!         if (c  != 0xFF) {
 //!             // No ambiguities, so we can do this the easy way.
-//!         	ncbi2na[i] = c;
+//!             ncbi2na[i] = c;
 //!
 //!         } else {
 //!             if (b == 0 || b == 0x0F) {
-//!             	//gap or N
+//!                 //gap or N
 //!                 ncbi2na[i] = random.GetRand() & 0x3;
 //! ```
 //! The walk gives the letter-by-letter walk's frames for every record (the unit test of

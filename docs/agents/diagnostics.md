@@ -2774,6 +2774,25 @@ Rebuilding less:
   sequences, N runs) 11.59 -> 9.75 s (NCBI `-db` 10.05 s), max RSS 257 -> 107 MiB (NCBI 162 MiB); the same
   with the genome FASTA as `-subject` 12.96 -> 11.39 s, 328 -> 217 MiB; 10 transcripts x the zebrafish cDNA
   database 62.74 -> 61.62 s, 46 -> 45 MiB.
+- `LOSAT_X_TBXRESOLVE=1` (TBLASTX, speed; in the strict set from the pull request that added it, 2026-10-24;
+  `=0` turns it off) the preliminary frames of a `-subject` (or `run_local`) record with a letter other than A,
+  C, G and T (`Subjects::x_preliminary_frames`, with `LOSAT_X_TBXFRAMES` on) read the base of each letter of one
+  base (`A`, `C`, `G`, `T`, `U`, either case) from a table (`tblastx/subjects.rs`, `ONE_BASE`), and only the other
+  letters go through `ncbi4na_of` and `resolve_ncbi4na_base`. Before, every letter of such a record went through
+  both. NCBI draws from `CRandom` only for an ncbi4na value outside `ctable` (not 1, 2, 4 or 8;
+  blast_objmgr_tools.cpp:441-450), so the draws and the bases are those of the letter-by-letter walk (a lib test
+  compares every cell of the table with the resolve and every frame of both walks). Conditional: a record of A, C,
+  G and T only copies its letters, and a `-db` sequence is read from its stored codes (`x_reach!` per record).
+  Found by the gate-gap audit's `-subject` packing item (line G, 2026-10-24): with the fruit fly genome FASTA as
+  `-subject`, `translate` took 2.31 s against 0.91 s for the same genome as `-db` (`LOSAT_TIMING`, 3 transcripts,
+  one thread), and `resolve_ncbi4na_base` plus its caller were 15 % of the cycles. Measured on the workstation
+  (node 0 CPUs 16-23, HT siblings idle, cores warmed 3 s, one warm-up round + 3 rounds, arm order rotating,
+  medians of the per-round ratios against the dev binary before the switch, bf92a834; reports and max RSS
+  identical; load 14-30): 3 fruit fly transcripts x the fruit fly genome FASTA (`-subject`, 1,870 records) 1 thread
+  9.72 -> 8.31 s (cycles x0.855, instructions x0.948), 8 threads 1.52 -> 1.28 s (cycles x0.835); the genome as
+  `-db` 8.22 -> 8.15 s (cycles x0.992, instructions x1.000). With `=0`: cycles x1.000-1.001 of the dev binary.
+  WebAssembly (serial WASI command, one Node process, CPU 20, 3 rounds, against `=0`): the fruit fly genome FASTA
+  as `-subject` 13.17 -> 11.38 s (x0.864), linear memory equal (206 MiB).
 
 Scheduling (each value computed by one thread with the original function; order of output kept):
 

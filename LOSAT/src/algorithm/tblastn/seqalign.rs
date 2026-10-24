@@ -48,7 +48,7 @@ use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::seqid::SeqId;
-use crate::report::serial::{write_query, SerialFormat};
+use crate::report::serial::{write_query_to, SerialFormat};
 
 /// Writes the documents of every query of `hitlists` (indexed by query) to `writer`, each
 /// query's warnings before it. `subject_records` and `subject_letters` are indexed by the hit
@@ -92,10 +92,7 @@ pub(super) fn write_tblastn_seqalign(
             searched_length: i32::try_from(query.seq().len())?,
             offset: i32::try_from(ranges.queries.offset(q_idx))?,
         };
-        buf.clear();
-        if write_query(format, &run, &query, &subjects, &hsps, &mut buf)? {
-            writer.write_all(&buf)?;
-        }
+        write_query_to(format, &run, &query, &subjects, &hsps, &mut buf, writer)?;
     }
     Ok(())
 }

@@ -144,10 +144,10 @@ impl TblastnDatabase {
         shared::read_nucleotide_stores(&self.db, PROGRAM)
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the database read where it is searched, after the checks
-    /// of `read_stores` (`x_db_stream.rs`).
-    pub(super) fn x_stream(&self) -> Result<super::x_db_stream::XDbStream<'_>> {
-        super::x_db_stream::XDbStream::new(&self.db, || self.read_stores())
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the database read where it is searched by `threads`
+    /// threads, after the checks of `read_stores` (`x_db_stream.rs`).
+    pub(super) fn x_stream(&self, threads: usize) -> Result<super::x_db_stream::XDbStream<'_>> {
+        super::x_db_stream::XDbStream::new(&self.db, threads, || self.read_stores())
     }
 }
 

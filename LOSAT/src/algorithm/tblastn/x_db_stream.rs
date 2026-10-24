@@ -27,10 +27,11 @@
 //!   reports read the sequences they show (`database::reported_subjects`), one read each.
 //! - A long sequence (a block of its own) is read once while anything holds it: the stages and
 //!   the query batches that run at the same time share it, and a thread that asks for it while
-//!   another reads it waits for that read (`XDbStream::read_shared`). It is read
-//!   into a buffer that glibc maps (`utils::x_mapped`), taken from the pool
+//!   another reads it waits for that read (`XDbStream::read_shared`). With more than one thread
+//!   it is read into a buffer that glibc maps (`utils::x_mapped`), taken from the pool
 //!   `utils::x_mapped::X_BYTES` when it holds one, and its store is that buffer cut to the 2-bit
-//!   data, not a copy; dropped, its pages go back instead of staying in the thread's arena.
+//!   data, not a copy; dropped, its pages go back instead of staying in the worker's arena. At one
+//!   thread it is read into the heap, where a dropped store's pages serve the next read.
 //! - A sequence whose plan has no residues (LOSAT_X_TBNUNITXLATE: a first frame of 1 MiB or more,
 //!   in a search that keeps no plan of it) is read before its plan and held while its units
 //!   translate it, as a packed subject of the copy is (`search_seed::x_lean_subject`,
@@ -185,6 +186,11 @@ pub(super) struct XDbStream<'a> {
     id: u64,
     /// The length of every sequence, by ordinal id (`x_check_nucleotide_stores`).
     lengths: Vec<usize>,
+    /// Whether a sequence is read into a buffer that glibc maps (`x_read_nucleotide_store`): with
+    /// more than one thread. The freed stores of the workers stayed resident in their arenas; at
+    /// one thread the heap's freed store serves the next read without faults (C. elegans genome:
+    /// 19 reads of its 7 sequences, against one read of the copy).
+    mapped: bool,
     /// The sequences that something holds or a thread reads (`read_shared`).
     shared: Mutex<XShared>,
     /// Woken when a read of `read_shared` ends.
@@ -198,6 +204,7 @@ impl<'a> XDbStream<'a> {
     /// also makes the copy (`read_stores`) and compares the check's result with it.
     pub(super) fn new(
         db: &'a SeqDb,
+        threads: usize,
         read_stores: impl FnOnce() -> Result<Vec<PackedNucleotide>>,
     ) -> Result<Self> {
         let checked = shared::x_check_nucleotide_stores(db, PROGRAM);
@@ -239,6 +246,7 @@ impl<'a> XDbStream<'a> {
             db,
             id: STREAMS.fetch_add(1, Ordering::Relaxed),
             lengths,
+            mapped: threads > 1,
             shared: Mutex::new(XShared::default()),
             read_done: Condvar::new(),
             copy,
@@ -258,8 +266,8 @@ impl<'a> XDbStream<'a> {
     /// Sequence `oid`, packed as the copy packs it, with one read (`XReadError` if it fails).
     pub(super) fn read(&self, oid: usize) -> Result<PackedNucleotide> {
         let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
-        let store =
-            shared::x_read_nucleotide_store(self.db, ordinal, PROGRAM).map_err(XReadError)?;
+        let store = shared::x_read_nucleotide_store(self.db, ordinal, PROGRAM, self.mapped)
+            .map_err(XReadError)?;
         Ok(self.checked(oid, store))
     }
 

@@ -1526,7 +1526,7 @@ fn search(
                 let read = if database.numbers().num_seqs == 0 {
                     Err(PreliminaryReadError("Database memory map file error").into())
                 } else if super::x_db_stream::x_tbn_db_stream() {
-                    database.x_stream().map(|stream| {
+                    database.x_stream(resolved.num_threads).map(|stream| {
                         x_stream = Some(stream);
                         Vec::new()
                     })

@@ -370,6 +370,7 @@ export LOSAT_X_TBXFRAMES=1
 export LOSAT_X_TBXHITBF=1
 export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
+export LOSAT_X_TBXMASKSEEK=1
 export LOSAT_X_TBXNEXT=1
 export LOSAT_X_TBXPIPE=1
 export LOSAT_X_TBXPREFETCH=1536
@@ -2175,6 +2176,19 @@ Rebuilding less:
   (bits), every outfmt 0 row (`Debug`) and the bytes of every tabular report (both written into memory,
   without warnings); a difference prints `[X_SHADOW] TBXRPTPAR ... DIFFERENT` and stops the run. One line
   after the reports (two or more threads): `[X_SHADOW] TBXRPTPAR hsps= pairwise= bytes= identical`.
+- `LOSAT_X_TBXMASKSEEK=1` (TBLASTX, the outfmt 0 rows and the hit records of LOSAT Web; speed; in the strict set from
+  the pull request that added it, 2026-10-24; `=0` scans every range) `PairwiseRows` keeps the shown SEG masks of each
+  query frame sorted by start, with the running maximum of their ends (`FrameMasks`, `tblastx/report.rs`), and
+  `lowercase_query_row` starts the scan of a row at the first range whose end, or the end of a range before it,
+  reaches the row (`partition_point`) and stops at the first range that starts after the row. A letter is lowercase
+  when a range of the row's frame covers it, in any order of the ranges, so the rows are the same. Before, every row
+  scanned all ranges of its frame: in LOSAT Web `PairwiseRows::hit` took 334 M of the 21.6 G cycles of TBLASTX
+  AP027131 x AP027133 (genetic code 4), 33 M with the switch. With outfmt 6 no row is made and the switch does not
+  act. Workstation, the same binary with `=0` and without, outfmt 0, alternating order (2026-10-24, outputs
+  identical in every run): AP027131 x AP027133 at one thread x0.983 of the time (cycles x0.982, instructions
+  x0.976; 8 rounds), MelaMJNV x PemoMJNVA x0.993 (cycles x0.993); eight threads (eight cores, siblings idle, 16
+  rounds) x0.990 and x0.986 (cycles x0.981 and x0.995). LOSAT Web (Node, serial reactor, 8 rounds in one process,
+  the same reactor with `=0`): the whole search x0.987 and x0.992 of the cycles (instructions x0.969 and x0.995).
 - LINKSLICES (graduated 2026-10-22, in the set since 2026-10-15; no variable, no `LOSAT_X_LINKSLICESSHADOW`;
   always on) (TBLASTX, memory) the linking call of the in-place HSP list path links its groups as disjoint
   sub-slices of the one sorted list (`tblastx/x_link_slices.rs`, exactness argument in its header). The

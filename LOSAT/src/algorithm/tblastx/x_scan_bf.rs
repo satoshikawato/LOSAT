@@ -41,7 +41,14 @@ pub(crate) fn x_tbx_scan_bf() -> bool {
 /// EXPERIMENT (LOSAT_X_TBXSCANBF): the offset-array length for `array_size` entries, with
 /// `X_SCAN_BF_SLACK` more when the switch is on.
 pub(crate) fn x_offset_pairs_len(array_size: i32) -> usize {
-    let slack = if x_tbx_scan_bf() { X_SCAN_BF_SLACK } else { 0 };
+    // PROBE (LOSAT_X_A7PROBE): the probe's scan writes up to X_A7_SLACK (> X_SCAN_BF_SLACK).
+    let slack = if crate::algorithm::tblastn::x_scan_byte::x_a7_probe() != 0 {
+        crate::algorithm::tblastn::x_scan_byte::X_A7_SLACK
+    } else if x_tbx_scan_bf() {
+        X_SCAN_BF_SLACK
+    } else {
+        0
+    };
     array_size.max(0) as usize + slack
 }
 
@@ -161,6 +168,35 @@ pub(crate) fn x_scan_subject_bf(
         );
         if s_range[1] <= s_last {
             // Stopped for room at word `s_range[1]` (blast_aascan.c:118-123).
+            return totalhits;
+        }
+    }
+    totalhits
+}
+
+/// PROBE (LOSAT_X_A7PROBE): `x_scan_subject_bf` with each range scanned on presence bytes.
+pub(crate) fn x_scan_subject_byte(
+    lookup: &BlastAaLookupTable,
+    presence: &[u8],
+    subject: &[u8],
+    seq_ranges: &[(i32, i32)],
+    offset_pairs: &mut [BlastOffsetPair],
+    array_size: i32,
+    s_range: &mut [i32; 3],
+) -> i32 {
+    let word_length = lookup.word_length;
+    let mut totalhits: i32 = 0;
+    while determine_scanning_offsets(seq_ranges, word_length, word_length, s_range) {
+        let s_last = s_range[2];
+        totalhits += crate::algorithm::tblastn::x_scan_byte::x_a7_scan_one_range(
+            lookup,
+            presence,
+            subject,
+            &mut offset_pairs[totalhits as usize..],
+            array_size - totalhits,
+            s_range,
+        );
+        if s_range[1] <= s_last {
             return totalhits;
         }
     }

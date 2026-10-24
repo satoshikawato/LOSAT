@@ -419,6 +419,14 @@ where
     // EXPERIMENT (LOSAT_X_BXSCANBF): room for the pairs the branch-free scan writes past
     // `array_size` (never read).
     let room = capacity + if branch_free { X_SCAN_BF_SLACK } else { 0 };
+    // PROBE (LOSAT_X_A7PROBE): the scan on presence bytes where the branch-free scan runs.
+    let a7 = match lookup {
+        Lookup::Standard(l) if branch_free => {
+            crate::algorithm::tblastn::x_scan_byte::x_a7_bx_presence(l)
+        }
+        _ => None,
+    };
+    let room = room.max(capacity + crate::algorithm::tblastn::x_scan_byte::X_A7_SLACK);
     // EXPERIMENT (LOSAT_X_BXHITBF): the constants of the branch-free test (the caller checked
     // XHitBf::fits).
     let bf = XHitBf::in_range(diagonals.offset, window, word);
@@ -431,6 +439,16 @@ where
         let array_size = capacity as i32;
         while range[1] <= range[2] {
             let n = match lookup {
+                Lookup::Standard(l) if a7.is_some() => {
+                    crate::algorithm::tblastn::x_scan_byte::x_a7_scan_one_range(
+                        l,
+                        a7.as_deref().unwrap(),
+                        scanned,
+                        pairs,
+                        array_size,
+                        &mut range,
+                    )
+                }
                 Lookup::Standard(l) if branch_free => {
                     x_scan_one_range_bf(l, scanned, pairs, array_size, &mut range)
                 }

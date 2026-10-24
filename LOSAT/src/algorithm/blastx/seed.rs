@@ -334,12 +334,15 @@ impl Lookup {
                 }
             })
             .collect();
-        Ok(Self::Standard(build_ncbi_lookup_from_prepared(
+        let table = build_ncbi_lookup_from_prepared(
             query,
             batch.lookup_segments.clone(),
             contexts,
             options.threshold as i32,
-        )))
+        );
+        // PROBE (LOSAT_X_A7PROBE): a new table (per-thread presence bytes are rebuilt).
+        crate::algorithm::tblastn::x_scan_byte::x_a7_bump();
+        Ok(Self::Standard(table))
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
     // ```c++

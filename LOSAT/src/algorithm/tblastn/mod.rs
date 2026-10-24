@@ -8,7 +8,7 @@ mod search_seed;
 // EXPERIMENT (LOSAT_X_TBNSCANBF): the lookup scan without a branch on the presence vector.
 pub(crate) mod x_scan_bf;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once.
-mod x_scan_byte;
+pub(crate) mod x_scan_byte;
 // NCBI c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
 // translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
 // length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);

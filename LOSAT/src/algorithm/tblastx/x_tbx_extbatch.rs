@@ -779,15 +779,27 @@ impl XPairPar {
             let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
             while scan_range[1] <= scan_range[2] {
                 let prev_scan_left = scan_range[1];
-                let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
-                    group.scan_bf,
-                    sub,
-                    subject,
-                    &seq_ranges,
-                    &mut scratch.offset_pairs[..],
-                    offset_array_size,
-                    &mut scan_range,
-                );
+                let hits = if let Some(presence) = &group.presence {
+                    crate::algorithm::tblastx::x_scan_bf::x_scan_subject_byte(
+                        sub,
+                        presence,
+                        subject,
+                        &seq_ranges,
+                        &mut scratch.offset_pairs[..],
+                        offset_array_size,
+                        &mut scan_range,
+                    )
+                } else {
+                    crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
+                        group.scan_bf,
+                        sub,
+                        subject,
+                        &seq_ranges,
+                        &mut scratch.offset_pairs[..],
+                        offset_array_size,
+                        &mut scan_range,
+                    )
+                };
                 if hits == 0 && scan_range[1] == prev_scan_left {
                     break;
                 }

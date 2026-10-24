@@ -223,6 +223,88 @@ pub(super) fn x_presence(mode: XScanByte, lookup: &Arc<BlastAaLookupTable>) -> O
     (mode != XScanByte::Sparse || sparse).then_some(bytes)
 }
 
+// PROBE (LOSAT_X_A7PROBE, exp/a7-probe, v4-A s7): A7 premise probe. 0 (default) = dev; 1 = the scan on
+// presence bytes (`scan`, AVX2 forms where detected) wherever blastx's direct loop or TBLASTX's unit
+// / extbatch path runs the branch-free scan; 2 = also on TBLASTX's dense tables (NCBI's loop now).
+pub(crate) fn x_a7_probe() -> u8 {
+    static MODE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| {
+        std::env::var("LOSAT_X_A7PROBE")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+/// PROBE (LOSAT_X_A7PROBE): offset-array entries the probe's scan needs after `array_size`.
+pub(crate) const X_A7_SLACK: usize = X_SCAN_BYTE_SLACK;
+
+/// PROBE (LOSAT_X_A7PROBE): the presence bytes when the probe scans `lookup` (`branch_free` = the
+/// table's choice of the branch-free scan), else `None`.
+pub(crate) fn x_a7_presence(lookup: &BlastAaLookupTable, branch_free: bool) -> Option<Arc<[u8]>> {
+    let mode = x_a7_probe();
+    if mode == 0 || !fits(lookup) || (mode == 1 && !branch_free) {
+        return None;
+    }
+    Some(build_presence(lookup))
+}
+
+/// PROBE (LOSAT_X_A7PROBE): one range scanned on presence bytes (NCBI's pairs and `s_range`).
+pub(crate) fn x_a7_scan_one_range(
+    lookup: &BlastAaLookupTable,
+    presence: &[u8],
+    subject: &[u8],
+    offset_pairs: &mut [BlastOffsetPair],
+    array_size: i32,
+    s_range: &mut [i32; 3],
+) -> i32 {
+    static AVX2: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let avx2 = *AVX2.get_or_init(|| avx2_detected() && x_a7_probe_plain() == 0);
+    scan(avx2, lookup, presence, subject, offset_pairs, array_size, s_range)
+}
+
+/// PROBE: LOSAT_X_A7PLAIN=1 takes the plain loops instead of the AVX2 forms.
+fn x_a7_probe_plain() -> u8 {
+    std::env::var("LOSAT_X_A7PLAIN").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0)
+}
+
+thread_local! {
+    /// PROBE: blastx's presence bytes on this thread, with the table key and the build generation.
+    #[allow(clippy::type_complexity)]
+    static A7_BX: std::cell::RefCell<((usize, usize, usize, usize), u64, Arc<[u8]>)> =
+        std::cell::RefCell::new(((0, 0, 0, 0), u64::MAX, Arc::from(Vec::new())));
+}
+
+/// PROBE: tables built so far (blastx `Lookup::new` bumps it once its table is built).
+static A7_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// PROBE: called by blastx `Lookup::new` after a standard table is built.
+pub(crate) fn x_a7_bump() {
+    A7_GENERATION.fetch_add(1, Ordering::AcqRel);
+}
+
+/// PROBE (LOSAT_X_A7PROBE): blastx's presence bytes of `lookup` for the direct loop, rebuilt on this
+/// thread when the key or the generation changed (a table at a reused address is newer).
+pub(crate) fn x_a7_bx_presence(lookup: &BlastAaLookupTable) -> Option<Arc<[u8]>> {
+    if x_a7_probe() == 0 || !fits(lookup) {
+        return None;
+    }
+    let key = (
+        lookup as *const BlastAaLookupTable as usize,
+        lookup.backbone.as_ptr() as usize,
+        lookup.pv.as_ptr() as usize,
+        lookup.overflow.len(),
+    );
+    let generation = A7_GENERATION.load(Ordering::Acquire);
+    A7_BX.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        if kept.0 != key || kept.1 != generation {
+            *kept = (key, generation, build_presence(lookup));
+        }
+        Some(Arc::clone(&kept.2))
+    })
+}
+
 thread_local! {
     /// The offset array of NCBI's loop under LOSAT_X_TBNSCANBYTESHADOW.
     static SHADOW_PAIRS: std::cell::RefCell<Vec<BlastOffsetPair>> =

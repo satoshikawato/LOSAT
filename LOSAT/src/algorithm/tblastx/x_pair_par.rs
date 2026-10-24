@@ -1175,11 +1175,15 @@ fn lut_direct_tables(
     pool: &crate::utils::threading::SearchPool<'_>,
     on_pool: bool,
 ) -> Vec<XGroup> {
-    let to_group = |g: XPairLutGroup| XGroup {
-        scan_bf: crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&g.table),
-        lookup: g.table,
-        q_min: g.q_min,
-        q_max: g.q_max,
+    let to_group = |g: XPairLutGroup| {
+        let scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&g.table);
+        XGroup {
+            presence: crate::algorithm::tblastn::x_scan_byte::x_a7_presence(&g.table, scan_bf),
+            scan_bf,
+            lookup: g.table,
+            q_min: g.q_min,
+            q_max: g.q_max,
+        }
     };
     #[cfg(all(
         feature = "parallel",
@@ -1251,6 +1255,8 @@ struct XGroup {
     q_max: u32,
     /// EXPERIMENT (LOSAT_X_TBXSCANBF): `x_scan_bf_for(&lookup)`, decided once per table.
     scan_bf: bool,
+    /// PROBE (LOSAT_X_A7PROBE): the presence bytes when the probe scans this table.
+    presence: Option<std::sync::Arc<[u8]>>,
 }
 
 /// One unit: subject frame `f`, its chunk number `k`, context group `g`.
@@ -2721,15 +2727,27 @@ fn x_unit_batch<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bo
     let prev_scan_left = scan_range[1];
     // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
-    let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
-        group.scan_bf,
-        &group.lookup,
-        subject,
-        seq_ranges,
-        &mut scratch.offset_pairs[..],
-        offset_array_size,
-        scan_range,
-    );
+    let hits = if let Some(presence) = &group.presence {
+        crate::algorithm::tblastx::x_scan_bf::x_scan_subject_byte(
+            &group.lookup,
+            presence,
+            subject,
+            seq_ranges,
+            &mut scratch.offset_pairs[..],
+            offset_array_size,
+            scan_range,
+        )
+    } else {
+        crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
+            group.scan_bf,
+            &group.lookup,
+            subject,
+            seq_ranges,
+            &mut scratch.offset_pairs[..],
+            offset_array_size,
+            scan_range,
+        )
+    };
     if hits == 0 && scan_range[1] == prev_scan_left {
         return false;
     }
@@ -3174,10 +3192,12 @@ fn build_tables(lookup: &BlastAaLookupTable, bounds: &[i32]) -> Vec<XGroup> {
                 threshold: lookup.threshold,
                 row_max: lookup.row_max.clone(),
             };
+            let scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup);
             XGroup {
                 q_min: if b.longest_chain > 0 { b.q_min } else { 0 },
                 q_max: b.q_max,
-                scan_bf: crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup),
+                presence: crate::algorithm::tblastn::x_scan_byte::x_a7_presence(&lookup, scan_bf),
+                scan_bf,
                 lookup,
             }
         })

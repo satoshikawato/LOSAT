@@ -1939,8 +1939,9 @@ fn x_redo_lpt_order(wanted: &[bool], hsps: impl Fn(usize) -> usize) -> Vec<usize
 /// next (the `par_iter` path also gives one worker the matches of whichever thread holds it); the
 /// results are read by index, so the in-order apply sees the same sequence, errors included. The
 /// order only changes which thread computes what, and when; no floating-point operation changes
-/// order, the matches share no reduction. A task holds its own worker and waits for nothing else,
-/// and a match runs no rayon work, so no task depends on a task that could be stolen below it.
+/// order, the matches share no reduction. A task holds its own worker and waits for nothing but a
+/// `-db` sequence another thread is reading (`XDbStream::read_shared`), a read that runs no rayon
+/// work; a match runs none either, so no task depends on a task that could be stolen below it.
 #[cfg(feature = "parallel")]
 #[inline(never)]
 fn x_redo_lpt<W, R>(

@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBXKMERGE / LOSAT_X_TBXKMERGESHADOW): the merge of a subject's unit lists
+//! EXPERIMENT (LOSAT_X_TBXKMERGE): the merge of a subject's unit lists
 //! (`XPairPar::merge_subject`) without its full sorts. A child module of x_pair_par.rs.
 //!
 //! With the switch off, `merge_subject_listed` builds the subject's `combined_ungapped_hits` as the
@@ -9,7 +9,7 @@
 //! list and sorts that (`Blast_HSPListAppend`). Each of these sorts is a full stable sort of a list
 //! made of pieces that are already sorted, or nearly so.
 //!
-//! What the switch changes (read once per process, `mode`; in the strict set):
+//! What the switch changes (read once per process, `on`; in the strict set):
 //! 1. Each unit sorts its own list, in its task on the pool, after its scan (`run_units`), by the
 //!    comparator of the chunk's init sort (`XRecord::cmp`); a compact list with the task's scratch
 //!    vector as the buffer (`x_stable_sort_with`, no allocation; `map_init` gives each split of the
@@ -59,12 +59,8 @@
 //! the combined list grown by the frame list's length and the frame list, as the append does, and
 //! no index array or sort buffer.
 //!
-//! `LOSAT_X_TBXKMERGESHADOW=1` (opt-in, whatever the switch): the units return unsorted lists; the
-//! merge copies them, runs `merge_subject_listed` on the copy and this file's merge on the lists
-//! (sorting them first; a compact list both with `x_stable_sort_with` and with `slice::sort_by`,
-//! which must agree), and compares every field of every HSP; the first difference stops the run.
 //! With `LOSAT_X_STATS` the counters of the items above are printed (`print_summary`) whenever the
-//! switch or its shadow is on, with zeros where no unit path ran.
+//! switch is on, with zeros where no unit path ran.
 
 use super::*;
 use crate::algorithm::tblastx::blast_gapalign::{
@@ -73,31 +69,21 @@ use crate::algorithm::tblastx::blast_gapalign::{
 };
 use std::cmp::Ordering;
 
-// No NCBI counterpart: counters of LOSAT_X_TBXKMERGE (LOSAT_X_STATS) and of its shadow; they do not
-// change any value NCBI computes.
+// No NCBI counterpart: counters of LOSAT_X_TBXKMERGE (LOSAT_X_STATS); they do not change any value
+// NCBI computes.
 static KM_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static KM_CHUNKS: AtomicU64 = AtomicU64::new(0);
 static KM_TIE_RUNS: AtomicU64 = AtomicU64::new(0);
 static KM_K1_FALLBACK: AtomicU64 = AtomicU64::new(0);
 static KM_FRAME_UNSORTED: AtomicU64 = AtomicU64::new(0);
-static KM_SHADOW_SUBJECTS: AtomicU64 = AtomicU64::new(0);
-static KM_SHADOW_HSPS: AtomicU64 = AtomicU64::new(0);
 
 // No NCBI counterpart: chooses how LOSAT orders the same lists; it does not change any value NCBI
 // computes. Read once per process, as the other modes of x_pair_par.rs.
-/// 0 = off, 1 = LOSAT_X_TBXKMERGE (a strict-set switch: on unless `LOSAT_X_TBXKMERGE` is `0`;
-/// `utils/xswitch.rs`), 2 = LOSAT_X_TBXKMERGESHADOW.
-pub(super) fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_TBXKMERGESHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_TBXKMERGE") {
-            1
-        } else {
-            0
-        }
-    })
+/// LOSAT_X_TBXKMERGE: a strict-set switch (on unless `LOSAT_X_TBXKMERGE` is `0`;
+/// `utils/xswitch.rs`).
+pub(super) fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXKMERGE"))
 }
 
 /// A saved init HSP of a unit, in either form of the units' lists (`XUnitOutputs`).
@@ -148,7 +134,7 @@ impl XRecord for XUnitHsp {
 
 /// A unit's list, sorted in its task (item 1).
 pub(super) trait XUnitSort {
-    /// The sort of the shadow mode and of the tests (`slice::sort_by`).
+    /// The sort of the tests (`slice::sort_by`), also that of an uncompacted list in its task.
     fn x_sort(&mut self);
     /// The sort of the unit's task, which may use the task's scratch as its buffer.
     fn x_sort_in(&mut self, scratch: &mut XScratch);
@@ -399,14 +385,13 @@ fn x_merge_frame(combined: &mut Vec<UngappedHit>, mut frame: Vec<UngappedHit>) {
     }
 }
 
-/// `combined_ungapped_hits` of one subject from its units' sorted lists (items 2-4); `count` adds
-/// the init HSPs to the `[X_STATS] PAIRPAR` counter.
+/// `combined_ungapped_hits` of one subject from its units' sorted lists (items 2-4); adds the init
+/// HSPs to the `[X_STATS] PAIRPAR` counter.
 fn x_merge<R: XRecord>(
     frame_chunks: &[Vec<SubjectChunk>],
     units: &[XUnit],
     lists: Vec<Vec<R>>,
     inp: &XSubject<'_>,
-    count: bool,
 ) -> Vec<UngappedHit> {
     let mut lists = lists.into_iter();
     let mut next_unit = 0usize;
@@ -423,9 +408,7 @@ fn x_merge<R: XRecord>(
             }
             let init_hsps = x_kway(chunk_lists, &unit);
             chunks_merged += 1;
-            if count {
-                INIT_HSPS.fetch_add(init_hsps.len() as u64, AtomicOrdering::Relaxed);
-            }
+            INIT_HSPS.fetch_add(init_hsps.len() as u64, AtomicOrdering::Relaxed);
             let mut hits = if init_hsps.is_empty() {
                 Vec::new()
             } else {
@@ -453,12 +436,8 @@ fn x_merge<R: XRecord>(
     combined_ungapped_hits
 }
 
-/// `XPairPar::merge_subject` with the switch on (`mode` 1: the units sorted their lists) or in
-/// the shadow mode (`mode` 2: they did not).
+/// `XPairPar::merge_subject` with the switch on (the units sorted their lists).
 pub(super) fn merge_subject(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<UngappedHit> {
-    if mode() == 2 {
-        return shadow(x_units, inp);
-    }
     let t_merge = timing().then(Instant::now);
     let XSubjectUnits {
         frame_chunks,
@@ -469,7 +448,7 @@ pub(super) fn merge_subject(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<U
     UNITS.fetch_add(units.len() as u64, AtomicOrdering::Relaxed);
     KM_SUBJECTS.fetch_add(1, AtomicOrdering::Relaxed);
     let combined = match outputs {
-        XUnitOutputs::Full(lists) => x_merge(&frame_chunks, &units, lists, inp, true),
+        XUnitOutputs::Full(lists) => x_merge(&frame_chunks, &units, lists, inp),
         XUnitOutputs::Compact(records) => {
             // The LOSAT_X_SEEDCOMPACT counters of `merge_subject_compact`.
             SC_SUBJECTS.fetch_add(1, AtomicOrdering::Relaxed);
@@ -478,82 +457,18 @@ pub(super) fn merge_subject(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<U
                 records.iter().map(|r| r.len() as u64).sum::<u64>(),
                 AtomicOrdering::Relaxed,
             );
-            x_merge(&frame_chunks, &units, records, inp, true)
+            x_merge(&frame_chunks, &units, records, inp)
         }
     };
     add_ns(&NS_MERGE, t_merge);
     combined
 }
 
-/// The shadow mode: the list of the switch off (on a copy of the units' lists, with its counters)
-/// against this file's, every field; returns this file's.
-fn shadow(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<UngappedHit> {
-    let XSubjectUnits {
-        frame_chunks,
-        units,
-        outputs,
-    } = x_units;
-    let copy = XSubjectUnits {
-        frame_chunks: frame_chunks.clone(),
-        units: units.clone(),
-        outputs: match &outputs {
-            XUnitOutputs::Full(lists) => XUnitOutputs::Full(lists.clone()),
-            XUnitOutputs::Compact(records) => XUnitOutputs::Compact(records.clone()),
-        },
-    };
-    let reference = XPairPar::merge_subject_listed(copy, inp);
-    KM_SUBJECTS.fetch_add(1, AtomicOrdering::Relaxed);
-    // This file's merge, without the counters of x_pair_par.rs (the reference counted the subject).
-    let merged = match outputs {
-        XUnitOutputs::Full(mut lists) => {
-            lists.iter_mut().for_each(XUnitSort::x_sort);
-            x_merge(&frame_chunks, &units, lists, inp, false)
-        }
-        XUnitOutputs::Compact(mut records) => {
-            // the task's sort (with a buffer) against `slice::sort_by`, unit by unit
-            let mut buffer = Vec::new();
-            for (k, list) in records.iter_mut().enumerate() {
-                let mut by_std = list.clone();
-                by_std.x_sort();
-                x_stable_sort_with(list, &mut buffer, <XUnitHsp as XRecord>::cmp);
-                assert!(
-                    *list == by_std,
-                    "LOSAT_X_TBXKMERGESHADOW: subject {} unit {k}: the buffered sort differs from slice::sort_by",
-                    inp.s_idx
-                );
-            }
-            x_merge(&frame_chunks, &units, records, inp, false)
-        }
-    };
-    let s_idx = inp.s_idx;
-    for k in 0..reference.len().max(merged.len()) {
-        match (merged.get(k), reference.get(k)) {
-            (Some(a), Some(b)) if x_same_hit(a, b) => {}
-            (a, b) => panic!(
-                "LOSAT_X_TBXKMERGESHADOW: subject {s_idx} index {k} differs (merged {} hits, reference {} hits): merged {a:?} vs reference {b:?}",
-                merged.len(),
-                reference.len()
-            ),
-        }
-    }
-    KM_SHADOW_SUBJECTS.fetch_add(1, AtomicOrdering::Relaxed);
-    KM_SHADOW_HSPS.fetch_add(reference.len() as u64, AtomicOrdering::Relaxed);
-    merged
-}
-
 /// The summary lines of the switch (printed by `x_pair_par::print_summary`).
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub(super) fn print_summary() {
     let load = |c: &AtomicU64| c.load(AtomicOrdering::Relaxed);
-    let m = mode();
-    if m == 2 {
-        eprintln!(
-            "[X_SHADOW] TBXKMERGE subjects_compared={} hsps_compared={} (combined_ungapped_hits identical)",
-            load(&KM_SHADOW_SUBJECTS),
-            load(&KM_SHADOW_HSPS)
-        );
-    }
-    if m != 0 && std::env::var_os("LOSAT_X_STATS").is_some() {
+    if on() && std::env::var_os("LOSAT_X_STATS").is_some() {
         eprintln!(
             "[X_STATS] TBXKMERGE subjects={} chunks={} tie_runs={} k1_fallback={} frame_unsorted={}",
             load(&KM_SUBJECTS),

@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBXQFRAMES, shadow LOSAT_X_TBXQFRAMESSHADOW): the SEG of a TBLASTX query
+//! EXPERIMENT (LOSAT_X_TBXQFRAMES): the SEG of a TBLASTX query
 //! batch's frames made on the search pool, one task per frame, each task writing only its own
 //! frame.
 //!
@@ -46,14 +46,7 @@
 //! BLASTX already masks the contexts of a large batch on the pool (at 2+ threads,
 //! `blastx/query_setup.rs`) and prepares the chunks of a split query in parallel
 //! (`blastx/split.rs`).
-//!
-//! The shadow also masks a copy of the frames serially, before the pool masks the frames, and
-//! compares every frame's letters, unmasked copy and interval list. On a difference it prints
-//! `[X_SHADOW] TBXQFRAMES ... DIFFERENT` and panics; otherwise `main` prints
-//! `[X_SHADOW] TBXQFRAMES batches= frames= intervals= diffs=0 identical` at exit (only batches
-//! that the pool masked are counted).
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use crate::algorithm::tblastx::translation::QueryFrame;
@@ -66,29 +59,14 @@ use crate::utils::threading::SearchPool;
 ))]
 use rayon::prelude::*;
 
-// No NCBI counterpart: reads the switches once (LOSAT_X_TBXQFRAMES is a strict-set switch: on
-// unless it is `0`; the shadow, off unless set to any
-// value, implies the switch). They choose between two LOSAT code paths with the same result and
-// change no value NCBI computes.
-/// 0 = off, 1 = LOSAT_X_TBXQFRAMES, 2 = LOSAT_X_TBXQFRAMESSHADOW.
-fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_TBXQFRAMESSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_TBXQFRAMES") {
-            1
-        } else {
-            0
-        }
-    })
+// No NCBI counterpart: reads the switch once (LOSAT_X_TBXQFRAMES is a strict-set switch: on unless
+// it is `0`). It chooses between two LOSAT code paths with the same result and changes no value
+// NCBI computes.
+/// LOSAT_X_TBXQFRAMES.
+fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXQFRAMES"))
 }
-
-// No NCBI counterpart: counters of the shadow's summary line.
-static BATCHES: AtomicU64 = AtomicU64::new(0);
-static FRAMES: AtomicU64 = AtomicU64::new(0);
-static INTERVALS: AtomicU64 = AtomicU64::new(0);
-static DIFFS: AtomicU64 = AtomicU64::new(0);
 
 /// SEG of one query frame: the masked intervals into `seg_masks`, then the masked letters
 /// overwritten with X, after keeping an unmasked copy. A frame of fewer than three bytes (the two
@@ -201,103 +179,42 @@ fn parallel<P: Fn() + Sync>(
     serial(query_frames, seg);
 }
 
-/// SEG of every frame of `query_frames` as the switch `mode` makes it (0 = off, 1 = on, 2 = on and
-/// compared with the serial loop). Separate from the environment so that tests choose the mode.
+/// SEG of every frame of `query_frames` with the switch `on` or off. Separate from the environment
+/// so that tests choose the switch.
 pub(super) fn mask_with_mode(
     query_frames: &mut [Vec<QueryFrame>],
     seg: &SegMasker,
     pool: &SearchPool<'_>,
-    mode: u8,
+    on: bool,
 ) {
-    mask_with_probe(query_frames, seg, pool, mode, &|| {})
+    mask_with_probe(query_frames, seg, pool, on, &|| {})
 }
 
 /// `mask_with_mode` with a `probe` that the parallel loop calls once per frame (see `parallel`).
-// No NCBI counterpart: the dispatch between the serial loop and the pool, and the shadow's
-// comparison; they compute no value NCBI computes.
+// No NCBI counterpart: the dispatch between the serial loop and the pool; it computes no value
+// NCBI computes.
 fn mask_with_probe<P: Fn() + Sync>(
     query_frames: &mut [Vec<QueryFrame>],
     seg: &SegMasker,
     pool: &SearchPool<'_>,
-    mode: u8,
+    on: bool,
     probe: &P,
 ) {
     let frame_count = masked_frame_count(query_frames);
     let pooled = on_pool(pool, frame_count);
-    if mode == 1 {
+    if on {
         crate::utils::xreach::x_reach!("LOSAT_X_TBXQFRAMES", pooled);
     }
-    if mode == 0 || !pooled {
+    if !on || !pooled {
         serial(query_frames, seg);
         return;
     }
-    let reference = (mode == 2).then(|| {
-        let mut reference = query_frames.to_vec();
-        serial(&mut reference, seg);
-        reference
-    });
     parallel(query_frames, seg, pool, probe);
-    if let Some(reference) = reference {
-        let intervals: usize = query_frames
-            .iter()
-            .flatten()
-            .map(|f| f.seg_masks.len())
-            .sum();
-        BATCHES.fetch_add(1, Ordering::Relaxed);
-        FRAMES.fetch_add(frame_count as u64, Ordering::Relaxed);
-        INTERVALS.fetch_add(intervals as u64, Ordering::Relaxed);
-        let first = query_frames
-            .iter()
-            .zip(&reference)
-            .enumerate()
-            .flat_map(|(q, (pool_frames, serial_frames))| {
-                pool_frames
-                    .iter()
-                    .zip(serial_frames)
-                    .enumerate()
-                    .map(move |(f, pair)| (q, f, pair))
-            })
-            .find(|(_, _, (a, b))| {
-                a.aa_seq != b.aa_seq
-                    || a.aa_seq_nomask != b.aa_seq_nomask
-                    || a.seg_masks != b.seg_masks
-            });
-        if let Some((query, frame, (a, b))) = first {
-            DIFFS.fetch_add(1, Ordering::Relaxed);
-            eprintln!(
-                "[X_SHADOW] TBXQFRAMES batches={} frames={} intervals={} diffs={} DIFFERENT (first query {query} frame index {frame}: intervals {:?} / {:?}, letters equal {}, unmasked copies equal {})",
-                BATCHES.load(Ordering::Relaxed),
-                FRAMES.load(Ordering::Relaxed),
-                INTERVALS.load(Ordering::Relaxed),
-                DIFFS.load(Ordering::Relaxed),
-                a.seg_masks,
-                b.seg_masks,
-                a.aa_seq == b.aa_seq,
-                a.aa_seq_nomask == b.aa_seq_nomask,
-            );
-            panic!("LOSAT_X_TBXQFRAMESSHADOW: the SEG of the query frames made on the pool differs from the serial one");
-        }
-    }
 }
 
 /// SEG of every frame of `query_frames` as `run_impl` makes it: the environment's switch decides.
 pub(super) fn mask(query_frames: &mut [Vec<QueryFrame>], seg: &SegMasker, pool: &SearchPool<'_>) {
-    mask_with_mode(query_frames, seg, pool, mode())
-}
-
-/// The shadow's summary line (printed by `main` at exit), only with LOSAT_X_TBXQFRAMESSHADOW.
-// No NCBI counterpart: prints counters; it does not change any value NCBI computes.
-pub fn print_summary() {
-    if mode() == 2 {
-        let diffs = DIFFS.load(Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] TBXQFRAMES batches={} frames={} intervals={} diffs={diffs} {}",
-            BATCHES.load(Ordering::Relaxed),
-            FRAMES.load(Ordering::Relaxed),
-            INTERVALS.load(Ordering::Relaxed),
-            if diffs == 0 { "identical" } else { "DIFFERENT" }
-        );
-    }
+    mask_with_mode(query_frames, seg, pool, on())
 }
 
 #[cfg(test)]
@@ -368,9 +285,8 @@ mod tests {
     }
 
     /// Pool == serial on random queries with low-complexity runs at 1, 2, 3 and 7 threads, for
-    /// several SEG parameter sets, for batches of many queries, of one query and of none, in modes
-    /// 1 and 2. (That the frames are masked on the pool is the business of
-    /// `frames_are_masked_on_the_pool_threads`.)
+    /// several SEG parameter sets, for batches of many queries, of one query and of none. (That the
+    /// frames are masked on the pool is the business of `frames_are_masked_on_the_pool_threads`.)
     #[cfg(feature = "parallel")]
     #[test]
     fn pool_frames_equal_serial_frames() {
@@ -393,18 +309,16 @@ mod tests {
                     for take in [seqs.len(), 2, 1, 0] {
                         let mut want = frames_of(&seqs[..take]);
                         serial(&mut want, &seg);
-                        for mode in [1u8, 2] {
-                            let mut got = frames_of(&seqs[..take]);
-                            mask_with_mode(&mut got, &seg, pool, mode);
-                            assert_eq!(
-                                masked(&got),
-                                masked(&want),
-                                "window {window} threads {threads} take {take} mode {mode}"
-                            );
-                        }
+                        let mut got = frames_of(&seqs[..take]);
+                        mask_with_mode(&mut got, &seg, pool, true);
+                        assert_eq!(
+                            masked(&got),
+                            masked(&want),
+                            "window {window} threads {threads} take {take}"
+                        );
                     }
                     let mut got = frames_of(&seqs);
-                    mask_with_mode(&mut got, &seg, pool, 1);
+                    mask_with_mode(&mut got, &seg, pool, true);
                     assert_eq!(masked(&got), masked(&want_all), "threads {threads}");
                     Ok(())
                 })
@@ -446,7 +360,7 @@ mod tests {
     #[test]
     fn frames_are_masked_on_the_pool_threads() {
         use std::collections::BTreeSet;
-        use std::sync::atomic::{AtomicBool, AtomicUsize};
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         use std::sync::Mutex;
         use std::time::{Duration, Instant};
 
@@ -476,30 +390,26 @@ mod tests {
                     std::thread::yield_now();
                 }
             };
-            for mode in [1u8, 2] {
-                calls.store(0, Ordering::SeqCst);
-                in_pool_of_three.store(0, Ordering::SeqCst);
-                workers.lock().unwrap().clear();
-                gave_up.store(false, Ordering::SeqCst);
+            {
                 let mut got = frames_of(&seqs);
-                mask_with_probe(&mut got, &seg, pool, mode, &probe);
-                assert_eq!(masked(&got), masked(&want), "mode {mode}");
-                assert_eq!(calls.load(Ordering::SeqCst), frame_count, "mode {mode}");
+                mask_with_probe(&mut got, &seg, pool, true, &probe);
+                assert_eq!(masked(&got), masked(&want));
+                assert_eq!(calls.load(Ordering::SeqCst), frame_count);
                 assert_eq!(
                     in_pool_of_three.load(Ordering::SeqCst),
                     frame_count,
-                    "mode {mode}: every frame is masked by a worker of the 3-thread pool"
+                    "every frame is masked by a worker of the 3-thread pool"
                 );
                 let workers = workers.lock().unwrap();
                 assert!(
                     workers.len() >= 2 && workers.iter().all(|&index| index < 3),
-                    "mode {mode}: workers {workers:?}"
+                    "workers {workers:?}"
                 );
             }
             // Not acted on: switch off.
             calls.store(0, Ordering::SeqCst);
             let mut got = frames_of(&seqs);
-            mask_with_probe(&mut got, &seg, pool, 0, &probe);
+            mask_with_probe(&mut got, &seg, pool, false, &probe);
             assert_eq!(masked(&got), masked(&want));
             assert_eq!(calls.load(Ordering::SeqCst), 0);
             Ok(())
@@ -511,7 +421,7 @@ mod tests {
                 calls.fetch_add(1, Ordering::SeqCst);
             };
             let mut got = frames_of(&seqs);
-            mask_with_probe(&mut got, &seg, pool, 1, &probe);
+            mask_with_probe(&mut got, &seg, pool, true, &probe);
             assert_eq!(masked(&got), masked(&want));
             assert_eq!(calls.load(Ordering::SeqCst), 0);
             Ok(())

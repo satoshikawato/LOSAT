@@ -3,9 +3,7 @@
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`. It
 //! acts on the units of the unit path that run without the probes of `LOSAT_TIMING` /
-//! `LOSAT_X_STATS`, in `scan_unit` and in the batched scan of `LOSAT_X_TBXEXTBATCH`; its shadow
-//! (`LOSAT_X_TBXHITBFSHADOW`) turns it on and compares it with the loop before the switch on every
-//! unit.
+//! `LOSAT_X_STATS`, in `scan_unit` and in the batched scan of `LOSAT_X_TBXEXTBATCH`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:536-552
 //! ```c
@@ -24,11 +22,14 @@
 //! the fixture comparisons. The input (150,000 bases of MelaMJNV against 150,000 of PemoMJNVA) has
 //! frames of about 50,000 letters, so the unit path runs; `LOSAT_X_TBXEXTBATCH=2` sends its units to
 //! the batched scan. The tests compare the default, the batched scan, the prefetch
-//! on every subject, today's lists and the shadow (which also shows that the loop ran and that no
-//! unit fell outside its range) with `=0`.
+//! on every subject and today's lists with `=0`; the reach rows (`LOSAT_X_REACH`,
+//! `tests/reach_support`) show that the loop ran.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+#[allow(clippy::duplicate_mod)]
+mod reach_support;
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -37,7 +38,6 @@ fn fasta(name: &str) -> PathBuf {
 }
 
 const OFF: (&str, &str) = ("LOSAT_X_TBXHITBF", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBXHITBFSHADOW", "1");
 /// The batched scan of LOSAT_X_TBXEXTBATCH on every unit (`x_hit_batched` for the rare hits).
 const BATCHED: (&str, &str) = ("LOSAT_X_TBXEXTBATCH", "2");
 /// Today's `InitHSP` lists instead of the compact records (`run_unit`, `run_unit_batched`).
@@ -141,33 +141,6 @@ impl Drop for Inputs {
     }
 }
 
-/// The lines of `stderr` that start with `prefix`.
-fn lines<'a>(stderr: &'a str, prefix: &str) -> Vec<&'a str> {
-    stderr
-        .lines()
-        .filter(|line| line.starts_with(prefix))
-        .collect()
-}
-
-/// The number after `name=` in the first line of `stderr` that starts with `prefix`.
-fn field(stderr: &str, prefix: &str, name: &str) -> u64 {
-    let line = lines(stderr, prefix)
-        .first()
-        .copied()
-        .unwrap_or_else(|| panic!("no {prefix} line in {stderr}"));
-    let key = format!("{name}=");
-    let at = line
-        .find(&key)
-        .unwrap_or_else(|| panic!("no {name} in {line}"))
-        + key.len();
-    line[at..]
-        .split(|c: char| !c.is_ascii_digit())
-        .next()
-        .unwrap()
-        .parse()
-        .unwrap()
-}
-
 #[test]
 fn the_branch_free_loop_gives_the_same_report() {
     let inputs = Inputs::new("same");
@@ -182,55 +155,19 @@ fn the_branch_free_loop_gives_the_same_report() {
             &[BATCHED, FULL_LISTS][..],
             &[BATCHED, PREFETCH][..],
         ] {
-            let (report, _) = inputs.tblastx(threads, switches);
+            // The loop ran on the units inside its range (`fits`).
+            let reach = reach_support::Reach::new("same");
+            let mut arm: Vec<(&str, &str)> = switches.to_vec();
+            arm.push(reach.var());
+            let (report, _) = inputs.tblastx(threads, &arm);
             assert_eq!(report, off, "threads {threads} {switches:?}: against =0");
+            let sides = reach.sides("LOSAT_X_TBXHITBF");
+            assert!(
+                sides.0,
+                "threads {threads} {switches:?}: sides {sides:?}: its path did not run"
+            );
         }
         let (batched_off, _) = inputs.tblastx(threads, &[BATCHED, OFF]);
         assert_eq!(batched_off, off, "threads {threads}: batched =0 against =0");
-    }
-}
-
-#[test]
-fn the_shadow_compares_every_unit() {
-    let inputs = Inputs::new("shadow");
-    for threads in [1, 2] {
-        let (off, _) = inputs.tblastx(threads, &[OFF]);
-        for switches in [
-            &[SHADOW][..],
-            &[SHADOW, FULL_LISTS][..],
-            &[SHADOW, BATCHED][..],
-            &[SHADOW, BATCHED, PREFETCH][..],
-        ] {
-            let (shadow, stderr) = inputs.tblastx(threads, switches);
-            assert_eq!(
-                shadow, off,
-                "threads {threads} {switches:?}: shadow against =0"
-            );
-            assert!(
-                field(&stderr, "[X_SHADOW] TBXHITBF", "units_compared") > 0,
-                "threads {threads} {switches:?}: no unit compared: {stderr}"
-            );
-            assert!(
-                field(&stderr, "[X_SHADOW] TBXHITBF", "records_compared") > 0,
-                "threads {threads} {switches:?}: no record compared: {stderr}"
-            );
-            assert_eq!(
-                field(&stderr, "[X_SHADOW] TBXHITBF", "outside"),
-                0,
-                "threads {threads} {switches:?}: a unit outside the range: {stderr}"
-            );
-        }
-    }
-}
-
-#[test]
-fn the_switch_off_prints_no_shadow_line() {
-    let inputs = Inputs::new("quiet");
-    for switches in [&[][..], &[OFF][..]] {
-        let (_, stderr) = inputs.tblastx(1, switches);
-        assert!(
-            lines(&stderr, "[X_SHADOW] TBXHITBF").is_empty(),
-            "{switches:?}: {stderr}"
-        );
     }
 }

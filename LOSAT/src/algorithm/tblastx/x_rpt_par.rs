@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBXRPTPAR, shadow LOSAT_X_TBXRPTPARSHADOW): TBLASTX's report stage
+//! EXPERIMENT (LOSAT_X_TBXRPTPAR): TBLASTX's report stage
 //! (`write_tblastx_outputs` in blast_engine/run_impl.rs) on the search's pool.
 //!
 //! The reports are written once, after the last query batch, by the thread of the batch loop.
@@ -9,7 +9,7 @@
 //! outfmt 0 rows 1.80 s (translated a second time, with the masks lowercased), the tabular rows
 //! 0.17 s (outfmt 0's text 0.41 s) and the final order (`report_order`) 0.15 s.
 //!
-//! What the switch changes (read once per process, `mode`), when the pool has two threads or
+//! What the switch changes (read once per process, `on`), when the pool has two threads or
 //! more (`pool`):
 //! 1. The displayed identities (`report::set_displayed_identities`) run over chunks of the final
 //!    list on the pool, each chunk with the serial function.
@@ -42,16 +42,8 @@
 //! Memory: the outfmt 0 rows are one list of the final list's length in both forms; the tabular
 //! windows hold at most `CHUNK` x `WINDOW_CHUNKS` x threads rows formatted (~13 MB at 16
 //! threads for rows of ~100 bytes).
-//!
-//! The shadow (`LOSAT_X_TBXRPTPARSHADOW`, implies the switch) runs the serial functions too, on
-//! a copy: it compares every HSP's displayed identities, positives, mismatches and identity
-//! (bits), every outfmt 0 row (`Debug`), and the bytes of every tabular report (both written
-//! into memory, without warnings); on a difference it prints `[X_SHADOW] TBXRPTPAR ...
-//! DIFFERENT` and panics; after the reports it prints `[X_SHADOW] TBXRPTPAR hsps= pairwise=
-//! bytes= identical` (the HSPs, outfmt 0 rows and tabular bytes compared).
 
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -74,27 +66,13 @@ const CHUNK: usize = 1024;
 /// The chunks of tabular rows formatted per thread before the loop's thread writes them.
 const WINDOW_CHUNKS: usize = 4;
 
-// No NCBI counterpart: what the shadow compared (LOSAT_X_TBXRPTPARSHADOW); it does not change any
-// value NCBI computes.
-static SHADOW_HSPS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_PAIRWISE: AtomicU64 = AtomicU64::new(0);
-static SHADOW_BYTES: AtomicU64 = AtomicU64::new(0);
-
 // No NCBI counterpart: chooses which threads compute the report's values; it does not change any
 // value NCBI computes. Read once per process.
-/// 0 = off, 1 = LOSAT_X_TBXRPTPAR (a strict-set switch: on unless `LOSAT_X_TBXRPTPAR` is `0`;
-/// `utils/xswitch.rs`), 2 = LOSAT_X_TBXRPTPARSHADOW.
-pub(crate) fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_TBXRPTPARSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_TBXRPTPAR") {
-            1
-        } else {
-            0
-        }
-    })
+/// LOSAT_X_TBXRPTPAR (a strict-set switch: on unless `LOSAT_X_TBXRPTPAR` is `0`;
+/// `utils/xswitch.rs`).
+fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXRPTPAR"))
 }
 
 /// The pool the report stage runs on (`Some` with the switch on and a pool of two threads or
@@ -104,176 +82,18 @@ pub(crate) fn pool<'p, 'q>(pool: &'p SearchPool<'q>) -> Option<&'p SearchPool<'q
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ));
-    let m = mode();
-    let pooled = PARALLEL && m != 0 && pool.enabled() && pool.threads() > 1;
-    if m == 1 {
+    let on = on();
+    let pooled = PARALLEL && on && pool.enabled() && pool.threads() > 1;
+    if on {
         crate::utils::xreach::x_reach!("LOSAT_X_TBXRPTPAR", pooled);
     }
     pooled.then_some(pool)
-}
-
-/// `report::set_displayed_identities` over chunks of `hits` on `pool` (item 1).
-pub(crate) fn set_displayed_identities(
-    pool: &SearchPool<'_>,
-    hits: &mut [TblastxHsp],
-    queries: &[FastaRecord],
-    subjects: SubjectLetters<'_>,
-    query_code: &GeneticCode,
-    db_code: &GeneticCode,
-) {
-    let reference = (mode() == 2).then(|| {
-        let mut copy = hits.to_vec();
-        report::set_displayed_identities(&mut copy, queries, subjects, query_code, db_code);
-        copy
-    });
-    identities_on(pool, hits, queries, subjects, query_code, db_code);
-    if let Some(reference) = reference {
-        for (index, (hsp, serial)) in hits.iter().zip(&reference).enumerate() {
-            let (a, b) = (&hsp.hit, &serial.hit);
-            if (
-                a.num_ident,
-                a.num_positives,
-                a.mismatch,
-                a.identity.to_bits(),
-            ) != (
-                b.num_ident,
-                b.num_positives,
-                b.mismatch,
-                b.identity.to_bits(),
-            ) {
-                different(&format!(
-                    "HSP {index}: identities {} / {}, positives {} / {}, mismatches {} / {}, identity {} / {}",
-                    a.num_ident, b.num_ident, a.num_positives, b.num_positives, a.mismatch,
-                    b.mismatch, a.identity, b.identity
-                ));
-            }
-        }
-        SHADOW_HSPS.fetch_add(hits.len() as u64, Ordering::Relaxed);
-    }
-}
-
-/// `report::engine_counts` (the Seq-aligns' engine counts, outfmt 8 and 12 only) over chunks of
-/// `hits` on `pool`, as item 1: each chunk counted by the serial function, the chunks' counts
-/// joined in the list's order.
-pub(crate) fn engine_counts(
-    pool: &SearchPool<'_>,
-    hits: &[TblastxHsp],
-    queries: &[FastaRecord],
-    subjects: SubjectLetters<'_>,
-    query_code: &GeneticCode,
-    db_code: &GeneticCode,
-) -> Vec<(u32, u32)> {
-    let counts = engine_counts_on(pool, hits, queries, subjects, query_code, db_code);
-    if mode() == 2 {
-        let serial = report::engine_counts(hits, queries, subjects, query_code, db_code);
-        if let Some(index) = (0..hits.len()).find(|&index| counts[index] != serial[index]) {
-            different(&format!(
-                "HSP {index}: engine counts {:?} / {:?}",
-                counts[index], serial[index]
-            ));
-        }
-    }
-    counts
-}
-
-/// The outfmt 0 rows of `hits` (`report::pairwise_hits`) as an indexed map on `pool` (item 2).
-pub(crate) fn pairwise_hits(
-    pool: &SearchPool<'_>,
-    hits: &[TblastxHsp],
-    rows: &PairwiseRows<'_>,
-) -> Vec<PairwiseHit> {
-    let pairwise = pairwise_on(pool, hits, rows);
-    if mode() == 2 {
-        let mut window = Vec::new();
-        for (index, (hit, hsp)) in pairwise.iter().zip(hits).enumerate() {
-            let (a, b) = (
-                format!("{hit:?}"),
-                format!("{:?}", rows.hit(hsp, &mut window)),
-            );
-            if a != b {
-                different(&format!("outfmt 0 row {index}: {a} / {b}"));
-            }
-        }
-        SHADOW_PAIRWISE.fetch_add(pairwise.len() as u64, Ordering::Relaxed);
-    }
-    pairwise
 }
 
 /// `report::write_tabular` without a format observer, with the rows of each query formatted on
 /// `pool` (item 3).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_tabular<W: Write>(
-    pool: &SearchPool<'_>,
-    hits: &[TblastxHsp],
-    writer: &mut W,
-    comments: bool,
-    query_titles: &[&[u8]],
-    database: &str,
-    query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
-    unsearched: &[bool],
-    epilog: bool,
-    mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
-) -> io::Result<()> {
-    if mode() == 2 {
-        let (mut serial, mut parallel) = (Vec::new(), Vec::new());
-        report::write_tabular(
-            hits,
-            &mut serial,
-            comments,
-            query_titles,
-            database,
-            query_ids,
-            subject_ids,
-            unsearched,
-            epilog,
-            None,
-            None,
-        )?;
-        write_tabular_rows(
-            pool,
-            hits,
-            &mut parallel,
-            comments,
-            query_titles,
-            database,
-            query_ids,
-            subject_ids,
-            unsearched,
-            epilog,
-            None,
-        )?;
-        if serial != parallel {
-            let at = serial
-                .iter()
-                .zip(&parallel)
-                .position(|(a, b)| a != b)
-                .unwrap_or(serial.len().min(parallel.len()));
-            different(&format!(
-                "tabular bytes {} / {}, first difference at byte {at}",
-                parallel.len(),
-                serial.len()
-            ));
-        }
-        SHADOW_BYTES.fetch_add(serial.len() as u64, Ordering::Relaxed);
-    }
-    write_tabular_rows(
-        pool,
-        hits,
-        writer,
-        comments,
-        query_titles,
-        database,
-        query_ids,
-        subject_ids,
-        unsearched,
-        epilog,
-        warnings.as_deref_mut(),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn write_tabular_rows<W: Write>(
     pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
     writer: &mut W,
@@ -344,11 +164,12 @@ fn format_chunk(
 }
 
 // The parallel forms of items 1-3; without threads (the second forms) they are the serial loops.
+/// `report::set_displayed_identities` over chunks of `hits` on `pool` (item 1).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn identities_on(
+pub(crate) fn set_displayed_identities(
     pool: &SearchPool<'_>,
     hits: &mut [TblastxHsp],
     queries: &[FastaRecord],
@@ -367,7 +188,7 @@ fn identities_on(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 )))]
-fn identities_on(
+pub(crate) fn set_displayed_identities(
     _pool: &SearchPool<'_>,
     hits: &mut [TblastxHsp],
     queries: &[FastaRecord],
@@ -378,11 +199,14 @@ fn identities_on(
     report::set_displayed_identities(hits, queries, subjects, query_code, db_code)
 }
 
+/// `report::engine_counts` (the Seq-aligns' engine counts, outfmt 8 and 12 only) over chunks of
+/// `hits` on `pool`, as item 1: each chunk counted by the serial function, the chunks' counts
+/// joined in the list's order.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn engine_counts_on(
+pub(crate) fn engine_counts(
     pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
     queries: &[FastaRecord],
@@ -402,7 +226,7 @@ fn engine_counts_on(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 )))]
-fn engine_counts_on(
+pub(crate) fn engine_counts(
     _pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
     queries: &[FastaRecord],
@@ -413,11 +237,12 @@ fn engine_counts_on(
     report::engine_counts(hits, queries, subjects, query_code, db_code)
 }
 
+/// The outfmt 0 rows of `hits` (`report::pairwise_hits`) as an indexed map on `pool` (item 2).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn pairwise_on(
+pub(crate) fn pairwise_hits(
     pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
     rows: &PairwiseRows<'_>,
@@ -434,7 +259,7 @@ fn pairwise_on(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 )))]
-fn pairwise_on(
+pub(crate) fn pairwise_hits(
     _pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
     rows: &PairwiseRows<'_>,
@@ -479,23 +304,4 @@ fn format_rows(
         .chunks(CHUNK)
         .map(|rows| format_chunk(rows, query_ids, subject_ids, config))
         .collect()
-}
-
-// No NCBI counterpart: the shadow's line after the reports (`LOSAT_X_TBXRPTPARSHADOW`); it does not
-// change any value NCBI computes.
-/// The shadow's line after the reports (`LOSAT_X_TBXRPTPARSHADOW`).
-pub(crate) fn print_shadow_summary() {
-    if mode() == 2 {
-        eprintln!(
-            "[X_SHADOW] TBXRPTPAR hsps={} pairwise={} bytes={} identical",
-            SHADOW_HSPS.load(Ordering::Relaxed),
-            SHADOW_PAIRWISE.load(Ordering::Relaxed),
-            SHADOW_BYTES.load(Ordering::Relaxed)
-        );
-    }
-}
-
-fn different(what: &str) -> ! {
-    eprintln!("[X_SHADOW] TBXRPTPAR DIFFERENT ({what})");
-    panic!("LOSAT_X_TBXRPTPARSHADOW: the report stage on the pool differs from the serial stage");
 }

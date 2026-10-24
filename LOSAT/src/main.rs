@@ -234,7 +234,6 @@ fn main() -> Result<()> {
     LOSAT::core::composition_adjustment::adjust_scores::x_newtonexact_print_stats();
     LOSAT::algorithm::tblastx::x_seed_bucket::print_summary();
     LOSAT::algorithm::tblastx::blast_engine::x_pair_par_print_summary();
-    LOSAT::algorithm::tblastx::blast_engine::x_query_frames_print_summary();
     LOSAT::algorithm::tblastx::blast_engine::x_seed_release_print_summary();
     LOSAT::algorithm::tblastx::lookup::x_bplut_print_summary();
     LOSAT::algorithm::tblastx::lookup::x_tbxlut_print_summary();
@@ -272,7 +271,6 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastx::seed::x_seed_scan::print_shadow_stats();
     LOSAT::algorithm::blastp::x_ungapped_fast::print_shadow_stats();
     LOSAT::algorithm::blastp::x_ungapped_sent::print_shadow_stats();
-    LOSAT::algorithm::tblastx::extension::x_tbxungap_print_shadow_stats();
     LOSAT::utils::x_logclone::print_shadow_stats();
     // Diagnostic (LOSAT_TIMING): the common line, last (utils/xtiming.rs).
     LOSAT::utils::xtiming::print();

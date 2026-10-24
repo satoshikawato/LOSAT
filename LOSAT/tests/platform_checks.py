@@ -6,8 +6,8 @@ Standard library only; it runs with the stock Python of the Linux, Windows and m
 run: for each case of platform_check_cases.json, run the binary with the performance switches as
 they are by default, at 1 and 4 threads, and require exit code 0 and one output (one SHA-256) over
 both runs.  Each --extra-mode NAME=VAR=VALUE adds a mode: the default plus that one variable (such
-as LOSAT_X_DPNEON2=1 on aarch64, which runs the NEON kernels in register pairs), whose outputs must
-equal the others too.  Writes DIR/rows.tsv with the columns case, threads, mode, exit_code, sha256,
+as LOSAT_X_DPNEON2=0 on aarch64, which runs the 128-bit NEON kernels instead of the register
+pairs), whose outputs must equal the others too.  Writes DIR/rows.tsv with the columns case, threads, mode, exit_code, sha256,
 seconds.  Exit code 1 on any difference or failure.
 
 compare: reads the rows.tsv of several platforms and requires, for every (case, threads, mode),

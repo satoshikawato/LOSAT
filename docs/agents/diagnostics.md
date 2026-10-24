@@ -329,6 +329,7 @@ export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
 export LOSAT_X_DISPTABLE=1
 export LOSAT_X_DPEMASK=1
+export LOSAT_X_DPNEON2=1
 export LOSAT_X_DPWINDOW=1
 export LOSAT_X_ERFABSORB=1
 export LOSAT_X_FOLDLEAN=1
@@ -712,8 +713,9 @@ Same values, faster computation:
   `utils/x_xdrop_w128.rs`; the kernel bodies are the ones x86_64 and wasm32 run). They always run
   on aarch64; there is no switch back to the scalar port, which stays for the calls the kernels
   decline. Platform checks no longer have the mode `noneon`; they hash the default (NEON) and, on
-  the Linux and macOS arm64 runners, `dpneon2`.
-- `LOSAT_X_DPNEON2=1` (aarch64 only, speed; not in the strict set: off unless set, to any value)
+  the Linux and macOS arm64 runners, `nodpneon2` (`LOSAT_X_DPNEON2=0`, the 128-bit NEON kernels).
+- `LOSAT_X_DPNEON2=1` (aarch64 only, speed; in the strict set since 2026-10-24: on unless
+  `LOSAT_X_DPNEON2=0`, which runs the DPW128 / 128-bit NEON kernels)
   the X-drop DP kernels of the 256-bit AVX2 kernels on NEON, each
   256-bit vector in two registers (32 x i8 or 16 x i16 lanes per block, the same band steps, the
   row gap in the form of the DPW128 kernels): the same values and result as the 128-bit kernels; a
@@ -721,8 +723,10 @@ Same values, faster computation:
   lanes with `16 * gap_extend - (gap_open + gap_extend) > 32768`) runs on the DPW128 /
   128-bit kernels (`utils/x_xdrop_neon2.rs`). It takes the place the 256-bit AVX2 kernels have on
   x86_64 (first in the dispatch). They move their DP rows down with the band like the other
-  kernels (`LOSAT_X_DPWINDOW`). Platform checks hash it on the Linux and macOS arm64 runners
-  (mode `dpneon2`).
+  kernels (`LOSAT_X_DPWINDOW`). Evidence: #208, bench run 38590719673 on ubuntu-24.04-arm, 1 thread
+  x0.867-0.974 on the cases with X-drop DP, x0.994-1.004 without, 4 threads x0.902-0.979, equal output
+  hashes. Platform checks hash `=0` on the Linux and macOS arm64 runners (mode `nodpneon2`); the
+  mode `dpneon2` was equal to the default on both arm64 runners in every run since 2026-10-15.
 - GREEDYFAST (graduated 2026-10-22; no variable, no `LOSAT_X_GREEDYSHADOW`, no `X_GREEDY_TEST_MODE`
   hook; always on) megablast greedy alignment, one distance in three passes of 256 cells, match
   extension 8 bases at a time, on an unpacked subject (`x_greedy_row` in `blastn/alignment/greedy.rs`).

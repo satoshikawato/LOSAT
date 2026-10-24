@@ -30,6 +30,11 @@
 //!   into a buffer that glibc maps (`utils::x_mapped`), taken from the pool
 //!   `utils::x_mapped::X_BYTES` when it holds one, and its store is that buffer cut to the 2-bit
 //!   data, not a copy; dropped, its pages go back instead of staying in the thread's arena.
+//! - A sequence whose plan has no residues (LOSAT_X_TBNUNITXLATE: a first frame of 1 MiB or more,
+//!   in a search that keeps no plan of it) is read before its plan and held while its units
+//!   translate it, as a packed subject of the copy is (`search_seed::x_lean_subject`,
+//!   `search_gapped::x_preliminary_protein_hsps_by_unit`); so is every sequence with
+//!   LOSAT_X_TBNUNITXLATESHADOW, whose units are compared with the frames.
 //! - While a stream is open (`x_frames_pooled`), the frames of 1 MiB or more of a dropped subject
 //!   plan go to `X_BYTES` and the next frames and long reads take them with their pages resident
 //!   (`x_subject_translate::x_frame_buffer`, `x_reuse_frame`), as BLASTN's database reads do. The

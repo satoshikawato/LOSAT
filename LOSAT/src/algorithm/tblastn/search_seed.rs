@@ -692,6 +692,23 @@ pub(super) fn x_keep_few_print_summary() {
     );
 }
 
+// No NCBI counterpart: the rule of LOSAT_X_TBNUNITXLATE in `x_scan_plan` (its packed arm) for a
+// subject that is not read yet; it computes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): whether `x_scan_plan` makes the plan of a packed subject of
+/// `length` bases without residues (LOSAT_X_TBNUNITXLATE): the search keeps no plan of it
+/// (`XSubjectSide::slot`) and `x_units_translate`.
+pub(super) fn x_lean_subject(
+    x_subject: Option<(&XSubjectSide, usize)>,
+    length: usize,
+    db_gencode: u8,
+    mask_lowercase: bool,
+) -> bool {
+    x_subject
+        .and_then(|(side, oid)| side.slot(oid, db_gencode, mask_lowercase))
+        .is_none()
+        && super::x_subject_translate::x_units_translate(length)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
 // ```c
 //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
@@ -791,6 +808,12 @@ pub(super) fn x_scan_plan(
     // `run_local` is given, or a set that keeps its letters for a byte without an ncbi4na code)
     // are packed for the plan (`x_plan_store`), and the plan is made from them as for a packed
     // subject.
+    // The slot of the subject's kept plan when the search keeps them (the dispatch point below);
+    // a plan made for this search only may have no residues (LOSAT_X_TBNUNITXLATE).
+    let x_slot = x_subject.and_then(|(side, oid)| {
+        side.slot(oid, db_gencode, mask_lowercase)
+            .map(|slot| (side, slot))
+    });
     let x_build_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
         use super::x_subject_store::XPrelimSubject;
         use crate::sequence::packed_subject::SubjectNt;
@@ -817,14 +840,19 @@ pub(super) fn x_scan_plan(
                     !mask_lowercase || store.lowercase().is_empty(),
                     "TBLASTN: a packed subject with lower-case letters searched with lowercase masking"
                 );
+                // EXPERIMENT (LOSAT_X_TBNUNITXLATE): the plan of a long subject made for this
+                // search only has no residues; each unit translates those it reads.
+                if x_slot.is_none() {
+                    let lean = super::x_subject_translate::x_units_translate(store.len());
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNUNITXLATE", lean);
+                    if lean {
+                        return super::x_subject_translate::x_packed_lean_plan(store, db_gencode);
+                    }
+                }
                 super::x_subject_translate::x_packed_subject_plan(store, db_gencode)
             }
         }
     };
-    let x_slot = x_subject.and_then(|(side, oid)| {
-        side.slot(oid, db_gencode, mask_lowercase)
-            .map(|slot| (side, slot))
-    });
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
     // ```c
     //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
@@ -915,14 +943,16 @@ pub(super) fn x_scan_plan(
 /// Scan one unit and hand every filled offset
 /// array to `on_pairs` in scan order, as NCBI c++/src/algo/blast/core/
 /// aa_ungapped.c:492-516 consumes it (`for (i = 0; i < hits; ++i)`).
+/// `subject` holds the unit's frame from the chunk's first residue on (the frame's `aa_seq`
+/// from `1 + chunk.offset`, or the residues the unit translated, `x_unit_residues`).
 pub(super) fn x_scan_unit(
     plan: &XScanPlan,
     unit: usize,
+    subject: &[u8],
     pairs: &mut Vec<BlastOffsetPair>,
     mut on_pairs: impl FnMut(&[BlastOffsetPair]),
 ) {
-    let (frame_index, chunk, ranges) = &plan.subject.units[unit];
-    let frame = &plan.subject.frames[*frame_index];
+    let (_, _, ranges) = &plan.subject.units[unit];
     // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1018-1019
     // BlastChooseProteinScanSubject(lookup_wrap);
     // aux_struct->WordFinder = BlastAaWordFinder;
@@ -965,7 +995,7 @@ pub(super) fn x_scan_unit(
                     scan_byte,
                     &plan.lookup,
                     presence,
-                    &frame.aa_seq[1 + chunk.offset..],
+                    subject,
                     pairs,
                     pair_capacity,
                     &mut scan_range,
@@ -973,7 +1003,7 @@ pub(super) fn x_scan_unit(
             } else if scan_bf {
                 super::x_scan_bf::x_scan_one_range_bf(
                     &plan.lookup,
-                    &frame.aa_seq[1 + chunk.offset..],
+                    subject,
                     pairs,
                     pair_capacity,
                     &mut scan_range,
@@ -981,7 +1011,7 @@ pub(super) fn x_scan_unit(
             } else {
                 s_blast_aa_scan_subject_one_range(
                     &plan.lookup,
-                    &frame.aa_seq[1 + chunk.offset..],
+                    subject,
                     pairs,
                     pair_capacity,
                     &mut scan_range,

@@ -246,11 +246,10 @@ fn apply_permutation_in_place<T>(items: &mut [T], source: &mut [usize]) {
 // same indices), then the records moved instead of copied and cloned back. `site` names the
 // caller for `x_link_sort`.
 /// The result of `sort_ungapped_hits_by_index_replay` without a copy of the list.
-fn sort_in_place(
-    hits: &mut [UngappedHit],
-    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
-    site: x_link_sort::Site,
-) {
+fn sort_in_place<C>(hits: &mut [UngappedHit], compare: C, site: x_link_sort::Site)
+where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
+{
     if hits.len() <= 1 {
         return;
     }
@@ -360,10 +359,10 @@ pub(super) fn x_assert_same_hits(what: &str, actual: &[UngappedHit], reference: 
 // ```
 // The sort of `sort_ungapped_hits_by_index_replay` (called after its `len <= 1` return).
 /// Sorts `hits` in place.
-pub(crate) fn sort_dispatch(
-    hits: &mut [UngappedHit],
-    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
-) {
+pub(crate) fn sort_dispatch<C>(hits: &mut [UngappedHit], compare: C)
+where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
+{
     sort_in_place(hits, compare, x_link_sort::Site::Dispatch);
     SORTS.fetch_add(1, AtomicOrdering::Relaxed);
     HITS.fetch_add(hits.len() as u64, AtomicOrdering::Relaxed);

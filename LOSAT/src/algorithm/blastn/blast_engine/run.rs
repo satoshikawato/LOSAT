@@ -850,6 +850,13 @@ fn advance_diag_table_offset(
         // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): every chain is empty now. No NCBI
         // counterpart (empty while the switch is off).
         diag_hash.max_level.fill(i32::MIN);
+        // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): no bucket has an insert now. No NCBI
+        // counterpart (empty while the switch is off).
+        diag_hash.x_last.fill(x_diag_lv::LvLast::EMPTY);
+        #[cfg(debug_assertions)]
+        {
+            diag_hash.x_last_fresh = true;
+        }
     } else {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:180-181
         // ```c
@@ -918,6 +925,19 @@ struct DiagHashTable {
     // and false while the switch is off. No NCBI counterpart.
     max_level: Vec<i32>,
     x_lv_shadow: bool,
+    // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): per bucket, the latest insert and an upper
+    // bound of the levels of the bucket's other cells. Empty unless the switch and
+    // LOSAT_X_DIAGLV are on and the table takes two hits. No NCBI counterpart. It is the memo of
+    // the cells only from a dc-megablast strips stage's `x_lv2_reset` to the end of that stage
+    // (and on a new or cleared table): the inserts of the reference fold (`insert_plain`) do not
+    // keep it, so only that stage's folds may read it (`retrieve_below::<true>`) or keep it
+    // (`insert_memo`, `insert_inl::<true>`).
+    x_last: Vec<x_diag_lv::LvLast>,
+    // Debug builds only (LOSAT_X_DIAGLV2): whether `x_last` is the memo of the cells (set by
+    // `new`, the clear and `x_lv2_reset`, ended by an insert that does not keep a memo the table
+    // has); the memo's reads and upkeep assert it.
+    #[cfg(debug_assertions)]
+    x_last_fresh: bool,
 }
 
 impl DiagHashTable {
@@ -947,6 +967,10 @@ impl DiagHashTable {
             window,
             max_level,
             x_lv_shadow,
+            // EXPERIMENT (LOSAT_X_DIAGLV2): the memo when the switch is on.
+            x_last: x_diag_lv::new_last(window),
+            #[cfg(debug_assertions)]
+            x_last_fresh: true,
         }
     }
 
@@ -1017,7 +1041,48 @@ impl DiagHashTable {
     // table->occupancy++;
     // return 1;
     // ```
-    fn insert(
+    // The insert of a dc-megablast strips stage with the memo of LOSAT_X_DIAGLV2 (`x_last`,
+    // valid from the stage's `x_lv2_reset`): the statements of `insert_plain` and the memo's
+    // upkeep (`insert_inl::<true>`).
+    fn insert_memo(
+        &mut self,
+        diag: i32,
+        level: i32,
+        hit_len: i32,
+        hit_saved: bool,
+        s_off: i32,
+        window_size: i32,
+    ) -> bool {
+        self.insert_inl::<true>(diag, level, hit_len, hit_saved, s_off, window_size)
+    }
+
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:396-449
+    /// (`s_BlastDiagHashInsert`, quoted above `insert_memo`).
+    /// `insert_memo` without the memo of LOSAT_X_DIAGLV2 (the code before that switch): the reference
+    /// fold (`process_offset_pairs`), which never reads the memo (it lives in the strips stages
+    /// of dc-megablast only, rebuilt at each stage's start: `x_diag_lv.rs`), the one-hit strips
+    /// folds (`x_pair_seed.rs` `fold`, `x_pair_seed_na.rs` `fold_na`), and the strips fold of
+    /// dc-megablast in its instance with LOSAT_X_FOLDLEAN off on a table without the memo.
+    #[inline(never)]
+    pub(super) fn insert_plain(
+        &mut self,
+        diag: i32,
+        level: i32,
+        hit_len: i32,
+        hit_saved: bool,
+        s_off: i32,
+        window_size: i32,
+    ) -> bool {
+        self.insert_inl::<false>(diag, level, hit_len, hit_saved, s_off, window_size)
+    }
+
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:396-449
+    /// (`s_BlastDiagHashInsert`, quoted above `insert_memo`).
+    /// The body of `insert_memo` (`MEMO`) and `insert_plain`, inlined into its caller; the strips fold
+    /// of dc-megablast inlines it with LOSAT_X_FOLDLEAN (`x_pair_seed_disc.rs` `fold_two_hit`).
+    /// The same statements. Without `MEMO` the memo (LOSAT_X_DIAGLV2) is not kept.
+    #[inline(always)]
+    pub(super) fn insert_inl<const MEMO: bool>(
         &mut self,
         diag: i32,
         level: i32,
@@ -1028,12 +1093,33 @@ impl DiagHashTable {
     ) -> bool {
         let bucket =
             ((diag as u32).wrapping_mul(0x9E370001) % DIAGHASH_NUM_BUCKETS as u32) as usize;
+        // (Debug builds: the memo's upkeep needs the memo of the cells; an insert that does not
+        // keep a memo the table has ends it until the next stage's `x_lv2_reset`.)
+        #[cfg(debug_assertions)]
+        {
+            if MEMO {
+                assert!(
+                    self.x_last.is_empty() || self.x_last_fresh,
+                    "LOSAT_X_DIAGLV2: an insert keeps a stale memo (no x_lv2_reset since an insert without it)"
+                );
+            } else if !self.x_last.is_empty() {
+                self.x_last_fresh = false;
+            }
+        }
         // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): this insert writes `level` into one cell
         // of this bucket (the match, a take-over or the append below). No NCBI counterpart;
         // with the switch off `max_level` is empty and this is one length test.
         if let Some(max_level) = self.max_level.get_mut(bucket) {
             if *max_level < level {
                 *max_level = level;
+            }
+            // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): this insert is the bucket's latest.
+            // No NCBI counterpart; with the switch off `x_last` is empty and this is one length
+            // test (none without `MEMO`: the reference fold's `insert_plain`).
+            if MEMO {
+                if let Some(last) = self.x_last.get_mut(bucket) {
+                    last.note(diag, level, hit_len, hit_saved);
+                }
             }
         }
         let mut index = self.backbone[bucket];
@@ -11678,6 +11764,11 @@ fn search_query_batch(
                     && !(debug_enabled || blastn_trace_enabled || debug_window.is_some());
                 if diag_hash.x_lv_on() {
                     crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV", use_diag_hash && x_lv_ref);
+                    // EXPERIMENT (LOSAT_X_DIAGLV2): the reference fold below never reads the memo
+                    // (the strips stage of dc-megablast records its own side).
+                    if x_diag_lv::lv2_on() {
+                        crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV2", false);
+                    }
                 }
                 if use_array_indexing {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:145-149
@@ -12331,7 +12422,7 @@ fn search_query_batch(
                                         // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same
                                         // decisions without the walk of a bucket below the bound.
                                         let (level, _hit_len, hit_saved) = if x_lv_ref {
-                                            diag_hash.retrieve_below(
+                                            diag_hash.retrieve_below::<false>(
                                                 diag as i32,
                                                 &x_lv_seeds,
                                                 s_ext_start + diag_offset as usize,
@@ -12811,7 +12902,7 @@ fn search_query_batch(
                                             hit_len_array[diag_idx] = (s_end_pos - s_off_pos) as u8;
                                         }
                                     } else if !use_array_indexing {
-                                        diag_hash.insert(
+                                        diag_hash.insert_plain(
                                             diag as i32,
                                             s_end_pos as i32,
                                             (s_end_pos - s_off_pos) as i32,
@@ -12986,7 +13077,7 @@ fn search_query_batch(
                                             };
                                         }
                                     } else if !use_array_indexing {
-                                        diag_hash.insert(
+                                        diag_hash.insert_plain(
                                             diag as i32,
                                             s_end_pos as i32,
                                             if hit_ready {
@@ -13071,7 +13162,7 @@ fn search_query_batch(
                                         hit_len_array[diag_idx] = 0;
                                     }
                                 } else if !use_array_indexing {
-                                    diag_hash.insert(
+                                    diag_hash.insert_plain(
                                         diag as i32,
                                         ungapped_s_end_pos as i32,
                                         0,
@@ -13709,7 +13800,7 @@ fn search_query_batch(
                                         // decisions without the walk of a bucket below the bound
                                         // (`s_off_pos` below).
                                         let (level, _hit_len, hit_saved) = if x_lv_ref {
-                                            diag_hash.retrieve_below(
+                                            diag_hash.retrieve_below::<false>(
                                                 diag as i32,
                                                 &x_lv_seeds,
                                                 kmer_start + diag_offset as usize,
@@ -14098,7 +14189,7 @@ fn search_query_batch(
                                             hit_len_array[diag_idx] = (s_end_pos - s_off_pos) as u8;
                                         }
                                     } else if !use_array_indexing {
-                                        diag_hash.insert(
+                                        diag_hash.insert_plain(
                                             diag as i32,
                                             s_end_pos as i32,
                                             (s_end_pos - s_off_pos) as i32,
@@ -14263,7 +14354,7 @@ fn search_query_batch(
                                         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
                                         //                       hit_ready, s_off_pos, window_size + Delta + 1);
                                         // ```
-                                        diag_hash.insert(
+                                        diag_hash.insert_plain(
                                             diag as i32,
                                             s_end_pos as i32,
                                             if hit_ready {
@@ -14340,7 +14431,7 @@ fn search_query_batch(
                                     //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
                                     //                       hit_ready, s_off_pos, window_size + Delta + 1);
                                     // ```
-                                    diag_hash.insert(
+                                    diag_hash.insert_plain(
                                         diag as i32,
                                         ungapped_s_end_pos as i32,
                                         0,

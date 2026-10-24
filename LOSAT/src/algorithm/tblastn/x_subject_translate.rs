@@ -34,8 +34,20 @@
 //! in the strict set: on unless it is `0`; elsewhere
 //! eight at a time from one word). With `LOSAT_X_STATS` set, `main` prints `[X_STATS]
 //! TBNXLATESIMD codons_vector= codons_scalar=` at exit, when a packed subject was translated.
+//!
+//! A long packed subject whose plan is made for its search alone (the search keeps no subject
+//! plans for several query batches) gets a plan without residues (`x_packed_lean_plan`;
+//! `LOSAT_X_TBNUNITXLATE`, in the strict set: on unless it is `0`): its frames have their lengths
+//! only, and each (frame, chunk) unit translates the residues it reads into a buffer of its thread
+//! (`x_unit_residues`), one strand of one phase from the packed bytes, by the same tables and loops
+//! (32 codons with AVX2, else eight from one word; counted in `[X_STATS] TBNXLATESIMD`). With
+//! `LOSAT_X_TBNUNITXLATESHADOW` set (any value) the plans keep their frames and every unit of a
+//! packed subject translates its residues with both loops and compares them with the frame's
+//! (`x_unit_shadow`); `main` prints `[X_SHADOW] TBNUNITXLATE units_compared= residues_compared=`
+//! at exit. With `LOSAT_X_STATS` set it prints `[X_STATS] TBNUNITXLATE plans= units= residues=`
+//! when a plan without residues was made.
 
-use super::search_seed::{translated_chunk_scan_ranges, XSubjectPlan};
+use super::search_seed::{translated_chunk_scan_ranges, TranslatedChunk, XSubjectPlan};
 use crate::algorithm::tblastx::constants::SENTINEL_BYTE;
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::core::blast_encoding::{iupacna_to_ncbi4na, NcbiRandom};
@@ -51,17 +63,46 @@ use std::sync::{Arc, OnceLock};
 /// a time (`[1]`).
 static PACKED_CODONS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 
-/// The summary lines (printed by `main` at exit): the `LOSAT_X_TBNKEEPFEWSHADOW` summary, and with
-/// LOSAT_X_STATS the codons of packed subjects read by the vector loop.
+// No NCBI counterpart: counters for LOSAT_X_STATS and LOSAT_X_TBNUNITXLATESHADOW; they do not
+// change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the plans without residues, the units that translated their
+/// residues and those residues (with LOSAT_X_STATS).
+static UNIT_RESIDUES: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATESHADOW): the units compared and their residues.
+static UNIT_SHADOW: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+
+// No NCBI counterpart: reads LOSAT_X_STATS once; it does not change any value NCBI computes.
+fn x_stats() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_STATS").is_some())
+}
+
+/// The summary lines (printed by `main` at exit): the `LOSAT_X_TBNKEEPFEWSHADOW` summary, the
+/// `LOSAT_X_TBNUNITXLATESHADOW` one when a unit was compared, and with LOSAT_X_STATS the codons
+/// of packed subjects read by the vector loop and the units that translated their residues.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
     super::search_seed::x_keep_few_print_summary();
+    let [units, residues] = UNIT_SHADOW
+        .each_ref()
+        .map(|count| count.load(Ordering::Relaxed));
+    if units > 0 {
+        eprintln!(
+            "[X_SHADOW] TBNUNITXLATE units_compared={units} residues_compared={residues} (unit residues identical)"
+        );
+    }
     if std::env::var_os("LOSAT_X_STATS").is_some() {
         let [vector, scalar] = PACKED_CODONS
             .each_ref()
             .map(|codons| codons.load(Ordering::Relaxed));
         if vector + scalar > 0 {
             eprintln!("[X_STATS] TBNXLATESIMD codons_vector={vector} codons_scalar={scalar}");
+        }
+        let [plans, units, residues] = UNIT_RESIDUES
+            .each_ref()
+            .map(|count| count.load(Ordering::Relaxed));
+        if plans > 0 {
+            eprintln!("[X_STATS] TBNUNITXLATE plans={plans} units={units} residues={residues}");
         }
     }
 }
@@ -997,6 +1038,444 @@ pub(super) fn x_packed_bytes_plan(
     x_bytes_plan(packed, length, db_gencode).map(Arc::new)
 }
 
+// No NCBI counterpart: reads LOSAT_X_TBNUNITXLATE and LOSAT_X_TBNUNITXLATESHADOW once; it does not
+// change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): where the units of a long packed subject read their
+/// residues.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum XUnitXlate {
+    /// The frames of the plan (the switch off).
+    Frames,
+    /// Their own translation (`x_packed_lean_plan`, `x_unit_residues`).
+    Units,
+    /// The frames of the plan, and each unit's own translation by both loops compared with them
+    /// (LOSAT_X_TBNUNITXLATESHADOW).
+    Shadow,
+}
+
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): a switch of the strict set (`utils/xswitch.rs`), on unless
+/// it is `0`; LOSAT_X_TBNUNITXLATESHADOW (any value) wins.
+fn x_unit_xlate() -> XUnitXlate {
+    static MODE: OnceLock<XUnitXlate> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if std::env::var_os("LOSAT_X_TBNUNITXLATESHADOW").is_some() {
+            XUnitXlate::Shadow
+        } else if crate::utils::xswitch::on("LOSAT_X_TBNUNITXLATE") {
+            XUnitXlate::Units
+        } else {
+            XUnitXlate::Frames
+        }
+    })
+}
+
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATESHADOW): whether every unit of a packed subject is compared
+/// (`x_unit_shadow`).
+pub(super) fn x_unit_shadow_on() -> bool {
+    x_unit_xlate() == XUnitXlate::Shadow
+}
+
+// No NCBI counterpart for the rule: NCBI translates the six frames of every subject into one
+// buffer (blast_engine.c:772-775). A frame of `X_MAPPED_FRAME` bytes or more is mapped when it is
+// made and unmapped when its plan is dropped (`x_frame_capacity`); on a genome database that is
+// six fresh frames of up to 83 MB per chromosome, made by one thread before the units of the
+// chromosome start, and their pages are faulted in and returned again (human genome, one protein,
+// 16 threads: 5.2 GiB at most, most of it the frames of the chromosomes searched at the same
+// time). A unit reads its chunk and nothing else.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): whether the plan of a packed subject of `length` bases
+/// made for its search alone (a search that keeps no subject plans, `XSubjectSide`) is made
+/// without residues (`x_packed_lean_plan`): with the switch, when its first frame has
+/// `X_MAPPED_FRAME` bytes or more (the frames that are mapped on Linux with glibc; the rule is the
+/// same everywhere).
+pub(super) fn x_units_translate(length: usize) -> bool {
+    x_unit_xlate() == XUnitXlate::Units && length / 3 + 2 >= X_MAPPED_FRAME
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+// ```c
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ...
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// The frames and units of `x_packed_plan`, without residues: a frame's length is that of the
+// frame `x_packed_frames` makes, `(length - i) / 3` for frames `i + 1` and `-(i + 1)`, and the
+// units follow from the lengths alone (no lowercase masking).
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the plan of one packed subject whose frames have an empty
+/// `aa_seq`; each unit makes its residues with `x_unit_residues`.
+pub(super) fn x_packed_lean_plan(
+    store: &crate::sequence::packed_subject::PackedNucleotide,
+    db_gencode: u8,
+) -> Result<Arc<XSubjectPlan>> {
+    // An unknown genetic code is refused here, as by x_packed_plan.
+    x_codon_tables(db_gencode)?;
+    let seq_len = store.len();
+    let mut frames = Vec::with_capacity(6);
+    for sign in [1i8, -1] {
+        for i in 0..3usize {
+            if i + 3 <= seq_len {
+                frames.push(QueryFrame {
+                    frame: sign * (i as i8 + 1),
+                    aa_seq: Vec::new(),
+                    aa_seq_nomask: None,
+                    aa_len: (seq_len - i) / 3,
+                    orig_len: seq_len,
+                    seg_masks: Vec::new(),
+                });
+            }
+        }
+    }
+    let negative_first_length = frames
+        .iter()
+        .find(|frame| frame.frame == -1)
+        .map(|frame| frame.aa_len)
+        .unwrap_or(0);
+    let mut units = Vec::new();
+    for (index, frame) in frames.iter().enumerate() {
+        for (chunk, ranges) in translated_chunk_scan_ranges(
+            &[],
+            frame.frame,
+            frame.aa_len,
+            negative_first_length,
+            false,
+        )? {
+            units.push((index, chunk, ranges));
+        }
+    }
+    super::x_subject_store::x_count_packed_plan();
+    if x_stats() {
+        UNIT_RESIDUES[0].fetch_add(1, Ordering::Relaxed);
+    }
+    Ok(Arc::new(XSubjectPlan { frames, units }))
+}
+
+// No NCBI counterpart for the margin: NCBI's scan reads the letters of its chunk
+// (aa_ungapped.c:496-501), as the scan loops here do (their blocks follow the scan range); one of
+// them (x_scan_byte) also looks at the length of the slice it is given before its last block.
+// With a margin past the chunk, or the frame's end sentinel when it is nearer, a unit's slice is
+// longer than every read and makes that choice as the frame's slice does; 4,096 residues are
+// 0.08 % of a chunk of 5,000,000.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the residues a unit's translation runs past its chunk.
+const X_UNIT_MARGIN: usize = 4096;
+
+// No NCBI counterpart: the range of a unit's translation (`X_UNIT_MARGIN`); it computes no value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): positions `from..to` of the frame's `aa_seq` that the unit
+/// of `chunk` reads: from the chunk's first residue to `X_UNIT_MARGIN` past its end, or to the
+/// end sentinel.
+fn x_unit_range(aa_len: usize, chunk: TranslatedChunk) -> (usize, usize) {
+    let from = 1 + chunk.offset;
+    (from, (aa_len + 2).min(from + chunk.length + X_UNIT_MARGIN))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812
+// ```c
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// The part of `subject->sequence` a unit reads, made when the unit runs.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the residues of `frame` (of a plan without residues) that
+/// the unit of `chunk` reads, made into `buffer`; returns the range of `buffer` that holds them,
+/// from the chunk's first residue on (see `x_unit_range`).
+pub(super) fn x_unit_residues(
+    store: &crate::sequence::packed_subject::PackedNucleotide,
+    db_gencode: u8,
+    frame: &QueryFrame,
+    chunk: TranslatedChunk,
+    buffer: &mut Vec<u8>,
+) -> Result<std::ops::Range<usize>> {
+    let tables = x_codon_tables(db_gencode)?;
+    let (from, to) = x_unit_range(frame.aa_len, chunk);
+    let (range, codons, vector) = x_frame_residues(
+        store,
+        tables,
+        frame.frame,
+        frame.aa_len,
+        from,
+        to,
+        buffer,
+        x_xlate_simd(),
+    );
+    if x_stats() {
+        UNIT_RESIDUES[1].fetch_add(1, Ordering::Relaxed);
+        UNIT_RESIDUES[2].fetch_add(range.len() as u64, Ordering::Relaxed);
+        PACKED_CODONS[0].fetch_add(vector as u64, Ordering::Relaxed);
+        PACKED_CODONS[1].fetch_add((codons - vector) as u64, Ordering::Relaxed);
+    }
+    Ok(range)
+}
+
+// No NCBI counterpart: compares two LOSAT translations of one unit (LOSAT_X_TBNUNITXLATESHADOW);
+// it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATESHADOW): translates the residues the unit of `chunk` reads
+/// with the vector loop and without it, and panics at the first that differs from `frame`'s
+/// (a frame of a plan with residues); counts the unit otherwise.
+pub(super) fn x_unit_shadow(
+    store: &crate::sequence::packed_subject::PackedNucleotide,
+    db_gencode: u8,
+    frame: &QueryFrame,
+    chunk: TranslatedChunk,
+) -> Result<()> {
+    let tables = x_codon_tables(db_gencode)?;
+    let (from, to) = x_unit_range(frame.aa_len, chunk);
+    let want = &frame.aa_seq[from..to];
+    let mut buffer = Vec::new();
+    for simd in [true, false] {
+        let (range, _, _) = x_frame_residues(
+            store,
+            tables,
+            frame.frame,
+            frame.aa_len,
+            from,
+            to,
+            &mut buffer,
+            simd,
+        );
+        let residues = &buffer[range];
+        if residues != want {
+            let at = residues.iter().zip(want).position(|(a, b)| a != b);
+            panic!(
+                "LOSAT_X_TBNUNITXLATESHADOW: frame {} chunk at {}: residues {from}..{to} of the unit (vector loop {simd}) differ from the frame's at {at:?} (lengths {} / {})",
+                frame.frame,
+                chunk.offset,
+                residues.len(),
+                want.len()
+            );
+        }
+    }
+    UNIT_SHADOW[0].fetch_add(1, Ordering::Relaxed);
+    UNIT_SHADOW[1].fetch_add(want.len() as u64, Ordering::Relaxed);
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1080-1090 (see
+// `x_packed_frames`)
+// The residues at positions `from..to` of the `aa_seq` that `x_packed_frames` makes for frame
+// `frame`: residue `i` of plus frame `r + 1` is the codon at base `r + 3 * i`; residue `i` of
+// minus frame `-(r + 1)` is codon `aa_len - 1 - i` of the phase `p` with `(length - p) % 3 == r`,
+// read from the reverse table. The codons are read from the packed bytes that start with the one
+// holding the first codon's first base; when that base is the byte's last (a phase of 3 within
+// the byte, which the loops do not take) the codon before it is read too and left out.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): positions `from..to` (`1 <= from <= to <= aa_len + 2`) of
+/// frame `frame` of `store` (`aa_len` residues), made into `buffer` by one strand of one phase;
+/// returns the range of `buffer` that holds them, the codons read and those the vector loop read.
+/// `simd`: the vector loop where the CPU has it. The buffer only grows (its other bytes are left
+/// as they are), so a thread's buffer is filled with zeros once.
+#[allow(clippy::too_many_arguments)]
+fn x_frame_residues(
+    store: &crate::sequence::packed_subject::PackedNucleotide,
+    tables: &XCodonTables,
+    frame: i8,
+    aa_len: usize,
+    from: usize,
+    to: usize,
+    buffer: &mut Vec<u8>,
+    simd: bool,
+) -> (std::ops::Range<usize>, usize, usize) {
+    let seq_len = store.len();
+    assert!(1 <= from && from <= to && to <= aa_len + 2);
+    // residues `i0..i1`; position `aa_len + 1` is the end sentinel
+    let (i0, i1) = (from - 1, (to - 1).min(aa_len));
+    let sentinel = from < to && to == aa_len + 2;
+    if i0 >= i1 {
+        if !sentinel {
+            return (0..0, 0, 0);
+        }
+        if buffer.is_empty() {
+            buffer.push(0);
+        }
+        buffer[0] = SENTINEL_BYTE;
+        return (0..1, 0, 0);
+    }
+    let r = usize::from(frame.unsigned_abs()) - 1;
+    let phase = if frame > 0 { r } else { (seq_len - r) % 3 };
+    let codons = (seq_len - phase) / 3;
+    assert_eq!(codons, aa_len, "frame {frame} of {seq_len} bases");
+    // the first codon read, in the phase's order (a minus frame's residues run backwards)
+    let mut first_codon = if frame > 0 { i0 } else { codons - i1 };
+    let mut back = 0;
+    if (phase + 3 * first_codon) % 4 == 3 {
+        first_codon -= 1;
+        back = 1;
+    }
+    let count = i1 - i0 + back;
+    let first_base = phase + 3 * first_codon;
+    let byte = first_base / 4;
+    let packed = store.packed();
+    // the bytes of the codons, and 32 more for the groups of the loops
+    let end = packed
+        .len()
+        .min(byte + (first_base % 4 + 3 * count).div_ceil(4) + 32);
+    if buffer.len() < count + 2 {
+        buffer.resize(count + 2, 0);
+    }
+    let bytes = &packed[byte..end];
+    let out = &mut buffer[..count + 2];
+    let vector = if frame > 0 {
+        x_phase_one::<false>(bytes, first_base % 4, count, tables, out, simd)
+    } else {
+        x_phase_one::<true>(bytes, first_base % 4, count, tables, out, simd)
+    };
+    // codon `j` read is at `buffer[1 + j]` (plus) or `buffer[count - j]` (minus)
+    let start = if frame > 0 { 1 + back } else { 1 };
+    let mut length = i1 - i0;
+    if sentinel {
+        buffer[start + length] = SENTINEL_BYTE;
+        length += 1;
+    }
+    (start..start + length, count, vector)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
+// `x_phase_words`)
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): [`x_phase_residues`] for one strand: codon `j` at
+/// `out[1 + j]` (forward table) or, with `MINUS`, at `out[codons - j]` (reverse table). Returns
+/// the codons the vector loop read.
+fn x_phase_one<const MINUS: bool>(
+    packed: &[u8],
+    phase: usize,
+    codons: usize,
+    tables: &XCodonTables,
+    out: &mut [u8],
+    simd: bool,
+) -> usize {
+    assert!(phase < 3 && out.len() == codons + 2);
+    let mut j = 0;
+    #[cfg(target_arch = "x86_64")]
+    if simd && x_avx2_available() {
+        // SAFETY: the CPU has AVX2; the bounds are checked inside.
+        j = unsafe { x_phase_one_avx2::<MINUS>(packed, phase, codons, tables, out) };
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = simd;
+    let vector = j;
+    let table = if MINUS {
+        &tables.reverse
+    } else {
+        &tables.forward
+    };
+    let shift = 58 - 2 * phase;
+    while j + 8 <= codons && j / 8 * 6 + 8 <= packed.len() {
+        let at = j / 8 * 6;
+        let word = u64::from_be_bytes(packed[at..at + 8].try_into().unwrap());
+        if MINUS {
+            let out8: &mut [u8; 8] = (&mut out[codons - j - 7..=codons - j]).try_into().unwrap();
+            for i in 0..8 {
+                out8[7 - i] = table[((word >> (shift - 6 * i)) & 63) as usize];
+            }
+        } else {
+            let out8: &mut [u8; 8] = (&mut out[1 + j..9 + j]).try_into().unwrap();
+            for i in 0..8 {
+                out8[i] = table[((word >> (shift - 6 * i)) & 63) as usize];
+            }
+        }
+        j += 8;
+    }
+    for j in j..codons {
+        let codon = x_packed_codon(packed, phase + 3 * j);
+        if MINUS {
+            out[codons - j] = table[codon];
+        } else {
+            out[1 + j] = table[codon];
+        }
+    }
+    vector
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
+// `x_phase_residues_avx2`)
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): [`x_phase_residues_avx2`] for one strand; returns the
+/// codons done (a multiple of 32).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn x_phase_one_avx2<const MINUS: bool>(
+    packed: &[u8],
+    phase: usize,
+    codons: usize,
+    tables: &XCodonTables,
+    out: &mut [u8],
+) -> usize {
+    use std::arch::x86_64::*;
+    let values = if MINUS {
+        &tables.reverse
+    } else {
+        &tables.forward
+    };
+    // SAFETY: 16 bytes of the 64.
+    let table = |k: usize| {
+        _mm256_broadcastsi128_si256(unsafe { _mm_loadu_si128(values.as_ptr().add(16 * k).cast()) })
+    };
+    let t = [table(0), table(1), table(2), table(3)];
+    let spread = _mm256_setr_epi8(
+        1, 0, 2, 1, 4, 3, 5, 4, 7, 6, 8, 7, 10, 9, 11, 10, 1, 0, 2, 1, 4, 3, 5, 4, 7, 6, 8, 7, 10,
+        9, 11, 10,
+    );
+    let backward = _mm256_setr_epi8(
+        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6,
+        5, 4, 3, 2, 1, 0,
+    );
+    let left = _mm_cvtsi32_si128(2 * phase as i32);
+    let right = _mm_cvtsi32_si128(8 - 2 * phase as i32);
+    let keep_left = _mm256_set1_epi8((0xFFu8 << (2 * phase)) as i8);
+    let keep_right = _mm256_set1_epi8(((1u16 << (2 * phase)) - 1) as u8 as i8);
+    let mut j = 0;
+    while j + 32 <= codons && 3 * j / 4 + 29 <= packed.len() {
+        // SAFETY: bytes `3 * j / 4 ..+ 29` are in `packed` (checked above).
+        let at = unsafe { packed.as_ptr().add(3 * j / 4) };
+        let (bytes, next) = unsafe {
+            (
+                _mm256_loadu2_m128i(at.add(12).cast(), at.cast()),
+                _mm256_loadu2_m128i(at.add(13).cast(), at.add(1).cast()),
+            )
+        };
+        // the codons of the group as in `x_phase_residues_avx2`
+        let shifted = _mm256_or_si256(
+            _mm256_and_si256(_mm256_sll_epi16(bytes, left), keep_left),
+            _mm256_and_si256(_mm256_srl_epi16(next, right), keep_right),
+        );
+        let spread = _mm256_shuffle_epi8(shifted, spread);
+        let index = _mm256_or_si256(
+            _mm256_mulhi_epu16(
+                _mm256_and_si256(spread, _mm256_set1_epi32(0x0FC0_FC00)),
+                _mm256_set1_epi32(0x0400_0040),
+            ),
+            _mm256_mullo_epi16(
+                _mm256_and_si256(spread, _mm256_set1_epi32(0x003F_03F0)),
+                _mm256_set1_epi32(0x0100_0010),
+            ),
+        );
+        let bit4 = _mm256_slli_epi16(index, 3);
+        let bit5 = _mm256_slli_epi16(index, 2);
+        let low = _mm256_blendv_epi8(
+            _mm256_shuffle_epi8(t[0], index),
+            _mm256_shuffle_epi8(t[1], index),
+            bit4,
+        );
+        let high = _mm256_blendv_epi8(
+            _mm256_shuffle_epi8(t[2], index),
+            _mm256_shuffle_epi8(t[3], index),
+            bit4,
+        );
+        let residues = _mm256_blendv_epi8(low, high, bit5);
+        // SAFETY: `out[1 + j..1 + j + 32]` and `out[codons - j - 31..=codons - j]` lie in `out`
+        // (`j + 32 <= codons`, length `codons + 2`).
+        unsafe {
+            if MINUS {
+                _mm256_storeu_si256(
+                    out.as_mut_ptr().add(codons - j - 31).cast(),
+                    _mm256_permute4x64_epi64(_mm256_shuffle_epi8(residues, backward), 0x4E),
+                );
+            } else {
+                _mm256_storeu_si256(out.as_mut_ptr().add(1 + j).cast(), residues);
+            }
+        }
+        j += 32;
+    }
+    j
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::search_seed::x_scan_plan;
@@ -1680,5 +2159,258 @@ mod tests {
             drop(packed(&short, 1));
         }
         assert!(X_FRAMES.with(|kept| kept.borrow().len()) <= X_REUSED_FRAMES);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
+    // `x_phase_words`)
+    // One strand of one phase read by the word loop alone and with the vector loop first is the
+    // strand `x_phase_residues` writes: every length from 0 to 400 bases (every phase of the last
+    // bytes, groups of 8 and 32 codons and the codons after them) and some long ones, every phase,
+    // three genetic codes, written over a buffer of other bytes; the vector loop takes the groups
+    // where the CPU has it.
+    #[test]
+    fn x_one_strand_of_a_phase_is_that_strand_of_both() {
+        use crate::sequence::packed_subject::PackedNucleotide;
+        let mut vector_codons = 0usize;
+        let lengths = (0..=400).chain([1_000, 4_999, 49_151, 49_153, 100_003]);
+        for length in lengths {
+            let subject = letters(b"ACGTACGTN", length, length as u64 + 11);
+            let store = PackedNucleotide::from_subject_letters(&subject).expect("letters");
+            for db_gencode in [1, 4, 11] {
+                let tables = x_codon_tables(db_gencode).unwrap();
+                for phase in (0..3).filter(|&phase| phase + 3 <= length) {
+                    let codons = (length - phase) / 3;
+                    let mut plus = vec![0u8; codons + 2];
+                    let mut minus = vec![0u8; codons + 2];
+                    x_phase_residues(
+                        store.packed(),
+                        phase,
+                        codons,
+                        tables,
+                        &mut plus,
+                        &mut minus,
+                        false,
+                    );
+                    for simd in [false, true] {
+                        let mut one = vec![0xAB; codons + 2];
+                        x_phase_one::<false>(store.packed(), phase, codons, tables, &mut one, simd);
+                        assert_eq!(one[1..=codons], plus[1..=codons], "{length} {phase} {simd}");
+                        one.fill(0xCD);
+                        x_phase_one::<true>(store.packed(), phase, codons, tables, &mut one, simd);
+                        assert_eq!(
+                            one[1..=codons],
+                            minus[1..=codons],
+                            "{length} {phase} {simd}"
+                        );
+                    }
+                    #[cfg(target_arch = "x86_64")]
+                    if x_avx2_available() && db_gencode == 1 {
+                        let mut one = vec![0u8; codons + 2];
+                        // SAFETY: the CPU has AVX2.
+                        vector_codons += unsafe {
+                            x_phase_one_avx2::<true>(
+                                store.packed(),
+                                phase,
+                                codons,
+                                tables,
+                                &mut one,
+                            )
+                        };
+                    }
+                }
+            }
+        }
+        #[cfg(target_arch = "x86_64")]
+        if x_avx2_available() {
+            assert!(vector_codons > 90_000, "{vector_codons}");
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812 (a unit reads
+    // `subject->sequence` of its frame from its chunk on)
+    // Positions `from..to` of every frame made by one strand are those of the frame
+    // `x_packed_frames` makes: every range of the short frames, and on the longer ones the ranges
+    // that start and end around the frame's ends, around a group of 32 codons and at a codon whose
+    // first base is a byte's last, with and without the vector loop, into one buffer whose bytes
+    // are those of the range before; every genetic code on one subject.
+    #[test]
+    fn x_frame_residues_of_a_range_are_the_frames() {
+        use crate::sequence::packed_subject::PackedNucleotide;
+        let mut buffer = Vec::new();
+        let mut ranges = 0usize;
+        for length in (0..=40).chain([99, 100, 101, 1_000, 4_999, 49_153]) {
+            let subject = letters(b"ACGTACGTN", length, length as u64 + 13);
+            let store = PackedNucleotide::from_subject_letters(&subject).expect("letters");
+            let codes = if length == 4_999 {
+                genetic_codes()
+            } else {
+                vec![1, 11]
+            };
+            for db_gencode in codes {
+                let tables = x_codon_tables(db_gencode).unwrap();
+                for frame in x_packed_frames_with(store.packed(), store.len(), tables, false) {
+                    let aa_len = frame.aa_len;
+                    let points: Vec<usize> = if aa_len <= 14 {
+                        (1..=aa_len + 2).collect()
+                    } else {
+                        let mut points: Vec<usize> = [1, 2, 3, 4, 5, 6, 31, 32, 33, 34, 35]
+                            .into_iter()
+                            .chain((aa_len - 12..=aa_len + 2).filter(|&p| p >= 1))
+                            .chain((aa_len / 2..aa_len / 2 + 5).map(|p| p.max(1)))
+                            .filter(|&p| p <= aa_len + 2)
+                            .collect();
+                        points.sort_unstable();
+                        points.dedup();
+                        points
+                    };
+                    for &from in &points {
+                        for &to in points.iter().filter(|&&to| to >= from) {
+                            for simd in [false, true] {
+                                let (range, _, _) = x_frame_residues(
+                                    &store,
+                                    tables,
+                                    frame.frame,
+                                    aa_len,
+                                    from,
+                                    to,
+                                    &mut buffer,
+                                    simd,
+                                );
+                                assert_eq!(
+                                    buffer[range],
+                                    frame.aa_seq[from..to],
+                                    "{length} bases, code {db_gencode}, frame {}, {from}..{to}, simd {simd}",
+                                    frame.frame
+                                );
+                                ranges += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(ranges > 100_000, "{ranges}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812 (the
+    // frames' lengths and the chunks of each frame)
+    // A plan without residues has the frames of `x_packed_plan` with an empty `aa_seq` and the
+    // same units, and the residues each unit makes are the frame's from its chunk to the margin or
+    // the frame's end sentinel: every length from 0 to 40 bases and some longer ones, two genetic
+    // codes; an unknown genetic code is refused as by `x_packed_plan`.
+    #[test]
+    fn x_lean_plans_are_the_plans_without_residues() {
+        use crate::sequence::packed_subject::PackedNucleotide;
+        let mut buffer = Vec::new();
+        for length in (0..=40).chain([1_000, 4_999, 100_003]) {
+            let subject = letters(b"ACGTMRSVWYHKDBN-acgtn", length, length as u64 + 17);
+            let store = PackedNucleotide::from_subject_letters(&subject).expect("letters");
+            for db_gencode in [1, 11] {
+                let plan = x_packed_plan(&store, db_gencode).unwrap();
+                let lean = x_packed_lean_plan(&store, db_gencode).unwrap();
+                assert_eq!(lean.frames.len(), plan.frames.len(), "{length} bases");
+                for (lean, frame) in lean.frames.iter().zip(&plan.frames) {
+                    assert!(lean.aa_seq.is_empty() && lean.aa_seq_nomask.is_none());
+                    assert_eq!(
+                        (lean.frame, lean.aa_len, lean.orig_len, &lean.seg_masks),
+                        (frame.frame, frame.aa_len, frame.orig_len, &frame.seg_masks),
+                        "{length} bases"
+                    );
+                }
+                assert_eq!(lean.units, plan.units, "{length} bases");
+                for (index, chunk, _) in &lean.units {
+                    let range = x_unit_residues(
+                        &store,
+                        db_gencode,
+                        &lean.frames[*index],
+                        *chunk,
+                        &mut buffer,
+                    )
+                    .unwrap();
+                    let frame = &plan.frames[*index];
+                    let (from, to) = x_unit_range(frame.aa_len, *chunk);
+                    assert_eq!(to, frame.aa_len + 2, "one chunk ends at the sentinel");
+                    assert_eq!(buffer[range], frame.aa_seq[from..to], "{length} bases");
+                }
+            }
+        }
+        let store = PackedNucleotide::from_subject_letters(b"ACGTACGTACGTACG").unwrap();
+        let refused = |plan: Result<Arc<XSubjectPlan>>| format!("{:#}", plan.err().unwrap());
+        assert_eq!(
+            refused(x_packed_lean_plan(&store, 7)),
+            refused(x_packed_plan(&store, 7).map(Arc::new))
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-264 (chunks of
+    // MAX_DBSEQ_LEN residues overlapping by DBSEQ_CHUNK_OVERLAP)
+    // A subject whose frames have three chunks each (30 Mb of random bases): the plan without
+    // residues has the 18 units of `x_packed_plan`, and each unit's residues, made with and
+    // without the vector loop, are the frame's from the chunk's first residue to 4,096 past its
+    // last: the first chunk of each frame; the second (whose margin passes the short third) and
+    // the third end at the end sentinel. Its first frame is one the plan of a search leaves out
+    // (`x_units_translate`, with the switch).
+    #[test]
+    fn x_units_of_a_frame_of_three_chunks_read_the_frames_residues() {
+        use crate::sequence::packed_subject::PackedNucleotide;
+        let length: usize = 30_000_301;
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let packed: Vec<u8> = (0..length.div_ceil(4))
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 56) as u8
+            })
+            .collect();
+        let store = PackedNucleotide::from_stored(&packed, length, &[]);
+        let plan = x_packed_plan(&store, 1).unwrap();
+        let lean = x_packed_lean_plan(&store, 1).unwrap();
+        assert_eq!(lean.units, plan.units);
+        assert_eq!(lean.units.len(), 18);
+        assert!(lean.units.chunks(3).all(|units| units[0].0 == units[2].0));
+        let tables = x_codon_tables(1).unwrap();
+        let mut buffer = Vec::new();
+        // units whose residues end 4,096 past the chunk, and at the end sentinel
+        let (mut margin, mut sentinel) = (0, 0);
+        for (index, chunk, _) in &lean.units {
+            let frame = &plan.frames[*index];
+            let (from, to) = x_unit_range(frame.aa_len, *chunk);
+            if to == from + chunk.length + 4_096 {
+                margin += 1;
+            } else {
+                assert_eq!(to, frame.aa_len + 2);
+                assert!(from + chunk.length + 4_096 > to);
+                sentinel += 1;
+            }
+            for simd in [true, false] {
+                let (range, _, _) = x_frame_residues(
+                    &store,
+                    tables,
+                    frame.frame,
+                    frame.aa_len,
+                    from,
+                    to,
+                    &mut buffer,
+                    simd,
+                );
+                assert!(
+                    buffer[range] == frame.aa_seq[from..to],
+                    "frame {} chunk at {}, simd {simd}",
+                    frame.frame,
+                    chunk.offset
+                );
+            }
+        }
+        assert_eq!((margin, sentinel), (6, 12));
+        assert_eq!(
+            x_units_translate(length),
+            x_unit_xlate() == XUnitXlate::Units
+        );
+        assert!(!x_units_translate(3 * (X_MAPPED_FRAME - 2) - 1));
+        assert_eq!(
+            x_units_translate(3 * (X_MAPPED_FRAME - 2)),
+            x_unit_xlate() == XUnitXlate::Units
+        );
     }
 }

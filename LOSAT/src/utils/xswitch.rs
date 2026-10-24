@@ -115,6 +115,10 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_TBNFLOWHELP` (a thread that waits in TBLASTN's subject flow runs the pool's jobs
 /// meanwhile, `tblastn/x_oid_flow.rs`) joined the set in the pull request that added it, after it
 /// was verified and timed with it on and off.
+/// `LOSAT_X_TBNUNITXLATE` (a long packed TBLASTN subject whose plan is made for its search alone
+/// gets a plan without residues, and each unit translates the residues it reads,
+/// `tblastn/x_subject_translate.rs`) joined the set in the pull request that added it, after it
+/// was verified and timed with it on and off.
 /// `LOSAT_X_BXSUBJFLOW` (BLASTX's subject loop of a query chunk as a flow of tasks of 64 subjects
 /// searched ahead by the pool's other threads, `blastx/x_subject_flow.rs`) joined the set in the
 /// pull request that added it (Owner 2026-10-17: speed-ups land default ON), after it was
@@ -153,6 +157,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPLKPAHEAD",
     "LOSAT_X_BPLKPFLAT",
     "LOSAT_X_BPLUT",
+    "LOSAT_X_BPMASKED",
     "LOSAT_X_BPPCOMPACT",
     "LOSAT_X_BPPFREE",
     "LOSAT_X_BPQBLOCK",
@@ -187,10 +192,13 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
     "LOSAT_X_DIAGLV",
+    "LOSAT_X_DIAGLV2",
     "LOSAT_X_DISCLUTPAR",
+    "LOSAT_X_DISPTABLE",
     "LOSAT_X_DPEMASK",
     "LOSAT_X_DPWINDOW",
     "LOSAT_X_ERFABSORB",
+    "LOSAT_X_FOLDLEAN",
     "LOSAT_X_MBFILL",
     "LOSAT_X_MBLUTKEEP",
     "LOSAT_X_MBLUTONCE",
@@ -199,6 +207,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_PAIRPARDISCARR",
     "LOSAT_X_PAIRPARFOLD",
     "LOSAT_X_PAIRPARGATE",
+    "LOSAT_X_PAIRPARHOME",
     "LOSAT_X_PAIRPARNA",
     "LOSAT_X_PAIRWISEPAR",
     "LOSAT_X_QBATCHPAR",
@@ -222,6 +231,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNSCANBF",
     "LOSAT_X_TBNSCANBYTE",
     "LOSAT_X_TBNSTORE",
+    "LOSAT_X_TBNUNITXLATE",
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXBAND",
     "LOSAT_X_TBXEXTBATCH",
@@ -229,6 +239,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXHITBF",
     "LOSAT_X_TBXKMERGE",
     "LOSAT_X_TBXLUT",
+    "LOSAT_X_TBXMASKSEEK",
     "LOSAT_X_TBXNEXT",
     "LOSAT_X_TBXPIPE",
     "LOSAT_X_TBXPREFETCH",

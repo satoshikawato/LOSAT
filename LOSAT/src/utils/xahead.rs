@@ -119,6 +119,11 @@ pub(crate) struct Ahead<R> {
     cells: Box<[Mutex<Cell<R>>]>,
     /// Indexes below this have been offered or closed by the owner.
     announced: Padded<AtomicUsize>,
+    /// The loop's length as the owner last gave it (`announce`), `usize::MAX` before.
+    total: Padded<AtomicUsize>,
+    /// Whether a helper leaves once every index of the loop is claimed (`x_new_leaving`), instead
+    /// of waiting for the owner to finish.
+    leave: bool,
     /// The next index a helper looks at.
     cursor: Padded<AtomicUsize>,
     finished: AtomicBool,
@@ -160,6 +165,18 @@ impl<R> Ahead<R> {
     // No NCBI counterpart: makes an empty ring of `window` slots; it does not change any value
     // NCBI computes.
     pub(crate) fn new(window: usize) -> Self {
+        Self::x_with(window, false)
+    }
+
+    // No NCBI counterpart: scheduling only. A helper that leaves frees its thread for other work
+    // of the pool (another loop's tasks) while the owner takes the last values.
+    /// `new(window)` whose helpers leave once every index of the loop is claimed.
+    pub(crate) fn x_new_leaving(window: usize) -> Self {
+        Self::x_with(window, true)
+    }
+
+    // No NCBI counterpart: the constructor of both (scheduling only).
+    fn x_with(window: usize, leave: bool) -> Self {
         let window = window.max(2);
         Self {
             cells: (0..window)
@@ -171,6 +188,8 @@ impl<R> Ahead<R> {
                 })
                 .collect(),
             announced: Padded(AtomicUsize::new(0)),
+            total: Padded(AtomicUsize::new(usize::MAX)),
+            leave,
             cursor: Padded(AtomicUsize::new(0)),
             finished: AtomicBool::new(false),
             evaluated: AtomicU64::new(0),
@@ -195,6 +214,7 @@ impl<R> Ahead<R> {
     /// `len` that have not been offered yet. `wanted(j)` is the owner's guess,
     /// with what it knows now, whether index `j` will need its value.
     pub(crate) fn announce(&self, at: usize, len: usize, mut wanted: impl FnMut(usize) -> bool) {
+        self.total.0.store(len, Ordering::Release);
         let end = at.saturating_add(self.cells.len()).min(len);
         let mut next = self.announced.0.load(Ordering::Relaxed);
         while next < end {
@@ -269,6 +289,13 @@ impl<R> Ahead<R> {
                     self.evaluate(index, scratch, compute);
                 }
                 None => {
+                    // Every index below `total` is claimed: no later one will be offered.
+                    if self.leave
+                        && self.cursor.0.load(Ordering::Acquire)
+                            >= self.total.0.load(Ordering::Acquire)
+                    {
+                        return;
+                    }
                     idle = idle.saturating_add(1);
                     if idle < 128 {
                         std::hint::spin_loop();
@@ -448,12 +475,16 @@ mod tests {
     }
 
     #[cfg(feature = "parallel")]
-    fn ordered_sum(n: usize, window: usize, helpers: usize) -> (u64, Vec<usize>) {
+    fn ordered_sum(n: usize, window: usize, helpers: usize, leave: bool) -> (u64, Vec<usize>) {
         let compute = |index: usize, scratch: &mut u64| -> u64 {
             *scratch += 1;
             value_of(index)
         };
-        let ahead = Ahead::new(window);
+        let ahead = if leave {
+            Ahead::x_new_leaving(window)
+        } else {
+            Ahead::new(window)
+        };
         let mut kept: Vec<usize> = Vec::new();
         let mut sum = 0u64;
         let mut owner_scratch = 0u64;
@@ -482,7 +513,7 @@ mod tests {
         });
         let (evaluated, taken) = ahead.counts();
         assert!(taken <= evaluated);
-        eprintln!("window {window} helpers {helpers}: evaluated ahead {evaluated}, taken {taken}, kept {}", kept.len());
+        eprintln!("window {window} helpers {helpers} leave {leave}: evaluated ahead {evaluated}, taken {taken}, kept {}", kept.len());
         (sum, kept)
     }
 
@@ -503,7 +534,9 @@ mod tests {
         };
         for &(window, helpers) in &[(2, 1), (8, 1), (64, 1), (64, 3), (5, 2), (256, 7)] {
             for _ in 0..3 {
-                assert_eq!(ordered_sum(5000, window, helpers), serial);
+                assert_eq!(ordered_sum(5000, window, helpers, false), serial);
+                // Helpers that leave once every index is claimed (the owner takes the rest).
+                assert_eq!(ordered_sum(5000, window, helpers, true), serial);
             }
         }
     }

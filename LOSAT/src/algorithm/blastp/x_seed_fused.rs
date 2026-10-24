@@ -2260,10 +2260,15 @@ where
 {
     use std::arch::x86_64::*;
     let mut batches = hits.chunks_exact(X_DIAG_LANES);
-    // Room for a full register past the last candidate (each batch stores eight lanes).
+    // PROBE (exp/a14-bpslot): batch k stores its eight lanes at slot 8k (an address known before
+    // its test) and the first candidate's place at offs[k]; the slots are packed after the
+    // batches. Slots for every batch, then one offset per batch.
+    let n_batches = hits.len().div_ceil(X_DIAG_LANES);
     buffer.clear();
-    buffer.reserve(hits.len() + X_DIAG_LANES);
+    buffer.reserve(n_batches * X_DIAG_LANES + n_batches);
     let out = buffer.as_mut_ptr();
+    let offs = out.add(n_batches * X_DIAG_LANES);
+    let mut slot = 0usize;
     let mut packed = 0usize;
     let mask = table.mask;
     for batch in &mut batches {
@@ -2282,12 +2287,12 @@ where
         let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(
             X_PACK_LANES[lanes as usize].as_ptr().cast(),
         ));
-        // packed <= the hits of the batches before this one, so the eight stores stay inside
-        // the reserved capacity.
         _mm256_storeu_si256(
-            out.add(packed).cast(),
+            out.add(slot * X_DIAG_LANES).cast(),
             _mm256_permutevar8x32_epi32(query, order),
         );
+        *offs.add(slot) = packed as i32;
+        slot += 1;
         packed += lanes.count_ones() as usize;
     }
     let rest = batches.remainder();
@@ -2316,12 +2321,19 @@ where
         let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(
             X_PACK_LANES[lanes as usize].as_ptr().cast(),
         ));
-        // packed <= hits.len() - n, so the eight stores end inside the reserved capacity.
         _mm256_storeu_si256(
-            out.add(packed).cast(),
+            out.add(slot * X_DIAG_LANES).cast(),
             _mm256_permutevar8x32_epi32(query, order),
         );
+        *offs.add(slot) = packed as i32;
+        slot += 1;
         packed += lanes.count_ones() as usize;
+    }
+    // Pack forward in place: offs[k] <= 8k, so slot k is read before any store reaches it and
+    // a store ends at or below slot k + 1; the offsets lie past the slots.
+    for k in 0..slot {
+        let v = _mm256_loadu_si256(out.add(k * X_DIAG_LANES).cast());
+        _mm256_storeu_si256(out.add(*offs.add(k) as usize).cast(), v);
     }
     // The first `packed` values were stored above.
     buffer.set_len(packed);

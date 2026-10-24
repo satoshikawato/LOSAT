@@ -128,12 +128,17 @@ pub(super) struct XTwoHit<'a> {
 // reference's do on every unit, also on a chunk that ends inside a frame. An extension whose codes
 // or X-drop the byte table does not cover (a code >= 32, an X-drop outside 1..=127, a word of more
 // than 11 residues) runs the reference. The table holds BLOSUM62's scores, the matrix of every
-// default tblastn search; another matrix keeps the reference. A strict-set switch
-// (`utils/xswitch.rs`): on unless `LOSAT_X_TBNUNGAP=0`.
+// default tblastn search; another matrix keeps the reference. The walks read the table whatever
+// LOSAT_X_BPUNGAP says, so the path is taken only where `build_table` gives one (every BLOSUM62
+// score fits a byte; were it not so, the table the walks read would be the zeros of
+// `x_ungapped_fast::state`'s fallback). A strict-set switch (`utils/xswitch.rs`): on unless
+// `LOSAT_X_TBNUNGAP=0`.
 /// Whether a word finder with `matrix` takes LOSAT_X_BPUNGAP's walks (BLOSUM62, switch on).
 fn x_tbn_ungap(matrix: ScoringMatrix) -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNUNGAP")) {
+    if !*ON.get_or_init(|| {
+        crate::utils::xswitch::on("LOSAT_X_TBNUNGAP") && x_ungapped_fast::build_table().is_some()
+    }) {
         return false;
     }
     let own = matrix == ScoringMatrix::Blosum62;
@@ -1620,7 +1625,7 @@ mod tests {
         );
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1088-1096
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1088-1091
     // ```c
     // static Int4
     // s_BlastAaExtendTwoHit(Int4 ** matrix,

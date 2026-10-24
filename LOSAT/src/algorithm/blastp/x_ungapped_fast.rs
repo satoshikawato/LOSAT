@@ -102,8 +102,9 @@ fn state() -> &'static State {
         } else {
             0
         };
-        // The table is built in every mode (the tests use it); a score that does not fit a byte
-        // keeps the switch off.
+        // The table is built in every mode (the tests use it, and tblastn's LOSAT_X_TBNUNGAP reads
+        // it whatever this switch says, after its own `build_table` check); a score that does not
+        // fit a byte keeps the switch off.
         match build_table() {
             Some(table) => State {
                 mode: requested,

@@ -118,13 +118,17 @@ impl Drop for Inputs {
     }
 }
 
-/// BLOSUM62 takes the byte-table walks and BLOSUM45 the reference, at 1 and 2 threads; the
-/// default's report is `=0`'s, and `=0` records no side.
+/// BLOSUM62 takes the byte-table walks (at 1 and 2 threads) and BLOSUM45 the reference (at 1
+/// thread: the switch does not change its path); the default's report is `=0`'s, and `=0` records
+/// no side.
 #[test]
 fn the_byte_table_walks_give_the_same_report() {
     let inputs = Inputs::new("same");
-    for (matrix, side) in [("BLOSUM62", (true, false)), ("BLOSUM45", (false, true))] {
-        for threads in [1, 2] {
+    for (matrix, side, threads) in [
+        ("BLOSUM62", (true, false), &[1, 2][..]),
+        ("BLOSUM45", (false, true), &[1][..]),
+    ] {
+        for &threads in threads {
             let (off, off_side) = inputs.tblastn(matrix, threads, &[OFF]);
             assert!(!off.is_empty(), "{matrix} threads {threads}: no hits");
             assert_eq!(

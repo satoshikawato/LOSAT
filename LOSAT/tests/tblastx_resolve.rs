@@ -1,12 +1,12 @@
-//! The table walk of TBLASTX's preliminary bases of a `-subject` record with ambiguous letters
-//! (`LOSAT_X_TBXRESOLVE`, `src/algorithm/tblastx/subjects.rs`, `x_resolved_record_frames`) on
-//! whole searches.
+//! The table walk of TBLASTX's preliminary bases of a `-subject` record with a letter other than
+//! A, C, G and T (`LOSAT_X_TBXRESOLVE`, `src/algorithm/tblastx/subjects.rs`,
+//! `x_resolved_record_frames`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`. It acts on each
-//! record that holds a letter other than A, C, G and T; a record of those four only copies its
-//! letters, and a `-db` sequence is read from its stored codes.
+//! such record while `LOSAT_X_TBXFRAMES` is on; a record of A, C, G and T only copies its letters,
+//! and a `-db` sequence is read from its stored codes.
 //!
-//! NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:443-450
 //! ```c
 //!         if (c  != 0xFF) {
 //!             // No ambiguities, so we can do this the easy way.
@@ -19,7 +19,8 @@
 //! ```
 //! The walk gives the letter-by-letter walk's frames for every record (the unit test of
 //! `subjects.rs` compares them in one process), so the property under test is that the report does
-//! not depend on the switch; that reports equal NCBI's is the business of the fixture comparisons.
+//! not depend on the switch; that reports equal NCBI's is the business of the fixture comparisons
+//! (`tblastx_regression_fixtures.py`'s `ambig.*` and `input.rna_*`, outfmt0's `tblastx.ambig.*`).
 //! `LOSAT_X_REACH` shows the side each run took. The input (the first 6 kb of MjeNMV against the
 //! MelaMJNV genome with IUPAC codes, lower-case letters and N blocks, one across a translation
 //! window, and the PemoMJNVA genome as it is) gives HSPs in both records.

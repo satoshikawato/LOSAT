@@ -1,0 +1,16 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST engine error: Warning: Sequence contains no data Warning:
+ Sequence contains no data"
+    }
+  }
+}

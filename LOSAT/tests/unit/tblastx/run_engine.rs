@@ -50,7 +50,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         dbsize: None,
         evalue: 10.0,
         threshold: 13.0,
-        word_size: 3,
+        word_size: None,
         num_threads: 1,
         out: Some(out.clone()),
         query_gencode: 4,
@@ -64,9 +64,10 @@ fn db_gencode_controls_local_subject_search_translation() {
         seg: "no".to_string(),
         window_size: 40,
         outfmt: "6".to_string(),
-        culling_limit: 0,
+        culling_limit: None,
         query_loc: None,
         subject_loc: None,
+        archive: None,
     };
 
     run(

@@ -1039,11 +1039,10 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, " 5 std", None, Writes(Xml)),
         (ALL, "9", None, Writes(AsnBinary)),
         (ALL, " 9 std", None, Writes(AsnBinary)),
-        // 11 (the BLAST archive, OF8a and OF8b): BLASTN, BLASTP, BLASTX and TBLASTN so far; NCBI
-        // ignores a specification after it.
-        (&["blastn", "blastp", "blastx", "tblastn"], "11", None, Writes(ArchiveFormat)),
-        (&["blastn", "blastp", "blastx", "tblastn"], " 11 qseqid", None, Writes(ArchiveFormat)),
-        (&["tblastx"], "11", None, UNSUPPORTED),
+        // 11 (the BLAST archive, OF8a and OF8b): every program; NCBI ignores a specification
+        // after it.
+        (ALL, "11", None, Writes(ArchiveFormat)),
+        (ALL, " 11 qseqid", None, Writes(ArchiveFormat)),
         // 13 and 14 (BLAST JSON and XML2 as side files and a master file at `-out`): every
         // program (BLASTP and BLASTN: OF5c part 1; BLASTX, TBLASTN and TBLASTX: part 2).
         (ALL, "13", Some("o.json"), Writes(Json)),

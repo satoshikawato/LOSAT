@@ -23,7 +23,9 @@ fn test_default_values() {
 
     assert_eq!(args.evalue, 10.0);
     assert_eq!(args.threshold, 13.0);
-    assert_eq!(args.word_size, 3);
+    assert_eq!(args.word_size, None);
+    assert_eq!(args.word_size(), 3);
+    assert_eq!(args.culling_limit, None);
     assert_eq!(args.num_threads, 1);
     assert_eq!(args.query_gencode, 1);
     assert_eq!(args.db_gencode, 1);
@@ -70,7 +72,7 @@ fn test_custom_word_size() {
         "-word_size",
         "3",
     ]);
-    assert_eq!(args.word_size, 3);
+    assert_eq!(args.word_size, Some(3));
 }
 
 #[test]

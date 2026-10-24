@@ -1,0 +1,1 @@
+- TBLASTN's search driver moved from `algorithm/tblastn/args.rs` to `algorithm/tblastn/tblastn_app.rs` (NCBI `app/blast/tblastn_app.cpp`); `args.rs` keeps the options; outputs do not change.

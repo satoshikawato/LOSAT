@@ -1,5 +1,6 @@
 //! TBLASTN CLI, genetic-code, and internal seed-search boundary.
 mod args;
+mod tblastn_app;
 // NCBI c++/src/algo/blast/core/blast_engine.c:804-844:
 // for (context=first_context; context<=last_context; context++) {
 //     status = s_BlastSearchEngineOneContext(...);
@@ -72,7 +73,8 @@ mod seqalign;
 // NCBI c++/src/app/blast/tblastn_app.cpp:188-194 and seqsrc_seqdb.cpp: the search of a BLAST
 // nucleotide database (`-db`): its sequences, numbers and titles.
 mod database;
-pub use args::{check_options, run_local, ResolvedTblastnArgs, TblastnArgs};
+pub use args::{check_options, ResolvedTblastnArgs, TblastnArgs};
+pub use tblastn_app::run_local;
 // The summary lines `main` prints at exit (`LOSAT_X_TBNXLATESIMD`, `LOSAT_X_TBNUNITXLATE`).
 // No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub use x_subject_translate::print_summary as x_subject_translate_print_summary;

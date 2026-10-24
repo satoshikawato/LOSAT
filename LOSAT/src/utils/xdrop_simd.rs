@@ -429,6 +429,79 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
     Some(t)
 }
 
+/// No NCBI counterpart (memory placement only): a row of the vector kernels whose first element
+/// lies on a 64-byte boundary. The 256-bit kernels store 32 bytes at `PAD + first` plus multiples
+/// of 32 bytes and load the same places in the next row; from a buffer at glibc's 16-byte
+/// alignment half of those stores could cross a cache line, and a split store does not forward
+/// to the load after it (an offset set by the heap's history: one more allocation elsewhere made
+/// blastn's 16-thread search 2 % slower with three times the blocked store forwards). The
+/// values and the lengths are those of the `Vec` before.
+struct Rows<T> {
+    v: Vec<T>,
+    /// `v`'s element on the boundary (`v` is never pushed to, so its buffer does not move).
+    ptr: *mut T,
+    len: usize,
+}
+
+// SAFETY: `ptr` points into `v`, which the struct owns; it goes and is shared with `v`.
+unsafe impl<T: Send> Send for Rows<T> {}
+unsafe impl<T: Sync> Sync for Rows<T> {}
+
+impl<T: Copy + Default> Rows<T> {
+    fn new(len: usize) -> Self {
+        let mut r = Rows {
+            v: Vec::new(),
+            ptr: std::ptr::NonNull::dangling().as_ptr(),
+            len: 0,
+        };
+        r.resize(len, T::default());
+        r
+    }
+
+    /// `Vec::resize`: the rows only grow (`grow`).
+    fn resize(&mut self, len: usize, value: T) {
+        if len <= self.len {
+            self.len = len;
+            return;
+        }
+        let mut v = vec![value; len + 64 / std::mem::size_of::<T>()];
+        let off = v.as_ptr().align_offset(64);
+        assert!(off <= 64 / std::mem::size_of::<T>());
+        v[off..off + self.len].copy_from_slice(self);
+        let ptr = v[off..].as_mut_ptr();
+        *self = Rows { v, ptr, len };
+    }
+}
+
+impl<T> std::ops::Deref for Rows<T> {
+    type Target = [T];
+    #[inline(always)]
+    fn deref(&self) -> &[T] {
+        // SAFETY: `ptr` and `len` lie in `v` (`resize`), and `v` is not changed elsewhere.
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
+}
+
+impl<T> std::ops::DerefMut for Rows<T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut [T] {
+        // SAFETY: as `deref`, and `&mut self` borrows `v` uniquely.
+        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
+    }
+}
+
+impl<T: PartialEq> PartialEq for Rows<T> {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+
+impl<T: std::fmt::Debug> std::fmt::Debug for Rows<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (**self).fmt(f)
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:462-468,476-479
 // ```c
 //     if (num_extra_cells > gap_align->dp_mem_alloc) {
@@ -442,15 +515,15 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
 // The vector kernels' rows (`best`, `best_gap` of `score_array`, here `H` and `E`), the traceback
 // rows (`edit_script`) and the operation list. Kept between calls like `gap_align->dp_mem`.
 pub(crate) struct XdropScratch {
-    ha: Vec<i16>,
-    hb: Vec<i16>,
-    e: Vec<i16>,
+    ha: Rows<i16>,
+    hb: Rows<i16>,
+    e: Rows<i16>,
     // 8-bit path
-    h8a: Vec<u8>,
-    h8b: Vec<u8>,
-    e8: Vec<u8>,
+    h8a: Rows<u8>,
+    h8b: Rows<u8>,
+    e8: Rows<u8>,
     dirty8: usize,
-    sb: Vec<u8>,
+    sb: Rows<u8>,
     sb_filled: usize,
     fence_k: usize,
     bad_k: usize,
@@ -462,6 +535,12 @@ pub(crate) struct XdropScratch {
     surv: Vec<u64>,
     /// Traceback operations in walk order (alignment end -> start), run-length encoded.
     pub ops: Vec<(u8, u32)>,
+    /// The column of lane 0 of the rows (`ha` .. `e8`, `sb`): a kernel moves its lanes down when
+    /// the band moves right (`x_shift`), so the rows hold the band and not every column before it.
+    x_sh: usize,
+    /// The band start, in lanes, at which a kernel moves its rows (`LOSAT_X_DPWINDOW`); `usize::MAX`
+    /// when they hold every column.
+    x_win_at: usize,
 }
 
 impl XdropScratch {
@@ -474,14 +553,14 @@ impl XdropScratch {
             return Self::new();
         }
         Self {
-            ha: Vec::new(),
-            hb: Vec::new(),
-            e: Vec::new(),
-            h8a: Vec::new(),
-            h8b: Vec::new(),
-            e8: Vec::new(),
+            ha: Rows::new(0),
+            hb: Rows::new(0),
+            e: Rows::new(0),
+            h8a: Rows::new(0),
+            h8b: Rows::new(0),
+            e8: Rows::new(0),
             dirty8: 0,
-            sb: Vec::new(),
+            sb: Rows::new(0),
             sb_filled: 0,
             fence_k: usize::MAX,
             bad_k: usize::MAX,
@@ -492,6 +571,8 @@ impl XdropScratch {
             rows: Vec::new(),
             surv: Vec::new(),
             ops: Vec::new(),
+            x_sh: 0,
+            x_win_at: x_dp_window_at(),
         }
     }
 
@@ -505,14 +586,14 @@ impl XdropScratch {
     // The initial allocation, like the first `dp_mem` allocation.
     pub(crate) fn new() -> Self {
         Self {
-            ha: vec![0; 1024],
-            hb: vec![0; 1024],
-            e: vec![0; 1024],
-            h8a: vec![0; 1024],
-            h8b: vec![0; 1024],
-            e8: vec![0; 1024],
+            ha: Rows::new(1024),
+            hb: Rows::new(1024),
+            e: Rows::new(1024),
+            h8a: Rows::new(1024),
+            h8b: Rows::new(1024),
+            e8: Rows::new(1024),
             dirty8: 0,
-            sb: vec![0; 1024],
+            sb: Rows::new(1024),
             sb_filled: 0,
             fence_k: usize::MAX,
             bad_k: usize::MAX,
@@ -523,6 +604,8 @@ impl XdropScratch {
             rows: Vec::new(),
             surv: vec![0; 64],
             ops: Vec::new(),
+            x_sh: 0,
+            x_win_at: x_dp_window_at(),
         }
     }
 
@@ -589,7 +672,79 @@ impl XdropScratch {
         self.trace.clear();
         self.rows.clear();
         self.ops.clear();
+        self.x_sh = 0;
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:641-649
+    // ```c
+    //         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
+    //
+    //             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
+    //                                           2 * gap_align->dp_mem_alloc);
+    // ```
+    // NCBI's `score_array` is indexed by column and grows to the last column of the band, like
+    // these rows before `LOSAT_X_DPWINDOW`. Here a kernel whose band start `first` reached
+    // `x_win_at` moves the lanes from `d` on down to lane 0 (`d` a multiple of 64 with at least 64
+    // lanes left below `first`) and lowers every column it keeps by `d`; `x_sh` adds `d` back
+    // where a column leaves the kernel (the best cell, the start of a traceback row). The lanes
+    // keep their values, the `d` lanes freed at the top are zero as lanes never written are, and
+    // the lanes below `first` are not read, so the DP is the same; only the rows' length changes.
+    // `wide`: the 16-bit rows (`ha`, `hb`, `e`), else the 8-bit ones (`h8a`, `h8b`, `e8`).
+    #[cold]
+    #[inline(never)]
+    fn x_shift(&mut self, d: usize, wide: bool) {
+        crate::utils::xreach::x_reach!("LOSAT_X_DPWINDOW", true);
+        if wide {
+            let n = self.dirty + 2 * PAD + 32;
+            x_shift_lanes(&mut self.ha, d, n);
+            x_shift_lanes(&mut self.hb, d, n);
+            x_shift_lanes(&mut self.e, d, n);
+            self.dirty = self.dirty.saturating_sub(d);
+        } else {
+            let n = self.dirty8 + 2 * PAD + 32;
+            x_shift_lanes(&mut self.h8a, d, n);
+            x_shift_lanes(&mut self.h8b, d, n);
+            x_shift_lanes(&mut self.e8, d, n);
+            self.dirty8 = self.dirty8.saturating_sub(d);
+        }
+        // `sb[PAD + k + 1]` holds column `k + x_sh`; lanes past `sb_filled` are filled before use
+        let n = (PAD + self.sb_filled + 1 + 32).min(self.sb.len());
+        if PAD + d < n {
+            self.sb.copy_within(PAD + d..n, PAD);
+        }
+        self.sb_filled = self.sb_filled.saturating_sub(d);
+        if self.fence_k != usize::MAX {
+            self.fence_k = self.fence_k.saturating_sub(d);
+        }
+        if self.bad_k != usize::MAX {
+            self.bad_k = self.bad_k.saturating_sub(d);
+        }
+        self.x_sh += d;
+    }
+}
+
+// No NCBI counterpart: lanes `PAD + d .. n` of one row move to `PAD ..`, and the `d` lanes at the
+// top become zero (`x_shift`).
+fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
+    let n = n.min(v.len());
+    if PAD + d < n {
+        v.copy_within(PAD + d..n, PAD);
+        v[n - d..n].fill(T::default());
+    } else if PAD < n {
+        v[PAD..n].fill(T::default());
+    }
+}
+
+/// No NCBI counterpart: `LOSAT_X_DPWINDOW` (strict set, a value switch): the band start, in
+/// lanes, at which the vector kernels move their rows down (`XdropScratch::x_shift`); built-in
+/// 1024, at least 128. Off: the rows hold every column up to the band's end, as before.
+pub(crate) fn x_dp_window_at() -> usize {
+    use std::sync::OnceLock;
+    static AT: OnceLock<usize> = OnceLock::new();
+    *AT.get_or_init(|| {
+        crate::utils::xswitch::value("LOSAT_X_DPWINDOW", 128..=usize::MAX, 1024)
+            .unwrap_or(usize::MAX)
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:612-613,732
@@ -1497,12 +1652,26 @@ mod kernel {
         let mut wend = [b_size, 0usize];
         let mut cur = 0usize; // buffer holding the previous row
 
+        // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
+        // `sc.x_sh`
+        let win_at = sc.x_win_at;
+        let mut len2 = len2;
         for a in 1..=len1 {
+            if first >= win_at {
+                let d = (first - 64) & !63;
+                sc.x_shift(d, true);
+                first -= d;
+                b_size -= d;
+                len2 -= d;
+                wend[0] = wend[0].saturating_sub(d);
+                wend[1] = wend[1].saturating_sub(d);
+            }
             sc.ensure(b_size + num_extra + 64);
             if sc.sb_filled < b_size {
                 let to = (b_size + 64).min(len2 + 1);
+                let sh = sc.x_sh;
                 for k in sc.sb_filled..to {
-                    let ch = s.get(k);
+                    let ch = s.get(k + sh);
                     if ch as usize >= ncols {
                         if check_fence && ch == FENCE_SENTRY {
                             if sc.fence_k == usize::MAX {
@@ -1646,14 +1815,17 @@ mod kernel {
             wend[wi] = proc_end;
             cur = wi;
             if rs.slow != 0 {
-                b_off = rs.rec_b;
+                b_off = rs.rec_b + sc.x_sh;
                 a_off = a;
                 best_rel = lane0(rs.bestv) - bias;
             }
             if TB {
                 sc.trace.set_len(row_off + proc_end - first);
-                sc.rows
-                    .push((row_off as u32, first as u32, (proc_end - first) as u32));
+                sc.rows.push((
+                    row_off as u32,
+                    (first + sc.x_sh) as u32,
+                    (proc_end - first) as u32,
+                ));
             }
             if fence_row {
                 fence_hit = true;
@@ -1946,12 +2118,26 @@ mod kernel {
         let mut wend = [b_size, 0usize];
         let mut cur = 0usize;
 
+        // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
+        // `sc.x_sh`
+        let win_at = sc.x_win_at;
+        let mut len2 = len2;
         for a in 1..=len1 {
+            if first >= win_at {
+                let d = (first - 64) & !63;
+                sc.x_shift(d, false);
+                first -= d;
+                b_size -= d;
+                len2 -= d;
+                wend[0] = wend[0].saturating_sub(d);
+                wend[1] = wend[1].saturating_sub(d);
+            }
             sc.ensure(b_size + num_extra + 64);
             if sc.sb_filled < b_size {
                 let to = (b_size + 64).min(len2 + 1);
+                let sh = sc.x_sh;
                 for k in sc.sb_filled..to {
-                    let ch = s.get(k);
+                    let ch = s.get(k + sh);
                     if ch as usize >= ncols {
                         if check_fence && ch == FENCE_SENTRY {
                             if sc.fence_k == usize::MAX {
@@ -2090,14 +2276,17 @@ mod kernel {
             wend[wi] = proc_end;
             cur = wi;
             if rs.slow != 0 {
-                b_off = rs.rec_b;
+                b_off = rs.rec_b + sc.x_sh;
                 a_off = a;
                 best_rel = lane0_u8(rs.bestv) - bias;
             }
             if TB {
                 sc.trace.set_len(row_off + proc_end - first);
-                sc.rows
-                    .push((row_off as u32, first as u32, (proc_end - first) as u32));
+                sc.rows.push((
+                    row_off as u32,
+                    (first + sc.x_sh) as u32,
+                    (proc_end - first) as u32,
+                ));
             }
             if fence_row {
                 fence_hit = true;
@@ -2403,7 +2592,7 @@ mod x_avx2;
 ))]
 #[path = "x_xdrop_w128.rs"]
 mod x_w128;
-// EXPERIMENT (LOSAT_X_DPNEON2): the 256-bit kernels of `x_xdrop_avx2.rs` on aarch64 NEON, each
+// LOSAT_X_DPNEON2 (on unless `=0`): the 256-bit kernels of `x_xdrop_avx2.rs` on aarch64 NEON, each
 // vector in two registers. A child module like `x_avx2`.
 #[cfg(target_arch = "aarch64")]
 #[path = "x_xdrop_neon2.rs"]
@@ -2417,8 +2606,8 @@ mod x_capture;
 /// has AVX2); bit 1: record a sample of the calls (LOSAT_X_DPCAPTURE).
 /// Bit 2 (EXPERIMENT): try the 128-bit kernels of `x_xdrop_w128.rs` after the
 /// 256-bit ones (set only when the CPU runs the 128-bit kernels; always on wasm32 simd128 and
-/// aarch64). Bit 3 (EXPERIMENT, LOSAT_X_DPNEON2, aarch64 only): try the two-register NEON kernels
-/// of `x_xdrop_neon2.rs` first, where bit 0 stands on x86_64. Bit 4 (LOSAT_X_DPEMASK, with bit 0):
+/// aarch64). Bit 3 (LOSAT_X_DPNEON2, on unless `=0`, aarch64 only): try the two-register NEON
+/// kernels of `x_xdrop_neon2.rs` first, where bit 0 stands on x86_64. Bit 4 (LOSAT_X_DPEMASK, with bit 0):
 /// the 8-bit 256-bit kernel's `EM` instances (no E clearing at the row end, see `x_xdrop_avx2.rs`).
 fn x_extra_switches() -> u8 {
     use std::sync::OnceLock;
@@ -2552,8 +2741,8 @@ fn x_extra_dispatch(
             }
         }
     }
-    // EXPERIMENT (LOSAT_X_DPNEON2): on aarch64 the two-register NEON kernels of `x_xdrop_neon2.rs`
-    // take the place of the 256-bit kernels: the same recurrence, the same lanes per block and
+    // LOSAT_X_DPNEON2 (on unless `=0`): on aarch64 the two-register NEON kernels of
+    // `x_xdrop_neon2.rs` take the place of the 256-bit kernels: the same recurrence, the same lanes per block and
     // band steps as `x_xdrop_avx2.rs`, so exactly what the 128-bit kernel returns (the argument is
     // at the head of that file). When they return None (a row-gap precondition, or a problem the
     // 128-bit kernel declines too) the next dispatch runs.
@@ -3164,6 +3353,33 @@ mod tests {
     //     if (!score_only) {
     //         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
     // ```
+    // `Rows` (memory placement only): the first element on a 64-byte boundary at every length
+    // the scratch takes, the contents kept when the rows grow, as `Vec::resize`.
+    #[test]
+    fn rows_start_on_64_byte_boundaries_and_keep_their_values_when_they_grow() {
+        fn check<T: Copy + Default + PartialEq + std::fmt::Debug + From<u8>>() {
+            let mut r = Rows::<T>::new(1024);
+            assert_eq!(r.len(), 1024);
+            assert_eq!(r.as_ptr() as usize % 64, 0);
+            for (i, x) in r.iter_mut().enumerate() {
+                *x = T::from((i % 251) as u8);
+            }
+            for len in [1030usize, 2100, 4096, 9001] {
+                r.resize(len, T::default());
+                assert_eq!(r.len(), len);
+                assert_eq!(r.as_ptr() as usize % 64, 0, "len {len}");
+                assert!(r[..1024]
+                    .iter()
+                    .enumerate()
+                    .all(|(i, &x)| x == T::from((i % 251) as u8)));
+                assert!(r[1024..].iter().all(|&x| x == T::default()));
+            }
+            assert_eq!(Rows::<T>::new(0).len(), 0);
+        }
+        check::<u8>();
+        check::<i16>();
+    }
+
     // Random problems (matrices of 16 and 28 letters, several gap costs and X-drop values,
     // some with a fence sentinel) are run through `reference` and `xdrop_align`. The
     // offsets, score, fence flag, edit script and cell count are compared.
@@ -3177,6 +3393,8 @@ mod tests {
         let mut sc = XdropScratch::new();
         let (mut handled, mut fences, mut ops_total) = (0usize, 0usize, 0usize);
         for case in 0..cases {
+            // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
+            sc.x_win_at = [128, 320, usize::MAX][case % 3];
             let n = if rng.below(2) == 0 { 16 } else { 28 };
             let scale = if rng.below(3) == 0 { 32 } else { 1 };
             let max_len = if rng.below(5) == 0 { 2500 } else { 300 };
@@ -3261,6 +3479,86 @@ mod tests {
                 "the SIMD kernel handled {handled} of {cases} cases"
             );
             assert!(fences > 0 && ops_total > 0);
+        }
+    }
+
+    // No NCBI counterpart: the band window of the vector kernels (`XdropScratch::x_shift`,
+    // `LOSAT_X_DPWINDOW`). Long problems whose band moves right (both scores of the blastn task
+    // and a protein matrix, score-only and traceback, forward columns) run with the rows moved
+    // from band start 128 on and with every column held: the offsets, score, fence flag, edit
+    // script and cell count are equal, equal to the scalar loops, and the moved rows stay short.
+    #[test]
+    fn band_window_keeps_every_result() {
+        let mut rng = Rng(0x5851_F42D_4C95_7F2D);
+        let (mut on, mut off) = (XdropScratch::new(), XdropScratch::new());
+        (on.x_win_at, off.x_win_at) = (128, usize::MAX);
+        let (mut shifted, mut handled) = (0usize, 0usize);
+        for case in 0..40 {
+            let n = if case % 2 == 0 { 16 } else { 28 };
+            let len = 1500 + rng.below(2500) as usize;
+            let p = random_problem(&mut rng, n, 1, len);
+            let (go, ge, x) = if case % 4 < 2 {
+                (5, 2, 110)
+            } else {
+                (11, 1, 38)
+            };
+            let (len1, len2) = (p.q.len(), p.s.len());
+            if len2 == 0 {
+                continue;
+            }
+            let rows = RowSeq::Bytes {
+                data: &p.q,
+                base: -1,
+                step: 1,
+            };
+            let cols = ColSeq {
+                data: &p.s,
+                base: 0,
+                step: 1,
+                zero_from: len2,
+            };
+            let scores = Scores::Flat { data: &p.m, n };
+            for tb in [false, true] {
+                let expected = reference(&p, len1, len2, go, ge, x, tb, false);
+                let a = xdrop_align(
+                    &rows, &cols, &scores, len1, len2, go, ge, x, tb, tb, &mut on,
+                );
+                let moved = on.x_sh;
+                let rows_len = on.h8a.len().max(on.ha.len());
+                let b = xdrop_align(
+                    &rows, &cols, &scores, len1, len2, go, ge, x, tb, tb, &mut off,
+                );
+                let (Some(a), Some(b)) = (a, b) else {
+                    continue;
+                };
+                handled += 1;
+                assert_eq!(a, b, "case {case} tb={tb} len1={len1} len2={len2}");
+                assert_eq!(on.ops, off.ops, "case {case} tb={tb} traceback");
+                assert_eq!(
+                    (a.a_offset, a.b_offset, a.score, a.fence_hit),
+                    (expected.0, expected.1, expected.2, expected.3),
+                    "case {case} tb={tb} against the scalar loops"
+                );
+                assert_eq!(on.ops, expected.4, "case {case} tb={tb} scalar traceback");
+                if moved > 0 {
+                    shifted += 1;
+                    assert!(
+                        rows_len <= 2048,
+                        "case {case}: rows of {rows_len} lanes after moving {moved} columns"
+                    );
+                }
+            }
+        }
+        // every vector kernel moves its rows, the NEON2 ones (LOSAT_X_DPNEON2) too
+        if cfg!(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128"),
+            target_arch = "aarch64"
+        )) {
+            assert!(
+                handled > 40 && shifted > 20,
+                "handled {handled}, moved {shifted}"
+            );
         }
     }
 }

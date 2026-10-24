@@ -75,8 +75,9 @@ struct Case {
     extra: &'static [&'static str],
     outfmt: String,
     rc: i32,
-    /// `-db tests/db_search/arch_sprot` in place of `-subject`.
+    /// `-db tests/db_search/<db_name>` in place of `-subject`.
     db: bool,
+    db_name: &'static str,
 }
 
 const BATCH: (&str, &str) = ("BATCH_SIZE", "200");
@@ -98,6 +99,7 @@ fn case(
         outfmt: "11".to_string(),
         rc,
         db: false,
+        db_name: "arch_sprot",
     }
 }
 
@@ -357,6 +359,36 @@ fn cases() -> Vec<Case> {
             )
         });
     }
+    // The values NCBI takes of the whole query batch, with a reader batch of several units (the
+    // reader batch is 100,000 letters, the search units 10,002). `m1_split`: two queries of
+    // 19,500 letters; NCBI does not split a batch of two queries, however long they are.
+    // `m1_avg`: a 20,100-letter run of `N` and 24 fragments of 1,000 letters, `-ungapped`:
+    // the link cutoffs use the batch's average query length. Each differs from NCBI when the
+    // values are taken of the unit.
+    cases.push(Case {
+        outfmt: "6".to_string(),
+        db: true,
+        db_name: "bslice",
+        ..case(
+            "m1_split",
+            &[("BATCH_SIZE", "100000")],
+            "arch_bx_m1_split.fna",
+            &[],
+            0,
+        )
+    });
+    cases.push(Case {
+        outfmt: "6".to_string(),
+        db: true,
+        db_name: "bslice",
+        ..case(
+            "m1_avg",
+            &[("BATCH_SIZE", "100000")],
+            "arch_bx_m1_avg.fna",
+            &["-ungapped", "-comp_based_stats", "F"],
+            0,
+        )
+    });
     cases
 }
 
@@ -377,6 +409,8 @@ const MULTI_BATCH: &[&str] = &[
     "batches_sub_fmt5",
     "units_sub",
     "units_sub_fmt6",
+    "m1_split",
+    "m1_avg",
 ];
 
 fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
@@ -384,9 +418,10 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     env.extend_from_slice(extra_env);
     let query = input(case.query);
     let subject = input(case.subject);
+    let db = format!("tests/db_search/{}", case.db_name);
     let mut args = vec!["-query", &query];
     if case.db {
-        args.extend_from_slice(&["-db", "tests/db_search/arch_sprot"]);
+        args.extend_from_slice(&["-db", &db]);
     } else {
         args.extend_from_slice(&["-subject", &subject]);
     }
@@ -419,16 +454,15 @@ fn archives_equal_ncbis_at_one_and_four_threads() {
 }
 
 /// The flow of batches (`LOSAT_X_BXFLOW`, in the strict set) writes the archives the waves write:
-/// the multi-batch cases are compared with `LOSAT_X_BXFLOW=0`.
+/// the multi-batch cases are compared with `LOSAT_X_BXFLOW=0`. At one thread there is no pool and
+/// the switch is never read, so that run would be the one of the test above.
 #[test]
 fn the_flow_does_not_change_the_archives() {
     for case in cases()
         .iter()
         .filter(|case| MULTI_BATCH.contains(&case.name.as_str()))
     {
-        for threads in ["1", "4"] {
-            check(case, &[("LOSAT_X_BXFLOW", "0")], threads);
-        }
+        check(case, &[("LOSAT_X_BXFLOW", "0")], "4");
     }
 }
 
@@ -436,7 +470,7 @@ fn the_flow_does_not_change_the_archives() {
 /// write still creates the (empty) file.
 #[test]
 fn the_out_file_receives_the_archive() {
-    let dir = std::env::temp_dir().join(format!("losat_outfmt11_out_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_out_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let query = input("arch_bx_q.fna");
     let subject = input("arch_bx_s.faa");
@@ -502,7 +536,7 @@ fn xml_archives_are_refused_before_the_first_byte() {
 /// before the first byte.
 #[test]
 fn non_ascii_titles_and_database_names_are_refused() {
-    let dir = std::env::temp_dir().join(format!("losat_outfmt11_title_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_title_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let plain = engine().join(input("arch_bx_s.faa"));
     let plain = plain.to_str().unwrap();
@@ -562,8 +596,10 @@ fn non_ascii_titles_and_database_names_are_refused() {
 /// is in the second batch (`BATCH_SIZE=60`), or after the first 10,002 letters (the default).
 #[test]
 fn a_non_ascii_title_before_a_reader_error_is_refused_before_the_first_byte() {
-    let dir =
-        std::env::temp_dir().join(format!("losat_outfmt11_batchtitle_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "losat_outfmt11_bx_batchtitle_{}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     let subject = engine().join(input("arch_bx_s.faa"));
     let subject = subject.to_str().unwrap();
@@ -633,7 +669,7 @@ fn a_non_ascii_title_before_a_reader_error_is_refused_before_the_first_byte() {
 #[test]
 fn a_fifo_query_is_refused_without_waiting() {
     use std::time::{Duration, Instant};
-    let dir = std::env::temp_dir().join(format!("losat_outfmt11_fifo_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_fifo_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let fifo = dir.join("query_fifo");
     let _ = std::fs::remove_file(&fifo);

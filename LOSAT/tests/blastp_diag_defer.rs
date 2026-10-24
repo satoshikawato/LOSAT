@@ -1,20 +1,26 @@
-//! blastp's two-hit test with `LOSAT_X_BPDEFER` (`src/algorithm/blastp/x_seed_fused.rs`) on whole
-//! searches: the candidates of a lookup cell's AVX2 batches are called after the cell's last batch
-//! of eight instead of at the end of each batch.
+//! blastp's two-hit test with `LOSAT_X_BPDEFER` and `LOSAT_X_BPMASKED`
+//! (`src/algorithm/blastp/x_seed_fused.rs`) on whole searches: the candidates of a lookup cell's
+//! AVX2 batches are called after the cell's last batch of eight instead of at the end of each batch
+//! (`LOSAT_X_BPDEFER`), and with `LOSAT_X_BPMASKED` the batches take their entry coordinates from
+//! scalar loads of the hits and a cell's last batch of fewer than eight hits is one masked AVX2
+//! batch whose candidates join the buffer (`x_cell_avx2_defer_masked`, `LOSAT_X_BXDEFER`'s cell
+//! test in blastx).
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`) since 2026-10-17: on unless
-//! `LOSAT_X_BPDEFER=0`. It acts only where
-//! `LOSAT_X_BPDIAG`'s AVX2 batch runs (the fused seed loop of `LOSAT_X_BPSEED`, both in the set, a
-//! CPU with AVX2, not `LOSAT_X_BPDIAG_SIMD=0`). Each search states the default it runs with: the
-//! reference loop (`LOSAT_X_BPSEED=0 LOSAT_X_BPDIAG=0`), the default (no variable: the deferred
-//! calls where the CPU has AVX2), and the default with the switch off (`LOSAT_X_BPDEFER=0`: the
-//! AVX2 batch with the calls per batch). The tests
+//! Both switches are in the strict set (`src/utils/xswitch.rs`), `LOSAT_X_BPDEFER` since
+//! 2026-10-17 and `LOSAT_X_BPMASKED` since 2026-10-24: on unless `=0`. `LOSAT_X_BPDEFER` acts only
+//! where `LOSAT_X_BPDIAG`'s AVX2 batch runs (the fused seed loop of `LOSAT_X_BPSEED`, both in the
+//! set, a CPU with AVX2, not `LOSAT_X_BPDIAG_SIMD=0`), and `LOSAT_X_BPMASKED` only where
+//! `LOSAT_X_BPDEFER`'s deferred calls run. Each search states the default it runs with: the
+//! reference loop (`LOSAT_X_BPSEED=0 LOSAT_X_BPDIAG=0`), the default (no variable: the masked batch
+//! where the CPU has AVX2), the default with `LOSAT_X_BPMASKED=0` (the deferred calls), and the
+//! default with `LOSAT_X_BPDEFER=0` (the AVX2 batch with the calls per batch). The tests
 //! compare the reports with the reference and with the batches at one and four threads on a
 //! generated pair (long lookup cells from repeats, related proteins for two-hit extensions) and
 //! the fixture pair, check from the
-//! `[TIMING] x_bpdiag: mode=<m> cells=<n> batched_hits=<h> candidates=<k>` lines that the deferred
-//! path ran and tested the same cells, hits and candidates as the batches, and run the shadow of
-//! `LOSAT_X_BPSEEDSHADOW` (the deferred loop against the reference for every subject).
+//! `[TIMING] x_bpdiag: mode=<m> cells=<n> batched_hits=<h> candidates=<k>` lines that the masked
+//! and the deferred paths ran and tested the same cells, hits and candidates as the batches, and
+//! run the shadow of `LOSAT_X_BPSEEDSHADOW` (the default's loop against the reference for every
+//! subject).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552
 //! ```c
@@ -174,8 +180,10 @@ fn generated_pair(test: &str) -> (PathBuf, PathBuf) {
 
 /// The reference loop: the loop without the fused seed stage and without its line.
 const REFERENCE: &[(&str, &str)] = &[("LOSAT_X_BPSEED", "0"), ("LOSAT_X_BPDIAG", "0")];
-/// The default: the strict set, with the deferred calls.
+/// The default: the strict set, with the deferred calls and the masked batch.
 const DEFAULT: &[(&str, &str)] = &[];
+/// The default without the masked batch: the deferred calls of `LOSAT_X_BPDEFER`.
+const DEFERRED: &[(&str, &str)] = &[("LOSAT_X_BPMASKED", "0")];
 /// The default without the deferred calls: the AVX2 batch with its calls per batch.
 const BATCHES: &[(&str, &str)] = &[("LOSAT_X_BPDEFER", "0")];
 
@@ -196,8 +204,34 @@ fn one_line(counts: &[DiagCounts], what: &str) -> DiagCounts {
     counts[0].clone()
 }
 
+/// The (thread, table) choices of `LOSAT_X_BPMASKEDMIN`'s rule from a search's
+/// `[TIMING] x_bpmasked: min_hits_per_cell=<n> tables_masked=<a> tables_deferred=<b> ...` lines:
+/// the tables that took the masked batch and those it gave the deferred calls (`None` without a
+/// line: the search did not choose the masked batch).
+fn masked_tables(stderr: &str) -> Option<(u64, u64)> {
+    let mut found = None;
+    for line in stderr.lines() {
+        let Some(rest) = line.strip_prefix("[TIMING] x_bpmasked: ") else {
+            continue;
+        };
+        let field = |name: &str| -> u64 {
+            rest.split(' ')
+                .find_map(|f| f.strip_prefix(name))
+                .expect("a field of the line")
+                .parse()
+                .expect("a count of tables")
+        };
+        let (masked, deferred) = found.unwrap_or((0, 0));
+        found = Some((
+            masked + field("tables_masked="),
+            deferred + field("tables_deferred="),
+        ));
+    }
+    found
+}
+
 #[test]
-fn deferred_calls_give_the_reports_and_counts_of_the_batches() {
+fn deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches() {
     let (query, subject) = generated_pair("reports");
     let pairs = [
         (query, subject),
@@ -217,32 +251,51 @@ fn deferred_calls_give_the_reports_and_counts_of_the_batches() {
                 blastp(query, subject, threads, BATCHES, &["-outfmt", "6"]);
             assert!(batched == reference, "{what}: the batches differ");
             let b = one_line(&batched_counts, &what);
-            // The run with the deferred calls, by default.
+            // The run with the deferred calls (LOSAT_X_BPMASKED=0).
+            let what_d = format!("{what} {DEFERRED:?}");
+            let (rows, counts, _) = blastp(query, subject, threads, DEFERRED, &["-outfmt", "6"]);
+            assert!(rows == reference, "{what_d}: the report differs");
+            let d = one_line(&counts, &what_d);
+            // The run with the masked batch, by default.
             let what = format!("{what} {DEFAULT:?}");
-            let (rows, counts, _) = blastp(query, subject, threads, DEFAULT, &["-outfmt", "6"]);
+            let (rows, counts, stderr) =
+                blastp(query, subject, threads, DEFAULT, &["-outfmt", "6"]);
             assert!(rows == reference, "{what}: the report differs");
-            let d = one_line(&counts, &what);
+            let m = one_line(&counts, &what);
             if avx2() {
                 assert_eq!(b.mode, "avx2", "{what}");
-                assert_eq!(d.mode, "avx2-defer", "{what}");
-                assert!(d.cells > 0 && d.candidates > 0, "{what}: {d:?}");
+                assert_eq!(d.mode, "avx2-defer", "{what_d}");
+                assert_eq!(m.mode, "avx2-defer-masked", "{what}");
+                assert!(m.cells > 0 && m.candidates > 0, "{what}: {m:?}");
+                // The query sets have enough hits per cell for the masked batch on every table.
+                let tables = masked_tables(&stderr);
+                assert!(
+                    matches!(tables, Some((n, 0)) if n > 0),
+                    "{what}: {tables:?}"
+                );
             } else {
                 // Without AVX2 there is no AVX2 batch to defer: the per-hit loop runs.
-                assert_eq!((b.mode.as_str(), d.mode.as_str()), ("per-hit", "per-hit"));
+                let modes = (b.mode.as_str(), d.mode.as_str(), m.mode.as_str());
+                assert_eq!(modes, ("per-hit", "per-hit", "per-hit"));
             }
-            // The same cells, hits and candidates: only the time of the calls moved.
-            assert_eq!(
-                (b.cells, b.hits, b.candidates),
-                (d.cells, d.hits, d.candidates),
-                "{what}: counts"
-            );
+            // The same cells, hits and candidates: only the time of the calls and the form of the
+            // batches changed.
+            for (c, what) in [(&d, &what_d), (&m, &what)] {
+                assert_eq!(
+                    (b.cells, b.hits, b.candidates),
+                    (c.cells, c.hits, c.candidates),
+                    "{what}: counts"
+                );
+            }
         }
     }
-    // The pairwise report too, on the fixture pair, by default.
+    // The pairwise report too, on the fixture pair, by default and with LOSAT_X_BPMASKED=0.
     let (query, subject) = &pairs[1];
     let (reference, _, _) = blastp(query, subject, 1, REFERENCE, &["-outfmt", "0"]);
-    let (report, _, _) = blastp(query, subject, 1, DEFAULT, &["-outfmt", "0"]);
-    assert!(report == reference, "outfmt 0: the report differs");
+    for vars in [DEFAULT, DEFERRED] {
+        let (report, _, _) = blastp(query, subject, 1, vars, &["-outfmt", "0"]);
+        assert!(report == reference, "outfmt 0 {vars:?}: the report differs");
+    }
 }
 
 #[test]
@@ -265,7 +318,7 @@ fn the_switch_acts_only_on_the_avx2_batches() {
 fn the_shadow_compares_the_deferred_loop_with_the_reference() {
     let (query, subject) = generated_pair("shadow");
     let (reference, _, _) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
-    // The shadow by default (the switch on).
+    // The shadow by default (both switches on: the masked batch).
     let vars: &[(&str, &str)] = &[("LOSAT_X_BPSEEDSHADOW", "1")];
     for threads in [1, 4] {
         let what = format!("{vars:?} threads {threads}");
@@ -278,7 +331,68 @@ fn the_shadow_compares_the_deferred_loop_with_the_reference() {
                     && line.contains(" identical")),
             "{what}: no shadow line: {stderr}"
         );
-        let expected = if avx2() { "avx2-defer" } else { "per-hit" };
+        let expected = if avx2() {
+            "avx2-defer-masked"
+        } else {
+            "per-hit"
+        };
         assert_eq!(one_line(&counts, &what).mode, expected);
+    }
+}
+
+/// `LOSAT_X_BPMASKEDMIN`'s rule on whole searches: a short query (about one hit per used lookup
+/// cell) keeps the deferred calls by default and takes the masked batch with
+/// `LOSAT_X_BPMASKEDMIN=0`, with the reference's report and the batches' counts either way.
+#[test]
+fn the_rule_gives_tables_with_few_hits_per_cell_the_deferred_calls() {
+    let (query, subject) = generated_pair("rule");
+    // The first 60 letters of the first query (a random protein, its copy among the subjects).
+    let text = std::fs::read_to_string(&query).expect("read the query set");
+    let first = text.lines().nth(1).expect("the first protein");
+    let short = query.with_file_name("short.faa");
+    std::fs::write(&short, format!(">short\n{}\n", &first[..60])).expect("write FASTA");
+    const FORCED: &[(&str, &str)] = &[("LOSAT_X_BPMASKEDMIN", "0")];
+    for threads in [1, 4] {
+        let what = format!("short query threads {threads}");
+        let (reference, _, _) = blastp(&short, &subject, threads, REFERENCE, &["-outfmt", "6"]);
+        assert!(
+            !reference.is_empty(),
+            "{what}: the short query has a report"
+        );
+        let (deferred, deferred_counts, stderr) =
+            blastp(&short, &subject, threads, DEFERRED, &["-outfmt", "6"]);
+        assert!(
+            deferred == reference,
+            "{what} {DEFERRED:?}: the report differs"
+        );
+        let d = one_line(&deferred_counts, &what);
+        // With the switch off the rule is never consulted.
+        let tables = masked_tables(&stderr);
+        assert_eq!(tables, None, "{what} {DEFERRED:?}: {tables:?}");
+        for (vars, rule_masks) in [(DEFAULT, false), (FORCED, true)] {
+            let what = format!("{what} {vars:?}");
+            let (rows, counts, stderr) = blastp(&short, &subject, threads, vars, &["-outfmt", "6"]);
+            assert!(rows == reference, "{what}: the report differs");
+            let c = one_line(&counts, &what);
+            assert_eq!(
+                (c.cells, c.hits, c.candidates),
+                (d.cells, d.hits, d.candidates),
+                "{what}: counts"
+            );
+            let tables = masked_tables(&stderr);
+            if !avx2() {
+                assert_eq!(tables, None, "{what}: no masked batch without AVX2");
+            } else if rule_masks {
+                assert!(
+                    matches!(tables, Some((n, 0)) if n > 0),
+                    "{what}: {tables:?}"
+                );
+            } else {
+                assert!(
+                    matches!(tables, Some((0, n)) if n > 0),
+                    "{what}: {tables:?}"
+                );
+            }
+        }
     }
 }

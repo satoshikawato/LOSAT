@@ -5,6 +5,7 @@ use super::{
     parameters::{effective_lengths, score_block, subject_parameters, ContextParameters},
     preliminary::{gapped, purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
     query_setup::{batch_ranges, prepare_queries, PreparedQueryBatch, BATCH_SIZE},
+    reader_batch::{prepare_reader_batch, UnitPrep},
     seed::{word_finder, Diagonals, InitHsp, Lookup},
     split::{adjust_chunk_hsps, merge_chunk_hsps, split_queries, QueryChunk},
     subjects::Subjects,
@@ -438,6 +439,7 @@ pub fn search_preliminary(
             true,
             &mut DiagnosticOnly,
             pool,
+            None,
         )
     })
 }
@@ -500,6 +502,13 @@ const X_BX_CHUNK: usize = 64;
 #[path = "x_subject_flow.rs"]
 pub(crate) mod x_subject_flow;
 
+// LOSAT_X_BXDIAGKEEP, LOSAT_X_BXUNITCAP: the workers' diagonal tables kept one per thread, and at
+// most K units searched at a time (a child module, so that it uses compute_subject and
+// SubjectComputation).
+#[cfg(feature = "parallel")]
+#[path = "x_bx_mem.rs"]
+pub(crate) mod x_bx_mem;
+
 pub(crate) fn search_core(
     records: &[FastaRecord],
     subjects: Subjects<'_>,
@@ -507,6 +516,7 @@ pub(crate) fn search_core(
     diagnostics: bool,
     sink: &mut impl PreliminarySink,
     pool: &crate::utils::threading::SearchPool<'_>,
+    prep: Option<UnitPrep>,
 ) -> Result<Vec<BatchStage>> {
     ensure!(
         !subjects.is_empty() || subjects.is_unreadable(),
@@ -548,14 +558,37 @@ pub(crate) fn search_core(
     // it does not change any value NCBI computes.
     let x_containment = diagnostics || sink.x_wants_containment();
     use super::x_timing::Batch as XBatch;
-    for range in batch_ranges(records, BATCH_SIZE) {
+    let ranges = batch_ranges(records, BATCH_SIZE);
+    // The units of a reader batch (`records`) are prepared first, together, and the values NCBI
+    // takes of the whole query batch are reduced (`reader_batch.rs`); each unit is then searched
+    // from its preparation. A caller that searches the units one by one has prepared them
+    // already (`prep`, the only unit of `records`). A batch of one unit is its own batch.
+    let mut preps: std::collections::VecDeque<UnitPrep> = match prep {
+        Some(prep) => {
+            ensure!(ranges.len() == 1, "a prepared unit is searched alone");
+            std::collections::VecDeque::from([prep])
+        }
+        None if ranges.len() > 1 => {
+            prepare_reader_batch(records, &ranges, options, subjects, pool)?.into()
+        }
+        None => std::collections::VecDeque::new(),
+    };
+    for range in ranges {
         // Diagnostic (LOSAT_TIMING): the clocks of the batch's stages (x_timing.rs). No NCBI
         // counterpart.
         let x_t_batch = super::x_timing::lap();
         let x_t = x_t_batch;
         let queries = &records[range.clone()];
-        let mut full = prepare_queries(queries, options)?;
-        let mut full_params = score_block(&full);
+        let (mut full, mut full_params) = match preps.pop_front() {
+            Some(UnitPrep {
+                prepared, params, ..
+            }) => (prepared, params),
+            None => {
+                let full = prepare_queries(queries, options)?;
+                let params = score_block(&full);
+                (full, params)
+            }
+        };
         super::x_timing::batch(XBatch::QuerySetup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
         // ```c++
@@ -682,8 +715,18 @@ pub(crate) fn search_core(
         let chunks = if x_chunks_par {
             use rayon::prelude::*;
             crate::utils::threading::report_stage("blastx", "query_chunks", chunks.len(), true);
-            let wave = pool.threads().max(2);
-            for wave_chunks in chunks.chunks(wave) {
+            // Dispatch point (LOSAT_X_BXUNITCAP, in the strict set): waves of at most K chunks
+            // (fewer inside the capped batch flow, x_bx_mem::chunk_wave), each chunk's subjects as
+            // tasks on the pool (x_bx_mem.rs).
+            let x_cap = x_bx_mem::chunk_unit_cap(pool, options, subjects);
+            let mut x_next = 0;
+            while x_next < chunks.len() {
+                let x_wave = x_cap.map(x_bx_mem::chunk_wave);
+                let wave = x_wave
+                    .as_ref()
+                    .map_or(pool.threads().max(2), x_bx_mem::XChunkWave::size);
+                let wave_chunks = &chunks[x_next..chunks.len().min(x_next + wave)];
+                x_next += wave_chunks.len();
                 let computed: Vec<_> = pool.install(|| {
                     wave_chunks
                         .par_iter()
@@ -698,6 +741,7 @@ pub(crate) fn search_core(
                                 db_count,
                                 min_subject_length,
                                 x_containment,
+                                x_cap.is_some(),
                             )
                         })
                         .collect()
@@ -844,7 +888,15 @@ pub(crate) fn search_core(
                 1
             };
             #[cfg(feature = "parallel")]
-            let mut worker_diagonals = if pool.enabled() {
+            let x_flow_k = x_subject_flow::chosen(pool, diagnostics, options, subjects);
+            // Dispatch point (LOSAT_X_BXDIAGKEEP, in the strict set): the flow's helpers run on the
+            // tables their threads keep (x_bx_mem.rs); only where the flow searches the subjects
+            // (the waves below then have nothing to do).
+            #[cfg(feature = "parallel")]
+            let x_keep =
+                pool.enabled() && x_flow_k.is_some() && x_bx_mem::diag_keep(options, subjects);
+            #[cfg(feature = "parallel")]
+            let mut worker_diagonals = if pool.enabled() && !x_keep {
                 (0..subjects.len().min(pool.threads()))
                     .map(|_| Diagonals::new(last.offset + last.length, options.window_size))
                     .collect::<Result<Vec<_>>>()?
@@ -858,32 +910,43 @@ pub(crate) fn search_core(
             // order by this thread
             // (x_subject_flow.rs); the waves below then have nothing left to do.
             #[cfg(feature = "parallel")]
-            let x_flowed =
-                if let Some(x_k) = x_subject_flow::chosen(pool, diagnostics, options, subjects) {
-                    let x_t = super::x_timing::lap();
-                    let helper_tables = std::mem::take(&mut worker_diagonals)
+            let x_flowed = if let Some(x_k) = x_flow_k {
+                let x_t = super::x_timing::lap();
+                let helper_tables = if x_keep {
+                    (1..pool.threads())
+                        .map(|_| {
+                            x_bx_mem::XScratch::Slot(x_bx_mem::XDiagSlot::new(
+                                last.offset + last.length,
+                                options.window_size,
+                            ))
+                        })
+                        .collect()
+                } else {
+                    std::mem::take(&mut worker_diagonals)
                         .into_iter()
                         .take(pool.threads() - 1)
-                        .collect();
-                    call += x_subject_flow::run(
-                        x_k,
-                        subjects,
-                        batch,
-                        &params,
-                        options,
-                        &lookup,
-                        &mut diagonals,
-                        helper_tables,
-                        xdrop,
-                        db_length,
-                        x_containment,
-                        sink,
-                    )?;
-                    super::x_timing::batch(XBatch::ScanPar, x_t);
-                    true
-                } else {
-                    false
+                        .map(x_bx_mem::XScratch::Owned)
+                        .collect()
                 };
+                call += x_subject_flow::run(
+                    x_k,
+                    subjects,
+                    batch,
+                    &params,
+                    options,
+                    &lookup,
+                    &mut diagonals,
+                    helper_tables,
+                    xdrop,
+                    db_length,
+                    x_containment,
+                    sink,
+                )?;
+                super::x_timing::batch(XBatch::ScanPar, x_t);
+                true
+            } else {
+                false
+            };
             #[cfg(not(feature = "parallel"))]
             let x_flowed = false;
             // The flow (LOSAT_X_BXSUBJFLOW) leaves the waves, and so the chunks, nothing to do.
@@ -1224,6 +1287,7 @@ fn x_compute_chunk(
     db_count: i64,
     min_subject_length: usize,
     x_containment: bool,
+    x_par: bool,
 ) -> Result<Option<(Vec<ContextParameters>, Vec<(usize, SubjectComputation)>)>> {
     let batch = &chunk.prepared;
     let mut params = score_block(batch);
@@ -1232,6 +1296,28 @@ fn x_compute_chunk(
     }
     let lookup = Lookup::new(batch, &params, options)?;
     let last = batch.contexts.last().expect("BLASTX contexts");
+    if x_par {
+        let xdrop = subject_parameters(
+            batch,
+            &mut params,
+            options,
+            db_length,
+            db_count,
+            min_subject_length,
+            Some(fixed_spaces),
+        )?;
+        let results = x_bx_mem::chunk_subjects_on_pool(
+            subjects,
+            batch,
+            &params,
+            options,
+            &lookup,
+            xdrop,
+            db_length,
+            x_containment,
+        )?;
+        return Ok(Some((params, results)));
+    }
     let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
     let xdrop = subject_parameters(
         batch,

@@ -1311,13 +1311,9 @@ fn aligned_sequences(
             (subject.fetch(start, start + length, window_buffer), first)
         }
     };
+    let display = crate::algorithm::tblastx::report::DisplayCode::new(code);
     let displayed_subject = |s: usize| -> u8 {
-        crate::algorithm::tblastx::report::display_residue(
-            nucleotides,
-            frame,
-            (base + s as isize) as usize - first,
-            code,
-        )
+        display.residue(nucleotides, frame, (base + s as isize) as usize - first)
     };
     const NCBISTDAA_TO_AA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
     let mut query_string = String::new();

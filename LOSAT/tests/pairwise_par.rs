@@ -20,6 +20,7 @@ use std::process::{Command, Output};
 
 const OFF: (&str, &str) = ("LOSAT_X_PAIRWISEPAR", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_PAIRWISEPARSHADOW", "1");
+/// The thread counts of `check`.
 const THREADS: [u32; 4] = [1, 2, 4, 16];
 
 fn manifest(path: &str) -> PathBuf {
@@ -181,23 +182,34 @@ fn rows_compared(output: &Output) -> bool {
     })
 }
 
-/// Checks the property for one search; returns the shadow's counters at two threads.
+/// Checks the property for one search at the thread counts `THREADS`; returns the shadow's
+/// counters at two threads.
 fn check(name: &str, args: &[&str]) -> Vec<[u64; 4]> {
-    check_with(name, args, &[])
+    check_with(name, args, &[], &THREADS)
 }
 
-/// `check` with more variables in every run.
-fn check_with(name: &str, args: &[&str], extra: &[(&str, &str)]) -> Vec<[u64; 4]> {
+/// `check` with more variables in every run, at `thread_counts`; returns the shadow's
+/// counters at the first of them above one.
+fn check_with(
+    name: &str,
+    args: &[&str],
+    extra: &[(&str, &str)],
+    thread_counts: &[u32],
+) -> Vec<[u64; 4]> {
     let with = |switches: &[(&'static str, &'static str)]| {
         let mut all = extra.to_vec();
         all.extend_from_slice(switches);
         all
     };
+    assert!(
+        thread_counts.iter().any(|&threads| threads > 1),
+        "{name}: a thread count above one"
+    );
     let off = losat(args, 1, &with(&[OFF]));
     assert!(off.status.success(), "{name}: {}", stderr(&off));
     assert!(!off.stdout.is_empty(), "{name}");
-    let mut at_two = Vec::new();
-    for threads in THREADS {
+    let mut on_the_pool = Vec::new();
+    for &threads in thread_counts {
         let on = losat(args, threads, &with(&[]));
         assert!(
             on.status.success(),
@@ -246,8 +258,8 @@ fn check_with(name: &str, args: &[&str], extra: &[(&str, &str)]) -> Vec<[u64; 4]
             off.stdout.len(),
             "{name}, threads {threads}: the shadow compared every query's report"
         );
-        if threads == 2 {
-            at_two = counts;
+        if on_the_pool.is_empty() {
+            on_the_pool = counts;
         }
     }
     let off_at_four = losat(args, 4, &with(&[OFF]));
@@ -260,7 +272,7 @@ fn check_with(name: &str, args: &[&str], extra: &[(&str, &str)]) -> Vec<[u64; 4]
         off_at_four.stdout, off.stdout,
         "{name}, LOSAT_X_PAIRWISEPAR=0 at 4 threads"
     );
-    at_two
+    on_the_pool
 }
 
 /// The bytes before the first query's report (`Query=` after two newlines) and after the last
@@ -420,7 +432,23 @@ fn the_blastp_pairwise_report_does_not_depend_on_the_switch() {
     let query = manifest("tests/fasta/MeenMJNV.faa");
     let fasta = manifest("tests/fasta/MejoMJNV.faa");
     let db = protein_database();
-    for (subject, value) in [("-subject", fasta.as_path()), ("-db", db)] {
+    // (subject option, its value, variables, thread counts, reports). Each search of the fixture
+    // pair costs CI seconds, and in the writer the thread count above one sets only how the pool
+    // cuts the report (the unit tests of `src/report/x_pairwise_par.rs` write the serial report in
+    // any chunks), so each case has two thread counts:
+    // - one search of all queries with `-subject`, at one thread (the serial writer: the pool
+    //   needs two threads) and four;
+    // - `-db` in LOSAT_X_BPQBLOCK's blocks of 50,000 letters (two reports) and in one search of
+    //   all queries, at two and four threads: outfmt 0 with LOSAT_X_BPDBCUT's cut, which acts at
+    //   two threads or more (the search's own cuts: `blastp_db_cut.rs`).
+    // `-subject` in blocks: `the_blastp_block_reports_do_not_depend_on_the_switch` below.
+    let one_search: &[(&str, &str)] = &[("LOSAT_X_BPQBLOCK", "0")];
+    let cases = [
+        ("-subject", fasta.as_path(), one_search, [1, 4], 1),
+        ("-db", db, &[][..], [2, 4], 2),
+        ("-db", db, one_search, [2, 4], 1),
+    ];
+    for (subject, value, extra, thread_counts, reports) in cases {
         let args = [
             "blastp",
             "-query",
@@ -430,16 +458,16 @@ fn the_blastp_pairwise_report_does_not_depend_on_the_switch() {
             "-evalue",
             "0.001",
         ];
-        // LOSAT_X_BPQBLOCK's blocks of 50,000 letters (two here), and one search of all queries.
-        for extra in [&[][..], &[("LOSAT_X_BPQBLOCK", "0")][..]] {
-            let counts = check_with(&format!("blastp {subject} {extra:?}"), &args, extra);
-            // The 101 queries' reports.
-            assert_eq!(
-                counts.iter().map(|[queries, ..]| queries).sum::<u64>(),
-                101,
-                "{subject} {extra:?}: {counts:?}"
-            );
-        }
+        let name = format!("blastp {subject} {extra:?}");
+        let counts = check_with(&name, &args, extra, &thread_counts);
+        // One shadow line per report: per block, or one for the search of all queries.
+        assert_eq!(counts.len(), reports, "{name}: {counts:?}");
+        // The 101 queries' reports.
+        assert_eq!(
+            counts.iter().map(|[queries, ..]| queries).sum::<u64>(),
+            101,
+            "{name}: {counts:?}"
+        );
     }
 }
 

@@ -13,8 +13,8 @@
 //! NCBI's order (the unit test `x_chosen_candidates_give_the_links_of_the_whole_window` compares
 //! the links), so a search with it gives the report of NCBI's loop (`LOSAT_X_TBNLINKWIN=0`). It is
 //! on by default and off with `=0`. These
-//! tests compare the reports and read the `[X_STATS] TBNLINKWIN heads= window= chosen=
-//! shadow_heads=` line (`LOSAT_X_STATS=1`, printed when a list was linked with the switch).
+//! tests compare the reports and read the `[X_STATS] TBNLINKWIN heads= window= chosen=` line
+//! (`LOSAT_X_STATS=1`, printed when a list was linked with the switch).
 //!
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` and all 115 of them; the
 //! subject is `tests/fasta/MelaMJNV.fasta`.
@@ -72,14 +72,14 @@ fn tblastn(query: &Path, threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>
 }
 
 /// The fields of the one `[X_STATS] TBNLINKWIN` line; `None` without the line.
-fn stats(stderr: &str) -> Option<[u64; 4]> {
+fn stats(stderr: &str) -> Option<[u64; 3]> {
     let lines: Vec<_> = stderr
         .lines()
         .filter(|line| line.starts_with("[X_STATS] TBNLINKWIN "))
         .collect();
     assert!(lines.len() <= 1, "one line per process:\n{stderr}");
     let line = lines.first()?;
-    Some(["heads", "window", "chosen", "shadow_heads"].map(|field| {
+    Some(["heads", "window", "chosen"].map(|field| {
         line.split_whitespace()
             .find_map(|word| word.strip_prefix(field)?.strip_prefix('='))
             .unwrap_or_else(|| panic!("no {field} in {line}"))
@@ -89,12 +89,10 @@ fn stats(stderr: &str) -> Option<[u64; 4]> {
 }
 
 const OFF: (&str, &str) = ("LOSAT_X_TBNLINKWIN", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBNLINKWINSHADOW", "1");
 
-// NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723 (above). The default, the shadow
-// (every head's whole window tested as well) and four threads give the report of NCBI's loop
-// (`=0`); the line is there with the switch and not without it, and fewer candidates were tested
-// than the windows held.
+// NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723 (above). The default and four
+// threads give the report of NCBI's loop (`=0`); the line is there with the switch and not
+// without it, and fewer candidates were tested than the windows held.
 #[test]
 fn the_report_is_that_of_ncbis_loop() {
     for query in queries() {
@@ -109,13 +107,8 @@ fn the_report_is_that_of_ncbis_loop() {
             report == expected,
             "{query:?}: the default changes the report"
         );
-        let [heads, window, chosen, shadow] = stats(&stderr).expect("a line by default");
+        let [heads, window, chosen] = stats(&stderr).expect("a line by default");
         assert!(heads > 0 && chosen <= window, "{query:?}");
-        assert_eq!(shadow, 0, "{query:?}");
-        let (report, stderr) = tblastn(query, 1, &[SHADOW]);
-        assert!(report == expected, "{query:?}: shadow");
-        let [heads, .., shadow] = stats(&stderr).expect("a line with the shadow");
-        assert!(heads > 0 && shadow > 0, "{query:?}");
         for variables in [&[][..], &[OFF]] {
             let (report, _) = tblastn(query, 4, variables);
             assert!(report == expected, "{query:?} {variables:?}: four threads");

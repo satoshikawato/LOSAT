@@ -361,10 +361,10 @@ fn fwd_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
 //       s_FwdCompareHSPsTransl);
 // ```
 #[inline]
-fn sort_hsps_by_ncbi_link_order(
-    hits: &mut [UngappedHit],
-    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
-) {
+fn sort_hsps_by_ncbi_link_order<C>(hits: &mut [UngappedHit], compare: C)
+where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
+{
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
     // ```c
     // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),

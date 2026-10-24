@@ -25,15 +25,11 @@
 //! link, E-value and number is NCBI's.
 //!
 //! `LOSAT_X_TBNLINKWIN` is in the strict set (`utils/xswitch.rs`): on unless it is `0`.
-//! With `LOSAT_X_TBNLINKWINSHADOW` set as well (any
-//! value), the whole window of each head whose candidates were chosen is tested too (a head that
-//! takes its whole window needs no check), and the search stops (panic) if an admissible
-//! candidate is not among the chosen ones. With `LOSAT_X_STATS`
-//! set, `main` prints `[X_STATS] TBNLINKWIN heads= window= chosen= shadow_heads=` at exit (the
-//! heads, the candidates of their query-offset windows, the candidates tested), when a list was
-//! linked with the switch. blastx keeps its own linking (`blastx/linking.rs`).
+//! With `LOSAT_X_STATS` set, `main` prints `[X_STATS] TBNLINKWIN heads= window= chosen=` at exit
+//! (the heads, the candidates of their query-offset windows, the candidates tested), when a list
+//! was linked with the switch. blastx keeps its own linking (`blastx/linking.rs`).
 
-use super::{sets_admissible, LocalLinkParameters, WorkHsp};
+use super::{LocalLinkParameters, WorkHsp};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -43,38 +39,24 @@ use std::sync::OnceLock;
 /// switch of the strict set, on unless it is `0`.
 pub(super) fn x_tbn_link_window() -> bool {
     #[cfg(test)]
-    if let Some((on, _)) = tests::X_FORCE.get() {
+    if let Some(on) = tests::X_FORCE.get() {
         return on;
     }
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNLINKWIN"))
 }
 
-// No NCBI counterpart: reads LOSAT_X_TBNLINKWINSHADOW once.
-/// EXPERIMENT (LOSAT_X_TBNLINKWIN): whether each head's whole window is tested as well.
-fn x_shadow() -> bool {
-    #[cfg(test)]
-    if let Some((_, shadow)) = tests::X_FORCE.get() {
-        return shadow;
-    }
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNLINKWINSHADOW").is_some())
-}
-
 // No NCBI counterpart: LOSAT_X_STATS counters; they do not change any value NCBI computes.
-/// Heads, candidates of their query-offset windows, candidates tested, heads checked by the
-/// shadow.
-static STATS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+/// Heads, candidates of their query-offset windows, candidates tested.
+static STATS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
 /// The `[X_STATS] TBNLINKWIN` line (printed by `main` at exit) with `LOSAT_X_STATS`, when a list
 /// was linked with the switch.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
-    let [heads, window, chosen, shadow] = STATS.each_ref().map(|v| v.load(Ordering::Relaxed));
+    let [heads, window, chosen] = STATS.each_ref().map(|v| v.load(Ordering::Relaxed));
     if heads > 0 && std::env::var_os("LOSAT_X_STATS").is_some() {
-        eprintln!(
-            "[X_STATS] TBNLINKWIN heads={heads} window={window} chosen={chosen} shadow_heads={shadow}"
-        );
+        eprintln!("[X_STATS] TBNLINKWIN heads={heads} window={window} chosen={chosen}");
     }
 }
 
@@ -94,8 +76,8 @@ pub(super) struct XLinkWindow {
     /// The chosen ranks, then the chosen HSPs in the query offset order.
     ranks: Vec<usize>,
     chosen: Vec<usize>,
-    /// heads, window, chosen, shadow heads (flushed to `STATS` when dropped).
-    counts: [u64; 4],
+    /// heads, window, chosen (flushed to `STATS` when dropped).
+    counts: [u64; 3],
 }
 
 impl XLinkWindow {
@@ -137,7 +119,7 @@ impl XLinkWindow {
             is_linked: vec![false; work.len()],
             ranks: Vec::new(),
             chosen: Vec::new(),
-            counts: [0; 4],
+            counts: [0; 3],
         }
     }
 
@@ -161,7 +143,6 @@ impl XLinkWindow {
         head: usize,
         left: usize,
         right: usize,
-        link: &LocalLinkParameters,
     ) -> &'a [usize] {
         let context = work[head].value.context;
         let sign = work[head].value.hsp.frame.signum();
@@ -216,18 +197,6 @@ impl XLinkWindow {
         self.chosen
             .extend(self.ranks.iter().map(|&rank| offset_order[rank]));
         self.counts[2] += self.chosen.len() as u64;
-        if x_shadow() {
-            self.counts[3] += 1;
-            for &candidate in &offset_order[left..right] {
-                if sets_admissible(work, head, candidate, link)
-                    && self.ranks.binary_search(&self.rank[candidate]).is_err()
-                {
-                    panic!(
-                        "LOSAT_X_TBNLINKWINSHADOW: HSP {candidate} is admissible with the set of HSP {head} but was not chosen"
-                    );
-                }
-            }
-        }
         &self.chosen
     }
 
@@ -267,8 +236,8 @@ mod tests {
     use std::cell::Cell;
 
     thread_local! {
-        /// (switch, shadow) for the linking calls of this test thread.
-        pub(super) static X_FORCE: Cell<Option<(bool, bool)>> = const { Cell::new(None) };
+        /// The switch for the linking calls of this test thread.
+        pub(super) static X_FORCE: Cell<Option<bool>> = const { Cell::new(None) };
         /// Heads of this test thread whose candidates were chosen (`[0]`) and whose whole window
         /// was taken (`[1]`).
         pub(super) static X_PATHS: Cell<[u64; 2]> = const { Cell::new([0; 2]) };
@@ -338,7 +307,7 @@ mod tests {
     }
 
     fn link_with(
-        force: (bool, bool),
+        force: bool,
         input: &[(usize, GappedHsp)],
         contexts: usize,
         subject_nt: i32,
@@ -381,8 +350,8 @@ mod tests {
     //     left_hsp->hsp->subject.offset >= right_hsp->hsp->subject.offset || ...) break;
     // ```
     // The chosen candidates give NCBI's links: on random lists the linked list (order, sets,
-    // numbers, E-value bits, best E-value) is the one of the whole window, with the shadow
-    // checking every head as well, for several sizes, contexts and intron lengths.
+    // numbers, E-value bits, best E-value) is the one of the whole window, for several sizes,
+    // contexts and intron lengths.
     #[test]
     fn x_chosen_candidates_give_the_links_of_the_whole_window() {
         let mut random = Random(0x9E37_79B9_7F4A_7C15);
@@ -408,23 +377,23 @@ mod tests {
                 let subject_aa = [3_000, 20_000, 200_000, 2_000_000][round];
                 let input = hsps(&mut random, count, contexts, subject_aa, &link);
                 let subject_nt = subject_aa * 3 + 2;
-                let expected = link_with((false, false), &input, contexts, subject_nt, &link);
-                for force in [(true, false), (true, true)] {
-                    let actual = link_with(force, &input, contexts, subject_nt, &link);
-                    let label = format!("{count} HSPs, {contexts} contexts, intron {intron}, subject {subject_aa}, {force:?}");
+                let expected = link_with(false, &input, contexts, subject_nt, &link);
+                let actual = link_with(true, &input, contexts, subject_nt, &link);
+                let label = format!(
+                    "{count} HSPs, {contexts} contexts, intron {intron}, subject {subject_aa}"
+                );
+                assert_eq!(
+                    actual.best_evalue.to_bits(),
+                    expected.best_evalue.to_bits(),
+                    "{label}"
+                );
+                assert_eq!(actual.hsps.len(), expected.hsps.len(), "{label}");
+                for (a, e) in actual.hsps.iter().zip(&expected.hsps) {
                     assert_eq!(
-                        actual.best_evalue.to_bits(),
-                        expected.best_evalue.to_bits(),
+                        (a.context, a.hsp, a.num, a.evalue.to_bits(), a.source_index),
+                        (e.context, e.hsp, e.num, e.evalue.to_bits(), e.source_index),
                         "{label}"
                     );
-                    assert_eq!(actual.hsps.len(), expected.hsps.len(), "{label}");
-                    for (a, e) in actual.hsps.iter().zip(&expected.hsps) {
-                        assert_eq!(
-                            (a.context, a.hsp, a.num, a.evalue.to_bits(), a.source_index),
-                            (e.context, e.hsp, e.num, e.evalue.to_bits(), e.source_index),
-                            "{label}"
-                        );
-                    }
                 }
                 links += expected.hsps.iter().filter(|hsp| hsp.num > 1).count();
             }

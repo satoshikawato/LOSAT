@@ -61,33 +61,20 @@ pub(crate) enum XDbIdxRead {
     Off,
     /// The arrays are read from the open file where they are needed (`IndexFile::open`).
     On,
-    /// `On`, with the held arrays beside them, compared with every read.
-    Shadow,
 }
 
-// No NCBI counterpart: reads the LOSAT_X_DBIDXREAD / LOSAT_X_DBIDXREADSHADOW switches once; it does
-// not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_DBIDXREAD): a strict-set switch, on unless it is `0`;
-/// `LOSAT_X_DBIDXREADSHADOW` (any value) selects the shadow mode.
+// No NCBI counterpart: reads the LOSAT_X_DBIDXREAD switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_DBIDXREAD): a strict-set switch, on unless it is `0`.
 pub(crate) fn x_dbidxread() -> XDbIdxRead {
     static MODE: OnceLock<XDbIdxRead> = OnceLock::new();
     *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_DBIDXREADSHADOW").is_some() {
-            XDbIdxRead::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_DBIDXREAD") {
+        if crate::utils::xswitch::on("LOSAT_X_DBIDXREAD") {
             XDbIdxRead::On
         } else {
             XDbIdxRead::Off
         }
     })
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_DBIDXREADSHADOW): the line `main` prints at exit.
-pub fn x_dbidxread_print_summary() {
-    if x_dbidxread() == XDbIdxRead::Shadow {
-        index::x_shadow_print_line(true);
-    }
 }
 
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): the most sequences of a range of
@@ -1056,7 +1043,7 @@ impl SeqDb {
     /// the sequences of `range` in order until `visit` returns false; returns whether every
     /// call returned true. The headers of the range are read with one read of the index file
     /// and one read of the header file per MiB (`Volume::visit_deflines`) instead of two reads
-    /// per sequence. `LOSAT_X_DBIDXREADSHADOW` compares every result with `deflines`'.
+    /// per sequence.
     pub fn visit_deflines(
         &self,
         range: BlockRange,
@@ -1088,7 +1075,6 @@ impl SeqDb {
                 visit(range.first_ordinal, Err(volume_range_error(range, self)))
             });
         };
-        let shadow = x_dbidxread() == XDbIdxRead::Shadow;
         vol.visit_deflines_as(
             range.first,
             range.end,
@@ -1097,24 +1083,6 @@ impl SeqDb {
             &mut |oid, deflines| {
                 let ordinal = range.first_ordinal + (oid - range.first);
                 let deflines = self.ordinal_deflines(range.volume, ordinal, deflines);
-                if shadow {
-                    let expected = match self.find_volume(ordinal) {
-                        Ok((volume, oid)) if want_taxid => self.ordinal_deflines(
-                            volume,
-                            ordinal,
-                            self.volumes[volume].deflines_as(oid, true),
-                        ),
-                        _ => self.deflines(ordinal),
-                    };
-                    if x_result_text(&deflines) != x_result_text(&expected) {
-                        index::x_shadow_difference(format!(
-                        "the definition lines of sequence {ordinal} read in a range differ: {} \
-                         where deflines gives {}",
-                        x_result_text(&deflines),
-                        x_result_text(&expected)
-                    ));
-                    }
-                }
                 visit(ordinal, deflines)
             },
         )
@@ -1146,8 +1114,7 @@ impl SeqDb {
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): calls `visit(ordinal, self.check_ambiguity(ordinal))`
     /// for the sequences of `range` in order until `visit` returns false; returns whether every
     /// call returned true. The offsets of the range are read at once
-    /// (`Volume::visit_ambiguity`). `LOSAT_X_DBIDXREADSHADOW` compares every result with
-    /// `check_ambiguity`'s.
+    /// (`Volume::visit_ambiguity`).
     pub fn visit_ambiguity(
         &self,
         range: BlockRange,
@@ -1158,24 +1125,12 @@ impl SeqDb {
                 visit(range.first_ordinal, Err(volume_range_error(range, self)))
             });
         };
-        let shadow = x_dbidxread() == XDbIdxRead::Shadow;
         vol.visit_ambiguity(
             range.first,
             range.end,
             range.first_ordinal,
             &mut |oid, result| {
                 let ordinal = range.first_ordinal + (oid - range.first);
-                if shadow {
-                    let expected = self.check_ambiguity(ordinal);
-                    if x_result_text(&result) != x_result_text(&expected) {
-                        index::x_shadow_difference(format!(
-                        "the ambiguity check of sequence {ordinal} read in a range differs: {} \
-                         where check_ambiguity gives {}",
-                        x_result_text(&result),
-                        x_result_text(&expected)
-                    ));
-                    }
-                }
                 visit(ordinal, result)
             },
         )
@@ -1188,15 +1143,6 @@ fn volume_range_error(range: BlockRange, db: &SeqDb) -> SeqDbError {
         range.volume,
         db.volumes.len()
     ))
-}
-
-// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_DBIDXREADSHADOW): a result as the shadow compares it (an error by its text).
-fn x_result_text<T: std::fmt::Debug>(result: &Result<T, SeqDbError>) -> String {
-    match result {
-        Ok(value) => format!("Ok({value:?})"),
-        Err(error) => format!("Err({error})"),
-    }
 }
 
 /// Number of leading values of the ascending `range` for which `fits` holds.

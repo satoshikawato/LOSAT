@@ -29,7 +29,7 @@ fn temp_dir(stem: &str) -> PathBuf {
         .expect("system time before Unix epoch")
         .as_nanos();
     let dir = std::env::temp_dir().join(format!(
-        "losat_outfmt16_{stem}_{}_{}",
+        "losat_outfmt16_blastn_{stem}_{}_{}",
         std::process::id(),
         nanos
     ));

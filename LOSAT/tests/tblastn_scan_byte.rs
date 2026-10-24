@@ -25,8 +25,7 @@
 //! `=3` for sparse tables only. It is off with `=0`;
 //! it acts in the unit path, which every search takes. These tests compare the reports and read the
 //! `[X_STATS] TBNSCANBYTE units= calls= avx2=` line (`LOSAT_X_STATS=1`), the
-//! `[X_STATS] TBNSCANBF` line of the scans before, and the `[X_SHADOW] TBNSCANBYTE` line of
-//! `LOSAT_X_TBNSCANBYTESHADOW`.
+//! `[X_STATS] TBNSCANBF` line of the scans before.
 //!
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` (few candidate words, a sparse
 //! table) and all 115 of them (four query batches, no sparse table; the offset array fills, so the
@@ -150,12 +149,11 @@ fn avx2() -> bool {
 const OFF: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "0");
 const PLAIN: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "2");
 const SPARSE: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "3");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBNSCANBYTESHADOW", "1");
 
 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (above). Each search gives the
-// report of the scan before the switch with the switch on (the default; =2, the plain loops) and in the
-// shadow, at one and four threads; the lines say which scan ran, and at one thread every scan took
-// the same number of calls. The search of all proteins took more calls than units: the offset
+// report of the scan before the switch with the switch on (the default; =2, the plain loops), at
+// one and four threads; the lines say which scan ran, and at one thread every scan took the same
+// number of calls. The search of all proteins took more calls than units: the offset
 // array filled.
 #[test]
 fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
@@ -223,20 +221,6 @@ fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
         assert_eq!(counts, [units, calls], "{query:?}: =2");
         assert!(!ran_avx2, "{query:?}: =2 takes the plain loops");
         assert_eq!(earlier_scans(&stderr), None, "{query:?}: =2");
-
-        let (report, stderr) = tblastn(query, 1, &[SHADOW]);
-        assert!(
-            report == expected,
-            "{query:?}: the shadow changed the report"
-        );
-        let [compared, pairs] = line_fields(
-            &stderr,
-            "[X_SHADOW] TBNSCANBYTE ",
-            ["calls_compared", "pairs_compared"],
-        )
-        .expect("a shadow line");
-        assert_eq!(compared, calls, "{query:?}: one comparison per scan call");
-        assert!(pairs > 0, "{query:?}: no pair compared");
 
         for variables in [&[][..], &[OFF]] {
             let (report, stderr) = tblastn(query, 4, variables);

@@ -7,10 +7,12 @@
 //! batches of eight in AVX2 registers where the CPU has AVX2; without AVX2 the per-hit loop runs,
 //! and `LOSAT_X_BPDIAG_SIMD=0` forces the scalar batch. `LOSAT_X_BPDEFER` (in the set too since
 //! 2026-10-17; `tests/blastp_diag_defer.rs`) calls the candidates of the AVX2 batches after a
-//! cell's last batch, so the default's line names `avx2-defer` where the CPU has AVX2; the AVX2
-//! batch with the calls per batch (`avx2`) runs with `LOSAT_X_BPDEFER=0`. These tests compare the
-//! reports with the reference loop (`LOSAT_X_BPSEED=0 LOSAT_X_BPDIAG=0`) and the per-hit fused
-//! loop at one and four threads, on a
+//! cell's last batch, and `LOSAT_X_BPMASKED` (in the set since 2026-10-24, same file) gives those
+//! batches the masked last batch, so the default's line names `avx2-defer-masked` where the CPU
+//! has AVX2 (tables with few hits per used cell keep the deferred calls under
+//! `LOSAT_X_BPMASKEDMIN`); the AVX2 batch with the calls per batch (`avx2`) runs with
+//! `LOSAT_X_BPDEFER=0`. These tests compare the reports with the reference loop
+//! (`LOSAT_X_BPSEED=0 LOSAT_X_BPDIAG=0`) and the per-hit fused loop at one and four threads, on a
 //! generated pair (long lookup cells from repeats, related proteins for two-hit extensions) and on
 //! the fixture pair, run the shadow of `LOSAT_X_BPSEEDSHADOW` (the batched loop against the
 //! reference for every subject), and check from the
@@ -116,9 +118,9 @@ fn blastp(
 }
 
 /// Checks one search's `[TIMING] x_bpdiag` line: `LOSAT_X_BPDIAG_SIMD=0` runs the scalar batch,
-/// otherwise the AVX2 batch where this CPU has AVX2 (`avx2-defer` when the search runs with
-/// `LOSAT_X_BPDEFER` on, `defer`) and the per-hit loop (nothing counted) where it has not. A
-/// batched run has tested cells and passed candidates on.
+/// otherwise the AVX2 batch where this CPU has AVX2 (`avx2-defer-masked` when the search runs
+/// with `LOSAT_X_BPDEFER` and `LOSAT_X_BPMASKED` on, `defer`) and the per-hit loop (nothing
+/// counted) where it has not. A batched run has tested cells and passed candidates on.
 fn check_counts(counts: &[DiagCounts], simd: &str, defer: bool, what: &str) {
     assert_eq!(counts.len(), 1, "{what}: {counts:?}");
     let c = &counts[0];
@@ -129,7 +131,7 @@ fn check_counts(counts: &[DiagCounts], simd: &str, defer: bool, what: &str) {
     let expected = if simd == "0" {
         "scalar"
     } else if avx2 && defer {
-        "avx2-defer"
+        "avx2-defer-masked"
     } else if avx2 {
         "avx2"
     } else {
@@ -225,7 +227,8 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
     let per_hit: &[(&str, &str)] = &[("LOSAT_X_BPDIAG", "0")];
     // The batches, with the `LOSAT_X_BPDIAG_SIMD` value each runs with and whether
     // `LOSAT_X_BPDEFER` is on: the default (the CPU's path, the AVX2 batch with the deferred calls
-    // or the per-hit loop without AVX2), its scalar batch, and its AVX2 batch without the deferred
+    // and the masked last batch, or the per-hit loop without AVX2), its scalar batch, and its AVX2
+    // batch without the deferred
     // calls (`LOSAT_X_BPDEFER=0`).
     let batched: [(Vars, &str, bool); 3] = [
         (&[], "1", true),

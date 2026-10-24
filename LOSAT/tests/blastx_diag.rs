@@ -520,11 +520,12 @@ fn diag_line(run: &Run) -> Option<&str> {
 }
 
 // EXPERIMENT (LOSAT_X_BXCROSS): the batches across the cells' borders (the default) give the
-// reports of the reference with every search, with the built-in LOSAT_X_BXDIAGMIN and with every
-// table fused, and LOSAT_X_BXDEFERMIN does not reach them (`tables_avx2=0`); the timing line names
-// `avx2-cross`. With every table fused, the batches are cut short before repeated entries
-// (`cross_splits=`: the hits of a diagonal in consecutive cells, the two-hit pairs of these related
-// sequences). `LOSAT_X_BXCROSS=0` gives the same reports with LOSAT_X_BXDEFER's cell test.
+// reports of the reference with every search, with the built-in LOSAT_X_BXDIAGMIN (670 with them,
+// 900 with LOSAT_X_BXDEFER's cell test) and with every table fused, and LOSAT_X_BXDEFERMIN does not
+// reach them (`tables_avx2=0`); the timing line names `avx2-cross`. With every table fused, the
+// batches are cut short before repeated entries (`cross_splits=`: the hits of a diagonal in
+// consecutive cells, the two-hit pairs of these related sequences). `LOSAT_X_BXCROSS=0` gives the
+// same reports with LOSAT_X_BXDEFER's cell test.
 #[test]
 fn the_cross_cell_batches_give_the_reports_of_the_reference() {
     let inputs = Inputs::new();
@@ -582,6 +583,11 @@ fn the_cross_cell_batches_give_the_reports_of_the_reference() {
                     "{what}: no timing line: {}",
                     run.stderr
                 ),
+            }
+            // The built-in LOSAT_X_BXDIAGMIN of the cell test that ran.
+            if let (Some(line), "") = (diag_line(&run), min) {
+                let built_in = if expected == "avx2-cross" { 670 } else { 900 };
+                assert_eq!(field(line, "min_hits_per_cell"), built_in, "{what}: {line}");
             }
         }
     }

@@ -312,7 +312,7 @@ fn query_blocks_do_not_change_the_archives() {
 /// write still creates the (empty) file.
 #[test]
 fn the_out_file_receives_the_archive() {
-    let dir = std::env::temp_dir().join(format!("losat_outfmt11_out_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_bp_out_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let query = input("arch_bp_q.faa");
     let subject = input("arch_bp_s.faa");
@@ -378,7 +378,7 @@ fn xml_archives_are_refused_before_the_first_byte() {
 /// before the first byte.
 #[test]
 fn non_ascii_titles_and_database_names_are_refused() {
-    let dir = std::env::temp_dir().join(format!("losat_outfmt11_title_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_bp_title_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let plain = engine().join(input("arch_bp_s.faa"));
     let plain = plain.to_str().unwrap();

@@ -826,6 +826,9 @@ pub(super) enum Queries<'a> {
         searched: &'a [FastaRecord],
     },
     Streamed(&'a Store),
+    /// EXPERIMENT (LOSAT_X_BNQDROP): the records read before the search, which the loop takes out
+    /// batch by batch (`x_query_drop.rs`).
+    Taken(&'a super::x_query_drop::Store),
 }
 
 /// The records a LOSAT_X_QBATCHPAR slot searches: those read before the search, a chunk of the
@@ -860,6 +863,9 @@ pub(super) enum BatchRecords<'a> {
         /// The searched records cut with `-query_loc` (`None`: the input records).
         cut: Option<Vec<FastaRecord>>,
     },
+    /// EXPERIMENT (LOSAT_X_BNQDROP): the records taken out of the `Store`, held by the loop alone
+    /// (the input and the searched records: no `-query_loc`).
+    Taken(Vec<FastaRecord>),
 }
 
 impl BatchRecords<'_> {
@@ -867,6 +873,7 @@ impl BatchRecords<'_> {
         match self {
             BatchRecords::Borrowed { input, .. } => input,
             BatchRecords::Read { input, .. } => input,
+            BatchRecords::Taken(records) => records,
         }
     }
 
@@ -874,6 +881,25 @@ impl BatchRecords<'_> {
         match self {
             BatchRecords::Borrowed { searched, .. } => searched,
             BatchRecords::Read { input, cut } => cut.as_deref().unwrap_or(input),
+            BatchRecords::Taken(records) => records,
+        }
+    }
+
+    /// The searched records for the batch's search: EXPERIMENT (LOSAT_X_BNQDROP) held by the loop
+    /// alone when taken out of the `Store`, else shared.
+    pub(super) fn batch_queries(&mut self) -> super::x_query_drop::BatchQueries<'_> {
+        match self {
+            BatchRecords::Taken(records) => super::x_query_drop::BatchQueries::Held(records),
+            other => super::x_query_drop::BatchQueries::Shared(other.searched()),
+        }
+    }
+
+    /// The searched records for a writer after the batch: those taken out of the `Store`, else a
+    /// copy.
+    pub(super) fn into_searched(self) -> Vec<FastaRecord> {
+        match self {
+            BatchRecords::Taken(records) => records,
+            other => other.searched().to_vec(),
         }
     }
 }
@@ -884,11 +910,18 @@ impl<'a> Queries<'a> {
         matches!(self, Queries::Streamed(_))
     }
 
+    /// Whether a batch's records leave the search with the batch (read batch by batch, or taken
+    /// out of a LOSAT_X_BNQDROP `Store`): a writer after the batch reads the loop's kept records.
+    pub(super) fn per_batch(&self) -> bool {
+        matches!(self, Queries::Streamed(_) | Queries::Taken(_))
+    }
+
     /// The number of input records.
     pub(super) fn input_count(&self) -> usize {
         match self {
             Queries::Records { input, .. } => input.len(),
             Queries::Streamed(store) => store.acting().query_input.input_lengths.len(),
+            Queries::Taken(store) => store.lengths().len(),
         }
     }
 
@@ -899,6 +932,7 @@ impl<'a> Queries<'a> {
                 searched.iter().map(|record| record.seq().len()).collect()
             }
             Queries::Streamed(store) => store.acting().lengths.clone(),
+            Queries::Taken(store) => store.lengths().to_vec(),
         }
     }
 
@@ -911,6 +945,7 @@ impl<'a> Queries<'a> {
                     out.write_all(&record.warnings)?;
                 }
             }
+            Queries::Taken(store) => store.write_warnings(out)?,
             Queries::Streamed(store) => {
                 let acting = store.acting();
                 let input_lengths = &acting.query_input.input_lengths;
@@ -951,6 +986,10 @@ impl<'a> Queries<'a> {
                 input: &input_records[input],
                 searched: &searched_records[searched],
             }),
+            Queries::Taken(store) => {
+                debug_assert_eq!(input, searched, "no -query_loc");
+                Ok(BatchRecords::Taken(store.take(input)?))
+            }
             Queries::Streamed(store) => {
                 let acting = store.acting();
                 let mut state = acting.lock();
@@ -1031,6 +1070,7 @@ impl<'a> Queries<'a> {
             Queries::Records {
                 searched: records, ..
             } => return Ok(Some(SlotRecords::Borrowed(&records[searched]))),
+            Queries::Taken(store) => return Ok(store.copy(searched).map(SlotRecords::Owned)),
             Queries::Streamed(store) => store,
         };
         if searched.is_empty() {
@@ -1095,10 +1135,10 @@ impl<'a> Queries<'a> {
     pub(super) fn before<'s>(&'s self, kept: &'s [FastaRecord], start: usize) -> &'s [FastaRecord] {
         match self {
             Queries::Records { searched, .. } => &searched[..start],
-            Queries::Streamed(_) => {
+            Queries::Streamed(_) | Queries::Taken(_) => {
                 assert!(
                     start <= kept.len(),
-                    "LOSAT_X_QSTREAM: a writer reads the records of earlier batches, which were not kept"
+                    "LOSAT_X_QSTREAM or LOSAT_X_BNQDROP: a writer reads the records of earlier batches, which were not kept"
                 );
                 &kept[..start]
             }
@@ -1109,7 +1149,7 @@ impl<'a> Queries<'a> {
     pub(super) fn all<'s>(&'s self, kept: &'s [FastaRecord]) -> &'s [FastaRecord] {
         match self {
             Queries::Records { searched, .. } => searched,
-            Queries::Streamed(_) => kept,
+            Queries::Streamed(_) | Queries::Taken(_) => kept,
         }
     }
 }

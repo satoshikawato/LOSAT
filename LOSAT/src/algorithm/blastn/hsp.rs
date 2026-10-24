@@ -155,6 +155,23 @@ impl BlastnOutputFormat {
             BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments
         )
     }
+
+    /// Whether the report reads the queries' letters (EXPERIMENT, LOSAT_X_BNQDROP's rule): the
+    /// HSP rows of outfmt 0 and of the XML / JSON documents, the archive's Bioseqs and DUST, and
+    /// SAM's SEQ where the query is the target (`SQ SR`). The tabular formats (BLASTN takes no
+    /// custom columns), the Seq-aligns and the other SAM documents show none.
+    pub(crate) fn reads_query_letters(self) -> bool {
+        match self {
+            BlastnOutputFormat::Tabular
+            | BlastnOutputFormat::TabularWithComments
+            | BlastnOutputFormat::Seqalign(_) => false,
+            BlastnOutputFormat::Sam(spec) => spec.sequence && spec.subject_as_reference,
+            BlastnOutputFormat::Pairwise
+            | BlastnOutputFormat::Xml
+            | BlastnOutputFormat::Xml2(_)
+            | BlastnOutputFormat::Archive => true,
+        }
+    }
 }
 
 pub(crate) const NCBI_BLASTN_VERSION: &str = "2.17.0+";

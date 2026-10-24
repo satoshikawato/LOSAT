@@ -3549,13 +3549,12 @@ mod tests {
                 }
             }
         }
-        // the opt-in NEON2 kernels (LOSAT_X_DPNEON2) never move their rows
+        // every vector kernel moves its rows, the NEON2 ones (LOSAT_X_DPNEON2) too
         if cfg!(any(
             target_arch = "x86_64",
             all(target_arch = "wasm32", target_feature = "simd128"),
             target_arch = "aarch64"
-        )) && std::env::var_os("LOSAT_X_DPNEON2").is_none()
-        {
+        )) {
             assert!(
                 handled > 40 && shifted > 20,
                 "handled {handled}, moved {shifted}"

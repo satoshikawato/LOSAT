@@ -435,72 +435,99 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
 /// alignment half of those stores could cross a cache line, and a split store does not forward
 /// to the load after it (an offset set by the heap's history: one more allocation elsewhere made
 /// blastn's 16-thread search 2 % slower with three times the blocked store forwards). The
-/// values and the lengths are those of the `Vec` before.
-struct Rows<T> {
-    v: Vec<T>,
-    /// `v`'s element on the boundary (`v` is never pushed to, so its buffer does not move).
-    ptr: *mut T,
-    len: usize,
-}
-
-// SAFETY: `ptr` points into `v`, which the struct owns; it goes and is shared with `v`.
-unsafe impl<T: Send> Send for Rows<T> {}
-unsafe impl<T: Sync> Sync for Rows<T> {}
-
-impl<T: Copy + Default> Rows<T> {
-    fn new(len: usize) -> Self {
-        let mut r = Rows {
-            v: Vec::new(),
-            ptr: std::ptr::NonNull::dangling().as_ptr(),
-            len: 0,
-        };
-        r.resize(len, T::default());
-        r
+/// values and the lengths are those of the `Vec` before. The fields are private to `rows`, so
+/// that only `resize` sets `ptr` and `len`.
+mod rows {
+    pub(super) struct Rows<T> {
+        v: Vec<T>,
+        /// `v`'s element on the boundary (`v` is never pushed to, so its buffer does not move).
+        ptr: *mut T,
+        len: usize,
     }
 
-    /// `Vec::resize`: the rows only grow (`grow`).
-    fn resize(&mut self, len: usize, value: T) {
-        if len <= self.len {
-            self.len = len;
-            return;
+    // SAFETY: `ptr` points into `v`, which the struct owns; it goes and is shared with `v`.
+    unsafe impl<T: Send> Send for Rows<T> {}
+    unsafe impl<T: Sync> Sync for Rows<T> {}
+
+    impl<T: Copy + Default> Rows<T> {
+        pub(super) fn new(len: usize) -> Self {
+            let mut r = Rows {
+                v: Vec::new(),
+                ptr: std::ptr::NonNull::dangling().as_ptr(),
+                len: 0,
+            };
+            r.resize(len, T::default());
+            r
         }
-        let mut v = vec![value; len + 64 / std::mem::size_of::<T>()];
-        let off = v.as_ptr().align_offset(64);
-        assert!(off <= 64 / std::mem::size_of::<T>());
-        v[off..off + self.len].copy_from_slice(self);
-        let ptr = v[off..].as_mut_ptr();
-        *self = Rows { v, ptr, len };
-    }
-}
 
-impl<T> std::ops::Deref for Rows<T> {
-    type Target = [T];
-    #[inline(always)]
-    fn deref(&self) -> &[T] {
-        // SAFETY: `ptr` and `len` lie in `v` (`resize`), and `v` is not changed elsewhere.
-        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+        /// `Vec::resize`: the rows only grow (`grow`).
+        pub(super) fn resize(&mut self, len: usize, value: T) {
+            if len <= self.len {
+                self.len = len;
+                return;
+            }
+            let slack = 64 / std::mem::size_of::<T>();
+            let mut v = vec![value; len + slack];
+            // `align_offset` may give no offset (`usize::MAX`, as under Miri's symbolic alignment
+            // check); the rows then start at `v`'s first element, which changes only the speed.
+            let off = Some(v.as_ptr().align_offset(64))
+                .filter(|&off| off <= slack)
+                .unwrap_or(0);
+            v[off..off + self.len].copy_from_slice(self);
+            // SAFETY: `off + len <= v.len()`. `Vec::as_mut_ptr` makes no reference to `v`'s
+            // elements, so the pointer may reach all of them.
+            let ptr = unsafe { v.as_mut_ptr().add(off) };
+            *self = Rows { v, ptr, len };
+        }
     }
-}
 
-impl<T> std::ops::DerefMut for Rows<T> {
-    #[inline(always)]
-    fn deref_mut(&mut self) -> &mut [T] {
-        // SAFETY: as `deref`, and `&mut self` borrows `v` uniquely.
-        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
-    }
-}
+    impl<T> Rows<T> {
+        /// `Vec::as_ptr`: the row's first element without a slice made first, so that a pointer a
+        /// kernel takes stays valid when the row is then read or written through `Deref`, as with
+        /// a `Vec` (the slice's method would take it from a slice that the next `deref_mut`
+        /// retires).
+        #[inline(always)]
+        pub(super) fn as_ptr(&self) -> *const T {
+            self.ptr
+        }
 
-impl<T: PartialEq> PartialEq for Rows<T> {
-    fn eq(&self, other: &Self) -> bool {
-        **self == **other
+        /// `Vec::as_mut_ptr`; see `as_ptr`.
+        #[inline(always)]
+        pub(super) fn as_mut_ptr(&mut self) -> *mut T {
+            self.ptr
+        }
     }
-}
 
-impl<T: std::fmt::Debug> std::fmt::Debug for Rows<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        (**self).fmt(f)
+    impl<T> std::ops::Deref for Rows<T> {
+        type Target = [T];
+        #[inline(always)]
+        fn deref(&self) -> &[T] {
+            // SAFETY: `ptr` and `len` lie in `v` (`resize`), and only `resize` changes them.
+            unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+        }
+    }
+
+    impl<T> std::ops::DerefMut for Rows<T> {
+        #[inline(always)]
+        fn deref_mut(&mut self) -> &mut [T] {
+            // SAFETY: as `deref`, and `&mut self` borrows `v` uniquely.
+            unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
+        }
+    }
+
+    impl<T: PartialEq> PartialEq for Rows<T> {
+        fn eq(&self, other: &Self) -> bool {
+            **self == **other
+        }
+    }
+
+    impl<T: std::fmt::Debug> std::fmt::Debug for Rows<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            (**self).fmt(f)
+        }
     }
 }
+use rows::Rows;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:462-468,476-479
 // ```c

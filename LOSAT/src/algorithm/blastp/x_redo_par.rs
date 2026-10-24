@@ -35,7 +35,8 @@
 //!    (`x_newton_lanes_prefetch_matches`, as the one-thread loop calls it for the next matches);
 //!    then each match runs `postprocess_preliminary_hits` with the arguments of the one-thread loop,
 //!    with per-worker scratch (composition workspace, gapped-alignment scratch, and the
-//!    subject-range SEG cache backed by one shared store for the search);
+//!    subject-range SEG cache backed by one shared store for the search; with `LOSAT_X_BPSEGWIN`
+//!    the store is emptied after each window, `x_bp_seg_win`);
 //! 5. the replay, per match in order: the early termination test (`BlastCompo_EarlyTermination`)
 //!    on the heaps of the query's batch; then the match's error, if it has one (the first error of
 //!    a match that the test does not end is the one the one-thread loop reports); then
@@ -212,6 +213,18 @@ pub(crate) fn x_bp_redo_par() -> XRedoPar {
 pub(crate) fn x_bp_redo_lpt() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPREDOLPT"))
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BPSEGWIN switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPSEGWIN): a strict-set switch, on unless it is `0`. Where the redo runs in
+/// windows, the search's store of SEG-masked subject ranges (`XSharedSubjectRanges`) is emptied
+/// after each window is computed, so it holds the ranges of one window, not those of the whole
+/// search. A later window that reaches a range again masks it again: an entry is a function of its
+/// key (the subject, the range and the SEG parameters), so it gets the same bytes and bias flag.
+pub(crate) fn x_bp_seg_win() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPSEGWIN"))
 }
 
 /// EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the mode the variables select.
@@ -1378,6 +1391,8 @@ where
     };
     // EXPERIMENT (LOSAT_X_BPREDOLPT): the windows' jobs in one scope, largest first.
     let lpt = x_bp_redo_lpt();
+    // EXPERIMENT (LOSAT_X_BPSEGWIN): the store keeps the masked ranges of one window.
+    let seg_win = x_bp_seg_win();
     let mut lpt_windows = 0;
     let mut counts = x_redo_windows(
         lists,
@@ -1389,6 +1404,9 @@ where
         expand,
         &mut |lists, heaps, window| {
             let (results, lpt_ran) = x_compute_window(search, lists, heaps, window, &shared, lpt);
+            if seg_win {
+                shared.x_clear();
+            }
             lpt_windows += usize::from(lpt_ran);
             results
         },
@@ -3231,6 +3249,128 @@ mod tests {
         assert!(
             compared > 200 && with_list > 50 && errors > 0 && lpt_windows > 30,
             "compared {compared} with a list {with_list} errors {errors} lpt windows {lpt_windows}"
+        );
+    }
+
+    /// EXPERIMENT (LOSAT_X_BPSEGWIN): windows computed with the search's SEG store emptied after
+    /// each one (`XSharedSubjectRanges::x_clear`) give the results of the same windows computed
+    /// with one store kept for the whole search, match for match (error or not, scores, E-value
+    /// bits, every HSP field), on windows from random starts with random job budgets and matches
+    /// ended at random, at 1, 2 and 7 threads, and when the parameters of one query fail; the
+    /// later windows mask ranges again that an earlier window had masked.
+    #[test]
+    fn windows_with_the_seg_store_emptied_after_each_equal_windows_with_one_store() {
+        let fixture = redo_fixture();
+        let count = fixture.lists.len();
+        let heaps = heaps_of(count, 500);
+        let all = stream(&fixture.lists);
+        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
+        let windows: Vec<XWindow> = (0..10)
+            .map(|index| {
+                let start = all[rng.below(all.len())];
+                let mut window = window_from(
+                    &fixture.lists,
+                    &heaps,
+                    &fixture.batches,
+                    &vec![None; count],
+                    start,
+                    2 + rng.below(10),
+                );
+                // None ended, about one in four, about one in two.
+                let share = index % 3;
+                for ended in &mut window.ended {
+                    *ended = share > 0 && rng.below(4) < share;
+                }
+                window
+            })
+            .collect();
+        let failing = all[all.len() / 2].q_idx;
+        let (mut compared, mut with_list, mut errors, mut masked_again) = (0, 0, 0, 0);
+        for threads in [1, 2, 7] {
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                for fail in [None, Some(failing)] {
+                    let build = |q_idx: usize| -> Result<BlastRedoAlignParams> {
+                        if Some(q_idx) == fail {
+                            anyhow::bail!("no parameters for query {q_idx}");
+                        }
+                        Ok(redo_params(&fixture, q_idx))
+                    };
+                    let search = XRedoParSearch {
+                        pool,
+                        threads,
+                        contexts: &fixture.contexts,
+                        query_nomask: query_raw,
+                        search_spaces: &fixture.search_spaces,
+                        subjects: crate::algorithm::blastp::x_redo_subjects::XRedoSubjects::Encoded(
+                            &fixture.subjects,
+                        ),
+                        query_batches: &fixture.batches,
+                        matrix: ScoringMatrix::Blosum62,
+                        gapped_params: &fixture.gapped_params,
+                        gapped_gumbel: &fixture.gapped_gumbel,
+                        evalue: 10.0,
+                        build_redo_align_params: &build,
+                        timing: false,
+                        engine_positives: false,
+                    };
+                    let kept = Arc::new(XSharedSubjectRanges::new());
+                    let emptied = Arc::new(XSharedSubjectRanges::new());
+                    let mut window_entries = 0;
+                    for window in &windows {
+                        let (reference, _) =
+                            x_compute_window(&search, &fixture.lists, &heaps, window, &kept, false);
+                        let (computed, _) = x_compute_window(
+                            &search,
+                            &fixture.lists,
+                            &heaps,
+                            window,
+                            &emptied,
+                            false,
+                        );
+                        window_entries += emptied.x_len();
+                        emptied.x_clear();
+                        assert_eq!(emptied.x_len(), 0);
+                        assert_eq!(computed.len(), reference.len());
+                        for (position, (computed, reference)) in
+                            computed.iter().zip(reference).enumerate()
+                        {
+                            let at = (threads, fail, window.matches[position]);
+                            match (computed, reference) {
+                                (None, None) => {}
+                                (Some(computed), Some(reference)) => {
+                                    with_list += usize::from(
+                                        reference
+                                            .as_ref()
+                                            .is_ok_and(|result| result.hsp_list.is_some()),
+                                    );
+                                    errors += usize::from(reference.is_err());
+                                    let reference = reference.map_err(|error| format!("{error:#}"));
+                                    assert_eq!(
+                                        x_result_difference(computed, &reference),
+                                        None,
+                                        "{at:?}"
+                                    );
+                                    compared += 1;
+                                }
+                                (computed, reference) => panic!(
+                                    "{at:?}: computed {} / {}",
+                                    computed.is_some(),
+                                    reference.is_some()
+                                ),
+                            }
+                        }
+                    }
+                    // The entries the emptied store made beyond the kept store's: ranges masked
+                    // again by a later window.
+                    masked_again += window_entries - kept.x_len();
+                }
+                Ok(())
+            })
+            .expect("a pool");
+        }
+        assert!(
+            compared > 150 && with_list > 40 && errors > 0 && masked_again > 0,
+            "compared {compared} with a list {with_list} errors {errors} masked again {masked_again}"
         );
     }
 }

@@ -352,6 +352,32 @@ impl XSharedSubjectRanges {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+
+    // No NCBI counterpart: memory only (LOSAT_X_BPSEGWIN, `x_redo_par::x_bp_seg_win`); it changes
+    // no value NCBI computes.
+    /// Drops every entry and the maps' room. A range looked up afterwards is masked again, into the
+    /// value it had: an entry depends on its key only.
+    pub(crate) fn x_clear(&self) {
+        for shard in &self.shards {
+            *shard
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = HashMap::new();
+        }
+    }
+
+    /// The number of entries (tests).
+    #[cfg(test)]
+    pub(crate) fn x_len(&self) -> usize {
+        self.shards
+            .iter()
+            .map(|shard| {
+                shard
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .len()
+            })
+            .sum()
+    }
 }
 
 impl BlastpKappaSubjectRangeCache {

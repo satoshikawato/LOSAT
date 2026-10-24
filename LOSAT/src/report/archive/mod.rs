@@ -35,6 +35,7 @@ pub mod masks;
 pub mod options;
 pub mod writer;
 
+use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -42,12 +43,35 @@ use std::sync::{Arc, Mutex};
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::diag_log::{DiagLog, Message, ERROR};
+use crate::stats::tables::KarlinParams;
 use options::OptionInputs;
 
 pub use writer::{
     write_archive, write_error_archive, AlignSource, ArchiveOut, BatchArchive, KaBlock,
     NoAlignments,
 };
+
+/// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes.
+pub(crate) fn ka_block(params: &KarlinParams, gapped: bool) -> KaBlock {
+    KaBlock {
+        lambda: params.lambda,
+        k: params.k,
+        h: params.h,
+        gapped,
+    }
+}
+
+/// The defline line of the Bioseq: the line as read, else `>` and the title.
+pub(crate) fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
+    match record.archive_defline() {
+        Some(defline) => Cow::Borrowed(defline),
+        None => {
+            let mut line = vec![b'>'];
+            line.extend_from_slice(&record.title);
+            Cow::Owned(line)
+        }
+    }
+}
 
 /// How `ARCHIVE_FORMAT` makes NCBI write the archive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

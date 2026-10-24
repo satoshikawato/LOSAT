@@ -769,15 +769,16 @@ const X_LAST_HIT_MARGIN: i64 = 1 << 16;
 const X_GATE_DIAG_CELLS: i32 = 1 << 18;
 
 /// No NCBI counterpart: with LOSAT_X_PAIRPARN1, LOSAT_X_PAIRPARGATE keeps the unit path at one
-/// thread from this many cells (a translated query batch of more than 4,056 letters, a nucleotide
-/// query of about 2 kb). The constant above was measured before the units' branch-free hit loop
-/// and masked tables; measured again (workstation, one thread, line A session 9, 2026-10-25) the
-/// units ran x0.82-0.93 of the reference loop for queries of 5-40 kb against one genome (4.6 Mb),
-/// the same genome cut into 2-1,000 kb subjects and 3,000 zebrafish cDNAs, and x0.906 on 10 fly
-/// transcripts against the zebrafish cDNA database (the search that set the constant above);
-/// x0.98-1.00 at 2 kb (4,096 cells, kept on the reference loop) and x1.15-1.96 at 1 kb and 300
-/// bases, where the units' scan of every subject frame once per group outweighs the hits.
-const X_GATE_N1_DIAG_CELLS: i32 = 1 << 13;
+/// thread for a query batch of at least this many letters (`query_length`: the translated frames
+/// with their sentinels; a nucleotide query of about 2.5 kb). The constant above was measured
+/// before the units' branch-free hit loop and masked tables; measured again (workstation, one
+/// thread, line A session 9, 2026-10-25) the units ran x0.82-0.94 of the reference loop for queries
+/// of 3-40 kb against one genome (4.6 Mb), the same genome cut into 2-1,000 kb subjects and 3,000
+/// zebrafish cDNAs, and x0.906 on 10 fly transcripts against the zebrafish cDNA database (the
+/// search that set the constant above); x0.99-1.03 at 2-2.1 kb (about 4,000-4,200 letters) and
+/// x1.15-1.96 at 1 kb and 300 bases, where the units' scan of every subject frame once per group
+/// outweighs the hits.
+const X_GATE_N1_LETTERS: i32 = 5_000;
 
 /// No NCBI counterpart: LOSAT_X_PAIRPARGATE acts only for a lookup threshold of at least TBLASTX's
 /// default (13), where it was measured. A lower threshold puts more words in every query position:
@@ -833,7 +834,7 @@ pub(super) struct XGates<'a> {
     pub threads: usize,
     /// `cost_gate()`: LOSAT_X_PAIRPARGATE acts.
     pub cost_gate: bool,
-    /// `n1_gate()`: LOSAT_X_PAIRPARN1 acts (one thread: the units from `X_GATE_N1_DIAG_CELLS`).
+    /// `n1_gate()`: LOSAT_X_PAIRPARN1 acts (one thread: the units from `X_GATE_N1_LETTERS`).
     pub n1_gate: bool,
     /// The lookup threshold (`lookup->threshold`, `ncbi_int4_from_double` of `-threshold`).
     pub threshold: i32,
@@ -949,7 +950,7 @@ fn x_guard_lengths(
 /// LOSAT_X_PAIRPARGATE: whether the unit path is expected to be faster than the reference loop for
 /// a batch. Either the lookup threshold is below `X_GATE_MIN_THRESHOLD` (not measured; the units
 /// stay), or the reference's diagonal table is large (`X_GATE_DIAG_CELLS`), or, at one thread with
-/// LOSAT_X_PAIRPARN1, it has at least `X_GATE_N1_DIAG_CELLS` cells, or the search has several
+/// LOSAT_X_PAIRPARN1, the batch has at least `X_GATE_N1_LETTERS` letters, or the search has several
 /// threads and one subject holds more than one and a half thread's share of the bases
 /// (`2 * longest * threads > 3 * total`): the reference loop searches a subject on one thread, the
 /// units split it over the pool. Several threads without such a subject keep the reference loop
@@ -963,7 +964,7 @@ fn units_gain(g: &XGates<'_>) -> bool {
         if !g.n1_gate {
             return false;
         }
-        let gain = g.diag_array_size >= X_GATE_N1_DIAG_CELLS;
+        let gain = g.query_length >= X_GATE_N1_LETTERS;
         // The one-thread rule sends a batch below the line to the reference loop (false).
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARN1", gain);
         return gain;
@@ -4800,20 +4801,20 @@ mod tests {
     }
 
     // No NCBI counterpart: LOSAT_X_PAIRPARN1 moves the one-thread line of LOSAT_X_PAIRPARGATE from
-    // 2^18 to 2^13 cells; the rule of several threads, the threshold rule and the gates before
-    // them are unchanged.
+    // 2^18 cells to batches of 5,000 letters; the rule of several threads, the threshold rule and
+    // the gates before them are unchanged.
     #[test]
-    fn the_one_thread_line_keeps_the_units_from_2_13_cells() {
+    fn the_one_thread_line_keeps_the_units_from_5000_letters() {
         let mut rng = Rng(11);
         let alphabet = aa("ACDEKW");
         let (_, contexts) = lookup_for(&[frame(1, &random_residues(&mut rng, 216, &alphabet))]);
-        let query_length = query_length_of(&contexts);
         let one = [FastaRecord::new("", b"s", &[b'A'; 120])];
         // 10 subjects of 40 bases: no subject holds one and a half thread's share at 2 or 8 threads.
         let spread: Vec<FastaRecord> = (0..10)
             .map(|_| FastaRecord::new("", b"s", &[b'A'; 40]))
             .collect();
-        let decision = |diag_array_size: i32,
+        // The batch's length in letters (the table follows it, as at the build site).
+        let decision = |query_length: i32,
                         subjects: &[FastaRecord],
                         threads: usize,
                         threshold: i32,
@@ -4822,7 +4823,7 @@ mod tests {
             decide(&XGates {
                 contexts: &contexts,
                 query_length,
-                diag_array_size,
+                diag_array_size: diag_array_size_for(query_length, 40),
                 subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
                 debugging,
                 chunk_switches: false,
@@ -4834,49 +4835,41 @@ mod tests {
                 unit_mask: false,
             })
         };
-        // One thread: the units from 2^13 cells with the switch, from 2^18 without it.
-        assert_eq!(decision(1 << 12, &one, 1, 13, true, false), XDecision::Cost);
+        assert_eq!(diag_array_size_for(140_000, 40), 1 << 18);
+        // One thread: the units from 5,000 letters with the switch, from 2^18 cells without it.
+        assert_eq!(decision(4_999, &one, 1, 13, true, false), XDecision::Cost);
+        assert_eq!(decision(5_000, &one, 1, 13, true, false), XDecision::Units);
         assert_eq!(
-            decision(1 << 13, &one, 1, 13, true, false),
+            decision(100_000, &spread, 1, 13, true, false),
             XDecision::Units
         );
+        assert_eq!(decision(5_000, &one, 1, 13, false, false), XDecision::Cost);
         assert_eq!(
-            decision(1 << 17, &spread, 1, 13, true, false),
-            XDecision::Units
-        );
-        assert_eq!(
-            decision(1 << 13, &one, 1, 13, false, false),
+            decision(100_000, &one, 1, 13, false, false),
             XDecision::Cost
         );
         assert_eq!(
-            decision(1 << 17, &one, 1, 13, false, false),
-            XDecision::Cost
-        );
-        assert_eq!(
-            decision(1 << 18, &one, 1, 13, false, false),
+            decision(140_000, &one, 1, 13, false, false),
             XDecision::Units
         );
         // Several threads keep their rule: spread subjects below 2^18 cells take the reference loop.
         for threads in [2, 8] {
             assert_eq!(
-                decision(1 << 13, &spread, threads, 13, true, false),
+                decision(5_000, &spread, threads, 13, true, false),
                 XDecision::Cost
             );
             assert_eq!(
-                decision(1 << 17, &spread, threads, 13, true, false),
+                decision(100_000, &spread, threads, 13, true, false),
                 XDecision::Cost
             );
             assert_eq!(
-                decision(1 << 13, &one, threads, 13, true, false),
+                decision(5_000, &one, threads, 13, true, false),
                 XDecision::Units
             );
         }
         // The threshold rule and the gates come first.
-        assert_eq!(
-            decision(1 << 12, &one, 1, 12, true, false),
-            XDecision::Units
-        );
-        assert_eq!(decision(1 << 13, &one, 1, 13, true, true), XDecision::Gate);
+        assert_eq!(decision(4_999, &one, 1, 12, true, false), XDecision::Units);
+        assert_eq!(decision(5_000, &one, 1, 13, true, true), XDecision::Gate);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266

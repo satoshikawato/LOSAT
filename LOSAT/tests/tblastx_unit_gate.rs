@@ -1,9 +1,9 @@
 //! `LOSAT_X_PAIRPARGATE` on whole runs of the binary: the unit path (`x_pair_par.rs`) runs only
 //! for a batch where it is expected to be faster than the reference frame loop
 //! (`units_gain` in `src/algorithm/tblastx/x_pair_par.rs`): a reference diagonal table of 2^18
-//! cells or more, or at one thread one of 2^13 cells or more (`LOSAT_X_PAIRPARN1`, a translated
-//! batch of more than 4,056 letters), or several threads and one subject with more than one and a
-//! half thread's share of the bases, or a lookup threshold below the default (13). Other batches run
+//! cells or more, or at one thread a translated batch of 5,000 letters or more
+//! (`LOSAT_X_PAIRPARN1`), or several threads and one subject with more than one and a half
+//! thread's share of the bases, or a lookup threshold below the default (13). Other batches run
 //! the reference loop ("fallback: cost").
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-504
@@ -17,7 +17,7 @@
 //! of each subject (module doc of x_pair_par.rs), so the switch may not change a report. The tests
 //! compare the reports of the default (the gate on) and of `LOSAT_X_PAIRPARGATE=0`, and read
 //! `[X_STATS] PAIRPAR ... fallback_cost=` and `units=` to see which path ran. `LOSAT_X_PAIRPARN1=0`
-//! keeps the one-thread line at 2^18 cells, as before that switch.
+//! keeps the one-thread line at a table of 2^18 cells, as before that switch.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -169,8 +169,9 @@ fn with_and_without_switches(
     (units, cost)
 }
 
-// A short query (diagonal table of 2^14 cells) against many short subjects: the units at one thread
-// (the reference loop with `LOSAT_X_PAIRPARN1=0`), the reference loop at several threads.
+// A short query (about 12,000 letters, a diagonal table of 2^14 cells) against many short subjects:
+// the units at one thread (the reference loop with `LOSAT_X_PAIRPARN1=0`), the reference loop at
+// several threads.
 #[test]
 fn a_short_query_against_short_subjects_takes_the_reference_loop() {
     let dir = temp_dir("short");
@@ -192,8 +193,8 @@ fn a_short_query_against_short_subjects_takes_the_reference_loop() {
     }
 }
 
-// A query of 1,500 bases (a table of 2^12 cells, below the one-thread line) keeps the reference
-// loop at one thread.
+// A query of 1,500 bases (about 3,000 letters, below the one-thread line) keeps the reference loop
+// at one thread.
 #[test]
 fn a_query_below_the_one_thread_line_takes_the_reference_loop() {
     let dir = temp_dir("below");

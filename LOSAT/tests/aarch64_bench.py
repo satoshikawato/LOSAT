@@ -20,7 +20,7 @@ NCBI time / configuration time, the ratio bench5 reports).
 
 usage:
   aarch64_bench.py --out DIR --bin ncbi=DIR --bin main=PATH --config ncbi=ncbi --config losat=main
-                   [--config nodp=main:LOSAT_X_DPFAST=0] [--threads 1,max] [--rounds 5] [--cases a,b]
+                   [--config nodp=main:LOSAT_X_DPNEON2=0] [--threads 1,max] [--rounds 5] [--cases a,b]
 """
 import argparse
 import hashlib

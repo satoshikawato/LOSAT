@@ -10,7 +10,9 @@
 //! variable and not with `LOSAT_X_BPREDOPAR=0`; QBATCHPAR's `[X_STATS]` line comes without a
 //! variable, and its off reason for these small query files is the budget, which is 0 by default
 //! for a query file that NCBI's blastn would not split by queries (`x_qbatch_par.rs`,
-//! `Profile::of_search`), and `LOSAT_X_QBATCHPARMEM` still sets one.
+//! `Profile::of_search`), and `LOSAT_X_QBATCHPARMEM` still sets one. `LOSAT_X_REACH`, set in the
+//! default run of a search, shows that BPLKPAHEAD, BPSUBJMETA, BPDBCUT, DIAGLV, QDUSTPAR and
+//! QPREPPAR take their own paths on these searches.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -88,12 +90,20 @@ fn losat(args: &[&str], vars: &[(&str, &str)]) -> (Vec<u8>, String) {
 
 /// The search `args` (with `base` set in every run) gives one report and one standard error with
 /// no variable, with each switch of `switches` at `0`, and with all of
-/// them at `0`; returns the report.
-fn one_report(args: &[&str], base: &[(&str, &str)], switches: &[&'static str]) -> Vec<u8> {
+/// them at `0`; returns the report. `first` is set in the first (default) run only, for example
+/// `LOSAT_X_REACH` (which writes nothing to standard error): the `=0` arms must not get it, or
+/// their rows would be ORed into the sides read afterwards.
+fn one_report(
+    args: &[&str],
+    base: &[(&str, &str)],
+    first: &[(&str, &str)],
+    switches: &[&'static str],
+) -> Vec<u8> {
     let with = |extra: Vec<(&'static str, &'static str)>| -> Vec<(&str, &str)> {
         base.iter().copied().chain(extra).collect()
     };
-    let (report, stderr) = losat(args, base);
+    let default_vars: Vec<(&str, &str)> = base.iter().chain(first).copied().collect();
+    let (report, stderr) = losat(args, &default_vars);
     assert!(!report.is_empty(), "{args:?}: the search has hits");
     let mut arms = Vec::new();
     for &name in switches {
@@ -192,7 +202,9 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
         "-num_threads",
         "4",
     ];
-    one_report(&fast, &[], BLASTP);
+    // The first (default) run of each search also writes the reach rows (S2: no extra run).
+    let reach_fast = reach_support::Reach::new("blastp_fast");
+    one_report(&fast, &[], &[reach_fast.var()], BLASTP);
     let db = protein_database("blastp");
     let db = db.to_str().unwrap();
     let exact = [
@@ -208,20 +220,21 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
         "-num_threads",
         "4",
     ];
-    one_report(&exact, &[], BLASTP);
-    // BPLKPAHEAD and BPSUBJMETA act on this input (their paths run, so the equalities above
-    // compare them; a later change of scope or input would otherwise make them vacuous).
-    let reach = reach_support::Reach::new("blastp_fast");
-    losat(&fast, &[reach.var()]);
+    let reach_db = reach_support::Reach::new("blastp_db");
+    one_report(&exact, &[], &[reach_db.var()], BLASTP);
+    // The rows come from the default runs whose reports every `=0` arm above matched, so the
+    // equalities compare these paths (a later change of scope or input would otherwise make
+    // them vacuous). BPLKPAHEAD: the look-ahead build was chosen for this input. BPSUBJMETA:
+    // subject records were read by the metadata path.
     for switch in ["LOSAT_X_BPLKPAHEAD", "LOSAT_X_BPSUBJMETA"] {
-        assert!(reach.sides(switch).0, "{switch}: its path did not run");
+        let sides = reach_fast.sides(switch);
+        assert!(sides.0, "{switch}: sides {sides:?}: its path did not run");
     }
-    // BPDBCUT cuts the database into blocks of its own size in the exact search.
-    let reach = reach_support::Reach::new("blastp_db");
-    losat(&exact, &[reach.var()]);
+    // BPDBCUT: the exact `-db` search was cut into blocks of the switch's own size.
+    let sides = reach_db.sides("LOSAT_X_BPDBCUT");
     assert!(
-        reach.sides("LOSAT_X_BPDBCUT").0,
-        "LOSAT_X_BPDBCUT: its path did not run"
+        sides.0,
+        "LOSAT_X_BPDBCUT: sides {sides:?}: its path did not run"
     );
     // The default runs BPREDOPAR's path (and BPREDOLPT's windows); its switch at 0 does not.
     let timing = [("LOSAT_TIMING", "1")];
@@ -264,7 +277,9 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
             "-num_threads",
             "4",
         ];
-        one_report(&args, &batches, BLASTN);
+        // The default run also writes the reach rows (no extra run).
+        let reach = reach_support::Reach::new(task);
+        one_report(&args, &batches, &[reach.var()], BLASTN);
         // The default runs the strips stages: PAIRPARDISC's for dc-megablast, PAIRPAR's
         // (megablast, blastn) otherwise, each fold split by PAIRPARFOLD (partitions), and
         // RPTSTREAM writes batch by batch; their switches at 0 do not.
@@ -304,15 +319,15 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
             0,
             "{task}: {stderr}"
         );
-        // DIAGLV, QDUSTPAR and QPREPPAR act on this input (the reach rows show their paths ran).
-        let reach = reach_support::Reach::new(task);
-        let mut vars = batches.to_vec();
-        vars.push(reach.var());
-        losat(&args, &vars);
+        // The rows of the default run above. DIAGLV: the reference fold took the diag-hash path
+        // with level bounds (its mark is in the reference fold only, not in the strips folds).
+        // QDUSTPAR: the query dusting ran on the pool. QPREPPAR: the pool ran the batch (the
+        // mark fires for any batch with more than one context at 2+ threads).
         for switch in ["LOSAT_X_DIAGLV", "LOSAT_X_QDUSTPAR", "LOSAT_X_QPREPPAR"] {
+            let sides = reach.sides(switch);
             assert!(
-                reach.sides(switch).0,
-                "{task} {switch}: its path did not run"
+                sides.0,
+                "{task} {switch}: sides {sides:?}: its path did not run"
             );
         }
     }

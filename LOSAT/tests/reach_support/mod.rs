@@ -1,13 +1,14 @@
 //! The sides of the conditional switches that a run took (`LOSAT_X_REACH`,
 //! `LOSAT/src/utils/xreach.rs`): a test passes `Reach::var()` with the variables of a run and
 //! asks `Reach::sides` whether the switch's own path ran on its input. It replaced the shadow
-//! counters as the proof that a path engaged (switch-tidy 2026-10-2x).
+//! counters as the proof that a path engaged (switch-tidy, 2026-10-24).
 #![allow(dead_code)]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// A directory that the runs of one test write their `reach-*.tsv` files into; removed on drop.
+/// A directory that the runs given its `var()` write their `reach-*.tsv` files into (one
+/// directory per call of `new`); removed on drop.
 pub struct Reach {
     dir: PathBuf,
 }
@@ -31,9 +32,10 @@ impl Reach {
     }
 
     /// `(new, ref)` of `switch` over every `reach-*.tsv` of the directory (the OR of its rows);
-    /// `(false, false)` when no run recorded it.
+    /// `(false, false)` when the runs recorded no row for it; panics when no run wrote a reach
+    /// file (a run that got no `LOSAT_X_REACH`, or could not write).
     pub fn sides(&self, switch: &str) -> (bool, bool) {
-        let (mut new, mut reference) = (false, false);
+        let (mut new, mut reference, mut files) = (false, false, 0usize);
         for entry in std::fs::read_dir(&self.dir).expect("reach directory") {
             let path = entry.expect("reach entry").path();
             let name = path
@@ -43,6 +45,7 @@ impl Reach {
             if !(name.starts_with("reach-") && name.ends_with(".tsv")) {
                 continue;
             }
+            files += 1;
             let text = std::fs::read_to_string(&path).expect("reach file");
             for row in text.lines().skip(1) {
                 let mut fields = row.split('\t');
@@ -52,6 +55,11 @@ impl Reach {
                 }
             }
         }
+        assert!(
+            files > 0,
+            "no reach-*.tsv in {}: the run did not get LOSAT_X_REACH ({switch}) or could not write",
+            self.dir.display()
+        );
         (new, reference)
     }
 }

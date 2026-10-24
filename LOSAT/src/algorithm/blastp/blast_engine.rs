@@ -8086,9 +8086,7 @@ fn run_resolved_in_pool(
                 crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
             }
             BlastpRuntimeLookup::CompressedFlat(table) => {
-                if !(super::x_seed_fused_clut::x_fseed_on()
-                    && super::x_seed_fused_clut::x_clut_scan_bf(table))
-                {
+                if !super::x_seed_fused_clut::x_fseed_table(table) {
                     crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
                 }
             }

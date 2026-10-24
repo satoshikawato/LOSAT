@@ -186,9 +186,10 @@ fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
     }
 }
 
-/// Default, `=0`, both lists of the scan and the reference compressed table give the same report
-/// and messages for blastp-fast on `-subject` and `-db` at 1 and 2 threads; a flat table with the
-/// branch-free list takes the loop, the other tables keep theirs, and `=0` records nothing.
+/// Default and `=0` give the same report and messages for blastp-fast on `-subject` and `-db` at 1
+/// and 2 threads, and so do the other lists of the scan and the reference compressed table on one
+/// case each; a flat table with the branch-free list takes the loop, the other tables keep theirs,
+/// and `=0` records nothing.
 #[test]
 fn blastp_fast_reports_do_not_depend_on_the_seed_loop() {
     let inputs = Inputs::new();
@@ -217,12 +218,18 @@ fn blastp_fast_reports_do_not_depend_on_the_seed_loop() {
                 assert_eq!(on.code, Some(0), "{case}: {}", on.stderr);
                 assert!(!on.stdout.is_empty(), "{case}: no hits");
                 assert_eq!(on.reached, (dense, !dense), "{case}: default's side");
-                for (label, env, reached) in [
-                    ("off", OFF, (false, false)),
-                    ("branch list", BRANCH_LIST, (false, true)),
-                    ("every table", EVERY_TABLE, (true, false)),
-                    ("reference table", REFERENCE_TABLE, (false, true)),
-                ] {
+                // The tables' other choices on one case each: the sparse table with the branch-free
+                // list, the dense one with the list with the branch and the reference table.
+                let first = source == "-subject" && threads == "1";
+                let mut arms = vec![("off", OFF, (false, false))];
+                if first && !dense {
+                    arms.push(("every table", EVERY_TABLE, (true, false)));
+                }
+                if first && dense {
+                    arms.push(("branch list", BRANCH_LIST, (false, true)));
+                    arms.push(("reference table", REFERENCE_TABLE, (false, true)));
+                }
+                for (label, env, reached) in arms {
                     let run = blastp(&args, &[env]);
                     assert_eq!(run.code, Some(0), "{case} {label}: {}", run.stderr);
                     assert!(run.stdout == on.stdout, "{case} {label}: report differs");

@@ -1832,16 +1832,17 @@ Rebuilding less:
   table of `LOSAT_X_BPCLUT` where the scan lists the cells without a branch, `LOSAT_X_BPCLUTSCANBF`, natively; a
   sparser table, the reference compressed table and wasm32 keep their loops) the loop on such a table
   (`blastp/x_seed_fused_clut.rs` `x_scan_flat_fseed`) takes two changes: each hit goes first through blastp's
-  branch-free two-hit test (`XHitBf::test` of `LOSAT_X_BPHITBF`: too far and overlap without a branch, a flag-1
-  entry or a candidate on to `x_test_hit`; exact where `XHitBf::fits` holds for the subject, which is decided and
-  recorded per subject, `LOSAT_X_REACH`), and no hit reads ahead a later hit's diagonal entry (with about 3.5 hits
+  branch-free two-hit test (`XHitBf::test`, the test of `LOSAT_X_BPHITBF`, which does not act here: too far and
+  overlap without a branch, a flag-1 entry or a candidate on to `x_test_hit`; exact where `XHitBf::fits` holds for
+  the subject, which is decided and recorded per subject, `LOSAT_X_REACH`), and no hit reads ahead a later hit's diagonal entry (with about 3.5 hits
   per cell the read-ahead rarely found one, and its bound test stayed). The cells, their order and the hits are
   `for_each_cell::<true, _>`'s, the diagonal table holds after each hit what `x_test_hit` leaves there, and the
   extension is called for the same hits with the same values, so the report is the same (the lib test
   `the_flat_loop_is_the_fused_loop_on_the_reference_table` compares the loop with the reference table's loop, and
   `tests/blastp_fast_seed_bf.rs` the reports with `=0`'s, with both lists and with the reference table). The loop
-  is out of line with a closure of its own type, so the loops without it keep their code (`=0` and a sparse
-  table run the instructions of the binary before the switch, x1.0000). Not taken (line v4-BPF K2 probes, one
+  is out of line, so the loops without it keep their code; only the choice in `x_scan_two_hit_compressed_flat`
+  is new (`=0` runs the instructions of the binary before the switch on the dense tables, x1.0000, and `=0` and
+  the default x0.9998 of them on a sparse one). Not taken (line v4-BPF K2 probes, one
   core on the workstation): the scan reading each listed cell's slice bounds (a list of (offset, start, end)) took
   x1.50 the cycles of 3 proteins x UniRef50 volume 00, as the branch-free list then loads the bounds at every
   offset; on the tables with the branch the loop gained nothing (x0.98-1.01 on a 42-residue protein x UniRef50);
@@ -2083,7 +2084,9 @@ Rebuilding less:
   `0 <= diag_offset` and `diag_offset + length + 2 window < 2^30` (otherwise the loop without the test runs: a
   window equal to the word size, or a subject of about 2^29 letters or a `-window_size` near 2^29). The
   AVX2 batches of `LOSAT_X_BPDIAG` (the x86-64 default) and blastp-fast's loop on the reference compressed
-  table keep their own tests; blastp-fast's loop on the flat table takes the test under `LOSAT_X_BPFSEED`. With `LOSAT_X_BPDIAG=0` 72-74 % of the hits of WSSV x PajaWSV and of 300 yeast
+  table keep their own tests; blastp-fast's loop on the flat table takes the test under `LOSAT_X_BPFSEED`
+  (`LOSAT_X_BPHITBF=0` does not turn it off there). With `LOSAT_X_BPDIAG=0` 72-74 % of the hits of WSSV x
+  PajaWSV and of 300 yeast
   proteins x the fly proteome are too far, 18.6-18.8 % overlap, 2.5-3.7 % meet a flag-1 entry and 4.7-5.3 %
   are candidates (v4-A10 probe bp1). Shadow: `LOSAT_X_BPSEEDSHADOW=1` compares the fused loop that runs, this
   one where it acts, with the reference on every subject, and prints `[X_SHADOW] BPHITBF subjects_compared=N`

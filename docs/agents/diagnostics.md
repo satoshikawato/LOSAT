@@ -684,8 +684,8 @@ Same values, faster computation:
   The fuzz tests against the scalar NCBI loops run each kernel with the bound at 128, 320 and off, and
   every family and lane width moves rows there (20,000 cases); `band_window_keeps_every_result` compares
   long problems on and off. All eight kernels move their rows: the six kernels of these three
-  families and the two opt-in NEON2 kernels (`x_xdrop_neon2.rs`, aarch64; their fuzz and window
-  tests run in the platform checks). Memory on the workstation
+  families and the two NEON2 kernels (`x_xdrop_neon2.rs`, `LOSAT_X_DPNEON2`, on by default on
+  aarch64; their fuzz and window tests run in the platform checks). Memory on the workstation
   (dev cd8e0f89 / this switch / `=0`, max RSS MiB, `v4-B/results/b16c/mem1/`, same output): Sakai x
   EDL933 `-subject` blastn 16 threads 592-597 / 526-550 / 575-622, dc-megablast 16 threads 689-736 /
   614-630 / 651-684, 4 threads 289-292 / 268-272 / 296-303 (blastn 4 threads and 1 thread, the D.
@@ -724,9 +724,9 @@ Same values, faster computation:
   128-bit kernels (`utils/x_xdrop_neon2.rs`). It takes the place the 256-bit AVX2 kernels have on
   x86_64 (first in the dispatch). They move their DP rows down with the band like the other
   kernels (`LOSAT_X_DPWINDOW`). Evidence: #208, bench run 38590719673 on ubuntu-24.04-arm, 1 thread
-  x0.867-0.974 on the cases with X-drop DP, x0.994-1.004 without, 4 threads x0.902-0.979, equal output
-  hashes. Platform checks hash `=0` on the Linux and macOS arm64 runners (mode `nodpneon2`); the
-  mode `dpneon2` was equal to the default on both arm64 runners in every run since 2026-10-15.
+  x0.867-0.974 on the cases with X-drop DP, x0.994-1.004 without, 4 threads x0.902-0.979, equal
+  output hashes. Platform checks hash `=0` on the Linux and macOS arm64 runners (mode `nodpneon2`);
+  the mode `dpneon2` was equal to the default on both arm64 runners in every run since 2026-10-15.
 - GREEDYFAST (graduated 2026-10-22; no variable, no `LOSAT_X_GREEDYSHADOW`, no `X_GREEDY_TEST_MODE`
   hook; always on) megablast greedy alignment, one distance in three passes of 256 cells, match
   extension 8 bases at a time, on an unpacked subject (`x_greedy_row` in `blastn/alignment/greedy.rs`).

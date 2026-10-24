@@ -2606,8 +2606,8 @@ mod x_capture;
 /// has AVX2); bit 1: record a sample of the calls (LOSAT_X_DPCAPTURE).
 /// Bit 2 (EXPERIMENT): try the 128-bit kernels of `x_xdrop_w128.rs` after the
 /// 256-bit ones (set only when the CPU runs the 128-bit kernels; always on wasm32 simd128 and
-/// aarch64). Bit 3 (LOSAT_X_DPNEON2, on unless `=0`, aarch64 only): try the two-register NEON kernels
-/// of `x_xdrop_neon2.rs` first, where bit 0 stands on x86_64. Bit 4 (LOSAT_X_DPEMASK, with bit 0):
+/// aarch64). Bit 3 (LOSAT_X_DPNEON2, on unless `=0`, aarch64 only): try the two-register NEON
+/// kernels of `x_xdrop_neon2.rs` first, where bit 0 stands on x86_64. Bit 4 (LOSAT_X_DPEMASK, with bit 0):
 /// the 8-bit 256-bit kernel's `EM` instances (no E clearing at the row end, see `x_xdrop_avx2.rs`).
 fn x_extra_switches() -> u8 {
     use std::sync::OnceLock;
@@ -2741,8 +2741,8 @@ fn x_extra_dispatch(
             }
         }
     }
-    // LOSAT_X_DPNEON2 (on unless `=0`): on aarch64 the two-register NEON kernels of `x_xdrop_neon2.rs`
-    // take the place of the 256-bit kernels: the same recurrence, the same lanes per block and
+    // LOSAT_X_DPNEON2 (on unless `=0`): on aarch64 the two-register NEON kernels of
+    // `x_xdrop_neon2.rs` take the place of the 256-bit kernels: the same recurrence, the same lanes per block and
     // band steps as `x_xdrop_avx2.rs`, so exactly what the 128-bit kernel returns (the argument is
     // at the head of that file). When they return None (a row-gap precondition, or a problem the
     // 128-bit kernel declines too) the next dispatch runs.

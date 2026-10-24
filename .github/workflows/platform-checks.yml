@@ -94,7 +94,8 @@ jobs:
           set -euo pipefail
           # The platforms. `extra` adds the mode of the arm64 platforms (they also hash the 128-bit
           # NEON kernels, the path of LOSAT_X_DPNEON2=0; the default runs the kernels in register
-          # pairs); the entries without it run the standard mode.
+          # pairs); the entries without it run the standard mode. The mode nodpneon2 goes when
+          # LOSAT_X_DPNEON2 graduates.
           neon='--extra-mode nodpneon2=LOSAT_X_DPNEON2=0'
           o_linux_x64='{"runner":"ubuntu-24.04","id":"linux-x64","python":"python3"}'
           o_linux_arm64='{"runner":"ubuntu-24.04-arm","id":"linux-arm64","python":"python3","extra":"'"$neon"'"}'

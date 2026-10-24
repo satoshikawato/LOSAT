@@ -81,8 +81,8 @@ use std::ops::RangeInclusive;
 /// verified with it on the Linux and macOS arm64 runners.
 /// `LOSAT_X_DPNEON2` (the X-drop kernels of `LOSAT_X_DPAVX2` on aarch64 NEON in register pairs,
 /// `utils/x_xdrop_neon2.rs`) was added on 2026-10-15 as a switch that is off unless set and joined
-/// the set on 2026-10-24 (Owner 2026-10-23), after the arm64 platform checks hashed it in every run since
-/// it was added.
+/// the set on 2026-10-24 (Owner 2026-10-23), after the arm64 platform checks hashed it in every
+/// run since it was added.
 /// `LOSAT_X_TBNBATCHRULE` (which query batches `LOSAT_X_TBNBATCH` searches side by side, only the
 /// full waves of a small subject set, `tblastn/stage_d_pipeline.rs`) was added after the change as
 /// a switch that is off unless set and joined the set once it was verified and timed with it on.

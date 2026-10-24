@@ -2514,7 +2514,7 @@ Rebuilding less:
   `[X_SHADOW] BPQBLOCKFMT blocks= formats= bytes= stderr_bytes= hits= events= side_files= identical`. The second search is a search
   of its own: it prints its own `LOSAT_TIMING` block and adds to the other switches' counters and shadow lines.
 - `LOSAT_X_BNTABPAR=1` (BLASTN, all tasks, outfmt 6 / 7, two or more threads, speed; in the strict set since
-  2026-10-2x (perf/bn-tab-par, evidence at the end of this entry): on unless it is `0`) the rows of a report are
+  2026-10-24 (perf/bn-tab-par, evidence at the end of this entry): on unless it is `0`) the rows of a report are
   formatted on the search's pool: they are cut into pieces of at most 512 rows of one query (the first piece of a
   query with its outfmt 7 header; a query without rows is one piece), the pieces are taken in windows of at least
   2,048 rows per thread (a piece without rows counts as one), each piece of a window is formatted into a buffer of
@@ -2535,7 +2535,16 @@ Rebuilding less:
   Premise (2026-10-24, v4-D s12): 31,168 cDNAs x 3 Mb `-task blastn` `-outfmt 6` (1.02 M rows) with
   `LOSAT_X_QBATCHPAR=0` on ws spent 0.88 s in the report calls at 8, 16 and 32 threads alike (`[TIMING] common`
   output 0.879 / 0.886 / 0.884 s), on one thread while the pool waited; local perf: 87 % of the call in
-  `write_hit_fields_bytes`. Evidence: (ws A/B to come).
+  `write_hit_fields_bytes`. Evidence (2026-10-24, ws node 1, ratios per round, median): window v4ds13-w2, this
+  code (216ede53) vs dev 499cd95d, 106 runs, one sha per case: AB with `LOSAT_X_QBATCHPAR=0` x0.929 / 0.882 /
+  0.866 at 8 / 16 / 32 threads (10.83 -> 10.12, 7.18 -> 6.33, 5.70 -> 4.93 s; `=0` 0.998 / 0.985 / 0.993 of dev),
+  C5 (5,000 cDNAs) loop n16 x0.884, `-db` (C5's queries x the 3 Mb database) n16 x0.887, A1 (1,775 cDNAs, blastn,
+  by default) n16 x0.909, AB by default (slots: serial) 1.000; cycles and instructions per run equal (0.996-1.011);
+  max RSS AB loop n32 124 -> 127 MiB; `[TIMING] common` output AB loop 0.904 / 0.936 / 0.947 -> 0.241 / 0.230 /
+  0.219 s. Window v4ds13-w1 (the first version, one buffer per query, 10f8aa9e vs dev 7a731a15, 370 runs): the
+  same AB / C5 loop ratios (x0.932 / 0.892 / 0.869, x0.917 / 0.892 / 0.877), A1 by default x0.933 / 0.904 / 0.862,
+  M1 / D1 by default 0.96-1.01, `-db` loop n16 x0.904, and the defaults with slots (G2, MB, C5, AD, AB at 8 / 16 /
+  32 threads) 0.96-1.01.
 - `LOSAT_X_PAIRWISEPAR=1` (BLASTN, TBLASTX, BLASTP, speed; in the strict set from the pull request that added it,
   2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads)) the pairwise
   report (outfmt 0) of BLASTN (every task, `-subject` and `-db`), TBLASTX and BLASTP is formatted on the search's pool

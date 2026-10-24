@@ -12,10 +12,10 @@
 //! has AVX2 (tables with few hits per used cell keep the deferred calls under
 //! `LOSAT_X_BPMASKEDMIN`); the AVX2 batch with the calls per batch (`avx2`) runs with
 //! `LOSAT_X_BPDEFER=0`. These tests compare the reports with the reference loop
-//! (`LOSAT_X_BPSEED=0 LOSAT_X_BPDIAG=0`) and the per-hit fused loop at one and four threads, on a
-//! generated pair (long lookup cells from repeats, related proteins for two-hit extensions) and on
-//! the fixture pair, run the shadow of `LOSAT_X_BPSEEDSHADOW` (the batched loop against the
-//! reference for every subject), and check from the
+//! (`LOSAT_X_BPSEED=0 LOSAT_X_BPDIAG=0`) and the per-hit fused loop, on a generated pair (long
+//! lookup cells from repeats, related proteins for two-hit extensions) at one and four threads and
+//! on the fixture pair at four, run the shadow of `LOSAT_X_BPSEEDSHADOW` (the batched loop against
+//! the reference for every subject), and check from the
 //! `[TIMING] x_bpdiag: mode=<m> cells=<n> batched_hits=<h> candidates=<k>` lines which path ran and
 //! that cells were tested in batches, not only that the report is equal. Each search states the
 //! default it runs with: no variable (the default) or the switches it sets to `0`.
@@ -219,9 +219,21 @@ type Vars = &'static [(&'static str, &'static str)];
 #[test]
 fn batched_cells_give_the_reports_of_the_per_hit_loop() {
     let (query, subject) = generated_pair("per_hit_loop");
+    // The generated pair (0.01 CPU s a search) at one and four threads with every run below. The
+    // fixture pair (7-12 CPU s a search) at four threads with the reference, the per-hit loop, the
+    // default and the scalar batch: the same pair's run of `LOSAT_X_BPDEFER=0` (`BATCHES`) and its
+    // pairwise reports (outfmt 0) of the reference and the default are made by
+    // `deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches` in
+    // `tests/blastp_diag_defer.rs`, and with `LOSAT_X_BPSEED=0` the switch has no fused loop to act
+    // in on any pair.
     let pairs = [
-        (query, subject),
-        (fixture("MeenMJNV.faa"), fixture("MejoMJNV.faa")),
+        (query, subject, &[1, 4][..], true),
+        (
+            fixture("MeenMJNV.faa"),
+            fixture("MejoMJNV.faa"),
+            &[4][..],
+            false,
+        ),
     ];
     // The fused per-hit loop: the switch off in the default.
     let per_hit: &[(&str, &str)] = &[("LOSAT_X_BPDIAG", "0")];
@@ -235,8 +247,9 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
         (&[("LOSAT_X_BPDIAG_SIMD", "0")], "0", true),
         (&[("LOSAT_X_BPDEFER", "0")], "1", false),
     ];
-    for (query, subject) in &pairs {
-        for threads in [1, 4] {
+    for (query, subject, thread_counts, every_run) in &pairs {
+        let every_run = *every_run;
+        for &threads in *thread_counts {
             let (reference, reference_counts, _) =
                 blastp(query, subject, threads, REFERENCE, &["-outfmt", "6"]);
             assert!(!reference.is_empty(), "the pair has a report");
@@ -251,11 +264,15 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
                 fused_counts.is_empty(),
                 "{per_hit:?}: no line with the switch off"
             );
-            for (vars, simd, defer) in batched {
+            // The fixture pair without the run of `LOSAT_X_BPDEFER=0`.
+            for &(vars, simd, defer) in batched.iter().filter(|run| every_run || run.2) {
                 let (rows, counts, _) = blastp(query, subject, threads, vars, &["-outfmt", "6"]);
                 let what = format!("{} threads {threads} {vars:?}", query.display());
                 assert!(rows == reference, "{what}: rows differ");
                 check_counts(&counts, simd, defer, &what);
+            }
+            if !every_run {
+                continue;
             }
             // The switch on without the fused loop: the reference loop, nothing tested in batches.
             let (rows, counts, _) = blastp(
@@ -275,12 +292,6 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
             );
         }
     }
-    // The pairwise report too, on the fixture pair: the default against the reference.
-    let (query, subject) = &pairs[1];
-    let (reference, _, _) = blastp(query, subject, 1, REFERENCE, &["-outfmt", "0"]);
-    let (report, counts, _) = blastp(query, subject, 1, &[], &["-outfmt", "0"]);
-    assert!(report == reference, "outfmt 0: the report differs");
-    check_counts(&counts, "1", true, "outfmt 0");
 }
 
 #[test]

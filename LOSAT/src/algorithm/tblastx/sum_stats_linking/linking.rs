@@ -130,17 +130,27 @@ static TRACE_LINK_SELECTIONS: OnceLock<bool> = OnceLock::new();
 
 #[inline(always)]
 fn trace_hsp_target() -> Option<TraceHspTarget> {
+    if !crate::utils::xdiag::ON {
+        return None;
+    }
     *TRACE_HSP_TARGET.get_or_init(|| parse_trace_hsp_target_env("LOSAT_TRACE_HSP"))
 }
 
 #[inline(always)]
 fn trace_chain_target() -> Option<TraceHspTarget> {
+    if !crate::utils::xdiag::ON {
+        return None;
+    }
     *TRACE_CHAIN_TARGET.get_or_init(|| parse_trace_hsp_target_env("LOSAT_TRACE_CHAIN_HSP"))
 }
 
 #[inline(always)]
 fn trace_link_selection_summaries() -> bool {
-    *TRACE_LINK_SELECTIONS.get_or_init(|| std::env::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some())
+    if !crate::utils::xdiag::ON {
+        return false;
+    }
+    *TRACE_LINK_SELECTIONS
+        .get_or_init(|| crate::utils::xdiag::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some())
 }
 
 /// Use the literal O(n^2)-per-pass port (`link_hsp_group_ncbi`) instead of the
@@ -150,10 +160,10 @@ fn legacy_linking_requested() -> bool {
     static LEGACY: OnceLock<bool> = OnceLock::new();
     *LEGACY.get_or_init(|| {
         std::env::var_os("LOSAT_LINKING_LEGACY").is_some()
-            || std::env::var_os("LOSAT_TRACE_HSP").is_some()
-            || std::env::var_os("LOSAT_TRACE_CHAIN_HSP").is_some()
-            || std::env::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some()
-            || std::env::var_os("LOSAT_DEBUG_CHAINING").is_some()
+            || crate::utils::xdiag::var_os("LOSAT_TRACE_HSP").is_some()
+            || crate::utils::xdiag::var_os("LOSAT_TRACE_CHAIN_HSP").is_some()
+            || crate::utils::xdiag::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some()
+            || crate::utils::xdiag::var_os("LOSAT_DEBUG_CHAINING").is_some()
     })
 }
 
@@ -187,7 +197,7 @@ fn link_shadow_enabled() -> bool {
 // print and does not alter the linking algorithm or runtime output.
 #[inline(always)]
 fn parse_trace_hsp_target_env(var_name: &str) -> Option<TraceHspTarget> {
-    let raw = std::env::var(var_name).ok()?;
+    let raw = crate::utils::xdiag::var(var_name).ok()?;
     let parts: Vec<&str> = raw
         .split(|c: char| c == ',' || c == ':' || c == ';' || c.is_whitespace())
         .filter(|p| !p.is_empty())
@@ -722,7 +732,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     // Debug output for cutoffs (controlled by LOSAT_DEBUG_CUTOFFS env var)
     static DEBUG_CUTOFFS_PRINTED: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);
-    if std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok()
+    if crate::utils::xenv::debug_cutoffs_is_ok()
         && !DEBUG_CUTOFFS_PRINTED.swap(true, std::sync::atomic::Ordering::SeqCst)
     {
         eprintln!("=== LOSAT Linking Cutoffs Debug ===");
@@ -1639,7 +1649,8 @@ fn link_hsp_group_ncbi(
     // Debug: trace a specific HSP (via LOSAT_TRACE_HSP) through linking.
     // Also supports legacy `LOSAT_DEBUG_CHAINING` to enable debug prints.
     let trace_target = trace_hsp_target();
-    let debug_chaining = trace_target.is_some() || std::env::var("LOSAT_DEBUG_CHAINING").is_ok();
+    let debug_chaining =
+        trace_target.is_some() || crate::utils::xdiag::var("LOSAT_DEBUG_CHAINING").is_ok();
     let trace_chain_target = trace_chain_target();
     let trace_link_selections = trace_link_selection_summaries();
 

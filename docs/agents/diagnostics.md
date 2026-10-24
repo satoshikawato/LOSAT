@@ -311,6 +311,7 @@ export LOSAT_X_BNDBCUT=1
 export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNDCONE=1
 export LOSAT_X_BNFEWSUBJ=1
+export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
@@ -322,6 +323,7 @@ export LOSAT_X_BPCOMPOREUSE=1
 export LOSAT_X_BPDBCUT=1
 export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
+export LOSAT_X_BPFSEED=1
 export LOSAT_X_BPGAP=1
 export LOSAT_X_BPGAP16=1
 export LOSAT_X_BPHITBF=1
@@ -1890,6 +1892,42 @@ Rebuilding less:
   proteins of 4,639 residues (31.6 %) 34.27 -> 27.95 s (branch misses 1.18 G -> 0.55 G); 100 proteins of 58,139
   residues at 4 threads (two blocks, 91 % and 23 %) 70.92 -> 66.84 s; max RSS unchanged. In the strict set from
   its first pull request (no measured case slower; AGENTS.md "Speed-up switches").
+- `LOSAT_X_BPFSEED=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
+  2026-10-24, line v4-BPF K2-1; `=0` turns it off; acts in the fused loop, `LOSAT_X_BPSEED`, on the flat compressed
+  table of `LOSAT_X_BPCLUT` where the scan lists the cells without a branch, `LOSAT_X_BPCLUTSCANBF`, natively; a
+  sparser table, the reference compressed table and wasm32 keep their loops) the loop on such a table
+  (`blastp/x_seed_fused_clut.rs` `x_scan_flat_fseed`) takes two changes: each hit goes first through blastp's
+  branch-free two-hit test (`XHitBf::test`, the test of `LOSAT_X_BPHITBF`, which does not act here: too far and
+  overlap without a branch, a flag-1 entry or a candidate on to `x_test_hit`; exact where `XHitBf::fits` holds for
+  the subject, which is decided and recorded per subject, `LOSAT_X_REACH`), and no hit reads ahead a later hit's diagonal entry (with about 3.5 hits
+  per cell the read-ahead rarely found one, and its bound test stayed). The cells, their order and the hits are
+  `for_each_cell::<true, _>`'s, the diagonal table holds after each hit what `x_test_hit` leaves there, and the
+  extension is called for the same hits with the same values, so the report is the same (the lib test
+  `the_flat_loop_is_the_fused_loop_on_the_reference_table` compares the loop with the reference table's loop, and
+  `tests/blastp_fast_seed_bf.rs` the reports with `=0`'s, with both lists and with the reference table). The loop
+  is out of line, so the loops without it keep their code; only the choice in `x_scan_two_hit_compressed_flat`
+  is new (`=0` runs the instructions of the binary before the switch on the dense tables, x1.0000, and `=0` and
+  the default x0.9998 of them on a sparse one). Not taken (line v4-BPF K2 probes, one
+  core on the workstation): the scan reading each listed cell's slice bounds (a list of (offset, start, end)) took
+  x1.50 the cycles of 3 proteins x UniRef50 volume 00, as the branch-free list then loads the bounds at every
+  offset; on the tables with the branch the loop gained nothing (x0.98-1.01 on a 42-residue protein x UniRef50);
+  AVX2 batches of the cells of eight or more hits (`LOSAT_X_BPDIAG` with `LOSAT_X_BPDEFER`) x1.06 the cycles of
+  the loop without them; reading the hits 4 or 16 cells ahead instead of 8, the slice bounds 8 or 32 ahead instead
+  of 16, and slices without bound tests changed nothing measurable. In WebAssembly (the serial WASI command in
+  Node 26, one process, 3 rounds) the loop took x1.055-1.086 the time of 3 proteins x UniRef50 (x0.945-0.979 for 10
+  proteins, x0.99 for 42 residues), so wasm32 keeps `x_scan_flat_bf`. Timed 2026-10-24 on the workstation (node 0, one physical core, its
+  HT sibling idle, warmed 3 s before every run, 8 rounds of the pairs in alternating order; other lines' gates ran on
+  node 0, load 22-88, so the cycle and instruction counts are the firmer measure; dev a806eaa5; every report
+  identical between the arms; medians, `cycles:u`): OrthoFinder's 1/10 of the Arabidopsis proteins x the zebrafish
+  proteome (`-db`, `-evalue 0.001`) x0.901 (instructions x0.989, mispredicted branches x0.701), the 1/10 of the human
+  proteins x the yeast proteome x0.939, the 1/10 of the yeast proteins x the yeast proteome x0.935; UniRef50 volume 00
+  (`-db`, `-evalue 1e-5`) 3 proteins x0.957, 10 proteins x0.912; once each, the whole human proteome x the yeast
+  proteome 74.16 -> 69.63 s (cycles x0.937) and the whole Arabidopsis proteome x the zebrafish proteome 256.49 ->
+  235.51 s (x0.915), max RSS 93.1 -> 94.9 MiB and 75.6 -> 75.7 MiB (one run each). Where the switch does not act the
+  instructions are those of dev: proteins of 42 and 357 residues x UniRef50 (the list with the branch) x0.9998 with
+  cycles x1.003 (the `=0` arm read x1.009 in a probe round: code layout), exact blastp (1/10 of the Arabidopsis
+  proteins x the yeast proteome) x1.0000. In the strict set from its first pull request (no measured case slower
+  natively; AGENTS.md "Speed-up switches").
 - `LOSAT_X_BPLKPFLAT=1` (BLASTP `-task blastp-fast`, speed; in the strict set since 2026-10-17, on by default
   together with `LOSAT_X_BPCLUT`; acts only where the search's pool builds the flat table of
   `LOSAT_X_BPCLUT` or `LOSAT_X_BPCLUTSHADOW`, with more than one thread) changes how that build is scheduled
@@ -2115,9 +2153,10 @@ Rebuilding less:
   hits that have a later hit, without a bound check per hit. Acts per subject where `1 <= wordsize < window`,
   `0 <= diag_offset` and `diag_offset + length + 2 window < 2^30` (otherwise the loop without the test runs: a
   window equal to the word size, or a subject of about 2^29 letters or a `-window_size` near 2^29). The
-  AVX2 batches of `LOSAT_X_BPDIAG` (the x86-64 default) and blastp-fast's loops keep their own tests (on
-  blastp-fast the test gave x0.97 on 300 yeast proteins x the fly proteome with 3-4 % more instructions and
-  changed the loops without it; not taken). With `LOSAT_X_BPDIAG=0` 72-74 % of the hits of WSSV x PajaWSV and of 300 yeast
+  AVX2 batches of `LOSAT_X_BPDIAG` (the x86-64 default) and blastp-fast's loop on the reference compressed
+  table keep their own tests; blastp-fast's loop on the flat table takes the test under `LOSAT_X_BPFSEED`
+  (`LOSAT_X_BPHITBF=0` does not turn it off there). With `LOSAT_X_BPDIAG=0` 72-74 % of the hits of WSSV x
+  PajaWSV and of 300 yeast
   proteins x the fly proteome are too far, 18.6-18.8 % overlap, 2.5-3.7 % meet a flag-1 entry and 4.7-5.3 %
   are candidates (v4-A10 probe bp1). Shadow: `LOSAT_X_BPSEEDSHADOW=1` compares the fused loop that runs, this
   one where it acts, with the reference on every subject, and prints `[X_SHADOW] BPHITBF subjects_compared=N`
@@ -3007,6 +3046,31 @@ Scheduling (each value computed by one thread with the original function; order 
   switch leaves alone, at 8-32 threads) 0.97-1.02; megablast of 1,775 cDNAs (the loop by default) 1.00 at one thread and
   1.02-1.03 at 8 and 16 threads, within the rounds' spread (0.97-1.09) with the same page faults, TLB shootdowns, user
   and system time as dev. Max RSS: the same (the 31,168 cDNAs in the loop 236 MiB against 249).
+- `LOSAT_X_BNLUTDROP=1` (BLASTN, every task, `-subject` and `-db`; in the strict set since 2026-10-24
+  (perf/mb-lut-drop, evidence at the end of this entry): on unless it is `0`) a query batch drops its lookup tables
+  when its preliminary stage ends, before its traceback (`blastn/blast_engine/x_lut_drop.rs`), where NCBI's traceback
+  stage drops its table (`m_LookupTable.Reset(NULL)`, `traceback_stage.cpp:208-211`); with `=0` the tables live until
+  the batch returns, as before. The traceback reads the HSPs that the preliminary stage kept and does not scan, and the
+  tables are passed to `process_subject` by the preliminary stage's calls only (`None` in the traceback's), so the
+  compiler shows that no traceback reads them; the values taken from them before the scan (the offset array size, the
+  shape of the subject search) are plain numbers. A `LOSAT_X_MBLUTKEEP` table goes back to the batch loop's keep when
+  the tables drop, as at the batch's end before (zeroed and taken by the next build as before); what the traceback no
+  longer holds is the rest: the chains (`next_pos`, 4 bytes a position of both strands), the PV array, and every table
+  that is not kept (the discontiguous tables, the tables of `LOSAT_X_QBATCHPAR`'s slots). A batch split into query
+  chunks has no table of its own (its chunks drop theirs when their calls return after their preliminary stage). With
+  `LOSAT_TIMING` `[TIMING] x_bn_lut_drop: batches=` gives the number of batches that dropped their tables before their
+  traceback. Evidence (workstation node 1, 16 cores with their HT siblings idle, membind 1, cores warmed 3 s before each run; dev
+  a1fb63f9 against 82176dc4, 4-6 pairs in alternating order; outputs identical; peak `RssAnon` and max RSS = max(`%M`, a
+  10 ms `VmHWM` sample)): megablast of E. coli Sakai against MG1655 `-subject` 135.7 -> 131.3 MiB at one thread and
+  142.5 -> 136.7 at 16, `-db` 135.0 -> 130.6 and 142.6 -> 133.7 (the peak moves from the traceback to the scan; NCBI's
+  anonymous memory 155.3 and 133.9, plan v4 line MF); megablast of 31,168 D. melanogaster cDNAs against dmel_dna_3M (37
+  batches) at 16 threads 579.2 -> 552.1, blastn of the cDNAs 741.2 -> 705.7 and dc-megablast 392.4 -> 390.9 (16 threads,
+  `LOSAT_X_QBATCHPAR`'s slots, whose tables are not kept). One case reads higher: the cDNAs' megablast at one thread
+  217.5 -> 219.7 (the batch loop with the keep). It is glibc's dynamic mmap threshold (freeing a mapped block of up to 32
+  MiB raises it): the chains of a batch are freed before its traceback instead of after, so the threshold rises one
+  traceback earlier and that traceback's medium buffers stay in the heap; with the threshold fixed
+  (`MALLOC_MMAP_THRESHOLD_=131072`) the run reads 217.2 -> 217.0, and `LOSAT_X_BNLUTDROP=0` reads 217.5 as dev. Time:
+  wall x0.997-1.001, cycles:u x0.991-1.000 and instructions:u x0.999-1.000 in every case.
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
   `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; in the strict set since 2026-10-17,
   default ON: `LOSAT_X_DISCLUTPAR=0` turns it off; evidence below, "Default ON") the
@@ -4537,6 +4601,10 @@ Scheduling (each value computed by one thread with the original function; order 
   (letters or resolved bases, reverse complement, frames). A set with a byte that has no ncbi4na
   code (only an API caller can make one) keeps the letters; the library entry `run_local` reads the
   caller's records. The plans of letters are made from them packed (below).
+  With `-outfmt 11` the reading takes the `=0` side (the records keep their letters, one byte per
+  base, and with `-subject_loc` the whole subjects), because every archive repeats the whole
+  subjects; the plans still pack per plan (+1 byte per subject base: 33 against 19 MiB on 20,000
+  subjects, 18.8 Mb; NCBI 282 MiB).
   In the set since 2026-10-16 (on unless `0`). With
   `LOSAT_X_STATS=1` a `[X_STATS] TBNSTORE
   subjects= stored_bytes= letters_made= packed_plans=` line gives the subjects held

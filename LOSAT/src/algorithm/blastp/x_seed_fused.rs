@@ -215,16 +215,18 @@
 //! `x_test_hit` leaves there, the extension is called for the same hits with the same values and
 //! entries, and the initial HSPs are the same, in the same order. blastx's direct loop takes the same
 //! test (`XHitBf` is shared; LOSAT_X_BXHITBF, `blastx/x_seed_scan.rs`, whose header shows that its
-//! table holds the same range of flag-0 values).
+//! table holds the same range of flag-0 values), and so does blastp-fast's loop on the flat
+//! compressed table (LOSAT_X_BPFSEED, `x_seed_fused_clut.rs`: the same diagonal table and
+//! extension as blastp's loop).
 //!
 //! The switch is read once; it is in the strict set (`utils/xswitch.rs`): on unless
-//! `LOSAT_X_BPHITBF=0`. The loop with the test is its own
-//! function, never inlined and with a closure of its own type (`x_scan_two_hit_hitbf`), so the loops
-//! without it keep their code; the AVX2 and scalar batches keep their own tests, and so do
-//! blastp-fast's loops (`x_seed_fused_compressed.rs`, `x_seed_fused_clut.rs`: the test there gave a
-//! scan of 300 yeast proteins x the fly proteome x0.97 on x86-64, with 3-4 % more instructions, and
-//! changed the code of the loops without it). The loop with the test also reads ahead without a
-//! bound check per hit (`x_cell_per_hit_bf`). With `LOSAT_X_BPSEEDSHADOW` the loop that runs, this
+//! `LOSAT_X_BPHITBF=0`. The loop with the test is its own function, never inlined and with a
+//! closure of its own type (`x_scan_two_hit_hitbf`), so the loops without it keep their code; the
+//! AVX2 and scalar batches keep their own tests, and so does blastp-fast's loop on the reference
+//! compressed table (`x_seed_fused_compressed.rs`). blastp-fast's loop on the flat compressed table
+//! takes the test, without the read-ahead, under its own switch (LOSAT_X_BPFSEED; LOSAT_X_BPHITBF
+//! does not act there). `x_scan_two_hit_hitbf` also reads ahead without a bound check per hit
+//! (`x_cell_per_hit_bf`). With `LOSAT_X_BPSEEDSHADOW` the loop that runs, this
 //! one where the switch acts, is compared with the reference for every subject, and `main` prints
 //! `[X_SHADOW] BPHITBF subjects_compared=N` at exit beside BPSEED's line, N the subjects the loop
 //! with the test scanned.
@@ -435,7 +437,8 @@ pub(crate) fn x_bp_hit_bf() -> bool {
 
 /// EXPERIMENT (LOSAT_X_BPHITBF, LOSAT_X_BXHITBF): the constants of the branch-free two-hit test
 /// ([`XHitBf::test`]) for one subject: the diagonal offset, `2 wordsize`, `2 (window - wordsize)`
-/// and `2 window`. blastp's per-hit loop and blastx's direct loop (`blastx/x_seed_scan.rs`) use it.
+/// and `2 window`. blastp's per-hit loop, blastx's direct loop (`blastx/x_seed_scan.rs`) and
+/// blastp-fast's loop on the flat compressed table (LOSAT_X_BPFSEED, `x_seed_fused_clut.rs`) use it.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct XHitBf {
     diag_offset: i32,
@@ -460,7 +463,12 @@ impl XHitBf {
 
     /// The test for a subject of `length` letters scanned at `diag_offset` where
     /// [`XHitBf::fits`] holds; `None` elsewhere.
-    fn new(diag_offset: i32, length: usize, window: i32, word_size: i32) -> Option<Self> {
+    pub(crate) fn new(
+        diag_offset: i32,
+        length: usize,
+        window: i32,
+        word_size: i32,
+    ) -> Option<Self> {
         Self::fits(diag_offset, length, window, word_size)
             .then(|| Self::in_range(diag_offset, window, word_size))
     }

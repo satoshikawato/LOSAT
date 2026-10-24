@@ -1,4 +1,5 @@
-//! EXPERIMENT (LOSAT_X_DPNEON2): the 256-bit kernels of `x_xdrop_avx2.rs` on aarch64 NEON, each
+//! LOSAT_X_DPNEON2 (a switch of the strict set: on unless `=0`, which leaves every call to the
+//! DPW128 / 128-bit NEON kernels): the 256-bit kernels of `x_xdrop_avx2.rs` on aarch64 NEON, each
 //! 256-bit vector held in two 128-bit registers: 16 lanes of 16 bits and 32 lanes of 8 bits, with
 //! (`TB`) and without the traceback. aarch64 only (NEON is a baseline feature of the targets).
 //! They run the recurrence of NCBI `ALIGN_EX` / `Blast_SemiGappedAlign` row by row, with the value
@@ -127,10 +128,11 @@ static HPM16: [i16; 8] = [-1, 0, 0, 0, 0, 0, 0, 0];
 /// Lane 0 of 8-bit lanes.
 static HPM8: [u8; 16] = [255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-/// No NCBI counterpart: LOSAT_X_DPNEON2 set (any value; not in the strict set, off unless set):
-/// the two-register kernels run first on aarch64 (`x_extra_switches` in `xdrop_simd.rs`).
+/// No NCBI counterpart: LOSAT_X_DPNEON2, a switch of the strict set: on unless `LOSAT_X_DPNEON2=0`,
+/// which leaves the calls to the DPW128 / 128-bit NEON kernels. The two-register kernels run first
+/// on aarch64 (`x_extra_switches` in `xdrop_simd.rs`, which reads this once).
 pub(super) fn switch_on() -> bool {
-    std::env::var_os("LOSAT_X_DPNEON2").is_some()
+    crate::utils::xswitch::on("LOSAT_X_DPNEON2")
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:766-770

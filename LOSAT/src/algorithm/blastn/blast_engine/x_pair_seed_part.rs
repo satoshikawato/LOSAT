@@ -247,7 +247,9 @@ pub(super) fn insert<const PT: bool, const LEAN: bool, const MEMO: bool>(
 /// into it; without the alignment the lock word and the first fields shared a line with the
 /// fields the folding thread writes, or with the neighbouring partition's, as the size of
 /// `PartState` placed them (DiagHashTable's memo of LOSAT_X_DIAGLV2 made DQ n16 x1.028 slower
-/// with both switches off: memory-ordering machine clears x1.37, same instructions).
+/// with both switches off: memory-ordering machine clears x1.37, same instructions). With
+/// LOSAT_X_PAIRPARHOME (`seed_stage_home`) also each partition's next strip, which its folder
+/// writes after every strip and the others read.
 #[repr(align(128))]
 struct OwnLines<T>(T);
 
@@ -748,12 +750,6 @@ where
     stats
 }
 
-/// No NCBI counterpart (scheduling only, LOSAT_X_PAIRPARHOME): a value on cache lines of its own
-/// (128 bytes: a line and the adjacent line the prefetcher pairs with it).
-#[derive(Default)]
-#[repr(align(128))]
-struct OwnLines<T>(T);
-
 /// No NCBI counterpart (scheduling only, LOSAT_X_PAIRPARHOME): marks the home partitions of a
 /// participant (`p % threads == me`) as having their participant in the stage while it lives,
 /// so that a helper that leaves a stalled stage (or unwinds) hands them to every participant.
@@ -848,7 +844,8 @@ where
     let raw_spare = Mutex::new(std::mem::take(&mut scratch.raw));
     // per partition: the next strip it folds (set under its lock by the participant that folded
     // the strip before) and whether a participant whose home it is takes part in the stage
-    let lanes: Vec<OwnLines<AtomicUsize>> = (0..parts).map(|_| OwnLines::default()).collect();
+    let lanes: Vec<OwnLines<AtomicUsize>> =
+        (0..parts).map(|_| OwnLines(AtomicUsize::new(0))).collect();
     let homes: Vec<AtomicBool> = (0..parts).map(|_| AtomicBool::new(false)).collect();
     let slots: Vec<RwLock<Option<StripBuf>>> = (0..n).map(|_| RwLock::new(None)).collect();
     let ready: Vec<AtomicBool> = (0..n).map(|_| AtomicBool::new(false)).collect();
@@ -2124,7 +2121,7 @@ mod tests {
                     format!("pool {pool_threads} threads {threads} slow {slow:?} stage {stage}");
                 let n = 3000;
                 let ops = random_ops(&mut rng, n, &mut s, 400);
-                let expected = reference(&mut reference_hash, &ops, first, 40);
+                let expected = reference::<true>(&mut reference_hash, &ops, first, 40);
                 let cuts: Vec<usize> = (0..=60).map(|k| k * n / 60).collect();
                 let (got, stats, _) = partitioned_on(
                     &pool,
@@ -2191,7 +2188,7 @@ mod tests {
                     let at = format!("threads {threads} home {home} attempt {attempt}");
                     let n = 2000;
                     let ops = random_ops(&mut rng, n, &mut s, 300);
-                    let expected = reference(&mut reference_hash, &ops, first, 40);
+                    let expected = reference::<true>(&mut reference_hash, &ops, first, 40);
                     let cuts: Vec<usize> = (0..=40).map(|k| k * n / 40).collect();
                     let (got, stats, _) = partitioned_on(
                         &pool,

@@ -1194,7 +1194,8 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
 /// One query's lines of `write_output_blastn_hitlists_to_writer` (outfmt 7's header, then one row
 /// per HSP of its final hit list), without the warnings that come before them. `hsp_index` counts
 /// the rows written so far (the format observer's HSP index). The EXPERIMENT LOSAT_X_BNTABPAR
-/// (`x_tab_par.rs`) formats queries into buffers with it on the search's pool.
+/// (`x_tab_par.rs`) formats pieces of queries into buffers with `write_query_header` and
+/// `write_hsp_rows`, the two parts of this function, on the search's pool.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:828-832
 /// ```c
@@ -1219,6 +1220,44 @@ pub(crate) fn write_query_rows<W: Write>(
     hsp_index: &mut HspIndex,
     mut probe: Option<&mut FormatProbe<'_>>,
 ) -> io::Result<()> {
+    write_query_header(
+        writer,
+        q_idx,
+        hit_list_opt,
+        output_format,
+        query_titles,
+        subject_title,
+        unsearched,
+    )?;
+    let hit_list = match hit_list_opt {
+        Some(value) => value,
+        None => return Ok(()),
+    };
+    for hsp_list in &hit_list.hsplist_array {
+        write_hsp_rows(
+            writer,
+            &hsp_list.hsps,
+            query_ids,
+            subject_ids,
+            config,
+            hsp_index,
+            probe.as_deref_mut(),
+        )?;
+    }
+    Ok(())
+}
+
+/// outfmt 7's header lines of query `q_idx` (nothing for outfmt 6), the first lines of
+/// `write_query_rows`.
+pub(crate) fn write_query_header<W: Write>(
+    writer: &mut W,
+    q_idx: usize,
+    hit_list_opt: Option<&BlastnHitList>,
+    output_format: BlastnOutputFormat,
+    query_titles: &[Arc<[u8]>],
+    subject_title: &str,
+    unsearched: &[bool],
+) -> io::Result<()> {
     if output_format == BlastnOutputFormat::TabularWithComments {
         let query_title = query_titles
             .get(q_idx)
@@ -1232,102 +1271,111 @@ pub(crate) fn write_query_rows<W: Write>(
                 .then(|| blastn_hsp_count(hit_list_opt)),
         )?;
     }
-    let hit_list = match hit_list_opt {
-        Some(value) => value,
-        None => return Ok(()),
-    };
-    for hsp_list in &hit_list.hsplist_array {
-        for hsp in &hsp_list.hsps {
-            let query_id = query_ids
-                .get(hsp.q_idx as usize)
-                .map(|id| id.as_ref())
-                .unwrap_or(b"unknown");
-            let subject_id = subject_ids
-                .get(hsp.s_idx as usize)
-                .map(|id| id.as_ref())
-                .unwrap_or(b"unknown");
-            // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-            // ```c
-            // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-            //     // Add tab in front of field, except for the first field.
-            //     if (iter != m_FieldsToShow.begin())
-            //         m_Ostream << m_FieldDelimiter;
-            //     x_PrintField(*iter);
-            // }
-            // m_Ostream << "\n";
-            // ```
-            if blastn_trace::should_trace_range(
+    Ok(())
+}
+
+/// One row per HSP of `hsps` (`write_query_rows`' rows of one HSP list, or a run of them).
+/// `hsp_index` counts the rows written so far (the format observer's HSP index).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_hsp_rows<W: Write>(
+    writer: &mut W,
+    hsps: &[BlastnHsp],
+    query_ids: &[Arc<[u8]>],
+    subject_ids: &[Arc<[u8]>],
+    config: &OutputConfig,
+    hsp_index: &mut HspIndex,
+    mut probe: Option<&mut FormatProbe<'_>>,
+) -> io::Result<()> {
+    for hsp in hsps {
+        let query_id = query_ids
+            .get(hsp.q_idx as usize)
+            .map(|id| id.as_ref())
+            .unwrap_or(b"unknown");
+        let subject_id = subject_ids
+            .get(hsp.s_idx as usize)
+            .map(|id| id.as_ref())
+            .unwrap_or(b"unknown");
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+        // ```c
+        // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+        //     // Add tab in front of field, except for the first field.
+        //     if (iter != m_FieldsToShow.begin())
+        //         m_Ostream << m_FieldDelimiter;
+        //     x_PrintField(*iter);
+        // }
+        // m_Ostream << "\n";
+        // ```
+        if blastn_trace::should_trace_range(
+            "hitlist",
+            hsp.q_idx * 2 + if hsp.query_frame < 0 { 1 } else { 0 },
+            hsp.s_idx as usize,
+            &String::from_utf8_lossy(subject_id),
+            hsp.internal_q_offset_0,
+            hsp.internal_q_end_0,
+            hsp.internal_s_offset_0,
+            hsp.internal_s_end_0,
+            hsp.query_length,
+            hsp.query_frame,
+        ) {
+            blastn_trace::log(
                 "hitlist",
-                hsp.q_idx * 2 + if hsp.query_frame < 0 { 1 } else { 0 },
-                hsp.s_idx as usize,
-                &String::from_utf8_lossy(subject_id),
-                hsp.internal_q_offset_0,
-                hsp.internal_q_end_0,
-                hsp.internal_s_offset_0,
-                hsp.internal_s_end_0,
-                hsp.query_length,
-                hsp.query_frame,
-            ) {
-                blastn_trace::log(
-                    "hitlist",
-                    format!(
-                        "query={} subject={} q={}..{} s={}..{} raw_score={} bit_score={:.12} evalue={:.12e} length={} identities={} mismatches={} gapopen={}",
-                        String::from_utf8_lossy(query_id),
-                        String::from_utf8_lossy(subject_id),
-                        hsp.q_start,
-                        hsp.q_end,
-                        hsp.s_start,
-                        hsp.s_end,
-                        hsp.raw_score,
-                        hsp.bit_score,
-                        hsp.e_value,
-                        hsp.length,
-                        hsp.num_ident,
-                        hsp.mismatch,
-                        hsp.gapopen
-                    ),
-                );
-            }
-            // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-            // ```c
-            // void CBlastTabularInfo::Print()
-            // {
-            //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-            //         if (iter != m_FieldsToShow.begin())
-            //             m_Ostream << m_FieldDelimiter;
-            //         x_PrintField(*iter);
-            //     }
-            //     m_Ostream << "\n";
-            // }
-            // ```
-            // One printed row is one HSP; the probe marks it without changing it.
-            if let Some(probe) = probe.as_mut() {
-                writer.flush()?;
-                probe.begin(*hsp_index);
-            }
-            write_hit_fields_bytes(
-                writer,
-                query_id,
-                subject_id,
-                hsp.identity,
-                hsp.num_ident,
-                hsp.length,
-                hsp.mismatch,
-                hsp.gapopen,
-                hsp.q_start,
-                hsp.q_end,
-                hsp.s_start,
-                hsp.s_end,
-                hsp.e_value,
-                hsp.bit_score,
-                config,
-            )?;
-            if let Some(probe) = probe.as_mut() {
-                writer.flush()?;
-                probe.end(*hsp_index);
-            }
-            *hsp_index += 1;
+                format!(
+                    "query={} subject={} q={}..{} s={}..{} raw_score={} bit_score={:.12} evalue={:.12e} length={} identities={} mismatches={} gapopen={}",
+                    String::from_utf8_lossy(query_id),
+                    String::from_utf8_lossy(subject_id),
+                    hsp.q_start,
+                    hsp.q_end,
+                    hsp.s_start,
+                    hsp.s_end,
+                    hsp.raw_score,
+                    hsp.bit_score,
+                    hsp.e_value,
+                    hsp.length,
+                    hsp.num_ident,
+                    hsp.mismatch,
+                    hsp.gapopen
+                ),
+            );
         }
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+        // ```c
+        // void CBlastTabularInfo::Print()
+        // {
+        //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+        //         if (iter != m_FieldsToShow.begin())
+        //             m_Ostream << m_FieldDelimiter;
+        //         x_PrintField(*iter);
+        //     }
+        //     m_Ostream << "\n";
+        // }
+        // ```
+        // One printed row is one HSP; the probe marks it without changing it.
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.begin(*hsp_index);
+        }
+        write_hit_fields_bytes(
+            writer,
+            query_id,
+            subject_id,
+            hsp.identity,
+            hsp.num_ident,
+            hsp.length,
+            hsp.mismatch,
+            hsp.gapopen,
+            hsp.q_start,
+            hsp.q_end,
+            hsp.s_start,
+            hsp.s_end,
+            hsp.e_value,
+            hsp.bit_score,
+            config,
+        )?;
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.end(*hsp_index);
+        }
+        *hsp_index += 1;
     }
     Ok(())
 }

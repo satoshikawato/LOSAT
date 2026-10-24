@@ -2515,19 +2515,23 @@ Rebuilding less:
   of its own: it prints its own `LOSAT_TIMING` block and adds to the other switches' counters and shadow lines.
 - `LOSAT_X_BNTABPAR=1` (BLASTN, all tasks, outfmt 6 / 7, two or more threads, speed; in the strict set since
   2026-10-2x (perf/bn-tab-par, evidence at the end of this entry): on unless it is `0`) the rows of a report are
-  formatted per query on the search's pool: the queries are taken in windows of at least 2,048 rows per thread (at
-  least one query), each query of a window is formatted into a buffer of its own by `write_query_rows` (the serial
-  writer's function of one query, `blastn/hsp.rs`), and the thread of the batch loop writes the window's buffers in
-  query order, each query's warnings before its buffer, before the next window is formatted; outfmt 7's last line
-  stays on that thread (`blastn/x_tab_par.rs`, called from `post_process_hits_and_write` in
-  `blastn/blast_engine/run.rs`). Same bytes: every buffer is the serial call for that query, and the serial writer
-  is those calls in query order. Where: the pool that `write_reports` gets while no LOSAT_X_QBATCHPAR slot exists
-  (the batch loop: `LOSAT_X_QBATCHPAR=0`, query files below its budget, `-db`); serial with one thread, while
-  slots exist, with the Web adapter's format observer and with the BLASTN trace. Memory: the rows of one window
-  (about 6 MiB at 32 threads with ~100-byte rows). `LOSAT_X_REACH` records the decision once per report call
+  formatted on the search's pool: they are cut into pieces of at most 512 rows of one query (the first piece of a
+  query with its outfmt 7 header; a query without rows is one piece), the pieces are taken in windows of at least
+  2,048 rows per thread (a piece without rows counts as one), each piece of a window is formatted into a buffer of
+  its own by `write_query_header` and `write_hsp_rows` (the two parts of the serial writer's function of one query,
+  `write_query_rows`, `blastn/hsp.rs`), and the thread of the batch loop writes the window's buffers in order, each
+  query's warnings before its first piece, before the next window is formatted; outfmt 7's last line stays on that
+  thread (`blastn/x_tab_par.rs`, called from `post_process_hits_and_write` in `blastn/blast_engine/run.rs`). Same
+  bytes: a query's pieces in order are its header and its HSP lists' rows in order, which is the serial call for
+  that query, and the serial writer is those calls in query order. Where: the pool that `write_reports` gets while
+  no LOSAT_X_QBATCHPAR slot exists (the batch loop: `LOSAT_X_QBATCHPAR=0`, query files below its budget, `-db`);
+  serial with one thread, while slots exist, with the Web adapter's format observer and with the BLASTN trace.
+  Memory: the rows of one window (about 6 MiB at 32 threads with ~100-byte rows), also for one query of many rows
+  or many queries without rows. `LOSAT_X_REACH` records the decision once per report call of at least one query
   (`switch_reach_expected.tsv`: conditional). Tests: `x_tab_par` unit tests (random hit lists, outfmt 6 and 7, with
-  and without the epilog, warnings, 2 / 3 / 8 threads, a query larger than a window: bytes of the serial writer),
-  integration test `blastn_tab_par` (default vs `=0` reports equal, the new side reached).
+  and without the epilog, warnings, 2 / 3 / 8 threads, a query larger than a window: the serial writer's report,
+  flushes and warnings in the same order; every row in exactly one piece, in order; a format observer keeps the
+  serial writer), integration test `blastn_tab_par` (default vs `=0` reports equal, the new side reached).
   Premise (2026-10-24, v4-D s12): 31,168 cDNAs x 3 Mb `-task blastn` `-outfmt 6` (1.02 M rows) with
   `LOSAT_X_QBATCHPAR=0` on ws spent 0.88 s in the report calls at 8, 16 and 32 threads alike (`[TIMING] common`
   output 0.879 / 0.886 / 0.884 s), on one thread while the pool waited; local perf: 87 % of the call in

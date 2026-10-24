@@ -2362,7 +2362,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hits_from_distinct_alignments_uses_edit_script_context() {
+    fn test_hsplist_from_distinct_alignments_uses_edit_script_context() {
         let template_hit = BlastpPreliminaryHsp {
             query_start: 0,
             query_end: 20,

@@ -82,6 +82,7 @@ fn s_lnfact(n: usize) -> f64 {
 //    }
 // }
 // ```
+// `lnalphasize` is the constant `K_LN20`, which s_GetProb (below) reads directly.
 #[derive(Debug, Clone)]
 struct SegAlpha {
     alphasize: usize,

@@ -2451,7 +2451,6 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
 // Without a Gumbel block, PrintKAParameters (align_format_util.cpp:585-619) prints only
 // the Lambda, K and H columns. An invalid query has neither Karlin block (`karlin` is
 // `None`) and a search space of 0.
-
 /// The footer of a nucleotide query, with the two blank lines that follow it (the next
 /// query's preamble or the epilog) when `trailing`.
 fn write_nucleotide_query_footer_spacing<W: Write>(

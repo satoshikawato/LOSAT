@@ -1421,7 +1421,7 @@ fn ltriang_matrix_new(n: usize) -> Vec<Vec<f64>> {
 /// Column stride of the column-major copy of the Newton matrix.
 const X_WC_STRIDE: usize = 2 * COMPO_NUM_TRUE_AA;
 
-// EXPERIMENT: `Nlm_FactorLtriangPosDef` with the loops interchanged.
+// `Nlm_FactorLtriangPosDef` with the loops interchanged.
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:120-143
 // ```c
@@ -1600,10 +1600,12 @@ fn x_factor_ltriang_pos_def_cols(a: &mut [Vec<f64>], n: usize, wc: &mut [f64]) {
     }
 }
 
-// EXPERIMENT: `Nlm_SolveLtriangPosDef`, forward substitution by columns.
+// `Nlm_SolveLtriangPosDef`, forward substitution by columns.
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:147-171
 // ```c
+// void Nlm_SolveLtriangPosDef(double x[], int n, double ** L)
+// ...
 // for (i = 0;  i < n;  i++) {
 //     temp = x[i];
 //     for (j = 0;  j < i;  j++) {
@@ -1636,10 +1638,6 @@ fn x_factor_ltriang_pos_def_cols(a: &mut [Vec<f64>], n: usize, wc: &mut [f64]) {
 //             x[i] -= L[j][i] * x[j];
 //         }
 //     }
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:147-171
-// ```c
-// void Nlm_SolveLtriangPosDef(double x[], int n, double ** L)
 // ```
 // Forward substitution is done by columns; the back substitution is the reference loop.
 fn x_solve_ltriang_pos_def_cols(x: &mut [f64], n: usize, l: &[Vec<f64>], wc: &[f64]) {
@@ -2914,6 +2912,7 @@ fn solve_re_newton_system(
     //         x[i] = temp/L[i][i];
     //     }
     // ```
+    debug_assert!(m <= X_WC_STRIDE);
     x_solve_ltriang_pos_def_cols(z, m, &newton_system.w, &newton_system.x_wc);
     if newton_system.constrain_rel_entropy {
         for i in 0..n {
@@ -2985,11 +2984,17 @@ fn optimize_target_frequencies(
     constrain_rel_entropy: bool,
     relative_entropy: f64,
 ) -> i32 {
-    // NCBI's only caller passes `COMPO_NUM_TRUE_AA` (composition_adjustment.c:1385-1399 @598d8ae6,
-    // quoted before `x_newton_input`: `Blast_OptimizeTargetFrequencies(.., COMPO_NUM_TRUE_AA, ..)`),
-    // and so does LOSAT's. The reordered forms (`x_step_bound`, `x_scaled_symmetric_product_a`,
-    // `x_factor_ltriang_pos_def_cols`, `x_solve_ltriang_pos_def_cols`) assume it: fixed-size
-    // storage for `n = 400` values and `m <= X_WC_STRIDE` rows.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1390-1392
+    // ```c
+    //     status =
+    //         Blast_OptimizeTargetFrequencies(&NRrecord->mat_final[0][0],
+    //                                         COMPO_NUM_TRUE_AA,
+    // ```
+    // No NCBI counterpart: the assert. NCBI's only caller (above) and LOSAT's
+    // (`composition_matrix_adjust`) pass `COMPO_NUM_TRUE_AA`; the reordered forms (`x_step_bound`,
+    // `x_scaled_symmetric_product_a`, `x_factor_ltriang_pos_def_cols`, `x_solve_ltriang_pos_def_cols`)
+    // assume it (fixed-size storage for `n = 400` values and `m <= X_WC_STRIDE` rows). It does not
+    // change any value NCBI computes.
     assert_eq!(alphsize, COMPO_NUM_TRUE_AA);
     // The same iteration, bit for bit, in fixed-size storage (see x_newton_exact.rs).
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696

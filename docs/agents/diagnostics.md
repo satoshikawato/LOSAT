@@ -754,7 +754,7 @@ Same values, faster computation:
   structured right-looking column Cholesky and AVX2, same element operations
   (`core/composition_adjustment/x_newton_exact.rs`). Both always run. The line-by-line ports stay where
   the default still takes them: `optimize_target_frequencies_reference` for a problem without the
-  relative-entropy constraint (the unconstrained matrix-adjust rule). `optimize_target_frequencies` asserts
+  relative-entropy constraint (`desired_re <= 0`: the unconstrained rule, or a relative entropy that could not be computed). `optimize_target_frequencies` asserts
   that the alphabet size is 20, as NCBI's only caller passes `COMPO_NUM_TRUE_AA`, so the ports for a larger
   vector or matrix (`step_bound_reference`, `scaled_symmetric_product_a_reference`, `factor_ltriang_pos_def`,
   `solve_ltriang_pos_def`) were deleted. The original-order

@@ -315,12 +315,15 @@ export LOSAT_X_BXCROSS=1
 export LOSAT_X_BXDBSTREAM=256
 export LOSAT_X_BXDEFER=1
 export LOSAT_X_BXDIAG=1
+export LOSAT_X_BXDIAGKEEP=1
 export LOSAT_X_BXEVALEMPTY=1
 export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
+export LOSAT_X_BXLUTPOOL=1
 export LOSAT_X_BXSCANBF=1
 export LOSAT_X_BXSUBJFLOW=1
 export LOSAT_X_BXUNGAPSENT=1
+export LOSAT_X_BXUNITCAP=8
 export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
@@ -4894,6 +4897,56 @@ Scheduling (each value computed by one thread with the original function; order 
   x1.004 with the same instructions; with one chunk per batch (the 10 transcripts of BX-t10 against Swiss-Prot at 8
   and 16 threads, 1,000 short reads against Swiss-Prot at 16) x0.996-1.000; the `-subject` case above x0.988-1.002
   (kept on the waves).
+- `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
+  unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
+  subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):
+  each helper of the subject flow runs on the diagonal table its thread keeps (one of the chunk's length and window,
+  else a new one, `search/x_bx_mem.rs` `XDiagSlot`) and gives it back when it ends, instead of one table per pool
+  thread made by the searching thread for each chunk. A batch searched with the pool inside (the batch flow's last
+  batches, a batch with a long query) made `threads` tables of next_pow2(letters + window) x 4 bytes on one thread,
+  128 KiB each for a batch of 10,002 bases: 4 MiB per batch at 32 threads, kept in that thread's glibc arena.
+  Exactness: a subject's computation depends on the subject and the chunk alone, not on the table's history, while
+  no diagonal offset passes 2^30 (`x_subject_flow.rs` module comment, the bound the flow already requires).
+- `LOSAT_X_BXLUTPOOL=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on unless
+  `=0` or `LOSAT_X_DEFAULT=0`; every word-size-3 table built in place, outside diagnostics mode): the lookup tables
+  are built with one set of neighbour lists shared by all threads (filled on first use as each thread's memo was,
+  `tblastx/lookup/x_lut_direct.rs` `XSharedMemo`), and on vectors kept between builds: a table's backbone, overflow
+  and pv vectors when the table is dropped (`blastx::seed::Lookup`'s drop), and the build's counts, layout and fill
+  vectors and its exact backbone (chains and slabs) after the build, each cleared and zero-filled to the new table's
+  sizes as calloc gives them, grown to n + n/4 where short. Each thread kept its own neighbour memo (about 1.1 MiB)
+  and every thread that built a table kept a table's worth (3-6 MiB) in its arena after the table was freed. The
+  pool holds as many sets as tables and builds were alive at once. The table equals `x_build_direct`'s (unit test
+  `pooled_tables_equal_the_reference_on_kept_vectors`: smaller and larger tables in turn, two alive at once, a
+  change of matrix).
+- `LOSAT_X_BXUNITCAP=1` or `=K` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24:
+  on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, K from 2 to 4,096, otherwise 8; acts with more than K
+  threads, `LOSAT_X_BXDIAGKEEP` on, and K units with tasks for every thread): at most K query batches are searched
+  at a time by the batch flow (`LOSAT_X_BXFLOW`), each with the pool inside (its subjects as the subject flow),
+  instead of one batch per thread. The flow counts the batches being searched, not the batches not yet written:
+  it reads up to 4K batches ahead of the writing (`x_bx_mem::flow_bound`), so a slow batch at the head of the
+  output does not stop the others; a search that ends spawns the next batch itself instead of waiting for the
+  writing thread; and the subject flow's helpers inside a capped batch leave once every task of the chunk is
+  claimed (`xahead::Ahead::x_new_leaving`) instead of waiting, spinning and yielding, for the batch's thread. The
+  chunks of a split query (`LOSAT_X_BXPAR`) are searched in waves of K, each chunk's subjects as tasks of 16 on the
+  pool, instead of waves of one chunk per thread. The lookup tables alive at once are then at most K (and K more for
+  a split query inside a batch of the flow), whatever the number of threads. Exactness: schedule only; the batch
+  flow writes every batch where the waves wrote it and searches a capped batch with the function it uses for the
+  batches it searches with the pool inside; a chunk's subject tasks keep the subjects with something for the sink
+  in subject order and the replay gives the sink the calls of the serial chunk loop (`tests/blastx_unit_cap.rs`:
+  reports equal to all three `=0` with K = 2 and 3 at 4 threads, each part off, 16 batches with K = 2, a split
+  query, `-db`). Measured
+  2026-10-24 on the workstation (node 1, CPUs 32..32+n-1 with their siblings and the rest of the node idle,
+  `--membind=1`, 5 rounds after a warm-up in rotated order, medians; max RSS = max(`%M`, sampled VmHWM); every
+  report the same bytes across arms; the pull request's first commit against dev 7164b5f7): bx_800 (the 800 fly
+  2L cDNAs against the 6,600 yeast proteins, `-subject -evalue 1e-5`) at 1 / 8 / 16 / 32 threads x0.994 / 0.967 /
+  0.976 / 0.953, max RSS 29 / 79 / 132 / 272 -> 29 / 71 / 83 / 108 MiB (NCBI 2.17.0 `-subject` 154 MiB); the same
+  with `-db` at 32 threads x0.960, 265 -> 108 MiB; bx_ap (`AP027131.fasta` against the 543 proteins of
+  `AP027133.faa`, `-query_gencode 4`: one query of 68 chunks) x1.000 / 0.973 / 0.944 / 0.964, 32 / 68 / 102 / 164
+  -> 35 / 65 / 71 / 85 MiB (NCBI 95 MiB; at one thread the pool keeps a table and a build set that glibc unmapped
+  before). The parts (prototypes, against all three `=0`): BXDIAGKEEP and BXLUTPOOL alone x0.974-0.994 with bx_800
+  at 32 threads 274 -> 210 MiB (one table per thread still alive at once); BXUNITCAP with K + 1 unwritten batches,
+  helpers waiting for the batch's thread and only the writing thread spawning batches cost bx_800 x1.07-1.14 at
+  16-32 threads, which the three parts of the capped flow above remove.
 - `LOSAT_X_BXDBSTREAM=1` or `=KiB` (BLASTX `-db`, memory; in the strict set from the pull request that added it:
   on unless `=0`; a value switch, `KiB` from 2 to 1,048,576, otherwise 256): the search reads
   the database's sequences where it searches them, a block at a time, instead of the copy of the whole database that

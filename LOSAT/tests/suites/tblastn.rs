@@ -9,6 +9,8 @@ mod run_local_tblastn;
 mod tblastn_batch_rule;
 #[path = "../tblastn_db_search.rs"]
 mod tblastn_db_search;
+#[path = "../tblastn_db_stream.rs"]
+mod tblastn_db_stream;
 #[path = "../tblastn_hitbf.rs"]
 mod tblastn_hitbf;
 #[path = "../tblastn_link_window.rs"]

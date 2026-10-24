@@ -30,7 +30,7 @@ use super::stage_d_results::{
 use super::stage_d_stats::{
     local_parameters_for_call, LocalParameterCall, LocalParameterOptions, LocalSubjectParameters,
 };
-use super::x_subject_store::SubjectLetters;
+use super::x_subject_store::{SubjectLetters, XPrelimSubject};
 use crate::algorithm::blastn::query_split::SplitSizes;
 use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
@@ -1266,6 +1266,12 @@ fn run_local_search_with_pool(
             observer.as_deref_mut(),
         );
     }
+    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): with a `-db` stream, the subjects of the lists, each read
+    // when first aligned, held until the redo ends.
+    let x_stage = super::x_db_stream::XStageSubjects::new(
+        subjects,
+        preliminary_lists.iter().map(|(_, oid, _)| *oid),
+    );
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2352-2384,2418-2479,
     // 3099-3110,3290-3302:
@@ -1375,8 +1381,9 @@ fn run_local_search_with_pool(
                      workspace: &mut BlastCompositionWorkspace|
      -> Result<Option<(CompoHeapRecord, KappaResultList)>> {
         // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form: the redo and
-        // the translations below read windows of it, as NCBI's do.
-        let subject = subjects.nt(oid);
+        // the translations below read windows of it, as NCBI's do. EXPERIMENT (LOSAT_X_TBNDBSTREAM):
+        // a `-db` sequence is read once for the redo (`x_stage`).
+        let subject = x_stage.nt(oid)?;
         let incoming: Vec<_> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
         // The matrix that the match's adjustments leave, for the engine positives
         // (`postredo_engine_positives`).
@@ -2330,7 +2337,7 @@ fn run_preliminary_subjects(
     // its last unit. The other subjects keep `unit_pool`. Scheduling only.
     #[cfg(feature = "parallel")]
     let x_units_beyond = x_chunk_bases;
-    let x_unit_pool = |subject: SubjectNt<'_>| {
+    let x_unit_pool = |subject: XPrelimSubject<'_>| {
         #[cfg(feature = "parallel")]
         if let Some(bases) = x_units_beyond {
             let beyond = u64::try_from(subject.len()).unwrap_or(u64::MAX) > bases;
@@ -2371,7 +2378,7 @@ fn run_preliminary_subjects(
     // No NCBI counterpart: x_oid is only the index of the subject among the shared subject plans;
     // it does not change any value NCBI computes.
     let subject_core = |x_oid: usize,
-                        subject: SubjectNt<'_>|
+                        subject: XPrelimSubject<'_>|
      -> Result<(Vec<(usize, GappedHsp)>, LinkedHspList)> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1412-1413,1469-1470
         // ```c
@@ -2731,13 +2738,20 @@ fn finish_local_mode0_no_sum_stats(
                 .collect::<Vec<_>>()
         })
         .collect();
+    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): with a `-db` stream, the subjects of the lists, each read
+    // when first aligned, held until the traceback ends.
+    let x_stage = super::x_db_stream::XStageSubjects::new(
+        subjects,
+        preliminary_lists.iter().map(|(_, oid, _)| *oid),
+    );
     for (context, oid, preliminary) in preliminary_lists {
         // The subject as the readers of windows take it: the record's letters, or its store (every
         // `-db` sequence; with EXPERIMENT LOSAT_X_TBNSTORE every `-subject` record), whose windows
         // the translations make when they read them (`TargetTranslation`). The whole subject's
         // letters are made only for a list retried after a fence, whose frames NCBI translates
-        // whole (one window for all of them).
-        let subject = subjects.nt(oid);
+        // whole (one window for all of them). EXPERIMENT (LOSAT_X_TBNDBSTREAM): a `-db` sequence is
+        // read once for the traceback (`x_stage`).
+        let subject = x_stage.nt(oid)?;
         let input: Vec<_> = preliminary.hsps.iter().map(|linked| linked.hsp).collect();
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536:
         // traceback uses the selected scoring matrix and gap costs.

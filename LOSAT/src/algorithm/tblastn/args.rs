@@ -595,6 +595,21 @@ impl TblastnArgs {
 
 /// LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
 /// LOSAT's TBLASTN does not implement are rejected, and the others select the search.
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the failure of the batch whose search a read of the database
+/// failed (`x_db_stream::XReadError`), as the check's error fails the first batch with a valid
+/// context: a reader error of NCBI's own is the engine error; LOSAT's refusal (and any other
+/// error) is returned as `Err` to stop the run.
+fn x_read_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
+    let error = match error.downcast::<super::x_db_stream::XReadError>() {
+        Ok(super::x_db_stream::XReadError(read)) => read,
+        Err(error) => return Err(error),
+    };
+    match error.downcast::<PreliminaryReadError>() {
+        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.0)),
+        Err(error) => Err(error),
+    }
+}
+
 fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
     use crate::blastinput::app::CompositionMode;
     // NCBI's compressed lookup table (blast_aalookup.c, word size 5 and more or
@@ -1647,11 +1662,19 @@ fn search(
         // without sequences (BLASTN's `Database memory map file error`,
         // blastn/blast_engine/run.rs) or a sequence file that cannot be read fails that batch,
         // after the reports of the batches before, which are searched without sequences; a run
-        // without such a batch never reads the file.
+        // without such a batch never reads the file. EXPERIMENT (LOSAT_X_TBNDBSTREAM): the
+        // database is checked as `read_stores` reads it, with the same error, and each sequence
+        // is read where it is searched (`x_db_stream.rs`).
+        let mut x_stream = None;
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
                 let read = if database.numbers().num_seqs == 0 {
                     Err(PreliminaryReadError("Database memory map file error").into())
+                } else if super::x_db_stream::x_tbn_db_stream() {
+                    database.x_stream(resolved.num_threads).map(|stream| {
+                        x_stream = Some(stream);
+                        Vec::new()
+                    })
                 } else {
                     database.read_stores()
                 };
@@ -1662,9 +1685,10 @@ fn search(
             }
             None => (Vec::new(), None),
         };
-        let search_letters = match database {
-            Some(_) => SubjectLetters::Packed(&database_stores),
-            None => subject_letters,
+        let search_letters = match (database, &x_stream) {
+            (Some(_), Some(stream)) => SubjectLetters::Stream(stream),
+            (Some(_), None) => SubjectLetters::Packed(&database_stores),
+            (None, _) => subject_letters,
         };
         // The batches before the stop are searched and reported; a reader at the end of its
         // input reads no batch (`!input->End()`), and the reports have no query (an empty
@@ -1728,7 +1752,10 @@ fn search(
                 .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
                 .collect(),
         };
-        let mut x_searched = super::stage_d_pipeline::x_search_batches(
+        // EXPERIMENT (LOSAT_X_TBNDBSTREAM): a read of the database that failed while the batches
+        // were searched ahead: they are searched again one at a time below, so that the batch
+        // that reads it fails after the reports of the batches before.
+        let x_searched_ahead = super::stage_d_pipeline::x_search_batches(
             &query_seqs,
             search_letters,
             x_batches,
@@ -1747,15 +1774,19 @@ fn search(
             resolved.sum_stats,
             scoring,
             resolved.num_threads,
-        )?
-        .map(Vec::into_iter);
+        );
+        let mut x_searched = match x_searched_ahead {
+            Ok(searched) => searched.map(Vec::into_iter),
+            Err(error) if error.is::<super::x_db_stream::XReadError>() => None,
+            Err(error) => return Err(error),
+        };
         for range in query_input
             .batches(batch_size)
             .into_iter()
             .map(|batch| batch.searched)
             .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
         {
-            let (mut batch_results, batch_lengths, batch_karlin, batch_validity) =
+            let (mut batch_results, batch_lengths, batch_karlin, batch_validity) = {
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-291
                 // ```c
                 //                 query =  input->GetNextSeqBatch(*scope);
@@ -1768,8 +1799,8 @@ fn search(
                 // Dispatch point: a report searched ahead for this very range is used; otherwise
                 // run_local_for_report_threads searches the batch here, which is the port of
                 // CLocalBlast::Run for one batch.
-                match x_searched.as_mut().and_then(Iterator::next) {
-                    Some((x_range, report)) if x_range == range => report,
+                let x_searched_here = match x_searched.as_mut().and_then(Iterator::next) {
+                    Some((x_range, report)) if x_range == range => Ok(report),
                     _ => run_local_for_report_threads(
                         &query_seqs[range.clone()],
                         search_letters,
@@ -1788,8 +1819,21 @@ fn search(
                         resolved.sum_stats,
                         scoring,
                         resolved.num_threads,
-                    )?,
+                    ),
                 };
+                // EXPERIMENT (LOSAT_X_TBNDBSTREAM): a read of the database that failed in this
+                // batch fails it as the check's error would (below).
+                match x_searched_here {
+                    Ok(report) => report,
+                    Err(error) => match x_read_failure(error) {
+                        Ok(failure) => {
+                            failed = Some((range, failure));
+                            break;
+                        }
+                        Err(error) => return Err(error),
+                    },
+                }
+            };
             // `-db`: the first batch with a valid context reads the sequences (above); a
             // reader error of NCBI's own fails it, LOSAT's refusal stops the run.
             if batch_validity.iter().any(|&valid| valid) {
@@ -1964,14 +2008,16 @@ fn search(
         // `-db`: the reported sequences by rank, with their records and packed subjects; the
         // database's other sequences are dropped before the reports.
         let reported = match database {
-            Some(_) => Some(super::database::reported_subjects(
-                &titles,
-                &mut results,
-                &database_stores,
-            )?),
+            Some(_) => Some(
+                super::database::reported_subjects(&titles, &mut results, search_letters)
+                    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): a read of a reported sequence that
+                    // failed: the run's error, as the check's error would be.
+                    .map_err(|error| x_read_failure(error).unwrap_or_else(|error| error))?,
+            ),
             None => None,
         };
         drop(database_stores);
+        super::x_db_stream::x_print_shadow_summary();
         // `-db`, XML2 and JSON: the taxid of each reported sequence, and what the taxonomy
         // database says about it (the refusals of both come before any byte).
         let xml_taxa = match (&reported, database) {
@@ -2088,6 +2134,30 @@ mod tests {
     use super::*;
 
     use crate::cli::{try_parse_from, Cli, Commands};
+
+    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): a read that failed during the search fails its batch with
+    // NCBI's engine error (exit status 3) when the reader's error is NCBI's own, and stops the run
+    // with LOSAT's refusal or any other error, as the check's error does.
+    #[test]
+    fn a_read_failed_in_the_search_fails_as_the_check_s_error() {
+        use super::super::x_db_stream::XReadError;
+        let engine = x_read_failure(
+            XReadError(PreliminaryReadError("Database memory map file error").into()).into(),
+        )
+        .expect("the engine error");
+        let native = engine
+            .downcast::<crate::cli::NativeError>()
+            .expect("a NativeError");
+        assert_eq!(native.exit, 3);
+        assert_eq!(
+            native.message,
+            "BLAST engine error: Database memory map file error\n"
+        );
+        let refusal = x_read_failure(XReadError(anyhow::anyhow!("refused")).into()).unwrap_err();
+        assert_eq!(refusal.to_string(), "refused");
+        let other = x_read_failure(anyhow::anyhow!("other")).unwrap_err();
+        assert_eq!(other.to_string(), "other");
+    }
 
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942
     // arg_desc.AddFlag(kArgUseLCaseMasking,

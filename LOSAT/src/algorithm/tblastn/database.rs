@@ -37,7 +37,7 @@ use super::stage_d_pipeline::DatabaseNumbers;
 use super::stage_d_results::KappaResultHitList;
 
 /// The program that LOSAT's refusals name.
-const PROGRAM: &str = "TBLASTN";
+pub(super) const PROGRAM: &str = "TBLASTN";
 
 /// The database of a `-db` search: the opened database and its name as NCBI keeps it
 /// (`TblastnArgs::database_name`: the `-db` value without white space at its ends).
@@ -143,6 +143,12 @@ impl TblastnDatabase {
     pub(super) fn read_stores(&self) -> Result<Vec<PackedNucleotide>> {
         shared::read_nucleotide_stores(&self.db, PROGRAM)
     }
+
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the database read where it is searched by `threads`
+    /// threads, after the checks of `read_stores` (`x_db_stream.rs`).
+    pub(super) fn x_stream(&self, threads: usize) -> Result<super::x_db_stream::XDbStream<'_>> {
+        super::x_db_stream::XDbStream::new(&self.db, threads, || self.read_stores())
+    }
 }
 
 /// The stored titles of the database sequences that the final hit lists of the query
@@ -210,12 +216,14 @@ pub(super) struct ReportedSubjects {
 /// ordinal id, so every comparison that breaks a tie by the subject index gives the same
 /// order), and their records (`titles`) and packed subjects (`stores`, by ordinal id) are
 /// kept for the reports. A reported sequence whose stored title LOSAT does not report as
-/// NCBI does is LOSAT's refusal.
+/// NCBI does is LOSAT's refusal. EXPERIMENT (LOSAT_X_TBNDBSTREAM): the packed subjects are read
+/// from the database (`SubjectLetters::Stream`, one read each) instead of cloned from the copy.
 pub(super) fn reported_subjects(
     titles: &DatabaseTitles,
     hitlists: &mut [KappaResultHitList],
-    stores: &[PackedNucleotide],
+    stores: super::x_subject_store::SubjectLetters<'_>,
 ) -> Result<ReportedSubjects> {
+    use super::x_subject_store::SubjectLetters;
     for hitlist in hitlists.iter_mut() {
         hitlist.drop_zero_score_hsps();
     }
@@ -247,12 +255,14 @@ pub(super) fn reported_subjects(
             warnings: Vec::new(),
             source: Default::default(),
         });
-        kept.push(
-            stores
+        kept.push(match stores {
+            SubjectLetters::Stream(stream) => stream.read(ordinal as usize)?,
+            SubjectLetters::Packed(stores) => stores
                 .get(ordinal as usize)
                 .with_context(|| format!("database sequence {ordinal} was not read"))?
                 .clone(),
-        );
+            SubjectLetters::Records(_) => unreachable!("a -db search holds no records"),
+        });
     }
     Ok(ReportedSubjects {
         ordinals,

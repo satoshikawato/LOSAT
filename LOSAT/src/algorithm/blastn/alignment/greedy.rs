@@ -3039,12 +3039,89 @@ unsafe fn x_greedy_row_avx2(
     )
 }
 
+// No NCBI counterpart: one distance in two passes per block instead of three, for CPUs with
+// AVX2/BMI (`LOSAT_X_GREEDYROWFUSE`; the exactness argument is in its module doc).
+#[cfg(target_arch = "x86_64")]
+#[path = "x_greedy_row_fuse.rs"]
+mod x_greedy_row_fuse;
+
+/// No NCBI counterpart: the build of the row code every `x_greedy_row` call of the process runs
+/// (the CPU and `LOSAT_X_GREEDYROWFUSE` are read once).
+#[cfg(target_arch = "x86_64")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum XGreedyRowKernel {
+    /// `x_greedy_row_any`: a CPU without AVX2, BMI1, BMI2 or LZCNT.
+    Plain,
+    /// `x_greedy_row_avx2`, three passes per block (`LOSAT_X_GREEDYROWFUSE=0`).
+    Avx2,
+    /// `x_greedy_row_fuse::x_greedy_row_fused_avx2`, two passes per block.
+    Fused,
+    /// `Fused`, counting its calls for the `LOSAT_X_STATS` line.
+    FusedCounted,
+}
+
+#[cfg(target_arch = "x86_64")]
+static X_GREEDY_ROW_KERNEL: std::sync::OnceLock<XGreedyRowKernel> = std::sync::OnceLock::new();
+
+/// No NCBI counterpart: the `Fused` calls of a `FusedCounted` run (`LOSAT_X_STATS`).
+#[cfg(target_arch = "x86_64")]
+static X_GREEDY_ROWS_FUSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(all(test, target_arch = "x86_64"))]
+thread_local! {
+    /// Lets a test choose the build of `x_greedy_row` (one the CPU supports).
+    static X_GREEDY_ROW_TEST_KERNEL: std::cell::Cell<Option<XGreedyRowKernel>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// No NCBI counterpart: `X_GREEDY_ROW_KERNEL`, chosen on the first call.
+#[cfg(target_arch = "x86_64")]
+fn x_greedy_row_kernel() -> XGreedyRowKernel {
+    *X_GREEDY_ROW_KERNEL.get_or_init(|| {
+        if !(std::is_x86_feature_detected!("avx2")
+            && std::is_x86_feature_detected!("bmi1")
+            && std::is_x86_feature_detected!("bmi2")
+            && std::is_x86_feature_detected!("lzcnt"))
+        {
+            XGreedyRowKernel::Plain
+        } else if !crate::utils::xswitch::on("LOSAT_X_GREEDYROWFUSE") {
+            XGreedyRowKernel::Avx2
+        } else if std::env::var_os("LOSAT_X_STATS").is_some() {
+            XGreedyRowKernel::FusedCounted
+        } else {
+            XGreedyRowKernel::Fused
+        }
+    })
+}
+
+/// The summary line `main` prints at exit with LOSAT_X_STATS once a greedy row ran: the build
+/// of the row code the process ran and the calls of the fused build.
+// No NCBI counterpart: prints a choice of machine code and a counter; it changes no value NCBI
+// computes.
+pub fn x_greedy_row_print_summary() {
+    #[cfg(target_arch = "x86_64")]
+    if let Some(kernel) = X_GREEDY_ROW_KERNEL.get() {
+        if std::env::var_os("LOSAT_X_STATS").is_some() {
+            eprintln!(
+                "[X_STATS] GREEDYROWFUSE kernel={} fused_rows={}",
+                match kernel {
+                    XGreedyRowKernel::Plain => "plain",
+                    XGreedyRowKernel::Avx2 => "avx2",
+                    XGreedyRowKernel::Fused | XGreedyRowKernel::FusedCounted => "fused",
+                },
+                X_GREEDY_ROWS_FUSED.load(std::sync::atomic::Ordering::Relaxed)
+            );
+        }
+    }
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537
 /// ```c
 ///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
 /// ```
-/// Picks the AVX2 or the plain build of the same row code (the CPU is checked once at
-/// run time). Both give the same result as the C loop; this is a choice of machine code.
+/// Picks the fused AVX2 build, the AVX2 build or the plain build of the row code (chosen once
+/// per process, `x_greedy_row_kernel`). All give the same result as the C loop; this is a choice
+/// of machine code.
 ///
 /// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
 #[inline(never)]
@@ -3063,27 +3140,60 @@ unsafe fn x_greedy_row(
 ) -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        use std::sync::OnceLock;
-        static AVX2: OnceLock<bool> = OnceLock::new();
-        if *AVX2.get_or_init(|| {
-            std::is_x86_feature_detected!("avx2")
-                && std::is_x86_feature_detected!("bmi1")
-                && std::is_x86_feature_detected!("bmi2")
-                && std::is_x86_feature_detected!("lzcnt")
-        }) {
-            return x_greedy_row_avx2(
-                reverse,
-                seq1,
-                seq2,
-                len1,
-                len2,
-                previous,
-                current,
-                tmp_diag_lower,
-                diag_origin,
-                xdrop_score,
-                st,
-            );
+        #[cfg(test)]
+        let kernel = X_GREEDY_ROW_TEST_KERNEL
+            .with(std::cell::Cell::get)
+            .unwrap_or_else(x_greedy_row_kernel);
+        #[cfg(not(test))]
+        let kernel = x_greedy_row_kernel();
+        match kernel {
+            XGreedyRowKernel::Fused => {
+                return x_greedy_row_fuse::x_greedy_row_fused_avx2(
+                    reverse,
+                    seq1,
+                    seq2,
+                    len1,
+                    len2,
+                    previous,
+                    current,
+                    tmp_diag_lower,
+                    diag_origin,
+                    xdrop_score,
+                    st,
+                );
+            }
+            XGreedyRowKernel::Avx2 => {
+                return x_greedy_row_avx2(
+                    reverse,
+                    seq1,
+                    seq2,
+                    len1,
+                    len2,
+                    previous,
+                    current,
+                    tmp_diag_lower,
+                    diag_origin,
+                    xdrop_score,
+                    st,
+                );
+            }
+            XGreedyRowKernel::FusedCounted => {
+                X_GREEDY_ROWS_FUSED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return x_greedy_row_fuse::x_greedy_row_fused_avx2(
+                    reverse,
+                    seq1,
+                    seq2,
+                    len1,
+                    len2,
+                    previous,
+                    current,
+                    tmp_diag_lower,
+                    diag_origin,
+                    xdrop_score,
+                    st,
+                );
+            }
+            XGreedyRowKernel::Plain => {}
         }
     }
     x_greedy_row_any(

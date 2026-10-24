@@ -311,6 +311,14 @@ pub(super) fn cost_gate() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRPARGATE"))
 }
 
+// No NCBI counterpart: a LOSAT variable that moves the line between the same two LOSAT paths at one
+// thread (`units_gain`); NCBI has one path.
+/// LOSAT_X_PAIRPARN1: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
+pub(super) fn n1_gate() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRPARN1"))
+}
+
 // No NCBI counterpart: a LOSAT variable that chooses, per batch, between two LOSAT paths with the
 // same result (the unit path and the reference frame loop, module doc item 3); NCBI has one path.
 // Read once per process, as the other modes of this file.
@@ -760,6 +768,17 @@ const X_LAST_HIT_MARGIN: i64 = 1 << 16;
 /// (x1.03-1.72).
 const X_GATE_DIAG_CELLS: i32 = 1 << 18;
 
+/// No NCBI counterpart: with LOSAT_X_PAIRPARN1, LOSAT_X_PAIRPARGATE keeps the unit path at one
+/// thread from this many cells (a translated query batch of more than 4,056 letters, a nucleotide
+/// query of about 2 kb). The constant above was measured before the units' branch-free hit loop
+/// and masked tables; measured again (workstation, one thread, line A session 9, 2026-10-25) the
+/// units ran x0.82-0.93 of the reference loop for queries of 5-40 kb against one genome (4.6 Mb),
+/// the same genome cut into 2-1,000 kb subjects and 3,000 zebrafish cDNAs, and x0.906 on 10 fly
+/// transcripts against the zebrafish cDNA database (the search that set the constant above);
+/// x0.98-1.00 at 2 kb (4,096 cells, kept on the reference loop) and x1.15-1.96 at 1 kb and 300
+/// bases, where the units' scan of every subject frame once per group outweighs the hits.
+const X_GATE_N1_DIAG_CELLS: i32 = 1 << 13;
+
 /// No NCBI counterpart: LOSAT_X_PAIRPARGATE acts only for a lookup threshold of at least TBLASTX's
 /// default (13), where it was measured. A lower threshold puts more words in every query position:
 /// more hits share each scan position (the units' extra scans weigh less) and the full table grows
@@ -814,6 +833,8 @@ pub(super) struct XGates<'a> {
     pub threads: usize,
     /// `cost_gate()`: LOSAT_X_PAIRPARGATE acts.
     pub cost_gate: bool,
+    /// `n1_gate()`: LOSAT_X_PAIRPARN1 acts (one thread: the units from `X_GATE_N1_DIAG_CELLS`).
+    pub n1_gate: bool,
     /// The lookup threshold (`lookup->threshold`, `ncbi_int4_from_double` of `-threshold`).
     pub threshold: i32,
     /// `tbx_band()`: LOSAT_X_TBXBAND, `guard` is not applied.
@@ -927,16 +948,25 @@ fn x_guard_lengths(
 // 1-4), from the batch's sizes and the thread count only.
 /// LOSAT_X_PAIRPARGATE: whether the unit path is expected to be faster than the reference loop for
 /// a batch. Either the lookup threshold is below `X_GATE_MIN_THRESHOLD` (not measured; the units
-/// stay), or the reference's diagonal table is large (`X_GATE_DIAG_CELLS`), or the search has
-/// several threads and one subject holds more than one and a half thread's share of the bases
+/// stay), or the reference's diagonal table is large (`X_GATE_DIAG_CELLS`), or, at one thread with
+/// LOSAT_X_PAIRPARN1, it has at least `X_GATE_N1_DIAG_CELLS` cells, or the search has several
+/// threads and one subject holds more than one and a half thread's share of the bases
 /// (`2 * longest * threads > 3 * total`): the reference loop searches a subject on one thread, the
-/// units split it over the pool, at up to about 1.5 times the work on short queries.
+/// units split it over the pool. Several threads without such a subject keep the reference loop
+/// below `X_GATE_DIAG_CELLS`: with the subjects spread over the pool the units used less CPU there
+/// but lost wall time on many short subjects (x1.02-1.06 at eight threads, session 9 of line A).
 fn units_gain(g: &XGates<'_>) -> bool {
     if g.threshold < X_GATE_MIN_THRESHOLD || g.diag_array_size >= X_GATE_DIAG_CELLS {
         return true;
     }
     if g.threads <= 1 {
-        return false;
+        if !g.n1_gate {
+            return false;
+        }
+        let gain = g.diag_array_size >= X_GATE_N1_DIAG_CELLS;
+        // The one-thread rule sends a batch below the line to the reference loop (false).
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARN1", gain);
+        return gain;
     }
     let (longest, total) = g
         .subjects
@@ -1093,6 +1123,7 @@ fn lut_direct(e: &XLutEarly<'_>) -> Option<XLutBatch> {
         ),
         threads: e.pool.threads(),
         cost_gate: cost_gate(),
+        n1_gate: n1_gate(),
         threshold: e.threshold,
         band: tbx_band(),
         unit_mask: unit_mask_kib().is_some(),
@@ -1783,6 +1814,7 @@ impl XPairPar {
             chunk_switches: b.chunk_switches,
             threads: b.threads,
             cost_gate: cost_gate(),
+            n1_gate: n1_gate(),
             threshold: b.threshold,
             band: tbx_band(),
             unit_mask: unit_mask_kib().is_some(),
@@ -4589,6 +4621,7 @@ mod tests {
                     chunk_switches,
                     threads: 1,
                     cost_gate: false,
+                    n1_gate: false,
                     threshold: 13,
                     band,
                     unit_mask: false,
@@ -4627,6 +4660,7 @@ mod tests {
                 chunk_switches: false,
                 threads: 1,
                 cost_gate: false,
+                n1_gate: false,
                 threshold: 13,
                 band: true,
                 unit_mask: true,
@@ -4646,6 +4680,7 @@ mod tests {
                 chunk_switches: false,
                 threads: 1,
                 cost_gate: true,
+                n1_gate: false,
                 threshold: 13,
                 band,
                 unit_mask: false,
@@ -4667,6 +4702,7 @@ mod tests {
             chunk_switches: false,
             threads: 1,
             cost_gate: false,
+            n1_gate: false,
             threshold: 13,
             band: false,
             unit_mask: false,
@@ -4722,6 +4758,7 @@ mod tests {
                 chunk_switches: false,
                 threads,
                 cost_gate,
+                n1_gate: false,
                 threshold,
                 band: false,
                 unit_mask: false,
@@ -4760,6 +4797,86 @@ mod tests {
         // The gates and the guard come first.
         assert_eq!(decision(256, &one, true, 1, true), XDecision::Gate);
         assert_eq!(decision(256, &long, false, 1, true), XDecision::Guard);
+    }
+
+    // No NCBI counterpart: LOSAT_X_PAIRPARN1 moves the one-thread line of LOSAT_X_PAIRPARGATE from
+    // 2^18 to 2^13 cells; the rule of several threads, the threshold rule and the gates before
+    // them are unchanged.
+    #[test]
+    fn the_one_thread_line_keeps_the_units_from_2_13_cells() {
+        let mut rng = Rng(11);
+        let alphabet = aa("ACDEKW");
+        let (_, contexts) = lookup_for(&[frame(1, &random_residues(&mut rng, 216, &alphabet))]);
+        let query_length = query_length_of(&contexts);
+        let one = [FastaRecord::new("", b"s", &[b'A'; 120])];
+        // 10 subjects of 40 bases: no subject holds one and a half thread's share at 2 or 8 threads.
+        let spread: Vec<FastaRecord> = (0..10)
+            .map(|_| FastaRecord::new("", b"s", &[b'A'; 40]))
+            .collect();
+        let decision = |diag_array_size: i32,
+                        subjects: &[FastaRecord],
+                        threads: usize,
+                        threshold: i32,
+                        n1_gate: bool,
+                        debugging: bool| {
+            decide(&XGates {
+                contexts: &contexts,
+                query_length,
+                diag_array_size,
+                subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
+                debugging,
+                chunk_switches: false,
+                threads,
+                cost_gate: true,
+                n1_gate,
+                threshold,
+                band: false,
+                unit_mask: false,
+            })
+        };
+        // One thread: the units from 2^13 cells with the switch, from 2^18 without it.
+        assert_eq!(decision(1 << 12, &one, 1, 13, true, false), XDecision::Cost);
+        assert_eq!(
+            decision(1 << 13, &one, 1, 13, true, false),
+            XDecision::Units
+        );
+        assert_eq!(
+            decision(1 << 17, &spread, 1, 13, true, false),
+            XDecision::Units
+        );
+        assert_eq!(
+            decision(1 << 13, &one, 1, 13, false, false),
+            XDecision::Cost
+        );
+        assert_eq!(
+            decision(1 << 17, &one, 1, 13, false, false),
+            XDecision::Cost
+        );
+        assert_eq!(
+            decision(1 << 18, &one, 1, 13, false, false),
+            XDecision::Units
+        );
+        // Several threads keep their rule: spread subjects below 2^18 cells take the reference loop.
+        for threads in [2, 8] {
+            assert_eq!(
+                decision(1 << 13, &spread, threads, 13, true, false),
+                XDecision::Cost
+            );
+            assert_eq!(
+                decision(1 << 17, &spread, threads, 13, true, false),
+                XDecision::Cost
+            );
+            assert_eq!(
+                decision(1 << 13, &one, threads, 13, true, false),
+                XDecision::Units
+            );
+        }
+        // The threshold rule and the gates come first.
+        assert_eq!(
+            decision(1 << 12, &one, 1, 12, true, false),
+            XDecision::Units
+        );
+        assert_eq!(decision(1 << 13, &one, 1, 13, true, true), XDecision::Gate);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266

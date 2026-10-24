@@ -6,8 +6,8 @@ name: Platform checks
 #    two thread counts must be byte-identical and the exit codes 0 (LOSAT/tests/platform_checks.py);
 #    on Linux arm64 the release binary also passes the floating-point contract check
 #    (LOSAT/tests/check_fp_contract.py binary; ci.yml checks the Linux x64 binary);
-#    on the two arm64 platforms one more mode, LOSAT_X_DPNEON2=1 (the NEON kernels in register
-#    pairs, off unless set), must give the same outputs as well;
+#    on the two arm64 platforms one more mode, LOSAT_X_DPNEON2=0 (the 128-bit NEON kernels instead
+#    of the register pairs), must give the same outputs as well;
 #  - compare: the hashes of the platforms of the run must equal each other (no expected hash is
 #    stored; the frozen hashes are checked on Linux x64 by ci.yml);
 #  - tests: cargo test --all-features (cargo-nextest), built once per platform, on the platforms
@@ -92,9 +92,11 @@ jobs:
           INPUT_SET: ${{ github.event.inputs.set }}
         run: |
           set -euo pipefail
-          # The platforms. `extra` adds the mode of the arm64 platforms (LOSAT_X_DPNEON2 is off
-          # unless set); the entries without it run the standard mode.
-          neon='--extra-mode dpneon2=LOSAT_X_DPNEON2=1'
+          # The platforms. `extra` adds the mode of the arm64 platforms (they also hash the 128-bit
+          # NEON kernels, the path of LOSAT_X_DPNEON2=0; the default runs the kernels in register
+          # pairs); the entries without it run the standard mode. The mode nodpneon2 goes when
+          # LOSAT_X_DPNEON2 graduates.
+          neon='--extra-mode nodpneon2=LOSAT_X_DPNEON2=0'
           o_linux_x64='{"runner":"ubuntu-24.04","id":"linux-x64","python":"python3"}'
           o_linux_arm64='{"runner":"ubuntu-24.04-arm","id":"linux-arm64","python":"python3","extra":"'"$neon"'"}'
           o_windows_x64='{"runner":"windows-2025","id":"windows-x64","python":"python"}'

@@ -1,5 +1,7 @@
 //! NCBI genetic-code tables used by translated searches.
 
+use std::sync::OnceLock;
+
 // NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:588-603
 // ```c++
 // const string kGenCode = CGen_code_table::GetNcbieaa(genetic_code);
@@ -147,7 +149,15 @@ const TABLES: &[(u8, &[u8; 64])] = &[
 
 pub struct GeneticCode {
     pub table: [u8; 64],
+    /// The code's slot of `DISPLAY_TABLES`.
+    display: &'static OnceLock<Box<[u8; 4096]>>,
 }
+
+// No NCBI counterpart: one slot per row of `TABLES` for the display's translation table of that
+// code (`tblastx::report::display_table`, `LOSAT_X_DISPTABLE`), made at its first use and kept
+// for the process, so a code is tabulated once however many `GeneticCode` values name it.
+static DISPLAY_TABLES: [OnceLock<Box<[u8; 4096]>>; TABLES.len()] =
+    [const { OnceLock::new() }; TABLES.len()];
 
 impl GeneticCode {
     // NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:588-600
@@ -159,9 +169,18 @@ impl GeneticCode {
     pub fn try_from_id(id: u8) -> Result<Self, String> {
         TABLES
             .iter()
-            .find(|(code, _)| *code == id)
-            .map(|(_, table)| Self { table: **table })
+            .position(|(code, _)| *code == id)
+            .map(|row| Self {
+                table: *TABLES[row].1,
+                display: &DISPLAY_TABLES[row],
+            })
             .ok_or_else(|| format!("unsupported genetic code {id}"))
+    }
+
+    /// No NCBI counterpart: the slot that holds this code's display translation table
+    /// (`tblastx::report::display_table`).
+    pub(crate) fn display_slot(&self) -> &'static OnceLock<Box<[u8; 4096]>> {
+        self.display
     }
 
     // NCBI reference: c++/src/algo/blast/core/gencode_singleton.c:65-69

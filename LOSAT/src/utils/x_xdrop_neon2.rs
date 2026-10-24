@@ -1,4 +1,5 @@
-//! EXPERIMENT (LOSAT_X_DPNEON2): the 256-bit kernels of `x_xdrop_avx2.rs` on aarch64 NEON, each
+//! LOSAT_X_DPNEON2 (a switch of the strict set: on unless `=0`, which leaves every call to the
+//! DPW128 / 128-bit NEON kernels): the 256-bit kernels of `x_xdrop_avx2.rs` on aarch64 NEON, each
 //! 256-bit vector held in two 128-bit registers: 16 lanes of 16 bits and 32 lanes of 8 bits, with
 //! (`TB`) and without the traceback. aarch64 only (NEON is a baseline feature of the targets).
 //! They run the recurrence of NCBI `ALIGN_EX` / `Blast_SemiGappedAlign` row by row, with the value
@@ -89,6 +90,14 @@
 //! 4. Column residues and row tables: the 128-bit NEON `fill_cols` and `build_row` of
 //!    `x_xdrop_w128.rs` (16 columns at a time; the same bytes as the AVX2 file's 32 at a time).
 //!
+//! 5. Band window (`LOSAT_X_DPWINDOW`, No NCBI counterpart): as in the AVX2 file, a kernel whose
+//!    band start `first` reaches `XdropScratch::x_win_at` moves its rows down (`x_shift`: by a
+//!    multiple of 64 lanes, so every lane keeps its place within the 64-byte-aligned rows; the
+//!    blocks start at `first` in every row either way, and at least 64 lanes stay below `first`)
+//!    and lowers `first`, `b_size`, `len2` and the buffers' write ends by
+//!    the same amount; the best cell and the traceback rows add `x_sh` back, so they keep absolute
+//!    columns, and the result is the same with the window on and off.
+//!
 //! Index bytes of 32 and up (the fence sentinel, letters the kernel declines, columns past the
 //! band) give 0 through `tbl`; they reach only lanes the kernels mask or do not read, as in the
 //! 128-bit NEON kernels.
@@ -127,10 +136,11 @@ static HPM16: [i16; 8] = [-1, 0, 0, 0, 0, 0, 0, 0];
 /// Lane 0 of 8-bit lanes.
 static HPM8: [u8; 16] = [255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-/// No NCBI counterpart: LOSAT_X_DPNEON2 set (any value; not in the strict set, off unless set):
-/// the two-register kernels run first on aarch64 (`x_extra_switches` in `xdrop_simd.rs`).
+/// No NCBI counterpart: LOSAT_X_DPNEON2, a switch of the strict set: on unless `LOSAT_X_DPNEON2=0`,
+/// which leaves the calls to the DPW128 / 128-bit NEON kernels. The two-register kernels run first
+/// on aarch64 (`x_extra_switches` in `xdrop_simd.rs`, which reads this once).
 pub(super) fn switch_on() -> bool {
-    std::env::var_os("LOSAT_X_DPNEON2").is_some()
+    crate::utils::xswitch::on("LOSAT_X_DPNEON2")
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:766-770
@@ -670,7 +680,20 @@ unsafe fn align16<const TB: bool>(
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize; // buffer holding the previous row
 
+    // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
+    // `sc.x_sh`
+    let win_at = sc.x_win_at;
+    let mut len2 = len2;
     for a in 1..=len1 {
+        if first >= win_at {
+            let d = (first - 64) & !63;
+            sc.x_shift(d, true);
+            first -= d;
+            b_size -= d;
+            len2 -= d;
+            wend[0] = wend[0].saturating_sub(d);
+            wend[1] = wend[1].saturating_sub(d);
+        }
         sc.ensure(b_size + num_extra + 64);
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
@@ -821,14 +844,17 @@ unsafe fn align16<const TB: bool>(
         wend[wi] = proc_end;
         cur = wi;
         if rs.slow {
-            b_off = rs.rec_b;
+            b_off = rs.rec_b + sc.x_sh;
             a_off = a;
             best_rel = lane0(rs.bestv) - bias;
         }
         if TB {
             sc.trace.set_len(row_off + proc_end - first);
-            sc.rows
-                .push((row_off as u32, first as u32, (proc_end - first) as u32));
+            sc.rows.push((
+                row_off as u32,
+                (first + sc.x_sh) as u32,
+                (proc_end - first) as u32,
+            ));
         }
         if fence_row {
             fence_hit = true;
@@ -1147,7 +1173,20 @@ unsafe fn align8<const TB: bool>(
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize;
 
+    // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
+    // `sc.x_sh`
+    let win_at = sc.x_win_at;
+    let mut len2 = len2;
     for a in 1..=len1 {
+        if first >= win_at {
+            let d = (first - 64) & !63;
+            sc.x_shift(d, false);
+            first -= d;
+            b_size -= d;
+            len2 -= d;
+            wend[0] = wend[0].saturating_sub(d);
+            wend[1] = wend[1].saturating_sub(d);
+        }
         sc.ensure(b_size + num_extra + 64);
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
@@ -1295,14 +1334,17 @@ unsafe fn align8<const TB: bool>(
         wend[wi] = proc_end;
         cur = wi;
         if rs.slow {
-            b_off = rs.rec_b;
+            b_off = rs.rec_b + sc.x_sh;
             a_off = a;
             best_rel = lane0_u8(rs.bestv) - bias;
         }
         if TB {
             sc.trace.set_len(row_off + proc_end - first);
-            sc.rows
-                .push((row_off as u32, first as u32, (proc_end - first) as u32));
+            sc.rows.push((
+                row_off as u32,
+                (first + sc.x_sh) as u32,
+                (proc_end - first) as u32,
+            ));
         }
         if fence_row {
             fence_hit = true;
@@ -1333,8 +1375,9 @@ mod tests {
     //! The two-register kernels against the scalar transliteration of the NCBI loops and against
     //! the 128-bit NEON kernels of `xdrop_simd.rs` (random problems: forward and reversed rows and
     //! columns, both lane widths, traceback and score-only, fences, scale 1 and 32, bands wider than
-    //! 256 cells, gap costs at both row-gap preconditions), and the pair helpers against scalar
-    //! models of their lanes.
+    //! 256 cells, gap costs at both row-gap preconditions; each problem with the rows moved from
+    //! band start 128 / 320 or held, the NEON2 result equal to a scratch that never moves), and the
+    //! pair helpers against scalar models of their lanes.
     use super::super::kernel;
     use super::super::tests::{random_problem, reference, Problem, Rng};
     use super::super::FENCE_SENTRY;
@@ -1552,7 +1595,8 @@ mod tests {
     // kernels of this file, with the rows and columns given forward and reversed (as the call sites
     // pass them for the left extension), on 16-bit lanes and, where the problem fits, 8-bit lanes,
     // with and without traceback. Offsets, score, fence flag, edit script and cell count must be
-    // equal; a call these kernels decline must be one that fails a row-gap precondition.
+    // equal; a call these kernels decline must be one that fails a row-gap precondition. The
+    // rows are moved from band start 128 / 320 or held, and the result is equal either way.
     // `LOSAT_FUZZ_CASES` sets the number of problems.
     #[test]
     fn neon2_kernels_match_scalar_loops_on_random_problems() {
@@ -1562,6 +1606,11 @@ mod tests {
             .unwrap_or(600);
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
         let (mut sc128, mut sc2) = (XdropScratch::new(), XdropScratch::new());
+        // the same kernels with every column held, for the band window comparison
+        let mut sc2_off = XdropScratch::new();
+        sc2_off.x_win_at = usize::MAX;
+        // calls whose rows were moved: [width 8 / 16][so / tb][128-bit / neon2]
+        let mut moved = [[[0usize; 2]; 2]; 2];
         // [width 8 / 16][tb][reverse]
         let mut handled = [[[0usize; 2]; 2]; 2];
         let (mut fences, mut ops_total, mut wide) = (0usize, 0usize, 0usize);
@@ -1570,6 +1619,9 @@ mod tests {
         // kernel); 16-bit with gap_extend >= 1000 handled
         let (mut edge_in, mut edge_out, mut big_ge) = (0usize, 0usize, 0usize);
         for case in 0..cases {
+            // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
+            let win_at = [128, 320, usize::MAX][case % 3];
+            (sc128.x_win_at, sc2.x_win_at) = (win_at, win_at);
             let n = if rng.below(2) == 0 { 16 } else { 28 };
             let mut scale = if rng.below(3) == 0 { 32 } else { 1 };
             let long = rng.below(6) == 0;
@@ -1715,7 +1767,7 @@ mod tests {
                              go={go} ge={ge} x={x} len1={len1} len2={len2} rep={repeats}"
                         );
                         // SAFETY: NEON is a baseline feature of the aarch64 targets.
-                        let (r128, r2) = unsafe {
+                        let (r128, r2, r2_off) = unsafe {
                             (
                                 run(
                                     false, m, tb, &rows, &cols, &scores, len1, len2, go, ge, x, tb,
@@ -1725,8 +1777,28 @@ mod tests {
                                     true, m, tb, &rows, &cols, &scores, len1, len2, go, ge, x, tb,
                                     &mut sc2,
                                 ),
+                                run(
+                                    true,
+                                    m,
+                                    tb,
+                                    &rows,
+                                    &cols,
+                                    &scores,
+                                    len1,
+                                    len2,
+                                    go,
+                                    ge,
+                                    x,
+                                    tb,
+                                    &mut sc2_off,
+                                ),
                             )
                         };
+                        // rows moved or held give the same offsets, score, fence flag, cells and
+                        // edit script (`sc2_off` never moves; `sc2.x_sh` is 0 when `win_at` is off)
+                        assert_eq!(r2, r2_off, "{tag}: neon2 window {win_at} vs every column");
+                        assert_eq!(sc2.ops, sc2_off.ops, "{tag}: neon2 window ops");
+                        assert_eq!(sc2_off.x_sh, 0, "{tag}: neon2 off moved");
                         let edge = if wide8 {
                             32 * ge - (go + ge)
                         } else {
@@ -1762,6 +1834,9 @@ mod tests {
                             assert_eq!(r.cells, expected.5, "{tag}: cells");
                         }
                         handled[usize::from(!wide8)][usize::from(tb)][usize::from(reverse)] += 1;
+                        moved[usize::from(!wide8)][usize::from(tb)][0] +=
+                            usize::from(sc128.x_sh > 0);
+                        moved[usize::from(!wide8)][usize::from(tb)][1] += usize::from(sc2.x_sh > 0);
                         fences += usize::from(r.fence_hit);
                         ops_total += sc2.ops.len();
                         if wide8 && (113..=128).contains(&edge) {
@@ -1779,7 +1854,8 @@ mod tests {
         }
         eprintln!(
             "neon2 fuzz: cases={cases} handled[w8/w16][so/tb][fwd/rev]={handled:?} fences={fences} \
-             wide={wide} edge_in={edge_in} edge_out={edge_out} big_ge={big_ge}"
+             wide={wide} edge_in={edge_in} edge_out={edge_out} big_ge={big_ge} \
+             moved[w8/w16][so/tb][128/neon2]={moved:?}"
         );
         if cases >= 200 {
             for (w, by_tb) in handled.iter().enumerate() {
@@ -1794,6 +1870,187 @@ mod tests {
             }
             assert!(fences > 0 && ops_total > 0 && wide > 0);
             assert!(edge_in > 0 && edge_out > 0 && big_ge > 0);
+            // the kernels of this file and the 128-bit kernels move their rows, on both lane
+            // widths, with and without the traceback
+            assert!(
+                moved.iter().flatten().flatten().all(|&n| n > 0),
+                "moved rows {moved:?}"
+            );
         }
+    }
+
+    /// Two similar sequences of about `len` letters (a few substitutions and indels), so the
+    /// band follows a diagonal for the whole length and its start passes the window bound.
+    fn similar_problem(rng: &mut Rng, n: usize, len: usize) -> Problem {
+        let mut p = random_problem(rng, n, 1, len);
+        let letters = (n - 1) as u64;
+        let mut s = Vec::with_capacity(len + 64);
+        let mut i = 0;
+        while i < p.q.len() {
+            let u = rng.unit();
+            if u < 0.01 {
+                for _ in 0..=rng.below(3) {
+                    s.push(1 + rng.below(letters) as u8);
+                }
+            } else if u < 0.02 {
+                i += 1 + rng.below(3) as usize;
+                continue;
+            }
+            s.push(if rng.unit() < 0.03 {
+                1 + rng.below(letters) as u8
+            } else {
+                p.q[i]
+            });
+            i += 1;
+        }
+        p.s = s;
+        p
+    }
+
+    // No NCBI counterpart: the band window of the NEON2 kernels (`XdropScratch::x_shift`,
+    // `LOSAT_X_DPWINDOW`). Long similar problems (gap costs (5, 2, 110) on 16-bit lanes and
+    // (11, 1, 38) on 8-bit and 16-bit lanes, forward and reversed columns, score-only and
+    // traceback) run `align16` and `align8` with the rows moved from band start 128 on and with
+    // every column held: offsets, score, fence flag, cell count and edit script are equal to each
+    // other, to the 128-bit kernel and to the scalar loops, and the moved rows stay short (they
+    // would hold every column up to the band's end, 1500 or more lanes, if they were not moved).
+    // Every call is inside the preconditions of the kernels, so none may be declined.
+    #[test]
+    fn neon2_band_window_keeps_every_result() {
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let (mut on, mut off, mut sc128) = (
+            XdropScratch::new(),
+            XdropScratch::new(),
+            XdropScratch::new(),
+        );
+        (on.x_win_at, off.x_win_at, sc128.x_win_at) = (128, usize::MAX, 128);
+        // [width 8 / 16][so / tb]: calls handled and calls whose rows were moved
+        let mut handled = [[0usize; 2]; 2];
+        let mut shifted = [[0usize; 2]; 2];
+        for case in 0..48 {
+            let n = if case % 2 == 0 { 16 } else { 28 };
+            let len = 1500 + rng.below(2500) as usize;
+            let p = similar_problem(&mut rng, n, len);
+            // (5, 2, 110) needs 16-bit lanes, (11, 1, 38) fits 8-bit lanes
+            let (go, ge, x) = if case % 4 < 2 {
+                (5, 2, 110)
+            } else {
+                (11, 1, 38)
+            };
+            let (len1, len2) = (p.q.len(), p.s.len());
+            if len2 == 0 {
+                continue;
+            }
+            let scores = Scores::Flat { data: &p.m, n };
+            let m8 = fits_8bit(&scores, go, ge, x);
+            let rq: Vec<u8> = p.q.iter().rev().copied().collect();
+            let rs: Vec<u8> = p.s.iter().rev().copied().collect();
+            let expected = [false, true].map(|tb| reference(&p, len1, len2, go, ge, x, tb, false));
+            for reverse in [false, true] {
+                let (rows, cols) = if reverse {
+                    (
+                        RowSeq::Bytes {
+                            data: &rq,
+                            base: len1 as isize,
+                            step: -1,
+                        },
+                        ColSeq {
+                            data: &rs,
+                            base: len2 as isize - 1,
+                            step: -1,
+                            zero_from: len2,
+                        },
+                    )
+                } else {
+                    (
+                        RowSeq::Bytes {
+                            data: &p.q,
+                            base: -1,
+                            step: 1,
+                        },
+                        ColSeq {
+                            data: &p.s,
+                            base: 0,
+                            step: 1,
+                            zero_from: len2,
+                        },
+                    )
+                };
+                for tb in [false, true] {
+                    // the reversed forms present the same logical sequences
+                    let expected = &expected[usize::from(tb)];
+                    // 8-bit lanes where the costs fit them, and always 16-bit lanes
+                    let widths: &[Option<i32>] = if m8.is_some() { &[m8, None] } else { &[None] };
+                    for &m in widths {
+                        let tag = format!(
+                            "case {case} tb={tb} rev={reverse} w8={} go={go} ge={ge} x={x} \
+                             len1={len1} len2={len2}",
+                            m.is_some()
+                        );
+                        // SAFETY: NEON is a baseline feature of the aarch64 targets.
+                        let (a, b, c) = unsafe {
+                            (
+                                run(
+                                    true, m, tb, &rows, &cols, &scores, len1, len2, go, ge, x, tb,
+                                    &mut on,
+                                ),
+                                run(
+                                    true, m, tb, &rows, &cols, &scores, len1, len2, go, ge, x, tb,
+                                    &mut off,
+                                ),
+                                run(
+                                    false, m, tb, &rows, &cols, &scores, len1, len2, go, ge, x, tb,
+                                    &mut sc128,
+                                ),
+                            )
+                        };
+                        let (Some(a), Some(b), Some(c)) = (a, b, c) else {
+                            panic!(
+                                "{tag}: declined (window {} / every column {} / 128-bit {})",
+                                a.is_some(),
+                                b.is_some(),
+                                c.is_some()
+                            );
+                        };
+                        let w = usize::from(m.is_none());
+                        handled[w][usize::from(tb)] += 1;
+                        assert_eq!(a, b, "{tag}: window vs every column");
+                        assert_eq!(a, c, "{tag}: neon2 window vs the 128-bit kernel");
+                        assert_eq!(on.ops, off.ops, "{tag}: traceback, window vs every column");
+                        assert_eq!(on.ops, sc128.ops, "{tag}: traceback, 128-bit kernel");
+                        assert_eq!(off.x_sh, 0, "{tag}: rows moved with the window off");
+                        assert_eq!(
+                            (a.a_offset, a.b_offset, a.score, a.fence_hit),
+                            (expected.0, expected.1, expected.2, expected.3),
+                            "{tag}: against the scalar loops"
+                        );
+                        assert_eq!(on.ops, expected.4, "{tag}: scalar traceback");
+                        if on.x_sh > 0 {
+                            shifted[w][usize::from(tb)] += 1;
+                            // the rows start at 1024 lanes and must not grow: with the window at
+                            // 128 the band, its extra lanes and the padding take about 500
+                            let rows_len = on.ha.len().max(on.h8a.len());
+                            assert!(
+                                rows_len <= 1024,
+                                "{tag}: rows of {rows_len} lanes after moving {} columns",
+                                on.x_sh
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("neon2 window: handled[w8/w16][so/tb]={handled:?} moved={shifted:?}");
+        // 48 cases, both column directions each: 24 with (5, 2, 110) on 16-bit lanes, 24 with
+        // (11, 1, 38) on 8-bit and on 16-bit lanes
+        assert_eq!(
+            handled,
+            [[48, 48], [96, 96]],
+            "handled {handled:?}, moved {shifted:?}"
+        );
+        assert!(
+            shifted.iter().flatten().all(|&n| n > 10),
+            "handled {handled:?}, moved {shifted:?}"
+        );
     }
 }

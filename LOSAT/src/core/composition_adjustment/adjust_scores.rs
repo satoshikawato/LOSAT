@@ -1301,7 +1301,6 @@ pub struct BlastAdjustScoresResult {
 //     if (subject_data[i] == eStopChar)
 //     { if (i - kCompositionMargin > right) right = i - kCompositionMargin; break; }
 // if (i == length) right = length;
-#[allow(dead_code)] // TBLASTN calls this after its translated-range callback is ported.
 pub(crate) fn blast_get_composition_range(
     subject_data: &[u8],
     start: usize,
@@ -1412,27 +1411,6 @@ fn ltriang_matrix_new(n: usize) -> Vec<Vec<f64>> {
     (0..n).map(|row| vec![0.0; row + 1]).collect()
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:120-143
-// ```c
-// void Nlm_FactorLtriangPosDef(double ** A, int n)
-// ```
-fn factor_ltriang_pos_def(a: &mut [Vec<f64>], n: usize) {
-    for i in 0..n {
-        for j in 0..i {
-            let mut temp = a[i][j];
-            for k in 0..j {
-                temp -= a[i][k] * a[j][k];
-            }
-            a[i][j] = temp / a[j][j];
-        }
-        let mut temp = a[i][i];
-        for k in 0..i {
-            temp -= a[i][k] * a[i][k];
-        }
-        a[i][i] = temp.sqrt();
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:725-727
 // ```c
 //     n  = alphsize * alphsize;
@@ -1443,10 +1421,12 @@ fn factor_ltriang_pos_def(a: &mut [Vec<f64>], n: usize) {
 /// Column stride of the column-major copy of the Newton matrix.
 const X_WC_STRIDE: usize = 2 * COMPO_NUM_TRUE_AA;
 
-// EXPERIMENT: `Nlm_FactorLtriangPosDef` with the loops interchanged.
+// `Nlm_FactorLtriangPosDef` with the loops interchanged.
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:120-143
 // ```c
+// void Nlm_FactorLtriangPosDef(double ** A, int n)
+// ...
 // for (i = 0;  i < n;  i++) {
 //     for (j = 0;  j < i;  j++) {
 //         temp = A[i][j];
@@ -1620,10 +1600,12 @@ fn x_factor_ltriang_pos_def_cols(a: &mut [Vec<f64>], n: usize, wc: &mut [f64]) {
     }
 }
 
-// EXPERIMENT: `Nlm_SolveLtriangPosDef`, forward substitution by columns.
+// `Nlm_SolveLtriangPosDef`, forward substitution by columns.
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:147-171
 // ```c
+// void Nlm_SolveLtriangPosDef(double x[], int n, double ** L)
+// ...
 // for (i = 0;  i < n;  i++) {
 //     temp = x[i];
 //     for (j = 0;  j < i;  j++) {
@@ -1674,26 +1656,6 @@ fn x_solve_ltriang_pos_def_cols(x: &mut [f64], n: usize, l: &[Vec<f64>], wc: &[f
         let xj = x[j];
         for (xi, &lji) in x[..j].iter_mut().zip(&row[..j]) {
             *xi -= lji * xj;
-        }
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:147-171
-// ```c
-// void Nlm_SolveLtriangPosDef(double x[], int n, double ** L)
-// ```
-fn solve_ltriang_pos_def(x: &mut [f64], n: usize, l: &[Vec<f64>]) {
-    for i in 0..n {
-        let mut temp = x[i];
-        for (j, &xj) in x.iter().enumerate().take(i) {
-            temp -= l[i][j] * xj;
-        }
-        x[i] = temp / l[i][i];
-    }
-    for j in (0..n).rev() {
-        x[j] /= l[j][j];
-        for i in 0..j {
-            x[i] -= l[j][i] * x[j];
         }
     }
 }
@@ -1751,11 +1713,9 @@ fn step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     //     return alpha;
     // ```
     // The quotients first, then the scan (`x_step_bound`), for the 400 values of the Newton
-    // iteration; the port of this function (`step_bound_reference`) for any other length.
-    if x.len() <= 400 && x.len() == step_x.len() {
-        return x_step_bound(x, step_x, max);
-    }
-    step_bound_reference(x, step_x, max)
+    // iteration (`n = alphsize * alphsize` with `alphsize == COMPO_NUM_TRUE_AA`).
+    debug_assert!(x.len() <= 400 && x.len() == step_x.len());
+    x_step_bound(x, step_x, max)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:230-238
@@ -1779,35 +1739,6 @@ fn x_step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     }
     let mut alpha = max;
     for &alpha_i in &ratio[..x.len()] {
-        if alpha_i >= 0.0 && alpha_i < alpha {
-            alpha = alpha_i;
-        }
-    }
-    alpha
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:224-238
-// ```c
-// double
-// Nlm_StepBound(const double x[], int n, const double step_x[], double max)
-// {
-//     int i;                 /* iteration index */
-//     double alpha = max;    /* current largest permitted step */
-//     for (i = 0; i < n; i++) {
-//         double alpha_i;    /* a step to the boundary for the current i */
-//         alpha_i = -x[i] / step_x[i];
-//         if (alpha_i >= 0 && alpha_i < alpha) {
-//             alpha = alpha_i;
-//         }
-//     }
-//     return alpha;
-// ```
-// The port of this function, for a vector longer than 400 values or of a different length than
-// `step_x`.
-fn step_bound_reference(x: &[f64], step_x: &[f64], max: f64) -> f64 {
-    let mut alpha = max;
-    for (&x_i, &step_i) in x.iter().zip(step_x.iter()) {
-        let alpha_i = -x_i / step_i;
         if alpha_i >= 0.0 && alpha_i < alpha {
             alpha = alpha_i;
         }
@@ -2528,12 +2459,10 @@ fn scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: us
     //             }
     //         }
     // ```
-    // The register-accumulator form (`x_scaled_symmetric_product_a`) for `alphsize` up to 20; the port
-    // of this function (`scaled_symmetric_product_a_reference`) for a larger alphabet.
-    if alphsize <= COMPO_NUM_TRUE_AA {
-        return x_scaled_symmetric_product_a(w, diagonal, alphsize);
-    }
-    scaled_symmetric_product_a_reference(w, diagonal, alphsize)
+    // The register-accumulator form (`x_scaled_symmetric_product_a`) for `alphsize` up to 20
+    // (`optimize_target_frequencies` asserts `alphsize == COMPO_NUM_TRUE_AA`).
+    debug_assert!(alphsize <= COMPO_NUM_TRUE_AA);
+    x_scaled_symmetric_product_a(w, diagonal, alphsize)
 }
 
 // `ScaledSymmetricProductA` with register accumulators.
@@ -2569,6 +2498,18 @@ fn scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: us
 //         }
 // ```
 // (The line numbers in the older comment above are for a different revision; these are the pinned ones.)
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:112-113,121-125
+// ```c
+// static void
+// ScaledSymmetricProductA(double ** W, const double diagonal[], int alphsize)
+// ...
+//     for (rowW = 0;  rowW < m;  rowW++) {
+//         for (colW = 0;  colW <= rowW;  colW++) {
+//             W[rowW][colW] = 0.0;
+//         }
+//     }
+// ```
+// The lower triangle of the first `m` rows is zeroed first, as here.
 fn x_scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: usize) {
     let n = alphsize;
     let m = 2 * n - 1;
@@ -2596,37 +2537,6 @@ fn x_scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: 
             acc += dd;
         }
         w_row[i + n - 1] = acc;
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:112-113,121-125
-// ```c
-// static void
-// ScaledSymmetricProductA(double ** W, const double diagonal[], int alphsize)
-// ...
-//     for (rowW = 0;  rowW < m;  rowW++) {
-//         for (colW = 0;  colW <= rowW;  colW++) {
-//             W[rowW][colW] = 0.0;
-//         }
-//     }
-// ```
-// The port of this function, for an alphabet larger than `COMPO_NUM_TRUE_AA`.
-fn scaled_symmetric_product_a_reference(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: usize) {
-    let m = 2 * alphsize - 1;
-    for (row_idx, row) in w.iter_mut().enumerate().take(m) {
-        for value in row.iter_mut().take(row_idx + 1) {
-            *value = 0.0;
-        }
-    }
-    for i in 0..alphsize {
-        for j in 0..alphsize {
-            let dd = diagonal[i * alphsize + j];
-            w[j][j] += dd;
-            if i > 0 {
-                w[i + alphsize - 1][j] += dd;
-                w[i + alphsize - 1][i + alphsize - 1] += dd;
-            }
-        }
     }
 }
 
@@ -2858,9 +2768,8 @@ struct ReNewtonSystem {
     alphsize: usize,
     constrain_rel_entropy: bool,
     // Column-major copy of the factor (see x_factor_ltriang_pos_def_cols).
-    // No NCBI counterpart: a column-major copy of the lower triangle of `W` after the factorisation, and a flag that says whether it is current; it does not change any value NCBI computes.
+    // No NCBI counterpart: a column-major copy of the lower triangle of `W` after the factorisation; it does not change any value NCBI computes.
     x_wc: Vec<f64>,
-    x_wc_valid: bool,
     w: Vec<Vec<f64>>,
     dinv: Vec<f64>,
     grad_re: Vec<f64>,
@@ -2876,7 +2785,6 @@ fn re_newton_system_new(alphsize: usize) -> ReNewtonSystem {
         constrain_rel_entropy: true,
         // No NCBI counterpart: the column-major copy of the factor; it does not change any value NCBI computes.
         x_wc: vec![0.0; X_WC_STRIDE * X_WC_STRIDE],
-        x_wc_valid: false,
         w: ltriang_matrix_new(2 * alphsize),
         dinv: vec![0.0; alphsize * alphsize],
         grad_re: vec![0.0; alphsize * alphsize],
@@ -2943,8 +2851,8 @@ fn factor_re_newton_system(
     // ```c
     //     Nlm_FactorLtriangPosDef(W, m);
     // ```
-    // The column-major form (`x_factor_ltriang_pos_def_cols`) for `m` up to `X_WC_STRIDE`; the port
-    // of this function (`factor_ltriang_pos_def`) for a larger system.
+    // The column-major form (`x_factor_ltriang_pos_def_cols`) for `m` up to `X_WC_STRIDE`
+    // (`m <= 2 * COMPO_NUM_TRUE_AA` as `alphsize == COMPO_NUM_TRUE_AA`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:143-149
     // ```c
     //     for (i = 0;  i < n;  i++) {
@@ -2955,13 +2863,8 @@ fn factor_re_newton_system(
     //             }
     //             A[i][j] = temp/A[j][j];
     // ```
-    newton_system.x_wc_valid = false;
-    if m <= X_WC_STRIDE {
-        x_factor_ltriang_pos_def_cols(&mut newton_system.w, m, &mut newton_system.x_wc);
-        newton_system.x_wc_valid = true;
-        return;
-    }
-    factor_ltriang_pos_def(&mut newton_system.w, m);
+    debug_assert!(m <= X_WC_STRIDE);
+    x_factor_ltriang_pos_def_cols(&mut newton_system.w, m, &mut newton_system.x_wc);
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:480-524
@@ -2997,8 +2900,8 @@ fn solve_re_newton_system(
     // ```c
     //     Nlm_SolveLtriangPosDef(z, m, W);
     // ```
-    // The column-major form (`x_solve_ltriang_pos_def_cols`) where the factor made a column-major
-    // copy; the port of this function (`solve_ltriang_pos_def`) otherwise.
+    // The column-major form (`x_solve_ltriang_pos_def_cols`), which reads the column-major copy
+    // that the factorisation made.
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:171-177
     // ```c
     //     for (i = 0;  i < n;  i++) {
@@ -3009,11 +2912,8 @@ fn solve_re_newton_system(
     //         x[i] = temp/L[i][i];
     //     }
     // ```
-    if newton_system.x_wc_valid {
-        x_solve_ltriang_pos_def_cols(z, m, &newton_system.w, &newton_system.x_wc);
-    } else {
-        solve_ltriang_pos_def(z, m, &newton_system.w);
-    }
+    debug_assert!(m <= X_WC_STRIDE);
+    x_solve_ltriang_pos_def_cols(z, m, &newton_system.w, &newton_system.x_wc);
     if newton_system.constrain_rel_entropy {
         for i in 0..n {
             x[i] += newton_system.grad_re[i] * z[m - 1];
@@ -3084,6 +2984,18 @@ fn optimize_target_frequencies(
     constrain_rel_entropy: bool,
     relative_entropy: f64,
 ) -> i32 {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1390-1392
+    // ```c
+    //     status =
+    //         Blast_OptimizeTargetFrequencies(&NRrecord->mat_final[0][0],
+    //                                         COMPO_NUM_TRUE_AA,
+    // ```
+    // No NCBI counterpart: the assert. NCBI's only caller (above) and LOSAT's
+    // (`composition_matrix_adjust`) pass `COMPO_NUM_TRUE_AA`; the reordered forms (`x_step_bound`,
+    // `x_scaled_symmetric_product_a`, `x_factor_ltriang_pos_def_cols`, `x_solve_ltriang_pos_def_cols`)
+    // assume it (fixed-size storage for `n = 400` values and `m <= X_WC_STRIDE` rows). It does not
+    // change any value NCBI computes.
+    assert_eq!(alphsize, COMPO_NUM_TRUE_AA);
     // The same iteration, bit for bit, in fixed-size storage (see x_newton_exact.rs).
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
     // ```c
@@ -3096,8 +3008,8 @@ fn optimize_target_frequencies(
     //                                 int maxits)
     // ```
     // The port of this function is `optimize_target_frequencies_reference`. The exact module handles
-    // only `alphsize == 20` with `constrain_rel_entropy`; the port runs the other problems.
-    if constrain_rel_entropy && alphsize == COMPO_NUM_TRUE_AA {
+    // only the problem with `constrain_rel_entropy`; the port runs the other problems.
+    if constrain_rel_entropy {
         // A result computed ahead (four problems per vector, eight on aarch64, x_newton_lanes.rs)
         // for exactly this input.
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
@@ -3189,8 +3101,8 @@ pub(super) fn x_optimize_reference_for_test(
 //     /* Use q as the initial value for x */
 //     memcpy(x, q, n * sizeof(double));
 // ```
-// The port of this function, for the problems the exact module does not take (`alphsize != 20` or
-// no relative-entropy constraint) and the reference of the bitwise tests of `x_newton_lanes`.
+// The port of this function, for the problems the exact module does not take (no relative-entropy
+// constraint) and the reference of the bitwise tests of `x_newton_lanes`.
 fn optimize_target_frequencies_reference(
     x: &mut [f64],
     alphsize: usize,

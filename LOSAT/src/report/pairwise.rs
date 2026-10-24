@@ -1540,20 +1540,6 @@ fn write_final_database_block<W: Write>(
     writeln!(writer)
 }
 
-fn write_blastp_database_header<W: Write>(
-    writer: &mut W,
-    database_name: &str,
-    database_num_sequences: usize,
-    database_total_letters: usize,
-) -> io::Result<()> {
-    write_blastp_database_header_spacing(
-        writer,
-        database_name,
-        database_num_sequences,
-        database_total_letters,
-        3,
-    )
-}
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:533-538
 // ```c++
 //         CAlignFormatUtil::AddSpace(out, 11);
@@ -1670,9 +1656,6 @@ fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
 // NCBI c++/src/algo/blast/format/blast_format.cpp:451-478 and
 // c++/src/objtools/align_format/align_format_util.cpp:581-613:
 // PrintKAParameters emits both -1 Karlin blocks with no Gumbel columns.
-fn write_tblastn_unsearched_query_footer<W: Write>(writer: &mut W) -> io::Result<()> {
-    write_tblastn_unsearched_query_footer_spacing(writer, true)
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:477-478
 // ```c++
 //     m_Outfile << "Effective search space used: " <<
@@ -1712,22 +1695,6 @@ fn write_tblastn_unsearched_query_footer_spacing<W: Write>(
 // if (kbp_ungap) CBlastFormatUtil::PrintKAParameters(..., false, gbp);
 // if (kbp_gap) CBlastFormatUtil::PrintKAParameters(..., true, gbp);
 // m_Outfile << "Effective search space used: " << summary.GetSearchSpace() << "\n";
-fn write_blastp_query_footer<W: Write>(
-    writer: &mut W,
-    ungapped_karlin: KarlinParams,
-    gapped_karlin: KarlinParams,
-    gumbel: BlastGumbelBlk,
-    effective_search_space: i64,
-) -> io::Result<()> {
-    write_blastp_query_footer_spacing(
-        writer,
-        ungapped_karlin,
-        gapped_karlin,
-        gumbel,
-        effective_search_space,
-        true,
-    )
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:477-478
 // ```c++
 //     m_Outfile << "Effective search space used: " <<
@@ -2484,15 +2451,7 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
 // Without a Gumbel block, PrintKAParameters (align_format_util.cpp:585-619) prints only
 // the Lambda, K and H columns. An invalid query has neither Karlin block (`karlin` is
 // `None`) and a search space of 0.
-fn write_nucleotide_query_footer<W: Write>(
-    writer: &mut W,
-    karlin: Option<(KarlinParams, KarlinParams)>,
-    effective_search_space: i64,
-) -> io::Result<()> {
-    write_nucleotide_query_footer_spacing(writer, karlin, effective_search_space, true)
-}
-
-/// `write_nucleotide_query_footer`, with the two blank lines that follow it (the next
+/// The footer of a nucleotide query, with the two blank lines that follow it (the next
 /// query's preamble or the epilog) when `trailing`.
 fn write_nucleotide_query_footer_spacing<W: Write>(
     writer: &mut W,

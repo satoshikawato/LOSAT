@@ -1,0 +1,1 @@
+- The aarch64 NEON2 X-drop kernels (`LOSAT_X_DPNEON2`) move their DP rows down with the band like the other kernels (`LOSAT_X_DPWINDOW`), so long gapped alignments keep less memory with `LOSAT_X_DPNEON2`; outputs unchanged.

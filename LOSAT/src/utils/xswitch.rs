@@ -79,6 +79,10 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_DPNEON` (the NEON build of the vector X-drop kernels on aarch64, `utils/xdrop_simd.rs`)
 /// was added after the change as a switch that is off unless set and joined the set once it was
 /// verified with it on the Linux and macOS arm64 runners.
+/// `LOSAT_X_DPNEON2` (the X-drop kernels of `LOSAT_X_DPAVX2` on aarch64 NEON in register pairs,
+/// `utils/x_xdrop_neon2.rs`) was added on 2026-10-15 as a switch that is off unless set and joined
+/// the set on 2026-10-24 (Owner 2026-10-23), after the arm64 platform checks hashed it in every
+/// run since it was added.
 /// `LOSAT_X_TBNBATCHRULE` (which query batches `LOSAT_X_TBNBATCH` searches side by side, only the
 /// full waves of a small subject set, `tblastn/stage_d_pipeline.rs`) was added after the change as
 /// a switch that is off unless set and joined the set once it was verified and timed with it on.
@@ -115,6 +119,10 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_TBNFLOWHELP` (a thread that waits in TBLASTN's subject flow runs the pool's jobs
 /// meanwhile, `tblastn/x_oid_flow.rs`) joined the set in the pull request that added it, after it
 /// was verified and timed with it on and off.
+/// `LOSAT_X_TBNUNITXLATE` (a long packed TBLASTN subject whose plan is made for its search alone
+/// gets a plan without residues, and each unit translates the residues it reads,
+/// `tblastn/x_subject_translate.rs`) joined the set in the pull request that added it, after it
+/// was verified and timed with it on and off.
 /// `LOSAT_X_BXSUBJFLOW` (BLASTX's subject loop of a query chunk as a flow of tasks of 64 subjects
 /// searched ahead by the pool's other threads, `blastx/x_subject_flow.rs`) joined the set in the
 /// pull request that added it (Owner 2026-10-17: speed-ups land default ON), after it was
@@ -126,6 +134,11 @@ use std::ops::RangeInclusive;
 /// subjects as the subject flow on the whole pool, where each chunk has enough tasks for the pool,
 /// `blastx/x_subject_flow.rs`) joined the set in the pull request that added it, after it was
 /// verified and timed with it on and off.
+/// `LOSAT_X_BXDIAGKEEP`, `LOSAT_X_BXLUTPOOL` and `LOSAT_X_BXUNITCAP` (BLASTX's memory at many
+/// threads: the workers' diagonal tables kept one per thread, the lookup tables' neighbour lists
+/// shared and their vectors kept between builds, at most K query batches or chunks searched at a
+/// time, `blastx/x_bx_mem.rs`, `tblastx/lookup/x_lut_direct.rs`) joined the set in the pull
+/// request that added them, after they were verified and timed with them on and off.
 /// `LOSAT_X_PAIRPARGATE` (TBLASTX's unit path only for the query batches where it is expected to
 /// be faster than the reference frame loop, `tblastx/x_pair_par.rs`) and `LOSAT_X_TBXLUT` (the
 /// reference loop's full lookup table filled in place from per-cell counts,
@@ -134,6 +147,7 @@ use std::ops::RangeInclusive;
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNDBSTREAM",
+    "LOSAT_X_BNDCONE",
     "LOSAT_X_BNFEWSUBJ",
     "LOSAT_X_BNMAPPED",
     "LOSAT_X_BNSTORE",
@@ -153,6 +167,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPLKPAHEAD",
     "LOSAT_X_BPLKPFLAT",
     "LOSAT_X_BPLUT",
+    "LOSAT_X_BPMASKED",
     "LOSAT_X_BPPCOMPACT",
     "LOSAT_X_BPPFREE",
     "LOSAT_X_BPQBLOCK",
@@ -177,20 +192,27 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXDBSTREAM",
     "LOSAT_X_BXDEFER",
     "LOSAT_X_BXDIAG",
+    "LOSAT_X_BXDIAGKEEP",
     "LOSAT_X_BXEVALEMPTY",
     "LOSAT_X_BXFLOW",
     "LOSAT_X_BXHITBF",
+    "LOSAT_X_BXLUTPOOL",
     "LOSAT_X_BXSCANBF",
     "LOSAT_X_BXSUBJFLOW",
     "LOSAT_X_BXUNGAPSENT",
+    "LOSAT_X_BXUNITCAP",
     "LOSAT_X_CTXO1",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
     "LOSAT_X_DIAGLV",
+    "LOSAT_X_DIAGLV2",
     "LOSAT_X_DISCLUTPAR",
+    "LOSAT_X_DISPTABLE",
     "LOSAT_X_DPEMASK",
+    "LOSAT_X_DPNEON2",
     "LOSAT_X_DPWINDOW",
     "LOSAT_X_ERFABSORB",
+    "LOSAT_X_FOLDLEAN",
     "LOSAT_X_MBFILL",
     "LOSAT_X_MBLUTKEEP",
     "LOSAT_X_MBLUTONCE",
@@ -199,6 +221,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_PAIRPARDISCARR",
     "LOSAT_X_PAIRPARFOLD",
     "LOSAT_X_PAIRPARGATE",
+    "LOSAT_X_PAIRPARHOME",
     "LOSAT_X_PAIRPARNA",
     "LOSAT_X_PAIRWISEPAR",
     "LOSAT_X_QBATCHPAR",
@@ -221,6 +244,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNSCANBF",
     "LOSAT_X_TBNSCANBYTE",
     "LOSAT_X_TBNSTORE",
+    "LOSAT_X_TBNUNITXLATE",
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXBAND",
     "LOSAT_X_TBXEXTBATCH",
@@ -228,6 +252,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXHITBF",
     "LOSAT_X_TBXKMERGE",
     "LOSAT_X_TBXLUT",
+    "LOSAT_X_TBXMASKSEEK",
     "LOSAT_X_TBXNEXT",
     "LOSAT_X_TBXPIPE",
     "LOSAT_X_TBXPREFETCH",

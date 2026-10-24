@@ -6,7 +6,6 @@
 //! arrays when the volume is opened and give the same values and the same errors.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::file::DbFile;
 use super::{SeqDbError, SeqType};
@@ -60,8 +59,6 @@ struct ReadOffsets {
     hdr_at: u64,
     seq_at: u64,
     amb_at: u64,
-    /// EXPERIMENT (LOSAT_X_DBIDXREADSHADOW): the held arrays every read is compared with.
-    x_shadow: Option<HeldOffsets>,
 }
 
 /// One of the three offset arrays.
@@ -411,25 +408,18 @@ impl IndexFile {
     // positioned reads (the file stays open), so the arrays take no memory.
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): opens the index file `file` as `seqtype`, the arrays left
     /// in the file. The arrays are checked here, as `parse` checks them, with one pass that
-    /// reads 1 MiB at a time; the errors are those of `parse`. With `x_shadow`
-    /// (LOSAT_X_DBIDXREADSHADOW) the file is parsed as `parse` does too, the two results are
-    /// compared, and the held arrays are kept to compare every read with.
-    pub fn open(file: DbFile, seqtype: SeqType, x_shadow: bool) -> Result<Self, SeqDbError> {
-        Self::open_checked(file, seqtype, x_shadow, CHECK_CHUNK_ENTRIES)
+    /// reads 1 MiB at a time; the errors are those of `parse`.
+    pub fn open(file: DbFile, seqtype: SeqType) -> Result<Self, SeqDbError> {
+        Self::open_checked(file, seqtype, CHECK_CHUNK_ENTRIES)
     }
 
     pub(super) fn open_checked(
         file: DbFile,
         seqtype: SeqType,
-        x_shadow: bool,
         chunk_entries: usize,
     ) -> Result<Self, SeqDbError> {
-        let reference = x_shadow.then(|| {
-            file.read_all()
-                .and_then(|bytes| Self::parse(&bytes, seqtype, file.path()))
-        });
         let path = file.path().to_path_buf();
-        let result = Self::parse_fixed(&file, seqtype, &path).and_then(|fixed| {
+        Self::parse_fixed(&file, seqtype, &path).and_then(|fixed| {
             let (hdr_at, seq_at, amb_at) = (fixed.hdr_at, fixed.seq_at, fixed.amb_at);
             let index = Self::with_offsets(
                 fixed,
@@ -439,62 +429,11 @@ impl IndexFile {
                     hdr_at,
                     seq_at,
                     amb_at,
-                    x_shadow: None,
                 }),
             );
             index.check_streamed(&path, chunk_entries)?;
             Ok(index)
-        });
-        let Some(reference) = reference else {
-            return result;
-        };
-        X_SHADOW_VOLUMES.fetch_add(1, Ordering::Relaxed);
-        match (result, reference) {
-            (Ok(mut index), Ok(held)) => {
-                if (
-                    index.version,
-                    index.seqtype,
-                    index.volume_number,
-                    &index.title,
-                    &index.lmdb_file,
-                    &index.date,
-                    index.num_oids,
-                    index.volume_length,
-                    index.max_length,
-                ) != (
-                    held.version,
-                    held.seqtype,
-                    held.volume_number,
-                    &held.title,
-                    &held.lmdb_file,
-                    &held.date,
-                    held.num_oids,
-                    held.volume_length,
-                    held.max_length,
-                ) {
-                    x_shadow_difference(format!("{}: fixed fields differ", path.display()));
-                }
-                let Offsets::Held(arrays) = held.offsets else {
-                    unreachable!("parse holds the arrays");
-                };
-                if let Offsets::Read(read) = &mut index.offsets {
-                    read.x_shadow = Some(arrays);
-                }
-                Ok(index)
-            }
-            (Err(error), Err(expected)) => {
-                if error.to_string() != expected.to_string() {
-                    x_shadow_difference(format!("error {error} where parse gives {expected}"));
-                }
-                Err(error)
-            }
-            (result, expected) => x_shadow_difference(format!(
-                "{}: {} where parse gives {}",
-                path.display(),
-                describe(&result),
-                describe(&expected)
-            )),
-        }
+        })
     }
 
     fn check_offsets(&self, path: &Path) -> Result<(), SeqDbError> {
@@ -663,17 +602,6 @@ impl IndexFile {
                 };
                 read.file.read_exact_at(bytes, at)?;
                 decode_words(bytes, out);
-                if let Some(held) = &read.x_shadow {
-                    X_SHADOW_READS.fetch_add(1, Ordering::Relaxed);
-                    X_SHADOW_WORDS.fetch_add(out.len() as u64, Ordering::Relaxed);
-                    if *out != held.get(region)[first..first + out.len()] {
-                        x_shadow_difference(format!(
-                            "{}: {region:?} entries {first}..{} differ from the held array",
-                            read.file.path().display(),
-                            first + out.len()
-                        ));
-                    }
-                }
             }
         }
         Ok(())
@@ -871,18 +799,6 @@ impl IndexFile {
         }
     }
 
-    /// EXPERIMENT (LOSAT_X_DBIDXREADSHADOW): the held sequence start offsets that the reads
-    /// are compared with.
-    pub(super) fn x_shadow_sequence_offsets(&self) -> Option<&[u32]> {
-        match &self.offsets {
-            Offsets::Read(ReadOffsets {
-                x_shadow: Some(held),
-                ..
-            }) => Some(&held.seq),
-            _ => None,
-        }
-    }
-
     /// Whether the arrays are held in memory (`parse`) rather than read from the file.
     pub fn holds_offsets(&self) -> bool {
         matches!(self.offsets, Offsets::Held(_))
@@ -905,42 +821,4 @@ fn sentinel_after_message(oid: usize) -> String {
 
 fn ambiguity_position_message(oid: usize) -> String {
     format!("ambiguity offset of sequence {oid} lies outside its sequence data")
-}
-
-static X_SHADOW_VOLUMES: AtomicU64 = AtomicU64::new(0);
-static X_SHADOW_READS: AtomicU64 = AtomicU64::new(0);
-static X_SHADOW_WORDS: AtomicU64 = AtomicU64::new(0);
-pub(super) static X_SHADOW_BLOCK_ENDS: AtomicU64 = AtomicU64::new(0);
-pub(super) static X_SHADOW_RUN_RECORDS: AtomicU64 = AtomicU64::new(0);
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_DBIDXREADSHADOW): the shadow's line, printed at exit (`identical`) or
-/// before the panic of a difference.
-pub(super) fn x_shadow_print_line(identical: bool) {
-    eprintln!(
-        "[X_SHADOW] DBIDXREAD volumes={} reads={} words={} block_ends={} run_records={}{}",
-        X_SHADOW_VOLUMES.load(Ordering::Relaxed),
-        X_SHADOW_READS.load(Ordering::Relaxed),
-        X_SHADOW_WORDS.load(Ordering::Relaxed),
-        X_SHADOW_BLOCK_ENDS.load(Ordering::Relaxed),
-        X_SHADOW_RUN_RECORDS.load(Ordering::Relaxed),
-        if identical {
-            " identical"
-        } else {
-            " DIFFERENT"
-        }
-    );
-}
-
-// No NCBI counterpart: the shadow mode's check stops the run on a difference.
-pub(super) fn x_shadow_difference(message: String) -> ! {
-    x_shadow_print_line(false);
-    panic!("[X_SHADOW] DBIDXREAD {message}");
-}
-
-fn describe(result: &Result<IndexFile, SeqDbError>) -> String {
-    match result {
-        Ok(_) => "a parsed index".to_string(),
-        Err(error) => format!("the error {error}"),
-    }
 }

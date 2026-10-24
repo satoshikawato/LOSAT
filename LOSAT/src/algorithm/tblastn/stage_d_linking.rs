@@ -413,7 +413,7 @@ pub(super) fn link_preliminary_hsps(
             // EXPERIMENT (LOSAT_X_TBNLINKWIN): the candidates of the window that can be
             // admissible, in the same order.
             let candidates = match x_window.as_mut() {
-                Some(window) => window.candidates(&work, &offset_order, current, left, right, link),
+                Some(window) => window.candidates(&work, &offset_order, current, left, right),
                 None => &offset_order[left..right],
             };
             for &candidate in candidates {

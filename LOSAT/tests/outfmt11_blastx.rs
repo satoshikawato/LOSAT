@@ -470,7 +470,7 @@ fn the_flow_does_not_change_the_archives() {
 /// write still creates the (empty) file.
 #[test]
 fn the_out_file_receives_the_archive() {
-    let dir = std::env::temp_dir().join(format!("losat_outfmt11_out_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_out_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let query = input("arch_bx_q.fna");
     let subject = input("arch_bx_s.faa");
@@ -536,7 +536,7 @@ fn xml_archives_are_refused_before_the_first_byte() {
 /// before the first byte.
 #[test]
 fn non_ascii_titles_and_database_names_are_refused() {
-    let dir = std::env::temp_dir().join(format!("losat_outfmt11_title_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_title_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let plain = engine().join(input("arch_bx_s.faa"));
     let plain = plain.to_str().unwrap();
@@ -596,8 +596,10 @@ fn non_ascii_titles_and_database_names_are_refused() {
 /// is in the second batch (`BATCH_SIZE=60`), or after the first 10,002 letters (the default).
 #[test]
 fn a_non_ascii_title_before_a_reader_error_is_refused_before_the_first_byte() {
-    let dir =
-        std::env::temp_dir().join(format!("losat_outfmt11_batchtitle_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "losat_outfmt11_bx_batchtitle_{}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     let subject = engine().join(input("arch_bx_s.faa"));
     let subject = subject.to_str().unwrap();
@@ -667,7 +669,7 @@ fn a_non_ascii_title_before_a_reader_error_is_refused_before_the_first_byte() {
 #[test]
 fn a_fifo_query_is_refused_without_waiting() {
     use std::time::{Duration, Instant};
-    let dir = std::env::temp_dir().join(format!("losat_outfmt11_fifo_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_fifo_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let fifo = dir.join("query_fifo");
     let _ = std::fs::remove_file(&fifo);

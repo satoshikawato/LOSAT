@@ -224,7 +224,8 @@ fn chunk_free_scope(
 /// a discontiguous table, or for a discontiguous
 /// table with the diagonal array the scope of `disc::in_scope_array` with LOSAT_X_PAIRPARDISCARR
 /// on. LOSAT_X_BNFEWSUBJ (`x_few_subj.rs`) reads it before it gives a search the shape of a
-/// one-subject search.
+/// one-subject search. (A chunk without a pool is not asked here: for a discontiguous table
+/// LOSAT_X_BNDCONE decides in `disc::run` and `disc::run_array`.)
 pub(super) fn takes_owner_chunks(
     two_stage: Option<&TwoStageLookup>,
     use_array_indexing: bool,
@@ -689,9 +690,9 @@ fn fold<const PT: bool>(
         let diag = s_ext_start as isize - q_ext_start as isize;
         let (last_hit, _hit_saved) = {
             // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
-            // of a bucket below the bound.
+            // of a bucket below the bound. (A one-hit table keeps no memo, LOSAT_X_DIAGLV2.)
             let (level, _hit_len, hit_saved) = if x_lv {
-                diag_hash.retrieve_below(
+                diag_hash.retrieve_below::<false>(
                     diag as i32,
                     &x_lv_seeds,
                     s_ext_start + diag_offset as usize,
@@ -787,7 +788,7 @@ fn fold<const PT: bool>(
         // ```
         // (`hit_ready` is still 1 in one-hit mode; the reference keeps this test.)
         if !hit_ready {
-            part::insert::<PT>(
+            part::insert::<PT, false, false>(
                 diag_hash,
                 out,
                 x_key,
@@ -890,7 +891,7 @@ fn fold<const PT: bool>(
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
             //                       hit_ready, s_off_pos, window_size + Delta + 1);
             // ```
-            part::insert::<PT>(
+            part::insert::<PT, false, false>(
                 diag_hash,
                 out,
                 x_key,
@@ -954,7 +955,7 @@ fn fold<const PT: bool>(
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                       hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT>(
+        part::insert::<PT, false, false>(
             diag_hash,
             out,
             x_key,
@@ -1387,6 +1388,9 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
         window: h.window,
         max_level: h.max_level.clone(),
         x_lv_shadow: h.x_lv_shadow,
+        x_last: h.x_last.clone(),
+        #[cfg(debug_assertions)]
+        x_last_fresh: h.x_last_fresh,
     }
 }
 
@@ -1546,6 +1550,8 @@ pub(super) fn shadow_check(
         h.max_level == diag_hash.max_level,
         "{name}: the level bounds of the diagonal hash (LOSAT_X_DIAGLV) differ"
     );
+    // (The memo of LOSAT_X_DIAGLV2 is not compared: the reference fold does not keep it, and a
+    // strips stage makes it again at its start; LOSAT_X_DIAGLVSHADOW checks its every answer.)
     if let Some(b) = (0..diag_hash.backbone.len()).find(|&b| diag_hash.backbone[b] != h.backbone[b])
     {
         panic!(
@@ -1674,10 +1680,10 @@ mod tests {
         }
         if op.pass {
             decisions.push(2);
-            hash.insert(op.diag, op.ungapped_end, 0, true, op.s_off_pos, window);
+            hash.insert_plain(op.diag, op.ungapped_end, 0, true, op.s_off_pos, window);
         } else {
             decisions.push(1);
-            hash.insert(
+            hash.insert_plain(
                 op.diag,
                 op.s_end_pos,
                 op.s_end_pos - op.s_off_pos,
@@ -1712,7 +1718,7 @@ mod tests {
                 .collect();
             // cells left at `last_hit = -window` by a reset with a window
             for &d in diags.iter().take(3) {
-                start.insert(d, -table_window, 0, false, -table_window, window);
+                start.insert_plain(d, -table_window, 0, false, -table_window, window);
             }
             let n = 200 + rng.below(3000) as usize;
             let mut s = -20i32;

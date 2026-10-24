@@ -26,6 +26,13 @@
 //! itself (inlined into the caller, the X-drop and the sequence pointers were reloaded from the
 //! stack at every step).
 //!
+//! wasm32 (plan v4 line W, s17): V8's code for the walks reads the table at a fixed address
+//! (`FIXED_TABLE`, one add fewer a step), the left walk hands its pair back as one u64 and the right
+//! walk is inlined into `two_hit`. A Wasm call keeps no register across it (every live value goes
+//! to the stack and back) and a returned pair or triple goes through linear memory; inlined, the
+//! right walk's loop keeps its 22 instructions a step, while an inlined left walk lost more cycles
+//! than the call cost. The statements of the walks are the same on every target.
+//!
 //! Why the result is the same.
 //! * Bounds. The reference reads `q_seq[q_r - 1 - i]` for `i < min(q_r, s_r)` on the left and
 //!   `q_seq[q_r + j]` while both `q_r + j < q_seq.len()` and `s_r + j < s_seq.len()` on the right.
@@ -78,11 +85,63 @@ const MAX_WORD_SCORE: i32 = 11;
 
 type Table = [i8; TABLE_LEN];
 
+/// wasm32: a copy of the table at a fixed address of linear memory, so that a load of the walks
+/// carries the address as its offset instead of adding the table pointer at every step (the native
+/// walks address `[table + index]` in one instruction). Zero until `state` copies the table in.
+#[cfg(target_arch = "wasm32")]
+struct FixedTable(std::cell::UnsafeCell<Table>);
+// SAFETY: written once, inside `STATE.get_or_init`, before `State::table` points at it; read only
+// through that reference.
+#[cfg(target_arch = "wasm32")]
+unsafe impl Sync for FixedTable {}
+#[cfg(target_arch = "wasm32")]
+static FIXED_TABLE: FixedTable = FixedTable(std::cell::UnsafeCell::new([0; TABLE_LEN]));
+
 struct State {
     /// 0 = off, 1 = LOSAT_X_TBXUNGAP, 2 = LOSAT_X_TBXUNGAPSHADOW (both paths, compared).
     mode: u8,
     /// The table of the walks; `None` (and mode 0) if a score does not fit it.
+    #[cfg(not(target_arch = "wasm32"))]
     table: Option<Box<Table>>,
+    /// The table of the walks (`FIXED_TABLE`); `None` (and mode 0) if a score does not fit it.
+    #[cfg(target_arch = "wasm32")]
+    table: Option<&'static Table>,
+}
+
+/// `tab[i]`. wasm32 reads `FIXED_TABLE` (where `tab` points) at its static address.
+///
+/// SAFETY: `i < TABLE_LEN`.
+// NCBI reference: aa_ungapped.c:846-921 `matrix[q[i]][s[i]]` (the table of `build_table`).
+#[inline(always)]
+unsafe fn score_at(tab: &Table, i: usize) -> i32 {
+    #[cfg(target_arch = "wasm32")]
+    let tab: &Table = &*FIXED_TABLE.0.get();
+    *tab.get_unchecked(i) as i32
+}
+
+/// `walk_left`'s (best score, length). wasm32 hands them back as one u64 (the score's bits in the
+/// low half, the length in the high half): a returned pair goes through linear memory there.
+#[cfg(not(target_arch = "wasm32"))]
+type LeftWalk = (i32, usize);
+#[cfg(target_arch = "wasm32")]
+type LeftWalk = u64;
+
+// No NCBI counterpart: carries two values of `s_BlastAaExtendLeft` (aa_ungapped.c:886-921).
+#[inline(always)]
+fn left_walk(best: i32, len: usize) -> LeftWalk {
+    #[cfg(not(target_arch = "wasm32"))]
+    return (best, len);
+    #[cfg(target_arch = "wasm32")]
+    return best as u32 as u64 | (len as u64) << 32;
+}
+
+// No NCBI counterpart: the inverse of `left_walk`.
+#[inline(always)]
+fn left_walk_parts(w: LeftWalk) -> (i32, usize) {
+    #[cfg(not(target_arch = "wasm32"))]
+    return w;
+    #[cfg(target_arch = "wasm32")]
+    return (w as u32 as i32, (w >> 32) as usize);
 }
 
 /// The table of the walks, `None` if a score other than `BLAST_SCORE_MIN` is outside
@@ -113,6 +172,12 @@ fn state() -> &'static State {
         // `LOSAT_X_TBXUNGAP` is a strict-set switch; the shadow variable is read first, as "set to
         // any value".
         let table = build_table();
+        // SAFETY: the only write to FIXED_TABLE (FixedTable).
+        #[cfg(target_arch = "wasm32")]
+        let table = table.map(|t| unsafe {
+            *FIXED_TABLE.0.get() = *t;
+            &*FIXED_TABLE.0.get()
+        });
         let mode = if table.is_none() {
             0
         } else if std::env::var_os("LOSAT_X_TBXUNGAPSHADOW").is_some() {
@@ -155,13 +220,7 @@ pub fn print_shadow_stats() {
 // `n` positions before the pointers, so one counter runs the loop and the length is
 // `n - (the index of the best step)`.
 #[inline(never)]
-unsafe fn walk_left(
-    tab: &Table,
-    qp: *const u8,
-    sp: *const u8,
-    n: usize,
-    x_drop: i32,
-) -> (i32, usize) {
+unsafe fn walk_left(tab: &Table, qp: *const u8, sp: *const u8, n: usize, x_drop: i32) -> LeftWalk {
     let q_lo = qp.sub(n);
     let s_lo = sp.sub(n);
     let mut score = 0i32;
@@ -173,7 +232,7 @@ unsafe fn walk_left(
         let qc = *q_lo.add(at);
         let sc = *s_lo.add(at);
         // SAFETY: q << 8 | s < TABLE_LEN for any two bytes.
-        score += *tab.get_unchecked((qc as usize) << 8 | sc as usize) as i32;
+        score += score_at(tab, (qc as usize) << 8 | sc as usize);
         if score > best {
             best = score;
             best_at = at;
@@ -182,7 +241,7 @@ unsafe fn walk_left(
             break;
         }
     }
-    (best, n - best_at)
+    left_walk(best, n - best_at)
 }
 
 /// `s_BlastAaExtendRight` from `(qp, sp)` over `n` steps, from the score `start`: step `j` (0..n)
@@ -190,8 +249,9 @@ unsafe fn walk_left(
 /// (`n` if it ran out).
 ///
 /// SAFETY: the `n` positions from `qp` and from `sp` are readable.
-// NCBI reference: aa_ungapped.c:846-866 (module comment).
-#[inline(never)]
+// NCBI reference: aa_ungapped.c:846-866 (module comment). Inlined on wasm32 (module comment).
+#[cfg_attr(not(target_arch = "wasm32"), inline(never))]
+#[cfg_attr(target_arch = "wasm32", inline(always))]
 unsafe fn walk_right(
     tab: &Table,
     qp: *const u8,
@@ -208,7 +268,7 @@ unsafe fn walk_right(
         let qc = *qp.add(taken);
         let sc = *sp.add(taken);
         // SAFETY: as in `walk_left`.
-        score += *tab.get_unchecked((qc as usize) << 8 | sc as usize) as i32;
+        score += score_at(tab, (qc as usize) << 8 | sc as usize);
         taken += 1;
         if score > best {
             best = score;
@@ -242,6 +302,10 @@ pub(super) fn two_hit(
         return None;
     }
     let tab: &Table = state().table.as_deref()?;
+    // SAFETY: `state().table` is set, so FIXED_TABLE holds the table (FixedTable). wasm32: the word
+    // loop below reads it at its static address, as `score_at` does.
+    #[cfg(target_arch = "wasm32")]
+    let tab: &Table = unsafe { &*FIXED_TABLE.0.get() };
 
     // The best end of the word at R (two_hit.rs, the `k_size` loop).
     let mut score = 0i32;
@@ -266,7 +330,7 @@ pub(super) fn two_hit(
 
     // SAFETY: q_r <= q_seq.len() and s_r <= s_seq.len() (the word fits); the left walk reads the
     // min(q_r, s_r) positions before them, the right walk the room left after them in both.
-    let (left_score, left_disp) = unsafe {
+    let (left_score, left_disp) = left_walk_parts(unsafe {
         walk_left(
             tab,
             q_seq.as_ptr().add(q_r),
@@ -274,7 +338,7 @@ pub(super) fn two_hit(
             q_r.min(s_r),
             x_drop,
         )
-    };
+    });
 
     let reached_first_hit = left_disp >= s_r.saturating_sub(s_left_off);
     let (right_score, right_disp, s_last_off) = if reached_first_hit {

@@ -48,9 +48,9 @@
 //! of a cell's last batch of fewer than eight hits and as the cell-by-cell version the tests
 //! compare with; `LOSAT_X_BPDIAG_SIMD=0` forces it (diagnostic, used by the tests; not in the
 //! strict set). With `LOSAT_TIMING=1` each search of a query set prints
-//! `[TIMING] x_bpdiag: mode=<avx2|avx2-defer|scalar|per-hit> cells=<n> batched_hits=<m>
-//! candidates=<k>` (the path that ran, the cells tested in batches, their hits, and the hits passed
-//! to the closure; zeros with `per-hit`).
+//! `[TIMING] x_bpdiag: mode=<avx2|avx2-defer|avx2-defer-masked|scalar|per-hit> cells=<n>
+//! batched_hits=<m> candidates=<k>` (the path that ran, the cells tested in batches, their hits,
+//! and the hits passed to the closure; zeros with `per-hit`).
 //!
 //! EXPERIMENT (LOSAT_X_BPDEFER): with the AVX2 batches on, a batch's candidates are not called at
 //! the end of the batch: their query offsets are packed into a buffer (the candidate lanes moved to
@@ -83,13 +83,35 @@
 //! closure is handed only its candidate's entry, as the table is borrowed by the cell test), so
 //! testing them before the calls changes nothing a call reads, and the calls keep their order (the
 //! batches', then the last batch's lanes'). The two changes come from line R's probes of blastp's
-//! cell test (v4-R R2, 2026-10-18); blastp's loops keep their code (the masked batch has a scan
-//! function of its own, never inlined, and a cell test of its own). `LOSAT_X_BXDEFER` is a switch of
+//! cell test (v4-R R2, 2026-10-18); blastp's fused loop takes them too since LOSAT_X_BPMASKED
+//! (below), and LOSAT_X_BPDEFER's loops keep their code (the masked batch has a scan function of
+//! its own, never inlined, and a cell test of its own). `LOSAT_X_BXDEFER` is a switch of
 //! the strict set: on unless it is `0`; off, blastx's
 //! fused loop takes the AVX2 batch ([`XDiagMode::Avx2`]). It acts only where that loop runs the AVX2
 //! batch and LOSAT_X_BXCROSS's cell test does not (below: `LOSAT_X_BXCROSS=0`, or a CPU without
 //! POPCNT), on tables with at least `LOSAT_X_BXDEFERMIN` hits per used cell
 //! (`blastx/x_seed_diag.rs`).
+//!
+//! EXPERIMENT (LOSAT_X_BPMASKED): blastp's fused loop takes LOSAT_X_BXDEFER's masked batch
+//! ([`x_cell_avx2_defer_masked`], [`XDiagMode::Avx2DeferMasked`]) in place of LOSAT_X_BPDEFER's
+//! deferred calls: the same buffer and calls, with the batches' entry coordinates from scalar loads
+//! of the hits and a cell's last batch of fewer than eight hits as one masked AVX2 batch. Why the
+//! outcome is LOSAT_X_BPDEFER's: the argument of LOSAT_X_BXDEFER above, which rests only on what
+//! both loops share (the hits of one cell lie on distinct entries; the closure is handed only its
+//! candidate's entry, as the table is borrowed by the cell test). A blastp cell holds about 100
+//! hits on the dense tables of all-against-all searches, where the masked batch saves 4-6 % of the
+//! job's cycles (one core, against `LOSAT_X_BPMASKED=0`; the cell test 7.28 -> 6.32 cycles per
+//! hit on an OrthoFinder job, v4-A14 s6). On a table with about one hit per used cell (a short
+//! query against a database) the masked last batch and the buffer cost more than the scalar batch
+//! they replace (x1.07-1.19 at 1.1-1.5 hits per used cell), so a table with fewer than
+//! `LOSAT_X_BPMASKEDMIN` hits per used cell (hundredths, built-in 250; LOSAT_X_BXDIAGMIN's measure,
+//! `blastx/x_seed_diag.rs`) keeps the deferred calls ([`x_bp_table_mode`], once per thread and
+//! table).
+//! `LOSAT_X_BPMASKED` is a switch of the strict set: on unless it is `0`; off, blastp's fused loop
+//! takes LOSAT_X_BPDEFER's deferred calls ([`XDiagMode::Avx2Defer`]). It acts only where those
+//! run (`LOSAT_X_BPDEFER` with the AVX2 batch, [`x_diag_mode`]; not with LOSAT_X_BPSEED=0,
+//! LOSAT_X_BPDIAG=0 or LOSAT_X_BPDIAG_SIMD=0, not in the per-hit loop of a CPU without AVX2), and
+//! never in blastp-fast's loops on the compressed table, which have no AVX2 batches.
 //!
 //! EXPERIMENT (LOSAT_X_BXCROSS, blastx's switch): blastx's fused loop tests
 //! the hits in batches of eight cut across the cells' borders ([`x_scan_cells_avx2_cross`]). The
@@ -274,6 +296,122 @@ pub(crate) fn x_bp_defer() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPDEFER"))
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BPMASKED switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPMASKED): a strict-set switch, on unless it is `0`.
+/// It acts on LOSAT_X_BPDEFER's deferred calls only.
+pub(crate) fn x_bp_masked() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPMASKED"))
+}
+
+// No NCBI counterpart: reads LOSAT_X_BPMASKEDMIN once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPMASKEDMIN): the fewest hits per used lookup cell, in hundredths, for
+/// which blastp's fused loop takes LOSAT_X_BPMASKED's masked batch (built-in
+/// [`X_BP_MASKED_MIN`]); a table with fewer takes LOSAT_X_BPDEFER's deferred calls. With about one
+/// hit per cell the masked last batch and the buffer cost more than the scalar batch they replace
+/// (one core, cycles against `LOSAT_X_BPMASKED=0` with the masked batch on every table: 1.11 hits
+/// per used cell x1.148, 2.08 x1.020, 2.60 x0.987, 4.52 x0.924; `docs/agents/diagnostics.md`).
+/// `0` takes it for every table; a value that is not a number takes the built-in one.
+#[cfg(target_arch = "x86_64")]
+fn x_bp_masked_min() -> u64 {
+    use std::sync::OnceLock;
+    static MIN: OnceLock<u64> = OnceLock::new();
+    *MIN.get_or_init(|| {
+        std::env::var("LOSAT_X_BPMASKEDMIN")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(X_BP_MASKED_MIN)
+    })
+}
+
+/// EXPERIMENT (LOSAT_X_BPMASKEDMIN): the built-in value of [`x_bp_masked_min`], between the
+/// measured loss at 2.08 hits per used cell and the gain at 2.60.
+#[cfg(target_arch = "x86_64")]
+const X_BP_MASKED_MIN: u64 = 250;
+
+#[cfg(target_arch = "x86_64")]
+thread_local! {
+    /// EXPERIMENT (LOSAT_X_BPMASKEDMIN): the last lookup table this thread chose a cell test for
+    /// (its address, its backbone's address and its overflow length) and its hits per used cell
+    /// (see [`x_bp_table_ratio`]).
+    static X_BP_CHOICE: std::cell::Cell<(usize, usize, usize, u64)> =
+        const { std::cell::Cell::new((0, 0, 0, 0)) };
+}
+
+// No NCBI counterpart: counters of LOSAT_X_BPMASKEDMIN for its timing line: the (thread, table)
+// choices of the masked batch and of the deferred calls, and the least and most hits per used
+// cell (hundredths) of the tables.
+#[cfg(target_arch = "x86_64")]
+static X_BP_TABLES: [std::sync::atomic::AtomicU64; 2] = [
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+];
+#[cfg(target_arch = "x86_64")]
+static X_BP_RATIO_MIN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+#[cfg(target_arch = "x86_64")]
+static X_BP_RATIO_MAX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+// No NCBI counterpart: a property of the lookup table that chooses LOSAT's cell test; it does
+// not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPMASKEDMIN): `table`'s hits per used backbone cell, in hundredths (0 for
+/// a table without hits; LOSAT_X_BXDIAGMIN's measure, `blastx/x_seed_diag.rs`), worked out once
+/// per table and thread (the table's addresses and overflow length identify it; a later table
+/// that matched all three would reuse the value, which changes only the speed), and whether this
+/// call worked it out.
+#[cfg(target_arch = "x86_64")]
+fn x_bp_table_ratio(table: &BlastAaLookupTable) -> (u64, bool) {
+    let key = (
+        table as *const BlastAaLookupTable as usize,
+        table.backbone.as_ptr() as usize,
+        table.overflow.len(),
+    );
+    X_BP_CHOICE.with(|choice| {
+        let (a, b, c, ratio) = choice.get();
+        if (a, b, c) == key {
+            return (ratio, false);
+        }
+        let (mut hits, mut used) = (0u64, 0u64);
+        for cell in &table.backbone {
+            if cell.num_used > 0 {
+                hits += cell.num_used as u64;
+                used += 1;
+            }
+        }
+        let ratio = (hits * 100).checked_div(used).unwrap_or(0);
+        choice.set((key.0, key.1, key.2, ratio));
+        (ratio, true)
+    })
+}
+
+// No NCBI counterpart: chooses LOSAT's cell test; every cell test gives the reference's hits and
+// table.
+/// EXPERIMENT (LOSAT_X_BPMASKEDMIN): the cell test for the subjects of `table`: `mode`, but
+/// LOSAT_X_BPDEFER's deferred calls instead of LOSAT_X_BPMASKED's masked batch where the table has
+/// fewer hits per used cell than [`x_bp_masked_min`]. Counted for the timing line and marked for
+/// `LOSAT_X_REACH` once per table and thread.
+fn x_bp_table_mode(mode: XDiagMode, table: &BlastAaLookupTable) -> XDiagMode {
+    #[cfg(target_arch = "x86_64")]
+    if mode == XDiagMode::Avx2DeferMasked {
+        let (ratio, first) = x_bp_table_ratio(table);
+        let masked = ratio >= x_bp_masked_min();
+        if first {
+            use std::sync::atomic::Ordering::Relaxed;
+            X_BP_TABLES[usize::from(!masked)].fetch_add(1, Relaxed);
+            X_BP_RATIO_MIN.fetch_min(ratio, Relaxed);
+            X_BP_RATIO_MAX.fetch_max(ratio, Relaxed);
+            crate::utils::xreach::x_reach!("LOSAT_X_BPMASKED", masked);
+        }
+        if !masked {
+            return XDiagMode::Avx2Defer;
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = table;
+    mode
+}
+
 // No NCBI counterpart: reads the LOSAT_X_BPSCANBF switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPSCANBF): blastp's fused loop finds the cells with [`x_scan_cells_bf`]
@@ -377,12 +515,14 @@ pub(crate) enum XDiagMode {
     /// cell's last batch of fewer than eight hits is a scalar batch.
     #[cfg(target_arch = "x86_64")]
     Avx2,
-    /// LOSAT_X_BPDIAG with AVX2 and LOSAT_X_BPDEFER: the AVX2 batches with the candidates of a
-    /// cell's batches of eight called after its last one ([`x_cell_avx2_defer`]).
+    /// LOSAT_X_BPDIAG with AVX2 and LOSAT_X_BPDEFER, with LOSAT_X_BPMASKED off or on a table below
+    /// LOSAT_X_BPMASKEDMIN ([`x_bp_table_mode`]): the AVX2 batches with the candidates of a cell's
+    /// batches of eight called after its last one ([`x_cell_avx2_defer`]).
     #[cfg(target_arch = "x86_64")]
     Avx2Defer,
-    /// LOSAT_X_BXDEFER (blastx's fused loop only, [`x_cell_test`]; with LOSAT_X_BXCROSS off or no
-    /// POPCNT): [`XDiagMode::Avx2Defer`] with
+    /// LOSAT_X_BPDIAG with AVX2, LOSAT_X_BPDEFER and LOSAT_X_BPMASKED, on tables with at least
+    /// LOSAT_X_BPMASKEDMIN hits per used cell (and blastx's fused loop with LOSAT_X_BXDEFER,
+    /// [`x_cell_test`], and LOSAT_X_BXCROSS off or no POPCNT): [`XDiagMode::Avx2Defer`] with
     /// the lanes' entry coordinates from scalar loads of the hits and a cell's last batch of fewer
     /// than eight hits as one masked AVX2 batch ([`x_cell_avx2_defer_masked`]).
     #[cfg(target_arch = "x86_64")]
@@ -447,8 +587,9 @@ fn x_cross_available() -> bool {
 }
 
 // No NCBI counterpart: chooses LOSAT's code path once (LOSAT_X_BPDIAG; the AVX2 batch where the
-// CPU has AVX2, with LOSAT_X_BPDEFER the deferred calls, otherwise the per-hit loop;
-// LOSAT_X_BPDIAG_SIMD=0 forces the scalar batch); it does not change any value NCBI computes.
+// CPU has AVX2, with LOSAT_X_BPDEFER the deferred calls, with LOSAT_X_BPMASKED also the masked
+// batch, otherwise the per-hit loop; LOSAT_X_BPDIAG_SIMD=0 forces the scalar batch); it does not
+// change any value NCBI computes.
 fn x_diag_mode() -> XDiagMode {
     use std::sync::OnceLock;
     static MODE: OnceLock<XDiagMode> = OnceLock::new();
@@ -461,10 +602,10 @@ fn x_diag_mode() -> XDiagMode {
         }
         #[cfg(target_arch = "x86_64")]
         if x_avx2_available() {
-            return if x_bp_defer() {
-                XDiagMode::Avx2Defer
-            } else {
-                XDiagMode::Avx2
+            return match (x_bp_defer(), x_bp_masked()) {
+                (true, true) => XDiagMode::Avx2DeferMasked,
+                (true, false) => XDiagMode::Avx2Defer,
+                (false, _) => XDiagMode::Avx2,
             };
         }
         // Without AVX2 the scalar batch would be slower than the per-hit loop (module header).
@@ -576,6 +717,20 @@ pub(crate) fn x_bp_diag_print_timing() {
             X_DIAG_HITS.swap(0, Relaxed),
             X_DIAG_CANDIDATES.swap(0, Relaxed)
         );
+        // EXPERIMENT (LOSAT_X_BPMASKEDMIN): the tables that took the masked batch and those its
+        // rule gave the deferred calls (once per thread and table).
+        #[cfg(target_arch = "x86_64")]
+        if x_diag_mode() == XDiagMode::Avx2DeferMasked {
+            let least = X_BP_RATIO_MIN.swap(u64::MAX, Relaxed);
+            eprintln!(
+                "[TIMING] x_bpmasked: min_hits_per_cell={} tables_masked={} tables_deferred={} hits_per_cell={}-{}",
+                x_bp_masked_min(),
+                X_BP_TABLES[0].swap(0, Relaxed),
+                X_BP_TABLES[1].swap(0, Relaxed),
+                if least == u64::MAX { 0 } else { least },
+                X_BP_RATIO_MAX.swap(0, Relaxed)
+            );
+        }
     }
 }
 
@@ -892,10 +1047,12 @@ pub(crate) fn x_scan_two_hit<F>(
         );
         return;
     }
+    // EXPERIMENT (LOSAT_X_BPMASKEDMIN): the masked batch only on tables with enough hits per cell.
+    let mode = x_bp_table_mode(x_diag_mode(), lookup);
     // EXPERIMENT (LOSAT_X_BPSCANBF): the same cells found without a branch on the presence bit.
     let counts = if x_bp_scan_bf() {
         x_scan_two_hit_bf(
-            x_diag_mode(),
+            mode,
             lookup,
             subject,
             subject_length,
@@ -905,7 +1062,7 @@ pub(crate) fn x_scan_two_hit<F>(
         )
     } else {
         x_scan_two_hit_in(
-            x_diag_mode(),
+            mode,
             lookup,
             subject,
             subject_length,
@@ -1311,9 +1468,9 @@ unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, F>(
     X_DEFER_BUFFER.set(buffer);
 }
 
-/// [`x_scan_cells_avx2`] with [`x_cell_avx2_defer_masked`] (LOSAT_X_BXDEFER, blastx's fused loop
-/// only). Never inlined, and its cell test is a function of its own, so blastp's loops keep their
-/// code.
+/// [`x_scan_cells_avx2`] with [`x_cell_avx2_defer_masked`] (LOSAT_X_BPMASKED in blastp's fused
+/// loop, LOSAT_X_BXDEFER in blastx's). Never inlined, and its cell test is a function of its own,
+/// so the loops of LOSAT_X_BPDEFER (`LOSAT_X_BPMASKED=0`) keep their code.
 ///
 /// # Safety
 /// The CPU must have AVX2.
@@ -2021,11 +2178,11 @@ where
     candidates
 }
 
-/// EXPERIMENT (LOSAT_X_BXDEFER): the test of [`x_batch_avx2`] for eight lanes whose entry
-/// coordinates the caller computed: reads the eight entries, stores their new values and returns
-/// the candidate lanes (bit `i` = lane `i`). Every load comes before every store, so lanes with the
-/// same coordinate (the masked batch of [`x_cell_avx2_defer_masked`]) read the same value and store
-/// the same new one.
+/// EXPERIMENT (LOSAT_X_BPMASKED, LOSAT_X_BXDEFER): the test of [`x_batch_avx2`] for eight lanes
+/// whose entry coordinates the caller computed: reads the eight entries, stores their new values
+/// and returns the candidate lanes (bit `i` = lane `i`). Every load comes before every store, so
+/// lanes with the same coordinate (the masked batch of [`x_cell_avx2_defer_masked`]) read the same
+/// value and store the same new one.
 ///
 /// # Safety
 /// The CPU must have AVX2, and every coordinate must be at most `table.mask`.
@@ -2075,8 +2232,9 @@ unsafe fn x_batch_avx2_at(
     _mm256_movemask_ps(_mm256_castsi256_ps(candidates)) as u32
 }
 
-/// EXPERIMENT (LOSAT_X_BXDEFER): [`x_cell_avx2_defer`] with two changes of the batches (module
-/// header), for blastx's fused loop: a batch of eight takes its lanes' entry coordinates from
+/// EXPERIMENT (LOSAT_X_BPMASKED, LOSAT_X_BXDEFER): [`x_cell_avx2_defer`] with two changes of the
+/// batches (module header), for blastp's and blastx's fused loops: a batch of eight takes its
+/// lanes' entry coordinates from
 /// scalar loads of its hits, and the last batch of fewer than eight hits is one masked AVX2 batch
 /// (the missing lanes repeat the first hit, their candidate bits are dropped) whose candidates go
 /// into the buffer after the others'. The closure is then called for the buffer in order, so the
@@ -3134,6 +3292,67 @@ mod tests {
             }
         }
         assert!(calls > 1000, "the edges must give candidates: {calls}");
+    }
+
+    // ---- EXPERIMENT (LOSAT_X_BPMASKED): the masked batch against the deferred calls ----
+
+    /// blastp's default cell test (the masked batch) against the one `LOSAT_X_BPMASKED=0` runs
+    /// (LOSAT_X_BPDEFER's deferred calls), from the same table, on cells of every size, with
+    /// entries at every edge of the test and random bits, and later cells on the entries earlier
+    /// cells and their calls wrote: the same calls in the same order with the same arguments, and
+    /// the same bits in every entry of the table.
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn the_masked_batch_equals_the_deferred_calls() {
+        if !x_avx2_available() {
+            return;
+        }
+        let deferred = XCellTest::Diag(XDiagMode::Avx2Defer);
+        let masked = XCellTest::Diag(XDiagMode::Avx2DeferMasked);
+        let mut seed = 0xa5ced_u64;
+        let size = 2048usize;
+        let mask = (size - 1) as i32;
+        let mut calls = 0;
+        for (window, word_size) in [(40, 3), (4, 3), (2, 2)] {
+            for diag_offset in DIAG_OFFSETS {
+                for n in HIT_COUNTS {
+                    let test = XDiagTest {
+                        diag_offset,
+                        window,
+                        word_size,
+                        prefetch: 0,
+                    };
+                    let s0 = (next(&mut seed) % 4000) as i32;
+                    let entries: Vec<DiagStruct> = (0..size)
+                        .map(|j| {
+                            let r = next(&mut seed);
+                            if r & 3 == 0 {
+                                entry_of(next(&mut seed))
+                            } else {
+                                entry_of(adversarial_entry(j + r as usize, s0, test))
+                            }
+                        })
+                        .collect();
+                    let cells: Vec<(i32, Vec<i32>)> = [0, 1, 2, window]
+                        .iter()
+                        .map(|&step| (s0 + step, distinct_offsets(&mut seed, size, n, 0)))
+                        .collect();
+                    let mut want_table = entries.clone();
+                    let want = run_cells(deferred, 0, &mut want_table, mask, test, &cells);
+                    let mut got_table = entries;
+                    let got = run_cells(masked, 0, &mut got_table, mask, test, &cells);
+                    assert_eq!(got, want, "{n} hits {test:?}: candidate calls");
+                    let at = got_table
+                        .iter()
+                        .zip(&want_table)
+                        .position(|(a, b)| a.raw_bits() != b.raw_bits());
+                    assert!(at.is_none(), "{n} hits {test:?}: entry {at:?}");
+                    calls += want.len();
+                }
+            }
+        }
+        assert!(calls > 1000, "the tables must give candidates: {calls}");
     }
 
     // ---- EXPERIMENT (LOSAT_X_BPHITBF): the branch-free test against the per-hit test ----

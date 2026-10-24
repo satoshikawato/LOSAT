@@ -17,9 +17,9 @@
 //! the dc-megablast fixtures (`tests/blastn_regression_fixtures.py`, `dc.*`).
 //!
 //! The inputs are one subject (the stage takes a search of one subject by the owner of a pool
-//! of two threads or more) and queries cut from LC738874 into files of this test: one query of
-//! 3900 bases (7801 letters with both strands and the sentinel), and two queries of 1900 bases
-//! (four contexts in one array).
+//! of two threads or more, or with `LOSAT_X_BNDCONE` by a search on one thread) and queries cut
+//! from LC738874 into files of this test: one query of 3900 bases (7801 letters with both
+//! strands and the sentinel), and two queries of 1900 bases (four contexts in one array).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -173,6 +173,30 @@ fn the_stage_runs_by_default_and_not_when_switched_off() {
         !stderr.contains("[TIMING] x_pairpardiscarr_seed:"),
         "{off:?}:\n{stderr}"
     );
+}
+
+// `LOSAT_X_BNDCONE` (in the strict set): a search on one thread has no pool, and runs the stage
+// on its own thread by default (the same bytes as the reference fold, chunks and seeds counted
+// by the stage's LOSAT_TIMING line), the reference fold with the switch at `0` (no chunk).
+#[test]
+fn the_stage_runs_at_one_thread() {
+    let query = query_file("one_thread", &[(180_000, 3900)]);
+    let (expected, _) = blastn(&query.0, &[], 1, &[SWITCH_OFF]);
+    assert!(!expected.is_empty());
+    for (one, taken) in [("1", true), ("0", false)] {
+        let on = [("LOSAT_X_BNDCONE", one), ("LOSAT_TIMING", "1")];
+        let (report, stderr) = blastn(&query.0, &[], 1, &on);
+        assert!(report == expected, "the report differs with {on:?}");
+        let (chunks, seeds) = stage_counts(&stderr);
+        if taken {
+            assert!(
+                chunks > 0 && seeds > 0,
+                "{on:?}: the stage took nothing:\n{stderr}"
+            );
+        } else {
+            assert_eq!((chunks, seeds), (0, 0), "{on:?}:\n{stderr}");
+        }
+    }
 }
 
 // The default template of dc-megablast (word size 11, coding, length 18), word size 12, the

@@ -590,30 +590,6 @@ const CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
 //                                         &LambdaRatio            // local
 //                                 );
 // ```
-pub(crate) fn redo_context(
-    input: &[PreliminaryHsp],
-    context_index: usize,
-    infos: &[BlastCompoQueryInfo],
-    subject: &[u8],
-    params: &BlastRedoAlignParams,
-    lambda: f64,
-    scratch: &mut GapAlignScratch,
-    workspace: &mut BlastCompositionWorkspace,
-    matrix_state: &mut Option<AdjustedProteinMatrix>,
-) -> Result<BlastRedoOneMatchResult> {
-    redo_context_observed(
-        input,
-        context_index,
-        infos,
-        subject,
-        params,
-        lambda,
-        scratch,
-        workspace,
-        matrix_state,
-        &mut |_| {},
-    )
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3641
 // ```c++
 //                                 Blast_RedoOneMatch(

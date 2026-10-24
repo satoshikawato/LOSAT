@@ -475,21 +475,10 @@ impl XSubjectSide {
     /// unless it is `0`. With it a search of
     /// `KEEP_FROM_BATCHES` or more batches keeps its plans only when `kept_within_threads`
     /// holds or it searches batches side by side (`stage_d_pipeline::x_searched_side_by_side`).
-    /// `LOSAT_X_TBNKEEPFEWSHADOW` (`shadow`) keeps them as with `=0`.
     pub(super) fn keep_few() -> bool {
         use std::sync::OnceLock;
         static ON: OnceLock<bool> = OnceLock::new();
-        *ON.get_or_init(|| !Self::shadow() && crate::utils::xswitch::on("LOSAT_X_TBNKEEPFEW"))
-    }
-
-    /// EXPERIMENT (LOSAT_X_TBNKEEPFEWSHADOW): set (opt-in). The plans are kept as with
-    /// `LOSAT_X_TBNKEEPFEW=0`, and every read of a kept plan also makes the plan of that use, as
-    /// a search that keeps none makes it, and compares the two (`plan`); a difference stops
-    /// the search. `x_keep_few_print_summary` prints the count at exit.
-    pub(super) fn shadow() -> bool {
-        use std::sync::OnceLock;
-        static ON: OnceLock<bool> = OnceLock::new();
-        *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNKEEPFEWSHADOW").is_some())
+        *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNKEEPFEW"))
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:627-631
@@ -615,81 +604,31 @@ impl XSubjectSide {
     ) -> Result<std::sync::Arc<XSubjectPlan>> {
         let mut failed = None;
         let mut own = None;
-        let mut made = false;
-        let kept = slot.get_or_init(|| {
-            made = true;
-            match build() {
-                Ok(plan) if self.keep(&plan) => {
-                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", true);
-                    Some(plan)
-                }
-                Ok(plan) => {
-                    // Over `KEEP_LIMIT`: the plan is made per use.
-                    crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", false);
-                    own = Some(plan);
-                    None
-                }
-                Err(error) => {
-                    failed = Some(error);
-                    None
-                }
+        let kept = slot.get_or_init(|| match build() {
+            Ok(plan) if self.keep(&plan) => {
+                crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", true);
+                Some(plan)
+            }
+            Ok(plan) => {
+                // Over `KEEP_LIMIT`: the plan is made per use.
+                crate::utils::xreach::x_reach!("LOSAT_X_TBNSSIDE", false);
+                own = Some(plan);
+                None
+            }
+            Err(error) => {
+                failed = Some(error);
+                None
             }
         });
         if let Some(error) = failed {
             return Err(error);
         }
         match (kept, own) {
-            (Some(plan), _) => {
-                if !made && Self::shadow() {
-                    Self::x_compare_with_own(plan, build()?);
-                }
-                Ok(std::sync::Arc::clone(plan))
-            }
+            (Some(plan), _) => Ok(std::sync::Arc::clone(plan)),
             (None, Some(plan)) => Ok(plan),
             (None, None) => build(),
         }
     }
-
-    // No NCBI counterpart: the comparison of the shadow mode; it does not change any value NCBI
-    // computes.
-    /// EXPERIMENT (LOSAT_X_TBNKEEPFEWSHADOW): stops the search when the plan made for a use
-    /// differs from the kept plan that use reads; counts the comparison otherwise.
-    fn x_compare_with_own(kept: &XSubjectPlan, own: std::sync::Arc<XSubjectPlan>) {
-        if let Some(difference) = super::x_subject_translate::x_plan_fields_difference(&own, kept) {
-            panic!(
-                "LOSAT_X_TBNKEEPFEWSHADOW: the plan made for a use differs from the kept plan of the subject: {difference}"
-            );
-        }
-        let residues: usize = kept.frames.iter().map(|frame| frame.aa_seq.len()).sum();
-        X_KEEP_SHADOW_READS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        X_KEEP_SHADOW_RESIDUES.fetch_add(residues as u64, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
-// No NCBI counterpart: counters of the shadow summary; they do not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_TBNKEEPFEWSHADOW): the reads of kept plans compared with a plan made for
-/// the use, and the translated residues in them (sentinels included).
-static X_KEEP_SHADOW_READS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static X_KEEP_SHADOW_RESIDUES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-// No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNKEEPFEWSHADOW): the summary line, printed at exit when the shadow is
-/// set (`x_subject_translate::print_summary`).
-pub(super) fn x_keep_few_print_summary() {
-    if !XSubjectSide::shadow() {
-        return;
-    }
-    let reads = X_KEEP_SHADOW_READS.load(std::sync::atomic::Ordering::Relaxed);
-    eprintln!(
-        "[X_SHADOW] TBNKEEPFEW kept_plan_reads_compared={reads} residues_compared={} ({})",
-        X_KEEP_SHADOW_RESIDUES.load(std::sync::atomic::Ordering::Relaxed),
-        if reads == 0 {
-            "nothing compared: no kept plan was read again"
-        } else {
-            "frames and units identical"
-        }
-    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
@@ -790,6 +729,12 @@ pub(super) fn x_scan_plan(
     // `run_local` is given, or a set that keeps its letters for a byte without an ncbi4na code)
     // are packed for the plan (`x_plan_store`), and the plan is made from them as for a packed
     // subject.
+    // The slot of the subject's kept plan when the search keeps them (the dispatch point below);
+    // a plan made for this search only may have no residues (LOSAT_X_TBNUNITXLATE).
+    let x_slot = x_subject.and_then(|(side, oid)| {
+        side.slot(oid, db_gencode, mask_lowercase)
+            .map(|slot| (side, slot))
+    });
     let x_build_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
         use crate::sequence::packed_subject::SubjectNt;
         match subject {
@@ -810,14 +755,19 @@ pub(super) fn x_scan_plan(
                     !mask_lowercase || store.lowercase().is_empty(),
                     "TBLASTN: a packed subject with lower-case letters searched with lowercase masking"
                 );
+                // EXPERIMENT (LOSAT_X_TBNUNITXLATE): the plan of a long subject made for this
+                // search only has no residues; each unit translates those it reads.
+                if x_slot.is_none() {
+                    let lean = super::x_subject_translate::x_units_translate(store.len());
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNUNITXLATE", lean);
+                    if lean {
+                        return super::x_subject_translate::x_packed_lean_plan(store, db_gencode);
+                    }
+                }
                 super::x_subject_translate::x_packed_subject_plan(store, db_gencode)
             }
         }
     };
-    let x_slot = x_subject.and_then(|(side, oid)| {
-        side.slot(oid, db_gencode, mask_lowercase)
-            .map(|slot| (side, slot))
-    });
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
     // ```c
     //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
@@ -908,14 +858,16 @@ pub(super) fn x_scan_plan(
 /// Scan one unit and hand every filled offset
 /// array to `on_pairs` in scan order, as NCBI c++/src/algo/blast/core/
 /// aa_ungapped.c:492-516 consumes it (`for (i = 0; i < hits; ++i)`).
+/// `subject` holds the unit's frame from the chunk's first residue on (the frame's `aa_seq`
+/// from `1 + chunk.offset`, or the residues the unit translated, `x_unit_residues`).
 pub(super) fn x_scan_unit(
     plan: &XScanPlan,
     unit: usize,
+    subject: &[u8],
     pairs: &mut Vec<BlastOffsetPair>,
     mut on_pairs: impl FnMut(&[BlastOffsetPair]),
 ) {
-    let (frame_index, chunk, ranges) = &plan.subject.units[unit];
-    let frame = &plan.subject.frames[*frame_index];
+    let (_, _, ranges) = &plan.subject.units[unit];
     // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1018-1019
     // BlastChooseProteinScanSubject(lookup_wrap);
     // aux_struct->WordFinder = BlastAaWordFinder;
@@ -958,7 +910,7 @@ pub(super) fn x_scan_unit(
                     scan_byte,
                     &plan.lookup,
                     presence,
-                    &frame.aa_seq[1 + chunk.offset..],
+                    subject,
                     pairs,
                     pair_capacity,
                     &mut scan_range,
@@ -966,7 +918,7 @@ pub(super) fn x_scan_unit(
             } else if scan_bf {
                 super::x_scan_bf::x_scan_one_range_bf(
                     &plan.lookup,
-                    &frame.aa_seq[1 + chunk.offset..],
+                    subject,
                     pairs,
                     pair_capacity,
                     &mut scan_range,
@@ -974,7 +926,7 @@ pub(super) fn x_scan_unit(
             } else {
                 s_blast_aa_scan_subject_one_range(
                     &plan.lookup,
-                    &frame.aa_seq[1 + chunk.offset..],
+                    subject,
                     pairs,
                     pair_capacity,
                     &mut scan_range,
@@ -2237,16 +2189,13 @@ mod tests {
         let (kept, read) = (scan(Some(&four)), scan(Some(&four)));
         assert!(std::sync::Arc::ptr_eq(&kept, &read));
         assert_eq!(four.kept_bytes(), XSubjectSide::plan_bytes(&kept));
-        assert!(first
-            .frames
-            .iter()
-            .map(|frame| (frame.frame, &frame.aa_seq))
-            .eq(kept.frames.iter().map(|frame| (frame.frame, &frame.aa_seq))));
-        assert!(first
-            .units
-            .iter()
-            .map(|unit| (unit.0, &unit.2))
-            .eq(kept.units.iter().map(|unit| (unit.0, &unit.2))));
+        // The kept plan is the plan a use makes for itself, in every field. For subject plans
+        // `aa_seq_nomask` is None and `seg_masks` is empty (and `mask_lowercase` is off here), so
+        // the comparison is trivial for those two; it covers the residues, lengths and units.
+        assert_eq!(
+            crate::algorithm::tblastn::x_subject_translate::x_plan_fields_difference(&first, &kept),
+            None
+        );
         assert!(!first.units.is_empty());
     }
 

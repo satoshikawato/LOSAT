@@ -3,7 +3,7 @@
 //! blocks of outfmt 7, and the data of the pairwise report.
 
 use std::io::{self, Write};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -66,6 +66,104 @@ fn display_base(base: u8) -> u8 {
     }
 }
 
+// No NCBI counterpart (the arrangement): `display_base` of every byte, on the plus strand and
+// complemented for the minus strand (the bits reversed, as in `display_residue_scan`), for the
+// display table (`LOSAT_X_DISPTABLE`). NCBI's `sm_BaseToIdx` (above) is the plus-strand table.
+const fn display_base_table(minus: bool) -> [u8; 256] {
+    let codes = b"-ACMGRSVTWYHKDBN";
+    let mut table = [0u8; 256];
+    let mut byte = 0;
+    while byte < 256 {
+        let upper = (byte as u8).to_ascii_uppercase();
+        let mut mask = 0;
+        if upper == b'U' {
+            mask = 8;
+        } else if upper == b'X' {
+            mask = 15;
+        } else {
+            let mut code = 0;
+            while code < codes.len() {
+                if codes[code] == upper {
+                    mask = code as u8;
+                    break;
+                }
+                code += 1;
+            }
+        }
+        if minus {
+            mask = ((mask & 1) << 3) | ((mask & 2) << 1) | ((mask & 4) >> 1) | ((mask & 8) >> 3);
+        }
+        table[byte] = mask;
+        byte += 1;
+    }
+    table
+}
+
+const DISPLAY_BASE_PLUS: [u8; 256] = display_base_table(false);
+const DISPLAY_BASE_MINUS: [u8; 256] = display_base_table(true);
+
+// No NCBI counterpart: reads the LOSAT_X_DISPTABLE variable once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_DISPTABLE): a switch of the strict set (`utils/xswitch.rs`): on unless it
+/// is `0`.
+fn x_display_table() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DISPTABLE"))
+}
+
+// NCBI reference: c++/src/objects/seqfeat/Genetic_code_table.cpp:155-160,228-231 (quoted at
+// `blastx::report::display_codon`): NCBI's display reads the residue of a codon's state from a
+// table (`m_AminoAcid`) that it fills once per code; `alnvec.cpp:911-918` (at
+// `display_residue`) steps the state by the three bases.
+/// The display's residue of each codon of 4-bit codes, at `(first << 8) | (second << 4) |
+/// third`: `display_codon` of the 4,096 codons of `code`, made at the first use of the code and
+/// kept for the process (`GeneticCode::display_slot`).
+fn display_table(code: &GeneticCode) -> &'static [u8; 4096] {
+    code.display_slot().get_or_init(|| {
+        Box::new(std::array::from_fn(|codon| {
+            let masks = [
+                (codon >> 8) as u8,
+                ((codon >> 4) & 15) as u8,
+                (codon & 15) as u8,
+            ];
+            crate::algorithm::blastx::report::display_codon(masks, code)
+        }))
+    })
+}
+
+/// A genetic code as the display translates with it (`display_residue`): with
+/// `LOSAT_X_DISPTABLE` the code's table (`display_table`), looked up once for many residues.
+#[derive(Clone, Copy)]
+pub(crate) struct DisplayCode<'a> {
+    code: &'a GeneticCode,
+    table: Option<&'static [u8; 4096]>,
+}
+
+impl<'a> DisplayCode<'a> {
+    pub(crate) fn new(code: &'a GeneticCode) -> Self {
+        Self {
+            code,
+            table: x_display_table().then(|| display_table(code)),
+        }
+    }
+
+    /// `display_residue` with this code.
+    pub(crate) fn residue(&self, sequence: &[u8], frame: i8, offset: usize) -> u8 {
+        let Some(table) = self.table else {
+            return display_residue_scan(sequence, frame, offset, self.code);
+        };
+        let first = 3 * offset + frame.unsigned_abs() as usize - 1;
+        let base = |i: usize| -> usize {
+            if frame > 0 {
+                DISPLAY_BASE_PLUS[sequence[first + i] as usize] as usize
+            } else {
+                DISPLAY_BASE_MINUS[sequence[sequence.len() - first - i - 1] as usize] as usize
+            }
+        };
+        table[(base(0) << 8) | (base(1) << 4) | base(2)]
+    }
+}
+
 // NCBI reference: c++/src/objtools/alnmgr/alnvec.hpp:292-302
 // ```c++
 //     if (GetWidth(row) == 3) {
@@ -104,6 +202,12 @@ fn display_base(base: u8) -> u8 {
 /// codon's bases read on the frame's strand (the IUPAC complement on the minus strand) and
 /// translated with the display's table (`display_codon`, which merges D/N, E/Q and I/L).
 pub(crate) fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &GeneticCode) -> u8 {
+    DisplayCode::new(code).residue(sequence, frame, offset)
+}
+
+/// `display_residue` without the display table (`LOSAT_X_DISPTABLE=0`): each base's code found
+/// in the IUPAC letters and the codon translated by `display_codon`.
+fn display_residue_scan(sequence: &[u8], frame: i8, offset: usize, code: &GeneticCode) -> u8 {
     let first = 3 * offset + frame.unsigned_abs() as usize - 1;
     let masks = std::array::from_fn(|i| {
         if frame > 0 {
@@ -162,10 +266,12 @@ fn displayed_residues<'r>(
 ) -> (impl Iterator<Item = u8> + 'r, impl Iterator<Item = u8> + 'r) {
     let hit = &hsp.hit;
     let query_frame = hit.query_frame as i8;
+    let (query_display, subject_display) =
+        (DisplayCode::new(query_code), DisplayCode::new(db_code));
     let query_row = (hit.sort_query_offset..hit.sort_query_end)
-        .map(move |offset| display_residue(query, query_frame, offset, query_code));
+        .map(move |offset| query_display.residue(query, query_frame, offset));
     let subject_row = (hit.sort_subject_offset..hit.sort_subject_end).map(move |offset| {
-        display_residue(subject, hsp.subject_frame, offset - subject_first, db_code)
+        subject_display.residue(subject, hsp.subject_frame, offset - subject_first)
     });
     (query_row, subject_row)
 }
@@ -750,12 +856,17 @@ pub(crate) fn xml_query_masks(
 /// label is the frame of the searched letters, which can differ from the frame the record
 /// gives the same letters: NCBI then shows a mask of another frame on the row (`locFrame ==
 /// frame`), and so does LOSAT.
+///
+/// With `seek` (`LOSAT_X_TBXMASKSEEK`) the scan of a frame's ranges starts at the first range
+/// whose end, or the end of a range before it, reaches `low`, and stops at the first range
+/// that starts after `high`; the ranges it leaves out are the ones the full scan skips.
 fn lowercase_query_row(
     row: &mut [u8],
     frame: i8,
     low: i32,
     high: i32,
-    masks: &[(i8, Vec<(i32, i32)>)],
+    masks: &[FrameMasks],
+    seek: bool,
 ) {
     let columns = row.len() as i32;
     let column = |nt: i32| -> i32 {
@@ -776,8 +887,16 @@ fn lowercase_query_row(
         };
         column.clamp(0, columns - 1)
     };
-    for (_, frame_masks) in masks.iter().filter(|(mask_frame, _)| *mask_frame == frame) {
-        for &(from, to) in frame_masks {
+    for frame_masks in masks.iter().filter(|masks| masks.frame == frame) {
+        let first_range = if seek {
+            frame_masks.ends_max.partition_point(|&end| end < low)
+        } else {
+            0
+        };
+        for &(from, to) in &frame_masks.ranges[first_range..] {
+            if seek && from > high {
+                break;
+            }
             if to < low || from > high {
                 continue;
             }
@@ -828,13 +947,45 @@ pub(crate) fn pairwise_hits(
     hits.iter().map(|hsp| rows.hit(hsp, &mut window)).collect()
 }
 
+// No NCBI counterpart: the masks of `shown_query_masks` arranged for `lowercase_query_row`. The
+// lowercase letters of a row do not depend on the order of the ranges, so a frame's ranges are
+// sorted by start, and the running maximum of their ends lets the row's scan start at the first
+// range that can reach it (`LOSAT_X_TBXMASKSEEK`). Before, every row scanned all ranges of its
+// frame: in TBLASTX of two ~650 kb genomes that scan was most of the row's time.
+/// The shown SEG masks of one frame of a query, sorted by start.
+struct FrameMasks {
+    frame: i8,
+    ranges: Vec<(i32, i32)>,
+    /// `ends_max[i]`: the largest end of `ranges[..=i]` (non-decreasing).
+    ends_max: Vec<i32>,
+}
+
+impl FrameMasks {
+    fn new(frame: i8, mut ranges: Vec<(i32, i32)>) -> Self {
+        ranges.sort_unstable();
+        let ends_max = ranges
+            .iter()
+            .scan(i32::MIN, |max, &(_, to)| {
+                *max = (*max).max(to);
+                Some(*max)
+            })
+            .collect();
+        Self {
+            frame,
+            ranges,
+            ends_max,
+        }
+    }
+}
+
 /// What the outfmt 0 row of an HSP (`PairwiseRows::hit`) reads besides the HSP: the inputs of
 /// `pairwise_hits`, with the queries' shown masks made once.
 pub(crate) struct PairwiseRows<'a> {
     queries: &'a [FastaRecord],
     subjects: &'a [FastaRecord],
     subject_letters: SubjectLetters<'a>,
-    query_masks: Vec<Vec<(i8, Vec<(i32, i32)>)>>,
+    query_masks: Vec<Vec<FrameMasks>>,
+    mask_seek: bool,
     query_code: &'a GeneticCode,
     db_code: &'a GeneticCode,
     query_placements: &'a Placements,
@@ -853,7 +1004,7 @@ impl<'a> PairwiseRows<'a> {
         query_placements: &'a Placements,
         subject_placements: &'a Placements,
     ) -> Self {
-        let query_masks: Vec<Vec<(i8, Vec<(i32, i32)>)>> = query_stats
+        let query_masks: Vec<Vec<FrameMasks>> = query_stats
             .iter()
             .zip(queries)
             .enumerate()
@@ -863,6 +1014,9 @@ impl<'a> PairwiseRows<'a> {
                     query.seq().len(),
                     query_placements.offset(q_idx),
                 )
+                .into_iter()
+                .map(|(frame, ranges)| FrameMasks::new(frame, ranges))
+                .collect()
             })
             .collect();
         Self {
@@ -870,6 +1024,7 @@ impl<'a> PairwiseRows<'a> {
             subjects,
             subject_letters,
             query_masks,
+            mask_seek: crate::utils::xswitch::on("LOSAT_X_TBXMASKSEEK"),
             query_code,
             db_code,
             query_placements,
@@ -934,6 +1089,7 @@ impl<'a> PairwiseRows<'a> {
             low,
             high,
             &self.query_masks[q_idx],
+            self.mask_seek,
         );
         hit.num_ident = identities;
         hit.num_positives = positives;
@@ -1672,6 +1828,65 @@ mod tests {
         assert_eq!(display_base(b'*'), 0);
     }
 
+    // The display table (LOSAT_X_DISPTABLE) holds the scan's answers: each byte's code on both
+    // strands, each codon of 4-bit codes of each genetic code, and so each residue of a row.
+    #[test]
+    fn display_table_gives_the_residues_of_the_scan() {
+        let reversed = |mask: u8| {
+            ((mask & 1) << 3) | ((mask & 2) << 1) | ((mask & 4) >> 1) | ((mask & 8) >> 3)
+        };
+        for byte in 0..=255u8 {
+            assert_eq!(DISPLAY_BASE_PLUS[byte as usize], display_base(byte));
+            assert_eq!(
+                DISPLAY_BASE_MINUS[byte as usize],
+                reversed(display_base(byte))
+            );
+        }
+        let letters = b"ACGTUNXRYMKSWBDHVacgtunxry-*";
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let sequence: Vec<u8> = (0..61)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                letters[(state % letters.len() as u64) as usize]
+            })
+            .collect();
+        let mut codes = 0;
+        for id in 0..=255u8 {
+            let Ok(code) = GeneticCode::try_from_id(id) else {
+                continue;
+            };
+            codes += 1;
+            let table = display_table(&code);
+            for (codon, &residue) in table.iter().enumerate() {
+                let masks = [
+                    (codon >> 8) as u8,
+                    ((codon >> 4) & 15) as u8,
+                    (codon & 15) as u8,
+                ];
+                assert_eq!(
+                    residue,
+                    crate::algorithm::blastx::report::display_codon(masks, &code)
+                );
+            }
+            let display = DisplayCode {
+                code: &code,
+                table: Some(table),
+            };
+            for frame in [1i8, 2, 3, -1, -2, -3] {
+                for offset in 0..(sequence.len() + 1 - frame.unsigned_abs() as usize) / 3 {
+                    assert_eq!(
+                        display.residue(&sequence, frame, offset),
+                        display_residue_scan(&sequence, frame, offset, &code),
+                        "code {id} frame {frame} offset {offset}"
+                    );
+                }
+            }
+        }
+        assert!(codes > 20);
+    }
+
     // NCBI c++/src/objects/seqfeat/Genetic_code_table.cpp:191-207 merges D/N to B, E/Q
     // to Z and I/L to J; the minus strand is the IUPAC complement in reverse.
     #[test]
@@ -1799,15 +2014,56 @@ mod tests {
         let masks = query_dna_masks(&stats, 30);
         assert_eq!(masks[0], (1, vec![(6, 12)]));
         assert_eq!(masks[1], (-1, vec![(18, 23)]));
-        let masks = shown_query_masks(masks, 30, 0);
-        let mut plus = b"AAAAAAAAAA".to_vec();
-        lowercase_query_row(&mut plus, 1, 0, 29, &masks);
-        assert_eq!(&plus, b"AAaaaAAAAA");
-        // Frame -1 residue i covers 0-based nucleotides 27-3i..29-3i: the mask 18-23 covers
-        // residues 2 and 3 only.
-        let mut minus = b"AAAAAAAAAA".to_vec();
-        lowercase_query_row(&mut minus, -1, 0, 29, &masks);
-        assert_eq!(&minus, b"AAaaAAAAAA");
+        let masks: Vec<FrameMasks> = shown_query_masks(masks, 30, 0)
+            .into_iter()
+            .map(|(frame, ranges)| FrameMasks::new(frame, ranges))
+            .collect();
+        for seek in [false, true] {
+            let mut plus = b"AAAAAAAAAA".to_vec();
+            lowercase_query_row(&mut plus, 1, 0, 29, &masks, seek);
+            assert_eq!(&plus, b"AAaaaAAAAA");
+            // Frame -1 residue i covers 0-based nucleotides 27-3i..29-3i: the mask 18-23 covers
+            // residues 2 and 3 only.
+            let mut minus = b"AAAAAAAAAA".to_vec();
+            lowercase_query_row(&mut minus, -1, 0, 29, &masks, seek);
+            assert_eq!(&minus, b"AAaaAAAAAA");
+        }
+    }
+
+    #[test]
+    fn mask_seek_lowercases_the_letters_of_the_full_scan() {
+        // Ranges in any order, overlapping, empty (start after end) or outside the row, on rows
+        // of both frame signs.
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |bound: i32| -> i32 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % bound as u64) as i32
+        };
+        for _ in 0..2000 {
+            let ranges: Vec<(i32, i32)> = (0..next(9))
+                .map(|_| {
+                    let from = next(70) - 5;
+                    (from, from + next(16) - 3)
+                })
+                .collect();
+            let masks = [
+                FrameMasks::new(1, ranges.clone()),
+                FrameMasks::new(-1, ranges),
+            ];
+            let low = next(55);
+            let high = low + 2 + next(58 - low);
+            for frame in [1, -1] {
+                let mut rows = [false, true].map(|seek| {
+                    let mut row = vec![b'A'; ((high - low + 1) / 3) as usize];
+                    lowercase_query_row(&mut row, frame, low, high, &masks, seek);
+                    row
+                });
+                let seek = rows[1].split_off(0);
+                assert_eq!(seek, rows[0], "frame {frame} low {low} high {high}");
+            }
+        }
     }
 
     // NCBI c++/src/algo/blast/core/blast_filter.c:993 (BlastSeqLocCombine(filter_out, 0)) joins

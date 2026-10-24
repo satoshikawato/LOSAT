@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use super::file::DbFile;
 use super::header::{decode_defline_taxids, decode_deflines_as, Defline};
-use super::index::{self, IndexFile};
+use super::index::IndexFile;
 use super::{SeqDbError, SeqType, XDbIdxRead};
 
 /// One volume of a database (`NAME.pin` / `.psq` / `.phr`, or the `n` files).
@@ -60,8 +60,7 @@ impl Volume {
         let index_file = DbFile::open(&index_path)?;
         let index = match mode {
             XDbIdxRead::Off => IndexFile::parse(&index_file.read_all()?, seqtype, &index_path)?,
-            XDbIdxRead::On => IndexFile::open(index_file, seqtype, false)?,
-            XDbIdxRead::Shadow => IndexFile::open(index_file, seqtype, true)?,
+            XDbIdxRead::On => IndexFile::open(index_file, seqtype)?,
         };
         let volume = Self {
             base: base.to_path_buf(),
@@ -225,19 +224,7 @@ impl Volume {
         if let Some(offsets) = self.index.held_sequence_offsets() {
             return Ok(held_block_end(offsets, first, max_bytes, self.lead()));
         }
-        let end = self.x_read_block_end(first, max_bytes, X_BLOCK_END_WINDOW)?;
-        if let Some(offsets) = self.index.x_shadow_sequence_offsets() {
-            index::X_SHADOW_BLOCK_ENDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let expected = held_block_end(offsets, first, max_bytes, self.lead());
-            if end != expected {
-                index::x_shadow_difference(format!(
-                    "{}: the block from {first} within {max_bytes} bytes ends at {end}, the held \
-                     array's at {expected}",
-                    self.base.display()
-                ));
-            }
-        }
-        Ok(end)
+        self.x_read_block_end(first, max_bytes, X_BLOCK_END_WINDOW)
     }
 
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): `block_end` over the offsets in the
@@ -772,8 +759,6 @@ impl Volume {
                     return false;
                 }
             }
-            index::X_SHADOW_RUN_RECORDS
-                .fetch_add((stop - i) as u64, std::sync::atomic::Ordering::Relaxed);
             i = stop;
         }
         true

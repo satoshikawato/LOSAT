@@ -53,7 +53,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | 「Filters and Masking」：Filter（Low complexity regions、Species-specific repeats）、Mask（Mask for lookup table only、Mask lower case letters） | 「Filters and Masking」：Low complexity regions filter（`-dust` / `-seg`）、Mask for lookup table only（TBLASTN の `-soft_masking`）、Mask lower case letters（`-lcase_masking`） | 寄せる | Species-specific repeats は採らない（NCBI のリピートのデータベース）。DUST・SEG は値（no、yes、引数）を書ける欄のまま |
 | 「Discontiguous Word Options」：Template length、Template type | 同じ節（`-template_length`、`-template_type`）。task が dc-megablast のとき、または値があるときに出す | 採る | NCBI は discontiguous megablast のときだけ出す。値が隠れたまま argv に入らないよう、値があれば出す |
 | 「PSI/PHI/DELTA BLAST」の節 | なし | 採らない | LOSAT に無い |
-| （無い） | 「Other Parameters」：NCBI の画面に無い LOSAT の option（BLASTN の Max HSPs per subject・Percent identity・Subject best hit、BLASTP・TBLASTN・TBLASTX の Neighboring words threshold・Two-hit window size、TBLASTN の X-dropoff・Sum statistics） | LOSAT だけ | Algorithm parameters の最後の節 |
+| （無い） | 「Other Parameters」：NCBI の画面に無い LOSAT の option（4 program の Number of descriptions・Number of alignments（`-num_descriptions` / `-num_alignments`。hit list の大きさが outfmt 0 と outfmt 6 / 7 で違うと検索を 2 回行う、`docs/web/abi_v2.md` §7）、BLASTN の Max HSPs per subject・Percent identity・Subject best hit、BLASTP・TBLASTN・TBLASTX の Neighboring words threshold・Two-hit window size、TBLASTN の X-dropoff・Sum statistics） | LOSAT だけ | Algorithm parameters の最後の節 |
 | 2 つ目の BLAST のボタン | Algorithm parameters を開いたとき、その下に 2 つ目の「Run LOSAT」（`add-to-queue-bottom`） | 採る | |
 | フッター、ヘッダー、ロゴ | LOSAT の見出し（「LOSAT Web」と「Local processing…」） | 採らない | ブランド |
 

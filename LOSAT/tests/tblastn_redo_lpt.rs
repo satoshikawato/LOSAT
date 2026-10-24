@@ -18,10 +18,15 @@
 //! `stage_d_pipeline.rs` compare the scope with the `par_iter` path in one process); either way
 //! the matches are applied in list order. So the property under test is that the report depends
 //! neither on the switch nor on the thread count; that reports equal NCBI's is the business of the
-//! fixture comparisons. `LOSAT_X_REACH` shows the side each run took. The input (the first 40
-//! proteins of AvCLPV against its genome cut into 42 pieces of 10 kb) has more matches than one
-//! chunk holds at 2 threads (64) and at 4 (128); with `-max_target_seqs 1` early termination
-//! leaves matches of later chunks out before they start.
+//! fixture comparisons. `LOSAT_X_REACH` shows the side each run took. Two inputs:
+//! - the first 40 proteins of AvCLPV against its genome cut into 42 pieces of 10 kb: two query
+//!   batches of 429 and 415 matches, more than one chunk holds at 2 threads (64) and at 4 (128),
+//!   every chunk with matches to redo;
+//! - its proteins 2 and 21 against the genome cut into 416 pieces of 1 kb with
+//!   `-max_target_seqs 2`: 146 matches; once both heaps are full, early termination leaves
+//!   matches out before their chunk starts (at 2 threads 8 of the second chunk's 64 are redone,
+//!   by the new path with the others' slots empty, and none of the third chunk's 18, which takes
+//!   the reference side; at 4 threads none of the second chunk's 18).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,10 +35,6 @@ mod reach_support;
 
 const SWITCH: &str = "LOSAT_X_TBNREDOLPT";
 const OFF: (&str, &str) = ("LOSAT_X_TBNREDOLPT", "0");
-/// The proteins of the query.
-const PROTEINS: usize = 40;
-/// The bases of each subject piece.
-const PIECE: usize = 10_000;
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -56,8 +57,8 @@ fn losat(switches: &[(&str, &str)]) -> Command {
     command
 }
 
-/// The query file (the first `PROTEINS` records of AvCLPV.faa) and the subject file (the AvCLPV
-/// genome in pieces of `PIECE` bases), in a directory of the test's own.
+/// The query file (the records of AvCLPV.faa at `proteins`, 0-based) and the subject file (the
+/// AvCLPV genome in pieces of `piece` bases), in a directory of the test's own.
 struct Inputs {
     dir: PathBuf,
     query: PathBuf,
@@ -65,7 +66,7 @@ struct Inputs {
 }
 
 impl Inputs {
-    fn new(test: &str) -> Self {
+    fn new(test: &str, proteins: &[usize], piece: usize) -> Self {
         let dir = std::env::temp_dir().join(format!(
             "losat-tblastn-redo-lpt-{test}-{}",
             std::process::id()
@@ -73,11 +74,12 @@ impl Inputs {
         std::fs::create_dir_all(&dir).unwrap();
         let query = dir.join("q.faa");
         let text = std::fs::read_to_string(fasta("AvCLPV.faa")).unwrap();
-        let end = text
-            .match_indices('>')
-            .nth(PROTEINS)
-            .map_or(text.len(), |(at, _)| at);
-        std::fs::write(&query, &text[..end]).unwrap();
+        let starts: Vec<usize> = text.match_indices('>').map(|(at, _)| at).collect();
+        let record = |index: usize| {
+            &text[starts[index]..starts.get(index + 1).copied().unwrap_or(text.len())]
+        };
+        let picked: String = proteins.iter().map(|&index| record(index)).collect();
+        std::fs::write(&query, picked).unwrap();
         let subject = dir.join("pieces.fna");
         let genome = std::fs::read_to_string(fasta("AvCLPV.fasta")).unwrap();
         let bases: String = genome
@@ -87,7 +89,7 @@ impl Inputs {
             .collect();
         let pieces: String = bases
             .as_bytes()
-            .chunks(PIECE)
+            .chunks(piece)
             .enumerate()
             .map(|(index, piece)| format!(">p{index}\n{}\n", std::str::from_utf8(piece).unwrap()))
             .collect();
@@ -140,7 +142,8 @@ impl Drop for Inputs {
 /// the one-thread report of `=0`, and `=0` records no side.
 #[test]
 fn the_redo_largest_first_gives_the_same_report() {
-    let inputs = Inputs::new("same");
+    let proteins: Vec<usize> = (0..40).collect();
+    let inputs = Inputs::new("same", &proteins, 10_000);
     for targets in [500, 1] {
         let (reference, _) = inputs.tblastn(targets, 1, &[OFF]);
         assert!(!reference.is_empty(), "targets {targets}: no hits");
@@ -165,5 +168,23 @@ fn the_redo_largest_first_gives_the_same_report() {
                 "targets {targets} threads {threads}: against =0"
             );
         }
+    }
+}
+
+/// With matches that early termination leaves out before their chunk starts, the new path runs
+/// with empty slots and the chunks left out take the reference side (both sides recorded at 2
+/// and 4 threads); every report is the one-thread report of `=0`.
+#[test]
+fn matches_left_out_before_their_chunk_give_the_same_report() {
+    let inputs = Inputs::new("ended", &[1, 20], 1_000);
+    let (reference, _) = inputs.tblastn(2, 1, &[OFF]);
+    assert!(!reference.is_empty(), "no hits");
+    for (threads, side) in [(1, (false, true)), (2, (true, true)), (4, (true, true))] {
+        let (off, off_side) = inputs.tblastn(2, threads, &[OFF]);
+        assert_eq!(off_side, (false, false), "threads {threads}: =0's side");
+        assert_eq!(off, reference, "threads {threads}: =0 against one thread");
+        let (report, reached) = inputs.tblastn(2, threads, &[]);
+        assert_eq!(reached, side, "threads {threads}: default's side");
+        assert_eq!(report, reference, "threads {threads}: against =0");
     }
 }

@@ -4441,7 +4441,8 @@ Scheduling (each value computed by one thread with the original function; order 
   `the_redo_lpt_scope_returns_the_par_iter_results_by_index`, `a_panicking_redo_match_propagates_and_the_pool_stays_usable`;
   `tests/tblastn_redo_lpt.rs`). NCBI runs the same matches in one `omp for schedule(static)` (`blast_kappa.c`
   3448-3451), whose fixed shares have the same problem. Conditional: two or more threads and two or more matches,
-  on each chunk with two or more matches to redo (`x_reach!`); one thread keeps the loop on the calling thread.
+  on each chunk with two or more matches to redo (`x_reach!`); one thread (also each query batch searched side by
+  side with others, on one thread) keeps the loop on the calling thread.
   MEASURED
 - `LOSAT_X_TBNKEEPFEW=1` tblastn (memory; in the strict set from the pull request that added it,
   2026-10-19, with `TBNFRAMEREUSE`; `=0` turns it off; `tblastn/search_seed.rs`

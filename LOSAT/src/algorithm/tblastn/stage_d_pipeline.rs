@@ -1673,7 +1673,8 @@ fn run_local_search_with_pool(
             }
         }
     } else {
-        // One thread or one match: the redo runs here, outside LOSAT_X_TBNREDOLPT's rule.
+        // One thread (also a query batch searched side by side with others, on one thread each) or
+        // one match: the redo runs here, outside LOSAT_X_TBNREDOLPT's rule.
         #[cfg(feature = "parallel")]
         if x_tbn_redo_lpt() {
             crate::utils::xreach::x_reach!("LOSAT_X_TBNREDOLPT", false);

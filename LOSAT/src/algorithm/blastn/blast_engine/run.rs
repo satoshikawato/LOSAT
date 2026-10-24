@@ -18274,7 +18274,7 @@ fn search_query_chunks(
             !chunk.queries.is_empty(),
             "a query chunk without a query is not supported by LOSAT's BLASTN"
         );
-        let mut parts: Vec<FastaRecord> = chunk
+        let parts: Vec<FastaRecord> = chunk
             .queries
             .iter()
             .map(|part| queries[part.query].cut(part.from, part.to))
@@ -18285,11 +18285,9 @@ fn search_query_chunks(
             .map(|part| restrict_masks(&query_masks[part.query], part, query_offsets[part.query]))
             .collect();
         let part_masks = chunk_query_masks(args, &parts, restricted, parallel_pool);
-        // EXPERIMENT (LOSAT_X_BNQDROP): the chunk's records are copies that this call alone reads;
-        // it drops their letters once it has encoded them.
         let batch = search_query_batch(
             args,
-            x_query_drop::BatchQueries::Held(&mut parts),
+            x_query_drop::BatchQueries::Shared(&parts),
             subjects,
             reborrow_outputs(&mut outputs),
             parallel_pool,

@@ -22,8 +22,11 @@
 //! drops their letters after its last reader (the encoding and the query chunks), before it builds
 //! the lookup tables (`record.sequence = Vec::new()`, as LOSAT_X_BNSTORE does with the subjects'
 //! letters). The loop keeps the records without letters for a writer after the batch, as the
-//! streamed records are kept. The records of a batch's query chunks (`FastaRecord::cut`, copies
-//! the search alone reads) drop their letters after their own encoding wherever the switch is on.
+//! streamed records are kept. A batch split into query chunks cuts them from its records' letters,
+//! so it drops the letters after its chunks, before its traceback; the chunks' own copies
+//! (`FastaRecord::cut`) keep theirs until the chunk ends, as before (dropping a copy of about 1 MiB
+//! before its chunk's scan saved nothing measurable: blastn of the 5.5 Mb query below, whose
+//! records LOSAT_X_QSTREAM reads batch by batch, read the same max RSS).
 //!
 //! The rule (`Rule::acts`; the reach of the switch is recorded where `search_cli` decides): every
 //! output format reads no query letter after the search (`BlastnOutputFormat::reads_query_letters`:
@@ -44,10 +47,13 @@
 //!
 //! Memory: the peak of a megablast batch is the scan (with LOSAT_X_BNLUTDROP), where the letters
 //! of a 5.5 Mb query (E. coli Sakai x MG1655) were 5.2 MiB beside the 10.5 MiB of the BLASTNA
-//! buffer and the 106 MiB of the lookup table (plan v4 line MF, `REPORT.md` §2.3).
+//! buffer and the 106 MiB of the lookup table (plan v4 line MF, `REPORT.md` §2.3): its peak
+//! `RssAnon` falls by 5.0-5.3 MiB at one and 16 threads, `-subject` and `-db`. Megablast of 31,168
+//! cDNAs at one thread (37 batches, 89 MB of letters) drops each batch's letters after its
+//! encoding; its peak, in the first batches, falls by 4.4 MiB.
 //!
 //! Timing: with LOSAT_TIMING, `[TIMING] x_bn_q_drop: batches= records= letters=` gives the number
-//! of batches (query chunks included) and records whose letters were dropped, and their letters.
+//! of batches and records whose letters were dropped, and their letters.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
@@ -151,8 +157,8 @@ impl Store {
 }
 
 /// The query records of a batch as `search_query_batch` reads them: shared with other readers, or
-/// held by the caller alone (the loop's batch taken from a `Store`, a batch's query chunks), whose
-/// letters the batch drops after its last reader of them.
+/// held by the caller alone (the loop's batch taken from a `Store`), whose letters the batch drops
+/// after its last reader of them.
 pub(super) enum BatchQueries<'r> {
     Shared(&'r [FastaRecord]),
     Held(&'r mut [FastaRecord]),

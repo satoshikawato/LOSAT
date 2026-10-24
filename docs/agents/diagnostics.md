@@ -3080,14 +3080,14 @@ Scheduling (each value computed by one thread with the original function; order 
   and the batch's query chunks), before it builds the lookup tables (`record.sequence = Vec::new()`, as
   `LOSAT_X_BNSTORE` does with the subjects'); the records keep their IDs, titles and messages, and every length read
   later comes from the lengths taken before (`query_lengths` in the traceback, the searched lengths for an invalid
-  query's message and the Seq-aligns). The rule (class conditional, recorded where `search_cli` decides): every output
+  query's message and the Seq-aligns). A batch split into query chunks cuts them from the records' letters, so it drops
+  them after its chunks, before its traceback; the chunks' own copies keep their letters to the chunk's end, as before.
+  The rule (class conditional, recorded where `search_cli` decides): every output
   format shows no query letter (`BlastnOutputFormat::reads_query_letters`: outfmt 6, 7, 8, 9, 12 and SAM without both
   `SQ` and `SR`; BLASTN takes no custom tabular column) and no caller takes the hits' records, no `-query_loc`, no
   `LOSAT_X_QBATCHPAR` slot may run (the condition `LOSAT_X_QSTREAM`'s rule computes), and the records are read before
-  the search (`LOSAT_X_QSTREAM` not acting; not `run_local`, whose caller holds its records). The records of a batch's
-  query chunks (`FastaRecord::cut`, copies that only the search reads) drop their letters after their own encoding
-  wherever the switch is on, with every format. With `LOSAT_TIMING` `[TIMING] x_bn_q_drop: batches= records= letters=`
-  gives the batches (query chunks included), records and letters dropped.
+  the search (`LOSAT_X_QSTREAM` not acting; not `run_local`, whose caller holds its records). With `LOSAT_TIMING`
+  `[TIMING] x_bn_q_drop: batches= records= letters=` gives the batches, records and letters dropped.
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
   `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; in the strict set since 2026-10-17,
   default ON: `LOSAT_X_DISCLUTPAR=0` turns it off; evidence below, "Default ON") the

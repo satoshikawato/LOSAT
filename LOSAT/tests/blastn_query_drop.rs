@@ -11,8 +11,8 @@
 //! drop the letters of every record, in a search of several batches (`BATCH_SIZE`) with a query
 //! without letters and a query without a valid context among them; the formats that show them
 //! (outfmt 0, 5, SAM `SQ SR`) and `-query_loc` keep them; a batch split into query chunks
-//! (`CHUNK_SIZE`) drops its chunks' copies with every format. That those bytes equal NCBI's is the
-//! business of the fixture suites.
+//! (`CHUNK_SIZE`), which cuts its chunks from the records' letters after the encoding, drops them
+//! after its chunks. That those bytes equal NCBI's is the business of the fixture suites.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -232,11 +232,12 @@ fn the_reports_with_query_letters_keep_them() {
 }
 
 // A batch split into query chunks (`BATCH_SIZE=10000` and `CHUNK_SIZE=2500`: the 6,000 letters of
-// three of the records in one batch of two chunks) drops its chunks' copies of the letters after
-// their encoding, also where a report shows the records' letters (outfmt 0, which keeps the
-// records'); the reports are those of `LOSAT_X_BNQDROP=0`.
+// three of the records in one batch of two chunks, a file too short for LOSAT_X_QSTREAM) cuts its
+// chunks from the records' letters after the encoding: with outfmt 6 it drops the letters after
+// its chunks (one batch, three records), with outfmt 0 it keeps them; the reports are those of
+// `LOSAT_X_BNQDROP=0`.
 #[test]
-fn the_query_chunks_drop_their_letters() {
+fn a_batch_of_query_chunks_drops_its_letters_after_them() {
     let dir = TestDir::new("chunks");
     let (_, db) = inputs(&dir);
     let genome = letters(&fasta("LC738874.fasta"));
@@ -262,12 +263,11 @@ fn the_query_chunks_drop_their_letters() {
         };
         let (default, messages, counts) = with(&[TIMING]);
         assert!(!default.is_empty(), "{what}: no report");
-        let [batches, records, _] =
-            counts.unwrap_or_else(|| panic!("{what}: no letters dropped: {messages}"));
-        // Two chunks, and with outfmt 6 the batch's own three records.
-        let (whole_batches, whole_records) = if format == "6" { (1, 3) } else { (0, 0) };
-        assert_eq!(batches, 2 + whole_batches, "{what}");
-        assert!(records > 3 + whole_records, "{what}: {records} records");
+        let expected = (format == "6").then_some([1, 3, 6_000]);
+        assert_eq!(
+            counts, expected,
+            "{what}: batches, records, letters: {messages}"
+        );
         let (report, off_messages, counts) = with(&[TIMING, SWITCH_OFF]);
         assert_eq!(report, default, "{what} {SWITCH_OFF:?}");
         assert_eq!(off_messages, messages, "{what} {SWITCH_OFF:?}");

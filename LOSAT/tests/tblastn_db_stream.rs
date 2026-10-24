@@ -225,3 +225,111 @@ fn an_unreadable_database_fails_the_same_batch_with_the_same_error() {
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+// A sequence longer than a block of the check is a block of its own, which the check reads without
+// its 2-bit data (`common::database::x_check_nucleotide_stores`, `SeqDb::x_nucleotide_check`): only
+// the last 2-bit byte and the ambiguity data.
+#[test]
+fn a_damaged_sequence_of_its_own_block_fails_or_reports_as_the_copy() {
+    let dir = temp_dir("damaged");
+    let (_, query) = inputs(&dir);
+    // The MelaMJNV genome with an ambiguity code every 1000 bases (runs of one, the old format),
+    // the last sequence and alone in its volume.
+    let mut letters: Vec<u8> = std::fs::read_to_string(fasta("fasta/MelaMJNV.fasta"))
+        .unwrap()
+        .lines()
+        .filter(|line| !line.starts_with('>'))
+        .flat_map(|line| line.trim().bytes())
+        .collect();
+    let runs = (500..letters.len()).step_by(1000).count();
+    for at in (500..letters.len()).step_by(1000) {
+        letters[at] = b"NRYKMSWBDHV"[at / 1000 % 11];
+    }
+    let mut subjects = std::fs::read(fasta("db_search/tslice.fna")).unwrap();
+    subjects.extend_from_slice(b">mela_amb MelaMJNV with ambiguity codes\n");
+    for line in letters.chunks(80) {
+        subjects.extend_from_slice(line);
+        subjects.push(b'\n');
+    }
+    let subjects_file = dir.join("subjects_amb.fna");
+    std::fs::write(&subjects_file, subjects).unwrap();
+    let db = makedb(&dir, &subjects_file, "subjects_amb", "20000");
+    let last = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            let name = path.to_string_lossy();
+            name.contains("subjects_amb.") && name.ends_with(".nsq")
+        })
+        .max()
+        .unwrap();
+    let original = std::fs::read(&last).unwrap();
+    // The sentinel byte, the 2-bit data, then the ambiguity data: a count word and a word per run.
+    let ambiguity = 1 + letters.len() / 4 + 1;
+    assert_eq!(original.len(), ambiguity + 4 + 4 * runs, "one sequence");
+    let count =
+        |bytes: &[u8]| u32::from_be_bytes(bytes[ambiguity..ambiguity + 4].try_into().unwrap());
+    assert_eq!(count(&original) as usize, runs);
+    let mut long_count = original.clone();
+    long_count[ambiguity..ambiguity + 4].copy_from_slice(&(count(&original) + 100).to_be_bytes());
+    let mut remainder = original.clone();
+    remainder[ambiguity - 1] ^= 1;
+    let all_x = format!(">xx all X\n{}\n", "X".repeat(32));
+    let mut both = all_x.into_bytes();
+    both.extend_from_slice(&std::fs::read(&query).unwrap());
+    let query = dir.join("xx.faa");
+    std::fs::write(&query, both).unwrap();
+    let env = [("BATCH_SIZE", "1")];
+    for (what, bytes, error) in [
+        (
+            "count past the end",
+            long_count,
+            Some("the ambiguity data of database sequence 5 cannot be read"),
+        ),
+        ("remainder", remainder, None),
+        (
+            "cut in the ambiguity data",
+            original[..ambiguity + 8].to_vec(),
+            Some("passes the end of the file"),
+        ),
+        (
+            "cut in the 2-bit data",
+            original[..ambiguity / 2].to_vec(),
+            Some("passes the end of the file"),
+        ),
+    ] {
+        std::fs::write(&last, bytes).unwrap();
+        let copy = tblastn(&query, &db, &[], 1, &[env[0], ("LOSAT_X_TBNDBSTREAM", "0")]);
+        match error {
+            Some(error) => {
+                assert_ne!(copy.0, Some(0), "{what}: {}", copy.2);
+                assert!(copy.2.contains(error), "{what}: {}", copy.2);
+            }
+            None => {
+                assert_eq!(copy.0, Some(0), "{what}: {}", copy.2);
+                assert!(!copy.1.is_empty(), "{what}");
+            }
+        }
+        for threads in [1, 4] {
+            assert!(
+                tblastn(&query, &db, &[], threads, &env) == copy,
+                "{what}: {threads} threads"
+            );
+        }
+        let shadow = tblastn(
+            &query,
+            &db,
+            &[],
+            1,
+            &[env[0], ("LOSAT_X_TBNDBSTREAMSHADOW", "1")],
+        );
+        assert_eq!(
+            (shadow.0, &shadow.1),
+            (copy.0, &copy.1),
+            "{what}: {}",
+            shadow.2
+        );
+        assert!(shadow.2.contains(&copy.2), "{what}: {}", shadow.2);
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}

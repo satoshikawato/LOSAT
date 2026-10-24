@@ -879,6 +879,23 @@ impl SeqDb {
         volume.read_block(range.first, range.end, range.first_ordinal)
     }
 
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the length and the ambiguity data that
+    /// `read_block(range)` gives the one nucleotide of `range`, read without its 2-bit data, with
+    /// the errors of `read_block` (`Volume::x_nucleotide_check`).
+    pub fn x_nucleotide_check(
+        &self,
+        range: BlockRange,
+    ) -> Result<(usize, SequenceBlock), SeqDbError> {
+        let Some(volume) = self.volumes.get(range.volume) else {
+            return Err(SeqDbError::Range(format!(
+                "volume {} is outside the database ({} volumes)",
+                range.volume,
+                self.volumes.len()
+            )));
+        };
+        volume.x_nucleotide_check(range.first, range.end, range.first_ordinal)
+    }
+
     /// Reads the one sequence `ordinal` (for traceback and reports).
     pub fn read_sequence(&self, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
         let (volume, first) = self.find_volume(ordinal)?;

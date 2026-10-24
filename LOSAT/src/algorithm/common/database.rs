@@ -224,11 +224,31 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
 /// database is read in the same blocks, and every sequence's length and ambiguity runs are read
 /// with the same errors in the same order; only the lengths are kept, by ordinal id. A search
 /// that reads its subjects where it searches them (`x_read_nucleotide_store`) fails the query
-/// batch that the copy would fail, with the same text.
+/// batch that the copy would fail, with the same text. A block of one sequence (one longer than
+/// a block, or the last of its volume) is checked without its 2-bit data
+/// (`SeqDb::x_nucleotide_check`): a human chromosome is not read here only to be dropped.
 pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<usize>> {
     let mut lengths = Vec::with_capacity(db.num_seqs() as usize);
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, STORE_BLOCK_BYTES) {
+        if range.len() == 1 {
+            let (length, ambiguity) = db
+                .x_nucleotide_check(range)
+                .map_err(|error| search_read_error(error, program))?;
+            // The error of `stored_parts`.
+            ambiguity.ambiguity_runs(0).map_err(|error| {
+                refusal(
+                    &format!(
+                        "the ambiguity data of database sequence {} cannot be read ({error})",
+                        range.first_ordinal
+                    ),
+                    program,
+                )
+            })?;
+            lengths.push(length);
+            next_ordinal = range.end_ordinal();
+            continue;
+        }
         let block = db
             .read_block(range)
             .map_err(|error| search_read_error(error, program))?;

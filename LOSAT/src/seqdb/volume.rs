@@ -376,6 +376,52 @@ impl Volume {
         Ok(block)
     }
 
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): what `read_block(first, end, first_ordinal)` of one
+    /// nucleotide (`end == first + 1`) gives `nucleotide_len(0)` and `ambiguity_runs(0)`, without
+    /// its 2-bit data: the index reads and checks of `read_block` in its order and the checks of
+    /// the file range it reads (`DbFile::x_check_range`), then the last byte of the 2-bit data and
+    /// the ambiguity data only. Returns the length, with `nucleotide_len`'s error, and a block of
+    /// the ambiguity data whose `ambiguity_runs(0)` is the one of `read_block`'s block (as in
+    /// `check_ambiguity_data`). An I/O error in the bytes between is not seen here; the search
+    /// reads them later.
+    pub fn x_nucleotide_check(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+    ) -> Result<(usize, SequenceBlock), SeqDbError> {
+        assert!(
+            self.index.seqtype == SeqType::Nucleotide && end == first.wrapping_add(1),
+            "the check of one nucleotide"
+        );
+        self.check_range(first, end)?;
+        let seq_offsets = self.index.sequence_offsets(first, end)?;
+        let amb_offsets = self.index.ambiguity_offsets(first, end)?;
+        let (start, amb_start, next) = (seq_offsets[0], amb_offsets[0], seq_offsets[1]);
+        if !self.index.holds_offsets() && !(start < amb_start && amb_start <= next) {
+            return Err(self.index.ambiguity_changed(first, amb_offsets.len()));
+        }
+        let file = self.seq_file()?;
+        file.x_check_range(u64::from(start), u64::from(next))?;
+        let last = file.read_range(u64::from(amb_start) - 1, u64::from(amb_start))?;
+        let length = u64::from(amb_start - start - 1) * 4 + u64::from(last[0] & 3);
+        let ambiguity = SequenceBlock {
+            seqtype: SeqType::Nucleotide,
+            first_ordinal,
+            path: file.path().to_path_buf(),
+            data: file.read_range(u64::from(amb_start), u64::from(next))?,
+            data_start: u64::from(amb_start),
+            // The block holds the ambiguity data only: its letters' range is
+            // empty, and nothing but `ambiguity_runs` reads it.
+            seq_offsets: vec![amb_start, next],
+            amb_offsets: vec![amb_start],
+        };
+        if length > i32::MAX as u64 {
+            return Err(ambiguity.format(0, "the sequence is longer than a signed 32-bit length"));
+        }
+        Ok((length as usize, ambiguity))
+    }
+
     /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the numbers of residues of the proteins `first..end`
     /// (volume-relative, non-empty), read from the index alone with one read of their offsets:
     /// `read_block(first, end, _)`'s `protein(i).len()`.

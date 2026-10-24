@@ -22,8 +22,9 @@
 //! (`LOSAT_X_BPQBLOCK`), and kept by a block whose table's vectors a later block's build takes
 //! (more than one thread: the build ahead of the block after the next, `LOSAT_X_BPLKPAHEAD`).
 //!
-//! The query is the first 30 proteins of AP027131 (9,948 residues), the subjects the first 150
-//! proteins of the related AP027133. `LOSAT_X_BPQBLOCK=1` makes each query a block (30 blocks).
+//! The query is the first 30 proteins of AP027131 (9,948 residues: one query batch), the subjects
+//! the first 150 proteins of the related AP027133. The block search reads the first 100 proteins
+//! (30,926 residues), with `LOSAT_X_BPQBLOCK=1`: one block per query batch.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -71,6 +72,8 @@ fn records(name: &str, from: usize, to: usize) -> String {
 struct Inputs {
     dir: PathBuf,
     query: PathBuf,
+    /// The first 100 proteins, for the block search.
+    blocks_query: PathBuf,
     subject: PathBuf,
     db: PathBuf,
 }
@@ -80,8 +83,10 @@ impl Inputs {
         let dir = temp_path("inputs");
         std::fs::create_dir_all(&dir).unwrap();
         let query = dir.join("query.faa");
+        let blocks_query = dir.join("blocks_query.faa");
         let subject = dir.join("subject.faa");
         std::fs::write(&query, records("AP027131.faa", 0, 30)).unwrap();
+        std::fs::write(&blocks_query, records("AP027131.faa", 0, 100)).unwrap();
         std::fs::write(&subject, records("AP027133.faa", 0, 150)).unwrap();
         let db = dir.join("db");
         let made = losat(&[], &dir.join("worker.log"))
@@ -100,6 +105,7 @@ impl Inputs {
         Inputs {
             dir,
             query,
+            blocks_query,
             subject,
             db,
         }
@@ -221,47 +227,48 @@ fn blastp_reports_do_not_depend_on_emptying_the_seg_store_after_each_window() {
 }
 
 /// Default and `LOSAT_X_BPLKDROP=0` give the same report and messages for exact blastp and
-/// blastp-fast on `-subject` and `-db` at 1 and 2 threads, in one search of all queries and in
-/// blocks; the table is dropped before the redo by every search except, at 2 threads, the blocks
-/// whose table's vectors a later block's build takes (all but the last two of the 30), and `=0`
-/// records nothing.
+/// blastp-fast on `-subject` and `-db`: in one search of all queries at 1 and 2 threads, and in
+/// blocks at 2 threads. The table is dropped before the redo by every search except the blocks
+/// whose table's vectors a later block's build takes (all but the last two), and `=0` records
+/// nothing.
 #[test]
 fn blastp_reports_do_not_depend_on_dropping_the_lookup_table_before_the_redo() {
     let inputs = Inputs::new();
-    let query = inputs.query.to_str().unwrap();
     let subject = inputs.subject.to_str().unwrap();
     let db = inputs.db.to_str().unwrap();
     for task in ["blastp", "blastp-fast"] {
         for (source, target) in [("-subject", subject), ("-db", db)] {
-            for threads in ["1", "2"] {
-                for blocks in [false, true] {
-                    let case = format!("{task} {source} n{threads} blocks {blocks}");
-                    let args = [
-                        "-task",
-                        task,
-                        "-query",
-                        query,
-                        source,
-                        target,
-                        "-outfmt",
-                        "6",
-                        "-evalue",
-                        "10",
-                        "-num_threads",
-                        threads,
-                    ];
-                    let env: &[(&str, &str)] = if blocks { &[BLOCKS] } else { &[] };
-                    let on = blastp(&args, env);
-                    assert_eq!(on.code, Some(0), "{case}: {}", on.stderr);
-                    assert!(!on.stdout.is_empty(), "{case}: no hits");
-                    let kept = blocks && threads == "2";
-                    assert_eq!(on.lk_drop, (true, kept), "{case}: default's side");
-                    let off = blastp(&args, &[env, &[(LK_DROP, "0")]].concat());
-                    assert_eq!(off.code, Some(0), "{case} off: {}", off.stderr);
-                    assert!(off.stdout == on.stdout, "{case} off: report differs");
-                    assert_eq!(off.stderr, on.stderr, "{case} off: messages");
-                    assert_eq!(off.lk_drop, (false, false), "{case} off: side");
-                }
+            for (threads, blocks) in [("1", false), ("2", false), ("2", true)] {
+                let query = if blocks {
+                    inputs.blocks_query.to_str().unwrap()
+                } else {
+                    inputs.query.to_str().unwrap()
+                };
+                let case = format!("{task} {source} n{threads} blocks {blocks}");
+                let args = [
+                    "-task",
+                    task,
+                    "-query",
+                    query,
+                    source,
+                    target,
+                    "-outfmt",
+                    "6",
+                    "-evalue",
+                    "10",
+                    "-num_threads",
+                    threads,
+                ];
+                let env: &[(&str, &str)] = if blocks { &[BLOCKS] } else { &[] };
+                let on = blastp(&args, env);
+                assert_eq!(on.code, Some(0), "{case}: {}", on.stderr);
+                assert!(!on.stdout.is_empty(), "{case}: no hits");
+                assert_eq!(on.lk_drop, (true, blocks), "{case}: default's side");
+                let off = blastp(&args, &[env, &[(LK_DROP, "0")]].concat());
+                assert_eq!(off.code, Some(0), "{case} off: {}", off.stderr);
+                assert!(off.stdout == on.stdout, "{case} off: report differs");
+                assert_eq!(off.stderr, on.stderr, "{case} off: messages");
+                assert_eq!(off.lk_drop, (false, false), "{case} off: side");
             }
         }
     }

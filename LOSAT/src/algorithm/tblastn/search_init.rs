@@ -4,6 +4,7 @@
 #[cfg(test)]
 use super::search_seed::encode_tblastn_lookup_query;
 use crate::algorithm::blastp::extension::extend_two_hit;
+use crate::algorithm::blastp::x_ungapped_fast;
 use crate::config::ScoringMatrix;
 
 // NCBI reference: c++/include/algo/blast/core/blast_extend.h:142-163
@@ -102,6 +103,42 @@ pub(super) struct XTwoHit<'a> {
     pub matrix: ScoringMatrix,
     pub window: i32,
     pub word_size: usize,
+    /// EXPERIMENT (LOSAT_X_TBNUNGAP): the extension takes LOSAT_X_BPUNGAP's walks
+    /// ([`x_tbn_ungap`]).
+    x_ungap_fast: bool,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1088-1096
+// ```c
+// static Int4
+// s_BlastAaExtendTwoHit(Int4 ** matrix,
+//                       const BLAST_SequenceBlk * subject,
+//                       const BLAST_SequenceBlk * query,
+//                       Int4 s_left_off, Int4 s_right_off,
+//                       Int4 q_right_off, Int4 dropoff,
+//                       Int4 * hsp_q, Int4 * hsp_s, Int4 * hsp_len,
+//                       Boolean use_pssm, Int4 word_size,
+//                       Boolean * right_extend, Int4 * s_last_off)
+// ```
+// EXPERIMENT (LOSAT_X_TBNUNGAP): the two-hit extension of tblastn's word finder (`XTwoHit::pairs`)
+// with BLASTP's byte-table walks (`blastp/x_ungapped_fast.rs`, LOSAT_X_BPUNGAP, whose module doc
+// gives why the result is the reference's): the same statements in the same order, a residue pair
+// scored from one signed byte (`q << 5 | s`) instead of the matrix row, and the bounds of each walk
+// computed from the slice lengths as the reference computes them, so the walks stop where the
+// reference's do on every unit, also on a chunk that ends inside a frame. An extension whose codes
+// or X-drop the byte table does not cover (a code >= 32, an X-drop outside 1..=127, a word of more
+// than 11 residues) runs the reference. The table holds BLOSUM62's scores, the matrix of every
+// default tblastn search; another matrix keeps the reference. A strict-set switch
+// (`utils/xswitch.rs`): on unless `LOSAT_X_TBNUNGAP=0`.
+/// Whether a word finder with `matrix` takes LOSAT_X_BPUNGAP's walks (BLOSUM62, switch on).
+fn x_tbn_ungap(matrix: ScoringMatrix) -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNUNGAP")) {
+        return false;
+    }
+    let own = matrix == ScoringMatrix::Blosum62;
+    crate::utils::xreach::x_reach!("LOSAT_X_TBNUNGAP", own);
+    own
 }
 
 impl<'a> XTwoHit<'a> {
@@ -168,6 +205,7 @@ impl<'a> XTwoHit<'a> {
             matrix,
             window,
             word_size,
+            x_ungap_fast: x_tbn_ungap(matrix),
         }
     }
 
@@ -271,16 +309,34 @@ impl<'a> XTwoHit<'a> {
             }
             // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
             // s_BlastAaExtendTwoHit(matrix, ..., wordsize, ...);
-            let result = extend_two_hit(
-                self.matrix,
-                self.query_sequence,
-                subject_sequence,
-                (previous + word_size_i32) as usize,
-                s as usize,
-                q as usize,
-                self.x_dropoffs[context],
-                word_size,
-            );
+            let reference = || {
+                extend_two_hit(
+                    self.matrix,
+                    self.query_sequence,
+                    subject_sequence,
+                    (previous + word_size_i32) as usize,
+                    s as usize,
+                    q as usize,
+                    self.x_dropoffs[context],
+                    word_size,
+                )
+            };
+            // EXPERIMENT (LOSAT_X_TBNUNGAP): the byte-table walks (`x_tbn_ungap`); `None` = an
+            // extension outside the table's range, which runs the reference.
+            let result = if self.x_ungap_fast {
+                x_ungapped_fast::two_hit(
+                    self.query_sequence,
+                    subject_sequence,
+                    (previous + word_size_i32) as usize,
+                    s as usize,
+                    q as usize,
+                    self.x_dropoffs[context],
+                    word_size,
+                )
+                .unwrap_or_else(reference)
+            } else {
+                reference()
+            };
             let Some(result) = result else {
                 continue;
             };
@@ -1562,5 +1618,101 @@ mod tests {
             outcomes.iter().all(|&count| count > 0),
             "outcomes {outcomes:?}"
         );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1088-1096
+    // ```c
+    // static Int4
+    // s_BlastAaExtendTwoHit(Int4 ** matrix,
+    //                       const BLAST_SequenceBlk * subject,
+    //                       const BLAST_SequenceBlk * query,
+    // ```
+    // EXPERIMENT (LOSAT_X_TBNUNGAP): the word finder with the byte-table walks gives, unit after
+    // unit on one kept table (`exit` after each), the init HSPs and the diagonal table of the word
+    // finder with the reference extension: on whole units and on units cut short (a chunk that ends
+    // inside a frame), with stop codons and X among the subject letters, and with a context whose
+    // X-drop the byte table does not cover (the reference runs for its candidates).
+    #[test]
+    fn x_byte_table_walks_give_the_reference_hits_and_table() {
+        let mut seed = 0x9e37_79b9_u64;
+        let mut next = move |bound: usize| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((seed >> 33) as usize) % bound
+        };
+        const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+        const SUBJECT_LETTERS: &[u8] = b"ACDEFGHIKLMNPQRSTVWYX*";
+        fn random(letters: &[u8], length: usize, next: &mut dyn FnMut(usize) -> usize) -> Vec<u8> {
+            (0..length).map(|_| letters[next(letters.len())]).collect()
+        }
+        let queries: Vec<Vec<u8>> = [170, 80, 230]
+            .into_iter()
+            .map(|length| random(RESIDUES, length, &mut next))
+            .collect();
+        let mut units = Vec::new();
+        for _ in 0..60 {
+            let mut unit = random(SUBJECT_LETTERS, next(40), &mut next);
+            for _ in 0..1 + next(3) {
+                let query = &queries[next(queries.len())];
+                let start = next(query.len() - 30);
+                let end = (start + 30 + next(80)).min(query.len());
+                for &residue in &query[start..end] {
+                    unit.push(if next(100) < 15 {
+                        SUBJECT_LETTERS[next(SUBJECT_LETTERS.len())]
+                    } else {
+                        residue
+                    });
+                }
+                unit.extend(random(SUBJECT_LETTERS, next(30), &mut next));
+            }
+            units.push(
+                encode_tblastn_lookup_query(&unit, None, false).aa_seq[1..=unit.len()].to_vec(),
+            );
+        }
+        let set: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+        let (query, offsets) = x_concatenated(&set);
+        let cutoffs = [24, 24, 24];
+        for x_dropoffs in [[16, 16, 16], [16, 300, 7]] {
+            let new = |fast: bool| {
+                let mut two_hit = XTwoHit::with_table(
+                    None,
+                    &query,
+                    &offsets,
+                    &x_dropoffs,
+                    &cutoffs,
+                    ScoringMatrix::Blosum62,
+                    40,
+                    3,
+                );
+                two_hit.x_ungap_fast = fast;
+                two_hit
+            };
+            let (mut fast, mut reference) = (new(true), new(false));
+            let mut found = 0;
+            for unit in &units {
+                for end in [unit.len(), unit.len() * 2 / 3] {
+                    let unit = &unit[..end];
+                    let pairs = x_word_pairs(&query, unit);
+                    let (mut got, mut want) = (Vec::new(), Vec::new());
+                    fast.pairs(1, 0, unit, &pairs, &mut got);
+                    reference.pairs(1, 0, unit, &pairs, &mut want);
+                    assert_eq!(got, want, "X-drops {x_dropoffs:?}: init HSPs");
+                    assert_eq!(
+                        fast.diagonals.entries, reference.diagonals.entries,
+                        "X-drops {x_dropoffs:?}: diagonal table"
+                    );
+                    found += got.len();
+                    fast.exit(unit.len());
+                    reference.exit(unit.len());
+                }
+            }
+            assert!(
+                found >= 60,
+                "X-drops {x_dropoffs:?}: the units must give hits ({found})"
+            );
+        }
+        // The rule: another matrix keeps the reference extension.
+        assert!(!x_tbn_ungap(ScoringMatrix::Blosum45));
     }
 }

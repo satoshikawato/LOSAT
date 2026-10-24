@@ -19,16 +19,18 @@
 //! none); at four threads with one subject the strips folds (PAIRPAR, which has no
 //! variable, for megablast and blastn; `LOSAT_X_PAIRPARDISC` for dc-megablast when it is set), and
 //! with many subjects the reference fold on every worker, whose hash offset moves on from subject
-//! to subject.
+//! to subject. The searches that set `LOSAT_X_BNDCONE` take the dc-megablast strips stage at one
+//! thread too.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), on
 /// 2026-10-18 `LOSAT_X_MBLUTONCE` (perf/bn-memory-rules), on 2026-10-22 `LOSAT_X_DIAGLV2` and
-/// `LOSAT_X_FOLDLEAN` (perf/dc-fold-lean), and on 2026-10-24 `LOSAT_X_BNDCONE` (perf/dc-one-thread), each `0`, the default before, unless the search sets
-/// it: every search here runs as it was written, with the switches off that it does not name (the
-/// default runs in `default_bundle.rs`).
+/// `LOSAT_X_FOLDLEAN` (perf/dc-fold-lean), and on 2026-10-24 `LOSAT_X_BNDCONE`
+/// (perf/dc-one-thread), each `0`, the default before, unless the search sets it: every search
+/// here runs as it was written, with the switches off that it does not name (the default runs in
+/// `default_bundle.rs`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BNDCONE", "0"),
     ("LOSAT_X_BPDBCUT", "0"),
@@ -112,6 +114,19 @@ fn blastn(
     threads: u32,
     switches: &[(&str, &str)],
 ) -> (Vec<u8>, String) {
+    blastn_with(dir, query, subject, task, threads, switches, &[])
+}
+
+/// `blastn` with `args` after the others (`-lcase_masking`).
+fn blastn_with(
+    dir: &Path,
+    query: &Path,
+    subject: &Path,
+    task: &str,
+    threads: u32,
+    switches: &[(&str, &str)],
+    args: &[&str],
+) -> (Vec<u8>, String) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
@@ -129,6 +144,7 @@ fn blastn(
         .arg(subject)
         .args(["-task", task, "-outfmt", "6"])
         .args(["-num_threads", &threads.to_string()])
+        .args(args)
         .envs(PREVIOUS_DEFAULT.iter().copied())
         .envs(switches.iter().copied())
         .output()
@@ -136,7 +152,7 @@ fn blastn(
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(
         output.status.success(),
-        "{task} {switches:?} threads {threads}: {stderr}"
+        "{task} {switches:?} {args:?} threads {threads}: {stderr}"
     );
     (output.stdout, stderr)
 }
@@ -355,7 +371,11 @@ fn blastn_short_gives_the_same_report_with_the_level_bounds() {
 // Many subjects: 61 pieces of LC738868 (5,000 letters every 5,000, and an 8-letter piece
 // shorter than the word, whose search only moves the hash offset on), searched one after the
 // other at one thread and by the workers at four, so that every worker's diagonal hash keeps
-// its cells and bounds from subject to subject with a growing offset.
+// its cells and bounds from subject to subject with a growing offset. With `LOSAT_X_BNDCONE` at
+// one thread every subject takes the dc-megablast strips stage in turn on that one table, and
+// the memo (checked answer by answer by the shadow) answers; with `-lcase_masking` and every
+// third piece in lowercase those subjects take the reference fold between the stages, whose
+// memo is made again at each stage's start (the stages' own shadow compares their chunks).
 #[test]
 fn many_subjects_give_the_same_report_with_the_level_bounds() {
     let dir = TestDir::new("many");
@@ -372,7 +392,69 @@ fn many_subjects_give_the_same_report_with_the_level_bounds() {
     }
     std::fs::write(&subjects, text).expect("write the subjects");
     let query = fasta("LC738874.fasta");
+    let mut dc = Vec::new();
     for task in ["megablast", "dc-megablast"] {
-        check(&dir, &query, &subjects, task, &[]);
+        dc = check(&dir, &query, &subjects, task, &[]);
     }
+    const ONE: [(&str, &str); 4] = [
+        ("LOSAT_X_DIAGLV2", "1"),
+        ("LOSAT_X_FOLDLEAN", "1"),
+        PAIRPARDISC,
+        ("LOSAT_X_BNDCONE", "1"),
+    ];
+    let task = "dc-megablast";
+    let mut on = ONE.to_vec();
+    on.push(SHADOW);
+    let at = format!("{task} {on:?} threads 1");
+    let (report, stderr) = blastn(&dir, &query, &subjects, task, 1, &on);
+    assert!(report == dc, "{at}: the report differs");
+    shadow_counts(&stderr, &[], &at);
+    let (memo, found) = memo_counts(&stderr, &at);
+    assert!(memo > 0 && found > 0 && found <= memo, "{at}: {stderr}");
+
+    let masked = dir.join("masked.fna");
+    let mut text = String::new();
+    for (index, record) in std::fs::read_to_string(&subjects)
+        .expect("read the subjects")
+        .split('>')
+        .filter(|record| !record.is_empty())
+        .enumerate()
+    {
+        let (name, letters) = record.split_once('\n').expect("a record");
+        let letters = letters.trim_end();
+        let letters = if index % 3 == 0 {
+            letters.to_ascii_lowercase()
+        } else {
+            letters.to_string()
+        };
+        text.push_str(&format!(">{name}\n{letters}\n"));
+    }
+    std::fs::write(&masked, text).expect("write the masked subjects");
+    let lcase = ["-lcase_masking"];
+    let (expected, expected_stderr) = blastn_with(&dir, &query, &masked, task, 1, &[], &lcase);
+    assert!(!expected.is_empty(), "{task} {lcase:?}: no hits");
+    assert_eq!(expected_stderr, "", "{task} {lcase:?}");
+    let at = format!("{task} {on:?} {lcase:?} threads 1");
+    let (report, stderr) = blastn_with(&dir, &query, &masked, task, 1, &on, &lcase);
+    assert!(report == expected, "{at}: the report differs");
+    shadow_counts(&stderr, &[], &at);
+    let (memo, _) = memo_counts(&stderr, &at);
+    assert!(memo > 0, "{at}: the memo answered no retrieve: {stderr}");
+    let mut stage = ONE.to_vec();
+    stage.push(("LOSAT_X_PAIRPARDISCSHADOW", "1"));
+    let at = format!("{task} {stage:?} {lcase:?} threads 1");
+    let (report, stderr) = blastn_with(&dir, &query, &masked, task, 1, &stage, &lcase);
+    assert!(report == expected, "{at}: the report differs");
+    let line = stderr
+        .lines()
+        .find(|line| line.starts_with("[X_PAIRPARDISCSHADOW] blastn: seed chunks equal="))
+        .unwrap_or_else(|| panic!("{at}: no shadow line:\n{stderr}"));
+    let chunks: u64 = line["[X_PAIRPARDISCSHADOW] blastn: seed chunks equal=".len()..]
+        .split_whitespace()
+        .next()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(|| panic!("{at}: {line}"));
+    // 61 records, every third in lowercase (21, among them the 8-letter one): the other 40 take
+    // the stage, one chunk each
+    assert_eq!(chunks, 40, "{at}: {line}");
 }

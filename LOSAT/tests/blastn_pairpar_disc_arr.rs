@@ -17,9 +17,9 @@
 //! the dc-megablast fixtures (`tests/blastn_regression_fixtures.py`, `dc.*`).
 //!
 //! The inputs are one subject (the stage takes a search of one subject by the owner of a pool
-//! of two threads or more, or with `LOSAT_X_BNDCONE` by a search on one thread) and queries cut from LC738874 into files of this test: one query of
-//! 3900 bases (7801 letters with both strands and the sentinel), and two queries of 1900 bases
-//! (four contexts in one array).
+//! of two threads or more, or with `LOSAT_X_BNDCONE` by a search on one thread) and queries cut
+//! from LC738874 into files of this test: one query of 3900 bases (7801 letters with both
+//! strands and the sentinel), and two queries of 1900 bases (four contexts in one array).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

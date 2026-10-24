@@ -1,7 +1,8 @@
 //! The two-hit seed stage of dc-megablast on the search pool (`LOSAT_X_PAIRPARDISC`,
 //! `src/algorithm/blastn/blast_engine/x_pair_seed_disc.rs`) on whole searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set). It chooses between
+//! The switch is in the strict set since 2026-10-17; these searches run with it `0` unless they set
+//! it (`PREVIOUS_DEFAULT`). It chooses between
 //! two LOSAT code paths with the same result: the subject scan cut into strips that the pool
 //! threads scan, and the diagonal-hash fold done by the owner thread in the scan order, or the
 //! scan and fold of the reference code. So the property under test is that the report does not
@@ -14,8 +15,8 @@
 //! fixtures (`tests/blastn_regression_fixtures.py`, `dc.*`).
 //!
 //! The input is one subject (the stage takes a search of one subject by the owner of a pool of
-//! two threads or more, or with `LOSAT_X_BNDCONE` by a search on one thread) and one query of 287 kb, whose query block is longer than 8000 letters
-//! (the stage takes the diagonal hash only).
+//! two threads or more, or with `LOSAT_X_BNDCONE` by a search on one thread) and one query of
+//! 287 kb, whose query block is longer than 8000 letters (the stage takes the diagonal hash only).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -23,6 +24,8 @@ use std::process::Command;
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
 /// `0`, the default before, unless the search sets it: every search here runs as it was written,
 /// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+/// `LOSAT_X_BNDCONE` (2026-10-24) stays on: the one-thread searches with the switch then run the
+/// stage too, so every template is compared at one thread as well.
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),

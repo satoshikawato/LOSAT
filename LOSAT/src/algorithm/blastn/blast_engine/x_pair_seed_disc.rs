@@ -133,13 +133,22 @@ fn lean_on() -> bool {
 
 /// No NCBI counterpart: reads LOSAT_X_BNDCONE once (a strict-set switch since 2026-10-24: on unless
 /// it is `0`). With it a chunk in the scope of either stage (`in_scope`, `in_scope_array`) that
-/// has no pool (a search on one thread) runs the stage on this thread: its strips are scanned
+/// has no pool (a search on one thread, or a one-thread slot of LOSAT_X_QBATCHPAR) runs the stage
+/// on this thread: its strips are scanned
 /// and folded in order, as the shadows' runs without a pool are. The owner folds the pairs in
 /// the reference order with the reference statements whatever the number of threads (module
 /// comment), so it does not change any value NCBI computes.
 fn one_thread_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNDCONE"))
+}
+
+/// No NCBI counterpart: whether LOSAT_TIMING is set (read once). The stages time themselves when
+/// it is (`timing` is `None` in a shadow's run although it is set); a chunk without a pool, one of
+/// many on one thread with LOSAT_X_BNDCONE, does not read the environment again.
+fn timing_env() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_TIMING").is_some())
 }
 
 /// No NCBI counterpart: LOSAT_X_REACH for LOSAT_X_FOLDLEAN, which acts in the strips folds only:
@@ -1103,7 +1112,7 @@ pub(super) fn run(
         }
     }
     let timing = if shadow { None } else { x.timing };
-    let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
+    let timed = timing.is_some() || timing_env();
     let t_start = timed.then(std::time::Instant::now);
     let mut shadow_hash = shadow.then(|| copy_hash(diag_hash));
     let mut shadow_hits: Vec<UngappedHit> = Vec::new();
@@ -1742,7 +1751,7 @@ fn run_array(
         reach_lean(true);
     }
     let timing = if shadow { None } else { x.timing };
-    let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
+    let timed = timing.is_some() || timing_env();
     let t_start = timed.then(std::time::Instant::now);
     let mut shadow_levels: Vec<DiagStruct> = Vec::new();
     let mut shadow_lens: Vec<u8> = Vec::new();

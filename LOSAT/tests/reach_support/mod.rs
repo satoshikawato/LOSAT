@@ -3,6 +3,7 @@
 //! asks `Reach::sides` whether the switch's own path ran on its input. It replaced the shadow
 //! counters as the proof that a path engaged (switch-tidy, 2026-10-24).
 #![allow(dead_code)]
+#![allow(clippy::duplicate_mod)]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -225,7 +225,7 @@ use std::sync::OnceLock;
 #[path = "x_unit_probe.rs"]
 mod x_unit_probe;
 
-// EXPERIMENT (LOSAT_X_TBXKMERGE / LOSAT_X_TBXKMERGESHADOW): the merge of a subject's unit lists
+// EXPERIMENT (LOSAT_X_TBXKMERGE): the merge of a subject's unit lists
 // without the full sorts (`merge_subject`). A child module of this file, as x_unit_probe is.
 #[path = "x_kmerge.rs"]
 mod x_kmerge;
@@ -236,11 +236,11 @@ use x_unit_probe::{XNoProbe, XProbe, XProbeSlot, XStatsProbe, XTimeProbe};
 #[path = "x_tbx_extbatch.rs"]
 mod x_tbx_extbatch;
 
-// EXPERIMENT (LOSAT_X_TBXHITBF / LOSAT_X_TBXHITBFSHADOW): the hit loop of a unit with the too-far
+// EXPERIMENT (LOSAT_X_TBXHITBF): the hit loop of a unit with the too-far
 // and overlap outcomes of the two-hit test taken without a branch (x_tbx_hitbf.rs).
 #[path = "x_tbx_hitbf.rs"]
 mod x_tbx_hitbf;
-// EXPERIMENT (LOSAT_X_TBXQSLICE / LOSAT_X_TBXQSLICESHADOW): the scan of a unit in slices of its
+// EXPERIMENT (LOSAT_X_TBXQSLICE): the scan of a unit in slices of its
 // query group, one lookup table per slice, on the unit's one diagonal table (x_tbx_qslice.rs).
 #[path = "x_tbx_qslice.rs"]
 mod x_tbx_qslice;
@@ -596,9 +596,6 @@ fn add_ns(counter: &AtomicU64, t0: Option<Instant>) {
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
     x_kmerge::print_summary();
-    x_tbx_extbatch::print_summary();
-    x_tbx_hitbf::print_summary();
-    x_tbx_qslice::print_summary();
     // LOSAT_X_SEEDCOMPACT: printed whenever the switch is on, so also when the unit path does not
     // run (zero counters). `bytes_saved` is what the unit outputs no longer
     // request: records x (size of `InitHSP` - size of `XUnitHsp`).
@@ -969,7 +966,7 @@ pub(super) struct XLutEarly<'a> {
 pub(super) struct XLutBatch {
     groups: Vec<XGroup>,
     /// EXPERIMENT (LOSAT_X_TBXQSLICE): the slices of the batch's groups when one is cut
-    /// (x_tbx_qslice.rs); `groups` is then empty, except in that switch's shadow mode.
+    /// (x_tbx_qslice.rs); `groups` is then empty.
     sliced: Option<Vec<XSliced>>,
     /// The stub of the full table and the batch's contexts, until the build site takes them
     /// (`take_stub`).
@@ -1104,19 +1101,14 @@ fn lut_direct(e: &XLutEarly<'_>) -> Option<XLutBatch> {
         return None;
     }
     // EXPERIMENT (LOSAT_X_TBXQSLICE): the tables of the slices of the groups the switch cuts,
-    // built directly as the groups are (x_tbx_qslice.rs); the whole groups only in its shadow mode.
+    // built directly as the groups are (x_tbx_qslice.rs).
     let starts = group_starts(contexts);
     let (groups, sliced) = match x_tbx_qslice::partition(contexts, &starts, e.pool.threads()) {
         None => (lut_direct_groups(&q, e.pool, lut_on_pool())?, None),
         Some(parts) => {
             let sliced =
                 x_tbx_qslice::lut_direct_sliced(&q, &starts, &parts, e.pool, lut_on_pool())?;
-            let groups = if x_tbx_qslice::shadow() {
-                lut_direct_groups(&q, e.pool, lut_on_pool())?
-            } else {
-                Vec::new()
-            };
-            (groups, Some(sliced))
+            (Vec::new(), Some(sliced))
         }
     };
     // The stub's `longest_chain` sums every cell over a partition of the entries: the whole
@@ -1749,8 +1741,7 @@ impl<'a, 'b> XExpand<'a, 'b> {
 
 /// The unit path of one batch: the sub-lookups of its context groups.
 pub(super) struct XPairPar {
-    /// The groups' tables. Empty when LOSAT_X_TBXQSLICE cuts a group of the batch (`sliced`),
-    /// except in that switch's shadow mode.
+    /// The groups' tables. Empty when LOSAT_X_TBXQSLICE cuts a group of the batch (`sliced`).
     groups: Vec<XGroup>,
     /// PAIRLUT: the groups were built directly and the batch's table is a stub without
     /// entries, which the reference frame loop must not scan.
@@ -1816,7 +1807,7 @@ impl XPairPar {
         if seed_compact() {
             crate::utils::xreach::x_reach!("LOSAT_X_SEEDCOMPACT", units);
         }
-        if x_kmerge::mode() == 1 {
+        if x_kmerge::on() {
             crate::utils::xreach::x_reach!("LOSAT_X_TBXKMERGE", units);
         }
         if !units {
@@ -1841,12 +1832,11 @@ impl XPairPar {
             None => {
                 let t0 = timing().then(Instant::now);
                 // EXPERIMENT (LOSAT_X_TBXQSLICE): the slices filtered out of the batch's table, as
-                // the groups are; the whole groups only where no group is cut, or in the
-                // switch's shadow mode.
+                // the groups are; the whole groups only where no group is cut.
                 let starts = group_starts(b.contexts);
                 let sliced = x_tbx_qslice::partition(b.contexts, &starts, b.threads)
                     .map(|parts| x_tbx_qslice::build_sliced(b.lookup, &parts));
-                let groups = if sliced.is_none() || x_tbx_qslice::shadow() {
+                let groups = if sliced.is_none() {
                     build_groups(b.lookup, b.contexts)
                 } else {
                     Vec::new()
@@ -1855,9 +1845,6 @@ impl XPairPar {
                 (groups, sliced, false)
             }
         };
-        if let Some(sliced) = &sliced {
-            x_tbx_qslice::count_batch(sliced);
-        }
         // LOSAT_X_TBXBAND: a batch the first guard rejects, counted for the `[X_STATS] PAIRPAR`
         // line (without the switch no such batch gets here).
         let band = tbx_band() && {
@@ -2051,9 +2038,9 @@ impl XPairPar {
     // table, so the tables may already be freed when it runs.
     /// `combined_ungapped_hits` of one subject, from its units.
     pub(super) fn merge_subject(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<UngappedHit> {
-        // EXPERIMENT (LOSAT_X_TBXKMERGE / LOSAT_X_TBXKMERGESHADOW), dispatch: the same list without
-        // the full sorts (x_kmerge.rs); with the switch off the body below runs.
-        if x_kmerge::mode() != 0 {
+        // EXPERIMENT (LOSAT_X_TBXKMERGE), dispatch: the same list without the full sorts
+        // (x_kmerge.rs); with the switch off the body below runs.
+        if x_kmerge::on() {
             return x_kmerge::merge_subject(x_units, inp);
         }
         Self::merge_subject_listed(x_units, inp)
@@ -2216,8 +2203,7 @@ impl XPairPar {
     // EXPERIMENT (LOSAT_X_TBXPREFETCH): `PF` picks the unit functions with the prefetch (module
     // doc); each (form, probe, `PF`) is its own function item, so `run_units` and the scan are
     // compiled once for each and the scan without the hint keeps its own code.
-    // EXPERIMENT (LOSAT_X_TBXKMERGE): the units sort their lists (not in the shadow mode, whose
-    // merge sorts them after it has copied the unsorted lists).
+    // EXPERIMENT (LOSAT_X_TBXKMERGE): the units sort their lists.
     // No NCBI counterpart: dispatch only.
     /// The units of one subject, run by the unit function of the switches' choice.
     fn run_subject_unit_fns<const PF: bool>(
@@ -2226,7 +2212,7 @@ impl XPairPar {
         inp: &XSubject<'_>,
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> XUnitOutputs {
-        let sort = x_kmerge::mode() == 1;
+        let sort = x_kmerge::on();
         // EXPERIMENT (LOSAT_X_TBXEXTBATCH): the batched extensions (x_tbx_extbatch.rs), without
         // the probes, for the subjects of its rule (`x_tbx_extbatch::active`: the window leaves
         // room for its pending marks and a unit's query-group span reaches the switch's value).
@@ -3184,8 +3170,9 @@ fn build_tables(lookup: &BlastAaLookupTable, bounds: &[i32]) -> Vec<XGroup> {
         .collect()
 }
 
-/// Every field of `a` equals the one of `b` (the e-value by its bits); the comparison of the
-/// shadow mode of LOSAT_X_TBXKMERGESHADOW and the unit tests.
+/// Every field of `a` equals the one of `b` (the e-value by its bits); the comparison of the unit
+/// tests.
+#[cfg(test)]
 fn x_same_hit(a: &UngappedHit, b: &UngappedHit) -> bool {
     let UngappedHit {
         q_idx,
@@ -5277,7 +5264,7 @@ mod tests {
                             &inp,
                             &serial,
                             XPairPar::run_unit::<false>,
-                            x_kmerge::mode() == 1
+                            x_kmerge::on()
                         )
                     );
                 }
@@ -5289,7 +5276,7 @@ mod tests {
                             &inp,
                             &serial,
                             XPairPar::run_unit_compact::<false>,
-                            x_kmerge::mode() == 1
+                            x_kmerge::on()
                         )
                     );
                 }

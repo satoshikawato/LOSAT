@@ -3,8 +3,7 @@
 //!
 //! The switch is a value switch of the strict set (`src/utils/xswitch.rs`): on unless it is `0`;
 //! its number is the most letters of a slice (`1` gives the built-in). It acts on x86-64 only (on
-//! other targets every search runs the unsliced scan, and the shadow, `LOSAT_X_TBXQSLICESHADOW`,
-//! which compares the units of a cut batch, compares none).
+//! other targets every search runs the unsliced scan).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-516
 //! ```c
@@ -20,10 +19,13 @@
 //! PemoMJNVA) has frames of about 50,000 letters, below the built-in, so the default cuts nothing
 //! and `=4096` cuts each group into about 13 slices: the tests compare `=4096` (with the compact
 //! records and with today's lists, with the reference table builder, with `LOSAT_X_TBXEXTBATCH` and
-//! `LOSAT_X_TBXPREFETCH` on every unit), the default and the shadow with `=0`.
+//! `LOSAT_X_TBXPREFETCH` on every unit) and the default with `=0`; the reach rows (`LOSAT_X_REACH`,
+//! `tests/reach_support`) show that the groups were cut.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod reach_support;
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -33,7 +35,6 @@ fn fasta(name: &str) -> PathBuf {
 
 const SLICES: (&str, &str) = ("LOSAT_X_TBXQSLICE", "4096");
 const OFF: (&str, &str) = ("LOSAT_X_TBXQSLICE", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBXQSLICESHADOW", "1");
 /// Today's `InitHSP` lists instead of the compact records (`run_unit_sliced`).
 const FULL_LISTS: (&str, &str) = ("LOSAT_X_SEEDCOMPACT", "0");
 /// The batched extensions on every unit of 2 Ki letters or more.
@@ -139,25 +140,6 @@ impl Drop for Inputs {
     }
 }
 
-/// The number after `name=` in the first line of `stderr` that starts with `prefix`.
-fn field(stderr: &str, prefix: &str, name: &str) -> u64 {
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with(prefix))
-        .unwrap_or_else(|| panic!("no {prefix} line in {stderr}"));
-    let key = format!("{name}=");
-    let at = line
-        .find(&key)
-        .unwrap_or_else(|| panic!("no {name} in {line}"))
-        + key.len();
-    line[at..]
-        .split(|c: char| !c.is_ascii_digit())
-        .next()
-        .unwrap()
-        .parse()
-        .unwrap()
-}
-
 #[test]
 fn sliced_units_give_the_same_report() {
     let inputs = Inputs::new("slices");
@@ -171,45 +153,18 @@ fn sliced_units_give_the_same_report() {
             &[SLICES, PREFETCH][..],
             &[][..],
         ] {
-            let (report, _) = inputs.tblastx(threads, switches);
+            // `=4096` cuts each group on x86-64; the default cuts nothing on this input.
+            let reach = reach_support::Reach::new("slices");
+            let mut arm: Vec<(&str, &str)> = switches.to_vec();
+            arm.push(reach.var());
+            let (report, _) = inputs.tblastx(threads, &arm);
             assert_eq!(report, off, "threads {threads} {switches:?}: against =0");
-        }
-    }
-}
-
-#[test]
-fn the_shadow_compares_every_sliced_unit() {
-    let inputs = Inputs::new("shadow");
-    for threads in [1, 2] {
-        let (off, _) = inputs.tblastx(threads, &[OFF]);
-        for switches in [
-            &[SLICES, SHADOW][..],
-            &[SLICES, SHADOW, FULL_LISTS][..],
-            &[SLICES, SHADOW, BATCHED][..],
-        ] {
-            let (shadow, stderr) = inputs.tblastx(threads, switches);
+            let sides = reach.sides("LOSAT_X_TBXQSLICE");
             assert_eq!(
-                shadow, off,
-                "threads {threads} {switches:?}: shadow against =0"
+                sides.0,
+                cfg!(target_arch = "x86_64") && switches.contains(&SLICES),
+                "threads {threads} {switches:?}: sides {sides:?}"
             );
-            let units = field(&stderr, "[X_SHADOW] TBXQSLICE", "units_compared");
-            let cut = field(&stderr, "[X_STATS] TBXQSLICE", "groups_cut");
-            if cfg!(target_arch = "x86_64") {
-                assert!(
-                    units > 0 && cut > 0,
-                    "threads {threads} {switches:?}: nothing cut or compared: {stderr}"
-                );
-                assert!(
-                    field(&stderr, "[X_SHADOW] TBXQSLICE", "records_compared") > 0,
-                    "threads {threads} {switches:?}: no record compared: {stderr}"
-                );
-            } else {
-                assert_eq!(
-                    (units, cut),
-                    (0, 0),
-                    "threads {threads} {switches:?}: cut on a target other than x86-64"
-                );
-            }
         }
     }
 }

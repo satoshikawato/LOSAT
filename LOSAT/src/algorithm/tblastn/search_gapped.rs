@@ -274,7 +274,7 @@ pub(super) fn preliminary_protein_hsps_for_search(
     queries: &[&[u8]],
     // EXPERIMENT (LOSAT_X_TBNSTORE): the subject's letters, or its packed store (the unit path
     // translates the store).
-    subject: SubjectNt<'_>,
+    subject: super::x_subject_store::XPrelimSubject<'_>,
     db_gencode: u8,
     profile: PreliminaryProfile<'_>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
@@ -542,7 +542,7 @@ impl Drop for XUnitResidues {
 // consumed straight from the scan buffer, so no per-frame seed list is kept.
 fn x_preliminary_protein_hsps_by_unit(
     queries: &[&[u8]],
-    subject: SubjectNt<'_>,
+    subject: super::x_subject_store::XPrelimSubject<'_>,
     db_gencode: u8,
     profile: PreliminaryProfile<'_>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
@@ -551,6 +551,7 @@ fn x_preliminary_protein_hsps_by_unit(
 ) -> Result<Vec<(usize, GappedHsp)>> {
     use super::search_init::XTwoHit;
     use super::search_seed::{x_scan_plan, x_scan_unit};
+    use super::x_subject_store::XPrelimSubject;
     // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927:
     // cutoff = hit_params->cutoffs[context].cutoff_score;
     // Every query context must supply its own measured cutoff.
@@ -575,6 +576,24 @@ fn x_preliminary_protein_hsps_by_unit(
     let total_query_length = x_frames.total_query_length;
     let query_sequence = &x_frames.query_sequence;
     let init_context_offsets = &x_frames.init_context_offsets;
+    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): a database sequence whose plan has no residues
+    // (LOSAT_X_TBNUNITXLATE, `x_lean_subject`) is read before its plan (`read_shared`) and
+    // searched as the packed subject of the copy is: its units translate the store they read.
+    let x_store;
+    let subject = match subject {
+        XPrelimSubject::Stream(stream, oid)
+            if super::search_seed::x_lean_subject(
+                x_subject,
+                stream.length(oid),
+                db_gencode,
+                profile.mask_lowercase,
+            ) =>
+        {
+            x_store = stream.read_shared(oid)?;
+            XPrelimSubject::Nt(SubjectNt::Packed(&x_store))
+        }
+        subject => subject,
+    };
     let Some(plan) = x_scan_plan(
         queries,
         subject,
@@ -637,7 +656,7 @@ fn x_preliminary_protein_hsps_by_unit(
         // thread's buffer.
         let mut x_held = None;
         let subject_residues: &[u8] = if frame.aa_seq.is_empty() {
-            let SubjectNt::Packed(store) = subject else {
+            let XPrelimSubject::Nt(SubjectNt::Packed(store)) = subject else {
                 bail!("TBLASTN: a plan without residues of a subject that is not packed");
             };
             let held = x_held.insert(XUnitResidues::take());
@@ -984,7 +1003,7 @@ pub(super) fn preliminary_hsps_of_letters(
 ) -> Result<Vec<(usize, GappedHsp)>> {
     preliminary_protein_hsps_for_search(
         queries,
-        SubjectNt::Letters(subject),
+        SubjectNt::Letters(subject).into(),
         db_gencode,
         profile,
         None,
@@ -1034,7 +1053,7 @@ fn preliminary_hsps_traced_of(
     });
     let hsps = preliminary_protein_hsps_for_search(
         queries,
-        subject,
+        subject.into(),
         db_gencode,
         profile,
         None,

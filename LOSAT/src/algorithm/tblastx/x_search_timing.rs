@@ -57,7 +57,7 @@ pub(super) enum XStage {
     Merge,
     /// The reference frame loop (scan, two-hit extension, per-frame append and sort).
     FrameLoop,
-    /// The shadow comparison and the end of the lookup stage (frees the lookup table and the
+    /// The end of the lookup stage (frees the lookup table and the
     /// worker's diagonal table at the batch's last subject).
     SeedRelease,
     /// The first linking call, on every HSP the seed stage saved.

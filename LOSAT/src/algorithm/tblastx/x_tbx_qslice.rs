@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBXQSLICE / LOSAT_X_TBXQSLICESHADOW): the scan of a unit of the unit path
+//! EXPERIMENT (LOSAT_X_TBXQSLICE): the scan of a unit of the unit path
 //! (x_pair_par.rs) in slices of its query group, each slice with its own lookup table, all of them
 //! on the unit's one diagonal table. A child module of x_pair_par.rs.
 //!
@@ -76,9 +76,8 @@
 //! subjects. A batch in which no group is cut runs as before (`scan_unit`, whose machine code does
 //! not change); in a batch with a cut group every group's units take this path (a group that is not
 //! cut is one slice). The size of a slice changes no output. x86-64 only (where it was measured).
-//! The probes of LOSAT_TIMING / LOSAT_X_STATS (x_unit_probe.rs) and the shadow of
-//! LOSAT_X_TBXEXTBATCH (which compares `scan_unit` with the batched scan of the whole group,
-//! unit by unit) need the group's table: with them nothing is cut.
+//! The probes of LOSAT_TIMING / LOSAT_X_STATS (x_unit_probe.rs) need the group's table: with them
+//! nothing is cut.
 //!
 //! Interactions, read by the window (the widest slice's span of entries) in place of the group:
 //! LOSAT_X_TBXPREFETCH prefetches where the window reaches its size, and LOSAT_X_TBXEXTBATCH holds
@@ -86,25 +85,10 @@
 //! pending marks of LOSAT_X_TBXEXTBATCH stay valid across slices (a mark is resolved before the
 //! next hit on its cell is tested, from whichever slice); the batch is flushed at the end of the
 //! unit.
-//!
-//! `LOSAT_X_TBXQSLICESHADOW=1` builds the whole groups as well and runs `scan_unit` with them on
-//! every unit of a cut batch, on its own table: it stops at the first difference of the final
-//! tables or of the unit's init HSPs after the chunk's stable sort (`XUnitSort::x_sort`).
 
 use super::x_kmerge::XUnitSort;
-use super::x_tbx_extbatch::{self, XPendBatch, XShadowList, XShadowRef, BATCH};
+use super::x_tbx_extbatch::{self, XPendBatch, BATCH};
 use super::*;
-
-// No NCBI counterpart: counters of LOSAT_X_TBXQSLICE (batches with a cut group, groups cut, slice
-// tables; the units and slice scans in shadow mode only) and of its shadow; they do not change any
-// value NCBI computes.
-static QS_BATCHES: AtomicU64 = AtomicU64::new(0);
-static QS_GROUPS_CUT: AtomicU64 = AtomicU64::new(0);
-static QS_SLICES: AtomicU64 = AtomicU64::new(0);
-static QS_UNITS: AtomicU64 = AtomicU64::new(0);
-static QS_SCANS: AtomicU64 = AtomicU64::new(0);
-static QS_SHADOW_UNITS: AtomicU64 = AtomicU64::new(0);
-static QS_SHADOW_RECORDS: AtomicU64 = AtomicU64::new(0);
 
 /// The most letters of a slice when the switch is not given a number (128 Ki: a window of
 /// 512 KiB, which fits the core's L2 with the slice's backbone).
@@ -153,14 +137,6 @@ fn slice_rule() -> Option<XSliceRule> {
     })
 }
 
-// No NCBI counterpart: a comparison of two LOSAT code paths.
-/// LOSAT_X_TBXQSLICESHADOW (set to any value): the whole groups are built as well and every unit of
-/// a cut batch runs `scan_unit` with them, compared.
-pub(super) fn shadow() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBXQSLICESHADOW").is_some())
-}
-
 // No NCBI counterpart: the rule of the switch for one batch (module doc). The groups are those of
 // `group_starts`; group g holds the query offsets from its first context's `frame_base` to the
 // next group's (the last group: to the end of its last context). `threads` are the search pool's.
@@ -173,7 +149,7 @@ pub(super) fn partition(
     threads: usize,
 ) -> Option<Vec<Vec<i32>>> {
     let rule = slice_rule()?;
-    if x_unit_probe::mode() != 0 || x_tbx_extbatch::shadow() {
+    if x_unit_probe::mode() != 0 {
         return None;
     }
     let min_len = rule.min_span_threads.div_ceil(threads.max(1) as u64);
@@ -183,7 +159,7 @@ pub(super) fn partition(
 }
 
 // No NCBI counterpart: the rule alone (module doc), without the conditions of `partition` that
-// depend on diagnostics (the probes, LOSAT_X_TBXEXTBATCHSHADOW), for LOSAT_X_TBXUNITMASK
+// depend on diagnostics (the probes), for LOSAT_X_TBXUNITMASK
 // (x_pair_par.rs module doc), whose choices must not change with them.
 /// Whether the switch's rule cuts a group of `contexts` (first contexts `starts`) at `threads`
 /// threads, whatever the diagnostics switches say.
@@ -434,40 +410,6 @@ pub(super) fn lut_shadow_compare(direct: Option<&[XSliced]>, reference: Option<&
     }
 }
 
-// No NCBI counterpart: counters of the summary.
-/// Counts a batch with a cut group (LOSAT_X_TBXQSLICE's summary).
-pub(super) fn count_batch(sliced: &[XSliced]) {
-    QS_BATCHES.fetch_add(1, AtomicOrdering::Relaxed);
-    let cut = sliced.iter().filter(|g| g.slices.len() > 1).count();
-    QS_GROUPS_CUT.fetch_add(cut as u64, AtomicOrdering::Relaxed);
-    let slices: usize = sliced.iter().map(|g| g.slices.len()).sum();
-    QS_SLICES.fetch_add(slices as u64, AtomicOrdering::Relaxed);
-}
-
-/// The summary lines (printed by x_pair_par.rs's `print_summary`): the shadow's and, in shadow
-/// mode, the counters.
-// No NCBI counterpart: prints counters; it does not change any value NCBI computes.
-pub(super) fn print_summary() {
-    if !shadow() {
-        return;
-    }
-    let load = |c: &AtomicU64| c.load(AtomicOrdering::Relaxed);
-    eprintln!(
-        "[X_SHADOW] TBXQSLICE units_compared={} records_compared={} (records after the chunk sort and unit tables identical)",
-        load(&QS_SHADOW_UNITS),
-        load(&QS_SHADOW_RECORDS)
-    );
-    eprintln!(
-        "[X_STATS] TBXQSLICE batches={} groups_cut={} slices={} units={} slice_scans={} rule={:?}",
-        load(&QS_BATCHES),
-        load(&QS_GROUPS_CUT),
-        load(&QS_SLICES),
-        load(&QS_UNITS),
-        load(&QS_SCANS),
-        slice_rule()
-    );
-}
-
 impl XPairPar {
     // EXPERIMENT (LOSAT_X_TBXQSLICE): `run_subject_unit_fns` for a batch with a cut group. The rules
     // of LOSAT_X_TBXPREFETCH and LOSAT_X_TBXEXTBATCH read each unit's window (module doc). No NCBI
@@ -503,7 +445,7 @@ impl XPairPar {
         inp: &XSubject<'_>,
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> XUnitOutputs {
-        let sort = x_kmerge::mode() == 1;
+        let sort = x_kmerge::on();
         if seed_compact() {
             XUnitOutputs::Compact(self.run_units(
                 units,
@@ -542,7 +484,15 @@ impl XPairPar {
         scratch: &mut XScratch,
     ) -> Vec<InitHSP> {
         let mut init_hsps: Vec<InitHSP> = Vec::new();
-        self.scan_unit_sliced_or_shadow::<_, B, PF>(unit, inp, scratch, &mut init_hsps);
+        // EXPERIMENT (LOSAT_X_TBXHITBF): the scan in slices or its branch-free hit loop
+        // (x_tbx_hitbf.rs).
+        self.scan_unit_sliced_or_bf::<_, B, PF>(
+            self.x_sliced(unit),
+            unit,
+            inp,
+            scratch,
+            &mut init_hsps,
+        );
         init_hsps
     }
 
@@ -559,67 +509,16 @@ impl XPairPar {
         let mut records = std::mem::take(&mut scratch.records);
         records.clear();
         let mapped = x_records_for(self.x_sliced(unit).span(), unit, scratch, &mut records);
-        self.scan_unit_sliced_or_shadow::<_, B, PF>(unit, inp, scratch, &mut records);
+        self.scan_unit_sliced_or_bf::<_, B, PF>(
+            self.x_sliced(unit),
+            unit,
+            inp,
+            scratch,
+            &mut records,
+        );
         let exact = x_unit_copy(&records, mapped);
         scratch.records = records;
         exact
-    }
-
-    // EXPERIMENT (LOSAT_X_TBXQSLICESHADOW): `scan_unit` with the whole group (on its own table, into
-    // its own list), then the scan in slices, compared (module doc).
-    /// The scan of one unit in slices, compared with `scan_unit` in shadow mode.
-    #[inline(always)]
-    fn scan_unit_sliced_or_shadow<
-        S: XShadowList + XUnitSort + Clone,
-        const B: bool,
-        const PF: bool,
-    >(
-        &self,
-        unit: &XUnit,
-        inp: &XSubject<'_>,
-        scratch: &mut XScratch,
-        init_hsps: &mut S,
-    ) {
-        let group = self.x_sliced(unit);
-        // EXPERIMENT (LOSAT_X_TBXHITBF): the scan in slices or its branch-free hit loop
-        // (x_tbx_hitbf.rs).
-        if !shadow() {
-            self.scan_unit_sliced_or_bf::<S, B, PF>(group, unit, inp, scratch, init_hsps);
-            return;
-        }
-        let mut reference = S::default();
-        self.scan_unit::<S, XShadowRef, PF>(unit, inp, scratch, &mut reference, &mut XShadowRef);
-        let reference_diag = std::mem::take(&mut scratch.diag);
-        let scans = self.scan_unit_sliced_or_bf::<S, B, PF>(group, unit, inp, scratch, init_hsps);
-        let mut sorted = init_hsps.clone();
-        sorted.x_sort();
-        reference.x_sort();
-        if sorted != reference || scratch.diag != reference_diag {
-            let first = sorted.first_difference(&reference);
-            let cell = scratch
-                .diag
-                .iter()
-                .zip(&reference_diag)
-                .position(|(a, b)| a != b);
-            panic!(
-                "LOSAT_X_TBXQSLICESHADOW: subject {} frame {} chunk {} group {} ({} slices): sorted records {} vs {} (first difference at {}), tables {} vs {} cells (first difference at {:?})",
-                inp.s_idx,
-                unit.f,
-                unit.k,
-                unit.g,
-                group.slices.len(),
-                sorted.len_of(),
-                reference.len_of(),
-                first,
-                scratch.diag.len(),
-                reference_diag.len(),
-                cell
-            );
-        }
-        QS_UNITS.fetch_add(1, AtomicOrdering::Relaxed);
-        QS_SCANS.fetch_add(scans, AtomicOrdering::Relaxed);
-        QS_SHADOW_UNITS.fetch_add(1, AtomicOrdering::Relaxed);
-        QS_SHADOW_RECORDS.fetch_add(sorted.len_of() as u64, AtomicOrdering::Relaxed);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:494-516
@@ -638,7 +537,7 @@ impl XPairPar {
     // `x_hit_batched` of LOSAT_X_TBXEXTBATCH (`B`; the batch flushed at the end of the unit), and
     // LOSAT_X_TBXPREFETCH's hint (`PF`) as in `scan_unit`.
     /// Scans one unit of the cut batch's group `group` in slices and saves its init HSPs into
-    /// `init_hsps`. Returns the number of slices scanned.
+    /// `init_hsps`.
     #[inline(always)]
     pub(super) fn scan_unit_sliced<S: XInitSink, const B: bool, const PF: bool>(
         &self,
@@ -647,8 +546,8 @@ impl XPairPar {
         inp: &XSubject<'_>,
         scratch: &mut XScratch,
         init_hsps: &mut S,
-    ) -> u64 {
-        self.scan_unit_sliced_hits::<S, B, PF, false>(group, unit, inp, scratch, init_hsps)
+    ) {
+        self.scan_unit_sliced_hits::<S, B, PF, false>(group, unit, inp, scratch, init_hsps);
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
@@ -669,7 +568,7 @@ impl XPairPar {
         inp: &XSubject<'_>,
         scratch: &mut XScratch,
         init_hsps: &mut S,
-    ) -> u64 {
+    ) {
         let wordsize = inp.wordsize;
         let window = inp.window;
         let s_frame = &inp.s_frames_preliminary[unit.f];
@@ -679,7 +578,7 @@ impl XPairPar {
         let chunk_end = chunk.offset.saturating_add(chunk.length);
         let subject = &subject_all[chunk.offset..chunk_end];
         if subject.len() < wordsize as usize {
-            return 0;
+            return;
         }
 
         // The unit's table, as `scan_unit` sets it up from the whole group's bounds (module doc,
@@ -711,7 +610,6 @@ impl XPairPar {
             s_len: inp.s_len,
         };
         let mut b = XPendBatch::new(BATCH);
-        let mut scans = 0u64;
 
         let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
         let scan_interiors = tblastx_scan_interiors(chunk.length, None);
@@ -720,7 +618,6 @@ impl XPairPar {
             if sub.longest_chain <= 0 {
                 continue;
             }
-            scans += 1;
             // NCBI sizes the offset array from the table it scans (lookup_wrap.c:264-266).
             let offset_array_size: i32 = OFFSET_ARRAY_SIZE + sub.longest_chain;
             // EXPERIMENT (LOSAT_X_TBXHITBF): with `BF` and `PF`, X_PREFETCH_AHEAD entries more, as
@@ -868,7 +765,6 @@ impl XPairPar {
             // SAFETY: the candidates' cells are cells of this unit's table.
             unsafe { x_tbx_extbatch::flush(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps) };
         }
-        scans
     }
 }
 
@@ -1030,7 +926,7 @@ mod tests {
         inp: &XSubject<'_>,
         scratch: &mut XScratch,
         got: &mut S,
-    ) -> u64 {
+    ) {
         match variant {
             0 => {
                 pp.scan_unit_sliced_hits::<_, false, false, false>(sliced, unit, inp, scratch, got)
@@ -1181,21 +1077,6 @@ mod tests {
                                 "case {case} frame {f} group {g} variant {variant}: records"
                             );
                         }
-                        // LOSAT_X_TBXHITBFSHADOW: both scans compared, the branch-free one's
-                        // records kept.
-                        let mut shadowed: Vec<InitHSP> = Vec::new();
-                        pp.scan_unit_sliced_mode::<_, true, false>(
-                            2,
-                            sliced,
-                            &unit,
-                            &inp,
-                            &mut scratch,
-                            &mut shadowed,
-                        );
-                        assert_eq!(
-                            shadowed, plain[2],
-                            "case {case} frame {f} group {g}: shadow"
-                        );
                     }
                     records += reference.len();
                     // The compact records, sorted, are today's too.

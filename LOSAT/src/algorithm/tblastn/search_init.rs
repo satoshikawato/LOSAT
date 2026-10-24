@@ -426,7 +426,9 @@ impl<'a> XTwoHit<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::algorithm::tblastn::search_gapped::{preliminary_stages, word_finder_profile};
+    use crate::algorithm::tblastn::search_gapped::{
+        preliminary_stages, preliminary_stages_of, word_finder_profile,
+    };
     use crate::sequence::packed_subject::SubjectNt;
     use std::fs;
 
@@ -950,16 +952,17 @@ mod tests {
         }
         assert_eq!(actual, expected);
     }
-    // NCBI c++/src/algo/blast/core/blast_engine.c:478-552:
-    // s_GetNextSubjectChunk precedes each WordFinder call and the hit list
-    // is reset before the next chunk. Subject offsets stay chunk-local.
-    #[test]
-    fn long_subject_chunk_wordfinder_hsps_match_ncbi() {
+    // No NCBI counterpart: the inputs and NCBI's initial HSPs of the long-subject tests below
+    // (docs/evidence/tlosan_stage_c/long_chunk_20260924): a 15,000,962-base subject whose frames
+    // have two chunks each.
+    fn long_chunk_case() -> (Vec<u8>, Vec<u8>, Vec<InitHsp>) {
         let root = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../docs/evidence/tlosan_stage_c/"
         );
-        let query = &read_fasta(&format!("{root}long_chunk_20260924/query.faa"))[0].1;
+        let query = read_fasta(&format!("{root}long_chunk_20260924/query.faa"))[0]
+            .1
+            .clone();
         let inserts = read_fasta(&format!("{root}run_20260923/subjects.fna"));
         let plus1 = &inserts.iter().find(|(id, _)| id == "plus1").unwrap().1;
         assert_eq!(plus1.len(), 362);
@@ -992,6 +995,16 @@ mod tests {
                 }
             })
             .collect();
+        (query, subject, expected)
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_engine.c:478-552:
+    // s_GetNextSubjectChunk precedes each WordFinder call and the hit list
+    // is reset before the next chunk. Subject offsets stay chunk-local.
+    #[test]
+    fn long_subject_chunk_wordfinder_hsps_match_ncbi() {
+        let (query, subject, expected) = long_chunk_case();
+        let query = &query;
         // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
         // cutoffs = word_params->cutoffs + curr_context;
         // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
@@ -999,6 +1012,60 @@ mod tests {
         let actual = preliminary_stages(
             &[query],
             &subject,
+            1,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16],
+                &[28],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
+        )
+        .unwrap()
+        .initial;
+        assert_eq!(actual, expected);
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_engine.c:478-552,805-812 (above)
+    // The same subject packed, as every `-db` sequence is: with LOSAT_X_TBNUNITXLATE its plan has
+    // no residues (its first frame has more than 1 MiB), and each unit translates its chunk and
+    // 4,096 residues past it (the first chunk of a frame) or to the end sentinel (the second) when
+    // it runs; the initial HSPs are NCBI's either way.
+    #[test]
+    fn long_packed_subject_chunk_wordfinder_hsps_match_ncbi() {
+        let (query, subject, expected) = long_chunk_case();
+        let store =
+            crate::sequence::packed_subject::PackedNucleotide::from_subject_letters(&subject)
+                .expect("letters");
+        let plan = super::super::search_seed::x_scan_plan(
+            &[&query],
+            SubjectNt::Packed(&store),
+            1,
+            None,
+            13,
+            false,
+            ScoringMatrix::Blosum62,
+            3,
+            &std::sync::OnceLock::new(),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(plan.subject.units.len(), 12);
+        let lean = super::super::x_subject_translate::x_units_translate(subject.len());
+        assert!(plan
+            .subject
+            .frames
+            .iter()
+            .all(|frame| frame.aa_seq.is_empty() == lean));
+        drop(plan);
+        // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590 (above): cutoff 28.
+        let actual = preliminary_stages_of(
+            &[&query],
+            SubjectNt::Packed(&store),
             1,
             word_finder_profile(
                 None,

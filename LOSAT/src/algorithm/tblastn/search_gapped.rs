@@ -54,6 +54,7 @@ pub(super) struct TracebackOwnedHsp {
 // GetGappedScore(..., init_hitlist, &hsp_list, ...);
 // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
 // Score only this chunk's sorted initial HSPs before the next chunk scan.
+/// `subject_sequence` is the chunk's residues of `frame`.
 fn score_gapped_chunk(
     queries: &[&[u8]],
     query_frames: &[QueryFrame],
@@ -61,6 +62,7 @@ fn score_gapped_chunk(
     total_query_length: i32,
     frame: &QueryFrame,
     chunk: TranslatedChunk,
+    subject_sequence: &[u8],
     initial: &[InitHsp],
     gap_open: i32,
     gap_extend: i32,
@@ -70,7 +72,7 @@ fn score_gapped_chunk(
     scratch: &mut GapAlignScratch,
 ) -> Result<Vec<(usize, GappedHsp)>> {
     let mut results = Vec::new();
-    let subject_sequence = &frame.aa_seq[1 + chunk.offset..1 + chunk.offset + chunk.length];
+    debug_assert_eq!(subject_sequence.len(), chunk.length);
     // NCBI c++/src/algo/blast/core/aa_ungapped.c:223-235:
     // Blast_InitHitListSortByScore(init_hitlist);
     // NCBI c++/src/algo/blast/core/blast_extend.c:273-313:
@@ -465,6 +467,42 @@ thread_local! {
     static X_UNIT_STATE: std::cell::Cell<Option<XUnitBuffers>> = const { std::cell::Cell::new(None) };
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812
+// ```c
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// NCBI's units read the subject's translation buffer; a unit of a plan without residues translates
+// the part it reads into a buffer its thread keeps (up to a chunk of 5,000,000 residues and the
+// margin, about 5 MB, until the thread ends).
+thread_local! {
+    /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): this thread's buffer for the residues of a unit of a plan
+    /// without residues (`x_packed_lean_plan`), taken by the unit and put back when it ends. A unit
+    /// that finds it empty (the thread's first, or one run while another holds it) makes a new one.
+    static X_UNIT_RESIDUES: std::cell::Cell<Vec<u8>> = const { std::cell::Cell::new(Vec::new()) };
+}
+
+// No NCBI counterpart: the hold of a unit on its thread's buffer (above); it computes no value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): a unit's hold on `X_UNIT_RESIDUES`, given back when the unit
+/// ends, also when it fails. The hold is a take of the cell, so a unit the thread runs while it
+/// waits (the pool's jobs) never meets a borrowed buffer.
+struct XUnitResidues(Vec<u8>);
+
+impl XUnitResidues {
+    fn take() -> Self {
+        Self(X_UNIT_RESIDUES.take())
+    }
+}
+
+impl Drop for XUnitResidues {
+    fn drop(&mut self) {
+        let residues = std::mem::take(&mut self.0);
+        // A thread that is ending keeps nothing.
+        let _ = X_UNIT_RESIDUES.try_with(|cell| cell.set(residues));
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-584,844
 // ```c
 //     while (TRUE) {
@@ -590,7 +628,37 @@ fn x_preliminary_protein_hsps_by_unit(
         let (frame_index, chunk, _) = &plan.subject.units[unit];
         let frame = &plan.subject.frames[*frame_index];
         let chunk = *chunk;
-        let subject_sequence = &frame.aa_seq[1 + chunk.offset..1 + chunk.offset + chunk.length];
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812
+        // ```c
+        //             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+        //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+        // ```
+        // EXPERIMENT (LOSAT_X_TBNUNITXLATE): the frame from the chunk's first residue on: the
+        // plan's, or for a plan without residues those the unit reads, translated into this
+        // thread's buffer (with LOSAT_X_TBNUNITXLATESHADOW, translated and compared with the plan's).
+        let mut x_held = None;
+        let subject_residues: &[u8] = if frame.aa_seq.is_empty() {
+            let SubjectNt::Packed(store) = subject else {
+                bail!("TBLASTN: a plan without residues of a subject that is not packed");
+            };
+            let held = x_held.insert(XUnitResidues::take());
+            let range = super::x_subject_translate::x_unit_residues(
+                store,
+                db_gencode,
+                frame,
+                chunk,
+                &mut held.0,
+            )?;
+            &held.0[range]
+        } else {
+            if let SubjectNt::Packed(store) = subject {
+                if super::x_subject_translate::x_unit_shadow_on() {
+                    super::x_subject_translate::x_unit_shadow(store, db_gencode, frame, chunk)?;
+                }
+            }
+            &frame.aa_seq[1 + chunk.offset..]
+        };
+        let subject_sequence = &subject_residues[..chunk.length];
         let chunk_offset = u32::try_from(chunk.offset)?;
         let UnitState {
             two_hit,
@@ -601,7 +669,7 @@ fn x_preliminary_protein_hsps_by_unit(
         hits.clear();
         #[cfg(test)]
         probe_begin_unit(unit, frame.frame, chunk.offset);
-        x_scan_unit(&plan, unit, pairs, |filled| {
+        x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
             #[cfg(test)]
             probe_seeds(unit, frame.frame, chunk_offset, filled);
             match x_hit_loop {
@@ -642,6 +710,7 @@ fn x_preliminary_protein_hsps_by_unit(
             total_query_length,
             frame,
             chunk,
+            subject_sequence,
             hits,
             profile.gap_open,
             profile.gap_extend,
@@ -953,6 +1022,25 @@ pub(super) fn preliminary_hsps_traced(
     profile: PreliminaryProfile<'_>,
     at_purge_input: Option<PurgeInputHook>,
 ) -> Result<(Vec<(usize, GappedHsp)>, Vec<PreliminaryEvent>)> {
+    preliminary_hsps_traced_of(
+        queries,
+        SubjectNt::Letters(subject),
+        db_gencode,
+        profile,
+        at_purge_input,
+    )
+}
+
+// No NCBI counterpart: test helper. `preliminary_hsps_traced` for the letters or the packed store
+// of a subject (a packed one is searched as every `-db` sequence is).
+#[cfg(test)]
+fn preliminary_hsps_traced_of(
+    queries: &[&[u8]],
+    subject: SubjectNt<'_>,
+    db_gencode: u8,
+    profile: PreliminaryProfile<'_>,
+    at_purge_input: Option<PurgeInputHook>,
+) -> Result<(Vec<(usize, GappedHsp)>, Vec<PreliminaryEvent>)> {
     let _guard = ProbeGuard;
     PRELIMINARY_PROBE.with_borrow_mut(|probe| {
         *probe = Some(PreliminaryProbe {
@@ -960,7 +1048,15 @@ pub(super) fn preliminary_hsps_traced(
             ..PreliminaryProbe::default()
         });
     });
-    let hsps = preliminary_hsps_of_letters(queries, subject, db_gencode, profile)?;
+    let hsps = preliminary_protein_hsps_for_search(
+        queries,
+        subject,
+        db_gencode,
+        profile,
+        None,
+        &XQuerySide::new(),
+        None,
+    )?;
     let events = with_probe(|probe| std::mem::take(&mut probe.events)).unwrap_or_default();
     Ok((hsps, events))
 }
@@ -992,7 +1088,19 @@ pub(super) fn preliminary_stages(
     db_gencode: u8,
     profile: PreliminaryProfile<'_>,
 ) -> Result<PreliminaryStages> {
-    let (list, events) = preliminary_hsps_traced(queries, subject, db_gencode, profile, None)?;
+    preliminary_stages_of(queries, SubjectNt::Letters(subject), db_gencode, profile)
+}
+
+// No NCBI counterpart: test helper (see `PreliminaryStages`), for the letters or the packed store
+// of a subject.
+#[cfg(test)]
+pub(super) fn preliminary_stages_of(
+    queries: &[&[u8]],
+    subject: SubjectNt<'_>,
+    db_gencode: u8,
+    profile: PreliminaryProfile<'_>,
+) -> Result<PreliminaryStages> {
+    let (list, events) = preliminary_hsps_traced_of(queries, subject, db_gencode, profile, None)?;
     let mut stages = PreliminaryStages {
         list,
         seeds: Vec::new(),

@@ -88,7 +88,7 @@ pub struct TblastxArgs {
     pub threshold: f64,
     // Option, not a value with a default: whether it was given is what a BLAST archive (outfmt 11)
     // records (`WordSize`, NCBI blast_args.cpp:290-292); the search uses `word_size()` (default 3).
-    #[arg(long, value_parser = protein_word_size)]
+    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3]")]
     pub word_size: Option<i32>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,

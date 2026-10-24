@@ -511,7 +511,7 @@
    },
    {
     "flag": "-word_size",
-    "help": "",
+    "help": "Word size for wordfinder algorithm [default: 3]",
     "takes_value": true
    },
    {

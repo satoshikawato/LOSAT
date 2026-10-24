@@ -273,6 +273,7 @@ export LOSAT_X_BNDBCUT=1
 export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNDCONE=1
 export LOSAT_X_BNFEWSUBJ=1
+export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
@@ -2940,6 +2941,20 @@ Scheduling (each value computed by one thread with the original function; order 
   switch leaves alone, at 8-32 threads) 0.97-1.02; megablast of 1,775 cDNAs (the loop by default) 1.00 at one thread and
   1.02-1.03 at 8 and 16 threads, within the rounds' spread (0.97-1.09) with the same page faults, TLB shootdowns, user
   and system time as dev. Max RSS: the same (the 31,168 cDNAs in the loop 236 MiB against 249).
+- `LOSAT_X_BNLUTDROP=1` (BLASTN, every task, `-subject` and `-db`; in the strict set since 2026-10-24
+  (perf/mb-lut-drop, evidence at the end of this entry): on unless it is `0`) a query batch drops its lookup tables
+  when its preliminary stage ends, before its traceback (`blastn/blast_engine/x_lut_drop.rs`), where NCBI's traceback
+  stage drops its table (`m_LookupTable.Reset(NULL)`, `traceback_stage.cpp:208-211`); with `=0` the tables live until
+  the batch returns, as before. The traceback reads the HSPs that the preliminary stage kept and does not scan, and the
+  tables are passed to `process_subject` by the preliminary stage's calls only (`None` in the traceback's), so the
+  compiler shows that no traceback reads them; the values taken from them before the scan (the offset array size, the
+  shape of the subject search) are plain numbers. A `LOSAT_X_MBLUTKEEP` table goes back to the batch loop's keep when
+  the tables drop, as at the batch's end before (zeroed and taken by the next build as before); what the traceback no
+  longer holds is the rest: the chains (`next_pos`, 4 bytes a position of both strands), the PV array, and every table
+  that is not kept (the discontiguous tables, the tables of `LOSAT_X_QBATCHPAR`'s slots). A batch split into query
+  chunks has no table of its own (its chunks drop theirs when their calls return after their preliminary stage). With
+  `LOSAT_TIMING` `[TIMING] x_bn_lut_drop: batches=` gives the number of batches that dropped their tables before their
+  traceback. Evidence. EVIDENCE_PLACEHOLDER
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
   `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; in the strict set since 2026-10-17,
   default ON: `LOSAT_X_DISCLUTPAR=0` turns it off; evidence below, "Default ON") the

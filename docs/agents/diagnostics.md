@@ -326,6 +326,7 @@ export LOSAT_X_DCCSR=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
+export LOSAT_X_DISPTABLE=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPWINDOW=1
 export LOSAT_X_ERFABSORB=1
@@ -821,6 +822,22 @@ Same values, faster computation:
   eight threads (eight cores, siblings idle) x0.923 and x0.965 (cycles x0.944 and x0.946). LOSAT Web (Node, serial
   reactor, 8 rounds in one process against dev 32a63700): the whole search x0.945 and x0.946 of the cycles, the sum
   P-value stage x0.09 and x0.15.
+- `LOSAT_X_DISPTABLE=1` (TBLASTX and TBLASTN, the displayed residues; speed; in the strict set from the pull request
+  that added it, 2026-10-24; `=0` translates each codon by the scan) `display_residue` (`tblastx/report.rs`) reads a
+  codon's displayed residue from a table of the 4,096 codons of 4-bit codes, made once per genetic code at its first
+  use (`display_table`, each entry `display_codon` of its codon; `GeneticCode::display_slot`), and the bases' codes
+  from two 256-byte tables (plus strand and complement). NCBI's display does the same (`CTrans_table`: `sm_BaseToIdx`
+  and `m_AminoAcid`, `Genetic_code_table.cpp`). Before, each base's code was found among the IUPAC letters and each
+  codon translated by the nested loops of `display_codon`. The residues are the same (unit test
+  `display_table_gives_the_residues_of_the_scan` over every byte, codon and code). TBLASTX translates the displayed
+  rows again for the identities of every HSP, the outfmt 0 rows and LOSAT Web's hit records; TBLASTN for its subject
+  rows. The table of a code is filled once per process (4,096 calls of `display_codon`). Workstation, the same binary
+  with `=0` and without, 8 rounds in alternating order (2026-10-24, outputs identical in every run): TBLASTX
+  AP027131 x AP027133 (genetic code 4) with outfmt 0 at one thread x0.979 of the time (cycles x0.980, instructions
+  x0.987), MelaMJNV x PemoMJNVA x0.957 (cycles x0.960); with outfmt 6 (the identities only) x0.991 and x0.982;
+  eight threads (eight cores, siblings idle) with outfmt 0 x0.994 and x0.971 (cycles x0.982 and x0.965). LOSAT Web
+  (Node, serial reactor, 8 rounds in one process, the same reactor with `=0`): the whole search x0.984 and x0.967
+  of the cycles, the report stage x0.63 and x0.46. TBLASTN was not timed.
 - DUSTFAST, DUSTRING (graduated 2026-10-22; no variables, no `LOSAT_X_DUSTSHADOW`) DUST perfect-interval
   list built in one merge, window kept in a ring buffer. Always run: `TripletWindow::find_perfect` is the
   merge (the literal `std::list` port was deleted), and `DustMasker::mask_subsequence` uses the ring buffer

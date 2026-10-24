@@ -3070,6 +3070,24 @@ Scheduling (each value computed by one thread with the original function; order 
   traceback earlier and that traceback's medium buffers stay in the heap; with the threshold fixed
   (`MALLOC_MMAP_THRESHOLD_=131072`) the run reads 217.2 -> 217.0, and `LOSAT_X_BNLUTDROP=0` reads 217.5 as dev. Time:
   wall x0.997-1.001, cycles:u x0.991-1.000 and instructions:u x0.999-1.000 in every case.
+- `LOSAT_X_BNQDROP=1` (BLASTN, every task, `-subject` and `-db`; in the strict set since 2026-10-25
+  (perf/mb-query-letters, evidence at the end of this entry): on unless it is `0`) a query batch drops its records'
+  letters once it has encoded them (`blastn/blast_engine/x_query_drop.rs`), where no report reads them; with `=0` the
+  records read before the search keep their letters until the search ends, as before. NCBI holds a batch's Bioseqs in its
+  scope until the batch is formatted (`QueryBatchCleanup`, `blastn_app.cpp:277`), beside the search's encoded copy; the
+  drop is memory only. `search_cli` moves the records into a store that the batch loop takes each batch out of
+  (`x_query_stream::Queries::Taken`), and `search_query_batch` drops the letters after their last readers (the encoding
+  and the batch's query chunks), before it builds the lookup tables (`record.sequence = Vec::new()`, as
+  `LOSAT_X_BNSTORE` does with the subjects'); the records keep their IDs, titles and messages, and every length read
+  later comes from the lengths taken before (`query_lengths` in the traceback, the searched lengths for an invalid
+  query's message and the Seq-aligns). The rule (class conditional, recorded where `search_cli` decides): every output
+  format shows no query letter (`BlastnOutputFormat::reads_query_letters`: outfmt 6, 7, 8, 9, 12 and SAM without both
+  `SQ` and `SR`; BLASTN takes no custom tabular column) and no caller takes the hits' records, no `-query_loc`, no
+  `LOSAT_X_QBATCHPAR` slot may run (the condition `LOSAT_X_QSTREAM`'s rule computes), and the records are read before
+  the search (`LOSAT_X_QSTREAM` not acting; not `run_local`, whose caller holds its records). The records of a batch's
+  query chunks (`FastaRecord::cut`, copies that only the search reads) drop their letters after their own encoding
+  wherever the switch is on, with every format. With `LOSAT_TIMING` `[TIMING] x_bn_q_drop: batches= records= letters=`
+  gives the batches (query chunks included), records and letters dropped.
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
   `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; in the strict set since 2026-10-17,
   default ON: `LOSAT_X_DISCLUTPAR=0` turns it off; evidence below, "Default ON") the

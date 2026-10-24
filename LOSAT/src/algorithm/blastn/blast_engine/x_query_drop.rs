@@ -127,8 +127,9 @@ impl Store {
         Ok(records.by_ref().take(range.len()).collect())
     }
 
-    /// A copy of the records `range` for a LOSAT_X_QBATCHPAR slot (the rule keeps the slots off
-    /// where the switch acts); `None` once the loop has taken the first of them.
+    /// A copy of the records `range` for a LOSAT_X_QBATCHPAR slot; `None` once the loop has taken
+    /// the first of them. No slot runs where the loop takes the records (`x_qbatch_par::Off::Taken`;
+    /// the rule acts where none may run), so a slot never waits on the loop's current batch.
     pub(super) fn copy(&self, range: std::ops::Range<usize>) -> Option<Vec<FastaRecord>> {
         let left = self.left.lock().unwrap_or_else(PoisonError::into_inner);
         let (records, taken) = &*left;

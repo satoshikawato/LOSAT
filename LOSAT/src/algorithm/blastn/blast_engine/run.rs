@@ -7128,9 +7128,11 @@ fn search_cli(
     // largest query batch, and whether LOSAT_X_QBATCHPAR's slots may run: the switch on, the
     // conditions of `x_qbatch_par_off` (`-subject`, two threads or more, the build, the output, fewer
     // subject units than threads), and a budget (LOSAT_X_QBATCHPARMEM when it is set, else
-    // `x_qbatch_par::Profile::of_search`'s default) or a slot count set by LOSAT_X_QBATCHPARSLOTS.
+    // `x_qbatch_par::Profile::of_search`'s default, none for a query without a file size, such as
+    // standard input) or a slot count set by LOSAT_X_QBATCHPARSLOTS. EXPERIMENT (LOSAT_X_BNQDROP)
+    // reads it too (`x_query_drop::Rule`).
     let x_slots_may_run = match (subjects.as_ref(), x_query_file_bytes(&args.query)) {
-        (Some((Subjects::Records(letters), _)), Some(bytes)) => {
+        (Some((Subjects::Records(letters), _)), bytes) => {
             let switches = x_qbatch_par::Switches::from_env();
             let lengths = (0..letters.records().len()).map(|index| letters.len(index));
             let subject_letters = lengths.clone().map(|length| length as u64).sum();
@@ -7139,7 +7141,7 @@ fn search_cli(
                     Some(mib) => mib > 0,
                     None => x_qbatch_par::ncbi_splits_by_queries(
                         super::super::coordination::determine_effective_word_size(&args),
-                        Some(bytes),
+                        bytes,
                         subject_letters,
                     ),
                 };
@@ -8410,6 +8412,11 @@ fn run_in_pool(
             }),
             qbp_off,
         );
+        // EXPERIMENT (LOSAT_X_BNQDROP): no slot searches the records that the loop takes out of
+        // their store (`search_cli`'s rule moved them there where it found that no slot may run).
+        if matches!(queries, x_query_stream::Queries::Taken(_)) {
+            qbp.x_refuse_taken();
+        }
         // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
         // (`lookup::x_mb_lut_keep`), freed when the loop ends.
         let x_lut_keep = x_mb_lut_keep::Keep::for_loop();

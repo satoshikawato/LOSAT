@@ -50,7 +50,7 @@ use super::runtime::BatchResults;
 use crate::blastinput::app::Program;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::seqid::SeqId;
-use crate::report::serial::{write_query, SerialFormat};
+use crate::report::serial::{write_query_to, SerialFormat};
 
 /// The subjects of a BLASTX search as the Seq-aligns name them: the records of `-subject`
 /// (`Subject_N`), or a database's reported sequences by rank with the database's title.
@@ -100,17 +100,15 @@ pub(super) fn write_blastx_seqalign(
                 searched_length: i32::try_from(query.sequence.len())?,
                 offset: 0,
             };
-            buf.clear();
-            if write_query(
+            write_query_to(
                 format,
                 &run,
                 &query_record,
                 &subject_records,
                 &hsp_records,
                 &mut buf,
-            )? {
-                writer.write_all(&buf)?;
-            }
+                writer,
+            )?;
         }
     }
     writer.flush()?;

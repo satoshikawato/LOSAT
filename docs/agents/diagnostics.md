@@ -377,9 +377,11 @@ export LOSAT_X_DISCLUTPAR=1
 export LOSAT_X_DISPTABLE=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPNEON2=1
+export LOSAT_X_DPNIBBLE=1
 export LOSAT_X_DPWINDOW=1
 export LOSAT_X_ERFABSORB=1
 export LOSAT_X_FOLDLEAN=1
+export LOSAT_X_GREEDYROWFUSE=1
 export LOSAT_X_MBFILL=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
@@ -427,6 +429,7 @@ export LOSAT_X_TBXPIPE=1
 export LOSAT_X_TBXPREFETCH=1536
 export LOSAT_X_TBXQFRAMES=1
 export LOSAT_X_TBXQSLICE=1
+export LOSAT_X_TBXRESOLVE=1
 export LOSAT_X_TBXRPTPAR=1
 export LOSAT_X_TBXSCANBF=1
 export LOSAT_X_TBXUNGAP=1
@@ -745,6 +748,30 @@ Same values, faster computation:
   (8; user x0.838), 4 threads x0.985 (6); D. melanogaster cDNAs x genome `-db` dc-megablast 16 threads
   x1.011 (4 pairs, 0.993-1.015; user x1.000, instructions x0.9995); blastp sp4 `-subject` x1.000 (6),
   yeast `-db` x1.001 (4); user-space instructions x0.970-0.9995 in every cell.
+- `LOSAT_X_DPNIBBLE=1` (every program's vector X-drop traceback, memory; in the strict set from the
+  pull request that added it, 2026-10-24; `=0` returns to one byte per cell) the
+  traceback rows of the vector kernels (`XdropScratch::trace`, NCBI's `edit_script`) held one byte of
+  `SCRIPT_*` bits per DP cell of the band, so a long gapped alignment kept one byte per cell: up to 36 MiB
+  for one Sakai x EDL933 traceback, and each worker keeps its largest. Now the kernels store a code of
+  four bits per cell (bits 0-1 the operation: 0 `SCRIPT_GAP_IN_A`, 1 `SCRIPT_SUB`, 2 `SCRIPT_GAP_IN_B`;
+  bit 2 extend A, bit 3 extend B), two adjacent cells per byte, packed in registers before a store of half
+  the size (x86 `pmaddubsw` + `packuswb`, wasm32 a shift, an or and a byte shuffle, aarch64 `usra` +
+  `xtn` / `uzp1`), and the walk (`kernel::finish`) follows the codes with the same state machine and
+  pushes each operation's NCBI value. A code comes from the same comparisons as the byte, so every script,
+  edit operation, score and offset is the same. All eight kernels (256-bit AVX2, 128-bit DPW128 and base,
+  NEON2); the fuzz tests against the scalar NCBI loops run every family in both layouts (20,000 cases),
+  and `nibble_trace_keeps_every_result` compares long problems in both. The rule (conditional): a
+  search's scratch takes the codes when it is made on a thread of a Rayon pool, that is in a search on
+  two threads or more (also the one-thread pools of the blastn query-batch slots); a one-thread search
+  (no pool) keeps one byte per cell, because there the packing cost time and the saving is one trace.
+  Workstation, node 1, against dev a806eaa5 (per-pair median wall, max RSS MiB, `v4-B/results/b16e/`,
+  same output): Sakai x EDL933 `-subject` dc-megablast 16 threads x0.962 (8 pairs), 613 -> 414; blastn 16
+  threads x0.980 (8), 529 -> 373; dc-megablast 4 threads x0.987 (6), 277 -> 208; blastn 4 threads x1.002
+  (6, 0.993-1.004), 244 -> 197; with the codes at one thread both tasks took x1.009 (cycles x1.010-1.012)
+  for 140 -> 123 and 137 -> 121 MiB, hence the rule. D. melanogaster cDNAs x genome `-db` dc-megablast 16
+  threads x1.014 (6 pairs, 0.985-1.045; user x0.996, cycles x0.994: steps of `time %e`), blastp sp4
+  `-subject` 16 threads x1.002, 1,000 proteins 1 thread x1.002, yeast `-db` x0.997, blastx 50 kb x dmel
+  proteome `-db` x1.000. NCBI `-subject` (one thread) 164-177 MiB.
 - DPW128 (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED`) the
   128-bit X-drop DP kernels with the per-row savings of the 256-bit AVX2 kernels (first and last
   survivor kept while the row runs,
@@ -777,8 +804,9 @@ Same values, faster computation:
   output hashes. Platform checks hash `=0` on the Linux and macOS arm64 runners (mode `nodpneon2`);
   the mode `dpneon2` was equal to the default on both arm64 runners in every run since 2026-10-15.
 - GREEDYFAST (graduated 2026-10-22; no variable, no `LOSAT_X_GREEDYSHADOW`, no `X_GREEDY_TEST_MODE`
-  hook; always on) megablast greedy alignment, one distance in three passes of 256 cells, match
-  extension 8 bases at a time, on an unpacked subject (`x_greedy_row` in `blastn/alignment/greedy.rs`).
+  hook; always on) megablast greedy alignment, one distance in three passes of 256 cells (two on x86_64 CPUs with
+  AVX2 since `LOSAT_X_GREEDYROWFUSE`), match extension 8 bases at a time, on an unpacked subject (`x_greedy_row` in
+  `blastn/alignment/greedy.rs`).
   `x_greedy_row` runs every traceback call and the score-only calls the fused loop (GREEDYFUSE) declines;
   the ported distance loop stays only for lengths that do not fit the slices (no production call passes
   them). The greedy functions take an unpacked subject only; the packed-subject scans (`rem != 4`) were
@@ -2797,6 +2825,25 @@ Rebuilding less:
   sequences, N runs) 11.59 -> 9.75 s (NCBI `-db` 10.05 s), max RSS 257 -> 107 MiB (NCBI 162 MiB); the same
   with the genome FASTA as `-subject` 12.96 -> 11.39 s, 328 -> 217 MiB; 10 transcripts x the zebrafish cDNA
   database 62.74 -> 61.62 s, 46 -> 45 MiB.
+- `LOSAT_X_TBXRESOLVE=1` (TBLASTX, speed; in the strict set from the pull request that added it, 2026-10-24;
+  `=0` turns it off) the preliminary frames of a `-subject` (or `run_local`) record with a letter other than A,
+  C, G and T (`Subjects::x_preliminary_frames`, with `LOSAT_X_TBXFRAMES` on) read the base of each letter of one
+  base (`A`, `C`, `G`, `T`, `U`, either case) from a table (`tblastx/subjects.rs`, `ONE_BASE`), and only the other
+  letters go through `ncbi4na_of` and `resolve_ncbi4na_base`. Before, every letter of such a record went through
+  both. NCBI draws from `CRandom` only for an ncbi4na value outside `ctable` (not 1, 2, 4 or 8;
+  blast_objmgr_tools.cpp:441-450), so the draws and the bases are those of the letter-by-letter walk (a lib test
+  compares every cell of the table with the resolve and every frame of both walks). Conditional: a record of A, C,
+  G and T only copies its letters, and a `-db` sequence is read from its stored codes (`x_reach!` per record).
+  Found by the gate-gap audit's `-subject` packing item (line G, 2026-10-24): with the fruit fly genome FASTA as
+  `-subject`, `translate` took 2.31 s against 0.91 s for the same genome as `-db` (`LOSAT_TIMING`, 3 transcripts,
+  one thread), and `resolve_ncbi4na_base` plus its caller were 15 % of the cycles. Measured on the workstation
+  (node 0 CPUs 16-23, HT siblings idle, cores warmed 3 s, one warm-up round + 3 rounds, arm order rotating,
+  medians of the per-round ratios against the dev binary before the switch, bf92a834; reports and max RSS
+  identical; load 14-30): 3 fruit fly transcripts x the fruit fly genome FASTA (`-subject`, 1,870 records) 1 thread
+  9.72 -> 8.31 s (cycles x0.855, instructions x0.948), 8 threads 1.52 -> 1.28 s (cycles x0.835); the genome as
+  `-db` 8.22 -> 8.15 s (cycles x0.992, instructions x1.000). With `=0`: cycles x1.000-1.001 of the dev binary.
+  WebAssembly (serial WASI command, one Node process, CPU 20, 3 rounds, against `=0`): the fruit fly genome FASTA
+  as `-subject` 13.17 -> 11.38 s (x0.864), linear memory equal (206 MiB).
 
 Scheduling (each value computed by one thread with the original function; order of output kept):
 
@@ -3088,6 +3135,28 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_QBATCHPAR` slot may run (the condition `LOSAT_X_QSTREAM`'s rule computes), and the records are read before
   the search (`LOSAT_X_QSTREAM` not acting; not `run_local`, whose caller holds its records). With `LOSAT_TIMING`
   `[TIMING] x_bn_q_drop: batches= records= letters=` gives the batches, records and letters dropped.
+- `LOSAT_X_GREEDYROWFUSE=1` (BLASTN megablast, the distances of the non-affine greedy alignment that `x_greedy_row` runs:
+  every traceback, and the score-only calls the fused loop GREEDYFUSE declines; speed; in the strict set from the pull
+  request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per
+  block of 256 diagonals instead of three on x86_64 CPUs with AVX2, BMI1, BMI2 and LZCNT
+  (`blastn/alignment/x_greedy_row_fuse.rs`, argument in its header). Pass 1 also keeps each diagonal's eight-byte load
+  offsets and whether either lies outside its sequence; the eight-byte slide test, which pass 2 ran as a vector loop over
+  the block whose lanes went back and forth between vector and general registers (line F s5, probe P6), runs as scalar
+  code inside the pass over the diagonals, for the surviving diagonals only. The same cells, state and
+  `x_greedy_cell_slow` calls in the same order; the unit tests compare the two builds and the plain build on random single
+  distances and on whole traceback alignments. Other CPUs and targets (wasm32, aarch64, x86_64 without AVX2) run the three
+  passes (`x_greedy_row_any`) as before; their machine code is unchanged, as is that of `x_greedy_row_avx2` (only the
+  dispatcher `x_greedy_row` changed). With `LOSAT_X_STATS`, once a greedy row ran, `[X_STATS] GREEDYROWFUSE
+  kernel=fused|avx2|plain fused_rows=N` gives the build every row of the process took and the rows of the fused build
+  (counted only with the variable). Measured 2026-10-24 on the workstation against `dev` 375afb0a (outputs and max RSS
+  identical in every arm; `perf stat` counts `:u`): at one thread (node 0, one pinned core, HT sibling idle, warmed 3 s; 3
+  rounds, the arm order reversed every other round; Sakai x MG1655 also 16 rounds on node 1) megablast of Sakai against
+  MG1655 cycles x0.900-0.908 (pairs 0.894-0.913), instructions x0.964, wall 0.623 -> 0.567 s; of Sakai with every 100th
+  letter N x0.908 (instructions x0.966); of 100 16S rRNAs against the 28,036 of `16s_all` (`-db`) x0.988 (instructions
+  x0.995); of 31,168 D. melanogaster cDNAs against dmel_dna_3M equal to `=0` (instructions x0.998; greedy rows are a small
+  part of that search). At 8 threads (node 1, 16 rounds) Sakai against MG1655 cycles x0.915 (0.909-0.918), wall 0.282 ->
+  0.274 s; at 16 threads cycles x0.920 (0.907-0.941), wall 0.259 -> 0.252 s. `=0` read x1.000-1.009 of `dev` (cycles;
+  instructions x1.001-1.002: the dispatcher). Kernel (P6 on 7e73ec9c): 17.5 -> 12.3 cycles per cell of the band.
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
   `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; in the strict set since 2026-10-17,
   default ON: `LOSAT_X_DISCLUTPAR=0` turns it off; evidence below, "Default ON") the

@@ -31,7 +31,8 @@ use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
 use crate::report::archive::{
-    write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
+    defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
+    KaBlock,
 };
 #[cfg(test)]
 use crate::report::diag_log::ERROR;
@@ -143,27 +144,6 @@ pub(crate) struct FirstContext {
     pub length_adjustment: i64,
     /// The search space of the batch's context 0 (the option).
     pub context0_space: i64,
-}
-
-fn ka_block(params: &crate::stats::tables::KarlinParams, gapped: bool) -> KaBlock {
-    KaBlock {
-        lambda: params.lambda,
-        k: params.k,
-        h: params.h,
-        gapped,
-    }
-}
-
-/// The defline line of the Bioseq: the line as read, else `>` and the title.
-fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
-    match record.archive_defline() {
-        Some(defline) => Cow::Borrowed(defline),
-        None => {
-            let mut line = vec![b'>'];
-            line.extend_from_slice(&record.title);
-            Cow::Owned(line)
-        }
-    }
 }
 
 /// The Seq-aligns of one batch of a call.

@@ -15,6 +15,8 @@ mod blastn_diag_lv;
 mod blastn_disc_lookup_par;
 #[path = "../blastn_few_subj.rs"]
 mod blastn_few_subj;
+#[path = "../blastn_greedy_row_fuse.rs"]
+mod blastn_greedy_row_fuse;
 #[path = "../blastn_lut_drop.rs"]
 mod blastn_lut_drop;
 #[path = "../blastn_mb_fill.rs"]

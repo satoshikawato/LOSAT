@@ -108,12 +108,12 @@ LOSAT_X_SEEDUNMAP	tblastx	conditional	gap	gap	Linux glibc, 2+ threads, THP not a
 LOSAT_X_SEGSHARE	blastp	conditional	required	required	blastp with 2+ threads
 LOSAT_X_SEGTRIMMEMO	blastx,tblastn	always			SEG trim of candidate segment memoised per thread
 LOSAT_X_SUMPMEMO	blastx,tblastn,tblastx	always			sum P-value of a linked set (Romberg path, r > 4) reused from the thread's last two calls
-LOSAT_X_TBNBATCH	tblastn	conditional	gap	required	needs 4+ query batches and at least one batch per thread; rule via TBNBATCHRULE; new gap: needs 4+ query batches of 20,000 residues and 4+ batches per thread
-LOSAT_X_TBNBATCHRULE	tblastn	conditional	gap	gap	several query batches; full waves of threads side by side; subjects <=24 Mb or <2 per thread; new gap: needs 4+ query batches with batches >= threads; ref gap: needs 4+ batches at 2+ threads with plans that fit and no full wave (batches < threads, or > 24 Mb of many subjects)
+LOSAT_X_TBNBATCH	tblastn	conditional	required	required	needs 4+ query batches and at least one batch per thread; rule via TBNBATCHRULE; the new side is reached by db.sa.arch.tbn.batch1 and db.sa.arch.tbn.warnbatches (BATCH_SIZE=1 and 60: 4+ batches at 4 threads), no fixture has 4 batches of 20,000 residues
+LOSAT_X_TBNBATCHRULE	tblastn	conditional	required	gap	several query batches; full waves of threads side by side; subjects <=24 Mb or <2 per thread; the new side is reached by db.sa.arch.tbn.batch1 and db.sa.arch.tbn.warnbatches (4+ batches, batches >= threads at 4 threads); ref gap: needs 4+ batches at 2+ threads with plans that fit and no full wave (batches < threads, or > 24 Mb of many subjects)
 LOSAT_X_TBNFLOWHELP	tblastn	conditional	required	required	2+ threads, several subjects (where the subject flow of TBNOIDNEXT runs); a thread waiting in the flow runs the pool's jobs
 LOSAT_X_TBNFRAMEREUSE	tblastn	always			a dropped plan's frames are reused by the next plan of its thread (rides on TBNKEEPFEW's drops)
 LOSAT_X_TBNHITBF	tblastn	always			Branch-free too-far/overlap outcomes in two-hit loop
-LOSAT_X_TBNKEEPFEW	tblastn	conditional	required	gap	4+ query batches searched one after another: plans dropped unless they fit threads x longest plan; ref gap: needs 4+ batches whose plans are kept (fit threads x longest plan, or batches side by side)
+LOSAT_X_TBNKEEPFEW	tblastn	conditional	required	required	4+ query batches searched one after another: plans dropped unless they fit threads x longest plan; the ref side (plans kept: fit threads x longest plan, or batches side by side) is reached by db.sa.arch.tbn.batch1 and db.sa.arch.tbn.warnbatches
 LOSAT_X_TBNLINKWIN	tblastn	always			Uneven-gap linking tests only admissible candidates of a head set
 LOSAT_X_TBNOIDCHUNK	tblastn	conditional	required	required	2+ threads and several subjects
 LOSAT_X_TBNOIDNEXT	tblastn	conditional	required	required	2+ threads, several subjects, where the pool takes chunks of subjects
@@ -121,8 +121,8 @@ LOSAT_X_TBNOIDUNITS	tblastn	conditional	required	required	2+ threads, several su
 LOSAT_X_TBNOWNPOOLS	tblastn	conditional	required	required	native only; <2 subjects per thread; 2..threads-1 batches (<=24 Mb) else 2..threads/2
 LOSAT_X_TBNSCANBF	tblastn	always			Branch-free lookup scan in blocks of 256 words (unit path)
 LOSAT_X_TBNSCANBYTE	tblastn	platform			AVX2 CPUs only (nothing elsewhere); word size 3, 5-bit letters tables
-LOSAT_X_TBNSSIDE	tblastn	conditional	gap	required	only searches of 4+ query batches (20,000 residues each); <=256 MiB of translated residues; new gap: since TBNKEEPFEW the fixtures' 4+ batch searches drop their plans; needs plans that fit threads x longest plan (e.g. one genome subject, 4+ batches)
-LOSAT_X_TBNSTORE	tblastn	conditional	required	required	-subject (with or without -subject_loc); run_local's letters packed per plan; ref: a packed subject with lower-case letters read by the -lcase_masking stage (e2d.tblastn.lcase.0), or a byte without an ncbi4na code (not from the CLI's reader)
+LOSAT_X_TBNSSIDE	tblastn	conditional	required	required	only searches of 4+ query batches (20,000 residues each, or BATCH_SIZE); <=256 MiB of translated residues; the new side (plans that fit threads x longest plan) is reached by db.sa.arch.tbn.batch1 and db.sa.arch.tbn.warnbatches
+LOSAT_X_TBNSTORE	tblastn	conditional	required	required	-subject (with or without -subject_loc; with -outfmt 11 the reading takes the =0 side, the plans still pack per plan); run_local's letters packed per plan; ref: a packed subject with lower-case letters read by the -lcase_masking stage (e2d.tblastn.lcase.0), or a byte without an ncbi4na code (not from the CLI's reader)
 LOSAT_X_TBNUNGAP	tblastn	conditional	required	required	matrix BLOSUM62 (the default); another -matrix keeps the reference extension (an extension outside the byte table falls back per call, not recorded)
 LOSAT_X_TBNUNITXLATE	tblastn	conditional	gap	required	a packed subject whose plan is made for its search alone (the search keeps no TBNSSIDE plans), first frame of 1 MiB or more (3,145,722+ bases); new gap: no CI subject is that long (unit tests on 15 and 30 Mb stores and tests/tblastn_unit_xlate.rs cover it)
 LOSAT_X_TBNXLATESIMD	tblastn	platform			AVX2 vector loop only on x86 AVX2; packed subjects (-db and -subject)

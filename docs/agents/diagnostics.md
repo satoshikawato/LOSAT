@@ -4538,6 +4538,10 @@ Scheduling (each value computed by one thread with the original function; order 
   (letters or resolved bases, reverse complement, frames). A set with a byte that has no ncbi4na
   code (only an API caller can make one) keeps the letters; the library entry `run_local` reads the
   caller's records. The plans of letters are made from them packed (below).
+  With `-outfmt 11` the reading takes the `=0` side (the records keep their letters, one byte per
+  base, and with `-subject_loc` the whole subjects), because every archive repeats the whole
+  subjects; the plans still pack per plan (+1 byte per subject base: 33 against 19 MiB on 20,000
+  subjects, 18.8 Mb; NCBI 282 MiB).
   In the set since 2026-10-16 (on unless `0`). With
   `LOSAT_X_STATS=1` a `[X_STATS] TBNSTORE
   subjects= stored_bytes= letters_made= packed_plans=` line gives the subjects held

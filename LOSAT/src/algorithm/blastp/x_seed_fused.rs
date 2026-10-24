@@ -1383,6 +1383,19 @@ where
         i64::from(table.mask) >= 0 && i64::from(table.mask) & (i64::from(table.mask) + 1) == 0,
         "the cross-cell stage needs a diagonal mask of the form 2^k - 1"
     );
+    // EXPERIMENT (A14 s8): the marker of a deferred candidate's entry (X_CROSS_MARKER, flag 1 and
+    // last_hit -1) is never a stored value: only a candidate's call sets the flag, with last_hit
+    // `s_last_off - (word - 1) + offset` for a subject offset `s_last_off` of this or an earlier
+    // subject (whose offset plus length is at most this offset), so in `1..offset + length` when
+    // the offset is at least the word size; without candidates (window <= word) no flag is set.
+    assert!(
+        test.window <= test.word_size
+            || (test.diag_offset >= test.word_size
+                && i64::from(test.diag_offset) + (subject_length as i64)
+                    < i64::from(X_LAST_HIT_MASK)),
+        "the deferred calls' marker needs offset {} + length {subject_length} below 2^31 - 1",
+        test.diag_offset
+    );
     let mut counts = XCrossCounts::default();
     // SAFETY: the CPU has AVX2 and POPCNT, and every query offset of the lookup is below
     // `query_length`, so at most the mask (asserted above).
@@ -1552,9 +1565,16 @@ impl<'a, const CHUNK: usize> XCross<'a, CHUNK> {
     /// The values of each array: the chunk and the slack.
     const STRIDE: usize = CHUNK + X_CROSS_SLACK;
 
+    /// EXPERIMENT (A14 s8, deferred calls): the records a drain can hold, one per unit (a batch
+    /// or a part of a window) at most, and a drain tests fewer than `CHUNK + X_CROSS_PIECE` hits.
+    const PENDING: usize = CHUNK + X_CROSS_PIECE;
+
+    /// The values of the stage: the two arrays, then per record its eight entries and (b, lanes).
+    const LEN: usize = 2 * Self::STRIDE + (X_DIAG_LANES + 2) * Self::PENDING;
+
     fn new(stage: &'a mut Vec<i32>) -> Self {
-        if stage.len() < 2 * Self::STRIDE {
-            stage.resize(2 * Self::STRIDE, 0);
+        if stage.len() < Self::LEN {
+            stage.resize(Self::LEN, 0);
         }
         Self {
             base: stage.as_mut_ptr(),
@@ -1573,6 +1593,24 @@ impl<'a, const CHUNK: usize> XCross<'a, CHUNK> {
     fn subject(self) -> *mut i32 {
         // SAFETY: STRIDE < 2 STRIDE, the allocation's length (`new`).
         unsafe { self.base.add(Self::STRIDE) }
+    }
+
+    /// EXPERIMENT (A14 s8): the eight entries a deferred record's unit read (record `r` at `8 r`).
+    #[inline(always)]
+    fn pending_old(self) -> *mut i32 {
+        // SAFETY: inside the allocation of LEN values (`new`).
+        unsafe { self.base.add(2 * Self::STRIDE) }
+    }
+
+    /// EXPERIMENT (A14 s8): a deferred record's first staged hit and candidate lanes (record `r` at
+    /// `2 r`).
+    #[inline(always)]
+    fn pending_at(self) -> *mut i32 {
+        // SAFETY: inside the allocation of LEN values (`new`).
+        unsafe {
+            self.base
+                .add(2 * Self::STRIDE + X_DIAG_LANES * Self::PENDING)
+        }
     }
 }
 
@@ -2419,8 +2457,9 @@ where
 /// EXPERIMENT (LOSAT_X_BXCROSS): tests the `staged` hits of the stage in windows of eight from the
 /// first one: a window whose eight entries are distinct ([`x_cross_conflict`]) is one batch
 /// ([`x_cross_batch`]); otherwise it is tested in parts ([`x_cross_window`], cold and out of line,
-/// so that the loop carries nothing of it). Each batch's candidates are called before the next
-/// batch loads. Then with `end` (the subject's scan is over) the fewer than eight left go one after
+/// so that the loop carries nothing of it). EXPERIMENT (A14 s8): each unit's candidates are
+/// deferred ([`x_cross_unit`]) and called in order ([`x_cross_flush`]) when a later unit meets
+/// a deferred candidate's entry, and after the last batch. Then with `end` (the subject's scan is over) the fewer than eight left go one after
 /// the other ([`x_cross_hit`], the reference's order); otherwise they move to the front of the
 /// stage by one eight-lane load and store per array (the lanes past them are never read), where
 /// the hits staged next follow them. The candidates and the windows tested in parts are added to
@@ -2450,17 +2489,21 @@ where
     let full = staged & !(X_DIAG_LANES - 1);
     let mut candidates = 0u32;
     let mut windows = 0u32;
+    let mut pending = 0usize;
     let mut b = 0;
     while b < full {
         let coords = _mm256_loadu_si256(cross.coord().add(b).cast());
         if x_cross_conflict(coords) {
-            candidates += x_cross_window(cross, b, table, test, candidate);
+            candidates += x_cross_window(cross, b, &mut pending, table, test, candidate);
             windows += 1;
         } else {
-            candidates += x_cross_batch(cross, b, table, test, candidate);
+            candidates += x_cross_batch(cross, b, &mut pending, table, test, candidate);
         }
         b += X_DIAG_LANES;
     }
+    // The deferred calls before the hits left are tested or moved (both read the stage and the
+    // left ones the entries).
+    x_cross_flush(cross, &mut pending, table, test, candidate);
     let left = if end {
         for i in full..staged {
             candidates += x_cross_hit(cross, i, table, test, candidate);
@@ -2575,7 +2618,7 @@ unsafe fn x_batch_avx2_lanes(
     s: std::arch::x86_64::__m256i,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
-) -> u32 {
+) -> Option<(u32, std::arch::x86_64::__m256i)> {
     use std::arch::x86_64::*;
     let diag_offset = _mm256_set1_epi32(test.diag_offset);
     let subject_plus_offset = _mm256_add_epi32(s, diag_offset);
@@ -2591,6 +2634,12 @@ unsafe fn x_batch_avx2_lanes(
             .raw_bits() as i32
     };
     let old = _mm256_setr_epi32(e(0), e(1), e(2), e(3), e(4), e(5), e(6), e(7));
+    // EXPERIMENT (A14 s8): an entry of a deferred candidate (the marker) ends the batch before
+    // any store; the caller makes the deferred calls and tests the eight again.
+    let marked = _mm256_cmpeq_epi32(old, _mm256_set1_epi32(X_CROSS_MARKER));
+    if _mm256_movemask_ps(_mm256_castsi256_ps(marked)) != 0 {
+        return None;
+    }
     // From here to the stores: x_batch_avx2's test, with `s` by lane.
     let flag = _mm256_srai_epi32::<31>(old);
     let last = _mm256_srai_epi32::<1>(_mm256_slli_epi32::<1>(old));
@@ -2600,7 +2649,8 @@ unsafe fn x_batch_avx2_lanes(
     let keep = _mm256_blendv_epi8(in_window, sum_below_last, flag);
     let below_word = _mm256_cmpgt_epi32(_mm256_set1_epi32(test.word_size), diff);
     let candidates = _mm256_andnot_si256(_mm256_or_si256(flag, below_word), in_window);
-    let new = _mm256_blendv_epi8(written, old, keep);
+    // A candidate lane (all ones) stores the marker, the others x_batch_avx2's new value.
+    let new = _mm256_or_si256(_mm256_blendv_epi8(written, old, keep), candidates);
     let mut lane_new = [0u32; X_DIAG_LANES];
     _mm256_storeu_si256(lane_new.as_mut_ptr().cast(), new);
     for (&coord, &raw) in lane_coords.iter().zip(&lane_new) {
@@ -2610,50 +2660,145 @@ unsafe fn x_batch_avx2_lanes(
             .get_unchecked_mut(coord as usize)
             .set_raw_bits(raw);
     }
-    _mm256_movemask_ps(_mm256_castsi256_ps(candidates)) as u32
+    Some((
+        _mm256_movemask_ps(_mm256_castsi256_ps(candidates)) as u32,
+        old,
+    ))
 }
 
-/// EXPERIMENT (LOSAT_X_BXCROSS): calls `candidate` for the candidate lanes of the batch at staged
-/// hit `b` (bit `i` = staged hit `b + i`) in lane order, with the values [`x_test_hit`] returns (as
-/// [`x_call_candidates`] calls them) and the query offset of [`x_cross_query`].
+// No NCBI counterpart: the marker of an entry whose candidate's call is deferred (A14 s8).
+/// EXPERIMENT (A14 s8): the raw value a candidate lane stores while its call is deferred: flag 1
+/// with last_hit -1, never a stored value ([`x_scan_cells_cross`] asserts the bound per subject).
+#[cfg(target_arch = "x86_64")]
+const X_CROSS_MARKER: i32 = -1;
+
+/// EXPERIMENT (A14 s8): records a unit's candidates for deferred calls: its first staged hit `b`,
+/// its candidate lanes and the eight entries it read go to record `pending` (written for every
+/// unit, without a branch), and the count advances when the unit has candidates.
 ///
 /// # Safety
-/// `b + i` must be below the staged count for every lane `i` set in `lanes`, and those hits' query
-/// offsets at most `table.mask`.
+/// The CPU must have AVX2, and `pending` must be below [`XCross::PENDING`].
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,popcnt")]
+#[inline]
+unsafe fn x_cross_defer<const CHUNK: usize>(
+    cross: XCross<'_, CHUNK>,
+    pending: &mut usize,
+    b: usize,
+    lanes: u32,
+    old: std::arch::x86_64::__m256i,
+) {
+    use std::arch::x86_64::*;
+    let r = *pending;
+    debug_assert!(r < XCross::<CHUNK>::PENDING);
+    _mm256_storeu_si256(cross.pending_old().add(X_DIAG_LANES * r).cast(), old);
+    *cross.pending_at().add(2 * r) = b as i32;
+    *cross.pending_at().add(2 * r + 1) = lanes as i32;
+    *pending = r + usize::from(lanes != 0);
+}
+
+/// EXPERIMENT (A14 s8): calls `candidate` for the deferred records in order, each record's
+/// candidate lanes in lane order (bit `i` = staged hit `b + i`), with the values [`x_test_hit`]
+/// returns (as [`x_call_candidates`] calls them) and the query offset of [`x_cross_query`]. A
+/// candidate's entry holds the marker since its unit; it gets back the value the unit read, which
+/// the call then sees (as when the call followed the unit at once: no unit between read the entry,
+/// or it would have met the marker). Leaves no record.
+///
+/// # Safety
+/// The records must be those of [`x_cross_defer`] in this drain, and the staged hits they name
+/// not yet moved.
 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): a hit
 // that passes the test reaches the context check with `last_hit` and `diff`.
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
-unsafe fn x_cross_calls<const CHUNK: usize, F>(
+#[inline(never)]
+unsafe fn x_cross_flush<const CHUNK: usize, F>(
     cross: XCross<'_, CHUNK>,
-    b: usize,
-    mut lanes: u32,
+    pending: &mut usize,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
     candidate: &mut F,
 ) where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
-    while lanes != 0 {
-        let i = b + lanes.trailing_zeros() as usize;
-        lanes &= lanes - 1;
-        let coord = *cross.coord().add(i);
-        let s = *cross.subject().add(i);
-        let query_offset = x_cross_query(coord, s, table.mask);
-        // coord <= mask < entries.len() (staged masked; XDiagTable::new). The batch stored a
-        // candidate's old value back, and no other lane of the batch or call touches its entry,
-        // so this is the entry the test read.
-        let entry = table.entries.get_unchecked_mut(coord as u32 as usize);
-        let last_hit = entry.last_hit().wrapping_sub(test.diag_offset);
-        let diff = s.wrapping_sub(last_hit);
-        candidate(query_offset, s, last_hit, diff, entry);
+    for r in 0..*pending {
+        let b = *cross.pending_at().add(2 * r) as usize;
+        let mut lanes = *cross.pending_at().add(2 * r + 1) as u32;
+        let old = cross.pending_old().add(X_DIAG_LANES * r);
+        while lanes != 0 {
+            let lane = lanes.trailing_zeros() as usize;
+            lanes &= lanes - 1;
+            let i = b + lane;
+            let coord = *cross.coord().add(i);
+            let s = *cross.subject().add(i);
+            let query_offset = x_cross_query(coord, s, table.mask);
+            // coord <= mask < entries.len() (staged masked; XDiagTable::new)
+            let entry = table.entries.get_unchecked_mut(coord as u32 as usize);
+            debug_assert_eq!(entry.raw_bits(), X_CROSS_MARKER as u32);
+            entry.set_raw_bits(*old.add(lane) as u32);
+            let last_hit = entry.last_hit().wrapping_sub(test.diag_offset);
+            let diff = s.wrapping_sub(last_hit);
+            candidate(query_offset, s, last_hit, diff, entry);
+            debug_assert_ne!(entry.raw_bits(), X_CROSS_MARKER as u32);
+        }
     }
+    *pending = 0;
+}
+
+/// EXPERIMENT (A14 s8): [`x_cross_flush`] where a unit met the marker (rare), out of the loop.
+#[cfg(target_arch = "x86_64")]
+#[cold]
+#[inline(never)]
+unsafe fn x_cross_flush_cold<const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    pending: &mut usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    x_cross_flush(cross, pending, table, test, candidate);
+}
+
+/// EXPERIMENT (A14 s8): [`x_batch_avx2_lanes`] until it meets no marker (the deferred calls made
+/// in between), then its candidates deferred ([`x_cross_defer`]); returns the candidate lanes.
+///
+/// # Safety
+/// As [`x_batch_avx2_lanes`], and `pending` below [`XCross::PENDING`] with the records of this
+/// drain.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,popcnt")]
+#[inline]
+#[allow(clippy::too_many_arguments)]
+unsafe fn x_cross_unit<const CHUNK: usize, F>(
+    cross: XCross<'_, CHUNK>,
+    pending: &mut usize,
+    b: usize,
+    lane_coords: [u32; X_DIAG_LANES],
+    s: std::arch::x86_64::__m256i,
+    keep: u32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> u32
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let (lanes, old) = loop {
+        if let Some(tested) = x_batch_avx2_lanes(lane_coords, s, table, test) {
+            break tested;
+        }
+        x_cross_flush_cold(cross, pending, table, test, candidate);
+    };
+    let lanes = lanes & keep;
+    x_cross_defer(cross, pending, b, lanes, old);
+    lanes
 }
 
 /// EXPERIMENT (LOSAT_X_BXCROSS): the staged hits `b..b + 8`, whose entries are distinct
 /// ([`x_cross_conflict`]), as one batch (module header): the lanes' coordinates from scalar
 /// loads of the stage, [`x_batch_avx2_lanes`] with the staged subject offsets, and the candidates
-/// called in lane order ([`x_cross_calls`]). Returns the number of candidates.
+/// deferred ([`x_cross_unit`]). Returns the number of candidates.
 ///
 /// # Safety
 /// The CPU must have AVX2 and POPCNT, `b + 8` must be at most the staged count, and the hits'
@@ -2665,6 +2810,7 @@ unsafe fn x_cross_calls<const CHUNK: usize, F>(
 unsafe fn x_cross_batch<const CHUNK: usize, F>(
     cross: XCross<'_, CHUNK>,
     b: usize,
+    pending: &mut usize,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
     candidate: &mut F,
@@ -2680,8 +2826,17 @@ where
         std::array::from_fn(|i| std::ptr::read_volatile(p.add(i)) as u32);
     debug_assert!(x_batch_coords_distinct(&lane_coords.map(|c| c as usize)));
     let s = _mm256_loadu_si256(cross.subject().add(b).cast());
-    let lanes = x_batch_avx2_lanes(lane_coords, s, table, test);
-    x_cross_calls(cross, b, lanes, table, test, candidate);
+    let lanes = x_cross_unit(
+        cross,
+        pending,
+        b,
+        lane_coords,
+        s,
+        !0,
+        table,
+        test,
+        candidate,
+    );
     lanes.count_ones()
 }
 
@@ -2693,8 +2848,8 @@ where
 /// coordinate and subject offset): they read its entry and store, after it, the value it stores
 /// (every load of [`x_batch_avx2_lanes`] comes before its stores), as the masked batch of
 /// [`x_cell_avx2_defer_masked`] does; only the part's candidate bits are kept, and their
-/// candidates are called in lane order ([`x_cross_calls`]) before the next part, which starts at
-/// the repeating lane, loads. Nothing past `b + 8` is read. Returns the number of candidates. Cold
+/// candidates are deferred ([`x_cross_unit`]); the next part starts at the repeating lane (and
+/// meets the marker if it repeats a candidate). Nothing past `b + 8` is read. Returns the number of candidates. Cold
 /// and never inlined, so that the drain's loop keeps none of its values.
 ///
 /// # Safety
@@ -2708,6 +2863,7 @@ where
 unsafe fn x_cross_window<const CHUNK: usize, F>(
     cross: XCross<'_, CHUNK>,
     b: usize,
+    pending: &mut usize,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
     candidate: &mut F,
@@ -2730,8 +2886,18 @@ where
         ));
         let lane_subjects: [i32; X_DIAG_LANES] = std::array::from_fn(|i| subjects[lane(i)]);
         let s = _mm256_loadu_si256(lane_subjects.as_ptr().cast());
-        let lanes = x_batch_avx2_lanes(lane_coords, s, table, test) & ((1u32 << (end - start)) - 1);
-        x_cross_calls(cross, b + start, lanes, table, test, candidate);
+        let part = (1u32 << (end - start)) - 1;
+        let lanes = x_cross_unit(
+            cross,
+            pending,
+            b + start,
+            lane_coords,
+            s,
+            part,
+            table,
+            test,
+            candidate,
+        );
         candidates += lanes.count_ones();
         start = end;
     }

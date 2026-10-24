@@ -2838,9 +2838,12 @@ Scheduling (each value computed by one thread with the original function; order 
   (`blast_nalookup.c:1081-1091`, the same statements) is applied 64 words after a prefetch of its cell (the queued loop's
   `Delay` queue was 16 deep). The loop over a run is a function of its own, so the tables and the queue stay in
   registers; the indexes are checked once per build instead of per word, and the presence bit comes from a table, so the
-  shift by `pv_array_bts` keeps `cl` (x86-64 without BMI2). Where: x86_64 (the queue needs a prefetch instruction), a
+  shift by `pv_array_bts` keeps `cl` (x86-64 without BMI2). Where: x86_64 and wasm32, a
   table built off a pool of two threads or more (PAIRPAR's pool fill takes the others), without database word counts
-  (`limit_lookup`, which the command line does not offer). R10 (line R, megablast Sakai x MG1655 at one thread): the queued loop spent 0.190 s, about 87
+  (`limit_lookup`, which the command line does not offer). wasm32 has no prefetch instruction, so there the queue is a
+  batch (since 2026-10-24, perf/mb-fill-wasm): 64 words are collected, their cells read in one loop (the cache misses
+  overlap), then the words applied in order, as the queued loop's `Batch` queue does; other targets (aarch64) keep the
+  queued loop, where the run loop has not been timed. R10 (line R, megablast Sakai x MG1655 at one thread): the queued loop spent 0.190 s, about 87
   instructions and 42 cycles a word, on 10.9 M words (NCBI 45.5 cycles); the loop shape of R10's probe (a closure and a
   queue 32 deep) gained 11 ms, and a branch-free update of the presence bit and helper counter lost here as in R10
   (megablast of the cDNAs below x1.004: about 21 more instructions a word for few saved misses). Shadow:
@@ -2854,6 +2857,15 @@ Scheduling (each value computed by one thread with the original function; order 
   37 table builds), of Sakai with every 20th letter N (runs of 19 letters, 8 words a run) x0.907, blastn of the cDNAs
   against MG1655 x0.985 (91 two-stage builds); megablast of Sakai at 8 threads (pool fill) x1.001. `=0` x0.976-0.999
   of the binary before (0.2-2.4 % fewer instructions: the queued loop sits behind the dispatch now).
+  Measured on wasm32 2026-10-24 (the serial WASI command in Node 26.8.2, every arm's module in one process, a fresh
+  instance per search, 8 rounds, the arm order rotating; `LOSAT_TIMING`; against `dev` b1f09848; outputs identical):
+  on the workstation (node 0, two pinned cores, HT siblings idle) megablast of Sakai against MG1655 x0.957 (1.403 ->
+  1.340 s; the fill 0.237 -> 0.182 s), of the 31,168 cDNAs against dmel_dna_3M x0.891 (8.37 -> 7.46 s; the fill 3.15
+  -> 2.22 s), of Sakai with every 20th letter N x0.924, of 21,994 150-letter pieces of Sakai against MG1655 x0.975;
+  `=0` x0.987-0.994. On this WSL i9 (a client CPU, loaded) the fill of the same loop read x0.74-0.84 of the queued
+  loop's in every case. Applying each word at once, or batching only the first 64 words of a run, was faster on the
+  workstation for long runs (the cDNAs x0.82) but slower than the queued loop on the i9 (short runs x1.24, Sakai x1.07),
+  so wasm32 takes the batch. The machine code of the x86_64 loops is unchanged.
 - `LOSAT_X_MBLUTKEEP=1` (BLASTN megablast and blastn, the contiguous megablast lookup table of `build_mb_lookup`; in the
   strict set since 2026-10-19 (perf/mb-lut-keep, evidence at the end of this entry): on unless it is `0`)
   the batch loop keeps the table's `hashtable` from one query batch to the next

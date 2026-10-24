@@ -1602,28 +1602,50 @@ fn run_local_search_with_pool(
                     .iter()
                     .map(|(_, _, list)| !compo_early_termination(list.best_evalue, &heaps))
                     .collect();
-                let computed: Vec<_> = pool.install(|| {
-                    batch
-                        .par_iter()
-                        .zip(wanted.par_iter())
-                        .map(|((context, oid, list), &wanted)| {
-                            if !wanted {
-                                return None;
-                            }
-                            let slot = rayon::current_thread_index().unwrap_or(0) % states.len();
-                            let mut guard = states[slot].lock().expect("TBLASTN redo worker state");
-                            let worker = &mut *guard;
-                            Some(redo_item(
-                                *context,
-                                *oid,
-                                list,
-                                &worker.params,
-                                &mut worker.scratch,
-                                &mut worker.workspace,
-                            ))
-                        })
-                        .collect()
-                });
+                let lpt = x_tbn_redo_lpt() && {
+                    let acts = wanted.iter().filter(|&&wanted| wanted).count() > 1;
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNREDOLPT", acts);
+                    acts
+                };
+                let computed: Vec<_> = if lpt {
+                    let order = x_redo_lpt_order(&wanted, |index| batch[index].2.hsps.len());
+                    x_redo_lpt(pool, &states, batch.len(), &order, |worker, index| {
+                        let (context, oid, list) = &batch[index];
+                        redo_item(
+                            *context,
+                            *oid,
+                            list,
+                            &worker.params,
+                            &mut worker.scratch,
+                            &mut worker.workspace,
+                        )
+                    })
+                } else {
+                    pool.install(|| {
+                        batch
+                            .par_iter()
+                            .zip(wanted.par_iter())
+                            .map(|((context, oid, list), &wanted)| {
+                                if !wanted {
+                                    return None;
+                                }
+                                let slot =
+                                    rayon::current_thread_index().unwrap_or(0) % states.len();
+                                let mut guard =
+                                    states[slot].lock().expect("TBLASTN redo worker state");
+                                let worker = &mut *guard;
+                                Some(redo_item(
+                                    *context,
+                                    *oid,
+                                    list,
+                                    &worker.params,
+                                    &mut worker.scratch,
+                                    &mut worker.workspace,
+                                ))
+                            })
+                            .collect()
+                    })
+                };
                 for ((context, oid, list), result) in batch.iter().zip(computed) {
                     if compo_early_termination(list.best_evalue, &heaps) {
                         continue;
@@ -1651,6 +1673,11 @@ fn run_local_search_with_pool(
             }
         }
     } else {
+        // One thread or one match: the redo runs here, outside LOSAT_X_TBNREDOLPT's rule.
+        #[cfg(feature = "parallel")]
+        if x_tbn_redo_lpt() {
+            crate::utils::xreach::x_reach!("LOSAT_X_TBNREDOLPT", false);
+        }
         for (context, oid, list) in preliminary_lists {
             // NCBI c++/src/algo/blast/core/blast_kappa.c:3383-3427,3525-3736:
             // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
@@ -1864,6 +1891,96 @@ struct XRedoWorker {
 // through its mutex, so it is never observed mid-call by another thread.
 #[cfg(feature = "parallel")]
 unsafe impl Send for XRedoWorker {}
+
+// No NCBI counterpart: reads the LOSAT_X_TBNREDOLPT variable once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNREDOLPT): a switch of the strict set (`utils/xswitch.rs`), on unless
+/// it is `0`. It acts only where the redo runs on the search pool (two or more threads, two or
+/// more matches), on a chunk with two or more matches to redo.
+#[cfg(feature = "parallel")]
+fn x_tbn_redo_lpt() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNREDOLPT"))
+}
+
+// No NCBI counterpart: the order in which the threads take a chunk's matches; it changes no value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNREDOLPT): the indices of the `wanted` matches by `hsps(index)` (the
+/// number of HSPs of the match's preliminary list), largest first; matches with as many HSPs in
+/// index order. A redo's cost grows with its list, whatever the function, so any such cost gives
+/// this order.
+#[cfg(feature = "parallel")]
+fn x_redo_lpt_order(wanted: &[bool], hsps: impl Fn(usize) -> usize) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..wanted.len()).filter(|&index| wanted[index]).collect();
+    order.sort_by_key(|&index| (std::cmp::Reverse(hsps(index)), index));
+    order
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3447-3449,3493-3497
+// ```c
+//         int b;
+// #pragma omp for schedule(static)
+//         for (b = 0; b < numMatches; ++b) {
+// ...
+//                 seqSrc               = seqsrc_tld[tid];
+//                 scoringParams        = score_params_tld[tid];
+//                 hitParams            = hit_params_tld[tid];
+// ```
+// No NCBI counterpart for the order: NCBI's threads take fixed shares of its loop; here the
+// threads take the matches one at a time, largest first. Scheduling only.
+/// EXPERIMENT (LOSAT_X_TBNREDOLPT): `run(worker, index)` for every index of `order`, in one
+/// `rayon::scope` on `pool` of `min(workers, order)` tasks, task `t` with `workers[t]`. Each task
+/// takes the next index of `order` from one counter until none is left, and puts each result in
+/// the index's slot. Returns the results of a chunk of `matches` matches by index, `None` where
+/// `order` does not name the index (a match early termination ends before the chunk).
+///
+/// Why the results are the `par_iter` path's: a match's result is a function of its preliminary
+/// list (`redo_item` with the same arguments); a worker carries no value from one match to the
+/// next (the `par_iter` path also gives one worker the matches of whichever thread holds it); the
+/// results are read by index, so the in-order apply sees the same sequence, errors included. The
+/// order only changes which thread computes what, and when; no floating-point operation changes
+/// order, the matches share no reduction. A task holds its own worker and waits for nothing else,
+/// and a match runs no rayon work, so no task depends on a task that could be stolen below it.
+#[cfg(feature = "parallel")]
+#[inline(never)]
+fn x_redo_lpt<W, R>(
+    pool: &SearchPool<'_>,
+    workers: &[std::sync::Mutex<W>],
+    matches: usize,
+    order: &[usize],
+    run: impl Fn(&mut W, usize) -> R + Sync,
+) -> Vec<Option<R>>
+where
+    W: Send,
+    R: Send + Sync,
+{
+    // A disabled pool would run the scope on the global pool, not the search pool.
+    debug_assert!(pool.enabled());
+    let slots: Vec<std::sync::OnceLock<R>> =
+        (0..matches).map(|_| std::sync::OnceLock::new()).collect();
+    let next = AtomicUsize::new(0);
+    let (slots_ref, next, run) = (&slots, &next, &run);
+    pool.install(|| {
+        rayon::scope(|scope| {
+            for worker in &workers[..workers.len().min(order.len())] {
+                scope.spawn(move |_| {
+                    let mut guard = worker.lock().expect("TBLASTN redo worker state");
+                    while let Some(&index) = order.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        let result = run(&mut guard, index);
+                        assert!(
+                            slots_ref[index].set(result).is_ok(),
+                            "match {index} ran twice"
+                        );
+                    }
+                });
+            }
+        });
+    });
+    slots
+        .into_iter()
+        .map(std::sync::OnceLock::into_inner)
+        .collect()
+}
 
 // The per-context cutoffs of the preliminary stage of a query set.
 struct ContextCutoffArrays {
@@ -6141,5 +6258,152 @@ mod tests {
             (0..7).map(|i| x_own_pool_threads(16, 7, i)).sum::<usize>(),
             16
         );
+    }
+
+    /// A fixed xorshift sequence.
+    #[cfg(feature = "parallel")]
+    struct XorShift(u64);
+
+    #[cfg(feature = "parallel")]
+    impl XorShift {
+        fn below(&mut self, bound: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % bound as u64) as usize
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBNREDOLPT): the order names each wanted match once, by HSPs largest
+    // first, ties in index order, and no match early termination ended.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn the_redo_lpt_order_takes_the_wanted_matches_largest_first() {
+        assert!(x_redo_lpt_order(&[], |_| 0).is_empty());
+        assert!(x_redo_lpt_order(&[false, false], |_| 1).is_empty());
+        let hsps = [3, 9, 3, 0, 9, 4];
+        assert_eq!(
+            x_redo_lpt_order(&[true; 6], |index| hsps[index]),
+            [1, 4, 5, 0, 2, 3]
+        );
+        assert_eq!(
+            x_redo_lpt_order(&[true, false, true, true, true, false], |index| hsps[index]),
+            [4, 0, 2, 3]
+        );
+        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
+        for len in [1, 2, 7, 64, 256] {
+            // Few distinct HSP counts (many ties), and many.
+            for distinct in [1, 3, 100_000] {
+                let hsps: Vec<usize> = (0..len).map(|_| rng.below(distinct)).collect();
+                let wanted: Vec<bool> = (0..len).map(|_| rng.below(4) != 0).collect();
+                let order = x_redo_lpt_order(&wanted, |index| hsps[index]);
+                let mut named = order.clone();
+                named.sort_unstable();
+                let expected: Vec<usize> = (0..len).filter(|&index| wanted[index]).collect();
+                assert_eq!(named, expected, "the wanted matches, once each");
+                for pair in order.windows(2) {
+                    let (a, b) = (pair[0], pair[1]);
+                    assert!(
+                        hsps[a] > hsps[b] || (hsps[a] == hsps[b] && a < b),
+                        "match {a} ({} HSPs) before match {b} ({} HSPs)",
+                        hsps[a],
+                        hsps[b]
+                    );
+                }
+            }
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBNREDOLPT): the scope returns what the `par_iter` path returns for the
+    // same chunk (`Some(run(match))` where wanted, `None` elsewhere, by index), runs each wanted
+    // match once, and gives each task one worker of its own; also when a match runs nested
+    // parallel work, where a thread that waits in it may run another task's loop.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn the_redo_lpt_scope_returns_the_par_iter_results_by_index() {
+        let mut rng = XorShift(0x9e37_79b9_7f4a_7c15);
+        for threads in [2, 3, 7] {
+            crate::utils::threading::with_search_pool(threads, "tblastn", |pool| {
+                for matches in [0_usize, 1, 2, 5, 40, 256] {
+                    let hsps: Vec<usize> = (0..matches).map(|_| rng.below(50)).collect();
+                    let wanted: Vec<bool> = (0..matches).map(|_| rng.below(5) != 0).collect();
+                    let order = x_redo_lpt_order(&wanted, |index| hsps[index]);
+                    // Each worker records the matches it ran.
+                    let workers: Vec<std::sync::Mutex<Vec<usize>>> =
+                        (0..threads).map(|_| Default::default()).collect();
+                    let run = |index: usize| -> (usize, u64) {
+                        let nested: u64 =
+                            (0..64_u64).into_par_iter().map(|x| x * index as u64).sum();
+                        (index * 3 + hsps[index], nested)
+                    };
+                    let results = x_redo_lpt(pool, &workers, matches, &order, |ran, index| {
+                        assert!(rayon::current_thread_index().is_some(), "on the pool");
+                        ran.push(index);
+                        run(index)
+                    });
+                    let par_iter: Vec<Option<(usize, u64)>> = pool.install(|| {
+                        (0..matches)
+                            .into_par_iter()
+                            .zip(wanted.par_iter())
+                            .map(|(index, &wanted)| wanted.then(|| run(index)))
+                            .collect()
+                    });
+                    assert_eq!(results, par_iter, "threads {threads} matches {matches}");
+                    let ran: Vec<Vec<usize>> = workers
+                        .into_iter()
+                        .map(|worker| worker.into_inner().unwrap())
+                        .collect();
+                    let tasks = threads.min(order.len());
+                    assert!(
+                        ran[tasks..].iter().all(Vec::is_empty),
+                        "only the first {tasks} workers ran"
+                    );
+                    let mut all: Vec<usize> = ran.concat();
+                    all.sort_unstable();
+                    let mut expected = order.clone();
+                    expected.sort_unstable();
+                    assert_eq!(all, expected, "each wanted match once");
+                    // One worker runs its matches in the order's order.
+                    for worker in &ran {
+                        let position = |index: &usize| order.iter().position(|o| o == index);
+                        assert!(worker.windows(2).all(|w| position(&w[0]) < position(&w[1])));
+                    }
+                }
+                Ok(())
+            })
+            .expect("a pool");
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBNREDOLPT): a match that panics: the panic comes out of the scope (the
+    // other tasks finish first, so nothing hangs) and the same pool computes the next chunk, with
+    // workers made again as the search would make them.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn a_panicking_redo_match_propagates_and_the_pool_stays_usable() {
+        for threads in [2, 3, 7] {
+            crate::utils::threading::with_search_pool(threads, "tblastn", |pool| {
+                let matches = 40_usize;
+                let order: Vec<usize> = (0..matches).collect();
+                let run = |panicking: bool| {
+                    let workers: Vec<std::sync::Mutex<()>> =
+                        (0..threads).map(|_| Default::default()).collect();
+                    x_redo_lpt(pool, &workers, matches, &order, |_, index| {
+                        assert!(
+                            !(panicking && (index == 5 || index == 30)),
+                            "match {index} panics"
+                        );
+                        index * 3
+                    })
+                };
+                let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(true)));
+                assert!(caught.is_err(), "threads {threads}: the panic was lost");
+                let expected: Vec<Option<usize>> =
+                    (0..matches).map(|index| Some(index * 3)).collect();
+                assert_eq!(run(false), expected, "threads {threads}");
+                Ok(())
+            })
+            .expect("a pool");
+        }
     }
 }

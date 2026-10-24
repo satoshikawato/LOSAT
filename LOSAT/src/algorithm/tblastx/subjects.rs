@@ -123,7 +123,13 @@ impl<'a> Subjects<'a> {
         match self {
             Self::Fasta(records) => {
                 let letters = records[oid].seq();
-                if is_unambiguous(letters) {
+                let unambiguous = is_unambiguous(letters);
+                let by_table = x_resolve_by_table();
+                // A record of A, C, G and T only copies its letters with either side.
+                if by_table {
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBXRESOLVE", !unambiguous);
+                }
+                if unambiguous {
                     let frames = x_generate_frames_in_windows(
                         letters.len(),
                         &mut |from, out| out.copy_from_slice(&letters[from..from + out.len()]),
@@ -131,23 +137,7 @@ impl<'a> Subjects<'a> {
                     );
                     return (frames, true);
                 }
-                let mut random = crate::core::blast_encoding::NcbiRandom::new(letters.len() as u32);
-                let frames = x_generate_frames_in_windows(
-                    letters.len(),
-                    &mut |from, out| {
-                        for (base, &letter) in out.iter_mut().zip(&letters[from..]) {
-                            let code = ncbi4na_of(letter);
-                            *base = b"ACGT"[usize::from(
-                                crate::core::blast_encoding::resolve_ncbi4na_base(
-                                    code,
-                                    &mut random,
-                                ),
-                            )];
-                        }
-                    },
-                    table,
-                );
-                (frames, false)
+                (x_resolved_record_frames(letters, table, by_table), false)
             }
             Self::Stored(stores) => {
                 let store = &stores[oid];
@@ -211,6 +201,78 @@ impl<'a> Subjects<'a> {
 pub(crate) fn x_frames_late() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXFRAMES"))
+}
+
+// No NCBI counterpart: the variable is read once per process; it chooses how LOSAT resolves a
+// record's letters, not a value NCBI computes.
+/// LOSAT_X_TBXRESOLVE: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
+pub(crate) fn x_resolve_by_table() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXRESOLVE"))
+}
+
+/// The base of each byte whose ncbi4na code has one base (`A`, `C`, `G`, `T` and `U`, in either
+/// case: `resolve_ncbi4na_base` gives it without a draw), and 0 for every other byte.
+const UNAMBIGUOUS_BASE: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let mut letter = 0;
+    while letter < 4 {
+        let [upper, base] = [[b'A', b'A'], [b'C', b'C'], [b'G', b'G'], [b'T', b'T']][letter];
+        table[upper as usize] = base;
+        table[upper.to_ascii_lowercase() as usize] = base;
+        letter += 1;
+    }
+    table[b'U' as usize] = b'T';
+    table[b'u' as usize] = b'T';
+    table
+};
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
+// ```c
+//         if (c  != 0xFF) {
+//             // No ambiguities, so we can do this the easy way.
+//         	ncbi2na[i] = c;
+//
+//         } else {
+//             if (b == 0 || b == 0x0F) {
+//             	//gap or N
+//                 ncbi2na[i] = random.GetRand() & 0x3;
+// ```
+// NCBI draws from `CRandom` only for an ambiguous base. EXPERIMENT (LOSAT_X_TBXRESOLVE): a letter
+// of one base is read from `UNAMBIGUOUS_BASE`, and only the others go through `ncbi4na_of` and
+// `resolve_ncbi4na_base`, so the draws and the bases are those of the letter-by-letter walk.
+/// The frames of the bases the preliminary stage translates for a record with ambiguous letters
+/// (`Subjects::x_preliminary_frames`), the letters resolved window by window from one `CRandom` of
+/// the record's length; `by_table` is LOSAT_X_TBXRESOLVE.
+fn x_resolved_record_frames(
+    letters: &[u8],
+    table: &GeneticCode,
+    by_table: bool,
+) -> Vec<QueryFrame> {
+    let mut random = crate::core::blast_encoding::NcbiRandom::new(letters.len() as u32);
+    let mut resolve = |letter: u8| {
+        let code = ncbi4na_of(letter);
+        b"ACGT"[usize::from(crate::core::blast_encoding::resolve_ncbi4na_base(
+            code,
+            &mut random,
+        ))]
+    };
+    x_generate_frames_in_windows(
+        letters.len(),
+        &mut |from, out| {
+            if by_table {
+                for (base, &letter) in out.iter_mut().zip(&letters[from..]) {
+                    let known = UNAMBIGUOUS_BASE[usize::from(letter)];
+                    *base = if known != 0 { known } else { resolve(letter) };
+                }
+            } else {
+                for (base, &letter) in out.iter_mut().zip(&letters[from..]) {
+                    *base = resolve(letter);
+                }
+            }
+        },
+        table,
+    )
 }
 
 /// Whether every letter is `A`, `C`, `G` or `T` in either case (`preliminary_subject_bases`
@@ -465,6 +527,45 @@ mod tests {
         records.push(FastaRecord::new("block", b"", &block));
         for id in [1, 4, 11] {
             check(Subjects::Fasta(&records), &GeneticCode::from_id(id));
+        }
+    }
+
+    /// LOSAT_X_TBXRESOLVE: the table walk against the letter-by-letter walk (`=0`), every frame,
+    /// for records of every IUPAC letter in both cases, `U`, gaps and bytes without a code, with
+    /// one ambiguous letter, and with an N block across a window border.
+    #[test]
+    fn the_table_walk_gives_the_letter_walks_frames() {
+        let mut records = vec![
+            b"N".to_vec(),
+            b"acgtN".to_vec(),
+            b"uUuUaN".to_vec(),
+            letters(5, 3, b"ACGTN"),
+        ];
+        for (i, len) in [1usize, 2, 3, 4, 7, 50, 1000, 200_003]
+            .into_iter()
+            .enumerate()
+        {
+            records.push(letters(
+                i as u64 + 11,
+                len,
+                b"ACGTacgtNnRrYyKkMmSsWwBbDdHhVvUu-*0 ",
+            ));
+            let mut one = letters(i as u64 + 31, len, b"ACGTacgt");
+            one[len / 2] = b'R';
+            records.push(one);
+        }
+        let mut block = letters(17, 400_000, b"ACGTacgu");
+        block[196_000..197_000].fill(b'N');
+        records.push(block);
+        for id in [1, 4, 11] {
+            let table = GeneticCode::from_id(id);
+            for (i, record) in records.iter().enumerate() {
+                assert_same(
+                    &x_resolved_record_frames(record, &table, true),
+                    &x_resolved_record_frames(record, &table, false),
+                    &format!("record {i} code {id}"),
+                );
+            }
         }
     }
 

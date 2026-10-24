@@ -18,6 +18,8 @@ mod newton_lanes8_default;
 mod outfmt11_blastn;
 #[path = "../outfmt11_blastp.rs"]
 mod outfmt11_blastp;
+#[path = "../outfmt11_blastx.rs"]
+mod outfmt11_blastx;
 #[path = "../outfmt13_14_files.rs"]
 mod outfmt13_14_files;
 #[path = "../outfmt16_blastn.rs"]

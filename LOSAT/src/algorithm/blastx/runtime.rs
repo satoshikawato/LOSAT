@@ -6,6 +6,7 @@ use super::{
     parameters::{subject_parameters, ContextParameters},
     preliminary::PreliminaryHsp,
     query_setup::PreparedQueryBatch,
+    reader_batch::UnitPrep,
     results::{
         prelim_hitlist_size, subject_besthit, CompoHeap, HeapEntry, HitList, Hsp, HspList,
         HspStream,
@@ -440,12 +441,24 @@ pub fn x_search_internal_serial<'a>(
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
 ) -> Result<Vec<BatchResults>> {
+    x_search_unit_serial(records, subjects, options, None)
+}
+
+/// `x_search_internal_serial` for one unit of a reader batch of several, prepared in phase 1
+/// (`reader_batch.rs`); `None`: `records` are the reader batch (or the whole batch is one unit).
+pub(crate) fn x_search_unit_serial<'a>(
+    records: &[FastaRecord],
+    subjects: impl Into<Subjects<'a>>,
+    options: &ResolvedOptions,
+    prep: Option<UnitPrep>,
+) -> Result<Vec<BatchResults>> {
     let _serial = XInnerSerial::enter();
-    x_search_internal_in_pool(
+    x_search_unit_in_pool(
         records,
         subjects,
         options,
         &crate::utils::threading::SearchPool::x_serial(),
+        prep,
     )
 }
 
@@ -464,6 +477,18 @@ pub fn x_search_internal_in_pool<'a>(
     options: &ResolvedOptions,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<Vec<BatchResults>> {
+    x_search_unit_in_pool(records, subjects, options, pool, None)
+}
+
+/// `x_search_internal_in_pool` for one unit of a reader batch of several, prepared in phase 1
+/// (`reader_batch.rs`); `None`: `records` are the reader batch (or the whole batch is one unit).
+pub(crate) fn x_search_unit_in_pool<'a>(
+    records: &[FastaRecord],
+    subjects: impl Into<Subjects<'a>>,
+    options: &ResolvedOptions,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    prep: Option<UnitPrep>,
+) -> Result<Vec<BatchResults>> {
     let subjects = subjects.into();
     let mut observer = Noop;
     let mut pipeline = Runtime {
@@ -479,7 +504,7 @@ pub fn x_search_internal_in_pool<'a>(
         chunk: None,
         output: Vec::new(),
     };
-    search_core(records, subjects, options, false, &mut pipeline, pool)?;
+    search_core(records, subjects, options, false, &mut pipeline, pool, prep)?;
     Ok(pipeline.output)
 }
 
@@ -530,7 +555,7 @@ pub fn search_internal_observed<'a>(
         output: Vec::new(),
     };
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
-        search_core(records, subjects, options, false, &mut pipeline, pool)
+        search_core(records, subjects, options, false, &mut pipeline, pool, None)
     })?;
     Ok(pipeline.output)
 }

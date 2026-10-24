@@ -1473,6 +1473,9 @@ struct XHitCtx<'a> {
     cutoff_scores: &'a [i32],
     x_dropoff_per_context: &'a [i32],
     subject: &'a [u8],
+    /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the frame's buffer `[0, subject.., 0]` when the
+    /// extensions take the walks the sentinels stop (`x_tbx_sent_subject`), else empty.
+    subject_sent: &'a [u8],
     s_f_idx: usize,
     s_frame: i8,
     s_idx: usize,
@@ -1764,6 +1767,9 @@ pub(super) struct XPairPar {
     /// LOSAT_X_TBXUNITMASK: each group's extent (`x_group_extents`) while `mask_rule` is Some,
     /// else empty.
     extents: Vec<usize>,
+    /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the batch's extensions may take the walks the
+    /// sentinels stop (`x_tbx_sent_contexts`); a unit takes them where its chunk is the whole frame.
+    sent: bool,
 }
 
 impl XPairPar {
@@ -1898,12 +1904,15 @@ impl XPairPar {
             Vec::new()
         };
         debug_assert!(extents.is_empty() || extents.len() == groups.len());
+        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): checked once for the batch's contexts.
+        let sent = x_tbx_sent_contexts(b.contexts.iter().map(|c| c.aa_seq.as_slice()));
         Some(Self {
             groups,
             stub,
             sliced,
             mask_rule,
             extents,
+            sent,
         })
     }
 
@@ -2636,6 +2645,7 @@ impl XPairPar {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
+            subject_sent: x_tbx_sent_subject(self.sent, subject_full, chunk.offset, chunk.length),
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -2969,16 +2979,33 @@ fn x_hit<S: XInitSink, P: XProbe>(
         // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): the probe around the extension
         // (x_unit_probe.rs; `XNoProbe` does nothing). No NCBI counterpart.
         let mark = probe.ext_begin();
+        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the walks the sentinels stop where the unit's chunk
+        // is the whole frame (`subject_sent`); never on wasm32.
         let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
-            extend_hit_two_hit(
-                query,
-                h.subject,
-                (last_hit + wordsize) as usize,
-                subject_offset as usize,
-                q_raw,
-                x_dropoff,
-                false,
-            );
+            if cfg!(target_arch = "wasm32") || h.subject_sent.is_empty() {
+                extend_hit_two_hit(
+                    query,
+                    h.subject,
+                    (last_hit + wordsize) as usize,
+                    subject_offset as usize,
+                    q_raw,
+                    x_dropoff,
+                    false,
+                )
+            } else {
+                // SAFETY: the batch's contexts passed `x_tbx_sent_contexts` (XPairPar::sent) and
+                // `subject_sent` is what `x_tbx_sent_subject` returned for this chunk.
+                unsafe {
+                    extend_hit_two_hit_sent(
+                        query_full,
+                        h.subject_sent,
+                        (last_hit + wordsize) as usize,
+                        subject_offset as usize,
+                        q_raw,
+                        x_dropoff,
+                    )
+                }
+            };
         probe.ext_end(
             mark,
             query,
@@ -3415,6 +3442,7 @@ mod tests {
                     cutoff_scores,
                     x_dropoff_per_context,
                     subject,
+                    subject_sent: &[],
                     s_f_idx: f,
                     s_frame: s_frame.frame,
                     s_idx: 0,
@@ -3506,6 +3534,7 @@ mod tests {
         let pp = XPairPar {
             groups: build_groups(&lookup, &contexts),
             stub: false,
+            sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
             sliced: None,
             mask_rule: None,
             extents: Vec::new(),
@@ -3895,6 +3924,7 @@ mod tests {
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -4025,6 +4055,7 @@ mod tests {
             let plain = XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -4033,6 +4064,7 @@ mod tests {
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: Some(XMaskRule {
                     max_cells: usize::MAX,
@@ -4047,6 +4079,7 @@ mod tests {
             let control = XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: pp.mask_rule,
                 extents: pp
@@ -4877,6 +4910,7 @@ mod tests {
                 pp: XPairPar {
                     groups: build_groups(&lookup, &contexts),
                     stub: false,
+                    sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                     sliced: None,
                     mask_rule: None,
                     extents: Vec::new(),
@@ -5394,6 +5428,7 @@ mod tests {
             pp: XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),

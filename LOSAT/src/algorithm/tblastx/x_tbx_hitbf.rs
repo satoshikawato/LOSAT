@@ -1053,6 +1053,7 @@ mod tests {
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -1214,6 +1215,7 @@ mod tests {
         let pp = XPairPar {
             groups: build_groups(&lookup, &contexts),
             stub: false,
+            sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
             sliced: None,
             mask_rule: None,
             extents: Vec::new(),

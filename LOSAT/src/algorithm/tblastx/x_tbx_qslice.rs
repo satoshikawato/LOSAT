@@ -705,6 +705,7 @@ impl XPairPar {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
+            subject_sent: x_tbx_sent_subject(self.sent, subject_full, chunk.offset, chunk.length),
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -1109,6 +1110,7 @@ mod tests {
             let pp = XPairPar {
                 groups,
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: Some(direct),
                 mask_rule: None,
                 extents: Vec::new(),

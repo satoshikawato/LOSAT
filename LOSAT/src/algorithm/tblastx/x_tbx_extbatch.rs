@@ -239,17 +239,31 @@ unsafe fn resolve(c: &mut XCand, diag_ptr: *mut DiagStruct, h: &XHitCtx<'_>) {
     // SAFETY: the context index was returned by `get_context_idx` (below num_contexts).
     let ctx = unsafe { h.contexts.get_unchecked(c.ctx_idx as usize) };
     let query_full = &ctx.aa_seq;
-    let query = &query_full[1..query_full.len() - 1];
+    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): as in `x_hit`.
     let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
-        extend_hit_two_hit(
-            query,
-            h.subject,
-            c.s_left as usize,
-            c.s_right as usize,
-            c.q_raw as usize,
-            c.x_drop,
-            false,
-        );
+        if cfg!(target_arch = "wasm32") || h.subject_sent.is_empty() {
+            extend_hit_two_hit(
+                &query_full[1..query_full.len() - 1],
+                h.subject,
+                c.s_left as usize,
+                c.s_right as usize,
+                c.q_raw as usize,
+                c.x_drop,
+                false,
+            )
+        } else {
+            // SAFETY: as in `x_hit`.
+            unsafe {
+                extend_hit_two_hit_sent(
+                    query_full,
+                    h.subject_sent,
+                    c.s_left as usize,
+                    c.s_right as usize,
+                    c.q_raw as usize,
+                    c.x_drop,
+                )
+            }
+        };
     // SAFETY: the caller's bound.
     unsafe {
         apply(
@@ -749,6 +763,7 @@ impl XPairPar {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
+            subject_sent: x_tbx_sent_subject(self.sent, subject_full, chunk.offset, chunk.length),
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -970,6 +985,7 @@ mod tests {
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -1135,6 +1151,7 @@ mod tests {
                 cutoff_scores: &cutoff_scores,
                 x_dropoff_per_context: &x_dropoff_per_context,
                 subject: &subject,
+                subject_sent: &[],
                 s_f_idx: 2,
                 s_frame: -1,
                 s_idx: 7,

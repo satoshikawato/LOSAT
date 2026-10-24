@@ -3499,6 +3499,10 @@ fn search_query_batch(
     let x_worker_diag_cells = x_seed_batch.worker_table_cells(diag_array_size as usize);
 
     let contexts_ref = &contexts;
+    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the reference frame loops' extensions may take the walks
+    // the sentinels stop (not with the debug output of `extend_hit_two_hit`).
+    let tbx_sent = !extension_debug_enabled
+        && x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice()));
     let _gapped_params_ref = &gapped_params; // Unused - tblastx uses ungapped params
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
@@ -4232,6 +4236,10 @@ fn search_query_batch(
                 let mut stats = TblastxChunkScanStats::default();
                 let chunk_end = chunk.offset.saturating_add(chunk.length);
                 let subject = &subject_all[chunk.offset..chunk_end];
+                // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the frame's buffer when the chunk is the
+                // whole frame, else empty.
+                let subject_sent =
+                    x_tbx_sent_subject(tbx_sent, subject_full, chunk.offset, chunk.length);
 
                 if subject.len() < wordsize as usize {
                     // NCBI still advances the diagonal table offset even when no hits can be found.
@@ -4513,18 +4521,33 @@ fn search_query_batch(
                                     score,
                                     right_extend,
                                     s_last_off_u,
-                                ) = extend_hit_two_hit(
-                                    query,
-                                    subject,
-                                    (last_hit + wordsize) as usize,
-                                    subject_offset as usize,
-                                    q_raw as usize,
-                                    x_dropoff,
-                                    // NCBI aa_ungapped.c:576-582 (call above):
-                                    // score = s_BlastAaExtendTwoHit(...);
-                                    // Search-local LOSAT diagnostic flag only.
-                                    extension_debug_enabled,
-                                );
+                                ) = if cfg!(target_arch = "wasm32") || subject_sent.is_empty() {
+                                    extend_hit_two_hit(
+                                        query,
+                                        subject,
+                                        (last_hit + wordsize) as usize,
+                                        subject_offset as usize,
+                                        q_raw as usize,
+                                        x_dropoff,
+                                        // NCBI aa_ungapped.c:576-582 (call above):
+                                        // score = s_BlastAaExtendTwoHit(...);
+                                        // Search-local LOSAT diagnostic flag only.
+                                        extension_debug_enabled,
+                                    )
+                                } else {
+                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent)
+                                    // and `subject_sent` is `x_tbx_sent_subject`'s for this chunk.
+                                    unsafe {
+                                        extend_hit_two_hit_sent(
+                                            query_full,
+                                            subject_sent,
+                                            (last_hit + wordsize) as usize,
+                                            subject_offset as usize,
+                                            q_raw as usize,
+                                            x_dropoff,
+                                        )
+                                    }
+                                };
                                 if let Some(t0) = t0 {
                                     ungapped_ns.fetch_add(
                                         t0.elapsed().as_nanos() as u64,
@@ -4796,6 +4819,10 @@ fn search_query_batch(
                 let mut stats = TblastxChunkScanStats::default();
                 let chunk_end = chunk.offset.saturating_add(chunk.length);
                 let subject = &subject_all[chunk.offset..chunk_end];
+                // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the frame's buffer when the chunk is the
+                // whole frame, else empty.
+                let subject_sent =
+                    x_tbx_sent_subject(tbx_sent, subject_full, chunk.offset, chunk.length);
 
                 if subject.len() < wordsize as usize {
                     // NCBI still advances the diagonal table offset even when no hits can be found.
@@ -5006,18 +5033,33 @@ fn search_query_batch(
                                     score,
                                     right_extend,
                                     s_last_off_u,
-                                ) = extend_hit_two_hit(
-                                    query,
-                                    subject,
-                                    (last_hit + wordsize) as usize,
-                                    subject_offset as usize,
-                                    q_raw as usize,
-                                    x_dropoff,
-                                    // NCBI aa_ungapped.c:576-582 (call above):
-                                    // score = s_BlastAaExtendTwoHit(...);
-                                    // Search-local LOSAT diagnostic flag only.
-                                    extension_debug_enabled,
-                                );
+                                ) = if cfg!(target_arch = "wasm32") || subject_sent.is_empty() {
+                                    extend_hit_two_hit(
+                                        query,
+                                        subject,
+                                        (last_hit + wordsize) as usize,
+                                        subject_offset as usize,
+                                        q_raw as usize,
+                                        x_dropoff,
+                                        // NCBI aa_ungapped.c:576-582 (call above):
+                                        // score = s_BlastAaExtendTwoHit(...);
+                                        // Search-local LOSAT diagnostic flag only.
+                                        extension_debug_enabled,
+                                    )
+                                } else {
+                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent)
+                                    // and `subject_sent` is `x_tbx_sent_subject`'s for this chunk.
+                                    unsafe {
+                                        extend_hit_two_hit_sent(
+                                            query_full,
+                                            subject_sent,
+                                            (last_hit + wordsize) as usize,
+                                            subject_offset as usize,
+                                            q_raw as usize,
+                                            x_dropoff,
+                                        )
+                                    }
+                                };
                                 if let Some(t0) = t0 {
                                     ungapped_ns.fetch_add(
                                         t0.elapsed().as_nanos() as u64,

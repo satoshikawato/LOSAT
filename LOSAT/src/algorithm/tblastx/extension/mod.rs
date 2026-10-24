@@ -23,6 +23,11 @@ mod x_two_hit_fast;
 // Re-export public functions
 pub use gapped::extend_gapped_protein;
 pub use two_hit::extend_hit_two_hit;
+// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the walks the sentinels stop, and the checks that choose them.
+pub use two_hit::extend_hit_two_hit_sent;
+pub(crate) use x_two_hit_fast::{
+    sent_contexts as x_tbx_sent_contexts, sent_subject as x_tbx_sent_subject,
+};
 // EXPERIMENT (LOSAT_X_TBXUNGAPSHADOW): the summary line at exit.
 pub use x_two_hit_fast::print_shadow_stats as x_tbxungap_print_shadow_stats;
 // Diagnostic (LOSAT_X_STATS): the cells of one extension (tblastx/x_unit_probe.rs).

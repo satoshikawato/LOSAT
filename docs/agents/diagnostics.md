@@ -2954,7 +2954,18 @@ Scheduling (each value computed by one thread with the original function; order 
   that is not kept (the discontiguous tables, the tables of `LOSAT_X_QBATCHPAR`'s slots). A batch split into query
   chunks has no table of its own (its chunks drop theirs when their calls return after their preliminary stage). With
   `LOSAT_TIMING` `[TIMING] x_bn_lut_drop: batches=` gives the number of batches that dropped their tables before their
-  traceback. Evidence. EVIDENCE_PLACEHOLDER
+  traceback. Evidence (workstation node 1, 16 cores with their HT siblings idle, membind 1, cores warmed 3 s before each run; dev
+  a1fb63f9 against 82176dc4, 4-6 pairs in alternating order; outputs identical; peak `RssAnon` and max RSS = max(`%M`, a
+  10 ms `VmHWM` sample)): megablast of E. coli Sakai against MG1655 `-subject` 135.7 -> 131.3 MiB at one thread and
+  142.5 -> 136.7 at 16, `-db` 135.0 -> 130.6 and 142.6 -> 133.7 (the peak moves from the traceback to the scan; NCBI's
+  anonymous memory 155.3 and 133.9, plan v4 line MF); megablast of 31,168 D. melanogaster cDNAs against dmel_dna_3M (37
+  batches) at 16 threads 579.2 -> 552.1, blastn of the cDNAs 741.2 -> 705.7 and dc-megablast 392.4 -> 390.9 (16 threads,
+  `LOSAT_X_QBATCHPAR`'s slots, whose tables are not kept). One case reads higher: the cDNAs' megablast at one thread
+  217.5 -> 219.7 (the batch loop with the keep). It is glibc's dynamic mmap threshold (freeing a mapped block of up to 32
+  MiB raises it): the chains of a batch are freed before its traceback instead of after, so the threshold rises one
+  traceback earlier and that traceback's medium buffers stay in the heap; with the threshold fixed
+  (`MALLOC_MMAP_THRESHOLD_=131072`) the run reads 217.2 -> 217.0, and `LOSAT_X_BNLUTDROP=0` reads 217.5 as dev. Time:
+  wall x0.997-1.001, cycles:u x0.991-1.000 and instructions:u x0.999-1.000 in every case.
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
   `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; in the strict set since 2026-10-17,
   default ON: `LOSAT_X_DISCLUTPAR=0` turns it off; evidence below, "Default ON") the

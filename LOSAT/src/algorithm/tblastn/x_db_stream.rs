@@ -80,9 +80,9 @@
 //! difference stops the run (panic) after printing the line that is otherwise printed at exit:
 //! `[X_SHADOW] TBNDBSTREAM sequences= reads= bases= identical`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 
 use anyhow::Result;
 
@@ -153,9 +153,30 @@ impl std::fmt::Display for XReadError {
 
 impl std::error::Error for XReadError {}
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): a sequence of `XDbStream::read_shared`: its store while
-/// something holds it, behind the lock that its one reader holds while it reads.
-type XShared = Mutex<Weak<PackedNucleotide>>;
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the sequences of `XDbStream::read_shared`.
+#[derive(Default)]
+struct XShared {
+    /// The stores that something holds, by ordinal id.
+    held: HashMap<usize, Weak<PackedNucleotide>>,
+    /// The sequences that a thread reads now.
+    reading: HashSet<usize>,
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the read of a sequence by `XDbStream::read_shared`; dropped
+/// (the read made, failed or unwound), the sequence is no longer read and the waiters wake.
+struct XReading<'s, 'a> {
+    stream: &'s XDbStream<'a>,
+    oid: usize,
+}
+
+impl Drop for XReading<'_, '_> {
+    fn drop(&mut self) {
+        let mut shared = self.stream.shared.lock().unwrap_or_else(|e| e.into_inner());
+        shared.reading.remove(&self.oid);
+        drop(shared);
+        self.stream.read_done.notify_all();
+    }
+}
 
 /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the database of a `-db` search, read where it is searched.
 pub(super) struct XDbStream<'a> {
@@ -164,8 +185,10 @@ pub(super) struct XDbStream<'a> {
     id: u64,
     /// The length of every sequence, by ordinal id (`x_check_nucleotide_stores`).
     lengths: Vec<usize>,
-    /// The sequences that something holds or reads (`read_shared`), by ordinal id.
-    shared: Mutex<HashMap<usize, Arc<XShared>>>,
+    /// The sequences that something holds or a thread reads (`read_shared`).
+    shared: Mutex<XShared>,
+    /// Woken when a read of `read_shared` ends.
+    read_done: Condvar,
     /// The copy of the shadow mode.
     copy: Option<Vec<PackedNucleotide>>,
 }
@@ -216,7 +239,8 @@ impl<'a> XDbStream<'a> {
             db,
             id: STREAMS.fetch_add(1, Ordering::Relaxed),
             lengths,
-            shared: Mutex::new(HashMap::new()),
+            shared: Mutex::new(XShared::default()),
+            read_done: Condvar::new(),
             copy,
         })
     }
@@ -244,28 +268,30 @@ impl<'a> XDbStream<'a> {
     /// reads it waits for that read (the threads of a stage that first align the same subject at
     /// once made one copy each). It is read again once nothing holds it.
     pub(super) fn read_shared(&self, oid: usize) -> Result<Arc<PackedNucleotide>> {
-        let slot = {
-            let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
-            if shared.len() >= 1024 && shared.len().is_power_of_two() {
-                // A slot that only the map holds has no reader; it goes when nothing holds its
-                // store.
-                shared.retain(|_, slot| {
-                    Arc::strong_count(slot) > 1
-                        || slot
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .strong_count()
-                            > 0
-                });
+        let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(store) = shared.held.get(&oid).and_then(Weak::upgrade) {
+                return Ok(store);
             }
-            Arc::clone(shared.entry(oid).or_default())
-        };
-        let mut held = slot.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(store) = held.upgrade() {
-            return Ok(store);
+            if !shared.reading.contains(&oid) {
+                break;
+            }
+            shared = self
+                .read_done
+                .wait(shared)
+                .unwrap_or_else(|e| e.into_inner());
         }
+        shared.reading.insert(oid);
+        drop(shared);
+        let reading = XReading { stream: self, oid };
         let store = Arc::new(self.read(oid)?);
-        *held = Arc::downgrade(&store);
+        let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+        if shared.held.len() >= 1024 && shared.held.len().is_power_of_two() {
+            shared.held.retain(|_, store| store.strong_count() > 0);
+        }
+        shared.held.insert(oid, Arc::downgrade(&store));
+        drop(shared);
+        drop(reading);
         Ok(store)
     }
 

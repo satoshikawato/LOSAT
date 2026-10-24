@@ -361,7 +361,8 @@ mod tests {
     // subjects with letters outside the alphabet and copies of the query, small diagonal tables: the
     // loop on the flat table makes the candidates and leaves the diagonal table of the loop of
     // `x_seed_fused_compressed.rs` on the reference's table, subject after subject, with the list
-    // of the branch and the branch-free one (LOSAT_X_BPCLUTSCANBF).
+    // of the branch and the branch-free one (LOSAT_X_BPCLUTSCANBF), and so does the loop of
+    // LOSAT_X_BPFSEED with both lists.
     #[test]
     fn the_flat_loop_is_the_fused_loop_on_the_reference_table() {
         let mut rng = XorShift(0x510e_527f_ade6_82d1);
@@ -420,6 +421,8 @@ mod tests {
                 let diag_mask = diag_len as i32 - 1;
                 let mut flat_diag = vec![DiagStruct::default(); diag_len];
                 let mut bf_diag = vec![DiagStruct::default(); diag_len];
+                let mut fseed_diag = vec![DiagStruct::default(); diag_len];
+                let mut fseed_bf_diag = vec![DiagStruct::default(); diag_len];
                 let mut reference_diag = vec![DiagStruct::default(); diag_len];
                 let mut diag_offset = window;
                 let mut total = 0usize;
@@ -454,6 +457,36 @@ mod tests {
                             stand_in(&mut bf_log, diag_offset, q, s, last_hit, diff, entry)
                         },
                     );
+                    // LOSAT_X_BPFSEED, both lists (the subjects are in XHitBf's range).
+                    assert!(XHitBf::fits(diag_offset, length, window, 5));
+                    let mut fseed_log = Vec::new();
+                    x_scan_flat_fseed::<false, _>(
+                        &flat,
+                        subject,
+                        length,
+                        &mut fseed_diag,
+                        diag_mask,
+                        diag_offset,
+                        window,
+                        5,
+                        &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
+                            stand_in(&mut fseed_log, diag_offset, q, s, last_hit, diff, entry)
+                        },
+                    );
+                    let mut fseed_bf_log = Vec::new();
+                    x_scan_flat_fseed::<true, _>(
+                        &flat,
+                        subject,
+                        length,
+                        &mut fseed_bf_diag,
+                        diag_mask,
+                        diag_offset,
+                        window,
+                        5,
+                        &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
+                            stand_in(&mut fseed_bf_log, diag_offset, q, s, last_hit, diff, entry)
+                        },
+                    );
                     let mut reference_log = Vec::new();
                     x_scan_two_hit_compressed(
                         &reference,
@@ -470,7 +503,17 @@ mod tests {
                     );
                     assert_eq!(flat_log, reference_log, "subject {n}: candidates");
                     assert_eq!(bf_log, reference_log, "subject {n}: branch-free candidates");
-                    for (diag, form) in [(&flat_diag, "branch"), (&bf_diag, "branch-free")] {
+                    assert_eq!(fseed_log, reference_log, "subject {n}: BPFSEED candidates");
+                    assert_eq!(
+                        fseed_bf_log, reference_log,
+                        "subject {n}: BPFSEED branch-free candidates"
+                    );
+                    for (diag, form) in [
+                        (&flat_diag, "branch"),
+                        (&bf_diag, "branch-free"),
+                        (&fseed_diag, "BPFSEED"),
+                        (&fseed_bf_diag, "BPFSEED branch-free"),
+                    ] {
                         assert!(
                             diag.iter()
                                 .zip(&reference_diag)

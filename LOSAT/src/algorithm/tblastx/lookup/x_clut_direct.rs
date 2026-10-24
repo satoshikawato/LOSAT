@@ -2342,7 +2342,8 @@ mod tests {
     // The scans: on random subjects (letters outside the alphabet none, rare, frequent; short
     // subjects), the flat `scan_subject` gives the reference's hits and rounds for arrays from the
     // longest cell up, and `for_each_cell` gives the same hits, with the branch-free list too
-    // (LOSAT_X_BPCLUTSCANBF); `used_cells` counts the cells with hits.
+    // (LOSAT_X_BPCLUTSCANBF), and so does `x_for_each_range` with both lists (LOSAT_X_BPFSEED), each
+    // visit with the slice of its cell; `used_cells` counts the cells with hits.
     #[test]
     fn flat_scans_give_the_reference_scans_hits() {
         let mut rng = XorShift(0x3c6e_f372_fe94_f82b);
@@ -2382,6 +2383,8 @@ mod tests {
                 subjects.push(random_subject(&mut rng, length, 0));
             }
             let mut cells = Vec::new();
+            let mut ranges = Vec::new();
+            let mut visited = Vec::new();
             for (n, subject) in subjects.iter().enumerate() {
                 let length = subject.len() - 1;
                 let mut expected = None;
@@ -2415,6 +2418,48 @@ mod tests {
                         "subject {n}: branch-free for_each_cell"
                     );
                     cells = scratch;
+                }
+                // LOSAT_X_BPFSEED: the scan that reads the slice bounds, with both lists, on the used
+                // scratch and on a new one; each visit gets its cell's slice.
+                for branch_free in [false, true] {
+                    for mut scratch in [std::mem::take(&mut ranges), Vec::new()] {
+                        let mut fused = Vec::new();
+                        visited.clear();
+                        let mut visit = |s: i32, hits: &[i32]| {
+                            fused.extend(hits.iter().map(|&q| (s as u32, q as u32)));
+                            visited.push((s, hits.as_ptr(), hits.len()));
+                        };
+                        if branch_free {
+                            flat.x_for_each_range::<true, _>(
+                                subject,
+                                length,
+                                &mut scratch,
+                                &mut visit,
+                            );
+                        } else {
+                            flat.x_for_each_range::<false, _>(
+                                subject,
+                                length,
+                                &mut scratch,
+                                &mut visit,
+                            );
+                        }
+                        assert_eq!(
+                            Some(fused),
+                            expected,
+                            "subject {n}: x_for_each_range, branch-free {branch_free}"
+                        );
+                        let mut cells_visited = Vec::new();
+                        flat.for_each_cell::<false, _>(subject, length, &mut cells, |s, hits| {
+                            cells_visited.push((s, hits.as_ptr(), hits.len()));
+                        });
+                        visited.retain(|&(_, _, len)| len != 0);
+                        assert_eq!(
+                            visited, cells_visited,
+                            "subject {n}: slices, branch-free {branch_free}"
+                        );
+                        ranges = scratch;
+                    }
                 }
             }
         }

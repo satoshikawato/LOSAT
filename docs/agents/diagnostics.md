@@ -5018,27 +5018,32 @@ Scheduling (each value computed by one thread with the original function; order 
   the whole database that `TblastnDatabase::read_stores` makes before the first query batch
   (`tblastn/x_db_stream.rs`, exactness argument in its header). The database is checked once before the first batch
   with the blocks and checks of the copy (`common::database::x_check_nucleotide_stores`: the same error fails the
-  same batch with the same text) and only the lengths of its sequences are kept. The preliminary search reads a
+  same batch with the same text; a block of one sequence, a long one, is checked from its last 2-bit byte and its
+  ambiguity data, `SeqDb::x_nucleotide_check`) and only the lengths of its sequences are kept. The preliminary search reads a
   subject when it makes the subject's plan and drops it once the plan is made (the plans of the short ones are made
   from the bytes of one block of 256 KiB per thread, without a store; a subject whose plan has no residues,
   `LOSAT_X_TBNUNITXLATE`, is read before its plan and held while its units translate it); the composition redo and the traceback of `-comp_based_stats 0` read each subject of their
   lists when they first align it and hold it until the stage ends; the reports read the sequences they show. A long
-  sequence is read into a buffer that glibc maps (taken from `utils::x_mapped::X_BYTES` when it holds one) and its
-  store is that buffer cut to the 2-bit data; stages and batches that hold it at the same time share it. While a
+  sequence is read once while anything holds it: stages and batches that hold it at the same time share it, and a
+  thread that asks for it while another thread reads it waits for that read. With more than one thread it is read
+  into a buffer that glibc maps (taken from `utils::x_mapped::X_BYTES` when it holds one) and its store is that
+  buffer cut to the 2-bit data; at one thread it is read into the heap. While a
   stream is open, the frames of 1 MiB or more of a dropped subject plan go to `X_BYTES` (idle bound
   `LOSAT_X_POOLIDLE`), and the next frames and long reads take them with their pages resident. A read that fails
   after the check fails its query batch with the check's error, after the reports of the batches before. Every
   read packs the stored bytes as the copy does, so every report is the same. Shadow:
   `LOSAT_X_TBNDBSTREAMSHADOW=1` also makes the copy and compares the check's lengths and error and every read with
   it, stopping at the first difference; at exit `[X_SHADOW] TBNDBSTREAM sequences= reads= bases= identical`
-  (`tests/tblastn_db_stream.rs`). Measured 2026-10-24 (workstation, every report identical, against dev 5215b7d5):
-  peak RssAnon (untimed, 2 runs) of 30 C. elegans proteins x the C. elegans genome (100 Mb in 7 sequences) 51 /
-  215-216 / 222-224 MiB at 1 / 8 / 16 threads against 72 / 237-239 / 250 with `=0` (NCBI 75 / 210 / 212), of 118
-  fly proteins x zebrafish cDNAs (57,776 sequences, `-max_target_seqs 5`) 22 / 55-56 / 86-87 against 52 / 83-84 /
-  113-114 (NCBI 16 / 28 / 34). At one thread (`perf stat`, 3 runs) minor faults 30.0k against 66.8k and
-  instructions:u x0.99990 on the genome, x1.00013 on the cDNAs (x1.00006 with `=0`; the check reads the database
-  once more). Timed against dev (node 1, warmed 3 s, 8 alternated pairs): the genome x0.995 / x0.991 (24 pairs) /
-  x0.993 at 1 / 8 / 16 threads, the cDNAs x0.999 / x0.998 / x0.998.
+  (`tests/tblastn_db_stream.rs`). Measured 2026-10-24 (workstation, every report identical, against dev 4c9ba700):
+  peak RssAnon (untimed, 2 runs) of 30 C. elegans proteins x the C. elegans genome (100 Mb in 7 sequences) 32 /
+  87-89 / 139-140 MiB at 1 / 8 / 16 threads against 46 / 109-110 / 153-158 (NCBI 75 / 210 / 212), of 118 fly
+  proteins x zebrafish cDNAs (57,776 sequences, `-max_target_seqs 5`) 22-23 / 55-56 / 86-87 against 52 / 81-82 / 112
+  (NCBI 16 / 28 / 34), of one fly protein x the human genome (3.1 Gb) 563 against 832 MiB at one thread (NCBI 483).
+  At one thread (`perf stat`, 3 runs) instructions:u x0.99990 / x1.00027 / x0.99960 on the three (x1.000002 /
+  x1.000095 / x1.000005 with `=0`; on the cDNAs the check reads the database once more) and minor faults 12.7k /
+  7.6k / 276k against 19.0k / 14.9k / 344k; cycles:u x0.9959 / x0.9983 / x0.9852. Timed against dev (node 1, warmed
+  3 s, 8 alternated pairs): the C. elegans genome x0.991 / x0.986 (24 pairs at 8), the cDNAs x0.999 / x0.999,
+  the human genome x0.790 / x0.673 at 8 / 16 threads.
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

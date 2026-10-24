@@ -352,5 +352,35 @@ class SelectionTests(unittest.TestCase):
             self.assertIn(program, fast.program_dependents()[program])
 
 
+class StartupTraceNoticeTests(unittest.TestCase):
+    """`check_startup_trace_notice` against stub executables standing in for `losat`."""
+
+    def check(self, body: str) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            program = Path(tmp) / "losat"
+            program.write_text(f"#!{sys.executable}\nimport os, sys\n{body}\n")
+            program.chmod(0o755)
+            return fast.check_startup_trace_notice(program)
+
+    def test_a_default_build_passes(self):
+        self.assertEqual(self.check(
+            "print('losat 1.0')\n"
+            "if os.environ.get('LOSAT_STARTUP_TRACE'):\n"
+            f"    sys.stderr.write({fast.STARTUP_TRACE_NOTICE!r})"), [])
+
+    def test_a_build_that_reads_the_variable_fails(self):
+        failures = self.check(
+            "print('losat 1.0')\n"
+            "if os.environ.get('LOSAT_STARTUP_TRACE'):\n"
+            "    sys.stderr.write('[startup] enter main\\n')")
+        self.assertEqual(len(failures), 1)
+        self.assertIn("default build", failures[0])
+
+    def test_stderr_without_the_variable_and_a_failing_exit_fail(self):
+        failures = self.check("print('losat 1.0')\nsys.stderr.write('warning\\n')\nsys.exit(1)")
+        self.assertTrue(any("exited" in failure for failure in failures))
+        self.assertTrue(any("stderr without" in failure for failure in failures))
+
+
 if __name__ == "__main__":
     unittest.main()

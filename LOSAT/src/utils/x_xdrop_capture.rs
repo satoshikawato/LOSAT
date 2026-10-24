@@ -44,11 +44,14 @@ struct Config {
 }
 
 fn config() -> Option<&'static Config> {
+    if !crate::utils::xdiag::ON {
+        return None;
+    }
     static CONFIG: OnceLock<Option<Config>> = OnceLock::new();
     CONFIG
         .get_or_init(|| {
-            let dir = std::env::var_os("LOSAT_X_DPCAPTURE")?;
-            let every = std::env::var("LOSAT_X_DPCAPTURE_EVERY")
+            let dir = crate::utils::xdiag::var_os("LOSAT_X_DPCAPTURE")?;
+            let every = crate::utils::xdiag::var("LOSAT_X_DPCAPTURE_EVERY")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
                 .filter(|&n| n >= 1)

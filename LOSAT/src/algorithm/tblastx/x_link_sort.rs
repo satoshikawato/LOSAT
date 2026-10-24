@@ -346,14 +346,20 @@ where
 //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
 //               ScoreCompareHSPs);
 // ```
-// The index sort of `x_hsp_inplace::sort_in_place`.
+// The index sort of `x_hsp_inplace::sort_in_place`. The comparator is a type parameter down to
+// `sort_by`, so each comparator has its own sort with the comparison inlined. Passed as a function
+// pointer, it was an indirect call per comparison, which on wasm32 (LOSAT Web) is a `call_indirect`
+// around which V8 saves and reloads the sort's registers: the stable sort took 1.9-2.0 times the
+// cycles of the native one.
 /// Sorts `indices` into the order of today's `sort_by` with `compare` over `records`.
-pub(super) fn sort_indices(
+pub(super) fn sort_indices<C>(
     indices: &mut [usize],
     records: &[UngappedHit],
-    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
+    compare: C,
     site: Site,
-) {
+) where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
+{
     let parallel = sort_stable(indices, records, compare, pool_allowed(site), PARALLEL_MIN);
     count(indices.len(), parallel, false);
 }

@@ -858,7 +858,7 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     }
 
     // Debug output for purge statistics
-    if std::env::var("LOSAT_DEBUG_BLASTN").is_ok() {
+    if crate::utils::xenv::debug_blastn_is_ok() {
         eprintln!(
             "[DEBUG_PURGE] initial={}, start_removed={} (trimmed={}), end_removed={} (trimmed={}), active_prefix={}, final={}",
             initial_count, start_removed, start_trimmed, end_removed, end_trimmed, extra_start, hits.len()

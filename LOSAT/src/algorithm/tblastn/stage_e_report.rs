@@ -97,7 +97,9 @@ impl ShownSubjects<'_> {
 //     ...
 // }
 // Each requested format prints the same final result without searching again.
-#[allow(clippy::too_many_arguments)]
+/// The number of the BLAST archive among the formats (outfmt 11).
+pub(super) const ARCHIVE_FORMAT: i32 = 11;
+
 /// The format number of a checked `-outfmt` value, as NCBI's `ParseFormattingString` reads
 /// it (a custom specification of outfmt 0 is ignored); -1 for a value it does not read.
 pub(super) fn format_number(outfmt: &str) -> i32 {
@@ -151,6 +153,7 @@ pub(super) fn render(
     xml_values: super::blast_xml::XmlValues,
     xml_taxa: super::database::XmlTaxa,
     out: Option<&std::path::Path>,
+    archive: Option<&super::archive::ArchiveRender<'_>>,
 ) -> Result<()> {
     ensure!(
         query_records.len() == hitlists.len(),
@@ -266,15 +269,22 @@ pub(super) fn render(
     let mut warning_lines = Some(query_warning_lines);
     let observer = &mut outputs.observer;
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
+        // The warnings that a format other than the archive writes are not the archive's
+        // messages (a call with several formats, `run_local`).
+        if let Some(archive) = archive {
+            archive
+                .handle
+                .set_muted(format_number(format.outfmt) != ARCHIVE_FORMAT);
+        }
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
-        let mut warnings =
-            (warning_lines.is_some() || xml2_kind(format.outfmt).is_some()).then(|| {
-                crate::report::query_warnings::QueryWarnings {
-                    before: warning_lines.take().unwrap_or(&[]),
-                    sink: &mut *outputs.diagnostics,
-                }
+        let mut warnings = (warning_lines.is_some()
+            || xml2_kind(format.outfmt).is_some()
+            || format_number(format.outfmt) == ARCHIVE_FORMAT)
+            .then(|| crate::report::query_warnings::QueryWarnings {
+                before: warning_lines.take().unwrap_or(&[]),
+                sink: &mut *outputs.diagnostics,
             });
         let mut writer = format.sink.open()?;
         match format_number(format.outfmt) {
@@ -386,9 +396,49 @@ pub(super) fn render(
                 ranges,
                 warnings.as_mut(),
             )?,
+            // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:295
+            // ```c++
+            //                 if (fmt_args->ArchiveFormatRequested(args)) {
+            //                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+            //                     m_Bah.ResetMessages();
+            // ```
+            // One BLAST archive per query batch (`archive`).
+            ARCHIVE_FORMAT => {
+                let archive = archive.expect("a BLAST archive request has its handle");
+                let gapped = lookup_protein_params(&ProteinScoringSpec {
+                    matrix: scoring.matrix,
+                    gap_open: scoring.gap_open,
+                    gap_extend: scoring.gap_extend,
+                });
+                super::archive::write_tblastn_archives(
+                    archive,
+                    &super::archive::ArchiveData {
+                        queries: query_records,
+                        subject_records,
+                        subject_letters,
+                        shown,
+                        hitlists,
+                        parameters,
+                        ungapped_karlin,
+                        query_validity,
+                        query_batch_skipped,
+                        gapped,
+                        seg,
+                        mask_lowercase,
+                        ranges,
+                    },
+                    warnings.as_mut(),
+                    &mut writer,
+                )?
+            }
             _ => bail!("unsupported TBLASTN outfmt {}", format.outfmt),
         }
         writer.flush()?;
+    }
+    // The messages that `search` writes after the formats (the stop messages) are the archive's
+    // again, whichever format came last (as in blastn and blastp).
+    if let Some(archive) = archive {
+        archive.handle.set_muted(false);
     }
     Ok(())
 }
@@ -819,6 +869,7 @@ mod tests {
                     db_gencode: 1,
                 },
                 Default::default(),
+                None,
                 None,
             )
             .unwrap();

@@ -226,8 +226,8 @@ pub struct BlastxArgs {
     //                      "least this many higher-scoring hits, delete the hit",
     //                      CArgDescriptions::eInteger);
     // ```
-    #[arg(long, default_value_t = 0, value_parser = nonnegative)]
-    pub culling_limit: i32,
+    #[arg(long, value_parser = nonnegative)]
+    pub culling_limit: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329-3329
     // ```c++
     //     arg_desc.AddFlag(kArgSubjectBestHit, "Return only the best HSP for each non overlapping query region", true);
@@ -326,6 +326,9 @@ pub struct BlastxArgs {
 // ```
 pub struct BlastxSeg {
     pub enabled: bool,
+    /// The value was `yes` (the BLAST archive records `SegFiltering` true for it, and the
+    /// three numbers for a value with parameters).
+    pub yes: bool,
     pub window: i32,
     pub locut: f64,
     pub hicut: f64,
@@ -361,6 +364,7 @@ pub struct BlastxSeg {
 fn seg(value: &str) -> std::result::Result<BlastxSeg, String> {
     let mut s = BlastxSeg {
         enabled: value != "no",
+        yes: value == "yes",
         window: 12,
         locut: 2.2,
         hicut: 2.5,
@@ -1012,7 +1016,7 @@ impl BlastxArgs {
             max_intron_length: self.max_intron_length,
             max_hsps: self.max_hsps.unwrap_or(0),
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
-            culling_limit: self.culling_limit,
+            culling_limit: self.culling_limit.unwrap_or(0),
             subject_besthit: self.subject_besthit,
             hitlist_size,
             num_descriptions: counts.num_descriptions as i32,

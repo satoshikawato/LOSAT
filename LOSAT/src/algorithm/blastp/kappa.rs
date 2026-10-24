@@ -87,9 +87,12 @@ pub(crate) struct BlastpTraceHspTarget {
 // s_Blast_HSPGetNumIdentitiesAndPositives(...)
 // ```
 pub(crate) fn blastp_trace_hsp_target() -> Option<BlastpTraceHspTarget> {
+    if !crate::utils::xdiag::ON {
+        return None;
+    }
     static TARGET: OnceLock<Option<BlastpTraceHspTarget>> = OnceLock::new();
     *TARGET.get_or_init(|| {
-        let value = std::env::var("LOSAT_DEBUG_BLASTP_TRACE_HSP").ok()?;
+        let value = crate::utils::xdiag::var("LOSAT_DEBUG_BLASTP_TRACE_HSP").ok()?;
         let fields: Vec<&str> = value.split(',').map(str::trim).collect();
         match fields.as_slice() {
             [q_idx, s_idx, q_start, q_end, s_start, s_end] => Some(BlastpTraceHspTarget {
@@ -610,7 +613,7 @@ fn redo_preliminary_blastp_hit(
     // matchStart = gap_align->subject_start + subject_range->begin;
     // matchEnd   = gap_align->subject_stop  + subject_range->begin;
     // ```
-    if std::env::var_os("LOSAT_DEBUG_BLASTP_WSSV").is_some()
+    if crate::utils::xdiag::var_os("LOSAT_DEBUG_BLASTP_WSSV").is_some()
         && query_start == 78
         && query_end == 789
         && subject_start == 0

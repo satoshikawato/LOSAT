@@ -160,6 +160,11 @@ mod x_few_subj;
 #[path = "x_bnstream.rs"]
 mod x_bnstream;
 
+// EXPERIMENT (LOSAT_X_BNLUTDROP): a query batch's lookup tables dropped when its preliminary stage
+// ends, before its traceback, as NCBI's traceback stage drops its table.
+#[path = "x_lut_drop.rs"]
+mod x_lut_drop;
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-318
 // ```c++
 //                 ITERATE(CSearchResultSet, result, *results) {
@@ -268,6 +273,12 @@ pub fn x_db_stream_print_summary() {
 /// counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_tb_range_print_summary() {
     database::x_tb_range_print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BNLUTDROP): the summary line `main` prints at exit (LOSAT_TIMING). No NCBI
+/// counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_lut_drop_print_summary() {
+    x_lut_drop::print_summary();
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:160-161
@@ -11059,16 +11070,9 @@ fn search_query_batch(
         }
     }
 
-    // Pass lookup tables and queries for use in the closure
+    // Pass queries for use in the closure (the lookup tables are passed by the preliminary
+    // stage's calls, `process_subject`'s `lookups`)
     let two_stage_lookup_ref = lookup_tables.two_stage_lookup.as_ref();
-    let pv_direct_lookup_ref = lookup_tables.pv_direct_lookup.as_ref();
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
-    // ```c
-    // typedef struct BlastNaLookupTable {
-    //     ...
-    // } BlastNaLookupTable;
-    // ```
-    let na_lookup_ref = lookup_tables.na_lookup.as_ref();
     let queries_ref = &seq_data.queries;
     let query_contexts_ref = &query_contexts;
     let query_base_offsets_ref = &query_base_offsets;
@@ -11274,9 +11278,21 @@ fn search_query_batch(
                            subject: BlastnSubjectRef<'_>,
                            gap_scratch: &mut GapAlignScratch,
                            subject_scratch: &mut SubjectScratch,
+                           lookups: Option<&LookupTables>,
                            prelim_source: Option<&Vec<PrelimHit>>,
                            subject_hits: &mut Option<Vec<BlastnHsp>>,
                            prelim_out: &mut Vec<PrelimHit>| {
+        // The batch's lookup tables: the preliminary stage's calls pass them, the traceback's
+        // (`prelim_source` set) pass `None` and do not scan (LOSAT_X_BNLUTDROP, `x_lut_drop.rs`).
+        let two_stage_lookup_ref = lookups.and_then(|tables| tables.two_stage_lookup.as_ref());
+        let pv_direct_lookup_ref = lookups.and_then(|tables| tables.pv_direct_lookup.as_ref());
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
+        // ```c
+        // typedef struct BlastNaLookupTable {
+        //     ...
+        // } BlastNaLookupTable;
+        // ```
+        let na_lookup_ref = lookups.and_then(|tables| tables.na_lookup.as_ref());
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
         // ```c
         //     int status = m_PrelimSearch->CheckInternalData();
@@ -17751,6 +17767,7 @@ fn search_query_batch(
     // threads search all subjects of the batch and then hand them over, or, with
     // `LOSAT_X_BNSTREAM`, hand each subject over in OID order while they search the next ones.
     let search_subjects = |kept: Option<&[Vec<PrelimHit>]>,
+                           lookups: Option<&LookupTables>,
                            sink: &mut (dyn FnMut(usize, Option<Vec<BlastnHsp>>, Vec<PrelimHit>)
                                      + Send)| {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
@@ -17778,6 +17795,7 @@ fn search_query_batch(
                 prepared_subject(s_idx),
                 gap_scratch,
                 subject_scratch,
+                lookups,
                 kept.map(|kept| &kept[s_idx]),
                 &mut subject_hits,
                 &mut prelim_hits,
@@ -17894,7 +17912,9 @@ fn search_query_batch(
                     prelim_hitlist_size,
                     args.culling_limit_value(),
                 );
-                search_subjects(None, &mut |oid, _, prelim| writer.add(oid, prelim));
+                search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
+                    writer.add(oid, prelim)
+                });
                 writer.finish()
             }
             SubjectSource::Database(database) if args.culling_limit_value() > 0 => {
@@ -17922,6 +17942,7 @@ fn search_query_batch(
                                 subject,
                                 gap_scratch,
                                 subject_scratch,
+                                Some(&lookup_tables),
                                 None,
                                 &mut subject_hits,
                                 &mut prelim_hits,
@@ -17945,7 +17966,9 @@ fn search_query_batch(
             }
             SubjectSource::Prepared(_) => {
                 let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
-                search_subjects(None, &mut |oid, _, prelim| collector.add(oid, prelim));
+                search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
+                    collector.add(oid, prelim)
+                });
                 collector.hit_lists
             }
             SubjectSource::Database(database) => {
@@ -17977,6 +18000,7 @@ fn search_query_batch(
                                 subject,
                                 gap_scratch,
                                 subject_scratch,
+                                Some(&lookup_tables),
                                 None,
                                 &mut subject_hits,
                                 &mut prelim_hits,
@@ -18006,12 +18030,16 @@ fn search_query_batch(
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
+    // Dispatch point of LOSAT_X_BNLUTDROP: the traceback reads the kept HSPs only, so the tables
+    // are dropped here (NCBI's traceback stage, traceback_stage.cpp:208-211); with `=0` they are
+    // held until the batch returns (`x_lut_drop.rs`).
+    let _x_kept_lookup_tables = x_lut_drop::after_prelim(lookup_tables);
     let hit_lists = match subjects {
         SubjectSource::Prepared(_) => {
             let kept = prelim_hits_by_subject(prelim_lists, subject_records_ref.len());
             let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
             hit_lists.resize_with(queries_ref.len(), || None);
-            search_subjects(Some(&kept), &mut |_, hits, _| {
+            search_subjects(Some(&kept), None, &mut |_, hits, _| {
                 if let Some(hits) = hits {
                     update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
                 }
@@ -18038,6 +18066,7 @@ fn search_query_batch(
                         subject,
                         gap_scratch,
                         subject_scratch,
+                        None,
                         Some(kept),
                         &mut subject_hits,
                         &mut prelim_hits,

@@ -31,7 +31,15 @@ fn main() -> Result<()> {
     if let Some(cwd) = std::env::var_os("PWD") {
         std::env::set_current_dir(&cwd)?;
     }
-    let startup_trace = std::env::var("LOSAT_STARTUP_TRACE").ok().as_deref() == Some("1");
+    // No NCBI counterpart: one stderr line per diagnostic variable that a build without the
+    // diagnostics feature ignores (utils/xdiag.rs).
+    for line in LOSAT::utils::xdiag::ignored_notices() {
+        eprintln!("{line}");
+    }
+    let startup_trace = LOSAT::utils::xdiag::var("LOSAT_STARTUP_TRACE")
+        .ok()
+        .as_deref()
+        == Some("1");
     if startup_trace {
         eprintln!("[startup] enter main");
     }
@@ -254,6 +262,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastn::blast_engine::x_db_cut_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_db_stream_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_tb_range_print_summary();
+    LOSAT::algorithm::blastn::blast_engine::x_lut_drop_print_summary();
     LOSAT::algorithm::blastp::x_bp_seed_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();

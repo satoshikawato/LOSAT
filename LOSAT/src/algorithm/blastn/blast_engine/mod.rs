@@ -23,6 +23,7 @@ pub use run::run_local;
 // LOSAT_X_QPREPPARSHADOW): the summary lines `main` prints at exit (no NCBI counterpart).
 pub use run::x_db_cut_print_summary;
 pub use run::x_db_stream_print_summary;
+pub use run::x_lut_drop_print_summary;
 pub use run::x_qgroup_par_print_summary;
 pub use run::x_query_prep_par_print_summary;
 pub use run::x_tb_range_print_summary;

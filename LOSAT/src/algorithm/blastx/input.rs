@@ -43,6 +43,10 @@ pub struct FastaRecord {
     pub sequence: Vec<u8>,
     pub lowercase_masks: Vec<(i32, i32)>,
     pub warnings: Vec<InputWarning>,
+    /// The defline line as read, for the BLAST archive (outfmt 11); `None` (8 bytes, no
+    /// allocation) unless the reader was asked to keep it. A record without a defline line
+    /// has none either (the archive then writes `>` and the title).
+    pub source: Option<Box<crate::blastinput::fasta_reader::RecordSource>>,
 }
 #[derive(Debug, Clone)]
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:974-995
@@ -337,6 +341,7 @@ pub(crate) fn parse_fasta_batches_with_warnings(
         protein,
         lowercase,
         batch_size,
+        false,
         deliver,
         warn,
     )
@@ -375,6 +380,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     protein: bool,
     lowercase: bool,
     batch_size: usize,
+    keep_defline: bool,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<Vec<FastaRecord>> {
@@ -687,7 +693,14 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             if let Some(warning) = &pending_title_warning {
                 warn(warning)?;
             }
-            current = Some(new_record(records.len(), protein, title));
+            let mut record = new_record(records.len(), protein, title);
+            if keep_defline {
+                record.source = Some(Box::new(crate::blastinput::fasta_reader::RecordSource {
+                    defline: header.to_vec(),
+                    uncut: None,
+                }));
+            }
+            current = Some(record);
             raw_residues = 0;
             continue;
         }
@@ -790,6 +803,7 @@ fn new_record(index: usize, protein: bool, title: String) -> FastaRecord {
         sequence: Vec::new(),
         lowercase_masks: Vec::new(),
         warnings: Vec::new(),
+        source: None,
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:437-447
@@ -2052,10 +2066,32 @@ pub(crate) fn parse_fasta_stream_with_warnings<R: Read>(
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<Vec<FastaRecord>> {
+    parse_fasta_stream_keeping(stream, protein, lowercase, batch_size, false, deliver, warn)
+}
+/// `parse_fasta_stream_with_warnings`, keeping each record's defline line (`keep_defline`: the
+/// BLAST archive, outfmt 11, writes it).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn parse_fasta_stream_keeping<R: Read>(
+    stream: &mut FastaStream<R>,
+    protein: bool,
+    lowercase: bool,
+    batch_size: usize,
+    keep_defline: bool,
+    deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
+    warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
+) -> Result<Vec<FastaRecord>> {
     if stream.at_eof() {
         return Ok(Vec::new());
     }
-    let records = parse_fasta_lines(stream, protein, lowercase, batch_size, deliver, warn)?;
+    let records = parse_fasta_lines(
+        stream,
+        protein,
+        lowercase,
+        batch_size,
+        keep_defline,
+        deliver,
+        warn,
+    )?;
     if records.is_empty() {
         deliver(&[])?;
     }

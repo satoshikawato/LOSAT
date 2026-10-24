@@ -2894,7 +2894,7 @@ fn search_query_batch(
     // ```
     // LOSAT-only existing diagnostics: capture configuration once per search;
     // the NCBI extension inputs and all biological decisions stay unchanged.
-    let extension_debug_enabled = std::env::var("LOSAT_DEBUG_EXTENSION").is_ok();
+    let extension_debug_enabled = crate::utils::xdiag::var("LOSAT_DEBUG_EXTENSION").is_ok();
     // Optional timing breakdown (disabled by default to preserve output/parity logs)
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
     let t_total = Instant::now();
@@ -2978,7 +2978,7 @@ fn search_query_batch(
     let ungapped_params_for_xdrop = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
 
     let diag_enabled = diagnostics_enabled();
-    let debug_cutoffs_all = std::env::var_os("LOSAT_DEBUG_CUTOFFS_ALL").is_some();
+    let debug_cutoffs_all = crate::utils::xdiag::var_os("LOSAT_DEBUG_CUTOFFS_ALL").is_some();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
     // ```c
     // #if _BLAST_DEBUG
@@ -2989,16 +2989,16 @@ fn search_query_batch(
     // #endif /* _BLAST_DEBUG */
     // ```
     let debug_output_filter = std::env::var_os("LOSAT_DEBUG_OUTPUT_FILTER").is_some();
-    let debug_hsp_saving = std::env::var_os("LOSAT_DEBUG_HSP_SAVING").is_some();
+    let debug_hsp_saving = crate::utils::xdiag::var_os("LOSAT_DEBUG_HSP_SAVING").is_some();
     let diagnostics = std::sync::Arc::new(DiagnosticCounters::default());
 
     // Debug: optional scan output dump around a specific subject offset.
     // The offset_pairs correspond to s_BlastAaScanSubject copy loop.
     // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:99-115
-    let scan_debug_center = std::env::var("LOSAT_DEBUG_SCAN_SOFF")
+    let scan_debug_center = crate::utils::xdiag::var("LOSAT_DEBUG_SCAN_SOFF")
         .ok()
         .and_then(|v| v.parse::<i32>().ok());
-    let scan_debug_window = std::env::var("LOSAT_DEBUG_SCAN_WINDOW")
+    let scan_debug_window = crate::utils::xdiag::var("LOSAT_DEBUG_SCAN_WINDOW")
         .ok()
         .and_then(|v| v.parse::<i32>().ok())
         .unwrap_or(0);
@@ -6109,7 +6109,7 @@ fn search_query_batch(
                 // score against the preserved unmasked query copy used for identity
                 // reporting. Normal runtime behavior is unchanged unless both
                 // LOSAT_TRACE_HSP and LOSAT_TRACE_HSP_MASKS are set.
-                if std::env::var_os("LOSAT_TRACE_HSP_MASKS").is_some() {
+                if crate::utils::xdiag::var_os("LOSAT_TRACE_HSP_MASKS").is_some() {
                     if let Some(target) = trace_hsp_target() {
                         if trace_match_target(target, q_start, q_end, s_start, s_end) {
                             // NCBI uses query_nomask = query_blk->sequence_nomask + query_offset,

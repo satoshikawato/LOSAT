@@ -5,13 +5,14 @@
 //! match from the database when it redoes the match, instead of a copy of every subject of the
 //! preliminary hit lists made before the redo, and the reports read the subjects of the final hit
 //! lists again. These tests compare the reports with the switch off and on on every redo path (the
-//! one-thread loop, `LOSAT_X_BPREDOPAR`, the two query-parallel paths of `LOSAT_X_BPREDOPAR=0`) and
-//! for each set of residues the reports keep (tabular rows of the default fields and Seq-aligns:
-//! the subjects with an O and those of the HSPs whose query has one; outfmt 0, XML and other
-//! tabular fields: every final subject; the records of `LOSAT_X_BPLISTEDLEAN=0`: every listed
-//! subject; the recount of the HSPs with a pyrrolysine on proteins made for it), and run its shadow mode
-//! (`LOSAT_X_BPREDODBSUBJSHADOW`), which makes the copy too and compares every read with it; its
-//! line at exit shows that the path ran. A difference stops the run.
+//! one-thread loop, `LOSAT_X_BPREDOPAR`, the query-parallel and the match-parallel redo of
+//! `LOSAT_X_BPREDOPAR=0`) and for each set of residues the reports keep (tabular rows of the
+//! default fields and Seq-aligns: the subjects with an O and those of the HSPs whose query has one;
+//! outfmt 0 and other tabular fields (XML reads the same set): every final subject; the records of
+//! `LOSAT_X_BPLISTEDLEAN=0`: every listed subject; the recount of the HSPs with a pyrrolysine on
+//! proteins made for it), and run its shadow mode (`LOSAT_X_BPREDODBSUBJSHADOW`), which makes the
+//! copy too and compares every read with it; its line at exit shows that the path ran. A
+//! difference stops the run.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385
 //! ```c
@@ -102,18 +103,22 @@ fn protein_database(fasta: &Path, name: &Path) -> PathBuf {
     name
 }
 
-/// The record BDT62584.1 of the fixture's query proteome (`MeenMJNV.faa`; more subjects of the
-/// database than any other), written to `dir`: a search with one query, which the parallel redo of
-/// one query's matches takes (`LOSAT_X_BPREDOPAR=0`).
-fn one_query(dir: &Path) -> PathBuf {
+/// `count` records of the fixture's query proteome (`MeenMJNV.faa`) from BDT62584.1 on (more
+/// subjects of the database than any other: 12 in its preliminary list), written to `dir`. One is a
+/// search with one query, whose matches the redo of `LOSAT_X_BPREDOPAR=0` parallelizes; two (with
+/// BDT62585.1, which has subjects too) take its query-parallel redo.
+fn queries(dir: &Path, count: usize) -> PathBuf {
     let text = std::fs::read_to_string(fixture("MeenMJNV.faa")).unwrap();
     let start = text
         .find(">BDT62584.1 ")
         .expect("the record is in the fixture");
-    let end = text[start + 1..]
-        .find("\n>")
-        .map_or(text.len(), |at| start + 1 + at + 1);
-    let path = dir.join("one_query.faa");
+    let mut end = start;
+    for _ in 0..count {
+        end = text[end + 1..]
+            .find("\n>")
+            .map_or(text.len(), |at| end + 1 + at + 1);
+    }
+    let path = dir.join(format!("queries_{count}.faa"));
     std::fs::write(&path, &text[start..end]).unwrap();
     path
 }
@@ -176,25 +181,25 @@ fn blastp(query: &Path, db: &Path, threads: u32, vars: &[(&str, &str)], outfmt: 
 fn reports_with_reads_per_match_are_the_copys_reports() {
     let dir = work_dir("reports");
     let db = subject_database(&dir);
-    let all = fixture("MeenMJNV.faa");
-    let one = one_query(&dir);
-    // Each redo path and each set of residues that the reports keep once; one search of all
-    // queries (`LOSAT_X_BPQBLOCK=0`) and the block search of `LOSAT_X_BPQBLOCK` (its default)
-    // alternate.
+    let one = queries(&dir, 1);
+    let two = queries(&dir, 2);
+    // Each redo path and each set of residues that the reports keep once. With
+    // `LOSAT_WASI_THREADS_DEBUG=1` the `[losat-thread-stage]` lines name the paths: kappa-redo-par
+    // takes precedence over kappa-match-redo and kappa-query-redo, which are printed before it. The
+    // switch lists and reads the subjects search by search, the same for a block of the block
+    // search (the default; every other `-db` test of blastp runs the switch in it) and for the one
+    // search of all queries of `LOSAT_X_BPQBLOCK=0`, so no case needs more than two queries.
     for (query, outfmt, threads, vars) in [
-        (&all, "6", 1, &[("LOSAT_X_BPQBLOCK", "0")][..]),
-        (&all, "6", 4, &[][..]),
-        (&all, "0", 2, &[("LOSAT_X_BPREDOPAR", "0")][..]),
-        (
-            &one,
-            "6",
-            2,
-            &[("LOSAT_X_BPREDOPAR", "0"), ("LOSAT_X_BPQBLOCK", "0")][..],
-        ),
-        (&all, "6 qseqid sseqid slen stitle sseq", 1, &[][..]),
-        (&all, "5", 2, &[("LOSAT_X_BPQBLOCK", "0")][..]),
-        (&all, "8", 1, &[][..]),
-        (&all, "6", 2, &[("LOSAT_X_BPLISTEDLEAN", "0")][..]),
+        // `LOSAT_X_BPREDOPAR` (kappa-redo-par) over two queries of one batch, the default fields.
+        (&two, "6", 4, &[][..]),
+        // The query-parallel redo of `LOSAT_X_BPREDOPAR=0` (kappa-query-redo), outfmt 0.
+        (&two, "0", 2, &[("LOSAT_X_BPREDOPAR", "0")][..]),
+        // Its redo of one query's matches (kappa-match-redo), Seq-aligns.
+        (&one, "8", 2, &[("LOSAT_X_BPREDOPAR", "0")][..]),
+        // The one-thread loop, other tabular fields.
+        (&one, "6 qseqid sseqid slen stitle sseq", 1, &[][..]),
+        // `LOSAT_X_BPREDOPAR`, the records of `LOSAT_X_BPLISTEDLEAN=0`.
+        (&one, "6", 2, &[("LOSAT_X_BPLISTEDLEAN", "0")][..]),
     ] {
         let with = |extra: (&'static str, &'static str)| {
             vars.iter().copied().chain([extra]).collect::<Vec<_>>()
@@ -207,7 +212,7 @@ fn reports_with_reads_per_match_are_the_copys_reports() {
             &with(("LOSAT_X_BPREDODBSUBJ", "0")),
             outfmt,
         );
-        assert!(!off.stdout.is_empty(), "{what}: the fixture pair has rows");
+        assert!(!off.stdout.is_empty(), "{what}: an empty report");
         let on = blastp(
             query,
             &db,

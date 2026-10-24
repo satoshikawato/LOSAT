@@ -8073,6 +8073,25 @@ fn run_resolved_in_pool(
             ),
         }
     }
+    // EXPERIMENT (LOSAT_X_BPFSEED): the reference compressed table, a flat table without the
+    // branch-free list and every table on wasm32 keep their loops; on a flat table with the list
+    // the loop records its side per subject (`x_seed_fused_clut.rs`).
+    if args.window_size != 0
+        && (super::x_seed_fused::x_bp_seed() || super::x_seed_fused::x_bp_seed_shadow())
+        && super::x_seed_fused_clut::x_bp_fseed()
+    {
+        match &lookup {
+            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Compressed(_) => {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
+            }
+            BlastpRuntimeLookup::CompressedFlat(table) => {
+                if !super::x_seed_fused_clut::x_fseed_table(table) {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
+                }
+            }
+        }
+    }
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
     let concatenated_query = build_blastp_concatenated_query(&contexts);
     // EXPERIMENT (LOSAT_X_BPSEED): the context of every query offset, for the candidates of the

@@ -353,7 +353,7 @@ pub fn compute_blastn_cutoff_score(
     scale_factor: f64,
 ) -> i32 {
     // Debug mode: LOSAT_DEBUG_CUTOFFS=1 to show detailed calculation
-    let debug_cutoffs = std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok();
+    let debug_cutoffs = crate::utils::xenv::debug_cutoffs_is_ok();
 
     // Step 1: Compute gap_trigger using UNGAPPED params
     let gap_trigger = gap_trigger_raw_score(gap_trigger_bits, ungapped_params);

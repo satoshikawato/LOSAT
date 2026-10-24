@@ -21,9 +21,12 @@ struct StageDump {
 static STAGE_DUMP: OnceLock<Option<StageDump>> = OnceLock::new();
 
 fn stage_dump() -> Option<&'static StageDump> {
+    if !crate::utils::xdiag::ON {
+        return None;
+    }
     STAGE_DUMP
         .get_or_init(|| {
-            std::env::var_os("LOSAT_DUMP_TBLASTX_STAGE").map(|dir| StageDump {
+            crate::utils::xdiag::var_os("LOSAT_DUMP_TBLASTX_STAGE").map(|dir| StageDump {
                 dir: PathBuf::from(dir),
                 lock: Mutex::new(()),
             })

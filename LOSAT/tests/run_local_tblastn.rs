@@ -21,7 +21,7 @@ use LOSAT::api::local_blast::{run_local_tblastn, FormatOutput, OutputSink, Repor
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 9] = ["0", "6", "7", "8", "9", "12", "5", "15", "16"];
+const FORMATS: [&str; 10] = ["0", "6", "7", "8", "9", "12", "5", "15", "16", "11"];
 /// The formats of the saved NCBI outputs (`docs/evidence/tlosan_stage_g/`).
 const SAVED_FORMATS: [&str; 3] = ["0", "6", "7"];
 
@@ -283,9 +283,9 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9, 12, 15 and 16 write
+            // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9, 11, 12, 15 and 16 write
             // no query result warnings, so their CLI runs equal `run_local` with that format alone.
-            if matches!(*outfmt, "5" | "8" | "9" | "12" | "15" | "16") {
+            if matches!(*outfmt, "5" | "8" | "9" | "11" | "12" | "15" | "16") {
                 // (The `-max_target_seqs 1` warning of the arguments stays.)
                 assert!(
                     !String::from_utf8_lossy(&cli_stderr).contains("Query_3"),

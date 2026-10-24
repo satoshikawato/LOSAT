@@ -351,7 +351,12 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
         }
         .to_string()
     });
-    let protein_query = matches!(program, Program::Blastp | Program::Tblastn);
+    // NCBI's `CGenericSearchArgs` of BLASTX is made with the flag that turns the word threshold
+    // rule on, as BLASTP's and TBLASTN's are (probes `opt_ws5` .. `opt_ws7`).
+    let protein_query = matches!(
+        program,
+        Program::Blastp | Program::Tblastn | Program::Blastx
+    );
     let mut threshold_set_by_word_size = false;
     for &class in class_order(program) {
         match class {

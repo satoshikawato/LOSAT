@@ -31,8 +31,8 @@
 //! `=3`).
 //!
 //! The queries are a 300-nt piece of AP027131 (a sparse table) and 6 pieces of 1,500 to 3,900
-//! letters (one batch, a table that is not sparse); the subjects are the first 150 proteins of
-//! AP027131, so there are extensions and HSPs.
+//! letters (two query batches, of 12,290 and 3,895 letters, whose tables are not sparse); the
+//! subjects are the first 150 proteins of AP027131, so there are extensions and HSPs.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -92,7 +92,7 @@ struct Inputs {
     dir: PathBuf,
     /// The 300-nt query (a sparse table).
     short: PathBuf,
-    /// The six pieces (one batch, a table that is not sparse).
+    /// The six pieces (two batches, neither table sparse).
     long: PathBuf,
     subject: PathBuf,
     db: PathBuf,
@@ -288,8 +288,16 @@ fn the_scan_on_presence_bytes_gives_the_reports_of_the_scans_before() {
             assert_eq!(reference.reached, (false, false), "{what}: =0 records");
             // (arm, run, the sides it must record; `None` = not checked).
             for (arm, run, sides) in [
-                ("direct", blastx(&args, &[DIRECT]), Some(default_sides(sparse))),
-                ("plain", blastx(&args, &[DIRECT, PLAIN]), Some((true, false))),
+                (
+                    "direct",
+                    blastx(&args, &[DIRECT]),
+                    Some(default_sides(sparse)),
+                ),
+                (
+                    "plain",
+                    blastx(&args, &[DIRECT, PLAIN]),
+                    Some((true, false)),
+                ),
                 (
                     "sparse",
                     blastx(&args, &[DIRECT, SPARSE]),
@@ -299,7 +307,10 @@ fn the_scan_on_presence_bytes_gives_the_reports_of_the_scans_before() {
                 ("default", blastx(&args, &[]), None),
             ] {
                 assert_eq!(run.code, reference.code, "{what} {arm}: {}", run.stderr);
-                assert!(run.stdout == reference.stdout, "{what} {arm}: report differs");
+                assert!(
+                    run.stdout == reference.stdout,
+                    "{what} {arm}: report differs"
+                );
                 assert_eq!(run.messages(), reference.messages(), "{what} {arm}");
                 if let Some(sides) = sides {
                     assert_eq!(run.reached, sides, "{what} {arm}: sides (new, ref)");

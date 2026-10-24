@@ -1,7 +1,8 @@
-//! The `common` test binary: tests of the command line, the output formats and the parts several programs share. Each file listed here is one module of it, named after
-//! the file, so `cargo test --test common <file>::` runs one file's tests. A new file of
-//! LOSAT/tests/ gets its two lines in its program's suite (`tests/suite_layout.rs` checks that
-//! every file is in exactly one test binary).
+//! The `common` test binary: tests of the command line, the output formats and the parts several
+//! programs share. Each file listed here is one module of it, named after the file, so
+//! `cargo test --test common <file>::` runs one file's tests. A new file of LOSAT/tests/ gets its
+//! two lines in its suite (`common` for the command line, the output formats and shared parts;
+//! `tests/suite_layout.rs` checks that every file is in exactly one test binary).
 
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;

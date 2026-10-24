@@ -2,8 +2,9 @@
 //! automatic test discovery off and lists eight binaries: six suites (`tests/suites/<name>.rs`,
 //! one `#[path]` module per file) and two files that change the process environment and so stay
 //! alone. A file that no binary lists would silently not build, a file in two binaries would run
-//! twice, and a suite member that changes the environment would disturb the other tests of its
-//! process. Each test below names every offender and says how to fix it. Standard library only.
+//! twice, and a suite member that changes the process environment or process-wide state (the panic
+//! hook, rayon's global pool) would disturb the other tests of its process. Each test below names
+//! every offender and says how to fix it. Standard library only.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -12,18 +13,15 @@ use std::path::{Path, PathBuf};
 /// The programs, each also the name of a suite.
 const PROGRAMS: [&str; 5] = ["tblastx", "tblastn", "blastx", "blastp", "blastn"];
 
-/// The calls that change the process environment.
-const ENV_CALLS: [&str; 3] = ["set_var", "remove_var", "set_current_dir"];
-
-/// The two files that change the process environment and therefore stay alone. The walk of their
-/// module trees must find an environment change (`walk_finds_the_lone_files_changes`); when it
-/// stops finding one, the file can join a suite.
-const LONE_FILES: [(&str, &str); 2] = [
-    (
-        "blastn_report_stream_api",
-        "tests/blastn_report_stream_api.rs",
-    ),
-    ("unit_tests", "tests/unit_tests.rs"),
+/// The calls that change the process environment or other process-wide state: environment
+/// variables, the working directory, the panic hook and rayon's global thread pool.
+const PROCESS_CALLS: [&str; 6] = [
+    "set_var",
+    "remove_var",
+    "set_current_dir",
+    "set_hook",
+    "take_hook",
+    "build_global",
 ];
 
 fn manifest_dir() -> PathBuf {
@@ -52,6 +50,17 @@ fn shown(path: &Path) -> String {
 struct Target {
     name: String,
     path: String,
+    /// Every key of the block, in file order.
+    keys: Vec<String>,
+}
+
+impl Target {
+    /// The file name of `path` when it is directly below `tests/` (not in `tests/suites/`).
+    fn lone_file(&self) -> Option<&str> {
+        self.path
+            .strip_prefix("tests/")
+            .filter(|file| !file.contains('/'))
+    }
 }
 
 fn quoted_value(line: &str, key: &str) -> Option<String> {
@@ -60,28 +69,30 @@ fn quoted_value(line: &str, key: &str) -> Option<String> {
     Some(rest[..rest.find('"')?].to_string())
 }
 
-/// The `[[test]]` blocks of `Cargo.toml`, read by lines.
+/// `autotests = false`, and the `[[test]]` blocks of `Cargo.toml`, read by lines without comments.
 fn cargo_targets() -> (bool, Vec<Target>) {
     let text = read(&manifest_dir().join("Cargo.toml"));
     let mut autotests_off = false;
     let mut targets: Vec<Target> = Vec::new();
     let mut in_test = false;
-    for line in text.lines().map(str::trim) {
+    for line in text
+        .lines()
+        .map(|line| line.split('#').next().unwrap_or("").trim())
+    {
         if line.starts_with('[') {
             in_test = line == "[[test]]";
             if in_test {
                 targets.push(Target {
                     name: String::new(),
                     path: String::new(),
+                    keys: Vec::new(),
                 });
             }
-            continue;
-        }
-        if line.replace(' ', "") == "autotests=false" {
+        } else if line.replace(' ', "") == "autotests=false" {
             autotests_off = true;
-        }
-        if in_test {
+        } else if let (true, Some((key, _))) = (in_test, line.split_once('=')) {
             let target = targets.last_mut().expect("a [[test]] block");
+            target.keys.push(key.trim().to_string());
             if let Some(name) = quoted_value(line, "name") {
                 target.name = name;
             }
@@ -136,8 +147,8 @@ fn suite_for(stem: &str) -> &'static str {
 }
 
 // ---------------------------------------------------------------------------------------------
-// A small Rust tokenizer: identifiers, punctuation and string contents; comments, character
-// literals and the insides of raw strings never reach the checks.
+// A small Rust tokenizer: identifiers, punctuation and string contents (only `#[path]` values are
+// read, so escapes are dropped); comments and character literals never reach the checks.
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq)]
@@ -194,8 +205,9 @@ fn tokenize(source: &str) -> Vec<Token> {
                         j += 1;
                     }
                     if chars.get(j) == Some(&'"') {
-                        i = skip_raw_string(&chars, i, j - i);
-                        tokens.push(Token::Str(String::new()));
+                        let (text, next) = read_raw_string(&chars, j + 1, j - i);
+                        tokens.push(Token::Str(text));
+                        i = next;
                     } else {
                         tokens.push(Token::Ident(word));
                     }
@@ -218,41 +230,33 @@ fn tokenize(source: &str) -> Vec<Token> {
     tokens
 }
 
-/// Reads a string whose opening quote is before `start`; returns the text and the index after the
-/// closing quote.
+/// Reads a string whose opening quote is before `start`; returns the text (an escape adds nothing)
+/// and the index after the closing quote.
 fn read_string(chars: &[char], start: usize) -> (String, usize) {
     let mut text = String::new();
     let mut i = start;
-    while i < chars.len() {
-        match chars[i] {
-            '\\' => {
-                text.push('\\');
-                if let Some(&next) = chars.get(i + 1) {
-                    text.push(next);
-                }
-                i += 2;
-            }
-            '"' => return (text, i + 1),
-            other => {
-                text.push(other);
-                i += 1;
-            }
-        }
-    }
-    (text, i)
-}
-
-/// `hashes` hash marks start at `from`, then the opening quote; returns the index after the closing
-/// quote and its hash marks.
-fn skip_raw_string(chars: &[char], from: usize, hashes: usize) -> usize {
-    let mut i = from + hashes + 1;
-    while i < chars.len() {
-        if chars[i] == '"' && (0..hashes).all(|k| chars.get(i + 1 + k) == Some(&'#')) {
-            return i + 1 + hashes;
+    while i < chars.len() && chars[i] != '"' {
+        if chars[i] == '\\' {
+            i += 1;
+        } else {
+            text.push(chars[i]);
         }
         i += 1;
     }
-    i
+    (text, i + 1)
+}
+
+/// Reads a raw string whose opening quote is before `start`, closed by a quote and `hashes` hash
+/// marks; returns the text and the index after the closing marks.
+fn read_raw_string(chars: &[char], start: usize, hashes: usize) -> (String, usize) {
+    let mut i = start;
+    while i < chars.len() {
+        if chars[i] == '"' && (0..hashes).all(|k| chars.get(i + 1 + k) == Some(&'#')) {
+            return (chars[start..i].iter().collect(), i + 1 + hashes);
+        }
+        i += 1;
+    }
+    (chars[start..].iter().collect(), i)
 }
 
 /// At a `'`: skips a character literal (`'{'`, `'"'`, `'\n'`, `'\''`); a lifetime leaves only the
@@ -274,13 +278,96 @@ fn skip_char_or_lifetime(chars: &[char], at: usize) -> usize {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The module tree of a test file
+// Module declarations, and the module tree of a test file
 // ---------------------------------------------------------------------------------------------
+
+/// A `mod name;` declaration.
+struct Decl {
+    name: String,
+    /// The value of a `#[path = "..."]` attribute on it.
+    path: Option<String>,
+    /// The names of the inline `mod a { ... }` blocks around it, outermost first.
+    inline: Vec<String>,
+}
+
+/// Every `mod x;` declaration of a token stream (with or without `pub` and attributes).
+fn declarations(tokens: &[Token]) -> Vec<Decl> {
+    let mut decls = Vec::new();
+    // Open braces: Some(name) for `mod name {`, None for any other.
+    let mut braces: Vec<Option<String>> = Vec::new();
+    let mut path: Option<String> = None;
+    let mut i = 0;
+    while i < tokens.len() {
+        match &tokens[i] {
+            Token::Punct('#') => {
+                // An attribute, `#[...]` or `#![...]`: remember `path = "..."`, skip the rest.
+                let start = i + 1 + usize::from(tokens.get(i + 1) == Some(&Token::Punct('!')));
+                if tokens.get(start) != Some(&Token::Punct('[')) {
+                    i += 1;
+                    continue;
+                }
+                if let Some([Token::Ident(key), Token::Punct('='), Token::Str(value)]) =
+                    tokens.get(start + 1..start + 4)
+                {
+                    if key == "path" {
+                        path = Some(value.clone());
+                    }
+                }
+                let mut depth = 0;
+                let mut end = start;
+                while end < tokens.len() {
+                    match tokens[end] {
+                        Token::Punct('[') => depth += 1,
+                        Token::Punct(']') => depth -= 1,
+                        _ => {}
+                    }
+                    if depth == 0 {
+                        break;
+                    }
+                    end += 1;
+                }
+                i = end + 1;
+            }
+            Token::Ident(word) if word == "mod" => match (tokens.get(i + 1), tokens.get(i + 2)) {
+                (Some(Token::Ident(name)), Some(Token::Punct('{'))) => {
+                    braces.push(Some(name.clone()));
+                    path = None;
+                    i += 3;
+                }
+                (Some(Token::Ident(name)), Some(Token::Punct(';'))) => {
+                    decls.push(Decl {
+                        name: name.clone(),
+                        path: path.take(),
+                        inline: braces.iter().flatten().cloned().collect(),
+                    });
+                    i += 3;
+                }
+                _ => i += 1,
+            },
+            Token::Punct('{') => {
+                braces.push(None);
+                path = None;
+                i += 1;
+            }
+            Token::Punct('}') => {
+                braces.pop();
+                path = None;
+                i += 1;
+            }
+            Token::Punct(';') => {
+                path = None;
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    decls
+}
 
 #[derive(Default)]
 struct Walk {
     visited: Vec<PathBuf>,
-    /// (file, call) for every environment change found.
+    /// (file, call) for every environment or process-wide change found.
     changes: Vec<(PathBuf, String)>,
     /// Declarations that resolve to no file or to two.
     unresolved: Vec<String>,
@@ -301,139 +388,50 @@ fn walk_module_tree(file: &Path, own_dir: bool, walk: &mut Walk) {
         dir.join(file.file_stem().expect("a file stem"))
     };
     let tokens = tokenize(&read(file));
-
-    // Open braces: Some(name) for `mod name {`, None for any other.
-    let mut braces: Vec<Option<String>> = Vec::new();
-    let mut pending_path: Option<String> = None;
-    let mut i = 0;
-    while i < tokens.len() {
-        match &tokens[i] {
-            Token::Punct('#') => {
-                // An attribute: `#[...]` or `#![...]`; remember `path = "..."`.
-                let mut j = i + 1;
-                if tokens.get(j) == Some(&Token::Punct('!')) {
-                    j += 1;
-                }
-                if tokens.get(j) == Some(&Token::Punct('[')) {
-                    let mut depth = 0;
-                    let start = j;
-                    while j < tokens.len() {
-                        match tokens[j] {
-                            Token::Punct('[') => depth += 1,
-                            Token::Punct(']') => {
-                                depth -= 1;
-                                if depth == 0 {
-                                    break;
-                                }
-                            }
-                            _ => {}
-                        }
-                        j += 1;
-                    }
-                    if let (
-                        Some(Token::Ident(key)),
-                        Some(Token::Punct('=')),
-                        Some(Token::Str(value)),
-                    ) = (
-                        tokens.get(start + 1),
-                        tokens.get(start + 2),
-                        tokens.get(start + 3),
-                    ) {
-                        if key == "path" {
-                            pending_path = Some(value.clone());
-                        }
-                    }
-                    i = j + 1;
-                    continue;
-                }
-                i += 1;
+    for pair in tokens.windows(2) {
+        if let [Token::Ident(word), Token::Punct('(')] = pair {
+            if PROCESS_CALLS.contains(&word.as_str()) {
+                walk.changes.push((file.to_path_buf(), format!("{word}(")));
             }
-            Token::Ident(word) if word == "mod" => {
-                let name = match tokens.get(i + 1) {
-                    Some(Token::Ident(name)) => name.clone(),
-                    _ => {
-                        i += 1;
-                        continue;
-                    }
-                };
-                match tokens.get(i + 2) {
-                    Some(Token::Punct('{')) => {
-                        braces.push(Some(name));
-                        pending_path = None;
-                        i += 3;
-                    }
-                    Some(Token::Punct(';')) => {
-                        let inline: Vec<&str> =
-                            braces.iter().flatten().map(String::as_str).collect();
-                        let mut here = children_dir.clone();
-                        for part in &inline {
-                            here = here.join(part);
-                        }
-                        let path_base = if inline.is_empty() {
-                            dir.clone()
-                        } else {
-                            here.clone()
-                        };
-                        match pending_path.take() {
-                            Some(relative) => {
-                                let target = path_base.join(relative);
-                                if target.is_file() {
-                                    walk_module_tree(&target, true, walk);
-                                } else {
-                                    walk.unresolved.push(format!(
-                                        "`mod {name};` with #[path] in {} points to {}, which does not exist",
-                                        shown(file),
-                                        shown(&target)
-                                    ));
-                                }
-                            }
-                            None => {
-                                let plain = here.join(format!("{name}.rs"));
-                                let nested = here.join(&name).join("mod.rs");
-                                match (plain.is_file(), nested.is_file()) {
-                                    (true, false) => walk_module_tree(&plain, false, walk),
-                                    (false, true) => walk_module_tree(&nested, true, walk),
-                                    (false, false) => walk.unresolved.push(format!(
-                                        "`mod {name};` in {} resolves to neither {} nor {}",
-                                        shown(file),
-                                        shown(&plain),
-                                        shown(&nested)
-                                    )),
-                                    (true, true) => walk.unresolved.push(format!(
-                                        "`mod {name};` in {} resolves to both {} and {}",
-                                        shown(file),
-                                        shown(&plain),
-                                        shown(&nested)
-                                    )),
-                                }
-                            }
-                        }
-                        i += 3;
-                    }
-                    _ => i += 1,
-                }
+        }
+    }
+    for decl in declarations(&tokens) {
+        let name = &decl.name;
+        // An inline block `mod a { mod x; }` looks in `a/`; so does a `#[path]` inside it.
+        let mut here = children_dir.clone();
+        for part in &decl.inline {
+            here = here.join(part);
+        }
+        if let Some(relative) = decl.path {
+            let target = if decl.inline.is_empty() { &dir } else { &here }.join(relative);
+            if target.is_file() {
+                walk_module_tree(&target, true, walk);
+            } else {
+                walk.unresolved.push(format!(
+                    "`mod {name};` with #[path] in {} points to {}, which does not exist",
+                    shown(file),
+                    shown(&target)
+                ));
             }
-            Token::Ident(word) if ENV_CALLS.contains(&word.as_str()) => {
-                if tokens.get(i + 1) == Some(&Token::Punct('(')) {
-                    walk.changes.push((file.to_path_buf(), format!("{word}(")));
-                }
-                i += 1;
-            }
-            Token::Punct('{') => {
-                braces.push(None);
-                pending_path = None;
-                i += 1;
-            }
-            Token::Punct('}') => {
-                braces.pop();
-                pending_path = None;
-                i += 1;
-            }
-            Token::Punct(';') => {
-                pending_path = None;
-                i += 1;
-            }
-            _ => i += 1,
+            continue;
+        }
+        let plain = here.join(format!("{name}.rs"));
+        let nested = here.join(name).join("mod.rs");
+        match (plain.is_file(), nested.is_file()) {
+            (true, false) => walk_module_tree(&plain, false, walk),
+            (false, true) => walk_module_tree(&nested, true, walk),
+            (false, false) => walk.unresolved.push(format!(
+                "`mod {name};` in {} resolves to neither {} nor {}",
+                shown(file),
+                shown(&plain),
+                shown(&nested)
+            )),
+            (true, true) => walk.unresolved.push(format!(
+                "`mod {name};` in {} resolves to both {} and {}",
+                shown(file),
+                shown(&plain),
+                shown(&nested)
+            )),
         }
     }
 }
@@ -455,58 +453,17 @@ struct Member {
     mod_name: String,
 }
 
-/// The `mod x;` declarations at the top level of a suite root, with their `#[path]`.
+/// The declarations of a suite root outside any inline block.
 fn suite_members(root: &str) -> Vec<Member> {
-    let tokens = tokenize(&read(&manifest_dir().join(root)));
-    let mut members = Vec::new();
-    let mut pending_path: Option<String> = None;
-    let mut depth = 0usize;
-    let mut i = 0;
-    while i < tokens.len() {
-        match &tokens[i] {
-            Token::Punct('#') => {
-                let mut j = i + 1;
-                if tokens.get(j) == Some(&Token::Punct('!')) {
-                    j += 1;
-                }
-                if tokens.get(j) == Some(&Token::Punct('[')) {
-                    if let (
-                        Some(Token::Ident(key)),
-                        Some(Token::Punct('=')),
-                        Some(Token::Str(value)),
-                    ) = (tokens.get(j + 1), tokens.get(j + 2), tokens.get(j + 3))
-                    {
-                        if key == "path" && depth == 0 {
-                            pending_path = Some(value.clone());
-                        }
-                    }
-                }
-                i += 1;
-            }
-            Token::Punct('{') => {
-                depth += 1;
-                i += 1;
-            }
-            Token::Punct('}') => {
-                depth = depth.saturating_sub(1);
-                i += 1;
-            }
-            Token::Ident(word) if word == "mod" && depth == 0 => {
-                if let (Some(Token::Ident(name)), Some(Token::Punct(';'))) =
-                    (tokens.get(i + 1), tokens.get(i + 2))
-                {
-                    members.push(Member {
-                        suite_root: root.to_string(),
-                        path_attr: pending_path.take(),
-                        mod_name: name.clone(),
-                    });
-                }
-                i += 1;
-            }
-            _ => i += 1,
-        }
-    }
-    members
+    declarations(&tokenize(&read(&manifest_dir().join(root))))
+        .into_iter()
+        .filter(|decl| decl.inline.is_empty())
+        .map(|decl| Member {
+            suite_root: root.to_string(),
+            path_attr: decl.path,
+            mod_name: decl.name,
+        })
+        .collect()
 }
 
 /// The file stem a member declares through `#[path = "../<file>.rs"]`, if it has that form.
@@ -549,9 +506,28 @@ fn cargo_toml_lists_the_binaries() {
         );
     }
     for target in &targets {
-        if target.path.is_empty() || !manifest_dir().join(&target.path).is_file() {
+        let mut keys = target.keys.clone();
+        keys.sort();
+        if keys != ["name", "path"] {
+            problems.push(format!(
+                "[[test]] `{}` has the keys {:?}: it must have exactly `name` and `path` (`test`, `harness`, \
+                 `required-features` and the like can stop a suite from running or run it without the features \
+                 of the gates)",
+                target.name, target.keys
+            ));
+        } else if !manifest_dir().join(&target.path).is_file() {
             problems.push(format!(
                 "[[test]] `{}` has path `{}`, which is not a file: fix the path in LOSAT/Cargo.toml",
+                target.name, target.path
+            ));
+        } else if Path::new(&target.path)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            != Some(target.name.as_str())
+        {
+            problems.push(format!(
+                "[[test]] `{}` has path `{}`: the name must be the file stem (`--test <suite>` and the \
+                 nextest binary id `LOSAT::<suite>` rely on it)",
                 target.name, target.path
             ));
         }
@@ -580,13 +556,11 @@ fn every_test_file_is_in_exactly_one_binary() {
         }
     }
     for target in &targets {
-        if let Some(file) = target.path.strip_prefix("tests/") {
-            if !file.contains('/') {
-                homes
-                    .entry(file.to_string())
-                    .or_default()
-                    .push(format!("its own [[test]] `{}`", target.name));
-            }
+        if let Some(file) = target.lone_file() {
+            homes
+                .entry(file.to_string())
+                .or_default()
+                .push(format!("its own [[test]] `{}`", target.name));
         }
     }
     let mut problems = Vec::new();
@@ -673,9 +647,19 @@ fn suite_members_do_not_change_the_process_environment() {
             ));
         }
         for (changing, call) in &walk.changes {
+            let fix = if *changing == root_file {
+                "give the file its own `[[test]]` in LOSAT/Cargo.toml, as blastn_report_stream_api"
+                    .to_string()
+            } else {
+                format!(
+                    "move the change out of {}, or give member {file} its own `[[test]]` in LOSAT/Cargo.toml, \
+                     as blastn_report_stream_api",
+                    shown(changing)
+                )
+            };
             problems.push(format!(
-                "member {file}: {} calls {call}...); the tests of a suite share one process: give the file its own \
-                 `[[test]]` in LOSAT/Cargo.toml, as blastn_report_stream_api",
+                "member {file}: {} calls {call}...), which changes the process environment or process-wide \
+                 state, and the tests of a suite share one process: {fix}",
                 shown(changing)
             ));
         }
@@ -683,13 +667,15 @@ fn suite_members_do_not_change_the_process_environment() {
     assert!(problems.is_empty(), "\n{}\n", lines(&problems));
 }
 
-/// The walk must see the environment changes of the two lone files, the second one through
+/// The walk must see the environment changes of the lone files, the one of `unit_tests` through
 /// `tests/unit/common/diagnostics.rs` inside `mod unit { pub mod common; }`. When this stops being
 /// true, the file no longer needs its own binary and can join a suite.
 #[test]
 fn walk_finds_the_lone_files_changes() {
+    let (_, targets) = cargo_targets();
     let mut problems = Vec::new();
-    for (name, path) in LONE_FILES {
+    for target in targets.iter().filter(|target| target.lone_file().is_some()) {
+        let (name, path) = (&target.name, &target.path);
         let walk = walk_from(&manifest_dir().join(path));
         if !walk.unresolved.is_empty() {
             problems.push(format!("{name}: {}", walk.unresolved.join("; ")));

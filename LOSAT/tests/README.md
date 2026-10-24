@@ -396,10 +396,13 @@ v0.1.0 certification and release contracts retain their historical target scope.
 
 The files `tests/*.rs` are built into eight test binaries: the suites `blastn`, `blastp`, `blastx`,
 `tblastn`, `tblastx` and `common` (`tests/suites/<suite>.rs`, one module per file) and the two files that
-change the process environment, `blastn_report_stream_api` and `unit_tests`. A test is named
-`<file>::<test>`. Run one file with `cargo test --all-features --test blastn blastn_strand::`, or with
+change the process environment or process-wide state, `blastn_report_stream_api` and `unit_tests`. A test is named
+`<file>::<test>`. Run one file with `cargo test --all-features --test blastn blastn_strand::` (keep
+`--test <suite>`, since the filter is a substring: `blastx_hitbf::` alone also runs `tblastx_hitbf::`), or with
 nextest `-E 'test(/^blastn_strand::/)'` (the binary id is `LOSAT::blastn`). A new file goes into its
 program's suite root (`common` for the command line, the output formats and the shared parts) with two
 lines, `#[path = "../<file>.rs"]` and `mod <file>;`; `tests/suite_layout.rs` checks that every file is in
 exactly one binary. Plain `cargo test` runs a suite's tests together, up to the CPU count at once; pass
 `-- --test-threads N` on a busy machine.
+A helper directory module (`run_local_support/`, `reach_support/`) is compiled once per file that declares it,
+so a `static` in it is per copy, and a name it makes needs `module_path!()`.

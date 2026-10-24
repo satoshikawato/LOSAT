@@ -336,11 +336,13 @@ cd LOSAT && cargo fmt
   only `pub` items, and each file adds to its suite's build) and do not make private items `pub`
   for a test. Cases that need the object manager, GenBank, BLAST databases, or PSI/RPS/PHI are
   `n-a`; whole-search cases (bl2seq) become fixture rows, not unit tests.
-- A new integration-test file `LOSAT/tests/<file>.rs` goes into its program's suite (two lines in
-  `LOSAT/tests/suites/<program>.rs`; run it as `cargo test --test <program> <file>::`). A file that
-  changes the process environment (`set_var`, `remove_var`, `set_current_dir`) gets its own
-  `[[test]]` in `LOSAT/Cargo.toml` instead, since the tests of a suite share one process;
-  `tests/suite_layout.rs` checks both.
+- A new integration-test file `LOSAT/tests/<file>.rs` goes into its suite: its program's (`blastn`,
+  `blastp`, `blastx`, `tblastn`, `tblastx`) or `common` (the command line, the output formats and
+  shared parts): two lines in `LOSAT/tests/suites/<suite>.rs`; run it as
+  `cargo test --test <suite> <file>::`. A file that changes the process environment or process-wide
+  state (`set_var`, `remove_var`, `set_current_dir`, `set_hook`, `take_hook`, rayon's `build_global`)
+  gets its own `[[test]]` in `LOSAT/Cargo.toml` instead, since the tests of a suite share one
+  process; `tests/suite_layout.rs` checks both.
 - Integration tests must compare output with NCBI BLAST+ and verify hit counts,
   bit scores, E-values, and coordinates, on real short and long sequences.
 - NCBI BLAST+ execution is allowed only as a comparison oracle during testing

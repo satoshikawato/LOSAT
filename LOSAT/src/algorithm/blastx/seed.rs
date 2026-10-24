@@ -264,8 +264,10 @@ pub struct InitHsp {
 //     scan_range[0] = 0;
 //     scan_range[1] = subject->seq_ranges[0].left;
 // ```
+// EXPERIMENT (LOSAT_X_BXSCANBYTE): the standard table carries the presence bytes of the direct
+// loop's scan, built the first time that loop scans with it (x_seed_scan.rs).
 pub enum Lookup {
-    Standard(BlastAaLookupTable),
+    Standard(BlastAaLookupTable, x_seed_scan::XKeptPresence),
     Compressed(BlastCompressedAaLookupTable),
 }
 
@@ -274,7 +276,7 @@ pub enum Lookup {
 // (not in diagnostics mode, whose reference builder makes the tables, nor while a panic unwinds).
 impl Drop for Lookup {
     fn drop(&mut self) {
-        if let Self::Standard(table) = self {
+        if let Self::Standard(table, _) = self {
             if crate::algorithm::tblastx::lookup::x_bx_pooled_builds() && !std::thread::panicking()
             {
                 crate::algorithm::tblastx::lookup::x_give_back_pooled(table);
@@ -360,12 +362,15 @@ impl Lookup {
                 }
             })
             .collect();
-        Ok(Self::Standard(build_ncbi_lookup_from_prepared(
-            query,
-            batch.lookup_segments.clone(),
-            contexts,
-            options.threshold as i32,
-        )))
+        Ok(Self::Standard(
+            build_ncbi_lookup_from_prepared(
+                query,
+                batch.lookup_segments.clone(),
+                contexts,
+                options.threshold as i32,
+            ),
+            x_seed_scan::XKeptPresence::default(),
+        ))
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
     // ```c++
@@ -406,7 +411,7 @@ impl Lookup {
     // ```
     pub fn capacity(&self) -> usize {
         4096 + match self {
-            Self::Standard(l) => l.longest_chain as usize,
+            Self::Standard(l, _) => l.longest_chain as usize,
             Self::Compressed(l) => l.longest_chain as usize,
         }
     }
@@ -446,7 +451,7 @@ impl Lookup {
         mut visit: impl FnMut(&[(i32, i32)]),
     ) {
         let word = match self {
-            Self::Standard(l) => l.word_length,
+            Self::Standard(l, _) => l.word_length,
             Self::Compressed(l) => l.word_length,
         };
         let ranges = [(0, length as i32)];
@@ -462,7 +467,7 @@ impl Lookup {
         while range[1] <= range[2] {
             seeds.clear();
             let n = match self {
-                Self::Standard(l) => {
+                Self::Standard(l, _) => {
                     s_blast_aa_scan_subject_one_range(l, subject, &mut pairs, capacity, &mut range)
                 }
                 Self::Compressed(l) => {

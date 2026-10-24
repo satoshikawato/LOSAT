@@ -368,6 +368,7 @@ export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNSCANBF=1
 export LOSAT_X_TBNSCANBYTE=1
 export LOSAT_X_TBNSTORE=1
+export LOSAT_X_TBNUNGAP=1
 export LOSAT_X_TBNUNITXLATE=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXBAND=1
@@ -2080,7 +2081,8 @@ Rebuilding less:
   table (`q << 5 | s`; the sentinel's `BLAST_SCORE_MIN` stored as -128) with raw-pointer walks over the
   positions the reference indexes, NCBI's statements and exit tests unchanged (`blastp/x_ungapped_fast.rs`,
   exactness argument in its header). Acts in `extend_one_hit_blosum62` / `extend_two_hit_blosum62` (TBLASTN
-  calls the matrix-generic functions and is not affected); a dropoff outside 1..=127, a word size outside
+  calls the matrix-generic functions and is not affected by this variable; its word finder takes the same
+  walks under `LOSAT_X_TBNUNGAP`); a dropoff outside 1..=127, a word size outside
   1..=11 or a residue code >= 32 run the reference.
 - `LOSAT_X_BPUNGAPSHADOW=1` shadow of `LOSAT_X_BPUNGAP` (turns the path on): every extension runs both ways and
   the results (score, offsets, length, `right_extend`, `s_last_off`, and the early return) must be equal; any
@@ -4279,6 +4281,24 @@ Scheduling (each value computed by one thread with the original function; order 
   before the switch (x1.000), time x0.98-1.01. The 2026-10-17 conditional-move form of these tests
   (perf-si-20261012 decision 180, not kept) added 7 % instructions on HsG_p1 and removed 2.5 % of the
   mispredicted branches; this one keeps the instruction count and removes 68 % there.
+- `LOSAT_X_TBNUNGAP=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-24;
+  `=0` turns it off) the two-hit ungapped extension of the word finder (`XTwoHit::pairs`, every candidate of the
+  unit path) takes `LOSAT_X_BPUNGAP`'s walks (`blastp/x_ungapped_fast.rs`: one signed byte per residue pair from
+  the 32 x 32 BLOSUM62 table, the bounds from the slice lengths as the reference computes them, so a chunk that
+  ends inside a frame stops the walks where it stops the reference's) instead of the matrix-generic
+  `extend_two_hit`; an extension with an X-drop outside 1..=127 runs the reference (`tblastn/search_init.rs`,
+  `x_tbn_ungap`). Conditional: BLOSUM62 (tblastn's default) takes the walks, another `-matrix` (BLOSUM45) keeps
+  the reference (`x_reach!` where the word finder is made). Found by the gate-gap audit (2026-10-19,
+  `blastx_shared.md`: tblastn had no counterpart of BPUNGAP); ungapped extension was 13 % of the cycles of a
+  short `-subject` search (50 AP027133 proteins x MG1655, local perf). Measured on the workstation (node 0 CPUs
+  20-23, HT siblings idle, cores warmed 3 s, one warm-up round + 3 rounds, arm order rotating, medians of the
+  per-round ratios against the dev binary before the switch, a806eaa5; reports and max RSS identical; other
+  lines' gates on node 0 meanwhile, load 31-54): AP027131 proteins x MG1655 (`-subject`) 1 thread cycles x0.968
+  (4.56 -> 4.43 s), 4 threads x0.971; HsG_p1 (`-db`) 1 thread x0.974 (14.30 -> 13.90 s); FlyG_b1 (`-db`)
+  1 thread x0.964 (17.05 -> 16.58 s), 4 threads x0.964. Instructions x0.952-0.977. With `=0`: cycles
+  x0.994-0.999 and instructions x1.004-1.009 of the dev binary.
+  WebAssembly (serial WASI command, one Node process per case, CPU 20, 3 rounds, against `=0`): x0.981
+  (AP027131 x MG1655, 5.56 -> 5.42 s) and x0.996 (FlyG_b1, 20.46 -> 20.39 s), linear memory equal.
 - `LOSAT_X_TBNKEEPFEW=1` tblastn (memory; in the strict set from the pull request that added it,
   2026-10-19, with `TBNFRAMEREUSE`; `=0` turns it off; `tblastn/search_seed.rs`
   `XSubjectSide::kept_within_threads`, `tblastn/stage_d_pipeline.rs` `x_searched_side_by_side`): a

@@ -11,6 +11,7 @@ import { splitOutfmt6Row } from '../../src/domain/outfmt6';
 import {
   buildResultIndex,
   filterQuery,
+  flagGiven,
   hitLimits,
   orientation,
   sortHsps,
@@ -228,6 +229,13 @@ describe('hitLimits', () => {
     expect(limits('-num_descriptions', '500').outfmt0).toEqual({ alignments: 250, hitList: 500, separate: false });
     expect(limits('-num_alignments', '600').outfmt0).toEqual({ alignments: 600, hitList: 600, separate: false });
     expect(limits('-num_descriptions', '4', '-num_alignments', '2').outfmt0).toEqual({ alignments: 2, hitList: 4, separate: true });
+    // The adapter accepts `-flag=value` as the CLI does: the same limits as the two words, and flagGiven sees it.
+    expect(limits('-num_alignments=3')).toEqual(limits('-num_alignments', '3'));
+    expect(limits('-num_descriptions=4', '-num_alignments=2').outfmt0).toEqual({ alignments: 2, hitList: 4, separate: true });
+    expect(limits('-max_target_seqs=7')).toEqual({ maxTargetSeqs: 7 });
+    expect(flagGiven(['blastp', '-num_alignments=3'], '-num_alignments')).toBe(true);
+    expect(flagGiven(['blastp', '-num_alignments=3'], '-num_descriptions')).toBe(false);
+    expect(flagGiven(['blastp', '-num_alignments', '3'], '-num_alignments')).toBe(true);
     // -max_target_seqs excludes both options: the same hit list in every format, no outfmt 0 entry.
     expect(limits('-max_target_seqs', '7')).toEqual({ maxTargetSeqs: 7 });
     // Without the described defaults, outfmt 0's size is not claimed (and a separate search is assumed).

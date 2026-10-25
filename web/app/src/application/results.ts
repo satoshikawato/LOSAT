@@ -113,6 +113,12 @@ export interface LoadedRun {
   readonly out6: Uint8Array;
   readonly description: ProgramDescription;
   readonly limits: HitLimits;
+  /**
+   * Whether outfmt 0 has a search of its own (-num_descriptions / -num_alignments) that wrote nothing: outfmt 0
+   * always writes its header when its search succeeds, so an empty stream 0 next to the tabular records means that
+   * the search failed (abi_v2.md §7; its error is in the diagnostics).
+   */
+  readonly outfmt0Failed: boolean;
   readonly badge: Badge;
   readonly diagnostics: string;
   readonly kinds: { readonly query: SequenceKind; readonly subject: SequenceKind };
@@ -242,12 +248,14 @@ export class ResultsBrowser {
       if (token !== this.loadToken) return;
       const program = programById(run.snapshot.program);
       const kinds = { query: program.query, subject: program.subject };
+      const limits = hitLimits(run.snapshot.argv, description.parameters);
       const loaded: LoadedRun = {
         run,
         index: buildResultIndex(table),
         out6,
         description,
-        limits: hitLimits(run.snapshot.argv, description.parameters),
+        limits,
+        outfmt0Failed: limits.outfmt0?.separate === true && run.result?.byteLengths[0] === 0,
         badge: verificationBadge(
           {
             program: run.snapshot.program,

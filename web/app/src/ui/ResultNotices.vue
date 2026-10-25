@@ -17,6 +17,8 @@ const limitFlag = computed(() => props.state.loaded?.limits.subjectFlag ?? '-max
 const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.argv ?? [], limitFlag.value));
 /** What outfmt 0 does with -num_descriptions / -num_alignments; undefined where neither is given. */
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
+/** Outfmt 0's own search failed: stream 0 is empty next to the tabular records (its error is in the diagnostics). */
+const outfmt0Failed = computed(() => props.state.loaded?.outfmt0Failed === true);
 const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(count)} ${count === 1 ? one : many}`;
 </script>
 
@@ -63,7 +65,12 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
         data-testid="results-notice"
         data-kind="outfmt0-partial"
       >
-        <template v-if="outfmt0.separate"
+        <template v-if="outfmt0Failed"
+          >The search of outfmt 0 failed (<span class="option-name">-num_descriptions</span> and <span class="option-name">-num_alignments</span> give
+          it a hit list of its own, and its error is in the diagnostics), so no alignment is linked to this query's
+          {{ plural(totals.subjects, 'subject') }}.
+        </template>
+        <template v-else-if="outfmt0.separate"
           >outfmt 0's alignments are linked to {{ formatCount(state.outfmt0Subjects) }} of this query's {{ plural(totals.subjects, 'subject') }}<template
             v-if="outfmt0.alignments !== undefined"
           >

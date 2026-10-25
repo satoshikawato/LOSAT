@@ -936,6 +936,8 @@ test('-num_alignments 0: outfmt 6 and 7 have no hits, and the notice says so', a
     // The run is not a failure: outfmt 0 is written, and the diagnostics hold the tabular formats' error.
     await showOutput(page, 1, 0, false);
     expect(await text(page.getByTestId('result-output'))).toContain('BLASTN');
+    await show(page, 'details');
+    await expect(page.getByTestId('run-diagnostics')).toContainText('No hits are being saved');
   }
 });
 

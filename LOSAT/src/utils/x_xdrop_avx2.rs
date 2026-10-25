@@ -2532,3 +2532,8 @@ mod tests {
         }
     }
 }
+
+// EXPERIMENT (line C s7, C8 probe; branch exp/c8-align8-grid-probe, not for merging)
+#[cfg(test)]
+#[path = "x_xdrop_c8probe.rs"]
+mod c8probe;

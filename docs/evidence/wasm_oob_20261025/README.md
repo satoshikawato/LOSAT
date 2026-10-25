@@ -43,6 +43,7 @@ command with `repro.py`. `results/run<k>-<job>.json` are the jobs' summaries.
 | default, commit a8faa7225 (before #488) | as at that commit | 800 | 2 |
 | prespawn0 | `LOSAT_WASI_PRESPAWN=0` (a new worker per thread) | 800 | 0 |
 | refresh | `memory.grow(0)` right before `wasi_thread_start` | 2,800 | 0 |
+| fixed host | this branch's `wasi_thread_host.js` (dafbbf0d0), no probe arm | 2,000 | 0 |
 
 - Run 1, 40163586559: arms interleaved in each job (default, prespawn0, refresh). Its probe
   read the start arguments through `DataView(memory.buffer)` before printing and threw
@@ -52,6 +53,8 @@ command with `repro.py`. `results/run<k>-<job>.json` are the jobs' summaries.
   was lost (a worker's `process.stderr.write` is asynchronous and the host ends the process).
 - Run 3, 40166384902: one arm per job (2 default, 2 refresh); the probe writes with
   `fs.writeSync`. 6 default failures, all this trap.
+- Run 4, 40168085788: the host of this branch (dafbbf0d0, cherry-picked onto the scratch
+  branch) in its default arm, 2 jobs of 1,000 runs: no failure.
 
 Runs 1 and 3 ran the default and refresh arms side by side, 2,800 runs each: 8 failures
 against 0. If both arms failed at the same rate, all 8 would fall in the default arm with

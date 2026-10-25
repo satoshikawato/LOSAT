@@ -1026,22 +1026,6 @@ pub(crate) fn check_losat_limits(args: &TblastxArgs) -> Result<()> {
             args.word_size
         );
     }
-    // NCBI reference: c++/src/algo/blast/core/blast_stat.c:3103-3105, 3136 (the length
-    // adjustment's tables of a name that the matrix loader read as IDENTITY, raw_scoremat.c:157-161)
-    // ```c
-    //    num_values = Blast_GetMatrixValues(matrixName, &gapOpen_arr,
-    //      &gapExtend_arr, NULL, NULL, NULL,  &alpha_arr, &beta_arr,
-    //      &pref_flags);
-    // ...
-    //    sfree(gapOpen_arr);
-    // ```
-    // NCBI 2.17.0 frees arrays that it never set and aborts (`free(): invalid size`, rc 134).
-    if args.scoring_matrix() == TblastxMatrix::Aborts {
-        anyhow::bail!(
-            "-matrix {} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's TBLASTX",
-            args.matrix_name()
-        );
-    }
     Ok(())
 }
 
@@ -2305,11 +2289,6 @@ fn run_in_pool(
         v1_titles,
         x_search_pool: parallel_pool,
     };
-    // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:173
-    // ```c
-    //         formatter.PrintProlog();
-    // ```
-    write_pairwise_prologs(outputs, &args, &subjects.shown, true)?;
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:176-178
     // ```c
     //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -2318,7 +2297,32 @@ fn run_in_pool(
     // ```
     // A reader at the end of its input reads no batch (`!input.End()`): the report of no
     // query, the prolog and the epilog (an empty pipe, or `-query -` after `-subject -`).
-    if query_runs.input_records.is_empty() && matches!(reading, QueryReading::End) {
+    let no_batch = query_runs.input_records.is_empty() && matches!(reading, QueryReading::End);
+    // NCBI reference: c++/src/algo/blast/core/blast_stat.c:3103-3105, 3136 (the length
+    // adjustment's tables of a name that the matrix loader read as IDENTITY,
+    // raw_scoremat.c:157-161)
+    // ```c
+    //    num_values = Blast_GetMatrixValues(matrixName, &gapOpen_arr,
+    //      &gapExtend_arr, NULL, NULL, NULL,  &alpha_arr, &beta_arr,
+    //      &pref_flags);
+    // ...
+    //    sfree(gapOpen_arr);
+    // ```
+    // NCBI 2.17.0 frees arrays that it never set and aborts (`free(): invalid size`, rc 134)
+    // when it sets up a batch; a run without a batch reads no matrix. LOSAT refuses a run with
+    // a batch before its first byte.
+    if !no_batch && args.scoring_matrix() == TblastxMatrix::Aborts {
+        anyhow::bail!(
+            "-matrix {} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's TBLASTX",
+            args.matrix_name()
+        );
+    }
+    // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:173
+    // ```c
+    //         formatter.PrintProlog();
+    // ```
+    write_pairwise_prologs(outputs, &args, &subjects.shown, true)?;
+    if no_batch {
         return reports.write(outputs, SearchedBatches::default(), &[], true);
     }
     // EXPERIMENT (LOSAT_X_TBXPIPE), dispatch: the batches the loop below will search, planned
@@ -2336,12 +2340,13 @@ fn run_in_pool(
     let search_subjects = subjects.subjects;
     let numbers = &subjects.numbers;
     // The search's matrix, chosen once (`scoring.rs`): BLOSUM62's instance of the search, or
-    // the other matrices' with the table of `-matrix` (a name without a table stops at the
-    // first batch, `run_batch_loop`).
+    // the other matrices' with the table of `-matrix` (a name without a table stops at the first
+    // batch with letters, `run_batch_loop`; one that NCBI aborts on runs no batch).
     let matrix_scores = match args.scoring_matrix() {
-        TblastxMatrix::Table(ScoringMatrix::Blosum62) | TblastxMatrix::Unknown => None,
+        TblastxMatrix::Table(ScoringMatrix::Blosum62)
+        | TblastxMatrix::Unknown
+        | TblastxMatrix::Aborts => None,
         TblastxMatrix::Table(matrix) => Some(MatrixScores::new(matrix)),
-        TblastxMatrix::Aborts => unreachable!("refused by check_losat_limits"),
     };
     let search: &x_batch_pipe::XSearch<'_, TblastxBatch> = &|range, seed_end| match &matrix_scores {
         None => search_query_batch(
@@ -2687,12 +2692,21 @@ fn run_batch_loop(
         // ```
         // One message per query of the batch (`TSearchMessages::ToString` above, after
         // `RemoveDuplicates` in each query's list), `Error: ` first (`GetMessage`).
+        // A query without letters keeps its own message (`Sequence contains no data`,
+        // blast_setup_cxx.cpp:631-638, id = the query's index) after the error (id
+        // kBlastMessageNoContext = -1), which `RemoveDuplicates` sorts first
+        // (`CSearchMessage::operator<`, blast_types.hpp:295-304).
         if args.scoring_matrix() == TblastxMatrix::Unknown {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
             outputs.diagnostics.write_all(&batch_warnings)?;
             let mut message = String::from("BLAST engine error: ");
-            for _ in batch_queries {
+            for record in batch_queries {
                 message.push_str("Error: Unknown error code -1 ");
+                if record.seq().is_empty() {
+                    message.push_str("Warning: ");
+                    message.push_str(NO_DATA_MESSAGE);
+                    message.push(' ');
+                }
             }
             message.push('\n');
             return Err(crate::cli::NativeError { exit: 3, message }.into());

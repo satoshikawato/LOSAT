@@ -42,7 +42,7 @@
 
 use std::io::Write;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats, TblastxReportRun};
 use super::ncbi_cutoffs::try_compute_eff_lengths_tblastx;
@@ -193,10 +193,25 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         None => ("", 0, 0),
     };
     names::check_database_name(PROGRAM, db_name)?;
-    // The batch loop refused a name that the formatting table does not know (`run_batch_loop`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2206-2208 (XML2
+    // and JSON) and :2242-2243 (BLAST XML)
+    // ```c++
+    //     if ((m_FormatType == CFormattingArgs::eXml2) || (m_FormatType == CFormattingArgs::eJson) ||
+    //         (m_FormatType == CFormattingArgs::eXml2_S) || (m_FormatType == CFormattingArgs::eJson_S)) {
+    //         if(!m_AccumulatedResults.empty()) {
+    // ...
+    //     if (m_FormatType == CFormattingArgs::eXml) {
+    //         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
+    // ```
+    // The batch loop refused a name that the formatting table does not know when a batch has
+    // letters (`run_batch_loop`); a run without queries makes no report data, and the document
+    // is its header and end.
     let matrix = args.matrix_name();
-    let positives = FormattingMatrix::new(matrix)
-        .with_context(|| format!("no formatting matrix for {matrix}"))?;
+    let positives = FormattingMatrix::new(matrix);
+    anyhow::ensure!(
+        positives.is_some() || hits.is_empty(),
+        "no formatting matrix for {matrix}"
+    );
     let (gap_open, gap_extend) = gap_costs(args.matrix.as_deref());
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:414-417
     // ```c
@@ -225,7 +240,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         filter: &filter,
         db_num,
         db_len,
-        positives: Some(&positives),
+        positives: positives.as_ref(),
         mask_char: b'X',
     };
     let queries = run.queries;

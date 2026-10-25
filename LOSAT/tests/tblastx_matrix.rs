@@ -27,13 +27,16 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
 const QUERY: &str = "tests/fasta/outfmt0/tblastx_multi_query.fasta";
 const SUBJECT: &str = "tests/fasta/outfmt0/tblastx_multi_subject.fasta";
 const DB_QUERY: &str = "tests/db_search/xslice_q.fna";
 const DB: &str = "tests/db_search/xslice";
+/// 180 bases of the first query of `QUERY` (the queries of `-query -` with a record without
+/// letters).
+const SEQUENCE: &str = "AGACTAAAGATTTAAGATTAGAAAAGAAAAAATGTCTAAATAATCAATTACCTTCATTCTATACATGTATGACGAATAATCCATCTTCTTGTATGAATACGACACTATTTGACGGTATATATAACAATGATTACATTTATAGTGATGAAAATGATGTTGACATGAGTGATGCTGACTCTG";
 
 fn fixture(name: &str) -> Vec<u8> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -43,6 +46,11 @@ fn fixture(name: &str) -> Vec<u8> {
 }
 
 fn run(args: &[&str], threads: &str) -> Output {
+    run_with_stdin(args, threads, b"")
+}
+
+/// LOSAT with `stdin` on a pipe (written, then closed).
+fn run_with_stdin(args: &[&str], threads: &str, stdin: &[u8]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy();
@@ -67,18 +75,28 @@ fn run(args: &[&str], threads: &str) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("run LOSAT");
-    drop(child.stdin.take());
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(stdin)
+        .expect("write stdin");
     child.wait_with_output().expect("LOSAT output")
 }
 
 /// LOSAT prints NCBI's bytes of `case` and exits with `status`, at 1 and 4 threads.
 fn equals_ncbi(case: &str, args: &[&str], status: i32) {
+    equals_ncbi_with_stdin(case, args, b"", status)
+}
+
+/// `equals_ncbi` with `stdin` on the pipe (the standard input of NCBI's run).
+fn equals_ncbi_with_stdin(case: &str, args: &[&str], stdin: &[u8], status: i32) {
     let (out, err) = (
         fixture(&format!("{case}.out")),
         fixture(&format!("{case}.err")),
     );
     for threads in ["1", "4"] {
-        let output = run(args, threads);
+        let output = run_with_stdin(args, threads, stdin);
         assert_eq!(output.status.code(), Some(status), "{case} n{threads}");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
@@ -114,6 +132,28 @@ fn an_unknown_matrix_stops_the_first_batch() {
     );
 }
 
+/// A query without letters keeps its own message, after the error of its list (the error has
+/// the id -1, the message the query's index; `RemoveDuplicates` sorts each list).
+#[test]
+fn an_unknown_matrix_lists_the_messages_of_queries_without_letters() {
+    let first = format!(">empty\n>q1\n{SEQUENCE}\n");
+    equals_ncbi_with_stdin(
+        "norecord_unknown",
+        &["-query", "-", "-subject", SUBJECT, "-matrix", "FOO"],
+        first.as_bytes(),
+        3,
+    );
+    let last = format!(">q1\n{SEQUENCE}\n>empty\n");
+    equals_ncbi_with_stdin(
+        "norecord_unknown_last",
+        &[
+            "-query", "-", "-subject", SUBJECT, "-matrix", "FOO", "-outfmt", "6",
+        ],
+        last.as_bytes(),
+        3,
+    );
+}
+
 /// The XML reports read the name as typed: `pam30` searches (outfmt 0 and the tabular formats
 /// are `score.tblastx.lc_pam30.0`), and the first report stops the run with exit status 3.
 #[test]
@@ -134,6 +174,16 @@ fn the_xml_reports_refuse_a_name_in_lower_case() {
         ],
         3,
     );
+    // Without queries NCBI makes no report data: the document's header and end, exit status 0.
+    for format in ["5", "16"] {
+        equals_ncbi(
+            &format!("empty_lower_{format}"),
+            &[
+                "-query", "-", "-subject", SUBJECT, "-matrix", "pam30", "-outfmt", format,
+            ],
+            0,
+        );
+    }
 }
 
 /// The options are checked before the matrix (exit status 1), and a run without a query reads no
@@ -161,16 +211,30 @@ fn an_unknown_matrix_comes_after_the_options_and_the_queries() {
         &["-query", "-", "-subject", SUBJECT, "-matrix", "FOO"],
         0,
     );
+    equals_ncbi(
+        "empty_unknown_15",
+        &[
+            "-query", "-", "-subject", SUBJECT, "-matrix", "FOO", "-outfmt", "15",
+        ],
+        0,
+    );
 }
 
 // No NCBI counterpart: NCBI 2.17.0 reads a name that starts with `identity` (any case) as
 // IDENTITY's table without IDENTITY's statistics and aborts (`free(): invalid size`, exit status
-// 134); LOSAT refuses it before the search, as its other refusals of NCBI defects.
+// 134) when it sets up the first batch with letters; LOSAT refuses that batch before anything is
+// written, as its other refusals of NCBI defects. Without queries NCBI reads no matrix
+// (`empty_identityx`: the prolog and the epilog with `Matrix: IDENTITYX`, exit status 0).
 #[test]
 fn a_name_read_as_identity_without_its_statistics_is_refused() {
-    for name in ["IDENTITYX", "identityx", "Identity1"] {
+    for (name, subject) in [
+        ("IDENTITYX", ["-subject", SUBJECT]),
+        ("identityx", ["-subject", SUBJECT]),
+        ("Identity1", ["-db", DB]),
+    ] {
+        let query = if subject[0] == "-db" { DB_QUERY } else { QUERY };
         let output = run(
-            &["-query", QUERY, "-subject", SUBJECT, "-matrix", name],
+            &["-query", query, subject[0], subject[1], "-matrix", name],
             "1",
         );
         assert_eq!(output.status.code(), Some(1), "{name}");
@@ -182,4 +246,9 @@ fn a_name_read_as_identity_without_its_statistics_is_refused() {
             "{name}: {stderr}"
         );
     }
+    equals_ncbi(
+        "empty_identityx",
+        &["-query", "-", "-subject", SUBJECT, "-matrix", "IDENTITYX"],
+        0,
+    );
 }

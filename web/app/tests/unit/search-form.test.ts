@@ -107,6 +107,7 @@ describe('formParameters', () => {
       '-db_gencode': '11',
       '-query_gencode': '4',
       '-seg': 'yes',
+      '-soft_masking': 'true',
       '-matrix': 'PAM30',
       '-culling_limit': '2',
       '-evalue': '1',
@@ -118,6 +119,7 @@ describe('formParameters', () => {
       ['-culling_limit', '2'],
       ['-matrix', 'PAM30'],
       ['-seg', 'yes'],
+      ['-soft_masking', 'true'],
     ]);
   });
 

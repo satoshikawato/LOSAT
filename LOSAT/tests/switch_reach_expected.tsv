@@ -1,6 +1,7 @@
 # One row per switch of STRICT_SET (LOSAT/src/utils/xswitch.rs); see switch_reach_check.py.
 switch	programs	class	new	ref	note
 LOSAT_X_AHEAD	blastn	conditional	required	required	2+ threads (1 thread runs reference loop); megablast traceback also needs GREEDYSPEC
+LOSAT_X_BNCSR	blastn	conditional	required	required	contiguous table of lut 8-11 as CSR when its positions x 4 >= cells (word 11: query batch >= ~524 kb); ref = smaller tables, lut 12, db word counts
 LOSAT_X_BNDBCUT	blastn	conditional	required	required	-db only, 2+ threads; DB below 4 x threads MiB of sequence bytes
 LOSAT_X_BNDBSTREAM	blastn	conditional	required	required	-db only, 2+ threads; memory switch (little change for few long sequences)
 LOSAT_X_BNDCONE	blastn	conditional	required	gap	-task dc-megablast (or megablast with template options) where a chunk in the scope of PAIRPARDISC / PAIRPARDISCARR (a subject searched by itself, unmasked) has no pool of 2+ threads: one thread, or a one-thread QBATCHPAR slot; ref gap: cannot happen: recorded only where a chunk in that scope has no pool, and every such chunk takes the stage while the switch is on
@@ -80,7 +81,6 @@ LOSAT_X_DPNEON2	blastn,blastp,blastx,tblastn,tblastx	platform			aarch64 only; tw
 LOSAT_X_DPNIBBLE	blastn,blastp,blastx,tblastn	conditional	required	required	vector X-drop traceback rows at four bits per cell, two cells per byte (all eight kernels: 256-bit AVX2, 128-bit DPW128 and base, NEON2), for the scratches made on a Rayon pool thread (searches on 2+ threads); a 1-thread search keeps one byte per cell
 LOSAT_X_DPW128	blastn,blastp,blastx,tblastn,tblastx	platform			runs where AVX2 kernel does not: wasm, aarch64, non-AVX2 x86; AVX2 has priority
 LOSAT_X_DPWINDOW	blastn,blastp,blastx,tblastn	conditional	required	gap	vector X-drop kernels, a band whose start passes lane 1024 (long gapped alignments: the rows are moved down); ref gap: every other row runs as before and has no mark (a mark per DP call would cost time); all eight kernels move their rows (256-bit AVX2, 128-bit DPW128 and base, NEON2)
-LOSAT_X_ERFABSORB	blastn,blastp,blastx,tblastn,tblastx	always			Spouge ErfC returns 2.0 below -6 without ErfImpl
 LOSAT_X_FOLDLEAN	blastn	conditional	required	required	the dc-megablast strips folds (PAIRPARDISC / PAIRPARDISCARR stages: 2+ threads or 1 with BNDCONE, one unmasked subject); ref = the reference fold where those stages do not run; recorded only at their decision points (nothing while both are off)
 LOSAT_X_GREEDYROWFUSE	blastn	platform			x86_64 with AVX2, BMI1, BMI2 and LZCNT only (the megablast greedy rows); other CPUs and targets run the plain three-pass rows
 LOSAT_X_GREEDYSPEC	blastn	conditional	required	required	2+ threads (AHEAD scheduling); acts only where the QGROUPPAR owner loop stays
@@ -112,22 +112,18 @@ LOSAT_X_SEEDBUCKET	tblastx	conditional	gap	required	only where PAIRPAR leaves sc
 LOSAT_X_SEEDCOMPACT	tblastx	conditional	required	required	only where PAIRPAR unit path runs (gated by PAIRPARGATE on query size)
 LOSAT_X_SEEDUNMAP	tblastx	conditional	gap	gap	Linux glibc, 2+ threads, THP not always; unit query span and subject chunk both >=65,536 letters; new gap: host-dependent: glibc, THP not 'always', 2+ threads, unit span and chunk >= 65,536 letters; ref gap: host-dependent: a THP-'always' host never decides (this WSL); 2+ threads with small units elsewhere
 LOSAT_X_SEGSHARE	blastp	conditional	required	required	blastp with 2+ threads
-LOSAT_X_SEGTRIMMEMO	blastx,tblastn	always			SEG trim of candidate segment memoised per thread
 LOSAT_X_SUMPMEMO	blastx,tblastn,tblastx	always			sum P-value of a linked set (Romberg path, r > 4) reused from the thread's last two calls
 LOSAT_X_TBNBATCH	tblastn	conditional	required	required	needs 4+ query batches and at least one batch per thread; rule via TBNBATCHRULE; the new side is reached by db.sa.arch.tbn.batch1 and db.sa.arch.tbn.warnbatches (BATCH_SIZE=1 and 60: 4+ batches at 4 threads), no fixture has 4 batches of 20,000 residues
 LOSAT_X_TBNBATCHRULE	tblastn	conditional	required	gap	several query batches; full waves of threads side by side; subjects <=24 Mb or <2 per thread; the new side is reached by db.sa.arch.tbn.batch1 and db.sa.arch.tbn.warnbatches (4+ batches, batches >= threads at 4 threads); ref gap: needs 4+ batches at 2+ threads with plans that fit and no full wave (batches < threads, or > 24 Mb of many subjects)
 LOSAT_X_TBNDBSTREAM	tblastn	always			-db sequences read where they are searched; every -db run (-subject reads no database)
 LOSAT_X_TBNFLOWHELP	tblastn	conditional	required	required	2+ threads, several subjects (where the subject flow of TBNOIDNEXT runs); a thread waiting in the flow runs the pool's jobs
 LOSAT_X_TBNFRAMEREUSE	tblastn	always			a dropped plan's frames are reused by the next plan of its thread (rides on TBNKEEPFEW's drops)
-LOSAT_X_TBNHITBF	tblastn	always			Branch-free too-far/overlap outcomes in two-hit loop
 LOSAT_X_TBNKEEPFEW	tblastn	conditional	required	required	4+ query batches searched one after another: plans dropped unless they fit threads x longest plan; the ref side (plans kept: fit threads x longest plan, or batches side by side) is reached by db.sa.arch.tbn.batch1 and db.sa.arch.tbn.warnbatches
-LOSAT_X_TBNLINKWIN	tblastn	always			Uneven-gap linking tests only admissible candidates of a head set
 LOSAT_X_TBNOIDCHUNK	tblastn	conditional	required	required	2+ threads and several subjects
 LOSAT_X_TBNOIDNEXT	tblastn	conditional	required	required	2+ threads, several subjects, where the pool takes chunks of subjects
 LOSAT_X_TBNOIDUNITS	tblastn	conditional	required	required	2+ threads, several subjects, subject longer than chunk budget
 LOSAT_X_TBNOWNPOOLS	tblastn	conditional	required	required	native only; <2 subjects per thread; 2..threads-1 batches (<=24 Mb) else 2..threads/2
 LOSAT_X_TBNREDOLPT	tblastn	conditional	required	required	composition-based redo (-comp_based_stats 2, the default) on the search pool: 2-16 threads, 2+ (query, subject) matches, a chunk with 2+ matches to redo; ref: one thread (also each query batch searched side by side), more than 16 threads, one match, or a chunk with fewer than 2 to redo
-LOSAT_X_TBNSCANBF	tblastn	always			Branch-free lookup scan in blocks of 256 words (unit path)
 LOSAT_X_TBNSCANBYTE	tblastn	platform			AVX2 CPUs only (nothing elsewhere); word size 3, 5-bit letters tables
 LOSAT_X_TBNSSIDE	tblastn	conditional	required	required	only searches of 4+ query batches (20,000 residues each, or BATCH_SIZE); <=256 MiB of translated residues; the new side (plans that fit threads x longest plan) is reached by db.sa.arch.tbn.batch1 and db.sa.arch.tbn.warnbatches
 LOSAT_X_TBNSTORE	tblastn	conditional	required	required	-subject (with or without -subject_loc; with -outfmt 11 the reading takes the =0 side, the plans still pack per plan); run_local's letters packed per plan; ref: a packed subject with lower-case letters read by the -lcase_masking stage (e2d.tblastn.lcase.0), or a byte without an ncbi4na code (not from the CLI's reader)

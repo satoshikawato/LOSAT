@@ -25,7 +25,7 @@
 //! `=3` for sparse tables only. It is off with `=0`;
 //! it acts in the unit path, which every search takes. These tests compare the reports and read the
 //! `[X_STATS] TBNSCANBYTE units= calls= avx2=` line (`LOSAT_X_STATS=1`), the
-//! `[X_STATS] TBNSCANBF` line of the scans before.
+//! `[X_STATS] TBNSCANBF` line of the branch-free scan before it.
 //!
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` (few candidate words, a sparse
 //! table) and all 115 of them (four query batches, no sparse table; the offset array fills, so the
@@ -119,14 +119,9 @@ fn byte_scans(stderr: &str) -> Option<([u64; 2], bool)> {
     Some((counts, avx2 == "true"))
 }
 
-/// Scan units and calls of the `[X_STATS] TBNSCANBF` line, both loops together.
+/// Scan units and calls of the `[X_STATS] TBNSCANBF` line.
 fn earlier_scans(stderr: &str) -> Option<[u64; 2]> {
-    let [units_bf, calls_bf, units_ref, calls_ref] = line_fields(
-        stderr,
-        "[X_STATS] TBNSCANBF ",
-        ["units_bf", "calls_bf", "units_ref", "calls_ref"],
-    )?;
-    Some([units_bf + units_ref, calls_bf + calls_ref])
+    line_fields(stderr, "[X_STATS] TBNSCANBF ", ["units", "calls"])
 }
 
 /// Whether the default (and `=1`) takes the plain loops for sparse tables: no AVX2, on the targets

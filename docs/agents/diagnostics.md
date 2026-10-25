@@ -308,6 +308,7 @@ and on what evidence in its own entry below; it adds no paragraph after this blo
 count of the set anywhere, so that two pull requests that each add a switch do not conflict:
 
 ```bash
+export LOSAT_X_BNCSR=1
 export LOSAT_X_BNDBCUT=1
 export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNDCONE=1
@@ -379,7 +380,6 @@ export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPNEON2=1
 export LOSAT_X_DPNIBBLE=1
 export LOSAT_X_DPWINDOW=1
-export LOSAT_X_ERFABSORB=1
 export LOSAT_X_FOLDLEAN=1
 export LOSAT_X_GREEDYROWFUSE=1
 export LOSAT_X_MBFILL=1
@@ -402,18 +402,14 @@ export LOSAT_X_QSTREAM=1
 export LOSAT_X_RPTSTREAM=1
 export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDUNMAP=1
-export LOSAT_X_SEGTRIMMEMO=1
 export LOSAT_X_SUMPMEMO=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNDBSTREAM=1
 export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNFRAMEREUSE=1
-export LOSAT_X_TBNHITBF=1
 export LOSAT_X_TBNKEEPFEW=1
-export LOSAT_X_TBNLINKWIN=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNREDOLPT=1
-export LOSAT_X_TBNSCANBF=1
 export LOSAT_X_TBNSCANBYTE=1
 export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNUNGAP=1
@@ -870,8 +866,8 @@ Same values, faster computation:
   `mask_sequence_reference`, the port of `s_SegSeq`, and a segment of more than 127 letters is trimmed by
   the port of `s_Trim`. The memo falls back to the port of `s_Entropy` for a state vector that does not
   pack (more than 15 letters). The unit tests compare the histogram path with the port on random sequences.
-- `LOSAT_X_SEGTRIMMEMO=1` (speed; in the strict set from the pull request that added it, 2026-10-19;
-  `=0` returns to the previous path) SEG's trim of a candidate segment (the
+- SEGTRIMMEMO (graduated 2026-10-26, in the set from 2026-10-19; no variable; always on for the maskers that
+  ask for it; the trim without the memo went with the variable) (speed) SEG's trim of a candidate segment (the
   port of `s_Trim`: about L^2 / 2 evaluations of `s_GetProb` for a segment of L letters up to
   maxtrim + 1 = 51, about 1,275 for longer ones) is kept per thread by the segment's letters and
   `maxtrim`, and a segment with the same letters takes the stored offsets instead of being trimmed
@@ -933,8 +929,7 @@ Same values, faster computation:
   with the variable.
 - ERFMEMO (graduated 2026-10-22; no variable) Spouge ErfC memoised per thread by the argument's bits;
   always on, `erf_impl_ncbi` computes the missing values.
-- `LOSAT_X_ERFABSORB=1` (speed; in the strict set from the pull request that added it, 2026-10-19;
-  `=0` returns to the previous path) Spouge ErfC returns 2.0 for an
+- ERFABSORB (graduated 2026-10-26, in the set from 2026-10-19; no variable; always on) (speed) Spouge ErfC returns 2.0 for an
   argument below -6 without evaluating ErfImpl. The reference computes `2.0 - ErfImpl(-z, TRUE)`
   there, and ErfImpl of 6 or more is below 2.2e-17 (a fifth of 2^-53; the bound is argued at
   `erfc_ncbi` in `stats/spouge.rs`), so the difference rounds to 2.0. The unit test
@@ -1069,7 +1064,7 @@ Rebuilding less:
   thread) the subject composition was read 9,434 times from 86 different byte strings, all of them
   cache entries (line C, v4-C DECISIONS 25). Each entry holds a pointer and, when the switch is
   on, 232 bytes on the heap. Workstation, one core, 8 rounds (2026-10-19): WSSV x PajaWSV n1 0.978
-  of the time with this switch alone (0.943 with `LOSAT_X_ERFABSORB` as well); max RSS unchanged.
+  of the time with this switch alone (0.943 with ERFABSORB as well); max RSS unchanged.
 - TBNQSIDE (graduated 2026-10-22; no variable; always on) tblastn: query SEG and lookup table
   once per query set (`XQuerySide`); the per-subject build is gone.
 - TBNSSIDE (graduated 2026-10-22; no variable; conditional: its rule stays) tblastn: subject
@@ -3264,6 +3259,44 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms) x1.003. `=0` is dev's (x0.998); instructions of megablast and blastn at one thread move by at most
   0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
   115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
+- `LOSAT_X_BNCSR=1` (BLASTN `-task blastn` and every task with word size 9, 10 or 11 that builds the contiguous
+  two-stage table of `build_mb_lookup`, `-subject` and `-db`, any thread count, speed; in the strict set from the pull
+  request that added it, 2026-10-25 (perf/bn-csr, evidence at the end of this entry): on unless it is `0`) lays out the
+  chains of that table as CSR, as `LOSAT_X_DCCSR` does for a discontiguous table (`blastn/x_bn_csr.rs`, argument in
+  its header): `offsets[cell] .. offsets[cell + 1]` of `qs` holds the cell's 1-based query offsets in the chain's
+  order, newest first for the megablast-type table (word size 11's) and in reading order for the table that stands
+  for NCBI's small table (`ascending_cells`, its count kept two elements later so that the place pass moves each
+  cell's cursor up from the run's start), built from the fill's own words by a count pass, a running sum (which also
+  makes the fill's presence vector and longest-chain counters) and a place pass, instead of NCBI's `hashtable` /
+  `next_pos`, which are then not allocated (`qs` has one element per word where `next_pos` had one per query
+  position). Only tables of `lut_word_length` 8 to 11 without database word counts and without `BLEMIR_DEBUG` whose
+  word loop reads at least a quarter as many positions as the table has cells get it: with NCBI's choice of table, a
+  query batch of 1,048,576 positions or more (about 524 kb, both strands) at word size 11, 262,144 at 10, 65,536
+  (and 16,384 for the reading-order table of 4^8 cells) at 9; word sizes 12 and above build 4^11-cell tables only
+  below that size and keep their chains, and so do megablast's 4^12-cell tables. Such a table takes nothing from the
+  batch loop's keep (`LOSAT_X_MBLUTKEEP`): its `offsets` is allocated per build and freed with the table (before the
+  traceback with `LOSAT_X_BNLUTDROP`), and a build laid out as CSR frees the table the keep holds. With a search pool
+  of two threads or more (where PAIRPAR's fill would run) the table is built on the pool
+  (`x_mb_lookup_once::csr`): the readers of `LOSAT_X_MBLUTONCE` put each chunk's words into the owners' sub-ranges of
+  its arena, once to count and once to place (so the build holds one chunk's words, the fill's arena, not the whole
+  query's), each thread owns a contiguous run of cell blocks, and the whole build is one `rayon::broadcast` whose
+  threads pass a spin barrier between the reading and the owners' work of each chunk. The scans read a word's run
+  instead of walking its chain: the strip scan of PAIRPAR (`scan_strip_csr`) and the reference scan of
+  `search_query_batch` put the words with hits (after the presence test) through the FIFO of `LOSAT_X_DCCSR`; the
+  words, pairs and their order are the chain walk's. `for_each_hit`, `count_hits` and the masked-word test of
+  `s_TypeOfWord` (`contains_hit`) read the run where the table has no chains. The `[TIMING] x_mb_lookup_build`
+  interval includes the CSR builds (in `loop` or `pool_fill`), and `[TIMING] x_bn_csr: builds= parallel= words=`
+  counts them. The unit tests compare every cell's run with the loop's chain, in both orders and for `lut_word_length`
+  8 to 11, the presence vector, the counters and the longest chain, a pool build in both orders (chunks of 1, 97
+  and 5,000 positions and the default size, 2 to 40 threads) with the serial one, and a table above the rule built by
+  `build_two_stage_lookup` with its chains; `LOSAT/tests/blastn_bn_csr.rs` compares whole reports of the default with
+  `=0`. Evidence (workstation, 2026-10-25, tree c14f064f on dev 105e4a60, medians of per-round ratios to `=0`, every
+  output equal and AB's equal to NCBI's): 16 threads on node 1, 31,168 dmel cDNAs × dmel 3 Mb `-task blastn`
+  `-subject` ×0.854 (0/10 rounds slower, CPU ×0.844), 5,000 cDNAs ×0.877 (CPU ×0.845), 1,775 cDNAs ×0.966 (3/30),
+  at `-word_size 9` ×0.768 and 10 ×0.921, the 31,168 against a `-db` ×0.958 and with `LOSAT_X_QBATCHPAR=0` ×0.952,
+  megablast (no CSR) ×0.979 (7/16, noise); one thread on one node 0 core (perf stat, user cycles) ×0.80 to ×0.88 at
+  1.005 to 1.03 times the instructions; max RSS (time %M with a 2 ms sampler, three runs per arm) not above `=0`'s
+  except the 1,775 cDNAs' 82 → 85 MiB (dev 84): 31,168 cDNAs 721 → 712, word size 9 329 → 322 MiB.
 - `LOSAT_X_PAIRPARDISC=1` (in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`; it does not depend on PAIRPAR) blastn `-task dc-megablast`, one query-subject pair
   on a pool of 2+ threads (or on one thread: `LOSAT_X_BNDCONE`): the two-hit seed stage of a subject chunk with a discontiguous megablast
   table (one or two templates) and the diagonal hash (query block over 8000 letters, `scan_range`
@@ -4179,8 +4212,8 @@ Scheduling (each value computed by one thread with the original function; order 
   code and every IUPAC letter. The letter-wise translation of tblastn subject plans, the shadow and
   the `[X_STATS] TBNXLATE` / `[X_SHADOW] TBNXLATE` lines are gone, and so is
   `LOSAT/tests/tblastn_subject_translate.rs` (it compared the report with `=0` and the shadow).
-- `LOSAT_X_TBNSCANBF=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's decision
-  of that day on the timings below: on by default, `=0` turns it off; `tblastn/x_scan_bf.rs`): the
+- TBNSCANBF (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's decision of that day on
+  the timings below; no variable; always on) tblastn (speed; `tblastn/x_scan_bf.rs`): the
   lookup scan of the unit path (`search_seed.rs` `x_scan_unit`) takes the subject in
   blocks of 256 words. Each word's position and table index are written to a list whose length
   advances by the word's presence-vector bit, without a branch; the hits of the listed words are
@@ -4189,11 +4222,12 @@ Scheduling (each value computed by one thread with the original function; order 
   (`blast_aascan.c:75-127`) does, so every call returns NCBI's pairs and scan range (test
   `x_scan_bf_equals_ncbi_scan_on_random_subjects` against `s_blast_aa_scan_subject_one_range` on
   random subjects, with offset arrays down to the longest chain). A backbone cell's hits are copied
-  as three pairs, so the offset array has three entries more. With `LOSAT_X_TBNSCANBF=0` the reference
-  loop scans; tblastx and blastp keep their scans, and blastx scans
+  as three pairs, so the offset array has three entries more. Before, `LOSAT_X_TBNSCANBF=0` scanned with the reference
+  loop; that call went from `x_scan_unit` (the loop stays in `tblastx/blast_aascan.rs` for the unit tests
+  and the other programs). Tblastx and blastp keep their scans, and blastx scans
   this way always (BXSCANBF, graduated 2026-10-26). With `LOSAT_X_STATS=1` a line `[X_STATS] TBNSCANBF
-  units_bf= calls_bf= units_ref= calls_ref=` gives the scan units of the unit path each loop scanned
-  and their scan calls (`tests/tblastn_scan_bf.rs`). perf stat on the workstation (one thread, a
+  units= calls=` gives the scan units of the unit path this loop scanned and their scan calls
+  (`tests/tblastn_scan_bf.rs`; the `_ref` counts of NCBI's loop went with the variable). perf stat on the workstation (one thread, a
   411-residue protein x the human genome `-db`, the same output): branch misses 1.96 G -> 0.46 G,
   cycles 136.0 G -> 96.7 G, instructions 285 G -> 348 G. Timed on the workstation (perf-si-20261012
   session 20, node 0, NCBI BLAST+ 2.17.0 `-db`, LOSAT without and with the switch in turn, one hash
@@ -4271,8 +4305,8 @@ Scheduling (each value computed by one thread with the original function; order 
   first k proteins of AP027131 x MG1655 (one core, plain loops against the scan before): the LOSAT
   Web serial reactor x0.84-0.95 and x86-64 cycles x0.84-0.90 at a fill of 0.09-0.24 (k = 1-8), x1.00
   and x0.95 at 0.34 (k = 16), x1.02-1.03 and x0.99-1.00 at 0.42-0.46. Tables of other shapes, tables
-  that are not sparse without AVX2, aarch64 and `LOSAT_X_TBNSCANBYTE=0` keep the scans before
-  (`TBNSCANBF`, NCBI's loop).
+  that are not sparse without AVX2, aarch64 and `LOSAT_X_TBNSCANBYTE=0` keep the scan before
+  (`TBNSCANBF`).
   With `LOSAT_X_STATS=1` a line `[X_STATS] TBNSCANBYTE units= calls= avx2=` gives the units and scan
   calls taken this way (`tests/tblastn_scan_byte.rs` reads it). Timed on the workstation (one booked
   core, against `TBNSCANBF`, same output): one protein x the human genome `-db` x0.754 (20.75 ->
@@ -4281,8 +4315,8 @@ Scheduling (each value computed by one thread with the original function; order 
   4 rounds, medians of the per-round ratios): x0.828 (3.43 -> 2.84 s), x0.981, x0.997 (x0.977-1.021),
   x0.985, x0.982 in the same order.
   Probe: line F P3 (V2) and P3b (arm 7, `exp/f2-tbn-scan`).
-- `LOSAT_X_TBNHITBF=1` tblastn (speed; in the strict set from the pull request that added it,
-  2026-10-19; `=0` turns it off) the two-hit loop of the unit path (`XTwoHit::pairs`, every offset array
+- TBNHITBF (graduated 2026-10-26, in the set since the pull request that added it, 2026-10-19; no
+  variable; always on) tblastn (speed) the two-hit loop of the unit path (`XTwoHit::pairs`, every offset array
   the scan fills; `tblastn/x_tbn_hitbf.rs`, exactness argument in its header) takes the two outcomes most
   hits end in, too far (`diff >= window`: `last_hit = s + diag_offset`) and overlap (`diff < wordsize`:
   nothing), without a branch: `diff = (s + diag_offset) - last_hit` (the reference's value, both
@@ -4298,8 +4332,8 @@ Scheduling (each value computed by one thread with the original function; order 
   other node-0 cores meanwhile): AP027131 proteins x MG1655 (`-subject`) 1 thread x0.831 (5.47 -> 4.55 s)
   and 8 threads x0.852; Bac_d16 x0.832 and x0.817; FlyG_b1 x0.803 (20.93 -> 16.88 s) and x0.837; HsG_p1
   x0.890 (23.32 -> 20.74 s) and x0.909. Cycles x0.80-0.88, instructions x0.96-0.99, mispredicted branches
-  x0.32-0.66. With `=0` the reports are the same and the instruction counts equal those of the binary
-  before the switch (x1.000), time x0.98-1.01. The 2026-10-17 conditional-move form of these tests
+  x0.32-0.66. With `=0` (before it graduated) the reports were the same and the instruction counts equal
+  those of the binary before the switch (x1.000), time x0.98-1.01. The 2026-10-17 conditional-move form of these tests
   (perf-si-20261012 decision 180, not kept) added 7 % instructions on HsG_p1 and removed 2.5 % of the
   mispredicted branches; this one keeps the instruction count and removes 68 % there.
 - `LOSAT_X_TBNUNGAP=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-24;
@@ -4379,9 +4413,9 @@ Scheduling (each value computed by one thread with the original function; order 
   every subject, about 800), the 16S set 134 -> 19 and 152 -> 38 MiB (NCBI 9 and 11), the 5,000
   cDNAs at 8 threads 70 -> 37 MiB (NCBI 16). Before (dev 23db0a4f, `TBNSSIDE=0` (a variable that graduated 2026-10-22) against the
   default, 38 pairs): x0.980-0.994 at 4, 8 and 16 threads on the two large sets, no pair slower.
-- `LOSAT_X_TBNLINKWIN=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule of
-  that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns it
-  off; `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list
+- TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
+  speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
+  `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list
   (`stage_d_linking.rs` `link_preliminary_hsps`, NCBI's `s_BlastUnevenGapLinkHSPs`) tests only the
   candidates of a head set that can be admissible. NCBI tests every HSP in the head's query-offset
   window; with a short query that is nearly the whole list (a 411-residue protein x the human
@@ -4393,11 +4427,11 @@ Scheduling (each value computed by one thread with the original function; order 
   and the candidates are tested in NCBI's order with NCBI's tests; a window with no more HSPs than
   the subject starts looked up is tested whole, as NCBI does, so every link, number and E-value is
   NCBI's (unit test `x_chosen_candidates_give_the_links_of_the_whole_window` against the whole
-  window on random lists).
+  window on random lists; the whole-window loop stays in `link_preliminary_hsps` for that test only).
   With `LOSAT_X_STATS=1` a line `[X_STATS] TBNLINKWIN heads= window= chosen=` gives the heads, the
   candidates of their windows and the candidates tested. blastx keeps its own linking.
   Timed on the workstation (perf-si-20261012 session 21, node 1, NCBI BLAST+ 2.17.0 `-db` and LOSAT
-  with `LOSAT_X_TBNSCANBF` without and with the switch in turn, three rounds, one hash per case;
+  with TBNSCANBF (then a switch) without and with the switch in turn, three rounds, one hash per case;
   time with the switch / without): zebrafish genome x one protein 0.60 at one thread (24.8 -> 14.8
   s, NCBI 31.3 s); human genome x one protein 0.87 at one thread (32.3 -> 28.0 s, NCBI 44.9 s) and
   at 8 threads (5.10 -> 4.46 s); fly genome x one batch at 8 threads 0.76 (4.04 -> 3.06 s); E. coli
@@ -4433,7 +4467,7 @@ Scheduling (each value computed by one thread with the original function; order 
   it off; `tblastx/x_scan_bf.rs`): the lookup scans of the unit path
   (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/run_impl.rs`) walk the subject
   ranges as NCBI's `s_BlastAaScanSubject` (`blast_aascan.c:48-131`) does and scan each range with
-  the branch-free loop of `LOSAT_X_TBNSCANBF` (`tblastn/x_scan_bf.rs` `x_scan_one_range_bf`), passing
+  the branch-free loop of tblastn (TBNSCANBF, graduated; `tblastn/x_scan_bf.rs` `x_scan_one_range_bf`), passing
   on the room the earlier ranges of the call left, so every call returns NCBI's pairs and scan range
   (test `x_scan_subject_bf_equals_ncbi_scan_on_random_subjects` against `s_blast_aa_scan_subject`:
   TBLASTX tables, subjects of one or many ranges, offset arrays down to the longest chain). The
@@ -5326,7 +5360,7 @@ Scheduling (each value computed by one thread with the original function; order 
   presence test went with the variable; acts where the standard lookup table is scanned by the
   direct loop or `LOSAT_X_BXDIAG`'s fused loop; the compressed table and the reference word finder keep their
   scans) the subject words with lookup hits found without a branch per word, by tblastn's loop of
-  `LOSAT_X_TBNSCANBF` (`tblastn/x_scan_bf.rs`): the direct loop calls `x_scan_one_range_bf` (NCBI's pairs,
+  tblastn's TBNSCANBF (graduated; `tblastn/x_scan_bf.rs`): the direct loop calls `x_scan_one_range_bf` (NCBI's pairs,
   stop and resume, and `scan_range` values, as for tblastn), and the fused loop lists the positions of 256 words
   with `x_block_candidates` and passes the listed cells to the cell test in position order
   (`blastp/x_seed_fused.rs` `x_scan_cells_bf`; blastp's own loop keeps the presence test). Tests: the fused
@@ -5393,7 +5427,7 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_BXHITBF=1` (BLASTX, speed; in the strict set from the pull request that added it, 2026-10-20; `=0`
   turns it off) the direct seed loop (`blastx/x_seed_scan.rs`, exactness argument in its
   header) takes the two outcomes most hits of a flag-0 cell end in, too far (`diff >= window`: `last_hit = s +
-  diag_offset`) and overlap (`diff < wordsize`: nothing), without a branch, as `LOSAT_X_TBNHITBF` does for
+  diag_offset`) and overlap (`diff < wordsize`: nothing), without a branch, as TBNHITBF (graduated) does for
   tblastn: with the packed cell `raw`, `d2 = 2 (s + diag_offset) - (raw << 1)` is twice the reference's `diff`
   (the shift brings the 31-bit field's sign; a cleared cell holds `-window`), a candidate is `(d2 - 2 wordsize)
   as u32 < 2 (window - wordsize)`, and the cell's next value is selected. A flag-1 cell or a candidate goes on

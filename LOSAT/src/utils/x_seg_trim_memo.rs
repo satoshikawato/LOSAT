@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_SEGTRIMMEMO): the trim of a SEG segment
+//! LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26, always on): the trim of a SEG segment
 //! computed once per thread for each segment's bytes, for the maskers that ask for it.
 //!
 //! NCBI trims every candidate segment that `s_SegSeq` finds, by evaluating `s_GetProb` on every
@@ -48,14 +48,6 @@
 //! input and does not change any value NCBI computes.
 
 use std::cell::RefCell;
-
-/// EXPERIMENT (LOSAT_X_SEGTRIMMEMO): whether the memo is on; a switch of the strict set
-/// (`utils/xswitch.rs`), on unless it is `0`.
-pub(crate) fn x_segtrimmemo_on() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_SEGTRIMMEMO"))
-}
 
 // No NCBI counterpart: the size bounds of the memo; they decide only which trims are evaluated
 // again and do not change any value NCBI computes.
@@ -227,7 +219,7 @@ thread_local! {
     static X_MEMO: RefCell<Memo> = const { RefCell::new(Memo::new()) };
 }
 
-/// EXPERIMENT (LOSAT_X_SEGTRIMMEMO): the pair `trim()` returns for `segment` (offsets of the
+/// LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the pair `trim()` returns for `segment` (offsets of the
 /// trimmed segment within `segment`), from the per-thread memo when `segment` and `maxtrim`
 /// equal a stored entry. `trim` must be the pure trim of exactly these letters with this
 /// `maxtrim`, and must not call `x_trimmed` itself or wait on other threads' work (it runs while

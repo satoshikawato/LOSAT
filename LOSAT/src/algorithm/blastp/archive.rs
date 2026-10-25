@@ -440,13 +440,31 @@ mod tests {
             .join(" ")
     }
 
+    /// `-task blastp-short` stops at the command line (LOSAT's BLASTP does not implement
+    /// it); NCBI's probes of it are applied to the arguments by hand.
     fn parse(extra: &[&str]) -> Option<BlastpArgs> {
+        let short = extra
+            .windows(2)
+            .any(|pair| pair == ["-task", "blastp-short"]);
         let mut argv = vec!["losat", "blastp", "-query", "q.fa", "-subject", "s.fa"];
-        argv.extend_from_slice(extra);
+        let mut index = 0;
+        while index < extra.len() {
+            if short && extra[index] == "-task" {
+                index += 2;
+            } else {
+                argv.push(extra[index]);
+                index += 1;
+            }
+        }
         argv.extend_from_slice(&["-outfmt", "11"]);
         let cli: Cli = try_parse_from(argv).ok()?;
         match cli.command {
-            Commands::Blastp(args) => Some(args),
+            Commands::Blastp(mut args) => {
+                if short {
+                    args.task = "blastp-short".into();
+                }
+                Some(args)
+            }
             _ => None,
         }
     }

@@ -6,8 +6,9 @@
 // instantiated the module on the shared memory and waits for a start message. A thread
 // worker is reused: when its thread ends, it instantiates the module again and becomes
 // ready for the next thread. The Node host of the same ABI (LOSAT/tests/wasi_thread_host.js)
-// starts a new Node worker for each thread instead, which Node can do while the spawning
-// thread waits; a browser cannot be relied on to start a worker then.
+// can also start a new Node worker for a thread while the spawning thread waits
+// (LOSAT_WASI_PRESPAWN=0), though by default it prepares standby workers too; a browser
+// cannot be relied on to start a worker then.
 //
 // A search can build one thread pool after another (TBLASTN builds one for each batch of
 // queries). The threads of a pool return only after the spawns of the next pool have

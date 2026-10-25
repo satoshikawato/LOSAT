@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBNHITBF): the two-hit loop of tblastn's unit path (`XTwoHit::pairs`)
+//! The two-hit loop of tblastn's unit path (`XTwoHit::pairs`)
 //! with its two common outcomes, too far and overlap, taken without a branch.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-551
@@ -67,29 +67,20 @@
 //! is a power of two and its `mask` is that length minus one (`Diagonals::new`), so this is the
 //! reference's index, and it is never past the end of the table.
 //!
-//! The switch is read once. It is in the strict set (`utils/xswitch.rs`): on unless
-//! `LOSAT_X_TBNHITBF=0`. TBLASTX's unit scan has a loop of this form under its own switch,
+//! The loop runs for every offset array of the unit path (the former switch `LOSAT_X_TBNHITBF`
+//! graduated on 2026-10-26). TBLASTX's unit scan has a loop of this form under its own switch,
 //! LOSAT_X_TBXHITBF.
 
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 
-// No NCBI counterpart: reads LOSAT_X_TBNHITBF once; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNHITBF): whether the unit path runs the branch-free two-hit loop
-/// (`XTwoHit::x_pairs_bf`) instead of the loop before the switch (`XTwoHit::pairs`).
-/// LOSAT_X_TBNHITBF is a switch of the strict set, on unless it is `0`.
-pub(super) fn x_branch_free_loop() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNHITBF"))
-}
-
-/// EXPERIMENT (LOSAT_X_TBNHITBF): whether `x_hits_bf` gives the reference's outcomes for this
+/// Whether `x_hits_bf` gives the reference's outcomes for this
 /// window and word size (module doc): `0 <= wordsize < window`.
 pub(super) fn fits(window: i32, word_size: usize) -> bool {
     i32::try_from(word_size).is_ok_and(|word_size| word_size < window)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (module doc).
-/// EXPERIMENT (LOSAT_X_TBNHITBF): the hits of `pairs` from the first, each on its cell of
+/// The hits of `pairs` from the first, each on its cell of
 /// `entries` (`(last_hit, flag)`), up to the first that is a flag-1 cell or a candidate for the
 /// extension; returns the number of hits taken (`pairs.len()` when there is no such hit). The
 /// hits taken are too far (`last_hit = s + offset`) or overlap (no change). The outcomes are

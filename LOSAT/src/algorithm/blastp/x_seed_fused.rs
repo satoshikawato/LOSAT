@@ -149,8 +149,8 @@
 //! the one of 1,024, and the tests also one of 64 (`X_CROSS_TEST_CHUNK`), which drains the stage
 //! every few cells.
 //!
-//! LOSAT_X_BXSCANBF (graduated 2026-10-26: blastx always takes it): `x_scan_two_hit_with(.., branch_free: true, ..)`
-//! finds the cells with hits by the candidate loop of LOSAT_X_TBNSCANBF
+//! BXSCANBF (graduated 2026-10-26: blastx always takes it): `x_scan_two_hit_with(.., branch_free: true, ..)`
+//! finds the cells with hits by the candidate loop of tblastn's branch-free scan
 //! (`tblastn/x_scan_bf.rs`, `x_block_candidates`): the positions of a block of words are written
 //! to a list whose length advances by the presence bit, without a branch on it, and the listed
 //! cells then go to the cell test in position order. The cells, their order and their hit lists
@@ -162,7 +162,7 @@
 //! EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loop (`x_cell_per_hit`: the fused loop without
 //! LOSAT_X_BPDIAG's batches, the default where the CPU has no AVX2, i.e. aarch64 and WebAssembly)
 //! takes the two outcomes most two-hit tests end in, too far and overlap, without a branch (tblastn's
-//! LOSAT_X_TBNHITBF and TBLASTX's LOSAT_X_TBXHITBF do the same in their loops, on tables whose entries
+//! tblastn's branch-free two-hit loop and TBLASTX's LOSAT_X_TBXHITBF do the same in their loops, on tables whose entries
 //! need no sign extension):
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
@@ -1264,7 +1264,7 @@ where
 
 /// EXPERIMENT (LOSAT_X_BXCROSS): [`x_scan_cells_avx2_cross`] with the chunk `CHUNK` (the program
 /// runs [`X_CROSS_CHUNK`]; the tests also `X_CROSS_TEST_CHUNK`) and the scan of `branch_free`
-/// (LOSAT_X_BXSCANBF), after the checks that the CPU has AVX2 and POPCNT and of the bound the
+/// (BXSCANBF, graduated for blastx), after the checks that the CPU has AVX2 and POPCNT and of the bound the
 /// stage rests on (below); returns the subject's counts. Out of line, and called by blastx's
 /// [`x_scan_two_hit_with`] before the choice of the cell test that blastp's loops share
 /// ([`x_scan_two_hit_in_with`]), so that blastp's loops keep their code.
@@ -3465,7 +3465,7 @@ mod tests {
     }
 
     /// One subject's scan with the cell test `mode` and the scan of `branch_free`
-    /// ([`x_scan_two_hit_in_with`]; LOSAT_X_BXSCANBF), LOSAT_X_BXCROSS's cell test as blastx's
+    /// ([`x_scan_two_hit_in_with`]; BXSCANBF, graduated for blastx), LOSAT_X_BXCROSS's cell test as blastx's
     /// entry runs it ([`x_scan_cells_cross`]) with the instance of `chunk`; returns the counts of
     /// the cells tested in batches.
     #[allow(clippy::too_many_arguments)]

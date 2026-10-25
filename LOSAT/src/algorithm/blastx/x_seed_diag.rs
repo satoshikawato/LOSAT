@@ -622,7 +622,7 @@ fn x_word_finder_fused_or_sent(
 
 /// EXPERIMENT (LOSAT_X_BXDIAG): `x_word_finder_direct`'s two-hit stage for one subject on the
 /// standard lookup table `table`, with the scan and the diagonal test fused (cell test `mode`;
-/// the branch-free scan, LOSAT_X_BXSCANBF); also returns the cells tested in
+/// the branch-free scan, BXSCANBF, graduated); also returns the cells tested in
 /// batches, their hits, the candidates and LOSAT_X_BXCROSS's windows tested in parts.
 /// `subject` starts at the first residue and keeps the sentinel after the last one.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
@@ -889,7 +889,7 @@ mod tests {
     use crate::algorithm::blastx::{input::parse_fasta, parameters, query_setup::prepare_queries};
 
     /// The cell tests this machine can run (the AVX2 batch with LOSAT_X_BXDEFER and without, and
-    /// with LOSAT_X_BXCROSS), each with the branch-free scan (LOSAT_X_BXSCANBF).
+    /// with LOSAT_X_BXCROSS), each with the branch-free scan (BXSCANBF, graduated).
     fn modes() -> Vec<XCellTest> {
         let mut modes = vec![
             XCellTest::Diag(XDiagMode::PerHit),

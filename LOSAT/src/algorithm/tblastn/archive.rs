@@ -546,7 +546,7 @@ mod tests {
     }
 
     /// The recorded inputs of a command line. The options that LOSAT's TBLASTN does not accept
-    /// (they stop at the command line) are applied to the inputs by hand.
+    /// (they stop at the command line; so does `-task tblastn-fast`) are applied to the inputs by hand.
     fn inputs_of(extra: &[&str]) -> Option<OptionInputs> {
         let mut parsed: Vec<&str> = Vec::new();
         let mut by_hand: Vec<(&str, &str)> = Vec::new();
@@ -564,6 +564,10 @@ mod tests {
                 // Not recorded (the ungapped X-drop is never set by the application).
                 "-xdrop_ungap" => index += 2,
                 "-parse_deflines" => index += 1,
+                "-task" if extra.get(index + 1) == Some(&"tblastn-fast") => {
+                    by_hand.push(("task", "tblastn-fast"));
+                    index += 2;
+                }
                 other => {
                     parsed.push(other);
                     index += 1;
@@ -574,12 +578,16 @@ mod tests {
         argv.extend_from_slice(&parsed);
         argv.extend_from_slice(&["-outfmt", "11"]);
         let cli: Cli = try_parse_from(argv).ok()?;
-        let Commands::Tblastn(args) = cli.command else {
+        let Commands::Tblastn(mut args) = cli.command else {
             return None;
         };
+        if by_hand.contains(&("task", "tblastn-fast")) {
+            args.task = "tblastn-fast".into();
+        }
         let mut inputs = option_inputs(&args);
         for (name, value) in by_hand {
             match name {
+                "task" => {}
                 "culling_limit" => inputs.culling_limit = value.parse().ok(),
                 "-subject_besthit" => inputs.subject_besthit = true,
                 _ => inputs.use_sw_tback = true,

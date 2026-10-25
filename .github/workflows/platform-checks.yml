@@ -2,8 +2,9 @@ name: Platform checks
 
 # LOSAT on Linux x64, Linux arm64, Windows x64, macOS arm64 and macOS x64, with the performance
 # switches as they are by default (LOSAT/src/utils/xswitch.rs):
-#  - outputs: release binary, 49 cases (all five programs) at 1 and 4 threads; the outputs of the
-#    two thread counts must be byte-identical and the exit codes 0 (LOSAT/tests/platform_checks.py);
+#  - outputs: release binary, the cases of LOSAT/tests/platform_check_cases.json (all five
+#    programs) at 1 and 4 threads; the outputs of the two thread counts must be byte-identical and
+#    the exit codes 0 (LOSAT/tests/platform_checks.py);
 #    on Linux arm64 the release binary also passes the floating-point contract check
 #    (LOSAT/tests/check_fp_contract.py binary; ci.yml checks the Linux x64 binary);
 #    on the two arm64 platforms one more mode, LOSAT_X_DPNEON2=0 (the 128-bit NEON kernels instead
@@ -196,7 +197,7 @@ jobs:
       - name: Floating-point contract (release binary)
         if: matrix.id == 'linux-arm64'
         run: mkdir -p platform-check && python3 LOSAT/tests/check_fp_contract.py binary --losat LOSAT/target/release/losat --out platform-check/fp-contract.txt
-      - name: Outputs, 49 cases, 1 and 4 threads
+      - name: Outputs, platform_check_cases.json, 1 and 4 threads
         run: ${{ matrix.python }} LOSAT/tests/platform_checks.py run --losat LOSAT/target/release/losat --out platform-check ${{ matrix.extra }}
       - uses: actions/upload-artifact@v4
         if: always()

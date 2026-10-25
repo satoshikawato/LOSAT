@@ -37,9 +37,9 @@
 //! and the diagonal statements below are those of `word_finder`. The caller uses this
 //! path only when nothing traces the seeds (not in the diagnostic stages).
 //!
-//! LOSAT_X_BXSCANBF (graduated 2026-10-26: no variable, always on): the scan of the standard
+//! BXSCANBF (graduated 2026-10-26: no variable, always on): the scan of the standard
 //! lookup table is tblastn's branch-free scan (`tblastn/x_scan_bf.rs`, `x_scan_one_range_bf`,
-//! LOSAT_X_TBNSCANBF's loop): the presence bits of a block of words advance a candidate list
+//! the loop of the former TBNSCANBF): the presence bits of a block of words advance a candidate list
 //! instead of a branch, and the listed words' hits are copied in position order with NCBI's stop
 //! and resume when the offset array is full. Its pairs and `scan_range` values are those of
 //! `s_blast_aa_scan_subject_one_range`, so the loop above reads the same pairs; it writes up to `X_SCAN_BF_SLACK` pairs past `array_size`, which the
@@ -47,7 +47,7 @@
 //! same candidate loop (`x_seed_diag.rs`). The compressed lookup table keeps its scan.
 //!
 //! EXPERIMENT (LOSAT_X_BXHITBF): the direct loop takes the two outcomes most two-hit tests end in,
-//! too far and overlap, without a branch (tblastn's LOSAT_X_TBNHITBF and TBLASTX's
+//! too far and overlap, without a branch (tblastn's branch-free two-hit loop and TBLASTX's
 //! LOSAT_X_TBXHITBF do the same in their loops):
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
@@ -116,7 +116,7 @@
 //! where the CPU has AVX2, the plain loops for sparse tables (at most three tenths of the backbone
 //! cells with hits) on x86-64 without AVX2 and in WebAssembly, nothing on aarch64 (not timed); `=2`
 //! the plain loops for every table, `=3` for sparse tables, on any CPU. Where it does not act the
-//! branch-free scan of LOSAT_X_BXSCANBF (always on) runs. The fused loop of LOSAT_X_BXDIAG keeps
+//! branch-free scan of BXSCANBF (graduated, always on) runs. The fused loop of LOSAT_X_BXDIAG keeps
 //! its candidate loop. On x86-64 with AVX2 the direct loop scans the subjects of batches with few hits
 //! per used cell (BXDIAGMIN: short queries); without AVX2 every batch.
 

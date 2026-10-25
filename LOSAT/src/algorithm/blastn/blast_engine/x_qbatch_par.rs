@@ -126,8 +126,14 @@
 //! winning cell of that map but five: 15,600 cDNAs at 24 / 32 threads (9 units, odd), and 10,400
 //! at 12 / 16 threads and 20,800 at 32 threads (two full rounds of 4- and 5-thread slots); and
 //! none of the losing ones. Narrow slots that use every thread, and last rounds more than half
-//! full, were not measured, so the rule keeps the model there (review 2). W3_EVIDENCE With the
-//! rule `rule_k`, `rule_m` and `predicted` of the summary
+//! full, were not measured, so the rule keeps the model there (review 2). With the final rule
+//! (ws, 2026-10-25, line D session 15 windows w3 to w5 against dev 416c427f and e6429b65, 6 to
+//! 8 rounds, max RSS by `time %M`): 31,168 cDNAs at 16 threads x0.976-0.982 of dev's time, max
+//! RSS 394-398 -> 222-235 MiB (NCBI `-subject`, one thread: 313 MiB); at 32 threads
+//! x0.911-0.916, 824 -> 330-335 MiB; 6,900 at 16 threads x0.965-0.980, 347 -> 208-209 MiB;
+//! 10,400 at 24 threads x0.967-0.973, 510 -> 233-238 MiB. Where the rule declines (5,000,
+//! 15,600 and 20,800 cDNAs at 16 threads, 31,168 at 24) the model's layout runs, with dev's
+//! cycles and instructions. With the rule `rule_k`, `rule_m` and `predicted` of the summary
 //! line still state the model's layout, and `k`, `m` the slots that ran. The tuning variable sets
 //! k directly, as before.
 //!

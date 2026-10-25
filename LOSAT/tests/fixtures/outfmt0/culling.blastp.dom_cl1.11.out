@@ -1,0 +1,1769 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">dqA domain x5"
+                  }
+                }
+              },
+              title "dqA domain x5"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 989,
+              seq-data ncbieaa "DVMAALALKKHEYPNVPRVGQMTASFASDKGQPDEDDNGDDHVSDK
+VLFRCEAKCKRATVCKACLLAFYLYLRIRNYALFTWTLRSRWKENLIEHATDQAGINKNAFRVYDEFSDVIVINGADP
+LLASRLIGNLLRILRIRLCECVMKRFVLGLFEGMHRALFDIPVQEVLGQMTAYFASLEGQPDEFDNADDATSATVLLL
+MENKCKRTTQIAACNAAFYKALWIRNYALEALGLRPNDKTGGDLYDCASDGVLEEIRIRILKEILHILDDGIFHCFST
+CSLFCHQYWDAKKVAPPAVKPGSVGYNNLPLERLTPATEVGTTDVLGGMEICNQESKSEGVDEMEEAATPVACTVTCE
+INIFVELEQATRQMTSSFASDEGQPDEDDDADYHASDQVLLLCETKGKHATVLAAVLAAFYLALRIRNYAVFAQGLRP
+RTKTDDVCQGVRGPFHFLNKACQGNLGMTFTGAPPGYEIILLRRESGTLTPNIARVFELVGKDILILKFDKETAAEVK
+RLINVLLEQKMPTPDDRGEEVESGPCTRMTVIDTSEDSNQGPSAMIMGFAERARVPSRTGCMPTMVVQMRATLAASEG
+QPDEDDNADDHASYKVLLLSEDKCKRATKEAACLAAFYLALRIRNYAIFAQGLRPRTKTDSITFTKAEFAMTIWSSQS
+LAVLLFNSNYFETRNDRTREMVDLIHEFLRKALRAPAECVGIRAMVLSYPHEASSKEGIEMGFGFLNAIAYRENATTI
+RDKANNILLGCSEMLTGAYYNTGAPEQAQTLQGTASFASDRGQPDESDNASDHASDLVAQFVEADCKRATVEAACHAA
+FYLALPIRNYALFAQGLRPRTKTVDEDASVRLQTVTSTSVHIELDRNAQPERAQINKDLIKDDRVMRAIYFRFNRDYF
+WKNFAKNLVKHETPAEYFVSIGISVVDAPNLRPFTPGDSPLIINIPYVFILLQTECDDLEAGGVRMRGPETLSPFESD
+FLENTEH"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd00_copies1"
+                }
+              }
+            },
+            title "dd00_copies1"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 228,
+            seq-data ncbieaa "LGLVGQHDLVQAVDFSKIHDPLARHREMISFEAGQDMKVVNMGDKKSF
+LQRQHTNMFGRDDGQLDSDDKAEDHASKAVLLLPEQKCRRARVEDALLRPFYPHLRICNSALFAQGLRYRTLTEGTRL
+LLDGLAVKDEAPTGNCNLQRYGGANEVYASTGKSTSAASSCDLVGAVVRTLATLSRDGAEQKQRSLRYERDKVRDAAR
+LHVASVKDAGNVEKGISLQIDIFP"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd01_copies2"
+                }
+              }
+            },
+            title "dd01_copies2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 397,
+            seq-data ncbieaa "LMVKLIIMQVYKRMERVVEAHINIKVDRTTFGPALVLGRQMTASFASD
+WGQPDEDDNAFDHAIKKNQLLKENKCGAHTVGAACNMAFTLAKRIRNYAYVAQQLRPRTKTAADVMVFSVPERRTEFS
+NRTEGCLEGGCYEYPQITAYVACALAQATDTARAGQSPQMNANKIMVRLLLQVWKALVTKVRVPLDDWPLRPLNQMTA
+SFKSDEMQPDEDGNADDHASDKVLLLCENKCQKVFVDAACLAAWYLWLRIRWYFLIAAGLRYRTKTGTIRYLDHCTLR
+RMNFFDQSFDARLLITKLRLQVNPVMPVDTEVEPKRKQDISHKVQLAKLPEIKEARVQDEKPPKAARGESFRKLGLFI
+YNHLCNLVILDYTKSSARANPINVNPMSVDWCDLRCV"
+          }
+        },
+        {
+          id {
+            local str "Subject_3"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd02_copies3"
+                }
+              }
+            },
+            title "dd02_copies3"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 609,
+            seq-data ncbieaa "PGRVLVGHPLEFVWDQMTASFATDEGQPDEDDHADEHASQVVLLLCEN
+KCKRATVEAACLAAFYLALRIRNYALFAQGLRPRTRTPLLFQERIPLGERTWRFTMFVPFTGVLQESADLDEMGVSII
+TKLIGVMYPVIASLKIHIDVQVPLLKFFYNRTRGALNEAKNHKPMLQEKTGQLIVGDPGEYSSLPVDEEEARAQHSHK
+AYTAQILLLHDGLFAGFLKEHMTASFASDEGQPREDDNADDHVSIKMLLLCENKCKRATVEAACLAAFYLAIHDRNTM
+PFACGLKPATKTVHRIKQKTGQFMSAAIGEAATTFFKVRLEGPSVFRRISATETRSKRKDYMPCANTVMKAGGNPTHE
+GPPGADVSQLLMGGFVGASQMYYSLVNEKIVIPIVYLETHSGLEALSAVRRSSHGSIVGVAEPNSWVILPAEQEIQMT
+ASFASDEGQPDEDDNAKDHMSDKVLLLCENKCKRATVEAACLKAFYLALRIRNYALFAQGLNPRTKYKTANDGYLAKF
+GHTKLYVFAAPGLYRGAFEEFGVAFVEMLMIALIKDKYPGLCKITSIEKPGKLVNGTTMSDANRENPFLHNEEAHLRR
+INGTECPTAALILDI"
+          }
+        },
+        {
+          id {
+            local str "Subject_4"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd03_copies4"
+                }
+              }
+            },
+            title "dd03_copies4"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 790,
+            seq-data ncbieaa "VIQEKGRTRGAGGINKCGNLELGQSKQELTTRIQMKYSFASDEGQPDE
+DDNADDHASDHVLLLCWNKNKRATVEAACLAAFYLALRARNVRLFAQGLRPRNKEPLPKTNLSNSAGVGMCSEDSLEA
+KYELCWVDMTVDDVARIRMGPRNGGSNTEISDTAVKKKRTMEAEMILDRQIDVYEIPAALAELIGTQRLLGPVVYKLL
+PSVKLTTRKMSRVDLATSLEQMFAWFCGDEGQTDEDDNADDHASLLVLLKCENKCTRATRFAACHAAFYCALVFRRWT
+LHANGLCHRIKTAGAYHSGMVENGKLDMIDAGFARGVKQSEEGENFGRGTGHLALPESFTFGLQGLLVIIVILVTVDV
+AYNLDMEVEESRAFNFGVPSIIKAYGLEAGFVVNNIWDLRKLIKDTNFSSSLGRSSHRLLDLNGTAGEVHKGNAFSTM
+KAQAGASFASDEGQPDCDDNIGDEASDKVLLLCENQCFRQTTEWACLAAFYLQLRIYNYYIFAQGLRPRTKLTPTIAV
+ISDQFYTGLSGEGCRKLIPNLAQRQGHGKNVLDAIPNNPRSLYIGKNSDTQLPTNYIYIVVALLGHSMMSLIQSPAGS
+GHKRNDRAITNKLKIIPFIPIVGTKMDREAETSSGMGCQMTASFASDEGMPDEDDNIDDHASDKVLALCKNKKKRATV
+EAACLAAFYLALRIRNYLLFAQGLRPRTKTVLAARAAVLRRGLEGVGLNEGIHILDLQLKDAYRKDGELKVEWILVES
+MFANEDESSPLSVLSLHVVKIEPESSGTAIEFEALTVPIK"
+          }
+        },
+        {
+          id {
+            local str "Subject_5"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd04_copies5"
+                }
+              }
+            },
+            title "dd04_copies5"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 932,
+            seq-data ncbieaa "GTKNQSKRRVNVGVGGKFAEVQTTASFGSDEGQPDEDDNADQHPFDKV
+LLLDSNKPKRATVEDACLFAFTLALRIRNYAKVAQGLRPRTATPANSPRFAEILVDVQLPMGIITADFLEVVNPKPRA
+KLMVWNPVVEALTDSRGIDKVKAQASIMRAQHCAILKFDISTRIPVGTKDNAALMTGSFISDECQASEDDNADPDAHD
+YHYRCCENKSKRWTIEHICKIASYLALRMRSYWRFAQGLRARTKTVPLGPHLVETDFLEPLGRDLWGARNEDWLFIEL
+VTAFIAISAKVGYIKSVQSIEGVDKDQLWDILLALAIVGIGNPEMLDCDLTSLTQKFLDQPGQTDEDDNTDQHAEDLN
+LCKCENKCKRGTFEAICSAAFYLALRIPNYAQFYQGLRVRTMLNNTKIFSQERVKATRAAILQLAQAVSAGYISLLVE
+LRASKQTLKGNEGTPMLSEIASQNVAVYEKQAFGLAVKATDIMVGDDSYDAISVMIKASGVAVVLAVYVQNARATITG
+PAVLQFMITQHSSFQMEASQASTEYAPAQDDNADDGASDKVVLLCINKCKRATVEAACLAAFYLALKIRWYALVACGL
+RPRTKAYALLFFSVQDEDSNSVVSPAEFAHMMVVFYAIDQNAELASDIKILANFTDVIHSIKEGPHPSLEEEPGREYE
+LTKERRFMNKYDFHKVIMSPKKKRRGNALVQDPVKIAQQVLIFEVLALQWASWARCEGQPDEMENSHDHHSDKVPLLC
+HNKKKRATIEAKCLAAFYLALQISNCQLFAQGLRKSTLTERKMRLILKGILLMGPAGTLDVTAQKFPSGCQKSAGQVS
+SGACRVAELINRKSDVVERIQIETRVAYSQFNEDQVNIIAQESWFISLDGGKDSNITQATESYGIKKVAADMQLYEEL
+MILNPAGSYYFCTGYPAVTYNNGKLE"
+          }
+        },
+        {
+          id {
+            local str "Subject_6"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd05_copies6"
+                }
+              }
+            },
+            title "dd05_copies6"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 1119,
+            seq-data ncbieaa "RSVYEDKEDFTNPKAVKILADMTTVTSIPHVAVKMLLIATQMTQSFAS
+DEGQGDEDDNADDHAADKVLLLCENKCKWGTVEAFCHAAVYLYLRIRNYALFAQGLRPRTKTQSNNKSRLQFSLIGKR
+MLPACLVAEVLNNENVVAVSFLLGEQQWGKIMFRFFNADVNACNIVSSCGMIAIIYPQFELEGNNMWFGGDALWTRSF
+QGQSTASFASDEGQPDEDDNQDDHASDKYLLLCENKCNRADVEAAELAAFYLALRIRNYIGFSQGLGPRTKTLRITVP
+PKVKIKGAIEKGYGRGYKFDLSHSTFNPVTARPLDDHAFNGGAMSRVWDLDTSSKYVYLFIVKKLPAAEFELYFTNSM
+MYPNLSSDYQSDADNFTVPFVAETGEEFELYRSLAFSDSLAEVGQYMASFAEMEGQPDEKDNHDDHASDKVLLLCSNN
+CKRATVEAACLAAFYLALRIRNYALFAQGLRPWTKTAEGCITKLRLYLEALDCKAGVATWILLTEQKHSAHVIAALYG
+TETHLDAEEQTWNPASRGKTKGEKEAFELRNFMQTFYTLQGYLDKYFWVLSEPLSANLIFNILTLNGEVLAVQGQYRA
+SFASDEAQPDECCWWDDHASDKVLLLAENWCRRFTVEAYCQAAFWVGLYKREYALFAQELRPRQKTVADNLLLPEFVQ
+NEGEEDTTLSNLENKCDLDETEKALQSGCGNVGQGGDFDDLCILGLQSEAMTTSLSRGVGGIVDRPVHAAITLLKRIV
+CFAQFASDEGQPDKDDNADFHASDKNDSLSEAMCKRAGCETECWGPAYTALRIRNPAHHIQQLRPKTKTADHVLGINV
+DMLQEQHMSFAQVSDSAHTVILITHFAPSKMYEMHDTSTMMPSEWDCDILNYKFIIPVFLIAAAQLIYDLASEAIFRL
+VKKLVALLMVYWRGFHSSEDLEQVYCDCYDVRYNYMGTQMTLSFARFEGQPDEWDNMDDHASDKVLLLCENKCIRATV
+EAACLAADYLALRIRNYTLFAQGGSPRKKTRDAIGSRTSLITAKSLSYEANPPWRGEFYQLVTAFDYKYLEMCLKDVY
+STKQSEPLASFGAAINGAKNSAFHQEGRCSRNEILRQGLAQAALTHQGLENKKNTNR"
+          }
+        },
+        {
+          id {
+            local str "Subject_7"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd06_copies1"
+                }
+              }
+            },
+            title "dd06_copies1"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 191,
+            seq-data ncbieaa "PENVWEHLGDVRERQMTAHFHGDECTMDEFDNAIDVRSDKVWTKCENK
+CKRATVEAACLLAMYLAKRIRVVAKMQQALRPRNPWLSLRALQSEPSIHSSVRNQVMPEDKRIKSEIRFEHGEYPVLA
+YLSVQAYDPDMAVFEPAAFTLTETRLIYPRELLPKLTSQKVDAPVERLIASCYAGGNKTDGGKQP"
+          }
+        },
+        {
+          id {
+            local str "Subject_8"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd07_copies2"
+                }
+              }
+            },
+            title "dd07_copies2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 359,
+            seq-data ncbieaa "FTVKRSGGALYARKVVPDIAVEDFGWVDKVRKSYVQQMWVSVASDSGQ
+PDEDDRAGQHTLDSCLLLGEAIKCRAYVEAACLAAFYLALRDRNLALFAQGLPPRTKPTNNMVVSLVTNQAKYDGSQK
+SQTLPGLFDHQFKVDSDSLDATPHLLGAANSLLRVPALWPVMDSGAPEDVFLSQSKWLDDGAPEKCEASEGPIRAPAE
+AMTYTFASDGQDPDEDDNAVDHASVQVLLMCEGKCKTATVHAVPLAATYLQERDRNYALKVQGLRPRTGPFLPNGKAQ
+NGEQTRIGRMKGLELAVGYQRGKLTSEVKCIKNGAQGPPECYSVSSTRGDTADWIHVKRALVSVTEQELQDSKEGEP"
+          }
+        },
+        {
+          id {
+            local str "Subject_9"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd08_copies3"
+                }
+              }
+            },
+            title "dd08_copies3"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 488,
+            seq-data ncbieaa "LRQANGVCLDKTQRAVPMTASFASFEEQTDFDDNADDHAADKVLLLCE
+NKCKRATVEAACLNYFYLAYRIRNMALFAWGLAPRLPTAAFLVSARNDTFTLSKKYKKNHLCTSGRKEMERPECVRLL
+HGTKDRVPPSHIDVIALSTRDYDALHALVAARGCEVHVTVKLRPQMAASFAPNEGQPDEDLNADDHASKKVRLLCEAK
+CLRQTVEAACLAARYRALRIRNYALFAQGLRKRTKTGVPEHLFNIHQRPHELSTPTDDVAGASVYGGPAVLRKEEKDP
+DMAAPREFPGDIHKTGSKVYKAIQLDGNSSLNLQVKGMQGQMTASFASDEGQPDEDDNADDHSSDKVLHTINNKCKRA
+TVEAACYSAFYLAWDIENYALFCLGLFPRTKTLATAYVRLRKPLSKKTHEPLQDNDLFLHKQWAPAELDDSITEHLFV
+GRPAPNAGQDTGAAPMTRLFVKHMGIIDSISANSDSTNQERMMPERYLPK"
+          }
+        },
+        {
+          id {
+            local str "Subject_10"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd09_copies4"
+                }
+              }
+            },
+            title "dd09_copies4"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 846,
+            seq-data ncbieaa "EQFETFMNTLFETPREKDSWPITCTAAAQRSEQVNVLIKTFFMVLPPN
+DQVIRYTYSFASDWGQPDYDDNVDDHASDKVNCLNSAVCKAAGVEAACDAALYNFLTQRVAALFAQGHRPYAWTYLFD
+SMTGDFNHLVEHPLKGLEATEYPHTSITGTKHLVKTMSTELTFYEALRLFMNDQLHGVGRSYNIHTPDKHLSDEFERL
+RVEVMKRVTPACEAGGPAKDMQPRSPLEIRNLDGLIPIQADTEGLSIFLIVEIDVVYGYAEIQAWCTQMTASFAKDAG
+NPDEDDVADDHANDKVLGLKENKCKRATVEAACLAAFKLAICIRNYALFAESLRPRTKTVKEDKLLKVVFIDLFTSKQ
+EQPNDDDNTEKVGEDKKDTIKALIKQLQGVKYEWGEANIIIYAFAQSQISWAMNVPVLGAVDLIQFNYKYLIHKEIKV
+NTVLDFVVENKNSLDGERGLPREVKQATWKLKFSIQSRTPQRTASFASDELQPDEDDNADDHASNKVLLLCENKCKRA
+TVEAACLAAFYLALRIRNYARFAQGLRPRTKTKFPGPEAAMQNQGWLNVSAQEAFLKIVREEPHKAATEQEYGEILVK
+AARIFGAEGSPVKPHDGLERYTIQTKEINNKLQTGDYCFTEGIPSQTVDGERLALPMWICLAWILEKGEESAGTAERT
+GTSKFIRHSTIIINANGVLGNALCMFAKFASHEGQPDEDDNAPDHASAKVMLLCENKCARATLEASCLAAFYLARRIR
+NYALFLQHLRMRDQTTAVYDNCYSTMPTTNSDAKTAKFLMPSKAEDADICHSKLLKMDAIRLPCLPGIGSSHMETSND
+SVNPIRLLRARGHLGSND"
+          }
+        },
+        {
+          id {
+            local str "Subject_11"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd10_copies5"
+                }
+              }
+            },
+            title "dd10_copies5"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 932,
+            seq-data ncbieaa "KHLRLTKAQLSHVMLQMTASFAMDEGQPDEVDCADDHASDKVQLLCAS
+KCQRATVEMACLAWFKLALRIRNYALFAQGIIPRTKLSVPGVVHLIDEGFTVKENVNVVIELTMYSDEMALGIRVAVR
+TTGEGLKPIMEQQAKLLSFKAVLVLFHKRRCDVLDAQAAQKAKRMRPYTTRECVAKEKRSFTIATFEQQMTAVWASDE
+GAPDPDDNADDRASDGVLLLCENEPKRATVIAACLAADLCALRIRNYALIAQRLRPRTKTSKIAPKVEKKEVISQYWS
+RDQMDYLLLKNISETLSPEATGLRQTFPLGLVDRKQIVIGKGRNVQKTLKKDELWIMNQEGAEANFRIIVQLVRQMTA
+SAASDCGQPTKKMDADDHWSDKVLILCENKHKRATVHAACNSVGCFALKIGNYALFCCGLRPRMKIQLDATDFYAEAA
+LSARDIIGAIDWAGKPGSAAGGLHIEVNAGLYGGFIGLDADVCIDEGHDRPDDAFNALQEVVEEVGSKAFYTFKDGLC
+DIQPAQASVVVKEAPVVFKKDLALEAKFGTAGTYSLASDEYQYGEFDTAEDHESNLVLLLDENKCKRKFVEAGCLAAE
+MIAHRSRNYALIAQGPAPRTGTPGDNSLCGALRIPANATHSLSAIVLDVCKLAWKDRQNPCMATGYGYPSKFYARLQD
+NKAYTSCNVDQPANPRPNTELTAIVWIVLIRLGPQVLHYIGKSGILERALTPSGRAPVAEVVRVFKQMTAIFASDEGQ
+PDEDDNADDRASDKPLLLTETKCKRATVMAICMAAFYLALRIRNYADFAQGLQPRTKTAEIAIRVNVTFSKMEAKVAM
+RSEIVRGLYGSFKEQLSFHIYMVYCVGPAQNKSSGAVDNDANTWITSSPNLKSKVYDLTSPTQSQFLGTKVGLEIPKG
+CNEWFSRSGDRKGMSANEKQGSYFLE"
+          }
+        },
+        {
+          id {
+            local str "Subject_12"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd11_copies6"
+                }
+              }
+            },
+            title "dd11_copies6"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 1155,
+            seq-data ncbieaa "VLNEATSKNDDPFTSSLPQESGENLMKMMIVDQMTADNAECGGQPDED
+DNPDDAASDKVLGLCENKCKRATVKAACLAAFYFALDIRNYKLYNQGTRSQTKTLAAGPSKLILNKVENFSVLSNDSA
+VNSNVYESIAPYVERRGRLAGLAFVISSLEVPLSPDNCAFGLGVGHALTRFYEKSDLLAHITVIGRTNDEITVALSSE
+GKVRASFTAKAVIHWNRQFVSEGGGLMYLGGIAEKEQSGEQMTASFASDEGQPDEDDNADDHASDKVNMLCENKKKRA
+TVEAASDAAFYLALIIRNYALTRRGLRPRWKTRLPGKSLYEMNALAKEVFAQWPVSPQDVPGDLNKPLEKTDLPKSMI
+NILSSQWGLHFGDALEYARTQSYMTAKLEGDYRLLPRGIAQFGLCAMKKSFASLEGQMPEDDNADDHASDIVQLLIAN
+KGKRDDAEAAILPAFYVELRIRNDTYHAQGLGPIINHGIPGTVHVKLLANGNKDRRYWDAIKGTKNGKITARTRIETG
+IVSAVQRNESKIIKNAKEMRCFTLKIDGREFEVTTYFETKAVAVLFPCAYVSQIAGEQKPVTSIFWVQTSTKDYGISP
+ALENVEISVPGMYPVGFGLKATFKRSQMTIFTASHASDEGHEDSDVNAKDHPSDKVLYLCELRCDVAPVEAWVLCLMY
+QALQTRNYAGFAQGLHPRLKSPNVDLFEPDSGHFELDSHQVIDVLILEGSTTLTEVPRTQHLRWSHAKESAKDHTQIV
+INQRSVALQLLGTFRQKGQIEAEELVLLEIEALNEGFSNLQQMTASEASDEFQVDDDDNADDHAGDKVCLLCEYGLKR
+ATQERARLAAFYEAGGIRSYALFAQGLRPRTKTFQRYMKSSGLMAENDAVLAARLDIAARCNIIWAYAVHGIAKALTL
+VGNSTDIPDAVIASLRQLAYGEIDVDYFCQGESENVGKRVGVVELVSTSSEGAENTKKHTWIVEMTHSQMTASFASDE
+GQPDEIDNADDHASDKVLLLCENKCKRATVEQACLAGFYLALRIRNYALFCQGMRPRTKTQPGLFRPHKSIPLTRIKI
+VLHVSSAAVLPTNKSVKTGQMYKAAKKMQTAIQDGIFVTIGSLGLHAHFSSLVGCPKIVRLLEMNKIRTMDGNLFYGG
+VDLFFQSLKGKHQTD"
+          }
+        },
+        {
+          id {
+            local str "Subject_13"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd12_copies1"
+                }
+              }
+            },
+            title "dd12_copies1"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 180,
+            seq-data ncbieaa "VGRQTESSFMRGDGSCQMTMSFASDIYVPDEDDNADDHNSDKVLLLCE
+NKNRRMTVEAACRAAFYLHLRIRNYAQFAQGKRPRTKTFYKSWAFVTIILEKWQVAKSGADNRGQLIPDDYLGKHQKS
+MKIIWLQAAAMHYDNIGIIIAETMLALTRLAYGLRYPDIADIDFSASIQIKLER"
+          }
+        },
+        {
+          id {
+            local str "Subject_14"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd13_copies2"
+                }
+              }
+            },
+            title "dd13_copies2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 434,
+            seq-data ncbieaa "QLTADGAVEVVDAMQEEIEPHAQKTLAGGGGEPGPVVSVVSTCETGSL
+FEEDWLRFYGPQMTLSFASDCGQPQFDDNCDDHASDAVLLLPENKLKRATAEAVCLAAFYLAKGERNYALFPQGLRPR
+TKLGSNERAHARNVIESNNFSLPIVAAASIVNGFGLYSDRGVSDQNKIFQGYLFARVFTEVLDMEPGQGAALKQKCNI
+IFIFLLMQRTEGERVSFQEFVAKMTRSKAIMEGQEDEDPNADDHESKKVLLLHENECKRAKVEAACLAAYYLALRIQN
+YALFASKLRPRTKTGYAEILASAIHLTRVFLSGGVEPPINRKTGSEGSELLNLDLRTTKVASSRVKFGPDPEEDEEVP
+SCKSRSSKRQRKRIPLEADSPKDNSEAMAGPLPMRSFSETNWMQELANVLTFDIYIGSLVPPKMMLSSNQMDRR"
+          }
+        },
+        {
+          id {
+            local str "Subject_15"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd14_copies3"
+                }
+              }
+            },
+            title "dd14_copies3"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 558,
+            seq-data ncbieaa "LELVLPDHAKLLELGFLRLKNDEMFRLANTIFKETSGKSYRNYKKESQ
+WLDLHGILQMTASFASDGGQPDVDDNADDHASDKRALLCERKCWRATVEVACNAAFYKALRIRNYAQFAQGLRPRTAT
+PGELIADDGLRGITDALGIDGKYVPPDKEKGFATASVNEFVSGTSVRCFSQALAHLVFMCSPVYGPLLVAVDVHPKPL
+AQLAGQMTASFASDEGQPREDDNADDHASDKVLLLCDTKCGRAKVEAACLAAFYLADRIRNYALFAQGLRPRTKTSSV
+VEYLTATTLTLQQLVLKAFNLLSASALLFQQREHAMCLAKDLGLLIKVRSLFDASFCKLAKFQDKWEVHLLRLVTKVM
+WDGQGWATEWYFIALTKNVTQMHASFASDEFQPDEDDNADDHASDKVMLLCEFKCKRATVEAACLAAFYLAIRICNYN
+LFANGLRPRTKTLMSTSIRGSANPRYHGVIKALKDDFTGEVETPKSQRVQNDMATSDKGPIEEVIEDKAYFKPLDQCT
+VAGRQDPSASSLSSLHFWVCSLQYLLQNTRAERLEAASNVKG"
+          }
+        },
+        {
+          id {
+            local str "Subject_16"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd15_copies4"
+                }
+              }
+            },
+            title "dd15_copies4"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 750,
+            seq-data ncbieaa "PYLNTETQQTIGVVSATATVLIALTRRPSLLGADNIYDQSRKLHHYEQ
+MTAQNDSDEGQPHEMDNAKDHASDKVRLLCELKCKKATFEGADLAAFYLAKKIRNYAAFAQGHYPRTKTVAPNIACFR
+MGIESGLKDHELTHVPEVAYWLQINQSIIQPSVGFIHLPAFLPVNEINLAMLFNGESDTTNHKFAAVDDIDEYLDSPL
+QMGASFASDENQIWWDNLARDHASDMVLCLNENKCARHTVNTAHLARFYLALRIYNYADYAQGLIPRTKTHLLDEWPK
+PGSTVDLKGAPAITIILTDLAGIFRVHNAVTAGRAAGDVVYDKHFASETHEEYLPAILILVAKAAKSWYSDKCIGYVS
+VSLDLPPKRIGYDYDTLTDSIQLYAFFLELGYPSAIKKLQMTASFASDEGQPDEDVGAQDHASDKVLLLPENWCKGAT
+DRWVCLMAFYLALRIANYALFQYGLFRRSKTDGAALSTLLSDSTGTSVITHNQKGLHTAVACNKFPAAGLRVKVVLLR
+ASSKVDIAGTEASHKTNFKVVVRITAPLCQVLEDDINTNNILQLIKRRKKNISTKCTFYTVQILGNLISGGQMCASFA
+KDEGQPDEDDNADIHASDRVLLLCENKEERAPVMAACLAAFYLKGRIRNYALGAQGLRPMTKTLDKIIGLVFTWAKVT
+RPNEQSTHAKTSAEGAAAMQQPHSKAEGADHRSDVMIRSRLFEIRAEDIVFLSELHLRLLNVLTSINKLDIFSLKTVF"
+          }
+        },
+        {
+          id {
+            local str "Subject_17"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd16_copies5"
+                }
+              }
+            },
+            title "dd16_copies5"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 964,
+            seq-data ncbieaa "MAPAAGGAGLRGLTKWDCQMTTSFLSDEGQPDEDDNADDHASDKVDLK
+CENKCKRATLEAAKYWAFYLALRIRWYAYFAQGLRPRTATGRFGFADLVKDVMKTITPADLRFTEFSAALFGEVDKDP
+TDYQKIPRINVTKQAVYFDGESGRAVPGEDFVLVIETLTANQDARIGKVDIGGAPQMTADDQIDEGEPDEQPVRDKSA
+WEKVLLLCENKCKRATPEEADQDAVYLALKITNKALFAQGLISNYKTGNGLAENFGQCAPALRDKIVDVIGNAAQDDV
+KQIAVIRGHTTIIHNPILGLSPLSNYAFLVVTPPYPSGRAQEHEDGGIAPGEVPEEGEELDRVFDEGAQKFWCAHSDM
+VQKPLKIEIPAAAQMTKMFASDEGQGKEHDNADDTAEIIVLLDQVFIKDRATVEAAILAQFALTLRPYNYARFNQGLR
+PRTKTAMVCQYIFAVSTPVVAGPVESRKHLMQYPSVFGQTVMVRGPDTVHYDADMLEGVNLAKLYGPAALFVTGVAYT
+YSEYRDAAEVSGVLYQLSKHCLQQRVDLIKELDPGFVIPQDSRKLLPFITQRLSAVHDCLVRKDEPANSFEVCPEQNF
+AHYASIEGMQKEQDNVWDHACDKVLYLRENKIKRADNEAACLVANYDAHPIDMYALFAQGLGPTTVTTLNTGLQMAAI
+EIGSHRIEEATEEEWDAVLATAIAAGVDVHRTTIMPVQDKKNIVKQSVLNWNVNVVYRYKPDEYMPENRISPKRIELH
+DKPQDDPKLLWFTPISKPITEIYKRPGQQQRLPPMDTKSTEDQRTESFASEEWQPDEPDNADDNASDKVLLLCFKSCK
+RATVEAKCLAAFYLALRITNYALQAQGLRYRTVTMAWMIVMVLRREDVGPSEILLRGIKIRGLTGWAGRYPARALSIG
+NVFSPIVHPQDSARDDFDKFGHPEMGADLVTVEWLFVPGNAIYKRLTLRSEIHDTKIE"
+          }
+        },
+        {
+          id {
+            local str "Subject_18"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd17_copies6"
+                }
+              }
+            },
+            title "dd17_copies6"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 1182,
+            seq-data ncbieaa "TQDLKFTAFLSVELKTRQMTAEFASDEGQPDEDDNVYDHASDIQLLLC
+ENKCRRATVEAACLAAFFYALRIRNYALFAQGLRPRRKTSDLATNLAKIPKSATVLALTYFQLAAKDVDELSDLVLAE
+EQFALSKYFTSGGKVNITPQAEPKGRSKLVMSGVLQCHKLGQKMFPSVRGLNIQHMAILQALFQINGRKKLLKVFLKD
+ECRLPNPVSPKQMTASFMSDEGEPDSDDNADVHASDKALDLNENKCRRAFVESACSFAQYLVFRIRNYALHYEGLDPR
+TKTEAVHKWMLGSEEPLRTDEIISSAVIREIPSMSFSKLPGAKRPNKIEERLRLLKIQAISIGIAAGAAARDFLLIEY
+EVGKRIKEAVCPTLKLMLSVPVIMLIVYRNLIGDKGLNNFLCSPSYGQLRTTSIANSRAMACSFPMDEGQPDEPQNAD
+DSAVDKVLLLCENNCKRFTVEHACLAEMYLALRDRNHALGAQQLEPMVSFLLSQLYILSVIRFIKNNVWSLVALQIAN
+KHKQAFSKRLAHLSKNCKTISDESEKQKTKGATDLPRTISYPATLEIDGAAAENSAAKRSWWQPSAIGGAVVQQQSIH
+AWSANVTISPPMPTLILTFREQEDSSADAYVVVNQMWAFFAFMEGEPDEDNNACDHASHKVLLTCENKCKRDTGEAMC
+EALFFLALRCMFYALFAQGLRPSTKLGENECELGIIPEKKANQKLGLLLFFHELDHKDLIAVGDDLPNWPLALCIPAD
+AKVPRVIMTITIPFEYPEQGSNRALDSLDEIVIFEHISNYHLLHQKQMTARFVSDEGHISWPSNAFDIEPDKVLLLCW
+NKCKRATVHAAWLAAQYLALRISVDAAFAQGGGYRTKTNAEESIFASILQKSMDTFDLVAETGISRRVYDELRSGLHH
+FLSFQLACGVSNFVAAVASLSGSHTRVTHILDLSYAEKYGAEFFNLYCLEDLGLIFLVALYAVVWAFVASSALVIQTK
+RVERAVIPDGIHPIEVGAAKTEADKDGVNQMTASEASDEGQPDEDDQAADHASDKVFLYCETKCKRATVEAACLFAFY
+LALRIRFYALFAQGLRPRTKTAGCSVTYIAIFTPAAVLHPPELVFTRGKNEPQVARNPLFGIFYKRKNWLRLPDPTYP
+GKDCEIAVADARLQMSEDDRGDLVKRWLIQAKNQAENEKSIS"
+          }
+        },
+        {
+          id {
+            local str "Subject_19"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd18_copies1"
+                }
+              }
+            },
+            title "dd18_copies1"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 189,
+            seq-data ncbieaa "YGVGLELDRSPAAKSQMTAHFFIDEGQPDEDDNCDDRASDKNLLLTEN
+KCNRATYRAAQLAAQYLAKRGRNYFLFAEGLRPRTRTRYGVCLLLVGTSASKHAKQAEVVNGAQLCSNLVVAFQDIKA
+LNADLIMGGSLSLVRWTPSVAPTAYALELNYSEQLHQVIQLSPSIMEALTKASAPSPVDLRNA"
+          }
+        },
+        {
+          id {
+            local str "Subject_20"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dd19_copies2"
+                }
+              }
+            },
+            title "dd19_copies2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 454,
+            seq-data ncbieaa "GQNTVDKRATFIFMYLKECPLIIVTIKDGGRFKQYAAFLAGADRNAEA
+SFHQMTASFASDEGQPDRDDNADDHASDKVVLLCENKYTRMTIEAACLAAFYLALFIRNYALFAQGLRPRTKMERAQQ
+GYGIAQLAMKEGQASKAKPNPTALVGLTFVIDKMTRPGSVVEAKLKKAERDVKNQNNEIRQGCKLKGFLDQRSGLLQK
+SYDLWITDIKSSFLTPALSALAKSVERLHDASQLMAGVDLSDTTMSVHNESLVVMTCNIFENPQMTASMASDEGQPDT
+IHAAEDDASNWLLLLCHNKCYRARLEAYCAAIFIFALRKWNKMLFAQTLRPRTETENIRIHVAAHNAIDLINPMTQSI
+PPVVSSLWEAGEYVSLSGRKDACENIIEKWQWLNFNGHESYNVLKGQACRTIFDGLQTNVLHSGREEFNMVGLFKGQE
+RATESELMFTGGDYAF"
+          }
+        },
+        {
+          id {
+            local str "Subject_21"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">df00_frag"
+                }
+              }
+            },
+            title "df00_frag"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 212,
+            seq-data ncbieaa "GYMGPIQGGQQELPKLRFRTKTFSITFTKAEFAMTIWSSQSLVVLLFN
+SNYFEGRNDRTRYEVDLIHEFLRKALRAPAECVGIRAMDLSYPGEASSKEGIEDGFGFLNAIAYRENATAIRDKANNI
+LLGCSEMLTGAYYNTGASEQAQTEQGTASFASDRGQPDESDNASDEGSDLNHQFVEADTKRWTVEAACHAAVKEKEFK
+FYWDIFRG"
+          }
+        },
+        {
+          id {
+            local str "Subject_22"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">df01_frag"
+                }
+              }
+            },
+            title "df01_frag"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 231,
+            seq-data ncbieaa "PLNDLDTGRSELATKPRTKTDSITFTKAEFAMTIWSSQSLAVLLFNSN
+YFETRNDRTREMVDLIHEFLRKALRAPAECVGIRAMVLSYPHEASSKEGIEMGFGFLNAIAYRENATTIRDKANNILL
+GCSEMLTGAYYNTGAPEQAQTLQGTASFASDRGQPDESDNASDHASDLVAQFVEADCKRATVEAACHAAFYLALPIRN
+YALFAQGLRPRTAHSPSNDRHALVNFG"
+          }
+        },
+        {
+          id {
+            local str "Subject_23"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">df02_frag"
+                }
+              }
+            },
+            title "df02_frag"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 231,
+            seq-data ncbieaa "LNDQMTSHKLVTANQTAAEDKCAINVLLEQKMETPDDDGEEVESGPCT
+RMTQEDTSEDSNQGPSFMIMGFAQRARVSSVTGCMPTMVVTMRATLAAREGQPDEDDNQDDHASYKVNLLSEDSRAHA
+SKRAACLAAFYCALRDRNMAIFTQGLRPRTKTDSKTFTGAEFAQTIWSSSSTAVLLLGSNYFETRITRNNEMVDPGHD
+FLNKALRAPAECKKLLVYLRTESKGGQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_24"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">df03_frag"
+                }
+              }
+            },
+            title "df03_frag"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 245,
+            seq-data ncbieaa "AATTRFPKYARRQKMFLRKALRAPAECVGIRAMVLSYPHEASSKEGIE
+MGFGFLNAIAYRENATTIRDKANNILLGCSEMLTGAYYNTGAPEQAQTLQGTASFASDRGQPDESDNASDHASDLVAQ
+FVEADCKRATVEAACHAAFYLALPIRNYALFAQGLRPRTKTVDEDASVRLQTVTSTSVHIELDRNAQPERAQINKDLI
+KDDRVMRAIYFRFNRDYFWKNFAKNLRNIDEKHSRSLSSNT"
+          }
+        },
+        {
+          id {
+            local str "Subject_25"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">df04_frag"
+                }
+              }
+            },
+            title "df04_frag"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 250,
+            seq-data ncbieaa "MQVEGLESVPSKISEKACQGNLGMTLGGAYNGYEIILLNRESGTLGPL
+DARVFELVGKEILILKMDKETAAEVKRLINVLLEQKMPTPDDRGEEVESGPCTRWTLIDTSEDSNKGPMAMIAGFAER
+ARVPSRDGCMPTMVVQMRATLAASEGQPDMDDNDDDHASYKVLLLMEDKCKWATKEAACLAAFYLALRIRNYAIFAQE
+LRPRTKTDSITFTKAEFAMTIWSSQSLFVLLYGEDRTVLAAVVELG"
+          }
+        },
+        {
+          id {
+            local str "Subject_26"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">df05_frag"
+                }
+              }
+            },
+            title "df05_frag"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 230,
+            seq-data ncbieaa "LGSCVLDSLSRKPNEILRIRLCECVMKRFVLGLFEGMHRALFDIPVQE
+VLGQMTAYFASLEGQPDEFDNADDATSATVLLLMENKCKRTTQIAACNAAFYKALWIRNYALEALGLRPNDKTGGDLY
+DCASDGVLEEIRIRILKEILHILDDGIFHCFSTCSLFCHQYWDAKKVAPPAVKPGSVGYNNLPLERLTPATEVGTTDV
+LGGMEICNQESSTALSHQVKKANKPQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_27"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">df06_frag"
+                }
+              }
+            },
+            title "df06_frag"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 162,
+            seq-data ncbieaa "GPVWGEGKLPGVQKTRMTVIDTSEDSNQGPMAMIMGFAERNRVPSRWG
+CMPTMVVQMRQTLAASEGQPDEDDNADDHASYKVLLLMEDKCKRATKEAADLAAFYLALRERNYAIFAQGLMPETKTI
+SITWTKALFAMTIWSSQSLYVKALADLFMTDKPKET"
+          }
+        },
+        {
+          id {
+            local str "Subject_28"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">df07_frag"
+                }
+              }
+            },
+            title "df07_frag"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 234,
+            seq-data ncbieaa "GNVVSWIPKFTRELDQESKSEGVDEMEEAATPVACTVTCEINIRVELE
+QATRQMFSTFASDEGQNDEDDDADYHASDQVLLLCETKGKHKTVLAAVLAAFYLALRIRNYSVFAQGLRPRTKTDDGC
+QGVRGPFHFLNKKCQGNLGMTFTGLPPGYEHILLRRESGTLTPNIARVFQLVGCIILDLKFDGETAAEVKRLINVALE
+CKMYTPDDRGVKVESQSQEHGYDADTPEVV"
+          }
+        },
+        {
+          id {
+            local str "Subject_29"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">df08_frag"
+                }
+              }
+            },
+            title "df08_frag"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 161,
+            seq-data ncbieaa "SLSSKVFAKSIKETQATTIRDKANNIQLGCSEFLTGAYYNTGAPEQEQ
+TLQGQASFASDNGQPDESRNAFDHASFLVAQVVETDCKRATVEAACHAAFYLALPIRNMALFNQGLRPRTKTVDEDAS
+VRLFTVTSTSVHIELDRNAQNNTTPDHIITSGGWL"
+          }
+        },
+        {
+          id {
+            local str "Subject_30"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">df09_frag"
+                }
+              }
+            },
+            title "df09_frag"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 180,
+            seq-data ncbieaa "HEQLEWNKGKTPLQSTDQAGINKNAFRVYDEFSDVIVINGADPLLASR
+LIGNLLRILRIRLCECVMKRFVLGLFEGMHRALFDIPVQEVLGQMTAYFASLEGQPDEFDNADDATSATVLLLMENKC
+KRTTQIAACNAAFYKALWIRNYALEALGLRPNDKTGGDLFGTKALGRASASVLQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_31"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">db00_dom2"
+                }
+              }
+            },
+            title "db00_dom2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 193,
+            seq-data ncbieaa "PNEAFISEQVDEKNSSVLGDKSESYTGANVRRCGALQAILKAVENLEP
+DLDEALLAQVQHFQLKSREHQLEMGLGELPLTKMMGHQAYESKDTKECAFSFSVGSHLWTLQTSVLPRRNTGFKDAGT
+ALETAYYNGLILCRQRTGLLVAPIAPVTEVFNCEGGLNQGIIRMMQECFFHEAMLRLDITEGFVAVT"
+          }
+        },
+        {
+          id {
+            local str "Subject_32"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">db01_dom2"
+                }
+              }
+            },
+            title "db01_dom2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 343,
+            seq-data ncbieaa "SNMDPPALLEIPPDLVVRDRKAEHFIGANVARTDAQMASWQAVLPIEN
+DLQQAPPAEVQFFSLKGHETQLERGVGELPATKALGHVTAVPMTVKLKSGFQSKVGKTFSQAMISESFTSKMFDGAYE
+LCDTANDSLRQDTYQIYFRPYSNVTPEGALVDILIEVDECVEWTAEIQFDVPPLVCLNYEAGKPTYVATKFSSFIGAY
+VDRCDAQCASLQAVLHLEKDLQAAPPADVQFFQLKKRSTGLEMGVGELPLTKALGHLDDSFASTGVGEGMFLAFEKKP
+CLEPTLYTETKNETDTRRKIDIIIDIDCNDDINQAYFGVARDTHITVFPVCTIGDTGSIHR"
+          }
+        },
+        {
+          id {
+            local str "Subject_33"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">db02_dom2"
+                }
+              }
+            },
+            title "db02_dom2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 543,
+            seq-data ncbieaa "ASKLKKVDIPVTSNLCLDARFAKSFSSANVAQCDAQMAHKKAVANTEK
+DLQAAPPADVQIFQHKKTNTQAEMGVGESPLTKAPGHHAEDSVQVYFRTADKKLTQLDDALVAELEYLCSGNAFEKYL
+DDPVAVSLYLFETCTFREPGTYPELQLIRAIVLDYRSIEELQKAESFIQANVARCDAQMAELQFVVYLEKDLRAAAPA
+DVQFAQLKKRDTQLEPGVGELPLTKAKGHRFVMTFSSLVPEEGLCQVPDYDDISVKVVRDFIIAHVPDFYVFVHGGGF
+FAGAELAEPGLIKAPSKLPSMPSVKILTTIREPDGVFAAQDHMEASATFASRYKAESCIGANVARCNEQMASLSAVLN
+LEKDFQAAPPACVQFFQLKKREGQLEMDVGELPLTKALGHNGTNGYQEQGIPELNIISLNYKRTVSLREEMALQCNAA
+AVFKRTESSLDSSDAHHRDGGWLEDGNVEAGAPIYAIFRQLAESSVVPTAPPAFVGFLFHLLDRVFKVYTDMTNALIA
+IVKRVTSLAEVAGLKGLDAKRWFVLPR"
+          }
+        },
+        {
+          id {
+            local str "Subject_34"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">db03_dom2"
+                }
+              }
+            },
+            title "db03_dom2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 780,
+            seq-data ncbieaa "DVAPEPRLLVGNSMVCVGQREAESFIGANVRRCDMLMASLQAVLNLHK
+DLQRAPPADVGFFQLKKRLTQLEMGVGELPLTKALGHSGETHKAHSSEFDVRNIGQMEHRLFHTFESGNAEGSLDYVM
+WKLTARRTGDTPMIVFHIVKPLLNIDAVSPAMYYSKLEGCGASKSATQALAWIIASQRSLSKQITTSTPWVTVWRDRM
+DYISVSPTLLRAGIVLVTTKRYFIAESFDGANVARHDAQMQSIQVVLNQAKDLQAPPPKNVIFSQLKKRETQIEMDVG
+ELPRTKACGHDVNDSIRLDTEMKPRSTAIPKVYEIGPERDTWTQDINSDAASLMPHGHIFDRASLLCSNKTRSVRELT
+IHVRNKQGGEMKPMDPRDRVDRIGGGTNENEGLITHAIGAGVVAVDALQQSKFKPAKAESFIGANQARCDAQLASCQA
+VLNLEKDLQAAFPADVQFFQLKKRKTQLEMGGGELPLTKAKGHVQALINHGSSLGTLSAASPQYTVLLYPNVVINSLR
+GLWIHPPKSEVDVSLGISSARATHAAGLQLAVSTVQLRLAATALLSASVDMFAEVILYLEAGMSVVSIELHLDQSSAK
+HTDGEIVLKRKVIALSEPVERLIEDKAESFIGANVARCDQVMASLQQVLNLEKILLGAPPADWTFFQLKFREQQPEMG
+VGESPLTRALYHELLKSILSSNKLGPGHDPLLRLPLGAAYRGGKTVVIFNAQKMKIKIMNAMETNAVKYEVGITGDSD
+EYHHFTAEFEIATDRDHFYDLKNIRPPAVI"
+          }
+        },
+        {
+          id {
+            local str "Subject_35"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">db04_dom2"
+                }
+              }
+            },
+            title "db04_dom2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 218,
+            seq-data ncbieaa "VIKVWSHPLATVSQMLLIAMKAESFIGHNVAVCDAEMAYLQQCARLEK
+DLLAAPCAGVQFFVHWLRETQYTMGKGEGPLNKALGQDYEDQPLSINDYLKYHEVPVQKTDVNVDLSPLFMFNLVCGR
+IHLKDYRYWVMQSNGSSPYQFLKFYQVVLQTGHPPDDRAEKPYGPDTQEHILQHELGTVKNEQMLGARGELLIFDSMS
+WDVVNSAISPKGVG"
+          }
+        },
+        {
+          id {
+            local str "Subject_36"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">db05_dom2"
+                }
+              }
+            },
+            title "db05_dom2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 310,
+            seq-data ncbieaa "DNGFRGSSFERTGGRASERNSAEMFTGANIARCLAFMASLQAVLNEEK
+NLQAGPPADVQFFQLKKGEYQLEMGVGHLPLTKALWHVADIPGKLKHTGADIATVNLALECAAKAMPAFSTDGENHRD
+KNHLAKELKHAVIGHRFSDIQATKKASEFSNSAYLERTSKASSFILANHATCDTHMASLQAVLNLNKDLQAAPPEDKT
+FFMLQDREYDLEYSVGELPRTKAEGHRNIYVTSPLYGAWFVLKGSNILGIPRKKIKHLTEGESAILLNCWFKPFLSLH
+HDTEHLGVQELSAVAKWCWAAARTRREV"
+          }
+        },
+        {
+          id {
+            local str "Subject_37"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">db06_dom2"
+                }
+              }
+            },
+            title "db06_dom2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 567,
+            seq-data ncbieaa "NKAETDVSPAAEIQAIQSHAKAENFIGMNVARMDDQAASLQAILWLEK
+DLQAAPPHDVQFFQLEKRNTQLEMGVGELPLTKAIGHLDKLFTMVVVPRVRLRKLAASYRALKRDAEVRVHLHGAWVQ
+LLSKTAPKRKLGITGVVHAESLLSRAAHMVKDNEVPPVEDVRCEKLRELVDVGKAESFFGANVARCDAQMDSLQAVLN
+LEKDLQAAPPADVQFFQLKKRETQLEMYVGTGPLTKALGHIVGMNLDCELREGTLVTNEARDFVLHFKIIHRFGKLSK
+EEMSQMVIVPSQLREMFYENHLGVVSNAAGSYIGCVFGNHWYLEGRGIPSEMIGEFGLWTTARSAEDESYQYSKAESF
+IGANVARCDAQMASLQAVLNLPKDLQAAPPADVQFTQLKKRETQLEMGVGELPLYLALGHRTDVVVKFLPPEFPLSSI
+HQNGFIFQIKTDEGTEGLARQLDQKYSFTDQGVNAEPEASVIRIGFLATYRLELWFAGVIRYTITGSIDIRNASSTIF
+RGEVTLRIIWGERQDDGIRFIQQVEGERFRDKRKIDDFLGAILKYQITQPE"
+          }
+        },
+        {
+          id {
+            local str "Subject_38"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">db07_dom2"
+                }
+              }
+            },
+            title "db07_dom2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 730,
+            seq-data ncbieaa "PELADAMAFSMSLKILTEMDGAESFEGHNNARCLKQMASLQAVLNDEK
+DLEGAEPARVFFFQLKKRVEQLEMGVGEILLTKALGHGCLADDLNIATDFTRRMPSMDLFEQLALQAEGNKFKPEDNN
+YVGFAYPFVEASHSTLDNPLITTISNARGDFSQAKLLLIEFLGMRKRIAEEEKIQTGMPNTFEEFQVAGDTYHLSGVE
+VLLPTEEAVVTQSHADTKADSEIGANVANCDAAMAILGAVLNDTKDNQATPPAFVQFRQLKKRETWAEMGVGELPLTD
+TLGHQDVSIKNEERVMFLSELVVSVELNLYIADAERAARFLHGWISNYVIRPGKLWQERQKQSPNLELKDIILAIVYL
+ADVATDLATKAESFIGANVAFCDAQMASIQAVLNLEKQLWAAPPADVQFFPLKKRETQLEMGVGELPLTKALGHMQFS
+LSNSSLENLAFPRRGYNKLLGRQTDIKPIFRVTEYEGNGGNSDAGSTITAKWTEGLQYVPLLVGLRRIGVKIKSLNNV
+YTLSVSVMSKAESFIGACVARCDIQMASLQAVLNLEKDLQVAPPADVQFFQLKKRETQLEMGVGELPLTKALGHKARL
+ASPVFEHVPEGYVKGLKGLVADTPHPPSNTEGPLGTEAEIIYSYETLIQFPYPNFLSSSVDLIPGLYNVVFKATCEVP
+FIDLQYIRRLPTQNRAESFFGLYQIRGVFHPWPTCRVLRTALIDCQLIKVKKETSKKK"
+          }
+        },
+        {
+          id {
+            local str "Subject_39"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">db08_dom2"
+                }
+              }
+            },
+            title "db08_dom2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 228,
+            seq-data ncbieaa "NMLSKWAQDLAIDNAVYAGEIAQSPINANVPPCDNQMASLQNPLVDEK
+DGQAAPPNDVKFYQLKKRETQLEMGVGIETLTCLLAHDFLFFMIIRHLSPKTEDLGEEVDSTDNQIAARNIAGIPTAT
+QYSGDVIIPVPLHVSELDNVLRFTGLKPIELEVMAALFKGHIFLYDITVKLHVISRQLVPAKAAPRSEGKTRFNEELV
+LLLYLGTNQNEMESSSEFNSIDGK"
+          }
+        },
+        {
+          id {
+            local str "Subject_40"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">db09_dom2"
+                }
+              }
+            },
+            title "db09_dom2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 399,
+            seq-data ncbieaa "VLEQYPRPQDTNLKAVGIARKLEVFFMAFRAREDAQMASMQAVLNLEK
+DLKAAPPKDVQFFELLKRETQLEMGHLELPWTKMMGHSDAPKEDDSSAMLDGTLTDGTQSCEFARLEATFCGLKYIQR
+SSLDALDFDYVRKGRQNPYADLENVPITDLDNGPFEKDMCYLKEQRSPIHSALYIGISLQRLVLTDDNNSPYMPLILD
+GLIVTRKVITEKAESFLGANEARCDAQMASLQAVLNLEKDLQAACPADVQWVQLKKRETQLEMGVGELPWTKALGVAG
+SKSLPGVLGRYGELNVKQATACNSHNDTLGKIQGIVFVVLMPLGYRATDQHSLPIVFDILGLSTLSDMILVFNLEAED
+GGVGVRPNIDGKVPEKLRYVLRPFEVEARASIYPGLAVK"
+          }
+        },
+        {
+          id {
+            local str "Subject_41"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dr00_random"
+                }
+              }
+            },
+            title "dr00_random"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 251,
+            seq-data ncbieaa "TVRAPTFCRSWEEHWKELICANHPCTVQLELRDVGEVPLVLLLSLSVN
+YLMPHAQQHADPEICDISPASNDMLVMKLIAQLIALDRMEMDANRGRKRKLLRMPDWGFMMPDIAKLFLGKQLDAKND
+SGLALLPAESCYSHNVDYLLTPGQQKNAHECWINTCFGKLTFTPEKDIFRKNFEKSTIPQLNMKRVRHVSLASPAFND
+NNDEPIDRQQVQIQISRTSVDQKTLAFGKLVRTCKQWEKVKSSGDTR"
+          }
+        },
+        {
+          id {
+            local str "Subject_42"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dr01_random"
+                }
+              }
+            },
+            title "dr01_random"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 380,
+            seq-data ncbieaa "LQVDRAQLKGMSALSGTVCPKMENVTHLDIHEDELRSALKLRNVCAWG
+AWKAPMRDNAELLVAIITKKRDFKDRSFNDGTMEIQVKSPEAGRYGSLNSKTQGDHGITSKDSLRQNGTSPAVDSCKF
+LNLATMEEHPAGCAVRLKGEFHLTSLAEDETGKEMKAEASSMPTAAVHDQKGGVKKKLSANARSKSMIEEDHDDYSDG
+LVEEVWLKSFDSSSQEQGQVIGTDEYRARLLDEITARVEVGPESILRKHSKKSTQGYYVEDAFAAERGESQLLELESE
+YRKLNDYIEAALETSGVTTPITRHEKPRFANASNGDQEEGLKMYVRTGYLLPGKTKCLDDVVPAGLLLSAGIMKVRGA
+AYTLKSDRDTEEGITRIVQT"
+          }
+        },
+        {
+          id {
+            local str "Subject_43"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dr02_random"
+                }
+              }
+            },
+            title "dr02_random"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 152,
+            seq-data ncbieaa "EYTAHVSQLGVAHADLCISEMYTVGSQQLHARTDRPQLLRPHVDMLYF
+VTPRVNDFTAKTLKLRLGVSQDGATGNDSIARAPAGQVKHRSPSDLGSLTAALLDMCFESIDINPYYNYVWSLNRYIM
+MGELGAEDLAVVGVWTTKEKAVYEVK"
+          }
+        },
+        {
+          id {
+            local str "Subject_44"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dr03_random"
+                }
+              }
+            },
+            title "dr03_random"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 231,
+            seq-data ncbieaa "LIVLSYAILSQSQGEIEVDRSFDVDNGSADGNYQEEVYDGYKEKGSMR
+SYAEEFKLVAGIYEKNQERITPYAFGLNLILAQLSAFVALRAFFGWLPRSVTEKRILKFLSRVHMFKNRAQPTPHTIA
+RRRRHGNQKAKVNIHVPHPTVNYGAQEKLMLTVFITVLLAFDATVNEEGFKYGDPRATEKKGQDGLQWSFKAAGDPGP
+VELNLQAKPAETYEILDQLEGATDKLQ"
+          }
+        },
+        {
+          id {
+            local str "Subject_45"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">dr04_random"
+                }
+              }
+            },
+            title "dr04_random"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 214,
+            seq-data ncbieaa "VNNYITIKAYETRYAEDNSPYSTIDWKAGPDTKHAYAVEVSSLALGTK
+SKYTEKEVSLCESAVKVIIDHAKANPYELRGYQEWAAEKNELGELVNGIGLDSGRARASSLDEGCNQDHSDPNLHDAN
+SALFPLPIQEWTWRRIGDALSRLPNMHVEVIPKYVPYRLEEISTMTGKRRSRNDYEFRSYITPGKAVAFAGNMREYLR
+FRLEHVPAGQ"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "Culling",
+          value integer 1
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 16176468
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 1155
+          },
+          {
+            id str "blast_score",
+            value int 1155
+          },
+          {
+            id str "e_value",
+            value real { 904724062272, 10, -166 }
+          },
+          {
+            id str "bit_score",
+            value real { 449513742464587, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 215
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 215
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 222391304347826, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_24"
+          },
+          starts {
+            697,
+            15
+          },
+          lens {
+            215
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 1101
+          },
+          {
+            id str "blast_score",
+            value int 1101
+          },
+          {
+            id str "e_value",
+            value real { 510869292008317, 10, -161 }
+          },
+          {
+            id str "bit_score",
+            value real { 42871296536505, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 202
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 207
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 221380182002022, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_26"
+          },
+          starts {
+            136,
+            15
+          },
+          lens {
+            214
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 989
+          },
+          {
+            id str "blast_score",
+            value int 989
+          },
+          {
+            id str "e_value",
+            value real { 501254071773128, 10, -144 }
+          },
+          {
+            id str "bit_score",
+            value real { 385570612862306, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 199
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 209
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 237558139534884, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_25"
+          },
+          starts {
+            449,
+            9
+          },
+          lens {
+            230
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 945
+          },
+          {
+            id str "blast_score",
+            value int 945
+          },
+          {
+            id str "e_value",
+            value real { 756373369940451, 10, -138 }
+          },
+          {
+            id str "bit_score",
+            value real { 368621831521943, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 184
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 189
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 212280080889788, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_28"
+          },
+          starts {
+            332,
+            14
+          },
+          lens {
+            205
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 277
+          },
+          {
+            id str "blast_score",
+            value int 277
+          },
+          {
+            id str "e_value",
+            value real { 142984824176013, 10, -41 }
+          },
+          {
+            id str "bit_score",
+            value real { 111308514809151, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 106
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 137
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 229469160768453, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 15,
+          ids {
+            local str "Query_1",
+            local str "Subject_11"
+          },
+          starts {
+            20,
+            15,
+            -1,
+            87,
+            92,
+            89,
+            -1,
+            109,
+            112,
+            112,
+            -1,
+            120,
+            120,
+            130,
+            -1,
+            136,
+            126,
+            138,
+            -1,
+            144,
+            132,
+            146,
+            -1,
+            160,
+            146,
+            170,
+            169,
+            -1,
+            171,
+            193
+          },
+          lens {
+            72,
+            2,
+            20,
+            3,
+            8,
+            10,
+            6,
+            2,
+            6,
+            2,
+            14,
+            10,
+            23,
+            2,
+            71
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 320506072381069, 10, -15 },
+        k { 135036272049748, 10, -15 },
+        h { 399940829745253, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 16176468",
+      "Effective search space used: 16176468",
+      "Length adjustment: 65"
+    }
+  }
+}

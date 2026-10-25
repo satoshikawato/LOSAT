@@ -106,8 +106,8 @@ Each release from v0.2.0 provides eight items on the [Releases](https://github.c
 | macOS arm64 | `aarch64-apple-darwin` | `.tar.gz` | `losat` |
 | macOS x86_64 | `x86_64-apple-darwin` | `.tar.gz` | `losat` |
 | Windows x86_64 | `x86_64-pc-windows-msvc` | `.zip` | `losat.exe` |
-| WASI serial | `wasm32-wasip1` | `.wasm` | `losat.wasm` |
-| WASI threads | `wasm32-wasip1-threads` | `.wasm` | `losat.wasm` |
+| WASI serial | `wasm32-wasip1` | `.tar.gz` | `losat.wasm` |
+| WASI threads | `wasm32-wasip1-threads` | `.tar.gz` | `losat.wasm` |
 | Source crate | n/a | `.crate` | n/a |
 
 LOSAT is not published on crates.io, Homebrew, PyPI, Docker Hub or npm. Bioconda (above) is the only package-manager channel.

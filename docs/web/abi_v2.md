@@ -173,11 +173,15 @@ the WASI imports.
   stream 1) while the second search runs (measured: +21.7 MiB on 142.6 MiB for BLASTN of Sakai against EDL933 with
   `-num_alignments 3`).
 - A search of a two-search run that fails before it has written a byte of its formats does not fail the run when the
-  other search succeeds: the options' checks reject its hit list size, as the CLI rejects that format alone. This
+  other search succeeds, but only when the options' checks reject its hit list size, as the CLI rejects that format
+  alone: for BLASTN the checks of `validate` for that search's formats fail (`check_scoring_for_formats`), for the other
+  programs the search's hit list size is 0. This
   is `-num_alignments 0` for the tabular formats (NCBI's error `BLAST query/options error: No hits are being saved`
   for `-outfmt 6` and `-outfmt 7`, while `-outfmt 0` keeps its size, 500 or `-num_descriptions`), and for BLASTN's format
-  0 a `-num_descriptions` of 2^30 or more (the preliminary hit list size overflows; LOSAT's error, where NCBI
-  crashes), while the tabular formats ignore `-num_descriptions`. The streams of the failed search's formats stay
+  0 a `-num_descriptions` of 2^30 or more (the preliminary hit list size overflows; LOSAT's
+  error, where NCBI crashes), while the tabular formats ignore
+  `-num_descriptions`. Any other error of a search, for example a thread pool that cannot start, fails the run, as it
+  did when the search was alone. The streams of the failed search's formats stay
   empty; if it is the tabular search there are no HSP records (stream 1), else the records have no `out0`. Stream 3 is
   the CLI's standard error for the tabular formats (the tabular search's warnings, and NCBI's error when it failed)
   followed by the CLI's standard error for `-outfmt 0` (the format 0 search's warnings, and its error when it failed):

@@ -101,13 +101,11 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
                 parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTN")
                     .map(|_| ())
             })
+            .map_err(|error| format!("{error:#}"))
             .and_then(|()| {
                 let mut first_error = None;
                 for group in &groups {
-                    let outfmts: Vec<i32> = group.iter().map(|&format| format as i32).collect();
-                    match LOSAT::algorithm::blastn::scoring::check_scoring_for_formats(
-                        &args, &outfmts,
-                    ) {
+                    match blastn_group_check(&args, group) {
                         Ok(()) => return Ok(()),
                         Err(error) => {
                             first_error.get_or_insert(error);
@@ -115,8 +113,7 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
                     }
                 }
                 first_error.map_or(Ok(()), Err)
-            })
-            .map_err(|error| format!("{error:#}"))?,
+            })?,
         Commands::Tblastx(args) => subject_range(args.subject_loc.as_deref(), "TBLASTX")
             .and_then(|()| LOSAT::algorithm::tblastx::blast_engine::check_options(&args))
             .map_err(|error| format!("{error:#}"))?,
@@ -129,6 +126,39 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         _ => {}
     }
     Ok(())
+}
+
+/// BLASTN's checks (`check_scoring_for_formats`) for the search of the output formats `group`,
+/// whose hit list size is the one the CLI derives for them. `validate` runs it for each search
+/// of a run, and `run` asks it which search is rejected (`group_rejected`).
+fn blastn_group_check(
+    args: &LOSAT::algorithm::blastn::BlastnArgs,
+    group: &[u32],
+) -> Result<(), String> {
+    let outfmts: Vec<i32> = group.iter().map(|&format| format as i32).collect();
+    LOSAT::algorithm::blastn::scoring::check_scoring_for_formats(args, &outfmts)
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// Whether the options' checks reject the search of the output formats `group`, as the CLI
+/// rejects those formats alone because of their hit list size: BLASTN's checks fail
+/// (`blastn_group_check`: a hit list of 0, or a preliminary hit list size below 1), or, for
+/// the other programs, the hit list size is 0. `run` tolerates a failed search of a
+/// two-search run only for this reason (`fails_run`).
+fn group_rejected(command: &Commands, group: &[u32]) -> bool {
+    match command {
+        Commands::Blastn(args) => blastn_group_check(args, group).is_err(),
+        _ => hit_list_size(command, group[0]) == 0,
+    }
+}
+
+/// Whether the failure of one search fails the run. A failed search of a run of two
+/// searches is tolerated only when it wrote no byte of its formats and `rejected` says that
+/// the options' checks reject its hit list size (`group_rejected`); any other error (for
+/// example a thread pool that cannot start) fails the run. When the other search fails too,
+/// `run` fails with the tabular search's error.
+fn fails_run(failed: &Failed, rejected: bool) -> bool {
+    failed.wrote || !rejected
 }
 
 /// Records the byte range of every HSP row (stream 6) and section (stream 0), and of
@@ -546,12 +576,15 @@ fn link_format0(
 /// only where the search of format 0 has exactly its HSPs (`link_format0`)
 /// (docs/web/abi_v2.md §5, §7, §8).
 ///
-/// A search of a two-search run that fails before it writes a byte of its formats (the
-/// options' checks reject its hit list size: `-num_alignments 0` for the tabular formats,
-/// a `-num_descriptions` of 2^30 or more for BLASTN's format 0) does not fail the run when
-/// the other search succeeds, as the CLI fails that format alone: the streams of its
-/// formats stay empty (with no tabular search there are no records). Both searches failing
-/// fails the run, as the CLI fails every format; so does a failure after a byte was written.
+/// A search of a two-search run that fails before it writes a byte of its formats, and
+/// that the options' checks reject because of its hit list size (`group_rejected`:
+/// `-num_alignments 0` for the tabular formats, a BLASTN `-num_descriptions` of 2^30 or more
+/// for format 0), does
+/// not fail the run when the other search succeeds, as the CLI fails that format alone: the
+/// streams of its formats stay empty (with no tabular search there are no records). Any other
+/// error of a search (for example a thread pool that cannot start) fails the run, as does a
+/// failure after a byte was written; so do both searches failing, as the CLI fails every
+/// format.
 ///
 /// Stream 3 is the CLI's standard error for the tabular formats (the tabular search's
 /// diagnostics, with its error when it failed). When a search failed it is followed by the
@@ -572,6 +605,9 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
             None => parse(words)?.1,
         };
         let mut scratch = Vec::new();
+        // Whether the options' checks reject this search, found before `search` takes the
+        // command.
+        let rejected = group_rejected(&command, group);
         // The warnings of the first search include the reader's and the queries' warnings
         // that the next searches repeat; the CLI writes them once.
         let result = if outcomes.is_empty() {
@@ -580,7 +616,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
             search(command, group, query, subject, &mut scratch)
         };
         if let Err(failed) = &result {
-            if failed.wrote {
+            if fails_run(failed, rejected) {
                 return Err(failed.message.clone());
             }
         }
@@ -1223,6 +1259,43 @@ mod tests {
         let both = [&words[..], &["-num_alignments", "0"]].concat();
         assert!(run(&both, &query, &subject).is_err());
         assert!(validate(&both).is_err());
+    }
+
+    // The tolerance of a failed search is the options' checks' rejection of its hit list
+    // size and nothing else: any other error (a thread pool that cannot start, which a real
+    // run cannot trigger cheaply: the pool is built by the engine from the host's threads)
+    // fails the run, as does a failure after a byte was written.
+    #[test]
+    fn only_a_rejected_hit_list_size_is_tolerated() {
+        let failed = |wrote| Failed {
+            message: "failed to build blastn pool with 4 threads".into(),
+            cli_stderr: Vec::new(),
+            wrote,
+        };
+        assert!(fails_run(&failed(false), false));
+        assert!(fails_run(&failed(true), true));
+        assert!(fails_run(&failed(true), false));
+        assert!(!fails_run(&failed(false), true));
+        // The predicate is the options' checks': rejected for a hit list of 0 and for the
+        // overflow of N + 50, not for 2^30 or any other size the CLI accepts.
+        let command = |extra: &[&str]| {
+            let words = [
+                &["blastn", "-query", "q", "-subject", "s", "-task", "blastn"][..],
+                extra,
+            ]
+            .concat();
+            parse(&words).unwrap().1
+        };
+        let rejected = |extra: &[&str], group: &[u32]| group_rejected(&command(extra), group);
+        assert!(rejected(&["-num_alignments", "0"], &[6, 7]));
+        assert!(!rejected(&["-num_alignments", "0"], &[0]));
+        assert!(rejected(&["-num_descriptions", "2147483598"], &[0]));
+        assert!(!rejected(&["-num_descriptions", "2147483597"], &[0]));
+        assert!(!rejected(&["-num_descriptions", "1073741824"], &[0]));
+        assert!(!rejected(&[], &[6, 7, 0]));
+        let blastp = parse(&["blastp", "-num_alignments", "0"]).unwrap().1;
+        assert!(group_rejected(&blastp, &[6]));
+        assert!(!group_rejected(&blastp, &[0]));
     }
 
     // Observer events that break the formatter contract fail the run instead of

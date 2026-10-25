@@ -4420,7 +4420,22 @@ Scheduling (each value computed by one thread with the original function; order 
   itself, `BTreeSet` drops, `memcpy`, `malloc`); the lists-plus-indexes form is within 0.02 % of the base there,
   with the switch on and off. Conditional: the new side is a match where some query's list reaches 32 alignments
   (`x_reach!`, once per match), the reference side one where none does.
-  MEASURED
+  Measured 2026-10-25 on the workstation (2x Xeon Gold 6338, cores warmed 3 s before each run, pairs alternating
+  in order, `perf stat` walls; base 51234c2a; every output of a case the same bytes in every arm; tblastn options
+  `-evalue 1e-5 -max_target_seqs 5 -outfmt 6`). Round 1, this pull request's first form ca0688e1 (the same index;
+  every query's list wrapped in a 128-byte set): the first batch of HsG_b4 (35 human proteins x `-db hsap_dna`,
+  396 matches) at 8 threads 330.8 -> 204.0 s (x0.619, 3 pairs, node 0 cores 8-15 with their siblings idle, load
+  9-58; user 2,358 -> 1,477 s, instructions x0.934), at 16 threads 278.4 -> 185.4 s (x0.670, 3 pairs, node 1), at
+  32 threads 269.3 -> 173.6 s (x0.650, 3 pairs, node 1); with `TBNREDOLPT` allowed up to 64 threads, 32 threads
+  ran x0.991 against this form (3 pairs), so its limit of 16 stays. Matches with few HSPs (node 1, 8 pairs at 8 /
+  16 threads): 16 proteins x E. coli x0.991 / x1.001, fly proteins x 5,000 16S x1.008 / x1.001, the same around fly
+  2L (`-subject`) x0.998 / x1.006, against the fly genome x1.007 / x1.009, one protein against the zebrafish genome
+  x1.001 / x0.992, instructions x1.0000 in every case. blastx of 50 kb of fly 2L x fly proteins (`-db`) at 8
+  threads x1.000 (8 pairs). Round 2, the head 87dbbb02 (node 0 cores 16-23, load 30-89 while another gate ran):
+  the 35 proteins at 8 threads 359.7 -> 209.4 s (x0.587, 3 pairs); blastp WSSV x PajaWSV at 1 thread x0.997
+  (8 pairs), instructions x1.0001 (`=0` x1.0000; the first form +0.27 %); the blastx case x0.990 (8 pairs),
+  instructions x1.0000; at 1 thread 16 proteins x E. coli and fly proteins x fly genome 81.420 G / 127.235 G
+  instructions in all three arms (base, default, `=0`). Max RSS within 3 % of the base everywhere.
 - `LOSAT_X_TBNKEEPFEW=1` tblastn (memory; in the strict set from the pull request that added it,
   2026-10-19, with `TBNFRAMEREUSE`; `=0` turns it off; `tblastn/search_seed.rs`
   `XSubjectSide::kept_within_threads`, `tblastn/stage_d_pipeline.rs` `x_searched_side_by_side`): a

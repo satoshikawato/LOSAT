@@ -850,6 +850,8 @@ pub(crate) fn x_try_build_flat_compressed_lookup(
 /// PROBE (v4-BPF K2-2, not for merge): the arm of `LOSAT_BPF_FILL` (0 = the current fill).
 /// 1 / 2 / 3 / 4: the partitioned fill with buckets of 2^12 / 2^10 / 2^14 / 2^8 cells;
 /// 5 / 6 / 7: its second form (`x_try_build_flat_part2`) with buckets of 2^10 / 2^12 / 2^11 cells;
+/// 10: the third form (`x_try_build_flat_part3`), 2^10, the move to the scan order as in the second;
+/// 11 / 12 / 13: the third form with the scan position computed in the fill, 2^10 / 2^11 / 2^12;
 /// 8: the current fill through this wrapper (its time with `LOSAT_BPF_FILLT`); 9: arm 1 checked
 /// against the current fill (panics on a difference).
 /// `LOSAT_BPF_FILLT=1` prints each build's phase times to stderr.
@@ -897,11 +899,15 @@ fn x_bpf_fill_probe(
     let mut appends = 0usize;
     let part = if arm == 8 {
         None
-    } else if (5..=7).contains(&arm) {
+    } else if (5..=7).contains(&arm) || (10..=13).contains(&arm) {
         let f = match arm {
             5 => x_try_build_flat_part2::<10>,
             6 => x_try_build_flat_part2::<12>,
-            _ => x_try_build_flat_part2::<11>,
+            7 => x_try_build_flat_part2::<11>,
+            10 => x_try_build_flat_part3::<10, false>,
+            11 => x_try_build_flat_part3::<10, true>,
+            12 => x_try_build_flat_part3::<11, true>,
+            _ => x_try_build_flat_part3::<12, true>,
         };
         f(
             word_size,
@@ -990,6 +996,244 @@ fn x_bpf_same_builds(got: &Option<XFlatBuild>, want: &Option<XFlatBuild>) {
         }
         _ => panic!("BPF_FILL: the builds differ in kind"),
     }
+}
+
+/// PROBE (v4-BPF K2-2): `x_emission_position` with selects instead of branches.
+#[inline(always)]
+fn x_emission_position_sel(k: u32, n: u32) -> u32 {
+    let k3 = k.wrapping_sub(3);
+    let g1 = (k3 >> 2).wrapping_add(1);
+    let s = k3 & COMPRESSED_HITS_CELL_MASK as u32;
+    let general = if g1 == n >> 2 {
+        3 + s
+    } else {
+        n.wrapping_sub(4u32.wrapping_mul(g1)).wrapping_add(s)
+    };
+    if n <= COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 || k < 3 {
+        k
+    } else {
+        general
+    }
+}
+
+/// PROBE (v4-BPF K2-2): the third form: the second form's allocations and constant shift with the
+/// histogram as its own pass over `targets` (as the first form); with FUSE each append is written
+/// at its scan-order slot (`x_emission_position_sel` of its rank and its cell's count) in the fill,
+/// without the move over the cells of more than 5 offsets.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_try_build_flat_part3<const SHIFT: u32, const FUSE: bool>(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+    phases: &mut [u64; 3],
+    appends_out: &mut usize,
+) -> Option<Option<XFlatBuild>> {
+    let t0 = std::time::Instant::now();
+    let header = match XHeader::new(word_size) {
+        Some(header) => header,
+        None => return Some(None),
+    };
+    let matrix = match build_blosum62_compressed_score_matrix(header.alphabet) {
+        Some(matrix) => matrix,
+        None => return Some(None),
+    };
+    let info = CompressedNeighborInfo::new(&matrix, header.alphabet);
+    let words = XWords::new(&header, scaled_threshold, &matrix, &info);
+    let backbone_size = header.backbone_size;
+    let max_appends = x_max_appends(backbone_size);
+    let offset_bits = usize::BITS - query.len().leading_zeros();
+    let cell_bits = usize::BITS - (backbone_size - 1).leading_zeros();
+    if offset_bits + SHIFT > 32 || cell_bits.saturating_sub(SHIFT) > 16 {
+        return None;
+    }
+    let buckets = backbone_size.div_ceil(1 << SHIFT);
+    let mask = (1u32 << SHIFT) - 1;
+
+    let mut starts = vec![0u32; backbone_size + 1];
+    let ranges = x_count_ranges(tables, locations.len());
+    let mut targets: Vec<u32> = Vec::new();
+    let mut per_offset: Vec<(i32, u32)> = Vec::new();
+    for (range, is_table) in ranges {
+        let range_start = targets.len();
+        let mut too_large = false;
+        let mut decline = false;
+        x_for_each_offset(word_size, query, &locations[range], |offset, word| {
+            let before = targets.len();
+            words.for_each_word(word, &mut targets);
+            let appends = targets.len() - before;
+            if appends != 0 {
+                per_offset.push((offset, appends as u32));
+            }
+            if targets.len() > max_appends {
+                too_large = true;
+                return false;
+            }
+            if is_table && targets.len() - range_start > overflow_cell_capacity {
+                decline = true;
+                return false;
+            }
+            true
+        });
+        if too_large {
+            return Some(Some(XFlatBuild::TooLarge));
+        }
+        if decline {
+            return None;
+        }
+    }
+    let n = targets.len();
+    *appends_out = n;
+    let t1 = std::time::Instant::now();
+
+    let mut bucket_starts = vec![0u32; buckets + 1];
+    for &index in &targets {
+        bucket_starts[(index >> SHIFT) as usize + 1] += 1;
+    }
+    for b in 0..buckets {
+        bucket_starts[b + 1] += bucket_starts[b];
+    }
+    let pv_known = ilog2(backbone_size / (8 * X_TARGET_PV_BYTES)) == 0;
+    let mut pv = if pv_known {
+        vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1]
+    } else {
+        Vec::new()
+    };
+    let mut hits = vec![0i32; n];
+    {
+        let mut cursors = bucket_starts[..buckets].to_vec();
+        let mut at = 0usize;
+        let out = hits.as_mut_ptr();
+        for &(query_offset, appends) in &per_offset {
+            let high = (query_offset as u32) << SHIFT;
+            let end = at + appends as usize;
+            for &index in &targets[at..end] {
+                let cursor = &mut cursors[(index >> SHIFT) as usize];
+                // SAFETY: bucket b's cursor runs from `bucket_starts[b]` over its appends, which
+                // the histogram counted, so it stays below `bucket_starts[b + 1] <= n`.
+                unsafe { out.add(*cursor as usize).write((high | (index & mask)) as i32) };
+                *cursor += 1;
+            }
+            at = end;
+        }
+    }
+    let t2 = std::time::Instant::now();
+
+    let mut cursor = vec![0u32; 1 << SHIFT];
+    let mut rank = if FUSE { vec![0u32; 1 << SHIFT] } else { Vec::new() };
+    let mut overflowed: Vec<u32> = Vec::new();
+    let mut appended: Vec<i32> = Vec::new();
+    let mut nonempty_count = 0usize;
+    let mut longest_chain = 0i32;
+    for b in 0..buckets {
+        let first = b << SHIFT;
+        let cells = (backbone_size - first).min(1 << SHIFT);
+        let lo = bucket_starts[b] as usize;
+        let hi = bucket_starts[b + 1] as usize;
+        let copy = &mut targets[..hi - lo];
+        for (to, &from) in copy.iter_mut().zip(&hits[lo..hi]) {
+            *to = from as u32;
+        }
+        let counts = &mut cursor[..cells];
+        counts.fill(0);
+        for &packed in copy.iter() {
+            counts[(packed & mask) as usize] += 1;
+        }
+        overflowed.clear();
+        let mut slot = lo as u32;
+        for (cell, (start, count)) in starts[first..first + cells]
+            .iter_mut()
+            .zip(counts.iter_mut())
+            .enumerate()
+        {
+            let c = *count;
+            *start = slot;
+            if c > 0 {
+                nonempty_count += 1;
+                longest_chain = longest_chain.max(c as i32);
+                if pv_known {
+                    compressed_pv_set(&mut pv, first + cell, PV_ARRAY_BTS);
+                }
+                if !FUSE && c > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
+                    overflowed.push(cell as u32);
+                }
+            }
+            if !FUSE {
+                *count = slot;
+            }
+            slot += c;
+        }
+        let out = hits.as_mut_ptr();
+        if FUSE {
+            let ranks = &mut rank[..cells];
+            ranks.fill(0);
+            let bases = &starts[first..first + cells];
+            for &packed in copy.iter() {
+                let cell = (packed & mask) as usize;
+                let k = ranks[cell];
+                ranks[cell] = k + 1;
+                let at = bases[cell] + x_emission_position_sel(k, counts[cell]);
+                // SAFETY: the positions of a cell's ranks 0..count are a permutation of
+                // 0..count (`x_emission_position`), so `at` lies in the cell's slice, within n.
+                unsafe { out.add(at as usize).write((packed >> SHIFT) as i32) };
+            }
+        } else {
+            for &packed in copy.iter() {
+                let at = &mut counts[(packed & mask) as usize];
+                // SAFETY: a cell's cursor runs from its start over its count, within lo..hi <= n.
+                unsafe { out.add(*at as usize).write((packed >> SHIFT) as i32) };
+                *at += 1;
+            }
+            for &cell in &overflowed {
+                let cell = cell as usize;
+                let begin = starts[first + cell] as usize;
+                let end = counts[cell] as usize;
+                let k_n = (end - begin) as u32;
+                let slice = &mut hits[begin..end];
+                appended.clear();
+                appended.extend_from_slice(slice);
+                for (k, &query_offset) in appended.iter().enumerate() {
+                    slice[x_emission_position(k as u32, k_n) as usize] = query_offset;
+                }
+            }
+        }
+    }
+    starts[backbone_size] = n as u32;
+    drop(targets);
+    drop(per_offset);
+
+    let mut pv_array_bts = PV_ARRAY_BTS;
+    if (nonempty_count as f64) <= 0.01 * (backbone_size as f64) {
+        pv_array_bts += ilog2(backbone_size / (8 * X_TARGET_PV_BYTES));
+    }
+    if !pv_known {
+        pv = vec![0u32; (backbone_size >> pv_array_bts) + 1];
+        for index in 0..backbone_size {
+            if starts[index] < starts[index + 1] {
+                compressed_pv_set(&mut pv, index, pv_array_bts);
+            }
+        }
+    }
+    let t3 = std::time::Instant::now();
+    phases[0] += (t1 - t0).as_nanos() as u64;
+    phases[1] += (t2 - t1).as_nanos() as u64;
+    phases[2] += (t3 - t2).as_nanos() as u64;
+
+    Some(Some(XFlatBuild::Table(XFlatCompressedLookup {
+        word_length: header.word_length as i32,
+        compressed_alphabet_size: header.alphabet as i32,
+        reciprocal_alphabet_size: header.reciprocal_alphabet_size,
+        longest_chain,
+        used_cells: nonempty_count,
+        pv,
+        pv_array_bts: pv_array_bts as i32,
+        scaled_compress_table_u8: build_scaled_compress_table_u8(&header.scaled_compress_table),
+        starts,
+        hits,
+    })))
 }
 
 /// PROBE (v4-BPF K2-2): the count pass's record of the appends with the histogram of their buckets
@@ -2659,6 +2903,16 @@ mod tests {
     // subjects), the flat `scan_subject` gives the reference's hits and rounds for arrays from the
     // longest cell up, and `for_each_cell` gives the same hits, with the branch-free list too
     // (LOSAT_X_BPCLUTSCANBF); `used_cells` counts the cells with hits.
+    // PROBE (v4-BPF K2-2): the select form of the scan position is `x_emission_position`.
+    #[test]
+    fn bpf_fill_emission_position_sel_is_the_branch_form() {
+        for n in 1..3000u32 {
+            for k in 0..n {
+                assert_eq!(x_emission_position_sel(k, n), x_emission_position(k, n), "k {k} n {n}");
+            }
+        }
+    }
+
     // PROBE (v4-BPF K2-2): the partitioned fill builds the current builder's table (or its refusal,
     // or declines where a table's appends pass the capacity) on random queries, tables and
     // capacities, at bucket widths from 2^2 to 2^14 cells.
@@ -2699,10 +2953,14 @@ mod tests {
                     &mut [u64; 3],
                     &mut usize,
                 ) -> Option<Option<XFlatBuild>>;
-                let forms: [XForm; 3] = [
+                let forms: [XForm; 7] = [
                     x_try_build_flat_part2::<10>,
                     x_try_build_flat_part2::<12>,
                     x_try_build_flat_part2::<11>,
+                    x_try_build_flat_part3::<10, false>,
+                    x_try_build_flat_part3::<10, true>,
+                    x_try_build_flat_part3::<11, true>,
+                    x_try_build_flat_part3::<4, true>,
                 ];
                 for (form, run) in forms.into_iter().enumerate() {
                     let (mut phases, mut appends) = ([0u64; 3], 0usize);

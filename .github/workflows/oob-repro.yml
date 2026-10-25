@@ -1,0 +1,76 @@
+name: Wasm n16 OOB repro
+
+# Scratch workflow of branch audit/wasm-oob-repro (not for merge): the v0.2.0 GO blocker
+# `format/blastx-blastx-query-2/threaded-n16` `memory access out of bounds` in
+# `__wasi_thread_start_C` (nightly run 40157413236, 2026-10-25). Each job builds the threaded
+# command as wasm-threading.yml does and runs that one command many times, arms interleaved
+# (docs/evidence/wasm_oob_20261025/repro.py); the thread host is patched on the runner to print
+# the start arguments after a trap (probe_patch.py).
+on:
+  push:
+    branches: [audit/wasm-oob-repro]
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: repro (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: dev-a, ref: '', arms: 'default,prespawn0,refresh', runs: 400 }
+          - { name: dev-b, ref: '', arms: 'default,prespawn0,refresh', runs: 400 }
+          - { name: pre488, ref: a8faa7225659a54a01eccc53c5cbee16ca510323, arms: 'default', runs: 800 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref || github.sha }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: oob
+          sparse-checkout: docs/evidence/wasm_oob_20261025
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          targets: wasm32-wasip1-threads
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LOSAT -> target
+          key: oob-${{ matrix.ref || 'dev' }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build the threaded command
+        run: |
+          cd LOSAT
+          cargo build --release --locked --bin losat
+          cd ..
+          python3 LOSAT/tests/build_wasi_artifacts.py --target-dir LOSAT/target --output-dir .tmp/threading/artifacts
+          sha256sum .tmp/threading/artifacts/*.wasm
+          git log --oneline -1
+      - name: Patch the thread host (probe after a trap, OOB_REFRESH)
+        run: python3 oob/docs/evidence/wasm_oob_20261025/probe_patch.py LOSAT/tests/wasi_thread_host.js
+      - name: Repro
+        run: |
+          python3 oob/docs/evidence/wasm_oob_20261025/repro.py \
+            --wasm .tmp/threading/artifacts/losat-threaded-command.wasm --out .tmp/oob \
+            --arms '${{ matrix.arms }}' --runs ${{ matrix.runs }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oob-${{ matrix.name }}
+          path: |
+            .tmp/oob/summary.json
+            .tmp/oob/runs.tsv
+            .tmp/oob/fail-*.txt
+            .tmp/threading/artifacts/losat-threaded-command.wasm
+          if-no-files-found: warn
+          retention-days: 14

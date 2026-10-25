@@ -13,7 +13,9 @@
 //! # Module Structure
 //!
 //! - `mod.rs` - Shared structures and helpers (WorkerState, atomic ops, reevaluation)
-//! - `run_impl.rs` - Main run() function for backbone mode
+//! - `run_impl.rs` - The search of a query batch and the subject chunking
+//! - `../tblastx_app.rs` - The application (child of `run_impl.rs`)
+//! - `../blast_format.rs` - The reports (child of `run_impl.rs`)
 
 // NCBI reference (main search loop):
 // ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1427

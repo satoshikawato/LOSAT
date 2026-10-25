@@ -26,7 +26,7 @@
 //! `run_in_pool` keeps its loop: its checks, its errors, its writes and their order. Only where a
 //! batch's result comes from changes (`XPipe::take`):
 //!
-//! 1. A plan lists the batches the loop will search unless a search fails (`run_impl.rs`
+//! 1. A plan lists the batches the loop will search unless a search fails (`tblastx_app.rs`
 //!    `x_pipe_plan`: the loop's boundaries and the checks that need no search).
 //! 2. The loop searches a batch itself when it reaches it, unless the batch before already
 //!    started it. A batch starts the next one at its *seed-stage end*: when the last of its

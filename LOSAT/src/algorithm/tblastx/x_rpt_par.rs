@@ -1,5 +1,5 @@
 //! EXPERIMENT (LOSAT_X_TBXRPTPAR): TBLASTX's report stage
-//! (`write_tblastx_outputs` in blast_engine/run_impl.rs) on the search's pool.
+//! (`write_tblastx_outputs` in blast_format.rs) on the search's pool.
 //!
 //! The reports are written once, after the last query batch, by the thread of the batch loop.
 //! Before this switch every part of that stage ran on that thread while the other threads of

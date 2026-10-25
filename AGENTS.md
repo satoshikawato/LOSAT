@@ -434,6 +434,7 @@ requirements above.
 
 - CLI: `LOSAT/src/main.rs`
 - TBLASTX engine: `LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs`
+  (application: `LOSAT/src/algorithm/tblastx/tblastx_app.rs`, reports: `LOSAT/src/algorithm/tblastx/blast_format.rs`, both children of it)
 - BLASTN engine: `LOSAT/src/algorithm/blastn/blast_engine/run.rs`
 - BLASTP engine: `LOSAT/src/algorithm/blastp/blast_engine.rs`
 

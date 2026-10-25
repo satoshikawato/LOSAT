@@ -371,7 +371,7 @@ impl<'a> XTwoHit<'a> {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (the tests of
     // `pairs`; tblastn/x_tbn_hitbf.rs module doc)
-    // EXPERIMENT (LOSAT_X_TBNHITBF): `x_hits_bf` takes the too-far and overlap outcomes; the
+    // `x_hits_bf` takes the too-far and overlap outcomes; the
     // body of `pairs` runs on each hit it stops at (a flag-1 cell or a candidate), in order.
     /// `pairs` with the too-far and overlap outcomes taken by `x_tbn_hitbf::x_hits_bf`; `pairs`
     /// itself when `x_tbn_hitbf::fits` does not hold.
@@ -1059,7 +1059,7 @@ mod tests {
                 .expect("letters");
         let plan = super::super::search_seed::x_scan_plan(
             &[&query],
-            SubjectNt::Packed(&store),
+            SubjectNt::Packed(&store).into(),
             1,
             None,
             13,
@@ -1123,7 +1123,7 @@ mod tests {
         // The (frame, chunk, scan ranges) units the search runs: the unit path's plan.
         let plan = super::super::search_seed::x_scan_plan(
             &[query],
-            SubjectNt::Letters(&subject),
+            SubjectNt::Letters(&subject).into(),
             1,
             None,
             13,
@@ -1225,7 +1225,7 @@ mod tests {
         // The (frame, chunk, scan ranges) units the search runs: the unit path's plan.
         let plan = super::super::search_seed::x_scan_plan(
             &[query],
-            SubjectNt::Letters(&subject),
+            SubjectNt::Letters(&subject).into(),
             1,
             None,
             13,
@@ -1500,7 +1500,7 @@ mod tests {
         );
     }
 
-    // LOSAT_X_TBNHITBF: `x_pairs_bf` against `pairs` on units made as in the test above (fragments
+    // `x_pairs_bf` against `pairs` on units made as in the test above (fragments
     // of the queries with substitutions, so that extensions and flag-1 cells occur), on cleared
     // tables, on a kept table and across the clear near INT4_MAX / 4, for windows 40 and
     // wordsize + 1; each unit's offset pairs come in arrays of random lengths, as the scan fills

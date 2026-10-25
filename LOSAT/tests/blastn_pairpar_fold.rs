@@ -10,10 +10,9 @@
 //! thread of the pool, each into the buckets of its partition, with the hits and the table's
 //! cell numbers put back in the reference order. So the property under test is that the report
 //! does not depend on it: with the switch at 2, 4 and 8 threads (also with `LOSAT_X_DIAGLV`),
-//! and (dc-megablast) with the strips shadow `LOSAT_X_PAIRPARDISCSHADOW`, which runs the
-//! partitioned stage on copies and compares the hit list and the whole diagonal hash with the
-//! reference fold for every chunk, the searches give the bytes of the search without it at one
-//! thread. That those bytes equal NCBI's is the business of the BLASTN fixtures.
+//! and (dc-megablast) with the stage's `[TIMING]` line showing every chunk folded in one partition
+//! per thread, the searches give the bytes of the search without it at one thread. That those
+//! bytes equal NCBI's is the business of the BLASTN fixtures.
 //!
 //! The query (LC738874, 287 kb) makes a query block longer than 8000 letters, so the searches
 //! use the diagonal hash, and the one subject (LC738868) is searched by the owner of the pool,
@@ -119,45 +118,29 @@ fn blastn(dir: &Path, task: &str, threads: u32, switches: &[(&str, &str)]) -> (V
     (output.stdout, stderr)
 }
 
-/// The fields of a strips shadow's line (`prefix`, the only line of `stderr`): the chunks
-/// compared, then `fold=`, `merges=` and `partitions=`.
-fn shadow_fields(stderr: &str, prefix: &str, at: &str) -> (u64, String, u64, u64) {
+/// The `chunks=`, `merges=` and `partitions=` fields of a strips stage's `[TIMING]` line (the
+/// line of `stderr` that starts with `prefix`).
+fn stage_fields(stderr: &str, prefix: &str, at: &str) -> (u64, u64, u64) {
     let line = stderr
         .lines()
         .find(|line| line.starts_with(prefix))
-        .unwrap_or_else(|| panic!("{at}: no shadow line:\n{stderr}"));
-    assert!(
-        stderr.lines().all(|l| l == line),
-        "{at}: unexpected standard error line:\n{stderr}"
-    );
-    let field = |name: &str| -> String {
+        .unwrap_or_else(|| panic!("{at}: no {prefix} line:\n{stderr}"));
+    let number = |name: &str| -> u64 {
         line.split_whitespace()
             .find_map(|word| word.strip_prefix(name))
+            .and_then(|value| value.parse().ok())
             .unwrap_or_else(|| panic!("{at}: no {name} in: {line}"))
-            .to_string()
     };
-    let number = |name: &str| -> u64 {
-        field(name)
-            .parse()
-            .unwrap_or_else(|_| panic!("{at}: {name} in: {line}"))
-    };
-    let (merges, partitions) = (number("merges="), number("partitions="));
-    let chunks = line
-        .split("seed chunks equal=")
-        .nth(1)
-        .and_then(|rest| rest.split_whitespace().next())
-        .and_then(|value| value.parse().ok())
-        .unwrap_or_else(|| panic!("{at}: no seed chunks in: {line}"));
-    (chunks, field("fold="), merges, partitions)
+    (number("chunks="), number("merges="), number("partitions="))
 }
 
 /// For one task: the search without the switch at one thread, then at 2, 4 and 8 threads
 /// without the switch, with it, with it and `LOSAT_X_DIAGLV`, with it and `LOSAT_X_PAIRPARHOME=0`,
-/// and, if there is one, with it and
-/// the strips shadow (`shadow`, whose line starts with `prefix`): the same bytes every time,
-/// nothing on standard error without the shadow, and the shadow's line says that it compared
-/// chunks folded in partitions, one per thread. `extra` goes to every run but the first.
-fn check(dir: &Path, task: &str, extra: &[(&str, &str)], shadow: Option<((&str, &str), &str)>) {
+/// and, if there is one, with it and `LOSAT_TIMING`, whose `[TIMING]` line of the strips stage
+/// (`stage`, the line's prefix) says that it folded chunks in partitions, one per thread: the same
+/// bytes every time, nothing on standard error without `LOSAT_TIMING`. `extra` goes to every run
+/// but the first.
+fn check(dir: &Path, task: &str, extra: &[(&str, &str)], stage: Option<&str>) {
     let (expected, expected_stderr) = blastn(dir, task, 1, &[]);
     assert!(!expected.is_empty(), "{task}: no hits");
     assert_eq!(expected_stderr, "", "{task}");
@@ -180,19 +163,18 @@ fn check(dir: &Path, task: &str, extra: &[(&str, &str)], shadow: Option<((&str, 
             assert!(report == expected, "{at}: the report differs with {more:?}");
             assert_eq!(stderr, "", "{at} {more:?}");
         }
-        let Some((shadow, prefix)) = shadow else {
+        let Some(prefix) = stage else {
             continue;
         };
         let mut on = extra.to_vec();
-        on.extend_from_slice(&[SWITCH, shadow]);
+        on.extend_from_slice(&[SWITCH, ("LOSAT_TIMING", "1")]);
         let (report, stderr) = blastn(dir, task, threads, &on);
         assert!(
             report == expected,
-            "{at}: the report differs with {shadow:?}"
+            "{at}: the report differs with LOSAT_TIMING"
         );
-        let (chunks, fold, merges, partitions) = shadow_fields(&stderr, prefix, &at);
-        assert!(chunks > 0, "{at}: no chunk compared:\n{stderr}");
-        assert_eq!(fold, "part", "{at}");
+        let (chunks, merges, partitions) = stage_fields(&stderr, prefix, &at);
+        assert!(chunks > 0, "{at}: no chunk taken:\n{stderr}");
         assert_eq!(
             merges, chunks,
             "{at}: chunks not folded in partitions:\n{stderr}"
@@ -220,10 +202,7 @@ fn dc_megablast_gives_the_same_report_with_the_partitioned_fold() {
         &dir,
         "dc-megablast",
         &[PAIRPARDISC],
-        Some((
-            ("LOSAT_X_PAIRPARDISCSHADOW", "1"),
-            "[X_PAIRPARDISCSHADOW] blastn:",
-        )),
+        Some("[TIMING] x_pairpardisc_seed:"),
     );
 }
 

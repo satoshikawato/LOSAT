@@ -1,0 +1,1 @@
+- Platform checks: `LOSAT/tests/platform_check_cases.json` has 59 cases (was 49). The five-platform hash comparison now covers `blastn -task dc-megablast` (2), `blastn -task blastn-short` (2), `blastp -task blastp-fast` (2), and two more each of `blastx` and `tblastn`, all with `-subject`. No expected hash is stored, so no frozen record changes.

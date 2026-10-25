@@ -74,7 +74,6 @@ mod x_search_timing;
 // that context, so where it runs is scheduling only.
 #[path = "../x_query_frames.rs"]
 mod x_query_frames;
-pub use x_query_frames::print_summary as x_query_frames_print_summary;
 // EXPERIMENT (LOSAT_X_TBXNEXT): the subjects of the parallel subject loop handed to the threads one
 // at a time, each thread taking the next subject when it is free, with one worker state per
 // thread (see tblastx/x_subject_next.rs). A child module of this file, as x_seed_release is.
@@ -2094,10 +2093,6 @@ fn write_tblastx_outputs(
         }
         writer.flush()?;
     }
-    // EXPERIMENT (LOSAT_X_TBXRPTPARSHADOW): the shadow's line after the reports.
-    if run.x_pool.is_some() {
-        crate::algorithm::tblastx::x_rpt_par::print_shadow_summary();
-    }
     // Without an output format the warnings are written all at once.
     if let Some(lines) = warning_lines {
         for query_warnings in lines {
@@ -2293,9 +2288,7 @@ fn run_in_pool(
     };
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if let Some(plan) = x_plan {
-        let compare: &x_batch_pipe::XCompare<'_, TblastxBatch> = &x_pipe_compare;
-        if let Some(pipe) = x_batch_pipe::XPipe::new(plan, search_subjects.count(), search, compare)
-        {
+        if let Some(pipe) = x_batch_pipe::XPipe::new(plan, search_subjects.count(), search) {
             let result = rayon::in_place_scope(|scope| {
                 let _closer = pipe.closer();
                 batch_loop(&mut |range| pipe.take(scope, range))
@@ -2381,40 +2374,6 @@ fn x_pipe_plan(
         input_start = input_end;
     }
     plan
-}
-
-// EXPERIMENT (LOSAT_X_TBXPIPESHADOW): two results of one batch compared: `searched`, the query
-// statistics, and the hits with every field (`Debug`), each subject's in its list order (the
-// order of the subjects' lists depends on which subject ended first, in the loop's searches as
-// well; `report::final_hit_order` orders them). No NCBI counterpart.
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-fn x_pipe_compare(taken: &TblastxBatch, reference: &TblastxBatch) -> Option<String> {
-    if taken.searched != reference.searched {
-        return Some(format!(
-            "searched {} / {}",
-            taken.searched, reference.searched
-        ));
-    }
-    let (queries, reference_queries) = (
-        format!("{:?}", taken.queries),
-        format!("{:?}", reference.queries),
-    );
-    if queries != reference_queries {
-        return Some(format!("query statistics {queries} / {reference_queries}"));
-    }
-    let by_subject = |hits: &[TblastxHsp]| -> Vec<String> {
-        let mut hits: Vec<&TblastxHsp> = hits.iter().collect();
-        hits.sort_by_key(|hsp| (hsp.hit.q_idx, hsp.hit.s_idx));
-        hits.iter().map(|hsp| format!("{hsp:?}")).collect()
-    };
-    let (hits, reference_hits) = (by_subject(&taken.hits), by_subject(&reference.hits));
-    if hits.len() != reference_hits.len() {
-        return Some(format!("{} hits / {}", hits.len(), reference_hits.len()));
-    }
-    hits.iter()
-        .zip(&reference_hits)
-        .position(|(hit, reference_hit)| hit != reference_hit)
-        .map(|index| format!("hit {index}: {} / {}", hits[index], reference_hits[index]))
 }
 
 /// The batch loop of `run_in_pool`: reads the batches, checks them, takes each one's search
@@ -3119,8 +3078,21 @@ fn search_query_batch(
         // Dispatch point (LOSAT_X_TBXQFRAMES, strict set): with two or more threads the frames
         // are masked on the search pool, one task per frame; otherwise, and with the switch off,
         // the frames are masked one after the other as before (tblastx/x_query_frames.rs, which
-        // holds the per-frame body `mask_frame`).
-        x_query_frames::mask(&mut query_frames, &seg, parallel_pool);
+        // holds the per-frame bodies `mask_frame` and `mask_frame_soft`).
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
+        // ```c
+        //     if (!mask_at_hash) {
+        //         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+        //                              program_number);
+        //     }
+        // ```
+        // `-soft_masking true` keeps the intervals for the lookup table and the frames' letters.
+        if args.soft_masking() {
+            x_query_frames::mask_soft(&mut query_frames, &seg, parallel_pool);
+        } else {
+            x_query_frames::mask(&mut query_frames, &seg, parallel_pool);
+        }
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     }
 
@@ -3181,8 +3153,9 @@ fn search_query_batch(
     // True when `lookup` is the stub: the reference frame loop must then run zero times
     // (asserted at dispatch point 2).
     let x_pair_lut_is_stub = x_pair_lut_stub.is_some();
-    // Dispatch point (LOSAT_X_TBXLUT, off unless set): the full table of the batch from the chain
-    // builder (`build_ncbi_lookup`) or filled in place from per-cell counts; the same table.
+    // Dispatch point (LOSAT_X_TBXLUT, on unless `LOSAT_X_TBXLUT=0`): the full table of the batch
+    // from the chain builder (`build_ncbi_lookup`) or filled in place from per-cell counts; the
+    // same table.
     let (lookup, contexts) = match x_pair_lut_stub {
         Some(stub) => {
             crate::algorithm::tblastx::lookup::x_tbxlut_reach_stub();
@@ -3479,7 +3452,7 @@ fn search_query_batch(
     // batch's last units stage frees the unit path (dispatch point 3) and its last lookup stage
     // the lookup table (dispatch point 5). `x_worker_diag_cells` is the size the workers'
     // diagonal tables are created with: `diag_array_size`, or 0 when the
-    // unit path takes every subject without its shadow, so that the reference frame loop, the
+    // unit path takes every subject, so that the reference frame loop, the
     // only reader of that table, runs for none.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1004
@@ -3982,19 +3955,15 @@ fn search_query_batch(
         //       subject_blk->length, frame, retval->translations[context], gen_code_string);
         // }
         // ```
-        // The letters and the preliminary bases of the subject (`Subjects::with_search_bases`:
-        // a database sequence's are made from its store, D2) live only while it is translated.
-        //
-        // EXPERIMENT (LOSAT_X_TBXFRAMES): only the frames the preliminary stage translates are
-        // made here, in windows (`Subjects::x_preliminary_frames`). For a subject with ambiguous
-        // bases the frames of its letters (`s_frames`) are made after the seed stage, once the
-        // preliminary frames are freed, and only when HSPs are left for the re-evaluation
-        // (`x_letter_frames_later`, below); until then `s_frames` is empty and the HSP lists
-        // index the preliminary frames, which have the same number and lengths
-        // (`s_frames_listed`). For a subject without ambiguous bases both are the same frames.
-        let x_frames_late = crate::algorithm::tblastx::subjects::x_frames_late();
+        // Only the frames the preliminary stage translates are made here, in windows
+        // (`Subjects::x_preliminary_frames`). For a subject with ambiguous bases the frames of
+        // its letters (`s_frames`) are made after the seed stage, once the preliminary frames
+        // are freed, and only when HSPs are left for the re-evaluation (`x_letter_frames_later`,
+        // below); until then `s_frames` is empty and the HSP lists index the preliminary frames,
+        // which have the same number and lengths (`s_frames_listed`). For a subject without
+        // ambiguous bases both are the same frames.
         let mut x_letter_frames_later = false;
-        let (s_frames, s_frames_preliminary_owned) = if x_frames_late {
+        let (s_frames, s_frames_preliminary_owned) = {
             let (frames, of_letters) = subjects.x_preliminary_frames(s_idx, &db_code);
             if of_letters {
                 (frames, None)
@@ -4002,13 +3971,6 @@ fn search_query_batch(
                 x_letter_frames_later = true;
                 (Vec::new(), Some(frames))
             }
-        } else {
-            subjects.with_search_bases(s_idx, |letters, bases| {
-                (
-                    generate_frames(letters, &db_code),
-                    bases.map(|bases| generate_frames(bases, &db_code)),
-                )
-            })
         };
         let s_frames_report = &s_frames;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:772-775
@@ -5795,11 +5757,9 @@ fn search_query_batch(
             // Source: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
             base += f.aa_seq.len() as i32 - 1;
         }
-        // EXPERIMENT (LOSAT_X_TBXFRAMES): nothing below reads the preliminary frames (the seed
-        // stage has ended); they are freed before the linking call, where the heap peaks.
-        if x_frames_late {
-            drop(s_frames_preliminary_owned);
-        }
+        // Nothing below reads the preliminary frames (the seed stage has ended); they are freed
+        // before the linking call, where the heap peaks.
+        drop(s_frames_preliminary_owned);
 
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899
         // ```c
@@ -5886,9 +5846,9 @@ fn search_query_batch(
         // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
         // Perform batch reevaluation on all HSPs after merging all frames
         //
-        // EXPERIMENT (LOSAT_X_TBXFRAMES): a subject with ambiguous bases gets the frames of its
-        // letters here, after its preliminary frames were freed, when HSPs are left for the
-        // re-evaluation (none are read otherwise).
+        // A subject with ambiguous bases gets the frames of its letters here, after its
+        // preliminary frames were freed, when HSPs are left for the re-evaluation (none are read
+        // otherwise).
         let x_letter_frames: Vec<QueryFrame>;
         let (s_frames, s_frames_report): (&[QueryFrame], &[QueryFrame]) = if x_letter_frames_later {
             x_letter_frames = if prelinked_ungapped_hits.is_empty() {

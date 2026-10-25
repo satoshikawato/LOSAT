@@ -170,7 +170,20 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     };
     names::check_database_name(PROGRAM, db_name)?;
     let positives = FormattingMatrix::new(MATRIX).context("no formatting matrix for BLOSUM62")?;
-    let filter = filter::filter_string(None, args.seg_spec()?.filter_options(), None, false);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:414-417
+    // ```c
+    //     if (SBlastFilterOptionsMaskAtHash(filtering_options)) {
+    //         if (strlen(retval) != 0) {
+    //             /* Add mask at hash as a modifier for other filtering options */
+    //             if (!s_SafeStrCat(&retval, &retval_size, "m;")) {
+    // ```
+    // `-soft_masking true` (`mask_at_hash`) ends the filter string with `m;`.
+    let filter = filter::filter_string(
+        None,
+        args.seg_spec()?.filter_options(),
+        None,
+        args.soft_masking(),
+    );
     let xml_run = XmlRun {
         program: "tblastx",
         version: "TBLASTX 2.17.0+",

@@ -1,5 +1,5 @@
-//! tblastn's linking candidates chosen by subject position (`LOSAT_X_TBNLINKWIN`, in the strict
-//! set; `src/algorithm/tblastn/stage_d_linking/x_link_window.rs`) on whole searches.
+//! tblastn's linking candidates chosen by subject position (`src/algorithm/tblastn/stage_d_linking/x_link_window.rs`;
+//! the former switch `LOSAT_X_TBNLINKWIN` graduated on 2026-10-26) on whole searches.
 //!
 //! NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723
 //! ```c
@@ -9,12 +9,12 @@
 //!            if (s_LinkedHSPSetsAdmissible(head_hsp, lhsp,
 //!                                          link_hsp_params, program)) {
 //! ```
-//! The switch tests the candidates of NCBI's window less those that cannot be admissible, in
+//! The search tests the candidates of NCBI's window less those that cannot be admissible, in
 //! NCBI's order (the unit test `x_chosen_candidates_give_the_links_of_the_whole_window` compares
-//! the links), so a search with it gives the report of NCBI's loop (`LOSAT_X_TBNLINKWIN=0`). It is
-//! on by default and off with `=0`. These
-//! tests compare the reports and read the `[X_STATS] TBNLINKWIN heads= window= chosen=` line
-//! (`LOSAT_X_STATS=1`, printed when a list was linked with the switch).
+//! the links with NCBI's whole window), so its report is that of NCBI's loop (the frozen NCBI
+//! hashes of the fast regressions check that). These tests compare the reports at one and four
+//! threads and read the `[X_STATS] TBNLINKWIN heads= window= chosen=` line (`LOSAT_X_STATS=1`,
+//! printed when a list was linked).
 //!
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` and all 115 of them; the
 //! subject is `tests/fasta/MelaMJNV.fasta`.
@@ -88,30 +88,19 @@ fn stats(stderr: &str) -> Option<[u64; 3]> {
     }))
 }
 
-const OFF: (&str, &str) = ("LOSAT_X_TBNLINKWIN", "0");
-
-// NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723 (above). The default and four
-// threads give the report of NCBI's loop (`=0`); the line is there with the switch and not
-// without it, and fewer candidates were tested than the windows held.
+// NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723 (above). The report does not
+// depend on the threads; the line is there, and fewer candidates were tested than the windows held.
 #[test]
-fn the_report_is_that_of_ncbis_loop() {
+fn the_report_is_the_same_at_every_thread_count_and_the_lookup_ran() {
     for query in queries() {
-        let (expected, stderr) = tblastn(query, 1, &[OFF]);
+        let (expected, stderr) = tblastn(query, 1, &[]);
         assert!(
             !expected.is_empty(),
             "{query:?}: the search must report hits"
         );
-        assert_eq!(stats(&stderr), None, "{query:?}: no line with =0");
-        let (report, stderr) = tblastn(query, 1, &[]);
-        assert!(
-            report == expected,
-            "{query:?}: the default changes the report"
-        );
-        let [heads, window, chosen] = stats(&stderr).expect("a line by default");
+        let [heads, window, chosen] = stats(&stderr).expect("a line");
         assert!(heads > 0 && chosen <= window, "{query:?}");
-        for variables in [&[][..], &[OFF]] {
-            let (report, _) = tblastn(query, 4, variables);
-            assert!(report == expected, "{query:?} {variables:?}: four threads");
-        }
+        let (report, _) = tblastn(query, 4, &[]);
+        assert!(report == expected, "{query:?}: four threads");
     }
 }

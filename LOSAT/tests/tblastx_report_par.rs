@@ -4,7 +4,8 @@
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_TBXRPTPAR` is
 //! `0`. With it on and two or more threads, the displayed
 //! identities, the outfmt 0 rows and the tabular rows of the final list are computed by the pool's
-//! threads; `LOSAT_X_TBXRPTPARSHADOW=1` also runs the serial stage and compares the two.
+//! threads (the Seq-align engine counts of outfmt 8 and 12 too). The reach rows (`LOSAT_X_REACH`,
+//! `tests/reach_support`) show that the pooled stage ran.
 //!
 //! The property under test is that the reports, the messages and the exit status do not depend on
 //! the switch or on the thread count: the searches are compared with the same LOSAT search with the
@@ -16,8 +17,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod reach_support;
+
 const OFF: (&str, &str) = ("LOSAT_X_TBXRPTPAR", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBXRPTPARSHADOW", "1");
 const THREADS: [u32; 5] = [1, 2, 4, 8, 16];
 
 fn letters(name: &str) -> Vec<u8> {
@@ -105,43 +107,17 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// The standard error without the shadow's lines.
-fn messages(output: &Output) -> String {
-    stderr(output)
-        .lines()
-        .filter(|line| !line.starts_with("[X_SHADOW]"))
-        .map(|line| format!("{line}\n"))
-        .collect()
-}
-
-/// The counters of the `[X_SHADOW] TBXRPTPAR` line: HSPs, outfmt 0 rows, tabular bytes.
-fn shadow_counts(output: &Output) -> [u64; 3] {
-    let text = stderr(output);
-    let line = text
-        .lines()
-        .find(|line| line.starts_with("[X_SHADOW] TBXRPTPAR "))
-        .unwrap_or_else(|| panic!("no TBXRPTPAR shadow line:\n{text}"));
-    assert!(line.ends_with(" identical"), "{line}");
-    ["hsps", "pairwise", "bytes"].map(|name| {
-        let key = format!("{name}=");
-        line.split_whitespace()
-            .find_map(|field| field.strip_prefix(key.as_str()))
-            .unwrap_or_else(|| panic!("no {name} in {line}"))
-            .parse()
-            .expect("a count")
-    })
-}
-
 fn check_format(outfmt: &str) {
     let off = tblastx(1, outfmt, &[OFF]);
     assert!(off.status.success(), "{}", stderr(&off));
     assert!(!off.stdout.is_empty(), "the pairs have hits");
+    // LOSAT writes no warning with outfmt 8.
     assert!(
-        stderr(&off).contains("empty record"),
+        outfmt == "8" || stderr(&off).contains("empty record"),
         "the empty record has a warning: {}",
         stderr(&off)
     );
-    if outfmt != "0" {
+    if matches!(outfmt, "6" | "7") {
         // The first query's rows are formatted in windows of chunks (more than 1,024 rows).
         let rows = String::from_utf8_lossy(&off.stdout)
             .lines()
@@ -153,53 +129,22 @@ fn check_format(outfmt: &str) {
         );
     }
     for threads in THREADS {
-        let on = tblastx(threads, outfmt, &[]);
+        let reach = reach_support::Reach::new("rptpar");
+        let on = tblastx(threads, outfmt, &[reach.var()]);
         assert!(on.status.success(), "threads {threads}: {}", stderr(&on));
         assert_eq!(on.stdout, off.stdout, "outfmt {outfmt}, threads {threads}");
         assert_eq!(
-            messages(&on),
-            messages(&off),
+            stderr(&on),
+            stderr(&off),
             "outfmt {outfmt}, threads {threads}"
         );
-        // The shadow at one thread (where the stage is serial) and at 2 and 16.
-        if ![1, 2, 16].contains(&threads) {
-            continue;
-        }
-        let shadow = tblastx(threads, outfmt, &[SHADOW]);
-        assert!(
-            shadow.status.success(),
-            "outfmt {outfmt}, threads {threads}: {}",
-            stderr(&shadow)
-        );
+        // The pooled stage runs with two threads or more, not with one.
+        let sides = reach.sides("LOSAT_X_TBXRPTPAR");
         assert_eq!(
-            shadow.stdout, off.stdout,
-            "outfmt {outfmt}, threads {threads}, shadow"
+            sides.0,
+            threads > 1,
+            "outfmt {outfmt}, threads {threads}: sides {sides:?}"
         );
-        assert_eq!(
-            messages(&shadow),
-            messages(&off),
-            "outfmt {outfmt}, threads {threads}"
-        );
-        if threads == 1 {
-            // One thread: the serial stage, as before.
-            assert!(
-                !stderr(&shadow).contains("TBXRPTPAR"),
-                "{}",
-                stderr(&shadow)
-            );
-            continue;
-        }
-        let [hsps, pairwise, bytes] = shadow_counts(&shadow);
-        assert!(
-            hsps > 2_048,
-            "outfmt {outfmt}, threads {threads}: {hsps} HSPs"
-        );
-        if outfmt == "0" {
-            assert_eq!((pairwise, bytes), (hsps, 0), "outfmt {outfmt}");
-        } else {
-            assert_eq!(pairwise, 0, "outfmt {outfmt}");
-            assert!(bytes > 0, "outfmt {outfmt}");
-        }
     }
 }
 
@@ -216,4 +161,9 @@ fn the_commented_tabular_report_does_not_depend_on_the_switch() {
 #[test]
 fn the_pairwise_report_does_not_depend_on_the_switch() {
     check_format("0");
+}
+
+#[test]
+fn the_seq_align_report_does_not_depend_on_the_switch() {
+    check_format("8");
 }

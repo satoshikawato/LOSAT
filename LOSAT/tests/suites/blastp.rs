@@ -11,6 +11,8 @@ mod blastp_diag_batch;
 mod blastp_diag_defer;
 #[path = "../blastp_fast_scan_bf.rs"]
 mod blastp_fast_scan_bf;
+#[path = "../blastp_fast_seed_bf.rs"]
+mod blastp_fast_seed_bf;
 #[path = "../blastp_hitbf.rs"]
 mod blastp_hitbf;
 #[path = "../blastp_hsp_tie_order.rs"]
@@ -33,6 +35,8 @@ mod blastp_query_blocks_fmt;
 mod blastp_redo_db_subjects;
 #[path = "../blastp_redo_fit.rs"]
 mod blastp_redo_fit;
+#[path = "../blastp_redo_memory.rs"]
+mod blastp_redo_memory;
 #[path = "../blastp_redo_par.rs"]
 mod blastp_redo_par;
 #[path = "../blastp_restricted_gapped.rs"]

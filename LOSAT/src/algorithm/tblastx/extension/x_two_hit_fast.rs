@@ -1,7 +1,7 @@
-//! EXPERIMENT (LOSAT_X_TBXUNGAP / LOSAT_X_TBXUNGAPSHADOW / LOSAT_X_TBXUNGAPSENT): TBLASTX's two-hit
-//! ungapped extension (`two_hit.rs::extend_hit_two_hit`: the word loop and the
-//! `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks of NCBI `s_BlastAaExtendTwoHit`) with the
-//! scores read from one flat byte table.
+//! TBLASTX's two-hit ungapped extension
+//! (`two_hit.rs::extend_hit_two_hit`: the word loop and the `s_BlastAaExtendLeft` /
+//! `s_BlastAaExtendRight` walks of NCBI `s_BlastAaExtendTwoHit`) with the scores read from one
+//! flat byte table.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-866
 //! ```c
@@ -56,10 +56,12 @@
 //!   -128 and a -32768 step to wrap differently, where the reference (and NCBI's `Int4`) overflows
 //!   too.
 //!
-//! The switch acts on every target. Until line W of plan v4 measured it (item W7), wasm32 kept the
-//! 16-residue v128 walks of `two_hit.rs`, which take each lane out of the vector and call
-//! `get_score` for it (scalar steps); with the table the two-hit extension of the LOSAT Web
-//! engine takes 0.77-0.89 of that time (`docs/agents/diagnostics.md`, entry `LOSAT_X_TBXUNGAP`).
+//! The table walks act on every target (the former switch `LOSAT_X_TBXUNGAP` graduated on
+//! 2026-10-26). Until line W of plan v4 measured them (item W7), wasm32 kept the 16-residue v128
+//! walks of `two_hit.rs`, which take each lane out of the vector and call `get_score` for it
+//! (scalar steps); with the table the two-hit extension of the LOSAT Web engine takes 0.77-0.89
+//! of that time (`docs/agents/diagnostics.md`, entry `LOSAT_X_TBXUNGAP`). The calls the table
+//! does not cover (the Why section's bounds and X-drop) run `extend_hit_two_hit_reference`.
 //!
 //! LOSAT_X_TBXUNGAPSENT (native builds; in the strict set, `=0` turns it off): `two_hit_sent`, the
 //! same extension with walks that the sentinels stop instead of a bound, inlined with the word loop
@@ -86,13 +88,13 @@
 //!   reaches `x_drop <= 127`); the path takes frames of at most `MAX_SENT_LEN` (`i32::MAX / 16`)
 //!   bytes.
 //!
-//! No NCBI counterpart for the switches themselves: they choose between LOSAT code paths with the
-//! same result.
+//! No NCBI counterpart for the split itself and the switch: they choose between LOSAT code paths
+//! with the same result.
 
 use super::get_score;
+#[cfg(test)]
 use super::two_hit::extend_hit_two_hit_reference;
 use crate::utils::matrix::BLAST_SCORE_MIN;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// The seven values of `extend_hit_two_hit`: (q_start, q_end, s_start, s_end, score,
@@ -123,14 +125,12 @@ unsafe impl Sync for FixedTable {}
 static FIXED_TABLE: FixedTable = FixedTable(std::cell::UnsafeCell::new([0; TABLE_LEN]));
 
 struct State {
-    /// 0 = off, 1 = LOSAT_X_TBXUNGAP, 2 = LOSAT_X_TBXUNGAPSHADOW (both paths, compared).
-    mode: u8,
-    /// LOSAT_X_TBXUNGAPSENT (with mode 1; native builds): the walks the sentinels stop.
+    /// LOSAT_X_TBXUNGAPSENT (native builds, with the table): the walks the sentinels stop.
     sent: bool,
-    /// The table of the walks; `None` (and mode 0) if a score does not fit it.
+    /// The table of the walks; `None` (the reference runs) if a score does not fit it.
     #[cfg(not(target_arch = "wasm32"))]
     table: Option<Box<Table>>,
-    /// The table of the walks (`FIXED_TABLE`); `None` (and mode 0) if a score does not fit it.
+    /// The table of the walks (`FIXED_TABLE`); `None` (the reference runs) if a score does not fit it.
     #[cfg(target_arch = "wasm32")]
     table: Option<&'static Table>,
 }
@@ -196,8 +196,6 @@ static STATE: OnceLock<State> = OnceLock::new();
 
 fn state() -> &'static State {
     STATE.get_or_init(|| {
-        // `LOSAT_X_TBXUNGAP` is a strict-set switch; the shadow variable is read first, as "set to
-        // any value".
         let table = build_table();
         // SAFETY: the only write to FIXED_TABLE (FixedTable).
         #[cfg(target_arch = "wasm32")]
@@ -205,43 +203,13 @@ fn state() -> &'static State {
             *FIXED_TABLE.0.get() = *t;
             &*FIXED_TABLE.0.get()
         });
-        let mode = if table.is_none() {
-            0
-        } else if std::env::var_os("LOSAT_X_TBXUNGAPSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_TBXUNGAP") {
-            1
-        } else {
-            0
-        };
-        // LOSAT_X_TBXUNGAPSENT: a strict-set switch on top of LOSAT_X_TBXUNGAP (not in its shadow
-        // mode); the wasm32 builds keep the walks of line W.
-        let sent = mode == 1
+        // LOSAT_X_TBXUNGAPSENT: a strict-set switch on the table walks; the wasm32 builds keep the
+        // walks of line W.
+        let sent = table.is_some()
             && cfg!(not(target_arch = "wasm32"))
             && crate::utils::xswitch::on("LOSAT_X_TBXUNGAPSENT");
-        State { mode, sent, table }
+        State { sent, table }
     })
-}
-
-/// 0 = off, 1 = LOSAT_X_TBXUNGAP, 2 = LOSAT_X_TBXUNGAPSHADOW.
-// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
-#[inline]
-pub(super) fn mode() -> u8 {
-    state().mode
-}
-
-static SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
-
-/// The summary line (printed by `main` at exit), only in shadow mode.
-// No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
-pub fn print_shadow_stats() {
-    // `STATE.get`: a run that never extended (every other program) does not build the table here.
-    if STATE.get().is_some_and(|s| s.mode == 2) {
-        eprintln!(
-            "[X_SHADOW] TBXUNGAP compared={} (two-hit extensions identical)",
-            SHADOW_COMPARED.load(Ordering::Relaxed)
-        );
-    }
 }
 
 /// `s_BlastAaExtendLeft` ending at `(qp, sp)` over `n` steps: step `i` (1..=n) reads `qp[-i]`,
@@ -576,40 +544,6 @@ pub(super) unsafe fn two_hit_sent(
         reached_first_hit,
         s_last_off,
     ))
-}
-
-/// LOSAT_X_TBXUNGAPSHADOW: both paths; any difference panics with the inputs.
-// No NCBI counterpart: a comparison of two LOSAT code paths.
-#[inline(never)]
-pub(super) fn shadow(
-    q_seq: &[u8],
-    s_seq: &[u8],
-    s_left_off: usize,
-    s_right_off: usize,
-    q_right_off: usize,
-    x_drop: i32,
-) -> TwoHit {
-    let expect = extend_hit_two_hit_reference(
-        q_seq,
-        s_seq,
-        s_left_off,
-        s_right_off,
-        q_right_off,
-        x_drop,
-        false,
-    );
-    if let Some(got) = two_hit(q_seq, s_seq, s_left_off, s_right_off, q_right_off, x_drop) {
-        assert_eq!(
-            got,
-            expect,
-            "[X_SHADOW] TBXUNGAP mismatch: s_left_off={s_left_off} s_right_off={s_right_off} \
-             q_right_off={q_right_off} x_drop={x_drop} q_len={} s_len={}",
-            q_seq.len(),
-            s_seq.len()
-        );
-        SHADOW_COMPARED.fetch_add(1, Ordering::Relaxed);
-    }
-    expect
 }
 
 #[cfg(test)]

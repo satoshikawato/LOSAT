@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBXEXTBATCH / LOSAT_X_TBXEXTBATCHSHADOW): the two-hit stage of a unit of the
+//! EXPERIMENT (LOSAT_X_TBXEXTBATCH): the two-hit stage of a unit of the
 //! unit path (x_pair_par.rs) with its extensions held back and resolved in batches. A child module
 //! of x_pair_par.rs.
 //!
@@ -62,22 +62,8 @@
 //! other subjects run `scan_unit`, whose machine code does not change. x86-64 only (the prefetch;
 //! elsewhere the path would only add work). The probes of LOSAT_TIMING / LOSAT_X_STATS run
 //! `scan_unit` (this path has none).
-//!
-//! `LOSAT_X_TBXEXTBATCHSHADOW=1` runs `scan_unit` and this path on every unit the path could take
-//! whatever the size rule says (the window leaves room for the marks, no probe runs), each on a
-//! fresh table, and stops at the first difference of the saved records or of the final table.
 
 use super::*;
-
-// No NCBI counterpart: counters of LOSAT_X_TBXEXTBATCH (units, candidates, early resolutions,
-// batches; counted in shadow mode only) and of its shadow; they do not change any value NCBI
-// computes.
-static EB_UNITS: AtomicU64 = AtomicU64::new(0);
-static EB_CANDS: AtomicU64 = AtomicU64::new(0);
-static EB_EARLY: AtomicU64 = AtomicU64::new(0);
-static EB_BATCHES: AtomicU64 = AtomicU64::new(0);
-static EB_SHADOW_UNITS: AtomicU64 = AtomicU64::new(0);
-static EB_SHADOW_RECORDS: AtomicU64 = AtomicU64::new(0);
 
 /// The candidates of a batch; a pending mark keeps the slot number, below this, in the cell's
 /// `last_hit` (module doc). 16: b8 and b16 were alike on the large query, b16 a little ahead on a
@@ -116,20 +102,12 @@ fn min_span_ki() -> Option<usize> {
     })
 }
 
-// No NCBI counterpart: a comparison of two LOSAT code paths.
-/// LOSAT_X_TBXEXTBATCHSHADOW (set to any value): every unit runs both scans, compared.
-pub(super) fn shadow() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBXEXTBATCHSHADOW").is_some())
-}
-
 // No NCBI counterpart: the rule of the module for one subject (module doc).
 /// Whether the units of a subject take the path: the two-hit `window` leaves room for the pending
-/// marks, and the shadow is on or the largest of the units' query-group `spans` reaches the
-/// switch's value.
+/// marks, and the largest of the units' query-group `spans` reaches the switch's value.
 pub(super) fn active(window: i32, wordsize: i32, spans: impl Iterator<Item = usize>) -> bool {
-    let active = window as i64 >= wordsize as i64 + BATCH as i64
-        && (shadow() || x_extbatch_units(min_span_ki(), spans));
+    let active =
+        window as i64 >= wordsize as i64 + BATCH as i64 && x_extbatch_units(min_span_ki(), spans);
     if min_span_ki().is_some() {
         crate::utils::xreach::x_reach!("LOSAT_X_TBXEXTBATCH", active);
     }
@@ -142,30 +120,6 @@ pub(super) fn active(window: i32, wordsize: i32, spans: impl Iterator<Item = usi
 /// `min_ki`: one of them has at least `min_ki` Ki letters.
 fn x_extbatch_units(min_ki: Option<usize>, mut spans: impl Iterator<Item = usize>) -> bool {
     min_ki.is_some_and(|ki| spans.any(|span| span / 1024 >= ki))
-}
-
-/// The summary lines of the shadow.
-// No NCBI counterpart: prints counters; it does not change any value NCBI computes.
-pub(super) fn print_summary() {
-    if shadow() {
-        eprintln!(
-            "[X_SHADOW] TBXEXTBATCH units_compared={} records_compared={} (records and unit tables identical)",
-            EB_SHADOW_UNITS.load(AtomicOrdering::Relaxed),
-            EB_SHADOW_RECORDS.load(AtomicOrdering::Relaxed)
-        );
-    }
-    // Only with the shadow: the probes of LOSAT_X_STATS / LOSAT_TIMING send the units to
-    // `scan_unit`, so with them the counters would stay at zero.
-    if shadow() {
-        eprintln!(
-            "[X_STATS] TBXEXTBATCH units={} candidates={} early={} batches={} min_span_ki={:?}",
-            EB_UNITS.load(AtomicOrdering::Relaxed),
-            EB_CANDS.load(AtomicOrdering::Relaxed),
-            EB_EARLY.load(AtomicOrdering::Relaxed),
-            EB_BATCHES.load(AtomicOrdering::Relaxed),
-            min_span_ki()
-        );
-    }
 }
 
 /// One held-back extension: the inputs of `extend_hit_two_hit` and of the init HSP, then its
@@ -204,7 +158,6 @@ pub(super) struct XPendBatch {
     len: usize,
     cands: u64,
     early: u64,
-    batches: u64,
 }
 
 // No NCBI counterpart: the batch of held-back extensions (module doc).
@@ -218,7 +171,6 @@ impl XPendBatch {
             len,
             cands: 0,
             early: 0,
-            batches: 0,
         }
     }
 
@@ -358,7 +310,6 @@ pub(super) unsafe fn flush<S: XInitSink>(
     h: &XHitCtx<'_>,
     init_hsps: &mut S,
 ) {
-    b.batches += 1;
     for c in &mut b.c[..b.n] {
         if !c.done {
             // SAFETY: the caller's bound.
@@ -511,57 +462,8 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink>(
     }
 }
 
-/// A probe that records nothing, for the shadow's run of `scan_unit`: its own type, so that the
-/// shadow adds no caller to the instance of `scan_unit` the units run (`XNoProbe`).
-#[derive(Default)]
-pub(super) struct XShadowRef;
-
-impl XProbe for XShadowRef {
-    type Mark = ();
-    fn unit_begin(&mut self, _width: usize) {}
-    fn batch(&mut self, _hits: usize) {}
-    fn at(&mut self, _cell: usize, _s: u32) {}
-    fn hit(&mut self, _outcome: XHit, _window: i32) {}
-    fn batch_end(&mut self) {}
-    fn ext_begin(&mut self) {}
-    fn ext_end(
-        &mut self,
-        _mark: (),
-        _q: &[u8],
-        _s: &[u8],
-        _s_left: usize,
-        _s_right: usize,
-        _q_right: usize,
-        _x_drop: i32,
-    ) {
-    }
-    fn unit_end(&mut self) {}
-}
-
-/// The lists the shadow compares (`Vec<InitHSP>`, `Vec<XUnitHsp>`).
-pub(super) trait XShadowList: XInitSink + Default + PartialEq + std::fmt::Debug {
-    fn len_of(&self) -> usize;
-    fn first_difference(&self, other: &Self) -> usize;
-}
-
-impl<T: PartialEq + std::fmt::Debug> XShadowList for Vec<T>
-where
-    Vec<T>: XInitSink,
-{
-    fn len_of(&self) -> usize {
-        self.len()
-    }
-    fn first_difference(&self, other: &Self) -> usize {
-        self.iter()
-            .zip(other)
-            .position(|(a, b)| a != b)
-            .unwrap_or(self.len().min(other.len()))
-    }
-}
-
 impl XPairPar {
-    // EXPERIMENT (LOSAT_X_TBXEXTBATCH): `run_unit` with the batched extensions (module doc);
-    // LOSAT_X_TBXEXTBATCHSHADOW runs both scans on every unit and compares.
+    // EXPERIMENT (LOSAT_X_TBXEXTBATCH): `run_unit` with the batched extensions (module doc).
     /// The saved init HSPs of one unit, in its scan order.
     #[inline(never)]
     pub(super) fn run_unit_batched<const PF: bool>(
@@ -571,7 +473,9 @@ impl XPairPar {
         scratch: &mut XScratch,
     ) -> Vec<InitHSP> {
         let mut init_hsps: Vec<InitHSP> = Vec::new();
-        self.scan_unit_batched_or_shadow::<_, PF>(unit, inp, scratch, &mut init_hsps);
+        // EXPERIMENT (LOSAT_X_TBXHITBF): the batched scan or its branch-free hit loop
+        // (x_tbx_hitbf.rs).
+        self.scan_unit_batched_or_bf::<_, PF>(unit, inp, scratch, &mut init_hsps);
         init_hsps
     }
 
@@ -588,54 +492,10 @@ impl XPairPar {
         let mut records = std::mem::take(&mut scratch.records);
         records.clear();
         let mapped = self.x_unit_records(unit, scratch, &mut records);
-        self.scan_unit_batched_or_shadow::<_, PF>(unit, inp, scratch, &mut records);
+        self.scan_unit_batched_or_bf::<_, PF>(unit, inp, scratch, &mut records);
         let exact = x_unit_copy(&records, mapped);
         scratch.records = records;
         exact
-    }
-
-    // EXPERIMENT (LOSAT_X_TBXEXTBATCHSHADOW): `scan_unit` (on a fresh table, into its own list)
-    // and then this module's scan, compared.
-    /// The module's scan of one unit, compared with `scan_unit` in shadow mode.
-    #[inline(always)]
-    fn scan_unit_batched_or_shadow<S: XShadowList, const PF: bool>(
-        &self,
-        unit: &XUnit,
-        inp: &XSubject<'_>,
-        scratch: &mut XScratch,
-        init_hsps: &mut S,
-    ) {
-        // EXPERIMENT (LOSAT_X_TBXHITBF): the batched scan or its branch-free hit loop
-        // (x_tbx_hitbf.rs).
-        if !shadow() {
-            self.scan_unit_batched_or_bf::<S, PF>(unit, inp, scratch, init_hsps);
-            return;
-        }
-        let mut reference = S::default();
-        self.scan_unit::<S, XShadowRef, PF>(unit, inp, scratch, &mut reference, &mut XShadowRef);
-        let reference_diag = scratch.diag.clone();
-        self.scan_unit_batched_or_bf::<S, PF>(unit, inp, scratch, init_hsps);
-        if *init_hsps != reference || scratch.diag != reference_diag {
-            let first = init_hsps.first_difference(&reference);
-            let cell = scratch
-                .diag
-                .iter()
-                .zip(&reference_diag)
-                .position(|(a, b)| a != b);
-            panic!(
-                "LOSAT_X_TBXEXTBATCHSHADOW: subject {} frame {} chunk {} group {}: records {} vs {} (first difference at {}), first table difference at {:?}",
-                inp.s_idx,
-                unit.f,
-                unit.k,
-                unit.g,
-                init_hsps.len_of(),
-                reference.len_of(),
-                first,
-                cell
-            );
-        }
-        EB_SHADOW_UNITS.fetch_add(1, AtomicOrdering::Relaxed);
-        EB_SHADOW_RECORDS.fetch_add(init_hsps.len_of() as u64, AtomicOrdering::Relaxed);
     }
 
     // The scan loop of `scan_unit` (RI:3082-3168 on one unit) with `x_hit_batched` for `x_hit` and
@@ -775,7 +635,6 @@ impl XPairPar {
             len,
             cands: 0,
             early: 0,
-            batches: 0,
         };
 
         let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
@@ -876,12 +735,6 @@ impl XPairPar {
             // SAFETY: the candidates' cells are cells of this unit's table.
             unsafe { flush(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps) };
         }
-        if shadow() {
-            EB_UNITS.fetch_add(1, AtomicOrdering::Relaxed);
-            EB_CANDS.fetch_add(b.cands, AtomicOrdering::Relaxed);
-            EB_EARLY.fetch_add(b.early, AtomicOrdering::Relaxed);
-            EB_BATCHES.fetch_add(b.batches, AtomicOrdering::Relaxed);
-        }
         (b.cands, b.early)
     }
 }
@@ -978,7 +831,7 @@ mod tests {
             let cutoff_scores: Vec<i32> = (0..contexts.len())
                 .map(|i| 10 + (i as i32 % 4) * 3)
                 .collect();
-            // X-drops inside and outside LOSAT_X_TBXUNGAP's 1..=127 (its fallback).
+            // X-drops inside and outside the 1..=127 of the two-hit table walks (their fallback).
             let x_dropoff_per_context: Vec<i32> = (0..contexts.len())
                 .map(|i| [7, 16, 30, 200][i % 4])
                 .collect();
@@ -1164,7 +1017,6 @@ mod tests {
                 len: BATCH,
                 cands: 0,
                 early: 0,
-                batches: 0,
             };
             let mut diag = vec![DiagStruct::default(); n];
             let mut expect_cells = Vec::new();

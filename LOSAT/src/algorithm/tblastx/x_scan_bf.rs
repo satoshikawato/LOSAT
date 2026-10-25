@@ -5,7 +5,7 @@
 //! `blast_aascan.rs` `s_blast_aa_scan_subject`) walks the subject's ranges with
 //! `s_DetermineScanningOffsets` (masksubj.inl:43-58) and tests the presence-vector bit of every
 //! word of a range. Here each range is scanned by tblastn's branch-free loop
-//! (`tblastn/x_scan_bf.rs` `x_scan_one_range_bf`, LOSAT_X_TBNSCANBF; its module text gives how
+//! (`tblastn/x_scan_bf.rs` `x_scan_one_range_bf`; its module text gives how
 //! it keeps NCBI's pairs and its stop for room). The ranges are walked as NCBI walks them and the
 //! room left after the earlier ranges of a call is passed on, so every call returns NCBI's pairs
 //! and `s_range`. The offset array must have `X_SCAN_BF_SLACK` entries after `array_size`

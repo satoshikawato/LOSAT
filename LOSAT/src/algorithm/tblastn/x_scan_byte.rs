@@ -5,7 +5,7 @@
 //! NCBI's scan (c++/src/algo/blast/core/blast_aascan.c:75-127, `s_BlastAaScanSubject`, kept as
 //! `tblastx/blast_aascan.rs` `s_blast_aa_scan_subject_one_range`) rolls the index of the next word
 //! from the one before (`ComputeTableIndexIncremental`), tests its presence-vector bit and copies
-//! the word's hits when the offset array has room. LOSAT_X_TBNSCANBF (`x_scan_bf.rs`) takes the
+//! the word's hits when the offset array has room. The branch-free scan (`x_scan_bf.rs`) takes the
 //! branch on the bit away, in blocks of `X_BLOCK` words; on a genome searched with one protein
 //! (HsG_p1 x hsap_dna `-db`, n1) the scan was still 55-58 % of the cycles, 5.38 cycles per word,
 //! with the rolling index a chain from word to word (line F probe P3, v4-F/REPORT.md).
@@ -30,7 +30,7 @@
 //! at a time from the overflow array. When a word's hits do not fit, `s_range[1]` is that word's
 //! position and the scan returns, so the next call resumes there. The offset pairs and the
 //! `s_range` values of every call are NCBI's (the words after the stop were looked at but not
-//! used; the next call looks at them again, as with LOSAT_X_TBNSCANBF).
+//! used; the next call looks at them again, as with the branch-free scan).
 //!
 //! The offset array must have `X_SCAN_BYTE_SLACK` entries after `array_size`; the entries past the
 //! returned count are not part of the result. `presence` depends on the lookup table only; each
@@ -42,7 +42,7 @@
 //!
 //! Both stages have an AVX2 form and a plain-loop form (the same values; the plain index loop is
 //! left to the compiler's vectorizer). On the workstation (one core, the scan before this switch =
-//! LOSAT_X_TBNSCANBF) the AVX2 forms take x0.75 of the time of one protein x the human genome and
+//! the branch-free scan) the AVX2 forms take x0.75 of the time of one protein x the human genome and
 //! x0.98-0.99 where most words are candidates (many proteins x a genome, 55 proteins x 16S); the
 //! plain loops take x0.79 and x0.83 (the LOSAT Web serial reactor, one protein x E. coli) of the
 //! time where few words are candidates, but x1.01-1.06 where most are: their copy of a cell's hits
@@ -59,9 +59,14 @@
 //! in WebAssembly, and changes nothing elsewhere (aarch64: not timed). `LOSAT_X_TBNSCANBYTE=2`
 //! takes the plain loops on any CPU for every table, `=3` the plain loops for sparse tables on any
 //! CPU. A table of another shape, and without AVX2 a table that is not sparse, is scanned as before
-//! (LOSAT_X_TBNSCANBF or NCBI's loop). With `LOSAT_X_STATS` set, `main` prints
+//! (the branch-free scan of `x_scan_bf.rs`). With `LOSAT_X_STATS` set, `main` prints
 //! `[X_STATS] TBNSCANBYTE units= calls= avx2=` (the units scanned this way, their scan calls, and
 //! whether the AVX2 forms ran).
+//!
+//! EXPERIMENT (LOSAT_X_BXSCANBYTE): blastx's direct seed loop (`blastx/x_seed_scan.rs`) scans its
+//! standard table (word size 3, 5-bit letters: every one `fits`) with `x_scan_one_range_byte` too,
+//! under its own switch of the same values and CPU policy (`x_mode`). Its presence bytes are built
+//! once per table and kept with it (`x_table_presence`; blastx's `Lookup`).
 
 use crate::algorithm::tblastx::blast_aascan::{s_blast_aa_scan_subject_one_range, BlastOffsetPair};
 use crate::algorithm::tblastx::lookup::{
@@ -80,7 +85,7 @@ const X_MASK: usize = (1 << 15) - 1;
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): offset-array entries needed after `array_size` (a cell of up
 /// to `AA_HITS_PER_CELL` hits is written as `AA_HITS_PER_CELL + 1` pairs).
-pub(super) const X_SCAN_BYTE_SLACK: usize = AA_HITS_PER_CELL + 1;
+pub(crate) const X_SCAN_BYTE_SLACK: usize = AA_HITS_PER_CELL + 1;
 
 /// A table is sparse when at most `X_SPARSE_TENTHS` tenths of its backbone cells have hits
 /// (presence bytes of 1): the plain loops then win (`XScanByte::Sparse`).
@@ -92,8 +97,8 @@ const X_SPARSE_DEFAULT: bool = cfg!(any(target_arch = "x86_64", target_arch = "w
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): how the unit path scans a table that `fits`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum XScanByte {
-    /// As before the switch (LOSAT_X_TBNSCANBF or NCBI's loop).
+pub(crate) enum XScanByte {
+    /// As before the switch (the branch-free scan of `x_scan_bf.rs`).
     Off,
     /// `x_scan_one_range_byte`; `avx2` = the AVX2 forms of both stages.
     On { avx2: bool },
@@ -104,7 +109,7 @@ pub(super) enum XScanByte {
 
 impl XScanByte {
     /// Whether `x_scan_one_range_byte` runs.
-    pub(super) fn on(self) -> bool {
+    pub(crate) fn on(self) -> bool {
         self != XScanByte::Off
     }
 }
@@ -119,17 +124,22 @@ impl XScanByte {
 /// CPU.
 pub(super) fn x_scan_byte() -> XScanByte {
     static MODE: std::sync::OnceLock<XScanByte> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| {
-        let value = crate::utils::xswitch::value("LOSAT_X_TBNSCANBYTE", 1..=3, 1);
-        let avx2 = !matches!(value, Some(2 | 3)) && avx2_detected();
-        if value == Some(2) || (value.is_some() && avx2) {
-            XScanByte::On { avx2 }
-        } else if value == Some(3) || (value == Some(1) && X_SPARSE_DEFAULT) {
-            XScanByte::Sparse
-        } else {
-            XScanByte::Off
-        }
-    })
+    *MODE.get_or_init(|| x_mode("LOSAT_X_TBNSCANBYTE"))
+}
+
+// No NCBI counterpart: reads a switch and detects AVX2; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNSCANBYTE, LOSAT_X_BXSCANBYTE): the scan that the strict-set switch `name`
+/// (one of these two) asks for on this CPU, read now (the callers keep it): `x_scan_byte`'s values.
+pub(crate) fn x_mode(name: &str) -> XScanByte {
+    let value = crate::utils::xswitch::value(name, 1..=3, 1);
+    let avx2 = !matches!(value, Some(2 | 3)) && avx2_detected();
+    if value == Some(2) || (value.is_some() && avx2) {
+        XScanByte::On { avx2 }
+    } else if value == Some(3) || (value == Some(1) && X_SPARSE_DEFAULT) {
+        XScanByte::Sparse
+    } else {
+        XScanByte::Off
+    }
 }
 
 /// Whether this machine has AVX2 (always false off x86-64).
@@ -212,6 +222,29 @@ pub(super) fn x_presence(mode: XScanByte, lookup: &Arc<BlastAaLookupTable>) -> O
     (mode != XScanByte::Sparse || sparse).then_some(bytes)
 }
 
+// No NCBI counterpart: the presence vector in another layout, made once per table; it does not
+// change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXSCANBYTE): the presence bytes of `lookup` (see `build_presence`) and
+/// whether it is sparse, for a caller that keeps them with the table (blastx's `Lookup`); `None`
+/// for a table that does not `fit`.
+pub(crate) fn x_table_presence(lookup: &BlastAaLookupTable) -> Option<(Arc<[u8]>, bool)> {
+    fits(lookup).then(|| {
+        let bytes = build_presence(lookup);
+        let sparse = sparse(&bytes, lookup);
+        (bytes, sparse)
+    })
+}
+
+/// EXPERIMENT (LOSAT_X_BXSCANBYTE): the bytes of `kept` (from `x_table_presence`) when `mode`
+/// scans that table on presence bytes (it is on, and the table is sparse if `mode` asks), else
+/// `None` (the scan before).
+pub(crate) fn x_kept_presence(mode: XScanByte, kept: &Option<(Arc<[u8]>, bool)>) -> Option<&[u8]> {
+    match kept {
+        Some((bytes, sparse)) if mode.on() && (mode != XScanByte::Sparse || *sparse) => Some(bytes),
+        _ => None,
+    }
+}
+
 // No NCBI counterpart: LOSAT_X_STATS counters; they do not change any value NCBI computes.
 /// Units scanned by `x_scan_one_range_byte` and their scan calls (`[0]`, `[1]`).
 static COUNTS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
@@ -247,9 +280,10 @@ fn x_scan_byte_if_read() -> Option<XScanByte> {
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): `s_blast_aa_scan_subject_one_range` for a table that `fits`
 /// (see the module text). Same arguments, same result, same `s_range`; `presence` is
 /// `presence_bytes(lookup)` and `offset_pairs` must hold `array_size + X_SCAN_BYTE_SLACK` entries.
-/// Not inlined: the switch-off scan of `x_scan_unit` keeps its code.
+/// Not inlined: the switch-off scan of `x_scan_unit` keeps its code. Blastx's direct loop calls it
+/// too (LOSAT_X_BXSCANBYTE).
 #[inline(never)]
-pub(super) fn x_scan_one_range_byte(
+pub(crate) fn x_scan_one_range_byte(
     mode: XScanByte,
     lookup: &BlastAaLookupTable,
     presence: &[u8],

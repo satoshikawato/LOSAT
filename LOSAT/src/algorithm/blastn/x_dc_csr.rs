@@ -1,5 +1,5 @@
 //! EXPERIMENT (LOSAT_X_DCCSR, in the strict set: default ON since 2026-10-21, off with
-//! `LOSAT_X_DCCSR=0`; shadow LOSAT_X_DCCSRSHADOW): the chains of a
+//! `LOSAT_X_DCCSR=0`): the chains of a
 //! one-template discontiguous megablast table (`build_disc_mb_lookup`) laid out as CSR
 //! (compressed sparse rows) instead of NCBI's `hashtable` / `next_pos`: `offsets[cell] ..
 //! offsets[cell + 1]` indexes `qs`, which holds the cell's 1-based query offsets in the order
@@ -62,8 +62,7 @@
 //! table goes through `DiscTemplates::x_csr`: the strip scan of LOSAT_X_PAIRPARDISC and its
 //! diagonal-array stage (`scan_strip_disc`), the reference scan of `search_query_batch`
 //! (`run.rs`, its `x_on_word_csr`; the chains' `on_word` stays as it was), and
-//! `TwoStageLookup::contains_hit` and `count_hits` where the table has no chains (under the
-//! shadow, which keeps the chains, these two walk the chains).
+//! `TwoStageLookup::contains_hit` and `count_hits` where the table has no chains.
 //!
 //! The scans of a CSR table read their words through `Ring`: each word enters a FIFO of `RING`
 //! words and leaves it, unchanged and in order, `RING` words later; a word entering prefetches
@@ -71,53 +70,31 @@
 //! the first and the last cache line of its run (x86_64 only; elsewhere the ring only delays
 //! the words). The words, and so every pair and its order, are the scan's own.
 //!
-//! The shadow (LOSAT_X_DCCSRSHADOW, implies the switch) builds the CSR of every one-template
-//! table whatever its size, and the chains too; it compares every cell's run with its chain,
-//! the presence vector, the helper counters and the longest chain, and, when the CSR was built
-//! on the pool, that CSR with the serial build's. The scans then read the CSR. A difference
-//! prints `[X_SHADOW] DCCSR ... DIFFERENT ...` and panics; at exit `main` prints
-//! `[X_SHADOW] DCCSR tables=<compared> pool=<built on a pool> cells=<cells compared>
-//! words=<words compared> diffs=0 identical`. With LOSAT_TIMING `main` prints `[TIMING]
-//! disc_lookup_csr: builds=<CSR tables> parallel=<on a pool> words=<their words>` (the build
-//! times are in `[TIMING] disc_lookup_build`, the CSR's in its `loop` or `pool_fill`).
+//! With LOSAT_TIMING `main` prints `[TIMING] disc_lookup_csr: builds=<CSR tables> parallel=<on a
+//! pool> words=<their words>` (the build times are in `[TIMING] disc_lookup_build`, the CSR's in
+//! its `loop` or `pool_fill`).
 
-use super::{
-    build_unmasked_ranges, disc_longest_chain, fill_disc_mb_tables, DiscTables, DiscWords,
-    PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK,
-};
+use super::{build_unmasked_ranges, DiscWords, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
+#[cfg(test)]
+use super::{disc_longest_chain, fill_disc_mb_tables, DiscTables};
 use crate::algorithm::blastn::disc_lookup::compute_discontiguous_index;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
-/// No NCBI counterpart: reads the switches once (LOSAT_X_DCCSR, in the strict set: on unless
-/// `LOSAT_X_DCCSR=0`; LOSAT_X_DCCSRSHADOW, off unless set to any value,
-/// implies the switch). They choose between two LOSAT layouts of the same chains and change no
+/// No NCBI counterpart: reads LOSAT_X_DCCSR once (a switch of the strict set: on unless
+/// `LOSAT_X_DCCSR=0`). It chooses between two LOSAT layouts of the same chains and changes no
 /// value NCBI computes.
-pub(super) fn switches() -> (bool, bool) {
-    static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();
-    *SWITCHES.get_or_init(|| {
-        let shadow = std::env::var_os("LOSAT_X_DCCSRSHADOW").is_some();
-        (shadow || crate::utils::xswitch::on("LOSAT_X_DCCSR"), shadow)
-    })
-}
-
-/// No NCBI counterpart: LOSAT_X_DCCSRSHADOW is set.
-pub(super) fn shadow() -> bool {
-    switches().1
+pub(super) fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCCSR"))
 }
 
 // No NCBI counterpart: counters of the summary lines.
 static BUILDS: AtomicU64 = AtomicU64::new(0);
 static BUILDS_ON_POOL: AtomicU64 = AtomicU64::new(0);
 static BUILT_WORDS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_TABLES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_POOL_TABLES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_CELLS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_WORDS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_DIFFS: AtomicU64 = AtomicU64::new(0);
 
-/// The `[TIMING]` line (with LOSAT_TIMING, when a CSR was built) and the shadow's summary line
-/// (with LOSAT_X_DCCSRSHADOW), printed by `main` at exit.
+/// The `[TIMING]` line (with LOSAT_TIMING, when a CSR was built), printed by `main` at exit.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
@@ -127,17 +104,6 @@ pub fn print_summary() {
             load(&BUILDS),
             load(&BUILDS_ON_POOL),
             load(&BUILT_WORDS)
-        );
-    }
-    if shadow() {
-        let diffs = load(&SHADOW_DIFFS);
-        eprintln!(
-            "[X_SHADOW] DCCSR tables={} pool={} cells={} words={} diffs={diffs} {}",
-            load(&SHADOW_TABLES),
-            load(&SHADOW_POOL_TABLES),
-            load(&SHADOW_CELLS),
-            load(&SHADOW_WORDS),
-            if diffs == 0 { "identical" } else { "DIFFERENT" }
         );
     }
 }
@@ -185,22 +151,16 @@ pub(super) enum Layout {
     Chains,
     /// The CSR alone.
     Csr,
-    /// Both, compared (LOSAT_X_DCCSRSHADOW); the scans read the CSR.
-    Shadow,
 }
 
 /// No NCBI counterpart: the layout of a table with `cells` cells (module comment, scope).
 pub(super) fn plan(words: &DiscWords<'_>, cells: usize) -> Layout {
-    let (on, shadow) = switches();
-    if !on {
+    if !on() {
         return Layout::Chains;
     }
     if words.two_templates {
         crate::utils::xreach::x_reach!("LOSAT_X_DCCSR", false);
         return Layout::Chains;
-    }
-    if shadow {
-        return Layout::Shadow;
     }
     let csr = wanted(positions(words), cells);
     crate::utils::xreach::x_reach!("LOSAT_X_DCCSR", csr);
@@ -368,7 +328,7 @@ pub(super) unsafe fn assemble(
     Csr { offsets, qs }
 }
 
-/// No NCBI counterpart (counters only): a CSR build of the search (not the shadow's second one).
+/// No NCBI counterpart (counters only): a CSR build of the search.
 pub(super) fn count_build(csr: &Csr, on_pool: bool) {
     BUILDS.fetch_add(1, Ordering::Relaxed);
     BUILDS_ON_POOL.fetch_add(u64::from(on_pool), Ordering::Relaxed);
@@ -568,14 +528,14 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
 const _: () = assert!(RING.is_power_of_two() && RING >= 4);
 const _: () = assert!(PV_ARRAY_MASK == 31);
 
-/// No NCBI counterpart: LOSAT_X_DCCSRSHADOW's check of a table built with both layouts: the
-/// CSR `csr` (built on the pool when `on_pool`; its presence vector and counters in `pv` and
+/// No NCBI counterpart: the check of the unit tests of a table built with both layouts: the CSR
+/// `csr` (built on the pool when `on_pool`; its presence vector and counters in `pv` and
 /// `helper`) against the chains, presence vector, counters and longest chain of the fill
 /// (`hashtable`, `next_pos`, `fill_pv`, `fill_helper`, `longest_chain`), and, when `on_pool`,
-/// against the serial build. Prints `[X_SHADOW] DCCSR ... DIFFERENT ...` and panics on a
-/// difference.
+/// against the serial build. Panics on a difference.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
-pub(super) fn shadow_check(
+pub(super) fn x_assert_runs_are_the_chains(
     words: &DiscWords<'_>,
     csr: &Csr,
     on_pool: bool,
@@ -639,19 +599,12 @@ pub(super) fn shadow_check(
             diffs.push("pool build != serial build".to_string());
         }
     }
-    SHADOW_TABLES.fetch_add(1, Ordering::Relaxed);
-    SHADOW_POOL_TABLES.fetch_add(u64::from(on_pool), Ordering::Relaxed);
-    SHADOW_CELLS.fetch_add(cells as u64, Ordering::Relaxed);
-    SHADOW_WORDS.fetch_add(csr.words() as u64, Ordering::Relaxed);
-    if !diffs.is_empty() {
-        SHADOW_DIFFS.fetch_add(diffs.len() as u64, Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] DCCSR table cells={cells} words={} pool={on_pool} DIFFERENT: {}",
-            csr.words(),
-            diffs.join("; ")
-        );
-        panic!("LOSAT_X_DCCSRSHADOW: the CSR differs from the chains");
-    }
+    assert!(
+        diffs.is_empty(),
+        "the CSR differs from the chains (cells {cells}, words {}, pool {on_pool}): {}",
+        csr.words(),
+        diffs.join("; ")
+    );
 }
 
 /// The chains of the first template filled by the original loop, for the tests: `(hashtable,
@@ -787,7 +740,7 @@ mod tests {
                 let mut helper = vec![0u32; cells >> 11];
                 let csr = build(&w, cells, &mut pv, pv_array_bts, &mut helper);
                 let longest = disc_longest_chain(&fill_helper, &[], false);
-                shadow_check(
+                x_assert_runs_are_the_chains(
                     &w,
                     &csr,
                     false,

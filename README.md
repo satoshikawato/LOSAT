@@ -22,8 +22,8 @@ On certified pairwise profiles and fixtures, LOSAT is checked against declared N
 - **NCBI-Verified Certified Fixtures**: Matches the declared NCBI source, CLI, or API oracle contract on certified fixtures, including exact output bytes where required and the documented local subject genetic-code exceptions.
 - **Pure Rust, Zero Dependencies**: Standalone single executable. Does not wrap, link, or shell out to external NCBI binaries or libraries.
 - **Direct Pairwise Alignment**: Compares FASTA files directly via `-query` and `-subject` without running `makeblastdb`.
-- **WebAssembly Ready**: Compiles to serial and threaded command-WASI. Browser/reactor APIs exist for integrations such as [gbdraw](https://github.com/satoshikawato/gbdraw), but they are outside the TBLASTN v0.2.0 certification.
-- **Corrected TBLASTX Genetic Codes**: Fully respects `--db-gencode` for translated subject sequences in pairwise searches (resolving NCBI BLAST+'s default fallback to standard code).
+- **WebAssembly Ready**: Compiles to serial and threaded command-WASI (see [Platforms](#platforms)) and runs in the browser through the [Web GUI (preview)](#web-gui-preview). Browser/reactor APIs exist for integrations such as [gbdraw](https://github.com/satoshikawato/gbdraw).
+- **Corrected TBLASTX Genetic Codes**: Fully respects `-db_gencode` for translated subject sequences in pairwise searches (resolving NCBI BLAST+'s default fallback to standard code; see [Scope & Differences](#scope--differences-from-ncbi-blast)).
 - **High Performance**: Multithreaded execution via Rayon natively and shared-memory threading in WebAssembly (`wasm32-wasip1-threads`).
 
 ---
@@ -34,10 +34,12 @@ On certified pairwise profiles and fixtures, LOSAT is checked against declared N
 |:---|:---|:---|:---|
 | **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16`, `17` (see [Output formats](#output-formats)) | Nucleotide vs. nucleotide alignment |
 | **`blastx`** | `blastx`; native and Wasm entry points | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
-| **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
+| **`blastp`** | `blastp` (default), `blastp-fast` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
 | **`tblastx`** | `tblastx` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
-| **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
+| **`tblastn`** | `tblastn` (default) | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
 
+> **Not supported**: `-task blastp-short` and `-task tblastn-fast` are rejected at the command line with an error message.
+>
 > **Note**: Tabular output (`-outfmt 6` and `7`) writes the 12 standard BLAST fields:  
 > `qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore`.  
 > BLASTP and BLASTX also accept a custom field list (for example `-outfmt "6 qseqid sseqid evalue"`); BLASTN, TBLASTN and TBLASTX write the standard fields only. `delim=` is rejected.
@@ -61,7 +63,7 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `8` | Seqalign (Text ASN.1) | all five | all five programs |
 | `9` | Seqalign (Binary ASN.1) | all five | all five programs |
 | `10` | Comma-separated values | all five | not yet |
-| `11` | BLAST archive (ASN.1) | all five | `blastn`, `blastp` and `blastx` (with `-subject` and `-db`; `ARCHIVE_FORMAT` text and `bin`, as NCBI reads it; `xml` is refused for now); the other programs: not yet |
+| `11` | BLAST archive (ASN.1) | all five | `blastn`, `blastp`, `blastx` and `tblastn` (with `-subject` and `-db`; `ARCHIVE_FORMAT` text and `bin`, as NCBI reads it; `xml` is refused for now); `tblastx`: not yet |
 | `12` | Seqalign (JSON) | all five | all five programs |
 | `13` | Multiple-file BLAST JSON | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
 | `14` | Multiple-file BLAST XML2 | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
@@ -95,10 +97,23 @@ pixi add losat
 ```
 
 ### Pre-built Binaries
-Download existing pre-compiled standalone binaries for Linux (x86_64, aarch64), macOS (Apple Silicon & Intel), and Windows from the [Releases](https://github.com/satoshikawato/LOSAT/releases) page. The unpublished TBLASTN v0.2.0 candidate is available only by building this branch; existing Releases and Bioconda packages do not provide that candidate.
+Each release from v0.2.0 provides eight items on the [Releases](https://github.com/satoshikawato/LOSAT/releases) page (earlier releases list their own items on their release pages):
+
+| Item | Target | Archive | Binary |
+|:---|:---|:---|:---|
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | `.tar.gz` | `losat` |
+| Linux aarch64 | `aarch64-unknown-linux-gnu` | `.tar.gz` | `losat` |
+| macOS arm64 | `aarch64-apple-darwin` | `.tar.gz` | `losat` |
+| macOS x86_64 | `x86_64-apple-darwin` | `.tar.gz` | `losat` |
+| Windows x86_64 | `x86_64-pc-windows-msvc` | `.zip` | `losat.exe` |
+| WASI serial | `wasm32-wasip1` | `.tar.gz` | `losat.wasm` |
+| WASI threads | `wasm32-wasip1-threads` | `.tar.gz` | `losat.wasm` |
+| Source crate | n/a | `.crate` | n/a |
+
+LOSAT is not published on crates.io, Homebrew, PyPI, Docker Hub or npm. Bioconda (above) is the only package-manager channel.
 
 ### Build from Source
-Requires the [Rust toolchain](https://rustup.rs/) (edition 2021, Rust 1.92+ recommended):
+Requires the [Rust toolchain](https://rustup.rs/) (edition 2021, Rust 1.92+ recommended). There is no crates.io package, so `cargo` builds from source only:
 
 ```bash
 git clone https://github.com/satoshikawato/LOSAT.git
@@ -106,6 +121,15 @@ cd LOSAT/LOSAT
 cargo build --release
 ```
 The compiled binary will be located at `target/release/losat`.
+
+### Platforms
+
+| Platform | Status in v0.2.0 |
+|:---|:---|
+| Linux x86_64, Linux aarch64, macOS arm64, macOS x86_64, Windows x86_64 (native) | **Certified** against NCBI BLAST+ 2.17.0 on the certification set |
+| WASI serial (`wasm32-wasip1`) | **Certified** against NCBI BLAST+ 2.17.0 on the certification set |
+| WASI threads (`wasm32-wasip1-threads`) | **Supported**: tested in CI, not certified |
+| [Web GUI](#web-gui-preview) (browser) | **Preview**: no NCBI certification is claimed |
 
 ---
 
@@ -156,9 +180,7 @@ losat blastx -query transcripts.fna -subject proteins.faa \
 
 The current branch implements native threaded BLASTX, command-WASI, and the
 Web/reactor entry points. See the [CLI scope and custom fields](docs/losatx_blastx_native_cli.md).
-The v0.2.0 release remains **HOLD**: the required cross-platform, browser,
-negative-case, and authority gates are not fully accepted. Existing finite
-performance measurements do not establish release readiness.
+The release record for v0.2.0 is [docs/release/v0.2.0.md](docs/release/v0.2.0.md).
 
 ### 4. Protein vs. Translated Nucleotide (TBLASTN)
 ```bash
@@ -170,7 +192,7 @@ losat tblastn \
   -outfmt 6
 ```
 
-The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. Its certified output and target claims apply to the [declared fixtures and options](docs/release/v0.2.0.md). `tblastn-fast`, PSI-TBLASTN, and composition modes 1/3 are unsupported; database searches (`-db`) are described in section 6.
+The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. Its certified output and target claims apply to the [declared fixtures and options](docs/release/v0.2.0.md). PSI-TBLASTN and composition modes 1/3 are unsupported (so is `-task tblastn-fast`); database searches (`-db`) are described in section 6.
 
 ### 5. Writing a BLAST Database (makedb)
 ```bash
@@ -218,9 +240,9 @@ losat blastx \
 | `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA) |
 | `-subject <file>` | File path | *(Required unless `-db`)* | Input subject sequence file (FASTA) |
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX; section 6) |
-| `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp`, `blastp-fast` or `blastp-short` (for `blastp`); `blastx` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`) |
+| `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp` or `blastp-fast` (for `blastp`); `blastx` (for `blastx`); `tblastn` (for `tblastn`). `blastp-short` and `tblastn-fast` are not supported |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `11`=BLAST archive (`blastn`, `blastp` and `blastx` so far), `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out` (every program), `15`=BLAST JSON and `16`=BLAST XML2 (every program), `17`=SAM (BLASTN only); custom tabular fields in BLASTP and BLASTX only |
+| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `11`=BLAST archive (`blastn`, `blastp`, `blastx` and `tblastn` so far), `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out` (every program), `15`=BLAST JSON and `16`=BLAST XML2 (every program), `17`=SAM (BLASTN only); custom tabular fields in BLASTP and BLASTX only |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |
@@ -229,6 +251,7 @@ losat blastx \
 | `-qcov_hsp_perc <real>` | Float | `0` (no filter) | Percent query coverage per HSP: HSPs that cover less of the query (of the query frame in BLASTX/TBLASTX) are removed |
 | `-dust <args>` | String | `20 64 1` | DUST low-complexity filter for BLASTN (`yes`, `no`, or `"level window linker"`) |
 | `-seg <args>` | String | `no` (blastp)<br>`12 2.2 2.5` (blastx/tblastx/tblastn) | SEG low-complexity filter for BLASTX/BLASTP/TBLASTX/TBLASTN (`yes`, `no`, or `"window locut hicut"`) |
+| `-soft_masking <bool>` | Boolean | `false` | Apply the filtering locations as soft masks: they keep words out of the lookup table, but the query keeps its letters (BLASTP, BLASTX, TBLASTN, TBLASTX) |
 | `-query_gencode <int>` | Integer | `1` | Genetic code for query translation (BLASTX/TBLASTX) |
 | `-db_gencode <int>` | Integer | `1` | Genetic code for subject translation (TBLASTX/TBLASTN) |
 
@@ -282,9 +305,9 @@ seconds (LOSAT / NCBI = ratio). Both tools searched the `makeblastdb` default
 | blastp, yeast proteome all against all (a) | 279.1 / 885.7 = 0.32 | 38.6 / 114.3 = 0.34 | 22.9 / 61.4 = 0.37 |
 | blastx, 10 transcripts x Swiss-Prot (b) | 28.3 / 30.2 = 0.94 | 3.90 / 4.12 = 0.95 | 2.24 / 2.27 = 0.99 |
 
-(a) The small-tier run (build 0b7335ce) lost at 16 threads (97.9 s vs NCBI 61.4 s) because the 2.9 MB database made only 3 blocks of 1 MiB. `LOSAT_X_BPDBCUT` (#231, in the default set since #289) fixes it. The LOSAT numbers here are from a later paired run on the same workstation (2026-10-18, build 9560b7c1, medians of 3, 2 and 1 runs at 16, 8 and 1 threads) that had no NCBI arm; the ratios use NCBI's small-tier medians (a cross-run ratio).
+(a) The small-tier run (build 0b7335ce) lost at 16 threads (97.9 s vs NCBI 61.4 s) because the 2.9 MB database made only 3 blocks of 1 MiB. The development variable `LOSAT_X_BPDBCUT` (#231, in the default set since #289) fixes it. The LOSAT numbers here are from a later paired run on the same workstation (2026-10-18, build 9560b7c1, medians of 3, 2 and 1 runs at 16, 8 and 1 threads) that had no NCBI arm; the ratios use NCBI's small-tier medians (a cross-run ratio).
 
-(b) The small-tier run lost at 8 and 16 threads (7.1 vs 4.1 s, 4.9 vs 2.2 s). `LOSAT_X_BXSUBJFLOW` (#287, default ON) fixes it. The 8- and 16-thread numbers are from a later run with NCBI in the same rounds (2026-10-17, build 6d0c7b1e, medians of 3); the 1-thread value is the small-tier one, because the flow does not act at one thread.
+(b) The small-tier run lost at 8 and 16 threads (7.1 vs 4.1 s, 4.9 vs 2.2 s). The development variable `LOSAT_X_BXSUBJFLOW` (#287, default ON) fixes it. The 8- and 16-thread numbers are from a later run with NCBI in the same rounds (2026-10-17, build 6d0c7b1e, medians of 3); the 1-thread value is the small-tier one, because the flow does not act at one thread.
 
 Database construction (median of three, one thread): `makeblastdb` 0.69 s for
 RefSeq 16S, 8.47 s for Swiss-Prot and 0.16 s for the yeast proteome; `losat makedb`
@@ -311,11 +334,23 @@ LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](ht
 
 ---
 
+## Web GUI (preview)
+
+LOSAT also runs in the browser through the Web GUI (`web/app`), which follows the layout and terms of NCBI BLAST: a search form with a "Run LOSAT" button, then a Graphic Summary and Descriptions on one page. It is a **preview**: it claims no NCBI certification, and it rejects `-db` (database searches are native only). Its boundary is set by [PD-LOSAT-WEB-APP-BOUNDARY](docs/product_decisions/PD-LOSAT-WEB-APP-BOUNDARY.md); the build and test commands are in [web/AGENTS.md](web/AGENTS.md).
+
+---
+
+## Development variables (unsupported)
+
+The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X_REACH` and the `--features diagnostics` build are development variables. They are unsupported and may change or disappear without notice. The defaults (no variable set, a normal build) are the certified configuration; do not set these variables in production runs.
+
+---
+
 ## Scope & Differences from NCBI BLAST+
 
 - **Intended Use Case**: LOSAT is engineered for local pairwise sequence comparisons (`-query` vs `-subject`).
 - **Database searches**: LOSAT searches `-subject` FASTA files and BLAST databases (`-db`, section 6) written by `makeblastdb` without `-parse_seqids` or by `losat makedb`; `-db` gives NCBI BLAST+ 2.17.0 `-db -num_threads 1` output at every thread count. NCBI's distributed databases (nr, nt, core_nt and other databases built with parsed Seq-ids), taxonomy and id filters, and several databases in one `-db` are not supported; use NCBI BLAST+ for those.
-- **TBLASTX Subject Genetic Code**: In NCBI BLAST+, local `-subject` searches inadvertently default to genetic code 1 (Standard) regardless of command-line flags. LOSAT correctly translates the subject according to `--db-gencode`.
+- **TBLASTX Subject Genetic Code**: In NCBI BLAST+, local `-subject` searches inadvertently default to genetic code 1 (Standard) regardless of command-line flags. LOSAT correctly translates the subject according to `-db_gencode`. See [PD-TBLASTX-LOCAL-SUBJECT-GENCODE](docs/product_decisions/PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md).
 - **Fail-Fast Configuration**: Unsupported flags and tasks fail fast with clear error messages rather than silently falling back to uncertified defaults.
 
 ---

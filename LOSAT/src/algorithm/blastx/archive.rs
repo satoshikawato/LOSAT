@@ -33,7 +33,7 @@ use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
 use crate::report::archive::{
-    write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
+    ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
 };
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::seqid::SeqId;
@@ -217,16 +217,9 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
     }
 }
 
-fn ka_block(params: &KarlinParams, gapped: bool) -> KaBlock {
-    KaBlock {
-        lambda: params.lambda,
-        k: params.k,
-        h: params.h,
-        gapped,
-    }
-}
-
-/// The defline line of the Bioseq: the line as read, else `>` and the title.
+/// The defline line of the Bioseq: the line as read, else `>` and the title. BLASTX keeps
+/// its own copy of `report::archive::defline_of`: its `FastaRecord` is its own type, and an
+/// empty defline counts as missing.
 fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
     match record
         .source

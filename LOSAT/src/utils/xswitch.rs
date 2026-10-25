@@ -66,6 +66,11 @@ use std::ops::RangeInclusive;
 /// after them. `LOSAT_X_TBNOIDCHUNK`,
 /// `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`,
 /// `LOSAT_X_SEGSHARE` and `LOSAT_X_DEKKER` graduated on 2026-10-22 (see `GRADUATED`).
+/// `LOSAT_X_ERFABSORB` (Spouge's ErfC returns 2.0 below -6 without evaluating ErfImpl,
+/// `stats/spouge.rs`) and `LOSAT_X_SEGTRIMMEMO` (the SEG trim of a segment kept per thread for the
+/// maskers that repeat segments, `utils/x_seg_trim_memo.rs`) graduated on 2026-10-26: they left
+/// `STRICT_SET` and their previous code was deleted (the maskers that do not ask for the memo keep
+/// trimming every segment, a rule of the masker and not a switch).
 /// `LOSAT_X_LINKSLICES` (the groups of the TBLASTX linking call linked as slices of its one list,
 /// `tblastx/x_link_slices.rs`) was added after the change as a switch that is off unless set and
 /// joined the set once it was verified with it on.
@@ -99,6 +104,17 @@ use std::ops::RangeInclusive;
 /// made when they are read and freed when they are no longer read, `tblastx/subjects.rs`) were
 /// added after the change as switches that are off unless set and joined the set together once
 /// they were verified and timed with it on.
+/// `LOSAT_X_TBXFRAMES` and `LOSAT_X_TBXUNGAP` (the byte table of TBLASTX's two-hit ungapped
+/// extension, `tblastx/extension/x_two_hit_fast.rs`) graduated on 2026-10-26: they left
+/// `STRICT_SET` and their previous code was deleted (the calls the byte table does not cover
+/// still run `extend_hit_two_hit_reference`, a rule of the table walks and not a switch).
+/// `LOSAT_X_TBNHITBF` (the branch-free two-hit loop of TBLASTN's unit path,
+/// `tblastn/x_tbn_hitbf.rs`), `LOSAT_X_TBNLINKWIN` (the linking candidates of a head chosen by
+/// subject position, `tblastn/stage_d_linking/x_link_window.rs`) and `LOSAT_X_TBNSCANBF` (the
+/// lookup scan without a branch on the presence vector, `tblastn/x_scan_bf.rs`) graduated on
+/// 2026-10-26: they left `STRICT_SET` and their previous code was deleted (NCBI's whole-window
+/// loop of the linking call stays as the reference of a unit test, and `XTwoHit::pairs` stays as
+/// the body that the branch-free loop hands the other hits to).
 /// `LOSAT_X_BPDIAG` (the two-hit diagonal test of a lookup cell eight hits at a time,
 /// `blastp/x_seed_fused.rs`) joined after a second run of the same jobs with it on as well.
 /// `LOSAT_X_SEEDCOMPACT` (TBLASTX's unit path keeps the saved init HSPs of a unit as 28-byte
@@ -127,6 +143,16 @@ use std::ops::RangeInclusive;
 /// searched ahead by the pool's other threads, `blastx/x_subject_flow.rs`) joined the set in the
 /// pull request that added it (Owner 2026-10-17: speed-ups land default ON), after it was
 /// verified and timed with it on and off.
+/// `LOSAT_X_BNTABPAR` (BLASTN's outfmt 6 / 7 rows of a report formatted per query on the search's
+/// pool while no LOSAT_X_QBATCHPAR slot exists, `blastn/x_tab_par.rs`) joined the set in the pull
+/// request that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_DCTWOSLOTS` (BLASTN's dc-megablast takes two LOSAT_X_QBATCHPAR slots of half the
+/// threads where the slot model takes three or more and the two-slot rule holds,
+/// `blastn/blast_engine/x_qbatch_par.rs`) joined the set in the pull request that added it, after
+/// it was verified and timed with it on and off.
+/// `LOSAT_X_BNCSR` (the chains of BLASTN's contiguous lookup tables of word sizes 9 to 11 laid out
+/// as CSR and scanned through a prefetch ring, `blastn/x_bn_csr.rs`) joined the set in the pull
+/// request that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_QGROUPPAR` (BLASTN's preliminary gapped loop and traceback of a subject searched on one
 /// thread run per query on the pool, `blastn/blast_engine/x_qgroup_par.rs`) joined the set in the
 /// pull request that added it, after it was verified and timed with it on and off.
@@ -144,14 +170,22 @@ use std::ops::RangeInclusive;
 /// reference loop's full lookup table filled in place from per-cell counts,
 /// `tblastx/lookup/x_lut_direct.rs`) were added after the change as switches that are off unless
 /// set and joined the set together once they were verified and timed with them on and off.
+/// `LOSAT_X_BXSCANBF` (BLASTX's seed scans find the subject words with lookup hits by tblastn's
+/// branch-free candidate loop, `blastx/x_seed_scan.rs`) graduated on 2026-10-26: it left
+/// `STRICT_SET` and the scan on the presence test was deleted (the compressed lookup table keeps
+/// its own scan, a rule of the table and not a switch).
 pub(crate) const STRICT_SET: &[&str] = &[
+    "LOSAT_X_BNCSR",
     "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNDBSTREAM",
     "LOSAT_X_BNDCONE",
     "LOSAT_X_BNFEWSUBJ",
+    "LOSAT_X_BNLUTDROP",
     "LOSAT_X_BNMAPPED",
+    "LOSAT_X_BNQDROP",
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
+    "LOSAT_X_BNTABPAR",
     "LOSAT_X_BNTBRANGE",
     "LOSAT_X_BNUNGAPCOUNT",
     "LOSAT_X_BPCLUT",
@@ -160,10 +194,12 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPDBCUT",
     "LOSAT_X_BPDEFER",
     "LOSAT_X_BPDIAG",
+    "LOSAT_X_BPFSEED",
     "LOSAT_X_BPGAP",
     "LOSAT_X_BPGAP16",
     "LOSAT_X_BPHITBF",
     "LOSAT_X_BPLISTEDLEAN",
+    "LOSAT_X_BPLKDROP",
     "LOSAT_X_BPLKPAHEAD",
     "LOSAT_X_BPLKPFLAT",
     "LOSAT_X_BPLUT",
@@ -183,6 +219,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPREDOWINEXPAND",
     "LOSAT_X_BPSCANBF",
     "LOSAT_X_BPSEED",
+    "LOSAT_X_BPSEGWIN",
     "LOSAT_X_BPSUBJMETA",
     "LOSAT_X_BPSUBJRUN",
     "LOSAT_X_BPUNGAP",
@@ -197,22 +234,24 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXFLOW",
     "LOSAT_X_BXHITBF",
     "LOSAT_X_BXLUTPOOL",
-    "LOSAT_X_BXSCANBF",
+    "LOSAT_X_BXSCANBYTE",
     "LOSAT_X_BXSUBJFLOW",
     "LOSAT_X_BXUNGAPSENT",
     "LOSAT_X_BXUNITCAP",
     "LOSAT_X_CTXO1",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
+    "LOSAT_X_DCTWOSLOTS",
     "LOSAT_X_DIAGLV",
     "LOSAT_X_DIAGLV2",
     "LOSAT_X_DISCLUTPAR",
     "LOSAT_X_DISPTABLE",
     "LOSAT_X_DPEMASK",
     "LOSAT_X_DPNEON2",
+    "LOSAT_X_DPNIBBLE",
     "LOSAT_X_DPWINDOW",
-    "LOSAT_X_ERFABSORB",
     "LOSAT_X_FOLDLEAN",
+    "LOSAT_X_GREEDYROWFUSE",
     "LOSAT_X_MBFILL",
     "LOSAT_X_MBLUTKEEP",
     "LOSAT_X_MBLUTONCE",
@@ -222,6 +261,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_PAIRPARFOLD",
     "LOSAT_X_PAIRPARGATE",
     "LOSAT_X_PAIRPARHOME",
+    "LOSAT_X_PAIRPARN1",
     "LOSAT_X_PAIRPARNA",
     "LOSAT_X_PAIRWISEPAR",
     "LOSAT_X_QBATCHPAR",
@@ -232,16 +272,14 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_RPTSTREAM",
     "LOSAT_X_SEEDCOMPACT",
     "LOSAT_X_SEEDUNMAP",
-    "LOSAT_X_SEGTRIMMEMO",
     "LOSAT_X_SUMPMEMO",
     "LOSAT_X_TBNBATCHRULE",
+    "LOSAT_X_TBNDBSTREAM",
     "LOSAT_X_TBNFLOWHELP",
     "LOSAT_X_TBNFRAMEREUSE",
-    "LOSAT_X_TBNHITBF",
     "LOSAT_X_TBNKEEPFEW",
-    "LOSAT_X_TBNLINKWIN",
     "LOSAT_X_TBNOWNPOOLS",
-    "LOSAT_X_TBNSCANBF",
+    "LOSAT_X_TBNREDOLPT",
     "LOSAT_X_TBNSCANBYTE",
     "LOSAT_X_TBNSTORE",
     "LOSAT_X_TBNUNGAP",
@@ -249,7 +287,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXBAND",
     "LOSAT_X_TBXEXTBATCH",
-    "LOSAT_X_TBXFRAMES",
     "LOSAT_X_TBXHITBF",
     "LOSAT_X_TBXKMERGE",
     "LOSAT_X_TBXLUT",
@@ -259,9 +296,9 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXPREFETCH",
     "LOSAT_X_TBXQFRAMES",
     "LOSAT_X_TBXQSLICE",
+    "LOSAT_X_TBXRESOLVE",
     "LOSAT_X_TBXRPTPAR",
     "LOSAT_X_TBXSCANBF",
-    "LOSAT_X_TBXUNGAP",
     "LOSAT_X_TBXUNGAPSENT",
     "LOSAT_X_TBXUNITMASK",
 ];

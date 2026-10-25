@@ -5,10 +5,11 @@ mod args;
 //     status = s_BlastSearchEngineOneContext(...);
 // }
 mod search_seed;
-// EXPERIMENT (LOSAT_X_TBNSCANBF): the lookup scan without a branch on the presence vector.
+// The lookup scan without a branch on the presence vector.
 pub(crate) mod x_scan_bf;
-// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once.
-mod x_scan_byte;
+// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once
+// (blastx's direct loop takes it too, LOSAT_X_BXSCANBYTE).
+pub(crate) mod x_scan_byte;
 // NCBI c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
 // translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
 // length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);
@@ -16,12 +17,14 @@ mod x_scan_byte;
 mod x_subject_translate;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects held packed, their letters made when read.
 mod x_subject_store;
+// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `-db` sequences read where they are searched.
+mod x_db_stream;
 // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
 // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
 // Blast_InitHitListSortByScore(init_hitlist);
 mod search_init;
 // NCBI c++/src/algo/blast/core/aa_ungapped.c:516-552: the two-hit tests of every hit.
-// EXPERIMENT (LOSAT_X_TBNHITBF): too far and overlap without a branch.
+// Too far and overlap without a branch.
 mod x_tbn_hitbf;
 // NCBI c++/src/algo/blast/core/blast_engine.c:522-552:
 // aux_struct->GetGappedScore(..., init_hitlist, &hsp_list, ...);
@@ -60,6 +63,9 @@ mod x_oid_flow;
 mod stage_e_report;
 // TBLASTN's BLAST XML (outfmt 5), once per run, from the final hit lists.
 mod blast_xml;
+// NCBI c++/src/app/blast/tblastn_app.cpp:295 (`WriteArchive`): TBLASTN's BLAST archive (outfmt 11),
+// one Blast4-archive per query batch.
+mod archive;
 // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod seqalign;
@@ -73,12 +79,12 @@ pub use x_subject_translate::print_summary as x_subject_translate_print_summary;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_subject_store::print_summary as x_subject_store_print_summary;
-// EXPERIMENT (LOSAT_X_TBNSCANBF): the summary line `main` prints at exit. No NCBI counterpart: it
+// The summary line of the branch-free scan that `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_scan_bf::print_summary as x_scan_bf_print_summary;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_scan_byte::print_summary as x_scan_byte_print_summary;
-// EXPERIMENT (LOSAT_X_TBNLINKWIN): the summary line `main` prints at exit. No NCBI counterpart: it
+// The summary line of the linking lookup that `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use stage_d_linking::x_link_window_print_summary;

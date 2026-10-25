@@ -1,0 +1,139 @@
+{
+  "declaredPages": 65535,
+  "normal": {
+    "maximumPages": 65535,
+    "initialBytes": 1507328,
+    "firstHighPointer": 0,
+    "linearBytes": 8257536,
+    "outputs": [
+      {
+        "program": "blastn",
+        "sha256": {
+          "0": "6ffedbbe15c6fdd069159c76ab51781871c49639c0daaa05afddfd7ecb856fcb",
+          "1": "785a3512ab1d1354e4fdb2c9ac245a1dbbe22486f31b066bd988af63e2915305",
+          "6": "a3d64318189748f4a90d7b5a9c992f353d2d819701f3bebcba54297dc11f048f",
+          "7": "d72fbbdca64f5a24a901be419613074a759ca46220c955022ba425c7effa38a9"
+        },
+        "bytes": {
+          "0": 20379,
+          "1": 10407,
+          "6": 202,
+          "7": 599
+        }
+      },
+      {
+        "program": "blastp",
+        "sha256": {
+          "0": "ec9334846a2830926d723a6098cd553265090b64b563e513bcefdfa1c75fb9e2",
+          "1": "0597663b6bbea44ba6475806ae0dc31d44292bed994ea378fc8529b8c4effd2a",
+          "6": "ea4d96de71668b3223c8eebb6da3a3864499fb4fdf7ca24c38714bc486411a69",
+          "7": "72beb53ba121b15d70671170b8e928375949b3788cc5240a6a3298b359f50f63"
+        },
+        "bytes": {
+          "0": 7871,
+          "1": 3669,
+          "6": 198,
+          "7": 586
+        }
+      },
+      {
+        "program": "tblastn",
+        "sha256": {
+          "0": "2385eaa7e4839a39fe513f264bf8643782373a67e072ec643b8f4f5f9fe951bb",
+          "1": "43d9f1159fa35867f6678f9013810a671fa8e40cd32dbffedd427457db87650b",
+          "6": "2afb84c55fe4dde38b8059a9ca03004253e92b79612ae57b3e3bec200c6d89e9",
+          "7": "54c6e28289ad31109e4c940eb0dc035bc0f39c171cd8a8426820cf7756980820"
+        },
+        "bytes": {
+          "0": 7759,
+          "1": 4167,
+          "6": 328,
+          "7": 718
+        }
+      },
+      {
+        "program": "tblastx",
+        "sha256": {
+          "0": "d27f2f1d850becfeea802dd6fb50a00d72d0034423a83b095c7d6a2354af968b",
+          "1": "9b65cc740ca123c40bdd5d8cf246f020717b0a91dc95edcb14ec326e050ad51c",
+          "6": "8c7cd9289b24c84e6257a4b844e05dad738934c0cc577d31501c1ca83f3c2e5d",
+          "7": "44849c5f55b0a7512385e3b1efa251af69a8c43c62cc1a41c7275f63d9806f2c"
+        },
+        "bytes": {
+          "0": 31585,
+          "1": 41773,
+          "6": 6853,
+          "7": 7244
+        }
+      }
+    ]
+  },
+  "high": {
+    "maximumPages": 65535,
+    "initialBytes": 2214592512,
+    "firstHighPointer": 2214592528,
+    "linearBytes": 2221932544,
+    "outputs": [
+      {
+        "program": "blastn",
+        "sha256": {
+          "0": "6ffedbbe15c6fdd069159c76ab51781871c49639c0daaa05afddfd7ecb856fcb",
+          "1": "785a3512ab1d1354e4fdb2c9ac245a1dbbe22486f31b066bd988af63e2915305",
+          "6": "a3d64318189748f4a90d7b5a9c992f353d2d819701f3bebcba54297dc11f048f",
+          "7": "d72fbbdca64f5a24a901be419613074a759ca46220c955022ba425c7effa38a9"
+        },
+        "bytes": {
+          "0": 20379,
+          "1": 10407,
+          "6": 202,
+          "7": 599
+        }
+      },
+      {
+        "program": "blastp",
+        "sha256": {
+          "0": "ec9334846a2830926d723a6098cd553265090b64b563e513bcefdfa1c75fb9e2",
+          "1": "0597663b6bbea44ba6475806ae0dc31d44292bed994ea378fc8529b8c4effd2a",
+          "6": "ea4d96de71668b3223c8eebb6da3a3864499fb4fdf7ca24c38714bc486411a69",
+          "7": "72beb53ba121b15d70671170b8e928375949b3788cc5240a6a3298b359f50f63"
+        },
+        "bytes": {
+          "0": 7871,
+          "1": 3669,
+          "6": 198,
+          "7": 586
+        }
+      },
+      {
+        "program": "tblastn",
+        "sha256": {
+          "0": "2385eaa7e4839a39fe513f264bf8643782373a67e072ec643b8f4f5f9fe951bb",
+          "1": "43d9f1159fa35867f6678f9013810a671fa8e40cd32dbffedd427457db87650b",
+          "6": "2afb84c55fe4dde38b8059a9ca03004253e92b79612ae57b3e3bec200c6d89e9",
+          "7": "54c6e28289ad31109e4c940eb0dc035bc0f39c171cd8a8426820cf7756980820"
+        },
+        "bytes": {
+          "0": 7759,
+          "1": 4167,
+          "6": 328,
+          "7": 718
+        }
+      },
+      {
+        "program": "tblastx",
+        "sha256": {
+          "0": "d27f2f1d850becfeea802dd6fb50a00d72d0034423a83b095c7d6a2354af968b",
+          "1": "9b65cc740ca123c40bdd5d8cf246f020717b0a91dc95edcb14ec326e050ad51c",
+          "6": "8c7cd9289b24c84e6257a4b844e05dad738934c0cc577d31501c1ca83f3c2e5d",
+          "7": "44849c5f55b0a7512385e3b1efa251af69a8c43c62cc1a41c7275f63d9806f2c"
+        },
+        "bytes": {
+          "0": 31585,
+          "1": 41773,
+          "6": 6853,
+          "7": 7244
+        }
+      }
+    ]
+  }
+}

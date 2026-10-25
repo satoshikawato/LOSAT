@@ -108,7 +108,8 @@
 //! X-drop test are evaluated lane by lane, in blocks of 8 (16-bit) or 16 (8-bit) cells.
 //! The row gap (`score_gap_row`), which the C loop carries from cell to cell, is a decayed
 //! prefix maximum over the lanes. The script bits have the values of the NCBI `SCRIPT_*`
-//! constants, and the traceback walk is the C walk. The argument above is why the cells that
+//! constants (or are the four-bit codes of them, `LOSAT_X_DPNIBBLE`), and the traceback walk is
+//! the C walk. The argument above is why the cells that
 //! are kept have the C values. The random test
 //! (`simd_kernels_match_scalar_loops_on_random_problems`) compares results with the
 //! scalar loop. The module is integer arithmetic only. A problem that does not fit the lanes
@@ -144,6 +145,39 @@ const SCRIPT_EXTEND_GAP_B: u8 = 0x40;
 // The same sentinel value as NCBI. The kernels stop at it as `ALIGN_EX` does (lines 571-575 of
 // `blast_gapalign.c`).
 const FENCE_SENTRY: u8 = 201;
+
+// No NCBI counterpart: the traceback rows at four bits per cell (`LOSAT_X_DPNIBBLE`). NCBI keeps one
+// byte of `SCRIPT_*` bits per cell (`edit_script`). With the switch on, the kernels store a code of
+// four bits instead, two cells per byte (cell 2k in the low half of byte k of the row, cell 2k + 1
+// in the high half), and the walk follows the codes (`kernel::finish`), giving each operation its
+// NCBI value. Bits 0-1 hold
+// the operation (0 = `SCRIPT_GAP_IN_A`, 1 = `SCRIPT_SUB`, 2 = `SCRIPT_GAP_IN_B`: the NCBI value / 3),
+// bit 2 `SCRIPT_EXTEND_GAP_A`, bit 3 `SCRIPT_EXTEND_GAP_B`. The kernels compute the code with the
+// same comparisons as the byte, so each cell keeps the script NCBI gives it.
+const NIB_SUB: u8 = 1;
+const NIB_EXTEND_GAP_A: u8 = 4;
+const NIB_EXTEND_GAP_B: u8 = 8;
+
+/// No NCBI counterpart: the values a kernel adds up for a cell's script (`SCRIPT_SUB`,
+/// `SCRIPT_EXTEND_GAP_A`, `SCRIPT_EXTEND_GAP_B`), as NCBI bytes or as four-bit codes (`NIB`).
+/// The kernels read them in `const` blocks: a branch on `NIB` that the MIR inliner copies into a
+/// kernel changes its register allocation (one byte per cell: +0.85 % instructions at one
+/// thread).
+#[inline(always)]
+pub(crate) const fn script_codes(nib: bool) -> (u8, u8, u8) {
+    if nib {
+        (NIB_SUB, NIB_EXTEND_GAP_A, NIB_EXTEND_GAP_B)
+    } else {
+        (SCRIPT_SUB, SCRIPT_EXTEND_GAP_A, SCRIPT_EXTEND_GAP_B)
+    }
+}
+
+/// No NCBI counterpart: the bytes a traceback row of `cells` cells takes (two cells per byte with
+/// `NIB`, rounded up), without a branch (`script_codes`).
+#[inline(always)]
+pub(crate) const fn trace_bytes(nib: bool, cells: usize) -> usize {
+    (cells + nib as usize) >> nib as usize
+}
 
 // No NCBI counterpart: lane padding, 16-bit value range and the largest score the vector
 // path accepts. A problem outside these limits is not handled and the scalar port runs; the
@@ -429,78 +463,109 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
     Some(t)
 }
 
-/// No NCBI counterpart (memory placement only): a row of the vector kernels whose first element
-/// lies on a 64-byte boundary. The 256-bit kernels store 32 bytes at `PAD + first` plus multiples
-/// of 32 bytes and load the same places in the next row; from a buffer at glibc's 16-byte
-/// alignment half of those stores could cross a cache line, and a split store does not forward
-/// to the load after it (an offset set by the heap's history: one more allocation elsewhere made
-/// blastn's 16-thread search 2 % slower with three times the blocked store forwards). The
-/// values and the lengths are those of the `Vec` before.
-struct Rows<T> {
-    v: Vec<T>,
-    /// `v`'s element on the boundary (`v` is never pushed to, so its buffer does not move).
-    ptr: *mut T,
-    len: usize,
-}
-
-// SAFETY: `ptr` points into `v`, which the struct owns; it goes and is shared with `v`.
-unsafe impl<T: Send> Send for Rows<T> {}
-unsafe impl<T: Sync> Sync for Rows<T> {}
-
-impl<T: Copy + Default> Rows<T> {
-    fn new(len: usize) -> Self {
-        let mut r = Rows {
-            v: Vec::new(),
-            ptr: std::ptr::NonNull::dangling().as_ptr(),
-            len: 0,
-        };
-        r.resize(len, T::default());
-        r
+// No NCBI counterpart: `Rows` and the only code that sets its fields.
+mod rows {
+    /// No NCBI counterpart (memory placement only): a row of the vector kernels whose first
+    /// element lies on a 64-byte boundary. The 256-bit kernels store 32 bytes at `PAD + first`
+    /// plus multiples of 32 bytes and load the same places in the next row; from a buffer at
+    /// glibc's 16-byte alignment half of those stores could cross a cache line, and a split store
+    /// does not forward to the load after it (an offset set by the heap's history: one more
+    /// allocation elsewhere made blastn's 16-thread search 2 % slower with three times the blocked
+    /// store forwards). The values and the lengths are those of the `Vec` before. The fields are
+    /// private to `rows`, so that only `new` and `resize` set `ptr` and `len`.
+    pub(super) struct Rows<T> {
+        v: Vec<T>,
+        /// `v`'s element on the boundary (`v` is never pushed to, so its buffer does not move).
+        ptr: *mut T,
+        len: usize,
     }
 
-    /// `Vec::resize`: the rows only grow (`grow`).
-    fn resize(&mut self, len: usize, value: T) {
-        if len <= self.len {
-            self.len = len;
-            return;
+    // SAFETY: `ptr` points into `v` (or dangles with `len` 0) and is sent and shared only together
+    // with `v`, so `Rows<T>` is `Send` / `Sync` when `Vec<T>` is.
+    unsafe impl<T: Send> Send for Rows<T> {}
+    unsafe impl<T: Sync> Sync for Rows<T> {}
+
+    impl<T: Copy + Default> Rows<T> {
+        pub(super) fn new(len: usize) -> Self {
+            let mut r = Rows {
+                v: Vec::new(),
+                ptr: std::ptr::NonNull::dangling().as_ptr(),
+                len: 0,
+            };
+            r.resize(len, T::default());
+            r
         }
-        let mut v = vec![value; len + 64 / std::mem::size_of::<T>()];
-        let off = v.as_ptr().align_offset(64);
-        assert!(off <= 64 / std::mem::size_of::<T>());
-        v[off..off + self.len].copy_from_slice(self);
-        let ptr = v[off..].as_mut_ptr();
-        *self = Rows { v, ptr, len };
-    }
-}
 
-impl<T> std::ops::Deref for Rows<T> {
-    type Target = [T];
-    #[inline(always)]
-    fn deref(&self) -> &[T] {
-        // SAFETY: `ptr` and `len` lie in `v` (`resize`), and `v` is not changed elsewhere.
-        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+        /// `Vec::resize`: the rows only grow (`grow`).
+        pub(super) fn resize(&mut self, len: usize, value: T) {
+            if len <= self.len {
+                self.len = len;
+                return;
+            }
+            let slack = 64 / std::mem::size_of::<T>();
+            let mut v = vec![value; len + slack];
+            // `align_offset` gives `usize::MAX` only for a pointer it cannot align, which `v`'s
+            // buffer (aligned for `T`) never is; if it ever did, the rows would start at `v`'s first
+            // element, which changes only the speed.
+            let off = v.as_ptr().align_offset(64);
+            let off = if off <= slack { off } else { 0 };
+            v[off..off + self.len].copy_from_slice(self);
+            // SAFETY: `off + len <= v.len()`. `Vec::as_mut_ptr` makes no reference to `v`'s
+            // elements, so the pointer may reach all of them.
+            let ptr = unsafe { v.as_mut_ptr().add(off) };
+            *self = Rows { v, ptr, len };
+        }
     }
-}
 
-impl<T> std::ops::DerefMut for Rows<T> {
-    #[inline(always)]
-    fn deref_mut(&mut self) -> &mut [T] {
-        // SAFETY: as `deref`, and `&mut self` borrows `v` uniquely.
-        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
-    }
-}
+    impl<T> Rows<T> {
+        /// `Vec::as_ptr`: the row's first element without a slice made first, so that a pointer a
+        /// kernel takes stays valid when the row is then read or written through `Deref` /
+        /// `DerefMut` or another `as_ptr` / `as_mut_ptr` call, as Miri accepts for a `Vec` (a
+        /// pointer from the slice's method comes from a slice that the next `deref` or `deref_mut`
+        /// of the row can invalidate).
+        #[inline(always)]
+        pub(super) fn as_ptr(&self) -> *const T {
+            self.ptr
+        }
 
-impl<T: PartialEq> PartialEq for Rows<T> {
-    fn eq(&self, other: &Self) -> bool {
-        **self == **other
+        /// `Vec::as_mut_ptr`; see `as_ptr`.
+        #[inline(always)]
+        pub(super) fn as_mut_ptr(&mut self) -> *mut T {
+            self.ptr
+        }
     }
-}
 
-impl<T: std::fmt::Debug> std::fmt::Debug for Rows<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        (**self).fmt(f)
+    impl<T> std::ops::Deref for Rows<T> {
+        type Target = [T];
+        #[inline(always)]
+        fn deref(&self) -> &[T] {
+            // SAFETY: `ptr .. ptr + len` lies in `v`, or `len` is 0 and `ptr` is dangling (`new`);
+            // only `new` and `resize` set them.
+            unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+        }
+    }
+
+    impl<T> std::ops::DerefMut for Rows<T> {
+        #[inline(always)]
+        fn deref_mut(&mut self) -> &mut [T] {
+            // SAFETY: as `deref`, and `&mut self` borrows `v` uniquely.
+            unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
+        }
+    }
+
+    impl<T: PartialEq> PartialEq for Rows<T> {
+        fn eq(&self, other: &Self) -> bool {
+            **self == **other
+        }
+    }
+
+    impl<T: std::fmt::Debug> std::fmt::Debug for Rows<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            (**self).fmt(f)
+        }
     }
 }
+use rows::Rows;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:462-468,476-479
 // ```c
@@ -541,6 +606,10 @@ pub(crate) struct XdropScratch {
     /// The band start, in lanes, at which a kernel moves its rows (`LOSAT_X_DPWINDOW`); `usize::MAX`
     /// when they hold every column.
     x_win_at: usize,
+    /// Whether the kernels write `trace` as four-bit codes, two cells per byte (`LOSAT_X_DPNIBBLE`;
+    /// `NIB_SUB`; a search's scratch follows `x_dp_nibble_here`); the walk reads the rows the same
+    /// way.
+    x_nib: bool,
 }
 
 impl XdropScratch {
@@ -550,7 +619,9 @@ impl XdropScratch {
     /// The scratch of a search: empty unless the vector kernels are compiled for the target.
     pub(crate) fn for_search() -> Self {
         if KERNEL_COMPILED {
-            return Self::new();
+            let mut sc = Self::new();
+            sc.x_nib = x_dp_nibble_here();
+            return sc;
         }
         Self {
             ha: Rows::new(0),
@@ -573,6 +644,7 @@ impl XdropScratch {
             ops: Vec::new(),
             x_sh: 0,
             x_win_at: x_dp_window_at(),
+            x_nib: x_dp_nibble(),
         }
     }
 
@@ -606,6 +678,7 @@ impl XdropScratch {
             ops: Vec::new(),
             x_sh: 0,
             x_win_at: x_dp_window_at(),
+            x_nib: x_dp_nibble(),
         }
     }
 
@@ -747,6 +820,46 @@ pub(crate) fn x_dp_window_at() -> usize {
     })
 }
 
+/// No NCBI counterpart: `LOSAT_X_DPNIBBLE` (strict set): the vector kernels keep the traceback rows
+/// at four bits per cell, two cells per byte (`NIB_SUB`). Off: one byte per cell, as before.
+pub(crate) fn x_dp_nibble() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DPNIBBLE"))
+}
+
+/// No NCBI counterpart: the rule of `LOSAT_X_DPNIBBLE` for the scratch of a search
+/// (`XdropScratch::for_search`): four-bit codes when the scratch is made on a thread of a Rayon
+/// pool, that is in a search on two threads or more (its pool, or the one-thread pools of the
+/// blastn query-batch slots); one byte per cell on the calling thread of a one-thread search,
+/// which has no pool. One thread keeps the bytes because there the codes' packing cost time
+/// (Sakai x EDL933 x1.009) and the memory they save is one trace. Memory only: both layouts give
+/// every script NCBI gives.
+fn x_dp_nibble_here() -> bool {
+    if !x_dp_nibble() {
+        return false;
+    }
+    let pooled = x_in_pool();
+    crate::utils::xreach::x_reach!("LOSAT_X_DPNIBBLE", pooled);
+    pooled
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_in_pool() -> bool {
+    rayon::current_thread_index().is_some()
+}
+
+#[cfg(any(
+    not(feature = "parallel"),
+    all(target_arch = "wasm32", not(feature = "wasm-threads"))
+))]
+fn x_in_pool() -> bool {
+    false
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:612-613,732
 // ```c
 //                     *a_offset = a_index;
@@ -812,6 +925,17 @@ mod arch {
     #[inline(always)]
     pub unsafe fn store<T>(p: *mut T, v: V) {
         _mm_storeu_si128(p as *mut V, v)
+    }
+    /// 16 four-bit codes (bytes <= 15) to 8 bytes in the low half, byte k = code 2k | code 2k+1 << 4.
+    #[inline(always)]
+    pub unsafe fn nibs(v: V) -> V {
+        let m = _mm_maddubs_epi16(v, _mm_set1_epi16(0x1001));
+        _mm_packus_epi16(m, m)
+    }
+    /// The low 8 bytes of `v`.
+    #[inline(always)]
+    pub unsafe fn store64<T>(p: *mut T, v: V) {
+        _mm_storel_epi64(p as *mut V, v)
     }
     #[inline(always)]
     pub unsafe fn adds16(a: V, b: V) -> V {
@@ -985,6 +1109,17 @@ mod arch {
     #[inline(always)]
     pub unsafe fn store<T>(p: *mut T, v: V) {
         v128_store(p as *mut v128, v)
+    }
+    /// 16 four-bit codes (bytes <= 15) to 8 bytes in the low half, byte k = code 2k | code 2k+1 << 4.
+    #[inline(always)]
+    pub unsafe fn nibs(v: V) -> V {
+        let w = v128_or(v, u16x8_shr(v, 4));
+        i8x16_shuffle::<0, 2, 4, 6, 8, 10, 12, 14, 0, 2, 4, 6, 8, 10, 12, 14>(w, w)
+    }
+    /// The low 8 bytes of `v`.
+    #[inline(always)]
+    pub unsafe fn store64<T>(p: *mut T, v: V) {
+        v128_store64_lane::<0>(v, p as *mut u64)
     }
     #[inline(always)]
     pub unsafe fn adds16(a: V, b: V) -> V {
@@ -1177,6 +1312,18 @@ mod arch {
     #[inline(always)]
     pub unsafe fn store<T>(p: *mut T, v: V) {
         vst1q_u8(p as *mut u8, v)
+    }
+    /// 16 four-bit codes (bytes <= 15) to 8 bytes in the low half, byte k = code 2k | code 2k+1 << 4.
+    #[inline(always)]
+    pub unsafe fn nibs(v: V) -> V {
+        let w = vreinterpretq_u16_u8(v);
+        let n = vmovn_u16(vsraq_n_u16::<4>(w, w));
+        vcombine_u8(n, n)
+    }
+    /// The low 8 bytes of `v`.
+    #[inline(always)]
+    pub unsafe fn store64<T>(p: *mut T, v: V) {
+        vst1_u8(p as *mut u8, vget_low_u8(v))
     }
     #[inline(always)]
     pub unsafe fn adds16(a: V, b: V) -> V {
@@ -1559,6 +1706,80 @@ mod kernel {
         check_fence: bool,
         sc: &mut XdropScratch,
     ) -> Option<XdropResult> {
+        if !TB || sc.x_nib {
+            align_body_rows::<TB, TB>(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        } else {
+            align_body_bytes(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        }
+    }
+
+    // No NCBI counterpart: the traceback of `align_body` with one byte per cell (`LOSAT_X_DPNIBBLE=0`). Off
+    // x86_64 it is a function of its own, so that the default entry keeps one traceback body.
+    #[cfg_attr(target_arch = "x86_64", inline(always))]
+    #[cfg_attr(not(target_arch = "x86_64"), inline(never))]
+    unsafe fn align_body_bytes(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
+        align_body_rows::<true, false>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
+    }
+
+    // No NCBI counterpart: the kernel of `align_body` for one trace layout (`NIB`: four-bit codes,
+    // `LOSAT_X_DPNIBBLE`).
+    #[inline(always)]
+    unsafe fn align_body_rows<const TB: bool, const NIB: bool>(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
         sc.ops.clear();
         if len1 == 0 || len2 == 0 {
             return Some(XdropResult {
@@ -1614,7 +1835,7 @@ mod kernel {
         }
         sc.dirty = b_size;
         if TB {
-            sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
+            sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
             sc.rows.push((0, 0, b_size as u32));
         }
 
@@ -1630,9 +1851,9 @@ mod kernel {
             kcross: load(core::hint::black_box(&KCROSS).as_ptr()),
             kb7: load(core::hint::black_box(&KB7).as_ptr()),
             xv: splat16(x as i16),
-            c3: splat16(SCRIPT_SUB as i16),
-            c10: splat16(SCRIPT_EXTEND_GAP_A as i16),
-            c40: splat16(SCRIPT_EXTEND_GAP_B as i16),
+            c3: splat16(const { script_codes(NIB).0 } as i16),
+            c10: splat16(const { script_codes(NIB).1 } as i16),
+            c40: splat16(const { script_codes(NIB).2 } as i16),
         };
         let zero_v = zero();
         let static_tabs: Option<*const u8> = match scores {
@@ -1777,7 +1998,9 @@ mod kernel {
                     (d0, sc0) = block::<TB>(&c, &mut rs, hr, hw, e, b0, s_lo, Some(m0));
                     (d1, sc1) = block::<TB>(&c, &mut rs, hr, hw, e, b0 + 8, s_hi, Some(m1));
                 }
-                if TB {
+                if TB && NIB {
+                    store64(tr.add((b0 - first) >> 1), nibs(packus16(sc0, sc1)));
+                } else if TB {
                     store(tr.add(b0 - first), packus16(sc0, sc1));
                 }
                 // 2 bits per lane, 32 bits per iteration
@@ -1820,7 +2043,8 @@ mod kernel {
                 best_rel = lane0(rs.bestv) - bias;
             }
             if TB {
-                sc.trace.set_len(row_off + proc_end - first);
+                sc.trace
+                    .set_len(row_off + trace_bytes(NIB, proc_end - first));
                 sc.rows.push((
                     row_off as u32,
                     (first + sc.x_sh) as u32,
@@ -1864,7 +2088,7 @@ mod kernel {
         }
 
         let best = base + best_rel;
-        finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+        finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
     }
 
     // No NCBI counterpart: shuffle and mask constants of the 8-bit lanes; they do not change any
@@ -2022,6 +2246,85 @@ mod kernel {
         check_fence: bool,
         sc: &mut XdropScratch,
     ) -> Option<XdropResult> {
+        if !TB || sc.x_nib {
+            align_body8_rows::<TB, TB>(
+                q,
+                s,
+                scores,
+                max_m,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        } else {
+            align_body8_bytes(
+                q,
+                s,
+                scores,
+                max_m,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        }
+    }
+
+    // No NCBI counterpart: the traceback of `align_body8` with one byte per cell (`LOSAT_X_DPNIBBLE=0`). Off
+    // x86_64 it is a function of its own, so that the default entry keeps one traceback body.
+    #[cfg_attr(target_arch = "x86_64", inline(always))]
+    #[cfg_attr(not(target_arch = "x86_64"), inline(never))]
+    unsafe fn align_body8_bytes(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        max_m: i32,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
+        align_body8_rows::<true, false>(
+            q,
+            s,
+            scores,
+            max_m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
+    }
+
+    // No NCBI counterpart: the kernel of `align_body8` for one trace layout (`NIB`: four-bit codes,
+    // `LOSAT_X_DPNIBBLE`).
+    #[inline(always)]
+    unsafe fn align_body8_rows<const TB: bool, const NIB: bool>(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        max_m: i32,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
         sc.ops.clear();
         if len1 == 0 || len2 == 0 {
             return Some(XdropResult {
@@ -2073,7 +2376,7 @@ mod kernel {
         }
         sc.dirty8 = b_size;
         if TB {
-            sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
+            sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
             sc.rows.push((0, 0, b_size as u32));
         }
 
@@ -2097,9 +2400,9 @@ mod kernel {
             kcross: load(core::hint::black_box(&KCROSS8).as_ptr()),
             kb15: load(core::hint::black_box(&KB15).as_ptr()),
             xv: splat8(sat(x)),
-            c3: splat8(SCRIPT_SUB as i8),
-            c10: splat8(SCRIPT_EXTEND_GAP_A as i8),
-            c40: splat8(SCRIPT_EXTEND_GAP_B as i8),
+            c3: splat8(const { script_codes(NIB).0 } as i8),
+            c10: splat8(const { script_codes(NIB).1 } as i8),
+            c40: splat8(const { script_codes(NIB).2 } as i8),
         };
         let zero_v = zero();
         let static_tabs: Option<*const u8> = match scores {
@@ -2238,7 +2541,9 @@ mod kernel {
                     let m0 = load(LANE_MASK8.as_ptr().add(16 - n));
                     (d0, sc0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv, Some(m0));
                 }
-                if TB {
+                if TB && NIB {
+                    store64(tr.add((b0 - first) >> 1), nibs(sc0));
+                } else if TB {
                     store(tr.add(b0 - first), sc0);
                 }
                 // 1 bit per lane, 16 bits per iteration
@@ -2281,7 +2586,8 @@ mod kernel {
                 best_rel = lane0_u8(rs.bestv) - bias;
             }
             if TB {
-                sc.trace.set_len(row_off + proc_end - first);
+                sc.trace
+                    .set_len(row_off + trace_bytes(NIB, proc_end - first));
                 sc.rows.push((
                     row_off as u32,
                     (first + sc.x_sh) as u32,
@@ -2322,7 +2628,7 @@ mod kernel {
         }
 
         let best = base + best_rel;
-        finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+        finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:682-727
@@ -2341,7 +2647,7 @@ mod kernel {
     ///
     /// Result assembly and traceback walk shared by both lane widths.
     #[inline(always)]
-    pub(super) unsafe fn finish<const TB: bool>(
+    pub(super) unsafe fn finish<const TB: bool, const NIB: bool>(
         sc: &mut XdropScratch,
         a_off: usize,
         b_off: usize,
@@ -2384,9 +2690,22 @@ mod kernel {
         //     GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
         // }
         // ```
+        // the script bits of the rows: NCBI bytes, or four-bit codes (`NIB`, `LOSAT_X_DPNIBBLE`); the
+        // walk below runs on the codes themselves, so a step reads its cell with no table between
+        let (op_mask, ext_a, ext_b, gap_a, gap_b) = if NIB {
+            (3, NIB_EXTEND_GAP_A, NIB_EXTEND_GAP_B, 0, 2)
+        } else {
+            (
+                SCRIPT_OP_MASK,
+                SCRIPT_EXTEND_GAP_A,
+                SCRIPT_EXTEND_GAP_B,
+                SCRIPT_GAP_IN_A,
+                SCRIPT_GAP_IN_B,
+            )
+        };
         let mut a_index = a_off;
         let mut b_index = b_off;
-        let mut script = SCRIPT_SUB;
+        let mut script = const { script_codes(NIB).0 };
         while a_index > 0 || b_index > 0 {
             if a_index >= sc.rows.len() {
                 break;
@@ -2399,34 +2718,40 @@ mod kernel {
             if b_rel >= len as usize {
                 break;
             }
-            let next = *sc.trace.get_unchecked(off as usize + b_rel);
-            match script & SCRIPT_OP_MASK {
-                x if x == SCRIPT_GAP_IN_A => {
-                    script = next & SCRIPT_OP_MASK;
-                    if next & SCRIPT_EXTEND_GAP_A != 0 {
-                        script = SCRIPT_GAP_IN_A;
+            let next = if NIB {
+                let pair = *sc.trace.get_unchecked(off as usize + (b_rel >> 1));
+                (pair >> ((b_rel & 1) << 2)) & 15
+            } else {
+                *sc.trace.get_unchecked(off as usize + b_rel)
+            };
+            match script & op_mask {
+                x if x == gap_a => {
+                    script = next & op_mask;
+                    if next & ext_a != 0 {
+                        script = gap_a;
                     }
                 }
-                x if x == SCRIPT_GAP_IN_B => {
-                    script = next & SCRIPT_OP_MASK;
-                    if next & SCRIPT_EXTEND_GAP_B != 0 {
-                        script = SCRIPT_GAP_IN_B;
+                x if x == gap_b => {
+                    script = next & op_mask;
+                    if next & ext_b != 0 {
+                        script = gap_b;
                     }
                 }
                 _ => {
-                    script = next & SCRIPT_OP_MASK;
+                    script = next & op_mask;
                 }
             }
-            let op = script & SCRIPT_OP_MASK;
-            if op == SCRIPT_GAP_IN_A {
+            let op = script & op_mask;
+            if op == gap_a {
                 b_index = b_index.saturating_sub(1);
-            } else if op == SCRIPT_GAP_IN_B {
+            } else if op == gap_b {
                 a_index = a_index.saturating_sub(1);
             } else {
                 a_index = a_index.saturating_sub(1);
                 b_index = b_index.saturating_sub(1);
             }
-            push_op(&mut sc.ops, op);
+            // the NCBI operation: a code's operation times SCRIPT_SUB (0, 3, 6)
+            push_op(&mut sc.ops, if NIB { op * SCRIPT_SUB } else { op });
         }
         Some(XdropResult {
             a_offset: a_off,
@@ -3395,6 +3720,8 @@ mod tests {
         for case in 0..cases {
             // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
             sc.x_win_at = [128, 320, usize::MAX][case % 3];
+            // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
+            sc.x_nib = case % 2 == 0;
             let n = if rng.below(2) == 0 { 16 } else { 28 };
             let scale = if rng.below(3) == 0 { 32 } else { 1 };
             let max_len = if rng.below(5) == 0 { 2500 } else { 300 };
@@ -3558,6 +3885,130 @@ mod tests {
             assert!(
                 handled > 40 && shifted > 20,
                 "handled {handled}, moved {shifted}"
+            );
+        }
+    }
+
+    // No NCBI counterpart: the traceback rows at four bits per cell (`LOSAT_X_DPNIBBLE`). Long
+    // tracebacks (both scores of the blastn task and a protein matrix, 8-bit and 16-bit lanes) run
+    // with four-bit codes and with one byte per cell: the offsets, score, fence flag, edit script
+    // and cell count are equal, equal to the scalar loops; the rows have the same bands and each
+    // takes half its cells' bytes, rounded up.
+    #[test]
+    fn nibble_trace_keeps_every_result() {
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let (mut on, mut off) = (XdropScratch::new(), XdropScratch::new());
+        (on.x_nib, off.x_nib) = (true, false);
+        let mut handled = 0usize;
+        for case in 0..40 {
+            let n = if case % 2 == 0 { 16 } else { 28 };
+            // scale 32 leaves the 8-bit lanes (16-bit kernels)
+            let scale = if case % 3 == 2 { 32 } else { 1 };
+            let len = 1500 + rng.below(2500) as usize;
+            let p = random_problem(&mut rng, n, scale, len);
+            let (go, ge, x) = if case % 4 < 2 {
+                (5 * scale, 2 * scale, 110 * scale)
+            } else {
+                (11 * scale, scale, 38 * scale)
+            };
+            let (len1, len2) = (p.q.len(), p.s.len());
+            if len2 == 0 {
+                continue;
+            }
+            let rows = RowSeq::Bytes {
+                data: &p.q,
+                base: -1,
+                step: 1,
+            };
+            let cols = ColSeq {
+                data: &p.s,
+                base: 0,
+                step: 1,
+                zero_from: len2,
+            };
+            let scores = Scores::Flat { data: &p.m, n };
+            let expected = reference(&p, len1, len2, go, ge, x, true, false);
+            let a = xdrop_align(
+                &rows, &cols, &scores, len1, len2, go, ge, x, true, true, &mut on,
+            );
+            let b = xdrop_align(
+                &rows, &cols, &scores, len1, len2, go, ge, x, true, true, &mut off,
+            );
+            assert_eq!(a.is_some(), b.is_some(), "case {case}: one layout declined");
+            let (Some(a), Some(b)) = (a, b) else {
+                continue;
+            };
+            handled += 1;
+            assert_eq!(a, b, "case {case} len1={len1} len2={len2}");
+            assert_eq!(on.ops, off.ops, "case {case} traceback");
+            assert_eq!(
+                (a.a_offset, a.b_offset, a.score, a.fence_hit),
+                (expected.0, expected.1, expected.2, expected.3),
+                "case {case} against the scalar loops"
+            );
+            assert_eq!(on.ops, expected.4, "case {case} scalar traceback");
+            let bands = |r: &[(u32, u32, u32)]| r.iter().map(|x| (x.1, x.2)).collect::<Vec<_>>();
+            assert_eq!(bands(&on.rows), bands(&off.rows), "case {case} rows");
+            for w in on.rows.windows(2) {
+                assert_eq!(w[1].0 - w[0].0, (w[0].2 + 1) / 2, "case {case} row bytes");
+            }
+            assert_eq!(
+                off.trace.len(),
+                off.rows.iter().map(|r| r.2 as usize).sum::<usize>()
+            );
+            assert_eq!(
+                on.trace.len(),
+                on.rows
+                    .iter()
+                    .map(|r| (r.2 as usize + 1) / 2)
+                    .sum::<usize>(),
+                "case {case} trace bytes"
+            );
+        }
+        if cfg!(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128"),
+            target_arch = "aarch64"
+        )) {
+            assert!(handled > 30, "handled {handled}");
+        }
+    }
+
+    // No NCBI counterpart: `nibs` of the `arch` layer (`LOSAT_X_DPNIBBLE`) against its definition
+    // on random codes: byte k of the low half = code 2k | code 2k+1 << 4.
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn nibs_pairs_adjacent_codes() {
+        // the x86_64 `arch` layer runs inside the kernels' SSSE3 / SSE4.1 entries (`x86_entry!`)
+        #[cfg(target_arch = "x86_64")]
+        if !is_x86_feature_detected!("ssse3") {
+            return;
+        }
+        let mut rng = Rng(0x0123_4567_89AB_CDEF);
+        for _ in 0..1000 {
+            let mut v = [0u8; 16];
+            for b in v.iter_mut() {
+                *b = rng.below(16) as u8;
+            }
+            let mut out = [0xAAu8; 16];
+            // SAFETY: SSSE3 was detected above (x86_64); simd128 and NEON are compile-time features
+            // of the wasm32 and aarch64 builds; the pointers cover 16 bytes.
+            unsafe {
+                super::arch::store64(
+                    out.as_mut_ptr(),
+                    super::arch::nibs(super::arch::load(v.as_ptr())),
+                );
+            }
+            for k in 0..8 {
+                assert_eq!(out[k], v[2 * k] | v[2 * k + 1] << 4, "byte {k} of {v:?}");
+            }
+            assert!(
+                out[8..].iter().all(|&b| b == 0xAA),
+                "store64 wrote past 8 bytes"
             );
         }
     }

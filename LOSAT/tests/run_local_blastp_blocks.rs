@@ -133,8 +133,6 @@ struct Child {
     dir: PathBuf,
     /// The `[TIMING] blastp_total` lines: one per search of a query set.
     searches: usize,
-    /// The `[X_SHADOW] BPQBLOCKFMT` lines.
-    shadow: Vec<String>,
 }
 
 impl Child {
@@ -228,11 +226,6 @@ fn child(
             .lines()
             .filter(|line| line.starts_with("[TIMING] blastp_total:"))
             .count(),
-        shadow: stderr
-            .lines()
-            .filter(|line| line.starts_with("[X_SHADOW] BPQBLOCKFMT"))
-            .map(str::to_string)
-            .collect(),
     }
 }
 
@@ -487,40 +480,6 @@ fn outputs_records_and_ranges_of_the_blocks_are_those_of_all_queries() {
                 "{tag}: the warnings are the CLI's of the first format"
             );
         }
-    }
-}
-
-/// The shadow (`LOSAT_X_BPQBLOCKFMTSHADOW`) compares the outputs, the warnings, the hit records and
-/// each format's observer events of the blocks with the search of all queries inside the run.
-#[test]
-fn the_shadow_compares_outputs_records_and_events() {
-    let inputs = Inputs::new();
-    for threads in [1, 4] {
-        let run = child(
-            &inputs,
-            &WEB,
-            Observe::Both,
-            threads,
-            &[BATCH, BLOCK_PER_BATCH, ("LOSAT_X_BPQBLOCKFMTSHADOW", "1")],
-            &format!("shadow_{threads}"),
-        );
-        assert_eq!(run.shadow.len(), 1, "n{threads}: {:?}", run.shadow);
-        let line = &run.shadow[0];
-        let value = |key: &str| -> usize {
-            line.split(' ')
-                .find_map(|word| word.strip_prefix(key))
-                .unwrap_or_else(|| panic!("{key} in {line}"))
-                .parse()
-                .expect("a count")
-        };
-        assert!(line.ends_with(" identical"), "n{threads}: {line}");
-        assert!(value("blocks=") >= 3, "n{threads}: {line}");
-        assert_eq!(value("formats="), 3, "n{threads}: {line}");
-        let hits = value("hits=");
-        assert!(hits > 0, "n{threads}: {line}");
-        // Each HSP opens and closes once in each of the three formats, and outfmt 0 heads each
-        // subject of each query once.
-        assert!(value("events=") > 6 * hits, "n{threads}: {line}");
     }
 }
 

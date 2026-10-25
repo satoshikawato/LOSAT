@@ -18,9 +18,19 @@
 //!
 //! The queries are 55 pieces of AP027131 of 1,500 to 3,900 letters each and, in the middle, one
 //! of 30,000 letters (more than two batches, so it takes the "large" path, searched with the
-//! pool inside its task): about 13 batches. The subject is the proteins of AP027131, so
-//! the pieces have many hits. Later records carry the reader's warnings: hyphens, a title that
-//! ends with 20 nucleotide letters, and invalid residues.
+//! pool inside its task): about 13 batches. The subject is every third protein of AP027131
+//! (`subject`), and the searches but one keep the hits of E-values up to 1e-5 (`blastx`): 51 of
+//! the 56 queries hit, at about a quarter of the CPU time of the first 400 proteins at the
+//! default E-value (0.4-0.5 s a search, against 1.5-1.8 s; local, 2026-10-25). At these thread
+//! counts no choice of the flow depends on the subject (`LOSAT_X_BXUNITCAP` caps the batches only
+//! above eight threads): its batches, the bound and the batches searched alone depend on the
+//! queries and the threads. The E-value does change one rule: a batch searched with the pool
+//! inside redoes its matches on the pool in rounds of 32 per thread (at least 64), and at 1e-5 its
+//! matches fit one round, so one search at two threads keeps the default E-value (10: 698
+//! matches in the two batches searched alone, about six rounds of 64 each, against 17; the 30 kb
+//! query's batch, searched with the pool inside in both runs, adds 383 against 21). Later records
+//! carry the reader's warnings: hyphens, a title that ends with 20 nucleotide letters, and invalid
+//! residues.
 
 #![cfg(feature = "parallel")]
 
@@ -111,8 +121,11 @@ fn queries() -> Vec<(String, Vec<u8>)> {
     records
 }
 
-/// The proteins of AP027131 as the subject: the first `count` records of the fixture.
-fn subject(count: usize) -> TempFasta {
+/// The proteins of AP027131 as the subject: every third record of the fixture (199 of 595). They
+/// are more than the 64 subjects of a task of the subject flow (`LOSAT_X_BXSUBJFLOW`), so a batch
+/// searched with the pool inside runs them as the flow of four tasks, one per thread at four
+/// threads, as the first 400 ran as seven.
+fn subject() -> TempFasta {
     let text = std::fs::read_to_string(fixture("AP027131.faa")).expect("read fixture");
     let mut records: Vec<(String, Vec<u8>)> = Vec::new();
     for line in text.lines() {
@@ -122,7 +135,7 @@ fn subject(count: usize) -> TempFasta {
             record.1.extend_from_slice(line.trim().as_bytes());
         }
     }
-    records.truncate(count);
+    let records: Vec<_> = records.into_iter().step_by(3).collect();
     TempFasta::new("subject", &records)
 }
 
@@ -158,7 +171,9 @@ impl Run {
     }
 }
 
-/// One `losat blastx` run with `args`, with `env` as its only variables that choose a code path.
+/// One `losat blastx` run with `args`, after `-evalue 1e-5` unless they set `-evalue` (fewer weak
+/// hits for the redo; the switch does not read it), with `env` as its only variables that choose
+/// a code path.
 /// `LOSAT_BLASTX_WORKER_LOG` is a file of its own: a binary built with the `blastx-worker-probe`
 /// feature (`cargo test --all-features`, as in CI) needs that file name as soon as a search has
 /// more than one thread, and it selects nothing.
@@ -176,8 +191,11 @@ fn blastx(args: &[&str], env: &[(&str, &str)]) -> Run {
             command.env_remove(name);
         }
     }
+    command.arg("blastx");
+    if !args.contains(&"-evalue") {
+        command.args(["-evalue", "1e-5"]);
+    }
     let output = command
-        .arg("blastx")
         .args(args)
         .env("LOSAT_BLASTX_WORKER_LOG", &log)
         .envs(env.iter().copied())
@@ -267,30 +285,33 @@ fn assert_warnings(run: &Run) {
 
 // Two, three and four threads (the bound of `threads * 4` unwritten batches is reached at two and
 // three) with each outfmt, on queries with the 30 kb query in the middle and the reader's
-// warnings in later batches.
+// warnings in later batches; the first at the default E-value (several rounds of the redo on the
+// pool in the batches searched alone: module comment).
 #[test]
 fn every_thread_count_and_outfmt_gives_the_reports_without_the_switch() {
     let query = TempFasta::new("q", &queries_with_warnings());
-    let subject = subject(400);
-    for (threads, outfmt) in [
-        ("2", "6"),
-        ("3", "6"),
-        ("4", "6"),
-        ("2", "7"),
-        ("4", "7"),
-        ("3", "0"),
+    let subject = subject();
+    for (threads, outfmt, evalue) in [
+        ("2", "6", "10"),
+        ("3", "6", "1e-5"),
+        ("4", "6", "1e-5"),
+        ("2", "7", "1e-5"),
+        ("4", "7", "1e-5"),
+        ("3", "0", "1e-5"),
     ] {
         let args = [
             "-query",
             query.path(),
             "-subject",
             subject.path(),
+            "-evalue",
+            evalue,
             "-outfmt",
             outfmt,
             "-num_threads",
             threads,
         ];
-        let what = format!("threads {threads} outfmt {outfmt}");
+        let what = format!("threads {threads} outfmt {outfmt} evalue {evalue}");
         let run = same_as_without(&what, &args, false);
         assert_warnings(&run);
         if outfmt == "6" {
@@ -304,7 +325,7 @@ fn every_thread_count_and_outfmt_gives_the_reports_without_the_switch() {
 #[test]
 fn an_out_file_gives_the_report_without_the_switch() {
     let query = TempFasta::new("q", &queries_with_warnings());
-    let subject = subject(400);
+    let subject = subject();
     for outfmt in ["0", "6"] {
         let out = temp_path("out.txt");
         let out_text = out.to_str().expect("UTF-8 path");
@@ -327,19 +348,17 @@ fn an_out_file_gives_the_report_without_the_switch() {
     }
 }
 
-// `-max_target_seqs 1` (and the default e-value spelt out) against all the proteins.
+// `-max_target_seqs 1`.
 #[test]
 fn one_target_sequence_gives_the_reports_without_the_switch() {
     let query = TempFasta::new("q", &queries_with_warnings());
-    let subject = subject(400);
+    let subject = subject();
     for threads in ["2", "4"] {
         let args = [
             "-query",
             query.path(),
             "-subject",
             subject.path(),
-            "-evalue",
-            "1e-5",
             "-max_target_seqs",
             "1",
             "-outfmt",
@@ -360,7 +379,7 @@ fn one_target_sequence_gives_the_reports_without_the_switch() {
 // switch (the batches searched past the error are dropped).
 #[test]
 fn an_error_at_a_later_batch_comes_as_without_the_switch() {
-    let subject = subject(400);
+    let subject = subject();
     let mut records = queries_with_warnings();
     records.insert(40, ("bad record".to_string(), b"@@@@@@@@".to_vec()));
     let query = TempFasta::new("bad", &records);
@@ -395,7 +414,7 @@ fn a_database_gives_the_reports_without_the_switch() {
     std::fs::create_dir_all(&dir).expect("make the database directory");
     let name = dir.join("subject");
     let name = name.to_str().expect("UTF-8 path");
-    let proteins = subject(400);
+    let proteins = subject();
     let made = Command::new(env!("CARGO_BIN_EXE_losat"))
         .args([
             "makedb",
@@ -430,9 +449,10 @@ fn a_database_gives_the_reports_without_the_switch() {
 
 #[test]
 fn fewer_batches_than_threads_give_the_reports_without_the_switch() {
-    // The first three pieces: one batch, and the first twelve: about three batches; all of them
-    // are the input's last batches, searched with the pool inside.
-    let subject = subject(400);
+    // The first three pieces: one batch, and the first twelve: three batches. At four threads
+    // every batch is one of the input's last `threads`, searched with the pool inside; at two the
+    // first of the three is searched as a task of its own.
+    let subject = subject();
     for (count, threads) in [(3, "4"), (12, "4"), (12, "2")] {
         let records: Vec<_> = queries().into_iter().take(count).collect();
         let query = TempFasta::new("few", &records);

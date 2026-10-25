@@ -89,15 +89,6 @@ fn without_cl(document: &[u8]) -> Vec<u8> {
     [&document[..start], &document[end..]].concat()
 }
 
-/// The standard error without the summary lines of the RPTSTREAM shadow.
-fn without_shadow(stderr: &[u8]) -> Vec<u8> {
-    String::from_utf8_lossy(stderr)
-        .split_inclusive('\n')
-        .filter(|line| !line.starts_with("[X_SHADOW]"))
-        .collect::<String>()
-        .into_bytes()
-}
-
 const SUBJECT: &str = "snucl.fna";
 const DB: &str = "db/snucl";
 
@@ -144,11 +135,7 @@ fn equals_frozen_in(
             );
             let [flag, value] = mode_args(mode, db);
             for threads in ["1", "4"] {
-                for (switch, shadow) in [
-                    (None, false),
-                    (Some(("LOSAT_X_RPTSTREAM", "0")), false),
-                    (Some(("LOSAT_X_RPTSTREAMSHADOW", "1")), true),
-                ] {
+                for switch in [None, Some(("LOSAT_X_RPTSTREAM", "0"))] {
                     let mut vars = env.to_vec();
                     vars.extend(switch);
                     let mut args = vec!["blastn", "-query", query, flag, value];
@@ -162,13 +149,8 @@ fn equals_frozen_in(
                         String::from_utf8_lossy(&without_cl(&expected)),
                         "{what}: stdout"
                     );
-                    let stderr = if shadow {
-                        without_shadow(&output.stderr)
-                    } else {
-                        output.stderr.clone()
-                    };
                     assert_eq!(
-                        String::from_utf8_lossy(&stderr),
+                        String::from_utf8_lossy(&output.stderr),
                         String::from_utf8_lossy(&expected_err),
                         "{what}: stderr"
                     );
@@ -292,7 +274,7 @@ fn the_error_sites_flush_the_document_with_a_stored_title_that_no_hit_reads() {
 /// LOSAT refuses it there (NCBI prints its `Bad char` messages and writes the document). The first
 /// batch's records are held, not written, so nothing is on standard output; the standard error and
 /// the status are those of the run that makes its reports after the search
-/// (`LOSAT_X_RPTSTREAM=0`), whatever the threads and the shadow.
+/// (`LOSAT_X_RPTSTREAM=0`), whatever the threads.
 #[test]
 fn a_title_refusal_in_a_later_batch_writes_nothing() {
     let dir = fixtures();
@@ -320,18 +302,14 @@ fn a_title_refusal_in_a_later_batch_writes_nothing() {
                 message.contains("database sequence 2 has a stored title"),
                 "{what}: {message}"
             );
-            for switch in [None, Some(("LOSAT_X_RPTSTREAMSHADOW", "1"))] {
-                let mut env = BATCHES.to_vec();
-                env.extend(switch);
-                let streamed = run_in(&dir, &args, &env);
-                assert_eq!(streamed.status.code(), Some(1), "{what} {switch:?}: status");
-                assert!(streamed.stdout.is_empty(), "{what} {switch:?}: wrote bytes");
-                assert_eq!(
-                    String::from_utf8_lossy(&without_shadow(&streamed.stderr)),
-                    message,
-                    "{what} {switch:?}: stderr"
-                );
-            }
+            let streamed = run_in(&dir, &args, BATCHES);
+            assert_eq!(streamed.status.code(), Some(1), "{what}: status");
+            assert!(streamed.stdout.is_empty(), "{what}: wrote bytes");
+            assert_eq!(
+                String::from_utf8_lossy(&streamed.stderr),
+                message,
+                "{what}: stderr"
+            );
         }
     }
 }

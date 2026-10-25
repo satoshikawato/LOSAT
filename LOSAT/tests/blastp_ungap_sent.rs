@@ -15,10 +15,10 @@
 //! The path gives the extension's result of the closure it replaces (the module's argument), so
 //! the property under test is that the report does not depend on it, for subjects read from FASTA
 //! (`-subject`) and from a database (`-db`), whose buffers carry the sentinels in different ways.
-//! That reports equal NCBI's is the business of the BLASTP fixtures. The shadow
-//! (`LOSAT_X_BPUNGAPSENTSHADOW`) runs both extensions on every candidate the path takes and panics
-//! on a difference; its line must show compared extensions. blastp-fast (word size 5, the
-//! compressed table) stays on the closure without the path and prints no line.
+//! That reports equal NCBI's is the business of the BLASTP fixtures. The default run is compared
+//! with the run of `LOSAT_X_BPUNGAPSENT=0` (the closure the path replaces), and `LOSAT_X_REACH`
+//! shows that the default run took the path (new side). blastp-fast (word size 5, the compressed
+//! table) stays on the closure without the path: its reach shows no new side.
 //!
 //! The queries are the first 30 proteins of AP027131 (a query block of 30 contexts), the subjects
 //! the first 150 proteins of the related AP027133, so there are long walks and HSPs.
@@ -27,8 +27,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod reach_support;
+
 const OFF: (&str, &str) = ("LOSAT_X_BPUNGAPSENT", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_BPUNGAPSENTSHADOW", "1");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -140,34 +141,13 @@ struct Run {
 }
 
 impl Run {
-    /// Standard error without the diagnostic lines (`[TIMING]`, `[X_SHADOW]`).
+    /// Standard error without the diagnostic lines (`[TIMING]`).
     fn messages(&self) -> String {
         self.stderr
             .lines()
-            .filter(|line| !line.starts_with("[TIMING]") && !line.starts_with("[X_SHADOW]"))
+            .filter(|line| !line.starts_with("[TIMING]"))
             .map(|line| format!("{line}\n"))
             .collect()
-    }
-
-    /// The number after `name=` in the `[X_SHADOW] BPUNGAPSENT` line, or `None` without that line.
-    fn shadow(&self, name: &str) -> Option<u64> {
-        let line = self
-            .stderr
-            .lines()
-            .find(|line| line.starts_with("[X_SHADOW] BPUNGAPSENT "))?;
-        let key = format!(" {name}=");
-        let at = line
-            .find(&key)
-            .unwrap_or_else(|| panic!("no {name} in {line}"))
-            + key.len();
-        Some(
-            line[at..]
-                .split(|c: char| !c.is_ascii_digit())
-                .next()
-                .unwrap()
-                .parse()
-                .unwrap(),
-        )
     }
 }
 
@@ -184,8 +164,8 @@ fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
     }
 }
 
-/// Default, `=0` and the shadow give the same report, on `-subject` and `-db`
-/// at 1 and 2 threads; the shadow compares extensions.
+/// Default and `=0` give the same report, on `-subject` and `-db` at 1 and 2 threads; the
+/// default run takes the path.
 #[test]
 fn reports_do_not_depend_on_the_sentinel_extension() {
     let inputs = Inputs::new();
@@ -206,39 +186,25 @@ fn reports_do_not_depend_on_the_sentinel_extension() {
                 "-num_threads",
                 threads,
             ];
-            let on = blastp(&args, &[]);
+            let reach = reach_support::Reach::new("bpungapsent");
+            let on = blastp(&args, &[reach.var()]);
             assert_eq!(on.code, Some(0), "{source} n{threads}: {}", on.stderr);
             assert!(!on.stdout.is_empty(), "{source} n{threads}: no hits");
-            for (label, env) in [("off", &[OFF][..]), ("shadow", &[SHADOW][..])] {
-                let run = blastp(&args, env);
-                assert_eq!(
-                    run.code,
-                    Some(0),
-                    "{source} n{threads} {label}: {}",
-                    run.stderr
-                );
-                assert!(
-                    run.stdout == on.stdout,
-                    "{source} n{threads} {label}: report differs"
-                );
-                assert_eq!(run.messages(), on.messages(), "{source} n{threads} {label}");
-                if label == "shadow" {
-                    let compared = run.shadow("compared").expect("shadow line");
-                    assert!(compared > 0, "{source} n{threads}: nothing compared");
-                    assert!(run.shadow("blocks").unwrap() > 0);
-                } else {
-                    assert_eq!(
-                        run.shadow("compared"),
-                        None,
-                        "{label} printed a shadow line"
-                    );
-                }
-            }
+            let (new, _) = reach.sides("LOSAT_X_BPUNGAPSENT");
+            assert!(new, "{source} n{threads}: the path was not taken");
+            let off = blastp(&args, &[OFF]);
+            assert_eq!(off.code, Some(0), "{source} n{threads} off: {}", off.stderr);
+            assert!(
+                off.stdout == on.stdout,
+                "{source} n{threads} off: report differs"
+            );
+            assert_eq!(off.messages(), on.messages(), "{source} n{threads} off");
         }
     }
 }
 
-/// blastp-fast (word size 5) keeps the closure without the path: the same report, no shadow line.
+/// blastp-fast (word size 5) keeps the closure without the path: the same report as with
+/// `LOSAT_X_BPUNGAPSENT=0`, and the default run does not take the path.
 #[test]
 fn blastp_fast_keeps_the_closure_without_the_path() {
     let inputs = Inputs::new();
@@ -252,14 +218,16 @@ fn blastp_fast_keeps_the_closure_without_the_path() {
         "-outfmt",
         "6",
     ];
-    let on = blastp(&args, &[]);
+    let reach = reach_support::Reach::new("bpungapsent-fast");
+    let on = blastp(&args, &[reach.var()]);
     assert_eq!(on.code, Some(0), "{}", on.stderr);
-    let shadow = blastp(&args, &[SHADOW]);
-    assert_eq!(shadow.code, Some(0), "{}", shadow.stderr);
-    assert!(shadow.stdout == on.stdout, "report differs");
+    let off = blastp(&args, &[OFF]);
+    assert_eq!(off.code, Some(0), "{}", off.stderr);
+    assert!(off.stdout == on.stdout, "report differs");
+    // The word size of blastp-fast refuses the path: the search marks the reference side.
     assert_eq!(
-        shadow.shadow("compared"),
-        None,
-        "shadow line on blastp-fast"
+        reach.sides("LOSAT_X_BPUNGAPSENT"),
+        (false, true),
+        "the path was taken on blastp-fast, or the search never reached the switch"
     );
 }

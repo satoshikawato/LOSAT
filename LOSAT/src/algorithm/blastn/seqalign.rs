@@ -85,7 +85,7 @@ use crate::blastinput::app::Program;
 use crate::blastinput::seq_range::Placements;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryNames, RunRecord, SubjectNames, SubjectRecord};
-use crate::report::serial::{write_query, SerialFormat};
+use crate::report::serial::{write_hit_list_seqaligns, SerialFormat};
 
 /// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
 /// query's warnings before it.
@@ -97,44 +97,30 @@ pub(crate) fn write_blastn_seqalign(
     subjects: SubjectNames<'_>,
     subject_placements: &Placements,
     writer: &mut dyn Write,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,
         db_title: subjects.db_title(),
         gapped: true,
     };
-    let mut subject_records: Vec<SubjectRecord<'_>> = Vec::new();
-    let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();
-    let mut buf: Vec<u8> = Vec::new();
-    for (q_idx, hit_list) in hit_lists.iter().enumerate() {
-        // The query's warnings come before its document (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, &mut *writer)?;
-        }
-        let Some(hit_list) = hit_list else {
-            continue;
-        };
-        query_records(
-            hit_list,
-            &subjects,
-            subject_placements,
-            &mut subject_records,
-            &mut hsp_records,
-        );
-        buf.clear();
-        if write_query(
-            format,
-            &run,
-            &queries.record(q_idx),
-            &subject_records,
-            &hsp_records,
-            &mut buf,
-        )? {
-            writer.write_all(&buf)?;
-        }
-    }
-    Ok(())
+    write_hit_list_seqaligns(
+        format,
+        &run,
+        hit_lists,
+        queries,
+        writer,
+        warnings,
+        |_, hit_list, subject_records, hsp_records| {
+            query_records(
+                hit_list,
+                &subjects,
+                subject_placements,
+                subject_records,
+                hsp_records,
+            );
+        },
+    )
 }
 
 /// The subject and HSP records of one query's hit list (what `write_query` and the archive

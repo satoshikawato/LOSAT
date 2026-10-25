@@ -328,7 +328,7 @@ give the runner of before).
   its own cache directory.
 
 The nightly workflow (`nightly.yml`, also `workflow_dispatch` and release
-readiness) runs `check_wasm_threading_regressions.py --jobs 3` against all frozen
+readiness; its schedule tests `main` and starts a run of `dev`) runs `check_wasm_threading_regressions.py --jobs 3` against all frozen
 manifest rows and `check_tblastx_thread_thresholds.py` for the LC738874/LC738875
 E-value 10/100/10000 sweep. The frozen runner executes every row and fails on
 any mismatch except the known ones in `frozen_mismatch_allowlist.json` (which

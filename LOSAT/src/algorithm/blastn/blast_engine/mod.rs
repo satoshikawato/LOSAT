@@ -19,11 +19,11 @@ mod run;
 // Re-export the main run function
 pub use run::run;
 pub use run::run_local;
-// EXPERIMENT (LOSAT_X_BNDBCUTSHADOW, LOSAT_X_BNDBSTREAMSHADOW, LOSAT_X_QGROUPPARSHADOW,
-// LOSAT_X_QPREPPARSHADOW): the summary lines `main` prints at exit (no NCBI counterpart).
-pub use run::x_db_cut_print_summary;
-pub use run::x_db_stream_print_summary;
+// EXPERIMENT (LOSAT_X_BNLUTDROP, LOSAT_X_QGROUPPAR, LOSAT_X_BNQDROP, LOSAT_X_QPREPPAR,
+// LOSAT_X_BNTBRANGELOG): the summary lines `main` prints at exit (no NCBI counterpart).
+pub use run::x_lut_drop_print_summary;
 pub use run::x_qgroup_par_print_summary;
+pub use run::x_query_drop_print_summary;
 pub use run::x_query_prep_par_print_summary;
 pub use run::x_tb_range_print_summary;
 // ABI v1 (`web_api::v1_blastn`) checks a search without subjects as the CLI does.

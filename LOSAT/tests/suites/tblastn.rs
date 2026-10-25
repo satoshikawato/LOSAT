@@ -9,12 +9,14 @@ mod run_local_tblastn;
 mod tblastn_batch_rule;
 #[path = "../tblastn_db_search.rs"]
 mod tblastn_db_search;
-#[path = "../tblastn_hitbf.rs"]
-mod tblastn_hitbf;
+#[path = "../tblastn_db_stream.rs"]
+mod tblastn_db_stream;
 #[path = "../tblastn_link_window.rs"]
 mod tblastn_link_window;
 #[path = "../tblastn_oid_chunk.rs"]
 mod tblastn_oid_chunk;
+#[path = "../tblastn_redo_lpt.rs"]
+mod tblastn_redo_lpt;
 #[path = "../tblastn_scan_bf.rs"]
 mod tblastn_scan_bf;
 #[path = "../tblastn_scan_byte.rs"]

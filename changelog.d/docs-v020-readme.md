@@ -1,0 +1,1 @@
+- README: v0.2.0 platform table (certified, supported, preview), the eight release assets, the Web GUI preview, development variables (`LOSAT_X_*`, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X_REACH`, `--features diagnostics`) marked unsupported, `blastp-short` and `tblastn-fast` listed as not supported, and the `-db_gencode` spelling; stale HOLD sentences removed.

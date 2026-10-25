@@ -27,7 +27,7 @@ use crate::algorithm::tblastx::constants::{
     GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
 };
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bp_build_compressed_lookup, x_bpclut_mode, XCompressedLookup, XFlatCompressedLookup,
+    x_bp_build_compressed_lookup, x_bpclut_on, XCompressedLookup, XFlatCompressedLookup,
 };
 use crate::algorithm::tblastx::lookup::compressed::BlastCompressedAaLookupTable;
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
@@ -59,22 +59,23 @@ use crate::stats::{
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score, BLASTAA_SIZE};
 
 mod database;
-// EXPERIMENT (LOSAT_X_BPSUBJRUN / LOSAT_X_BPSUBJRUNSHADOW): the parallel `-subject` loop in runs of
-// subjects, one diagonal table fill per run.
+// EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel `-subject` loop in runs of subjects, one diagonal
+// table fill per run.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_subject_runs;
-// EXPERIMENT (LOSAT_X_BPSUBJMETA / LOSAT_X_BPSUBJMETASHADOW): the subjects' tabular IDs and titles
-// of the block search made once for all blocks (held by `x_query_blocks::XBlockSubjects`).
+// EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular IDs and titles of the block search made
+// once for all blocks (held by `x_query_blocks::XBlockSubjects`).
 pub(super) mod x_subject_meta;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{BlastpArgs, BlastpCompositionMode, BlastpLookupTableType, ResolvedBlastpArgs};
 use super::encoding::{
-    encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
-    encode_protein_sequence, ncbistdaa_to_ascii, EncodedProtein,
+    encode_protein_query_frame_soft_masked, encode_protein_query_frame_with_seg,
+    encode_protein_query_frame_with_seg_timed, encode_protein_sequence, ncbistdaa_to_ascii,
+    EncodedProtein,
 };
 #[cfg(test)]
 use super::extension::{extend_one_hit, extend_two_hit};
@@ -1062,32 +1063,6 @@ fn blastp_subject_diag_offsets(subjects: &[EncodedProtein], window: i32) -> Vec<
         }
     }
     offsets
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPSUBJRUNSHADOW): the shadow mode's line at exit.
-pub(crate) fn x_bp_subj_run_print_summary() {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    x_subject_runs::x_bp_subj_run_print_summary();
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPDBCUTSHADOW): the shadow mode's line at exit.
-pub(crate) fn x_bp_db_cut_print_summary() {
-    database::x_bp_db_cut_print_summary();
-}
-
-/// EXPERIMENT (LOSAT_X_BPLISTEDLEANSHADOW): the shadow mode's line at exit.
-pub(crate) fn x_bp_listed_lean_print_summary() {
-    database::x_bp_listed_lean_print_summary();
-}
-
-/// EXPERIMENT (LOSAT_X_BPSUBJMETASHADOW): the shadow mode's line at exit.
-pub(crate) fn x_bp_subj_meta_print_summary() {
-    x_subject_meta::x_bp_subj_meta_print_summary();
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
@@ -2810,23 +2785,13 @@ fn check_tabular_subject_ids(
 /// The stored results are `tabular_subject_id_results` of the same records, a function of each
 /// record only (`tabular_subject_id(local_id, title, true)`), so the check fails for the same block
 /// and names the same record as `tabular_subject_ids`, and otherwise the shown IDs are its IDs.
-/// No floating-point operation is involved. With `LOSAT_X_BPSUBJMETASHADOW` the block's values are
-/// made again as without the switch and compared (`XSubjectMeta::x_shadow_compare`).
+/// No floating-point operation is involved.
 fn x_tabular_subject_ids_cached<'m>(
     hit_lists: &[Option<BlastpHitList>],
     subjects: &[FastaRecord],
     meta: &'m x_subject_meta::XSubjectMeta,
 ) -> Result<&'m [Arc<[u8]>]> {
-    let result = check_tabular_subject_ids(hit_lists, subjects, meta.ids()).map(|()| meta.shown());
-    if meta.shadow() {
-        meta.x_shadow_compare(
-            subjects,
-            &tabular_subject_id_results(subjects),
-            &tabular_subject_ids(hit_lists, subjects),
-            &result,
-        );
-    }
-    result
+    check_tabular_subject_ids(hit_lists, subjects, meta.ids()).map(|()| meta.shown())
 }
 
 fn blastp_tabular_field_text(
@@ -4060,18 +4025,9 @@ fn build_pairwise_hits(
     ))]
     if let Some(pool) = x_pool {
         use rayon::prelude::*;
-        let reference = (crate::report::x_pairwise_par::mode() == 2).then(|| hits.clone());
         let rows: Vec<Result<PairwiseHit>> =
             pool.install(|| hits.into_par_iter().map(&row).collect());
-        let rows = rows.into_iter().collect::<Result<Vec<_>>>()?;
-        if let Some(reference) = reference {
-            let serial = reference
-                .into_iter()
-                .map(&row)
-                .collect::<Result<Vec<_>>>()?;
-            crate::report::x_pairwise_par::compare_rows(&rows, &serial);
-        }
-        return Ok(rows);
+        return rows.into_iter().collect::<Result<Vec<_>>>();
     }
     #[cfg(not(all(
         feature = "parallel",
@@ -6247,7 +6203,7 @@ fn search(
             x_queries_before: 0,
             x_xml2_carry: None,
         };
-        let result = run_resolved_in_pool(
+        run_resolved_in_pool(
             args,
             &searched_queries[..searched_done],
             subject_source,
@@ -6259,10 +6215,7 @@ fn search(
             &ranges,
             &reports,
             x_lookup_ahead::XAheadBlock::none(),
-        );
-        // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
-        super::x_bp_redo_par_shadow_error(&result);
-        result
+        )
     };
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries in blocks of whole batches, each block a search
     // of its own whose report is written before the next block is searched
@@ -6299,9 +6252,7 @@ fn search(
         super::x_query_blocks::x_reach_block_search(&x_formats, false);
     }
     if let Some((x_kinds, blocks)) = x_plan {
-        use super::x_query_blocks::{
-            XBlockReport, XBlockSink, XCopyWriter, XOffsetObserver, XShadowDir, XShadowObserver,
-        };
+        use super::x_query_blocks::{XBlockReport, XBlockSink, XOffsetObserver};
         let reader_warnings = &batches.warnings;
         let ReportOutputs {
             formats,
@@ -6315,26 +6266,14 @@ fn search(
         // LOSAT_X_BPQBLOCKXML2): the reports the
         // blocks write, whose titles are checked below.
         let x_pairwise = x_kinds.contains(&XBlockReport::Pairwise);
-        // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): copies of what the blocks write, compared below
-        // with the search of all queries.
-        let x_shadow = super::x_query_blocks::x_bp_qblock_fmt() == 2;
-        // The messages and search space the run carries before its first archive: the shadow's
-        // search of all queries starts from them (`ArchiveHandle::scratch`).
-        let x_archive_seed = args.archive.as_ref().map(|handle| handle.seed());
-        let output_copies: Vec<std::sync::Mutex<Vec<u8>>> =
-            outfmts.iter().map(|_| Default::default()).collect();
-        let warning_copy = std::sync::Mutex::new(Vec::new());
         // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the hit records of all blocks, each with the index of its
         // query among the call's queries (the block's index plus the block's first query), handed to
         // the caller's sink once, after the last block: one call with the final list of all
         // queries, as the search of all queries makes it.
         let x_want_records = hits.is_some();
         let mut x_records: Option<Vec<PairwiseHit>> = x_want_records.then(Vec::new);
-        let mut x_recorder =
-            (x_shadow && observer.is_some()).then(|| XShadowObserver::new(&output_copies));
         // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state that the blocks of an outfmt 13 to 16
-        // run hand on (such a run has one output, `x_query_block_plan`); the shadow reads the
-        // number of side files from it after the last block.
+        // run hand on (such a run has one output, `x_query_block_plan`).
         let x_xml2_carry = std::sync::Mutex::new(crate::report::blast_xml2::Xml2Carry::default());
         let searched_in_blocks =
             crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
@@ -6410,18 +6349,6 @@ fn search(
                     .iter_mut()
                     .map(|format| XBlockSink::new(&mut format.sink))
                     .collect();
-                let mut x_outputs: Vec<XCopyWriter<'_, XBlockSink<'_>>> = sinks
-                    .iter_mut()
-                    .zip(&output_copies)
-                    .map(|(sink, copy)| XCopyWriter {
-                        inner: sink,
-                        copy: x_shadow.then_some(copy),
-                    })
-                    .collect();
-                let mut x_warnings = XCopyWriter {
-                    inner: &mut **diagnostics,
-                    copy: x_shadow.then_some(&warning_copy),
-                };
                 // The HSPs of the blocks before: the first index of the block's HSPs in the list
                 // of all queries.
                 let mut x_hsps_before: HspIndex = 0;
@@ -6447,14 +6374,13 @@ fn search(
                         }
                     };
                     // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the caller's observer with the block's HSP
-                    // indices moved past the blocks before (and the shadow's record of the events).
+                    // indices moved past the blocks before.
                     let mut x_offset = observer.as_deref_mut().map(|inner| XOffsetObserver {
                         inner,
                         base: x_hsps_before,
-                        shadow: x_recorder.as_mut(),
                     });
                     let mut block_outputs = ReportOutputs {
-                        formats: x_outputs
+                        formats: sinks
                             .iter_mut()
                             .zip(&outfmts)
                             .map(|(output, &outfmt)| crate::api::local_blast::FormatOutput {
@@ -6462,14 +6388,15 @@ fn search(
                                 sink: OutputSink::Writer(output),
                             })
                             .collect(),
-                        diagnostics: &mut x_warnings,
+                        diagnostics: &mut **diagnostics,
                         hits: x_want_records
                             .then_some(&mut x_collect as &mut (dyn FnMut(&[PairwiseHit]) + Send)),
                         observer: x_offset
                             .as_mut()
                             .map(|offset| offset as &mut (dyn FormatObserver + Send)),
                     };
-                    let result = x_ahead.run_block(x_next_queries, |x_block| {
+                    let x_later_blocks = blocks.len() - index - 1;
+                    x_ahead.run_block(x_next_queries, x_later_blocks, |x_block| {
                         run_resolved_in_pool(
                             args.clone(),
                             block_queries,
@@ -6497,15 +6424,12 @@ fn search(
                             },
                             x_block,
                         )
-                    });
-                    // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
-                    super::x_bp_redo_par_shadow_error(&result);
-                    result?;
+                    })?;
                     drop(block_outputs);
                     x_hsps_before += x_records.as_ref().map_or(0, Vec::len) - records_before;
                 }
-                for output in &mut x_outputs {
-                    output.flush()?;
+                for sink in &mut sinks {
+                    sink.flush()?;
                 }
                 Ok(true)
             })?;
@@ -6513,180 +6437,6 @@ fn search(
             // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the hit records of all queries, once.
             if let (Some(sink), Some(records)) = (hits.as_mut(), x_records.as_ref()) {
                 sink(records);
-            }
-            // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): the search of all queries, its reports,
-            // warnings, hit records and observer events written into memory, against the blocks'.
-            if x_shadow {
-                let reference_copies: Vec<std::sync::Mutex<Vec<u8>>> =
-                    outfmts.iter().map(|_| Default::default()).collect();
-                let mut reference_sinks: Vec<std::io::Sink> =
-                    outfmts.iter().map(|_| std::io::sink()).collect();
-                let mut reference_writers: Vec<XCopyWriter<'_, std::io::Sink>> = reference_sinks
-                    .iter_mut()
-                    .zip(&reference_copies)
-                    .map(|(sink, copy)| XCopyWriter {
-                        inner: sink,
-                        copy: Some(copy),
-                    })
-                    .collect();
-                // The side files of an outfmt 13 or 14 run: the search of all queries writes its
-                // own into a fresh directory under TMPDIR with `-out`'s file name (the master lists
-                // the names without the directory), so that the run's files are not rewritten.
-                let side_kind = outfmts
-                    .first()
-                    .and_then(|outfmt| blastp_xml2_kind(outfmt))
-                    .filter(|kind| kind.is_files());
-                let side_files = side_kind
-                    .map(|_| x_xml2_carry.lock().expect("the carry").written())
-                    .unwrap_or(0);
-                let shadow_dir = side_kind
-                    .zip(args.out.as_deref())
-                    .map(|(_, out)| XShadowDir::new(out));
-                let mut reference_args = args.clone();
-                if let Some(dir) = &shadow_dir {
-                    reference_args.out = Some(dir.out.clone());
-                }
-                let mut reference_warnings = Vec::new();
-                let mut reference_diagnostics = super::x_query_blocks::XFeedWriter {
-                    inner: &mut reference_warnings,
-                    handle: args.archive.clone(),
-                };
-                let mut reference_records: Vec<String> = Vec::new();
-                let mut record_reference = |found: &[PairwiseHit]| {
-                    reference_records.extend(found.iter().map(|record| format!("{record:?}")));
-                };
-                let mut reference_recorder = XShadowObserver::new(&reference_copies);
-                let mut reference_outputs = ReportOutputs {
-                    formats: reference_writers
-                        .iter_mut()
-                        .zip(&outfmts)
-                        .map(|(writer, &outfmt)| crate::api::local_blast::FormatOutput {
-                            outfmt,
-                            sink: OutputSink::Writer(writer),
-                        })
-                        .collect(),
-                    diagnostics: &mut reference_diagnostics,
-                    hits: x_records.is_some().then_some(
-                        &mut record_reference as &mut (dyn FnMut(&[PairwiseHit]) + Send),
-                    ),
-                    observer: x_recorder
-                        .is_some()
-                        .then_some(&mut reference_recorder as &mut (dyn FormatObserver + Send)),
-                };
-                // The taxonomy database's open and lookup messages (outfmt 15 and 16) belong to the
-                // first search of a run: the blocks wrote them, so the second starts them over.
-                if let Some(database) = subject_source.database() {
-                    database.x_reset_taxdb();
-                }
-                let run_reference = || {
-                    crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
-                        search_batches(
-                            reference_args,
-                            &mut reference_outputs,
-                            pool,
-                            batches.input_done,
-                            batches.searched_done,
-                            epilog,
-                        )
-                    })
-                };
-                // The archive's state (messages, search space) is the reference's own while it
-                // runs: the blocks have used the run's.
-                match (args.archive.as_ref(), x_archive_seed.as_ref()) {
-                    (Some(handle), Some(seed)) => handle.scratch(seed, run_reference)?,
-                    _ => run_reference()?,
-                }
-                drop(reference_outputs);
-                drop(reference_diagnostics);
-                drop(reference_writers);
-                let block_records: Vec<String> = x_records
-                    .iter()
-                    .flatten()
-                    .map(|record| format!("{record:?}"))
-                    .collect();
-                let as_lines = |records: &[String]| {
-                    records
-                        .iter()
-                        .flat_map(|record| [record.as_bytes(), b"\n"].concat())
-                        .collect::<Vec<u8>>()
-                };
-                let (block_hits, reference_hits) =
-                    (as_lines(&block_records), as_lines(&reference_records));
-                let events = x_recorder.as_ref().map_or(0, XShadowObserver::count);
-                let block_events = x_recorder.take().map(|recorder| recorder.text());
-                let reference_events = block_events.is_some().then(|| reference_recorder.text());
-                drop(reference_recorder);
-                let written: Vec<Vec<u8>> = output_copies
-                    .into_iter()
-                    .map(|copy| copy.into_inner().expect("the shadow's copy"))
-                    .collect();
-                let reference: Vec<Vec<u8>> = reference_copies
-                    .into_iter()
-                    .map(|copy| copy.into_inner().expect("the shadow's copy"))
-                    .collect();
-                let warned = warning_copy.into_inner().expect("the shadow's copy");
-                // Side file n of the blocks (next to `-out`) and of the search of all queries (in
-                // the shadow directory), n in 1..=written; an unreadable file reads as empty text
-                // that differs from the other's.
-                let mut side_texts: Vec<(String, Vec<u8>, Vec<u8>)> = Vec::new();
-                if let (Some(kind), Some(out), Some(dir)) =
-                    (side_kind, args.out.as_deref(), &shadow_dir)
-                {
-                    let blocks_files = crate::report::blast_xml2::FsSideFiles::new(out, kind);
-                    let reference_files =
-                        crate::report::blast_xml2::FsSideFiles::new(&dir.out, kind);
-                    for n in 1..=side_files {
-                        let read = |path: std::path::PathBuf| {
-                            std::fs::read(&path)
-                                .unwrap_or_else(|error| format!("unreadable: {error}").into_bytes())
-                        };
-                        side_texts.push((
-                            format!("side file {n}"),
-                            read(blocks_files.path(n)),
-                            read(reference_files.path(n)),
-                        ));
-                    }
-                }
-                drop(shadow_dir);
-                let mut streams: Vec<(String, &[u8], &[u8])> = written
-                    .iter()
-                    .zip(&reference)
-                    .enumerate()
-                    .map(|(format, (written, reference))| {
-                        let name = if format == 0 {
-                            "output".to_string()
-                        } else {
-                            format!("output {format}")
-                        };
-                        (name, &written[..], &reference[..])
-                    })
-                    .collect();
-                streams.push(("stderr".to_string(), &warned, &reference_warnings));
-                streams.extend(
-                    side_texts.iter().map(|(name, blocks, reference)| {
-                        (name.clone(), &blocks[..], &reference[..])
-                    }),
-                );
-                if x_records.is_some() {
-                    streams.push(("hit records".to_string(), &block_hits, &reference_hits));
-                }
-                if let (Some(block_events), Some(reference_events)) =
-                    (block_events.as_ref(), reference_events.as_ref())
-                {
-                    for (format, (written, reference)) in
-                        block_events.iter().zip(reference_events).enumerate()
-                    {
-                        streams.push((format!("observer {format}"), written, reference));
-                    }
-                }
-                super::x_query_blocks::x_block_shadow_compare(
-                    blocks.len(),
-                    outfmts.len(),
-                    &streams,
-                    block_records.len(),
-                    events,
-                    side_files as usize,
-                );
             }
             return Ok(());
         }
@@ -6878,15 +6628,13 @@ fn x_query_block_plan(
     // `OutputFormat::parse` does not know.
     let mut kind_of = |outfmt: &str| match OutputFormat::parse(outfmt) {
         Ok((OutputFormat::Tabular, _)) => Some(XBlockReport::Tabular),
-        Ok((OutputFormat::TabularWithComments, _))
-            if super::x_query_blocks::x_bp_qblock_fmt() > 0 =>
-        {
+        Ok((OutputFormat::TabularWithComments, _)) if super::x_query_blocks::x_bp_qblock_fmt() => {
             x_formats.push(XBlockFormat::Fmt);
             Some(XBlockReport::Tabular)
         }
         // ABI v1's outfmt 0 titles of a database are not argued here.
         Ok((OutputFormat::Pairwise, _))
-            if super::x_query_blocks::x_bp_qblock_fmt() > 0
+            if super::x_query_blocks::x_bp_qblock_fmt()
                 && !(v1 && subject_source.database().is_some()) =>
         {
             x_formats.push(XBlockFormat::Fmt);
@@ -7592,7 +7340,8 @@ pub(super) mod x_lookup_ahead;
 // query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
 // ```
 /// The query frames of a search: each record encoded with the search's SEG parameters
-/// (`encode_protein_query_frame_with_seg`). `run_resolved_in_pool` encodes its queries with it, and so
+/// (`encode_protein_query_frame_with_seg`; `encode_protein_query_frame_soft_masked` with
+/// `-soft_masking true`). `run_resolved_in_pool` encodes its queries with it, and so
 /// does the build of the next block's lookup ahead of that block (LOSAT_X_BPLKPAHEAD,
 /// `x_lookup_ahead.rs`).
 fn blastp_query_frames(
@@ -7610,10 +7359,19 @@ fn blastp_query_frames_marked(
     marked: bool,
 ) -> Vec<Vec<QueryFrame>> {
     let seg_params = args.seg.params();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
+    // ```c
+    //     if (!mask_at_hash) {
+    //         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+    //                              program_number);
+    //     }
+    // ```
     query_records
         .iter()
         .map(|record| {
-            vec![if marked {
+            vec![if args.soft_masking {
+                encode_protein_query_frame_soft_masked(record.seq(), seg_params.as_ref(), marked)
+            } else if marked {
                 encode_protein_query_frame_with_seg_timed(record.seq(), seg_params.as_ref())
             } else {
                 encode_protein_query_frame_with_seg(record.seq(), seg_params.as_ref())
@@ -7628,8 +7386,8 @@ fn blastp_query_frames_marked(
 // ```
 /// The lookup table of exact blastp (`AaLookupTable`) and the query contexts of `query_frames`, as
 /// the lookup region of `run_resolved_in_pool` builds them. The threshold takes the x86-64
-/// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). EXPERIMENT (LOSAT_X_BPLUT /
-/// LOSAT_X_BPLUTSHADOW): the same table filled in place, without the reference builder's chains
+/// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). EXPERIMENT (LOSAT_X_BPLUT):
+/// the same table filled in place, without the reference builder's chains
 /// (lookup/x_lut_direct.rs). The build of the next block's table ahead of that block
 /// (LOSAT_X_BPLKPAHEAD, `x_lookup_ahead.rs`) makes the same call with the same arguments
 /// (`blastp_aa_lookup_ahead`).
@@ -7716,10 +7474,10 @@ fn blastp_compressed_lookup(
         &locations,
         query_chunk,
     )?;
-    // EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW; BPCLUT is a strict-set switch): the same table built
+    // EXPERIMENT (LOSAT_X_BPCLUT; BPCLUT is a strict-set switch): the same table built
     // flat, each cell's hits in one slice in NCBI's scan order, with the same refusal
     // (lookup/x_clut_direct.rs), by the search's pool when it has more than one thread
-    // (lookup/x_clut_par.rs); without the switches `try_build_blosum62_compressed_lookup`.
+    // (lookup/x_clut_par.rs); without the switch `try_build_blosum62_compressed_lookup`.
     let lookup = x_bp_build_compressed_lookup(
         args.word_size,
         crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
@@ -7740,7 +7498,7 @@ fn blastp_compressed_lookup(
     let lookup = match lookup {
         XCompressedLookup::Reference(lookup) => {
             // The flat build declined (a backbone past its stripes): the reference builder ran.
-            if x_bpclut_mode() == 1 {
+            if x_bpclut_on() {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", false);
             }
             BlastpRuntimeLookup::Compressed(lookup)
@@ -7750,8 +7508,36 @@ fn blastp_compressed_lookup(
             BlastpRuntimeLookup::CompressedFlat(lookup)
         }
     };
-    x_flat.finish(&mut contexts, &query, &locations, blastp_parallel_pool);
+    x_flat.finish(&mut contexts);
     Ok((lookup, contexts))
+}
+
+// No NCBI counterpart: memory only; it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLKDROP): a strict-set switch, on unless it is `0`. The search's lookup
+/// table after its preliminary stage, which nothing reads any more: kept (`Some`) only where the
+/// search gives its vectors to a spare at its end that a later block's build may take
+/// (`x_query_blocks::x_bp_lookup_spare` / `x_bp_aa_spares` and
+/// `XAheadBlock::x_table_taken_later`), or with the switch off; otherwise dropped here, before the
+/// redo, instead of at the search's end.
+fn x_lookup_after_prelim(
+    lookup: BlastpRuntimeLookup,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    ahead: &x_lookup_ahead::XAheadBlock<'_>,
+) -> Option<BlastpRuntimeLookup> {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLKDROP")) {
+        return Some(lookup);
+    }
+    let taken_later = ahead.x_table_taken_later()
+        && match &lookup {
+            BlastpRuntimeLookup::CompressedFlat(_) => {
+                super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
+            }
+            BlastpRuntimeLookup::Aa(_) => super::x_query_blocks::x_bp_aa_spares(pool).is_some(),
+            BlastpRuntimeLookup::Compressed(_) => false,
+        };
+    crate::utils::xreach::x_reach!("LOSAT_X_BPLKDROP", !taken_later);
+    taken_later.then_some(lookup)
 }
 
 fn run_resolved_in_pool(
@@ -7998,25 +7784,15 @@ fn run_resolved_in_pool(
     //     program == eBlastTypeRpsTblastn);
     // ```
     // Exact blastp (`AaLookupTable`) builds no compressed table: LOSAT_X_BPCLUT does not act.
-    if matches!(args.lookup_table_type, BlastpLookupTableType::AaLookupTable)
-        && x_bpclut_mode() != 0
-    {
+    if matches!(args.lookup_table_type, BlastpLookupTableType::AaLookupTable) && x_bpclut_on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", false);
     }
     let (lookup, mut contexts) = match args.lookup_table_type {
         // `blastp_aa_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built
         // ahead of this block by the same call on the block search's spare vectors
-        // (`blast_engine/x_lookup_ahead.rs`; its shadow builds them again here and compares).
+        // (`blast_engine/x_lookup_ahead.rs`).
         BlastpLookupTableType::AaLookupTable => match x_prebuilt.take() {
-            Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(
-                prebuilt,
-                &args,
-                query_records,
-                &query_frames,
-                &query_batches,
-                &query_lengths,
-                blastp_parallel_pool,
-            ),
+            Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(prebuilt),
             None => blastp_aa_lookup(&args, &query_frames),
         },
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
@@ -8026,18 +7802,9 @@ fn run_resolved_in_pool(
         // s_CompressedLookupFinalize(lookup);
         // ```
         // `blastp_compressed_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built
-        // ahead of this block by the same calls (`blast_engine/x_lookup_ahead.rs`; its shadow builds
-        // them again here and compares).
+        // ahead of this block by the same calls (`blast_engine/x_lookup_ahead.rs`).
         BlastpLookupTableType::CompressedAaLookupTable => match x_prebuilt.take() {
-            Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(
-                prebuilt,
-                &args,
-                query_records,
-                &query_frames,
-                &query_batches,
-                &query_lengths,
-                blastp_parallel_pool,
-            ),
+            Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(prebuilt),
             None => blastp_compressed_lookup(
                 &args,
                 &query_frames,
@@ -8059,7 +7826,7 @@ fn run_resolved_in_pool(
     // branch on the presence bit: on the flat compressed table when enough of its cells are used,
     // on the reference compressed table never (the standard table has LOSAT_X_BPSCANBF's scan).
     if args.window_size != 0
-        && (super::x_seed_fused::x_bp_seed() || super::x_seed_fused::x_bp_seed_shadow())
+        && super::x_seed_fused::x_bp_seed()
         && super::x_seed_fused_clut::x_bp_clut_scan_bf()
     {
         match &lookup {
@@ -8071,6 +7838,25 @@ fn run_resolved_in_pool(
                 "LOSAT_X_BPCLUTSCANBF",
                 super::x_seed_fused_clut::x_clut_scan_bf(table)
             ),
+        }
+    }
+    // EXPERIMENT (LOSAT_X_BPFSEED): the reference compressed table, a flat table without the
+    // branch-free list and every table on wasm32 keep their loops; on a flat table with the list
+    // the loop records its side per subject (`x_seed_fused_clut.rs`).
+    if args.window_size != 0
+        && super::x_seed_fused::x_bp_seed()
+        && super::x_seed_fused_clut::x_bp_fseed()
+    {
+        match &lookup {
+            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Compressed(_) => {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
+            }
+            BlastpRuntimeLookup::CompressedFlat(table) => {
+                if !super::x_seed_fused_clut::x_fseed_table(table) {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
+                }
+            }
         }
     }
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
@@ -8529,10 +8315,7 @@ fn run_resolved_in_pool(
         // for the compressed table of blastp-fast) and this closure takes the hits that need the
         // context check and the extension, with the same body as the reference closure below.
         // EXPERIMENT (LOSAT_X_BPDIAG): inside it the hits of a cell are tested in batches.
-        // EXPERIMENT (LOSAT_X_BPSEEDSHADOW): both loops from the same diagonal table, compared.
-        let x_shadow = args.window_size != 0 && super::x_seed_fused::x_bp_seed_shadow();
-        let x_fused = args.window_size != 0 && (super::x_seed_fused::x_bp_seed() || x_shadow);
-        let x_snapshot = x_shadow.then(|| (scratch.diag_array.clone(), init_hsps.len()));
+        let x_fused = args.window_size != 0 && super::x_seed_fused::x_bp_seed();
         if x_fused {
             let x_candidate = |query_offset: i32,
                                subject_offset: i32,
@@ -8636,14 +8419,13 @@ fn run_resolved_in_pool(
             //         lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
             //     }
             // ```
-            // EXPERIMENT (LOSAT_X_BPUNGAPSENT / LOSAT_X_BPUNGAPSENTSHADOW): the closure above with the
-            // two-hit extension of `x_ungapped_sent.rs` inlined (word size 3, walks stopped by the
-            // sentinels), for the table of single letters, on a block and a subject that pass the
-            // path's checks; with the shadow variable the closure above's extension runs as well and
-            // the two results are compared. Each use of the macro is a closure type of its own, so the
-            // loops of the closure above keep their own instances.
+            // EXPERIMENT (LOSAT_X_BPUNGAPSENT): the closure above with the two-hit extension of
+            // `x_ungapped_sent.rs` inlined (word size 3, walks stopped by the sentinels), for the
+            // table of single letters, on a block and a subject that pass the path's checks. The
+            // macro's closure is a type of its own, so the loops of the closure above keep their
+            // own instances.
             macro_rules! x_candidate_sent {
-                ($sent_query:expr, $sent_subject:expr, $shadow:literal) => {
+                ($sent_query:expr, $sent_subject:expr) => {
                     |query_offset: i32,
                      subject_offset: i32,
                      last_hit: i32,
@@ -8687,22 +8469,6 @@ fn run_resolved_in_pool(
                                 x_drop,
                             )
                         };
-                        if $shadow {
-                            let expected = extend_two_hit_blosum62(
-                                &concatenated_query,
-                                subject_raw,
-                                s_left_off,
-                                s_right_off,
-                                q_right_off,
-                                x_drop,
-                                args.word_size,
-                            );
-                            assert_eq!(
-                                extended, expected,
-                                "[X_SHADOW] BPUNGAPSENT two-hit mismatch: s_left_off={s_left_off} s_right_off={s_right_off} q_right_off={q_right_off} dropoff={x_drop}"
-                            );
-                            super::x_ungapped_sent::count_shadow();
-                        }
                         let Some(ungapped_hit) = extended else {
                             return;
                         };
@@ -8743,31 +8509,17 @@ fn run_resolved_in_pool(
                 (None, _) => None,
             };
             if let Some((sent_query, sent_subject, aa_lookup)) = x_sent {
-                if sent_query.shadow() {
-                    super::x_seed_fused::x_scan_two_hit(
-                        aa_lookup,
-                        subject_sequence,
-                        subject.aa_len,
-                        &mut scratch.diag_array,
-                        diag_mask,
-                        subject_diag_offset,
-                        window,
-                        word_size,
-                        x_candidate_sent!(sent_query, sent_subject, true),
-                    );
-                } else {
-                    super::x_seed_fused::x_scan_two_hit(
-                        aa_lookup,
-                        subject_sequence,
-                        subject.aa_len,
-                        &mut scratch.diag_array,
-                        diag_mask,
-                        subject_diag_offset,
-                        window,
-                        word_size,
-                        x_candidate_sent!(sent_query, sent_subject, false),
-                    );
-                }
+                super::x_seed_fused::x_scan_two_hit(
+                    aa_lookup,
+                    subject_sequence,
+                    subject.aa_len,
+                    &mut scratch.diag_array,
+                    diag_mask,
+                    subject_diag_offset,
+                    window,
+                    word_size,
+                    x_candidate_sent!(sent_query, sent_subject),
+                );
             } else {
                 match &lookup {
                     BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
@@ -8812,18 +8564,7 @@ fn run_resolved_in_pool(
                 }
             }
         }
-        // EXPERIMENT (LOSAT_X_BPSEEDSHADOW): put the table back as it was before the fused loop and keep
-        // the fused loop's results for the comparison below.
-        let x_fused_results = x_snapshot.map(|(diag_before, hsps_before)| {
-            let fused_diag = std::mem::replace(&mut scratch.diag_array, diag_before);
-            let fused_hsps: Vec<String> = init_hsps[hsps_before..]
-                .iter()
-                .map(|hsp| format!("{hsp:?}"))
-                .collect();
-            init_hsps.truncate(hsps_before);
-            (fused_diag, fused_hsps, hsps_before)
-        });
-        if !x_fused || x_fused_results.is_some() {
+        if !x_fused {
             blastp_for_each_offset_pair(
                 &lookup,
                 subject_sequence,
@@ -9077,26 +8818,6 @@ fn run_resolved_in_pool(
                         diag_entry.set_last_hit(subject_offset + subject_diag_offset);
                     }
                 },
-            );
-        }
-        if let Some((fused_diag, fused_hsps, hsps_before)) = x_fused_results {
-            let reference_hsps: Vec<String> = init_hsps[hsps_before..]
-                .iter()
-                .map(|hsp| format!("{hsp:?}"))
-                .collect();
-            // The reference's words stay in the subject's buffer (its residues and the
-            // sentinel after them) unless the subject is shorter than a word less one letter.
-            // The compressed scan reads a letter past the buffer as NULLB in both loops
-            // (`scan_subject`), so its tables are always compared.
-            super::x_seed_fused::x_shadow_compare(
-                &fused_hsps,
-                &reference_hsps,
-                &fused_diag,
-                &scratch.diag_array,
-                matches!(
-                    &lookup,
-                    BlastpRuntimeLookup::Compressed(_) | BlastpRuntimeLookup::CompressedFlat(_)
-                ) || subject.aa_len + 1 >= word_size as usize,
             );
         }
 
@@ -9798,17 +9519,14 @@ fn run_resolved_in_pool(
             };
             // EXPERIMENT (LOSAT_X_BPSUBJRUN): runs of consecutive subjects, one scratch per
             // thread and one diagonal table fill per run (`x_subject_runs.rs`).
-            let x_subj_run = x_subject_runs::x_bp_subj_run();
-            if x_subj_run != x_subject_runs::XSubjRun::Off {
+            if x_subject_runs::x_bp_subj_run() {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJRUN", true);
                 x_subject_runs::x_search_subject_runs(
                     pool,
                     &subjects,
                     &subject_diag_offsets,
-                    window,
                     &new_scratch,
                     &process_subject,
-                    x_subj_run == x_subject_runs::XSubjRun::Shadow,
                     &mut subject_results,
                 );
             } else {
@@ -9849,7 +9567,7 @@ fn run_resolved_in_pool(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
-        if x_subject_runs::x_bp_subj_run() != x_subject_runs::XSubjRun::Off {
+        if x_subject_runs::x_bp_subj_run() {
             crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJRUN", false);
         }
         let mut scratch =
@@ -9925,14 +9643,12 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the listed subjects without a copy of their residues
     // (`ListedSubjects::x_list`); the redo reads each match's subject from the database.
     let t_search = crate::utils::xtiming::clock();
-    let x_redo_db_subj = super::x_redo_subjects::x_bp_redo_db_subj();
     let mut listed_subjects = match database {
-        Some(database) if x_redo_db_subj != super::x_redo_subjects::XRedoDbSubj::Off => {
+        Some(database) if super::x_redo_subjects::x_bp_redo_db_subj() => {
             Some(database::ListedSubjects::x_list(
                 database,
                 &mut preliminary_hit_lists,
                 &mut x_compact_hit_lists,
-                x_redo_db_subj,
             )?)
         }
         Some(database) => Some(database::ListedSubjects::read(
@@ -9989,8 +9705,8 @@ fn run_resolved_in_pool(
     ))]
     let x_win_expand = x_compact_expand_all
         && x_prelim_compact == XPrelimCompact::On
-        && super::x_redo_par::x_bp_redo_par() == super::x_redo_par::XRedoPar::On
-        && super::x_redo_par::x_bp_redo_win_expand() != super::x_redo_par::XWinExpand::Off;
+        && super::x_redo_par::x_bp_redo_par()
+        && super::x_redo_par::x_bp_redo_win_expand();
     #[cfg(any(
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
@@ -10015,6 +9731,9 @@ fn run_resolved_in_pool(
     //     );
     // }
     // ```
+    // EXPERIMENT (LOSAT_X_BPLKDROP): nothing reads the lookup table after the preliminary stage;
+    // it is dropped here unless a later block's build may take its vectors (at the end below).
+    let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
     // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
@@ -10265,14 +9984,12 @@ fn run_resolved_in_pool(
     // #pragma omp for schedule(static)
     //         for (b = 0; b < numMatches; ++b) {
     // ```
-    // EXPERIMENT (LOSAT_X_BPREDOPAR, a strict-set switch / LOSAT_X_BPREDOPARSHADOW): NCBI splits one
-    // loop over the matches of all queries between its threads. With the switch, more than one
-    // thread and at least two matches, the matches run on the pool in jobs of up to four matches
-    // of one query, and the early termination test, the heap insertions and the error that ends
-    // the redo are replayed in the order of the one-thread loop below; it replaces both parallel
-    // paths (`x_redo_par.rs`). The shadow mode runs it into separate heaps first, then the
-    // one-thread loop for the output, and compares the hit lists (or the errors, at the callers of
-    // this function).
+    // EXPERIMENT (LOSAT_X_BPREDOPAR, a strict-set switch): NCBI splits one loop over the matches
+    // of all queries between its threads. With the switch, more than one thread and at least two
+    // matches, the matches run on the pool in jobs of up to four matches of one query, and the
+    // early termination test, the heap insertions and the error that ends the redo are replayed
+    // in the order of the one-thread loop below; it replaces both parallel paths
+    // (`x_redo_par.rs`).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -10297,12 +10014,12 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let x_redo_par_mode = super::x_redo_par::x_bp_redo_par();
+    let x_redo_par_switch = super::x_redo_par::x_bp_redo_par();
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let x_redo_par_on = x_redo_par_mode != super::x_redo_par::XRedoPar::Off
+    let x_redo_par_on = x_redo_par_switch
         && blastp_should_parallelize_stage(
             "kappa-redo-par",
             args.num_threads,
@@ -10323,27 +10040,14 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if x_redo_par_mode != super::x_redo_par::XRedoPar::Off {
+    if x_redo_par_switch {
         crate::utils::xreach::x_reach!("LOSAT_X_BPREDOPAR", x_redo_par_on);
     }
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let x_redo_par_shadow =
-        (x_redo_par_on && x_redo_par_mode == super::x_redo_par::XRedoPar::Shadow).then(|| {
-            super::x_redo_par::x_redo_par_shadow_run(
-                &x_redo_par_search,
-                &mut preliminary_hit_lists,
-                &redone_matches,
-                args.max_target_seqs,
-            )
-        });
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let x_redo_par_run = x_redo_par_on && x_redo_par_shadow.is_none();
+    let x_redo_par_run = x_redo_par_on;
     #[cfg(any(
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
@@ -10358,16 +10062,6 @@ fn run_resolved_in_pool(
             &x_split_queries,
         );
     }
-    // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): the shadow's reference is the one-thread loop.
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let (use_parallel_kappa_match_redo, use_parallel_kappa_redo) = if x_redo_par_shadow.is_some() {
-        (false, false)
-    } else {
-        (use_parallel_kappa_match_redo, use_parallel_kappa_redo)
-    };
 
     // Graduated 2026-10-22 (was `LOSAT_X_SEGSHARE`): the query-parallel redo and the windows of
     // `x_redo_par` share the masked ranges; the match-parallel redo shares none, and the
@@ -10382,6 +10076,15 @@ fn run_resolved_in_pool(
         "LOSAT_X_NEWTONLANES",
         x_redo_par_run || !use_parallel_kappa_match_redo
     );
+    // EXPERIMENT (LOSAT_X_BPSEGWIN): a redo not in windows empties no store; the windows record
+    // their side (`x_redo_par::x_redo`).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on {
+        crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", false);
+    }
     if x_redo_par_run {
         #[cfg(all(
             feature = "parallel",
@@ -11068,14 +10771,6 @@ fn run_resolved_in_pool(
             }
         }
     }
-    // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): the new path's hit lists against the one-thread loop's.
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    if let Some(shadow) = x_redo_par_shadow {
-        shadow.compare(&redone_matches);
-    }
 
     if x_prelim_free && timing_enabled {
         eprintln!("[TIMING] x_bppfree: freed_lists={x_prelim_freed}");
@@ -11161,15 +10856,8 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the titles of the reported subjects only, and the
     // letters from the stored residues (`database/x_listed_lean.rs`); ABI v1's title checks
     // read the records.
-    let x_listed_lean = if reports.v1_titles {
-        database::XListedLean::Off
-    } else {
-        database::x_bp_listed_lean()
-    };
-    if listed_subjects.is_some()
-        && database.is_some()
-        && database::x_bp_listed_lean() != database::XListedLean::Off
-    {
+    let x_listed_lean = !reports.v1_titles && database::x_bp_listed_lean();
+    if listed_subjects.is_some() && database.is_some() && database::x_bp_listed_lean() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPLISTEDLEAN", !reports.v1_titles);
     }
     // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues that the reports read, read from the
@@ -11178,7 +10866,7 @@ fn run_resolved_in_pool(
     // read the letters only to recount the HSPs whose query or subject has an O, those of the
     // subjects with an O and of the HSPs whose query has one; every final subject's otherwise.
     if let (Some(listed), Some(database)) = (listed_subjects.as_mut(), database) {
-        let residues = if x_listed_lean != database::XListedLean::On {
+        let residues = if !x_listed_lean {
             database::XShownResidues::Listed
         } else if outputs.hits.is_none()
             && requested_formats.iter().all(|(outfmt, custom_fields)| {
@@ -11211,15 +10899,10 @@ fn run_resolved_in_pool(
         None => subject_set,
     };
     let listed_titles = match (listed_subjects.as_ref(), database) {
-        (Some(listed), Some(database)) => Some(match x_listed_lean {
-            database::XListedLean::Off => listed.read_titles(database, &hit_lists)?,
-            database::XListedLean::On => listed.x_read_titles_lean(database, &hit_lists)?,
-            database::XListedLean::Shadow => {
-                let records = listed.read_titles(database, &hit_lists)?;
-                let lean = listed.x_read_titles_lean(database, &hit_lists)?;
-                database::x_listed_lean_shadow_compare(&lean, &records);
-                lean
-            }
+        (Some(listed), Some(database)) => Some(if x_listed_lean {
+            listed.x_read_titles_lean(database, &hit_lists)?
+        } else {
+            listed.read_titles(database, &hit_lists)?
         }),
         _ => None,
     };
@@ -11827,11 +11510,19 @@ fn run_resolved_in_pool(
                 };
                 let db_name = database.map(|database| database.name().to_string());
                 let version = format!("BLASTP {NCBI_BLASTP_VERSION}");
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:414-417
+                // ```c
+                //     if (SBlastFilterOptionsMaskAtHash(filtering_options)) {
+                //         if (strlen(retval) != 0) {
+                //             /* Add mask at hash as a modifier for other filtering options */
+                //             if (!s_SafeStrCat(&retval, &retval_size, "m;")) {
+                // ```
+                // `-soft_masking true` (`mask_at_hash`) ends the filter string with `m;`.
                 let filter = crate::report::blast_xml::filter::filter_string(
                     None,
                     args.seg.filter_options(),
                     None,
-                    false,
+                    args.soft_masking,
                 );
                 let xml = super::blast_xml::BlastpXml {
                     run: crate::report::blast_xml::XmlRun {
@@ -12186,19 +11877,20 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
     // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed. EXPERIMENT
     // (LOSAT_X_BPLKPAHEAD): exact blastp's, for the build of a later block's table ahead of it
-    // (`x_query_blocks::x_bp_aa_spares`).
+    // (`x_query_blocks::x_bp_aa_spares`). EXPERIMENT (LOSAT_X_BPLKDROP): `None` when the table was
+    // dropped before the redo.
     match lookup {
-        BlastpRuntimeLookup::CompressedFlat(table) => {
+        Some(BlastpRuntimeLookup::CompressedFlat(table)) => {
             if let Some(spare) = super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool) {
                 spare.give(table);
             }
         }
-        BlastpRuntimeLookup::Aa(table) => {
+        Some(BlastpRuntimeLookup::Aa(table)) => {
             if let Some(spares) = super::x_query_blocks::x_bp_aa_spares(blastp_parallel_pool) {
                 spares.give(table);
             }
         }
-        BlastpRuntimeLookup::Compressed(_) => {}
+        Some(BlastpRuntimeLookup::Compressed(_)) | None => {}
     }
 
     if let Some(timing) = timing.as_ref() {
@@ -12446,6 +12138,7 @@ mod tests {
             gap_extend: None,
             comp_based_stats: "2".to_string(),
             seg: None,
+            soft_masking: None,
             use_sw_tback: false,
             query_loc: None,
             subject_loc: None,

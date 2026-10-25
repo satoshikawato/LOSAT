@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_QBATCHPAR, shadow LOSAT_X_QBATCHPARSHADOW): blastn's query batches
+//! EXPERIMENT (LOSAT_X_QBATCHPAR): blastn's query batches
 //! searched side by side, ahead of the batch loop of `run_in_pool`.
 //!
 //! NCBI's blastn reads its queries in batches (`CBatchSizeMixer`, blastn_app.cpp:261-300): the
@@ -44,9 +44,8 @@
 //! batches taken so far; its error paths still call `finish` before they write. The batches still exposed past an
 //! error at batch j: before the error is known, the slots may have searched up to the plan's
 //! window (2k - 1 batches) past j; once it is known, at most k - 1 still run, and they are
-//! cancelled when the loop meets j. Slot panics are counted (`panicked=`), and in the shadow
-//! mode any slot panic, taken or not, is a difference. `LOSAT_TIMING` blocks are text in
-//! the batch's result, printed when the loop takes it.
+//! cancelled when the loop meets j. Slot panics are counted (`panicked=`). `LOSAT_TIMING` blocks
+//! are text in the batch's result, printed when the loop takes it.
 //!
 //! Cancellation: a slot's search gets a flag through its pool (`SearchPool::x_with_ext`,
 //! `Cancel`), which `search_query_batch` reads at its start, between subjects, between subject
@@ -69,8 +68,6 @@
 //! Active threads: the slots use `k x m <= n` threads. The loop's thread waits while a slot
 //! searches its batch. The loop searches a batch on the whole pool only when no slot is running
 //! and none can start (the first batch, and every batch once the search does not speculate).
-//! `LOSAT_X_QBATCHPARSHADOW` searches every batch on the loop as well, on the whole pool, while
-//! the slots run (a test mode; more than n threads are active then).
 //!
 //! Off (the loop as before): switch off; a build without `parallel`, or wasm32; one thread;
 //! a BLAST database (`-db`); `-verbose`, `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`,
@@ -103,6 +100,43 @@
 //! `k >= 2` predicts less than 0.97 of the loop's span. `LOSAT_X_QBATCHPARSLOTS=k` (tuning) sets k
 //! directly.
 //!
+//! `LOSAT_X_DCTWOSLOTS` (a strict-set switch: on unless it is `0`): for `-task dc-megablast` only
+//! (megablast with template options runs the same stages but keeps the model), where the model
+//! takes three slots or more (k x m), two slots of `n / 2` threads search instead when the
+//! two-slot rule holds (`Profile::two_slots`, `two_slots_win`, `choose_slots`): 12 to 33 threads
+//! (the measured range: at most 16 threads per slot; 64 and 128 threads keep the model), an even
+//! count of batch units (an odd count leaves the last round to one slot), and either the model's
+//! slots are narrow and leave threads idle (`m <= 3` and `k x m < 2 x (n / 2)`), or all units fit
+//! in its first round (`units <= k`), or its last round is at most half full within five rounds
+//! (`0 < units mod k <= k / 2` and `ceil(units / k) <= 5`). Where it takes two slots or keeps the
+//! loop, or the rule declines, nothing changes. The E(m)
+//! points predate LOSAT_X_PAIRPARDISCARR and LOSAT_X_PAIRPARHOME (2026-10-20 and 2026-10-24),
+//! which made one dc-megablast batch scale better on 8 to 32 threads; the rule is drawn from a map
+//! of `LOSAT_X_QBATCHPARSLOTS=2` against the model on dev d92512d0 (ws, 2026-10-25, line D
+//! session 14 window w2: dc-megablast of the first 6,900 / 10,400 / 15,600 / 20,800 / 31,168
+//! D. melanogaster cDNAs and of 5,000 cDNAs against 3 Mb of chromosome 2L, `-subject`, at 12 / 16 /
+//! 24 / 32 threads, 4 rounds; `the_two_slot_rule_holds_only_where_two_slots_won_on_the_w2_map`):
+//! two slots win where the model's narrow slots leave threads idle (31,168 cDNAs at 32 threads,
+//! 9 x 3 on 27 threads: x0.909; 15,600 at 24 threads, 9 x 2 on 18: x0.892), where its batches fit
+//! in one round (10,400 at 24 / 32 threads, 6 x 4 / 6 x 5: x0.946 / x0.943) and where its last
+//! round is half empty in a short search (31,168 at 16 threads, 4 x 4 for 18 units: x0.983); they
+//! lose with an odd unit count (5,000 cDNAs, 3 units: x1.10-1.16 at every thread count) and where
+//! the model runs two full rounds or more of 4-thread slots (20,800 cDNAs at 12 / 16 / 24
+//! threads: x1.006-1.018; 31,168 at 12 / 24 threads: x1.016 / x1.031). The rule takes every
+//! winning cell of that map but five: 15,600 cDNAs at 24 / 32 threads (9 units, odd), and 10,400
+//! at 12 / 16 threads and 20,800 at 32 threads (two full rounds of 4- and 5-thread slots); and
+//! none of the losing ones. Narrow slots that use every thread, and last rounds more than half
+//! full, were not measured, so the rule keeps the model there (review 2). With the final rule
+//! (ws, 2026-10-25, line D session 15 windows w3 to w5 against dev 416c427f and e6429b65, 6 to
+//! 8 rounds, max RSS by `time %M`): 31,168 cDNAs at 16 threads x0.976-0.982 of dev's time, max
+//! RSS 394-398 -> 222-235 MiB (NCBI `-subject`, one thread: 313 MiB); at 32 threads
+//! x0.911-0.916, 824 -> 330-335 MiB; 6,900 at 16 threads x0.965-0.980, 347 -> 208-209 MiB;
+//! 10,400 at 24 threads x0.967-0.973, 510 -> 233-238 MiB. Where the rule declines (5,000,
+//! 15,600 and 20,800 cDNAs at 16 threads, 31,168 at 24) the model's layout runs, with dev's
+//! cycles and instructions. With the rule `rule_k`, `rule_m` and `predicted` of the summary
+//! line still state the model's layout, and `k`, `m` the slots that ran. The tuning variable sets
+//! k directly, as before.
+//!
 //! Diagnostics: with the switch and `LOSAT_X_STATS` set, one line on standard error at the end of
 //! the search, `[X_STATS] QBATCHPAR batches= precomputed= loop= mispredicted= discarded=
 //! cancelled= panicked= waste_bound= k= m= idle= units= rule_k= rule_m= predicted= budget_mib=
@@ -115,10 +149,8 @@
 //! printed to three decimals, the value the 0.97 gate compares (`slots_pay`), `-` when the model
 //! did not run; peak_mib: the most memory admitted at once; off: why the search did not, or stopped to,
 //! speculate, `none` if it never stopped).
-//! Without `LOSAT_X_STATS` the switch writes nothing of its own. With the shadow,
-//! `[X_SHADOW] QBATCHPAR batches= compared= diffs= panicked= mispredicted= wasted=`; the first difference
-//! prints it and panics. `LOSAT_X_QBATCHPARMISS=N` (test only) corrupts every N-th prediction so
-//! that the discard, replan and guard paths run.
+//! Without `LOSAT_X_STATS` the switch writes nothing of its own. `LOSAT_X_QBATCHPARMISS=N` (test
+//! only) corrupts every N-th prediction so that the discard, replan and guard paths run.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-300
 //! ```c++
@@ -171,10 +203,8 @@ const SLOT_STACK_BYTES: usize = 8 << 20;
 /// code path and change no value NCBI computes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Switches {
-    /// `LOSAT_X_QBATCHPAR` (a strict-set switch: on unless it is `0`), or the shadow.
+    /// `LOSAT_X_QBATCHPAR` (a strict-set switch: on unless it is `0`).
     pub on: bool,
-    /// `LOSAT_X_QBATCHPARSHADOW` (any value; implies the switch).
-    pub shadow: bool,
     /// `LOSAT_X_STATS` (any value): the summary line.
     pub stats: bool,
     /// `LOSAT_X_QBATCHPARMEM`: the budget of the batches in flight beyond the loop's, in MiB.
@@ -183,6 +213,9 @@ pub(super) struct Switches {
     pub slots: Option<usize>,
     /// `LOSAT_X_QBATCHPARMISS` (test only): corrupt every N-th prediction.
     pub miss_every: Option<u64>,
+    /// `LOSAT_X_DCTWOSLOTS` (a strict-set switch: on unless it is `0`): the profile's two-slot
+    /// rule (`Profile::two_slots`, `two_slots_win`).
+    pub dc_two: bool,
 }
 
 impl Switches {
@@ -194,16 +227,15 @@ impl Switches {
                 .ok()
                 .and_then(|value| value.trim().parse::<u64>().ok())
         };
-        let shadow = std::env::var_os("LOSAT_X_QBATCHPARSHADOW").is_some();
         Switches {
-            on: shadow || crate::utils::xswitch::on("LOSAT_X_QBATCHPAR"),
-            shadow,
+            on: crate::utils::xswitch::on("LOSAT_X_QBATCHPAR"),
             stats: std::env::var_os("LOSAT_X_STATS").is_some(),
             mem_mib: number("LOSAT_X_QBATCHPARMEM"),
             slots: number("LOSAT_X_QBATCHPARSLOTS")
                 .filter(|&slots| slots > 0)
                 .map(|slots| usize::try_from(slots).unwrap_or(usize::MAX)),
             miss_every: number("LOSAT_X_QBATCHPARMISS").filter(|&every| every > 0),
+            dc_two: crate::utils::xswitch::on("LOSAT_X_DCTWOSLOTS"),
         }
     }
 }
@@ -241,6 +273,8 @@ pub(super) enum Off {
     Waste,
     /// The loop's next key was not planned (not expected to happen).
     Unplanned,
+    /// EXPERIMENT (LOSAT_X_BNQDROP): the loop takes its batches' records out of their store.
+    Taken,
 }
 
 impl Off {
@@ -260,6 +294,7 @@ impl Off {
             Off::Guard => "guard",
             Off::Waste => "waste",
             Off::Unplanned => "unplanned",
+            Off::Taken => "taken",
         }
     }
 }
@@ -444,11 +479,15 @@ pub(super) struct Profile {
     pub query_bytes_per_letter: u64,
     /// The in-batch efficiency E(m) (`EFFICIENCY_MEGABLAST`, `EFFICIENCY_BLASTN`).
     pub efficiency: &'static [(usize, f64)],
+    /// Whether the two-slot rule of `LOSAT_X_DCTWOSLOTS` (`two_slots_win`) applies while the
+    /// switch is on: `-task dc-megablast` only (module header).
+    pub two_slots: bool,
 }
 
 impl Profile {
     /// The profile of `-task` `task`: megablast and dc-megablast (5 Mb batches) take the
-    /// efficiency measured on dc-megablast; blastn and blastn-short that of blastn.
+    /// efficiency measured on dc-megablast; blastn and blastn-short that of blastn. Only
+    /// dc-megablast takes the two-slot rule (module header).
     pub(super) fn of_task(task: &str) -> Self {
         let megablast = matches!(task, "megablast" | "dc-megablast");
         Profile {
@@ -463,6 +502,7 @@ impl Profile {
             } else {
                 EFFICIENCY_BLASTN
             },
+            two_slots: task == "dc-megablast",
         }
     }
 
@@ -618,6 +658,16 @@ const CONTENTION_PER_SLOT: f64 = 0.05;
 const CONTENTION_SLOTS: usize = 5;
 /// Slots start only when the model predicts their span below this share of the loop's.
 const MODEL_GAIN: f64 = 0.97;
+/// The two-slot rule of dc-megablast (`LOSAT_X_DCTWOSLOTS`, module header, `two_slots_win`): the
+/// slots it runs where the model takes more, the fewest threads and the most threads per slot
+/// it was measured with, the slot width of the model's layout at or below which it holds (where
+/// that layout leaves threads idle), and the rounds within which a last round at most half full
+/// makes it hold.
+const DC_SLOTS: usize = 2;
+const DC_MIN_THREADS: usize = 12;
+const DC_SLOT_THREADS: usize = 16;
+const DC_NARROW_SLOT: usize = 3;
+const DC_SHORT_SEARCH_ROUNDS: usize = 5;
 
 /// A predicted ratio in thousandths, as the summary line prints it (`predicted=`).
 fn milli(ratio: f64) -> u64 {
@@ -705,6 +755,27 @@ pub(super) fn predicted_span(
     rounds * contention / (m as f64 * efficiency(efficiency_points, m))
 }
 
+/// The two-slot rule of `LOSAT_X_DCTWOSLOTS` (module header): whether `units` batch units on
+/// `threads` threads, where the model takes `k` slots of `m` threads (`k > DC_SLOTS`), run as
+/// `DC_SLOTS` slots of `threads / DC_SLOTS` threads instead: `DC_MIN_THREADS` threads or more and
+/// at most `DC_SLOT_THREADS` threads per slot, an even unit count, and either slots of at most
+/// `DC_NARROW_SLOT` threads in the model's layout that leave threads idle which the two slots
+/// use (`k x m < DC_SLOTS x (threads / DC_SLOTS)`), or every unit in its first round
+/// (`units <= k`), or a last round at most half full within `DC_SHORT_SEARCH_ROUNDS` rounds
+/// (`0 < units mod k <= k / 2` and `ceil(units / k)` at most that; the rounds are counted whole
+/// here, not with `predicted_span`'s half-round tail allowance).
+fn two_slots_win(threads: usize, k: usize, m: usize, units: usize) -> bool {
+    let k = k.max(1);
+    let half = threads / DC_SLOTS;
+    let last = units % k;
+    threads >= DC_MIN_THREADS
+        && half <= DC_SLOT_THREADS
+        && units % DC_SLOTS == 0
+        && ((m <= DC_NARROW_SLOT && k.saturating_mul(m) < DC_SLOTS * half)
+            || units <= k
+            || (last != 0 && 2 * last <= k && units.div_ceil(k) <= DC_SHORT_SEARCH_ROUNDS))
+}
+
 /// A layout of the slot model: `k` slots of `m` threads, and its predicted span over the loop's
 /// (`k = 1` on the whole pool).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -724,7 +795,10 @@ pub(super) struct Layout {
 /// `k` runs over `1 ..= min(1 + budget / estimate, threads, units)` and `m = threads / k`; the
 /// least `predicted_span` of `k >= 2` (the fewest slots on a tie) is taken when its ratio to
 /// `k = 1`'s pays (`slots_pay`: below 0.970 in thousandths), else the search does not speculate
-/// (`Off::Model`).
+/// (`Off::Model`). With `two_slots` (LOSAT_X_DCTWOSLOTS: `Profile::two_slots` while the switch is
+/// on) a layout of more than `DC_SLOTS` slots runs as `DC_SLOTS` slots of `threads / DC_SLOTS`
+/// threads where the two-slot rule holds (`two_slots_win`), and the layout judged stays the
+/// model's. The tuning variable's slots are not subject to the rule.
 ///
 /// Exactness: this chooses only `k` and `m`. Which batches a slot searches, and that the loop
 /// takes a slot's result only under the key it computed itself, do not depend on them (module
@@ -734,6 +808,7 @@ pub(super) fn choose_slots(
     budget_bytes: u64,
     estimate_bytes: u64,
     slots: Option<usize>,
+    two_slots: bool,
     units: usize,
     efficiency_points: &[(usize, f64)],
 ) -> (Result<(usize, usize), Off>, Option<Layout>) {
@@ -766,7 +841,12 @@ pub(super) fn choose_slots(
         }
     }
     if slots_pay(best.ratio) {
-        (Ok((best.k, best.m)), Some(best))
+        let k = if two_slots && best.k > DC_SLOTS && two_slots_win(threads, best.k, best.m, units) {
+            DC_SLOTS
+        } else {
+            best.k
+        };
+        (Ok((k, threads / k)), Some(best))
     } else {
         (Err(Off::Model), Some(best))
     }
@@ -875,9 +955,8 @@ struct State<T> {
     /// Finished or cancelled batches dropped unused, and how many of them were cancelled.
     discarded: u64,
     cancelled: u64,
-    /// Slot batches that panicked (kept for the loop or dropped), and the first one's messages.
+    /// Slot batches that panicked (kept for the loop or dropped).
     panicked: u64,
-    first_panic: Option<String>,
     /// The most slots searching at once, and the most memory admitted at once.
     peak_busy: usize,
     peak_bytes: u64,
@@ -898,7 +977,6 @@ impl<T> State<T> {
             discarded: 0,
             cancelled: 0,
             panicked: 0,
-            first_panic: None,
             peak_busy: 0,
             peak_bytes: 0,
             alive: 0,
@@ -949,8 +1027,6 @@ pub(super) struct Stats {
     pub estimate_mib: u64,
     pub waste_bound: u64,
     pub off: Option<Off>,
-    pub compared: u64,
-    pub diffs: u64,
 }
 
 /// What the run's counters were at the end, with the executor's own.
@@ -1069,35 +1145,17 @@ impl<T> Shared<T> {
             stats.off.map_or("none", Off::name)
         )
     }
-
-    /// `[X_SHADOW] QBATCHPAR ...`
-    pub(super) fn shadow_line(&self) -> String {
-        let summary = self.summary();
-        let stats = summary.stats;
-        format!(
-            "[X_SHADOW] QBATCHPAR batches={} compared={} diffs={} panicked={} mispredicted={} wasted={}",
-            stats.batches,
-            stats.compared,
-            stats.diffs,
-            summary.panicked,
-            stats.mispredicted,
-            summary.discarded
-        )
-    }
 }
 
 impl<T> Drop for Shared<T> {
-    // No NCBI counterpart: the summary lines at the end of a search: the counters with
-    // LOSAT_X_STATS (as the other counters of the tree), the shadow's line with the shadow.
+    // No NCBI counterpart: the summary line at the end of a search: the counters with
+    // LOSAT_X_STATS (as the other counters of the tree).
     fn drop(&mut self) {
         if !self.switches.on || std::thread::panicking() {
             return;
         }
         if self.switches.stats {
             eprintln!("{}", self.stats_line());
-        }
-        if self.switches.shadow {
-            eprintln!("{}", self.shadow_line());
         }
     }
 }
@@ -1184,11 +1242,6 @@ where
         }
     }
 
-    /// Whether the loop also searches every batch it takes from a slot, and compares.
-    pub(super) fn shadow(&self) -> bool {
-        self.shared.switches.shadow && self.phase == Phase::Active
-    }
-
     /// Whether a slot may still search a batch of this search: `false` once the driver is off
     /// (nothing starts any more, and `take` has waited for the slots to be idle), and before the
     /// first commit when no slot can start: without `LOSAT_X_QBATCHPARSLOTS`, `choose_slots`
@@ -1202,6 +1255,16 @@ where
             Phase::Pending => {
                 self.shared.switches.slots.is_some() || (self.budget_mib() > 0 && self.threads > 1)
             }
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNQDROP): the loop takes its batches' records out of their store, which
+    /// no slot can read: a search whose slots could start does not speculate (`Off::Taken`; the rule
+    /// of `x_query_drop` acts only where `search_cli` found that none could).
+    pub(super) fn x_refuse_taken(&mut self) {
+        if self.may_speculate() {
+            crate::utils::xreach::x_reach!("LOSAT_X_QBATCHPAR", false);
+            self.stop(Off::Taken);
         }
     }
 
@@ -1262,45 +1325,6 @@ where
         None
     }
 
-    /// The shadow: the loop's own result of a batch taken from a slot equals the slot's
-    /// (`compare` gives the first difference); the first difference prints the shadow line and
-    /// panics.
-    pub(super) fn shadow_check(
-        &mut self,
-        key: BatchKey,
-        precomputed: &T,
-        reference: &T,
-        compare: impl Fn(&T, &T) -> Result<(), String>,
-    ) {
-        self.stats.compared += 1;
-        if let Err(difference) = compare(precomputed, reference) {
-            self.stats.diffs += 1;
-            self.flush();
-            eprintln!("{}", self.shared.shadow_line());
-            panic!("[X_SHADOW] QBATCHPAR batch {key:?}: {difference}");
-        }
-        self.flush();
-    }
-
-    /// The shadow: a slot's batch that panicked, kept for the loop or dropped, is a difference;
-    /// the first one prints the shadow line and panics with the batch's message (in the release
-    /// profile, which aborts on a panic, the slot's panic has already ended the process).
-    fn shadow_panics(&mut self) {
-        if !self.shared.switches.shadow || self.stats.diffs > 0 {
-            return;
-        }
-        let first = {
-            let state = self.shared.lock();
-            (state.panicked > 0).then(|| state.first_panic.clone().unwrap_or_default())
-        };
-        if let Some(message) = first {
-            self.stats.diffs += 1;
-            self.flush();
-            eprintln!("{}", self.shared.shadow_line());
-            panic!("[X_SHADOW] QBATCHPAR a batch searched by a slot panicked: {message}");
-        }
-    }
-
     /// Batch `key` is done in the loop with `gie` successful initial extensions; `mixer` is the
     /// loop's mixer after it (`None` with `BATCH_SIZE`) and `next_size` the next batch's size.
     pub(super) fn commit(
@@ -1312,7 +1336,6 @@ where
     ) {
         self.stats.batches += 1;
         self.commits += 1;
-        self.shadow_panics();
         let searched = self
             .input
             .query_input
@@ -1398,8 +1421,6 @@ where
         }
         if started && !std::thread::panicking() {
             check_no_global_pool();
-            // The shadow: every panic of a slot's batch, taken or not, is a difference.
-            self.shadow_panics();
         }
         self.flush();
     }
@@ -1444,14 +1465,24 @@ where
         let budget_mib = self.budget_mib();
         self.stats.budget_mib = budget_mib;
         self.stats.estimate_mib = estimate.div_ceil(MIB);
+        let two_slots = self.profile.two_slots && switches.dc_two;
         let (choice, layout) = choose_slots(
             self.threads,
             budget_mib.saturating_mul(MIB),
             estimate,
             switches.slots,
+            two_slots,
             units,
             self.profile.efficiency,
         );
+        // LOSAT_X_DCTWOSLOTS decides where the model itself takes slots for a task with the rule
+        // (marked once the slots started): its own side where fewer slots run than the model
+        // judged, the reference side where the model's layout runs (two slots of its own, or the
+        // rule declined).
+        let capped = match (two_slots, switches.slots, choice, layout) {
+            (true, None, Ok((k, _)), Some(judged)) => Some(k < judged.k),
+            _ => None,
+        };
         if let Some(layout) = layout {
             self.stats.rule_k = layout.k;
             self.stats.rule_m = layout.m;
@@ -1472,6 +1503,9 @@ where
         match self.start_slots(k, m) {
             Ok(()) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_QBATCHPAR", true);
+                if let Some(capped) = capped {
+                    crate::utils::xreach::x_reach!("LOSAT_X_DCTWOSLOTS", capped);
+                }
                 self.phase = Phase::Active;
                 self.stats.off = None;
                 self.window = 2 * k;
@@ -1791,11 +1825,8 @@ fn settle<T: SlotResult>(
     flagged: bool,
 ) -> Option<Outcome<T>> {
     state.running[slot] = None;
-    if let Outcome::Panic(_, messages) = &outcome {
+    if matches!(&outcome, Outcome::Panic(..)) {
         state.panicked += 1;
-        if state.first_panic.is_none() {
-            state.first_panic = Some(messages.concat());
-        }
     }
     let wanted =
         !state.shutdown && state.wanted.contains(&job.key) && !state.done.contains_key(&job.key);
@@ -2195,10 +2226,18 @@ mod tests {
         let dc = batch_estimate_bytes(11, 5_001_442, 1_000, dc) as f64 / MIB as f64;
         assert!((47.0..=54.0).contains(&blastn), "{blastn}");
         assert!((65.0..=82.0).contains(&dc), "{dc}");
+        // dc-megablast differs from megablast only by the two-slot rule (LOSAT_X_DCTWOSLOTS).
         assert_eq!(
             Profile::of_task("megablast"),
-            Profile::of_task("dc-megablast")
+            Profile {
+                two_slots: false,
+                ..Profile::of_task("dc-megablast")
+            }
         );
+        assert!(Profile::of_task("dc-megablast").two_slots);
+        for task in ["megablast", "blastn", "blastn-short"] {
+            assert!(!Profile::of_task(task).two_slots, "{task}");
+        }
         assert_eq!(Profile::of_task("blastn-short"), Profile::of_task("blastn"));
         assert_eq!(allowance_mib("blastn"), 96);
         assert_eq!(allowance_mib("blastn-short"), 96);
@@ -2253,7 +2292,7 @@ mod tests {
             assert_eq!(stdin.allowance_mib, 0, "{task}");
         }
         // No default budget: the slots do not start (a budget of fewer than two slots).
-        let (choice, layout) = choose_slots(16, 0, 50 * MIB, None, 5, EFFICIENCY_BLASTN);
+        let (choice, layout) = choose_slots(16, 0, 50 * MIB, None, false, 5, EFFICIENCY_BLASTN);
         assert_eq!((choice, layout), (Err(Off::Budget), None));
     }
 
@@ -2339,11 +2378,22 @@ mod tests {
 
     /// The choice for `planned` batches of `task` at `threads` threads with the default budget
     /// (the estimate of the largest batch: lookup width 11, ~72,000 extensions per 1 Mb blastn
-    /// batch, ~1,000 per 5 Mb dc-megablast batch).
+    /// batch, ~1,000 per 5 Mb dc-megablast batch), without the two-slot rule
+    /// (LOSAT_X_DCTWOSLOTS=0).
     fn split3_choice(
         task: &str,
         planned: &[u64],
         threads: usize,
+    ) -> (Result<(usize, usize), Off>, Option<Layout>, usize) {
+        split3_choice_ruled(task, planned, threads, false)
+    }
+
+    /// `split3_choice` with the two-slot rule where `two_slots`.
+    fn split3_choice_ruled(
+        task: &str,
+        planned: &[u64],
+        threads: usize,
+        two_slots: bool,
     ) -> (Result<(usize, usize), Off>, Option<Layout>, usize) {
         let profile = Profile::of_task(task);
         let largest = planned.iter().copied().max().unwrap();
@@ -2355,8 +2405,15 @@ mod tests {
         let estimate = batch_estimate_bytes(11, largest, gie, profile.query_bytes_per_letter);
         let budget = profile.allowance_mib * (threads as u64 - 1) * MIB;
         let units = batch_units(planned);
-        let (choice, layout) =
-            choose_slots(threads, budget, estimate, None, units, profile.efficiency);
+        let (choice, layout) = choose_slots(
+            threads,
+            budget,
+            estimate,
+            None,
+            two_slots,
+            units,
+            profile.efficiency,
+        );
         (choice, layout, units)
     }
 
@@ -2469,6 +2526,270 @@ mod tests {
         }
     }
 
+    // LOSAT_X_DCTWOSLOTS on the split3 cells: dc-megablast's rule turns the model's layouts of
+    // three slots or more into two slots of half the threads where it holds (Ad, 18 units: 4 x 4
+    // at 16 threads, a half-empty fifth round, and 9 x 3 at 32 and 33 threads, narrow slots on 27
+    // threads) and
+    // leaves every other choice as it was ((a) one unit, (b) two units: the loop at 16 threads,
+    // 2 x 2 and 2 x 16 where the model takes two; Ad at 12 and 24 threads: 6 and 3 full rounds of
+    // 4-thread slots; at 64 and 128 threads: 32 threads per slot; Ab's 89 units, odd, at every
+    // thread count), with the model's judged layout in both cases.
+    #[test]
+    fn the_dc_rule_takes_two_slots_on_the_split3_cells_where_it_holds() {
+        // (input, planned, threads, choice with the rule)
+        let cells: [(&str, &[u64], usize, Result<(usize, usize), Off>); 17] = [
+            ("a", SPLIT3_A, 16, Err(Off::Single)),
+            ("b", SPLIT3_B, 4, Ok((2, 2))),
+            ("b", SPLIT3_B, 16, Err(Off::Model)),
+            ("b", SPLIT3_B, 32, Ok((2, 16))),
+            ("Ad", SPLIT3_AD, 1, Err(Off::Budget)),
+            ("Ad", SPLIT3_AD, 4, Ok((2, 2))),
+            ("Ad", SPLIT3_AD, 8, Ok((2, 4))),
+            ("Ad", SPLIT3_AD, 12, Ok((3, 4))),
+            ("Ad", SPLIT3_AD, 16, Ok((2, 8))),
+            ("Ad", SPLIT3_AD, 24, Ok((6, 4))),
+            ("Ad", SPLIT3_AD, 32, Ok((2, 16))),
+            ("Ad", SPLIT3_AD, 33, Ok((2, 16))),
+            ("Ad", SPLIT3_AD, 64, Ok((18, 3))),
+            ("Ad", SPLIT3_AD, 128, Ok((18, 7))),
+            ("Ab", SPLIT3_AB, 16, Ok((15, 1))),
+            ("Ab", SPLIT3_AB, 32, Ok((16, 2))),
+            ("Ab", SPLIT3_AB, 33, Ok((31, 1))),
+        ];
+        let two_slots = Profile::of_task("dc-megablast").two_slots;
+        for (input, planned, threads, expected) in cells {
+            let cell = format!("({input}) {threads} threads");
+            let (choice, layout, units) =
+                split3_choice_ruled("dc-megablast", planned, threads, two_slots);
+            let (model, judged, model_units) = split3_choice("dc-megablast", planned, threads);
+            assert_eq!(choice, expected, "{cell}: {layout:?}");
+            assert_eq!((layout, units), (judged, model_units), "{cell}");
+            let expected_units = match input {
+                "a" => 1,
+                "b" => 2,
+                "Ad" => 18,
+                _ => 89,
+            };
+            assert_eq!(units, expected_units, "{cell}");
+            match model {
+                Ok((k, m)) if k > DC_SLOTS => {
+                    let taken = matches!((input, threads), ("Ad", 16 | 32 | 33));
+                    assert_eq!(two_slots_win(threads, k, m, units), taken, "{cell}");
+                    if !taken {
+                        assert_eq!(choice, model, "{cell}");
+                    }
+                }
+                _ => assert_eq!(choice, model, "{cell}"),
+            }
+        }
+        // Megablast has no rule: Ad's batches at 16 threads keep the model's 4 x 4.
+        let megablast = Profile::of_task("megablast").two_slots;
+        assert!(!megablast);
+        assert_eq!(
+            split3_choice_ruled("megablast", SPLIT3_AD, 16, megablast).0,
+            Ok((4, 4))
+        );
+    }
+
+    // The two-slot rule on the 24 cells of the map it was drawn from (line D session 14 window
+    // w2, dev d92512d0, ws: `LOSAT_X_QBATCHPARSLOTS=2` over the model, the median of 4 rounds;
+    // the model's layout and the batch units from its `LOSAT_X_STATS` line; module header): it
+    // holds only on cells where two slots won (by 1.7 % or more) and on none where they lost; the
+    // wins it forgoes are an odd unit count (15,600 cDNAs at 24 / 32 threads) and two full rounds
+    // of 4- and 5-thread slots (10,400 at 12 / 16 threads, 20,800 at 32).
+    #[test]
+    fn the_two_slot_rule_holds_only_where_two_slots_won_on_the_w2_map() {
+        // (input, threads, model k, model m, units, two slots' time over the model's, thousandths)
+        let cells: [(&str, usize, usize, usize, usize, u32); 24] = [
+            ("D5", 12, 3, 4, 3, 1118),
+            ("D5", 16, 3, 5, 3, 1156),
+            ("D5", 24, 3, 8, 3, 1106),
+            ("D5", 32, 3, 10, 3, 1099),
+            ("U4", 12, 4, 3, 4, 964),
+            ("U4", 16, 4, 4, 4, 978),
+            ("U4", 24, 4, 6, 4, 973),
+            ("U4", 32, 2, 16, 4, 1005),
+            ("U6", 12, 3, 4, 6, 986),
+            ("U6", 16, 3, 5, 6, 957),
+            ("U6", 24, 6, 4, 6, 946),
+            ("U6", 32, 6, 5, 6, 943),
+            ("U9", 12, 3, 4, 9, 1071),
+            ("U9", 16, 3, 5, 9, 1013),
+            ("U9", 24, 9, 2, 9, 892),
+            ("U9", 32, 9, 3, 9, 920),
+            ("U12", 12, 3, 4, 12, 1018),
+            ("U12", 16, 4, 4, 12, 1008),
+            ("U12", 24, 6, 4, 12, 1006),
+            ("U12", 32, 6, 5, 12, 979),
+            ("AD", 12, 3, 4, 18, 1016),
+            ("AD", 16, 4, 4, 18, 983),
+            ("AD", 24, 6, 4, 18, 1031),
+            ("AD", 32, 9, 3, 18, 909),
+        ];
+        let taken = [
+            ("U4", 12),
+            ("U4", 16),
+            ("U4", 24),
+            ("U6", 24),
+            ("U6", 32),
+            ("AD", 16),
+            ("AD", 32),
+        ];
+        let forgone = [("U6", 12), ("U6", 16), ("U9", 24), ("U9", 32), ("U12", 32)];
+        for (input, threads, k, m, units, ratio) in cells {
+            let cell = format!("{input} n{threads}");
+            assert_eq!(threads / k, m, "{cell}");
+            if k <= DC_SLOTS {
+                // The model takes two slots itself (U4 at 32 threads): the rule is not consulted.
+                assert_eq!((input, threads), ("U4", 32));
+                continue;
+            }
+            let holds = two_slots_win(threads, k, m, units);
+            assert_eq!(holds, taken.contains(&(input, threads)), "{cell}");
+            if holds {
+                assert!(ratio <= 983, "{cell}: {ratio}");
+            } else if forgone.contains(&(input, threads)) {
+                assert!(ratio < 1000, "{cell}: {ratio}");
+            } else {
+                assert!(ratio > 1000, "{cell}: {ratio}");
+            }
+        }
+    }
+
+    // The two-slot rule at its boundaries (`two_slots_win`): each clause on either side.
+    #[test]
+    fn the_two_slot_rule_at_its_boundaries() {
+        // (threads, model k, model m, units, holds)
+        let cases = [
+            // Threads: 12 to 33 (32 and 33 give 16 per slot, 34 give 17); 11 and fewer, 64 and
+            // 128 keep the model.
+            (32, 9, 3, 18, true),
+            (33, 9, 3, 18, true),
+            (34, 9, 3, 18, false),
+            (64, 9, 7, 18, false),
+            (128, 9, 14, 18, false),
+            (12, 4, 3, 4, true),
+            (11, 3, 3, 2, false),
+            (9, 3, 3, 2, false),
+            // An even unit count.
+            (16, 4, 4, 18, true),
+            (16, 4, 4, 17, false),
+            (16, 4, 4, 19, false),
+            (32, 9, 3, 9, false),
+            // Narrow slots that leave threads idle: 9 x 3 on 32 threads (27 used), 5 x 3 on 16
+            // (15), 14 x 1 on 16; not 4 x 3 on 12, 8 x 3 on 24, 11 x 3 on 33 (every thread, or
+            // one more than two slots use), nor 4-thread slots.
+            (16, 5, 3, 20, true),
+            (16, 14, 1, 28, true),
+            (12, 4, 3, 12, false),
+            (24, 8, 3, 16, false),
+            (33, 11, 3, 22, false),
+            (16, 4, 4, 16, false),
+            // One round: units at most the slots.
+            (24, 6, 4, 6, true),
+            (24, 6, 4, 4, true),
+            (24, 6, 4, 2, true),
+            (24, 8, 3, 8, true),
+            (24, 6, 4, 12, false),
+            // A last round at most half full within five rounds: 18 units on 4 slots are 5
+            // rounds (counted whole) with 2 of 4 in the last, 22 are 6, 20 fill 5; 14 on 4 slots
+            // leave 2 of 4, 20 on 6 leave 2 of 6 and 28 on 8 leave 4 of 8; 28 on 6 leave 4 of 6,
+            // 22 on 6 leave 4 of 6 and 30 on 8 leave 6 of 8, more than half.
+            (16, 4, 4, 18, true),
+            (16, 4, 4, 22, false),
+            (16, 4, 4, 20, false),
+            (16, 4, 4, 14, true),
+            (32, 6, 5, 28, false),
+            (32, 6, 5, 30, false),
+            (32, 6, 5, 32, false),
+            (32, 6, 5, 22, false),
+            (32, 6, 5, 20, true),
+            (32, 8, 4, 30, false),
+            (32, 8, 4, 28, true),
+        ];
+        for (threads, k, m, units, holds) in cases {
+            assert_eq!(threads / k, m, "{threads} threads, {k} slots");
+            assert_eq!(
+                two_slots_win(threads, k, m, units),
+                holds,
+                "{threads} threads, {k} x {m}, {units} units"
+            );
+        }
+    }
+
+    // The rule against the model without it (LOSAT_X_DCTWOSLOTS=0) on random and edge inputs:
+    // the judged layout is the same; the choice is the same wherever the model keeps the loop,
+    // does not run, takes at most two slots, the tuning variable sets the slots, or the rule
+    // declines; elsewhere it is two slots of `threads / 2` threads. Every clause of the rule,
+    // written out here as a chain, decides some cases: an odd unit count, more than 16 threads
+    // per slot, fewer than 12 threads, narrow slots that leave threads idle, one round, a last
+    // round at most half full within five rounds, and a declined even count.
+    #[test]
+    fn the_rule_changes_only_layouts_of_more_than_two_slots_where_it_holds() {
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = |bound: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % bound
+        };
+        let budgets = [0, 1, 50, 84, 196, 420, 868, 4096];
+        let estimates = [1, 4 * MIB, 79 * MIB, 140 * MIB, u64::MAX];
+        // kept, odd, wide, few threads, narrow and idle, one round, half-empty last round,
+        // declined even
+        let mut hits = [0usize; 8];
+        for case in 0..20_000 {
+            // Half the cases lie in the rule's range (4 to 33 threads, at most 40 units).
+            let threads = match case % 4 {
+                0 => [1, 2, 3, 16, 32, 33, 34, 128][next(8) as usize],
+                1 => 1 + next(130) as usize,
+                _ => 4 + next(30) as usize,
+            };
+            let budget = budgets[next(budgets.len() as u64) as usize] * MIB;
+            let estimate = estimates[next(estimates.len() as u64) as usize];
+            let units = match case % 4 {
+                0 | 1 => next(120) as usize,
+                _ => next(41) as usize,
+            };
+            let slots = (next(8) == 0).then(|| next(threads as u64 + 3) as usize);
+            let points = [EFFICIENCY_MEGABLAST, EFFICIENCY_BLASTN][next(2) as usize];
+            let what = format!("{threads} {budget} {estimate} {units} {slots:?}");
+            let (old, old_layout) =
+                choose_slots(threads, budget, estimate, slots, false, units, points);
+            let (new, new_layout) =
+                choose_slots(threads, budget, estimate, slots, true, units, points);
+            assert_eq!(new_layout, old_layout, "{what}");
+            match (old, old_layout) {
+                (Ok((k, m)), Some(judged)) if k > DC_SLOTS && slots.is_none() => {
+                    assert_eq!((k, m), (judged.k, judged.m), "{what}");
+                    let two = Ok((DC_SLOTS, threads / DC_SLOTS));
+                    let (clause, expected) = if units % 2 == 1 {
+                        (1, old)
+                    } else if threads / 2 > 16 {
+                        (2, old)
+                    } else if threads < 12 {
+                        (3, old)
+                    } else if m <= 3 && k * m < 2 * (threads / 2) {
+                        (4, two)
+                    } else if units <= k {
+                        (5, two)
+                    } else if units % k != 0 && 2 * (units % k) <= k && units.div_ceil(k) <= 5 {
+                        (6, two)
+                    } else {
+                        (7, old)
+                    };
+                    hits[clause] += 1;
+                    assert_eq!(new, expected, "{what}: clause {clause}");
+                }
+                _ => {
+                    hits[0] += 1;
+                    assert_eq!(new, old, "{what}");
+                }
+            }
+        }
+        assert!(hits.iter().all(|&hit| hit >= 30), "{hits:?}");
+    }
+
     // One long record among normal batches (review S2): Ab's 89 blastn batches of ~1 Mb with one
     // 3 Mb record keep slots (the largest batch's estimate, 121 MiB, caps k by the budget), and
     // ten 5 Mb dc-megablast batches with one 11 Mb contig too; against the largest batch both had
@@ -2515,7 +2836,7 @@ mod tests {
             );
         }
         let tiny = batch_estimate_bytes(8, 100, 10, QUERY_BYTES_PER_LETTER);
-        let (choice, layout) = choose_slots(16, 4096 * MIB, tiny, None, 18, slow);
+        let (choice, layout) = choose_slots(16, 4096 * MIB, tiny, None, false, 18, slow);
         assert_eq!(choice, Ok((9, 1)), "{layout:?}");
     }
 
@@ -2525,33 +2846,36 @@ mod tests {
         let dc = batch_estimate_bytes(11, 5_000_000, 1_000, MEGABLAST_QUERY_BYTES_PER_LETTER);
         // Too small a budget (or none) for a second batch.
         assert_eq!(
-            choose_slots(16, 50 * MIB, dc, None, 18, mb),
+            choose_slots(16, 50 * MIB, dc, None, false, 18, mb),
             (Err(Off::Budget), None)
         );
         assert_eq!(
-            choose_slots(16, 0, dc, None, 18, mb),
+            choose_slots(16, 0, dc, None, false, 18, mb),
             (Err(Off::Budget), None)
         );
         // One unit of work, or none, whatever the budget.
         assert_eq!(
-            choose_slots(16, 4096 * MIB, dc, None, 1, mb),
+            choose_slots(16, 4096 * MIB, dc, None, false, 1, mb),
             (Err(Off::Single), None)
         );
         assert_eq!(
-            choose_slots(16, 4096 * MIB, dc, None, 0, mb),
+            choose_slots(16, 4096 * MIB, dc, None, false, 0, mb),
             (Err(Off::Single), None)
         );
         // One thread.
         assert_eq!(
-            choose_slots(1, 4096 * MIB, dc, None, 18, mb),
+            choose_slots(1, 4096 * MIB, dc, None, false, 18, mb),
             (Err(Off::Single), None)
         );
         // A large budget does not give more slots than the model wants: 18 dc units at 16
         // threads stay at 4 x 4 (the earlier rule gave 9 x 1).
-        assert_eq!(choose_slots(16, 4096 * MIB, dc, None, 18, mb).0, Ok((4, 4)));
+        assert_eq!(
+            choose_slots(16, 4096 * MIB, dc, None, false, 18, mb).0,
+            Ok((4, 4))
+        );
         // The budget caps k: with 84 MiB the best is 2 x 8, which the model judges 1 % slower
         // than the loop on 16 threads.
-        let (choice, layout) = choose_slots(16, 84 * MIB, dc, None, 18, mb);
+        let (choice, layout) = choose_slots(16, 84 * MIB, dc, None, false, 18, mb);
         assert_eq!(choice, Err(Off::Model));
         let layout = layout.expect("a judged layout");
         assert_eq!((layout.k, layout.m), (2, 8));
@@ -2560,21 +2884,21 @@ mod tests {
         let tiny = batch_estimate_bytes(8, 100, 10, QUERY_BYTES_PER_LETTER);
         for points in [EFFICIENCY_BLASTN, mb] {
             assert_eq!(
-                choose_slots(4, 4096 * MIB, tiny, None, 40, points).0,
+                choose_slots(4, 4096 * MIB, tiny, None, false, 40, points).0,
                 Ok((4, 1))
             );
         }
         // The tuning variable wins, within the thread count, whatever the budget and units; the
         // layout it sets is judged too.
-        let (choice, layout) = choose_slots(16, 0, dc, Some(8), 18, mb);
+        let (choice, layout) = choose_slots(16, 0, dc, Some(8), false, 18, mb);
         assert_eq!(choice, Ok((8, 2)));
         let layout = layout.expect("a judged layout");
         assert_eq!((layout.k, layout.m), (8, 2));
         let loop_span = predicted_span(mb, 16, 1, 18);
         assert!((layout.ratio - predicted_span(mb, 16, 8, 18) / loop_span).abs() < 1e-12);
-        assert_eq!(choose_slots(4, 0, dc, Some(8), 18, mb).0, Ok((4, 1)));
-        assert_eq!(choose_slots(4, 0, dc, Some(2), 1, mb).0, Ok((2, 2)));
-        assert_eq!(choose_slots(1, 0, dc, Some(2), 0, mb).0, Ok((1, 1)));
+        assert_eq!(choose_slots(4, 0, dc, Some(8), false, 18, mb).0, Ok((4, 1)));
+        assert_eq!(choose_slots(4, 0, dc, Some(2), false, 1, mb).0, Ok((2, 2)));
+        assert_eq!(choose_slots(1, 0, dc, Some(2), false, 0, mb).0, Ok((1, 1)));
     }
 
     // The span model: rounds, contention and the in-batch efficiency.
@@ -2682,7 +3006,6 @@ mod tests {
         let panic = Outcome::Panic(Box::new("boom"), vec!["message\n".to_string()]);
         assert!(settle(&mut state, 0, job_at(1), panic, 0, false).is_none());
         assert_eq!(state.panicked, 1);
-        assert_eq!(state.first_panic.as_deref(), Some("message\n"));
         assert!(state.done.contains_key(&key_at(1)));
         assert!(
             state.queue.is_empty(),
@@ -3239,35 +3562,6 @@ mod tests {
             assert!(bounded.summary.stats.precomputed > 0, "{}", bounded.line);
         }
 
-        // Review R3: in the shadow mode a slot's panic is a difference even when its batch is
-        // dropped (here past an error at batch 10): the loop stops with the shadow's panic.
-        #[test]
-        fn the_shadow_fails_on_a_dropped_slot_panic() {
-            let lengths = vec![100; 40];
-            let switches = Switches {
-                shadow: true,
-                slots: Some(4),
-                ..on()
-            };
-            let fakes = Fakes {
-                fail: Some(10),
-                panic: Some(12),
-                fail_waits_for_panic: true,
-                ..Fakes::default()
-            };
-            let caught = std::panic::catch_unwind(|| run(&lengths, Some(100), 4, switches, fakes));
-            let payload = caught.expect_err("the shadow fails on the slot's panic");
-            let message = payload
-                .downcast_ref::<String>()
-                .cloned()
-                .unwrap_or_default();
-            assert!(
-                message.starts_with("[X_SHADOW] QBATCHPAR a batch searched by a slot panicked"),
-                "{message}"
-            );
-            assert!(message.contains("fake batch panic at 12"), "{message}");
-        }
-
         // The model keeps the loop where slots would not be 3 % faster: 9 planned batches at 4
         // threads with megablast's efficiency (the loop: 9 / (4 x 0.81) = 2.78 batch times; the
         // best, 2 x 2: 5 x 1.05 / (2 x 0.89) = 2.95). The summary line states the units, the
@@ -3305,6 +3599,91 @@ mod tests {
                 kept.line
             );
             assert!(kept.line.ends_with(" off=model"), "{}", kept.line);
+        }
+
+        // LOSAT_X_DCTWOSLOTS on whole runs with dc-megablast's profile at 16 threads: for 9
+        // planned batches (8 units, even) the model takes 8 x 2 (one round: the rule holds) and
+        // two slots of 8 threads run; for 10 (9 units, odd) it takes 3 x 5 (predicted 0.806
+        // of the loop) and the rule declines, so 3 x 5 runs. The loop's batches are the same
+        // either way; the slots' pools have 8 threads where the rule acted; the summary line
+        // states the model's layout and the slots that ran.
+        #[test]
+        fn the_dc_rule_runs_two_slots_of_half_the_threads_where_it_holds() {
+            let dc = Fakes {
+                profile: Some(Profile {
+                    allowance_mib: 1024,
+                    ..Profile::of_task("dc-megablast")
+                }),
+                ..Fakes::default()
+            };
+            let ruled = Switches {
+                dc_two: true,
+                ..on()
+            };
+            // Nine batches: even units, narrow slots.
+            let nine = vec![100; 36];
+            let off = off_run(&nine, Some(400));
+            let model = run(&nine, Some(400), 16, on(), dc);
+            let two = run(&nine, Some(400), 16, ruled, dc);
+            for run in [&model, &two] {
+                assert_eq!(keys(&run.results), keys(&off.results), "{}", run.line);
+                assert!(run.summary.stats.precomputed > 0, "{}", run.line);
+            }
+            let (judged, ran) = (model.summary.stats, two.summary.stats);
+            assert_eq!(
+                (
+                    judged.k,
+                    judged.m,
+                    judged.rule_k,
+                    judged.rule_m,
+                    judged.units
+                ),
+                (8, 2, 8, 2, 8),
+                "{}",
+                model.line
+            );
+            assert_eq!(
+                (ran.k, ran.m, ran.idle, ran.rule_k, ran.rule_m, ran.units),
+                (2, 8, 0, 8, 2, 8),
+                "{}",
+                two.line
+            );
+            assert_eq!(ran.predicted_milli, judged.predicted_milli, "{}", two.line);
+            let pools: HashSet<usize> = two
+                .results
+                .iter()
+                .filter_map(|result| result.as_ref().ok().map(|&(_, threads)| threads))
+                .collect();
+            assert_eq!(pools, HashSet::from([1, 8]), "{}", two.line);
+            // Ten batches: odd units, the rule declines; the model's 3 x 5 runs with the switch.
+            let ten = vec![100; 40];
+            let off = off_run(&ten, Some(400));
+            let declined = run(&ten, Some(400), 16, ruled, dc);
+            assert_eq!(
+                keys(&declined.results),
+                keys(&off.results),
+                "{}",
+                declined.line
+            );
+            let stats = declined.summary.stats;
+            assert_eq!(
+                (stats.k, stats.m, stats.rule_k, stats.rule_m, stats.units),
+                (3, 5, 3, 5, 9),
+                "{}",
+                declined.line
+            );
+            assert_eq!(stats.predicted_milli, Some(806), "{}", declined.line);
+            // Megablast's profile has no rule: nine batches keep the model's 8 x 2.
+            let megablast = Fakes {
+                profile: Some(Profile {
+                    allowance_mib: 1024,
+                    ..Profile::of_task("megablast")
+                }),
+                ..Fakes::default()
+            };
+            let kept = run(&nine, Some(400), 16, ruled, megablast);
+            let stats = kept.summary.stats;
+            assert_eq!((stats.k, stats.m), (8, 2), "{}", kept.line);
         }
 
         // Without a budget for a second batch the model does not run: no layout is judged.

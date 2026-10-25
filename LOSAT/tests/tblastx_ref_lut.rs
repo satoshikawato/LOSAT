@@ -12,15 +12,17 @@
 //! ```
 //! The table must be the same, so the report must be: the tests run the reference frame loop
 //! (`LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1`, whose gate sends every batch to the frame loop at any
-//! threshold and thread count) and compare the report with the switch (the default), and with its
-//! shadow (`LOSAT_X_TBXLUTSHADOW`, which builds both tables and compares them field by field),
-//! against the report with `LOSAT_X_TBXLUT=0`, at the default threshold (13), at 11 and at `+inf`
-//! (NCBI's INT_MIN: every word enters every cell it can), at one and four threads; and on the
-//! default path, where the unit path builds its own tables and the switch acts only on a batch the
-//! guard or `LOSAT_X_PAIRPARGATE` sends back.
+//! threshold and thread count) and compare the report with the switch (the default), whose in-place
+//! build the run's reach file shows (`LOSAT_X_REACH`, `tests/reach_support`), against the report
+//! with `LOSAT_X_TBXLUT=0`, at the default threshold (13), at 11 and at `+inf` (NCBI's INT_MIN:
+//! every word enters every cell it can), at one and four threads; and on the default path, where
+//! the unit path builds its own tables and the switch acts only on a batch the guard or
+//! `LOSAT_X_PAIRPARGATE` sends back.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod reach_support;
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -136,20 +138,10 @@ fn pair_par(stderr: &str) -> [u64; 2] {
 
 const REFERENCE: (&str, &str) = ("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS", "1");
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_TBXLUT", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBXLUTSHADOW", "1");
 
-/// The number in the shadow's exit line.
-fn tables_compared(stderr: &str) -> u64 {
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with("[X_SHADOW] TBXLUT tables_compared="))
-        .unwrap_or_else(|| panic!("no TBXLUT shadow line in: {stderr}"));
-    line["[X_SHADOW] TBXLUT tables_compared=".len()..]
-        .split_whitespace()
-        .next()
-        .unwrap()
-        .parse()
-        .unwrap()
+/// Whether the run of `reach` built the full table in place (`LOSAT_X_TBXLUT` took its new side).
+fn built_in_place(reach: &reach_support::Reach) -> bool {
+    reach.sides("LOSAT_X_TBXLUT").0
 }
 
 /// Two queries in one batch (1,500 and 2,000 bases of MjeNMV) against two subjects (40 kb of
@@ -184,18 +176,22 @@ fn the_reference_loop_reports_the_same_with_the_table_filled_in_place() {
                 !base.is_empty(),
                 "threshold {threshold:?}: no hits to compare"
             );
-            let (with, _) = tblastx(&query, &subject, threshold, threads, &[REFERENCE]);
+            let reach = reach_support::Reach::new("tbxlut-thresholds");
+            let (with, _) = tblastx(
+                &query,
+                &subject,
+                threshold,
+                threads,
+                &[REFERENCE, reach.var()],
+            );
             assert_eq!(
                 base, with,
                 "LOSAT_X_TBXLUT, threshold {threshold:?}, threads {threads}"
             );
-            let (shadow, stderr) =
-                tblastx(&query, &subject, threshold, threads, &[REFERENCE, SHADOW]);
-            assert_eq!(
-                base, shadow,
-                "shadow, threshold {threshold:?}, threads {threads}"
+            assert!(
+                built_in_place(&reach),
+                "threshold {threshold:?}, threads {threads}: the table was not built in place"
             );
-            assert!(tables_compared(&stderr) >= 1, "{stderr}");
         }
     }
     std::fs::remove_dir_all(&dir).ok();
@@ -212,11 +208,13 @@ fn every_word_threshold_gives_the_same_report() {
         &[("mela", &letters("MelaMJNV.fasta")[..3_000])],
     );
     let (base, _) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE, SWITCH_OFF]);
-    let (with, _) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE]);
+    let reach = reach_support::Reach::new("tbxlut-inf");
+    let (with, _) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE, reach.var()]);
     assert_eq!(base, with, "LOSAT_X_TBXLUT at -threshold +inf");
-    let (shadow, stderr) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE, SHADOW]);
-    assert_eq!(base, shadow, "shadow at -threshold +inf");
-    assert_eq!(tables_compared(&stderr), 1, "{stderr}");
+    assert!(
+        built_in_place(&reach),
+        "-threshold +inf: the table was not built in place"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 

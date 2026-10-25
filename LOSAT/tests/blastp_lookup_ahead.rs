@@ -7,11 +7,12 @@
 //! thread: for blastp-fast where `LOSAT_X_BPLKPFLAT` acts on the flat table of `LOSAT_X_BPCLUT`,
 //! and for exact blastp where its table is built in place (`LOSAT_X_BPLUT`, outside
 //! `LOSAT_DIAGNOSTICS`); these are in the strict set too, so "off" for any of them is `=0`. These
-//! tests compare the reports, standard error and exit codes with the switch off, on and in its
-//! shadow mode (`LOSAT_X_BPLKPAHEADSHADOW`, which builds every block's values again inline and
-//! compares them), with `-subject` and `-db`, and read the shadow's line at exit: `blocks` (blocks
-//! searched where the switch acts), `prebuilt` (blocks that took values built ahead), `dropped`
-//! (builds ahead that gave none), `compared`. Every run states `LOSAT_X_BPQBLOCK`, and
+//! tests compare the reports, standard error and exit codes with the switch off and on, with
+//! `-subject` and `-db`, and read the `[X_STATS] BPLKPAHEAD` line of the run with the switch on
+//! (printed with `LOSAT_X_STATS`, when a counter is not zero) at exit: `blocks` (blocks searched
+//! where the switch acts), `prebuilt` (blocks that took values built ahead), `dropped` (builds
+//! ahead that gave none). That the values built ahead are the values the block builds itself is a
+//! unit test of `x_lookup_ahead.rs`. Every run states `LOSAT_X_BPQBLOCK`, and
 //! `LOSAT_X_BPCLUT` and `LOSAT_X_BPLKPFLAT` (blastp-fast) or `LOSAT_X_BPLUT` (exact blastp),
 //! itself, so that the tests do not depend on the defaults of the strict set. Each test writes its
 //! files to a directory of its own.
@@ -135,34 +136,38 @@ struct Run {
 }
 
 impl Run {
-    /// Standard error without the `[TIMING]` lines and the shadow lines of the switch and of
-    /// `LOSAT_X_BPLKPFLATSHADOW` (whose counts include the builds ahead).
+    /// Standard error without the `[TIMING]` and `[X_STATS]` lines.
     fn stderr_compared(&self) -> String {
         self.stderr
             .lines()
-            .filter(|line| {
-                !line.starts_with("[TIMING]")
-                    && !line.starts_with("[X_SHADOW] BPLKPAHEAD ")
-                    && !line.starts_with("[X_SHADOW] BPLKPFLAT ")
-            })
+            .filter(|line| !line.starts_with("[TIMING]") && !line.starts_with("[X_STATS]"))
             .map(|line| format!("{line}\n"))
             .collect()
     }
 
-    /// The counters of the `[X_SHADOW] <name>` line, which must end with `identical`.
-    fn shadow(&self, name: &str) -> HashMap<String, u64> {
-        let prefix = format!("[X_SHADOW] {name} ");
-        let line = self
-            .stderr
-            .lines()
-            .find(|line| line.starts_with(&prefix))
-            .unwrap_or_else(|| panic!("no {prefix}line in {}", self.stderr));
-        assert!(line.ends_with(" identical"), "{line}");
+    /// The counters of the `[X_STATS] <name>` line (`LOSAT_X_STATS`; printed only when a counter is
+    /// not zero): empty when the run printed none.
+    fn stats(&self, name: &str) -> HashMap<String, u64> {
+        let prefix = format!("[X_STATS] {name} ");
+        let Some(line) = self.stderr.lines().find(|line| line.starts_with(&prefix)) else {
+            return HashMap::new();
+        };
         line[prefix.len()..]
             .split(' ')
             .filter_map(|field| field.split_once('='))
             .map(|(key, value)| (key.to_string(), value.parse().expect("a count")))
             .collect()
+    }
+
+    /// `stats(name)` where the line is expected: fails with the run's stderr when it is missing.
+    fn printed(&self, name: &str) -> HashMap<String, u64> {
+        let counts = self.stats(name);
+        assert!(
+            !counts.is_empty(),
+            "no [X_STATS] {name} line; stderr:\n{}",
+            self.stderr
+        );
+        counts
     }
 
     /// The searches of query sets that ran to their reports (`[TIMING] blastp_total` lines, with
@@ -237,7 +242,7 @@ fn with<'a>(base: &[(&'a str, &'a str)], extra: &[(&'a str, &'a str)]) -> Vec<(&
 }
 
 const ON: (&str, &str) = ("LOSAT_X_BPLKPAHEAD", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_BPLKPAHEADSHADOW", "1");
+const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 /// Where the switch acts: the block search with the pool's build of the flat table.
 const ACTS: [(&str, &str); 2] = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPLKPFLAT", "1")];
 /// Where the switch acts for exact blastp: the block search with the table built in place.
@@ -248,8 +253,9 @@ const TASKS: [(&str, &[(&str, &str)]); 2] = [("blastp-fast", &ACTS), ("blastp", 
 // TODO after the rebase onto main: also LOSAT_X_BPSUBJRUN (its subject runs are not on this base).
 const REDOPAR: (&str, &str) = ("LOSAT_X_BPREDOPAR", "1");
 
-/// The switch off, on and in its shadow mode give the same report, standard error (but the
-/// `[TIMING]` lines and the shadow's line) and exit code; returns the off run and the shadow run.
+/// The switch off and on give the same report, standard error (but the `[TIMING]` and `[X_STATS]`
+/// lines) and exit code; returns the off run and the run with the switch on (which also has
+/// `LOSAT_X_STATS`).
 fn same_runs(
     dir: &Path,
     task: &str,
@@ -261,33 +267,27 @@ fn same_runs(
 ) -> (Run, Run) {
     let off = blastp(dir, task, queries, subject, threads, base, extra);
     let what = format!("{task} {base:?} {extra:?} threads {threads}");
-    for switch in [ON, SHADOW] {
-        let run = blastp(
-            dir,
-            task,
-            queries,
-            subject,
-            threads,
-            &with(base, &[switch]),
-            extra,
-        );
-        assert!(run.stdout == off.stdout, "{what} {switch:?}: the report");
-        assert_eq!(
-            run.stderr_compared(),
-            off.stderr_compared(),
-            "{what} {switch:?}: standard error"
-        );
-        assert_eq!(run.code, off.code, "{what} {switch:?}: exit code");
-        if switch == SHADOW {
-            return (off, run);
-        }
-    }
-    unreachable!()
+    let on = blastp(
+        dir,
+        task,
+        queries,
+        subject,
+        threads,
+        &with(base, &[ON, STATS]),
+        extra,
+    );
+    assert!(on.stdout == off.stdout, "{what}: the report");
+    assert_eq!(
+        on.stderr_compared(),
+        off.stderr_compared(),
+        "{what}: standard error"
+    );
+    assert_eq!(on.code, off.code, "{what}: exit code");
+    (off, on)
 }
 
-/// The shadow's counters where the switch acts on `searches` blocks: every block counted, every
-/// block after the first built ahead (taken or dropped), every value taken compared, and at least
-/// one taken.
+/// The counters of `[X_STATS] BPLKPAHEAD` where the switch acts on `searches` blocks: every block
+/// counted, every block after the first built ahead (taken or dropped), and at least one taken.
 fn assert_built_ahead(counts: &HashMap<String, u64>, searches: u64, what: &str) {
     assert!(searches > 1, "{what}: {searches} blocks");
     assert_eq!(counts["blocks"], searches, "{what}: {counts:?}");
@@ -297,13 +297,11 @@ fn assert_built_ahead(counts: &HashMap<String, u64>, searches: u64, what: &str) 
         "{what}: {counts:?}"
     );
     assert!(counts["prebuilt"] > 0, "{what}: {counts:?}");
-    assert_eq!(counts["compared"], counts["prebuilt"], "{what}: {counts:?}");
 }
 
 // The block search with blocks of one batch and of two: each block after the first takes the values
-// built ahead during the block before it where they fit (below), and the shadow finds them equal to
-// its own build. Both tasks: blastp-fast's flat table and exact blastp's table. Blocks of one batch
-// with `drop_queries`, whose second block's build ahead lacks the room; blocks of two batches with
+// built ahead during the block before it where they fit (below). Both tasks: blastp-fast's flat
+// table and exact blastp's table. Blocks of one batch with `drop_queries`, whose second block's build ahead lacks the room; blocks of two batches with
 // `four_queries` (blastp-fast's build ahead makes its table of the block's query batches). One
 // case per path: four threads (every gate is `threads() > 1`; two threads, where the build ahead
 // has the block's one helper: the `-db` test and the `/dev/full` test); the build beside the redo
@@ -319,11 +317,11 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
             [(&drop, "1", 3, 1), (&four, TWO_BATCH_BLOCKS, 2, 0)]
         {
             let base = with(acts, &[("LOSAT_X_BPQBLOCK", letters)]);
-            let (off, shadow) = same_runs(&dir, task, queries, &subject, 4, &base, &[]);
+            let (off, on) = same_runs(&dir, task, queries, &subject, 4, &base, &[]);
             assert!(!off.stdout.is_empty(), "the fixture pair has rows");
             let what = format!("{task}, threads 4, blocks of {letters}");
             assert_eq!(off.searches(), blocks, "{what}");
-            let counts = shadow.shadow("BPLKPAHEAD");
+            let counts = on.printed("BPLKPAHEAD");
             assert_built_ahead(&counts, off.searches(), &what);
             // `drop_queries`: the second block, whose table's hits (exact blastp: overflow) do not
             // fit the vectors made ready, builds its table itself (exact blastp: after its thread
@@ -334,10 +332,10 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     // Exact blastp's pairwise report written in blocks (`LOSAT_X_BPQBLOCKFMT`): the build ahead
     // beside the block's report.
     let base = with(&EXACT_ACTS, &[("LOSAT_X_BPQBLOCK", "1")]);
-    let (off, shadow) = same_runs(&dir, "blastp", &four, &subject, 4, &base, &["-outfmt", "0"]);
+    let (off, on) = same_runs(&dir, "blastp", &four, &subject, 4, &base, &["-outfmt", "0"]);
     assert_eq!(off.searches(), 4, "blastp -outfmt 0");
     assert_built_ahead(
-        &shadow.shadow("BPLKPAHEAD"),
+        &on.printed("BPLKPAHEAD"),
         off.searches(),
         "blastp -outfmt 0, threads 4",
     );
@@ -372,7 +370,7 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
     let queries = four_queries(&dir);
     for ((task, acts), threads) in TASKS.into_iter().zip([2, 4]) {
         let base = with(acts, &[("LOSAT_X_BPQBLOCK", "1"), REDOPAR]);
-        let (off, shadow) = same_runs(&dir, task, &queries, &subject, threads, &base, &[]);
+        let (off, on) = same_runs(&dir, task, &queries, &subject, threads, &base, &[]);
         assert!(!off.stdout.is_empty(), "the fixture pair has rows");
         let what = format!("{task} -db, threads {threads}");
         assert_eq!(off.searches(), 4, "{what}");
@@ -386,7 +384,7 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
             off.searches(),
             "{what}: every block's redo on the pool"
         );
-        assert_built_ahead(&shadow.shadow("BPLKPAHEAD"), off.searches(), &what);
+        assert_built_ahead(&on.printed("BPLKPAHEAD"), off.searches(), &what);
     }
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -421,9 +419,9 @@ fn one_block_and_the_search_of_all_queries_build_nothing_ahead() {
         ),
     ] {
         let base = with(acts, blocks);
-        let (off, shadow) = same_runs(&dir, task, &queries, &subject, 4, &base, extra);
+        let (off, on) = same_runs(&dir, task, &queries, &subject, 4, &base, extra);
         assert_eq!(off.searches(), 1, "{task} {blocks:?} {extra:?}");
-        let counts = shadow.shadow("BPLKPAHEAD");
+        let counts = on.stats("BPLKPAHEAD");
         assert!(
             counts.values().all(|&count| count == 0),
             "{task} {blocks:?} {extra:?}: {counts:?}"
@@ -433,8 +431,8 @@ fn one_block_and_the_search_of_all_queries_build_nothing_ahead() {
 }
 
 // Where `LOSAT_X_BPLKPFLAT` does not act on the pool's flat table (one thread, the switch =0 or
-// `LOSAT_X_BPCLUT=0`, `LOSAT_X_BPCLUTSHADOW`, whose search uses the reference builder's table), the
-// switch changes nothing for blastp-fast and its shadow counts nothing.
+// `LOSAT_X_BPCLUT=0`), the switch changes nothing for blastp-fast and the run prints no
+// `[X_STATS] BPLKPAHEAD` line.
 #[test]
 fn the_switch_does_not_act_without_the_pools_flat_table() {
     let dir = test_dir("off");
@@ -447,16 +445,14 @@ fn the_switch_does_not_act_without_the_pools_flat_table() {
     // Both are in the strict set (on by default): "off" is `=0`.
     let clut_off = ("LOSAT_X_BPCLUT", "0");
     let flat_off = ("LOSAT_X_BPLKPFLAT", "0");
-    let clut_shadow = ("LOSAT_X_BPCLUTSHADOW", "1");
     for (task, threads, base) in [
         ("blastp-fast", 1, vec![block, clut, flat]),
         ("blastp-fast", 4, vec![block, clut, flat_off]),
         ("blastp-fast", 4, vec![block, clut_off, flat]),
-        ("blastp-fast", 4, vec![block, clut_shadow, flat]),
     ] {
-        let (off, shadow) = same_runs(&dir, task, &queries, &subject, threads, &base, &[]);
+        let (off, on) = same_runs(&dir, task, &queries, &subject, threads, &base, &[]);
         assert_eq!(off.searches(), 4, "{task} {base:?}");
-        let counts = shadow.shadow("BPLKPAHEAD");
+        let counts = on.stats("BPLKPAHEAD");
         assert!(
             counts.values().all(|&count| count == 0),
             "{task} threads {threads} {base:?}: {counts:?}"
@@ -466,10 +462,10 @@ fn the_switch_does_not_act_without_the_pools_flat_table() {
 }
 
 // Exact blastp where its table is not built in place by the pool's search (one thread,
-// `LOSAT_X_BPLUTSHADOW`, which builds the reference builder's table, and `LOSAT_DIAGNOSTICS`, whose
-// reference builder prints its phases in order): the switch changes nothing and its shadow counts
-// nothing. `LOSAT_X_BPLUT=0` is the shadow's branch (`XAaSpares::x_applies`: mode 1 only). The flat
-// table's switches do not decide it.
+// `LOSAT_X_BPLUT=0`, which builds the reference builder's table, and `LOSAT_DIAGNOSTICS`, whose
+// reference builder prints its phases in order): the switch changes nothing and the run prints no
+// `[X_STATS] BPLKPAHEAD` line (`XAaSpares::x_applies`: the in-place build only). The flat table's
+// switches do not decide it.
 #[test]
 fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
     let dir = test_dir("exact-off");
@@ -480,12 +476,12 @@ fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
     let lut = ("LOSAT_X_BPLUT", "1");
     for (threads, base) in [
         (1, vec![block, lut]),
-        (4, vec![block, ("LOSAT_X_BPLUTSHADOW", "1")]),
+        (4, vec![block, ("LOSAT_X_BPLUT", "0")]),
         (4, vec![block, lut, ("LOSAT_DIAGNOSTICS", "1")]),
     ] {
-        let (off, shadow) = same_runs(&dir, "blastp", &queries, &subject, threads, &base, &[]);
+        let (off, on) = same_runs(&dir, "blastp", &queries, &subject, threads, &base, &[]);
         assert_eq!(off.searches(), 4, "{base:?}");
-        let counts = shadow.shadow("BPLKPAHEAD");
+        let counts = on.stats("BPLKPAHEAD");
         assert!(
             counts.values().all(|&count| count == 0),
             "threads {threads} {base:?}: {counts:?}"
@@ -498,9 +494,9 @@ fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
         ("LOSAT_X_BPCLUT", "0"),
         ("LOSAT_X_BPLKPFLAT", "0"),
     ];
-    let (off, shadow) = same_runs(&dir, "blastp", &queries, &subject, 4, &base, &[]);
+    let (off, on) = same_runs(&dir, "blastp", &queries, &subject, 4, &base, &[]);
     assert_built_ahead(
-        &shadow.shadow("BPLKPAHEAD"),
+        &on.printed("BPLKPAHEAD"),
         off.searches(),
         "exact, BPCLUT=0 BPLKPFLAT=0",
     );
@@ -510,9 +506,8 @@ fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
 // Split query batches inside the blocks (`CHUNK_SIZE` 400, `OVERLAP_CHUNK_SIZE` 100: a batch is
 // split into letters / 300 chunks where that is two or more, `calculate_num_chunks`): each query
 // chunk builds its own table inside its block's search (nothing ahead) while the next block's table
-// is built ahead; for blastp-fast with the shadow of `LOSAT_X_BPLKPFLAT` too, which then also
-// checks the builds ahead (one-latch passes on the second spare's vectors, poisoned first), and for
-// exact blastp. `four_queries` at `BATCH_SIZE` 500: three blocks of one batch, {BDT62581.1} into 2
+// is built ahead; for blastp-fast the pool's builds counted by `[X_STATS] BPLKPFLAT` then include
+// the builds ahead (one-latch passes on the second spare's vectors), and for exact blastp. `four_queries` at `BATCH_SIZE` 500: three blocks of one batch, {BDT62581.1} into 2
 // chunks, {BDT62582.1, BDT62583.1} (897 letters) into 2, the first holding parts of both queries,
 // and {BDT62584.1} into 3.
 #[test]
@@ -529,26 +524,19 @@ fn query_chunks_of_split_batches_build_their_own_tables() {
         ("CHUNK_SIZE", "400"),
         ("OVERLAP_CHUNK_SIZE", "100"),
     ];
-    for (task, flat_shadow) in [
-        ("blastp-fast", false),
-        ("blastp-fast", true),
-        ("blastp", false),
-    ] {
+    for task in ["blastp-fast", "blastp"] {
         let acts: &[(&str, &str)] = if task == "blastp" { &EXACT_ACTS } else { &ACTS };
-        let mut base = with(acts, &chunks);
-        if flat_shadow {
-            base.push(("LOSAT_X_BPLKPFLATSHADOW", "1"));
-        }
-        let (off, shadow) = same_runs(&dir, task, &queries, &subject, 4, &base, &[]);
+        let base = with(acts, &chunks);
+        let (off, on) = same_runs(&dir, task, &queries, &subject, 4, &base, &[]);
         assert!(!off.stdout.is_empty(), "the fixture pair has rows");
-        let what = format!("{task} split batches, BPLKPFLATSHADOW {flat_shadow}");
+        let what = format!("{task} split batches");
         assert_eq!(off.searches(), 3, "{what}");
-        let counts = shadow.shadow("BPLKPAHEAD");
+        let counts = on.printed("BPLKPAHEAD");
         assert_built_ahead(&counts, off.searches(), &what);
-        if flat_shadow {
-            let flat = shadow.shadow("BPLKPFLAT");
+        if task == "blastp-fast" {
+            let flat = on.printed("BPLKPFLAT");
             assert!(
-                flat["tables_compared"] > off.searches() + counts["prebuilt"],
+                flat["tables"] > off.searches() + counts["prebuilt"],
                 "{what}: {flat:?}"
             );
         }
@@ -559,7 +547,7 @@ fn query_chunks_of_split_batches_build_their_own_tables() {
 // A block that fails after the next block's build has started (the report written to `/dev/full`
 // fails at the first block's flush; BDT62581.1, the first block of `four_queries`, has a row): the
 // run ends with that block's error, standard error and exit code as without the switch; the values
-// built ahead are dropped and no shadow line is printed.
+// built ahead are dropped and no `[X_STATS] BPLKPAHEAD` line is printed.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_block_that_fails_after_the_next_build_started_ends_the_run_alike() {
@@ -569,7 +557,7 @@ fn a_block_that_fails_after_the_next_build_started_ends_the_run_alike() {
     let queries = four_queries(&dir);
     for ((task, acts), threads) in TASKS.into_iter().flat_map(|t| [(t, 2), (t, 4)]) {
         let base = with(acts, &[("LOSAT_X_BPQBLOCK", "1")]);
-        let (off, shadow) = same_runs(
+        let (off, on) = same_runs(
             &dir,
             task,
             &queries,
@@ -585,11 +573,7 @@ fn a_block_that_fails_after_the_next_build_started_ends_the_run_alike() {
             off.stderr
         );
         assert!(off.stdout.is_empty());
-        assert!(
-            !shadow.stderr.contains("[X_SHADOW] BPLKPAHEAD"),
-            "{}",
-            shadow.stderr
-        );
+        assert!(!on.stderr.contains("[X_STATS] BPLKPAHEAD"), "{}", on.stderr);
     }
     std::fs::remove_dir_all(&dir).ok();
 }

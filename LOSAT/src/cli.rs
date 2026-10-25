@@ -353,7 +353,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "ungapped"
             | "use_index"
             | "version"
-            | "window_masker_db"
             | "window_masker_taxid"
             | "window_size"
             | "xdrop_gap"

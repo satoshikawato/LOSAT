@@ -2150,12 +2150,18 @@ mod tests {
     // (`helpers_left`); the owner finishes the stage alone, with LOSAT_X_PAIRPARHOME folding the
     // helpers' home partitions away from home (they have no participant at home any more).
     // Both ways give the reference's hits and table. (On a loaded machine the helper jobs may
-    // start only after the owner's sleep, and then nothing stalls, so each way gets up to five
-    // stages to see a helper leave.)
+    // start only after the owner's sleep, and then nothing stalls, so each way gets up to 40
+    // stages or 20 s, whichever comes first, to see a helper leave; a pool with more threads than
+    // the machine has CPUs is skipped, as the helpers then may not run during the owner's sleep.)
     #[test]
     fn a_stalled_stage_lets_the_helpers_leave() {
         let mut rng = Lcg(0x57A1_1ED0);
+        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
         for threads in [2usize, 4] {
+            if threads > cpus {
+                eprintln!("skipping threads {threads}: the machine has {cpus} CPUs");
+                continue;
+            }
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(threads)
                 .build()
@@ -2167,7 +2173,8 @@ mod tests {
                 let mut s = 50i32;
                 let mut first = 0usize;
                 let mut left = false;
-                for attempt in 0..5 {
+                let started = std::time::Instant::now();
+                for attempt in 0..40 {
                     let at = format!("threads {threads} home {home} attempt {attempt}");
                     let n = 2000;
                     let ops = random_ops(&mut rng, n, &mut s, 300);
@@ -2203,10 +2210,14 @@ mod tests {
                         left = true;
                         break;
                     }
+                    if started.elapsed() > std::time::Duration::from_secs(20) {
+                        break;
+                    }
                 }
                 assert!(
                     left,
-                    "threads {threads} home {home}: no helper left a stalled stage in five stages"
+                    "threads {threads} home {home} ({cpus} CPUs): no helper left a stalled stage in {:?}",
+                    started.elapsed()
                 );
             }
         }

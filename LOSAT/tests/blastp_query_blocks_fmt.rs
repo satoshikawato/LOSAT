@@ -17,9 +17,8 @@
 //! (NCBI's query batch size, `BATCH`) makes three batches, so that they have several blocks. The
 //! default block of 50,000 letters is more than they hold: it is run in `blastp_query_blocks.rs`
 //! (`the_default_searches_in_blocks_of_50000_letters`; one value, `x_bp_qblock`, for every
-//! format), and every block run here but the shadow's leaves the format switches at their
-//! defaults. The shadow (`LOSAT_X_BPQBLOCKFMTSHADOW`) compares the block search's bytes with the
-//! search of all queries inside the run.
+//! format), and every block run here leaves the format switches at their defaults unless it names
+//! one.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
 //! ```c++
@@ -48,7 +47,6 @@ const THREADS: [u32; 2] = [1, 4];
 const BATCH: (&str, &str) = ("BATCH_SIZE", "500");
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCK", "0");
 const FMT_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKFMT", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_BPQBLOCKFMTSHADOW", "1");
 const SA_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKSA", "0");
 const XML_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKXML", "0");
 const XML2_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKXML2", "0");
@@ -69,12 +67,10 @@ struct Run {
     /// The exit status (`None` when a signal ended the process).
     code: Option<i32>,
     stdout: Vec<u8>,
-    /// Standard error without the `[TIMING]` and `[X_SHADOW]` lines.
+    /// Standard error without the `[TIMING]` lines.
     stderr: String,
     /// The `[TIMING] blastp_total` lines: one per search of a query set.
     searches: usize,
-    /// The `[X_SHADOW] BPQBLOCKFMT` lines.
-    shadow: Vec<String>,
     /// The `[TIMING] x_bppfree` lines: one per search of a query set, also of a run that failed
     /// (the `blastp_total` line comes only from a run that ended well).
     frees: usize,
@@ -142,14 +138,9 @@ fn blastp(
         .lines()
         .filter(|line| line.starts_with("[TIMING] x_bppfree:"))
         .count();
-    let shadow = all
-        .lines()
-        .filter(|line| line.starts_with("[X_SHADOW] BPQBLOCKFMT"))
-        .map(str::to_string)
-        .collect();
     let stderr = all
         .split_inclusive('\n')
-        .filter(|line| !line.starts_with("[TIMING]") && !line.starts_with("[X_SHADOW]"))
+        .filter(|line| !line.starts_with("[TIMING]"))
         .collect();
     Run {
         success: output.status.success(),
@@ -157,7 +148,6 @@ fn blastp(
         stdout: output.stdout,
         stderr,
         searches,
-        shadow,
         frees,
     }
 }
@@ -576,19 +566,18 @@ fn a_refused_outfmt_0_title_leaves_the_search_of_all_queries() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// The report written to a `-out` file, and the shadow: with `LOSAT_X_BPQBLOCKFMTSHADOW` each block
-// search compares its output and its warnings with the search of all queries written into memory
-// and says so in one line (it panics on a difference). The shadow implies the family's switch,
-// which is `0` here (outfmt 6 has none of its own; `LOSAT_X_BPQBLOCKFMT=0` does not stop its
-// blocks). One case per family (CI time), with both subject sources and both thread counts;
-// outfmt 6 has the shadow only here (its `-out` file: `blastp_query_blocks.rs`).
+// The report written to a `-out` file by the blocks is the report of the search of all queries
+// (`LOSAT_X_BPQBLOCK=0`, on standard output). The case without `-out` runs the blocks to standard
+// output: the family's switch is at its default (outfmt 6 has none of its own). One case per family
+// (CI time), with both subject sources and both thread counts; outfmt 6 has its `-out` file in
+// `blastp_query_blocks.rs`.
 #[test]
-fn the_out_file_and_the_shadow() {
+fn the_out_file_is_written_by_the_blocks() {
     let dir = std::env::temp_dir().join(format!("losat-bpqblockfmt-out-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let query = queries(&dir);
     let fasta = fixture("MejoMJNV.faa");
-    let db = subject_database("shadow");
+    let db = subject_database("out");
     let with_fasta = [OsStr::new("-subject"), fasta.as_os_str()];
     let with_db = [OsStr::new("-db"), db.as_os_str()];
     // (subject, outfmt, threads, also to a `-out` file)
@@ -624,26 +613,16 @@ fn the_out_file_and_the_shadow() {
                 std::fs::read(&path).unwrap() == reference.stdout,
                 "{what}: the -out file differs"
             );
+        } else {
+            let run = blastp(
+                &query,
+                subject,
+                threads,
+                &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+                &os(&fmt),
+            );
+            assert_same(&run, &reference, true, &what);
         }
-        let run = blastp(
-            &query,
-            subject,
-            threads,
-            &[BATCH, ("LOSAT_X_BPQBLOCK", "1"), family_off(spec), SHADOW],
-            &os(&fmt),
-        );
-        assert!(run.success, "{what} shadow: {}", run.stderr);
-        assert!(
-            run.stdout == reference.stdout,
-            "{what} shadow: the report differs"
-        );
-        assert_eq!(run.shadow.len(), 1, "{what} shadow: {:?}", run.shadow);
-        assert!(
-            run.shadow[0].starts_with("[X_SHADOW] BPQBLOCKFMT blocks=")
-                && run.shadow[0].ends_with(" identical"),
-            "{what} shadow: {}",
-            run.shadow[0]
-        );
     }
     std::fs::remove_dir_all(db.parent().unwrap()).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
@@ -1343,17 +1322,6 @@ fn taxonomy_names_for_outfmt_15_and_16_keep_the_bytes_and_the_refusals() {
                 if blocks {
                     let run = run_with(&[("LOSAT_X_BPQBLOCK", "1"), XML2_OFF]);
                     assert_same_outcome(&run, &reference, false, &format!("{what}, switch off"));
-                    // The shadow's second search starts the taxonomy database over, so that it
-                    // writes the open and lookup messages the blocks wrote.
-                    let run = run_with(&[("LOSAT_X_BPQBLOCK", "1"), SHADOW]);
-                    assert!(run.success, "{what} shadow: {}", run.stderr);
-                    assert!(run.stdout == reference.stdout, "{what} shadow: stdout");
-                    assert_eq!(run.shadow.len(), 1, "{what} shadow: {:?}", run.shadow);
-                    assert!(
-                        run.shadow[0].ends_with(" identical"),
-                        "{what}: {}",
-                        run.shadow[0]
-                    );
                 }
             }
         }
@@ -1428,9 +1396,9 @@ fn queries_of_an_unsearched_batch_are_written_by_the_block_that_holds_them() {
 // two archives) and `db.sa.arch.bp.pajab.11` (`BATCH_SIZE=3000`, several). With `LOSAT_X_BPQBLOCK=80`
 // every NCBI batch is a block of its own: the blocks' bytes equal the search of all queries
 // (`LOSAT_X_BPQBLOCK=0`) and NCBI's frozen bytes (standard error included, the option warning of
-// `-max_target_seqs 2` in the first archive), the shadow reports `identical`, `LOSAT_X_BPQBLOCKSA=0`
-// keeps the search of all queries, and `ARCHIVE_FORMAT=bin` gives the same documents as ASN.1
-// binary in blocks and out of them.
+// `-max_target_seqs 2` in the first archive), `LOSAT_X_BPQBLOCKSA=0` keeps the search of all
+// queries, and `ARCHIVE_FORMAT=bin` gives the same documents as ASN.1 binary in blocks and out of
+// them.
 #[test]
 fn the_archive_of_two_or_more_batches_is_written_by_blocks_as_by_the_search_of_all_queries() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1472,17 +1440,6 @@ fn the_archive_of_two_or_more_batches_is_written_by_blocks_as_by_the_search_of_a
                 blocks.stdout == want,
                 "{what}: blocks differ from NCBI's bytes"
             );
-            vars.push(SHADOW);
-            let shadow = blastp(&query, &subject, threads, &vars, &os(&fmt));
-            assert!(shadow.success && shadow.stdout == want, "{what} shadow");
-            assert_eq!(shadow.shadow.len(), 1, "{what}: {:?}", shadow.shadow);
-            assert!(
-                shadow.shadow[0].ends_with(" identical"),
-                "{what}: {}",
-                shadow.shadow[0]
-            );
-            assert_eq!(shadow.stderr, want_err, "{what} shadow: standard error");
-            vars.pop();
             vars.push(SA_OFF);
             let off = blastp(&query, &subject, threads, &vars, &os(&fmt));
             assert_same(&off, &reference, false, &format!("{what} family off"));
@@ -1590,21 +1547,6 @@ fn assert_same_files(
     }
 }
 
-/// `blocks=<n>` and `side_files=<n>` of the one shadow line of `run`, which must end in `identical`.
-fn shadow_blocks_and_side_files(run: &Run, what: &str) -> (usize, usize) {
-    assert_eq!(run.shadow.len(), 1, "{what}: {:?}", run.shadow);
-    let line = &run.shadow[0];
-    assert!(line.ends_with(" identical"), "{what}: {line}");
-    let value = |key: &str| -> usize {
-        line.split_whitespace()
-            .find_map(|word| word.strip_prefix(key))
-            .unwrap_or_else(|| panic!("{what}: no {key} in {line}"))
-            .parse()
-            .unwrap()
-    };
-    (value("blocks="), value("side_files="))
-}
-
 /// The reports of 13 and 14 are written serially after each block's search, so the thread count does
 /// not reach the side-file code: the cases that look at the files alone run at one thread.
 const ONE_THREAD: [u32; 1] = [1];
@@ -1630,8 +1572,8 @@ fn paja() -> (PathBuf, PathBuf) {
 
 // Outfmt 13 and 14 with `-db`: the 30 queries of `bpqb_q.faa` are two NCBI batches, so with
 // `LOSAT_X_BPQBLOCK=80` two blocks (queries 1-26, 27-30) write the master and the 30 side files
-// that the search of all queries writes (`LOSAT_X_BPQBLOCKXML2=0`); the shadow run writes the blocks'
-// files and says so (two blocks, 30 side files), with the side files compared with the reference's.
+// that the search of all queries writes (`LOSAT_X_BPQBLOCKXML2=0`); the default run writes the
+// blocks' files, which are compared with the reference's (two searches, 30 side files).
 // The reports are written serially after each block's search, so the thread count does not reach
 // the side-file code; both thread counts are run here once, for the files to show it.
 #[test]
@@ -1661,21 +1603,20 @@ fn outfmt_13_and_14_blocks_write_the_side_files_and_master_of_the_search_of_all_
                 31,
                 "{what}: the master and 30 side files"
             );
-            // The default switch, in the shadow mode.
-            let shadow = run(&[BLOCK_80, SHADOW], "shadow");
-            assert_same_files(&shadow, &reference, None, &format!("{what} shadow"));
-            let (count, sides) = shadow_blocks_and_side_files(&shadow.0, &what);
-            assert_eq!((count, sides), (2, 30), "{what}: blocks and side files");
+            // The default switch.
+            let blocks = run(&[BLOCK_80], "blocks");
+            assert_same_files(&blocks, &reference, Some(true), &what);
+            assert_eq!(blocks.0.searches, 2, "{what}: blocks");
         }
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // Outfmt 14 with `-subject` (a FASTA subject file): the last report of a block is held until the
-// next report arrives, which is in the next block, and is written as the next number. The shadow run
-// writes the blocks' files and compares them with the reference's. Outfmt 13 holds a report through
-// the same `Xml2Document`, `Xml2Carry` and `FsSideFiles` (the db test above and the cases below run
-// both), and the search runs at one thread (the reports are written serially).
+// next report arrives, which is in the next block, and is written as the next number. The default
+// run writes the blocks' files, which are compared with the reference's. Outfmt 13 holds a report
+// through the same `Xml2Document`, `Xml2Carry` and `FsSideFiles` (the db test above and the cases
+// below run both), and the search runs at one thread (the reports are written serially).
 #[test]
 fn outfmt_13_and_14_with_subject_hold_a_report_across_blocks() {
     let fasta = fixture("MejoMJNV.faa");
@@ -1701,11 +1642,9 @@ fn outfmt_13_and_14_with_subject_hold_a_report_across_blocks() {
             assert!(reference.0.success, "{what}: {}", reference.0.stderr);
             // A side file per query of `queries` and the master.
             assert_eq!(reference.1.len(), 5, "{what}: files");
-            let shadow = run(&[BATCH, ("LOSAT_X_BPQBLOCK", "1"), SHADOW], "shadow");
-            assert_same_files(&shadow, &reference, None, &format!("{what} shadow"));
-            let (count, sides) = shadow_blocks_and_side_files(&shadow.0, &what);
-            assert_eq!(count, 3, "{what}: blocks");
-            assert_eq!(sides, reference.1.len() - 1, "{what}: side files");
+            let blocks = run(&[BATCH, ("LOSAT_X_BPQBLOCK", "1")], "blocks");
+            assert_same_files(&blocks, &reference, Some(true), &what);
+            assert_eq!(blocks.0.searches, 3, "{what}: blocks");
         }
     }
     std::fs::remove_dir_all(&dir).unwrap();
@@ -1714,9 +1653,8 @@ fn outfmt_13_and_14_with_subject_hold_a_report_across_blocks() {
 // Outfmt 13 and 14 with taxids and a taxonomy database: the names in the side files and the
 // messages on standard error are those of the search of all queries; a database that the search of
 // all queries refuses (9606's name has UTF-8 bytes) leaves the blocks and fails before any file.
-// Both formats are run (names render differently in JSON and XML), at one thread; the shadow run
-// writes the blocks' files, and only a refused database has a separate blocks run, which no
-// shadow run repeats.
+// Both formats are run (names render differently in JSON and XML), at one thread; the default run
+// writes the blocks' files (a refused database leaves the blocks).
 #[test]
 fn outfmt_13_and_14_with_taxids_and_a_taxonomy_database_keep_the_files_and_messages() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1772,10 +1710,9 @@ fn outfmt_13_and_14_with_taxids_and_a_taxonomy_database_keep_the_files_and_messa
                 );
                 if completes {
                     assert_eq!(reference.1.len(), 31, "{what}");
-                    let shadow = run(&[SHADOW], "shadow");
-                    assert_same_files(&shadow, &reference, None, &format!("{what} shadow"));
-                    let (count, sides) = shadow_blocks_and_side_files(&shadow.0, &what);
-                    assert_eq!((count, sides), (2, 30), "{what}");
+                    let blocks = run(&[], "blocks");
+                    assert_same_files(&blocks, &reference, Some(true), &what);
+                    assert_eq!(blocks.0.searches, 2, "{what}: blocks");
                 } else {
                     // The refused database leaves the blocks (the check is made before the first
                     // block), so that no side file is written.
@@ -1882,7 +1819,8 @@ fn an_unopenable_side_file_stops_the_blocks_where_it_stops_the_search_of_all_que
 // output" and status 6 (DECISIONS 35: NCBI ignores the error); the blocks do the same at the same
 // report with the same files. Outfmt 14 only, at one thread, in the second block (the first block's
 // stop is that of the test above, and outfmt 13 writes through the same `FsSideFiles`).
-#[cfg(unix)]
+// Linux only: macOS has no `/dev/full`, so the link cannot be opened and the run ends with status 1.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_side_file_that_cannot_be_written_stops_the_blocks_where_it_stops_the_search_of_all_queries() {
     let dir = test_dir("full");
@@ -1936,8 +1874,8 @@ fn a_side_file_that_cannot_be_written_stops_the_blocks_where_it_stops_the_search
 
 // Queries without a hit and an empty query file: the blocks write what the search of all queries
 // writes (a side file per query, even one without hits; for an empty query file the plan is not
-// taken and the master lists nothing). Both formats and both inputs, at one thread; the shadow run
-// writes the blocks' files and compares them with the reference's.
+// taken and the master lists nothing). Both formats and both inputs, at one thread; the default
+// run writes the files, which are compared with the reference's, in one search.
 #[test]
 fn outfmt_13_and_14_without_hits_and_without_queries_are_unchanged() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
@@ -1962,11 +1900,10 @@ fn outfmt_13_and_14_without_hits_and_without_queries_are_unchanged() {
                     )
                 };
                 let reference = run(&[BLOCK_80, XML2_OFF], "ref");
-                let shadow = run(&[BLOCK_80, SHADOW], "shadow");
-                assert_same_files(&shadow, &reference, None, &format!("{what} shadow"));
+                let run = run(&[BLOCK_80], "default");
                 // One block or no query: the search of all queries, in one search, so that the
-                // plan of blocks is not taken and the shadow has no line.
-                assert!(shadow.0.shadow.is_empty(), "{what}: {:?}", shadow.0.shadow);
+                // plan of blocks is not taken.
+                assert_same_files(&run, &reference, Some(false), &what);
             }
         }
     }

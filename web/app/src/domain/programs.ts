@@ -207,7 +207,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     label: 'BLASTP',
     summary: 'BLASTP searches protein subjects using a protein query.',
     searches: 'protein subjects',
-    taskNotes: { blastp: 'protein-protein BLAST', 'blastp-fast': 'Quick BLASTP', 'blastp-short': 'short queries' },
+    taskNotes: { blastp: 'protein-protein BLAST', 'blastp-fast': 'Quick BLASTP' },
     query: 'protein',
     subject: 'protein',
     fastaParser: 0,
@@ -223,7 +223,6 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
             choiceLabels: {
               blastp: 'blastp (protein-protein BLAST)',
               'blastp-fast': 'Quick BLASTP (blastp-fast)',
-              'blastp-short': 'blastp-short (short queries)',
             },
           },
         ],

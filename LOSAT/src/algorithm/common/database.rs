@@ -872,17 +872,6 @@ impl TaxdbRun {
             std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(search_path.clone()))
         }))
     }
-
-    /// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): forgets the opened taxonomy database and the taxids
-    /// looked up, so that a second search of the same queries (the shadow's search of all queries)
-    /// writes the messages of opening and of the volumes' lookups as the first search did.
-    pub(crate) fn x_reset(&self) {
-        *self.lazy.lock().expect("the taxonomy database") = None;
-        self.volume_lookups
-            .lock()
-            .expect("the volume lookups")
-            .clear();
-    }
 }
 
 /// LOSAT's refusal of a taxonomy database name or record (`read_reported_taxids`): a scientific

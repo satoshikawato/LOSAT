@@ -52,6 +52,9 @@ mod x_mb_fill;
 // PROBE (LOSAT_X_MBHRANK, v4-A10 s20): the head table of a 4^12-cell megablast table by rank.
 #[path = "x_mb_head_rank.rs"]
 mod x_mb_head_rank;
+// PROBE (LOSAT_X_MB24, v4-A10 s20): 3-byte chains / heads of a 4^12-cell megablast table.
+#[path = "x_mb_narrow.rs"]
+mod x_mb_narrow;
 
 /// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): with
 /// LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the megablast table builds; then the
@@ -924,6 +927,9 @@ struct MbLookupTable {
     /// PROBE (LOSAT_X_MBHRANK): the head table by rank (`x_mb_head_rank.rs`); then `hashtable`
     /// is empty and `x_keep` is `None`.
     x_rank: Option<x_mb_head_rank::HeadRank>,
+    /// PROBE (LOSAT_X_MB24): 3-byte chains (and heads) (`x_mb_narrow.rs`); then `next_pos` (and
+    /// `hashtable`) is empty.
+    x_narrow: Option<x_mb_narrow::Narrow>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1376
@@ -970,6 +976,14 @@ impl MbLookupTable {
         if !self.has_hits(index) {
             return;
         }
+        if let Some(n) = self.x_narrow.as_ref() {
+            let mut q_off = n.head(&self.hashtable, index as usize);
+            while q_off != 0 {
+                callback(q_off);
+                q_off = n.next(q_off);
+            }
+            return;
+        }
         let head = match self.hashtable.get(index as usize) {
             Some(&head) => head,
             None => match self.x_rank.as_ref() {
@@ -1006,6 +1020,17 @@ impl MbLookupTable {
         if !self.has_hits(index) {
             return false;
         }
+        if let Some(n) = self.x_narrow.as_ref() {
+            let mut found = false;
+            let mut q_off = n.head(&self.hashtable, index as usize);
+            while q_off != 0 {
+                if q_off == q_off_1 {
+                    found = true;
+                }
+                q_off = n.next(q_off);
+            }
+            return found;
+        }
         let head = match self.hashtable.get(index as usize) {
             Some(&head) => head,
             None => match self.x_rank.as_ref() {
@@ -1029,6 +1054,15 @@ impl MbLookupTable {
     fn count_hits(&self, index: u64, x_csr: impl FnOnce() -> usize) -> usize {
         if !self.has_hits(index) {
             return 0;
+        }
+        if let Some(n) = self.x_narrow.as_ref() {
+            let mut count = 0usize;
+            let mut q_off = n.head(&self.hashtable, index as usize);
+            while q_off != 0 {
+                count += 1;
+                q_off = n.next(q_off);
+            }
+            return count;
         }
         let head = match self.hashtable.get(index as usize) {
             Some(&head) => head,
@@ -1947,8 +1981,28 @@ fn build_mb_lookup(
             debug_mode,
             pv_array_bts,
         );
+    let max_query_offset = queries_blastna
+        .iter()
+        .zip(query_offsets.iter())
+        .map(|(seq, &query_offset)| query_offset.max(0) as usize + seq.len())
+        .max()
+        .unwrap_or(0);
+    // PROBE (LOSAT_X_MB24): the one-thread fill only; =2 takes no keep (its heads are 3-byte).
+    let x_narrow_mode =
+        if x_csr_layout || x_rank_layout || x_mb_lookup_par::pool_threads().is_some() {
+            0
+        } else {
+            x_mb_narrow::plan(
+                &x_words,
+                table_size,
+                db_word_counts.is_some(),
+                debug_mode,
+                max_query_offset + 1,
+                ((table_size + 2047) / 2048).max(1),
+            )
+        };
     let x_keep = match x_keep {
-        Some(keep) if x_csr_layout || x_rank_layout => {
+        Some(keep) if x_csr_layout || x_rank_layout || x_narrow_mode == 2 => {
             keep.release();
             None
         }
@@ -1964,16 +2018,10 @@ fn build_mb_lookup(
     // as before (`x_mb_lut_keep.rs`).
     let (mut hashtable, x_resident, x_dirty) = match x_keep {
         Some(keep) => keep.take(table_size, x_mb_lookup_par::pool_threads().is_some()),
-        None if x_csr_layout || x_rank_layout => (Vec::new(), false, 0),
+        None if x_csr_layout || x_rank_layout || x_narrow_mode == 2 => (Vec::new(), false, 0),
         None => (vec![0u32; table_size], false, table_size),
     };
-    let max_query_offset = queries_blastna
-        .iter()
-        .zip(query_offsets.iter())
-        .map(|(seq, &query_offset)| query_offset.max(0) as usize + seq.len())
-        .max()
-        .unwrap_or(0);
-    let mut next_pos = if x_csr_layout {
+    let mut next_pos = if x_csr_layout || x_narrow_mode != 0 {
         Vec::new()
     } else {
         vec![0u32; max_query_offset + 1]
@@ -2039,8 +2087,9 @@ fn build_mb_lookup(
     x_clock.fill();
     let mut x_csr = None;
     let mut x_rank = None;
+    let mut x_narrow = None;
     let mut x_csr_on_pool = false;
-    let x_on_pool = if x_csr_layout || x_rank_layout {
+    let x_on_pool = if x_csr_layout || x_rank_layout || x_narrow_mode != 0 {
         None
     } else {
         x_mb_lookup_par::parts(db_word_counts.is_none() && !debug_mode)
@@ -2061,6 +2110,21 @@ fn build_mb_lookup(
             &x_words,
             table_size,
             &mut next_pos,
+            &mut pv_array,
+            pv_array_bts,
+            &mut helper_array,
+        ));
+    } else if x_narrow_mode != 0 {
+        x_narrow = Some(x_mb_narrow::serial(
+            x_narrow_mode,
+            &x_words,
+            table_size,
+            if x_narrow_mode == 2 {
+                &mut []
+            } else {
+                &mut hashtable[..table_size]
+            },
+            max_query_offset + 1,
             &mut pv_array,
             pv_array_bts,
             &mut helper_array,
@@ -2152,7 +2216,7 @@ fn build_mb_lookup(
     }
     // No NCBI counterpart: the end of the `[TIMING] x_mb_lookup_build` interval.
     x_clock.record(x_on_pool.is_some() || x_csr_on_pool, x_filled);
-    if x_mb_head_rank::trace() && x_rank.is_none() && !x_csr_layout {
+    if x_mb_head_rank::trace() && x_rank.is_none() && x_narrow.is_none() && !x_csr_layout {
         x_mb_head_rank::trace_chains(&hashtable[..table_size], &next_pos);
     }
 
@@ -2179,6 +2243,7 @@ fn build_mb_lookup(
         x_keep: x_keep.map(|keep| (keep.clone(), x_dirty)),
         x_csr,
         x_rank,
+        x_narrow,
     }
 }
 
@@ -2699,6 +2764,7 @@ pub fn build_disc_mb_lookup(
                 x_keep: None,
                 x_csr: None,
                 x_rank: None,
+                x_narrow: None,
             },
             lut_word_length,
             word_length: word_size,
@@ -2777,6 +2843,7 @@ pub fn build_disc_mb_lookup(
             x_keep: None,
             x_csr: None,
             x_rank: None,
+            x_narrow: None,
         },
         lut_word_length,
         word_length: word_size,

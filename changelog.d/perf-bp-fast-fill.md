@@ -1,0 +1,1 @@
+- `blastp -task blastp-fast` fills its compressed lookup table by buckets of cells at one thread (`LOSAT_X_BPFFILL`, a new switch of the strict set; natively and in WebAssembly): the table, the reports and max RSS do not change. One thread: (A/B to follow).

@@ -327,6 +327,7 @@ export LOSAT_X_BPCOMPOREUSE=1
 export LOSAT_X_BPDBCUT=1
 export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
+export LOSAT_X_BPFFILL=1
 export LOSAT_X_BPFSEED=1
 export LOSAT_X_BPGAP=1
 export LOSAT_X_BPGAP16=1
@@ -1836,6 +1837,34 @@ Rebuilding less:
   that instance runs 6 G fewer instructions than dev's), 3 proteins of 1,005 residues (7.3 %) 10.33 -> 9.68 s, 10
   proteins of 4,639 residues (31.6 %) 34.27 -> 27.95 s (branch misses 1.18 G -> 0.55 G); 100 proteins of 58,139
   residues at 4 threads (two blocks, 91 % and 23 %) 70.92 -> 66.84 s; max RSS unchanged. In the strict set from
+  its first pull request (no measured case slower; AGENTS.md "Speed-up switches").
+- `LOSAT_X_BPFFILL=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
+  2026-10-25, line v4-BPF K2-2; `=0` turns it off; acts where the serial builder makes the flat compressed table of
+  `LOSAT_X_BPCLUT`: one thread, natively and in WebAssembly; with two or more threads the pool builds the table,
+  `tblastx/lookup/x_clut_par.rs`, already by stripes of cells) fills the table by buckets of 2^10 cells
+  (`tblastx/lookup/x_clut_direct.rs` `x_try_build_flat_by_buckets`, exactness argument in that file's header):
+  the appends are recorded as before but not counted while they are made; they are sorted by bucket, stably,
+  into the slots of `hits` that the bucket's cells will take (each packed as the query offset above the cell's
+  index in its bucket), and each bucket then counts its cells, lays out their starts, PV bits and statistics,
+  places its appends at their cells' cursors and puts the cells of more than 5 offsets in the scan order, within
+  4 KiB of counts and the bucket's slots. The count pass's random updates of 3 MB of counts and the fill pass's
+  random writes into the starts and hits (48 cycles per append, 63 % of them stalls, line v4-BPF K1) become
+  passes within the cache (about 30 cycles per append, of which the partition about 15; floor H about 6). The
+  record of the appends serves as the buckets' scratch and is dropped where the count-and-fill builder drops it,
+  and the vectors are allocated in its order, so max RSS does not change. An append takes at most one overflow
+  cell, so a table whose appends stay within NCBI's overflow capacity cannot be refused and its count is not
+  needed while the appends are made; the bucket fill declines (the count-and-fill builder runs) a table whose
+  appends pass the capacity and a query batch of 2^22 letters or more (the packed offset), `LOSAT_X_REACH`. The
+  table is the count-and-fill builder's slot for slot (the lib test `x_bucket_fill_is_the_count_and_fill_build`
+  compares them on random queries, tables and capacities; `tests/blastp_fast_fill_buckets.rs` the reports with
+  `=0`'s). The function is out of line, so the count-and-fill builder keeps its code. Not taken (line v4-BPF K2-2
+  probes, one core on the workstation): the histogram counted by the appends' sink (17 more instructions per
+  append in the neighbor enumeration, which is no longer vectorized), the scan position computed in the fill with
+  selects instead of the move over the cells of more than 5 offsets (x1.01-1.02 the cycles), and buckets of 2^8,
+  2^12 or 2^14 cells (the same or slower). Timed (probe round 3, 2026-10-25, workstation node 0, one physical core,
+  its HT sibling idle, warmed 3 s before every run, 3 rounds; dev 51234c2a; every report identical between the
+  arms; medians, `cycles:u`): OrthoFinder's 1/10 of the human proteins x the yeast proteome (`-db`,
+  `-evalue 0.001`) x0.907, of the yeast proteins x the yeast proteome... (A/B to follow). In the strict set from
   its first pull request (no measured case slower; AGENTS.md "Speed-up switches").
 - `LOSAT_X_BPFSEED=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
   2026-10-24, line v4-BPF K2-1; `=0` turns it off; acts in the fused loop, `LOSAT_X_BPSEED`, on the flat compressed

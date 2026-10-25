@@ -90,7 +90,7 @@ pub fn encode_protein_sequence(seq: &[u8]) -> EncodedProtein {
 // }
 // ```
 pub fn encode_protein_query_frame_with_seg(seq: &[u8], seg: Option<&SegParams>) -> QueryFrame {
-    encode_query_frame(seq, seg, false)
+    encode_query_frame::<false>(seq, seg, false)
 }
 
 /// As `encode_protein_query_frame_with_seg`, and with LOSAT_TIMING the encoding and the SEG are
@@ -100,10 +100,35 @@ pub fn encode_protein_query_frame_with_seg_timed(
     seq: &[u8],
     seg: Option<&SegParams>,
 ) -> QueryFrame {
-    encode_query_frame(seq, seg, true)
+    encode_query_frame::<false>(seq, seg, true)
 }
 
-fn encode_query_frame(seq: &[u8], seg: Option<&SegParams>, timed: bool) -> QueryFrame {
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
+// ```c
+//     if (!mask_at_hash) {
+//         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+//                              program_number);
+//     }
+// ```
+/// The query frame of a BLASTP search with `-soft_masking true` (`mask_at_hash`): as
+/// `encode_protein_query_frame_with_seg` (`_timed` with `timed`), the SEG intervals kept in
+/// `seg_masks` for the lookup table and the reports, but the letters left as they are (no X, no
+/// `aa_seq_nomask`), so the extensions, the Karlin blocks and the composition read the query.
+pub fn encode_protein_query_frame_soft_masked(
+    seq: &[u8],
+    seg: Option<&SegParams>,
+    timed: bool,
+) -> QueryFrame {
+    encode_query_frame::<true>(seq, seg, timed)
+}
+
+// `MASK_AT_HASH` is a const parameter so that the default (hard) instance and its callers keep the
+// code they had before `-soft_masking` (one instance per value).
+fn encode_query_frame<const MASK_AT_HASH: bool>(
+    seq: &[u8],
+    seg: Option<&SegParams>,
+    timed: bool,
+) -> QueryFrame {
     // Diagnostic (LOSAT_TIMING): the encoding for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
     let t_encode = if timed {
@@ -127,7 +152,15 @@ fn encode_query_frame(seq: &[u8], seg: Option<&SegParams>, timed: bool) -> Query
         };
         let masker = SegMasker::with_params(params);
         let intervals = masker.mask_sequence(&aa_seq[1..aa_seq.len() - 1]);
-        if !intervals.is_empty() {
+        if MASK_AT_HASH {
+            // `BlastSetUp_MaskQuery` is not called: the intervals only keep words out of the
+            // lookup table (`BLAST_ComplementMaskLocations`).
+            seg_masks.extend(
+                intervals
+                    .iter()
+                    .map(|interval| (interval.start, interval.end)),
+            );
+        } else if !intervals.is_empty() {
             aa_seq_nomask = Some(aa_seq.clone());
             for interval in &intervals {
                 seg_masks.push((interval.start, interval.end));
@@ -175,6 +208,30 @@ mod tests {
     // 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*',
     // 'O', 'J'};
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
+    // ```c
+    //     if (!mask_at_hash) {
+    //         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+    //                              program_number);
+    //     }
+    // ```
+    // `-soft_masking true` keeps the SEG intervals of the hard query and its letters.
+    #[test]
+    fn test_soft_masked_query_keeps_letters_and_seg_intervals() {
+        let seq = b"MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKQQQQQQQQQQQQQQQQQQQQQGWENYCWPANMSWKVLMKYEFSSD";
+        let seg = SegParams::default();
+        let hard = encode_protein_query_frame_with_seg(seq, Some(&seg));
+        let soft = encode_protein_query_frame_soft_masked(seq, Some(&seg), false);
+        assert!(!hard.seg_masks.is_empty());
+        assert_eq!(soft.seg_masks, hard.seg_masks);
+        assert_eq!(soft.aa_seq, encode_protein_sequence(seq).aa_seq);
+        assert_eq!(hard.aa_seq_nomask.as_deref(), Some(&soft.aa_seq[..]));
+        assert!(soft.aa_seq_nomask.is_none());
+        assert_ne!(soft.aa_seq, hard.aa_seq);
+        let none = encode_protein_query_frame_soft_masked(seq, None, false);
+        assert!(none.seg_masks.is_empty() && none.aa_seq == soft.aa_seq);
+    }
+
     #[test]
     fn test_ncbistdaa_to_ascii_roundtrip() {
         let encoded = encode_protein_sequence(b"Acd");

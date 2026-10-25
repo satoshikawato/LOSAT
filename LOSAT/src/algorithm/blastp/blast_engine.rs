@@ -73,8 +73,9 @@ pub(super) mod x_subject_meta;
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{BlastpArgs, BlastpCompositionMode, BlastpLookupTableType, ResolvedBlastpArgs};
 use super::encoding::{
-    encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
-    encode_protein_sequence, ncbistdaa_to_ascii, EncodedProtein,
+    encode_protein_query_frame_soft_masked, encode_protein_query_frame_with_seg,
+    encode_protein_query_frame_with_seg_timed, encode_protein_sequence, ncbistdaa_to_ascii,
+    EncodedProtein,
 };
 #[cfg(test)]
 use super::extension::{extend_one_hit, extend_two_hit};
@@ -7592,7 +7593,8 @@ pub(super) mod x_lookup_ahead;
 // query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
 // ```
 /// The query frames of a search: each record encoded with the search's SEG parameters
-/// (`encode_protein_query_frame_with_seg`). `run_resolved_in_pool` encodes its queries with it, and so
+/// (`encode_protein_query_frame_with_seg`; `encode_protein_query_frame_soft_masked` with
+/// `-soft_masking true`). `run_resolved_in_pool` encodes its queries with it, and so
 /// does the build of the next block's lookup ahead of that block (LOSAT_X_BPLKPAHEAD,
 /// `x_lookup_ahead.rs`).
 fn blastp_query_frames(
@@ -7613,7 +7615,9 @@ fn blastp_query_frames_marked(
     query_records
         .iter()
         .map(|record| {
-            vec![if marked {
+            vec![if args.soft_masking {
+                encode_protein_query_frame_soft_masked(record.seq(), seg_params.as_ref(), marked)
+            } else if marked {
                 encode_protein_query_frame_with_seg_timed(record.seq(), seg_params.as_ref())
             } else {
                 encode_protein_query_frame_with_seg(record.seq(), seg_params.as_ref())
@@ -11846,11 +11850,19 @@ fn run_resolved_in_pool(
                 };
                 let db_name = database.map(|database| database.name().to_string());
                 let version = format!("BLASTP {NCBI_BLASTP_VERSION}");
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:414-417
+                // ```c
+                //     if (SBlastFilterOptionsMaskAtHash(filtering_options)) {
+                //         if (strlen(retval) != 0) {
+                //             /* Add mask at hash as a modifier for other filtering options */
+                //             if (!s_SafeStrCat(&retval, &retval_size, "m;")) {
+                // ```
+                // `-soft_masking true` (`mask_at_hash`) ends the filter string with `m;`.
                 let filter = crate::report::blast_xml::filter::filter_string(
                     None,
                     args.seg.filter_options(),
                     None,
-                    false,
+                    args.soft_masking,
                 );
                 let xml = super::blast_xml::BlastpXml {
                     run: crate::report::blast_xml::XmlRun {
@@ -12465,6 +12477,7 @@ mod tests {
             gap_extend: None,
             comp_based_stats: "2".to_string(),
             seg: None,
+            soft_masking: None,
             use_sw_tback: false,
             query_loc: None,
             subject_loc: None,

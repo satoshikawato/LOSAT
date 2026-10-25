@@ -721,7 +721,7 @@ pub(crate) fn search_core(
             let x_cap = x_bx_mem::chunk_unit_cap(pool, options, subjects);
             let mut x_next = 0;
             while x_next < chunks.len() {
-                let x_wave = x_cap.map(x_bx_mem::chunk_wave);
+                let x_wave = x_cap.map(|k| x_bx_mem::chunk_wave(pool, k));
                 let wave = x_wave
                     .as_ref()
                     .map_or(pool.threads().max(2), x_bx_mem::XChunkWave::size);
@@ -940,6 +940,7 @@ pub(crate) fn search_core(
                     xdrop,
                     db_length,
                     x_containment,
+                    x_bx_mem::in_capped_batch(pool),
                     sink,
                 )?;
                 super::x_timing::batch(XBatch::ScanPar, x_t);

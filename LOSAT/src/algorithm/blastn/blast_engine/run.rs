@@ -7173,6 +7173,19 @@ fn search_cli(
     let t_read_fasta = crate::utils::xtiming::clock();
     // EXPERIMENT (LOSAT_X_QSTREAM): with the switch acting this reading keeps only each record's
     // length and how the reading ends; the batches read their records again (`x_query_stream`).
+    // PROBE (v4-A10 s19, LOSAT_X_QPACKPROBE): where the store of LOSAT_X_BNQDROP acts, each record's
+    // letters are packed as it is read.
+    let x_pack = x_query_drop::x_pack_probe()
+        && !x_opening.acts()
+        && x_query_drop::on()
+        && x_query_drop::Rule {
+            formats: &output_formats,
+            query_range: query_range.is_some(),
+            slots_may_run: x_slots_may_run,
+            hit_records: outputs.hits.is_some(),
+        }
+        .acts();
+    let mut x_packed = Vec::new();
     let (records, end, x_store) = if x_opening.acts() {
         let (store, end) = x_query_stream::Store::read(
             x_opening,
@@ -7181,6 +7194,12 @@ fn search_cli(
             query_range.as_ref(),
         )?;
         (Vec::new(), end, store)
+    } else if x_pack {
+        let QueryRecords { records, end } =
+            crate::blastinput::fasta_reader::read_queries_with(&mut query_source, |record| {
+                x_query_drop::x_pack_record(record, &mut x_packed)
+            });
+        (records, end, x_query_stream::Store::off(x_opening))
     } else {
         let QueryRecords { records, end } = read_queries(&mut query_source);
         (records, end, x_query_stream::Store::off(x_opening))
@@ -7222,11 +7241,19 @@ fn search_cli(
         crate::utils::xreach::x_reach!("LOSAT_X_BNQDROP", acts);
         acts
     };
+    assert!(
+        !x_pack || x_taken,
+        "LOSAT_X_QPACKPROBE: packed records outside the store"
+    );
     let x_taken_store;
     let queries = if x_store.acts() {
         SearchQueries::Streamed(&x_store)
     } else if x_taken {
-        x_taken_store = x_query_drop::Store::new(records);
+        x_taken_store = if x_pack {
+            x_query_drop::Store::x_new_packed(records, x_packed)
+        } else {
+            x_query_drop::Store::new(records)
+        };
         SearchQueries::Taken(&x_taken_store)
     } else {
         SearchQueries::Records(&records)

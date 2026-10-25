@@ -795,6 +795,16 @@ pub enum QueryEnd {
 /// The `catch (const exception&)` skips a query whose Seq-id was not found or whose
 /// range does not fit (`seq_range.rs`); LOSAT rejects Seq-id lines.
 pub fn read_queries<R: Read>(source: &mut FastaInputSource<R>) -> QueryRecords {
+    read_queries_with(source, |_| {})
+}
+
+/// `read_queries`, with each record given to `keep` as soon as it has been read, before the
+/// next one is read: a caller that keeps a smaller form of a record's letters (`sequence::
+/// packed_subject`) never holds the letters of the whole input at once.
+pub fn read_queries_with<R: Read>(
+    source: &mut FastaInputSource<R>,
+    mut keep: impl FnMut(&mut FastaRecord),
+) -> QueryRecords {
     let mut records = Vec::new();
     loop {
         if source.end() {
@@ -808,7 +818,10 @@ pub fn read_queries<R: Read>(source: &mut FastaInputSource<R>) -> QueryRecords {
             warnings.extend_from_slice(message);
             Ok(())
         }) {
-            Ok(record) => records.push(record),
+            Ok(mut record) => {
+                keep(&mut record);
+                records.push(record);
+            }
             Err(ReadError::Parse {
                 code: ParseErrorCode::Eof,
                 ..

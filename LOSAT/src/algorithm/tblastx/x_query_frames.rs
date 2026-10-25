@@ -23,7 +23,8 @@
 //!
 //! With the switch on, and a LOSAT search pool of two or more threads current, the frames of the
 //! batch that SEG reads (three or more bytes with the sentinels) are listed in query and frame
-//! order and masked by `mask_frame` in a parallel loop (`into_par_iter().for_each()`) run with
+//! order and masked by `mask_frame` (`mask_frame_soft` with `-soft_masking true`) in a parallel loop
+//! (`into_par_iter().for_each()`) run with
 //! `SearchPool::install`, so on the pool of the search that calls it. Rayon's global pool is never
 //! used. A search without a pool (one thread, a build without the `parallel` feature, WebAssembly
 //! without `wasm-threads`) and a batch with fewer than two such frames run the serial loop.
@@ -37,12 +38,14 @@
 //! their key (the sorted letter counts of a window), computed by the same reference function on a
 //! miss, so a frame masked on any thread, with a warm or a cold cache, gets the same intervals as in
 //! the serial loop. The statics of `utils/seg.rs` are those switches, read once and never written.
-//! So no frame's mask depends on another frame or on the order in which the frames are masked.
+//! `mask_frame_soft` (`-soft_masking true`) is the first half of `mask_frame`: it writes only the
+//! interval list of its frame, so the same holds for it. So no frame's mask depends on another
+//! frame or on the order in which the frames are masked.
 //! No floating-point operation changes order: each window's entropy is the same expression on
 //! the same counts.
 //!
 //! Programs that reach it: only TBLASTX (`-subject` and `-db`, every query batch of
-//! `search_query_batch`). The translation of the frames (at most a few ms per batch) stays serial.
+//! `search_query_batch`, with either value of `-soft_masking`). The translation of the frames (at most a few ms per batch) stays serial.
 //! BLASTX already masks the contexts of a large batch on the pool (at 2+ threads,
 //! `blastx/query_setup.rs`) and prepares the chunks of a split query in parallel
 //! (`blastx/split.rs`).
@@ -113,7 +116,8 @@ pub(super) fn mask_frame(seg: &SegMasker, frame: &mut QueryFrame) {
 //     }
 // ```
 /// As `mask_frame` with `-soft_masking true` (`mask_at_hash`): only the masked intervals into
-/// `seg_masks`, which keep words out of the lookup table (`BLAST_ComplementMaskLocations`); the
+/// `seg_masks`, which keep words out of the lookup table (`BLAST_ComplementMaskLocations`,
+/// blast_setup.c:634-637); the
 /// frame keeps its letters and has no unmasked copy, so the extensions and the frame's Karlin block
 /// read the translation.
 fn mask_frame_soft(seg: &SegMasker, frame: &mut QueryFrame) {
@@ -127,6 +131,8 @@ fn mask_frame_soft(seg: &SegMasker, frame: &mut QueryFrame) {
 /// `mask_frame_soft` with `MASK_AT_HASH`, `mask_frame` without. `MASK_AT_HASH` is a const parameter
 /// so that the default (hard) instance of the loops below keeps the code it had before
 /// `-soft_masking` (one instance per value).
+// No NCBI counterpart: chooses at compile time between the two bodies of blast_setup.c:621-624
+// (`mask_frame_soft`, `mask_frame`); it computes nothing NCBI does not.
 #[inline(always)]
 fn mask_frame_as<const MASK_AT_HASH: bool>(seg: &SegMasker, frame: &mut QueryFrame) {
     if MASK_AT_HASH {

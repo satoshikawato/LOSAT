@@ -3078,7 +3078,7 @@ fn search_query_batch(
         // Dispatch point (LOSAT_X_TBXQFRAMES, strict set): with two or more threads the frames
         // are masked on the search pool, one task per frame; otherwise, and with the switch off,
         // the frames are masked one after the other as before (tblastx/x_query_frames.rs, which
-        // holds the per-frame body `mask_frame`).
+        // holds the per-frame bodies `mask_frame` and `mask_frame_soft`).
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
         // ```c

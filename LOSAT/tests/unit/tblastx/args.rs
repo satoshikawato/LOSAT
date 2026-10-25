@@ -131,6 +131,8 @@ fn test_seg_options() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
 // ```c++
+// CFilteringArgs::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
+// {
 //     if (args[kArgLookupTableMaskingOnly]) {
 //         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
 //     }

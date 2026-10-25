@@ -1195,7 +1195,10 @@ fn is_same_endpoint(new_align: &BlastCompoAlignment, align: &BlastCompoAlignment
 //     return result;
 // }
 // ```
-fn is_similar_endpoint(new_align: &BlastCompoAlignment, align: &BlastCompoAlignment) -> bool {
+pub(crate) fn is_similar_endpoint(
+    new_align: &BlastCompoAlignment,
+    align: &BlastCompoAlignment,
+) -> bool {
     let start_contained = align.query_start <= new_align.query_start
         && align.query_end >= new_align.query_start
         && align.match_start <= new_align.match_start

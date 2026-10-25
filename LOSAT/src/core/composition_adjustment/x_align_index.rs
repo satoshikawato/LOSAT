@@ -17,7 +17,8 @@ use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 use super::redo_alignment::{
-    is_contained, with_distinct_ends, BlastCompoAlignment, KAPPA_BIT_TOL, LOCAL_LN2,
+    is_contained, is_similar_endpoint, with_distinct_ends, BlastCompoAlignment, KAPPA_BIT_TOL,
+    LOCAL_LN2,
 };
 
 /// No NCBI counterpart: the switch, read once per process.
@@ -134,7 +135,7 @@ impl XAlignSet {
     fn insert(&mut self, align: Box<BlastCompoAlignment>) {
         let slot = u32::try_from(self.slots.len()).expect("fewer than 2^32 alignments per query");
         let d = i64::from(align.match_end) - i64::from(align.match_start);
-        if self.by_start.is_empty() && self.slots.is_empty() {
+        if self.slots.is_empty() {
             self.dmax = d;
             self.dmin = d;
         } else {
@@ -193,7 +194,13 @@ fn x_contains_indexed(set: &XAlignSet, in_align: &BlastCompoAlignment, lambda: f
         if frame.signum() != in_align.frame.signum() {
             continue;
         }
-        for &(_, _, slot) in set.by_start.range((frame, lo, 0)..=(frame, hi, u32::MAX)) {
+        // Nearest start first: a containing alignment starts at or before the HSP, and the
+        // answer does not depend on the order.
+        for &(_, _, slot) in set
+            .by_start
+            .range((frame, lo, 0)..=(frame, hi, u32::MAX))
+            .rev()
+        {
             let align = set.slots[slot as usize]
                 .as_deref()
                 .expect("indexed slot holds an alignment");
@@ -254,7 +261,7 @@ fn x_contains_indexed(set: &XAlignSet, in_align: &BlastCompoAlignment, lambda: f
 // [min(ms, ms - dmax, me - dmax), max(ms, me, me - dmin)] only (ms, me: the new alignment's match
 // start and end): a shared start has matchStart == ms; a shared end has matchStart == me -
 // (matchEnd - matchStart), in [me - dmax, me - dmin]; a start contained in `align` (similar end
-// point) has matchStart in [ms - dmax, ms], a contained end in [me - dmax, me]. The first loop's
+// point, `s_IsSimilarEndPoint`, 321-349) has matchStart in [ms - dmax, ms], a contained end in [me - dmax, me]. The first loop's
 // answer does not depend on the order; the second removes the same alignments and the slots keep
 // the others' order.
 fn x_add_distinct_indexed(
@@ -281,7 +288,7 @@ fn x_add_distinct_indexed(
         let shared = if is_same_adjustment {
             same_start || same_end
         } else {
-            similar_endpoint(&new_align, align)
+            is_similar_endpoint(&new_align, align)
         };
         if shared && new_align.score <= align.score {
             return;
@@ -297,28 +304,6 @@ fn x_add_distinct_indexed(
         set.by_start.remove(&(align.frame, align.match_start, slot));
     }
     set.insert(new_align);
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:321-349
-// ```c
-// static Boolean
-// s_IsSimilarEndPoint(const BlastCompo_Alignment* newAlign,
-//                     const BlastCompo_Alignment* align)
-// ```
-// The same test as `redo_alignment::is_similar_endpoint`.
-fn similar_endpoint(new_align: &BlastCompoAlignment, align: &BlastCompoAlignment) -> bool {
-    let start_contained = align.query_start <= new_align.query_start
-        && align.query_end >= new_align.query_start
-        && align.match_start <= new_align.match_start
-        && align.match_end >= new_align.match_start;
-    let end_contained = align.query_start <= new_align.query_end
-        && align.query_end >= new_align.query_end
-        && align.match_start <= new_align.match_end
-        && align.match_end >= new_align.match_end;
-    (start_contained
-        && (new_align.query_start - new_align.match_start == align.query_start - align.match_start))
-        || (end_contained
-            && (new_align.query_end - new_align.match_end == align.query_end - align.match_end))
 }
 
 #[cfg(test)]
@@ -393,12 +378,13 @@ mod tests {
     #[test]
     fn the_index_answers_as_ncbis_list() {
         let frame_sets: [&[i32]; 3] = [&[0], &[1, 2, 3, -1, -2, -3], &[1, -1]];
-        let mut indexed_runs = 0;
+        let index_froms = [Some(0), Some(1), Some(4), Some(X_INDEX_FROM), None];
+        let mut indexed_runs = [0usize; 5];
         for trial in 0..600u64 {
             let mut rng = Lcg(trial * 7 + 1);
             let frames = frame_sets[trial as usize % frame_sets.len()];
-            let index_from =
-                [Some(0), Some(1), Some(4), Some(X_INDEX_FROM), None][trial as usize % 5];
+            let which = trial as usize % 5;
+            let index_from = index_froms[which];
             let mut reference: Option<Box<BlastCompoAlignment>> = None;
             let mut set = XAlignSet::new(index_from);
             let lambda = 0.267;
@@ -420,16 +406,17 @@ mod tests {
                     assert!(a.is_none() && b.is_none());
                 }
             }
-            indexed_runs += usize::from(set.indexed());
+            indexed_runs[which] += usize::from(set.indexed());
             assert_eq!(
                 fields(&set.into_list()),
                 fields(&reference),
                 "trial {trial}"
             );
         }
+        // 120 runs per threshold; `None` never indexes.
         assert!(
-            indexed_runs >= 400,
-            "{indexed_runs} of 600 runs reached the index"
+            indexed_runs[..4].iter().all(|&runs| runs >= 60) && indexed_runs[4] == 0,
+            "runs that reached the index per threshold: {indexed_runs:?}"
         );
     }
 
@@ -450,6 +437,53 @@ mod tests {
             let set = XAlignSet::new(index_from);
             assert!(!set.contains(&probe, 0.267));
             assert!(set.into_list().is_none());
+        }
+    }
+
+    /// Match coordinates near both ends of i32 (and alignments that span from one end to the
+    /// other, so `dmax` is near 2^32 and the ranges clamp), against NCBI's list functions.
+    #[test]
+    fn coordinates_at_the_ends_of_i32_give_the_same_answers() {
+        const EDGE: i32 = i32::MAX - 1_000;
+        for trial in 0..200u64 {
+            let mut rng = Lcg(trial * 13 + 5);
+            let mut reference: Option<Box<BlastCompoAlignment>> = None;
+            let mut set = XAlignSet::new(Some(if trial % 2 == 0 { 0 } else { 8 }));
+            for step in 0..200 {
+                let mut align = random_align(&mut rng, &[1, -1], step);
+                let (ms, me) = match rng.next(6) {
+                    0 => (-EDGE, EDGE),
+                    1 => (EDGE, -EDGE),
+                    2 | 3 => {
+                        let ms = EDGE - rng.next(60);
+                        (ms, (ms + rng.next(30)).min(EDGE))
+                    }
+                    _ => {
+                        let ms = -EDGE + rng.next(60);
+                        (ms, ms + rng.next(30))
+                    }
+                };
+                align.match_start = ms;
+                align.match_end = me;
+                if rng.next(2) == 0 {
+                    assert_eq!(
+                        set.contains(&align, 0.267),
+                        is_contained(&align, &reference, 0.267),
+                        "trial {trial} step {step}"
+                    );
+                } else {
+                    let same = rng.next(2) == 0;
+                    let mut a = Some(align.clone());
+                    let mut b = Some(align);
+                    with_distinct_ends(&mut a, &mut reference, same);
+                    set.add_distinct(&mut b, same);
+                }
+            }
+            assert_eq!(
+                fields(&set.into_list()),
+                fields(&reference),
+                "trial {trial}"
+            );
         }
     }
 

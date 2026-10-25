@@ -4396,8 +4396,8 @@ Scheduling (each value computed by one thread with the original function; order 
   `redo_alignment.rs` `blast_redo_one_match_with_workspace_queries_and_matrix_observed`): the composition-based
   redo of one match keeps, for each query, the alignments it has redone so far (NCBI's list `alignments[query_index]`
   of `Blast_RedoOneMatch`, newest first) and asks two questions of it for every HSP: whether the HSP is contained in
-  an alignment that scores enough more (`s_IsContained`, `redo_alignment.c` 965-997) and, for every new alignment,
-  whether one with a shared end scores at least as well, else which ones it replaces (`s_WithDistinctEnds`, 386-451).
+  an alignment that scores enough more (`s_IsContained`, `redo_alignment.c` 965-996) and, for every new alignment,
+  whether one with a shared end scores at least as well, else which ones it replaces (`s_WithDistinctEnds`, 385-450).
   NCBI walks the whole list each time, so a match with tens of thousands of HSPs costs the square of that: on the
   human genome the B11g probe (35 proteins of HsG_b4, 8 threads, 396 matches, 1.35 M HSPs) counted 63 G list nodes
   visited, 15 ns each (966 thread-s), 99.5 % of them in the 44 matches with lists of 10,000 or more. With the switch
@@ -4410,8 +4410,8 @@ Scheduling (each value computed by one thread with the original function; order 
   end of the match the slots that hold an alignment are linked newest first, which is the order of NCBI's list (the
   new alignment goes to the head, the others keep their order), so every value and the report stay the same (unit
   tests `the_index_answers_as_ncbis_list` (600 random runs against `is_contained` / `with_distinct_ends`),
-  `a_list_moves_into_the_index_once_it_reaches_the_threshold`; `tests/redo_contain_idx.rs`, one search per
-  program). Shorter lists stay NCBI's list and the original functions answer, so matches with few HSPs (most
+  `coordinates_at_the_ends_of_i32_give_the_same_answers`, `a_list_moves_into_the_index_once_it_reaches_the_threshold`;
+  `tests/redo_contain_idx.rs`: one input per program, the switch on and off at 1 and 2 threads). Shorter lists stay NCBI's list and the original functions answer, so matches with few HSPs (most
   blastp and blastx matches) take the same path as before. Conditional: the new side is a match where some query's
   list reaches 32 alignments (`x_reach!`, once per match), the reference side one where none does.
   MEASURED

@@ -48,10 +48,10 @@ mod outfmt5_tblastn;
 mod outfmt5_tblastx;
 #[path = "../pairwise_par.rs"]
 mod pairwise_par;
-#[path = "../report_counts_cli.rs"]
-mod report_counts_cli;
 #[path = "../redo_contain_idx.rs"]
 mod redo_contain_idx;
+#[path = "../report_counts_cli.rs"]
+mod report_counts_cli;
 #[path = "../seqalign_samples.rs"]
 mod seqalign_samples;
 #[path = "../suite_layout.rs"]

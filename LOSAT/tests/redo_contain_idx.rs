@@ -5,7 +5,7 @@
 //! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`. In a redo, a
 //! query's list of kept alignments moves into the index once it holds `X_INDEX_FROM` (32)
 //! alignments; shorter lists stay NCBI's list. `s_IsContained` and `s_WithDistinctEnds`
-//! (`redo_alignment.c` 386-451, 966-997) then look only at the alignments whose subject range can
+//! (`redo_alignment.c` 385-450, 965-996) then look only at the alignments whose subject range can
 //! meet the new one; the answers, and the final list with its order, are the list's (the unit
 //! tests of `x_align_index.rs` compare them call by call on random lists). So the property under
 //! test is that the report does not depend on the switch; that reports equal NCBI's is the business
@@ -68,10 +68,7 @@ fn records(fixture: &str, ids: &[&str]) -> String {
 /// Bases `from..to` of the single record of a nucleotide fixture, as one record.
 fn bases(fixture: &str, from: usize, to: usize) -> String {
     let text = std::fs::read_to_string(fasta(fixture)).expect("FASTA");
-    let sequence: String = text
-        .lines()
-        .filter(|line| !line.starts_with('>'))
-        .collect();
+    let sequence: String = text.lines().filter(|line| !line.starts_with('>')).collect();
     let mut out = format!(">{fixture}_{from}_{to}\n");
     for line in sequence.as_bytes()[from..to].chunks(70) {
         out.push_str(std::str::from_utf8(line).expect("ASCII"));

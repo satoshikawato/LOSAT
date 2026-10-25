@@ -3000,6 +3000,40 @@ Scheduling (each value computed by one thread with the original function; order 
   wall x0.981-0.999, cycles:u x0.990-1.001, instructions:u x0.998-1.000. Dropping the query chunks' copies before their
   chunk's scan (an earlier form) saved nothing measurable: blastn of Sakai, whose records `LOSAT_X_QSTREAM` reads,
   read the same max RSS at one thread.
+- `LOSAT_X_BNQPACK=1` (BLASTN, every task, `-subject` and `-db`; in the strict set since 2026-10-25
+  (perf/mb-query-pack, evidence at the end of this entry): on unless it is `0`) the reader packs the letters of the
+  query records read before the search as it reads them (`sequence/packed_letters.rs`: 2-bit codes, the runs of other
+  bytes, the lowercase mask as intervals), where they go into the `LOSAT_X_BNQDROP` store and the query file holds at
+  least two of the task's largest batches; with `=0` every record keeps its letters until its batch drops them. NCBI
+  reads its batches one at a time (`GetNextSeqBatch`); LOSAT reads all records first (it needs every length before
+  the first batch), so their letters, touched while the file was read, stayed with the process to the end of the
+  search: dropping each batch's letters after its encoding (`LOSAT_X_BNQDROP`) freed pages the heap kept for later
+  allocations. Memory only; no NCBI counterpart. The reader packs each nucleotide record in place of the copy of its
+  buffer (`FastaInputSource::x_pack_letters`; `U` read as `T` first, the mask kept as intervals), so no record's
+  letters are held after its reading; a record keeps its letters where the store and its place in the list would take
+  no fewer heap bytes than they do (a short record, many other runs; glibc's chunk sizes), and records with gap lines
+  or of proteins are never packed. The batch loop makes a batch's letters again when it takes the batch
+  (`Store::take`, by the search pool's threads with two threads or more), before any reader of them (WindowMasker,
+  DUST, the encoding): the letters are the reader's, byte for byte. Packing reads 32 letters at a time with AVX2
+  where the CPU has it (checked at run time) and 8 in a `u64` elsewhere; the letters are made 32 at a time with AVX2,
+  else 4 from a table per packed byte. The rule (class conditional, recorded where `search_cli` decides, before the
+  reading): the store acts (`LOSAT_X_BNQDROP`'s rule) and the query file's bytes are at least twice the largest batch
+  (`x_query_batch_letters`, as `LOSAT_X_QSTREAM`'s `Batch`: with fewer the first batch holds most letters anyway);
+  standard input, without a size, is not packed. With `LOSAT_TIMING`
+  `[TIMING] x_bn_q_pack: records= letters= bytes= unpack_s=` gives the records packed, their letters, the bytes held
+  for them and the time spent making their letters again. Evidence (workstation, outputs identical; peak `RssAnon` of
+  a 10 ms sample, max RSS = max(%M, VmHWM)): megablast of 31,168 D. melanogaster cDNAs (89.3 Mb, 37 batches) against
+  3 Mb, `-subject` at one thread (node 0 core 28 with its sibling idle, 8 pairs against dev 83b9673b, alternating
+  order, load 9-11): `RssAnon` 215.3 -> 156.7 MiB, max RSS 221.9 -> 163.5, wall x0.997 (7 of 8 faster), `cycles:u`
+  x1.002, `instructions:u` x1.005, minor faults -15.0k (the reading takes 0.152 s against 0.163); again after the
+  review's change (records that save no heap bytes keep their letters), under a load of 93-106: 215.3 -> 156.2 MiB,
+  wall x1.002 (3 of 8), `cycles:u` x1.003, `instructions:u` x1.005; `-db` at 16 threads (node 1, CPUs 32-47, 8 pairs,
+  load 20): `RssAnon` 234.4 -> 175.3 MiB, max RSS 235.5 -> 177.8, wall median x1.001 (geometric mean x0.995, 4 of 8
+  faster, every pair within 0.96-1.03), `instructions:u` x1.004, `cycles:u` x1.009 (the pool's threads woken to make
+  each batch's letters again: 13 ms on the loop's thread at one thread); megablast of the 5.5 Mb Sakai genome (one
+  batch, not packed): `instructions:u` x1.000. The 22.3 MB of packed letters replace 89.3 MB. Before the reader
+  packed in place of its copy, packing after it with `PackedNucleotide` cost x1.020 (one thread) and x1.098 (`-db`,
+  16 threads) of the time (plan v4 line A10 session 19).
 - `LOSAT_X_GREEDYROWFUSE=1` (BLASTN megablast, the distances of the non-affine greedy alignment that `x_greedy_row` runs:
   every traceback, and the score-only calls the fused loop GREEDYFUSE declines; speed; in the strict set from the pull
   request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per

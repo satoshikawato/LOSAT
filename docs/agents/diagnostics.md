@@ -432,6 +432,7 @@ export LOSAT_X_TBXQSLICE=1
 export LOSAT_X_TBXRESOLVE=1
 export LOSAT_X_TBXRPTPAR=1
 export LOSAT_X_TBXSCANBF=1
+export LOSAT_X_TBXSTORE=1
 export LOSAT_X_TBXUNITMASK=256
 ```
 
@@ -2753,7 +2754,39 @@ Rebuilding less:
   9.72 -> 8.31 s (cycles x0.855, instructions x0.948), 8 threads 1.52 -> 1.28 s (cycles x0.835); the genome as
   `-db` 8.22 -> 8.15 s (cycles x0.992, instructions x1.000). With `=0`: cycles x1.000-1.001 of the dev binary.
   WebAssembly (serial WASI command, one Node process, CPU 20, 3 rounds, against `=0`): the fruit fly genome FASTA
-  as `-subject` 13.17 -> 11.38 s (x0.864), linear memory equal (206 MiB).
+  as `-subject` 13.17 -> 11.38 s (x0.864), linear memory equal (206 MiB). Since `LOSAT_X_TBXSTORE`
+  (2026-10-25) the command line searches its records packed: the switch acts on `run_local`'s records (LOSAT Web,
+  the library) and with `LOSAT_X_TBXSTORE=0`.
+- `LOSAT_X_TBXSTORE=1` (TBLASTX, memory; in the strict set from the pull request that added it, 2026-10-25;
+  `=0` turns it off) the records of `-subject` are packed as they are read (`blastinput/x_packed_subjects.rs`,
+  `x_read_packed_subjects`, shared with `LOSAT_X_TBNSTORE`: a record is cut to `-subject_loc` first; at two or
+  more threads a second thread packs while the reader reads, natively), the records keep their deflines and no
+  letters, and the search reads the stores as it reads a database's sequences (`Subjects::Stored`): the
+  preliminary frames from the packed bases (NCBI's compressed subject: an ambiguous base resolved by
+  `CRandom(length)`, the bases `x_resolved_record_frames` gives a record), the letter frames and the report rows
+  from the stored letters (`report::SubjectLetters::Stored`, ordinals `0..n`); the numbers of the subject set, the
+  warnings of records without letters and the outfmt 0 prolog read the stores' lengths. Before, the letters of
+  the whole set (one byte per base) were held for the whole run. Conditional: `run_local` (LOSAT Web, the
+  library) keeps its records, and a set with a byte without an ncbi4na code keeps every record's letters (the
+  CLI reader gives none, it reads `U` as `T`: the reference side is a gap of the reach table). The same pull
+  request made the packing and the stored windows faster for every caller, with no switch (the switch alone
+  cost time, below, and a fix that costs time lands only with its recovery): `PackedNucleotide::
+  from_subject_letters` packs blocks of 32 letters of one case at a time (the check vectorized, four letters by
+  one multiplication), and `bases_into` / `letters_to` make a window's letters with one table read per packed
+  byte. The lib tests `every_form_is_the_one_made_from_the_letters` (the packed bytes against
+  `encode_subject_ncbi2na_packed`, `bases_into` against `codes_into`, letters and intervals, with block-shaped
+  cases: one case per block, case changes and other letters inside and between blocks, N runs across blocks,
+  every length around a block) pin them. Measured on the workstation (node 0 CPUs 16-23, HT siblings idle, cores warmed 3 s, one warm-up round +
+  3 rounds, arm order rotating, medians of the per-round ratios against `=0` of the same binary; reports
+  identical; load 21-35): 3 fruit fly transcripts x the fruit fly genome FASTA (`-subject`, 1,870 records) 1
+  thread max RSS 218 -> 114 MiB (the genome as `-db`: 107 MiB), cycles x0.990, wall x0.984; 8 threads 409 ->
+  316 MiB, cycles x0.992, wall x0.992; x the fruit fly cDNA FASTA (31,168 records) 1 thread 105 -> 43 MiB,
+  cycles x0.985; 8 threads 106 -> 46 MiB, cycles x0.992; the genome as `-db` against the dev binary cycles
+  x0.985 (the stored windows). Without the faster packing the switch cost cycles x1.016 (1 thread) and x1.019
+  (8 threads, wall up to x1.13: the packing thread was slower than the reader) for the same memory. With
+  `LOSAT_TIMING` the packing is in `read_fasta`. WebAssembly (serial WASI command, one Node process, a fresh
+  instance per search, CPU 20, one warm-up round + 3 rounds against `=0`; output identical): the fruit fly
+  genome FASTA as `-subject` 11.01 -> 10.82 s (x0.981), linear memory 206 -> 128 MiB.
 
 Scheduling (each value computed by one thread with the original function; order of output kept):
 
@@ -4620,7 +4653,8 @@ Scheduling (each value computed by one thread with the original function; order 
   With `-subject_loc` a record is first cut in place to its interval, into the record
   `seq_range::cut_subjects` makes, whose length seeds the resolution of ambiguous bases as NCBI's
   subject set-up does; the records keep their deflines. With two or more threads a second
-  thread packs the records while the reader reads the next ones (`x_packed_while_read`: batches of
+  thread packs the records while the reader reads the next ones (`x_packed_while_read`, since
+  2026-10-25 in `blastinput/x_packed_subjects.rs`, shared with `LOSAT_X_TBXSTORE`: batches of
   up to 1,024 records or 4 MiB of letters, handed over one at a time), so the packing does not add
   to the read; the records and their stores are those of the one-thread read, in the same order.
   A WebAssembly build packs on the reader at every thread count (since 2026-10-18): there the

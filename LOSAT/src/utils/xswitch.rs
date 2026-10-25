@@ -299,6 +299,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXRESOLVE",
     "LOSAT_X_TBXRPTPAR",
     "LOSAT_X_TBXSCANBF",
+    "LOSAT_X_TBXSTORE",
     "LOSAT_X_TBXUNITMASK",
 ];
 

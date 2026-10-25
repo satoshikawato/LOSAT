@@ -126,7 +126,16 @@ struct RunSubjects<'a> {
 /// The subject set as the reports show it.
 enum ShownSubjects<'a> {
     /// `-subject`: `User specified sequence set (Input: PATH)`; the records are the whole set.
-    Fasta(&'a [FastaRecord]),
+    /// EXPERIMENT (LOSAT_X_TBXSTORE): with `x_stored`, the records hold no letters; the stores
+    /// hold them, by record (the ordinals `0..n`, which the reports' `SubjectLetters::Stored`
+    /// reads).
+    Fasta {
+        records: &'a [FastaRecord],
+        x_stored: Option<(
+            &'a [crate::sequence::packed_subject::PackedNucleotide],
+            &'a [u32],
+        )>,
+    },
     /// `-db`: the `-db` value (outfmt 7's `# Database:` line), the database's `Database:` lines
     /// (outfmt 0), and the sequences by ordinal id, whose reported ones the reports show by
     /// rank (`database::reported_subjects`).
@@ -143,6 +152,9 @@ enum SubjectSource<'a> {
     Fasta {
         records: &'a [FastaRecord],
         placements: &'a Placements,
+        /// EXPERIMENT (LOSAT_X_TBXSTORE): the records' letters, packed as read (the records
+        /// hold none).
+        x_stores: Option<&'a [crate::sequence::packed_subject::PackedNucleotide]>,
     },
     /// A `-db` database (`tblastx/database.rs`).
     Database(&'a super::super::database::TblastxDatabase),
@@ -718,8 +730,8 @@ pub fn run(
     use crate::blastinput::input_files;
     // `-db`: no subject file; the database is opened after the options are processed
     // (`search_cli`), where NCBI's `InitializeSubject` opens it (tblastx_app.cpp:113-119).
-    let (subjects, subject_placements) = if args.db.is_some() {
-        (Vec::new(), Placements::default())
+    let (subjects, subject_placements, x_stores) = if args.db.is_some() {
+        (Vec::new(), Placements::default(), None)
     } else {
         read_subject_set(&args, settings.clone())?
     };
@@ -769,6 +781,7 @@ pub fn run(
             query_file,
             &subjects,
             &subject_placements,
+            x_stores.as_deref(),
             &mut outputs,
             settings,
         )
@@ -801,7 +814,11 @@ pub fn run(
 fn read_subject_set(
     args: &TblastxArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-) -> Result<(Vec<FastaRecord>, Placements)> {
+) -> Result<(
+    Vec<FastaRecord>,
+    Placements,
+    Option<Vec<crate::sequence::packed_subject::PackedNucleotide>>,
+)> {
     use crate::blastinput::input_files;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2553-2557
     // ```c
@@ -851,26 +868,39 @@ fn read_subject_set(
         subject_file,
         ReaderConfig::subject("TBLASTX", false, settings.data_loaders),
     );
-    // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
-    // counterpart.
+    // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs); with
+    // LOSAT_X_TBXSTORE the packing of each record is in this interval too. No NCBI counterpart.
     let t_read_fasta = crate::utils::xtiming::clock();
-    let read_subject_records = {
-        let mut stderr = std::io::stderr();
-        read_subjects(
-            &mut subject_source,
-            subject_range.as_ref(),
-            &mut |message: &[u8]| std::io::Write::write_all(&mut stderr, message),
-        )?
+    // EXPERIMENT (LOSAT_X_TBXSTORE): each record's letters packed as it is read
+    // (`x_read_packed_subjects`, cut to `-subject_loc` first); the search reads the stores as
+    // a database's (`Subjects::Stored`), the reports by record. A set with a byte without an
+    // ncbi4na code (the FASTA reader gives none: it reads `U` as `T`) or a record over `u32::MAX`
+    // bases keeps every record's letters.
+    let mut stderr = std::io::stderr();
+    let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
+    let (subjects, subject_placements, stores) = if super::super::subjects::x_tbx_store() {
+        let (subjects, stores, placements) =
+            crate::blastinput::x_packed_subjects::x_read_packed_subjects(
+                &mut subject_source,
+                subject_range.as_ref(),
+                &mut warn,
+                args.num_threads,
+                "TBLASTX",
+            )?;
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXSTORE", stores.is_some());
+        (subjects, placements, stores)
+    } else {
+        let read_subject_records =
+            read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?;
+        match cut_subjects(&read_subject_records, subject_range.as_ref())? {
+            Some((cut, placements)) => (cut, placements, None),
+            None => (read_subject_records, Placements::default(), None),
+        }
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(subject_source);
-    let (subjects, subject_placements) =
-        match cut_subjects(&read_subject_records, subject_range.as_ref())? {
-            Some((cut, placements)) => (cut, placements),
-            None => (read_subject_records, Placements::default()),
-        };
     check_subjects_not_empty(&subjects)?;
-    Ok((subjects, subject_placements))
+    Ok((subjects, subject_placements, stores))
 }
 
 /// NCBI's error for a subject file without records, raised when it reads the subjects.
@@ -1049,6 +1079,7 @@ fn search_cli(
     query_file: std::fs::File,
     subjects: &[FastaRecord],
     subject_placements: &Placements,
+    x_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
     outputs: &mut ReportOutputs<'_>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
@@ -1104,6 +1135,7 @@ fn search_cli(
         None => SubjectSource::Fasta {
             records: subjects,
             placements: subject_placements,
+            x_stores,
         },
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:125-135
@@ -1260,6 +1292,7 @@ pub(crate) fn run_local_with(
         SubjectSource::Fasta {
             records: searched_subjects,
             placements: subject_placements,
+            x_stores: None,
         },
         outputs,
         v1,
@@ -1347,12 +1380,25 @@ fn search(
     // stays in the database statistics with no letters, and is never searched
     // (`process_subject` skips subjects shorter than a word).
     // A database has no such warnings (its sequences are not set up by the formatter).
-    if let SubjectSource::Fasta { records, .. } = &source {
-        crate::blastinput::input_files::write_empty_subject_warnings(
+    match &source {
+        SubjectSource::Fasta {
             records,
+            x_stores: Some(stores),
+            ..
+        } => crate::blastinput::input_files::write_empty_subject_warnings_by_length(
+            records,
+            |index| stores[index].len(),
             "tblastx",
             outputs.diagnostics,
-        )?;
+        )?,
+        SubjectSource::Fasta { records, .. } => {
+            crate::blastinput::input_files::write_empty_subject_warnings(
+                records,
+                "tblastx",
+                outputs.diagnostics,
+            )?
+        }
+        SubjectSource::Database(_) => {}
     }
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:170-173
     // ```c
@@ -1417,15 +1463,46 @@ fn search(
         }
         SubjectSource::Fasta { .. } => (Vec::new(), None),
     };
+    // EXPERIMENT (LOSAT_X_TBXSTORE): the reports read the stores by record.
+    let x_ordinals: Vec<u32> = match &source {
+        SubjectSource::Fasta {
+            x_stores: Some(stores),
+            ..
+        } => (0..stores.len() as u32).collect(),
+        _ => Vec::new(),
+    };
     let (run_subjects, subject_placements) = match source {
         SubjectSource::Fasta {
             records,
             placements,
+            x_stores: Some(stores),
+        } => (
+            RunSubjects {
+                subjects: Subjects::Stored(stores),
+                numbers: SubjectSetNumbers {
+                    total: stores.iter().map(|store| store.len() as i64).sum(),
+                    count: records.len() as i64,
+                    dbsize: args.dbsize,
+                },
+                shown: ShownSubjects::Fasta {
+                    records,
+                    x_stored: Some((stores, &x_ordinals)),
+                },
+            },
+            placements,
+        ),
+        SubjectSource::Fasta {
+            records,
+            placements,
+            x_stores: None,
         } => (
             RunSubjects {
                 subjects: Subjects::Fasta(records),
                 numbers: SubjectSetNumbers::of_records(records, args.dbsize),
-                shown: ShownSubjects::Fasta(records),
+                shown: ShownSubjects::Fasta {
+                    records,
+                    x_stored: None,
+                },
             },
             placements,
         ),
@@ -1513,7 +1590,8 @@ pub(crate) struct TblastxReportRun<'a> {
     pub queries: &'a [FastaRecord],
     pub subjects: &'a [FastaRecord],
     /// The subjects' letters that the displayed rows read (`-db`: the stored codes of the
-    /// reported sequences; their records hold none).
+    /// reported sequences; `-subject` with LOSAT_X_TBXSTORE: the stores of the records; their
+    /// records hold none).
     pub subject_letters: report::SubjectLetters<'a>,
     /// `-db`: the database and its reported sequences (`subjects` are their records, by rank).
     pub database: Option<ReportDatabase<'a>>,
@@ -1679,13 +1757,16 @@ fn write_pairwise_prologs(
         {
             let mut writer = format.sink.open()?;
             match subjects {
-                ShownSubjects::Fasta(records) => {
+                ShownSubjects::Fasta { records, x_stored } => {
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
                         report::NCBI_TBLASTX_VERSION,
                         &tblastx_database_name(args),
                         records.len(),
-                        records.iter().map(|r| r.seq().len()).sum(),
+                        match x_stored {
+                            Some((stores, _)) => stores.iter().map(|store| store.len()).sum(),
+                            None => records.iter().map(|r| r.seq().len()).sum(),
+                        },
                         None,
                     )?
                 }
@@ -1960,7 +2041,9 @@ fn write_tblastx_outputs(
                     },
                     database_total_letters: match &run.database {
                         Some(database) => database.pairwise.total_letters as usize,
-                        None => run.subjects.iter().map(|r| r.seq().len()).sum(),
+                        None => (0..run.subjects.len())
+                            .map(|s_idx| run.subject_letters.length(s_idx))
+                            .sum(),
                     },
                     word_threshold: args.threshold,
                     window_size: args.window_size as usize,
@@ -2765,9 +2848,14 @@ impl BatchReports<'_> {
         // letters are read from the stored codes).
         let reported_subjects;
         let (subjects, subject_letters, database) = match self.subjects {
-            ShownSubjects::Fasta(records) => {
-                (*records, report::SubjectLetters::Records(records), None)
-            }
+            ShownSubjects::Fasta { records, x_stored } => (
+                *records,
+                match x_stored {
+                    Some((stores, ordinals)) => report::SubjectLetters::Stored { stores, ordinals },
+                    None => report::SubjectLetters::Records(records),
+                },
+                None,
+            ),
             ShownSubjects::Database {
                 database,
                 pairwise,

@@ -44,8 +44,8 @@ mod x_redo_fit;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_redo_par;
-// EXPERIMENT (LOSAT_X_BPREDODBSUBJ / LOSAT_X_BPREDODBSUBJSHADOW): the redo of a `-db` search reads
-// each match's subject from the database.
+// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the redo of a `-db` search reads each match's subject from
+// the database.
 mod x_redo_subjects;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691
 // ```c
@@ -86,36 +86,6 @@ pub fn x_bp_redo_par_print_summary() {
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     x_redo_par::x_bp_redo_par_print_summary();
-}
-
-/// EXPERIMENT (LOSAT_X_BPSUBJRUNSHADOW): the shadow mode's line at exit.
-// No NCBI counterpart: it prints counters and changes no value NCBI computes.
-pub fn x_bp_subj_run_print_summary() {
-    blast_engine::x_bp_subj_run_print_summary();
-}
-
-/// EXPERIMENT (LOSAT_X_BPDBCUTSHADOW): the shadow mode's line at exit.
-// No NCBI counterpart: it prints counters and changes no value NCBI computes.
-pub fn x_bp_db_cut_print_summary() {
-    blast_engine::x_bp_db_cut_print_summary();
-}
-
-/// EXPERIMENT (LOSAT_X_BPLISTEDLEANSHADOW): the shadow mode's line at exit.
-// No NCBI counterpart: it prints counters and changes no value NCBI computes.
-pub fn x_bp_listed_lean_print_summary() {
-    blast_engine::x_bp_listed_lean_print_summary();
-}
-
-/// EXPERIMENT (LOSAT_X_BPREDODBSUBJSHADOW): the shadow mode's line at exit.
-// No NCBI counterpart: it prints counters and changes no value NCBI computes.
-pub fn x_bp_redo_db_subj_print_summary() {
-    x_redo_subjects::x_bp_redo_db_subj_print_summary();
-}
-
-/// EXPERIMENT (LOSAT_X_BPSUBJMETASHADOW): the shadow mode's line at exit.
-// No NCBI counterpart: it prints counters and changes no value NCBI computes.
-pub fn x_bp_subj_meta_print_summary() {
-    blast_engine::x_bp_subj_meta_print_summary();
 }
 
 /// EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): a search's result against the new path's when the

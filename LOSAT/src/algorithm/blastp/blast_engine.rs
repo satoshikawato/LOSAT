@@ -59,15 +59,15 @@ use crate::stats::{
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score, BLASTAA_SIZE};
 
 mod database;
-// EXPERIMENT (LOSAT_X_BPSUBJRUN / LOSAT_X_BPSUBJRUNSHADOW): the parallel `-subject` loop in runs of
-// subjects, one diagonal table fill per run.
+// EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel `-subject` loop in runs of subjects, one diagonal
+// table fill per run.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_subject_runs;
-// EXPERIMENT (LOSAT_X_BPSUBJMETA / LOSAT_X_BPSUBJMETASHADOW): the subjects' tabular IDs and titles
-// of the block search made once for all blocks (held by `x_query_blocks::XBlockSubjects`).
+// EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular IDs and titles of the block search made
+// once for all blocks (held by `x_query_blocks::XBlockSubjects`).
 pub(super) mod x_subject_meta;
 
 use super::alignment::build_alignment_view_with_matrix;
@@ -1062,32 +1062,6 @@ fn blastp_subject_diag_offsets(subjects: &[EncodedProtein], window: i32) -> Vec<
         }
     }
     offsets
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPSUBJRUNSHADOW): the shadow mode's line at exit.
-pub(crate) fn x_bp_subj_run_print_summary() {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    x_subject_runs::x_bp_subj_run_print_summary();
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPDBCUTSHADOW): the shadow mode's line at exit.
-pub(crate) fn x_bp_db_cut_print_summary() {
-    database::x_bp_db_cut_print_summary();
-}
-
-/// EXPERIMENT (LOSAT_X_BPLISTEDLEANSHADOW): the shadow mode's line at exit.
-pub(crate) fn x_bp_listed_lean_print_summary() {
-    database::x_bp_listed_lean_print_summary();
-}
-
-/// EXPERIMENT (LOSAT_X_BPSUBJMETASHADOW): the shadow mode's line at exit.
-pub(crate) fn x_bp_subj_meta_print_summary() {
-    x_subject_meta::x_bp_subj_meta_print_summary();
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
@@ -2810,23 +2784,13 @@ fn check_tabular_subject_ids(
 /// The stored results are `tabular_subject_id_results` of the same records, a function of each
 /// record only (`tabular_subject_id(local_id, title, true)`), so the check fails for the same block
 /// and names the same record as `tabular_subject_ids`, and otherwise the shown IDs are its IDs.
-/// No floating-point operation is involved. With `LOSAT_X_BPSUBJMETASHADOW` the block's values are
-/// made again as without the switch and compared (`XSubjectMeta::x_shadow_compare`).
+/// No floating-point operation is involved.
 fn x_tabular_subject_ids_cached<'m>(
     hit_lists: &[Option<BlastpHitList>],
     subjects: &[FastaRecord],
     meta: &'m x_subject_meta::XSubjectMeta,
 ) -> Result<&'m [Arc<[u8]>]> {
-    let result = check_tabular_subject_ids(hit_lists, subjects, meta.ids()).map(|()| meta.shown());
-    if meta.shadow() {
-        meta.x_shadow_compare(
-            subjects,
-            &tabular_subject_id_results(subjects),
-            &tabular_subject_ids(hit_lists, subjects),
-            &result,
-        );
-    }
-    result
+    check_tabular_subject_ids(hit_lists, subjects, meta.ids()).map(|()| meta.shown())
 }
 
 fn blastp_tabular_field_text(
@@ -6299,9 +6263,7 @@ fn search(
         super::x_query_blocks::x_reach_block_search(&x_formats, false);
     }
     if let Some((x_kinds, blocks)) = x_plan {
-        use super::x_query_blocks::{
-            XBlockReport, XBlockSink, XCopyWriter, XOffsetObserver, XShadowDir, XShadowObserver,
-        };
+        use super::x_query_blocks::{XBlockReport, XBlockSink, XOffsetObserver};
         let reader_warnings = &batches.warnings;
         let ReportOutputs {
             formats,
@@ -6315,26 +6277,14 @@ fn search(
         // LOSAT_X_BPQBLOCKXML2): the reports the
         // blocks write, whose titles are checked below.
         let x_pairwise = x_kinds.contains(&XBlockReport::Pairwise);
-        // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): copies of what the blocks write, compared below
-        // with the search of all queries.
-        let x_shadow = super::x_query_blocks::x_bp_qblock_fmt() == 2;
-        // The messages and search space the run carries before its first archive: the shadow's
-        // search of all queries starts from them (`ArchiveHandle::scratch`).
-        let x_archive_seed = args.archive.as_ref().map(|handle| handle.seed());
-        let output_copies: Vec<std::sync::Mutex<Vec<u8>>> =
-            outfmts.iter().map(|_| Default::default()).collect();
-        let warning_copy = std::sync::Mutex::new(Vec::new());
         // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the hit records of all blocks, each with the index of its
         // query among the call's queries (the block's index plus the block's first query), handed to
         // the caller's sink once, after the last block: one call with the final list of all
         // queries, as the search of all queries makes it.
         let x_want_records = hits.is_some();
         let mut x_records: Option<Vec<PairwiseHit>> = x_want_records.then(Vec::new);
-        let mut x_recorder =
-            (x_shadow && observer.is_some()).then(|| XShadowObserver::new(&output_copies));
         // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state that the blocks of an outfmt 13 to 16
-        // run hand on (such a run has one output, `x_query_block_plan`); the shadow reads the
-        // number of side files from it after the last block.
+        // run hand on (such a run has one output, `x_query_block_plan`).
         let x_xml2_carry = std::sync::Mutex::new(crate::report::blast_xml2::Xml2Carry::default());
         let searched_in_blocks =
             crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
@@ -6410,18 +6360,6 @@ fn search(
                     .iter_mut()
                     .map(|format| XBlockSink::new(&mut format.sink))
                     .collect();
-                let mut x_outputs: Vec<XCopyWriter<'_, XBlockSink<'_>>> = sinks
-                    .iter_mut()
-                    .zip(&output_copies)
-                    .map(|(sink, copy)| XCopyWriter {
-                        inner: sink,
-                        copy: x_shadow.then_some(copy),
-                    })
-                    .collect();
-                let mut x_warnings = XCopyWriter {
-                    inner: &mut **diagnostics,
-                    copy: x_shadow.then_some(&warning_copy),
-                };
                 // The HSPs of the blocks before: the first index of the block's HSPs in the list
                 // of all queries.
                 let mut x_hsps_before: HspIndex = 0;
@@ -6447,14 +6385,13 @@ fn search(
                         }
                     };
                     // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the caller's observer with the block's HSP
-                    // indices moved past the blocks before (and the shadow's record of the events).
+                    // indices moved past the blocks before.
                     let mut x_offset = observer.as_deref_mut().map(|inner| XOffsetObserver {
                         inner,
                         base: x_hsps_before,
-                        shadow: x_recorder.as_mut(),
                     });
                     let mut block_outputs = ReportOutputs {
-                        formats: x_outputs
+                        formats: sinks
                             .iter_mut()
                             .zip(&outfmts)
                             .map(|(output, &outfmt)| crate::api::local_blast::FormatOutput {
@@ -6462,7 +6399,7 @@ fn search(
                                 sink: OutputSink::Writer(output),
                             })
                             .collect(),
-                        diagnostics: &mut x_warnings,
+                        diagnostics: &mut **diagnostics,
                         hits: x_want_records
                             .then_some(&mut x_collect as &mut (dyn FnMut(&[PairwiseHit]) + Send)),
                         observer: x_offset
@@ -6504,8 +6441,8 @@ fn search(
                     drop(block_outputs);
                     x_hsps_before += x_records.as_ref().map_or(0, Vec::len) - records_before;
                 }
-                for output in &mut x_outputs {
-                    output.flush()?;
+                for sink in &mut sinks {
+                    sink.flush()?;
                 }
                 Ok(true)
             })?;
@@ -6513,180 +6450,6 @@ fn search(
             // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the hit records of all queries, once.
             if let (Some(sink), Some(records)) = (hits.as_mut(), x_records.as_ref()) {
                 sink(records);
-            }
-            // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): the search of all queries, its reports,
-            // warnings, hit records and observer events written into memory, against the blocks'.
-            if x_shadow {
-                let reference_copies: Vec<std::sync::Mutex<Vec<u8>>> =
-                    outfmts.iter().map(|_| Default::default()).collect();
-                let mut reference_sinks: Vec<std::io::Sink> =
-                    outfmts.iter().map(|_| std::io::sink()).collect();
-                let mut reference_writers: Vec<XCopyWriter<'_, std::io::Sink>> = reference_sinks
-                    .iter_mut()
-                    .zip(&reference_copies)
-                    .map(|(sink, copy)| XCopyWriter {
-                        inner: sink,
-                        copy: Some(copy),
-                    })
-                    .collect();
-                // The side files of an outfmt 13 or 14 run: the search of all queries writes its
-                // own into a fresh directory under TMPDIR with `-out`'s file name (the master lists
-                // the names without the directory), so that the run's files are not rewritten.
-                let side_kind = outfmts
-                    .first()
-                    .and_then(|outfmt| blastp_xml2_kind(outfmt))
-                    .filter(|kind| kind.is_files());
-                let side_files = side_kind
-                    .map(|_| x_xml2_carry.lock().expect("the carry").written())
-                    .unwrap_or(0);
-                let shadow_dir = side_kind
-                    .zip(args.out.as_deref())
-                    .map(|(_, out)| XShadowDir::new(out));
-                let mut reference_args = args.clone();
-                if let Some(dir) = &shadow_dir {
-                    reference_args.out = Some(dir.out.clone());
-                }
-                let mut reference_warnings = Vec::new();
-                let mut reference_diagnostics = super::x_query_blocks::XFeedWriter {
-                    inner: &mut reference_warnings,
-                    handle: args.archive.clone(),
-                };
-                let mut reference_records: Vec<String> = Vec::new();
-                let mut record_reference = |found: &[PairwiseHit]| {
-                    reference_records.extend(found.iter().map(|record| format!("{record:?}")));
-                };
-                let mut reference_recorder = XShadowObserver::new(&reference_copies);
-                let mut reference_outputs = ReportOutputs {
-                    formats: reference_writers
-                        .iter_mut()
-                        .zip(&outfmts)
-                        .map(|(writer, &outfmt)| crate::api::local_blast::FormatOutput {
-                            outfmt,
-                            sink: OutputSink::Writer(writer),
-                        })
-                        .collect(),
-                    diagnostics: &mut reference_diagnostics,
-                    hits: x_records.is_some().then_some(
-                        &mut record_reference as &mut (dyn FnMut(&[PairwiseHit]) + Send),
-                    ),
-                    observer: x_recorder
-                        .is_some()
-                        .then_some(&mut reference_recorder as &mut (dyn FormatObserver + Send)),
-                };
-                // The taxonomy database's open and lookup messages (outfmt 15 and 16) belong to the
-                // first search of a run: the blocks wrote them, so the second starts them over.
-                if let Some(database) = subject_source.database() {
-                    database.x_reset_taxdb();
-                }
-                let run_reference = || {
-                    crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
-                        search_batches(
-                            reference_args,
-                            &mut reference_outputs,
-                            pool,
-                            batches.input_done,
-                            batches.searched_done,
-                            epilog,
-                        )
-                    })
-                };
-                // The archive's state (messages, search space) is the reference's own while it
-                // runs: the blocks have used the run's.
-                match (args.archive.as_ref(), x_archive_seed.as_ref()) {
-                    (Some(handle), Some(seed)) => handle.scratch(seed, run_reference)?,
-                    _ => run_reference()?,
-                }
-                drop(reference_outputs);
-                drop(reference_diagnostics);
-                drop(reference_writers);
-                let block_records: Vec<String> = x_records
-                    .iter()
-                    .flatten()
-                    .map(|record| format!("{record:?}"))
-                    .collect();
-                let as_lines = |records: &[String]| {
-                    records
-                        .iter()
-                        .flat_map(|record| [record.as_bytes(), b"\n"].concat())
-                        .collect::<Vec<u8>>()
-                };
-                let (block_hits, reference_hits) =
-                    (as_lines(&block_records), as_lines(&reference_records));
-                let events = x_recorder.as_ref().map_or(0, XShadowObserver::count);
-                let block_events = x_recorder.take().map(|recorder| recorder.text());
-                let reference_events = block_events.is_some().then(|| reference_recorder.text());
-                drop(reference_recorder);
-                let written: Vec<Vec<u8>> = output_copies
-                    .into_iter()
-                    .map(|copy| copy.into_inner().expect("the shadow's copy"))
-                    .collect();
-                let reference: Vec<Vec<u8>> = reference_copies
-                    .into_iter()
-                    .map(|copy| copy.into_inner().expect("the shadow's copy"))
-                    .collect();
-                let warned = warning_copy.into_inner().expect("the shadow's copy");
-                // Side file n of the blocks (next to `-out`) and of the search of all queries (in
-                // the shadow directory), n in 1..=written; an unreadable file reads as empty text
-                // that differs from the other's.
-                let mut side_texts: Vec<(String, Vec<u8>, Vec<u8>)> = Vec::new();
-                if let (Some(kind), Some(out), Some(dir)) =
-                    (side_kind, args.out.as_deref(), &shadow_dir)
-                {
-                    let blocks_files = crate::report::blast_xml2::FsSideFiles::new(out, kind);
-                    let reference_files =
-                        crate::report::blast_xml2::FsSideFiles::new(&dir.out, kind);
-                    for n in 1..=side_files {
-                        let read = |path: std::path::PathBuf| {
-                            std::fs::read(&path)
-                                .unwrap_or_else(|error| format!("unreadable: {error}").into_bytes())
-                        };
-                        side_texts.push((
-                            format!("side file {n}"),
-                            read(blocks_files.path(n)),
-                            read(reference_files.path(n)),
-                        ));
-                    }
-                }
-                drop(shadow_dir);
-                let mut streams: Vec<(String, &[u8], &[u8])> = written
-                    .iter()
-                    .zip(&reference)
-                    .enumerate()
-                    .map(|(format, (written, reference))| {
-                        let name = if format == 0 {
-                            "output".to_string()
-                        } else {
-                            format!("output {format}")
-                        };
-                        (name, &written[..], &reference[..])
-                    })
-                    .collect();
-                streams.push(("stderr".to_string(), &warned, &reference_warnings));
-                streams.extend(
-                    side_texts.iter().map(|(name, blocks, reference)| {
-                        (name.clone(), &blocks[..], &reference[..])
-                    }),
-                );
-                if x_records.is_some() {
-                    streams.push(("hit records".to_string(), &block_hits, &reference_hits));
-                }
-                if let (Some(block_events), Some(reference_events)) =
-                    (block_events.as_ref(), reference_events.as_ref())
-                {
-                    for (format, (written, reference)) in
-                        block_events.iter().zip(reference_events).enumerate()
-                    {
-                        streams.push((format!("observer {format}"), written, reference));
-                    }
-                }
-                super::x_query_blocks::x_block_shadow_compare(
-                    blocks.len(),
-                    outfmts.len(),
-                    &streams,
-                    block_records.len(),
-                    events,
-                    side_files as usize,
-                );
             }
             return Ok(());
         }
@@ -6878,15 +6641,13 @@ fn x_query_block_plan(
     // `OutputFormat::parse` does not know.
     let mut kind_of = |outfmt: &str| match OutputFormat::parse(outfmt) {
         Ok((OutputFormat::Tabular, _)) => Some(XBlockReport::Tabular),
-        Ok((OutputFormat::TabularWithComments, _))
-            if super::x_query_blocks::x_bp_qblock_fmt() > 0 =>
-        {
+        Ok((OutputFormat::TabularWithComments, _)) if super::x_query_blocks::x_bp_qblock_fmt() => {
             x_formats.push(XBlockFormat::Fmt);
             Some(XBlockReport::Tabular)
         }
         // ABI v1's outfmt 0 titles of a database are not argued here.
         Ok((OutputFormat::Pairwise, _))
-            if super::x_query_blocks::x_bp_qblock_fmt() > 0
+            if super::x_query_blocks::x_bp_qblock_fmt()
                 && !(v1 && subject_source.database().is_some()) =>
         {
             x_formats.push(XBlockFormat::Fmt);
@@ -9798,17 +9559,14 @@ fn run_resolved_in_pool(
             };
             // EXPERIMENT (LOSAT_X_BPSUBJRUN): runs of consecutive subjects, one scratch per
             // thread and one diagonal table fill per run (`x_subject_runs.rs`).
-            let x_subj_run = x_subject_runs::x_bp_subj_run();
-            if x_subj_run != x_subject_runs::XSubjRun::Off {
+            if x_subject_runs::x_bp_subj_run() {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJRUN", true);
                 x_subject_runs::x_search_subject_runs(
                     pool,
                     &subjects,
                     &subject_diag_offsets,
-                    window,
                     &new_scratch,
                     &process_subject,
-                    x_subj_run == x_subject_runs::XSubjRun::Shadow,
                     &mut subject_results,
                 );
             } else {
@@ -9849,7 +9607,7 @@ fn run_resolved_in_pool(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
-        if x_subject_runs::x_bp_subj_run() != x_subject_runs::XSubjRun::Off {
+        if x_subject_runs::x_bp_subj_run() {
             crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJRUN", false);
         }
         let mut scratch =
@@ -9925,14 +9683,12 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the listed subjects without a copy of their residues
     // (`ListedSubjects::x_list`); the redo reads each match's subject from the database.
     let t_search = crate::utils::xtiming::clock();
-    let x_redo_db_subj = super::x_redo_subjects::x_bp_redo_db_subj();
     let mut listed_subjects = match database {
-        Some(database) if x_redo_db_subj != super::x_redo_subjects::XRedoDbSubj::Off => {
+        Some(database) if super::x_redo_subjects::x_bp_redo_db_subj() => {
             Some(database::ListedSubjects::x_list(
                 database,
                 &mut preliminary_hit_lists,
                 &mut x_compact_hit_lists,
-                x_redo_db_subj,
             )?)
         }
         Some(database) => Some(database::ListedSubjects::read(
@@ -11161,15 +10917,8 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the titles of the reported subjects only, and the
     // letters from the stored residues (`database/x_listed_lean.rs`); ABI v1's title checks
     // read the records.
-    let x_listed_lean = if reports.v1_titles {
-        database::XListedLean::Off
-    } else {
-        database::x_bp_listed_lean()
-    };
-    if listed_subjects.is_some()
-        && database.is_some()
-        && database::x_bp_listed_lean() != database::XListedLean::Off
-    {
+    let x_listed_lean = !reports.v1_titles && database::x_bp_listed_lean();
+    if listed_subjects.is_some() && database.is_some() && database::x_bp_listed_lean() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPLISTEDLEAN", !reports.v1_titles);
     }
     // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues that the reports read, read from the
@@ -11178,7 +10927,7 @@ fn run_resolved_in_pool(
     // read the letters only to recount the HSPs whose query or subject has an O, those of the
     // subjects with an O and of the HSPs whose query has one; every final subject's otherwise.
     if let (Some(listed), Some(database)) = (listed_subjects.as_mut(), database) {
-        let residues = if x_listed_lean != database::XListedLean::On {
+        let residues = if !x_listed_lean {
             database::XShownResidues::Listed
         } else if outputs.hits.is_none()
             && requested_formats.iter().all(|(outfmt, custom_fields)| {
@@ -11211,15 +10960,10 @@ fn run_resolved_in_pool(
         None => subject_set,
     };
     let listed_titles = match (listed_subjects.as_ref(), database) {
-        (Some(listed), Some(database)) => Some(match x_listed_lean {
-            database::XListedLean::Off => listed.read_titles(database, &hit_lists)?,
-            database::XListedLean::On => listed.x_read_titles_lean(database, &hit_lists)?,
-            database::XListedLean::Shadow => {
-                let records = listed.read_titles(database, &hit_lists)?;
-                let lean = listed.x_read_titles_lean(database, &hit_lists)?;
-                database::x_listed_lean_shadow_compare(&lean, &records);
-                lean
-            }
+        (Some(listed), Some(database)) => Some(if x_listed_lean {
+            listed.x_read_titles_lean(database, &hit_lists)?
+        } else {
+            listed.read_titles(database, &hit_lists)?
         }),
         _ => None,
     };

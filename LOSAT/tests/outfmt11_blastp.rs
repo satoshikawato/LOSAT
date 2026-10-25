@@ -25,6 +25,8 @@
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
+mod reach_support;
+
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 const INPUTS: &str = "tests/fasta/outfmt11";
 
@@ -242,37 +244,7 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
         output.stdout.len(),
         want.len()
     );
-    // The shadow's summary line (`LOSAT_X_BPQBLOCKFMTSHADOW`) must say the bytes were identical.
-    let mut shadow_lines = 0;
-    let stderr: Vec<u8> = output
-        .stderr
-        .split_inclusive(|&byte| byte == b'\n')
-        .filter(|line| {
-            if line.starts_with(b"[X_SHADOW]") {
-                shadow_lines += 1;
-                assert!(
-                    line.ends_with(b" identical\n"),
-                    "{label}: {}",
-                    String::from_utf8_lossy(line)
-                );
-                false
-            } else {
-                true
-            }
-        })
-        .flatten()
-        .copied()
-        .collect();
-    assert_eq!(stderr, frozen(case.name, "err"), "{label}: stderr");
-    let shadow_run = extra_env
-        .iter()
-        .any(|&(name, _)| name == "LOSAT_X_BPQBLOCKFMTSHADOW");
-    if shadow_run {
-        assert_eq!(
-            shadow_lines, 1,
-            "{label}: one shadow line, ending in identical"
-        );
-    }
+    assert_eq!(output.stderr, frozen(case.name, "err"), "{label}: stderr");
 }
 
 #[test]
@@ -286,24 +258,30 @@ fn archives_equal_ncbis_at_one_and_four_threads() {
 
 /// The query-block search takes outfmt 11 under the switch of outfmt 8, 9 and 12
 /// (`LOSAT_X_BPQBLOCKSA`) and writes the same bytes: with a block of one query letter, every
-/// batch is a block of its own; the shadow compares the blocks' bytes with the search of all
-/// queries; `LOSAT_X_BPQBLOCKSA=0` keeps the search of all queries.
+/// batch is a block of its own (the reach rows of the run show that the block search took the
+/// archive: `LOSAT_X_REACH`, `tests/reach_support`); `LOSAT_X_BPQBLOCKSA=0` keeps the search of
+/// all queries.
 #[test]
 fn query_blocks_do_not_change_the_archives() {
     // Only these cases run more than one batch to a searched end: the others have one batch, or
     // stop or fail before a search, so the plan of blocks refuses them.
     for case in CASES.iter().filter(|case| MULTI_BATCH.contains(&case.name)) {
-        for extra in [
-            &[("LOSAT_X_BPQBLOCK", "1")][..],
-            &[
-                ("LOSAT_X_BPQBLOCK", "1"),
-                ("LOSAT_X_BPQBLOCKFMTSHADOW", "1"),
-            ][..],
-            &[("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPQBLOCKSA", "0")][..],
-        ] {
-            for threads in ["1", "4"] {
-                check(case, extra, threads);
+        for threads in ["1", "4"] {
+            let reach = reach_support::Reach::new("outfmt11_bp");
+            check(case, &[("LOSAT_X_BPQBLOCK", "1"), reach.var()], threads);
+            for switch in ["LOSAT_X_BPQBLOCK", "LOSAT_X_BPQBLOCKSA"] {
+                let sides = reach.sides(switch);
+                assert!(
+                    sides.0,
+                    "{} threads {threads}: {switch} did not take the block search: {sides:?}",
+                    case.name
+                );
             }
+            check(
+                case,
+                &[("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPQBLOCKSA", "0")],
+                threads,
+            );
         }
     }
 }

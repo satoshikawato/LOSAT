@@ -8,13 +8,11 @@
 //! consecutive subjects, each run searched with one diagonal table that is filled once, at the
 //! one-thread order's offset of the run's first subject. These tests compare the reports with the
 //! switch off (`LOSAT_X_BPSUBJRUN=0`) and on (the default; blastp and blastp-fast, one hit and two
-//! hits, the block search of `LOSAT_X_BPQBLOCK`) and run its shadow mode
-//! (`LOSAT_X_BPSUBJRUNSHADOW`), which checks every later subject of a run's offset and table and
-//! compares every subject's result with the result from a cleared table; its line at exit shows
-//! that the path ran (and, at one thread and on `-db`, that it did not). A difference stops the
-//! run. Each kernel and case runs at one thread count: the runs are cut by the subjects' lengths
-//! and the thread count only, and the unit tests of `x_subject_runs.rs` cut them at several
-//! thread counts.
+//! hits, the block search of `LOSAT_X_BPQBLOCK`); the reach rows of the run with the switch on
+//! (`LOSAT_X_REACH`, `tests/reach_support`) show that the path ran (and, at one thread and on
+//! `-db`, that it did not). Each kernel and case runs at one thread count: the runs are cut by the
+//! subjects' lengths and the thread count only, and the unit tests of `x_subject_runs.rs` cut them
+//! at several thread counts and check each later subject's offset and table.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-172
 //! ```c
@@ -26,10 +24,11 @@
 //!         }
 //! ```
 
-use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod reach_support;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -40,35 +39,16 @@ fn fixture(name: &str) -> PathBuf {
 /// The subjects of the fixture's subject proteome (`MejoMJNV.faa`).
 const SUBJECTS: u64 = 124;
 
-/// What one run printed: the report and standard error.
+/// What one run printed: the report.
 struct Run {
     stdout: Vec<u8>,
-    stderr: String,
-}
-
-impl Run {
-    /// The counters of the `[X_SHADOW] BPSUBJRUN` line, which must end with `identical`.
-    fn shadow(&self) -> HashMap<String, u64> {
-        let prefix = "[X_SHADOW] BPSUBJRUN ";
-        let line = self
-            .stderr
-            .lines()
-            .find(|line| line.starts_with(prefix))
-            .unwrap_or_else(|| panic!("no {prefix}line in {}", self.stderr));
-        assert!(line.ends_with(" identical"), "{line}");
-        line[prefix.len()..]
-            .split(' ')
-            .filter_map(|field| field.split_once('='))
-            .map(|(key, value)| (key.to_string(), value.parse().expect("a count")))
-            .collect()
-    }
 }
 
 /// One blastp run of the fixture pair (two related nimavirus proteomes) with `-task task`,
 /// against `subject` (`-subject FILE` or `-db NAME`), with `vars` as its only `LOSAT_*` variables
 /// that choose a code path, `BATCH_SIZE` 3000 (several query batches), `extra` arguments and
 /// `-outfmt outfmt`. `LOSAT_X_BPQBLOCK` is 0 (one search of all queries) unless `vars` sets it, so
-/// that the counts do not depend on the strict set's default. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
+/// that the searches do not depend on the strict set's default. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
 /// soon as a search has more than one thread, and it selects nothing; without the caller's value
 /// a file of the tests is named. The run must exit with 0.
@@ -118,7 +98,6 @@ fn blastp(
     );
     Run {
         stdout: output.stdout,
-        stderr,
     }
 }
 
@@ -132,10 +111,9 @@ fn with<'a>(base: &[(&'a str, &'a str)], extra: &[(&'a str, &'a str)]) -> Vec<(&
 }
 
 const OFF: (&str, &str) = ("LOSAT_X_BPSUBJRUN", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_BPSUBJRUNSHADOW", "1");
 
-/// The switch off, on (the default: the switch is in the strict set) and in its shadow mode give
-/// the same report; returns the shadow's counters.
+/// The switch off and on (the default: the switch is in the strict set) give the same report;
+/// returns the reach rows of the run with the switch on (`LOSAT_X_BPSUBJRUN`).
 fn same_reports(
     task: &str,
     subject: &[&OsStr],
@@ -143,64 +121,30 @@ fn same_reports(
     base: &[(&str, &str)],
     extra: &[&str],
     outfmt: &str,
-) -> HashMap<String, u64> {
+) -> reach_support::Reach {
     let what = format!("{task} {base:?} {extra:?} threads {threads} outfmt {outfmt}");
     let off = blastp(task, subject, threads, &with(base, &[OFF]), extra, outfmt);
     assert!(!off.stdout.is_empty(), "{what}: the fixture pair has rows");
-    let on = blastp(task, subject, threads, base, extra, outfmt);
-    assert!(
-        on.stdout == off.stdout,
-        "{what}: the report differs with the switch"
-    );
-    let shadow = blastp(
+    let reach = reach_support::Reach::new("subject_runs");
+    let on = blastp(
         task,
         subject,
         threads,
-        &with(base, &[SHADOW]),
+        &with(base, &[reach.var()]),
         extra,
         outfmt,
     );
     assert!(
-        shadow.stdout == off.stdout,
-        "{what}: the report differs in the shadow mode"
+        on.stdout == off.stdout,
+        "{what}: the report differs with the switch"
     );
-    shadow.shadow()
+    reach
 }
 
-/// The counters of a shadow run where the switch acted in `searches` searches of `subjects`
-/// subjects each (at most one run per subject, at least one per search): every subject compared,
-/// every subject but the first of each run searched without a fill and with its table checked.
-fn assert_counts(counts: &HashMap<String, u64>, searches: u64, subjects: u64, what: &str) {
-    assert_eq!(counts["searches"], searches, "{what}: {counts:?}");
-    assert_eq!(
-        counts["subjects"],
-        subjects * searches,
-        "{what}: {counts:?}"
-    );
-    assert_eq!(
-        counts["subjects_compared"], counts["subjects"],
-        "{what}: {counts:?}"
-    );
-    assert!(
-        (searches..counts["subjects"]).contains(&counts["runs"]),
-        "{what}: {counts:?}"
-    );
-    assert_eq!(
-        counts["fills_saved"],
-        counts["subjects"] - counts["runs"],
-        "{what}: {counts:?}"
-    );
-    assert_eq!(
-        counts["tables_checked"], counts["fills_saved"],
-        "{what}: {counts:?}"
-    );
-}
-
-/// `assert_counts` for the fixture's subjects, with no INT4_MAX / 4 reset (with the default window
-/// the fixture's offsets stay far below it).
-fn assert_engaged(counts: &HashMap<String, u64>, searches: u64, what: &str) {
-    assert_counts(counts, searches, SUBJECTS, what);
-    assert_eq!(counts["resets_in_runs"], 0, "{what}: {counts:?}");
+/// The runs of the switch were searched (its new side, not the one-thread loop's).
+fn assert_engaged(reach: &reach_support::Reach, what: &str) {
+    let sides = reach.sides("LOSAT_X_BPSUBJRUN");
+    assert!(sides.0, "{what}: the runs were not searched: {sides:?}");
 }
 
 // blastp and blastp-fast, the reference loops (the two-hit loop of
@@ -223,8 +167,8 @@ fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
         ),
         ("blastp-fast", "fused", &[][..], 2),
     ] {
-        let counts = same_reports(task, &subject, threads, base, &[], "6");
-        assert_engaged(&counts, 1, &format!("{task} {kernel} threads {threads}"));
+        let reach = same_reports(task, &subject, threads, base, &[], "6");
+        assert_engaged(&reach, &format!("{task} {kernel} threads {threads}"));
     }
 }
 
@@ -235,8 +179,8 @@ fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
 fn one_hit_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    let counts = same_reports("blastp", &subject, 3, &[], &["-window_size", "0"], "6");
-    assert_engaged(&counts, 1, "one hit");
+    let reach = same_reports("blastp", &subject, 3, &[], &["-window_size", "0"], "6");
+    assert_engaged(&reach, "one hit");
 }
 
 // The block search (`LOSAT_X_BPQBLOCK`, every block a search of all subjects). A report that is
@@ -246,22 +190,24 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let base = [("LOSAT_X_BPQBLOCK", "1")];
-    let counts = same_reports("blastp", &subject, 4, &base, &[], "6");
-    assert!(counts["searches"] > 1, "{counts:?}");
-    assert_engaged(&counts, counts["searches"], "block search");
+    let reach = same_reports("blastp", &subject, 4, &base, &[], "6");
+    assert!(
+        reach.sides("LOSAT_X_BPQBLOCK").0,
+        "the block search did not run"
+    );
+    assert_engaged(&reach, "block search");
 }
 
 // `-window_size 10000000`: each subject moves the diagonal offset by its length and 10,000,000, so
 // the offset passes INT4_MAX / 4 twice in the fixture's subjects (after the 54th and the 108th
 // subject; at 2 threads both inside runs). `finish_subject` (`Blast_ExtendWordExit`) puts it back
 // to the window and clears the table inside the run, and the later subjects of the run start from
-// there as in the one-thread loop. Each run allocates diagonal tables of 64 MiB (two per thread in
-// the shadow mode).
+// there as in the one-thread loop. Each run allocates a diagonal table of 64 MiB.
 #[test]
 fn the_int4_max_quarter_reset_inside_a_run_gives_the_reports_without_the_switch() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    let counts = same_reports(
+    let reach = same_reports(
         "blastp",
         &subject,
         2,
@@ -269,8 +215,7 @@ fn the_int4_max_quarter_reset_inside_a_run_gives_the_reports_without_the_switch(
         &["-window_size", "10000000"],
         "6",
     );
-    assert_counts(&counts, 1, SUBJECTS, "window 10000000");
-    assert!(counts["resets_in_runs"] > 0, "{counts:?}");
+    assert_engaged(&reach, "window 10000000");
 }
 
 /// The fixture's subject proteome with a record without letters before its 61st record, in a file
@@ -303,9 +248,8 @@ fn subject_file_with_an_empty_record() -> PathBuf {
 fn a_subject_without_letters_inside_a_run_gives_the_reports_without_the_switch() {
     let path = subject_file_with_an_empty_record();
     let subject = [OsStr::new("-subject"), path.as_os_str()];
-    let counts = same_reports("blastp", &subject, 2, &[], &[], "6");
-    assert_counts(&counts, 1, SUBJECTS + 1, "empty record");
-    assert_eq!(counts["resets_in_runs"], 0, "{counts:?}");
+    let reach = same_reports("blastp", &subject, 2, &[], &[], "6");
+    assert_engaged(&reach, "empty record");
     let _ = std::fs::remove_file(&path);
 }
 
@@ -333,8 +277,8 @@ fn subject_database() -> PathBuf {
 }
 
 // Where the subjects are not searched on the pool (one thread; a database, whose blocks are
-// searched with one table each already), the switch does not act: its shadow mode, which runs the
-// switch, searches no run and compares nothing.
+// searched with one table each already), the switch does not act: the run with the switch on
+// takes no new side (`LOSAT_X_REACH`).
 #[test]
 fn the_switch_does_not_act_at_one_thread_or_on_a_database() {
     let subject = subject_file();
@@ -342,15 +286,16 @@ fn the_switch_does_not_act_at_one_thread_or_on_a_database() {
     let database = subject_database();
     let db = [OsStr::new("-db"), database.as_os_str()];
     for (subject, threads) in [(&subject, 1), (&db, 4)] {
-        let run = blastp("blastp", subject, threads, &[SHADOW], &[], "6");
+        let reach = reach_support::Reach::new("subject_runs_none");
+        let run = blastp("blastp", subject, threads, &[reach.var()], &[], "6");
         assert!(
             !run.stdout.is_empty(),
             "threads {threads}: the fixture pair has rows"
         );
-        let counts = run.shadow();
+        let sides = reach.sides("LOSAT_X_BPSUBJRUN");
         assert!(
-            counts.values().all(|&count| count == 0),
-            "threads {threads}: {counts:?}"
+            !sides.0,
+            "threads {threads}: the runs were searched: {sides:?}"
         );
     }
     let _ = std::fs::remove_dir_all(database.parent().unwrap());

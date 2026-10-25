@@ -418,6 +418,7 @@ export LOSAT_X_TBNDBSTREAM=1
 export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNKEEPFEW=1
+export LOSAT_X_TBNLINKSETS=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNREDOLPT=1
 export LOSAT_X_TBNSCANBYTE=1
@@ -4749,13 +4750,15 @@ Scheduling (each value computed by one thread with the original function; order 
   increasing subject starts, each at most `longest_intron` after the end before it, so a set whose
   subject range lies more than `longest_intron` from the head set's cannot be admissible. The HSPs
   alone in their set are looked up by context, frame sign and subject start, the HSPs of linked sets
-  are always kept (their ranks sorted, so a head takes those in its window by two binary searches),
+  are always kept (their ranks sorted, so a head takes those in its window by two binary searches;
+  since `TBNLINKSETS`, 2026-10-26, only the sets the lookup meets, unless `LOSAT_X_TBNLINKSETS=0`),
   and the candidates are tested in NCBI's order with NCBI's tests; a window with no more HSPs than
   the subject starts looked up is tested whole, as NCBI does, so every link, number and E-value is
   NCBI's (unit test `x_chosen_candidates_give_the_links_of_the_whole_window` against the whole
   window on random lists; the whole-window loop stays in `link_preliminary_hsps` for that test only).
-  With `LOSAT_X_STATS=1` a line `[X_STATS] TBNLINKWIN heads= window= chosen=` gives the heads, the
-  candidates of their windows and the candidates tested. blastx keeps its own linking.
+  With `LOSAT_X_STATS=1` a line `[X_STATS] TBNLINKWIN heads= window= chosen= sets=` gives the heads, the
+  candidates of their windows, the candidates tested and the sets the lookup brought in. blastx
+  keeps its own linking.
   Timed on the workstation (perf-si-20261012 session 21, node 1, NCBI BLAST+ 2.17.0 `-db` and LOSAT
   with TBNSCANBF (then a switch) without and with the switch in turn, three rounds, one hash per case;
   time with the switch / without): zebrafish genome x one protein 0.60 at one thread (24.8 -> 14.8
@@ -4765,6 +4768,40 @@ Scheduling (each value computed by one thread with the original function; order 
   tblastn switches of 2026-10-17 against `=0` in rotating rounds, 3-8 rounds, one hash per case):
   zebrafish 0.58 (23.2 -> 13.5 s), human 0.82 at one thread and 0.84 at 8 threads, fly 0.81, MG1655
   0.98.
+- `LOSAT_X_TBNLINKSETS=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-26;
+  `=0` turns it off; `tblastn/stage_d_linking/x_link_window.rs` `XLinkWindow::candidates`): the linking candidates
+  of a head whose query-offset window holds more HSPs than its subject lookup (TBNLINKWIN, graduated) take a set of
+  two or more only when the lookup meets one of the set's HSPs, and then every HSP of that set in the window. Before,
+  every HSP of every set in the window was a candidate: repeat-family queries against a genome form thousands of
+  small sets, and every head tested all of them again (the B11i probe, 35 human proteins x the human genome `-db`
+  at 8 threads: 12.47 M heads chose 18.85 G candidates, 18.83 G of them HSPs of sets, and of the 9.60 G set HSPs
+  tested past NCBI's skip of 1719, 0.47 M (0.005 %) belonged to a set whose subject range meets the head set's
+  range +- `longest_intron`; chr1 x one query: 13,272 sets of at most 3, 11,734 candidates per head). A set of two or
+  more is itself an admissible merge, so each gap inside it is at most `longest_intron`; when its subject range
+  meets [lowest start - `longest_intron`, highest end + `longest_intron`] of the head set (which every admissible
+  set does), one of its HSPs meets that range, and the lookup (subject starts within `longest_intron` plus the
+  longest HSP of the list) finds it. The set is brought in once, by its first HSP met (the starts of a set increase
+  along its chain); the HSPs of a set share its sum score, number and E-value, and all of its HSPs in the window
+  stay candidates in NCBI's order, so NCBI's skip (`link_hsps.c` 1719) and tests (1407-1491) choose the same link
+  (unit test `x_chosen_candidates_give_the_links_of_the_whole_window`: random lists and lists of repeat copies of two
+  to five pieces over the whole subject, switch on and off, against NCBI's whole window; `tests/tblastn_link_window.rs`:
+  the 115 proteins of PemoMJNVA x MelaMJNV, the switch on and off at 1 and 2 threads). The sorted list of set HSPs
+  and its upkeep after each link are not kept while the switch is on. With `LOSAT_X_STATS=1` the
+  `[X_STATS] TBNLINKWIN` line ends with `sets=`, the sets the lookup brought in (0 with `=0`). Always: every
+  linking call whose heads take the lookup (a head's window longer than its lookup) takes this path.
+  Cost and floor: the preliminary linking was 902 of the 1,405 thread-s of the preliminary stage (35 proteins at 8
+  threads, session 10 of v4-B10); the floor is the lookup, about 1 us per head (298 thread-s of lookup and 631 of
+  tests for 12.47 M heads, loaded). Measured 2026-10-26 on the workstation (2x Xeon Gold 6338, cores warmed 3 s
+  before each run, pairs alternating in order, `perf stat` walls; base 9d477f4f; every output of a case the same
+  bytes in every arm; options `-evalue 1e-5 -max_target_seqs 5 -outfmt 6`): the first batch of HsG_b4 (35 human
+  proteins x `-db hsap_dna`) at 8 threads 212.1 -> 90.8 s (x0.433, 3 pairs, node 0 cores 24-31 with their siblings
+  idle, load 15-42; user 1,487 -> 706 s, instructions x0.515, max RSS x0.918; `=0` 211.0 s), at 16 threads 186.3 ->
+  48.3 s (x0.259) and at 32 threads 176.1 -> 42.9 s (x0.243; 3 pairs each, node 1; max RSS x1.00-1.01); at 1 thread
+  16 proteins x E. coli and fly proteins x the fly genome 81.416 / 81.404 / 81.416 G and 127.222 / 127.132 / 127.221 G
+  instructions (base, default, `=0`). Light cases (node 1, 8 pairs at 8 / 16 threads, instructions x0.9985-0.9999,
+  max RSS within 2 %): 16 proteins x E. coli x0.992 / x0.995, fly proteins x 5,000 16S x1.006 / x1.016 (0.10-0.15 s
+  runs; per-round ratios 0.92-1.09), the same around fly 2L (`-subject`) x0.999 / x0.979, against the fly genome
+  x0.995 / x0.991, one protein against the zebrafish genome x0.996 / x1.002.
 - `LOSAT_X_TBNXLATESIMD=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule
   of that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns
   it off; `tblastn/x_subject_translate.rs`): a packed subject's six frames (`TBNSTORE`, every `-db`

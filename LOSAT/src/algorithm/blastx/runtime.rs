@@ -1585,6 +1585,11 @@ impl PreliminarySink for Runtime<'_> {
         } else {
             None
         };
+        // EXPERIMENT (LOSAT_X_BXNEWTONLANES): the Newton problems of the redo are solved ahead
+        // (kappa::x_bx_newton_lanes) only where the composition-based redo runs.
+        if super::kappa::x_bx_newton_lanes() {
+            crate::utils::xreach::x_reach!("LOSAT_X_BXNEWTONLANES", kappa.is_some());
+        }
         super::x_timing::end(XEnd::Init, x_t);
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3543

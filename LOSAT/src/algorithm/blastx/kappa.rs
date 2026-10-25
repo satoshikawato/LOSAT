@@ -304,6 +304,11 @@ struct RedoContext<'a> {
 //     if (status != 0) {
 //         free(seqData->buffer);
 // ```
+// No NCBI counterpart: this thread's `get_range` calls, for the unit tests of the Newton lanes.
+#[cfg(test)]
+thread_local! {
+    static X_TEST_GET_RANGES: Cell<u64> = const { Cell::new(0) };
+}
 fn get_range<'a>(
     matching: &BlastCompoMatchingSequence<'a>,
     subject_range: &BlastCompoSequenceRange,
@@ -315,6 +320,8 @@ fn get_range<'a>(
     biased: bool,
     params: &BlastRedoAlignParams,
 ) -> Result<BlastRedoRangeResult> {
+    #[cfg(test)]
+    X_TEST_GET_RANGES.with(|count| count.set(count.get() + 1));
     let query =
         BlastCompoSequenceData::copy_query_range_with_selenocysteine_fix(orig_query, query_range);
     let mut subject = BlastCompoSequenceData::from_ncbistdaa(matching.data);
@@ -610,18 +617,11 @@ const CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
 //                                         &LambdaRatio            // local
 //                                 );
 // ```
-pub(crate) fn redo_context_observed(
+fn incoming_alignments(
     input: &[PreliminaryHsp],
     context_index: usize,
-    infos: &[BlastCompoQueryInfo],
-    subject: &[u8],
     params: &BlastRedoAlignParams,
-    lambda: f64,
-    scratch: &mut GapAlignScratch,
-    workspace: &mut BlastCompositionWorkspace,
-    matrix_state: &mut Option<AdjustedProteinMatrix>,
-    trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
-) -> Result<BlastRedoOneMatchResult> {
+) -> Option<Box<BlastCompoAlignment>> {
     let mut incoming = None;
     let mut tail = &mut incoming;
     for (index, h) in input
@@ -643,6 +643,46 @@ pub(crate) fn redo_context_observed(
         *tail = Some(node);
         tail = &mut tail.as_mut().expect("incoming inserted").next;
     }
+    incoming
+}
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3641
+// ```c++
+//                                 Blast_RedoOneMatch(
+//                                         alignments,             // thread-local
+//                                         redo_align_params,      // thread-local
+//                                         incoming_aligns,        // thread-local
+//                                         numAligns[frame_index], // local
+//                                         kbp->Lambda,            // thread-local
+//                                         &matchingSeq,           // thread-local
+//                                         -1,                     // const
+//                                         query_info,             // thread-local
+//                                         numContexts,            // thread-local
+//                                         matrix,                 // thread-local
+//                                         BLASTAA_SIZE,           // const
+//                                         NRrecord,               // thread-local
+//                                         &pvalueForThisPair,     // local
+//                                         compositionTestIndex,   // thread-local
+//                                         &LambdaRatio            // local
+//                                 );
+// ```
+// `incoming` is the frame's list (`incoming_alignments`); `x_ranges` the `get_range` results made
+// ahead for this call (EXPERIMENT LOSAT_X_BXNEWTONLANES, `x_bx_newton_lanes_prefetch_frames`; empty
+// when nothing was made ahead).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn redo_context_observed(
+    input: &[PreliminaryHsp],
+    incoming: &Option<Box<BlastCompoAlignment>>,
+    context_index: usize,
+    infos: &[BlastCompoQueryInfo],
+    subject: &[u8],
+    params: &BlastRedoAlignParams,
+    lambda: f64,
+    scratch: &mut GapAlignScratch,
+    workspace: &mut BlastCompositionWorkspace,
+    matrix_state: &mut Option<AdjustedProteinMatrix>,
+    x_ranges: XLaneRanges,
+    trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
+) -> Result<BlastRedoOneMatchResult> {
     let matching = BlastCompoMatchingSequence::new(0, subject);
     let state = RedoContext {
         input,
@@ -678,7 +718,7 @@ pub(crate) fn redo_context_observed(
         matrix: matrix_state.as_ref(),
     });
     let result = blast_redo_one_match_with_workspace_queries_and_matrix_observed(
-        &incoming,
+        incoming,
         params,
         &matching,
         infos,
@@ -686,6 +726,7 @@ pub(crate) fn redo_context_observed(
         &CALLBACKS,
         workspace,
         matrix_state,
+        x_ranges,
         trace,
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3641-3647
@@ -1005,6 +1046,28 @@ pub fn redo_list(
     state.redo_list(input, batch, subject)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
+// ```c
+// int
+// Blast_OptimizeTargetFrequencies(double x[],
+// ...
+//                                 int constrain_rel_entropy,
+//                                 double relative_entropy,
+//                                 double tol,
+//                                 int maxits)
+// ```
+// No NCBI counterpart: the switch, read once per process. On, the Newton problems of a match's frame
+// calls are solved ahead, four per vector (eight on aarch64; `x_newton_lanes.rs`), across frames;
+// off, each `Blast_AdjustScores` call solves its own problem. A result is used only by a call with the
+// same input bits, so it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXNEWTONLANES): a switch of the strict set, on unless
+/// `LOSAT_X_BXNEWTONLANES=0` (acts where the composition-based redo runs).
+pub(crate) fn x_bx_newton_lanes() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXNEWTONLANES"))
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3244-3248
 // ```c++
 //         query_info_tld[i] = s_GetQueryInfo(
@@ -1290,19 +1353,63 @@ impl KappaState {
         subject: &[u8],
         trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
     ) -> Result<Vec<RedoneHsp>> {
+        self.x_redo_list_observed(input, batch, subject, x_bx_newton_lanes(), trace)
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3590-3596
+    // ```c
+    //                 for (frame_index = 0;
+    //                         frame_index < numFrames;
+    //                         frame_index++, context_index++) {
+    //                     incoming_aligns = incoming_align_set[frame_index];
+    //                     if (!incoming_aligns) {
+    //                         continue;
+    //                     }
+    // ```
+    // `redo_list_observed` with the switch given: `x_lanes` (EXPERIMENT LOSAT_X_BXNEWTONLANES) solves
+    // the Newton problems of the coming frame calls ahead (`x_bx_newton_lanes_prefetch_frames`, at
+    // least `X_LANES_PREFETCH_INPUTS` at a time where the match has them) and hands each call the
+    // `get_range` results made for it.
+    pub(crate) fn x_redo_list_observed(
+        &mut self,
+        input: &[PreliminaryHsp],
+        batch: &PreparedQueryBatch,
+        subject: &[u8],
+        x_lanes: bool,
+        trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
+    ) -> Result<Vec<RedoneHsp>> {
         let query_index = input.first().map(|h| h.context / 6);
         ensure!(
             input.iter().all(|h| Some(h.context / 6) == query_index),
             "BLASTX Kappa requires one query/OID HSP list"
         );
         let mut output = Vec::new();
+        let first_context = query_index.unwrap_or(0) * 6;
+        let contexts: Vec<usize> = (first_context..first_context + 6)
+            .filter(|&context_index| input.iter().any(|h| h.context == context_index))
+            .collect();
+        let incoming: Vec<_> = contexts
+            .iter()
+            .map(|&context_index| incoming_alignments(input, context_index, &self.params))
+            .collect();
+        let x_lanes = x_lanes && self.params.uses_composition_based_stats();
+        // No NCBI counterpart: the ranges made ahead for the frame calls still to come, in call
+        // order; it does not change any value NCBI computes.
+        let mut x_ahead = std::collections::VecDeque::new();
 
-        for context_index in query_index.unwrap_or(0) * 6..query_index.unwrap_or(0) * 6 + 6 {
-            if !input.iter().any(|h| h.context == context_index) {
-                continue;
+        for (position, &context_index) in contexts.iter().enumerate() {
+            if x_lanes && x_ahead.is_empty() {
+                x_ahead.extend(x_bx_newton_lanes_prefetch_frames(
+                    &incoming[position..],
+                    &self.params,
+                    &BlastCompoMatchingSequence::new(0, subject),
+                    &self.infos,
+                    &CALLBACKS,
+                    &self.workspace,
+                ));
             }
             let result = redo_context_observed(
                 input,
+                &incoming[position],
                 context_index,
                 &self.infos,
                 subject,
@@ -1311,6 +1418,7 @@ impl KappaState {
                 &mut self.scratch,
                 &mut self.workspace,
                 &mut self.matrix,
+                x_ahead.pop_front().unwrap_or_default(),
                 trace,
             )?;
             for (context, alignments) in result.alignments_by_query.into_iter().enumerate() {
@@ -1502,5 +1610,213 @@ mod contained_reap_tests {
             let expected_hsps: Vec<PreliminaryHsp> = expected.into_iter().map(|(_, h)| h).collect();
             assert_eq!(actual_hsps, expected_hsps, "direct C boundary case {name}");
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1244
+// ```c
+//                 if (compo_adjust_mode != eNoCompositionBasedStats &&
+//                         (subject_is_translated || hsp_index == 0
+//                                 || (nearIdenticalStatus != oldNearIdenticalStatus))) {
+//                     Blast_AminoAcidComposition subject_composition;
+//                     s_GetComposition(&subject_composition,
+//                             alphsize, &subject,
+//                             &window->subject_range,
+//                             in_align, FALSE, subject_is_translated);
+//                     adjust_search_failed =
+//                             Blast_AdjustScores(matrix, query_composition,
+//                                     query.length,
+//                                     &subject_composition,
+//                                     subject.length,
+// ```
+// EXPERIMENT (LOSAT_X_BXNEWTONLANES): the redo of matches with the Newton problems of their frame
+// calls solved ahead equals the redo that solves each problem in its `Blast_AdjustScores` call, and
+// every problem a call solves was solved ahead with the same input bits.
+#[cfg(test)]
+mod x_bx_newton_lanes_tests {
+    use super::super::{
+        input::read_fasta,
+        parameters::{effective_lengths, score_block, subject_parameters},
+        query_setup::prepare_queries,
+    };
+    use super::*;
+    use crate::core::composition_adjustment::x_newton_lanes::x_test_take_counts;
+
+    /// The 20 standard residues in NCBIstdaa.
+    const STANDARD: [u8; 20] = [
+        1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22,
+    ];
+
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self, bound: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % bound as u64) as usize
+        }
+    }
+
+    /// One query: 36,000 bases of AP027131 (the genome of the measured blastx case) with the
+    /// default blastx options (`-comp_based_stats 2`, query SEG).
+    fn setup(
+        subject_length: usize,
+    ) -> (PreparedQueryBatch, Vec<ContextParameters>, ResolvedOptions) {
+        let cli: crate::cli::Cli = crate::cli::try_parse_from([
+            "losat",
+            "blastx",
+            "-query",
+            "unused.fna",
+            "-subject",
+            "unused.faa",
+        ])
+        .unwrap();
+        let crate::cli::Commands::Blastx(args) = cli.command else {
+            unreachable!()
+        };
+        let options = args.resolve().unwrap();
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/AP027131.fasta");
+        let mut records = read_fasta(&path, false, false).unwrap();
+        records.truncate(1);
+        records[0].sequence = records[0].sequence[100_000..136_000].to_vec();
+        records[0].lowercase_masks.clear();
+        let batch = prepare_queries(&records, &options).unwrap();
+        let mut parameters = score_block(&batch);
+        let length = subject_length as i64;
+        effective_lengths(&batch, &mut parameters, &options, length, 1, None).unwrap();
+        subject_parameters(
+            &batch,
+            &mut parameters,
+            &options,
+            length,
+            1,
+            subject_length,
+            None,
+        )
+        .unwrap();
+        (batch, parameters, options)
+    }
+
+    /// A subject made of `pieces` stretches of the query's translated frames (one in ten residues
+    /// replaced), separated by random residues or by runs of Q that SEG masks, and one HSP per
+    /// stretch, some with a second HSP inside it; the HSP scores alternate between near-identical
+    /// (5 per residue) and not, so that windows change their near-identical status.
+    fn case(
+        batch: &PreparedQueryBatch,
+        rng: &mut Rng,
+        pieces: usize,
+    ) -> (Vec<u8>, Vec<PreliminaryHsp>) {
+        let mut subject = Vec::new();
+        let mut hsps = Vec::new();
+        for _ in 0..pieces {
+            if rng.next(3) == 0 {
+                subject.extend(std::iter::repeat(15).take(20 + rng.next(20)));
+            } else {
+                for _ in 0..10 + rng.next(40) {
+                    subject.push(STANDARD[rng.next(20)]);
+                }
+            }
+            let context_index = rng.next(6);
+            let context = &batch.contexts[context_index];
+            let length = 60 + rng.next(140);
+            if context.length <= length {
+                continue;
+            }
+            let q_start = rng.next(context.length - length);
+            let translated =
+                &batch.sequence_start[1 + context.offset..1 + context.offset + context.length];
+            let s_start = subject.len();
+            for &residue in &translated[q_start..q_start + length] {
+                let keep = residue != 0 && residue != 25 && rng.next(10) != 0;
+                subject.push(if keep {
+                    residue
+                } else {
+                    STANDARD[rng.next(20)]
+                });
+            }
+            let near = rng.next(2) == 0;
+            let score = |near: bool, length: usize| {
+                if near {
+                    5 * length as i32
+                } else {
+                    length as i32
+                }
+            };
+            let hsp = |from: usize, to: usize, score: i32| PreliminaryHsp {
+                context: context_index,
+                frame: context.frame,
+                score,
+                q_start: (q_start + from) as i32,
+                q_end: (q_start + to) as i32,
+                q_gapped_start: (q_start + (from + to) / 2) as i32,
+                s_start: (s_start + from) as i32,
+                s_end: (s_start + to) as i32,
+                s_gapped_start: (s_start + (from + to) / 2) as i32,
+            };
+            hsps.push(hsp(0, length, score(near, length)));
+            if rng.next(3) == 0 {
+                let inner = length / 4;
+                hsps.push(hsp(inner, length - inner, score(!near, length - 2 * inner)));
+            }
+        }
+        for _ in 0..30 {
+            subject.push(STANDARD[rng.next(20)]);
+        }
+        (subject, hsps)
+    }
+
+    #[test]
+    fn prefetched_problems_cover_the_redo_and_change_nothing() {
+        const SUBJECT_LENGTH: usize = 6_000;
+        let (batch, parameters, options) = setup(SUBJECT_LENGTH);
+        let mut off = KappaState::new(&batch, &parameters, &options).unwrap();
+        let mut on = KappaState::new(&batch, &parameters, &options).unwrap();
+        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+        x_test_take_counts();
+        let mut solved = 0;
+        let mut largest = 0;
+        for (index, pieces) in [1, 2, 3, 5, 8, 12, 20, 30, 45, 70, 1, 4, 16, 50]
+            .into_iter()
+            .enumerate()
+        {
+            let (subject, hsps) = case(&batch, &mut rng, pieces);
+            X_TEST_GET_RANGES.with(|count| count.set(0));
+            let expected = off
+                .x_redo_list_observed(&hsps, &batch, &subject, false, &mut |_| {})
+                .unwrap();
+            let [prefetched_off, hits_off, calls] = x_test_take_counts();
+            let ranges_off = X_TEST_GET_RANGES.with(|count| count.replace(0));
+            assert_eq!((prefetched_off, hits_off), (0, 0), "case {index}");
+            let actual = on
+                .x_redo_list_observed(&hsps, &batch, &subject, true, &mut |_| {})
+                .unwrap();
+            let [prefetched, hits, misses] = x_test_take_counts();
+            let ranges_on = X_TEST_GET_RANGES.with(|count| count.replace(0));
+            assert_eq!(
+                misses, 0,
+                "case {index}: a Newton problem of the redo was not solved ahead"
+            );
+            assert_eq!(hits, calls, "case {index}: the same Newton problems");
+            assert!(prefetched >= hits, "case {index}");
+            assert_eq!(
+                ranges_on, ranges_off,
+                "case {index}: every range made ahead is used"
+            );
+            assert_eq!(actual.len(), expected.len(), "case {index}");
+            for (a, e) in actual.iter().zip(&expected) {
+                assert_eq!(a.hsp, e.hsp, "case {index}");
+                assert_eq!(a.edit_script, e.edit_script, "case {index}");
+                assert_eq!(a.composition_method, e.composition_method, "case {index}");
+                assert_eq!(a.identity_matrix, e.identity_matrix, "case {index}");
+            }
+            solved += hits;
+            largest = largest.max(hits);
+        }
+        // The cases reach the prefetch with several batches per match (more than 32 problems).
+        assert!(
+            solved > 0 && largest > 32,
+            "solved {solved}, largest {largest}"
+        );
     }
 }

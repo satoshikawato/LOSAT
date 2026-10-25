@@ -62,6 +62,7 @@ LOSAT_X_BXEVALEMPTY	blastx	always			Gapped evaluation of a subject without preli
 LOSAT_X_BXFLOW	blastx	conditional	required	required	2+ threads, native only (Web keeps waves), several query batches
 LOSAT_X_BXHITBF	blastx	conditional	required	gap	direct loop only: no-AVX2 CPUs, aarch64, Wasm, or short queries (<6.7 hits per cell with BXCROSS, <9 without; BXDIAGMIN) on x86; ref gap: needs -window_size 0 or <= 3 (or a diagonal offset near 2^30)
 LOSAT_X_BXLUTPOOL	blastx	always			BLASTX lookup tables built with one shared neighbour memo, on vectors kept between builds (every word-size-3 table outside diagnostics mode)
+LOSAT_X_BXNEWTONLANES	blastx	conditional	required	required	the composition-based redo (-comp_based_stats 2, the default): every match solves its Newton problems ahead across frames, at least 32 at a time where it has them; reuse only if inputs bit-equal; ref = -comp_based_stats 0 (no redo)
 LOSAT_X_BXPAR	blastx	conditional	required	required	2+ threads (1 thread leaves reference code)
 LOSAT_X_BXPOOL	blastx	conditional	required	required	2+ threads
 LOSAT_X_BXSCANBYTE	blastx	conditional	required	gap	direct loop only (every batch without AVX2; short queries, <6.7 hits per cell with BXCROSS, <9 without, BXDIAGMIN, on x86 AVX2): every table with AVX2, sparse tables on x86 without AVX2 and Wasm, nothing on aarch64; ref gap: with AVX2 every table takes it; without AVX2 tables with hits in over 3/10 of backbone cells (tests/blastx_scan_byte.rs reaches it with =3)

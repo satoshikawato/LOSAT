@@ -1491,6 +1491,11 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
     let mut outputs = vec![NewtonOutput::new(); inputs.len()];
     solve_batch(&inputs, &mut outputs);
     PREFETCHED.fetch_add(inputs.len() as u64, Ordering::Relaxed);
+    #[cfg(test)]
+    X_TEST_COUNTS.with(|counts| {
+        let [prefetched, hits, misses] = counts.get();
+        counts.set([prefetched + inputs.len() as u64, hits, misses]);
+    });
     STORE.with(|store| {
         let mut store = store.borrow_mut();
         for (input, output) in inputs.into_iter().zip(outputs) {
@@ -1541,6 +1546,15 @@ pub(crate) fn take(
                 && same_bits(&entry.input.row, row)
                 && same_bits(&entry.input.q, q)
         });
+        #[cfg(test)]
+        X_TEST_COUNTS.with(|counts| {
+            let [prefetched, hits, misses] = counts.get();
+            counts.set(if position.is_some() {
+                [prefetched, hits + 1, misses]
+            } else {
+                [prefetched, hits, misses + 1]
+            });
+        });
         match position {
             Some(position) => {
                 let entry = store.remove(position).expect("stored entry");
@@ -1554,6 +1568,21 @@ pub(crate) fn take(
             }
         }
     })
+}
+
+// No NCBI counterpart: this thread's prefetched inputs, hits and misses of `take`, for the unit tests
+// of the callers (the process counters above are shared by the tests that run at the same time).
+#[cfg(test)]
+thread_local! {
+    static X_TEST_COUNTS: std::cell::Cell<[u64; 3]> = const { std::cell::Cell::new([0; 3]) };
+}
+
+// No NCBI counterpart: empties this thread's store and returns its counts (prefetched, hits,
+// misses) since the last call; for unit tests.
+#[cfg(test)]
+pub(crate) fn x_test_take_counts() -> [u64; 3] {
+    STORE.with(|store| store.borrow_mut().clear());
+    X_TEST_COUNTS.with(|counts| counts.replace([0; 3]))
 }
 
 #[cfg(test)]

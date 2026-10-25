@@ -2516,6 +2516,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
         callbacks,
         composition_workspace,
         matrix_state,
+        Vec::new(),
         &mut |_| {},
     )
 }
@@ -2575,19 +2576,20 @@ thread_local! {
 // call are fixed by these. It does not change any value NCBI computes.
 /// Key of a `get_range` result made ahead.
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct XLaneRangeKey {
+pub(crate) struct XLaneRangeKey {
     window: usize,
     hsp_index: usize,
     should_test_identical: bool,
     subject_maybe_biased: bool,
 }
 
+// No NCBI counterpart: the `get_range` results made ahead for one `Blast_RedoOneMatch` call, with
+// the keys of the calls they answer; it does not change any value NCBI computes.
+pub(crate) type XLaneRanges = Vec<(XLaneRangeKey, BlastRedoRangeResult)>;
+
 // No NCBI counterpart: removes and returns the `get_range` result made ahead for this call, if any;
 // it does not change any value NCBI computes.
-fn x_take_lane_range(
-    ranges: &mut Vec<(XLaneRangeKey, BlastRedoRangeResult)>,
-    key: XLaneRangeKey,
-) -> Option<BlastRedoRangeResult> {
+fn x_take_lane_range(ranges: &mut XLaneRanges, key: XLaneRangeKey) -> Option<BlastRedoRangeResult> {
     let position = ranges.iter().position(|(stored, _)| *stored == key)?;
     Some(ranges.swap_remove(position).1)
 }
@@ -2735,6 +2737,189 @@ fn x_newton_lanes_prefetch_windows<'seq>(
     window_index
 }
 
+// No NCBI counterpart: limits of one BLASTX prefetch within a frame call: the inputs (half the
+// results a thread's store keeps, so that a prefetch never drops its own results) and the bytes of
+// the `get_range` results kept (a frame against a long subject with many windows keeps at most
+// this much). They do not change any value NCBI computes.
+const X_BX_LANES_MAX_INPUTS: usize = 256;
+const X_BX_LANES_RANGE_BYTES: usize = 1 << 20;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3590-3596
+// ```c
+//                 for (frame_index = 0;
+//                         frame_index < numFrames;
+//                         frame_index++, context_index++) {
+//                     incoming_aligns = incoming_align_set[frame_index];
+//                     if (!incoming_aligns) {
+//                         continue;
+//                     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1217-1244
+// ```c
+//             /* do frequency count for partial translated query */
+//             if (query_is_translated) {
+//                 s_GetComposition(query_composition,
+//                         alphsize, &query,
+//                         &window->query_range,
+//                         in_align, TRUE, FALSE);
+//             }
+//             /* if in_align is not contained in a higher-scoring
+//              * alignment */
+//             if ( !s_IsContained(in_align, alignments[query_index], Lambda) ) {
+// ...
+//                 if (compo_adjust_mode != eNoCompositionBasedStats &&
+//                         (subject_is_translated || hsp_index == 0
+//                                 || (nearIdenticalStatus != oldNearIdenticalStatus))) {
+//                     Blast_AminoAcidComposition subject_composition;
+//                     s_GetComposition(&subject_composition,
+//                             alphsize, &subject,
+//                             &window->subject_range,
+//                             in_align, FALSE, subject_is_translated);
+//                     adjust_search_failed =
+//                             Blast_AdjustScores(matrix, query_composition,
+//                                     query.length,
+//                                     &subject_composition,
+//                                     subject.length,
+// ```
+// Newton lanes, BLASTX (translated query, protein subject): BLASTX calls `Blast_RedoOneMatch` once per
+// query frame, and one call holds few windows, so this replica walks the frame calls of one match from
+// the first one in `frames` on (each frame's incoming alignments, in call order): per frame the windows
+// of `windows_from_translated_query_aligns`, then the window loop of
+// `blast_redo_one_match_with_workspace_queries_and_matrix_observed` with the same near-identical test and
+// `get_range` calls with the same arguments (results kept for that frame's call, up to
+// `X_BX_LANES_RANGE_BYTES`), and at each HSP that would call `Blast_AdjustScores` (a protein subject:
+// `hsp_index == 0` or a changed near-identical status) the composition of the HSP's query range, the
+// composition of the whole subject range and `x_newton_input`. Containment is not tested (every HSP is
+// assumed not contained), so the inputs are a superset of those the calls adjust. Stops before a frame
+// once `X_LANES_PREFETCH_INPUTS` inputs are reached (inside a frame at `X_BX_LANES_MAX_INPUTS` or the
+// byte limit) and solves the inputs (`x_newton_lanes::prefetch`). Errors end the replica; the calls
+// meet them themselves.
+// No NCBI counterpart: computes ahead what the frame calls compute; a result is used only by a call
+// with the same input bits, and a kept range only by the `get_range` call with the same window, HSP
+// index and flags. It does not change any value NCBI computes.
+/// One entry per frame covered (at least one when `frames` is not empty): the ranges kept for that
+/// frame's call. Frames after the last entry are not covered.
+pub(crate) fn x_bx_newton_lanes_prefetch_frames<'seq>(
+    frames: &[Option<Box<BlastCompoAlignment>>],
+    params: &BlastRedoAlignParams,
+    matching_seq: &BlastCompoMatchingSequence<'seq>,
+    query_infos: &[BlastCompoQueryInfo],
+    callbacks: &BlastRedoAlignCallbacks,
+    composition_workspace: &BlastCompositionWorkspace,
+) -> Vec<XLaneRanges> {
+    let mut inputs = Vec::new();
+    let mut covered: Vec<XLaneRanges> = Vec::new();
+    let mut kept_bytes = 0usize;
+    'frames: for incoming_aligns in frames {
+        if inputs.len() >= X_LANES_PREFETCH_INPUTS {
+            break;
+        }
+        let mut ranges: XLaneRanges = Vec::new();
+        let Ok(windows) = windows_from_translated_query_aligns(
+            incoming_aligns,
+            query_infos,
+            matching_seq.length,
+            WINDOW_BORDER,
+        ) else {
+            covered.push(ranges);
+            break;
+        };
+        for (window_index, window) in windows.iter().enumerate() {
+            if inputs.len() >= X_BX_LANES_MAX_INPUTS || kept_bytes >= X_BX_LANES_RANGE_BYTES {
+                covered.push(ranges);
+                break 'frames;
+            }
+            let Some(query_info) = usize::try_from(window.query_range.context)
+                .ok()
+                .and_then(|query_index| query_infos.get(query_index))
+            else {
+                covered.push(ranges);
+                break 'frames;
+            };
+            let Some(window_align_head) = window.align.as_deref() else {
+                continue;
+            };
+            let mut range: Option<(XLaneRangeKey, BlastRedoRangeResult)> = None;
+            let mut old_near_identical = false;
+            let mut subject_maybe_biased = true;
+            let mut hsp_index = 0usize;
+            let mut in_align = window.align.as_deref();
+            while let Some(current) = in_align {
+                let near_identical = if hsp_index == 0 || subject_maybe_biased {
+                    preliminary_test_near_identical(
+                        query_info,
+                        window,
+                        current,
+                        params.near_identical_cutoff,
+                    )
+                } else {
+                    old_near_identical
+                };
+                if hsp_index == 0 || (subject_maybe_biased && near_identical != old_near_identical)
+                {
+                    let key = XLaneRangeKey {
+                        window: window_index,
+                        hsp_index,
+                        should_test_identical: near_identical,
+                        subject_maybe_biased,
+                    };
+                    let Ok(next_range) = (callbacks.get_range)(
+                        matching_seq,
+                        &window.subject_range,
+                        &query_info.seq,
+                        &window.query_range,
+                        query_info.words.as_deref(),
+                        window_align_head,
+                        near_identical,
+                        subject_maybe_biased,
+                        params,
+                    ) else {
+                        covered.push(ranges);
+                        super::x_newton_lanes::prefetch(inputs);
+                        return covered;
+                    };
+                    subject_maybe_biased = next_range.subject_maybe_biased;
+                    if let Some(done) = range.replace((key, next_range)) {
+                        kept_bytes += done.1.query.buffer.len() + done.1.subject.buffer.len();
+                        ranges.push(done);
+                    }
+                }
+                if hsp_index == 0 || near_identical != old_near_identical {
+                    let (_, current_range) = range.as_ref().expect("range made at hsp_index 0");
+                    let subject_composition = x_whole_subject_composition(current_range);
+                    if let Ok(query_composition) = translated_query_composition(
+                        &current_range.query,
+                        &window.query_range,
+                        current,
+                    ) {
+                        if let Some(input) = super::adjust_scores::x_newton_input(
+                            &params.matrix_info,
+                            &query_composition,
+                            current_range.query.length,
+                            &subject_composition,
+                            current_range.subject.length,
+                            params.compo_adjust_mode,
+                            composition_workspace,
+                        ) {
+                            inputs.push(input);
+                        }
+                    }
+                }
+                old_near_identical = near_identical;
+                in_align = current.next.as_deref();
+                hsp_index += 1;
+            }
+            if let Some(done) = range {
+                kept_bytes += done.1.query.buffer.len() + done.1.subject.buffer.len();
+                ranges.push(done);
+            }
+        }
+        covered.push(ranges);
+    }
+    super::x_newton_lanes::prefetch(inputs);
+    covered
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1274
 // ```c++
 //                 if (compo_adjust_mode != eNoCompositionBasedStats &&
@@ -2790,6 +2975,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
     callbacks: &BlastRedoAlignCallbacks,
     composition_workspace: &mut BlastCompositionWorkspace,
     matrix_state: &mut Option<AdjustedProteinMatrix>,
+    x_ranges_ahead: XLaneRanges,
     trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
 ) -> Result<BlastRedoOneMatchResult> {
     if params.smith_waterman {
@@ -2881,7 +3067,9 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
         crate::utils::xreach::x_reach!("LOSAT_X_NEWTONLANES", x_lanes_on);
     }
     let mut x_next_prefetch = 0usize;
-    let mut x_lane_ranges: Vec<(XLaneRangeKey, BlastRedoRangeResult)> = Vec::new();
+    // BLASTX: the ranges made ahead for this frame call (`x_bx_newton_lanes_prefetch_frames`).
+    let mut x_lane_ranges: XLaneRanges = x_ranges_ahead;
+    let x_take_ranges = x_lanes_on || !x_lane_ranges.is_empty();
 
     for (window_index, window) in windows.iter().enumerate() {
         // No NCBI counterpart: Newton lanes prefetch (see above); it does not change any value NCBI
@@ -2967,7 +3155,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                 // No NCBI counterpart: the result of this call made ahead (same window, HSP index,
                 // near-identical status and bias flag) is used. It does not change any value NCBI
                 // computes.
-                let x_stored = if x_lanes_on {
+                let x_stored = if x_take_ranges {
                     x_take_lane_range(
                         &mut x_lane_ranges,
                         XLaneRangeKey {

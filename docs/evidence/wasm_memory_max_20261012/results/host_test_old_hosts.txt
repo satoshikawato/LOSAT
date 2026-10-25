@@ -1,0 +1,38 @@
+# The new host tests (test_wasi_runners.js, test_wasi_shared_memory.js of dcf9d591) placed among the host files of 141615ec
+# (git archive 141615ec LOSAT/tests, then the two test files of HEAD; node --test, Node v26.8.2). 28 is EINVAL.
+✔ serial preserves WASI exit 0
+✔ serial preserves WASI exit 23
+✔ serial preserves WASI exit 70
+✔ threaded preserves WASI exit 0
+✔ threaded preserves WASI exit 23
+✔ threaded preserves WASI exit 70
+✔ worker memory trap terminates the command while its main thread waits
+✔ missing thread entry is rejected before starting the command
+✔ successful worker releases its parent and exits successfully
+✖ serial WASI call with a pointer above 2 GiB succeeds
+✖ threaded WASI call with a pointer above 2 GiB succeeds
+✖ WASI imports receive i32 arguments as unsigned values
+✖ shared memory steps down when the declared maximum cannot be reserved
+✔ prepared serial module preserves metadata and executes the inspected bytes
+✔ artifact preparation preserves validation and ABI rejection
+✔ bulk guards preserve import, export, call and element indices
+✔ fill: unsigned ranges, overlap, zero length and traps match original Wasm
+✔ copy: unsigned ranges, overlap, zero length and traps match original Wasm
+✔ opcode-looking constants, SIMD immediates, locals and memargs are not rewritten
+✔ fill and copy across 2 GiB and at the top of a 65,535-page memory match original Wasm
+✔ invalid modules and unsupported memory layout fail explicitly
+✔ another isolate grows memory before fill in a running Wasm consumer
+✔ another isolate grows memory before copy destination in a running Wasm consumer
+✔ another isolate grows memory before copy source in a running Wasm consumer
+ℹ tests 24
+ℹ pass 20
+ℹ fail 4
+✖ failing tests:
+✖ serial WASI call with a pointer above 2 GiB succeeds
+  28 !== 0
+✖ threaded WASI call with a pointer above 2 GiB succeeds
+  28 !== 0
+✖ WASI imports receive i32 arguments as unsigned values
+  TypeError: unsignedWasiImports is not a function
+✖ shared memory steps down when the declared maximum cannot be reserved
+  TypeError: createSharedMemory is not a function

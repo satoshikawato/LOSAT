@@ -1,0 +1,8 @@
+01:31:42 unit_node rc=0 (ℹ pass 24 ℹ fail 0 )
+01:31:43 unit_py_wasm_performance rc=0 (OK)
+01:32:15 unit_py_simple_comparison rc=0 ([Missing] AP027280_Self (TBLASTX): LOSAT wasm threads n8)
+01:32:15 build_identity rc=0 (identical True [])
+01:39:21 vabi rc=0 ()
+01:45:24 vabi_high rc=0 ()
+01:47:52 matrix rc=0 (tblastx-short-context-short-subject-e10 raw parity + thread contract PASS 306 command/oracle records; reactor lifecycle gates PASS; format failures=0 )
+01:47:52 done rc=0 (unit vabi vabi_high matrix)

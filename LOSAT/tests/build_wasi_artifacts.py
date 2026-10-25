@@ -23,6 +23,16 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+# (*thread)->Run(); (*thread)->Join(&result);
+# Build identity only: the shared memory's maximum is a link argument in the target
+# rustflags (.cargo/config.toml). A build that lost it would silently declare Rust's 1 GiB.
+def declared_maximum_pages(rustflags):
+    """The `--max-memory` of the rustflags in 64 KiB pages, or None if they set none."""
+    sizes = [flag.rsplit("=", 1)[1] for flag in rustflags if flag.startswith("link-arg=--max-memory=")]
+    return int(sizes[-1]) // 65536 if sizes else None
+
+
 # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
 # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
 # Artifact identity belongs to the host ABI, not to any NCBI implementation.
@@ -68,6 +78,10 @@ def main():
         # A reactor is the cdylib of the library crate `LOSAT`; a command is the `losat` binary.
         built = target / kind / triple / "release" / ("LOSAT.wasm" if kind.endswith("reactor") else "losat.wasm")
         identity = json.loads(subprocess.check_output([args.node, str(CRATE / "tests/wasi_artifact.js"), str(built), kind], text=True))
+        expected_maximum = declared_maximum_pages(config["target"][triple]["rustflags"])
+        if expected_maximum is not None and identity["memory"]["maximum"] != expected_maximum:
+            raise RuntimeError(f"{kind}: the module declares a memory maximum of {identity['memory']['maximum']} pages, "
+                               f"the rustflags ask for {expected_maximum}")
         destination = out / f"losat-{kind}.wasm"
         shutil.copyfile(built, destination)
         recorded[built] = digest(built)

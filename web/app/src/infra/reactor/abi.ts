@@ -2,6 +2,10 @@
 // arguments (§6), the error text of a failed call (§4), and the `losat_host.emit` stream
 // receiver (§5). The Engine worker (searches) and the Data worker (index scan, describe,
 // validate) both use it.
+//
+// Pointers and lengths are unsigned 32-bit values (ABI v2 §6). JavaScript receives a Wasm
+// i32 as a signed number, so a pointer of 2 GiB or more arrives negative: every pointer
+// and length is converted with `>>> 0` before it is used as an offset into the memory.
 import type { RecordKey } from '../../domain/dataset';
 
 /** Stream 2: the JSON response of describe, register and scan_end. */
@@ -86,7 +90,7 @@ export class ReactorAbi {
 
   /** The `losat_host.emit` import of the instance. */
   readonly emit = (stream: number, ptr: number, len: number): void => {
-    const view = new Uint8Array(this.exports.memory.buffer, ptr, len);
+    const view = new Uint8Array(this.exports.memory.buffer, ptr >>> 0, len >>> 0);
     if (stream === RESPONSE_STREAM) this.responses.push(view.slice());
     else this.sink?.(stream, view);
   };
@@ -181,8 +185,8 @@ export class ReactorAbi {
   }
 
   private lastError(): string {
-    const ptr = this.call(this.exports.losat_web2_last_error_ptr, []);
-    const len = this.call(this.exports.losat_web2_last_error_len, []);
+    const ptr = this.call(this.exports.losat_web2_last_error_ptr, []) >>> 0;
+    const len = this.call(this.exports.losat_web2_last_error_len, []) >>> 0;
     // A view of shared memory cannot be decoded directly; decode a copy.
     return new TextDecoder().decode(new Uint8Array(this.exports.memory.buffer, ptr, len).slice());
   }
@@ -200,7 +204,7 @@ export class ReactorAbi {
           flat.push(arg);
           continue;
         }
-        const ptr = this.exports.losat_web2_alloc(arg.length);
+        const ptr = this.exports.losat_web2_alloc(arg.length) >>> 0;
         if (ptr === 0) throw new EngineAllocationError(`the engine could not allocate ${arg.length} bytes for an input`);
         allocations.push([ptr, arg.length]);
         new Uint8Array(this.exports.memory.buffer, ptr, arg.length).set(arg);

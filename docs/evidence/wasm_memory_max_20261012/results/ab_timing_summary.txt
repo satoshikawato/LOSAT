@@ -1,0 +1,5 @@
+p03 n1 (5 rounds): wall median A 3.795 s, B 3.799 s; B/A per round: wall median 1.007 (min 0.996, max 1.014), CPU median 1.008 (min 0.997, max 1.013); outputs one SHA-256, rc 0
+p03 n8 (5 rounds): wall median A 2.992 s, B 3.182 s; B/A per round: wall median 1.022 (min 0.910, max 1.112), CPU median 1.011 (min 0.931, max 1.123); outputs one SHA-256, rc 0
+blastp_ap n1 (5 rounds): wall median A 24.962 s, B 23.487 s; B/A per round: wall median 1.002 (min 0.863, max 1.020), CPU median 1.008 (min 0.840, max 1.019); outputs one SHA-256, rc 0
+blastp_ap n8 (5 rounds): wall median A 6.413 s, B 5.970 s; B/A per round: wall median 0.980 (min 0.853, max 1.321), CPU median 0.984 (min 0.853, max 1.373); outputs one SHA-256, rc 0
+d04 n8 (3 rounds): wall median A 46.459 s, B 47.981 s; B/A per round: wall median 1.031 (min 0.764, max 1.033), CPU median 0.989 (min 0.768, max 1.015); outputs one SHA-256, rc 0

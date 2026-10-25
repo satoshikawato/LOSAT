@@ -58,7 +58,9 @@ fn ideal_block_computed(std: &[f64; crate::utils::matrix::BLASTAA_SIZE]) -> Karl
 }
 
 /// No NCBI counterpart (`LOSAT_X_BXKAONCE`): the ideal block is a constant of the program (no
-/// input), so it is computed on first use and shared; the value `ideal_block_computed` gives.
+/// input), so it is computed on first use and shared; the value `ideal_block_computed` gives. It
+/// is a constant because BLASTX accepts only BLOSUM62 (`args.rs`, "unsupported BLASTX matrix"); a
+/// port of another BLASTX `-matrix` must key the `OnceLock` by the matrix.
 fn ideal_block() -> KarlinParams {
     static IDEAL: std::sync::OnceLock<KarlinParams> = std::sync::OnceLock::new();
     *IDEAL.get_or_init(|| ideal_block_computed(&compute_std_aa_composition()))

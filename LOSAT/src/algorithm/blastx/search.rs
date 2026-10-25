@@ -808,9 +808,10 @@ pub(crate) fn search_core(
             // Dispatch point (LOSAT_X_BXKAONCE, in the strict set): the one chunk of a batch that
             // is not split is a clone of `full` (`split_queries`) whose contexts' `is_valid` are
             // the raw blocks' `valid` (set above); `score_block` on it would compute the same
-            // compositions and so the same Karlin blocks, and `effective_lengths` only reads
-            // `valid`, so the raw blocks kept above are its result. The chunks of a split batch
-            // have sequences of their own and keep `score_block`.
+            // compositions and so the same Karlin blocks, and `effective_lengths` writes only
+            // `length_adjustment` and `search_space`, never `valid` or `ungapped`, so the raw
+            // blocks kept above are its result. The chunks of a split batch have sequences of
+            // their own and keep `score_block`.
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:243-246
             // ```c++
             //                 CRef<SInternalData> chunk_data =

@@ -269,10 +269,23 @@ fn statistical_validity_is_distinct_from_preparation_validity() {
 }
 /// No NCBI counterpart (`LOSAT_X_BXKAONCE`): for a batch that is not split, the blocks `score_block`
 /// gave before `effective_lengths` (what `search_core` keeps) equal `score_block` of the chunk
-/// `split_queries` returns, with contexts that are invalid (a query of 4 bases, one of N only)
-/// among valid ones.
+/// `split_queries` returns. Several queries with contexts that are invalid (a query of 4 bases,
+/// one of N only: its contexts are prepared valid and statistically invalid) among valid ones,
+/// gapped or not; and one query of 19,410 letters or more without gapped (`split_queries` makes
+/// one chunk, `!options.gapped`).
 #[test]
 fn kept_blocks_equal_score_block_of_the_unsplit_chunk() {
+    let mut state = 12345u64;
+    let mut random = |letters: usize| -> Vec<u8> {
+        (0..letters)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                b"ACGT"[(state >> 60) as usize & 3]
+            })
+            .collect()
+    };
     let record = |sequence: Vec<u8>| FastaRecord {
         internal_id: String::new(),
         title: String::new(),
@@ -281,33 +294,34 @@ fn kept_blocks_equal_score_block_of_the_unsplit_chunk() {
         warnings: Vec::new(),
         source: None,
     };
-    let mut state = 12345u64;
-    let random: Vec<u8> = (0..600)
-        .map(|_| {
-            state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            b"ACGT"[(state >> 60) as usize & 3]
-        })
-        .collect();
-    let records = vec![
-        record(random.clone()),
+    let sequence = random(600);
+    let several = vec![
+        record(sequence.clone()),
         record(b"ACGT".to_vec()),
         record(vec![b'N'; 300]),
-        record(random[100..400].to_vec()),
+        record(sequence[100..400].to_vec()),
     ];
-    for gapped in [true, false] {
+    let long = vec![record(random(19_500))];
+    for (records, gapped) in [(&several, true), (&several, false), (&long, false)] {
         let mut o = options();
         o.gapped = gapped;
-        let mut full = prepare_queries(&records, &o).unwrap();
+        let mut full = prepare_queries(records, &o).unwrap();
         let mut params = score_block(&full);
-        assert!(params.iter().any(|p| p.valid) && params.iter().any(|p| !p.valid));
+        if records.len() > 1 {
+            assert!(params.iter().any(|p| p.valid) && params.iter().any(|p| !p.valid));
+            // The assignment below flips a context's `is_valid` from true to false.
+            assert!(full
+                .contexts
+                .iter()
+                .zip(&params)
+                .any(|(c, p)| c.is_valid && !p.valid));
+        }
         let kept = params.clone();
         effective_lengths(&full, &mut params, &o, 1_000_000, 100, None).unwrap();
         for (context, p) in full.contexts.iter_mut().zip(&params) {
             context.is_valid = p.valid;
         }
-        let chunks = split_queries(&records, &full, &o).unwrap();
+        let chunks = split_queries(records, &full, &o).unwrap();
         assert_eq!(chunks.len(), 1);
         let again = score_block(&chunks[0].prepared);
         assert_eq!(kept.len(), again.len());

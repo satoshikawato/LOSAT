@@ -5842,14 +5842,20 @@ Scheduling (each value computed by one thread with the original function; order 
   `split_queries` then returns, for a batch that is not split (one chunk, also without gapped), a chunk whose
   `prepared` is a clone of that batch, and the chunk loop called `score_block` on it again: the same compositions,
   so the same ungapped blocks (`valid` = `is_valid && block`, and `is_valid` is the first block's `valid`), and
-  `effective_lengths` only reads `valid`. With the switch the loop uses the blocks `score_block` gave, kept
+  `effective_lengths` writes only `length_adjustment` and `search_space`, never `valid` or `ungapped` (it reads
+  `ungapped` in ungapped mode). With the switch the serial chunk loop uses the blocks `score_block` gave, kept
   before `effective_lengths` (`search.rs`, dispatch point); the chunks of a split batch have sequences of their
   own and keep `score_block`. NCBI computes the score block once in the query setup and creates a chunk's own only
   for a split query (`prelim_stage.cpp:243-246`). The ideal block (`Blast_ScoreBlkKbpIdealCalc`: the standard
   composition against itself) takes no input, and `score_block` computed it on each call; with the switch it is a
-  `OnceLock` (`parameters.rs`). Exactness: a unit test (`kept_blocks_equal_score_block_of_the_unsplit_chunk`)
-  compares the kept blocks with `score_block` of the chunk field by field, bit for bit, with invalid contexts
-  among valid ones; `tests/blastx_unit_cap.rs` compares the reports (batches, a split query) with it on and off. Measurements pending.
+  `OnceLock` (`parameters.rs`; a constant because BLASTX accepts only BLOSUM62), which acts on every BLASTX search.
+  Reach: the own side is recorded where a batch that is not split runs through the serial chunk loop; the
+  reference side (`score_block` on a chunk) only where a split query runs through that loop (1 thread, or
+  `LOSAT_X_BXCHUNKFLOW`), not in the chunk waves at 2+ threads (`x_compute_chunk`, which keeps `score_block`).
+  Exactness: a unit test (`kept_blocks_equal_score_block_of_the_unsplit_chunk`) compares the kept blocks with
+  `score_block` of the chunk field by field, bit for bit, with invalid contexts among valid ones, for a batch of
+  several queries and for one long query without gapped; `tests/blastx_unit_cap.rs` compares the reports of
+  several queries with it on and off, at 1 and 4 threads. Measurements pending.
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (diagnostic build; distinct composition-adjustment inputs),

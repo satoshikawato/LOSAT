@@ -905,7 +905,8 @@ test('-num_alignments 3: the records follow the tabular list, and the texts say 
   await expect(partial).toContainText("outfmt 0's alignments are linked to 2 of this query's 3 subjects (BLAST+'s -num_alignments: 3).");
   await expect(partial).toContainText('Its search has a hit list of its own (500 subjects per query)');
   await expect(partial).toContainText("a subject's HSPs are linked only where outfmt 0 shows the alignments of exactly the HSPs that outfmt 6 and 7 keep for it");
-  expect(await text(partial)).not.toMatch(/\bshows the alignments of\b/);
+  // The one-search notice reads "shows the alignments of 2 subjects"; the rule above says "shows the alignments of exactly".
+  expect(await text(partial)).not.toMatch(/\bshows the alignments of \d/);
   // The subject-limit notice is the tabular list's: three subjects is -num_alignments.
   expect(await noticeKinds(page)).toEqual(['subject-limit']);
   // The third subject: no outfmt 0 alignment is linked to its HSP.

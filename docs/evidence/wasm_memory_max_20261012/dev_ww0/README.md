@@ -33,7 +33,7 @@
 | E2E、FakeEngine の build | Chromium・Firefox 64 件通過、WebKit 28 件通過、失敗 0 |
 | 3 ブラウザでの共有メモリと 2 GiB 超の検索（`engine-memory.spec.ts`、4 スレッド） | 3 ブラウザとも 65,535 ページの共有メモリを確保。2,214,592,512 バイトから始めた memory で、最初の高い番地は 2,214,592,528。4 program の全 stream が通常の memory と同じで、outfmt 0・6・7 は native の CLI と同じ（[`engine-memory-chromium.json`](engine-memory-chromium.json)、[`-firefox`](engine-memory-firefox.json)、[`-webkit`](engine-memory-webkit.json)） |
 
-- WebKit は、この機械に無い共有ライブラリ（`libxslt.so.1` ほか、Ubuntu 24.04 の package 15 個）を `apt-get download` で取り、`$BUILD_ROOT/np-ww0/webkit-deps/` に展開して、bundle の MiniBrowser を `LD_LIBRARY_PATH` 付きで起動する launcher（`LOSAT_WEB_WEBKIT_EXECUTABLE`）で動かした。system には何も入れていない。最初の gate の WebKit の失敗（engine 44 件、fake 31 件）はすべて起動の失敗（bundle の `MiniBrowser` の script が `LD_LIBRARY_PATH` を置き換える）で、launcher を直して WebKit だけを走らせ直した。
+- WebKit は、この機械に無い共有ライブラリ（`libxslt.so.1` ほか、Ubuntu 24.04 の package 16 個）を `apt-get download` で取り、`$BUILD_ROOT/np-ww0/webkit-deps/` に展開して、bundle の MiniBrowser を `LD_LIBRARY_PATH` 付きで起動する launcher（`LOSAT_WEB_WEBKIT_EXECUTABLE`）で動かした。system には何も入れていない。最初の gate の WebKit の失敗（engine 44 件、fake 31 件）はすべて起動の失敗（bundle の `MiniBrowser` の script が `LD_LIBRARY_PATH` を置き換える）で、launcher を直して WebKit だけを走らせ直した。
 - V-ABI full、capture、エンジンの full gate は走らせていない。Rust のソースは変わらず、変わるのは threaded の link 引数だけで、code・data 節が dev と同じだから（#137 の記録と同じ判断）。native の build は対象の rustflags の外で変わらない。
 - 時間の A/B は取っていない。code 節が同じで、#137 の A/B（5 つの組で B/A の wall の中央値 0.980〜1.031）と同じ条件である。
 

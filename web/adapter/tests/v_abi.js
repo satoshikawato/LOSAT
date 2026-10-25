@@ -134,6 +134,7 @@ function inputPath(search, option) {
 function nativeOutputs(native, search, scratch) {
   const outputs = new Map();
   let stderr = null, status = null;
+  const stderrs = new Map();
   for (const format of FORMATS[search.program]) {
     const out = path.join(scratch, `native.${format}.out`);
     const argv = [...search.argv, "-outfmt", String(format), "-num_threads", "1", "-out", out];
@@ -144,8 +145,22 @@ function nativeOutputs(native, search, scratch) {
     }
     outputs.set(format, fs.existsSync(out) ? fs.readFileSync(out) : Buffer.alloc(0));
     fs.rmSync(out, { force: true });
+    stderrs.set(format, result.stderr);
     if (stderr === null) [stderr, status] = [result.stderr, result.status];
-    else assert.equal(sha256(result.stderr), sha256(stderr), "the CLI writes the same warnings for every format");
+  }
+  // The diagnostics are the CLI's standard error for the tabular formats (abi_v2.md §5):
+  // outfmt 6 and 7 write the same lines, and outfmt 0 the same without the formatting
+  // handler's lines, which -num_descriptions and -num_alignments can make differ.
+  const handler = /^Warning: \[\w+\] (The parameter -num_descriptions is ignored|Examining 5 or more matches)/;
+  const lines = (format) => stderrs.get(format).toString().split("\n");
+  const withoutHandler = (format) => lines(format).filter((line) => !handler.test(line));
+  if (stderrs.has(6)) {
+    stderr = stderrs.get(6);
+    if (stderrs.has(7)) assert.equal(sha256(stderrs.get(7)), sha256(stderr), "outfmt 7 writes the warnings of outfmt 6");
+    for (const format of FORMATS[search.program].filter((f) => f !== 6)) {
+      assert.deepEqual(withoutHandler(format), withoutHandler(6), `outfmt ${format}: the same warnings but the handler's`);
+      for (const line of lines(format)) assert.ok(lines(6).includes(line), `outfmt ${format}: ${line} is in the warnings of outfmt 6`);
+    }
   }
   return { outputs, stderr, status };
 }
@@ -211,6 +226,7 @@ function checkSurface(reactor, native) {
     const flags = description.parameters.map((parameter) => parameter.flag);
     assert.ok(flags.includes("-evalue") && flags.includes("-query"), `${program}: parameters`);
     assert.ok(!flags.includes("-outfmt") && !flags.includes("-out") && !flags.includes("-num_threads"), `${program}: adapter-owned options`);
+    assert.ok(flags.includes("-num_descriptions") && flags.includes("-num_alignments"), `${program}: hit list options`);
     if (program === "tblastn") assert.ok(description.subject_gencodes.includes(32), "tblastn: genetic code 32");
     if (program === "blastn") {
       assert.ok(flags.includes("-template_type") && flags.includes("-template_length"), "blastn: dc-megablast templates");

@@ -578,8 +578,8 @@ fn link_format0(
 ///
 /// A search of a two-search run that fails before it writes a byte of its formats, and
 /// that the options' checks reject because of its hit list size (`group_rejected`:
-/// `-num_alignments 0` for the tabular formats, a BLASTN `-num_descriptions` of 2^30 or more
-/// for format 0), does
+/// `-num_alignments 0` for the tabular formats, a BLASTN `-num_descriptions` of 2,147,483,598
+/// or more for format 0, where N + 50 overflows the 32-bit preliminary hit list size), does
 /// not fail the run when the other search succeeds, as the CLI fails that format alone: the
 /// streams of its formats stay empty (with no tabular search there are no records). Any other
 /// error of a search (for example a thread pool that cannot start) fails the run, as does a
@@ -1228,7 +1228,7 @@ mod tests {
         validate(&words).unwrap();
     }
 
-    // The reverse: a -num_descriptions of 2^30 or more overflows BLASTN's preliminary hit list
+    // The reverse: a -num_descriptions of 2,147,483,598 or more (N + 50 overflows) makes BLASTN's preliminary hit list
     // size for format 0 only (the tabular formats ignore -num_descriptions). The CLI's outfmt 6
     // and 7 succeed and its outfmt 0 fails with LOSAT's error (NCBI crashes there); the run
     // writes the tabular formats and the records as the CLI does, stream 0 stays empty, and

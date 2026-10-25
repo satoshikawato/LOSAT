@@ -178,8 +178,8 @@ the WASI imports.
   programs the search's hit list size is 0. This
   is `-num_alignments 0` for the tabular formats (NCBI's error `BLAST query/options error: No hits are being saved`
   for `-outfmt 6` and `-outfmt 7`, while `-outfmt 0` keeps its size, 500 or `-num_descriptions`), and for BLASTN's format
-  0 a `-num_descriptions` of 2^30 or more (the preliminary hit list size overflows; LOSAT's
-  error, where NCBI crashes), while the tabular formats ignore
+  0 a `-num_descriptions` of 2,147,483,598 or more (N + 50 overflows the 32-bit preliminary hit list size; LOSAT's
+  error, where NCBI crashes; the CLI accepts up to 2,147,483,597), while the tabular formats ignore
   `-num_descriptions`. Any other error of a search, for example a thread pool that cannot start, fails the run, as it
   did when the search was alone. The streams of the failed search's formats stay
   empty; if it is the tabular search there are no HSP records (stream 1), else the records have no `out0`. Stream 3 is

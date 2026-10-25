@@ -993,7 +993,7 @@ fn skipped_records_and_an_out_file_give_the_reports_without_the_switch() {
 
 // dc-megablast's `LOSAT_X_PAIRPARDISC` inside a slot's pool of two threads: batches of 10,000
 // letters or more (the stage takes a query block over 8,000 letters), two slots of two threads
-// at four threads. The stage's shadow compares the chunks of every batch, the loop's first
+// at four threads. The stage's `[TIMING]` line counts the chunks of every batch, the loop's first
 // and the slots'.
 #[test]
 fn pairpardisc_runs_inside_a_slots_pool() {
@@ -1016,7 +1016,7 @@ fn pairpardisc_runs_inside_a_slots_pool() {
         SWITCH,
         ("LOSAT_X_QBATCHPARSLOTS", "2"),
         ("LOSAT_X_PAIRPARDISC", "1"),
-        ("LOSAT_X_PAIRPARDISCSHADOW", "1"),
+        ("LOSAT_TIMING", "1"),
     ];
     let reference = blastn(&args, &env);
     let mut with = env.to_vec();
@@ -1031,10 +1031,10 @@ fn pairpardisc_runs_inside_a_slots_pool() {
     let line = run
         .stderr
         .lines()
-        .find(|line| line.starts_with("[X_PAIRPARDISCSHADOW] blastn: seed chunks equal="))
-        .unwrap_or_else(|| panic!("no PAIRPARDISC shadow line:\n{}", run.stderr));
+        .find(|line| line.starts_with("[TIMING] x_pairpardisc_seed: chunks="))
+        .unwrap_or_else(|| panic!("no PAIRPARDISC stage line:\n{}", run.stderr));
     let chunks: u64 = line
-        .trim_start_matches("[X_PAIRPARDISCSHADOW] blastn: seed chunks equal=")
+        .trim_start_matches("[TIMING] x_pairpardisc_seed: chunks=")
         .split_whitespace()
         .next()
         .and_then(|value| value.parse().ok())

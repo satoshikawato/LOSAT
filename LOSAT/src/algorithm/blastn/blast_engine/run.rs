@@ -930,10 +930,8 @@ struct DiagHashTable {
     window: i32,
     // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): per bucket, an upper bound of the levels of
     // its cells (the largest level `insert` wrote since the table was made or cleared;
-    // `i32::MIN` for none), and whether `LOSAT_X_DIAGLVSHADOW` checks the skipped walks. Empty
-    // and false while the switch is off. No NCBI counterpart.
+    // `i32::MIN` for none). Empty while the switch is off. No NCBI counterpart.
     max_level: Vec<i32>,
-    x_lv_shadow: bool,
     // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): per bucket, the latest insert and an upper
     // bound of the levels of the bucket's other cells. Empty unless the switch and
     // LOSAT_X_DIAGLV are on and the table takes two hits. No NCBI counterpart. It is the memo of
@@ -965,7 +963,7 @@ impl DiagHashTable {
     fn new(window: i32) -> Self {
         let capacity = DIAGHASH_CHAIN_LENGTH as u32;
         // EXPERIMENT (LOSAT_X_DIAGLV): the level bounds when the switch is on.
-        let (max_level, x_lv_shadow) = x_diag_lv::new_levels();
+        let max_level = x_diag_lv::new_levels();
         Self {
             num_buckets: DIAGHASH_NUM_BUCKETS,
             occupancy: 1,
@@ -975,7 +973,6 @@ impl DiagHashTable {
             offset: window,
             window,
             max_level,
-            x_lv_shadow,
             // EXPERIMENT (LOSAT_X_DIAGLV2): the memo when the switch is on.
             x_last: x_diag_lv::new_last(window),
             #[cfg(debug_assertions)]
@@ -1179,7 +1176,7 @@ impl DiagHashTable {
 //     /* hit within the explored area should be rejected*/
 //     if (s_off_pos < last_hit) return 0;
 // ```
-// EXPERIMENT (LOSAT_X_DIAGLV, shadow LOSAT_X_DIAGLVSHADOW): a fold's retrieve skips the walk of
+// EXPERIMENT (LOSAT_X_DIAGLV): a fold's retrieve skips the walk of
 // a bucket whose cells all lie below the level that could change a decision of the seed (a
 // child module, so that it uses the private table of this file).
 #[path = "x_diag_lv.rs"]
@@ -7689,11 +7686,8 @@ fn search(
             batching,
         )
     });
-    // No NCBI counterpart: the PAIRPAR counters with LOSAT_TIMING (and the lines of the dc and Na
-    // shadows); nothing without those variables.
+    // No NCBI counterpart: the PAIRPAR counters with LOSAT_TIMING; nothing without it.
     x_pair_seed::summary();
-    // No NCBI counterpart: the summary line of LOSAT_X_DIAGLVSHADOW; nothing without it.
-    x_diag_lv::summary();
     x_result
 }
 
@@ -13457,7 +13451,7 @@ fn search_query_batch(
                     // (scan, diagonal hash, ungapped extension; one-hit diagonal-hash scope only)
                     // with the subject scan in strips on the pool threads and the pairs folded in
                     // the scan order; `continue` ends the one-iteration strand loop. Otherwise
-                    // (and with LOSAT_X_PAIRPARNASHADOW) the code below runs.
+                    // the code below runs.
                     if x_pair_seed::run_na(
                         &x_pair_seed::NaInputs {
                             pv_direct_lookup: pv_direct_lookup_ref,
@@ -14409,16 +14403,6 @@ fn search_query_batch(
             // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
             // compare equal keep the order in which they were saved. `sort_by`
             // is stable too.
-            // Dispatch point of the strips shadows (LOSAT_X_PAIRPARDISCSHADOW,
-            // LOSAT_X_PAIRPARNASHADOW and LOSAT_X_PAIRPARDISCARRSHADOW): the hit list and the
-            // diagonal hash (or array) of the code above against those `x_pair_seed::run`
-            // computed for this chunk.
-            x_pair_seed::shadow_check(
-                ungapped_hits,
-                &subject_scratch.diag_hash,
-                &subject_scratch.hit_level_array,
-                &subject_scratch.hit_len_array,
-            );
             // EXPERIMENT (LOSAT_X_QGROUPPAR): with the stage run per query, each query's hits are
             // taken in the order saved above and sorted by the task (the comparator and the sort
             // are those below, so each query's hits come in the relative order the batch's sort

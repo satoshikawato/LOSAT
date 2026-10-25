@@ -64,9 +64,6 @@ pub use x_subject_store::print_summary as x_subject_store_print_summary;
 // EXPERIMENT (LOSAT_X_QDUSTPAR): the summary line `main` prints at exit. No NCBI counterpart:
 // it prints counters and changes no value NCBI computes.
 pub use x_query_dust_par::print_summary as x_query_dust_par_print_summary;
-// EXPERIMENT (LOSAT_X_BNUNGAPCOUNTSHADOW): the summary line `main` prints at exit. No NCBI
-// counterpart: it prints a counter and changes no value NCBI computes.
-pub use x_ungap_count::print_summary as x_ungap_count_print_summary;
 // EXPERIMENT (LOSAT_X_GREEDYROWFUSE): the summary line `main` prints at exit with LOSAT_X_STATS. No
 // NCBI counterpart: it prints which build of the greedy row code ran and changes no value NCBI
 // computes.

@@ -1001,9 +1001,7 @@ Same values, faster computation:
   cost 0.8 branch misses a call more than the counts (premise probe on bs24: NCBI's loop shape without the
   extra tests kept the misses, the counted loops dropped them).
   R8 (`LOSAT_X_CTXFAST` / `CTXO1` era): 167 cycles, 574 instructions and 3.10 branch misses a call
-  against NCBI's 135 / 497 / 2.56. Shadow: `LOSAT_X_BNUNGAPCOUNTSHADOW=1` (implies the switch) runs
-  both loops on every call and stops on the first difference; at exit `[X_SHADOW] BNUNGAPCOUNT
-  compared=N`.
+  against NCBI's 135 / 497 / 2.56.
   Measured 2026-10-22 on the workstation (node 1, one pinned core, HT sibling idle, warmed 3 s; 3 rounds,
   the arm order reversed every other round; `perf stat` cycles against the binary before, `dev`
   249c7454; outputs identical in every arm): blastn-short of 30,000 queries of 24 letters against
@@ -1367,9 +1365,8 @@ Rebuilding less:
   integers in tenths). The subjects keep their tasks with `-lcase_masking` (a masked chunk has no strips), and a
   batch's chunks keep theirs when the subject has lowercase letters under it; never for `-db` (plan v4 line D). The
   new shape is the one of a one-subject search (strips, `LOSAT_X_QGROUPPAR`, the speculative traceback), and the
-  subjects reach `sink` in OID order in both shapes. The shadows of the strips (`LOSAT_X_PAIRPARDISCSHADOW`,
-  `LOSAT_X_PAIRPARNASHADOW`, `LOSAT_X_PAIRPARDISCARRSHADOW`; PAIRPAR's own went with its graduation) and of `LOSAT_X_QGROUPPAR` run on it; it has no shadow of
-  its own (it only chooses between two shapes with the same bytes). Memory: the shape holds one chunk's seed stage on
+  subjects reach `sink` in OID order in both shapes. It has no shadow of its own (it only chooses between
+  two shapes with the same bytes). Memory: the shape holds one chunk's seed stage on
   the whole pool. The pull request that added the switch also cut the one-hit strips of `LOSAT_X_PAIRPARFOLD` to 64
   per thread with a look-ahead of 2 per thread (about 1/32 of a chunk's seeds, as dc-megablast's; before 8 / 2, a
   quarter), for every search and not under this switch (`=0` keeps them). That also lowers one-subject blastn (Sakai
@@ -3013,10 +3010,7 @@ Scheduling (each value computed by one thread with the original function; order 
   queued loop, where the run loop has not been timed. R10 (line R, megablast Sakai x MG1655 at one thread): the queued loop spent 0.190 s, about 87
   instructions and 42 cycles a word, on 10.9 M words (NCBI 45.5 cycles); the loop shape of R10's probe (a closure and a
   queue 32 deep) gained 11 ms, and a branch-free update of the presence bit and helper counter lost here as in R10
-  (megablast of the cDNAs below x1.004: about 21 more instructions a word for few saved misses). Shadow:
-  `LOSAT_X_MBFILLSHADOW=1` (implies the switch) builds every such table again with the queued loop and compares
-  `hashtable`, `next_pos`, `pv_array`, the helper counters, the words of a two-stage table and the debug counters (a
-  difference panics; at exit `[X_SHADOW] MBFILL compared=N`).
+  (megablast of the cDNAs below x1.004: about 21 more instructions a word for few saved misses).
   Measured 2026-10-23 on the workstation (node 1, one pinned core, HT sibling idle, warmed 3 s; 5 rounds, the arm order
   reversed every other round; `perf stat` cycles against the binary before, `dev` ceaef53e; outputs and max RSS
   identical in every arm): megablast of Sakai against MG1655 x0.906 (0.683 -> 0.623 s; the fill 0.189 -> 0.131 s under
@@ -3056,9 +3050,7 @@ Scheduling (each value computed by one thread with the original function; order 
   before the first commit with no `LOSAT_X_QBATCHPARSLOTS` and a budget of 0 or one thread): the slots' tables are what
   QBATCHPAR's budget counts. Not the discontiguous tables, the PAIRPAR sub-lookups or the tests. Memory:
   between batches the loop holds the longest table instead of freeing it; a probe batch's peak with it stays below the
-  full batch's. `LOSAT_X_MBLUTKEEPSHADOW=1` builds every table built on the kept one again on a fresh table and compares
-  `hashtable`, `next_pos`, `pv_array` and the longest chain (a difference panics; at exit `[X_SHADOW] MBLUTKEEP tables=
-  cells= diffs=0 identical`; the second builds are counted in `[TIMING] x_mb_lookup_*`). With `LOSAT_TIMING` `[TIMING]
+  full batch's. With `LOSAT_TIMING` `[TIMING]
   x_mb_lut_keep: kept= fresh= zero=` gives the loop's builds on the kept table, its builds on a fresh one and the time
   spent zeroing (also in `x_mb_lookup_split`'s `alloc=`). Evidence. Premise probe (v4-D
   `results/d10d2_probe1_summary.md`, workstation node 1, `LOSAT_X_QBATCHPAR=0`): megablast of 31,168 D. melanogaster
@@ -3183,20 +3175,15 @@ Scheduling (each value computed by one thread with the original function; order 
   of two threads or more is current: the search's pool, or the private pool of a `LOSAT_X_QBATCHPAR`
   slot of two or more threads (never rayon's global pool); with one thread, a slot of one thread, a
   build without the `parallel` feature or WebAssembly without `wasm-threads` the original loop runs.
-  Shadow: `LOSAT_X_DISCLUTPARSHADOW=1` (implies the switch) builds the tables again the other way
-  (serially when the pool built them, otherwise in four parts one after another) and compares every
-  element and the longest chain; a difference prints `[X_SHADOW] DISCLUTPAR ... DIFFERENT ...` and
-  panics; at exit `main` prints `[X_SHADOW] DISCLUTPAR tables= pool= two_templates= cells= diffs=0
-  identical` (tables compared, of them built on a pool, of them with two templates, elements
-  compared). With `LOSAT_TIMING` (any switch state) `main` prints `[TIMING] disc_lookup_build: <s>s
+  With `LOSAT_TIMING` (any switch state) `main` prints `[TIMING] disc_lookup_build: <s>s
   (builds=<n> parallel=<n>)` when a table was built: the summed wall time of the builds (allocation,
-  fill and longest chain, not the shadow's second build; with `LOSAT_X_QBATCHPAR` it includes the
+  fill and longest chain; with `LOSAT_X_QBATCHPAR` it includes the
   slots' concurrent builds) and how many were filled on a pool. A second line, `[TIMING]
   disc_lookup_split: alloc= loop= pool_fill= chain= chunks= read_wall= read_max= read_sum= read_late=
   update_... link_... buckets_peak= x_prefault_wall= x_prefault_max= x_prefault_sum= x_prefault_late=
   x_prefault_rounds= x_prefault_touches=`, splits the same builds: the allocation, the fill by the
   original loop, the fill on the pool (its prefault rounds included) and the longest chain (seconds,
-  summed); for the pool fills (not the shadow's) their chunks and, per phase (read = A, update = B,
+  summed); for the pool fills their chunks and, per phase (read = A, update = B,
   link = C) summed over the chunks, the calling worker's wall time, the longest job, the jobs' summed
   time and the latest job start; the most the buckets of one fill reserved; and the same four times of
   the prefault rounds (below), their number and the zeros they wrote (one per page). The jobs' times
@@ -3382,12 +3369,9 @@ Scheduling (each value computed by one thread with the original function; order 
   order are the chain walk's. The masked-word test of `s_TypeOfWord` (`contains_hit`) searches the run.
   The `[TIMING] disc_lookup_build` interval includes the CSR builds (in `loop` or `pool_fill` of
   `disc_lookup_split`; its phase times count the chain fills only), and `[TIMING] disc_lookup_csr:
-  builds= parallel= words=` counts them. `LOSAT_X_DISCLUTPARSHADOW` compares the chain fills only.
-  Shadow: `LOSAT_X_DCCSRSHADOW=1` (implies the switch) builds the CSR of every one-template table whatever
-  its size and the chains too, compares every cell's run with its chain (and that it decreases), the
-  presence vector, the counters and the longest chain, and a pool build with the serial one; the scans then
-  read the CSR. Exit line `[X_SHADOW] DCCSR tables= pool= cells= words= diffs=0 identical`; a difference
-  prints `DIFFERENT` and panics.
+  builds= parallel= words=` counts them. The unit test `the_runs_are_the_chains_with_the_fills_presence_vector_and_counters`
+  compares every cell's run with its chain (and that it decreases), the presence vector, the counters and
+  the longest chain, and a pool build with the serial one.
   Evidence (ws, node 1 timed, dev 7bea6267 against perf/dc-csr 8b8b3f51, medians; v4-A15 ab2 / ab3): 31,168
   dmel cDNAs against 3 Mb of dmel genome with `-subject`, 16 threads 2.619 -> 1.847 s (x0.705, cycles:u 101.7 ->
   69.1 G), 8 threads x0.733, 1 thread x0.788; the same queries against that genome as `-db`, 16 threads x0.796;
@@ -3407,9 +3391,7 @@ Scheduling (each value computed by one thread with the original function; order 
   ahead of the owner and reuse the owner's consumed buffers. The owner's fold is the slower side
   for dc-megablast (most pairs reach the diagonal hash), so the stage stops gaining at about 4
   threads. Anything else (contiguous tables, which PAIRPAR takes in one-hit mode) runs
-  the original code. Shadow: `LOSAT_X_PAIRPARDISCSHADOW=1` (per chunk the hit list and the whole
-  diagonal hash compared with the original code; one `[X_PAIRPARDISCSHADOW]` summary line on
-  stderr at the end, with the number of chunks compared). With `LOSAT_TIMING` a
+  the original code. With `LOSAT_TIMING` a
   `[TIMING] x_pairpardisc_seed` line gives the strips, seeds and the owner's fold, scan and wait
   time. Test: `LOSAT/tests/blastn_pairpar_disc.rs`.
   Default ON since 2026-10-17 (perf/perfmb-default-bundle; workstation (2x Xeon Gold 6338, 16 physical cores of one
@@ -3433,9 +3415,7 @@ Scheduling (each value computed by one thread with the original function; order 
   its chunks carry few pairs (31,168 cDNAs against 3 Mb: 10 chunks, 42,107 seeds in all, against 188.7 M in the
   27 hash chunks); the stage replaces the one-thread scan of the whole subject, which NCBI's `CBatchSizeMixer`
   brings once per small batch (a batch of one short cDNA after a large batch).
-  Anything else runs the original code. Shadow: `LOSAT_X_PAIRPARDISCARRSHADOW=1` (per chunk the hit list and both
-  arrays compared with the original code; one `[X_PAIRPARDISCARRSHADOW]` summary line on stderr at the end, with
-  the number of chunks, hits and array cells compared). With `LOSAT_TIMING` a `[TIMING] x_pairpardiscarr_seed` line
+  Anything else runs the original code. With `LOSAT_TIMING` a `[TIMING] x_pairpardiscarr_seed` line
   gives the chunks, strips, seeds and the owner's fold, scan and wait time. Test:
   `LOSAT/tests/blastn_pairpar_disc_arr.rs`.
   Default ON since 2026-10-20 (perf/dc-seed-batch; workstation (2x Xeon Gold 6338, node 1 booked through its FIFO,
@@ -3464,9 +3444,7 @@ Scheduling (each value computed by one thread with the original function; order 
   bucket over the threads, without it the owner folds. Every lookup hit is a seed here (about 100 per subject offset for
   30,000 24-mers against 3 Mb), so the helpers scan at most two strips per thread ahead of the slowest fold. Anything
   else (the diagonal array of a query block up to 8000 letters, such as a few primers; one thread; several subjects or
-  subject chunks searched in parallel) runs the original code. Before it, blastn-short against one subject ran on one core at any thread count. Shadow:
-  `LOSAT_X_PAIRPARNASHADOW=1` (per chunk the hit list and the whole diagonal hash compared with the original code; one
-  `[X_PAIRPARNASHADOW]` summary line on stderr at the end, with the number of chunks compared). With `LOSAT_TIMING` a
+  subject chunks searched in parallel) runs the original code. Before it, blastn-short against one subject ran on one core at any thread count. With `LOSAT_TIMING` a
   `[TIMING] x_pairparna_seed` line gives the strips, seeds and the fold, scan and wait time. Tests:
   `LOSAT/tests/blastn_pairpar_na.rs`, `x_pair_seed_na.rs` `seed_stage_on_strips_equals_one_scan`.
   Default ON since 2026-10-20 (perf/bn-short-strip; workstation (2x Xeon Gold 6338, node 1 booked through its FIFO,
@@ -3671,14 +3649,12 @@ Scheduling (each value computed by one thread with the original function; order 
   retrieves (`scan_range`) stay walks. With the switch off the table has no bounds, an insert tests the
   length of an empty vector, and the retrieves walk as before (callgrind, release: +0.005 to +0.10 %
   instructions against the base).
-  Shadow: `LOSAT_X_DIAGLVSHADOW=1` (implies the switch) walks every skipped bucket and panics unless each
-  of its cells lies below the bound and at or below the bucket's bound (the bound invariant), and unless
-  the cell the retrieve's walk returns gives the seed's decisions (the `last_hit` test, then with two hits
-  the window test) of no cell (the bound's sufficiency); one `[X_SHADOW] DIAGLV retrieves= skipped=
-  verified= decisions= cells= memo= memofound= identical` line (`memo=`, `memofound=`: `LOSAT_X_DIAGLV2`) on stderr at the end of the search (`cells`: skipped
-  retrieves whose walk found the diagonal's cell). `LOSAT_X_PAIRPARDISCSHADOW`
-  compares the bounds of the two tables too (the one-hit strips fold had `LOSAT_X_PAIRPARSHADOW` until PAIRPAR
-  graduated on 2026-10-22).
+  The unit tests of `x_diag_lv.rs` check the bound invariant (`the_bounds_hold_under_inserts_advances_and_clears`:
+  every cell of a bucket lies at or below the bucket's bound) and its sufficiency
+  (`retrieve_below_makes_the_decisions_of_retrieve`, `the_bound_is_tight_at_every_reachable_setting`: the cell the
+  retrieve's walk returns gives the seed's decisions, the `last_hit` test and with two hits the window test, of no
+  cell, where the walk is skipped); the tests of the strips folds compare the bounds of the two tables with the
+  reference fold's.
   Measured on the workstation (alternating pairs, node 1 CPUs 32-47, `LOSAT_X_PAIRPARDISC=1` in the dc-megablast
   runs; 1,775 or 3,492 D. melanogaster cDNAs against 3 Mb of chromosome 2L): dc-megablast one batch 2.237 ->
   1.806 s at 1 thread (0.808, 4 pairs) and 2.089 -> 1.304 s at 16 (0.624, 4 pairs), two batches 4.442 -> 2.663
@@ -3716,12 +3692,9 @@ Scheduling (each value computed by one thread with the original function; order 
   (PAIRPAR, `LOSAT_X_PAIRPARNA`) take the same memo-free calls. The dc strips stage runs an instance per state
   of the table's memo (`MEMO`, with `LOSAT_X_FOLDLEAN`'s `LEAN`: see there); with the switch off (or `LOSAT_X_DIAGLV`
   off) it is the instance without the memo.
-  Shadow: `LOSAT_X_DIAGLVSHADOW=1` also checks every memo answer: the bucket's walk must find the latest insert's
-  values in the first cell of its diagonal and every other cell at or below `other`, and the retrieve's walk must
-  return the memo's cell for that diagonal, or for another diagonal a cell with the decisions of no cell; the
-  `[X_SHADOW] DIAGLV` line counts the answers (`memo=`) and those for the latest insert's diagonal (`memofound=`).
-  Tests: the unit tests of `x_diag_lv.rs` (`the_memo_makes_the_decisions_of_retrieve`,
-  `the_shadow_panics_on_a_memo_that_misses_a_cell`), the dc strips stage test of `x_pair_seed_disc.rs` (the memo
+  Tests: the unit tests of `x_diag_lv.rs` (`the_memo_makes_the_decisions_of_retrieve`: the bucket's walk
+  finds the latest insert's values in the first cell of its diagonal and every other cell at or below
+  `other`, and every answer makes the decisions of the walk), the dc strips stage test of `x_pair_seed_disc.rs` (the memo
   on 1 to 8 threads and 2 to 16 partitions), the partition tests of `x_pair_seed_part.rs`,
   `LOSAT/tests/blastn_diag_lv.rs` (`the_memo_and_the_lean_folds_give_the_same_report`: dc-megablast at 1 and 4
   threads with each switch, the memo answering under the shadow; megablast keeps no memo).
@@ -3789,12 +3762,9 @@ Scheduling (each value computed by one thread with the original function; order 
   `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` lines end with `partitions= merges= merge=
   helpers_left=` (without it they are as before), their `fold=` is the CPU time summed over the
   participants (not wall time), and `[TIMING] scan_lookup` takes off only the owner's extension time, so
-  it stays a figure of the owner's wall time. Shadow: `LOSAT_X_PAIRPARDISCSHADOW=1` /
-  `LOSAT_X_PAIRPARNASHADOW=1` with the switch run the partitioned stage on the copies; with the switch
-  their lines end with `fold=part partitions= merges=` (without the switch the lines are as before). The one-hit
-  fold's own shadow (`LOSAT_X_PAIRPARSHADOW`) went with PAIRPAR's graduation on 2026-10-22: the `=0` runs
-  of `LOSAT/tests/blastn_pairpar_fold.rs` compare the reports, and the `[TIMING] x_pairpar_seed` fields
-  (`merges=` equal to `chunks=`) show that every chunk folded in partitions.
+  it stays a figure of the owner's wall time. The `=0` runs
+  of `LOSAT/tests/blastn_pairpar_fold.rs` compare the reports, and the `[TIMING] x_pairpardisc_seed` fields
+  (`merges=` equal to `chunks=`, `partitions=` the thread count) show that every chunk folded in partitions.
   RSS grows with the thread count: every partition table is a full copy of the chunk's table (P =
   threads, at most 512; about P x the table's capacity x 20 bytes), and up to `2 x threads` strips of
   seeds are in flight. On the inputs below the tables are small (thousands of cells per chunk), so the
@@ -3856,8 +3826,7 @@ Scheduling (each value computed by one thread with the original function; order 
   strips (no stage-wide count), and the partitions' next strips and states lie on cache lines of their own. Each
   partition keeps its strips' order and one folder at a time (its lock), so the output is the same (the module
   comment's argument holds as it stands; only who folds which run changes); the owner alone can still scan every
-  strip and fold every partition. The shadows `LOSAT_X_PAIRPARDISCSHADOW` / `LOSAT_X_PAIRPARNASHADOW` run the
-  partitioned stage, with this switch, against the reference. With LOSAT_TIMING the `[TIMING] x_pairpar_seed` /
+  strip and fold every partition. With LOSAT_TIMING the `[TIMING] x_pairpar_seed` /
   `x_pairpardisc_seed` / `x_pairparna_seed` lines end with `runs= away= units=` (the runs folded, the strips of
   partitions folded away from home, and the stages' fold units, strips x partitions). Tests: the unit tests of
   `x_pair_seed_part.rs` run both ways (random op streams in alternating stages, with the strip buffers held within

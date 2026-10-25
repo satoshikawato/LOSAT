@@ -24,7 +24,7 @@
 //!
 //! Harness `c8_loop` (ignored): `C8_DIR` (capture directory, `LOSAT_X_DPCAPTURE`), `C8_KERN`
 //! (`dev` = `align8::<false, true, false>`, `grid` = `grid8` in one loop, `grid2` = `grid8` in two
-//! phases), `C8_REPS` (0: load, check and count
+//! phases, `dev2` = `dev8ph`, align8 with only the band start in two phases), `C8_REPS` (0: load, check and count
 //! only), `C8_LIMIT`, `C8_OUT` (append the result line). Every handled 8-bit score-only problem is
 //! checked once against the recorded result with both kernels, and counted (rows, cells, blocks of
 //! `grid8`); then the chosen kernel runs `C8_REPS` times over all problems. Counters: `perf stat`
@@ -397,6 +397,337 @@ pub(super) unsafe fn grid8<const CNT: bool, const PH: bool>(
     finish::<false, false>(sc, a_off, b_off, best, fence_hit, cells)
 }
 
+/// `align8::<false, true, false>` (blocks at `first + 32k`, then 16-lane tails) with only the
+/// band start taken in two phases as in `grid8::<_, true>`: blocks up to the first survivor, then
+/// the rest. Separates the effect of the `lo_surv` cmov from that of the grid.
+#[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
+pub(super) unsafe fn dev8ph(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    max_m: i32,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
+    sc.ops.clear();
+    if len1 == 0 || len2 == 0 {
+        return Some(XdropResult {
+            a_offset: 0,
+            b_offset: 0,
+            score: 0,
+            fence_hit: false,
+            cells: 0,
+        });
+    }
+    let goe = gap_open.checked_add(gap_extend)?;
+    let mut x = x_drop;
+    if x < goe {
+        x = goe;
+    }
+    if gap_extend < 1 || gap_open < 0 || max_m < 0 {
+        return None;
+    }
+    let bias = x as i64 + goe as i64 + max_m as i64 + 1;
+    let limit_rebase = 127 - bias - max_m as i64;
+    if limit_rebase < 0 {
+        return None;
+    }
+    if gap_extend > 4 {
+        return None;
+    }
+    let bias = bias as i32;
+    let limit_rebase = limit_rebase as i32;
+    let num_extra = (x / gap_extend + 3) as usize;
+    let ncols = scores.ncols();
+    sc.reset();
+
+    sc.ensure(num_extra.min(len2 + 2) + 16);
+    let mut b_size = 1usize;
+    {
+        let h = sc.h8a.as_mut_ptr().add(PAD);
+        let e = sc.e8.as_mut_ptr().add(PAD);
+        *h = bias as u8;
+        *e = (bias - goe) as u8;
+        let mut score = -goe;
+        for i in 1..=len2 {
+            if score < -x {
+                break;
+            }
+            *h.add(i) = (bias + score) as u8;
+            *e.add(i) = (bias + score - goe) as u8;
+            score -= gap_extend;
+            b_size = i + 1;
+        }
+        *h.add(b_size - 1) = 0;
+    }
+    sc.dirty8 = b_size;
+
+    let sat = |v: i32| v.min(255) as u8 as i8;
+    let mut ramp = [0u8; 32];
+    for (i, r) in ramp.iter_mut().enumerate() {
+        *r = (i as i32 * gap_extend) as u8;
+    }
+    let c = C8 {
+        goe: _mm256_set1_epi8(sat(goe)),
+        ge1: _mm256_set1_epi8(sat(gap_extend)),
+        ge16: _mm256_set1_epi8(sat(16 * gap_extend)),
+        ge32: _mm256_set1_epi8(sat(32 * gap_extend)),
+        ramp: ld(ramp.as_ptr()),
+        xv: _mm256_set1_epi8(sat(x)),
+        kb15: _mm256_set1_epi8(15),
+        c3: _mm256_setzero_si256(),
+        c10: _mm256_setzero_si256(),
+        c40: _mm256_setzero_si256(),
+    };
+    let zero = _mm256_setzero_si256();
+    let lane0 = _mm256_setr_epi8(
+        -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    );
+    let k70 = _mm256_set1_epi8(0x70);
+    let k10 = _mm256_set1_epi8(0x10);
+    let static_tabs: Option<*const u8> = match scores {
+        Scores::Tables { t, .. } => Some(t.data.as_ptr()),
+        _ => None,
+    };
+    let small_alphabet = ncols <= 16;
+    let mut cells: u64 = 0;
+
+    let mut base: i32 = 0;
+    let mut best_rel: i32 = 0;
+    let mut a_off = 0usize;
+    let mut b_off = 0usize;
+    let mut first = 0usize;
+    let mut fence_hit = false;
+    let mut wend = [b_size, 0usize];
+    let mut cur = 0usize;
+
+    let win_at = sc.x_win_at;
+    let mut len2 = len2;
+    for a in 1..=len1 {
+        if first >= win_at {
+            let d = (first - 64) & !63;
+            sc.x_shift(d, false);
+            first -= d;
+            b_size -= d;
+            len2 -= d;
+            wend[0] = wend[0].saturating_sub(d);
+            wend[1] = wend[1].saturating_sub(d);
+        }
+        sc.ensure(b_size + num_extra + 64);
+        if sc.sb_filled < b_size {
+            fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
+        }
+        if sc.bad_k < b_size {
+            return None;
+        }
+        let mut limit = len2 + 1;
+        let mut bend = b_size;
+        let mut fence_row = false;
+        if sc.fence_k < b_size {
+            limit = sc.fence_k;
+            bend = sc.fence_k;
+            fence_row = true;
+            if bend <= first {
+                fence_hit = true;
+                break;
+            }
+        }
+        let qa = q.get(a)? as usize;
+        if qa >= ncols {
+            return None;
+        }
+        cells += (b_size - first) as u64;
+        let t: *const u8 = if let Some(tabs) = static_tabs {
+            tabs.add(qa * TAB)
+        } else {
+            if sc.tab_ok & (1u32 << qa) == 0 {
+                if !build_row(scores, qa, &mut sc.tabs[qa * TAB..(qa + 1) * TAB]) {
+                    return None;
+                }
+                sc.tab_ok |= 1u32 << qa;
+            }
+            sc.tabs.as_ptr().add(qa * TAB)
+        };
+        let (hr, hw) = if cur == 0 {
+            (sc.h8a.as_mut_ptr().add(PAD), sc.h8b.as_mut_ptr().add(PAD))
+        } else {
+            (sc.h8b.as_mut_ptr().add(PAD), sc.h8a.as_mut_ptr().add(PAD))
+        };
+        let e = sc.e8.as_mut_ptr().add(PAD);
+        let sb = sc.sb.as_ptr().add(PAD);
+        let t0 = bcast128(t.add(64));
+        let t1 = bcast128(t.add(80));
+
+        if best_rel > limit_rebase {
+            let dv = _mm256_set1_epi8(best_rel as u8 as i8);
+            let mut b = first;
+            while b < b_size {
+                st(hr.add(b), _mm256_subs_epu8(ld(hr.add(b)), dv));
+                st(e.add(b), _mm256_subs_epu8(ld(e.add(b)), dv));
+                b += 32;
+            }
+            base += best_rel;
+            best_rel = 0;
+        }
+        let mut hpm = lane0;
+        let bestv0 = _mm256_set1_epi8((bias + best_rel) as u8 as i8);
+        let mut rs = Row {
+            carry: zero,
+            bestv: bestv0,
+            thrv: _mm256_subs_epu8(bestv0, c.xv),
+            rec_b: 0,
+            slow: false,
+        };
+        let mut lo_surv = usize::MAX;
+        let mut hi_surv = 0usize;
+        let mut b0 = first;
+        let t0x = _mm256_castsi256_si128(t0);
+        let t1x = _mm256_castsi256_si128(t1);
+        macro_rules! step32 {
+            () => {{
+                let idx = ld(sb.add(b0));
+                let sv = if small_alphabet {
+                    _mm256_shuffle_epi8(t0, idx)
+                } else {
+                    lut32(t0, t1, _mm256_add_epi8(idx, k70), _mm256_sub_epi8(idx, k10))
+                };
+                let mask = if b0 + 32 <= limit {
+                    None
+                } else {
+                    Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
+                };
+                let (d0, _) = block8::<false, true>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
+                hpm = zero;
+                !(_mm256_movemask_epi8(d0) as u32)
+            }};
+        }
+        // Some(live) or None at the stop point
+        macro_rules! step16 {
+            ($rx:ident, $rec_b:ident, $slow:ident) => {{
+                if b0 >= bend
+                    && (b0 >= limit
+                        || (_mm_cvtsi128_si32($rx.carry) & 0xFF)
+                            < (_mm_cvtsi128_si32($rx.thrv) & 0xFF))
+                {
+                    None
+                } else {
+                    let idx = ldx(sb.add(b0));
+                    let sv = if small_alphabet {
+                        _mm_shuffle_epi8(t0x, idx)
+                    } else {
+                        lut32x(t0x, t1x, idx)
+                    };
+                    let mask = if b0 + 16 <= limit {
+                        None
+                    } else {
+                        Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0))))
+                    };
+                    let (d0, _) = block8x::<false, true>(
+                        &c,
+                        &mut $rx,
+                        &mut $rec_b,
+                        &mut $slow,
+                        hr,
+                        hw,
+                        e,
+                        b0,
+                        sv,
+                        mask,
+                        _mm256_castsi256_si128(hpm),
+                    );
+                    hpm = zero;
+                    Some((!(_mm_movemask_epi8(d0) as u32)) & 0xFFFF)
+                }
+            }};
+        }
+        // phase 1: up to the first survivor
+        let mut in16 = false;
+        while b0 + 16 < bend {
+            let live = step32!();
+            b0 += 32;
+            if live != 0 {
+                lo_surv = b0 - 32 + live.trailing_zeros() as usize;
+                hi_surv = b0 - 32 + (31 - live.leading_zeros() as usize);
+                break;
+            }
+        }
+        if lo_surv == usize::MAX {
+            in16 = true;
+        } else {
+            // phase 2, 32-lane blocks
+            while b0 + 16 < bend {
+                let live = step32!();
+                if live != 0 {
+                    hi_surv = b0 + (31 - live.leading_zeros() as usize);
+                }
+                b0 += 32;
+            }
+        }
+        let mut rx = RowX {
+            carry: _mm256_castsi256_si128(rs.carry),
+            bestv: _mm256_castsi256_si128(rs.bestv),
+            thrv: _mm256_castsi256_si128(rs.thrv),
+        };
+        let (mut rec_b, mut slow) = (rs.rec_b, rs.slow);
+        if in16 {
+            // phase 1 in the 16-lane blocks
+            while let Some(live) = step16!(rx, rec_b, slow) {
+                b0 += 16;
+                if live != 0 {
+                    lo_surv = b0 - 16 + live.trailing_zeros() as usize;
+                    hi_surv = b0 - 16 + (31 - live.leading_zeros() as usize);
+                    break;
+                }
+            }
+        }
+        if lo_surv != usize::MAX {
+            while let Some(live) = step16!(rx, rec_b, slow) {
+                if live != 0 {
+                    hi_surv = b0 + (31 - live.leading_zeros() as usize);
+                }
+                b0 += 16;
+            }
+        }
+        let proc_end = b0;
+        sc.dirty8 = sc.dirty8.max(proc_end);
+        let wi = 1 - cur;
+        let mut b = proc_end;
+        while b < wend[wi] {
+            st(hw.add(b), zero);
+            b += 32;
+        }
+        wend[wi] = proc_end;
+        cur = wi;
+        if slow {
+            b_off = rec_b + sc.x_sh;
+            a_off = a;
+            best_rel = (_mm_cvtsi128_si32(rx.bestv) & 0xFF) - bias;
+        }
+        if fence_row {
+            fence_hit = true;
+            break;
+        }
+        if lo_surv == usize::MAX {
+            break;
+        }
+        let last = hi_surv;
+        first = lo_surv;
+        b_size = last + 1;
+        if b_size <= len2 {
+            b_size += 1;
+        }
+    }
+
+    let best = base + best_rel;
+    finish::<false, false>(sc, a_off, b_off, best, fence_hit, cells)
+}
+
 /// `grid8` against `align8::<false, true, false>` on random problems (forward and reversed, fences,
 /// band windows, both alphabets, the 8-bit cost range): equal results. `LOSAT_FUZZ_CASES` sets the
 /// number of problems.
@@ -517,6 +848,11 @@ fn grid8_matches_align8_on_random_problems() {
                 )
             };
             assert_eq!(rg, rp, "case {case}: grid8 one loop vs two phases");
+            // SAFETY: AVX2 detected above.
+            let rq = unsafe {
+                dev8ph(&rows, &cols, &scores, m, len1, len2, go, ge, x, cf, &mut sg)
+            };
+            assert_eq!(ra, rq, "case {case}: align8 vs its two-phase copy");
             assert_eq!(
                 ra, rg,
                 "case {case} rev={reverse} n={n} go={go} ge={ge} x={x} len1={len1} len2={len2} cf={cf} sentinel={sentinel} win_at={win_at}"
@@ -562,6 +898,10 @@ fn call(p: &Prob<'_>, kern: u8, sc: &mut XdropScratch) -> Option<XdropResult> {
             grid8::<false, true>(
                 &p.q, &p.s, &p.scores, p.m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
             )
+        } else if kern == 3 {
+            dev8ph(
+                &p.q, &p.s, &p.scores, p.m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+            )
         } else {
             align8::<false, true, false>(
                 &p.q, &p.s, &p.scores, p.m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
@@ -587,7 +927,8 @@ fn c8_loop() {
         "dev" => 0,
         "grid" => 1,
         "grid2" => 2,
-        k => panic!("C8_KERN must be dev, grid or grid2, not {k}"),
+        "dev2" => 3,
+        k => panic!("C8_KERN must be dev, grid, grid2 or dev2, not {k}"),
     };
     let t_load = Instant::now();
     let probs = load_dir(std::path::Path::new(&dir)).expect("read the capture files");
@@ -631,6 +972,7 @@ fn c8_loop() {
         };
         assert_eq!(rd, rg, "grid8 vs align8");
         assert_eq!(rd, call(p, 2, &mut sc), "grid8 two phases vs align8");
+        assert_eq!(rd, call(p, 3, &mut sc), "align8 two-phase copy vs align8");
         match rd {
             Some(r) => {
                 assert_eq!(Some(r), p.want, "align8 vs recorded");

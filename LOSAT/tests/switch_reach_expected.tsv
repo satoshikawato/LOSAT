@@ -108,6 +108,7 @@ LOSAT_X_QDUSTPAR	blastn	conditional	required	required	DUST on (default except bl
 LOSAT_X_QGROUPPAR	blastn	conditional	required	required	2+ threads, one subject at a time, 2+ queries with HSPs, no query holding >1/4 of HSPs, no debug
 LOSAT_X_QPREPPAR	blastn	conditional	required	required	2+ threads and 2+ queries (encoding) or contexts (blocks)
 LOSAT_X_QSTREAM	blastn	conditional	required	required	only with RPTSTREAM; off for -task megablast, stdin/pipes, file <2x largest batch, files where QBATCHPAR slots may run
+LOSAT_X_REDOCONTAINIDX	blastp,blastx,tblastn	conditional	required	required	composition-based redo: a query's list of kept alignments in one match reaches 32 (X_INDEX_FROM) -> index by subject start; ref: every list of the match shorter
 LOSAT_X_RPTSTREAM	blastn	conditional	required	required	usually on (CLI); off for Web adapter/observers, debug, several formats, refused scoring/titles/search space (outfmt 17 streams despite titles and ambiguity: sam_despite); checks only with 2+ batches
 LOSAT_X_SEEDBUCKET	tblastx	conditional	gap	required	only where PAIRPAR leaves scan loop and diagonal table >=2^21 cells (query >=524 kb); new gap: needs the reference frame loop with a diagonal table >= 2^21 cells (query >= 524 kb)
 LOSAT_X_SEEDCOMPACT	tblastx	conditional	required	required	only where PAIRPAR unit path runs (gated by PAIRPARGATE on query size)

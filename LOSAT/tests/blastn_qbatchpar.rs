@@ -1,7 +1,8 @@
 //! NCBI's query batches searched side by side ahead of blastn's batch loop
 //! (`LOSAT_X_QBATCHPAR`, `src/algorithm/blastn/blast_engine/x_qbatch_par.rs`) on whole searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set). It chooses between
+//! The switch is in the strict set (on unless it is `0`); these searches run with it `0` unless
+//! they set it (`PREVIOUS_DEFAULT`). It chooses between
 //! two LOSAT code paths with the same result: the loop searching every batch itself, or slots
 //! searching the planned batches ahead of it, whose results the loop takes only under the key it
 //! computes itself. So the property under test is that nothing the run writes depends on it:
@@ -12,10 +13,11 @@
 //! `-max_target_seqs 1`, warnings of later batches (the reader's, and an invalid query's),
 //! `-query_loc` skipping records, `LOSAT_TIMING` blocks, an error at a batch with slots searching
 //! past it (each kind of error of a batch), corrupted predictions (`LOSAT_X_QBATCHPARMISS`, two
-//! slots) and dc-megablast's `LOSAT_X_PAIRPARDISC` inside a slot's pool. With `LOSAT_X_STATS` the summary line (`[X_STATS] QBATCHPAR ...`) shows that
-//! the slots' path ran (`precomputed=` batches taken from a slot), or why it did not, and which
-//! layout the slot model judged (`units=`, `rule_k=`, `rule_m=`, `predicted=`). That the bytes
-//! equal NCBI's is the business of the BLASTN fixtures.
+//! slots) and dc-megablast's `LOSAT_X_PAIRPARDISC` inside a slot's pool. With `LOSAT_X_STATS` the
+//! summary line (`[X_STATS] QBATCHPAR ...`) shows that the slots' path ran (`precomputed=` batches
+//! taken from a slot), or why it did not, and which layout the slot model judged (`units=`,
+//! `rule_k=`, `rule_m=`, `predicted=`). That the bytes equal NCBI's is the business of the BLASTN
+//! fixtures.
 //!
 //! The slot model (`choose_slots`) keeps the loop on many of the small megablast and
 //! dc-megablast inputs here at four threads, and where it chooses slots for them it does so by a

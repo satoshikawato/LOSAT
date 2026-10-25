@@ -118,12 +118,13 @@
 //! With `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM
 //! records= read= batches= slots= slot_copies= slot_records= kept= stale= scan_s= read_s=
 //! peak_window= off=` (records: the input records; read: the records read again; off: why the
-//! switch did not act, `none` when it did; slots: the slots' requests, slot_copies of them answered with a copy of slot_records records, the others
-//! with a shared chunk; kept: the searched records the loop kept for a writer after their batch,
-//! 0 where LOSAT_X_RPTSTREAM writes each batch's reports; stale: slot requests for records the loop had passed, answered with QBATCHPAR's
+//! switch did not act, `none` when it did; slots: the slots' requests, slot_copies of them answered
+//! with a copy of slot_records records, the others with a shared chunk; kept: the searched records
+//! the loop kept for a writer after their batch, 0 where LOSAT_X_RPTSTREAM writes each batch's
+//! reports; stale: slot requests for records the loop had passed, answered with QBATCHPAR's
 //! `Cancelled`; scan_s: the first reading; read_s: the second, summed over the threads that read;
-//! peak_window: the most records read ahead of the loop at once).
-//! The line is printed for searches of the command line only.
+//! peak_window: the most records read ahead of the loop at once). The line is printed for searches
+//! of the command line only.
 
 use std::collections::VecDeque;
 use std::fs::File;

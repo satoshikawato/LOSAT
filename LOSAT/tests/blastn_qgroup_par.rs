@@ -7,10 +7,11 @@
 //! test is that the report does not depend on it: for megablast, blastn, dc-megablast and
 //! blastn-short with several queries (pieces of LC738874 with microsatellites, runs of `N`, lower
 //! case letters, a poly-A query and two very short ones) against LC738868 at 1 and 4 threads, the
-//! searches with `LOSAT_X_QGROUPPAR=0` and by default give the same bytes. The same holds in `LOSAT_X_QBATCHPAR` slots of two threads and for batches split into query chunks.
-//! With `LOSAT_X_STATS` the counters show which form ran: per query at 4 threads, the owner loop
-//! where one query holds most of the HSPs. That the bytes equal NCBI's is the business of the
-//! blastn fixtures.
+//! searches with `LOSAT_X_QGROUPPAR=0` and by default give the same bytes. The same holds in
+//! `LOSAT_X_QBATCHPAR` slots of two threads and for batches split into query chunks. With
+//! `LOSAT_X_STATS` the counters show which form ran: per query at 4 threads, the owner loop where
+//! one query holds most of the HSPs. That the bytes equal NCBI's is the business of the blastn
+//! fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

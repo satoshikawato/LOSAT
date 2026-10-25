@@ -12,8 +12,8 @@
 //! pools of two threads) and when a batch is split into query chunks (`CHUNK_SIZE`, which reaches
 //! `chunk_query_masks`). That the masks are made on the pool's threads is checked by the unit
 //! test `masks_are_made_on_the_pool_threads` in `x_query_dust_par.rs`; here the sides of the
-//! switch's decision (`LOSAT_X_REACH`) show that the pool path ran at 4 threads and not at one. That those bytes equal NCBI's is the business of the blastn
-//! fixtures.
+//! switch's decision (`LOSAT_X_REACH`) show that the pool path ran at 4 threads and not at one.
+//! That those bytes equal NCBI's is the business of the blastn fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

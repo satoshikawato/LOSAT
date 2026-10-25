@@ -224,18 +224,18 @@
 //!
 //! With LOSAT_TIMING (any switch state) `main` prints `[TIMING] disc_lookup_build: <s>s
 //! (builds=<n> parallel=<n on a pool>)` when at least one table was built: `<s>` is the sum of
-//! the wall times of every build of the process (allocation, fill and longest chain); with LOSAT_X_QBATCHPAR it includes the slots' builds, which run
-//! concurrently. A second line, `[TIMING] disc_lookup_split: alloc= loop= pool_fill= chain=
-//! chunks= read_wall= read_max= read_sum= read_late= update_... link_... buckets_peak=
-//! x_prefault_wall= x_prefault_max= x_prefault_sum= x_prefault_late= x_prefault_rounds=
-//! x_prefault_touches=`, splits the same builds: the allocation of the tables, the fill by the
-//! original loop, the fill on the pool (the prefault rounds included) and the longest chain
-//! (seconds, summed); then, for the pool fills only, their
-//! chunks, and per phase (read = A, update = B, link = C), summed over the chunks: the calling
-//! worker's wall time from before the phase's first job to the return of its last (`wall`), the
-//! longest job (`max`), the jobs' summed running time (`sum`) and the latest start of a job after
-//! the phase began (`late`); the most the buckets of one fill reserved (both templates); and the
-//! same four times of the prefault rounds (phase P), the number of rounds and the zeros they
+//! the wall times of every build of the process (allocation, fill and longest chain); with
+//! LOSAT_X_QBATCHPAR it includes the slots' builds, which run concurrently. A second line,
+//! `[TIMING] disc_lookup_split: alloc= loop= pool_fill= chain= chunks= read_wall= read_max=
+//! read_sum= read_late= update_... link_... buckets_peak= x_prefault_wall= x_prefault_max=
+//! x_prefault_sum= x_prefault_late= x_prefault_rounds= x_prefault_touches=`, splits the same
+//! builds: the allocation of the tables, the fill by the original loop, the fill on the pool (the
+//! prefault rounds included) and the longest chain (seconds, summed); then, for the pool fills
+//! only, their chunks, and per phase (read = A, update = B, link = C), summed over the chunks: the
+//! calling worker's wall time from before the phase's first job to the return of its last (`wall`),
+//! the longest job (`max`), the jobs' summed running time (`sum`) and the latest start of a job
+//! after the phase began (`late`); the most the buckets of one fill reserved (both templates); and
+//! the same four times of the prefault rounds (phase P), the number of rounds and the zeros they
 //! wrote (one per page touched). The jobs' start and end are taken only with LOSAT_TIMING.
 
 use super::x_mb_lookup_par::{plan, pool_threads, Shared, K_COMPRESSION_FACTOR_SHIFT};
@@ -3492,9 +3492,9 @@ mod tests {
     }
 
     // EXPERIMENT (LOSAT_X_DCCSR): the CSR built on the pool, in chunks of any size, is the serial
-    // build's and lists the chains of the original loop (`x_dc_csr::x_assert_runs_are_the_chains` compares every
-    // cell's run with its chain, the presence vector, the counters, the longest chain and the
-    // two builds; it panics on a difference).
+    // build's and lists the chains of the original loop (`x_dc_csr::x_assert_runs_are_the_chains`
+    // compares every cell's run with its chain, the presence vector, the counters, the longest
+    // chain and the two builds; it panics on a difference).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")

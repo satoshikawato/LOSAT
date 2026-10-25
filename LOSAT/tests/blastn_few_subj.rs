@@ -8,11 +8,11 @@
 //! `LOSAT_X_PAIRPARDISCARR`), or the subjects (the chunks) as tasks of the pool without strips. So
 //! the property under test is that the report does not depend on it or on the thread count: the
 //! search with the switch at 2, 3 and 4 threads gives the bytes of the search at one thread and of
-//! the search without it. With `LOSAT_TIMING` the strips report how many chunks they took, which shows which
-//! shape ran: the rule needs the longest unit's letters times the strips' speed-up at the thread
-//! count to be more than all the letters (two subjects of about 300 kb each: 4 threads or more; a
-//! record of 5.2 Mb, whose second chunk is short: 2 threads or more), and no lowercase mask with
-//! `-lcase_masking`. That those bytes equal NCBI's is the business of the fixtures
+//! the search without it. With `LOSAT_TIMING` the strips report how many chunks they took, which
+//! shows which shape ran: the rule needs the longest unit's letters times the strips' speed-up at
+//! the thread count to be more than all the letters (two subjects of about 300 kb each: 4 threads
+//! or more; a record of 5.2 Mb, whose second chunk is short: 2 threads or more), and no lowercase
+//! mask with `-lcase_masking`. That those bytes equal NCBI's is the business of the fixtures
 //! (`tests/blastn_regression_fixtures.py`).
 //!
 //! The query is LC738874 (287 kb, longer than 8000 letters: the strips take the diagonal hash),
@@ -293,7 +293,7 @@ fn lowercase_masking_keeps_the_subject_tasks() {
 
 // A query of at most 8000 letters with both strands has the diagonal array, whose strips are
 // LOSAT_X_PAIRPARDISCARR's: dc-megablast of 3,000 letters of LC738874 against the two subjects at 4
-// threads takes the shape too (one chunk per subject), with the one-thread report, the report
+// threads takes the shape too (one chunk per subject), with the one-thread report, and the report
 // without the switch (no strips).
 #[test]
 fn a_short_query_takes_the_shape_with_the_diagonal_array() {

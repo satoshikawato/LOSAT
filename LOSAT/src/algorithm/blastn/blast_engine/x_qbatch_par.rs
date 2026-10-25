@@ -112,8 +112,8 @@
 //! printed to three decimals, the value the 0.97 gate compares (`slots_pay`), `-` when the model
 //! did not run; peak_mib: the most memory admitted at once; off: why the search did not, or stopped to,
 //! speculate, `none` if it never stopped).
-//! Without `LOSAT_X_STATS` the switch writes nothing of its own. `LOSAT_X_QBATCHPARMISS=N` (test only) corrupts every N-th prediction so
-//! that the discard, replan and guard paths run.
+//! Without `LOSAT_X_STATS` the switch writes nothing of its own. `LOSAT_X_QBATCHPARMISS=N` (test
+//! only) corrupts every N-th prediction so that the discard, replan and guard paths run.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-300
 //! ```c++

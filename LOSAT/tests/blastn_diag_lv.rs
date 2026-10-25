@@ -367,6 +367,8 @@ fn many_subjects_give_the_same_report_with_the_level_bounds() {
     assert!(!expected.is_empty(), "{task} {lcase:?}: no hits");
     assert_eq!(expected_stderr, "", "{task} {lcase:?}");
     let reach = reach_support::Reach::new("diaglv-masked");
+    let mut on = ONE.to_vec();
+    on.push(SWITCH);
     on.push(("LOSAT_TIMING", "1"));
     on.push(reach.var());
     let at = format!("{task} {on:?} {lcase:?} threads 1");

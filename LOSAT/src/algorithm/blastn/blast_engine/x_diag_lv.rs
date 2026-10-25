@@ -1,8 +1,8 @@
-//! EXPERIMENT (LOSAT_X_DIAGLV, a strict-set switch since 2026-10-17): a seed's retrieve of its
-//! own diagonal from the diagonal hash skips its
-//! read-only chain walk when every cell of the diagonal's bucket has a level below the smallest
-//! level that could change a decision of the seed. The table keeps, per bucket, an upper bound
-//! of the levels of its cells (`DiagHashTable::max_level`, 512 values).
+//! EXPERIMENT (LOSAT_X_DIAGLV, a strict-set switch since 2026-10-17): a seed's retrieve of its own
+//! diagonal from the diagonal hash skips its read-only chain walk when every cell of the diagonal's
+//! bucket has a level below the smallest level that could change a decision of the seed. The table
+//! keeps, per bucket, an upper bound of the levels of its cells (`DiagHashTable::max_level`, 512
+//! values).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:361-382
 //! (`s_BlastDiagHashRetrieve`)
@@ -150,17 +150,17 @@
 //! With the switch off the table has no bounds (`max_level` empty), `insert` does one length
 //! test of the empty vector, the clear fills an empty vector, and the callers call `retrieve`.
 //!
-//! EXPERIMENT (LOSAT_X_DIAGLV2, a strict-set switch since 2026-10-22): a retrieve that the bound does not skip is answered without the walk
-//! when every cell of the bucket but the one the latest insert wrote lies below the bound. A
-//! two-hit table (window above 0, dc-megablast) with level bounds keeps, per bucket, the latest
-//! insert's `(diag, level, hit_len, hit_saved)` and `other`, an upper bound of the levels of the
-//! bucket's other cells (`DiagHashTable::x_last`, `LvLast`). Where `other` is below the seed's
-//! bound, the retrieve returns the latest insert's values for its diagonal and no cell for any
-//! other diagonal. Only the strips folds of LOSAT_X_PAIRPARDISC keep and read the memo: each of
-//! their stages makes it again from the bounds at its start (`x_lv2_reset`: no latest insert,
-//! `other` the bucket's bound), so the reference fold (`process_offset_pairs`: a chunk without a
-//! pool with LOSAT_X_BNDCONE `0`, a masked chunk, and every worker with many subjects) runs the code
-//! before the switch and need not keep it.
+//! EXPERIMENT (LOSAT_X_DIAGLV2, a strict-set switch since 2026-10-22): a retrieve that the bound
+//! does not skip is answered without the walk when every cell of the bucket but the one the latest
+//! insert wrote lies below the bound. A two-hit table (window above 0, dc-megablast) with level
+//! bounds keeps, per bucket, the latest insert's `(diag, level, hit_len, hit_saved)` and `other`,
+//! an upper bound of the levels of the bucket's other cells (`DiagHashTable::x_last`, `LvLast`).
+//! Where `other` is below the seed's bound, the retrieve returns the latest insert's values for its
+//! diagonal and no cell for any other diagonal. Only the strips folds of LOSAT_X_PAIRPARDISC keep
+//! and read the memo: each of their stages makes it again from the bounds at its start
+//! (`x_lv2_reset`: no latest insert, `other` the bucket's bound), so the reference fold
+//! (`process_offset_pairs`: a chunk without a pool with LOSAT_X_BNDCONE `0`, a masked chunk, and
+//! every worker with many subjects) runs the code before the switch and need not keep it.
 //!
 //! Why the output is the same:
 //! - (iv) The latest insert's cell is the first cell of its diagonal in the bucket's chain, with

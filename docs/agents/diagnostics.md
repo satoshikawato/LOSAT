@@ -1327,8 +1327,7 @@ Rebuilding less:
   discontiguous table) takes them too. Before, such a chunk took the reference fold (`process_offset_pairs`), which
   keeps neither the memo of `LOSAT_X_DIAGLV2` nor the lean folds of `LOSAT_X_FOLDLEAN` (it reads the CSR table of
   `LOSAT_X_DCCSR` as the stage does). Exact for the stages' reason: the owner folds every
-  pair in the reference order with the reference statements whatever the number of threads (their entries; their
-  shadows compare the hit list and the table per chunk, at one thread too). Many subjects on a pool keep the reference
+  pair in the reference order with the reference statements whatever the number of threads (their entries). Many subjects on a pool keep the reference
   fold in every worker (outside the scope). Reach: recorded where a chunk in the scope has no pool. Tests:
   `LOSAT/tests/blastn_pairpar_disc.rs` and `blastn_pairpar_disc_arr.rs` (`the_stage_runs_at_one_thread`: the same
   bytes as the reference, the stage's chunks counted, none with the switch `0`), `blastn_diag_lv.rs` (the memo
@@ -2851,7 +2850,7 @@ Scheduling (each value computed by one thread with the original function; order 
   `[X_PAIRPARSHADOW]` summary line) went with the variable, with the second build of the megablast
   table that was the only run-time comparison of MBLUTONCE and MBLUTPREFAULT, the one-hit
   comparison of PAIRPARFOLD and the `max_level` check of DIAGLV for this path; their `=0`
-  comparisons in the tests remain, and the dc-megablast and Na strips keep their own shadows. With
+  comparisons in the tests remain. With
   `LOSAT_TIMING` a `[TIMING] x_pairpar_seed` line gives the strips, seeds and the owner's fold, scan
   and wait time.
 - Private copies of the megablast fill's counters (`blastn/x_mb_lookup_par.rs`; used by the read-once fill of
@@ -3333,14 +3332,14 @@ Scheduling (each value computed by one thread with the original function; order 
   length and word size, one and two templates, 1-20 parts, chunks of 1 to 5,000 positions and random
   layouts of queries and masks, pools of 1, 2, 3, 5, 8 and 16 threads, a 2.6 M-position query in the
   default chunks on pools; the template indices read only the last `template_length` bases; the owners
-  run on at least two workers of a 3-thread pool; the shadow names a change in any one array or the
+  run on at least two workers of a 3-thread pool; a test names a change in any one array or the
   longest chain; the buckets' bound; the private counters give the loop's counters on pools of 2, 3, 5
   and 16 threads also from start values that the increments wrap past u32::MAX, with blocks whose
   counters wrap and blocks whose counters stay zero, and at least two owners' private copies hold
   counts before the flush (a fill that counted into one shared copy would be just as exact but bring
   the false sharing back); the bucket headers and the counter copies are
   whole 64-byte lines) and `LOSAT/tests/blastn_disc_lookup_par.rs`
-  (off / on / shadow equal at 1 and 4 threads, `-subject` and `-db`, one and two templates, with
+  (off / on equal at 1 and 4 threads, `-subject` and `-db`, one and two templates, with
   `LOSAT_X_PAIRPARDISC`, `LOSAT_X_QBATCHPAR` slots and split query chunks, megablast with and without a
   template, the timing and split lines, and AP027131 against NZ_CP006932 with one and two templates,
   whose tables span two chunks).
@@ -3654,7 +3653,7 @@ Scheduling (each value computed by one thread with the original function; order 
   (`retrieve_below_makes_the_decisions_of_retrieve`, `the_bound_is_tight_at_every_reachable_setting`: the cell the
   retrieve's walk returns gives the seed's decisions, the `last_hit` test and with two hits the window test, of no
   cell, where the walk is skipped); the tests of the strips folds compare the bounds of the two tables with the
-  reference fold's.
+  reference fold's (the one-hit strips fold had `LOSAT_X_PAIRPARSHADOW` until PAIRPAR graduated on 2026-10-22).
   Measured on the workstation (alternating pairs, node 1 CPUs 32-47, `LOSAT_X_PAIRPARDISC=1` in the dc-megablast
   runs; 1,775 or 3,492 D. melanogaster cDNAs against 3 Mb of chromosome 2L): dc-megablast one batch 2.237 ->
   1.806 s at 1 thread (0.808, 4 pairs) and 2.089 -> 1.304 s at 16 (0.624, 4 pairs), two batches 4.442 -> 2.663
@@ -3697,7 +3696,7 @@ Scheduling (each value computed by one thread with the original function; order 
   `other`, and every answer makes the decisions of the walk), the dc strips stage test of `x_pair_seed_disc.rs` (the memo
   on 1 to 8 threads and 2 to 16 partitions), the partition tests of `x_pair_seed_part.rs`,
   `LOSAT/tests/blastn_diag_lv.rs` (`the_memo_and_the_lean_folds_give_the_same_report`: dc-megablast at 1 and 4
-  threads with each switch, the memo answering under the shadow; megablast keeps no memo).
+  threads with each switch, the memo answering; megablast keeps no memo).
   Evidence (ws, node 1 timed, dev f664ceee against perf/dc-fold-lean 33397e4a, medians of the per-pair ratios,
   pairs in rotated order, every output dev's; v4-A15 ab9 and the many-pair runs fin6; both switches on unless
   named): 31,168 dmel cDNAs
@@ -3762,7 +3761,8 @@ Scheduling (each value computed by one thread with the original function; order 
   `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` lines end with `partitions= merges= merge=
   helpers_left=` (without it they are as before), their `fold=` is the CPU time summed over the
   participants (not wall time), and `[TIMING] scan_lookup` takes off only the owner's extension time, so
-  it stays a figure of the owner's wall time. The `=0` runs
+  it stays a figure of the owner's wall time. The one-hit
+  fold's own shadow (`LOSAT_X_PAIRPARSHADOW`) went with PAIRPAR's graduation on 2026-10-22: the `=0` runs
   of `LOSAT/tests/blastn_pairpar_fold.rs` compare the reports, and the `[TIMING] x_pairpardisc_seed` fields
   (`merges=` equal to `chunks=`, `partitions=` the thread count) show that every chunk folded in partitions.
   RSS grows with the thread count: every partition table is a full copy of the chunk's table (P =

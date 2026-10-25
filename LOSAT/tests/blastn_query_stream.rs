@@ -22,8 +22,9 @@
 //! errors (late in the file, and in the first record, before any output), a batch of queries
 //! without letters, LOSAT's refusals that come before every report (LOSAT_X_RPTSTREAM then keeps
 //! its reports after the loop, and the records of every batch are kept for them), and `-db`.
-//! Standard input and a pipe are read once (the `[X_STATS]` line names why), and the switch is on by default and off by its rule. That those bytes equal NCBI's is the business of the
-//! blastn fixtures.
+//! Standard input and a pipe are read once (the `[X_STATS]` line names why), and the switch is on
+//! by default and off by its rule. That those bytes equal NCBI's is the business of the blastn
+//! fixtures.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -530,8 +531,14 @@ fn ranges_masks_and_hit_list_options_give_the_off_bytes() {
         }
         // LOSAT_X_QBATCHPAR's slots search the batches ahead (the rule keeps the switch off).
         let what = format!("{task} {extra:?} QBATCHPAR");
-        let (off, _) = same_two(&what, &args, 4, &[QBATCHPAR, TWO_SLOTS, RPTSTREAM], None);
+        let (off, numbers) = same_two(&what, &args, 4, &[QBATCHPAR, TWO_SLOTS, RPTSTREAM], None);
         assert_eq!(off.status, Some(0), "{what}");
+        let why = if task == "megablast" {
+            "megablast"
+        } else {
+            "slots"
+        };
+        assert_eq!(numbers.off, why, "{what}: {numbers:?}");
     }
 }
 
@@ -818,11 +825,12 @@ fn a_database_search_gives_the_off_bytes() {
 
 /// The switch is on by default (an empty value): with LOSAT_X_RPTSTREAM it reads the batches
 /// again (its `[X_STATS]` line with `off=none`); with `LOSAT_X_QSTREAM=0` the records are read
-/// before the search (no line). Its rule, where the line says why: `-task megablast` (`off=megablast`); a file shorter than twice the largest batch
-/// (`off=batch`; here `BATCH_SIZE` half the file's bytes plus one, and half the file's bytes on);
-/// where the slots of LOSAT_X_QBATCHPAR may run, a file shorter than twice what their budget holds
-/// (`off=slots`; a budget set by `LOSAT_X_QBATCHPARMEM` for a small file at 2 threads, none at one
-/// thread). The bytes are the same.
+/// before the search (no line). Its rule, where the line says why: `-task megablast`
+/// (`off=megablast`); a file shorter than twice the largest batch (`off=batch`; here `BATCH_SIZE`
+/// half the file's bytes plus one, and half the file's bytes on); where the slots of
+/// LOSAT_X_QBATCHPAR may run, a file shorter than twice what their budget holds (`off=slots`; a
+/// budget set by `LOSAT_X_QBATCHPARMEM` for a small file at 2 threads, none at one thread). The
+/// bytes are the same.
 #[test]
 fn the_switch_is_on_by_default() {
     let dir = TempDir::new("default");
@@ -941,4 +949,53 @@ fn the_records_are_kept_only_for_a_writer_after_the_loop() {
     };
     assert_eq!(kept(&[SWITCH, RPTSTREAM, STATS]), "0");
     assert_eq!(kept(&[SWITCH, RPTSTREAM, STATS, QBATCHPAR, TWO_SLOTS]), "0");
+
+    // LOSAT_X_RPTSTREAM on but refusing the search (a `-dbsize` whose search space could
+    // overflow: `off=search_space`) while the switch acts: the reports are written after the
+    // loop from the records it kept, and the bytes are those without the switch.
+    let mut huge = args.to_vec();
+    huge.extend_from_slice(&["-dbsize", "1200000000000000"]);
+    let stats_line = |stderr: &str, name: &str| -> String {
+        stderr
+            .lines()
+            .find(|line| line.starts_with(name))
+            .unwrap_or_else(|| panic!("no {name} line: {stderr}"))
+            .to_string()
+    };
+    let refused = blastn(&huge, 4, &[SWITCH, RPTSTREAM, STATS], None);
+    let stderr = String::from_utf8_lossy(&refused.stderr).into_owned();
+    let rpt = stats_line(&stderr, "[X_STATS] RPTSTREAM ");
+    assert!(
+        rpt.split_whitespace()
+            .any(|word| word == "off=search_space"),
+        "{rpt}"
+    );
+    let stream = stats_line(&stderr, "[X_STATS] QSTREAM ");
+    assert!(
+        stream.split_whitespace().any(|word| word == "off=none"),
+        "{stream}"
+    );
+    let kept_records: u64 = stream
+        .split_whitespace()
+        .find_map(|word| word.strip_prefix("kept="))
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(|| panic!("{stream}"));
+    assert!(kept_records > 0, "{stream}");
+    let zero = blastn(&huge, 4, &[RPTSTREAM, ("LOSAT_X_QSTREAM", "0")], None);
+    assert_eq!(refused.status, Some(0), "{stderr}");
+    assert!(!refused.report.is_empty(), "{stderr}");
+    let without_stats = |stderr: &str| -> String {
+        stderr
+            .split_inclusive('\n')
+            .filter(|line| !line.starts_with("[X_STATS] "))
+            .collect()
+    };
+    assert_eq!(
+        (refused.status, &refused.report, without_stats(&stderr)),
+        (
+            zero.status,
+            &zero.report,
+            without_stats(&String::from_utf8_lossy(&zero.stderr))
+        )
+    );
 }

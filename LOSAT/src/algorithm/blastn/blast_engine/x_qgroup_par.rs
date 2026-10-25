@@ -119,7 +119,7 @@ static TRACEBACK: AtomicU64 = AtomicU64::new(0);
 static TRACEBACK_QUERIES: AtomicU64 = AtomicU64::new(0);
 static OWNER: AtomicU64 = AtomicU64::new(0);
 
-/// Which stage a plan or a comparison is for.
+/// Which stage a plan is for.
 #[derive(Clone, Copy)]
 pub(super) enum Stage {
     Prelim,

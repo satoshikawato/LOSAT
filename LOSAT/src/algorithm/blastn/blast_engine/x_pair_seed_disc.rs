@@ -1010,8 +1010,8 @@ fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
 /// ```
 /// The parent's `run` for a discontiguous table: the seed stage of this chunk (the loop
 /// above with its two-hit extension) when LOSAT_X_PAIRPARDISC is on and the chunk is in
-/// scope; `true` means it has run and the reference scan is skipped. `fold_scratch` holds the allocations of LOSAT_X_PAIRPARFOLD's partition tables and
-/// buffers (`x_pair_seed_part.rs`).
+/// scope; `true` means it has run and the reference scan is skipped. `fold_scratch` holds the
+/// allocations of LOSAT_X_PAIRPARFOLD's partition tables and buffers (`x_pair_seed_part.rs`).
 pub(super) fn run(
     x: &Inputs<'_>,
     diag_hash: &mut DiagHashTable,
@@ -2222,9 +2222,9 @@ mod tests {
                         assert_eq!(max_level, lv_hash.max_level, "{at}");
                     }
                     // LOSAT_X_DIAGLV2 (`x_diag_lv.rs`) and LOSAT_X_FOLDLEAN: on a table with
-                    // level bounds, with and without the memo, the serial fold's four instances (`LEAN` x `MEMO`) give the
-                    // hits and the table of the fold on a table with neither; with the memo it
-                    // answers retrieves, without it never.
+                    // level bounds, with and without the memo, the serial fold's four instances
+                    // (`LEAN` x `MEMO`) give the hits and the table of the fold on a table with
+                    // neither; with the memo it answers retrieves, without it never.
                     let mut plain_hash = new_hash();
                     plain_hash.max_level = Vec::new();
                     plain_hash.x_last = Vec::new();

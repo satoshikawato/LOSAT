@@ -5321,12 +5321,20 @@ Scheduling (each value computed by one thread with the original function; order 
   3 s, 8 alternated pairs): the C. elegans genome x0.991 / x0.986 (24 pairs at 8), the cDNAs x0.999 / x0.999,
   the human genome x0.790 / x0.673 at 8 / 16 threads.
 - `LOSAT_X_TBNSTAGEDROP=1` (TBLASTN `-db`, memory; in the strict set from the pull request that added it: on unless
-  `=0`): the composition redo and the traceback of `-comp_based_stats 0` of a `-db` stream let a subject's store go
-  once the stage has done the subject's last match (redone, or passed by the early termination), instead of holding
-  every subject they read until the stage ends (`tblastn/x_db_stream.rs` `XStageSubjects::done`; the number of
-  matches of each subject is counted when the stage starts, so no subject is read again). With more than one thread a
-  match redone by a worker is done when the worker ends it. It changes no value and no order of computation. NCBI's
-  redo fetches each match's subject and releases it after the match (`blast_kappa.c`). @@MEASURED@@
+  `=0`): the composition redo and the traceback of `-comp_based_stats 0` of a `-db` stream let a subject's store go once
+  the stage has done the subject's last match (redone, or passed by the early termination), instead of holding every
+  subject they read until the stage ends (`tblastn/x_db_stream.rs` `XStageSubjects::done`; the number of matches of each
+  subject is counted when the stage starts, so no subject is read again). With more than one thread a match redone by a
+  worker is done when the worker ends it. It changes no value and no order of computation. NCBI's redo fetches each
+  match's subject and releases it after the match (`blast_kappa.c`). Measured 2026-10-25 (workstation, every report
+  identical, against the same binary with `=0`): peak RssAnon of one fly protein x the human genome (3.1 Gb) 112-115
+  against 533-546 MiB at one thread (NCBI 483; the redo held the stores of 15 chromosomes, 2.3 Gb in 2 bits) and 421
+  against 454-490 at 8 threads (697-702 against 691-700 at 16, where the peak is elsewhere); 30 C. elegans proteins x
+  the C. elegans genome and 118 fly proteins x zebrafish cDNAs within the spread of their runs (their peaks are not in
+  the redo). At one thread (`perf stat`, node 0) instructions:u x1.000000 / x0.999993 / x0.999920 on the three, cycles:u
+  x0.9963 / x0.9991 / x0.9990 (8 and 3 rounds beside an A/A arm of `=0`: x0.9964 / x1.0035). Timed (node 1, warmed 3 s,
+  alternating pairs): the human genome x0.984 / x0.980 at 8 / 16 threads (8 pairs, none above 1), the C. elegans genome
+  x1.000 / x0.985 (16 / 8 pairs), the cDNAs x1.002 / x1.000 (8 pairs; x1.002 is one 10 ms step of 8.17 s).
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

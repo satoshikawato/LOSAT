@@ -372,6 +372,7 @@ export LOSAT_X_BXUNITCAP=8
 export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
+export LOSAT_X_DCTWOSLOTS=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
@@ -3832,6 +3833,18 @@ Scheduling (each value computed by one thread with the original function; order 
   vs 199). Where the rule keeps the loop (1,775 cDNAs, 5.4 MB): plain blastn at 8 / 16 threads 120 / 122 MiB, 1.04 /
   0.91 s, against 183 / 332 MiB, 0.99 / 0.66 s with the earlier default budget; NCBI `-db` 128 / 136 MiB, 15.2 / 15.1
   s.
+- `LOSAT_X_DCTWOSLOTS=1` (BLASTN, `-task dc-megablast`, `-subject` with LOSAT_X_QBATCHPAR slots, memory and speed;
+  in the strict set since 2026-10-25 (perf/dc-two-slots, evidence at the end of this entry): on unless it is `0`)
+  where the slot model of LOSAT_X_QBATCHPAR (`choose_slots`) takes three slots or more for dc-megablast, two slots
+  of `n / 2` threads search instead (`Profile::slot_cap`, `blastn/blast_engine/x_qbatch_par.rs`). Where the model
+  takes two slots or keeps the loop, and with `LOSAT_X_QBATCHPARSLOTS`, nothing changes; megablast, blastn and
+  blastn-short have no cap. Why: the model's E(m) points (above) were measured before LOSAT_X_PAIRPARDISCARR and
+  LOSAT_X_PAIRPARHOME made one dc-megablast batch scale better on 8 to 32 threads, so it took 4 x 4 at 16 threads
+  and 9 x 3 at 32 on 31,168 cDNAs against 3 Mb where two slots are faster and hold fewer batches in memory. Same
+  bytes: the slots change no output (LOSAT_X_QBATCHPAR above), this chooses only `k` and `m`. With
+  `LOSAT_X_STATS` the QBATCHPAR line's `k=` and `m=` are the slots that ran; `rule_k=`, `rule_m=` and `predicted=`
+  stay the model's layout. Tests: `the_dc_cap_*` and `the_cap_changes_only_layouts_of_more_than_two_slots` in
+  `x_qbatch_par.rs`, `LOSAT/tests/blastn_dc_two_slots.rs`. Evidence: EVIDENCE_PENDING
 - `LOSAT_X_RPTSTREAM=1` (BLASTN, all tasks, `-subject` and `-db`, memory and speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`) the batch loop of `run_in_pool` writes the
   reports of each query batch right after it has taken the batch (in batch order, also when
   `LOSAT_X_QBATCHPAR` slots finish out of order: the loop's in-order take is unchanged), finished its lists

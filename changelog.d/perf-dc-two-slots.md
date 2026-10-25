@@ -1,0 +1,1 @@
+- `blastn -task dc-megablast` of a large query file against `-subject` with many threads searches its query batches in two `LOSAT_X_QBATCHPAR` slots of half the threads where the slot model would take three or more (`LOSAT_X_DCTWOSLOTS`, one of the switches above; `=0` keeps the model's choice): CHANGELOG_PENDING. Outputs do not change.

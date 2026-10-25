@@ -130,6 +130,9 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BNTABPAR` (BLASTN's outfmt 6 / 7 rows of a report formatted per query on the search's
 /// pool while no LOSAT_X_QBATCHPAR slot exists, `blastn/x_tab_par.rs`) joined the set in the pull
 /// request that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_DCTWOSLOTS` (BLASTN's dc-megablast takes two LOSAT_X_QBATCHPAR slots of half the
+/// threads where the slot model takes three or more, `blastn/blast_engine/x_qbatch_par.rs`) joined
+/// the set in the pull request that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_QGROUPPAR` (BLASTN's preliminary gapped loop and traceback of a subject searched on one
 /// thread run per query on the pool, `blastn/blast_engine/x_qgroup_par.rs`) joined the set in the
 /// pull request that added it, after it was verified and timed with it on and off.
@@ -212,6 +215,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_CTXO1",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
+    "LOSAT_X_DCTWOSLOTS",
     "LOSAT_X_DIAGLV",
     "LOSAT_X_DIAGLV2",
     "LOSAT_X_DISCLUTPAR",

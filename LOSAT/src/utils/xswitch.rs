@@ -286,6 +286,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNOWNPOOLS",
     "LOSAT_X_TBNREDOLPT",
     "LOSAT_X_TBNSCANBYTE",
+    "LOSAT_X_TBNSTAGEDROP",
     "LOSAT_X_TBNSTORE",
     "LOSAT_X_TBNUNGAP",
     "LOSAT_X_TBNUNITXLATE",
@@ -305,6 +306,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXRPTPAR",
     "LOSAT_X_TBXSCANBF",
     "LOSAT_X_TBXSTORE",
+    "LOSAT_X_TBXUNGAPSENT",
     "LOSAT_X_TBXUNITMASK",
 ];
 

@@ -17,6 +17,7 @@ use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::protein_display_score;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats};
+use super::scoring::{Blosum62Score, TbxScore};
 
 /// The version that NCBI's TBLASTX reports print.
 ///
@@ -284,13 +285,14 @@ fn displayed_residues<'r>(
 // which 60 ms under this pass (v4-W s8).
 /// `row_counts` of the displayed rows of `hsp` (`displayed_rows`), without making them. The
 /// HSPs are ungapped: both rows have the HSP's length.
-fn displayed_counts(
+fn displayed_counts<S: TbxScore>(
     hsp: &TblastxHsp,
     query: &[u8],
     subject: &[u8],
     subject_first: usize,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    sc: S,
 ) -> (usize, usize) {
     let hit = &hsp.hit;
     debug_assert_eq!(
@@ -300,7 +302,7 @@ fn displayed_counts(
     );
     let (query_row, subject_row) =
         displayed_residues(hsp, query, subject, subject_first, query_code, db_code);
-    pair_counts(query_row.zip(subject_row))
+    pair_counts(sc, query_row.zip(subject_row))
 }
 
 /// `displayed_rows` into two buffers (cleared first), which the BLAST XML reuses from HSP to HSP.
@@ -369,16 +371,17 @@ impl<'a> SubjectLetters<'a> {
 
     /// The engine counts of `hsp` (`hsp_engine_counts`) against its subject; `window` is the
     /// buffer of a stored subject's letters.
-    fn engine_counts(
+    fn engine_counts<S: TbxScore>(
         &self,
         hsp: &TblastxHsp,
         query: &[u8],
         query_code: &GeneticCode,
         db_code: &GeneticCode,
         window: &mut Vec<u8>,
+        sc: S,
     ) -> (usize, usize) {
         let (subject, subject_first) = self.letters(hsp, window);
-        hsp_engine_counts(hsp, query, subject, subject_first, query_code, db_code)
+        hsp_engine_counts(hsp, query, subject, subject_first, query_code, db_code, sc)
     }
 
     /// The displayed rows of `hsp` (`displayed_rows`) against its subject; `window` is the
@@ -402,16 +405,17 @@ impl<'a> SubjectLetters<'a> {
     /// The counts of the displayed rows of `hsp` (`displayed_counts`) against its subject;
     /// `window` is the buffer of a stored subject's letters.
     #[cfg_attr(target_arch = "wasm32", inline(never))]
-    fn counts(
+    fn counts<S: TbxScore>(
         &self,
         hsp: &TblastxHsp,
         query: &[u8],
         query_code: &GeneticCode,
         db_code: &GeneticCode,
         window: &mut Vec<u8>,
+        sc: S,
     ) -> (usize, usize) {
         let (subject, subject_first) = self.letters(hsp, window);
-        displayed_counts(hsp, query, subject, subject_first, query_code, db_code)
+        displayed_counts(hsp, query, subject, subject_first, query_code, db_code, sc)
     }
 }
 
@@ -463,8 +467,11 @@ fn codon_window(length: usize, frame: i8, from: usize, to: usize) -> (usize, usi
 }
 
 /// The identities and the positives (identities included) of two displayed rows.
-fn row_counts(query_row: &[u8], subject_row: &[u8]) -> (usize, usize) {
-    pair_counts(query_row.iter().copied().zip(subject_row.iter().copied()))
+fn row_counts<S: TbxScore>(sc: S, query_row: &[u8], subject_row: &[u8]) -> (usize, usize) {
+    pair_counts(
+        sc,
+        query_row.iter().copied().zip(subject_row.iter().copied()),
+    )
 }
 
 // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2131-2150
@@ -494,15 +501,16 @@ fn row_counts(query_row: &[u8], subject_row: &[u8]) -> (usize, usize) {
 //                     }
 // ```
 /// The identities and the positives (identities included) of the letter pairs of two
-/// displayed rows, in row order (`row_counts`, `displayed_counts`).
-fn pair_counts(pairs: impl Iterator<Item = (u8, u8)>) -> (usize, usize) {
+/// displayed rows, in row order (`row_counts`, `displayed_counts`), by the display matrix of
+/// the search's matrix (BLOSUM62's instance reads the constant matrix).
+fn pair_counts<S: TbxScore>(sc: S, pairs: impl Iterator<Item = (u8, u8)>) -> (usize, usize) {
     let mut identities = 0;
     let mut positives = 0;
     for (q, s) in pairs {
         if q == s {
             identities += 1;
             positives += 1;
-        } else if protein_display_score(ScoringMatrix::Blosum62, q, s) > 0 {
+        } else if protein_display_score(sc.matrix(), q, s) > 0 {
             positives += 1;
         }
     }
@@ -521,12 +529,13 @@ fn pair_counts(pairs: impl Iterator<Item = (u8, u8)>) -> (usize, usize) {
 ///     case eMismatches:
 ///         x_PrintMismatches(); break;
 /// ```
-pub(crate) fn set_displayed_identities(
+pub(crate) fn set_displayed_identities<S: TbxScore>(
     hits: &mut [TblastxHsp],
     queries: &[FastaRecord],
     subjects: SubjectLetters<'_>,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    sc: S,
 ) {
     let mut window = Vec::new();
     for hsp in hits {
@@ -536,6 +545,7 @@ pub(crate) fn set_displayed_identities(
             query_code,
             db_code,
             &mut window,
+            sc,
         );
         let hit = &mut hsp.hit;
         hit.num_ident = identities;
@@ -601,13 +611,14 @@ pub(crate) fn set_displayed_identities(
 ///    if(NULL != matrix)
 /// 	   *num_pos_ptr = num_pos + num_ident;
 /// ```
-fn hsp_engine_counts(
+fn hsp_engine_counts<S: TbxScore>(
     hsp: &TblastxHsp,
     query: &[u8],
     subject: &[u8],
     subject_first: usize,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    sc: S,
 ) -> (usize, usize) {
     use super::translation::frame_residue;
     let hit = &hsp.hit;
@@ -626,7 +637,7 @@ fn hsp_engine_counts(
         );
         if q == s {
             identities += 1;
-        } else if crate::utils::matrix::blosum62_score(q, s) > 0 {
+        } else if sc.score(q, s) > 0 {
             positives += 1;
         }
     }
@@ -638,12 +649,13 @@ fn hsp_engine_counts(
 /// count; read before it) and its `num_positives`, which the search does not count
 /// (`hsp_engine_counts`: the same letters give the same identities, checked in debug builds).
 /// Made only when a Seq-align format is requested.
-pub(crate) fn engine_counts(
+pub(crate) fn engine_counts<S: TbxScore>(
     hits: &[TblastxHsp],
     queries: &[FastaRecord],
     subjects: SubjectLetters<'_>,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    sc: S,
 ) -> Vec<(u32, u32)> {
     let mut window = Vec::new();
     hits.iter()
@@ -654,6 +666,7 @@ pub(crate) fn engine_counts(
                 query_code,
                 db_code,
                 &mut window,
+                sc,
             );
             debug_assert_eq!(identities, hsp.hit.num_ident, "engine identities");
             (hsp.hit.num_ident as u32, positives as u32)
@@ -952,6 +965,26 @@ pub(crate) fn pairwise_hits(
     hits.iter().map(|hsp| rows.hit(hsp, &mut window)).collect()
 }
 
+/// The positives of the outfmt 0 rows `hits` by `matrix`, a matrix other than BLOSUM62, counted
+/// again from the rows (`row_counts`) after `PairwiseRows::hit` counted BLOSUM62's: the query
+/// row's masked letters are lower case there, and the letters of the rows are upper case. One
+/// `hit` for every matrix keeps the helpers that it calls once (`SubjectLetters::rows`,
+/// `lowercase_query_row`) in its body.
+pub(crate) fn set_row_positives(hits: &mut [PairwiseHit], matrix: ScoringMatrix) {
+    for hit in hits {
+        let query_row = hit
+            .query_seq
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes()
+            .to_ascii_uppercase();
+        let subject_row = hit.subject_seq.as_deref().unwrap_or_default().as_bytes();
+        let (_, positives) = row_counts(matrix, &query_row, subject_row);
+        hit.hit.num_positives = positives;
+        hit.positives = Some(positives);
+    }
+}
+
 // No NCBI counterpart: the masks of `shown_query_masks` arranged for `lowercase_query_row`. The
 // lowercase letters of a row do not depend on the order of the ranges, so a frame's ranges are
 // sorted by start, and the running maximum of their ends lets the row's scan start at the first
@@ -1055,7 +1088,7 @@ impl<'a> PairwiseRows<'a> {
         let subject = &subjects[hsp.hit.s_idx as usize];
         let (mut query_row, subject_row) =
             subject_letters.rows(hsp, query.seq(), query_code, db_code, window);
-        let (identities, positives) = row_counts(&query_row, &subject_row);
+        let (identities, positives) = row_counts(Blosum62Score, &query_row, &subject_row);
         let (q_idx, s_idx) = (hsp.hit.q_idx as usize, hsp.hit.s_idx as usize);
         let mut hit = hsp.hit.clone();
         shift_hit(&mut hit, query_placements, subject_placements);
@@ -1918,7 +1951,7 @@ mod tests {
     // display matrix).
     #[test]
     fn row_counts_use_the_displayed_letters() {
-        assert_eq!(row_counts(b"XAB*J", b"XADKI"), (2, 3));
+        assert_eq!(row_counts(Blosum62Score, b"XAB*J", b"XADKI"), (2, 3));
     }
 
     // The identities pass counts without the rows: the counts of a residue-by-residue loop
@@ -1976,15 +2009,24 @@ mod tests {
                                 expected.1 += 1;
                             }
                         }
-                        let counts =
-                            subjects.counts(&hsp, &query, &query_code, &db_code, &mut window);
+                        let counts = subjects.counts(
+                            &hsp,
+                            &query,
+                            &query_code,
+                            &db_code,
+                            &mut window,
+                            Blosum62Score,
+                        );
                         assert_eq!(
                             counts, expected,
                             "frames {query_frame} {subject_frame} at {subject_offset}"
                         );
                         let (query_row, subject_row) =
                             subjects.rows(&hsp, &query, &query_code, &db_code, &mut window);
-                        assert_eq!(row_counts(&query_row, &subject_row), expected);
+                        assert_eq!(
+                            row_counts(Blosum62Score, &query_row, &subject_row),
+                            expected
+                        );
                         mismatched += usize::from(expected.0 < 10);
                         positive += usize::from(expected.1 > expected.0);
                     }

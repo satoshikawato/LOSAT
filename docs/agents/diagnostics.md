@@ -420,6 +420,7 @@ export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNREDOLPT=1
 export LOSAT_X_TBNSCANBYTE=1
+export LOSAT_X_TBNSTAGEDROP=1
 export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNUNGAP=1
 export LOSAT_X_TBNUNITXLATE=1
@@ -439,6 +440,7 @@ export LOSAT_X_TBXRESOLVE=1
 export LOSAT_X_TBXRPTPAR=1
 export LOSAT_X_TBXSCANBF=1
 export LOSAT_X_TBXSTORE=1
+export LOSAT_X_TBXUNGAPSENT=1
 export LOSAT_X_TBXUNITMASK=256
 ```
 
@@ -5072,6 +5074,43 @@ Scheduling (each value computed by one thread with the original function; order 
   8 threads extension x0.772 (5/6), whole search x0.916 (5/6); serial reactor x0.807 (5/6), x0.913 (5/6);
   MelaMJNV x PemoMJNVA 8 threads x0.889 (6/6), x0.977 (4/6); serial reactor x0.846 (6/6), x0.957 (6/6);
   every report identical. (The method's noise: the same unchanged code read x0.92-1.02.)
+- `LOSAT_X_TBXUNGAPSENT=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-10-25; `=0` turns it off) the two-hit ungapped extension (TBXUNGAP's table walks, above) with
+  walks that the sentinels stop instead of a bound (`two_hit_sent` in
+  `tblastx/extension/x_two_hit_fast.rs`, exactness argument in its header): a query context's buffer
+  and a subject frame's are `[0, residues.., 0]` (NCBI's NULLB at each end, blast_util.c:438-453), and
+  the table scores code 0 against anything as -128, so a step on a sentinel stops either walk where the
+  reference's bound stops it (the step does not raise the best and makes `best - score >= 128 >
+  x_drop`), with the same best, length and stop position. The word loop and the walks (two steps a
+  loop) are inlined into the callers' extension code (the unit path's `x_hit`, the batched `resolve`,
+  the reference frame loops). Acts in native builds where the batch's query contexts carry both
+  sentinels (checked once per batch) and the unit's subject chunk is its whole frame (frames of at
+  most 5,000,000 residues, `MAX_DBSEQ_LEN`, so subjects up to 15 Mb; a longer frame is searched in
+  chunks whose ends are residues) of at most `i32::MAX / 16` bytes (no score wraps). An X-drop
+  outside 1..=127 or a word that does not fit runs the reference, and so does the debug output. In
+  the unit path the switch acts on the units of the branch-free hit loops (`LOSAT_X_TBXHITBF`): each
+  unit takes one of two instances of the loop's function (`scan_unit_bf`, `scan_unit_batched_bf`,
+  `scan_unit_sliced_bf`, `const SENT`, chosen once per unit), and the instances without the walks
+  are dev's machine code (normalized `objdump`: `scan_unit_bf`, the masked unit scans, `flush`,
+  `resolve_early`; the instances with batched extensions store one field more per unit). The units
+  of the other hit loop (`LOSAT_X_TBXHITBF=0`, the probes of `LOSAT_TIMING` and `LOSAT_X_STATS`) run
+  without it, so timings taken with those variables do not include it; the reference frame loops test
+  at every call. wasm32 (LOSAT Web) keeps TBXUNGAP's walks (plan v4 line W).
+  Measured 2026-10-25 on the workstation against dev f24d161f, the binary before the switch (node 1
+  without other timed runs, CPU 40 at 1 thread and CPUs 40-47 at 8, their HT siblings idle, warmed
+  3 s before every run, arm order reversed every other round, one warm-up round + 8 rounds, medians
+  of the per-round ratios; every report identical between the arms): AP027131 x AP027133 (code 4)
+  1 thread x0.950 (7.56 -> 7.19 s, 8 of 8 rounds below 1; cycles x0.950, instructions x0.924) and
+  8 threads x0.968 (1.524 -> 1.474 s, 8 of 8; cycles x0.957); MelaMJNV x PemoMJNVA 1 thread x0.963
+  (1.030 -> 0.992 s, 8 of 8; instructions x0.936); Sakai x MG1655[0:1 Mb] (code 11, the batched
+  scan in slices) 8 threads x0.979 (11.96 -> 11.71 s, 8 of 8; cycles x0.967, instructions x0.919).
+  With `=0` the instructions equal dev's (x1.0000 in all four) and so does the time (x0.997-1.002).
+  Max RSS equal but for Sakai at 8 threads, 743 MiB with the switch against 884 MiB for dev and
+  `=0` in every round (the switch allocates nothing). On AP027131 x AP027133 at 1 thread the
+  extension (31.9 million calls) took 235 cycles a call in dev (`walk_left`, `two_hit` and
+  `walk_right`, 30.6 % of the cycles in `perf record`) and 38 fewer with the switch (from the cycle
+  totals), about 197; what is left is the latency of the first query loads and the mispredicted
+  exits of the walks (as in TBXUNGAP).
 - `LOSAT_X_TBXHITBF=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` turns it off) the hit loop of the unit scan of the unit path (`scan_unit`, the
   batched scan of `LOSAT_X_TBXEXTBATCH`, and, from the next pull request (2026-10-19), the scan in slices
@@ -5388,7 +5427,8 @@ Scheduling (each value computed by one thread with the original function; order 
   subject when it makes the subject's plan and drops it once the plan is made (the plans of the short ones are made
   from the bytes of one block of 256 KiB per thread, without a store; a subject whose plan has no residues,
   `LOSAT_X_TBNUNITXLATE`, is read before its plan and held while its units translate it); the composition redo and the traceback of `-comp_based_stats 0` read each subject of their
-  lists when they first align it and hold it until the stage ends; the reports read the sequences they show. A long
+  lists when they first align it and hold it until the stage has done its last match (`LOSAT_X_TBNSTAGEDROP` below;
+  until the stage ends with `=0`); the reports read the sequences they show. A long
   sequence is read once while anything holds it: stages and batches that hold it at the same time share it, and a
   thread that asks for it while another thread reads it waits for that read. With more than one thread it is read
   into a buffer that glibc maps (taken from `utils::x_mapped::X_BYTES` when it holds one) and its store is that
@@ -5409,6 +5449,21 @@ Scheduling (each value computed by one thread with the original function; order 
   7.6k / 276k against 19.0k / 14.9k / 344k; cycles:u x0.9959 / x0.9983 / x0.9852. Timed against dev (node 1, warmed
   3 s, 8 alternated pairs): the C. elegans genome x0.991 / x0.986 (24 pairs at 8), the cDNAs x0.999 / x0.999,
   the human genome x0.790 / x0.673 at 8 / 16 threads.
+- `LOSAT_X_TBNSTAGEDROP=1` (TBLASTN `-db`, memory; in the strict set from the pull request that added it: on unless
+  `=0`): the composition redo and the traceback of `-comp_based_stats 0` of a `-db` stream let a subject's store go once
+  the stage has done the subject's last match (redone, or passed by the early termination), instead of holding every
+  subject they read until the stage ends (`tblastn/x_db_stream.rs` `XStageSubjects::done`; the number of matches of each
+  subject is counted when the stage starts, so no subject is read again). With more than one thread a match redone by a
+  worker is done when the worker ends it. It changes no value and no order of computation. NCBI's redo fetches each
+  match's subject and releases it after the match (`blast_kappa.c`). Measured 2026-10-25 (workstation, every report
+  identical, against the same binary with `=0`): peak RssAnon of one fly protein x the human genome (3.1 Gb) 112-115
+  against 533-546 MiB at one thread (NCBI 483; the redo held the stores of 15 chromosomes, 2.3 Gb in 2 bits) and 421
+  against 454-490 at 8 threads (697-702 against 691-700 at 16, where the peak is elsewhere); 30 C. elegans proteins x
+  the C. elegans genome and 118 fly proteins x zebrafish cDNAs within the spread of their runs (their peaks are not in
+  the redo). At one thread (`perf stat`, node 0) instructions:u x1.000000 / x0.999993 / x0.999920 on the three, cycles:u
+  x0.9963 / x0.9991 / x0.9990 (8 and 3 rounds beside an A/A arm of `=0`: x0.9964 / x1.0035). Timed (node 1, warmed 3 s,
+  alternating pairs): the human genome x0.984 / x0.980 at 8 / 16 threads (8 pairs, none above 1), the C. elegans genome
+  x1.000 / x0.985 (16 / 8 pairs), the cDNAs x1.002 / x1.000 (8 pairs; x1.002 is one 10 ms step of 8.17 s).
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

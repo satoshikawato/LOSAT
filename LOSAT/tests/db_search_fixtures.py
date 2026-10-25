@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Frozen `blastp -db`, `blastn -db`, `tblastn -db`, `blastx -db` and `tblastx -db` fixtures: LOSAT against the bytes NCBI BLAST+ 2.17.0 wrote (comparison only).
+"""Frozen `blastp -db`, `blastn -db`, `tblastn -db`, `blastx -db`, `tblastx -db` and `psiblast -db` fixtures: LOSAT against the bytes NCBI BLAST+ 2.17.0 wrote (comparison only).
 
 LOSAT/tests/db_search_manifest.tsv lists the rows (columns: row_id, program, kind, db, query, extra_args,
 outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers, and for the rows of outfmt 13 and 14 two more:
 files, side_sha256; xinclude_fixtures.py says what they mean: the run gets `-out <tmp>/<row_id>.out`, the frozen
 master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells). Every row runs from LOSAT/ as
 `PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
-(`blastp`, `blastn`, `tblastn`, `blastx` or `tblastx`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
+(`blastp`, `blastn`, `tblastn`, `blastx`, `tblastx` or `psiblast`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
 argument `-db ""`; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom
 `7 qseqid sseqid ...` spec stays whole). The databases are under LOSAT/tests/seqdb/db and
 LOSAT/tests/db_search (README.md there says how they were built).
@@ -53,7 +53,7 @@ MANIFEST = TESTS / "db_search_manifest.tsv"
 FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
-PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx")
+PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast")
 NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY", "ARCHIVE_FORMAT")
 TIMEOUT = 600
 # The `NAME=VALUE` tokens of `extra_args` that are environment variables of both programs: BLASTDB

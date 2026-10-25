@@ -1539,6 +1539,7 @@ fn write_seq_align_diags<E: Encoder>(
     query: &QueryRecord<'_>,
     subject: &SubjectRecord<'_>,
     hsps: &[HspRecord<'_>],
+    after_each: &mut impl FnMut(&mut E),
 ) {
     enc.element();
     enc.begin_sequence("Seq-align");
@@ -1581,6 +1582,8 @@ fn write_seq_align_diags<E: Encoder>(
         enc.end_list();
         enc.end_member();
         enc.end_sequence();
+        // A subject's HSPs are one Seq-align: hand the final bytes over after each Std-seg.
+        after_each(enc);
     }
     enc.end_list();
     enc.end_variant();
@@ -1748,8 +1751,9 @@ fn has_alignments(run: &RunRecord<'_>, hsps: &[HspRecord<'_>]) -> bool {
 
 /// The Seq-aligns of one query's HSPs, as the elements of the list that the caller opened
 /// (`Seq-annot` `data align` of outfmt 8, `alignments` of the archive of outfmt 11).
-/// `after_each` is called after each Seq-align (the archive hands the encoder's final bytes to
-/// its sink there).
+/// `after_each` is called after each Seq-align, and after each Std-seg of an ungapped search's
+/// Seq-align (it holds all of a subject's HSPs); the archive hands the encoder's final bytes to
+/// its sink there.
 pub(crate) fn write_seq_aligns<E: Encoder>(
     enc: &mut E,
     run: &RunRecord<'_>,
@@ -1767,7 +1771,13 @@ pub(crate) fn write_seq_aligns<E: Encoder>(
         }
     } else {
         for list in hsps.chunk_by(|a, b| a.subject == b.subject) {
-            write_seq_align_diags(enc, query, &subjects[list[0].subject as usize], list);
+            write_seq_align_diags(
+                enc,
+                query,
+                &subjects[list[0].subject as usize],
+                list,
+                &mut after_each,
+            );
             after_each(enc);
         }
     }

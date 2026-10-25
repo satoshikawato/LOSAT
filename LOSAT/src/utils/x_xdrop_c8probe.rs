@@ -23,7 +23,8 @@
 //!   are dropped by the same argument).
 //!
 //! Harness `c8_loop` (ignored): `C8_DIR` (capture directory, `LOSAT_X_DPCAPTURE`), `C8_KERN`
-//! (`dev` = `align8::<false, true, false>`, `grid` = `grid8`), `C8_REPS` (0: load, check and count
+//! (`dev` = `align8::<false, true, false>`, `grid` = `grid8` in one loop, `grid2` = `grid8` in two
+//! phases), `C8_REPS` (0: load, check and count
 //! only), `C8_LIMIT`, `C8_OUT` (append the result line). Every handled 8-bit score-only problem is
 //! checked once against the recorded result with both kernels, and counted (rows, cells, blocks of
 //! `grid8`); then the chosen kernel runs `C8_REPS` times over all problems. Counters: `perf stat`
@@ -102,8 +103,9 @@ unsafe fn block8g(
 
 /// `align8::<false, true, false>` with the blocks on the 32-lane grid (see the head of this file).
 /// `CNT`: count rows, blocks and band lanes into `COUNTS` (the check pass; the timed pass uses false).
+/// `PH`: the row's blocks in two phases (before / after the first survivor, see the row loop).
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-pub(super) unsafe fn grid8<const CNT: bool>(
+pub(super) unsafe fn grid8<const CNT: bool, const PH: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -288,38 +290,65 @@ pub(super) unsafe fn grid8<const CNT: bool>(
         let mut lo_surv = usize::MAX;
         let mut hi_surv = 0usize;
         let mut b0 = s0;
-        loop {
-            if b0 >= bend {
-                if b0 >= limit {
-                    break;
-                }
-                if (_mm256_cvtsi256_si32(rs.carry) & 0xFF) < (_mm256_cvtsi256_si32(rs.thrv) & 0xFF)
+        // One block: Some(live mask) or None at the row's stop point.
+        macro_rules! step {
+            () => {{
+                if b0 >= bend
+                    && (b0 >= limit
+                        || (_mm256_cvtsi256_si32(rs.carry) & 0xFF)
+                            < (_mm256_cvtsi256_si32(rs.thrv) & 0xFF))
                 {
+                    None
+                } else {
+                    let idx = ld(sb.add(b0));
+                    let sv = if small_alphabet {
+                        _mm256_shuffle_epi8(t0, idx)
+                    } else {
+                        lut32(t0, t1, _mm256_add_epi8(idx, k70), _mm256_sub_epi8(idx, k10))
+                    };
+                    let mask = if b0 + 32 <= limit {
+                        None
+                    } else {
+                        Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
+                    };
+                    let d0 = block8g(&c, &mut rs, &mut prev, hr, hw, e, b0, sv, mask);
+                    if CNT {
+                        cnt.blocks += 1;
+                    }
+                    Some(!(_mm256_movemask_epi8(d0) as u32))
+                }
+            }};
+        }
+        if PH {
+            // Blocks up to the first survivor, then the rest: the next row's band start (and so
+            // the places of all its loads) depends on the first phase only. In one loop the
+            // compiler keeps `lo_surv` with a cmov that waits for every block's drop mask, so the
+            // next row's addresses wait for the end of this row.
+            while let Some(live) = step!() {
+                b0 += 32;
+                if live != 0 {
+                    lo_surv = b0 - 32 + live.trailing_zeros() as usize;
+                    hi_surv = b0 - 32 + (31 - live.leading_zeros() as usize);
                     break;
                 }
             }
-            let idx = ld(sb.add(b0));
-            let sv = if small_alphabet {
-                _mm256_shuffle_epi8(t0, idx)
-            } else {
-                lut32(t0, t1, _mm256_add_epi8(idx, k70), _mm256_sub_epi8(idx, k10))
-            };
-            let mask = if b0 + 32 <= limit {
-                None
-            } else {
-                Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
-            };
-            let d0 = block8g(&c, &mut rs, &mut prev, hr, hw, e, b0, sv, mask);
-            let live = !(_mm256_movemask_epi8(d0) as u32);
-            if live != 0 {
-                if lo_surv == usize::MAX {
-                    lo_surv = b0 + live.trailing_zeros() as usize;
+            if lo_surv != usize::MAX {
+                while let Some(live) = step!() {
+                    if live != 0 {
+                        hi_surv = b0 + (31 - live.leading_zeros() as usize);
+                    }
+                    b0 += 32;
                 }
-                hi_surv = b0 + (31 - live.leading_zeros() as usize);
             }
-            b0 += 32;
-            if CNT {
-                cnt.blocks += 1;
+        } else {
+            while let Some(live) = step!() {
+                if live != 0 {
+                    if lo_surv == usize::MAX {
+                        lo_surv = b0 + live.trailing_zeros() as usize;
+                    }
+                    hi_surv = b0 + (31 - live.leading_zeros() as usize);
+                }
+                b0 += 32;
             }
         }
         if CNT {
@@ -474,14 +503,20 @@ fn grid8_matches_align8_on_random_problems() {
                 )
             };
             // SAFETY: AVX2 detected above.
-            let (ra, rg) = unsafe {
+            let (ra, rg, rp) = unsafe {
                 (
                     align8::<false, true, false>(
                         &rows, &cols, &scores, m, len1, len2, go, ge, x, cf, &mut sa,
                     ),
-                    grid8::<true>(&rows, &cols, &scores, m, len1, len2, go, ge, x, cf, &mut sg),
+                    grid8::<true, false>(
+                        &rows, &cols, &scores, m, len1, len2, go, ge, x, cf, &mut sg,
+                    ),
+                    grid8::<false, true>(
+                        &rows, &cols, &scores, m, len1, len2, go, ge, x, cf, &mut sg,
+                    ),
                 )
             };
+            assert_eq!(rg, rp, "case {case}: grid8 one loop vs two phases");
             assert_eq!(
                 ra, rg,
                 "case {case} rev={reverse} n={n} go={go} ge={ge} x={x} len1={len1} len2={len2} cf={cf} sentinel={sentinel} win_at={win_at}"
@@ -516,11 +551,15 @@ struct Prob<'a> {
 }
 
 #[inline(never)]
-fn call(p: &Prob<'_>, grid: bool, sc: &mut XdropScratch) -> Option<XdropResult> {
+fn call(p: &Prob<'_>, kern: u8, sc: &mut XdropScratch) -> Option<XdropResult> {
     // SAFETY: `available()` is checked before any call.
     unsafe {
-        if grid {
-            grid8::<false>(
+        if kern == 1 {
+            grid8::<false, false>(
+                &p.q, &p.s, &p.scores, p.m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+            )
+        } else if kern == 2 {
+            grid8::<false, true>(
                 &p.q, &p.s, &p.scores, p.m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
             )
         } else {
@@ -544,10 +583,11 @@ fn c8_loop() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(usize::MAX);
     let kern = var("C8_KERN").unwrap_or_else(|| "dev".into());
-    let grid = match kern.as_str() {
-        "dev" => false,
-        "grid" => true,
-        k => panic!("C8_KERN must be dev or grid, not {k}"),
+    let kid: u8 = match kern.as_str() {
+        "dev" => 0,
+        "grid" => 1,
+        "grid2" => 2,
+        k => panic!("C8_KERN must be dev, grid or grid2, not {k}"),
     };
     let t_load = Instant::now();
     let probs = load_dir(std::path::Path::new(&dir)).expect("read the capture files");
@@ -582,14 +622,15 @@ fn c8_loop() {
     let (mut ok, mut declined) = (0usize, 0usize);
     COUNTS.with(|k| k.set(Cnt::default()));
     for p in &list {
-        let rd = call(p, false, &mut sc);
+        let rd = call(p, 0, &mut sc);
         // SAFETY: AVX2 checked above.
         let rg = unsafe {
-            grid8::<true>(
+            grid8::<true, false>(
                 &p.q, &p.s, &p.scores, p.m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, &mut sc,
             )
         };
         assert_eq!(rd, rg, "grid8 vs align8");
+        assert_eq!(rd, call(p, 2, &mut sc), "grid8 two phases vs align8");
         match rd {
             Some(r) => {
                 assert_eq!(Some(r), p.want, "align8 vs recorded");
@@ -602,7 +643,7 @@ fn c8_loop() {
     let t0 = Instant::now();
     for _ in 0..reps {
         for p in &list {
-            std::hint::black_box(call(p, grid, &mut sc));
+            std::hint::black_box(call(p, kid, &mut sc));
         }
     }
     let loop_s = t0.elapsed().as_secs_f64();

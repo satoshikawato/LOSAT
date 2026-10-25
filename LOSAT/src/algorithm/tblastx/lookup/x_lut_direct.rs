@@ -245,6 +245,7 @@ pub(crate) fn x_give_back_pooled(table: &mut BlastAaLookupTable) {
         backbone: std::mem::take(&mut table.backbone),
         overflow: std::mem::take(&mut table.overflow),
         pv: std::mem::take(&mut table.pv),
+        grow: false,
     };
     if !vectors.is_empty() {
         x_pool_lock(&X_BX_TABLES).push(vectors);
@@ -274,32 +275,45 @@ pub(crate) struct XAaVectors {
     backbone: Vec<BackboneCell>,
     overflow: Vec<i32>,
     pv: Vec<u32>,
+    /// EXPERIMENT (LOSAT_X_BPLKREUSE): a vector short of the table's size grows in place
+    /// (`x_take_zeroed`) instead of refusing the build.
+    grow: bool,
 }
 
 impl XAaVectors {
     // No NCBI counterpart: buffer reuse only (above).
     /// The three vectors, cleared and zero-filled to `backbone_size`, `pv_size` and `overflow_size`
     /// entries, where each has the capacity (nothing is allocated); else `None`, nothing taken.
+    /// With `grow` (LOSAT_X_BPLKREUSE) a vector short of its size grows first, by a reallocation
+    /// of its own allocation to that size (`reserve_exact`; the first allocation where it has
+    /// none), never a new allocation and a free of the old one: glibc
+    /// moves a mapped allocation with `mremap`, so the freed table never raises its dynamic mmap
+    /// threshold, which a free of a mapped allocation does (the next table then lands in the main
+    /// heap, whose free space stays resident below the allocations made after it).
     fn x_take_zeroed(
         &mut self,
         backbone_size: usize,
         pv_size: usize,
         overflow_size: usize,
     ) -> Option<(Vec<BackboneCell>, Vec<u32>, Vec<i32>)> {
-        if self.backbone.capacity() < backbone_size
-            || self.pv.capacity() < pv_size
-            || self.overflow.capacity() < overflow_size
+        if !self.grow
+            && (self.backbone.capacity() < backbone_size
+                || self.pv.capacity() < pv_size
+                || self.overflow.capacity() < overflow_size)
         {
             return None;
         }
         let mut backbone = std::mem::take(&mut self.backbone);
         backbone.clear();
+        backbone.reserve_exact(backbone_size);
         backbone.resize(backbone_size, BackboneCell::default());
         let mut pv = std::mem::take(&mut self.pv);
         pv.clear();
+        pv.reserve_exact(pv_size);
         pv.resize(pv_size, 0);
         let mut overflow = std::mem::take(&mut self.overflow);
         overflow.clear();
+        overflow.reserve_exact(overflow_size);
         overflow.resize(overflow_size, 0);
         Some((backbone, pv, overflow))
     }
@@ -321,6 +335,8 @@ impl XAaVectors {
 /// (`x_make_room`), never by the pool's task (a pool thread's allocations stay in its own glibc
 /// arena, which keeps them resident after they are freed), and one set of neighbour lists serves
 /// every build ahead (the block search's thread's, moved here), not one set per pool thread.
+/// EXPERIMENT (LOSAT_X_BPLKREUSE): where no table is built ahead (one thread), each block's own
+/// build takes the vectors of the block before from here (`x_build_on_block_spare`).
 #[derive(Default)]
 pub(crate) struct XAaSpares {
     block: std::sync::Mutex<XAaVectors>,
@@ -348,13 +364,72 @@ impl XAaSpares {
 
     // No NCBI counterpart: buffer reuse only (`XAaSpares`).
     /// Keeps `table`'s backbone, overflow and pv vectors (in place of any kept before); the rest of
-    /// the table is dropped.
+    /// the table is dropped. The next build ahead (`x_make_room`) or, with LOSAT_X_BPLKREUSE, the
+    /// next block's own build (`x_build_on_block_spare`) takes them.
     pub(crate) fn give(&self, table: BlastAaLookupTable) {
         *x_locked(&self.block) = XAaVectors {
             backbone: table.backbone,
             overflow: table.overflow,
             pv: table.pv,
+            grow: false,
         };
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
+    // `build_ncbi_lookup_from_prepared`)
+    // ```c
+    //     for (i = 0; i < lookup->backbone_size; i++) {
+    //         if (exact_backbone[i] != NULL) {
+    //             s_AddWordHits(lookup, matrix, query->sequence,
+    //                           exact_backbone[i], query_bias, row_max);
+    // ```
+    /// EXPERIMENT (LOSAT_X_BPLKREUSE): `x_bp_build_lookup(true, queries, threshold, karlin_params,
+    /// check_ideal)` (where [`Self::x_applies`]) on the calling thread, with its neighbour lists,
+    /// for a block search whose tables are not built ahead: the table built on the vectors the
+    /// block before gave back (`give`), each grown in place where it is short
+    /// (`XAaVectors::x_take_zeroed`), or on new ones for the first block. Where the in-place
+    /// builder declines (it does not where `x_applies`), the reference builder builds it and the
+    /// vectors stay kept.
+    pub(crate) fn x_build_on_block_spare(
+        &self,
+        queries: &[Vec<QueryFrame>],
+        threshold: i32,
+        karlin_params: &KarlinParams,
+        check_ideal: bool,
+    ) -> (BlastAaLookupTable, Vec<QueryContext>) {
+        let _ = karlin_params;
+        let prepared = x_bp_prepared_query(queries, check_ideal);
+        // build_lookup_from_prepared returns the prepared contexts unchanged.
+        let contexts = prepared.contexts.clone();
+        let mut room = std::mem::take(&mut *x_locked(&self.block));
+        room.grow = true;
+        let built = X_MEMO.with(|memo| {
+            x_build_direct_in(
+                prepared,
+                threshold,
+                ScoringMatrix::Blosum62,
+                LOOKUP_WORD_LENGTH,
+                &mut memo.borrow_mut(),
+                Some(&mut room),
+                false,
+            )
+        });
+        match built {
+            Ok(table) => (
+                table.expect("grown vectors have the room for any table"),
+                contexts,
+            ),
+            Err(prepared) => {
+                room.grow = false;
+                *x_locked(&self.block) = room;
+                build_lookup_from_prepared(
+                    prepared,
+                    threshold,
+                    ScoringMatrix::Blosum62,
+                    LOOKUP_WORD_LENGTH,
+                )
+            }
+        }
     }
 
     // No NCBI counterpart: buffer reuse, and the thread that allocates the next table's vectors
@@ -1579,6 +1654,70 @@ mod tests {
         assert!(!x_locked(&spares.block).is_empty());
         spares.x_home(true);
         assert!(x_locked(&spares.block).is_empty() && x_locked(&spares.ahead).is_empty());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:321-336
+    // ```c
+    //       lookup->thick_backbone =
+    //             calloc(lookup->backbone_size, sizeof(AaLookupBackboneCell));
+    // ...
+    //           lookup->overflow =
+    //                  calloc(overflow_cells_needed, sizeof(Int4));
+    // ```
+    /// LOSAT_X_BPLKREUSE: each block's own build on the block spare (`x_build_on_block_spare`) is
+    /// `x_bp_build_lookup(true, ..)`'s table: the first on new vectors; the next ones on the
+    /// vectors the block before gave back with other values, the same allocations where they have
+    /// the room (a table as large or smaller), grown in place for a larger one. The spare is empty
+    /// while a table built on it is in use.
+    #[test]
+    fn aa_block_spare_builds_each_block_on_the_vectors_given_back() {
+        let mut seed = 47u64;
+        let queries = bp_queries(&mut seed);
+        let small = vec![bp_query(residues(&mut seed, 300), vec![], false)];
+        let large = vec![
+            bp_query(residues(&mut seed, 4000), vec![(100, 180)], true),
+            bp_query(residues(&mut seed, 3000), vec![], false),
+        ];
+        let params = blosum62_ideal_karlin_params();
+        let table_addresses = |t: &BlastAaLookupTable| {
+            [
+                t.backbone.as_ptr() as usize,
+                t.overflow.as_ptr() as usize,
+                t.pv.as_ptr() as usize,
+            ]
+        };
+        let spare = XAaSpares::default();
+        let first = spare.x_build_on_block_spare(&queries, 11, &params, false);
+        assert!(
+            !first.0.overflow.is_empty(),
+            "the fixture must reach the overflow array"
+        );
+        assert!(x_locked(&spare.block).is_empty());
+        assert_same_bp(&first, &queries);
+        // Given back with other values: the next table is built on the same allocations.
+        let (mut table, _) = first;
+        let overflow = table.overflow.len();
+        for cell in table.backbone.iter_mut() {
+            cell.num_used = 99;
+            cell.entries = [7; AA_HITS_PER_CELL];
+        }
+        table.overflow.fill(-5);
+        table.pv.fill(u32::MAX);
+        let given = table_addresses(&table);
+        spare.give(table);
+        let again = spare.x_build_on_block_spare(&queries, 11, &params, false);
+        assert_eq!(table_addresses(&again.0), given);
+        assert!(x_locked(&spare.block).is_empty());
+        assert_same_bp(&again, &queries);
+        spare.give(again.0);
+        let smaller = spare.x_build_on_block_spare(&small, 11, &params, false);
+        assert_eq!(table_addresses(&smaller.0), given);
+        assert_same_bp(&smaller, &small);
+        // A larger table: the overflow vector grows to its size.
+        spare.give(smaller.0);
+        let grown = spare.x_build_on_block_spare(&large, 11, &params, false);
+        assert!(grown.0.overflow.len() > overflow);
+        assert_same_bp(&grown, &large);
     }
 
     /// LOSAT_X_BPLKPAHEAD: vectors without the room for the table give no table and are left as

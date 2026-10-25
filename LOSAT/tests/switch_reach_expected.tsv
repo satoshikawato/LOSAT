@@ -32,6 +32,7 @@ LOSAT_X_BPLISTEDLEAN	blastp	conditional	required	gap	-db searches only (every ta
 LOSAT_X_BPLKDROP	blastp	conditional	required	gap	the lookup table dropped before the redo; kept only in the block search of BPQBLOCK at 2+ threads by a block whose table a later block's build takes (all but the last two blocks with BPLKPAHEAD, all but the last without); ref gap: needs a block search of 3+ blocks at 2+ threads (the CI fixtures make at most 2); tests/blastp_redo_memory.rs reaches it
 LOSAT_X_BPLKPAHEAD	blastp	conditional	required	required	only in BPQBLOCK block search (>50,000 query letters, 2+ blocks, supported outfmt), more than one thread
 LOSAT_X_BPLKPFLAT	blastp	conditional	required	required	-task blastp-fast and more than one thread
+LOSAT_X_BPLKREUSE	blastp	conditional	required	required	exact blastp (BPLUT) in BPQBLOCK block search (>50,000 query letters) where no table is built ahead: one thread (or BPLKPAHEAD=0); ref = block search at 2+ threads (BPLKPAHEAD builds ahead)
 LOSAT_X_BPLUT	blastp	always			Default (non-compressed) lookup table filled in place from per-cell counts
 LOSAT_X_BPMASKED	blastp	conditional	required	required	x86-64 AVX2, where BPDEFER deferred calls run; tables with >=2.5 hits per used cell (BPMASKEDMIN 250) take it, fewer take the deferred calls (short queries); never blastp-fast (no AVX2 batches on the compressed table)
 LOSAT_X_BPPCOMPACT	blastp	always			Preliminary HSPs kept as 64-byte elements instead of 168-byte

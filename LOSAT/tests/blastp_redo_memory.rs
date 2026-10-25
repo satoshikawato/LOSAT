@@ -2,7 +2,9 @@
 //! ranges emptied after a window of the redo in windows once it holds the switch's number of
 //! entries (`LOSAT_X_BPSEGWIN`, `src/algorithm/blastp/x_redo_par.rs` `x_bp_seg_win`), and the lookup table dropped before the
 //! redo where no later block's build takes its vectors (`LOSAT_X_BPLKDROP`,
-//! `src/algorithm/blastp/blast_engine.rs` `x_lookup_after_prelim`), on whole searches.
+//! `src/algorithm/blastp/blast_engine.rs` `x_lookup_after_prelim`), and the vectors of a block's
+//! table taken by the next block's own build where no table is built ahead (`LOSAT_X_BPLKREUSE`,
+//! `src/algorithm/blastp/x_query_blocks.rs` `x_bp_aa_block_spare`), on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
 //! ```c
@@ -22,7 +24,9 @@
 //! `LOSAT_X_BPSEGWIN=2` empties it), and kept otherwise;
 //! the table is dropped by a search of all queries and by the last blocks of the block search
 //! (`LOSAT_X_BPQBLOCK`), and kept by a block whose table's vectors a later block's build takes
-//! (more than one thread: the build ahead of the block after the next, `LOSAT_X_BPLKPAHEAD`).
+//! (more than one thread: the build ahead of the block after the next, `LOSAT_X_BPLKPAHEAD`; one
+//! thread: the next block's own build, `LOSAT_X_BPLKREUSE`, which records its side per block
+//! search: its own at one thread, the other where the tables are built ahead).
 //!
 //! The query is the first 30 proteins of AP027131 (9,948 residues: one query batch), the subjects
 //! the first 150 proteins of the related AP027133. The block search reads the first 100 proteins
@@ -34,6 +38,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const SEG_WIN: &str = "LOSAT_X_BPSEGWIN";
 const LK_DROP: &str = "LOSAT_X_BPLKDROP";
+const LK_REUSE: &str = "LOSAT_X_BPLKREUSE";
 const BLOCKS: (&str, &str) = ("LOSAT_X_BPQBLOCK", "1");
 
 fn fixture(name: &str) -> PathBuf {
@@ -147,9 +152,10 @@ struct Run {
     stdout: Vec<u8>,
     stderr: String,
     code: Option<i32>,
-    /// The sides each switch's run recorded: (new, ref) of `SEG_WIN` and of `LK_DROP`.
+    /// The sides each switch's run recorded: (new, ref) of `SEG_WIN`, `LK_DROP` and `LK_REUSE`.
     seg_win: (bool, bool),
     lk_drop: (bool, bool),
+    lk_reuse: (bool, bool),
 }
 
 /// `blastp` with `env` and `LOSAT_X_REACH` set to a directory of its own (removed after the run,
@@ -165,7 +171,7 @@ fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
         .args(args)
         .output()
         .expect("run LOSAT");
-    let (mut seg_win, mut lk_drop) = ((false, false), (false, false));
+    let (mut seg_win, mut lk_drop, mut lk_reuse) = ((false, false), (false, false), (false, false));
     for file in std::fs::read_dir(&dir).expect("the reach directory") {
         let text = std::fs::read_to_string(file.unwrap().path()).unwrap();
         for row in text.lines().skip(1) {
@@ -173,6 +179,7 @@ fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
             let sides = match f[0] {
                 SEG_WIN => &mut seg_win,
                 LK_DROP => &mut lk_drop,
+                LK_REUSE => &mut lk_reuse,
                 _ => continue,
             };
             sides.0 |= f[1] == "1";
@@ -187,6 +194,7 @@ fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
         code: output.status.code(),
         seg_win,
         lk_drop,
+        lk_reuse,
     }
 }
 
@@ -275,6 +283,49 @@ fn blastp_reports_do_not_depend_on_dropping_the_lookup_table_before_the_redo() {
                 assert_eq!(off.stderr, on.stderr, "{case} off: messages");
                 assert_eq!(off.lk_drop, (false, false), "{case} off: side");
             }
+        }
+    }
+}
+
+/// Default and `LOSAT_X_BPLKREUSE=0` give the same report and messages for exact blastp on
+/// `-subject` and `-db` in blocks, at 1 and 2 threads. At 1 thread each block's build takes the
+/// vectors of the block before: every block but the last keeps its table to its search's end and
+/// the last drops it before the redo (`LOSAT_X_BPLKDROP` records both sides; with `=0` every block
+/// drops it). At 2 threads the tables are built ahead (`LOSAT_X_BPLKPAHEAD`), and the switch
+/// records its other side. `=0` records nothing.
+#[test]
+fn blastp_reports_do_not_depend_on_reusing_the_vectors_of_the_block_before() {
+    let inputs = Inputs::new();
+    let query = inputs.blocks_query.to_str().unwrap();
+    let subject = inputs.subject.to_str().unwrap();
+    let db = inputs.db.to_str().unwrap();
+    for (source, target) in [("-subject", subject), ("-db", db)] {
+        for threads in ["1", "2"] {
+            let case = format!("{source} n{threads}");
+            let args = [
+                "-query",
+                query,
+                source,
+                target,
+                "-outfmt",
+                "6",
+                "-evalue",
+                "10",
+                "-num_threads",
+                threads,
+            ];
+            let one = threads == "1";
+            let on = blastp(&args, &[BLOCKS]);
+            assert_eq!(on.code, Some(0), "{case}: {}", on.stderr);
+            assert!(!on.stdout.is_empty(), "{case}: no hits");
+            assert_eq!(on.lk_reuse, (one, !one), "{case}: default's side");
+            assert_eq!(on.lk_drop, (true, true), "{case}: LK_DROP's sides");
+            let off = blastp(&args, &[BLOCKS, (LK_REUSE, "0")]);
+            assert_eq!(off.code, Some(0), "{case} off: {}", off.stderr);
+            assert!(off.stdout == on.stdout, "{case} off: report differs");
+            assert_eq!(off.stderr, on.stderr, "{case} off: messages");
+            assert_eq!(off.lk_reuse, (false, false), "{case} off: side");
+            assert_eq!(off.lk_drop, (true, !one), "{case} off: LK_DROP's sides");
         }
     }
 }

@@ -48,15 +48,16 @@ pub enum SerialError {
     /// A NaN or an infinity in the ASN.1 binary stream, which NCBI marks with its own form
     /// byte and LOSAT does not write (no BLAST report has one).
     NonFiniteReal,
-    /// A byte >= 0x80 in a string of the XML stream, whose US-ASCII encoding cannot hold it:
-    /// NCBI's `CUtf8::SymbolToChar` throws (rc 255, or a document cut after the failed
-    /// element); the callers refuse such strings first, so this does not occur.
+    /// A byte >= 0x80 in a string of the XML streams of outfmt 5 / 14 / 16, whose US-ASCII
+    /// encoding cannot hold it: NCBI's `CUtf8::SymbolToChar` throws (rc 255, or a document cut
+    /// after the failed element); the callers refuse such strings first, so this does not
+    /// occur. The archive's stream has no encoding and writes the byte.
     NonAsciiChar(u8),
-    /// A call that the XML stream does not write for outfmt 5 (a BOOLEAN, an ENUMERATED
-    /// value or a CHOICE).
+    /// A call that the XML stream does not write outside the archive's object mode (a BOOLEAN,
+    /// an ENUMERATED value or a CHOICE of outfmt 5).
     XmlUnsupported(&'static str),
     /// An OCTET STRING in a stream that does not write one (the archive of outfmt 11 is the
-    /// only document with one, written as ASN.1 text or binary).
+    /// only document with one; JSON and the XML of outfmt 5 / 14 / 16 do not write it).
     OctetString,
 }
 
@@ -105,6 +106,18 @@ pub trait Encoder {
     fn begin_sequence(&mut self, type_name: &str);
     /// `EndClass`.
     fn end_sequence(&mut self);
+    /// `BeginNamedType` (`CObjectOStream::WriteNamedType`): a value of the named ASN.1 type
+    /// `type_name` that is neither a SEQUENCE nor a CHOICE starts (a `Seq-descr`, a `Na-strand`
+    /// or a `NCBI2na`: a SEQUENCE OF / SET OF alias, an ENUMERATED type, an OCTET STRING or
+    /// StringStore alias, any other alias), around the value's own calls. Only the XML object
+    /// stream of the archive (`XmlEncoder::archive`) writes anything for it (`<Type>`); the
+    /// ASN.1 text, ASN.1 binary and JSON streams write nothing for a named type, so the
+    /// default does nothing.
+    fn begin_named(&mut self, type_name: &str) {
+        let _ = type_name;
+    }
+    /// `EndNamedType`.
+    fn end_named(&mut self) {}
     /// `BeginClassMember(id)`: member `name` (position `tag`) of the current SEQUENCE.
     fn member(&mut self, name: &str, tag: u8);
     /// `EndClassMember`.
@@ -137,7 +150,8 @@ pub trait Encoder {
     /// `WriteBytes` of an OCTET STRING (`Seq-data` `ncbi2na` and `ncbi4na`): in ASN.1 text
     /// `'` then two upper-case hex digits per byte, an end of line without indentation before
     /// a digit pair whenever the line holds 78 bytes or more, then `'H`; in ASN.1 binary the
-    /// tag 0x04, the length and the bytes.
+    /// tag 0x04, the length and the bytes; in the XML object stream of the archive two upper-case
+    /// hex digits per byte, unwrapped.
     fn octets(&mut self, value: &[u8]);
     /// `WriteStringStore` of a StringStore (`Seq-data` `ncbieaa`): a VisibleString in ASN.1
     /// text; the application tag 0x41, the length and the bytes in ASN.1 binary.

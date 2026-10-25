@@ -354,6 +354,7 @@ fn scan<R: Read>(
     archive: bool,
 ) -> Result<(Vec<usize>, QueryEnd)> {
     let mut lengths = Vec::new();
+    let encoding = crate::report::archive::ArchiveEncoding::from_env();
     loop {
         if source.end() {
             return Ok((lengths, QueryEnd::Input));
@@ -365,7 +366,8 @@ fn scan<R: Read>(
         }) {
             Ok(record) => {
                 if archive {
-                    crate::report::archive::check_titles(
+                    crate::report::archive::check_titles_for(
+                        encoding,
                         std::slice::from_ref(&record),
                         "query",
                         "BLASTN",

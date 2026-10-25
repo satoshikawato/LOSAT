@@ -64,7 +64,7 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `8` | Seqalign (Text ASN.1) | all five | all five programs |
 | `9` | Seqalign (Binary ASN.1) | all five | all five programs |
 | `10` | Comma-separated values | all five | not yet |
-| `11` | BLAST archive (ASN.1) | all five | every program (with `-subject` and `-db`; `ARCHIVE_FORMAT` text and `bin`, as NCBI reads it; `xml` is refused for now) |
+| `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all five | every program (with `-subject` and `-db`; `ARCHIVE_FORMAT` unset: ASN.1 text, `bin...`: ASN.1 binary, `xml`: XML (`Blast4-archive`), any case, as NCBI reads it) |
 | `12` | Seqalign (JSON) | all five | all five programs |
 | `13` | Multiple-file BLAST JSON | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
 | `14` | Multiple-file BLAST XML2 | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |

@@ -4,7 +4,8 @@
 //! `db.sa.arch.bn.*` rows of `db_search_manifest.tsv`): `BATCH_SIZE` (one archive per query
 //! batch, `EffectiveSearchSpace` per batch), a reader error in the second batch (the archive of
 //! the first batch, then an error archive, rc 1), `ARCHIVE_FORMAT` (`bin...` in any case:
-//! ASN.1 binary; any value except `xml` that is not empty: nothing is written, rc 0), `-outfmt
+//! ASN.1 binary; `xml` in any case: NCBI's XML archive; any other value that is not empty: nothing
+//! is written, rc 0), `-outfmt
 //! "11 qseqid"` (the specification is ignored), a `-subject` file that does not exist (an error
 //! archive, rc 1), a `-query` file that does not exist (an error archive, rc 1, with `-subject` and with
 //! `-db`), a run that ends with messages no archive carried (an empty pipe as the query with `-max_target_seqs 1`:
@@ -43,8 +44,13 @@ fn input(name: &str) -> String {
 
 /// One run of `losat blastn` from `LOSAT/` in a clean environment plus `env`.
 fn run(env: &[(&str, &str)], args: &[&str], threads: &str) -> Output {
+    run_in(&engine(), env, args, threads)
+}
+
+/// `run` from the directory `cwd`.
+fn run_in(cwd: &std::path::Path, env: &[(&str, &str)], args: &[&str], threads: &str) -> Output {
     let mut command = Command::new(BIN);
-    command.current_dir(engine()).arg("blastn").args(args);
+    command.current_dir(cwd).arg("blastn").args(args);
     command.args(["-num_threads", threads]);
     for (name, _) in std::env::vars() {
         if name.starts_with("LOSAT_X_")
@@ -75,8 +81,36 @@ struct Case {
 
 const BATCH: (&str, &str) = ("BATCH_SIZE", "500");
 const BIN_FORMAT: (&str, &str) = ("ARCHIVE_FORMAT", "bin");
+const XML_FORMAT: (&str, &str) = ("ARCHIVE_FORMAT", "xml");
 
 const CASES: &[Case] = &[
+    Case {
+        name: "default_sub_xml",
+        env: &[XML_FORMAT],
+        query: "arch_q.fna",
+        subject: "arch_s.fna",
+        outfmt: "11",
+        rc: 0,
+    },
+    // Titles with bytes from 0x7F up (UTF-8 in a query and a subject title, 0x7F in a query
+    // title): NCBI's XML archive writes them raw in the titles and as octal escapes in the
+    // DefLine.
+    Case {
+        name: "u8_titles_sub_xml",
+        env: &[XML_FORMAT],
+        query: "arch_u8_q.fna",
+        subject: "arch_u8_s.fna",
+        outfmt: "11",
+        rc: 0,
+    },
+    Case {
+        name: "bad_sub_xml",
+        env: &[XML_FORMAT, BATCH],
+        query: "arch_bad.fna",
+        subject: "arch_s.fna",
+        outfmt: "11",
+        rc: 1,
+    },
     Case {
         name: "batches_sub",
         env: &[BATCH],
@@ -238,6 +272,37 @@ fn archives_equal_ncbis_at_one_and_four_threads() {
     }
 }
 
+/// `ARCHIVE_FORMAT` is compared without case (`xml`, `XML`, `Xml`): the same bytes, which are
+/// those of `default_sub_xml` (NCBI's run of the other spellings gave the same file).
+#[test]
+fn xml_is_read_in_any_case() {
+    let query = input("arch_q.fna");
+    let subject = input("arch_s.fna");
+    let want = frozen("default_sub_xml", "out");
+    for spelling in ["XML", "Xml", "xMl"] {
+        for threads in ["1", "4"] {
+            let output = run(
+                &[("ARCHIVE_FORMAT", spelling)],
+                &["-query", &query, "-subject", &subject, "-outfmt", "11"],
+                threads,
+            );
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{spelling} threads {threads}"
+            );
+            assert!(
+                output.stdout == want,
+                "{spelling} threads {threads}: stdout"
+            );
+            assert!(
+                output.stderr.is_empty(),
+                "{spelling} threads {threads}: stderr"
+            );
+        }
+    }
+}
+
 #[test]
 fn batch_cases_do_not_depend_on_report_streaming() {
     for case in CASES.iter().filter(|case| case.env.contains(&BATCH)) {
@@ -264,6 +329,7 @@ fn the_out_file_receives_the_archive() {
         ("", frozen("env_empty", "out")),
         ("foo", Vec::new()),
         ("bin", frozen("env_bin_upper", "out")),
+        ("xml", frozen("default_sub_xml", "out")),
     ] {
         let file = dir.join(format!("out_{format}.asn"));
         let _ = std::fs::remove_file(&file);
@@ -295,30 +361,9 @@ fn the_out_file_receives_the_archive() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `ARCHIVE_FORMAT=xml` is NCBI's XML archive, which LOSAT does not write yet: it stops
-/// before the first byte and says so.
-#[test]
-fn xml_archives_are_refused_before_the_first_byte() {
-    let query = input("arch_q.fna");
-    let subject = input("arch_s.fna");
-    for value in ["xml", "XML", "Xml"] {
-        let output = run(
-            &[("ARCHIVE_FORMAT", value)],
-            &["-query", &query, "-subject", &subject, "-outfmt", "11"],
-            "1",
-        );
-        assert_ne!(output.status.code(), Some(0), "{value}");
-        assert!(output.stdout.is_empty(), "{value}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("ARCHIVE_FORMAT=xml with -outfmt 11 is not supported by LOSAT"),
-            "{value}: {stderr}"
-        );
-    }
-}
-
-/// A title with a byte outside `0x20..=0x7E` (0x80 and above, and 0x7F) is written as `#` by
-/// NCBI, with a diagnostic per byte: LOSAT refuses it (query, `-subject` and a `-db` name)
+/// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
+/// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
+/// and so does LOSAT): LOSAT refuses it (query, `-subject` and a `-db` name)
 /// before the first byte.
 #[test]
 fn non_ascii_titles_and_database_names_are_refused() {
@@ -372,6 +417,115 @@ fn non_ascii_titles_and_database_names_are_refused() {
             String::from_utf8_lossy(&output.stderr).contains("-db name"),
             "{database:?}"
         );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `-window_masker_db` with a directory name of UTF-8 bytes: the archive records the path as
+/// typed (`WindowMaskerDatabase`), and NCBI's XML archive writes the bytes as they are (its
+/// stream has no encoding). The directory is made here, in a temporary directory that is the
+/// working directory of the run, so that the path is the relative one NCBI was frozen with
+/// (`wm\u{e9}/mg1655_u9.obinary`, `wm_utf8_xml.out`).
+#[test]
+fn a_utf8_window_masker_path_is_written_as_it_is_in_xml() {
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_wm_{}", std::process::id()));
+    let masker_dir = dir.join("wm\u{e9}");
+    std::fs::create_dir_all(&masker_dir).unwrap();
+    std::fs::copy(
+        engine().join("tests/winmask/counts/mg1655_u9.obinary"),
+        masker_dir.join("mg1655_u9.obinary"),
+    )
+    .unwrap();
+    let query = engine().join(input("arch_wm_q.fna"));
+    let subject = engine().join(input("arch_wm_s.fna"));
+    let args = [
+        "-query",
+        query.to_str().unwrap(),
+        "-subject",
+        subject.to_str().unwrap(),
+        "-task",
+        "blastn",
+        "-window_masker_db",
+        "wm\u{e9}/mg1655_u9.obinary",
+        "-outfmt",
+        "11",
+    ];
+    for threads in ["1", "4"] {
+        let output = run_in(&dir, &[XML_FORMAT], &args, threads);
+        assert_eq!(output.status.code(), Some(0), "threads {threads}");
+        let want = frozen("wm_utf8_xml", "out");
+        assert!(
+            output.stdout == want,
+            "threads {threads}: stdout differs ({} bytes, NCBI wrote {}): {}",
+            output.stdout.len(),
+            want.len(),
+            crate::outfmt11_blastx::first_difference(&output.stdout, &want)
+        );
+        assert_eq!(
+            output.stderr,
+            frozen("wm_utf8_xml", "err"),
+            "threads {threads}"
+        );
+    }
+    // The text and binary archives cannot hold the bytes (NCBI writes `#` and a diagnostic per
+    // byte): refused before the first byte.
+    for format in ["", "bin"] {
+        let output = run_in(&dir, &[("ARCHIVE_FORMAT", format)], &args, "1");
+        assert_ne!(output.status.code(), Some(0), "{format:?}");
+        assert!(output.stdout.is_empty(), "{format:?}: nothing is written");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("-window_masker_db path"),
+            "{format:?}: {stderr}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A control byte in the `-window_masker_db` path (other than TAB, LF and CR in XML) is
+/// written as `#` by NCBI with a diagnostic in every encoding: refused before the first byte,
+/// with nothing on standard output and an empty `-out` file.
+#[test]
+fn a_window_masker_path_with_a_control_byte_is_refused_before_the_first_byte() {
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_wmctl_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let query = input("arch_wm_q.fna");
+    let subject = input("arch_wm_s.fna");
+    for format in ["", "bin", "xml"] {
+        for path in ["wm\x01/mg.obinary", "wm\x1f", "wm\x0b"] {
+            let file = dir.join("refused.asn");
+            let _ = std::fs::remove_file(&file);
+            let args = [
+                "-query",
+                &query,
+                "-subject",
+                &subject,
+                "-task",
+                "blastn",
+                "-window_masker_db",
+                path,
+                "-outfmt",
+                "11",
+                "-out",
+                file.to_str().unwrap(),
+            ];
+            let output = run(&[("ARCHIVE_FORMAT", format)], &args, "1");
+            let label = format!("ARCHIVE_FORMAT={format:?} {path:?}");
+            assert_ne!(output.status.code(), Some(0), "{label}");
+            assert!(
+                output.stdout.is_empty(),
+                "{label}: nothing on standard output"
+            );
+            assert!(
+                std::fs::read(&file).map_or(true, |bytes| bytes.is_empty()),
+                "{label}: nothing in the -out file"
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains("-window_masker_db path"),
+                "{label}: {stderr}"
+            );
+        }
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -27,6 +27,7 @@ use crate::report::diag_log::Message;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::Encoder;
+use crate::report::serial::xml::XmlEncoder;
 
 /// The version NCBI writes as the request's `ident` (`CBlastVersion::Print`).
 pub const IDENT: &str = "2.17.0+";
@@ -286,6 +287,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.end_member();
 
     out.enc.member("algorithm-options", 5);
+    out.enc.begin_named("Blast4-parameters");
     out.enc.begin_list(false);
     let mut written_search_space = false;
     for param in &request.algorithm {
@@ -304,10 +306,12 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
         );
     }
     out.enc.end_list();
+    out.enc.end_named();
     out.enc.end_member();
 
     if batch.required.is_some() || !batch.lcase_masks.is_empty() {
         out.enc.member("program-options", 6);
+        out.enc.begin_named("Blast4-parameters");
         out.enc.begin_list(false);
         if let Some((start, end)) = batch.required {
             for (name, value) in [("RequiredStart", start), ("RequiredEnd", end)] {
@@ -334,6 +338,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
             out.enc.end_sequence();
         }
         out.enc.end_list();
+        out.enc.end_named();
         out.enc.end_member();
     }
     out.enc.end_sequence();
@@ -345,9 +350,11 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.member("results", 1);
     out.enc.begin_sequence("Blast4-get-search-results-reply");
     out.enc.member("alignments", 0);
+    out.enc.begin_named("Seq-align-set");
     out.enc.begin_list(true);
     aligns.write(out)?;
     out.enc.end_list();
+    out.enc.end_named();
     out.enc.end_member();
 
     out.enc.member("masks", 2);
@@ -418,13 +425,6 @@ fn write_error_document<E: Encoder>(out: &mut ArchiveOut<'_, E>, messages: &[Mes
     out.enc.end_document();
 }
 
-/// The error text for an encoding that LOSAT does not write yet.
-fn unsupported_xml() -> anyhow::Error {
-    anyhow::anyhow!(
-        "ARCHIVE_FORMAT=xml with -outfmt 11 is not supported by LOSAT yet (the archive is written as ASN.1 text and ASN.1 binary)"
-    )
-}
-
 /// Writes the archive of one query batch to `sink` and takes the messages saved since the
 /// previous archive. `ARCHIVE_FORMAT` values that NCBI does not write leave the sink
 /// untouched.
@@ -439,7 +439,16 @@ pub fn write_archive<A: AlignSource>(
     let request = handle.request();
     match handle.encoding() {
         ArchiveEncoding::Nothing => Ok(()),
-        ArchiveEncoding::Xml => Err(unsupported_xml()),
+        ArchiveEncoding::Xml => {
+            let mut buf = Vec::new();
+            let mut out = ArchiveOut {
+                enc: XmlEncoder::archive(&mut buf),
+                sink,
+                io_error: None,
+            };
+            write_search_archive(&mut out, request, batch, space, &messages, aligns)?;
+            out.finish()
+        }
         ArchiveEncoding::Text => {
             let mut buf = Vec::new();
             let mut out = ArchiveOut {
@@ -478,7 +487,16 @@ pub fn write_error_archive(
     messages.extend(error_lines.iter().cloned());
     match handle.encoding() {
         ArchiveEncoding::Nothing => Ok(()),
-        ArchiveEncoding::Xml => Err(unsupported_xml()),
+        ArchiveEncoding::Xml => {
+            let mut buf = Vec::new();
+            let mut out = ArchiveOut {
+                enc: XmlEncoder::archive(&mut buf),
+                sink,
+                io_error: None,
+            };
+            write_error_document(&mut out, &messages);
+            out.finish()
+        }
         ArchiveEncoding::Text => {
             let mut buf = Vec::new();
             let mut out = ArchiveOut {

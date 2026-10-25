@@ -267,7 +267,8 @@ fn x_shadow_check(kept: &[(usize, SubjectComputation)], failed_at: Option<usize>
 /// The subject loop of one query chunk: every subject of `subjects` in oid order, with the sink
 /// calls of the waves' replay loop (`subject_start`, `containment`, `preliminary_purge`,
 /// `subject`); `diagonals` is the owner's table, `helper_tables` one table per helper (its own, or
-/// with `LOSAT_X_BXDIAGKEEP` the one its thread keeps, `x_bx_mem::XScratch`). Returns the number of
+/// with `LOSAT_X_BXDIAGKEEP` the one its thread keeps, `x_bx_mem::XScratch`); `capped` = the chunk's
+/// batch is one of the capped batch flow (`x_bx_mem::in_capped_batch`). Returns the number of
 /// subjects handed to the sink.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
@@ -282,6 +283,7 @@ pub(super) fn run(
     xdrop: i32,
     db_length: i64,
     x_containment: bool,
+    capped: bool,
     sink: &mut impl PreliminarySink,
 ) -> Result<usize> {
     let tasks = subjects.len().div_ceil(k);
@@ -313,7 +315,7 @@ pub(super) fn run(
     // task to the sink, and the tasks held at once stay few (only subjects with hits are kept).
     // Inside the capped batch flow (LOSAT_X_BXUNITCAP), the helpers leave once every task is
     // claimed: the other batches searched at the time want the threads (x_bx_mem.rs).
-    let ahead = if super::x_bx_mem::in_capped_batch() {
+    let ahead = if capped {
         crate::utils::xahead::Ahead::x_new_leaving(4 * (helper_tables.len() + 1))
     } else {
         crate::utils::xahead::Ahead::new(4 * (helper_tables.len() + 1))

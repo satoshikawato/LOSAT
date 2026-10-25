@@ -5,6 +5,9 @@
 pub mod adjust_scores;
 pub mod matrix_tables;
 pub mod redo_alignment;
+// No NCBI counterpart: `LOSAT_X_REDOCONTAINIDX`, the redo's kept alignments with an index by
+// subject start (`s_IsContained` / `s_WithDistinctEnds` answer from the alignments that can meet).
+pub(crate) mod x_align_index;
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-758,762-768
 // ```c
 //     while (its <= maxits) {

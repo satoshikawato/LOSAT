@@ -50,11 +50,15 @@ def make_counts() -> None:
     for index in range(1 << k):
         # three collisions from index M: past the values table (`bad index`)
         struct.pack_into("<I", bad, ht_at + 4 * index, (m << bc) | 3)
+    # the same with the entry of key 0 kept: a query without A, C, G or T only reads that one
+    bad_after0 = bytearray(bad)
+    bad_after0[ht_at:ht_at + 4] = body[ht_at:ht_at + 4]
     pct_md = b"##windowmasker-statistics-format-version:obinary 2.0.0\0##pct:\0"
     files = {
         "unit17.obinary": head + body[:4] + words(17) + body[8:],
         "short_cba.obinary": head + body[:48],
         "bad_index.obinary": head + bytes(bad),
+        "bad_index_after0.obinary": head + bytes(bad_after0),
         "pct6.obinary": words(3, len(pct_md)) + pct_md + body,
         "binary_unit0.binary": words(0, 0) + words(5, 1) + words(1, 2, 3, 4),
         "ascii.counts": b"##windowmasker-statistics-format-version:ascii 1.1.0\n9\nAAAAAAAAA 5\n",
@@ -63,10 +67,9 @@ def make_counts() -> None:
     for name, content in files.items():
         (WORK / name).write_bytes(content)
     unreadable = WORK / "unreadable.obinary"
-    if unreadable.exists():
-        unreadable.chmod(0o600)
-    unreadable.write_bytes(data)
-    unreadable.chmod(0)
+    if not unreadable.exists():
+        unreadable.write_bytes(data)
+        unreadable.chmod(0)
 
 
 def read_cases() -> list[tuple[str, str, list[str]]]:

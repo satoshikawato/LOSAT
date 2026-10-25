@@ -213,8 +213,9 @@ impl WindowMasker {
     }
 }
 
-/// NCBI's stop at the set-up of a query batch (or of the first chunk of a split batch) whose
-/// masks could not be made, with `queries` queries in it: the messages that NCBI posts while
+/// NCBI's stop at the set-up of a query batch whose masks could not be made (also a batch
+/// that NCBI splits: it sets up the whole batch before it splits it), with `queries` queries
+/// in it: the messages that NCBI posts while
 /// it reads the counts file for each query, and the error.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:149-151
@@ -273,9 +274,9 @@ pub(crate) fn batch_error(error: &WinMaskError, queries: usize) -> Option<(Vec<u
 /// LOSAT's rejection of the errors that NCBI does not report as `batch_error` does: a
 /// format LOSAT does not read (a counts source that names one after the check), the masker's
 /// window check (not reached with blastn's settings), a cache bit array of 0 words that NCBI
-/// reads past (`WinMaskError::EmptyCacheBitArray`), and an error of the masks of a split
-/// batch, where NCBI makes the masks of each chunk when it searches it and those of the
-/// whole queries for the report.
+/// reads past (`WinMaskError::EmptyCacheBitArray`), a query of 2^32 letters or more, and an
+/// error of the masks of a chunk of a split batch whose whole queries were masked (NCBI masks
+/// each chunk when it searches it, after the batch's set-up).
 pub(crate) fn rejection(name: &str, error: &WinMaskError) -> anyhow::Error {
     anyhow::anyhow!(
         "the windowmasker unit counts {name} give an error that LOSAT's BLASTN does not report as NCBI BLAST+ does ({error}); this is not supported by LOSAT's BLASTN"

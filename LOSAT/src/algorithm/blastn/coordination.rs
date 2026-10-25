@@ -1206,6 +1206,16 @@ pub fn query_masks<R: InputRecord>(
     queries: &[R],
     pool: &SearchPool<'_>,
 ) -> Result<Vec<Vec<MaskedInterval>>, crate::utils::winmask::WinMaskError> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
+    // ```c
+    //         if (NULL != m_Options->GetWindowMaskerDatabase() ||
+    //             0    != m_Options->GetWindowMaskerTaxId()) {
+    //
+    //             if (m_QueryVector.NotEmpty()) {
+    //                 Blast_FindWindowMaskerLoc(*m_QueryVector, m_Options);
+    // ```
+    // After DUST, and `query.SetMaskedRegions(mqr)` (winmask_filter.cpp:311) replaces the
+    // query's masks: DUST's and the lower case are not made.
     if let Some(window_masker) = &args.window_masker {
         return window_masker.batch_masks(
             queries.iter().map(|record| record.seq()),
@@ -1272,7 +1282,7 @@ pub fn chunk_query_masks<R: InputRecord>(
     restricted: Vec<Vec<MaskedInterval>>,
     pool: &SearchPool<'_>,
 ) -> Result<Vec<Vec<MaskedInterval>>, crate::utils::winmask::WinMaskError> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:874-879
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:876-880
     // ```c++
     //         for (size_t chunk_num = 0; chunk_num < m_NumChunks; chunk_num++) {
     //             CRef<IQueryFactory> qf

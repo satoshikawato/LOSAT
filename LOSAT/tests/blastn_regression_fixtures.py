@@ -455,6 +455,7 @@ _CASES = [
     ("wm.minus_fmt0", f"{WM} -task blastn -window_masker_db {WMC} -strand minus -max_hsps 2 -outfmt 0", ""),
     ("wm.qloc", f"{P} -task blastn -window_masker_db {WMC} -query_loc 101-2500 -outfmt 6", ""),
     ("wm.qloc_fmt0", f"{P} -task blastn -window_masker_db {WMC} -query_loc 101-2500 -max_target_seqs 5 -outfmt 0", ""),
+    ("wm.qloc_minus", f"{P} -task blastn -window_masker_db {WMC} -query_loc 101-2500 -strand minus -outfmt 6", ""),
     # (Chunks of 600 and 400: with the chunks' own masks the hits are NCBI's, with the whole queries'
     # masks cut to the chunks they are not.)
     ("wm.split_c600", f"{WM} -task blastn -window_masker_db {WMC} -outfmt 6", "", "CHUNK_SIZE=600"),
@@ -466,6 +467,7 @@ _CASES = [
     ("wm.mixed", f"-query {I}/wm_mixed_query.fa -subject {I}/s60k.fa -task blastn -window_masker_db {WMC} -outfmt 6", ""),
     ("wm.fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 11", ""),
     ("wm.minus_fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -strand minus -outfmt 11", ""),
+    ("wm.plus_lc_fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -strand plus -lcase_masking -outfmt 11", ""),
     ("wm.fmt5", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 5", ""),
     ("wm.fmt16", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 16", ""),
     ("wm.fmt15", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 15", ""),

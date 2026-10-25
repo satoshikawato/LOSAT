@@ -87,6 +87,8 @@ pub enum WinMaskError {
     /// A cache bit array of 0 words (units of 1 or 2 letters) that the cache boost would read:
     /// NCBI reads past its `new Uint4[0]` (`seq_masker_cache_boost.cpp:40-48`).
     EmptyCacheBitArray { unit: u8 },
+    /// A sequence of 2^32 letters or more: NCBI's positions are 32-bit (`TSeqPos`).
+    SequenceTooLong { length: usize },
     /// `CSeqMaskerUsetHash::eBadIndex` (`seq_masker_uset_hash.cpp:95-99`).
     BadIndex { key: u32, value: u32 },
 }
@@ -130,6 +132,10 @@ impl fmt::Display for WinMaskError {
             Self::EmptyCacheBitArray { unit } => write!(
                 f,
                 "the cache bit array of units of {unit} letters has no words to read"
+            ),
+            Self::SequenceTooLong { length } => write!(
+                f,
+                "a sequence of {length} letters is longer than WindowMasker's 32-bit positions"
             ),
             // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_hash.cpp:95-99
             // ```c
@@ -312,10 +318,9 @@ impl SeqMasker {
     /// With the "mean" trigger `trigger_score` and `score` are the same object, so `ts == s`.
     /// `merge_pass` is false (`winmask_filter.cpp:110`, `win_mask_config.cpp:336`).
     pub fn mask(&self, data: &[u8]) -> Result<Vec<(u32, u32)>, WinMaskError> {
-        assert!(
-            u32::try_from(data.len()).is_ok(),
-            "WindowMasker positions are 32-bit (TSeqPos)"
-        );
+        if u32::try_from(data.len()).is_err() {
+            return Err(WinMaskError::SequenceTooLong { length: data.len() });
+        }
         let mut mask = Vec::new();
         let cutoff_score = self.ustat.threshold();
         let limit = self.ustat.textend();

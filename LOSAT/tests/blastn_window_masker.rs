@@ -3,7 +3,8 @@
 //! M/DECISIONS.md 14): a file that does not exist or cannot be read (exit 255, before `-query_loc` is
 //! read and before the database is opened; an error archive with `-outfmt 11`), a format other than
 //! the two binary ones (exit 1, after the `-dust` check), and damaged counts files, which stop the
-//! first batch with one message per query (per query of the first chunk of a split batch), after the
+//! batch that cannot be masked with one message per query of the batch (split or not: NCBI sets up the
+//! whole batch first), after the reports of the batches before and the
 //! outfmt 0 prolog (exit 3).
 //!
 //! The cases are `tests/fixtures/winmask_blastn/cases.tsv` with `<case>.out`, `.err` and `.rc`,
@@ -38,6 +39,18 @@ fn word_at(data: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(data[at..at + 4].try_into().unwrap())
 }
 
+/// Writes `content` to `path` unless the file already has it: through a file of its own and a
+/// rename, so that another test process (nextest runs each test in one) never reads a file being
+/// written.
+fn put(path: &Path, content: &[u8]) {
+    if std::fs::read(path).is_ok_and(|old| old == content) {
+        return;
+    }
+    let part = path.with_extension(format!("part{}", std::process::id()));
+    std::fs::write(&part, content).unwrap();
+    std::fs::rename(&part, path).unwrap();
+}
+
 /// The counts files of the cases (`make_counts` of make_blastn_error_fixtures.py).
 fn make_counts() {
     static ONCE: Once = Once::new();
@@ -59,13 +72,18 @@ fn make_counts() {
             let at = ht_at + 4 * index;
             bad[at..at + 4].copy_from_slice(&((m << bc) | 3).to_le_bytes());
         }
+        // The same with the entry of key 0 kept: a query without A, C, G or T only reads that
+        // one, so a batch of such queries is masked and the next batch fails.
+        let mut bad_after0 = bad.clone();
+        bad_after0[ht_at..ht_at + 4].copy_from_slice(&body[ht_at..ht_at + 4]);
         let pct_md = b"##windowmasker-statistics-format-version:obinary 2.0.0\0##pct:\0";
         let unit17 = [head, &body[..4], &words(&[17]), &body[8..]].concat();
         let pct6 = [&words(&[3, pct_md.len() as u32])[..], pct_md, body].concat();
-        let files: [(&str, Vec<u8>); 7] = [
+        let files: [(&str, Vec<u8>); 8] = [
             ("unit17.obinary", unit17),
             ("short_cba.obinary", [head, &body[..48]].concat()),
             ("bad_index.obinary", [head, &bad].concat()),
+            ("bad_index_after0.obinary", [head, &bad_after0].concat()),
             ("pct6.obinary", pct6),
             ("binary_unit0.binary", words(&[0, 0, 5, 1, 1, 2, 3, 4])),
             (
@@ -75,18 +93,19 @@ fn make_counts() {
             ("empty.obinary", Vec::new()),
         ];
         for (name, content) in files {
-            std::fs::write(work.join(name), content).unwrap();
+            put(&work.join(name), &content);
         }
+        // A file without read permission, made once (its bytes do not matter).
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let unreadable = work.join("unreadable.obinary");
-            if unreadable.exists() {
-                std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o600))
-                    .unwrap();
+            if !unreadable.exists() {
+                let part = work.join(format!("unreadable.part{}", std::process::id()));
+                std::fs::write(&part, &data).unwrap();
+                std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o000)).unwrap();
+                std::fs::rename(&part, &unreadable).unwrap();
             }
-            std::fs::write(&unreadable, &data).unwrap();
-            std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0)).unwrap();
         }
     });
 }
@@ -203,13 +222,10 @@ fn check(threads: &str) {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+// One test for both thread counts: the counts files are made by the test process.
 #[test]
-fn unusable_counts_files_give_ncbis_errors_at_one_thread() {
+fn unusable_counts_files_give_ncbis_errors_at_one_and_four_threads() {
     check("1");
-}
-
-#[test]
-fn unusable_counts_files_give_ncbis_errors_at_four_threads() {
     check("4");
 }
 

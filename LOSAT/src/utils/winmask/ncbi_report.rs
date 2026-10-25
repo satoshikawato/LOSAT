@@ -133,6 +133,7 @@ impl WinMaskError {
             Self::UnsupportedFormat(_)
             | Self::WindowSize { .. }
             | Self::EmptyCacheBitArray { .. }
+            | Self::SequenceTooLong { .. }
             | Self::BadIndex { .. } => return None,
         };
         Some(format!("NCBI C++ Exception:\n{lines}"))

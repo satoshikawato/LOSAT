@@ -328,6 +328,15 @@ pub struct BlastpArgs {
     // an omitted value keeps the default of the task (no filtering).
     #[arg(long, help = "SEG: no, yes, or \"WINDOW LOCUT HICUT\" [default: no]")]
     pub seg: Option<String>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
+    // ```c++
+    //         arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
+    //                         "Apply filtering locations as soft masks",
+    //                         CArgDescriptions::eBoolean,
+    //                         kDfltArgLookupTableMaskingOnlyProt);
+    // ```
+    #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
+    pub soft_masking: Option<bool>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:803-806
     // ```c
     //     arg_desc.AddFlag(kArgUseSWTraceback,
@@ -535,6 +544,9 @@ pub struct ResolvedBlastpArgs {
     pub scoring: ProteinScoringSpec,
     pub comp_based_stats: BlastpCompBasedStats,
     pub seg: BlastpSegSpec,
+    /// `-soft_masking` (`mask_at_hash`): the SEG intervals keep words out of the lookup table
+    /// but the searched query keeps its letters (`encoding.rs` `encode_query_frame`).
+    pub soft_masking: bool,
     pub use_sw_tback: bool,
     pub chaining: bool,
     /// The `-query_loc` range, as given.
@@ -649,6 +661,17 @@ impl BlastpArgs {
         if let Some(seg) = &self.seg {
             options.seg = crate::blastinput::app::parse_seg_option(seg, "BLASTP")?;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
+        // ```c++
+        // CFilteringArgs::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
+        // {
+        //     if (args[kArgLookupTableMaskingOnly]) {
+        //         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
+        //     }
+        // ```
+        // The argument always has its default (`kDfltArgLookupTableMaskingOnlyProt`, "false"),
+        // and no other handler of blastp sets `mask_at_hash`.
+        let soft_masking = self.soft_masking.unwrap_or(false);
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:634-639
         // ```c
         // CMatrixNameArg::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
@@ -844,6 +867,7 @@ impl BlastpArgs {
                 unified_p,
             },
             seg: options.seg,
+            soft_masking,
             use_sw_tback: self.use_sw_tback,
             chaining: options.chaining,
             query_range,
@@ -940,7 +964,41 @@ mod tests {
         assert!(!resolved.ungapped);
         assert!(!resolved.use_sw_tback);
         assert!(!resolved.chaining);
+        assert!(!resolved.soft_masking);
         assert_eq!(resolved.outfmt, "0");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
+    // ```c++
+    //     if (args[kArgLookupTableMaskingOnly]) {
+    //         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
+    //     }
+    // ```
+    // `-soft_masking` takes NCBI's boolean spellings (`NStr::StringToBool`); a task does not
+    // change it (`blastp-short`'s `ClearFilterOptions` comes before the handler).
+    #[test]
+    fn soft_masking_sets_mask_at_hash() {
+        let resolve = |extra: &[&str]| {
+            let mut argv = vec!["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"];
+            argv.extend_from_slice(extra);
+            let TestCommand::Blastp(args) = parse_cli(argv).command;
+            args.resolve().expect("resolved blastp args").soft_masking
+        };
+        for value in ["true", "T", "1", "YES", "on"] {
+            assert!(resolve(&["-soft_masking", value]), "{value}");
+        }
+        for value in ["false", "F", "0", "no", "off"] {
+            assert!(!resolve(&["-soft_masking", value]), "{value}");
+        }
+        assert!(resolve(&["-task", "blastp-short", "-soft_masking", "true"]));
+        assert!(resolve(&[
+            "-task",
+            "blastp-fast",
+            "-soft_masking",
+            "true",
+            "-seg",
+            "yes"
+        ]));
     }
 
     // NCBI blast_args.cpp:2894-2973 (`blastinput::report_counts`): the hit list size and the

@@ -395,7 +395,7 @@ fn parse_tblastx_args(
         soft_masking: None,
         window_size: 40,
         outfmt: "6".to_string(),
-        culling_limit: None,
+        culling_limit: 0,
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,
         subject_loc: None,

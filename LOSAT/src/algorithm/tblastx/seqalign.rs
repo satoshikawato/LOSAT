@@ -58,7 +58,7 @@ use crate::blastinput::seq_range::Placements;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::seqid::SeqId;
-use crate::report::serial::{write_query, SerialFormat};
+use crate::report::serial::{write_query_to, SerialFormat};
 
 /// The subjects of a TBLASTX search as the Seq-aligns name them: the records of `-subject`
 /// (`Subject_N`) with their `-subject_loc` placements, or a database's reported sequences by
@@ -180,17 +180,15 @@ pub(crate) fn write_tblastx_seqalign(
             searched_length: i32::try_from(query.seq().len())?,
             offset: i32::try_from(query_placements.offset(q_idx))?,
         };
-        buf.clear();
-        if write_query(
+        write_query_to(
             format,
             &run,
             &query_record,
             &subject_records,
             &hsp_records,
             &mut buf,
-        )? {
-            writer.write_all(&buf)?;
-        }
+            &mut *writer,
+        )?;
     }
     debug_assert_eq!(next, hits.len(), "the final list is in query order");
     Ok(())

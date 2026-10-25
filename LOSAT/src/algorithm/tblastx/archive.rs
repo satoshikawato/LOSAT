@@ -46,13 +46,13 @@ use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
 use crate::report::archive::{
-    write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
+    defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
+    KaBlock,
 };
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::seqid::SeqId;
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
-use crate::stats::tables::KarlinParams;
 
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
@@ -113,27 +113,6 @@ pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
 }
 
 pub(crate) use crate::report::archive::error_lines;
-
-fn ka_block(params: &KarlinParams) -> KaBlock {
-    KaBlock {
-        lambda: params.lambda,
-        k: params.k,
-        h: params.h,
-        gapped: false,
-    }
-}
-
-/// The defline line of the Bioseq: the line as read, else `>` and the title.
-fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
-    match record.archive_defline() {
-        Some(defline) => Cow::Borrowed(defline),
-        None => {
-            let mut line = vec![b'>'];
-            line.extend_from_slice(&record.title);
-            Cow::Owned(line)
-        }
-    }
-}
 
 fn frame_of(frame: i8) -> Frame {
     match frame {
@@ -357,7 +336,7 @@ pub(super) fn write_tblastx_archives(
                 )
                 .map_or(0, |lengths| lengths.length_adjustment);
                 (
-                    [ka_block(karlin), KaBlock::missing(true)],
+                    [ka_block(karlin, false), KaBlock::missing(true)],
                     stats.eff_searchsp,
                     adjustment,
                 )

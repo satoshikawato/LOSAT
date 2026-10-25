@@ -1,7 +1,7 @@
 // Reads the kind and the memory limits of an engine module from its bytes, before it is
 // compiled (docs/web/abi_v2.md §2-§4). The JavaScript API does not expose the limits of
-// an imported memory, and the threaded host must create the shared memory with exactly
-// the maximum that the module declares (plan TD-7).
+// an imported memory, and the threaded host must create the shared memory with a maximum
+// that is not larger than the one the module declares (plan TD-7; shared-memory.ts).
 
 export type ReactorKind = 'serial-reactor' | 'threaded-reactor';
 

@@ -1,24 +1,25 @@
 //! The DUST masks of a query batch on the search pool (`LOSAT_X_QDUSTPAR`,
 //! `src/algorithm/blastn/x_query_dust_par.rs`) on whole searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set). It chooses between
+//! The switch is in the strict set (on unless it is `0`). It chooses between
 //! two LOSAT code paths with the same result: the queries of a batch masked one after the other,
 //! or the per-query map split over the search pool and collected in query order. So the property under
 //! test is that the report does not depend on it: for megablast, blastn and dc-megablast with
 //! several queries (pieces of LC738874 with microsatellites, runs of `N`, a poly-A query and a
-//! query shorter than a triplet) at 1 and 4 threads, the searches without the switch, with it,
-//! and with the shadow (`LOSAT_X_QDUSTPARSHADOW`, which makes the masks serially as well and
-//! compares them) give the same bytes, and `-dust no` is not acted on (the shadow compares
-//! nothing). The same holds when the batches are searched in `LOSAT_X_QBATCHPAR` slots (private
+//! query shorter than a triplet) at 1 and 4 threads, the searches without the switch and with it
+//! give the same bytes, and `-dust no` is not acted on (the switch's own path does not run). The
+//! same holds when the batches are searched in `LOSAT_X_QBATCHPAR` slots (private
 //! pools of two threads) and when a batch is split into query chunks (`CHUNK_SIZE`, which reaches
 //! `chunk_query_masks`). That the masks are made on the pool's threads is checked by the unit
-//! test `masks_are_made_on_the_pool_threads` in `x_query_dust_par.rs`; here the shadow's counters
-//! show that the pool path ran. That those bytes equal NCBI's is the business of the blastn
-//! fixtures.
+//! test `masks_are_made_on_the_pool_threads` in `x_query_dust_par.rs`; here the sides of the
+//! switch's decision (`LOSAT_X_REACH`) show that the pool path ran at 4 threads and not at one.
+//! That those bytes equal NCBI's is the business of the blastn fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+mod reach_support;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
 /// `0`, the default before, unless the search sets it: every search here runs as it was written,
@@ -39,9 +40,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
 ];
 
 const SWITCH: (&str, &str) = ("LOSAT_X_QDUSTPAR", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_QDUSTPARSHADOW", "1");
-/// The number of queries of `Queries`.
-const QUERY_COUNT: u64 = 28;
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -172,26 +170,9 @@ fn blastn(
     (output.stdout, stderr)
 }
 
-/// The numbers of `[X_SHADOW] QDUSTPAR batches=B queries=Q intervals=I diffs=0 identical` in `stderr`.
-fn shadow_counts(stderr: &str) -> (u64, u64, u64) {
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with("[X_SHADOW] QDUSTPAR "))
-        .unwrap_or_else(|| panic!("no shadow line:\n{stderr}"));
-    assert!(line.ends_with(" diffs=0 identical"), "{line}");
-    let field = |name: &str| -> u64 {
-        line.split_whitespace()
-            .find_map(|word| word.strip_prefix(name))
-            .and_then(|value| value.parse().ok())
-            .unwrap_or_else(|| panic!("no {name} in: {line}"))
-    };
-    assert_eq!(stderr.lines().count(), 1, "{stderr}");
-    (field("batches="), field("queries="), field("intervals="))
-}
-
-/// For one task: the search without the switch at one thread, then off, on and the shadow at 1
-/// and 4 threads, all with the same bytes; the switch writes nothing, the shadow one line, which
-/// counts masks made on the pool only at 4 threads.
+/// For one task: the search without the switch at one thread, then off and on at 1 and 4 threads,
+/// all with the same bytes and no standard error; the masks are made on the pool only at 4 threads
+/// (the sides of the switch's decision).
 fn check_task(task: &str, extra: &[&str]) {
     let queries = Queries::new();
     let mut args = vec!["-task", task];
@@ -203,33 +184,22 @@ fn check_task(task: &str, extra: &[&str]) {
         let (report, stderr) = blastn(&queries, &args, threads, &[]);
         assert!(report == expected, "{task} threads {threads}: off differs");
         assert_eq!(stderr, "", "{task} threads {threads}");
-        let (report, stderr) = blastn(&queries, &args, threads, &[SWITCH]);
+        let reach = reach_support::Reach::new("qdustpar");
+        let (report, stderr) = blastn(&queries, &args, threads, &[SWITCH, reach.var()]);
         assert!(report == expected, "{task} threads {threads}: on differs");
         assert_eq!(stderr, "", "{task} threads {threads}");
-        let (report, stderr) = blastn(&queries, &args, threads, &[SHADOW]);
-        assert!(
-            report == expected,
-            "{task} threads {threads}: shadow differs"
-        );
-        let (batches, count, intervals) = shadow_counts(&stderr);
-        if threads == 1 {
-            assert_eq!((batches, count, intervals), (0, 0, 0), "{task}");
-        } else {
-            assert!(
-                batches > 0 && count > 1 && intervals > 0,
-                "{task}: {stderr}"
-            );
-        }
+        let sides = reach.sides("LOSAT_X_QDUSTPAR");
+        assert_eq!(sides.0, threads > 1, "{task} threads {threads}: {sides:?}");
     }
 }
 
 type Var = (&'static str, &'static str);
 
 /// The searches of `env` (`BATCH_SIZE` and `CHUNK_SIZE` values), megablast: the report without
-/// the switch at one thread, then off, with `slots` added to the switch, and with `slots` added to
-/// the shadow, at 4 threads, all the same bytes and no standard error but the shadow's line. Returns
-/// the shadow's `(batches, queries, intervals)`.
-fn check_env(env: &[Var], slots: &[Var]) -> (u64, u64, u64) {
+/// the switch at one thread, then off, and with `slots` added to the switch, at 4 threads, all the
+/// same bytes and no standard error. Returns whether the masks were made on the pool (the switch's
+/// decision's new side).
+fn check_env(env: &[Var], slots: &[Var]) -> bool {
     let queries = Queries::new();
     let args = ["-task", "megablast"];
     let with = |extra: &[Var]| -> Vec<Var> { env.iter().chain(extra).copied().collect() };
@@ -239,41 +209,34 @@ fn check_env(env: &[Var], slots: &[Var]) -> (u64, u64, u64) {
     let (report, stderr) = blastn(&queries, &args, 4, &with(slots));
     assert!(report == expected, "{env:?} {slots:?}: off differs");
     assert_eq!(stderr, "", "{env:?} {slots:?}");
-    let (report, stderr) = blastn(&queries, &args, 4, &with(&[&[SWITCH][..], slots].concat()));
+    let reach = reach_support::Reach::new("qdustpar-env");
+    let mut on: Vec<(&str, &str)> = with(&[&[SWITCH][..], slots].concat());
+    on.push(reach.var());
+    let (report, stderr) = blastn(&queries, &args, 4, &on);
     assert!(report == expected, "{env:?} {slots:?}: on differs");
     assert_eq!(stderr, "", "{env:?} {slots:?}");
-    let (report, stderr) = blastn(&queries, &args, 4, &with(&[&[SHADOW][..], slots].concat()));
-    assert!(report == expected, "{env:?} {slots:?}: shadow differs");
-    shadow_counts(&stderr)
+    reach.sides("LOSAT_X_QDUSTPAR").0
 }
 
 // The batches are searched in LOSAT_X_QBATCHPAR slots (2 slots of 2 threads, each with a private
 // pool): the slot's DUST masks are made on the slot's pool, and the report is the same. A batch
-// size of 10,000 letters gives several batches, and the shadow's batches count both the slots'
-// batches and the loop's own searches.
+// size of 10,000 letters gives several batches.
 #[test]
 fn queries_masked_in_qbatchpar_slots() {
-    let (batches, queries, intervals) = check_env(
+    assert!(check_env(
         &[("BATCH_SIZE", "10000")],
         &[("LOSAT_X_QBATCHPAR", "1"), ("LOSAT_X_QBATCHPARSLOTS", "2")],
-    );
-    assert!(
-        batches > 1 && queries >= QUERY_COUNT && intervals > 0,
-        "{batches} {queries} {intervals}"
-    );
+    ));
 }
 
 // A batch that is split into query chunks (`CHUNK_SIZE` below the batch's letters): the parts of
-// the split queries are masked by `chunk_query_masks`, so the shadow counts more queries than the
-// file has.
+// the split queries are masked by `chunk_query_masks`.
 #[test]
 fn split_query_chunks_masked_on_the_pool() {
-    let (batches, queries, intervals) =
-        check_env(&[("BATCH_SIZE", "1000000"), ("CHUNK_SIZE", "7000")], &[]);
-    assert!(
-        batches > 0 && queries > QUERY_COUNT && intervals > 0,
-        "{batches} {queries} {intervals}"
-    );
+    assert!(check_env(
+        &[("BATCH_SIZE", "1000000"), ("CHUNK_SIZE", "7000")],
+        &[]
+    ));
 }
 
 #[test]
@@ -297,7 +260,7 @@ fn dust_parameters_and_lowercase_masking() {
     check_task("megablast", &["-dust", "10 32 2", "-lcase_masking"]);
 }
 
-// `-dust no` makes no masks: the shadow has nothing to compare, and the report is the same.
+// `-dust no` makes no masks: the switch's own path does not run, and the report is the same.
 #[test]
 fn dust_no_is_not_acted_on() {
     let queries = Queries::new();
@@ -305,11 +268,11 @@ fn dust_no_is_not_acted_on() {
     let (expected, _) = blastn(&queries, &args, 1, &[]);
     assert!(!expected.is_empty());
     for threads in [1, 4] {
-        let (report, _) = blastn(&queries, &args, threads, &[SWITCH]);
+        let reach = reach_support::Reach::new("qdustpar-no");
+        let (report, _) = blastn(&queries, &args, threads, &[SWITCH, reach.var()]);
         assert!(report == expected, "threads {threads}: on differs");
-        let (report, stderr) = blastn(&queries, &args, threads, &[SHADOW]);
-        assert!(report == expected, "threads {threads}: shadow differs");
-        assert_eq!(shadow_counts(&stderr), (0, 0, 0));
+        let sides = reach.sides("LOSAT_X_QDUSTPAR");
+        assert!(!sides.0, "threads {threads}: sides {sides:?}");
     }
 }
 

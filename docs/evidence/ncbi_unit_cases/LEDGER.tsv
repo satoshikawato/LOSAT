@@ -42,17 +42,17 @@ blastfilter	TSeqLocVector2Packed_seqint_TestNoIntervals	n-a		Object-manager plum
 blastfilter	TSeqLocVector2Packed_seqint_TestEmptyInput	n-a		CRef plumbing.	2026-10-10
 blastfilter	SegFilter	ported	LOSAT/src/utils/seg.rs::test_mask_sequence_matches_ncbi_core_bdv02435_1_query_defaults;LOSAT/src/utils/seg.rs::test_mask_sequence_matches_ncbi_segmasker_yp_009220568_1;LOSAT/src/utils/seg.rs::test_mask_sequence_matches_ncbi_segmasker_yp_009220574_1		2026-10-10
 blastfilter	RepeatsFilter	n-a		Repeat filtering needs a BLAST database of repeats; LOSAT has no -db and rejects -filtering_db explicitly.	2026-10-10
-blastfilter	WindowMasker	n-a		WindowMasker data files are not supported.	2026-10-10
+blastfilter	WindowMasker	n-a		Needs the GenBank query gi|1945388 and NCBI's human WindowMasker data (taxid 9606); -window_masker_db is compared with NCBI BLAST+ 2.17.0 blastn instead (LOSAT/tests/blastn_regression_fixtures.py wm.* cases, LOSAT/tests/blastn_window_masker.rs).	2026-10-10
 blastfilter	RepeatsFilter_OnSeqInterval	n-a		Both the repeats database and -query_loc are unported.	2026-10-10
 blastfilter	CSeqLocInfo_EqualityOperators	n-a		No CSeqLocInfo in LOSAT; masks are (i32,i32) tuples or MaskedInterval with derived PartialEq (LOSAT/src/utils/dust.rs:108-109) and carry no Seq-id or frame.	2026-10-10
 blastfilter	CombineDustAndLowerCaseMasking_WithBlastQueryVector	partial	LOSAT/src/algorithm/blastn/coordination.rs::test_merge_mask_intervals;LOSAT/src/algorithm/blastn/coordination.rs::test_collect_lowercase_masks	Only the interval merge and the lowercase collection are asserted, on synthetic data; no test combines real DUST output with a lowercase mask, and the +1/-1 frame bookkeeping and the GetMasks exception are object-manager API without analog…	2026-10-10
 blastfilter	RepeatsAndDustFilter	n-a		Repeats filtering unported.	2026-10-10
-blastfilter	WindowMaskerAndDustFilter	n-a		WindowMasker unported.	2026-10-10
-blastfilter	WindowMasker_OnSeqInterval	n-a		WindowMasker and -query_loc unported.	2026-10-10
+blastfilter	WindowMaskerAndDustFilter	n-a		Needs the GenBank query gi|197333738 and -window_masker_taxid (not ported yet, line NP M3); that WindowMasker's masks replace DUST's is compared with NCBI BLAST+ 2.17.0 blastn (LOSAT/tests/blastn_regression_fixtures.py wm.* cases).	2026-10-10
+blastfilter	WindowMasker_OnSeqInterval	n-a		Needs a GenBank query and NCBI's human WindowMasker data; -window_masker_db with -query_loc is compared with NCBI BLAST+ 2.17.0 blastn instead (LOSAT/tests/blastn_regression_fixtures.py wm.qloc cases).	2026-10-10
 blastfilter	RepeatsFilter_NoHitsFound	n-a		Repeats filtering unported.	2026-10-10
 blastfilter	WindowMasker_NoHitsFound	n-a		The NCBI body actually calls the repeats filter, so it tests nothing WindowMasker-specific; both features are unported.	2026-10-10
 blastfilter	RepeatsFilterWithMissingParameter	n-a		Repeats database and the legacy filter string are unported.	2026-10-10
-blastfilter	WindowMaskerWithMissingParameter	n-a		WindowMasker unported.	2026-10-10
+blastfilter	WindowMaskerWithMissingParameter	n-a		Sets the C++ API's filter string (SetFilterString "m L; W -d "); LOSAT reads no filtering option string.	2026-10-10
 blastfilter	TestGetFilteredQueryRegions_BothStrandsOneQuery	e2e		evidence (b28e42e1): LOSAT/tests/outfmt0_manifest.tsv:17 (mask.dust.blastn: DUST-masked repeat shown lowercase in the Query row, frozen hash) and LOSAT/tests/fixtures/outfmt0/dc.default.out (23 Query rows with lowercase DUST regions); checker docs/evidence/los…	2026-10-10
 blastfilter	TestGetFilteredQueryRegions_PlusStrandsOneQuery	e2e	LOSAT/tests/blastn_regression_fixtures.py#strand.lcase_qloc_plus_fmt0	-strand plus is implemented: DUST masks the plus strand of the query; frozen NCBI report of -strand plus with DUST, -lcase_masking and -query_loc (blastn_regression_fixtures.py strand.lcase_qloc_plus_fmt0); the C filtering function itself is not unit-tested.	2026-10-21
 blastfilter	TestGetFilteredQueryRegions_MinusStrandsOneQuery	e2e	LOSAT/tests/blastn_regression_fixtures.py#strand.dust_blastn_minus_fmt0;LOSAT/tests/blastn_regression_fixtures.py#strand.dust_megablast_minus_fmt0;LOSAT/src/algorithm/blastn/coordination.rs::dust_of_the_minus_strand_is_that_of_the_reverse_complement	-strand minus is implemented: DUST runs on the reverse complement of the query and its regions are mapped back (coordination.rs apply_dust_masking, reverse_mask_intervals); frozen NCBI reports of a query whose low-complexity region lies on one strand only (strand.dust_blastn_minus_fmt0, strand.dust_megablast_minus_fmt0) and the unit test of that equivalence.	2026-10-21
@@ -88,7 +88,7 @@ blastfilter	FilterOptionsFromStringSEGWithParams	partial	LOSAT/tests/cli_v2.rs::
 blastfilter	FilterOptionsFromBadStringSEGWithParams	partial	LOSAT/tests/cli_v2.rs::filtering_has_exactly_one_shared_value_grammar	Same rejection for the BLAST+ grammar, with NCBI's message "Invalid number of arguments to filtering option" (LOSAT/src/blastinput/value_parsers.rs:99-101); the legacy grammar is not ported.	2026-10-10
 blastfilter	FilterOptionsFromStringBlastnL	n-a		LOSAT exposes DUST through -dust (blastn) and SEG through -seg (protein programs); there is no program-dependent "L" token.	2026-10-10
 blastfilter	FilterOptionsFromStringBlastpL	n-a		Legacy grammar unported.	2026-10-10
-blastfilter	FilterOptionsFromStringBlastnW	n-a		WindowMasker unported.	2026-10-10
+blastfilter	FilterOptionsFromStringBlastnW	n-a		LOSAT reads no filtering option string (BlastFilteringOptionsFromString); the XML filter string W -t/-d is written by LOSAT/src/report/blast_xml/filter.rs (its tests).	2026-10-10
 blastfilter	FilterMerge	n-a		LOSAT has no SBlastFilterOptions struct and nothing to merge.	2026-10-10
 blastfilter	FilterStringFalse	partial	LOSAT/tests/cli_v2.rs::filtering_has_exactly_one_shared_value_grammar;LOSAT/tests/cli_v2.rs::canonical_options_for_every_program;LOSAT/tests/cli_v2.rs::legacy_and_unsupported_syntax_is_unknown		2026-10-10
 blastfilter	MergeOptionHandle	n-a		Repeats database and options-handle API unported.	2026-10-10
@@ -103,7 +103,7 @@ blastfilter	TestBlastSeqLocCombine_MergeElems	partial	LOSAT/src/algorithm/blastn
 blastfilter	TestBlastSeqLocCombine_MergeIdenticals	partial	LOSAT/src/algorithm/blastn/coordination.rs::test_merge_mask_intervals;LOSAT/src/algorithm/blastx/query_setup.rs::touching_and_duplicate_masks_preserve_lookup_intervals	No assertion that identical multi-residue intervals collapse in combine_masks.	2026-10-10
 blastfilter	TestBlastSeqLocCombine_NoMerging	partial	LOSAT/src/algorithm/blastx/query_setup.rs::touching_and_duplicate_masks_preserve_lookup_intervals	Sorting of disjoint intervals is implemented but not asserted.	2026-10-10
 blastfilter	TestBlastSeqLocListReverse	n-a		Linked-list helper; LOSAT masks are sorted Vecs.	2026-10-10
-blastfilter	TestGetTaxIdWithWindowMaskerSupport	n-a		WindowMasker unported.	2026-10-10
+blastfilter	TestGetTaxIdWithWindowMaskerSupport	n-a		-window_masker_taxid is not ported yet (line NP M3).	2026-10-10
 blasthits	BlastTargetSequence	partial	LOSAT/src/algorithm/tblastn/search_gapped.rs::long_multi_hsp_partial_windows_and_retry_match_ncbi;LOSAT/src/algorithm/tblastn/search_gapped.rs::nonzero_base_partial_traceback_without_fence_matches_ncbi;LOSAT/src/algorithm/tblastn/search_gapped.rs::full_translation_traceback_matches_ncbi_post_fence_scores_and_offsets	Window range (NCBI range[2*context..]) is asserted against a pinned NCBI oracle; the sentinel byte positions, the +33 length, the per-position residue values and the NULL-HSP case are not asserted directly (fence detection is only observed…	2026-10-10
 blasthits	testMergeHSPLists	ported	LOSAT/src/algorithm/tblastn/search_gapped.rs::long_chunk_overlap_merge_matches_ncbi_input_score_and_order;LOSAT/src/algorithm/tblastn/search_gapped.rs::long_subject_chunk_local_gapped_hsps_match_ncbi;LOSAT/src/algorithm/tblastn/search_gapped.rs::skipped_middle_chunk_preserves_both_hsps_and_all_append_rows		2026-10-10
 blasthits	testPurgeOfNewHSPList	n-a		C pointer-array / detached hspcnt bookkeeping; LOSAT keeps HSPs in Vec (no NULL slots, no separate count), so an empty-list purge has no analogue to test.	2026-10-10
@@ -273,7 +273,7 @@ nuclwordfinder	testWordFinder_Discontig_Direct_Stacks_NoUngap	n-a		Same as case 
 nuclwordfinder	testWordFinder_Discontig_Direct_Diag	e2e		evidence (b28e42e1): Implementation: discontiguous scan with template_length as word length run.rs:2842-2865, two-hit run.rs:7881 and :8475, off-diagonal search run.rs:8566-8620, type_of_word extension.rs:972. Exercised only by frozen outputs: LOSAT/tests/blas…	2026-10-10
 nuclwordfinder	testWordFinder_Discontig_Direct_Stacks	e2e		evidence (b28e42e1): Implementation: second copy of the hash extension for the discontiguous branch run.rs:9221 (branch), :9564-9615 (retrieve/insert window), :9825-9845 (off-diagonal). Exercised only end to end: LOSAT/tests/outfmt0_manifest.tsv:83 (dc.default…	2026-10-10
 nuclwordfinder	testHitAtEndOfSubject	to-port		evidence (b28e42e1): Implemented at run.rs:8232 (`if s_off + (ext_to - ext_left) > s_range { continue; }`, port of na_ungapped.c:1123 for the generic variant); no test targets the subject-end bound of the word extension.	2026-10-10
-optionshandle	Set_Get_MaskAtHash_Universal	partial	LOSAT/src/algorithm/tblastn/args.rs::ordinary_defaults_and_code32_are_accepted	NCBI's -soft_masking is SetMaskAtHash (blast_args.cpp:390). Only TBLASTN round-trips it; BLASTN/BLASTP/TBLASTX reject -soft_masking (LOSAT/src/cli.rs:252, :318, :585) and BLASTX's field (blastx/args.rs:144) is not asserted.	2026-10-10
+optionshandle	Set_Get_MaskAtHash_Universal	partial	LOSAT/src/algorithm/tblastn/args.rs::ordinary_defaults_and_code32_are_accepted;LOSAT/src/algorithm/blastp/args.rs::soft_masking_sets_mask_at_hash;LOSAT/tests/unit/tblastx/args.rs::test_soft_masking_sets_mask_at_hash	NCBI's -soft_masking is SetMaskAtHash (blast_args.cpp:390). TBLASTN, BLASTP and TBLASTX round-trip it; BLASTN rejects -soft_masking (LOSAT/src/cli.rs is_unported_*_arg) and BLASTX's field (blastx/args.rs) is not asserted.	2026-10-10
 optionshandle	Set_Get_GapXDropoff_Universal	e2e		evidence (b28e42e1): Cited impl and rejections are correct (LOSAT/src/algorithm/tblastn/args.rs:91 `pub xdrop_gap: Option<f64>`, :285-287 override of the 15.0 default; src/cli.rs:265 in is_unported_blastn_arg, :326 in is_unported_blastp_arg, :642 in is_unporte…	2026-10-10
 optionshandle	Set_Get_GapTrigger_Universal	n-a		No LOSAT option sets the gap trigger; NCBI's command line does not expose it either (API only).	2026-10-10
 optionshandle	Set_Get_HitlistSize_Universal	partial	LOSAT/tests/unit/blastn/args.rs::test_custom_max_target_seqs;LOSAT/src/algorithm/blastx/args.rs::omission_and_explicit_target_count_remain_distinct;LOSAT/src/algorithm/tblastn/args.rs::ordinary_defaults_and_code32_are_accepted	Missing: a non-default -max_target_seqs asserted on the resolved hitlist size (the explicit value tested equals the default).	2026-10-10
@@ -342,8 +342,8 @@ optionshandle	Set_Get_DustFilteringWindow_BlastNucl	ported	LOSAT/tests/unit/blas
 optionshandle	Get_DustWindowWithDustOptionsUnallocated_BlastNucl	partial	LOSAT/tests/cli_v2.rs::filtering_has_exactly_one_shared_value_grammar;LOSAT/src/algorithm/blastn/coordination.rs::task_defaults_follow_ncbi_handles	Missing: an assertion that params() is None for DustSpec::No.	2026-10-10
 optionshandle	Set_Get_DustFilteringLinker_BlastNucl	ported	LOSAT/tests/unit/blastn/args.rs::test_dust_options;LOSAT/tests/cli_v2.rs::filtering_has_exactly_one_shared_value_grammar		2026-10-10
 optionshandle	Get_DustLinkerWithDustOptionsUnallocated_BlastNucl	partial	LOSAT/tests/cli_v2.rs::filtering_has_exactly_one_shared_value_grammar;LOSAT/src/algorithm/blastn/coordination.rs::task_defaults_follow_ncbi_handles	Missing: an assertion that params() is None for DustSpec::No.	2026-10-10
-optionshandle	Set_Get_RepeatFiltering_BlastNucl	n-a		-filtering_db, -window_masker_db, -window_masker_taxid rejected (LOSAT/src/cli.rs:227, :262-263)	2026-10-10
-optionshandle	Set_Get_RepeatFilteringDB_BlastNucl	n-a		-filtering_db, -window_masker_db, -window_masker_taxid rejected (LOSAT/src/cli.rs:227, :262-263)	2026-10-10
+optionshandle	Set_Get_RepeatFiltering_BlastNucl	n-a		-filtering_db and -window_masker_taxid rejected (LOSAT/src/cli.rs is_unported_blastn_arg); LOSAT has no options handle to set and get them.	2026-10-10
+optionshandle	Set_Get_RepeatFilteringDB_BlastNucl	n-a		-filtering_db and -window_masker_taxid rejected (LOSAT/src/cli.rs is_unported_blastn_arg); LOSAT has no options handle to set and get them.	2026-10-10
 optionshandle	Set_Get_TemplateLength_DiscNucleotide	ported	LOSAT/src/algorithm/blastn/coordination.rs::task_defaults_follow_ncbi_handles;LOSAT/tests/cli_v2.rs::defaults_and_task_overrides_remain_distinct		2026-10-10
 optionshandle	Set_Get_TemplateType_DiscNucleotide	ported	LOSAT/src/algorithm/blastn/coordination.rs::task_defaults_follow_ncbi_handles;LOSAT/tests/cli_v2.rs::defaults_and_task_overrides_remain_distinct		2026-10-10
 optionshandle	Set_Get_WordSize_DiscNucleotide	partial	LOSAT/src/algorithm/blastn/scoring.rs::discontiguous_templates_are_checked_after_the_word_size_limit	LOSAT ports the core check (blast_options.c) with its message, not the handle's; the accepted 12 is asserted as is_ok, not read back for dc-megablast (coordination.rs:1439 reads 12 back for megablast).	2026-10-10
@@ -489,14 +489,14 @@ bl2seq	TblastxManyHits	e2e		evidence (b28e42e1): LOSAT/tests/tblastx_regression_
 bl2seq	ProteinBlast2Seqs	e2e		evidence (b28e42e1): LOSAT/tests/blastp_v010_parity_manifest.tsv:9 (all_hsp_self_serial, SicyWSV self search) and :2 (pairwise_default_serial); LOSAT/tests/run_local_blastp.rs fn every_format_of_one_search_matches_the_cli_run_of_that_format; LOSAT/tests/compar…	2026-10-10
 bl2seq	BlastnWithRepeatFiltering_InvalidDB	n-a		No repeat-database filtering in LOSAT.	2026-10-10
 bl2seq	BlastnWithRepeatFiltering	n-a		No repeat-database filtering in LOSAT.	2026-10-10
-bl2seq	BlastnWithWindowMasker_Db	n-a		No WindowMasker support in LOSAT.	2026-10-10
-bl2seq	BlastnWithWindowMasker_Taxid	n-a		No WindowMasker support in LOSAT.	2026-10-10
-bl2seq	BlastnWithWindowMasker_InvalidDb	n-a		No WindowMasker support in LOSAT.	2026-10-10
-bl2seq	BlastnWithWindowMasker_InvalidTaxid	n-a		No WindowMasker support in LOSAT.	2026-10-10
-bl2seq	WindowMaskerPathInitInvalid	n-a		No WindowMasker support in LOSAT.	2026-10-10
-bl2seq	WindowMaskerPathInitValid	n-a		No WindowMasker support in LOSAT.	2026-10-10
-bl2seq	BlastnWithWindowMasker_DbAndTaxid	n-a		No WindowMasker support in LOSAT.	2026-10-10
-bl2seq	ConvertTaxIdToWindowMaskerDb	n-a		No WindowMasker support in LOSAT.	2026-10-10
+bl2seq	BlastnWithWindowMasker_Db	n-a		Needs the GenBank query gi|555 and NCBI's human WindowMasker data; -window_masker_db is compared with NCBI BLAST+ 2.17.0 blastn instead (LOSAT/tests/blastn_regression_fixtures.py wm.* cases, LOSAT/tests/blastn_window_masker.rs).	2026-10-10
+bl2seq	BlastnWithWindowMasker_Taxid	n-a		-window_masker_taxid is not ported yet (line NP M3).	2026-10-10
+bl2seq	BlastnWithWindowMasker_InvalidDb	n-a		Needs the GenBank query gi|555; a -window_masker_db that does not exist is compared with NCBI BLAST+ 2.17.0 blastn instead (LOSAT/tests/blastn_window_masker.rs).	2026-10-10
+bl2seq	BlastnWithWindowMasker_InvalidTaxid	n-a		-window_masker_taxid is not ported yet (line NP M3).	2026-10-10
+bl2seq	WindowMaskerPathInitInvalid	n-a		-window_masker_taxid and its search path are not ported yet (line NP M3).	2026-10-10
+bl2seq	WindowMaskerPathInitValid	n-a		-window_masker_taxid and its search path are not ported yet (line NP M3).	2026-10-10
+bl2seq	BlastnWithWindowMasker_DbAndTaxid	n-a		-window_masker_taxid is not ported yet (line NP M3).	2026-10-10
+bl2seq	ConvertTaxIdToWindowMaskerDb	n-a		-window_masker_taxid is not ported yet (line NP M3).	2026-10-10
 bl2seq	Alex	n-a		No repeat-database filtering in LOSAT.	2026-10-10
 bl2seq	NucleotideBlast2Seqs	e2e		evidence (b28e42e1): LOSAT/tests/blastn_parity_manifest.tsv:6-13 (task blastn genome pairs compared with NCBI outfmt 7); LOSAT/tests/comparison_cases.tsv:22-30 (blastn oracle pairs); LOSAT/tests/outfmt0_manifest.tsv:9 (compact.blastn, 2 queries x 2 subjects)	2026-10-10
 bl2seq	ProteinBlastChangeQuery	n-a		Object reuse is C++ API plumbing; the searched pairs themselves are covered under ProteinBlast2Seqs and NucleotideBlast2Seqs.	2026-10-10

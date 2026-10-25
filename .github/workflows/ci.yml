@@ -37,6 +37,8 @@ jobs:
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_pure_rust_runtime_boundary.py'
       - name: Release-candidate tooling tests
         run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v010.py
+      - name: Release-candidate v0.2.0 tooling tests
+        run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v020.py LOSAT/tests/test_verify_release_archive_v020.py
       - name: Regression tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_ci_fast_regressions.py'
       # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143

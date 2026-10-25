@@ -29,6 +29,7 @@ const { WASI } = require("node:wasi");
 
 const ROOT = path.resolve(__dirname, "../../..");
 const { createThreadHost } = require(path.join(ROOT, "LOSAT/tests/wasi_thread_host"));
+const { unsignedWasiImports } = require(path.join(ROOT, "LOSAT/tests/wasi_artifact"));
 
 const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7] };
 const WITH_HITS = new Set(["blastp", "tblastn", "blastn", "tblastx"]);
@@ -59,8 +60,10 @@ class Reactor {
     this.streams = new Map();
   }
 
+  // Pointers and lengths are unsigned; JavaScript receives an i32 as a signed number
+  // (docs/web/abi_v2.md §6), so a pointer of 2 GiB or more arrives negative.
   emit(stream, ptr, len) {
-    const chunk = Buffer.from(new Uint8Array(this.memory().buffer, ptr, len));
+    const chunk = Buffer.from(new Uint8Array(this.memory().buffer, ptr >>> 0, len >>> 0));
     if (!this.streams.has(stream)) this.streams.set(stream, []);
     this.streams.get(stream).push(chunk);
   }
@@ -74,7 +77,7 @@ class Reactor {
 
   error() {
     const e = this.exports;
-    return Buffer.from(new Uint8Array(this.memory().buffer, e.losat_web2_last_error_ptr(), e.losat_web2_last_error_len())).toString();
+    return Buffer.from(new Uint8Array(this.memory().buffer, e.losat_web2_last_error_ptr() >>> 0, e.losat_web2_last_error_len() >>> 0)).toString();
   }
 
   // Calls an export; Buffer and string arguments become (ptr, len) pairs.
@@ -83,7 +86,7 @@ class Reactor {
     for (const arg of args) {
       if (typeof arg === "number") { flat.push(arg); continue; }
       const bytes = Buffer.isBuffer(arg) ? arg : Buffer.from(arg);
-      const ptr = e.losat_web2_alloc(bytes.length);
+      const ptr = e.losat_web2_alloc(bytes.length) >>> 0;
       new Uint8Array(this.memory().buffer, ptr, bytes.length).set(bytes);
       allocations.push([ptr, bytes.length]);
       flat.push(ptr, bytes.length);
@@ -101,7 +104,7 @@ async function openSerial(wasmPath) {
   const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env: {} });
   let reactor;
   const imports = {
-    wasi_snapshot_preview1: wasi.wasiImport,
+    wasi_snapshot_preview1: unsignedWasiImports(wasi.wasiImport),
     losat_host: { emit: (stream, ptr, len) => reactor.emit(stream, ptr, len) },
   };
   const { instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), imports);

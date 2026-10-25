@@ -137,16 +137,11 @@ struct RunState {
 #[derive(Default)]
 struct Inner {
     real: RunState,
-    /// The state of a scratch run (`ArchiveHandle::scratch`), used instead of `real`.
-    scratch: Option<RunState>,
 }
 
 impl Inner {
     fn state(&mut self) -> &mut RunState {
-        match self.scratch.as_mut() {
-            Some(scratch) => scratch,
-            None => &mut self.real,
-        }
+        &mut self.real
     }
 }
 
@@ -155,11 +150,6 @@ struct Shared {
     request: ArchiveRequest,
     state: Mutex<Inner>,
 }
-
-/// The messages and search space a run carries from one archive to the next, as they are at
-/// some point of the run.
-#[derive(Clone, Debug)]
-pub struct ArchiveSeed(RunState);
 
 /// What an archive-writing run shares between its diagnostics stream and its writer.
 #[derive(Clone)]
@@ -283,33 +273,6 @@ impl ArchiveHandle {
             state.last_search_space
         })
     }
-
-    /// What the run carries now.
-    pub fn seed(&self) -> ArchiveSeed {
-        self.with_state(|state| ArchiveSeed(state.clone()))
-    }
-
-    /// Runs `f` with a scratch state in place of the run's: the report-streaming shadow
-    /// writes the archives of the batches before an error a second time, from `seed` (what
-    /// the run carried when it started streaming).
-    pub fn scratch<R>(&self, seed: &ArchiveSeed, f: impl FnOnce() -> R) -> R {
-        {
-            let mut inner = self
-                .0
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            inner.scratch = Some(seed.0.clone());
-        }
-        let result = f();
-        let mut inner = self
-            .0
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        inner.scratch = None;
-        result
-    }
 }
 
 /// Whether `byte` is one of NCBI's visible characters (`GoodVisibleChar`: `' '` to `'~'`).
@@ -342,11 +305,21 @@ pub fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> anyhow:
 /// `-subject` file, whose "Command line argument error" NCBI raises inside `Run`.
 pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Message>> {
     let native = error.downcast_ref::<crate::cli::NativeError>()?;
-    const PREFIXES: [&str; 4] = [
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+    // ```c++
+    //     catch (const CException& e) {                                           \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    // `Error: NCBI C++ Exception:` is that report of an exception of NCBI's C++ Toolkit
+    // (BLASTN's `-window_masker_db` file that cannot be opened).
+    const PREFIXES: [&str; 5] = [
         "BLAST query error:",
         "BLAST Database error:",
         "BLAST engine error:",
         "BLAST query/options error:",
+        "Error: NCBI C++ Exception:",
     ];
     let known = PREFIXES
         .iter()

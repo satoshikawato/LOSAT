@@ -519,6 +519,51 @@ const PAM250_TEXT: &str = r#"
 /***/   -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8,  1
 "#;
 
+// NCBI reference: c++/src/util/tables/sm_identity.c:38-96
+// ```c
+// static const TNCBIScore s_IdentityPSM[25 * 25] = {
+//     /*       A,  R,  N,  D,  C,  Q,  E,  G,  H,  I,  L,  K,  M,
+//              F,  P,  S,  T,  W,  Y,  V,  B,  J,  Z,  X,  *        */
+//     /*A*/    9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+// ...
+//     /*X*/   -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+//             -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+// ...
+// const SNCBIPackedScoreMatrix NCBISM_Identity = {
+//     "ARNDCQEGHILKMFPSTWYVBJZX*",
+//     s_IdentityPSM,
+//     -5
+// };
+// ```
+// (The X row is -5 throughout, its diagonal included.)
+const IDENTITY_TEXT: &str = r#"
+/*A*/  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*R*/ -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*N*/ -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*D*/ -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*C*/ -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*Q*/ -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*E*/ -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*G*/ -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*H*/ -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*I*/ -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*L*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*K*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*M*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*F*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*P*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*S*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*T*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5,
+/*W*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5,
+/*Y*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5,
+/*V*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5,
+/*B*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5,
+/*J*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5,
+/*Z*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5,
+/*X*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/***/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9
+"#;
+
 // NCBI reference: ncbi-blast/c++/src/util/tables/raw_scoremat.c:81-109
 // ```c
 // for (i = 0;  i < dim;  ++i) {
@@ -610,6 +655,13 @@ fn pam250_scores() -> &'static [i8] {
         .as_slice()
 }
 
+fn identity_scores() -> &'static [i8] {
+    static SCORES: OnceLock<Vec<i8>> = OnceLock::new();
+    SCORES
+        .get_or_init(|| parse_matrix_scores(IDENTITY_TEXT))
+        .as_slice()
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ProteinScoreMatrix {
     pub scores: &'static [i8],
@@ -657,6 +709,10 @@ pub fn standard_protein_matrix(matrix: ScoringMatrix) -> ProteinScoreMatrix {
         ScoringMatrix::Pam250 => ProteinScoreMatrix {
             scores: pam250_scores(),
             defscore: -8,
+        },
+        ScoringMatrix::Identity => ProteinScoreMatrix {
+            scores: identity_scores(),
+            defscore: -5,
         },
     }
 }
@@ -934,6 +990,39 @@ mod tests {
         assert_eq!(protein_defscore(ScoringMatrix::Blosum80), -6);
         assert_eq!(protein_defscore(ScoringMatrix::Pam30), -17);
         assert_eq!(protein_defscore(ScoringMatrix::Pam250), -8);
+        assert_eq!(protein_defscore(ScoringMatrix::Identity), -5);
+    }
+
+    // NCBI reference: c++/src/util/tables/sm_identity.c:38-96 (9 on the diagonal, -5
+    // elsewhere, the X row -5 throughout; defscore -5)
+    #[test]
+    fn identity_matrix_is_ncbis_packed_table() {
+        let identity = standard_protein_matrix(ScoringMatrix::Identity);
+        let symbols = b"ARNDCQEGHILKMFPSTWYVBJZX*";
+        for (r, &row) in symbols.iter().enumerate() {
+            for c in 0..symbols.len() {
+                let expected = if r == c && row != b'X' { 9 } else { -5 };
+                assert_eq!(
+                    identity.scores[r * PROTEIN_MATRIX_SIZE + c],
+                    expected,
+                    "{} {}",
+                    row as char,
+                    symbols[c] as char
+                );
+            }
+        }
+        assert_eq!(
+            protein_score(ScoringMatrix::Identity, ncbistdaa::W, ncbistdaa::W),
+            9
+        );
+        assert_eq!(
+            protein_score(ScoringMatrix::Identity, ncbistdaa::X, ncbistdaa::X),
+            -5
+        );
+        assert_eq!(
+            protein_score(ScoringMatrix::Identity, ncbistdaa::A, ncbistdaa::GAP),
+            BLAST_SCORE_MIN
+        );
     }
 
     #[test]
@@ -1055,6 +1144,7 @@ mod tests {
             ScoringMatrix::Pam30,
             ScoringMatrix::Pam70,
             ScoringMatrix::Pam250,
+            ScoringMatrix::Identity,
         ] {
             for query in 0..=u8::MAX {
                 for subject in 0..=u8::MAX {

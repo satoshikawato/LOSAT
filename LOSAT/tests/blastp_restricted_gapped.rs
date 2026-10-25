@@ -21,16 +21,16 @@
 //!                gap_align->score >= restricted_cutoff) {
 //! ```
 //! The blastp fixtures of `ci_fast_regressions.py` and `check_losat.py` never reach this path
-//! (LOSAT_X_BPGAPSHADOW compared nothing on any of them): it needs a query whose best ungapped
-//! alignment scores below 0.68 of the cutoff, and the cutoff grows with the search space. The
-//! inputs here are generated:
+//! (`[X_STATS] BPGAP` counted no restricted alignment on any of them): it needs a query whose best
+//! ungapped alignment scores below 0.68 of the cutoff, and the cutoff grows with the search space.
+//! The inputs here are generated:
 //! - four random queries;
 //! - 1,500 random subjects of 400 letters (0.6 Mb);
 //! - at subjects 0, 375, 750 and 1,125, a copy of each query with 60 % of its letters replaced
 //!   and an insertion or deletion about every eighth letter. These copies give gapped alignments
 //!   above the cutoff whose ungapped pieces are short.
 //!
-//! On x86_64 with AVX2, LOSAT_X_BPGAPSHADOW printed `compared=380` on these inputs, and
+//! On x86_64 with AVX2, `[X_STATS] BPGAP` counted `fast=380` on these inputs, and
 //! `LOSAT_TIMING` counted five exact redos. The expected rows are NCBI BLAST+ 2.17.0's
 //! (`blastp -outfmt "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore score"
 //! -evalue 0.001 -query query.faa -subject subject.faa`), on the files this test writes.
@@ -222,28 +222,27 @@ fn restricted_gapped_alignments_match_ncbi_with_and_without_the_switch() {
     }
 }
 
+/// `[X_STATS] BPGAP fast= not_taken=`: the restricted alignments the vector kernel computed
+/// and those it passed on to the reference function. With the kernel on this CPU every
+/// alignment of the fixture is its own and the report is NCBI's.
 #[test]
-fn the_shadow_mode_compares_the_restricted_alignments() {
-    let (report, stderr) = blastp(1, &[("LOSAT_X_BPGAPSHADOW", "1")]);
+fn the_vector_kernel_computes_the_restricted_alignments_of_the_fixture() {
+    let (report, stderr) = blastp(1, &[("LOSAT_X_STATS", "1")]);
     assert_eq!(report, NCBI_ROWS);
     let line = stderr
         .lines()
-        .find(|line| line.starts_with("[X_SHADOW] BPGAP "))
-        .unwrap_or_else(|| panic!("no shadow line in {stderr:?}"));
+        .find(|line| line.starts_with("[X_STATS] BPGAP "))
+        .unwrap_or_else(|| panic!("no BPGAP line in {stderr:?}"));
     let count = |key: &str| -> u64 {
         line.split_whitespace()
             .find_map(|field| field.strip_prefix(key))
             .and_then(|value| value.parse().ok())
             .unwrap_or_else(|| panic!("no {key} in {line:?}"))
     };
-    let (compared, not_taken) = (count("compared="), count("not_taken="));
+    let (fast, not_taken) = (count("fast="), count("not_taken="));
     if vector_kernel_runs() {
-        assert!(compared > 0 && not_taken == 0, "{line}");
-        assert!(
-            line.ends_with("(every restricted gapped alignment identical)"),
-            "{line}"
-        );
+        assert!(fast > 0 && not_taken == 0, "{line}");
     } else {
-        assert!(compared == 0 && not_taken > 0, "{line}");
+        assert!(fast == 0 && not_taken > 0, "{line}");
     }
 }

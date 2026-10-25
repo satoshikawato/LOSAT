@@ -89,6 +89,8 @@ pub struct OptionInputs {
     pub seg: Option<Filter>,
     /// `-dust` (BLASTN), only when given.
     pub dust: Option<Filter>,
+    /// `-window_masker_db` (BLASTN) as given.
+    pub window_masker_db: Option<String>,
     pub threshold: Option<i32>,
     /// `-culling_limit` (also 0), when given.
     pub culling_limit: Option<i32>,
@@ -131,6 +133,7 @@ impl OptionInputs {
             soft_masking: None,
             seg: None,
             dust: None,
+            window_masker_db: None,
             threshold: None,
             culling_limit: None,
             subject_besthit: false,
@@ -153,32 +156,19 @@ fn matrix_gaps(matrix: &str) -> (i32, i32) {
     crate::stats::protein_options::protein_gap_existence_extend_params(matrix).unwrap_or((11, 1))
 }
 
-/// The word threshold the matrix suggests (`BLAST_GetSuggestedThreshold`,
-/// blast_options.c:1174-1209).
+/// The word threshold the matrix suggests before the program's addition
+/// (`BLAST_GetSuggestedThreshold`, blast_options.c:1174-1209; `protein_options`).
 fn suggested_threshold(matrix: &str) -> i32 {
-    match matrix.to_ascii_uppercase().as_str() {
-        "BLOSUM62" => 11,
-        "BLOSUM45" => 14,
-        "BLOSUM62_20" => 100,
-        "BLOSUM80" => 12,
-        "PAM30" => 16,
-        "PAM70" => 14,
-        "IDENTITY" => 27,
-        _ => 11,
-    }
+    crate::stats::protein_options::suggested_threshold(
+        crate::stats::protein_options::SuggestionProgram::Protein,
+        matrix,
+    ) as i32
 }
 
 /// The window size the matrix suggests (`BLAST_GetSuggestedWindowSize`,
-/// blast_options.c:1211-1236).
+/// blast_options.c:1211-1236; `protein_options`).
 fn suggested_window(matrix: &str) -> i32 {
-    match matrix.to_ascii_uppercase().as_str() {
-        "BLOSUM62" => 40,
-        "BLOSUM45" => 60,
-        "BLOSUM80" => 25,
-        "PAM30" => 15,
-        "PAM70" => 20,
-        _ => 40,
-    }
+    crate::stats::protein_options::suggested_window_size(matrix)
 }
 
 fn default_threshold(program: Program) -> i32 {
@@ -472,6 +462,17 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                         Filter::Seg { .. } => {}
                     }
                 }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-459
+                // ```c++
+                //     if (args.Exist(kArgWindowMaskerDatabase) &&
+                //         args[kArgWindowMaskerDatabase]) {
+                //         const string& stat_file = args[kArgWindowMaskerDatabase].AsString();
+                //         ...
+                //         opt.SetWindowMaskerDatabase(stat_file.c_str());
+                // ```
+                if let Some(database) = &inputs.window_masker_db {
+                    list.set("WindowMaskerDatabase", Str(database.clone()));
+                }
             }
             Class::Matrix => {
                 if let Some(name) = &inputs.matrix {
@@ -560,6 +561,35 @@ mod tests {
             .iter()
             .map(|param| param.name.to_string())
             .collect()
+    }
+
+    // NCBI BLAST+ 2.17.0 blastn -window_masker_db (line NP M2): the parameter follows the
+    // filtering handler's MaskAtHash and DUST calls, also after blastn-short's cleared filters.
+    #[test]
+    fn the_window_masker_database_follows_the_dust_options() {
+        let mut inputs = OptionInputs::new(Program::Blastn, "blastn");
+        inputs.window_masker_db = Some("counts.obinary".to_string());
+        inputs.dust = Some(Filter::No);
+        let params = algorithm_options(&inputs);
+        let listed: Vec<&str> = params.iter().map(|param| param.name).collect();
+        let at = listed
+            .iter()
+            .position(|&name| name == "WindowMaskerDatabase")
+            .unwrap();
+        assert_eq!(&listed[at - 2..at], ["MaskAtHash", "DustFiltering"]);
+        assert_eq!(
+            params[at].value,
+            ParamValue::Str("counts.obinary".to_string())
+        );
+        let mut short = OptionInputs::new(Program::Blastn, "blastn-short");
+        short.window_masker_db = Some("counts.obinary".to_string());
+        let listed = names(&short);
+        let at = listed
+            .iter()
+            .position(|name| name == "WindowMaskerDatabase")
+            .unwrap();
+        assert_eq!(listed[at - 1], "MaskAtHash");
+        assert_eq!(listed[at + 1], "UngappedMode");
     }
 
     #[test]

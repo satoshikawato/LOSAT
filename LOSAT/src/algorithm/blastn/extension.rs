@@ -114,8 +114,8 @@ pub fn extend_hit_ungapped_exact_ncbi(
     x_dropoff: i32,
     matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> UngappedData {
-    match super::x_ungap_count::mode() {
-        1 => super::x_ungap_count::extend_hit_ungapped_exact_counted(
+    if super::x_ungap_count::on() {
+        super::x_ungap_count::extend_hit_ungapped_exact_counted(
             q_seq,
             s_seq_packed,
             q_off,
@@ -123,8 +123,9 @@ pub fn extend_hit_ungapped_exact_ncbi(
             subject_len,
             x_dropoff,
             matrix,
-        ),
-        0 => extend_hit_ungapped_exact_ported(
+        )
+    } else {
+        extend_hit_ungapped_exact_ported(
             q_seq,
             s_seq_packed,
             q_off,
@@ -132,21 +133,11 @@ pub fn extend_hit_ungapped_exact_ncbi(
             subject_len,
             x_dropoff,
             matrix,
-        ),
-        _ => super::x_ungap_count::shadow(
-            q_seq,
-            s_seq_packed,
-            q_off,
-            s_off,
-            subject_len,
-            x_dropoff,
-            matrix,
-        ),
+        )
     }
 }
 
-/// The port of `s_NuclUngappedExtendExact` above, loop for loop (`LOSAT_X_BNUNGAPCOUNT=0`, and
-/// the reference of its shadow).
+/// The port of `s_NuclUngappedExtendExact` above, loop for loop (`LOSAT_X_BNUNGAPCOUNT=0`).
 #[inline(never)]
 pub(crate) fn extend_hit_ungapped_exact_ported(
     q_seq: &[u8],        // BLASTNA (1 byte/base)

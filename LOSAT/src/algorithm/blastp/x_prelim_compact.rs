@@ -110,6 +110,10 @@ impl HitListHsp for XPrelimHsp {
             self.hsp.subject_end as usize,
         )
     }
+    #[inline]
+    fn query_length(&self) -> usize {
+        self.hsp.query_length
+    }
 }
 
 // No NCBI counterpart: rebuilds the off path's hit list from the compact one (same counts, same

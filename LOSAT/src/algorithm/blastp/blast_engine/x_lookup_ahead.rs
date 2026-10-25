@@ -982,6 +982,7 @@ mod tests {
             num_alignments: None,
             max_hsps_per_subject: None,
             qcov_hsp_perc: None,
+            culling_limit: None,
             ungapped: false,
             window_size: None,
             matrix: None,

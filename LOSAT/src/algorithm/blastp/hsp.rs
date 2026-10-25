@@ -180,6 +180,9 @@ pub(crate) trait HitListHsp {
     /// `(q_start, q_end, s_start, s_end)` as `BlastpHsp` stores them: 1-based starts, ends
     /// inclusive (NCBI's 0-based offset + 1, and its exclusive end).
     fn offsets(&self) -> (usize, usize, usize, usize);
+    /// The length of the query (or query part, or searched range) the HSP was found in:
+    /// `contexts[hsp->context].query_length`.
+    fn query_length(&self) -> usize;
 }
 
 impl HitListHsp for BlastpHsp {
@@ -194,6 +197,10 @@ impl HitListHsp for BlastpHsp {
     #[inline]
     fn offsets(&self) -> (usize, usize, usize, usize) {
         (self.q_start, self.q_end, self.s_start, self.s_end)
+    }
+    #[inline]
+    fn query_length(&self) -> usize {
+        self.query_length
     }
 }
 
@@ -583,7 +590,7 @@ pub(crate) fn sort_hsplist_by_score(list: &mut BlastpHspList) {
 //     ...
 // }
 // ```
-fn sort_hsplist_by_evalue<H: HitListHsp>(list: &mut BlastpHspList<H>) {
+pub(crate) fn sort_hsplist_by_evalue<H: HitListHsp>(list: &mut BlastpHspList<H>) {
     if list.hsps.len() > 1 {
         let mut index = 0usize;
         while index < list.hsps.len() - 1 {

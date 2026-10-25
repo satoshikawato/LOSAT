@@ -1,0 +1,1460 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "tblastn",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">iq 150 aa"
+                  }
+                }
+              },
+              title "iq 150 aa"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 150,
+              seq-data ncbieaa "HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLI
+DNNRAFDCIVTILPVDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVELDVA
+LFGVLLTSVAEGIIAEGRVPTRMAGH"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t000"
+                }
+              }
+            },
+            title "t000"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t001"
+                }
+              }
+            },
+            title "t001"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_3"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t002"
+                }
+              }
+            },
+            title "t002"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_4"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t003"
+                }
+              }
+            },
+            title "t003"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_5"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t004"
+                }
+              }
+            },
+            title "t004"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_6"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t005"
+                }
+              }
+            },
+            title "t005"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_7"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t006"
+                }
+              }
+            },
+            title "t006"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_8"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t007"
+                }
+              }
+            },
+            title "t007"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_9"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t008"
+                }
+              }
+            },
+            title "t008"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_10"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t009"
+                }
+              }
+            },
+            title "t009"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_11"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t010"
+                }
+              }
+            },
+            title "t010"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_12"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t011"
+                }
+              }
+            },
+            title "t011"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_13"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t012"
+                }
+              }
+            },
+            title "t012"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_14"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t013"
+                }
+              }
+            },
+            title "t013"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_15"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t014"
+                }
+              }
+            },
+            title "t014"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_16"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t015"
+                }
+              }
+            },
+            title "t015"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_17"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t016"
+                }
+              }
+            },
+            title "t016"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_18"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t017"
+                }
+              }
+            },
+            title "t017"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_19"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t018"
+                }
+              }
+            },
+            title "t018"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_20"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t019"
+                }
+              }
+            },
+            title "t019"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_21"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">tm0_mut"
+                }
+              }
+            },
+            title "tm0_mut"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '47B9F35E99A806DF02052446090DA7C619DFA9C082FD46D1
+A9CAE880E9BF069A847CD84305B9BF8F936DBCF9D6BE1F6C5668002AC8E2683AE2B656686BF767
+B27C6AF634822D89FC396CC030F9C342E9DE865AD6B5198FEDCBE27E1B647BDAAF71D1CCB278AB
+30D93AA5BBD41193A7A910'H
+          }
+        },
+        {
+          id {
+            local str "Subject_22"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">tm1_mut"
+                }
+              }
+            },
+            title "tm1_mut"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4799315299EB06EF82050447010D26C6193CA7C080F55611
+AFEAD380E9BD06AA0778F8C107D9FD87932F168F94B21F6F56482822F860203AE0B2666B63F766
+B66CEAF614822CA95F395CC230D98342D91D864A16B9398F39C7A2FA3BA77BFA6F89E135B258B9
+3CD9A0A1ABD61273A5AD30'H
+          }
+        },
+        {
+          id {
+            local str "Subject_23"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t020"
+                }
+              }
+            },
+            title "t020"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_24"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t021"
+                }
+              }
+            },
+            title "t021"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_25"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t022"
+                }
+              }
+            },
+            title "t022"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_26"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t023"
+                }
+              }
+            },
+            title "t023"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_27"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t024"
+                }
+              }
+            },
+            title "t024"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_28"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t025"
+                }
+              }
+            },
+            title "t025"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_29"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t026"
+                }
+              }
+            },
+            title "t026"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_30"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t027"
+                }
+              }
+            },
+            title "t027"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_31"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t028"
+                }
+              }
+            },
+            title "t028"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_32"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t029"
+                }
+              }
+            },
+            title "t029"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_33"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t030"
+                }
+              }
+            },
+            title "t030"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_34"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t031"
+                }
+              }
+            },
+            title "t031"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_35"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t032"
+                }
+              }
+            },
+            title "t032"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_36"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t033"
+                }
+              }
+            },
+            title "t033"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_37"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t034"
+                }
+              }
+            },
+            title "t034"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_38"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t035"
+                }
+              }
+            },
+            title "t035"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_39"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t036"
+                }
+              }
+            },
+            title "t036"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_40"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t037"
+                }
+              }
+            },
+            title "t037"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_41"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t038"
+                }
+              }
+            },
+            title "t038"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_42"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">t039"
+                }
+              }
+            },
+            title "t039"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4F99F15AB92806EF800D24C6010DA4C639DCA5F000F54213
+ABCAE880E9FF0E9A07F8C8430C897F8FB32F1CCF94B61F6D5668802AE8E2643A20BA66EB6FD7A6
+BE4CE9F61480D9A95D397C403CD9C342C93C864AD5B5194DEFCBE0F21BA57FDAAC71F1F7B64829
+30F9A2A4AB961983A5A930'H
+          }
+        },
+        {
+          id {
+            local str "Subject_43"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">tm2_mut"
+                }
+              }
+            },
+            title "tm2_mut"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4799B15A89AA06E7820524C1012DE6C619BEA5F002F40693
+A0EA6880E9FF0EAA0670F843F0A95587B36F14F757BD6FEF56488062F8E06E1AE0B645C76FD026
+C66C68FD24802D89DE396C4230C9C142C9FE8E4AD6BD198CE5DB22FA3B67FBDAAFF9F1B5B278A8
+34FC62A59B571E23A4ABA0'H
+          }
+        },
+        {
+          id {
+            local str "Subject_44"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">tm3_mut"
+                }
+              }
+            },
+            title "tm3_mut"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 450,
+            seq-data ncbi2na '4FB9F156B92906CBC20D04D100AD27C63E9D5BE000FD6293
+ABC42A81B9BD0EBA8678F84305899C8FBCF918D716BCE76F8A48822AD8E9281362BA52A86BF7E7
+B66CE9021140D8A99D395C42C4D983F6E95C866AD6BA298FE5DBA07E1BA473FAEDF9E14BD268A7
+30C920A98B971DA3A5AD30'H
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "DbGeneticCode",
+          value integer 1
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 13
+        },
+        {
+          name "Culling",
+          value integer 0
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 3
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 532400
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 787
+          },
+          {
+            id str "blast_score",
+            value int 787
+          },
+          {
+            id str "e_value",
+            value real { 674765616260517, 10, -127 }
+          },
+          {
+            id str "bit_score",
+            value real { 307760298527001, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 150
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 150
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_42"
+            },
+            loc {
+              int {
+                from 0,
+                to 149,
+                strand unknown,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 449,
+                strand plus,
+                id local str "Subject_42"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 787
+          },
+          {
+            id str "blast_score",
+            value int 787
+          },
+          {
+            id str "e_value",
+            value real { 674765616260517, 10, -127 }
+          },
+          {
+            id str "bit_score",
+            value real { 307760298527001, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 150
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 150
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_41"
+            },
+            loc {
+              int {
+                from 0,
+                to 149,
+                strand unknown,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 449,
+                strand plus,
+                id local str "Subject_41"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 787
+          },
+          {
+            id str "blast_score",
+            value int 787
+          },
+          {
+            id str "e_value",
+            value real { 674765616260517, 10, -127 }
+          },
+          {
+            id str "bit_score",
+            value real { 307760298527001, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 150
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 150
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_40"
+            },
+            loc {
+              int {
+                from 0,
+                to 149,
+                strand unknown,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 449,
+                strand plus,
+                id local str "Subject_40"
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 322900428249882, 10, -15 },
+        k { 14041131761774, 10, -14 },
+        h { 420775288958072, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 532400",
+      "Effective search space used: 532400",
+      "Length adjustment: 40"
+    }
+  },
+  messages {
+    {
+      code 1,
+      message "Warning: [tblastn] Examining 5 or more matches is recommended"
+    }
+  }
+}

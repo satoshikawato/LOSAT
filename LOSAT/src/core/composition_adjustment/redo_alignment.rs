@@ -10,6 +10,7 @@ use std::cmp::Ordering;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
+use super::x_align_index::{x_add_distinct, x_contains, x_finish, XAlignIndexes};
 use crate::common::GapEditOp;
 use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
 use crate::sequence::packed_subject::SubjectNt;
@@ -46,13 +47,13 @@ pub(crate) fn redo_calc_lambda(
 // /** The natural log of 2 ... */
 // #define LOCAL_LN2 0.69314718055994530941723212145818
 // ```
-const LOCAL_LN2: f64 = 0.6931471805599453;
+pub(crate) const LOCAL_LN2: f64 = 0.6931471805599453;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:791-797
 // ```c
 // #define KAPPA_BIT_TOL 2.0
 // ```
-const KAPPA_BIT_TOL: f64 = 2.0;
+pub(crate) const KAPPA_BIT_TOL: f64 = 2.0;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:79-84
 // ```c
@@ -1194,7 +1195,10 @@ fn is_same_endpoint(new_align: &BlastCompoAlignment, align: &BlastCompoAlignment
 //     return result;
 // }
 // ```
-fn is_similar_endpoint(new_align: &BlastCompoAlignment, align: &BlastCompoAlignment) -> bool {
+pub(crate) fn is_similar_endpoint(
+    new_align: &BlastCompoAlignment,
+    align: &BlastCompoAlignment,
+) -> bool {
     let start_contained = align.query_start <= new_align.query_start
         && align.query_end >= new_align.query_start
         && align.match_start <= new_align.match_start
@@ -3064,6 +3068,11 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
         windows_from_protein_aligns(incoming_aligns, query_info, matching_seq.length)?
     };
     let mut alignments_by_query: Vec<Option<Box<BlastCompoAlignment>>> = Vec::new();
+    // No NCBI counterpart: LOSAT_X_REDOCONTAINIDX moves a query's list into an index by subject
+    // start once it is long (`x_align_index.rs`); the answers and the final lists are NCBI's.
+    let x_index_from =
+        super::x_align_index::x_redo_contain_idx().then_some(super::x_align_index::X_INDEX_FROM);
+    let mut x_indexes: XAlignIndexes = Vec::new();
     let mut pvalue_for_this_pair = None;
     let mut lambda_ratio = None;
     let mut matrix_adjust_rule = EMatrixAdjustRule::DontAdjustMatrix;
@@ -3239,7 +3248,13 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
             //              * alignment */
             //             if ( !s_IsContained(in_align, alignments[query_index], Lambda) ) {
             // ```
-            let contained = is_contained(current, &alignments_by_query[query_index], lambda);
+            let contained = x_contains(
+                &x_indexes,
+                query_index,
+                &alignments_by_query[query_index],
+                current,
+                lambda,
+            );
             trace(BlastRedoTraceEvent::Contained {
                 incoming: current,
                 result: contained,
@@ -3451,10 +3466,13 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                         // s_WithDistinctEnds(&newAlign, &alignments[query_index],
                         //                    ..., num_adjustments == 1);
                         // ```
-                        with_distinct_ends(
-                            &mut new_align,
+                        x_add_distinct(
+                            &mut x_indexes,
+                            query_index,
                             &mut alignments_by_query[query_index],
+                            &mut new_align,
                             num_adjustments == 1,
+                            x_index_from,
                         );
                     }
                 }
@@ -3502,6 +3520,10 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
     //
     //                 if ( !adjust_search_failed ) {
     // ```
+    if x_index_from.is_some() {
+        let x_indexed = x_finish(x_indexes, &mut alignments_by_query);
+        crate::utils::xreach::x_reach!("LOSAT_X_REDOCONTAINIDX", x_indexed);
+    }
     *matrix_state = adjusted_matrix;
     Ok(BlastRedoOneMatchResult {
         alignments_by_query,

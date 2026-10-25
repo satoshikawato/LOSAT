@@ -23,6 +23,8 @@ mod tblastx_link_fast;
 mod tblastx_link_slices;
 #[path = "../tblastx_link_sort.rs"]
 mod tblastx_link_sort;
+#[path = "../tblastx_matrix.rs"]
+mod tblastx_matrix;
 #[path = "../tblastx_prefetch.rs"]
 mod tblastx_prefetch;
 #[path = "../tblastx_qslice.rs"]

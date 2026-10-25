@@ -706,7 +706,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "import_search_strategy"
             | "lcase_masking"
             | "line_length"
-            | "matrix"
             | "max_intron_length"
             | "negative_gilist"
             | "negative_seqidlist"

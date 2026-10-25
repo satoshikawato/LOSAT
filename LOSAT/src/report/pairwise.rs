@@ -2979,6 +2979,8 @@ pub struct TblastxPairwiseReport {
     pub database_name: String,
     pub database_num_sequences: usize,
     pub database_total_letters: usize,
+    /// The `-matrix` name as typed (`options.GetMatrixName()`), BLOSUM62 when omitted.
+    pub matrix_name: String,
     /// `-threshold` and `-window_size` (the epilog prints them when they are not 0).
     pub word_threshold: f64,
     pub window_size: usize,
@@ -3322,7 +3324,7 @@ fn write_tblastx_epilog<W: Write>(
             report.database_total_letters,
         )?,
     }
-    writeln!(writer, "Matrix: BLOSUM62")?;
+    writeln!(writer, "Matrix: {}", report.matrix_name)?;
     if report.word_threshold != 0.0 {
         // `GetWordThreshold()` is a double, written with the stream's default format.
         writeln!(

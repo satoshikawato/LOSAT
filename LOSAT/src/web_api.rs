@@ -378,7 +378,10 @@ fn parse_tblastx_args(
         db: None,
         dbsize: None,
         evalue: 10.0,
-        threshold: 13.0,
+        // The frozen web ABI v1 (plan TD-1) has no -threshold, -matrix or -window_size: BLOSUM62's
+        // suggestions, 13 and 40.
+        threshold: None,
+        matrix: None,
         word_size: None,
         num_threads: 1,
         out: Some(out),
@@ -393,7 +396,7 @@ fn parse_tblastx_args(
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
         seg: "yes".to_string(),
         soft_masking: None,
-        window_size: 40,
+        window_size: None,
         outfmt: "6".to_string(),
         culling_limit: None,
         // The frozen web ABI v1 (plan TD-1) has no ranges.

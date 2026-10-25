@@ -1,0 +1,619 @@
+{
+  "schema_version": 2,
+  "release": "v0.2.0",
+  "package_name": "LOSAT",
+  "package_version": "0.2.0",
+  "integration_base_sha": "",
+  "integration_base_sha_note": "filled on the cut day with the candidate commit C (dev head promoted to main)",
+  "cert_toolchain": {
+    "rust": "1.92.0",
+    "cargo": "1.92.0",
+    "node": "24.21.0",
+    "profile": "release",
+    "locked": true,
+    "output_affecting_environment": {
+      "CARGO_BUILD_RUSTFLAGS": "",
+      "CARGO_ENCODED_RUSTFLAGS": "",
+      "CC": "",
+      "CFLAGS": "",
+      "CPPFLAGS": "",
+      "LDFLAGS": "",
+      "RUSTC_LINKER": "",
+      "RUSTFLAGS": ""
+    }
+  },
+  "binary_hash_policy": {
+    "candidate_artifact_hashes": "generated and verified for the exact RC workflow outputs",
+    "historical_certification_hashes": "retained as certification provenance only; they are not cross-runner reproducibility gates",
+    "cross_runner_binary_equality_required": false
+  },
+  "certification_lineage": {
+    "candidate_sha": "",
+    "candidate_sha_note": "must equal the commit every run of certification_set used (C); 40 lowercase hex digits when filled",
+    "runtime_input_paths": [
+      "LOSAT/src",
+      "LOSAT/Cargo.toml",
+      "LOSAT/Cargo.lock",
+      "LOSAT/build.rs",
+      "LOSAT/.cargo",
+      "LOSAT/tests",
+      "docs/product_decisions"
+    ],
+    "runtime_input_excludes": [
+      "LOSAT/tests/prepare_release_candidate_v020.py",
+      "LOSAT/tests/test_prepare_release_candidate_v020.py"
+    ],
+    "v010_ancestors": {
+      "integrated_runtime": "5845d22ed9842449628a647f29b8c6762511ca59",
+      "cross_platform_native": "647e5f13c6f6c32f7877568e187125d7f71ece19",
+      "platform_native_v011": "e9f07039f9ca73a56ecbca0aac53503f6f19b60b",
+      "note": "provenance only; no v0.1.0 LOSAT result is certification evidence for v0.2.0"
+    },
+    "reused_ncbi_records": [
+      "LOSAT/tests/ncbi_platform_variance_v011.json",
+      "LOSAT/tests/outfmt0_manifest.tsv",
+      "LOSAT/tests/db_search_manifest.tsv",
+      "LOSAT/tests/blastn_parity_manifest.tsv",
+      "LOSAT/tests/blastp_v010_parity_manifest.tsv",
+      "LOSAT/tests/tblastx_v010_parity_manifest.tsv",
+      "LOSAT/tests/fixtures/outfmt0",
+      "LOSAT/tests/fixtures/db_search",
+      "LOSAT/tests/fixtures/blastn_regression",
+      "LOSAT/tests/fixtures/tblastx_regression",
+      "LOSAT/tests/fixtures/range_regression",
+      "LOSAT/tests/fixtures/fasta_input"
+    ],
+    "runs": {
+      "B": {
+        "workflow": "platform-native-certification.yml",
+        "name": "platform_native_certification",
+        "run_id": null,
+        "conclusion": null
+      },
+      "C": {
+        "workflow": "platform-checks.yml",
+        "name": "platform_checks",
+        "run_id": null,
+        "conclusion": null
+      },
+      "F": {
+        "workflow": "nightly.yml",
+        "name": "nightly",
+        "run_id": null,
+        "conclusion": null
+      },
+      "G": {
+        "workflow": "wasm-threading.yml",
+        "name": "wasm_threading",
+        "required_consecutive_green": 3,
+        "runs": [
+          {
+            "run_id": null,
+            "conclusion": null
+          },
+          {
+            "run_id": null,
+            "conclusion": null
+          },
+          {
+            "run_id": null,
+            "conclusion": null
+          }
+        ]
+      },
+      "H": {
+        "workflow": "ci.yml",
+        "name": "promotion_pr_rust_job",
+        "run_id": null,
+        "conclusion": null
+      },
+      "I": {
+        "workflow": "release-readiness-v020.yml",
+        "name": "release_readiness",
+        "run_id": null,
+        "conclusion": null
+      }
+    },
+    "local_evidence": {
+      "A": {
+        "name": "integrated_runtime",
+        "tool": "LOSAT/tests/certify_integrated_runtime_v010.py",
+        "evidence_sha256": null
+      },
+      "D": {
+        "name": "oracle_rerun_subject",
+        "tool": "docs/evidence/losat_web_e2a/run_oracle.py + check_losat.py",
+        "evidence_sha256": null
+      },
+      "E": {
+        "name": "oracle_rerun_db",
+        "tool": "LOSAT/tests/db_search_fixtures.py freeze + check",
+        "evidence_sha256": null
+      }
+    },
+    "ws_evidence": {
+      "J": {
+        "memory_table": {
+          "record": null
+        },
+        "speed_grid": {
+          "record": null
+        }
+      }
+    },
+    "rerun_required": true,
+    "rerun_reason": "LOSAT/src changed in more than 1,400 commits since the v0.1.0 certification, so every LOSAT-side result is re-run on the candidate commit C."
+  },
+  "certification_set": [
+    {
+      "id": "A",
+      "title": "Gate A v0.1.1, Linux x64 native and serial Wasm",
+      "cases": "43 native (blastn 14 / blastp 9 / tblastx 20) + 41 serial-Wasm equalities",
+      "comparator": "mixed",
+      "comparator_note": "NCBI executed for the native pairs (blastp 9 x 3 repeats, tblastx 20 x repeats); serial Wasm = raw-byte equality with native",
+      "tool": "LOSAT/tests/certify_integrated_runtime_v010.py --expected-sha C",
+      "where": "local",
+      "expected_duration": "3-5.6 h",
+      "evidence_key": "local_evidence.A"
+    },
+    {
+      "id": "B",
+      "title": "Native platform certification",
+      "cases": "43 cases x 4 platforms (Windows x64, macOS arm64, macOS x64, Linux aarch64) + 6 NCBI reference executions + 12 repeats per platform",
+      "comparator": "mixed",
+      "comparator_note": "NCBI executed on each platform for the 6 representatives (variance bounded by ncbi_platform_variance_v011.json); 43 LOSAT outputs = canonical hashes",
+      "tool": "platform-native-certification.yml (candidate_sha=C)",
+      "where": "github",
+      "expected_duration": "22 min - 3.5 h",
+      "evidence_key": "runs.B"
+    },
+    {
+      "id": "C",
+      "title": "Cross-platform and thread equality",
+      "cases": "platform_check_cases.json x 5 platforms x 1 and 4 threads; arm64 also LOSAT_X_DPNEON2=0; cargo test --all-features on four platforms",
+      "comparator": "hash_equality",
+      "tool": "platform-checks.yml (set=full)",
+      "where": "github",
+      "expected_duration": "about 2.5 h",
+      "evidence_key": "runs.C"
+    },
+    {
+      "id": "D",
+      "title": "NCBI fixture set, -subject rows, re-executed",
+      "cases": "outfmt0_manifest.tsv: 958 rows, all five programs and every task, outfmt 0/5/6/7/8/9/11-17",
+      "comparator": "ncbi_executed",
+      "comparator_note": "run_oracle.py re-runs the oracle and fails on any hash different from the frozen column; then LOSAT vs frozen at 1, 2, 4 threads",
+      "tool": "docs/evidence/losat_web_e2a/run_oracle.py then check_losat.py",
+      "where": "local",
+      "expected_duration": "about 1 h",
+      "evidence_key": "local_evidence.D"
+    },
+    {
+      "id": "E",
+      "title": "NCBI fixture set, -db rows",
+      "cases": "db_search_manifest.tsv 573 rows (ncbi 557 + 16 LOSAT rejections), NCBI -num_threads 1",
+      "comparator": "ncbi_executed",
+      "comparator_note": "db_search_fixtures.py freeze into a scratch checkout of C; git status --porcelain of the frozen files must be empty; then check",
+      "tool": "LOSAT/tests/db_search_fixtures.py freeze --ncbi-bin <oracle>, then check --losat <C binary>",
+      "where": "local",
+      "expected_duration": "under 1 h",
+      "evidence_key": "local_evidence.E"
+    },
+    {
+      "id": "F",
+      "title": "Full regression set",
+      "cases": "ci_fast_regressions.py --all-cases (S02 baseline 236, Gate A and Stage G frozen hashes, every NCBI frozen fixture family, switch_reach_check.py)",
+      "comparator": "ncbi_frozen",
+      "comparator_note": "NCBI frozen + LOSAT frozen",
+      "tool": "nightly.yml dispatched on main after the promotion, or the regressions job of the promotion PR",
+      "where": "github",
+      "expected_duration": "about 6 min",
+      "evidence_key": "runs.F"
+    },
+    {
+      "id": "G",
+      "title": "WASI threads and serial compatibility",
+      "cases": "native vs wasm32-wasip1-threads at 1, 2, 4, 8, 16 threads and serial wasm32-wasip1; reactor, fault, cap and thread-threshold checks; three consecutive green runs",
+      "comparator": "mixed",
+      "comparator_note": "NCBI executed (the workflow downloads and sha-verifies 2.17.0) + raw-byte equality",
+      "tool": "wasm-threading.yml (candidate_sha=C, include_serial_compatibility=true)",
+      "where": "github",
+      "expected_duration": "16-17 min per run",
+      "evidence_key": "runs.G"
+    },
+    {
+      "id": "H",
+      "title": "Output formats and library tests",
+      "cases": "cargo test --locked --all-features (lib + eight suites, 679 ported NCBI unit cases)",
+      "comparator": "ncbi_frozen",
+      "comparator_note": "NCBI frozen + LOSAT invariants",
+      "tool": "CI rust job of the promotion PR",
+      "where": "github",
+      "expected_duration": "about 20 min",
+      "evidence_key": "runs.H"
+    },
+    {
+      "id": "I",
+      "title": "Release-candidate artifacts",
+      "cases": "8 artifacts built from R, extracted, losat --version = losat 0.2.0, one smoke per program (5), checksums, handoff",
+      "comparator": "ncbi_frozen",
+      "comparator_note": "contract smoke hashes (NCBI-certified outputs)",
+      "tool": "release-readiness-v020.yml (candidate_sha=R)",
+      "where": "github",
+      "expected_duration": "1.5-3 h",
+      "evidence_key": "runs.I"
+    },
+    {
+      "id": "J",
+      "title": "Memory and speed",
+      "cases": "standard memory table n <= 16 (max RSS <= NCBI on every cell); speed grid 9 modes; pair timing against the v0.1.0 Linux x64 binary",
+      "comparator": "ncbi_executed",
+      "comparator_note": "NCBI 2.17.0 executed on the same machine",
+      "tool": "ws scripts of the memory line (v4-MEM) and v4-progress-20261025/ws/vp_*.sh",
+      "where": "ws",
+      "expected_duration": "2 windows, 2-4 h + 2-3 h",
+      "evidence_key": "ws_evidence.J"
+    }
+  ],
+  "platform_claims": [
+    {
+      "platform": "Linux x86_64",
+      "artifact_index": 1,
+      "evidence_sets": [
+        "A",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "J"
+      ],
+      "claim": "certified",
+      "wording": "Certified against NCBI BLAST+ 2.17.0: blastn (megablast, blastn, dc-megablast, blastn-short), blastp (blastp, blastp-fast), blastx, tblastn, tblastx"
+    },
+    {
+      "platform": "Linux aarch64",
+      "artifact_index": 2,
+      "evidence_sets": [
+        "B",
+        "C"
+      ],
+      "claim": "certified",
+      "wording": "Certified: Gate A 43 cases against NCBI BLAST+ 2.17.0 on the platform; every other case byte-identical to Linux x64"
+    },
+    {
+      "platform": "Windows x86_64",
+      "artifact_index": 3,
+      "evidence_sets": [
+        "B",
+        "C"
+      ],
+      "claim": "certified",
+      "wording": "Certified: Gate A 43 cases against NCBI BLAST+ 2.17.0 on the platform; every other case byte-identical to Linux x64"
+    },
+    {
+      "platform": "macOS arm64",
+      "artifact_index": 4,
+      "evidence_sets": [
+        "B",
+        "C"
+      ],
+      "claim": "certified",
+      "wording": "Certified: Gate A 43 cases against NCBI BLAST+ 2.17.0 on the platform; every other case byte-identical to Linux x64"
+    },
+    {
+      "platform": "macOS x86_64",
+      "artifact_index": 5,
+      "evidence_sets": [
+        "B",
+        "C"
+      ],
+      "claim": "certified",
+      "wording": "Certified: Gate A 43 cases against NCBI BLAST+ 2.17.0 on the platform; every other case byte-identical to Linux x64"
+    },
+    {
+      "platform": "WASI serial (wasm32-wasip1)",
+      "artifact_index": 6,
+      "evidence_sets": [
+        "A",
+        "G"
+      ],
+      "claim": "certified",
+      "wording": "Certified: byte-identical to the Linux x64 native binary on the Gate A set and the threading-regression set"
+    },
+    {
+      "platform": "WASI threads (wasm32-wasip1-threads)",
+      "artifact_index": 7,
+      "evidence_sets": [
+        "G"
+      ],
+      "claim": "supported",
+      "wording": "Supported: tested in CI, not a certification claim"
+    },
+    {
+      "platform": "Web GUI (browser, reactor)",
+      "artifact_index": null,
+      "evidence_sets": [
+        "web.yml E2E and V-ABI quick"
+      ],
+      "claim": "preview",
+      "wording": "Preview: no NCBI certification claim (PD-LOSAT-WEB-APP-BOUNDARY)"
+    }
+  ],
+  "public_cli": {
+    "blastn_tasks": [
+      "megablast",
+      "blastn",
+      "dc-megablast",
+      "blastn-short"
+    ],
+    "blastp_tasks": [
+      "blastp",
+      "blastp-fast"
+    ],
+    "blastx_tasks": [
+      "blastx"
+    ],
+    "tblastn_tasks": [
+      "tblastn"
+    ],
+    "tblastx_tasks": [
+      "tblastx"
+    ],
+    "rejected_tasks": [
+      "blastp-short",
+      "tblastn-fast"
+    ]
+  },
+  "smoke": [
+    {
+      "program": "blastn",
+      "case_id": "PesePMNV.MjPMNV.task_blastn",
+      "source": "LOSAT/tests/blastn_parity_manifest.tsv row PesePMNV.MjPMNV.task_blastn",
+      "query": "LOSAT/tests/fasta/AP027152.fasta",
+      "subject": "LOSAT/tests/fasta/AP027202.fasta",
+      "expected_output_sha256": "fcd9236c7b02488d868feaf35166a472c73e9f9e6cc45fc6d7449a9edc7d4120",
+      "expected_output_origin": "LOSAT/tests/platform_native_v011_canonical.tsv losat_sha256 (certified LOSAT output, equal to NCBI 2.17.0 text)",
+      "arguments": [
+        "blastn",
+        "-query",
+        "{query}",
+        "-subject",
+        "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027202.fasta",
+        "-task",
+        "blastn",
+        "-reward",
+        "2",
+        "-penalty=-3",
+        "-gapopen",
+        "5",
+        "-gapextend",
+        "2",
+        "-word_size",
+        "11",
+        "-evalue",
+        "10",
+        "-max_target_seqs",
+        "500",
+        "-dust",
+        "yes",
+        "-outfmt",
+        "7",
+        "-num_threads",
+        "1",
+        "-out",
+        "{output}"
+      ],
+      "verified": true,
+      "verification_note": "The outfmt 7 header prints the -subject argument literally (# Database: User specified sequence set (Input: <path>)), and the certified hash was taken with the controlled lexical path; the subject argument is therefore that literal path (the same file as the subject field), which must resolve to the repository file through a symlink or copy at /tmp/losat-pr5-runtime-cert-5845d22/LOSAT (certify_platform_native_v010.py HISTORICAL_LEXICAL_ROOT). Any other spelling changes the Database line and the hash.",
+      "controlled_lexical_root": {
+        "path": "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT",
+        "target": "LOSAT"
+      }
+    },
+    {
+      "program": "blastp",
+      "case_id": "pairwise_default_serial",
+      "source": "LOSAT/tests/blastp_v010_parity_manifest.tsv row pairwise_default_serial",
+      "query": "LOSAT/tests/fasta/SicyWSV.faa",
+      "subject": "LOSAT/tests/fasta/PajaWSV.faa",
+      "expected_output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "expected_output_origin": "LOSAT/tests/platform_native_v011_canonical.tsv losat_sha256",
+      "arguments": [
+        "blastp",
+        "-task",
+        "blastp",
+        "-query",
+        "{query}",
+        "-subject",
+        "{subject}",
+        "-max_hsps",
+        "1",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "{output}"
+      ],
+      "verified": true
+    },
+    {
+      "program": "blastx",
+      "case_id": "sa.blastx.multi.8",
+      "source": "LOSAT/tests/outfmt0_manifest.tsv row sa.blastx.multi.8",
+      "query": "LOSAT/tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+      "subject": "LOSAT/tests/fasta/outfmt0/e2d_t_qp2.faa",
+      "expected_output_sha256": "976955db459348dbc3e53c6f5521c8c707ddda8683d9949a806026a5a5985657",
+      "expected_output_origin": "LOSAT/tests/outfmt0_manifest.tsv stdout_sha256 (NCBI BLAST+ 2.17.0 frozen bytes, outfmt 8)",
+      "arguments": [
+        "blastx",
+        "-query",
+        "{query}",
+        "-subject",
+        "{subject}",
+        "-outfmt",
+        "8",
+        "-num_threads",
+        "1",
+        "-out",
+        "{output}"
+      ],
+      "verified": true,
+      "verification_note": "blastx has no outfmt 6/7 row without extra options; outfmt 0 row best_hsp.blastx was rejected because its Database line prints the subject path. The outfmt 8 output (Seq-annot ASN.1 text) contains no input path."
+    },
+    {
+      "program": "tblastn",
+      "case_id": "e2e.tblastn.query_split",
+      "source": "LOSAT/tests/outfmt0_manifest.tsv row e2e.tblastn.query_split",
+      "query": "LOSAT/tests/fasta/outfmt0/e2e_split_query.faa",
+      "subject": "LOSAT/tests/fasta/outfmt0/e2e_split_subject.fna",
+      "expected_output_sha256": "a56467e6a82df343f85ff784ca869bf65e8c55582bf4c0cb68f082ef79971116",
+      "expected_output_origin": "LOSAT/tests/outfmt0_manifest.tsv stdout_sha256 (NCBI BLAST+ 2.17.0 frozen bytes, outfmt 6)",
+      "arguments": [
+        "tblastn",
+        "-query",
+        "{query}",
+        "-subject",
+        "{subject}",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "{output}"
+      ],
+      "verified": true
+    },
+    {
+      "program": "tblastx",
+      "case_id": "p03_mela_pemojnva",
+      "source": "LOSAT/tests/tblastx_v010_parity_manifest.tsv row p03_mela_pemojnva",
+      "query": "LOSAT/tests/fasta/MelaMJNV.fasta",
+      "subject": "LOSAT/tests/fasta/PemoMJNVA.fasta",
+      "expected_output_sha256": "bbef153094025db89dd4a69b2a3c4246b0b8853396fe740bc7e1bd654db105b6",
+      "expected_output_origin": "LOSAT/tests/platform_native_v011_canonical.tsv losat_sha256",
+      "arguments": [
+        "tblastx",
+        "-query",
+        "{query}",
+        "-subject",
+        "{subject}",
+        "-query_gencode",
+        "1",
+        "-db_gencode",
+        "1",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "{output}"
+      ],
+      "verified": true
+    }
+  ],
+  "artifacts": [
+    {
+      "kind": "native",
+      "target": "x86_64-unknown-linux-gnu",
+      "runner": "ubuntu-24.04",
+      "binary_name": "losat",
+      "archive_format": "tar.gz",
+      "filename": "LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz",
+      "features": "default",
+      "build_command": "cargo build --release --locked",
+      "historical_certification_binary_sha256": "058587655963bf1eb253f232fdb5553819105646c0d1c50bbece96e410446819"
+    },
+    {
+      "kind": "native",
+      "target": "aarch64-unknown-linux-gnu",
+      "runner": "ubuntu-24.04-arm",
+      "binary_name": "losat",
+      "archive_format": "tar.gz",
+      "filename": "LOSAT-0.2.0-aarch64-unknown-linux-gnu.tar.gz",
+      "features": "default",
+      "build_command": "cargo build --release --locked",
+      "historical_certification_binary_sha256": null,
+      "historical_certification_note": "no v0.1.0 certification binary for this target"
+    },
+    {
+      "kind": "native",
+      "target": "x86_64-pc-windows-msvc",
+      "runner": "windows-2025",
+      "binary_name": "losat.exe",
+      "archive_format": "zip",
+      "filename": "LOSAT-0.2.0-x86_64-pc-windows-msvc.zip",
+      "features": "default",
+      "build_command": "cargo build --release --locked",
+      "historical_certification_binary_sha256": "7621d18f384f4cbb81505eb14c429748d394ac2358ca88b04b80d1f5b15dae47"
+    },
+    {
+      "kind": "native",
+      "target": "aarch64-apple-darwin",
+      "runner": "macos-15",
+      "binary_name": "losat",
+      "archive_format": "tar.gz",
+      "filename": "LOSAT-0.2.0-aarch64-apple-darwin.tar.gz",
+      "features": "default",
+      "build_command": "cargo build --release --locked",
+      "historical_certification_binary_sha256": "d8e81b7ef82ef311c23fe39dd3711bc83d14d10c1bf6d4c08117ec84961b5825"
+    },
+    {
+      "kind": "native",
+      "target": "x86_64-apple-darwin",
+      "runner": "macos-15-intel",
+      "binary_name": "losat",
+      "archive_format": "tar.gz",
+      "filename": "LOSAT-0.2.0-x86_64-apple-darwin.tar.gz",
+      "features": "default",
+      "build_command": "cargo build --release --locked",
+      "historical_certification_binary_sha256": "3d3bfd84640095887c77fa539f591118f97cb00ae5459e6b35e32ca6da1aa99a"
+    },
+    {
+      "kind": "wasm",
+      "target": "wasm32-wasip1",
+      "runner": "ubuntu-24.04",
+      "binary_name": "losat.wasm",
+      "archive_format": "tar.gz",
+      "filename": "LOSAT-0.2.0-wasm32-wasip1.tar.gz",
+      "features": "no-default-features",
+      "build_command": "cargo build --release --target wasm32-wasip1 --no-default-features --locked",
+      "runner_script": "LOSAT/tests/run_losat_wasi.js",
+      "historical_certification_binary_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47"
+    },
+    {
+      "kind": "wasm",
+      "target": "wasm32-wasip1-threads",
+      "runner": "ubuntu-24.04",
+      "binary_name": "losat.wasm",
+      "archive_format": "tar.gz",
+      "filename": "LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz",
+      "features": "wasm-threads",
+      "build_command": "cargo build --release --target wasm32-wasip1-threads --features wasm-threads --locked",
+      "runner_script": "LOSAT/tests/run_losat_wasi_threads.js",
+      "historical_certification_binary_sha256": null,
+      "historical_certification_note": "no v0.1.0 certification binary for this target"
+    },
+    {
+      "kind": "source",
+      "target": "source",
+      "runner": "ubuntu-24.04",
+      "binary_name": null,
+      "archive_format": "crate",
+      "filename": "LOSAT-0.2.0.crate",
+      "features": "default",
+      "build_command": "cargo package --locked",
+      "historical_certification_binary_sha256": null
+    }
+  ],
+  "publication": {
+    "tag_created": false,
+    "github_release_created": false,
+    "registry_upload_performed": false,
+    "bioconda_submission_performed": false,
+    "signing_performed": false,
+    "notarization_performed": false
+  }
+}

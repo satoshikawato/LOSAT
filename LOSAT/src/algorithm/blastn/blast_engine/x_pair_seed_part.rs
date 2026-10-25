@@ -1571,8 +1571,8 @@ mod tests {
     enum Slow {
         /// every scan call on this pool thread sleeps 1 ms first
         Scans(usize),
-        /// the first scan on the owner's thread sleeps 60 ms (well past `HELPER_STALL`)
-        OwnerFirstScan,
+        /// the first scan on the owner's thread sleeps this long (60 ms is well past `HELPER_STALL`)
+        OwnerFirstScan(std::time::Duration),
     }
 
     /// `partitioned` with the stage's thread count given (`threads` participants whatever the
@@ -1608,11 +1608,12 @@ mod tests {
                 if slow_scans.is_some() && rayon::current_thread_index() == slow_scans {
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 }
-                if matches!(slow, Some(Slow::OwnerFirstScan))
-                    && rayon::current_thread_index() == owner
-                    && !owner_scanned.swap(true, Ordering::Relaxed)
-                {
-                    std::thread::sleep(std::time::Duration::from_millis(60));
+                if let Some(Slow::OwnerFirstScan(sleep)) = slow {
+                    if rayon::current_thread_index() == owner
+                        && !owner_scanned.swap(true, Ordering::Relaxed)
+                    {
+                        std::thread::sleep(sleep);
+                    }
                 }
                 if nested {
                     use rayon::prelude::*;
@@ -2151,7 +2152,8 @@ mod tests {
     // helpers' home partitions away from home (they have no participant at home any more).
     // Both ways give the reference's hits and table. (On a loaded machine the helper jobs may
     // start only after the owner's sleep, and then nothing stalls, so each way gets up to five
-    // stages to see a helper leave.)
+    // stages to see a helper leave, and the owner's sleep doubles with each stage: 60, 120, 240,
+    // 480, 960 ms, so that a late helper start is covered without an upper bound on the time.)
     #[test]
     fn a_stalled_stage_lets_the_helpers_leave() {
         let mut rng = Lcg(0x57A1_1ED0);
@@ -2176,7 +2178,9 @@ mod tests {
                     let (got, stats, _) = partitioned_on(
                         &pool,
                         threads,
-                        Some(Slow::OwnerFirstScan),
+                        Some(Slow::OwnerFirstScan(std::time::Duration::from_millis(
+                            60 << attempt,
+                        ))),
                         &mut hash,
                         &mut scratch,
                         &ops,

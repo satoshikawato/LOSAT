@@ -305,6 +305,38 @@ const STRICT_SET_RUNS: &[(&str, &str)] = &[
     ("segbatch_sub", "LOSAT_X_TBNFLOWHELP"),
 ];
 
+/// Why `got` (LOSAT's bytes of `what`) is not `want` (the frozen NCBI bytes): the lengths, the first
+/// differing byte offset, how many bytes differ in the common length, and about 160 bytes of both
+/// sides around the first difference (`<<HERE>>` marks it), so that a run on a machine that
+/// cannot be reached shows the difference in its log.
+fn byte_difference(what: &str, got: &[u8], want: &[u8]) -> String {
+    let at = got
+        .iter()
+        .zip(want)
+        .position(|(a, b)| a != b)
+        .unwrap_or(got.len().min(want.len()));
+    let differing = got.iter().zip(want).filter(|(a, b)| a != b).count();
+    let around = |bytes: &[u8]| {
+        let escape = |part: &[u8]| String::from_utf8_lossy(part).escape_debug().to_string();
+        let from = at.saturating_sub(64).min(bytes.len());
+        let to = (at + 96).min(bytes.len());
+        let mid = at.min(bytes.len());
+        format!(
+            "{}<<HERE>>{}",
+            escape(&bytes[from..mid]),
+            escape(&bytes[mid..to])
+        )
+    };
+    format!(
+        "{what} differs ({} bytes, NCBI wrote {}): first difference at byte {at}, {differing} bytes differ \
+         in the common length\n  LOSAT: {}\n  NCBI:  {}",
+        got.len(),
+        want.len(),
+        around(got),
+        around(want)
+    )
+}
+
 fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     let mut env: Vec<(&str, &str)> = case.env.to_vec();
     env.extend_from_slice(extra_env);
@@ -324,14 +356,14 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     let want = frozen(&case.name, "out");
     assert!(
         output.stdout == want,
-        "{label}: stdout differs ({} bytes, NCBI wrote {})",
-        output.stdout.len(),
-        want.len()
+        "{label}: {}",
+        byte_difference("stdout", &output.stdout, &want)
     );
-    assert_eq!(
-        String::from_utf8_lossy(&output.stderr),
-        String::from_utf8_lossy(&frozen(&case.name, "err")),
-        "{label}: stderr"
+    let want_err = frozen(&case.name, "err");
+    assert!(
+        String::from_utf8_lossy(&output.stderr) == String::from_utf8_lossy(&want_err),
+        "{label}: {}",
+        byte_difference("stderr", &output.stderr, &want_err)
     );
 }
 

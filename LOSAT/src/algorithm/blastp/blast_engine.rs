@@ -1098,20 +1098,6 @@ fn x_prelim_hsplist_count(
 trait PrelimSink {
     /// `BlastHSPStreamWrite` of one subject's lists; the subject result is emptied.
     fn add(&mut self, subject_result: &mut BlastpSubjectResult);
-
-    /// EXPERIMENT (LOSAT_X_BPDBCUTSHADOW): the hit lists that this sink keeps as it is fed, when
-    /// it keeps them as lists (the collector); the shadow mode compares them with a second
-    /// search's. A culling writer makes its lists at the end and has none.
-    #[allow(clippy::type_complexity)]
-    fn x_lists(
-        &mut self,
-    ) -> Option<(
-        &mut [Option<BlastpHitList>],
-        &mut [Option<BlastpHitList<XPrelimHsp>>],
-        usize,
-    )> {
-        None
-    }
 }
 
 /// The default writer: `hspfilter_collector.c`, a heap of `prelim_hitlist_size` lists per query.
@@ -1130,20 +1116,6 @@ impl PrelimSink for PrelimCollector<'_> {
             subject_result,
             self.prelim_hitlist_size,
         );
-    }
-
-    fn x_lists(
-        &mut self,
-    ) -> Option<(
-        &mut [Option<BlastpHitList>],
-        &mut [Option<BlastpHitList<XPrelimHsp>>],
-        usize,
-    )> {
-        Some((
-            &mut *self.preliminary_hit_lists,
-            &mut *self.x_compact_hit_lists,
-            self.prelim_hitlist_size,
-        ))
     }
 }
 

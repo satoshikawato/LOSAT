@@ -62,7 +62,7 @@ fn cull_key<H: HitListHsp>(hsp: &H) -> (i32, CullKey) {
 ///
 /// There are two forests, because the preliminary lists have two representations
 /// (EXPERIMENT LOSAT_X_BPPCOMPACT, `x_prelim_compact.rs`): the compact lists (the default),
-/// the full ones (`LOSAT_X_DEFAULT=0`), or both (the shadow mode). Each forest receives what the
+/// the full ones (`LOSAT_X_BPPCOMPACT=0`), or both (the shadow mode). Each forest receives what the
 /// subject result holds of its kind and gives the same culled lists as the other.
 pub(super) struct PrelimCulling {
     full: CullingForest<BlastpHsp>,

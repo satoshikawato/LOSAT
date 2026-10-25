@@ -2,7 +2,7 @@
 //! the option is read as NCBI reads it (non-negative, hexadecimal too, 0 is no culling), the
 //! search with it culls (the preliminary writer and the pipe of `hspfilter_culling.c`), and the
 //! report does not depend on the thread count, on the subject source (`-subject` or `-db`) or on
-//! the representation of the preliminary lists (`LOSAT_X_DEFAULT=0`). That the bytes equal NCBI's
+//! the representation of the preliminary lists (`LOSAT_X_BPPCOMPACT`). That the bytes equal NCBI's
 //! is the business of the parity probe (`O3b`); the unit tests of `culling.rs` pin the key, the
 //! length of the tree, the shape of the final hit list and the order of the pipe.
 //!
@@ -187,7 +187,7 @@ fn the_report_is_the_same_at_every_thread_count_and_source() {
             let args = ["-culling_limit", limit, "-num_threads", threads];
             for env in [
                 &[][..],
-                &[("LOSAT_X_DEFAULT", "0")][..],
+                &[("LOSAT_X_BPPCOMPACT", "0")][..],
                 &[("LOSAT_X_BPPCOMPACT", "shadow")][..],
             ] {
                 let subject = subject_search(&args, env);

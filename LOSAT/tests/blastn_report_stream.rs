@@ -1,21 +1,20 @@
 //! The reports of each query batch written when the batch loop takes the batch
 //! (`LOSAT_X_RPTSTREAM`, `src/algorithm/blastn/blast_engine/x_rpt_stream.rs`) on whole searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set). It chooses when LOSAT
+//! The switch is in the strict set (on unless it is `0`). It chooses when LOSAT
 //! writes the same reports: each batch's when the loop takes it, or all of them after the loop.
 //! So the property under test is that nothing a run writes depends on it: for megablast, blastn
 //! and dc-megablast, outfmt 0, 6 and 7, at 1 and 4 threads, with small query batches
-//! (`BATCH_SIZE`), the searches without the switch, with it and with its shadow
-//! (`LOSAT_X_RPTSTREAMSHADOW`, which also writes the reports the off path's way in memory and
-//! compares the bytes) give the same exit status, standard output (or `-out` file) and standard
-//! error (the shadow's line taken out), and the shadow line shows that the loop wrote the
+//! (`BATCH_SIZE`), the searches without the switch and with it give the same exit status,
+//! standard output (or `-out` file) and standard error, and the `[X_STATS] RPTSTREAM` line (the arm
+//! with `LOSAT_X_STATS`; its lines are taken out of the comparison) shows that the loop wrote the
 //! batches. The same holds with LOSAT_X_QBATCHPAR slots searching the batches ahead while the
 //! loop writes, with `-query_loc`, `-subject_loc` and `-lcase_masking`, with `-max_target_seqs`,
 //! `-max_hsps` and `-subject_besthit`, with the warnings of the reader and of invalid queries,
 //! on the error paths that come after the reports of earlier batches (a reader error, a batch of
 //! queries without letters), and with `-db`. Where the switch must not act (LOSAT's refusal of a
 //! subject's id, which comes before every report without the switch; a search space that could
-//! overflow; the debug output) the shadow line names why and the bytes are the same too. That
+//! overflow; the debug output) the `[X_STATS]` line names why and the bytes are the same too. That
 //! those bytes equal NCBI's is the business of the blastn fixtures.
 
 use std::path::{Path, PathBuf};
@@ -41,7 +40,7 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
 ];
 
 const SWITCH: (&str, &str) = ("LOSAT_X_RPTSTREAM", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_RPTSTREAMSHADOW", "1");
+const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const QBATCHPAR: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
 /// Two slots whatever QBATCHPAR's own choice of the layout (its tuning variable), so that slots run.
 const TWO_SLOTS: (&str, &str) = ("LOSAT_X_QBATCHPARSLOTS", "2");
@@ -200,46 +199,42 @@ fn blastn(args: &[&str], threads: u32, switches: &[(&str, &str)], out: Option<&P
     }
 }
 
-/// The shadow's line `[X_SHADOW] RPTSTREAM batches=B bytes=N checks=C off=O identical` taken out
-/// of `run`'s standard error: (B, N, C, O).
-fn take_shadow_line(run: &mut Run) -> (u64, u64, u64, String) {
+/// The `[X_STATS]` lines taken out of `run`'s standard error, and the numbers of the line
+/// `[X_STATS] RPTSTREAM batches=B queries=Q off=O ...`: (B, O).
+fn take_stats_lines(run: &mut Run) -> (u64, String) {
     let text = String::from_utf8_lossy(&run.stderr).into_owned();
     let lines: Vec<&str> = text
         .split_inclusive('\n')
-        .filter(|line| line.starts_with("[X_SHADOW] RPTSTREAM "))
+        .filter(|line| line.starts_with("[X_STATS] RPTSTREAM "))
         .collect();
-    assert_eq!(lines.len(), 1, "one shadow line:\n{text}");
+    assert_eq!(lines.len(), 1, "one RPTSTREAM line:\n{text}");
     let line = lines[0].trim_end();
-    assert!(line.ends_with(" identical"), "{line}");
     let field = |name: &str| -> String {
         line.split_whitespace()
             .find_map(|word| word.strip_prefix(name))
             .unwrap_or_else(|| panic!("no {name} in: {line}"))
             .to_string()
     };
-    let numbers = (
-        field("batches=").parse().unwrap(),
-        field("bytes=").parse().unwrap(),
-        field("checks=").parse().unwrap(),
-        field("off="),
-    );
+    let numbers = (field("batches=").parse().unwrap(), field("off="));
     run.stderr = text
         .split_inclusive('\n')
-        .filter(|line| !line.starts_with("[X_SHADOW] RPTSTREAM "))
+        .filter(|line| !line.starts_with("[X_STATS] "))
         .collect::<String>()
         .into_bytes();
     numbers
 }
 
-/// The run without the switch, with it and with the shadow (with `extra` switches in all three):
-/// the same status, report and standard error. Returns the off run and the shadow's numbers.
-fn same_three(
+/// The run without the switch and with it (with `extra` switches in both), and with it and
+/// `LOSAT_X_STATS`: the same status, report and standard error (the counters' lines taken out of
+/// the last). Returns the off run and the counters (batches written by the loop, why the switch
+/// did not act: `none` when it did).
+fn same_two(
     what: &str,
     args: &[&str],
     threads: u32,
     extra: &[(&str, &str)],
     out: Option<&Path>,
-) -> (Run, (u64, u64, u64, String)) {
+) -> (Run, (u64, String)) {
     let off = blastn(args, threads, extra, out);
     let mut with = extra.to_vec();
     with.push(SWITCH);
@@ -248,20 +243,18 @@ fn same_three(
         on == off,
         "{what} threads {threads}: on differs\n{on:?}\n{off:?}"
     );
-    let mut with = extra.to_vec();
-    with.push(SHADOW);
-    let mut shadow = blastn(args, threads, &with, out);
-    let numbers = take_shadow_line(&mut shadow);
+    with.push(STATS);
+    let mut counted = blastn(args, threads, &with, out);
+    let numbers = take_stats_lines(&mut counted);
     assert!(
-        shadow == off,
-        "{what} threads {threads}: shadow differs\n{shadow:?}\n{off:?}"
+        counted == off,
+        "{what} threads {threads}: on with statistics differs\n{counted:?}\n{off:?}"
     );
     (off, numbers)
 }
 
 /// Every task, outfmt 0, 6 and 7, 1 and 4 threads: the off bytes, with every batch written by
-/// the loop (the shadow compared once, at the end) and the warnings of the reader and of the
-/// invalid queries on standard error.
+/// the loop and the warnings of the reader and of the invalid queries on standard error.
 #[test]
 fn every_task_format_and_thread_count_gives_the_off_bytes() {
     let dir = TempDir::new("formats");
@@ -281,8 +274,7 @@ fn every_task_format_and_thread_count_gives_the_off_bytes() {
                     outfmt,
                 ];
                 let what = format!("{task} outfmt {outfmt}");
-                let (off, (batches, bytes, checks, reason)) =
-                    same_three(&what, &args, threads, &[], None);
+                let (off, (batches, reason)) = same_two(&what, &args, threads, &[], None);
                 assert_eq!(off.status, Some(0), "{what}");
                 assert!(!off.report.is_empty(), "{what}: no report");
                 let stderr = String::from_utf8_lossy(&off.stderr);
@@ -293,14 +285,6 @@ fn every_task_format_and_thread_count_gives_the_off_bytes() {
                 );
                 assert_eq!(reason, "none", "{what}");
                 assert!(batches >= 8, "{what}: {batches} batches");
-                assert_eq!(checks, 1, "{what}");
-                // Every byte after the outfmt 0 prolog (written before the search) was compared.
-                let written = off.report.len() + off.stderr.len();
-                if outfmt == "0" {
-                    assert!(bytes > 0 && (bytes as usize) < written, "{what}");
-                } else {
-                    assert_eq!(bytes as usize, written, "{what}");
-                }
             }
         }
     }
@@ -328,14 +312,13 @@ fn out_files_and_qbatchpar_slots_give_the_off_bytes() {
                 outfmt,
             ];
             let what = format!("{task} outfmt {outfmt} -out");
-            let (off, (batches, _, _, reason)) = same_three(&what, &args, 4, &[], Some(&out));
+            let (off, (batches, reason)) = same_two(&what, &args, 4, &[], Some(&out));
             assert!(
                 !off.report.is_empty() && reason == "none" && batches >= 8,
                 "{what}"
             );
             let what = format!("{task} outfmt {outfmt} QBATCHPAR");
-            let (off, (batches, _, _, reason)) =
-                same_three(&what, &args, 4, &[QBATCHPAR, TWO_SLOTS], None);
+            let (off, (batches, reason)) = same_two(&what, &args, 4, &[QBATCHPAR, TWO_SLOTS], None);
             assert!(
                 !off.report.is_empty() && reason == "none" && batches >= 8,
                 "{what}"
@@ -423,7 +406,7 @@ fn ranges_and_hit_list_options_give_the_off_bytes() {
         args.extend_from_slice(extra);
         for threads in [1, 4] {
             let what = format!("{task} {extra:?}");
-            let (off, (batches, _, _, reason)) = same_three(&what, &args, threads, &[], None);
+            let (off, (batches, reason)) = same_two(&what, &args, threads, &[], None);
             assert_eq!(off.status, Some(0), "{what}");
             assert!(
                 !off.report.is_empty() && reason == "none" && batches >= 8,
@@ -434,8 +417,7 @@ fn ranges_and_hit_list_options_give_the_off_bytes() {
 }
 
 /// The errors of a later batch that come after the reports of the batches before (a reader
-/// error; a batch of queries without letters): the off bytes, status and standard error, the
-/// shadow compared where the error is met.
+/// error; a batch of queries without letters): the off bytes, status and standard error.
 #[test]
 fn errors_after_earlier_batches_give_the_off_bytes() {
     let dir = TempDir::new("errors");
@@ -475,8 +457,7 @@ fn errors_after_earlier_batches_give_the_off_bytes() {
             ];
             for threads in [1, 4] {
                 let what = format!("{task} outfmt {outfmt} {query:?}");
-                let (off, (batches, _, checks, reason)) =
-                    same_three(&what, &args, threads, &[], None);
+                let (off, (batches, reason)) = same_two(&what, &args, threads, &[], None);
                 assert_eq!(off.status, Some(status), "{what}");
                 assert!(
                     String::from_utf8_lossy(&off.stderr).contains(error),
@@ -484,7 +465,7 @@ fn errors_after_earlier_batches_give_the_off_bytes() {
                     String::from_utf8_lossy(&off.stderr)
                 );
                 assert!(!off.report.is_empty(), "{what}");
-                assert!(reason == "none" && batches >= 8 && checks == 1, "{what}");
+                assert!(reason == "none" && batches >= 8, "{what}");
             }
         }
     }
@@ -527,7 +508,7 @@ fn a_database_search_gives_the_off_bytes() {
         ];
         for threads in [1, 4] {
             let what = format!("-db {task} outfmt {outfmt}");
-            let (off, (batches, _, _, reason)) = same_three(&what, &args, threads, &[], None);
+            let (off, (batches, reason)) = same_two(&what, &args, threads, &[], None);
             assert_eq!(off.status, Some(0), "{what}");
             assert!(
                 !off.report.is_empty() && reason == "none" && batches >= 8,
@@ -567,8 +548,8 @@ fn database(dir: &TempDir, name: &str, patch: impl FnOnce(&str)) -> String {
 /// raised by one in the sequence file. Both are refused when a batch reports the sequence (its
 /// title) or traces it back (its ambiguity data), which only the last batches do; without the
 /// switch the refusal comes before every report, so the switch reads both before the search and
-/// does not act (`off=titles`, `off=ambiguity`): the refusal, no row, the same bytes off / on /
-/// shadow. The intact database streams, with its ambiguity data decoded by the traceback.
+/// does not act (`off=titles`, `off=ambiguity`): the refusal, no row, the same bytes off / on.
+/// The intact database streams, with its ambiguity data decoded by the traceback.
 #[test]
 fn a_database_search_where_the_switch_must_not_act() {
     let dir = TempDir::new("dbrefuse");
@@ -584,11 +565,11 @@ fn a_database_search_where_the_switch_must_not_act() {
             "-outfmt",
             "6",
         ];
-        same_three(&format!("-db {db}"), &args, threads, &[], None)
+        same_two(&format!("-db {db}"), &args, threads, &[], None)
     };
     let intact = database(&dir, "intact", |_| {});
     for threads in [1, 4] {
-        let (off, (batches, _, _, reason)) = run(&intact, threads);
+        let (off, (batches, reason)) = run(&intact, threads);
         assert_eq!(off.status, Some(0));
         let rows = String::from_utf8_lossy(&off.report).into_owned();
         assert!(
@@ -629,7 +610,7 @@ fn a_database_search_where_the_switch_must_not_act() {
         ),
     ] {
         for threads in [1, 4] {
-            let (off, (batches, _, checks, reason)) = run(db, threads);
+            let (off, (batches, reason)) = run(db, threads);
             assert_ne!(off.status, Some(0), "{db}: the refusal");
             assert!(
                 String::from_utf8_lossy(&off.stderr).contains(refusal),
@@ -640,7 +621,7 @@ fn a_database_search_where_the_switch_must_not_act() {
                 off.report.is_empty(),
                 "{db}: the refusal comes before every row"
             );
-            assert_eq!((batches, checks, reason.as_str()), (0, 0, expected), "{db}");
+            assert_eq!((batches, reason.as_str()), (0, expected), "{db}");
         }
     }
 }
@@ -653,7 +634,7 @@ fn a_database_search_where_the_switch_must_not_act() {
 /// `CHUNK_SIZE` (whose refusal comes where a batch is split); and the debug output
 /// (`LOSAT_DEBUG_COORDS`).
 #[test]
-fn where_the_switch_must_not_act_the_shadow_names_why() {
+fn where_the_switch_must_not_act_the_counters_name_why() {
     let dir = TempDir::new("off");
     let query = queries(&dir, "q.fa", b"");
     // The first subject, LC738868, is hit from the first batch on; the second, named
@@ -678,7 +659,7 @@ fn where_the_switch_must_not_act_the_shadow_names_why() {
         "-outfmt",
         "6",
     ];
-    let (off, (batches, _, checks, reason)) = same_three("Subject_ id", &args, 4, &[], None);
+    let (off, (batches, reason)) = same_two("Subject_ id", &args, 4, &[], None);
     assert_ne!(off.status, Some(0), "the refusal");
     assert!(
         String::from_utf8_lossy(&off.stderr).contains("'Subject_'"),
@@ -689,7 +670,7 @@ fn where_the_switch_must_not_act_the_shadow_names_why() {
         off.report.is_empty(),
         "the refusal comes before every report"
     );
-    assert_eq!((batches, checks, reason.as_str()), (0, 0, "subject_ids"));
+    assert_eq!((batches, reason.as_str()), (0, "subject_ids"));
     let subject = fasta("LC738868.fasta");
     let plain = [
         "-task",
@@ -703,7 +684,7 @@ fn where_the_switch_must_not_act_the_shadow_names_why() {
     ];
     let mut huge = plain.to_vec();
     huge.extend_from_slice(&["-dbsize", "9000000000000000000"]);
-    let (_, (batches, _, _, reason)) = same_three("-dbsize", &huge, 1, &[], None);
+    let (_, (batches, reason)) = same_two("-dbsize", &huge, 1, &[], None);
     assert_eq!((batches, reason.as_str()), (0, "search_space"));
     let mut scoring = plain.to_vec();
     scoring[1] = "blastn";
@@ -717,15 +698,15 @@ fn where_the_switch_must_not_act_the_shadow_names_why() {
         "-gapextend",
         "1",
     ]);
-    let (off, (batches, _, _, reason)) = same_three("scoring", &scoring, 4, &[], None);
+    let (off, (batches, reason)) = same_two("scoring", &scoring, 4, &[], None);
     assert_eq!(off.status, Some(3), "NCBI's Karlin-Altschul error");
     assert_eq!((batches, reason.as_str()), (0, "scoring"));
     let chunks = [("CHUNK_SIZE", "-5"), ("OVERLAP_CHUNK_SIZE", "-10")];
-    let (off, (batches, _, _, reason)) = same_three("CHUNK_SIZE", &plain, 4, &chunks, None);
+    let (off, (batches, reason)) = same_two("CHUNK_SIZE", &plain, 4, &chunks, None);
     assert_ne!(off.status, Some(0), "LOSAT's refusal");
     assert_eq!((batches, reason.as_str()), (0, "chunk_size"));
-    let (off, (batches, _, _, reason)) =
-        same_three("debug", &plain, 1, &[("LOSAT_DEBUG_COORDS", "1")], None);
+    let (off, (batches, reason)) =
+        same_two("debug", &plain, 1, &[("LOSAT_DEBUG_COORDS", "1")], None);
     assert!(!off.report.is_empty());
     assert_eq!((batches, reason.as_str()), (0, "debug"));
 }

@@ -29,6 +29,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const OFF: (&str, &str) = ("LOSAT_X_BNFEWSUBJ", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
+const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const SHADOWS: &[(&str, &str)] = &[("LOSAT_X_PAIRPARDISCSHADOW", "1")];
 
 fn fasta(name: &str) -> PathBuf {
@@ -395,9 +396,9 @@ fn a_long_subject_and_another_take_both_shapes() {
 // a subject searched by its owner (before, only on one-chunk batches): 27 queries of 10 kb cut from
 // LC738868 (3,000 letters on, as `blastn_qgroup_par.rs` cuts them) against a record of 4,990,000
 // pseudo-random bases and LC738868 (two chunks; the hits in the second), blastn at 4 threads, with
-// the stages' shadow comparing them to the owner loop.
+// the report of one thread and the counters of `LOSAT_X_STATS` showing the stages ran per query.
 #[test]
-fn per_query_stages_on_a_later_chunk_match_their_shadow() {
+fn per_query_stages_on_a_later_chunk_give_the_one_thread_report() {
     let first = letters("LC738868.fasta");
     let pieces: Vec<(String, String)> = (0..27)
         .map(|i| {
@@ -422,21 +423,15 @@ fn per_query_stages_on_a_later_chunk_match_their_shadow() {
     let task_args = ["-task", "blastn"];
     let (expected, _) = blastn_query(&query, &subject, &task_args, 1, &[]);
     assert!(!expected.is_empty());
-    let (report, stderr) = blastn_query(
-        &query,
-        &subject,
-        &task_args,
-        4,
-        &[("LOSAT_X_QGROUPPARSHADOW", "1"), TIMING],
-    );
-    assert!(report == expected, "the report differs with the shadow");
+    let (report, stderr) = blastn_query(&query, &subject, &task_args, 4, &[STATS, TIMING]);
+    assert!(report == expected, "the report differs at 4 threads");
     assert!(strip_chunks(&stderr) >= 2, "{stderr}");
+    let prefix = "[X_STATS] QGROUPPAR prelim=";
     let line = stderr
         .lines()
-        .find(|line| line.starts_with("[X_SHADOW] QGROUPPAR prelim="))
+        .find(|line| line.starts_with(prefix))
         .unwrap_or_else(|| panic!("no QGROUPPAR line:\n{stderr}"));
-    assert!(line.ends_with(" identical"), "{line}");
-    let prelim: u64 = line["[X_SHADOW] QGROUPPAR prelim=".len()..]
+    let prelim: u64 = line[prefix.len()..]
         .split_whitespace()
         .next()
         .and_then(|value| value.parse().ok())

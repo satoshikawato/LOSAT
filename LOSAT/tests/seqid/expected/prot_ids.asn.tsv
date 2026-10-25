@@ -1,0 +1,27 @@
+0	0	0	other { accession "XP_000001", version 1 }
+0	1	0	swissprot { name "TEST_HUMAN", accession "P99999", release "reviewed", version 2 }
+0	2	0	genbank { accession "AAA00001", version 1 }
+1	0	0	gi 123456
+1	0	1	other { accession "NP_000002", version 1 }
+2	0	0	swissprot { name "ABC_MOUSE", accession "Q00003", release "reviewed" }
+3	0	0	swissprot { name "A0A000_YEAST", accession "A0A000", release "unreviewed" }
+4	0	0	pdb { mol "1ABC", chain 65, chain-id "A" }
+5	0	0	embl { accession "CAA00005", version 1 }
+6	0	0	ddbj { accession "BAA00006", version 1 }
+7	0	0	pir { name "S00007" }
+8	0	0	prf { name "0008123A" }
+9	0	0	local str "myprot9"
+10	0	0	general { db "mydb", tag str "prot10" }
+11	0	0	other { accession "XP_000011", version 2 }
+12	0	0	swissprot { accession "P00012" }
+13	0	0	local str "myprot_13"
+14	0	0	gi 1414
+15	0	0	tpg { accession "DAA00016", version 1 }
+16	0	0	genbank { name "LOCUS17", accession "AAA00017", version 1 }
+17	0	0	gi 1818
+17	0	1	genbank { accession "AAA00018", version 1 }
+17	1	0	gi 1819
+17	1	1	embl { accession "CAA00019", version 1 }
+17	2	0	gi 1820
+17	2	1	other { accession "XP_000020", version 1 }
+18	0	0	swissprot { name "NAME_HUMAN", accession "P00019", release "reviewed", version 3 }

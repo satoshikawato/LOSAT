@@ -1,0 +1,24 @@
+0	0	0	tpe { accession "BK000012", version 1 }
+1	0	0	tpd { accession "BK000013", version 1 }
+2	0	0	gpipe { accession "GPP123" }
+3	0	0	gibbsq 123
+4	0	0	gibbmt 123
+5	0	0	pdb { mol "1ABC", chain-id "AA" }
+6	0	0	pdb { mol "1ABC" }
+7	0	0	swissprot { accession "P99999", release "reviewed" }
+8	0	0	gi 3000000000
+8	0	1	genbank { accession "AAA00100", version 1 }
+9	0	0	local str "long1"
+10	0	0	general { db "ti", tag id 123 }
+11	0	0	general { db "PIG", tag id 123 }
+12	0	0	patent { seqid 1, cit { country "US", id number "RE33188" } }
+13	0	0	patent { seqid 7, cit { country "EP", id number "0123456A1" } }
+14	0	0	other { accession "NP_000002" }
+15	0	0	prf { name "DEF", accession "ABC" }
+16	0	0	local id 123
+17	0	0	patent { seqid 7, cit { country "EP", id number "0238993" } }
+18	0	0	named-annot-track { accession "NA000001", version 1 }
+19	0	0	local str "Subject_7"
+20	0	0	local str "Subject_8"
+21	0	0	swissprot { name "ONE_HUMAN", accession "P11111", release "reviewed", version 1 }
+21	1	0	local str "Subject_9"

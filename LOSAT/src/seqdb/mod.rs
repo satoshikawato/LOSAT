@@ -8,8 +8,9 @@
 //!
 //! Read: the index file (`.pin` / `.nin`), the sequence file (`.psq`:
 //! NCBIstdaa; `.nsq`: 2-bit bases followed by ambiguity data), the header
-//! file (`.phr` / `.nhr`: title and `gnl|BL_ORD_ID|n`), and alias files
-//! (`.pal` / `.nal`: `TITLE` and `DBLIST`).
+//! file (`.phr` / `.nhr`: title and `gnl|BL_ORD_ID|n` with `deflines`, every
+//! member and Seq-id with `defline_set`), and alias files (`.pal` / `.nal`:
+//! `TITLE` and `DBLIST`).
 //!
 //! Not read: the LMDB file and the id and taxonomy files of version 5, the
 //! ISAM files of `-parse_seqids`, column files (mask data), group alias files,
@@ -47,6 +48,9 @@ mod x_dbidxread_tests;
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+
+use crate::seqid::model::ObjectId;
+use crate::seqid::{DeflineSet, ParsedSeqId};
 
 pub use alias::SearchPath;
 pub use header::Defline;
@@ -430,10 +434,8 @@ impl SeqDb {
     /// separate names, double quotes keep one name together), of which LOSAT
     /// accepts one name; it carries no file extension.
     ///
-    /// A database that stores parsed Seq-ids is rejected here: the first
-    /// header of every volume is decoded once. A volume whose header file
-    /// cannot be opened (missing, or an `open` that fails) is not checked:
-    /// NCBI opens a header file at its first read, and the error comes there.
+    /// A database that stores parsed Seq-ids opens; `check_ordinal_ids` tells
+    /// it from one that holds only the ordinal ids.
     pub fn open_in(name: &str, seqtype: SeqType, path: &SearchPath) -> Result<Self, SeqDbError> {
         let mut db = Self::open_tree(alias::resolve_in(name, seqtype, path)?, name, seqtype)?;
         db.search_path = Some(path.clone());
@@ -679,30 +681,42 @@ impl SeqDb {
             max_length,
             search_path: None,
         };
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:126-133
-        // ```c++
-        // void
-        // CSeqDBVol::x_OpenHdrFile(void) const {
-        //     CFastMutexGuard mtx_gurad(m_MtxHdr);
-        //     if (!m_HdrFileOpened && m_Idx->GetNumOIDs() != 0) {
-        //         m_Hdr.Reset(new CSeqDBHdrFile(m_Atlas, m_VolName, (m_IsAA?'p':'n')));
-        //     }
-        //     m_HdrFileOpened = true;
-        // }
-        // ```
-        // NCBI opens a header file at the first read of a header of its volume
-        // (`x_GetHdrAsn1Binary`, seqdbvol.cpp:2302-2310): a search program reads
-        // the first one after its search, so a header file that is missing or
-        // cannot be opened fails there, not here (`Volume::lazy_file`).
-        for (at, volume) in db.volumes.iter().enumerate() {
+        Ok(db)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:126-133
+    // ```c++
+    // void
+    // CSeqDBVol::x_OpenHdrFile(void) const {
+    //     CFastMutexGuard mtx_gurad(m_MtxHdr);
+    //     if (!m_HdrFileOpened && m_Idx->GetNumOIDs() != 0) {
+    //         m_Hdr.Reset(new CSeqDBHdrFile(m_Atlas, m_VolName, (m_IsAA?'p':'n')));
+    //     }
+    //     m_HdrFileOpened = true;
+    // }
+    // ```
+    // NCBI opens a header file at the first read of a header of its volume
+    // (`x_GetHdrAsn1Binary`, seqdbvol.cpp:2302-2310): a search program reads
+    // the first one after its search, so a header file that is missing or
+    // cannot be opened fails there, not here (`Volume::lazy_file`).
+    /// Checks that the database holds the ordinal ids of a database built without
+    /// `-parse_seqids`: the first header of every volume is decoded with the
+    /// ordinal-id decoder (`deflines`), whose error for any other Seq-id is
+    /// `SeqDbError::Unsupported`; the first error is returned. A volume whose
+    /// header file cannot be opened (missing, or an `open` that fails) is not
+    /// checked: NCBI opens a header file at its first read, and the error comes
+    /// there. A search program that reads only ordinal ids calls this right
+    /// after opening the database.
+    pub fn check_ordinal_ids(&self) -> Result<(), SeqDbError> {
+        for (at, volume) in self.volumes.iter().enumerate() {
             if volume.num_oids() > 0 {
-                match db.deflines(db.volume_starts[at]) {
+                match self.deflines(self.volume_starts[at]) {
                     Ok(_) | Err(SeqDbError::NotFound(_) | SeqDbError::Open { .. }) => {}
                     Err(error) => return Err(error),
                 }
             }
         }
-        Ok(db)
+        Ok(())
     }
 
     /// Sequence type of the database.
@@ -992,6 +1006,70 @@ impl SeqDb {
     pub fn deflines(&self, ordinal: u32) -> Result<Vec<OrdinalDefline>, SeqDbError> {
         let (volume, oid) = self.find_volume(ordinal)?;
         self.ordinal_deflines(volume, ordinal, self.volumes[volume].deflines(oid))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2221-2240
+    // ```c++
+    //     if (adjust_oids && bdls.NotEmpty() && m_VolStart) {
+    //         NON_CONST_ITERATE(list< CRef<CBlast_def_line> >, dl, bdls->Set()) {
+    //             if (! (**dl).CanGetSeqid()) {
+    //                 continue;
+    //             }
+    //
+    //             NON_CONST_ITERATE(list< CRef<CSeq_id> >, id, (*dl)->SetSeqid()) {
+    //                 CSeq_id & seqid = **id;
+    //
+    //                 if (seqid.Which() == CSeq_id::e_General) {
+    //                     CDbtag & dbt = seqid.SetGeneral();
+    //
+    //                     if (dbt.GetDb() == "BL_ORD_ID") {
+    //                         int vol_oid = dbt.GetTag().GetId();
+    //                         dbt.SetTag().SetId(m_VolStart + vol_oid);
+    //                         if (changed) {
+    //                             *changed = true;
+    //                         }
+    //                     }
+    // ```
+    /// The definition lines of `ordinal` with every member and every Seq-id
+    /// (`seqid::ber::decode_full_set`), as NCBI's `GetHdr` gives them: the
+    /// tag of a `general` id `BL_ORD_ID` is its database ordinal id (the
+    /// stored number plus the first ordinal id of the volume).
+    pub fn defline_set(&self, ordinal: u32) -> Result<DeflineSet, SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        let mut set = self.volumes[volume].defline_set(oid)?;
+        let volume_start = self.volume_starts[volume];
+        if volume_start == 0 {
+            return Ok(set);
+        }
+        for id in set
+            .deflines
+            .iter_mut()
+            .flat_map(|defline| defline.ids.iter_mut())
+        {
+            let ParsedSeqId::General(dbtag) = id else {
+                continue;
+            };
+            if dbtag.db != b"BL_ORD_ID" {
+                continue;
+            }
+            let format = |message: String| SeqDbError::Format {
+                path: self.volumes[volume].base().to_path_buf(),
+                message,
+            };
+            // `GetId` of a string tag throws in NCBI (an invalid CHOICE selection).
+            let ObjectId::Id(tag) = dbtag.tag else {
+                return Err(format(format!(
+                    "BL_ORD_ID of sequence {ordinal} has a string tag"
+                )));
+            };
+            let Ok(adjusted) = i32::try_from(i64::from(volume_start) + i64::from(tag)) else {
+                return Err(format(format!(
+                    "BL_ORD_ID of sequence {ordinal} passes a signed 32-bit id"
+                )));
+            };
+            dbtag.tag = ObjectId::Id(adjusted);
+        }
+        Ok(set)
     }
 
     /// The Blast-def-line `taxid` of each definition line of `ordinal`, 0 for none: read

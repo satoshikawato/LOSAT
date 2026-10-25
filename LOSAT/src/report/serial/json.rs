@@ -237,6 +237,11 @@ impl<'b> JsonEncoder<'b> {
 }
 
 impl Encoder for JsonEncoder<'_> {
+    /// `m_EnforceWritingDefaults = true` (the constructor, quoted in the module).
+    fn writes_defaults(&self) -> bool {
+        true
+    }
+
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:137-150
     /// ```c++
     /// void CObjectOStreamJson::WriteFileHeader(TTypeInfo type)

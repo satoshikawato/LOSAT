@@ -1,12 +1,13 @@
 //! NCBI's Seq-id of the sequences that LOSAT reports, and its printings.
 //!
-//! LOSAT reads queries and `-subject` subjects without `-parse_deflines` (refused), and
-//! BLAST databases without parsed Seq-ids (`seqdb/header.rs`), so a reported sequence has one
-//! of two Seq-ids: the local ID that NCBI's FASTA reader generates (`Query_N`, `Subject_N`),
-//! or the ordinal ID of a database sequence (`gnl|BL_ORD_ID|<oid>`). The serial formats
-//! (outfmt 8, 9, 11, 12) write the Seq-id object itself (`SeqId::write`); the other printings
-//! (the title's first word, `gnl|BL_ORD_ID|0`, `BL_ORD_ID:0`, ...) join this type with the
-//! formats that use them.
+//! LOSAT reads queries and `-subject` subjects without `-parse_deflines` (refused), so a
+//! reported sequence has one of three Seq-ids: the local ID that NCBI's FASTA reader
+//! generates (`Query_N`, `Subject_N`), the ordinal ID of a sequence of a database without
+//! parsed Seq-ids (`gnl|BL_ORD_ID|<oid>`), or a Seq-id that a database built with
+//! `-parse_seqids` stores (`SeqId::Db`, chosen and printed by `crate::seqid`). The serial
+//! formats (outfmt 8, 9, 11, 12) write the Seq-id object itself (`SeqId::write`); the other
+//! printings (the title's first word, `gnl|BL_ORD_ID|0`, `BL_ORD_ID:0`, ...) join this type
+//! with the formats that use them.
 //!
 //! NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-36
 //! ```text
@@ -27,6 +28,8 @@
 //! ```
 
 use crate::report::serial::encoder::Encoder;
+use crate::seqid::model::{Date, ObjectId, PatentNumber, PDB_DEFAULT_CHAIN};
+use crate::seqid::ParsedSeqId;
 
 /// The Seq-id of a reported sequence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,12 +77,18 @@ pub enum SeqId<'a> {
     /// The tag is the sequence's ordinal ID in the opened database (its volume's start plus
     /// its position in the volume).
     BlOrdId(u32),
+    /// A Seq-id of a database sequence with parsed Seq-ids: the Seq-align id that
+    /// `seqid::DeflineSet::alignment_id` chooses (or the id a format shows).
+    Db(&'a ParsedSeqId),
 }
 
 impl SeqId<'_> {
     /// Appends the Seq-id as the SAM formatter prints it: `GetSeqIdString(true)` of the
     /// `fSAM_PlainSeqIds` flag (the local string, or `BL_ORD_ID:<oid>` for a database
-    /// sequence). `AdjustSeqIdType` finds no accession for either id, so it keeps them.
+    /// sequence). `AdjustSeqIdType` finds no accession for either id, so it keeps them. A
+    /// parsed Seq-id prints `GetSeqIdString(true)` (`seqid::label::content`) of the id it
+    /// holds: the caller passes the id that NCBI's `GetId(eGetId_ForceAcc)` and
+    /// `AdjustSeqIdType` give.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:111-115
     /// ```c++
@@ -96,13 +105,14 @@ impl SeqId<'_> {
                 out.extend_from_slice(b"BL_ORD_ID:");
                 out.extend_from_slice(oid.to_string().as_bytes());
             }
+            SeqId::Db(id) => crate::seqid::label::content(id, true, out),
         }
     }
 
     /// Writes the Seq-id object (a CHOICE) through `enc`, in the member order of the ASN.1
     /// modules quoted above: `local` (variant 0) holds an Object-id `str` (variant 1);
     /// `general` (variant 10) holds a Dbtag (`db` member 0, `tag` member 1 = Object-id `id`,
-    /// variant 0).
+    /// variant 0). A parsed Seq-id is written by `write_parsed`.
     pub fn write<E: Encoder>(&self, enc: &mut E) {
         match *self {
             SeqId::Local(id) => {
@@ -128,6 +138,195 @@ impl SeqId<'_> {
                 enc.end_sequence();
                 enc.end_variant();
             }
+            SeqId::Db(id) => write_parsed(id, enc),
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:444-454
+// ```c++
+//     else {
+//         // have set flag
+//         getConstFunc = &TFunc::GetConstSimpleMember;
+//         getFunc = &TFunc::GetWithSetFlagMember;
+//         readFuncs.first = &TFunc::ReadWithSetFlagMember;
+//         writeFunc = &TFunc::WriteWithSetFlagMember;
+//         if ( (GetDefault() || Nillable()) && GetId().HaveNoPrefix()) {
+//             readFuncs.first = &TFunc::ReadWithDefaultMemberX;
+//             writeFunc = &TFunc::WriteWithDefaultMemberX;
+//         }
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:1015-1027
+// ```c++
+// void CMemberInfoFunctions::WriteWithSetFlagMember(CObjectOStream& out,
+//                                                   const CMemberInfo* memberInfo,
+//                                                   TConstObjectPtr classPtr)
+// {
+//     _ASSERT(!memberInfo->CanBeDelayed());
+//     _ASSERT(memberInfo->HaveSetFlag());
+//     if (out.IsWritingDefaultValuesEnforced() &&  memberInfo->GetDefault()) {
+//         goto do_write;
+//     }
+//     if ( memberInfo->GetSetFlagNo(classPtr) ) {
+//         if (memberInfo->Optional()) {
+//             return;
+//         }
+// ```
+// The members of a type from an ASN.1 module have a prefix (`HaveNoPrefix` is false), so
+// they all take `WriteWithSetFlagMember`, and a member with a DEFAULT is optional
+// (`CMemberInfo::Optional`, serial/impl/member.inl:42-51). `PDB-seq-id.chain` is therefore
+// written when it was read, and else only by a stream that enforces the defaults (the JSON
+// stream, `Encoder::writes_defaults`), with its DEFAULT 32: NCBI's outfmt 12 writes
+// `"chain": 32` for a pdb id stored without one, outfmt 8 nothing.
+/// Writes a parsed Seq-id (a CHOICE) through `enc`, in the member order of the ASN.1 modules
+/// quoted in `seqid::model`, with the calls of `SeqId::write` for `local` and `general`. An
+/// absent OPTIONAL member is skipped.
+fn write_parsed<E: Encoder>(id: &ParsedSeqId, enc: &mut E) {
+    enc.variant("Seq-id", id.alternative_name(), id.alternative());
+    match id {
+        ParsedSeqId::Local(tag) => write_object_id(enc, tag),
+        ParsedSeqId::Gibbsq(value) | ParsedSeqId::Gibbmt(value) => enc.int(*value),
+        ParsedSeqId::Giim(id) => {
+            enc.begin_sequence("Giimport-id");
+            enc.member("id", 0);
+            enc.int(id.id);
+            enc.end_member();
+            optional_str(enc, "db", 1, id.db.as_deref());
+            optional_str(enc, "release", 2, id.release.as_deref());
+            enc.end_sequence();
+        }
+        ParsedSeqId::Patent(id) => {
+            enc.begin_sequence("Patent-seq-id");
+            enc.member("seqid", 0);
+            enc.int(id.seqid);
+            enc.end_member();
+            enc.member("cit", 1);
+            enc.begin_sequence("Id-pat");
+            enc.member("country", 0);
+            enc.visible_str(&id.cit.country);
+            enc.end_member();
+            enc.member("id", 1);
+            match &id.cit.id {
+                PatentNumber::Number(number) => {
+                    enc.variant("Id-pat_id", "number", 0);
+                    enc.visible_str(number);
+                }
+                PatentNumber::AppNumber(number) => {
+                    enc.variant("Id-pat_id", "app-number", 1);
+                    enc.visible_str(number);
+                }
+            }
+            enc.end_variant();
+            enc.end_member();
+            optional_str(enc, "doc-type", 2, id.cit.doc_type.as_deref());
+            enc.end_sequence();
+            enc.end_member();
+            enc.end_sequence();
+        }
+        ParsedSeqId::General(dbtag) => {
+            enc.begin_sequence("Dbtag");
+            enc.member("db", 0);
+            enc.visible_str(&dbtag.db);
+            enc.end_member();
+            enc.member("tag", 1);
+            write_object_id(enc, &dbtag.tag);
+            enc.end_member();
+            enc.end_sequence();
+        }
+        ParsedSeqId::Gi(gi) => enc.big_int(*gi),
+        ParsedSeqId::Pdb(id) => {
+            enc.begin_sequence("PDB-seq-id");
+            enc.member("mol", 0);
+            enc.visible_str(&id.mol);
+            enc.end_member();
+            let chain = match id.chain {
+                Some(chain) => Some(chain),
+                None if enc.writes_defaults() => Some(PDB_DEFAULT_CHAIN),
+                None => None,
+            };
+            optional_int(enc, "chain", 1, chain);
+            if let Some(rel) = &id.rel {
+                enc.member("rel", 2);
+                write_date(enc, rel);
+                enc.end_member();
+            }
+            optional_str(enc, "chain-id", 3, id.chain_id.as_deref());
+            enc.end_sequence();
+        }
+        ParsedSeqId::Genbank(id)
+        | ParsedSeqId::Embl(id)
+        | ParsedSeqId::Pir(id)
+        | ParsedSeqId::Swissprot(id)
+        | ParsedSeqId::Other(id)
+        | ParsedSeqId::Ddbj(id)
+        | ParsedSeqId::Prf(id)
+        | ParsedSeqId::Tpg(id)
+        | ParsedSeqId::Tpe(id)
+        | ParsedSeqId::Tpd(id)
+        | ParsedSeqId::Gpipe(id)
+        | ParsedSeqId::NamedAnnotTrack(id) => {
+            enc.begin_sequence("Textseq-id");
+            optional_str(enc, "name", 0, id.name.as_deref());
+            optional_str(enc, "accession", 1, id.accession.as_deref());
+            optional_str(enc, "release", 2, id.release.as_deref());
+            optional_int(enc, "version", 3, id.version);
+            enc.end_sequence();
+        }
+    }
+    enc.end_variant();
+}
+
+fn write_object_id<E: Encoder>(enc: &mut E, tag: &ObjectId) {
+    match tag {
+        ObjectId::Id(id) => {
+            enc.variant("Object-id", "id", 0);
+            enc.int(*id);
+        }
+        ObjectId::Str(text) => {
+            enc.variant("Object-id", "str", 1);
+            enc.visible_str(text);
+        }
+    }
+    enc.end_variant();
+}
+
+fn write_date<E: Encoder>(enc: &mut E, date: &Date) {
+    match date {
+        Date::Str(text) => {
+            enc.variant("Date", "str", 0);
+            enc.visible_str(text);
+        }
+        Date::Std(std) => {
+            enc.variant("Date", "std", 1);
+            enc.begin_sequence("Date-std");
+            enc.member("year", 0);
+            enc.int(std.year);
+            enc.end_member();
+            optional_int(enc, "month", 1, std.month);
+            optional_int(enc, "day", 2, std.day);
+            optional_str(enc, "season", 3, std.season.as_deref());
+            optional_int(enc, "hour", 4, std.hour);
+            optional_int(enc, "minute", 5, std.minute);
+            optional_int(enc, "second", 6, std.second);
+            enc.end_sequence();
+        }
+    }
+    enc.end_variant();
+}
+
+fn optional_str<E: Encoder>(enc: &mut E, name: &str, tag: u8, value: Option<&[u8]>) {
+    if let Some(value) = value {
+        enc.member(name, tag);
+        enc.visible_str(value);
+        enc.end_member();
+    }
+}
+
+fn optional_int<E: Encoder>(enc: &mut E, name: &str, tag: u8, value: Option<i32>) {
+    if let Some(value) = value {
+        enc.member(name, tag);
+        enc.int(value);
+        enc.end_member();
     }
 }

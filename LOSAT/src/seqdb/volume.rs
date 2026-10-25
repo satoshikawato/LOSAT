@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use super::file::DbFile;
-use super::header::{decode_defline_taxids, decode_deflines_as, Defline};
+use super::header::{decode_defline_taxids, decode_deflines_as, decode_full, Defline};
 use super::index::IndexFile;
 use super::{SeqDbError, SeqType, XDbIdxRead};
 
@@ -461,6 +461,17 @@ impl Volume {
     pub fn defline_taxids(&self, oid: u32) -> Result<Vec<i32>, SeqDbError> {
         let record = self.header_bytes(oid)?;
         decode_defline_taxids(
+            &record,
+            &with_extension(&self.base, self.index.seqtype, "hr"),
+        )
+    }
+
+    /// The definition lines of the sequence `oid` (volume-relative) with every member and
+    /// every Seq-id (`header::decode_full`); a `general` id `BL_ORD_ID` keeps its
+    /// volume-relative tag.
+    pub fn defline_set(&self, oid: u32) -> Result<crate::seqid::DeflineSet, SeqDbError> {
+        let record = self.header_bytes(oid)?;
+        decode_full(
             &record,
             &with_extension(&self.base, self.index.seqtype, "hr"),
         )

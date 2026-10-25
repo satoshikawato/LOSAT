@@ -1,0 +1,23 @@
+0	ref|XP_000001.1|	XP_000001.1	N/A	9606	0	alpha protein [Homo sapiens]
+0	sp|P99999.2|TEST_HUMAN	P99999.2	N/A	10090	0	alpha-like protein
+0	gb|AAA00001.1|	AAA00001.1	N/A	9606	0	hypothetical protein, partial
+1	ref|NP_000002.1|	NP_000002.1	123456	10116	0	gi plus ref protein
+2	sp|Q00003|ABC_MOUSE	Q00003	N/A	0	0	swissprot without version
+3	tr|A0A000|A0A000_YEAST	A0A000	N/A	0	0	trembl entry
+4	pdb|1ABC|A	1ABC_A	N/A	0	0	Chain A, test structure
+5	emb|CAA00005.1|	CAA00005.1	N/A	0	0	emb protein
+6	dbj|BAA00006.1|	BAA00006.1	N/A	0	0	dbj protein
+7	pir||S00007	pir||S00007	N/A	0	0	pir protein
+8	prf||0008123A	prf||0008123A	N/A	0	0	prf protein
+9	lcl|myprot9	myprot9	N/A	0	0	local id protein
+10	gnl|mydb|prot10	mydb:prot10	N/A	0	0	general id protein
+11	ref|XP_000011.2|	XP_000011.2	N/A	0	0	bare refseq accession
+12	sp|P00012|	P00012	N/A	0	0	bare uniprot-like accession
+13	lcl|myprot_13	myprot_13	N/A	0	0	bare non-accession word
+14	gi|1414	gi|1414	1414	0	0	gi only
+15	tpg|DAA00016.1|	DAA00016.1	N/A	0	0	third-party protein
+16	gb|AAA00017.1|LOCUS17	AAA00017.1	N/A	0	0	gb with a locus name
+17	gb|AAA00018.1|	AAA00018.1	1818	562	0	
+17	emb|CAA00019.1|	CAA00019.1	1819	562	0	second defline
+17	ref|XP_000020.1|	XP_000020.1	1820	9606	0	third defline
+18	sp|P00019.3|NAME_HUMAN	P00019.3	N/A	9606	0	with taxid

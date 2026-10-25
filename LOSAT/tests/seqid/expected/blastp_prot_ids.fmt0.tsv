@@ -1,0 +1,96 @@
+plain_description	XP_000001.1 alpha protein [Homo sapiens]                              255     5e-93
+plain_description	NP_000002.1 gi plus ref protein                                       251     2e-91
+plain_description	Q00003 swissprot without version                                      247     1e-89
+plain_description	CAA00005.1 emb protein                                                241     2e-87
+plain_description	A0A000 trembl entry                                                   240     4e-87
+plain_description	1ABC_A Chain A, test structure                                        237     7e-86
+plain_description	BAA00006.1 dbj protein                                                233     4e-84
+plain_description	pir||S00007 pir protein                                               223     2e-80
+plain_description	prf||0008123A prf protein                                             217     8e-78
+plain_description	myprot9 local id protein                                              213     2e-76
+plain_description	mydb:prot10 general id protein                                        209     1e-74
+plain_description	XP_000011.2 bare refseq accession                                     204     6e-73
+plain_description	P00012 bare uniprot-like accession                                    201     2e-71
+plain_description	myprot_13 bare non-accession word                                     195     3e-69
+plain_description	AAA00017.1 gb with a locus name                                       195     3e-69
+plain_description	gi|1414 gi only                                                       190     2e-67
+plain_description	AAA00018.1 unnamed protein product                                    186     1e-65
+plain_description	DAA00016.1 third-party protein                                        184     9e-65
+plain_description	P00019.3 with taxid                                                   173     2e-60
+plain_block	>XP_000001.1 alpha protein [Homo sapiens]\n P99999.2 alpha-like protein\n AAA00001.1 hypothetical protein, partial
+plain_block	>NP_000002.1 gi plus ref protein
+plain_block	>Q00003 swissprot without version
+plain_block	>CAA00005.1 emb protein
+plain_block	>A0A000 trembl entry
+plain_block	>1ABC_A Chain A, test structure
+plain_block	>BAA00006.1 dbj protein
+plain_block	>pir||S00007 pir protein
+plain_block	>prf||0008123A prf protein
+plain_block	>myprot9 local id protein
+plain_block	>mydb:prot10 general id protein
+plain_block	>XP_000011.2 bare refseq accession
+plain_block	>P00012 bare uniprot-like accession
+plain_block	>myprot_13 bare non-accession word
+plain_block	>AAA00017.1 gb with a locus name
+plain_block	>gi|1414 gi only
+plain_block	>AAA00018.1 unnamed protein product\n CAA00019.1 second defline\n XP_000020.1 third defline
+plain_block	>DAA00016.1 third-party protein
+plain_block	>P00019.3 with taxid
+plain_description	mydb:prot10 general id protein                                        17.3    0.24 
+plain_description	pir||S00007 pir protein                                               16.5    0.34 
+plain_description	P00012 bare uniprot-like accession                                    16.5    0.39 
+plain_description	P00019.3 with taxid                                                   14.6    2.0  
+plain_description	DAA00016.1 third-party protein                                        13.5    5.8  
+plain_block	>mydb:prot10 general id protein
+plain_block	>pir||S00007 pir protein
+plain_block	>P00012 bare uniprot-like accession
+plain_block	>P00019.3 with taxid
+plain_block	>DAA00016.1 third-party protein
+show_gis_description	ref|XP_000001.1|alpha protein [Homo sapiens]                          255     5e-93
+show_gis_description	gi|123456|ref|NP_000002.1|  gi plus ref protein                       251     2e-91
+show_gis_description	sp|Q00003|ABC_MOUSEswissprot without version                          247     1e-89
+show_gis_description	emb|CAA00005.1|emb protein                                            241     2e-87
+show_gis_description	tr|A0A000|A0A000_YEASTtrembl entry                                    240     4e-87
+show_gis_description	pdb|1ABC|AChain A, test structure                                     237     7e-86
+show_gis_description	dbj|BAA00006.1|dbj protein                                            233     4e-84
+show_gis_description	pir||S00007pir protein                                                223     2e-80
+show_gis_description	prf||0008123Aprf protein                                              217     8e-78
+show_gis_description	myprot9local id protein                                               213     2e-76
+show_gis_description	gnl|mydb|prot10general id protein                                     209     1e-74
+show_gis_description	ref|XP_000011.2|bare refseq accession                                 204     6e-73
+show_gis_description	sp|P00012|bare uniprot-like accession                                 201     2e-71
+show_gis_description	myprot_13bare non-accession word                                      195     3e-69
+show_gis_description	gb|AAA00017.1|LOCUS17gb with a locus name                             195     3e-69
+show_gis_description	gi|1414|gi|1414   gi only                                             190     2e-67
+show_gis_description	gi|1818|gb|AAA00018.1|  unnamed protein product                       186     1e-65
+show_gis_description	tpg|DAA00016.1|third-party protein                                    184     9e-65
+show_gis_description	sp|P00019.3|NAME_HUMANwith taxid                                      173     2e-60
+show_gis_block	>XP_000001.1 alpha protein [Homo sapiens]\n P99999.2 alpha-like protein\n AAA00001.1 hypothetical protein, partial
+show_gis_block	>gi|123456|ref|NP_000002.1| gi plus ref protein
+show_gis_block	>Q00003 swissprot without version
+show_gis_block	>CAA00005.1 emb protein
+show_gis_block	>A0A000 trembl entry
+show_gis_block	>1ABC_A Chain A, test structure
+show_gis_block	>BAA00006.1 dbj protein
+show_gis_block	>pir||S00007 pir protein
+show_gis_block	>prf||0008123A prf protein
+show_gis_block	>myprot9 local id protein
+show_gis_block	>mydb:prot10 general id protein
+show_gis_block	>XP_000011.2 bare refseq accession
+show_gis_block	>P00012 bare uniprot-like accession
+show_gis_block	>myprot_13 bare non-accession word
+show_gis_block	>AAA00017.1 gb with a locus name
+show_gis_block	>gi|1414 gi only
+show_gis_block	>gi|1818|gb|AAA00018.1| unnamed protein product\n gi|1819|emb|CAA00019.1| second defline\n gi|1820|ref|XP_000020.1| third defline
+show_gis_block	>DAA00016.1 third-party protein
+show_gis_block	>P00019.3 with taxid
+show_gis_description	gnl|mydb|prot10general id protein                                     17.3    0.24 
+show_gis_description	pir||S00007pir protein                                                16.5    0.34 
+show_gis_description	sp|P00012|bare uniprot-like accession                                 16.5    0.39 
+show_gis_description	sp|P00019.3|NAME_HUMANwith taxid                                      14.6    2.0  
+show_gis_description	tpg|DAA00016.1|third-party protein                                    13.5    5.8  
+show_gis_block	>mydb:prot10 general id protein
+show_gis_block	>pir||S00007 pir protein
+show_gis_block	>P00012 bare uniprot-like accession
+show_gis_block	>P00019.3 with taxid
+show_gis_block	>DAA00016.1 third-party protein

@@ -54,6 +54,8 @@ impl TblastxDatabase {
     /// (above `usize`) or as NCBI's `Int8` is LOSAT's refusal.
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         let db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
+        // A database with parsed Seq-ids is refused (line DBID: ID2b opens it).
+        shared::refuse_parsed_seqids(&db, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()

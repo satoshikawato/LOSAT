@@ -1,0 +1,24 @@
+ref|XP_000001.1|	alpha protein [Homo sapiens] >sp|P99999.2|TEST_HUMAN alpha-like protein >gb|AAA00001.1| hypothetical protein, partial	XP_000001
+gi|123456|ref|NP_000002.1|	gi plus ref protein	NP_000002
+sp|Q00003|ABC_MOUSE	swissprot without version	Q00003
+emb|CAA00005.1|	emb protein	CAA00005
+tr|A0A000|A0A000_YEAST	trembl entry	A0A000
+pdb|1ABC|A	Chain A, test structure	1ABC_A
+dbj|BAA00006.1|	dbj protein	BAA00006
+pir||S00007	pir protein	S00007
+prf||0008123A	prf protein	0008123A
+myprot9	local id protein	myprot9
+gnl|mydb|prot10	general id protein	prot10
+ref|XP_000011.2|	bare refseq accession	XP_000011
+sp|P00012|	bare uniprot-like accession	P00012
+myprot_13	bare non-accession word	myprot_13
+gb|AAA00017.1|LOCUS17	gb with a locus name	AAA00017
+gi|1414	gi only	1414
+gi|1818|gb|AAA00018.1|	 >gi|1819|emb|CAA00019.1| second defline >gi|1820|ref|XP_000020.1| third defline	AAA00018
+tpg|DAA00016.1|	third-party protein	DAA00016
+sp|P00019.3|NAME_HUMAN	with taxid	P00019
+gnl|mydb|prot10	general id protein	prot10
+pir||S00007	pir protein	S00007
+sp|P00012|	bare uniprot-like accession	P00012
+sp|P00019.3|NAME_HUMAN	with taxid	P00019
+tpg|DAA00016.1|	third-party protein	DAA00016

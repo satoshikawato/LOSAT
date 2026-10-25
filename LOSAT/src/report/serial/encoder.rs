@@ -89,6 +89,12 @@ impl std::error::Error for SerialError {}
 
 /// The calls of NCBI's `CObjectOStream` that the serialized BLAST reports make.
 pub trait Encoder {
+    /// `IsWritingDefaultValuesEnforced`: whether a member with a DEFAULT that was not set is
+    /// written anyway, with its default value (`report::seqid` quotes the rule). Only NCBI's
+    /// JSON stream enforces it (`m_EnforceWritingDefaults`, `json`).
+    fn writes_defaults(&self) -> bool {
+        false
+    }
     /// `WriteFileHeader(type)`: the start of a document whose top-level object is of the
     /// ASN.1 type `type_name` (`Seq-annot`).
     fn begin_document(&mut self, type_name: &str);

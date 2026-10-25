@@ -49,6 +49,9 @@ pub(crate) mod x_mb_lut_keep;
 // run by run and the update queued 64 words.
 #[path = "x_mb_fill.rs"]
 mod x_mb_fill;
+// PROBE (LOSAT_X_MBHRANK, v4-A10 s20): the head table of a 4^12-cell megablast table by rank.
+#[path = "x_mb_head_rank.rs"]
+mod x_mb_head_rank;
 
 /// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): with
 /// LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the megablast table builds; then the
@@ -918,6 +921,9 @@ struct MbLookupTable {
     /// EXPERIMENT (LOSAT_X_BNCSR): the chains of a contiguous table as CSR (`x_bn_csr.rs`); then
     /// `hashtable` and `next_pos` are empty and `x_keep` is `None`.
     x_csr: Option<x_dc_csr::Csr>,
+    /// PROBE (LOSAT_X_MBHRANK): the head table by rank (`x_mb_head_rank.rs`); then `hashtable`
+    /// is empty and `x_keep` is `None`.
+    x_rank: Option<x_mb_head_rank::HeadRank>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1376
@@ -964,8 +970,12 @@ impl MbLookupTable {
         if !self.has_hits(index) {
             return;
         }
-        let Some(&head) = self.hashtable.get(index as usize) else {
-            return self.x_csr_each(index, callback);
+        let head = match self.hashtable.get(index as usize) {
+            Some(&head) => head,
+            None => match self.x_rank.as_ref() {
+                Some(rank) => rank.head(index as usize),
+                None => return self.x_csr_each(index, callback),
+            },
         };
         let mut q_off = head;
         while q_off != 0 {
@@ -996,8 +1006,12 @@ impl MbLookupTable {
         if !self.has_hits(index) {
             return false;
         }
-        let Some(&head) = self.hashtable.get(index as usize) else {
-            return x_csr();
+        let head = match self.hashtable.get(index as usize) {
+            Some(&head) => head,
+            None => match self.x_rank.as_ref() {
+                Some(rank) => rank.head(index as usize),
+                None => return x_csr(),
+            },
         };
         let mut found = false;
         let mut q_off = head;
@@ -1016,8 +1030,12 @@ impl MbLookupTable {
         if !self.has_hits(index) {
             return 0;
         }
-        let Some(&head) = self.hashtable.get(index as usize) else {
-            return x_csr();
+        let head = match self.hashtable.get(index as usize) {
+            Some(&head) => head,
+            None => match self.x_rank.as_ref() {
+                Some(rank) => rank.head(index as usize),
+                None => return x_csr(),
+            },
         };
         let mut count = 0usize;
         let mut q_off = head;
@@ -1919,8 +1937,18 @@ fn build_mb_lookup(
     // `hashtable` nor `next_pos` and takes nothing from the batch loop's keep; the table the keep
     // holds is freed, so the loop does not hold it beside this one.
     let x_csr_layout = x_bn_csr::plan(&x_words, table_size, db_word_counts.is_some(), debug_mode);
+    // PROBE (LOSAT_X_MBHRANK): the one-thread fill only (no pool), as CSR takes no keep.
+    let x_rank_layout = !x_csr_layout
+        && x_mb_lookup_par::pool_threads().is_none()
+        && x_mb_head_rank::plan(
+            &x_words,
+            table_size,
+            db_word_counts.is_some(),
+            debug_mode,
+            pv_array_bts,
+        );
     let x_keep = match x_keep {
-        Some(keep) if x_csr_layout => {
+        Some(keep) if x_csr_layout || x_rank_layout => {
             keep.release();
             None
         }
@@ -1936,7 +1964,7 @@ fn build_mb_lookup(
     // as before (`x_mb_lut_keep.rs`).
     let (mut hashtable, x_resident, x_dirty) = match x_keep {
         Some(keep) => keep.take(table_size, x_mb_lookup_par::pool_threads().is_some()),
-        None if x_csr_layout => (Vec::new(), false, 0),
+        None if x_csr_layout || x_rank_layout => (Vec::new(), false, 0),
         None => (vec![0u32; table_size], false, table_size),
     };
     let max_query_offset = queries_blastna
@@ -2010,8 +2038,9 @@ fn build_mb_lookup(
     // be (`x_bn_csr::build`).
     x_clock.fill();
     let mut x_csr = None;
+    let mut x_rank = None;
     let mut x_csr_on_pool = false;
-    let x_on_pool = if x_csr_layout {
+    let x_on_pool = if x_csr_layout || x_rank_layout {
         None
     } else {
         x_mb_lookup_par::parts(db_word_counts.is_none() && !debug_mode)
@@ -2027,6 +2056,15 @@ fn build_mb_lookup(
         );
         x_csr = Some(csr);
         x_csr_on_pool = on_pool;
+    } else if x_rank_layout {
+        x_rank = Some(x_mb_head_rank::serial(
+            &x_words,
+            table_size,
+            &mut next_pos,
+            &mut pv_array,
+            pv_array_bts,
+            &mut helper_array,
+        ));
     } else if let Some(x_parts) = x_on_pool {
         x_filled = x_mb_lookup_par::fill(
             x_parts,
@@ -2114,6 +2152,9 @@ fn build_mb_lookup(
     }
     // No NCBI counterpart: the end of the `[TIMING] x_mb_lookup_build` interval.
     x_clock.record(x_on_pool.is_some() || x_csr_on_pool, x_filled);
+    if x_mb_head_rank::trace() && x_rank.is_none() && !x_csr_layout {
+        x_mb_head_rank::trace_chains(&hashtable[..table_size], &next_pos);
+    }
 
     if debug_mode {
         let hashtable_bytes = table_size * std::mem::size_of::<u32>();
@@ -2137,6 +2178,7 @@ fn build_mb_lookup(
         longest_chain,
         x_keep: x_keep.map(|keep| (keep.clone(), x_dirty)),
         x_csr,
+        x_rank,
     }
 }
 
@@ -2656,6 +2698,7 @@ pub fn build_disc_mb_lookup(
                 longest_chain,
                 x_keep: None,
                 x_csr: None,
+                x_rank: None,
             },
             lut_word_length,
             word_length: word_size,
@@ -2733,6 +2776,7 @@ pub fn build_disc_mb_lookup(
             longest_chain: total_longest_chain,
             x_keep: None,
             x_csr: None,
+            x_rank: None,
         },
         lut_word_length,
         word_length: word_size,

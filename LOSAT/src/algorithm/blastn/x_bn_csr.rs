@@ -175,7 +175,7 @@ fn positions(words: &Words<'_>) -> usize {
 /// The word loop of `build_mb_lookup` (`x_mb_lookup_par::fill_part` without the owner test and
 /// the update): calls `f(cell, q_off_1)` for each word, in the loop's order.
 #[inline(always)]
-fn each_word(words: &Words<'_>, mut f: impl FnMut(usize, u32)) {
+pub(super) fn each_word(words: &Words<'_>, mut f: impl FnMut(usize, u32)) {
     let lut_word_length = words.lut_word_length;
     for (q_idx, seq) in words.queries_blastna.iter().enumerate() {
         if seq.len() < lut_word_length {

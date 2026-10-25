@@ -7,6 +7,8 @@
 mod run_local_tblastn;
 #[path = "../tblastn_batch_rule.rs"]
 mod tblastn_batch_rule;
+#[path = "../tblastn_culling.rs"]
+mod tblastn_culling;
 #[path = "../tblastn_db_search.rs"]
 mod tblastn_db_search;
 #[path = "../tblastn_db_stream.rs"]

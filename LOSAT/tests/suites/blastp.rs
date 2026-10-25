@@ -3,6 +3,8 @@
 //! LOSAT/tests/ gets its two lines in its program's suite (`tests/suite_layout.rs` checks that
 //! every file is in exactly one test binary).
 
+#[path = "../blastp_culling.rs"]
+mod blastp_culling;
 #[path = "../blastp_db_cut.rs"]
 mod blastp_db_cut;
 #[path = "../blastp_diag_batch.rs"]

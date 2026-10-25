@@ -215,6 +215,12 @@ pub struct TblastnArgs {
     pub max_hsps: Option<usize>,
     #[arg(long = "qcov_hsp_perc", value_parser = tblastn_query_coverage, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
+    // NCBI blast_args.cpp:3335-3340 (CHspFilteringArgs::ExtractAlgorithmOptions):
+    // opts.SetCullingLimit(args[kArgCullingLimit].AsInteger());
+    /// If the query range of a hit is enveloped by that of at least this many
+    /// higher-scoring hits, delete the hit (default: 0, no culling).
+    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: Option<i32>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
     #[arg(long)]
@@ -274,6 +280,8 @@ pub struct ResolvedTblastnArgs {
     pub max_hsps: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
+    /// The -culling_limit value (0: no culling).
+    pub culling_limit: i32,
     pub composition_mode: crate::blastinput::app::CompositionMode,
     /// The `-comp_based_stats` value as typed.
     pub comp_based_stats: String,
@@ -283,6 +291,12 @@ pub struct ResolvedTblastnArgs {
 }
 
 impl TblastnArgs {
+    /// `-culling_limit`, 0 (no culling) when it is not given. The BLAST archive records
+    /// whether it was given (`culling_limit`).
+    pub fn culling_limit_value(&self) -> i32 {
+        self.culling_limit.unwrap_or(0)
+    }
+
     /// The `-db` value as NCBI keeps it (white space at its ends removed), `None` for a
     /// search of `-subject`.
     ///
@@ -592,6 +606,7 @@ impl TblastnArgs {
             // NCBI blast_args.cpp:313-319: SetQueryCovHspPerc, SetMaxHspsPerSubject.
             max_hsps: self.max_hsps.unwrap_or(0),
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
+            culling_limit: self.culling_limit_value(),
             composition_mode,
             comp_based_stats: self.comp_based_stats.clone(),
             num_threads: self.num_threads,
@@ -1772,6 +1787,7 @@ fn search(
                 query_offsets: &query_offsets[range],
                 subject_set,
                 engine_positives,
+                culling_limit: resolved.culling_limit,
             },
             composition_mode2,
             resolved.sum_stats,
@@ -1817,6 +1833,7 @@ fn search(
                             query_offsets: &query_offsets[range.clone()],
                             subject_set,
                             engine_positives,
+                            culling_limit: resolved.culling_limit,
                         },
                         composition_mode2,
                         resolved.sum_stats,
@@ -1875,13 +1892,25 @@ fn search(
             // context is its searched letters), which the search has sorted by e-value; the
             // sort is a total order (best e-value, first score, OID), so sorting again after
             // the filter gives NCBI's order. A search with hits has subject letters.
-            if resolved.max_hsps > 0 || resolved.query_cov_hsp_perc > 0.0 {
+            // `-culling_limit` runs NCBI's culling pipe first on each query's hit list
+            // (`BlastHSPStreamTBackClose`, before the filters of `s_FilterBlastResults`;
+            // hspfilter_culling.c:699-733); its lists leave in the order of the tree, and the
+            // sort by e-value below is the one NCBI runs unconditionally after the pipes.
+            if resolved.max_hsps > 0
+                || resolved.query_cov_hsp_perc > 0.0
+                || resolved.culling_limit > 0
+            {
                 for (hitlist, query) in batch_results.iter_mut().zip(&query_seqs[range.clone()]) {
-                    hitlist.filter_results(
-                        resolved.max_hsps,
-                        resolved.query_cov_hsp_perc,
-                        query.len(),
-                    );
+                    if resolved.culling_limit > 0 {
+                        hitlist.cull(resolved.culling_limit, query.len())?;
+                    }
+                    if resolved.max_hsps > 0 || resolved.query_cov_hsp_perc > 0.0 {
+                        hitlist.filter_results(
+                            resolved.max_hsps,
+                            resolved.query_cov_hsp_perc,
+                            query.len(),
+                        );
+                    }
                     hitlist.sort_by_evalue_for_positive_totlen();
                 }
             }

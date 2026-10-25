@@ -3914,7 +3914,21 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_PAIRPARHOME=0`, against `=0`, the
   one-hit fold of `-task blastn` with 17,506 hits in its stage and with 412, the Na fold of `-task blastn-short`, the
   two-hit fold of `-task dc-megablast`, with the sides of `LOSAT_X_REACH`).
-  Default ON since 2026-10-25 (perf/pairpar-merge; EVIDENCE_PR).
+  Default ON since 2026-10-25 (perf/pairpar-merge; workstation (2x Xeon Gold 6338, node 1 booked through its FIFO, 8 /
+  16 / 32 physical cores with the siblings idle, `numactl --membind 1`, the many-pair driver with the arm order rotated,
+  every output the expected one: the 31,168-cDNA blastn NCBI's daa7e0ac, the dc-megablast NCBI's 5c357f81); a ratio is
+  the median of the per-round with / `=0` of the same binary, 1d2884b1 against origin/dev e41ccb34, v4-A15
+  `results/s12/ms1`): blastn of 31,168 D. melanogaster cDNAs against 3 Mb of chromosome 2L in the batch loop
+  (`LOSAT_X_QBATCHPAR=0`) x0.960 / 0.949 / 0.947 at 8 / 16 / 32 threads (5 / 8 / 8 rounds, none slower; at 32 threads
+  rounds 2-6 of every arm ran with 1.6 times the CPU time, a disturbance outside the run, and rounds 0, 1 and 7 read
+  x0.941-0.948), against a `-db` of the chromosome x0.953 / 0.958 at 16 / 32 threads, with eight QBATCHPAR slots
+  (`LOSAT_X_QBATCHPARSLOTS=8`) x0.988 / 0.981, 1,775 cDNAs (the batch loop by default) x0.940 at 16 threads (20 rounds).
+  Within noise where no stage reaches the bound or none is partitioned (16 threads): the 31,168 cDNAs by default
+  (one-thread QBATCHPAR slots) x1.003, 5,000 cDNAs x1.000, dc-megablast of the 31,168 cDNAs x0.999, of 1,775 x0.999,
+  of 236 x1.001 (100 rounds), megablast x1.004 and in the batch loop x0.985, blastn-short of 236 cDNAs x0.996. CPU time
+  x0.985-1.009, max RSS unchanged (`ru_maxrss`, every cell within 1 % or the arena spread of the arms). One thread (one
+  node 0 core, `perf stat`, the 1,775 cDNAs with blastn and dc-megablast): instructions within 0.0001 % of `=0` and of
+  dev, cycles x0.999 / x0.995 (no stage is partitioned at one thread).
   Probe (v4-A15 s12, workstation 2x Xeon Gold 6338, node 1 booked through its FIFO, 8 / 16 / 24 / 32 physical cores with
   the siblings idle, `numactl --membind 1`, dev f24d161f, every output NCBI's): blastn of 31,168 D. melanogaster cDNAs
   against 3 Mb of chromosome 2L in the batch loop (`LOSAT_X_QBATCHPAR=0`) 9.84 / 6.03 / 5.09 / 4.70 s at 8 / 16 / 24 / 32

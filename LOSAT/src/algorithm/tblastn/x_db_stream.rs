@@ -54,7 +54,7 @@
 //! search (a database changed or damaged after the check, an error of the file system) is an
 //! `XReadError` holding the error that the check gives for the same read: the search of the
 //! batches is then made again one batch at a time, so that the batch that reads it fails after the
-//! reports of the batches before, as with the check's error (`args.rs`).
+//! reports of the batches before, as with the check's error (`tblastn_app.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:374-376 (the sequence of
 //! the search is the mapped volume's bytes, not a copy)

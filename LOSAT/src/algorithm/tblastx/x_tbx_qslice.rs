@@ -547,20 +547,22 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        self.scan_unit_sliced_hits::<S, B, PF, false>(group, unit, inp, scratch, init_hsps);
+        self.scan_unit_sliced_hits::<S, B, PF, false, false>(group, unit, inp, scratch, init_hsps);
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
     // `x_hits_bf`, which takes the too-far and overlap outcomes without a branch and hands the
     // others to `x_hit` (or `x_hit_batched` with `B`); without it this is the loop before the
     // switch. `BF` runs only where `x_tbx_hitbf::fits` holds.
-    /// `scan_unit_sliced`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF.
+    /// `scan_unit_sliced`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF and with `SENT` the
+    /// extensions of `extend_hit_two_hit_sent` (LOSAT_X_TBXUNGAPSENT).
     #[inline(always)]
     pub(super) fn scan_unit_sliced_hits<
         S: XInitSink,
         const B: bool,
         const PF: bool,
         const BF: bool,
+        const SENT: bool,
     >(
         &self,
         group: &XSliced,
@@ -569,6 +571,8 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
+        // LOSAT_X_TBXUNGAPSENT: as in `scan_unit_cells`.
+        assert!(!SENT || self.x_unit_sent(unit, inp));
         let wordsize = inp.wordsize;
         let window = inp.window;
         let s_frame = &inp.s_frames_preliminary[unit.f];
@@ -604,6 +608,7 @@ impl XPairPar {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
+            subject_sent: if SENT { subject_full } else { &[] },
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -682,7 +687,7 @@ impl XPairPar {
                                 wordsize,
                                 |cell, query_offset, subject_offset| {
                                     if B {
-                                        x_tbx_extbatch::x_hit_batched(
+                                        x_tbx_extbatch::x_hit_batched::<S, SENT>(
                                             diag_ptr,
                                             cell,
                                             query_offset,
@@ -692,7 +697,7 @@ impl XPairPar {
                                             init_hsps,
                                         );
                                     } else {
-                                        x_hit(
+                                        x_hit::<S, XNoProbe, SENT>(
                                             &mut *diag_ptr.add(cell),
                                             query_offset,
                                             subject_offset,
@@ -735,7 +740,7 @@ impl XPairPar {
                             // and subject_offset < s_len, so diag_coord < width =
                             // scratch.diag.len(); every candidate's cell is such a cell.
                             unsafe {
-                                x_tbx_extbatch::x_hit_batched(
+                                x_tbx_extbatch::x_hit_batched::<S, SENT>(
                                     diag_ptr,
                                     diag_coord,
                                     query_offset,
@@ -748,7 +753,7 @@ impl XPairPar {
                         } else {
                             // SAFETY: as above.
                             let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
-                            x_hit(
+                            x_hit::<S, XNoProbe, SENT>(
                                 diag_entry,
                                 query_offset,
                                 subject_offset,
@@ -763,7 +768,9 @@ impl XPairPar {
         }
         if B && b.pending() > 0 {
             // SAFETY: the candidates' cells are cells of this unit's table.
-            unsafe { x_tbx_extbatch::flush(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps) };
+            unsafe {
+                x_tbx_extbatch::flush::<S, SENT>(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps)
+            };
         }
     }
 }
@@ -917,8 +924,9 @@ mod tests {
     }
 
     // No NCBI counterpart: one instance of the scan in slices by the bits of `variant`: batched
-    // extensions (2), the prefetch (1), the branch-free hit loop of LOSAT_X_TBXHITBF (4).
-    fn scan_sliced_variant<S: XInitSink>(
+    // extensions (2), the prefetch (1), the branch-free hit loop of LOSAT_X_TBXHITBF (4); `SENT`:
+    // the extensions of LOSAT_X_TBXUNGAPSENT (for a unit `x_unit_sent` accepts).
+    fn scan_sliced_variant<S: XInitSink, const SENT: bool>(
         pp: &XPairPar,
         variant: usize,
         sliced: &XSliced,
@@ -928,16 +936,30 @@ mod tests {
         got: &mut S,
     ) {
         match variant {
-            0 => {
-                pp.scan_unit_sliced_hits::<_, false, false, false>(sliced, unit, inp, scratch, got)
-            }
-            1 => pp.scan_unit_sliced_hits::<_, false, true, false>(sliced, unit, inp, scratch, got),
-            2 => pp.scan_unit_sliced_hits::<_, true, false, false>(sliced, unit, inp, scratch, got),
-            3 => pp.scan_unit_sliced_hits::<_, true, true, false>(sliced, unit, inp, scratch, got),
-            4 => pp.scan_unit_sliced_hits::<_, false, false, true>(sliced, unit, inp, scratch, got),
-            5 => pp.scan_unit_sliced_hits::<_, false, true, true>(sliced, unit, inp, scratch, got),
-            6 => pp.scan_unit_sliced_hits::<_, true, false, true>(sliced, unit, inp, scratch, got),
-            _ => pp.scan_unit_sliced_hits::<_, true, true, true>(sliced, unit, inp, scratch, got),
+            0 => pp.scan_unit_sliced_hits::<_, false, false, false, SENT>(
+                sliced, unit, inp, scratch, got,
+            ),
+            1 => pp.scan_unit_sliced_hits::<_, false, true, false, SENT>(
+                sliced, unit, inp, scratch, got,
+            ),
+            2 => pp.scan_unit_sliced_hits::<_, true, false, false, SENT>(
+                sliced, unit, inp, scratch, got,
+            ),
+            3 => pp.scan_unit_sliced_hits::<_, true, true, false, SENT>(
+                sliced, unit, inp, scratch, got,
+            ),
+            4 => pp.scan_unit_sliced_hits::<_, false, false, true, SENT>(
+                sliced, unit, inp, scratch, got,
+            ),
+            5 => pp.scan_unit_sliced_hits::<_, false, true, true, SENT>(
+                sliced, unit, inp, scratch, got,
+            ),
+            6 => pp.scan_unit_sliced_hits::<_, true, false, true, SENT>(
+                sliced, unit, inp, scratch, got,
+            ),
+            _ => pp.scan_unit_sliced_hits::<_, true, true, true, SENT>(
+                sliced, unit, inp, scratch, got,
+            ),
         }
     }
 
@@ -953,6 +975,10 @@ mod tests {
         let mut rng = Rng(0x5eed_51ce_0123_4567);
         let mut records = 0usize;
         let mut cut_groups = 0usize;
+        // LOSAT_X_TBXUNGAPSENT: the units, those whose chunk is the whole frame, and those that took
+        // the sentinel walks.
+        let (mut units, mut whole_units, mut sent_units) = (0usize, 0usize, 0usize);
+        let on = x_tbx_sent_contexts(std::iter::empty());
         for case in 0..12 {
             let abc = if case % 3 == 2 { &narrow } else { &alphabet };
             let q_len = 200 + rng.below(500) as usize;
@@ -1005,6 +1031,7 @@ mod tests {
             let pp = XPairPar {
                 groups,
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: Some(direct),
                 mask_rule: None,
                 extents: Vec::new(),
@@ -1046,17 +1073,37 @@ mod tests {
                     reference.x_sort();
                     for sliced in [&pp.sliced.as_ref().unwrap()[g], &filtered[g]] {
                         let mut plain: Vec<Vec<InitHSP>> = Vec::new();
-                        for variant in 0..8 {
+                        // 8..16: the same with LOSAT_X_TBXUNGAPSENT, on the units that take it.
+                        let sent = pp.x_unit_sent(&unit, &inp);
+                        units += 1;
+                        whole_units += usize::from(chunk.offset == 0);
+                        sent_units += usize::from(sent);
+                        for variant in 0..16 {
+                            if variant >= 8 && !sent {
+                                continue;
+                            }
                             let mut got: Vec<InitHSP> = Vec::new();
-                            scan_sliced_variant(
-                                &pp,
-                                variant,
-                                sliced,
-                                &unit,
-                                &inp,
-                                &mut scratch,
-                                &mut got,
-                            );
+                            if variant < 8 {
+                                scan_sliced_variant::<_, false>(
+                                    &pp,
+                                    variant,
+                                    sliced,
+                                    &unit,
+                                    &inp,
+                                    &mut scratch,
+                                    &mut got,
+                                );
+                            } else {
+                                scan_sliced_variant::<_, true>(
+                                    &pp,
+                                    variant & 7,
+                                    sliced,
+                                    &unit,
+                                    &inp,
+                                    &mut scratch,
+                                    &mut got,
+                                );
+                            }
                             assert!(
                                 scratch.diag == reference_diag,
                                 "case {case} frame {f} group {g} variant {variant}: table"
@@ -1067,7 +1114,7 @@ mod tests {
                                 // LOSAT_X_TBXHITBF: the same records in the same order.
                                 assert_eq!(
                                     got,
-                                    plain[variant - 4],
+                                    plain[variant & 3],
                                     "case {case} frame {f} group {g} variant {variant}: order"
                                 );
                             }
@@ -1097,7 +1144,7 @@ mod tests {
                         &mut compact,
                     );
                     let mut compact_bf: Vec<XUnitHsp> = Vec::new();
-                    pp.scan_unit_sliced_hits::<_, true, false, true>(
+                    pp.scan_unit_sliced_hits::<_, true, false, true, false>(
                         &pp.sliced.as_ref().unwrap()[g],
                         &unit,
                         &inp,
@@ -1119,5 +1166,9 @@ mod tests {
         }
         assert!(cut_groups > 40, "cut groups {cut_groups}");
         assert!(records > 500, "records {records}");
+        // The units of a whole frame take the walks when the switch is on, the others (the odd
+        // cases' chunks start inside the frame) never.
+        assert!(0 < whole_units && whole_units < units);
+        assert_eq!(sent_units, if on { whole_units } else { 0 });
     }
 }

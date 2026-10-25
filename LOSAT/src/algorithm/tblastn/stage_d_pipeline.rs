@@ -83,7 +83,7 @@ pub(super) struct LocalStageDProfile<'a> {
     /// The `-culling_limit` value (0: no culling). A positive value makes the preliminary
     /// stage keep the HSPs of each query in NCBI's culling writer (`culling.rs`)
     /// instead of the plain hit-list collector; the pipe after the traceback is run by the
-    /// finish of the search (`args.rs`).
+    /// finish of the search (`tblastn_app.rs`).
     pub culling_limit: i32,
 }
 
@@ -576,9 +576,9 @@ fn x_own_pool_threads(threads: usize, pools: usize, index: usize) -> usize {
 }
 
 /// Graduated 2026-10-22 (was `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`): the query batches
-/// `ranges` of `search` (`args.rs`) searched ahead, each with its range, in the order of
-/// `ranges`; `None` when `ranges` is empty; the caller's loop then searches its batches (args.rs
-/// passes none when the database's sequences could not be read).
+/// `ranges` of `search` (`tblastn_app.rs`) searched ahead, each with its range, in the order
+/// of `ranges`; `None` when `ranges` is empty; the caller's loop then searches its batches
+/// (tblastn_app.rs passes none when the database's sequences could not be read).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
 /// ```c++
@@ -1001,7 +1001,8 @@ fn run_local_search_with_pool(
         "TBLASTN Stage D requires a protein query"
     );
     // A database search has no subjects in hand when its sequences could not be read: its
-    // batches are set up and reported, and `args::search` fails the first with a valid context.
+    // batches are set up and reported, and `tblastn_app::search` fails the first with a valid
+    // context.
     ensure!(
         subjects.count() > 0 || profile.subject_set.database.is_some(),
         "TBLASTN Stage D requires a local subject"
@@ -3094,7 +3095,7 @@ fn finish_local_mode0_no_sum_stats(
 mod tests {
     use super::*;
 
-    // The search reads the subjects as slices of the records' residues (`args.rs`).
+    // The search reads the subjects as slices of the records' residues (`tblastn_app.rs`).
     fn subject_slices(subjects: &[Vec<u8>]) -> Vec<&[u8]> {
         subjects.iter().map(Vec::as_slice).collect()
     }

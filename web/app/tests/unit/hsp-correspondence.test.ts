@@ -8,13 +8,17 @@
 //   as docs/evidence/losat_web_e2a/check_losat.py compares them),
 // - the HSP records' `out6` ranges tile the outfmt 6 text in the order of the records, and
 //   each row's coordinates are the record's,
-// - outfmt 0 has as many sections and subject headings as the records point to,
+// - outfmt 0 has as many sections and subject headings as the records point to, except in a run
+//   of two searches (-num_descriptions / -num_alignments that give outfmt 0 another hit list size
+//   than outfmt 6 and 7, abi_v2.md §7): the records are the tabular list, and the sections and
+//   headings that no record points to belong to pairs whose records are absent or differ,
 // - each `out0` range is the HSP's section (its score lines and its alignment, whose first
 //   and last Query and Sbjct coordinates are the record's), in the order of the records,
 // - each `out0_subject` range is the subject's heading, the same for the HSPs of one subject
 //   in one query, and before their sections,
 // - an HSP has no section exactly when its subject has no heading, and such subjects come
-//   after the subjects that outfmt 0 shows (-num_alignments),
+//   after the subjects that outfmt 0 shows (-num_alignments; in a run of two searches a pair is
+//   linked only where the outfmt 0 search has exactly its HSPs, so there is no such order),
 // - the results screen's index (domain/result-index.ts) groups the same HSPs.
 // It needs LOSAT_WEB_REACTORS; the gate runs it (docs/evidence/losat_web_w4/run_gate.sh).
 import { createHash } from 'node:crypto';
@@ -83,7 +87,33 @@ function fixtures(): Map<string, Fixture[]> {
 interface Outputs {
   readonly streams: Map<number, Uint8Array>;
   readonly records: HspRecord[];
+  /** The ids of the registered records (the `id` of the register responses). */
+  readonly queryIds: readonly string[];
+  readonly subjectIds: readonly string[];
 }
+
+/**
+ * The hit list size that the engine derives for the output format `format` from the options of a run
+ * (NCBI `blast_args.cpp:2894-2973`, the adapter's `hit_list_size`): written out here, not read from the
+ * app's `hitLimits`, which the results screen uses, so that a wrong `separate` there cannot select the
+ * weaker rule below. outfmt 0 (any format up to 4): -max_target_seqs, or the larger of -num_descriptions
+ * (500) and -num_alignments (250) where either is given; the tabular formats: -max_target_seqs, else
+ * -num_alignments, else 500.
+ */
+function hitListSize(words: readonly string[], format: 0 | 6): number {
+  const value = (flag: string): number | undefined => {
+    const at = words.lastIndexOf(flag);
+    return at >= 0 ? Number(words[at + 1]) : undefined;
+  };
+  const [maxTargetSeqs, descriptions, alignments] = [value('-max_target_seqs'), value('-num_descriptions'), value('-num_alignments')];
+  if (format === 0) {
+    return descriptions !== undefined || alignments !== undefined ? Math.max(descriptions ?? 500, alignments ?? 250) : (maxTargetSeqs ?? 500);
+  }
+  return maxTargetSeqs ?? alignments ?? 500;
+}
+
+/** Whether the run searched twice: outfmt 0 has a hit list size of its own (the sizes of the formats differ). */
+const searchedTwice = (fixture: Fixture): boolean => hitListSize(fixture.words, 0) !== hitListSize(fixture.words, 6);
 
 function search(abi: ReactorAbi, fixture: Fixture): Outputs {
   const parts = new Map<number, Uint8Array[]>();
@@ -100,7 +130,7 @@ function search(abi: ReactorAbi, fixture: Fixture): Outputs {
   for (const [stream, chunks] of parts) streams.set(stream, Buffer.concat(chunks));
   const text = new TextDecoder().decode(streams.get(1) ?? new Uint8Array());
   const records = text.split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l) as HspRecord);
-  return { streams, records };
+  return { streams, records, queryIds: query.records.map((r) => r.id), subjectIds: subject.records.map((r) => r.id) };
 }
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -163,8 +193,54 @@ function alignmentEnds(section: string, label: 'Query' | 'Sbjct'): [number, numb
   return [Number(first[1]), Number(last.at(-1))];
 }
 
+/** The raw score, the first and last coordinates of one HSP section of outfmt 0, as a comparable text. */
+function sectionKey(section: string): string {
+  const raw = /^ Score = +[\d.]+ bits \((\d+)\)/.exec(section)?.[1];
+  return JSON.stringify([Number(raw), ...alignmentEnds(section, 'Query'), ...alignmentEnds(section, 'Sbjct')]);
+}
+
+/**
+ * The subject headings of outfmt 0 in order with their offsets, the query they belong to (the index
+ * among the registered queries, matched by id in order) and the sections of their HSPs.
+ */
+function headingsOf(
+  text: string,
+  queryIds: readonly string[],
+): Array<{ qIdx: number; offset: number; id: string; hsps: string[] }> {
+  const found: Array<{ qIdx: number; offset: number; id: string; hsps: string[] }> = [];
+  let qIdx = -1;
+  let offset = 0;
+  let current: { qIdx: number; offset: number; id: string; hsps: string[] } | undefined;
+  let section: string[] | undefined;
+  const close = () => {
+    if (section !== undefined && current !== undefined) current.hsps.push(sectionKey(section.join('\n')));
+    section = undefined;
+  };
+  for (const line of text.split('\n')) {
+    if (line.startsWith('Query= ')) {
+      close();
+      current = undefined;
+      const id = line.slice(7).trim().split(/\s+/)[0]!;
+      do qIdx++;
+      while (qIdx < queryIds.length && queryIds[qIdx] !== id);
+    } else if (line.startsWith('>') && qIdx >= 0) {
+      close();
+      current = { qIdx, offset, id: line.slice(1).trim().split(/\s+/)[0]!, hsps: [] };
+      found.push(current);
+    } else if (line.startsWith(' Score =') && current !== undefined) {
+      close();
+      section = [line];
+    } else if (section !== undefined) {
+      section.push(line);
+    }
+    offset += Buffer.byteLength(line) + 1;
+  }
+  close();
+  return found;
+}
+
 /** Checks one search and returns what it saw, for the summary. */
-function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: number; unshown: number } {
+function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: number; unshown: number; unpointed: number } {
   const decoder = new TextDecoder();
   const out6 = outputs.streams.get(6) ?? new Uint8Array();
   const out0 = outputs.streams.get(0) ?? new Uint8Array();
@@ -209,18 +285,51 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
     const heading = decoder.decode(out0.subarray(hStart, hEnd));
     expect(heading.startsWith('>'), `${where(record)} heading text`).toBe(true);
     expect(heading, `${where(record)} heading Length=`).toMatch(/\nLength=\d+\n/);
+    // The heading is the record's subject (not another subject with the same coordinates); a record without an ID has
+    // no name in the heading, or NCBI's `unnamed`.
+    const named = heading.slice(1).split('\n')[0]!.trim().split(/\s+/)[0]!;
+    const subjectId = outputs.subjectIds[record.s_idx]!;
+    expect(subjectId === '' ? ['', 'unnamed'] : [subjectId], `${where(record)} heading names the record's subject`).toContain(named);
     const section = decoder.decode(out0.subarray(start, end));
     expect(section.startsWith(' Score ='), `${where(record)} section text`).toBe(true);
+    expect(section, `${where(record)} section raw score`).toContain(`bits (${record.raw_score}),`);
     expect(alignmentEnds(section, 'Query'), `${where(record)} Query lines`).toEqual([record.q_start, record.q_end]);
     expect(alignmentEnds(section, 'Sbjct'), `${where(record)} Sbjct lines`).toEqual([record.s_start, record.s_end]);
     previousEnd = end;
   }
   // The text has as many sections and subject headings as the records point to: no section or
-  // heading of outfmt 0 lacks its records.
+  // heading of outfmt 0 lacks its records. In a run of two searches outfmt 0 has a hit list of its own:
+  // a section or heading that no record points to is a pair whose records are absent or differ.
   const text = decoder.decode(out0);
-  expect(text.match(/^ Score =/gm)?.length ?? 0, `${fixture.id}: outfmt 0 sections and records with one`).toBe(sections);
   const pointed = new Set([...headings.values()].flatMap((range) => (range === null ? [] : [range[0]])));
-  expect(text.match(/^>/gm)?.length ?? 0, `${fixture.id}: outfmt 0 subject headings and the records' headings`).toBe(pointed.size);
+  const twice = searchedTwice(fixture);
+  let unpointed = 0;
+  if (!twice) {
+    expect(text.match(/^ Score =/gm)?.length ?? 0, `${fixture.id}: outfmt 0 sections and records with one`).toBe(sections);
+    expect(text.match(/^>/gm)?.length ?? 0, `${fixture.id}: outfmt 0 subject headings and the records' headings`).toBe(pointed.size);
+  } else {
+    const recordsOf = new Map<string, string[]>();
+    for (const record of records) {
+      const key = `${record.q_idx}:${record.s_idx}`;
+      recordsOf.set(key, [...(recordsOf.get(key) ?? []), JSON.stringify([record.raw_score, record.q_start, record.q_end, record.s_start, record.s_end])]);
+    }
+    let seenPointed = 0;
+    for (const heading of headingsOf(text, outputs.queryIds)) {
+      if (pointed.has(heading.offset)) {
+        seenPointed++;
+        continue;
+      }
+      unpointed += heading.hsps.length;
+      // The ids of the registered subjects that the heading can name; the pair differs for each of them.
+      for (const [sIdx, id] of outputs.subjectIds.entries()) {
+        if (id !== heading.id) continue;
+        const ours = recordsOf.get(`${heading.qIdx}:${sIdx}`) ?? [];
+        expect(ours, `${fixture.id}: q${heading.qIdx} ${heading.id}: outfmt 0's HSPs are not the records' (the pair would be linked)`).not.toEqual(heading.hsps);
+      }
+    }
+    expect(seenPointed, `${fixture.id}: every heading that the records point to is in outfmt 0`).toBe(pointed.size);
+    expect(text.match(/^ Score =/gm)?.length ?? 0, `${fixture.id}: outfmt 0 sections = linked + unlinked`).toBe(sections + unpointed);
+  }
 
   // Subjects without alignments in outfmt 0 come after those with them, in each query.
   const table = hspTable(outputs.records);
@@ -229,7 +338,7 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   for (const query of index.queries.values()) {
     const shown = query.subjects.map((subject) => table.out0SubjectStart[subject.rows[0]!]! >= 0);
     const firstUnshown = shown.indexOf(false);
-    if (firstUnshown >= 0) expect(shown.slice(firstUnshown).every((s) => !s), `${fixture.id} q${query.qIdx}: unshown subjects last`).toBe(true);
+    if (firstUnshown >= 0 && !twice) expect(shown.slice(firstUnshown).every((s) => !s), `${fixture.id} q${query.qIdx}: unshown subjects last`).toBe(true);
     for (const subject of query.subjects) {
       grouped += subject.rows.length;
       const ranks = subject.rows.map((row) => table.rank[row]!);
@@ -237,7 +346,7 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
     }
   }
   expect(grouped, `${fixture.id}: every HSP is in the index`).toBe(records.length);
-  return { hsps: records.length, sections, unshown };
+  return { hsps: records.length, sections, unshown, unpointed };
 }
 
 const reactors = findReactors();
@@ -245,7 +354,7 @@ const reactors = findReactors();
 describe.skipIf(reactors === undefined)('HSP records and the rows and sections of outfmt 6 and 0 (every outfmt 0 fixture)', () => {
   const searches = reactors === undefined ? new Map<string, Fixture[]>() : fixtures();
   const module = reactors === undefined ? undefined : new WebAssembly.Module(reactors.serial.bytes as BufferSource);
-  const summary = { searches: 0, hsps: 0, sections: 0, unshown: 0, programs: new Set<string>(), frozen: { bytes: 0, database: 0, none: 0 } };
+  const summary = { searches: 0, twice: 0, hsps: 0, sections: 0, unshown: 0, unpointed: 0, programs: new Set<string>(), frozen: { bytes: 0, database: 0, none: 0 } };
 
   it(
     'agree for every search',
@@ -263,16 +372,20 @@ describe.skipIf(reactors === undefined)('HSP records and the rows and sections o
         summary.hsps += seen.hsps;
         summary.sections += seen.sections;
         summary.unshown += seen.unshown;
+        summary.unpointed += seen.unpointed;
+        if (searchedTwice(fixture)) summary.twice++;
         summary.programs.add(fixture.program);
       }
       console.log(
         `HSP correspondence: ${summary.searches} searches (${[...summary.programs].sort().join(', ')}), ${summary.hsps} HSPs, ` +
-          `${summary.sections} outfmt 0 sections, ${summary.unshown} HSPs that outfmt 0 does not show; fixtures equal to NCBI: ` +
+          `${summary.sections} outfmt 0 sections, ${summary.unshown} HSPs that outfmt 0 does not show; ${summary.twice} searches of two hit list sizes, ${summary.unpointed} outfmt 0 sections no record points to; fixtures equal to NCBI: ` +
           `${summary.frozen.bytes} byte for byte, ${summary.frozen.database} as the database search (-db_gencode exception), ` +
           `${summary.frozen.none} field lists not compared`,
       );
       expect([...summary.programs].sort()).toEqual(['blastn', 'blastp', 'tblastn', 'tblastx']);
       expect(summary.unshown, 'the fixtures include HSPs that outfmt 0 does not show').toBeGreaterThan(0);
+      expect(summary.twice, 'the fixtures include searches of two hit list sizes').toBeGreaterThan(0);
+      expect(summary.unpointed, 'the split fixture has an outfmt 0 section that no record points to').toBeGreaterThan(0);
       expect(summary.frozen.bytes, 'fixtures compared byte for byte').toBeGreaterThan(0);
       expect(summary.frozen.database, 'fixtures of the -db_gencode exception compared').toBeGreaterThan(0);
     },

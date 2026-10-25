@@ -2521,7 +2521,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
         composition_workspace,
         matrix_state,
         XLaneFrame::default(),
-        &mut |_, _| XLaneFrame::default(),
+        &mut |_, _, _| XLaneFrame::default(),
         &mut |_| {},
     )
 }
@@ -2813,8 +2813,9 @@ fn x_bx_lanes_limits() -> [usize; 2] {
 // ```
 // Newton lanes, BLASTX (translated query, protein subject): BLASTX calls `Blast_RedoOneMatch` once per
 // query frame, and one call holds few windows, so this replica walks the frame calls of one match from
-// window `first_window` of the first one in `frames` on (each frame's incoming alignments, in call
-// order): per frame the windows of `windows_from_translated_query_aligns`, then the window loop of
+// the first one in `frames` on (each frame's incoming alignments, in call order; `resume`: the windows
+// of the first frame's call and the window where it resumes the replica): per frame the windows of
+// `windows_from_translated_query_aligns`, then the window loop of
 // `blast_redo_one_match_with_workspace_queries_and_matrix_observed` with the same near-identical test and
 // `get_range` calls with the same arguments (results kept for that frame's call), and at each HSP that
 // would call `Blast_AdjustScores` (a protein subject: `hsp_index == 0` or a changed near-identical
@@ -2834,7 +2835,7 @@ fn x_bx_lanes_limits() -> [usize; 2] {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn x_bx_newton_lanes_prefetch_frames<'seq>(
     frames: &[Option<Box<BlastCompoAlignment>>],
-    first_window: usize,
+    resume: Option<(&[WindowInfo], usize)>,
     params: &BlastRedoAlignParams,
     matching_seq: &BlastCompoMatchingSequence<'seq>,
     query_infos: &[BlastCompoQueryInfo],
@@ -2853,19 +2854,26 @@ pub(crate) fn x_bx_newton_lanes_prefetch_frames<'seq>(
             break;
         }
         let mut ranges: XLaneRanges = Vec::new();
-        let Ok(windows) = windows_from_translated_query_aligns(
-            incoming_aligns,
-            query_infos,
-            matching_seq.length,
-            WINDOW_BORDER,
-        ) else {
-            covered.push(XLaneFrame {
-                ranges,
-                resume_at: None,
-            });
-            break;
+        let made;
+        let (windows, start): (&[WindowInfo], usize) = match resume {
+            Some((windows, start)) if frame_position == 0 => (windows, start),
+            _ => {
+                let Ok(windows) = windows_from_translated_query_aligns(
+                    incoming_aligns,
+                    query_infos,
+                    matching_seq.length,
+                    WINDOW_BORDER,
+                ) else {
+                    covered.push(XLaneFrame {
+                        ranges,
+                        resume_at: None,
+                    });
+                    break;
+                };
+                made = windows;
+                (&made, 0)
+            }
         };
-        let start = if frame_position == 0 { first_window } else { 0 };
         for (window_index, window) in windows.iter().enumerate().skip(start) {
             if inputs.len() >= max_inputs || kept_bytes >= range_bytes {
                 covered.push(XLaneFrame {
@@ -3030,7 +3038,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
     composition_workspace: &mut BlastCompositionWorkspace,
     matrix_state: &mut Option<AdjustedProteinMatrix>,
     x_ahead: XLaneFrame,
-    x_resume: &mut dyn FnMut(usize, &BlastCompositionWorkspace) -> XLaneFrame,
+    x_resume: &mut dyn FnMut(&[WindowInfo], usize, &BlastCompositionWorkspace) -> XLaneFrame,
     trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
 ) -> Result<BlastRedoOneMatchResult> {
     if params.smith_waterman {
@@ -3139,7 +3147,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
         // No NCBI counterpart: Newton lanes prefetch (see above); it does not change any value NCBI
         // computes.
         if x_resume_at == Some(window_index) {
-            let more = x_resume(window_index, composition_workspace);
+            let more = x_resume(&windows, window_index, composition_workspace);
             x_lane_ranges.extend(more.ranges);
             x_resume_at = more.resume_at;
         }

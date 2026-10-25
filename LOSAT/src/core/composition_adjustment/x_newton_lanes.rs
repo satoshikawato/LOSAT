@@ -1493,7 +1493,8 @@ struct StoredKey {
 }
 
 // No NCBI counterpart: the results of one `prefetch` batch, written by `solve_batch` in place, their
-// inputs, and how many of them are not gone; it does not change any value NCBI computes.
+// inputs, and how many of them are not gone (a batch is compacted once half of its slots are gone);
+// it does not change any value NCBI computes.
 struct StoredBatch {
     keys: Vec<StoredKey>,
     outputs: Vec<NewtonOutput>,
@@ -1502,7 +1503,8 @@ struct StoredBatch {
 
 // No NCBI counterpart: per-thread store of results computed ahead, oldest batch first (bounded: once
 // more than `STORE_CAPACITY` results are kept, the oldest are dropped first; a batch is freed when
-// none of its results is left); it does not change any value NCBI computes.
+// none of its results is left, and compacted when half of its slots are gone, so the store holds at
+// most twice the slots of its results); it does not change any value NCBI computes.
 struct Store {
     batches: VecDeque<StoredBatch>,
     live: usize,
@@ -1555,6 +1557,13 @@ pub(crate) fn prefetch(inputs: &[NewtonInput]) {
         let [prefetched, hits, misses] = counts.get();
         counts.set([prefetched + inputs.len() as u64, hits, misses]);
     });
+    keep(inputs, outputs);
+}
+
+// No NCBI counterpart: keeps `outputs[i]` (the result of `inputs[i]`) as the newest batch of this
+// thread's store and drops the oldest results beyond `STORE_CAPACITY`; it does not change any value
+// NCBI computes.
+fn keep(inputs: &[NewtonInput], outputs: Vec<NewtonOutput>) {
     STORE.with(|store| {
         let mut store = store.borrow_mut();
         let Store { batches, live } = &mut *store;
@@ -1574,18 +1583,45 @@ pub(crate) fn prefetch(inputs: &[NewtonInput]) {
             live: inputs.len(),
         });
         *live += inputs.len();
-        while *live > STORE_CAPACITY {
+        let mut excess = live.saturating_sub(STORE_CAPACITY);
+        while excess > 0 {
             let front = batches.front_mut().expect("a kept result");
-            if let Some(key) = front.keys.iter_mut().find(|key| !key.gone) {
-                key.gone = true;
+            for key in front.keys.iter_mut() {
+                if excess == 0 {
+                    break;
+                }
+                if !key.gone {
+                    key.gone = true;
+                    front.live -= 1;
+                    *live -= 1;
+                    excess -= 1;
+                }
             }
-            front.live -= 1;
-            *live -= 1;
             if front.live == 0 {
                 batches.pop_front();
+            } else {
+                x_compact(front);
             }
         }
     });
+}
+
+// No NCBI counterpart: once half of a batch's slots are gone, keeps only the slots not gone, in their
+// order (`take` finds the same first match); it does not change any value NCBI computes.
+fn x_compact(batch: &mut StoredBatch) {
+    if batch.live * 2 > batch.keys.len() {
+        return;
+    }
+    let mut keys = Vec::with_capacity(batch.live);
+    let mut outputs = Vec::with_capacity(batch.live);
+    for (key, output) in batch.keys.drain(..).zip(batch.outputs.drain(..)) {
+        if !key.gone {
+            keys.push(key);
+            outputs.push(output);
+        }
+    }
+    batch.keys = keys;
+    batch.outputs = outputs;
 }
 
 // No NCBI counterpart: drops the results of this thread's store that no call took (BLASTX: those of
@@ -1661,6 +1697,8 @@ pub(crate) fn take(
                 *live -= 1;
                 if batch.live == 0 {
                     batches.remove(b);
+                } else {
+                    x_compact(batch);
                 }
                 HITS.fetch_add(1, Ordering::Relaxed);
                 Some(status)
@@ -2025,6 +2063,92 @@ mod tests {
 
     // No NCBI counterpart: the store returns a result only for a bitwise-equal input; it does not
     // change any value NCBI computes.
+    // The store across batches without solving: results are kept per batch (outputs marked by their
+    // input's index), `take` returns the oldest match first, the capacity drops the oldest results
+    // across batches, and compaction keeps the order and at most twice the slots of the results.
+    #[test]
+    fn x_newton_lanes_store_batches_keep_order_and_bound() {
+        fn marked(
+            base: &NewtonInput,
+            from: usize,
+            to: usize,
+        ) -> (Vec<NewtonInput>, Vec<NewtonOutput>) {
+            let inputs: Vec<NewtonInput> = (from..to)
+                .map(|i| {
+                    let mut input = base.clone();
+                    input.relative_entropy = i as f64;
+                    input
+                })
+                .collect();
+            let outputs = (from..to)
+                .map(|i| {
+                    let mut output = NewtonOutput::new();
+                    output.x[0] = i as f64;
+                    output.status = i as i32;
+                    output
+                })
+                .collect();
+            (inputs, outputs)
+        }
+        fn shape() -> (usize, usize, usize) {
+            STORE.with(|store| {
+                let store = store.borrow();
+                let slots = store.batches.iter().map(|batch| batch.keys.len()).sum();
+                let live: usize = store.batches.iter().map(|batch| batch.live).sum();
+                assert_eq!(live, store.live, "live counts");
+                for batch in &store.batches {
+                    assert!(batch.live > 0 && batch.live * 2 > batch.keys.len());
+                    assert_eq!(batch.keys.len(), batch.outputs.len());
+                    assert_eq!(
+                        batch.live,
+                        batch.keys.iter().filter(|key| !key.gone).count()
+                    );
+                }
+                (store.live, slots, store.batches.len())
+            })
+        }
+        let base = test_problems().remove(0);
+        let take_index = |re: f64| {
+            let mut x = [0.0; NN];
+            take(&mut x, &base.q[..], &base.row, &base.col, re).map(|status| {
+                assert_eq!(x[0], f64::from(status));
+                status
+            })
+        };
+        x_test_take_counts();
+        // Capacity across batches: 300 + 300 results keep the newest 512.
+        let (inputs, outputs) = marked(&base, 0, 300);
+        keep(&inputs, outputs);
+        let (inputs, outputs) = marked(&base, 300, 600);
+        keep(&inputs, outputs);
+        assert_eq!(shape(), (STORE_CAPACITY, 600, 2));
+        assert_eq!(take_index(87.0), None);
+        assert_eq!(take_index(88.0), Some(88));
+        assert_eq!(take_index(599.0), Some(599));
+        // Takes in order compact the first batch; the store stays within twice its results.
+        for i in 89..290 {
+            assert_eq!(take_index(i as f64), Some(i as i32));
+            let (live, slots, _) = shape();
+            assert!(slots <= 2 * live, "{live} results in {slots} slots");
+        }
+        assert_eq!(shape().0, STORE_CAPACITY - 203);
+        x_test_take_counts();
+        assert_eq!(shape(), (0, 0, 0));
+        // The same input in two batches: the older result first.
+        let (inputs, mut outputs) = marked(&base, 7, 8);
+        outputs[0].status = 1000;
+        outputs[0].x[0] = 1000.0;
+        keep(&inputs, outputs);
+        let (inputs, mut outputs) = marked(&base, 7, 8);
+        outputs[0].status = 2000;
+        outputs[0].x[0] = 2000.0;
+        keep(&inputs, outputs);
+        assert_eq!(take_index(7.0), Some(1000));
+        assert_eq!(take_index(7.0), Some(2000));
+        assert_eq!(take_index(7.0), None);
+        assert_eq!(shape(), (0, 0, 0));
+    }
+
     #[test]
     fn x_newton_lanes_store_returns_only_exact_input_matches() {
         let problems = test_problems();

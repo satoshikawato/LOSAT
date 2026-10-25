@@ -653,7 +653,8 @@ fn incoming_alignments(
 // ```
 // `incoming` is the frame's list (`incoming_alignments`); `x_frame` the `get_range` results made
 // ahead for this call (EXPERIMENT LOSAT_X_BXNEWTONLANES, `x_bx_newton_lanes_prefetch_frames`; empty
-// when nothing was made ahead) and the window where the call resumes that prefetch with `x_resume`.
+// when nothing was made ahead) and the window where the call resumes that prefetch with `x_resume`
+// (given the call's windows).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn redo_context_observed(
     input: &[PreliminaryHsp],
@@ -667,7 +668,7 @@ pub(crate) fn redo_context_observed(
     workspace: &mut BlastCompositionWorkspace,
     matrix_state: &mut Option<AdjustedProteinMatrix>,
     x_frame: XLaneFrame,
-    x_resume: &mut dyn FnMut(usize, &BlastCompositionWorkspace) -> XLaneFrame,
+    x_resume: &mut dyn FnMut(&[WindowInfo], usize, &BlastCompositionWorkspace) -> XLaneFrame,
     trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
 ) -> Result<BlastRedoOneMatchResult> {
     let matching = BlastCompoMatchingSequence::new(0, subject);
@@ -1389,7 +1390,7 @@ impl KappaState {
             if x_lanes && x_ahead.is_empty() {
                 x_ahead.extend(x_bx_newton_lanes_prefetch_frames(
                     &incoming[position..],
-                    0,
+                    None,
                     &self.params,
                     &BlastCompoMatchingSequence::new(0, subject),
                     &self.infos,
@@ -1401,23 +1402,24 @@ impl KappaState {
             // No NCBI counterpart: the prefetch resumed inside this frame (its first entry is this
             // call's, the others the next frames'); it does not change any value NCBI computes.
             let (params, infos) = (&self.params, &self.infos);
-            let mut x_resume = |window: usize, workspace: &BlastCompositionWorkspace| {
-                #[cfg(test)]
-                X_TEST_RESUMES.with(|count| count.set(count.get() + 1));
-                let mut frames = x_bx_newton_lanes_prefetch_frames(
-                    &incoming[position..],
-                    window,
-                    params,
-                    &BlastCompoMatchingSequence::new(0, subject),
-                    infos,
-                    &CALLBACKS,
-                    workspace,
-                )
-                .into_iter();
-                let this = frames.next().unwrap_or_default();
-                x_ahead.extend(frames);
-                this
-            };
+            let mut x_resume =
+                |windows: &[WindowInfo], window: usize, workspace: &BlastCompositionWorkspace| {
+                    #[cfg(test)]
+                    X_TEST_RESUMES.with(|count| count.set(count.get() + 1));
+                    let mut frames = x_bx_newton_lanes_prefetch_frames(
+                        &incoming[position..],
+                        Some((windows, window)),
+                        params,
+                        &BlastCompoMatchingSequence::new(0, subject),
+                        infos,
+                        &CALLBACKS,
+                        workspace,
+                    )
+                    .into_iter();
+                    let this = frames.next().unwrap_or_default();
+                    x_ahead.extend(frames);
+                    this
+                };
             let result = redo_context_observed(
                 input,
                 &incoming[position],

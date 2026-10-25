@@ -218,7 +218,7 @@ losat psiblast \
   -outfmt 6
 ```
 
-`losat psiblast` runs the first round of NCBI BLAST+ 2.17.0 `psiblast` (`-num_iterations 1`, the default), with `-subject` or `-db`: the search of each query with blastp's options, one query at a time, and psiblast's report (the `PSIBLAST` header and references, `Results from round 1`, `# Iteration: 1`). It takes blastp's options without `-task` and `-ungapped`, and `-inclusion_ethresh` and `-pseudocount`. More rounds, the PSSM files (`-out_pssm`, `-out_ascii_pssm`, `-save_*`, `-in_pssm`), `-in_msa`, `-phi_pattern`, `-gap_trigger` and `-sum_stats` are rejected for now, as are the output formats other than `0`, `6` and `7`.
+`losat psiblast` runs the first round of NCBI BLAST+ 2.17.0 `psiblast` (`-num_iterations 1`, the default), with `-subject` or `-db`: the search of each query with blastp's options, one query at a time, and psiblast's report (the `PSIBLAST` header and references, `Results from round 1`, `# Iteration: 1`). It takes blastp's options without `-task` and `-ungapped` (`-soft_masking` included), and `-inclusion_ethresh` and `-pseudocount`. More rounds, the PSSM files (`-out_pssm`, `-out_ascii_pssm`, `-save_*`, `-in_pssm`), `-in_msa`, `-phi_pattern`, `-gap_trigger` and `-sum_stats` are rejected for now, as are the output formats other than `0`, `6` and `7`.
 
 ---
 

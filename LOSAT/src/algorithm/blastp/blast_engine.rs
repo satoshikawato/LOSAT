@@ -6170,21 +6170,17 @@ fn resolve_for_formats(
 /// and NCBI's psiblast crashes in the traceback (exit 139; 2.17.0, 20,000 X letters at the default
 /// CHUNK_SIZE): LOSAT rejects it. Each batch of `batches` holds one query
 /// (`read_psiblast_query_batches`); its validity is that of the search's contexts (the query with
-/// its SEG masks, `blastp_query_frames`).
+/// its SEG masks, or its letters with `-soft_masking true`: `blastp_query_frames`).
 fn psiblast_stop_at_invalid_query(
     args: &ResolvedBlastpArgs,
     searched_queries: &[FastaRecord],
     mut batches: crate::blastinput::query_batch::QueryBatches,
 ) -> crate::blastinput::query_batch::QueryBatches {
-    let seg_params = args.seg.params();
     let frames: Vec<Vec<QueryFrame>> = batches
         .starts
         .iter()
-        .map(|&(_, query)| {
-            vec![encode_protein_query_frame_with_seg(
-                searched_queries[query].seq(),
-                seg_params.as_ref(),
-            )]
+        .flat_map(|&(_, query)| {
+            blastp_query_frames(args, std::slice::from_ref(&searched_queries[query]))
         })
         .collect();
     let (_, _, contexts) =
@@ -12298,8 +12294,22 @@ fn run_resolved_in_pool(
                     Some(titles) => titles.check_shown_titles(&shown)?,
                     None => check_shown_subject_titles(shown.iter().copied(), subject_records)?,
                 }
-                let masked_hits =
-                    masked_query_rows(pairwise_hits, &query_frames, &ranges.query_input.placements);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:293-294
+                // ```c++
+                //     CRef<CSearchResultSet> retval = m_TbackSearch->Run();
+                //     retval->SetFilteredQueryRegions(m_PrelimSearch->GetFilteredQueryRegions());
+                // ```
+                // blastp's results carry the query masks; psiblast's `CPsiBlastImpl::Run` returns
+                // the traceback's results without them (psiblast_impl.cpp:150), so its rows show
+                // no lowercase masking.
+                let masked_hits = match args.app {
+                    BlastpApp::Blastp => masked_query_rows(
+                        pairwise_hits,
+                        &query_frames,
+                        &ranges.query_input.placements,
+                    ),
+                    BlastpApp::Psiblast => None,
+                };
                 write_blastp_pairwise_report(
                     masked_hits.as_deref().unwrap_or(pairwise_hits),
                     &mut writer,

@@ -373,6 +373,7 @@ export LOSAT_X_BXUNITCAP=8
 export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
+export LOSAT_X_DCTWOSLOTS=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
@@ -3865,6 +3866,41 @@ Scheduling (each value computed by one thread with the original function; order 
   vs 199). Where the rule keeps the loop (1,775 cDNAs, 5.4 MB): plain blastn at 8 / 16 threads 120 / 122 MiB, 1.04 /
   0.91 s, against 183 / 332 MiB, 0.99 / 0.66 s with the earlier default budget; NCBI `-db` 128 / 136 MiB, 15.2 / 15.1
   s.
+- `LOSAT_X_DCTWOSLOTS=1` (BLASTN, `-task dc-megablast`, `-subject` with LOSAT_X_QBATCHPAR slots, memory and speed;
+  in the strict set since 2026-10-25 (perf/dc-two-slots, evidence at the end of this entry): on unless it is `0`)
+  where the slot model of LOSAT_X_QBATCHPAR (`choose_slots`) takes three slots or more (k slots of m threads) for
+  `-task dc-megablast` and the two-slot rule holds, two slots of `n / 2` threads search instead (`Profile::two_slots`,
+  `two_slots_win`, `blastn/blast_engine/x_qbatch_par.rs`). The rule: 12 to 33 threads (at most 16 threads per slot;
+  fewer threads, and 64 or 128, keep the model), an even count of batch units (an odd count leaves the last round to
+  one slot), and either narrow slots in the model's layout that leave threads idle (`m <= 3` and `k x m < 2 x (n /
+  2)`), or every unit in its first round (`units <= k`), or a last round at most half full within five rounds (`0 <
+  units mod k <= k / 2` and `ceil(units / k) <= 5`). Where the
+  model takes two slots or keeps the loop, where the rule declines, and with `LOSAT_X_QBATCHPARSLOTS`, nothing
+  changes; megablast (also with template options), blastn and blastn-short have no rule. Why: the model's E(m)
+  points (above) were measured before LOSAT_X_PAIRPARDISCARR and LOSAT_X_PAIRPARHOME made one dc-megablast batch
+  scale better on 8 to 32 threads; on a map of `LOSAT_X_QBATCHPARSLOTS=2` against the model (dev d92512d0, ws,
+  2026-10-25, line D session 14 window w2: dc-megablast of the first 6,900 / 10,400 / 15,600 / 20,800 / 31,168
+  D. melanogaster cDNAs and of 5,000 cDNAs against 3 Mb of chromosome 2L, `-subject`, 12 / 16 / 24 / 32 threads,
+  4 rounds) two slots win where the model's narrow slots leave threads idle (31,168 cDNAs at 32 threads, 9 x 3 on 27
+  threads: x0.909), where its batches fit in one round (10,400 at 24 / 32 threads: x0.946 / x0.943) and where its
+  last round is half empty in a short search (31,168 at 16 threads, 4 x 4 for 18 units: x0.983), and lose with an
+  odd unit count (5,000 cDNAs, 3 units: x1.10-1.16) and where the model runs two full rounds or more of 4-thread
+  slots (x1.006-1.031); the rule takes every winning cell of that map but five (an odd unit count; two full rounds of
+  4- and 5-thread slots) and none of the losing ones, and keeps the model where nothing was measured (narrow slots
+  on every thread, last rounds more than half full, fewer than 12 threads). Same bytes: the slots change no output (LOSAT_X_QBATCHPAR above), this chooses only `k` and
+  `m`. With `LOSAT_X_STATS` the QBATCHPAR line's `k=` and `m=` are the slots that ran; `rule_k=`, `rule_m=` and
+  `predicted=` stay the model's layout. Tests: `the_two_slot_rule_*`, `the_dc_rule_*` and
+  `the_rule_changes_only_layouts_of_more_than_two_slots_where_it_holds` in `x_qbatch_par.rs`,
+  `LOSAT/tests/blastn_dc_two_slots.rs` (`the_report_does_not_depend_on_the_rule`,
+  `no_side_without_the_model_s_slots`). Evidence (ws node 1, 2026-10-25, line D session 15 windows w3 to w5:
+  dc-megablast `-subject` 3 Mb of chromosome 2L, the candidate against dev 416c427f and e6429b65, 6 to 8 rounds
+  rotated, max RSS by `time %M`, one output sha per case): 31,168 cDNAs at 16 threads (model 4 x 4 -> 2 x 8)
+  x0.976-0.982 of dev's time, max RSS 394-398 -> 222-235 MiB (NCBI `-subject`, one thread: 313 MiB); at 32 threads
+  (9 x 3 -> 2 x 16) x0.911-0.916, 824 -> 330-335 MiB; 6,900 cDNAs at 16 threads (4 x 4 -> 2 x 8) x0.965-0.980,
+  347 -> 208-209 MiB; 10,400 at 24 threads (6 x 4 -> 2 x 12) x0.967-0.973, 510 -> 233-238 MiB; `=0` against dev
+  x0.985-1.001. Where the rule declines (5,000, 15,600 and 20,800 cDNAs at 16 threads, 31,168 at 24) the model's
+  layout runs (`LOSAT_X_STATS`), with dev's cycles and instructions (x0.996-1.002 / x1.000); `-db`, 1,775 cDNAs and
+  megablast are unchanged.
 - `LOSAT_X_RPTSTREAM=1` (BLASTN, all tasks, `-subject` and `-db`, memory and speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`) the batch loop of `run_in_pool` writes the
   reports of each query batch right after it has taken the batch (in batch order, also when
   `LOSAT_X_QBATCHPAR` slots finish out of order: the loop's in-order take is unchanged), finished its lists

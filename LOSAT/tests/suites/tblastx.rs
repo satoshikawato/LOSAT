@@ -49,5 +49,7 @@ mod tblastx_seed_unmap;
 mod tblastx_store;
 #[path = "../tblastx_subject_next.rs"]
 mod tblastx_subject_next;
+#[path = "../tblastx_ungap_sent.rs"]
+mod tblastx_ungap_sent;
 #[path = "../tblastx_unit_gate.rs"]
 mod tblastx_unit_gate;

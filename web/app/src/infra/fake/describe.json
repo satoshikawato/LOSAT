@@ -258,6 +258,11 @@
     "takes_value": true
    },
    {
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks [default: false]",
+    "takes_value": true
+   },
+   {
     "flag": "-use_sw_tback",
     "help": "",
     "takes_value": false,

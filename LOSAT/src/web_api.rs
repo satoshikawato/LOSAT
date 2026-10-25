@@ -546,6 +546,7 @@ fn parse_blastp_args(
         gap_extend: None,
         comp_based_stats: "2".to_string(),
         seg: None,
+        soft_masking: None,
         use_sw_tback: false,
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,

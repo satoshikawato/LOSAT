@@ -25,7 +25,7 @@ The options of each program are grouped in sets (`--sets`, default all): matrice
 costs (every pair of NCBI's table for the matrix, read from blast_stat.c, and pairs
 outside it), word size x threshold, window, composition-based statistics (with
 `-ungapped` and `-use_sw_tback`), SEG, e-values, integer spellings, tasks, genetic codes,
-TBLASTN's intron length, X-drops, sum statistics and masking, TBLASTX's culling limit and masking,
+TBLASTN's intron length, X-drops and sum statistics, BLASTP's, TBLASTN's and TBLASTX's masking, TBLASTX's culling limit,
 `-num_descriptions` / `-num_alignments` (`counts`),
 and the spellings of `-outfmt` (which carry their own format). Exits 1 when any case is
 DIFF.
@@ -150,6 +150,11 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
         sets["task"] += [["-task", "blastp-short", "-word_size", value] for value in ("2", "3", "4")]
         sets["task"] += [["-task", "blastp-fast", "-word_size", value] for value in ("3", "5", "6")]
         sets["task"] += [["-task", "blastp-fast", "-matrix", "PAM30"], ["-task", "blastp-short", "-matrix", "BLOSUM62"]]
+        # -soft_masking (blast_args.cpp:387-391): SEG masks only the lookup table (line NP, SM-1).
+        sets["mask"] = [["-soft_masking", value] for value in ("true", "false", "T", "F", "1", "x")]
+        sets["mask"] += [["-seg", "yes", "-soft_masking", value] for value in ("true", "false")]
+        sets["mask"] += [["-seg", "yes", "-soft_masking", "true", "-comp_based_stats", value] for value in ("0", "1", "3")]
+        sets["mask"] += [["-task", task, "-seg", "yes", "-soft_masking", "true"] for task in ("blastp-fast", "blastp-short")]
     if program == "tblastn":
         sets["task"] = [["-task", task] for task in ("tblastn", "tblastn-fast", "TBLASTN", "tblastx")]
         sets["task"] += [["-task", "tblastn-fast", "-word_size", value] for value in ("3", "5", "6")]

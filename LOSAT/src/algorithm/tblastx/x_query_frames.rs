@@ -23,7 +23,8 @@
 //!
 //! With the switch on, and a LOSAT search pool of two or more threads current, the frames of the
 //! batch that SEG reads (three or more bytes with the sentinels) are listed in query and frame
-//! order and masked by `mask_frame` in a parallel loop (`into_par_iter().for_each()`) run with
+//! order and masked by `mask_frame` (`mask_frame_soft` with `-soft_masking true`) in a parallel loop
+//! (`into_par_iter().for_each()`) run with
 //! `SearchPool::install`, so on the pool of the search that calls it. Rayon's global pool is never
 //! used. A search without a pool (one thread, a build without the `parallel` feature, WebAssembly
 //! without `wasm-threads`) and a batch with fewer than two such frames run the serial loop.
@@ -37,12 +38,14 @@
 //! their key (the sorted letter counts of a window), computed by the same reference function on a
 //! miss, so a frame masked on any thread, with a warm or a cold cache, gets the same intervals as in
 //! the serial loop. The statics of `utils/seg.rs` are those switches, read once and never written.
-//! So no frame's mask depends on another frame or on the order in which the frames are masked.
+//! `mask_frame_soft` (`-soft_masking true`) is the first half of `mask_frame`: it writes only the
+//! interval list of its frame, so the same holds for it. So no frame's mask depends on another
+//! frame or on the order in which the frames are masked.
 //! No floating-point operation changes order: each window's entropy is the same expression on
 //! the same counts.
 //!
 //! Programs that reach it: only TBLASTX (`-subject` and `-db`, every query batch of
-//! `search_query_batch`). The translation of the frames (at most a few ms per batch) stays serial.
+//! `search_query_batch`, with either value of `-soft_masking`). The translation of the frames (at most a few ms per batch) stays serial.
 //! BLASTX already masks the contexts of a large batch on the pool (at 2+ threads,
 //! `blastx/query_setup.rs`) and prepares the chunks of a split query in parallel
 //! (`blastx/split.rs`).
@@ -105,16 +108,50 @@ pub(super) fn mask_frame(seg: &SegMasker, frame: &mut QueryFrame) {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
+// ```c
+//     if (!mask_at_hash) {
+//         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+//                              program_number);
+//     }
+// ```
+/// As `mask_frame` with `-soft_masking true` (`mask_at_hash`): only the masked intervals into
+/// `seg_masks`, which keep words out of the lookup table (`BLAST_ComplementMaskLocations`,
+/// blast_setup.c:634-637); the
+/// frame keeps its letters and has no unmasked copy, so the extensions and the frame's Karlin block
+/// read the translation.
+fn mask_frame_soft(seg: &SegMasker, frame: &mut QueryFrame) {
+    if frame.aa_seq.len() >= 3 {
+        for m in seg.mask_sequence(&frame.aa_seq[1..frame.aa_seq.len() - 1]) {
+            frame.seg_masks.push((m.start, m.end));
+        }
+    }
+}
+
+/// `mask_frame_soft` with `MASK_AT_HASH`, `mask_frame` without. `MASK_AT_HASH` is a const parameter
+/// so that the default (hard) instance of the loops below keeps the code it had before
+/// `-soft_masking` (one instance per value).
+// No NCBI counterpart: chooses at compile time between the two bodies of blast_setup.c:621-624
+// (`mask_frame_soft`, `mask_frame`); it computes nothing NCBI does not.
+#[inline(always)]
+fn mask_frame_as<const MASK_AT_HASH: bool>(seg: &SegMasker, frame: &mut QueryFrame) {
+    if MASK_AT_HASH {
+        mask_frame_soft(seg, frame)
+    } else {
+        mask_frame(seg, frame)
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
 // ```c
 //     for (context = query_info->first_context;
 //          context <= query_info->last_context; ++context) {
 // ```
 /// The serial loop: every frame of every query, in query and frame order.
-fn serial(query_frames: &mut [Vec<QueryFrame>], seg: &SegMasker) {
+fn serial<const MASK_AT_HASH: bool>(query_frames: &mut [Vec<QueryFrame>], seg: &SegMasker) {
     for frames in query_frames.iter_mut() {
         for frame in frames.iter_mut() {
-            mask_frame(seg, frame);
+            mask_frame_as::<MASK_AT_HASH>(seg, frame);
         }
     }
 }
@@ -146,7 +183,7 @@ fn on_pool(pool: &SearchPool<'_>, frame_count: usize) -> bool {
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn parallel<P: Fn() + Sync>(
+fn parallel<const MASK_AT_HASH: bool, P: Fn() + Sync>(
     query_frames: &mut [Vec<QueryFrame>],
     seg: &SegMasker,
     pool: &SearchPool<'_>,
@@ -160,7 +197,7 @@ fn parallel<P: Fn() + Sync>(
     pool.install(|| {
         frames.into_par_iter().for_each(|frame| {
             probe();
-            mask_frame(seg, frame);
+            mask_frame_as::<MASK_AT_HASH>(seg, frame);
         })
     });
 }
@@ -170,30 +207,30 @@ fn parallel<P: Fn() + Sync>(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 )))]
-fn parallel<P: Fn() + Sync>(
+fn parallel<const MASK_AT_HASH: bool, P: Fn() + Sync>(
     query_frames: &mut [Vec<QueryFrame>],
     seg: &SegMasker,
     _pool: &SearchPool<'_>,
     _probe: &P,
 ) {
-    serial(query_frames, seg);
+    serial::<MASK_AT_HASH>(query_frames, seg);
 }
 
 /// SEG of every frame of `query_frames` with the switch `on` or off. Separate from the environment
 /// so that tests choose the switch.
-pub(super) fn mask_with_mode(
+pub(super) fn mask_with_mode<const MASK_AT_HASH: bool>(
     query_frames: &mut [Vec<QueryFrame>],
     seg: &SegMasker,
     pool: &SearchPool<'_>,
     on: bool,
 ) {
-    mask_with_probe(query_frames, seg, pool, on, &|| {})
+    mask_with_probe::<MASK_AT_HASH, _>(query_frames, seg, pool, on, &|| {})
 }
 
 /// `mask_with_mode` with a `probe` that the parallel loop calls once per frame (see `parallel`).
 // No NCBI counterpart: the dispatch between the serial loop and the pool; it computes no value
 // NCBI computes.
-fn mask_with_probe<P: Fn() + Sync>(
+fn mask_with_probe<const MASK_AT_HASH: bool, P: Fn() + Sync>(
     query_frames: &mut [Vec<QueryFrame>],
     seg: &SegMasker,
     pool: &SearchPool<'_>,
@@ -206,15 +243,35 @@ fn mask_with_probe<P: Fn() + Sync>(
         crate::utils::xreach::x_reach!("LOSAT_X_TBXQFRAMES", pooled);
     }
     if !on || !pooled {
-        serial(query_frames, seg);
+        serial::<MASK_AT_HASH>(query_frames, seg);
         return;
     }
-    parallel(query_frames, seg, pool, probe);
+    parallel::<MASK_AT_HASH, P>(query_frames, seg, pool, probe);
 }
 
 /// SEG of every frame of `query_frames` as `run_impl` makes it: the environment's switch decides.
 pub(super) fn mask(query_frames: &mut [Vec<QueryFrame>], seg: &SegMasker, pool: &SearchPool<'_>) {
-    mask_with_mode(query_frames, seg, pool, on())
+    mask_with_mode::<false>(query_frames, seg, pool, on())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
+// ```c
+//     if (!mask_at_hash) {
+//         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+//                              program_number);
+//     }
+// ```
+/// As `mask`, for `-soft_masking true` (`mask_at_hash`): the frames get their SEG intervals in
+/// `seg_masks` and keep their letters. Cold and out of line (no NCBI counterpart: code placement
+/// only), so that the caller, `run_impl::search_query_batch`, keeps the default path's code.
+#[cold]
+#[inline(never)]
+pub(super) fn mask_soft(
+    query_frames: &mut [Vec<QueryFrame>],
+    seg: &SegMasker,
+    pool: &SearchPool<'_>,
+) {
+    mask_with_mode::<true>(query_frames, seg, pool, on())
 }
 
 #[cfg(test)]
@@ -298,7 +355,7 @@ mod tests {
         for (window, locut, hicut) in [(12, 2.2, 2.5), (10, 1.8, 2.1), (20, 3.0, 3.3)] {
             let seg = SegMasker::new(window, locut, hicut);
             let mut want_all = frames_of(&seqs);
-            serial(&mut want_all, &seg);
+            serial::<false>(&mut want_all, &seg);
             let intervals: usize = want_all.iter().flatten().map(|f| f.seg_masks.len()).sum();
             assert!(
                 intervals > 40,
@@ -308,9 +365,9 @@ mod tests {
                 with_search_pool(threads, "tblastx", |pool| {
                     for take in [seqs.len(), 2, 1, 0] {
                         let mut want = frames_of(&seqs[..take]);
-                        serial(&mut want, &seg);
+                        serial::<false>(&mut want, &seg);
                         let mut got = frames_of(&seqs[..take]);
-                        mask_with_mode(&mut got, &seg, pool, true);
+                        mask_with_mode::<false>(&mut got, &seg, pool, true);
                         assert_eq!(
                             masked(&got),
                             masked(&want),
@@ -318,12 +375,54 @@ mod tests {
                         );
                     }
                     let mut got = frames_of(&seqs);
-                    mask_with_mode(&mut got, &seg, pool, true);
+                    mask_with_mode::<false>(&mut got, &seg, pool, true);
                     assert_eq!(masked(&got), masked(&want_all), "threads {threads}");
                     Ok(())
                 })
                 .unwrap();
             }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
+    // ```c
+    //     if (!mask_at_hash) {
+    //         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+    //                              program_number);
+    //     }
+    // ```
+    /// `-soft_masking true`: every frame gets the intervals of the hard frame and keeps its letters
+    /// (no unmasked copy), in the serial loop and on pools of 1, 2 and 3 threads.
+    #[test]
+    fn soft_frames_keep_letters_and_hard_intervals() {
+        let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+        let seqs: Vec<Vec<u8>> = (0..12).map(|_| sequence(&mut rng)).collect();
+        let seg = SegMasker::new(12, 2.2, 2.5);
+        let plain = frames_of(&seqs);
+        let mut hard = frames_of(&seqs);
+        serial::<false>(&mut hard, &seg);
+        let mut soft = frames_of(&seqs);
+        serial::<true>(&mut soft, &seg);
+        let intervals: usize = hard.iter().flatten().map(|f| f.seg_masks.len()).sum();
+        assert!(intervals > 0, "the frames must have masked regions");
+        let frames = soft.iter().flatten().zip(hard.iter().flatten());
+        for ((soft, hard), plain) in frames.zip(plain.iter().flatten()) {
+            assert_eq!(soft.seg_masks, hard.seg_masks);
+            assert_eq!(soft.aa_seq, plain.aa_seq);
+            assert!(soft.aa_seq_nomask.is_none());
+            assert_eq!(
+                hard.aa_seq_nomask.as_ref().unwrap_or(&hard.aa_seq),
+                &plain.aa_seq
+            );
+        }
+        for threads in [1usize, 2, 3] {
+            with_search_pool(threads, "tblastx", |pool| {
+                let mut got = frames_of(&seqs);
+                mask_with_mode::<true>(&mut got, &seg, pool, true);
+                assert_eq!(masked(&got), masked(&soft), "threads {threads}");
+                Ok(())
+            })
+            .unwrap();
         }
     }
 
@@ -367,7 +466,7 @@ mod tests {
         let seqs: Vec<Vec<u8>> = (0..5).map(|i| b"CAGCAGTTGACCA".repeat(20 + i)).collect();
         let seg = SegMasker::new(12, 2.2, 2.5);
         let mut want = frames_of(&seqs);
-        serial(&mut want, &seg);
+        serial::<false>(&mut want, &seg);
         let frame_count = masked_frame_count(&want);
         with_search_pool(3, "tblastx", |pool| {
             let calls = AtomicUsize::new(0);
@@ -394,7 +493,7 @@ mod tests {
             // next run.
             {
                 let mut got = frames_of(&seqs);
-                mask_with_probe(&mut got, &seg, pool, true, &probe);
+                mask_with_probe::<false, _>(&mut got, &seg, pool, true, &probe);
                 assert_eq!(masked(&got), masked(&want));
                 assert_eq!(calls.load(Ordering::SeqCst), frame_count);
                 assert_eq!(
@@ -411,7 +510,7 @@ mod tests {
             // Not acted on: switch off.
             calls.store(0, Ordering::SeqCst);
             let mut got = frames_of(&seqs);
-            mask_with_probe(&mut got, &seg, pool, false, &probe);
+            mask_with_probe::<false, _>(&mut got, &seg, pool, false, &probe);
             assert_eq!(masked(&got), masked(&want));
             assert_eq!(calls.load(Ordering::SeqCst), 0);
             Ok(())
@@ -423,7 +522,7 @@ mod tests {
                 calls.fetch_add(1, Ordering::SeqCst);
             };
             let mut got = frames_of(&seqs);
-            mask_with_probe(&mut got, &seg, pool, true, &probe);
+            mask_with_probe::<false, _>(&mut got, &seg, pool, true, &probe);
             assert_eq!(masked(&got), masked(&want));
             assert_eq!(calls.load(Ordering::SeqCst), 0);
             Ok(())

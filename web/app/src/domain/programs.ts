@@ -298,7 +298,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       },
       // TBLASTX is ungapped: NCBI's page has the matrix and no gap costs.
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix] },
-      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg] },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking] },
       { title: OTHER, placement: 'algorithm', fields: [threshold, windowSize] },
     ],
   },

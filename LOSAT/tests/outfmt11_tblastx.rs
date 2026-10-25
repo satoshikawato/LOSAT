@@ -337,7 +337,7 @@ fn cases() -> Vec<Case> {
 /// path other than the default one. The seed stage's switches (`PAIRPARGATE`, `SEEDCOMPACT`,
 /// `TBXHITBF`, `TBXKMERGE`, `TBXSCANBF`), the pool's (`TBXNEXT`, `TBXQFRAMES`, `TBXRPTPAR`,
 /// `TBXPIPE`: the next batch starts while the batch before links) and the always-on ones
-/// (`TBXFRAMES`, `TBXUNGAP`, `ERFABSORB`, `SUMPMEMO`) change what the search does, not what the
+/// (`TBXFRAMES`, `TBXUNGAP`, `SUMPMEMO`) change what the search does, not what the
 /// archive reads: the first query's block, search space and masks and the final hits.
 /// `DISPTABLE` is not here: it acts only where a format reads displayed counts, which outfmt 11
 /// never builds, so its `=0` run is the default run. `lenbatch_sub` x `TBXPIPE` is not here for
@@ -345,7 +345,7 @@ fn cases() -> Vec<Case> {
 /// `TBXPREFETCH`, `TBXQSLICE`, `TBXUNITMASK` and `SEEDUNMAP` are not needed: they change only
 /// the seed scan of the PAIRPAR units (value switches reach their new side with a small value on
 /// a 200 kb pair), and the archive reads the final hits and the batch set-up's query statistics,
-/// which are made before the seed stage. The review sweep (26 switches against 26 archive
+/// which are made before the seed stage. The review sweep (26 switches, `ERFABSORB` since graduated, against 26 archive
 /// cases, `S/of8/logs/RESULTS_impl_b3.md`) covers every switch.
 const STRICT_SET_RUNS: &[(&str, &str)] = &[
     ("batches_sub", "LOSAT_X_PAIRPARGATE"),
@@ -361,7 +361,6 @@ const STRICT_SET_RUNS: &[(&str, &str)] = &[
     ("stop1batch_sub", "LOSAT_X_TBXPIPE"),
     ("batches_sub", "LOSAT_X_TBXFRAMES"),
     ("batches_sub", "LOSAT_X_TBXUNGAP"),
-    ("batches_sub", "LOSAT_X_ERFABSORB"),
     ("batches_sub", "LOSAT_X_SUMPMEMO"),
 ];
 

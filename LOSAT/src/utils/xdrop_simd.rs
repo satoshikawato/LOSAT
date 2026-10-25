@@ -808,37 +808,55 @@ fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
     }
 }
 
-// PROBE (probe/b16e-pool, line B s18; never a PR as is): the trace and rows of a long traceback
-// come from a pool the scratches share. A scratch whose trace passes `x_pool_from()` bytes while
-// it grows takes the largest idle pair (its rows so far are copied over); after the traceback
-// call (`xdrop_align`) a pair above that size goes back, at most `x_pool_idle()` idle (the
-// smallest freed). Placement of memory only. PROBE_B16E3_FROM=bytes (0 = off; default 1 MiB),
-// PROBE_B16E3_IDLE=n (default 4).
-type XTracePair = (Vec<u8>, Vec<(u32, u32, u32)>);
-static X_TRACE_POOL: std::sync::Mutex<Vec<XTracePair>> = std::sync::Mutex::new(Vec::new());
-
-fn x_probe_env(name: &str, default: usize) -> usize {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(default)
+/// No NCBI counterpart: `LOSAT_X_DPTRACEPOOL` (strict set): the traceback rows of long alignments
+/// (trace past `X_POOL_FROM` bytes) come from a pool the scratches of a search share, instead of
+/// each scratch keeping the largest trace it ever held. A scratch whose trace passes the size while
+/// it grows takes the largest idle pair (its rows so far are copied over) and gives it back after
+/// the traceback call (`XdropScratch::x_trace_release`); the pool keeps at most `X_POOL_IDLE` idle
+/// pairs (the smallest is freed). Off: every scratch keeps its own trace, as before. Placement of
+/// memory only: the kernels write and the walk reads the same rows either way.
+pub(crate) fn x_dp_trace_pool() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DPTRACEPOOL"))
 }
 
+// No NCBI counterpart: the trace size (bytes) from which a traceback's rows come from the pool
+// (`LOSAT_X_DPTRACEPOOL`); below it a scratch keeps its own trace.
+const X_POOL_FROM: usize = 1 << 20;
+// No NCBI counterpart: how many idle trace + rows pairs the pool keeps (`LOSAT_X_DPTRACEPOOL`).
+const X_POOL_IDLE: usize = 4;
+
+// No NCBI counterpart: one trace + rows pair of the pool (`XdropScratch::trace`, `rows`).
+type XTracePair = (Vec<u8>, Vec<(u32, u32, u32)>);
+// No NCBI counterpart: the idle pairs (`LOSAT_X_DPTRACEPOOL`).
+static X_TRACE_POOL: std::sync::Mutex<Vec<XTracePair>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+thread_local! {
+    // a test's pool size on its thread (small, so that short problems reach the pool)
+    static X_TEST_FROM: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+// No NCBI counterpart: the pool size in bytes, `usize::MAX` when `LOSAT_X_DPTRACEPOOL` is off.
+#[inline]
 fn x_pool_from() -> usize {
+    #[cfg(test)]
+    if let Some(n) = X_TEST_FROM.with(|c| c.get()) {
+        return n;
+    }
     use std::sync::OnceLock;
     static FROM: OnceLock<usize> = OnceLock::new();
-    *FROM.get_or_init(|| match x_probe_env("PROBE_B16E3_FROM", 1 << 20) {
-        0 => usize::MAX,
-        n => n,
+    *FROM.get_or_init(|| {
+        if x_dp_trace_pool() {
+            X_POOL_FROM
+        } else {
+            usize::MAX
+        }
     })
 }
 
-fn x_pool_idle() -> usize {
-    use std::sync::OnceLock;
-    static IDLE: OnceLock<usize> = OnceLock::new();
-    *IDLE.get_or_init(|| x_probe_env("PROBE_B16E3_IDLE", 4))
-}
-
+// No NCBI counterpart: the pool's lock; a pair is plain memory, so poisoning carries no meaning.
 fn x_pool_lock() -> std::sync::MutexGuard<'static, Vec<XTracePair>> {
     X_TRACE_POOL
         .lock()
@@ -846,13 +864,14 @@ fn x_pool_lock() -> std::sync::MutexGuard<'static, Vec<XTracePair>> {
 }
 
 thread_local! {
-    // The calling thread's own small trace + rows while it holds a pooled pair (one xdrop_align
-    // call: taken in `x_trace_grow`, put back in `XdropScratch::x_trace_release`).
+    // No NCBI counterpart: the calling thread's own small trace + rows while its scratch holds a
+    // pooled pair (one traceback call: taken in `x_trace_grow`, back in `x_trace_release`).
     static X_OWN: std::cell::RefCell<Option<XTracePair>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Room for `n` more trace bytes (the kernels' row reserve); only the two buffers escape, as
-/// with `Vec::reserve`.
+/// No NCBI counterpart: room for `n` more trace bytes, the kernels' reserve of a traceback row
+/// (`Vec::reserve`, and the pool of `LOSAT_X_DPTRACEPOOL` when the trace passes its size). Only the
+/// two buffers are passed, so that the kernels keep the rest of the scratch in registers.
 #[inline(always)]
 pub(crate) fn x_trace_reserve(trace: &mut Vec<u8>, rows: &mut Vec<(u32, u32, u32)>, n: usize) {
     if trace.capacity() - trace.len() < n {
@@ -860,11 +879,15 @@ pub(crate) fn x_trace_reserve(trace: &mut Vec<u8>, rows: &mut Vec<(u32, u32, u32
     }
 }
 
+// No NCBI counterpart: the growth of `x_trace_reserve` (`LOSAT_X_DPTRACEPOOL`).
 #[cold]
 #[inline(never)]
 fn x_trace_grow(trace: &mut Vec<u8>, rows: &mut Vec<(u32, u32, u32)>, n: usize) {
     let from = x_pool_from();
-    if trace.len() + n > from && trace.capacity() <= from {
+    // the growth below makes the capacity `max(2 * capacity, len + n)` (`Vec::reserve`): an own
+    // trace at most the pool size that would pass it takes a pooled pair instead
+    let cap = trace.capacity();
+    if cap <= from && (trace.len() + n).max(2 * cap) > from {
         let taken = {
             let mut pool = x_pool_lock();
             let best = pool
@@ -888,9 +911,10 @@ fn x_trace_grow(trace: &mut Vec<u8>, rows: &mut Vec<(u32, u32, u32)>, n: usize) 
 }
 
 impl XdropScratch {
-    /// After a traceback call: a pooled pair goes back (the thread's own buffers return), and a
-    /// trace of a pool thread that grew past the pool size by itself goes to the pool. A
-    /// one-thread search (no pool) keeps its trace: it has nothing to share it with.
+    /// No NCBI counterpart: after a traceback call (`LOSAT_X_DPTRACEPOOL`): a pooled pair goes back
+    /// (the thread's own buffers return), and the trace of a scratch on a Rayon pool thread that
+    /// grew past the pool size by itself goes to the pool. A one-thread search (no pool) keeps its
+    /// trace: it has nothing to share it with.
     #[inline]
     pub(crate) fn x_trace_release(&mut self) {
         if self.trace.capacity() > x_pool_from() {
@@ -898,6 +922,7 @@ impl XdropScratch {
         }
     }
 
+    // No NCBI counterpart: the slow part of `x_trace_release`.
     #[cold]
     #[inline(never)]
     fn x_trace_give_back(&mut self) {
@@ -911,12 +936,16 @@ impl XdropScratch {
                 std::mem::take(&mut self.trace),
                 std::mem::take(&mut self.rows),
             ),
-            None => return,
+            None => {
+                crate::utils::xreach::x_reach!("LOSAT_X_DPTRACEPOOL", false);
+                return;
+            }
         };
+        crate::utils::xreach::x_reach!("LOSAT_X_DPTRACEPOOL", true);
         let dropped = {
             let mut pool = x_pool_lock();
             pool.push(pair);
-            if pool.len() > x_pool_idle() {
+            if pool.len() > X_POOL_IDLE {
                 let small = pool
                     .iter()
                     .enumerate()
@@ -4103,6 +4132,100 @@ mod tests {
             target_arch = "aarch64"
         )) {
             assert!(handled > 30, "handled {handled}");
+        }
+    }
+
+    // No NCBI counterpart: the pool of long traceback rows (`LOSAT_X_DPTRACEPOOL`). On a thread of
+    // a two-thread Rayon pool, with a pool size of 4 KiB, two scratches run long tracebacks in turn
+    // (each gives its trace back after the call, the other takes it while its trace grows): the
+    // offsets, score, fence flag, edit script and cell count equal those of a scratch that keeps its
+    // own trace and those of the scalar loops, and after each call a scratch holds at most its own
+    // small trace.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn trace_pool_keeps_every_result() {
+        const FROM: usize = 4096;
+        let threads = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap();
+        let (handled, taken) = threads.install(|| {
+            let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+            let mut pair = [XdropScratch::new(), XdropScratch::new()];
+            let mut own = XdropScratch::new();
+            let (mut handled, mut taken) = (0usize, 0usize);
+            for case in 0..40 {
+                let n = if case % 2 == 0 { 16 } else { 28 };
+                let scale = if case % 3 == 2 { 32 } else { 1 };
+                let len = 1500 + rng.below(2500) as usize;
+                let p = random_problem(&mut rng, n, scale, len);
+                let (go, ge, x) = if case % 4 < 2 {
+                    (5 * scale, 2 * scale, 110 * scale)
+                } else {
+                    (11 * scale, scale, 38 * scale)
+                };
+                let (len1, len2) = (p.q.len(), p.s.len());
+                if len2 == 0 {
+                    continue;
+                }
+                let rows = RowSeq::Bytes {
+                    data: &p.q,
+                    base: -1,
+                    step: 1,
+                };
+                let cols = ColSeq {
+                    data: &p.s,
+                    base: 0,
+                    step: 1,
+                    zero_from: len2,
+                };
+                let scores = Scores::Flat { data: &p.m, n };
+                let expected = reference(&p, len1, len2, go, ge, x, true, false);
+                X_TEST_FROM.with(|c| c.set(Some(usize::MAX)));
+                let b = xdrop_align(
+                    &rows, &cols, &scores, len1, len2, go, ge, x, true, true, &mut own,
+                );
+                X_TEST_FROM.with(|c| c.set(Some(FROM)));
+                let sc = &mut pair[case % 2];
+                sc.x_nib = case % 4 < 2;
+                own.x_nib = sc.x_nib;
+                let a = xdrop_align(&rows, &cols, &scores, len1, len2, go, ge, x, true, true, sc);
+                taken += X_OWN.with(|o| o.borrow().is_some()) as usize;
+                sc.x_trace_release();
+                assert!(
+                    sc.trace.capacity() <= FROM,
+                    "case {case}: {} bytes kept after the call",
+                    sc.trace.capacity()
+                );
+                assert_eq!(a.is_some(), b.is_some(), "case {case}: one side declined");
+                let (Some(a), Some(b)) = (a, b) else {
+                    continue;
+                };
+                handled += 1;
+                assert_eq!(a, b, "case {case} len1={len1} len2={len2}");
+                assert_eq!(sc.ops, own.ops, "case {case} traceback");
+                assert_eq!(
+                    (a.a_offset, a.b_offset, a.score, a.fence_hit),
+                    (expected.0, expected.1, expected.2, expected.3),
+                    "case {case} against the scalar loops"
+                );
+                assert_eq!(sc.ops, expected.4, "case {case} scalar traceback");
+            }
+            X_TEST_FROM.with(|c| c.set(None));
+            (handled, taken)
+        });
+        if cfg!(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128"),
+            target_arch = "aarch64"
+        )) {
+            assert!(
+                handled > 30 && taken > 10,
+                "handled {handled}, taken {taken}"
+            );
         }
     }
 

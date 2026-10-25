@@ -6395,7 +6395,8 @@ fn search(
                             .as_mut()
                             .map(|offset| offset as &mut (dyn FormatObserver + Send)),
                     };
-                    x_ahead.run_block(x_next_queries, |x_block| {
+                    let x_later_blocks = blocks.len() - index - 1;
+                    x_ahead.run_block(x_next_queries, x_later_blocks, |x_block| {
                         run_resolved_in_pool(
                             args.clone(),
                             block_queries,
@@ -7509,6 +7510,34 @@ fn blastp_compressed_lookup(
     };
     x_flat.finish(&mut contexts);
     Ok((lookup, contexts))
+}
+
+// No NCBI counterpart: memory only; it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLKDROP): a strict-set switch, on unless it is `0`. The search's lookup
+/// table after its preliminary stage, which nothing reads any more: kept (`Some`) only where the
+/// search gives its vectors to a spare at its end that a later block's build may take
+/// (`x_query_blocks::x_bp_lookup_spare` / `x_bp_aa_spares` and
+/// `XAheadBlock::x_table_taken_later`), or with the switch off; otherwise dropped here, before the
+/// redo, instead of at the search's end.
+fn x_lookup_after_prelim(
+    lookup: BlastpRuntimeLookup,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    ahead: &x_lookup_ahead::XAheadBlock<'_>,
+) -> Option<BlastpRuntimeLookup> {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLKDROP")) {
+        return Some(lookup);
+    }
+    let taken_later = ahead.x_table_taken_later()
+        && match &lookup {
+            BlastpRuntimeLookup::CompressedFlat(_) => {
+                super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
+            }
+            BlastpRuntimeLookup::Aa(_) => super::x_query_blocks::x_bp_aa_spares(pool).is_some(),
+            BlastpRuntimeLookup::Compressed(_) => false,
+        };
+    crate::utils::xreach::x_reach!("LOSAT_X_BPLKDROP", !taken_later);
+    taken_later.then_some(lookup)
 }
 
 fn run_resolved_in_pool(
@@ -9702,6 +9731,9 @@ fn run_resolved_in_pool(
     //     );
     // }
     // ```
+    // EXPERIMENT (LOSAT_X_BPLKDROP): nothing reads the lookup table after the preliminary stage;
+    // it is dropped here unless a later block's build may take its vectors (at the end below).
+    let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
     // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
@@ -10044,6 +10076,15 @@ fn run_resolved_in_pool(
         "LOSAT_X_NEWTONLANES",
         x_redo_par_run || !use_parallel_kappa_match_redo
     );
+    // EXPERIMENT (LOSAT_X_BPSEGWIN): a redo not in windows empties no store; the windows record
+    // their side (`x_redo_par::x_redo`).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on {
+        crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", false);
+    }
     if x_redo_par_run {
         #[cfg(all(
             feature = "parallel",
@@ -11836,19 +11877,20 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
     // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed. EXPERIMENT
     // (LOSAT_X_BPLKPAHEAD): exact blastp's, for the build of a later block's table ahead of it
-    // (`x_query_blocks::x_bp_aa_spares`).
+    // (`x_query_blocks::x_bp_aa_spares`). EXPERIMENT (LOSAT_X_BPLKDROP): `None` when the table was
+    // dropped before the redo.
     match lookup {
-        BlastpRuntimeLookup::CompressedFlat(table) => {
+        Some(BlastpRuntimeLookup::CompressedFlat(table)) => {
             if let Some(spare) = super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool) {
                 spare.give(table);
             }
         }
-        BlastpRuntimeLookup::Aa(table) => {
+        Some(BlastpRuntimeLookup::Aa(table)) => {
             if let Some(spares) = super::x_query_blocks::x_bp_aa_spares(blastp_parallel_pool) {
                 spares.give(table);
             }
         }
-        BlastpRuntimeLookup::Compressed(_) => {}
+        Some(BlastpRuntimeLookup::Compressed(_)) | None => {}
     }
 
     if let Some(timing) = timing.as_ref() {

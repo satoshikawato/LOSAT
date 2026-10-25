@@ -7,9 +7,20 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:185-232
 //! ```c++
-//!     if (strcmp(matrix_name, "BLOSUM62") == 0)
-//!         packed_matrix = &NCBISM_Blosum62;
+//!     if (strcmp(matrix_name, "BLOSUM45") == 0)
+//!         packed_matrix = &NCBISM_Blosum45;
 //!     ...
+//!     else if (strcmp(matrix_name, "IDENTITY") == 0)
+//!         	packed_matrix = &NCBISM_Identity;
+//!     else {
+//!         string prog_name = Blast_ProgramNameFromType(
+//!                                            m_Options.GetProgramType());
+//!         if (prog_name != "blastn" && prog_name != "megablast") {
+//!             NCBI_THROW(blast::CBlastException, eInvalidArgument,
+//!                         "unsupported score matrix");
+//!         }
+//!     }
+//!
 //!     if (packed_matrix) {
 //!         SNCBIFullScoreMatrix m;
 //!
@@ -56,20 +67,17 @@ pub struct FormattingMatrix {
     scores: Box<[i32]>,
 }
 
-/// The packed matrix of `data4xmlformat.cpp`'s `x_FillScoreMatrix` by name (exactly as typed)
-/// that LOSAT runs; none for a name it does not know (BLOSUM50, 80, 90, PAM and IDENTITY
-/// are NCBI's, but no LOSAT program with outfmt 5 runs them).
+/// The packed matrix of `data4xmlformat.cpp`'s `x_FillScoreMatrix` by name, compared with
+/// `strcmp` (so `blosum62` has none and a protein program's XML stops with "unsupported score
+/// matrix").
 fn packed_matrix(name: &str) -> Option<ScoringMatrix> {
-    match name {
-        "BLOSUM45" => Some(ScoringMatrix::Blosum45),
-        "BLOSUM62" => Some(ScoringMatrix::Blosum62),
-        _ => None,
-    }
+    ScoringMatrix::ALL
+        .into_iter()
+        .find(|matrix| matrix.ncbi_name() == name)
 }
 
 impl FormattingMatrix {
-    /// The matrix of the score matrix `name` (`CCmdLineBlastXMLReportData::x_FillScoreMatrix`);
-    /// BLOSUM62 and BLOSUM45 run in LOSAT.
+    /// The matrix of the score matrix `name` (`CCmdLineBlastXMLReportData::x_FillScoreMatrix`).
     pub fn new(name: &str) -> Option<Self> {
         let matrix = packed_matrix(name)?;
         let mut scores = vec![i32::MIN; 256 * 256].into_boxed_slice();
@@ -94,7 +102,7 @@ impl FormattingMatrix {
 }
 
 /// `NCBISM_Unpack` of a packed matrix for two letters: the packed table, or its `defscore`
-/// (BLOSUM62 -4, BLOSUM45 -5) when either letter is not one of the packed symbols.
+/// (BLOSUM62 -4, BLOSUM45 -5, ...) when either letter is not one of the packed symbols.
 fn packed_score(matrix: ScoringMatrix, row: u8, col: u8) -> i32 {
     let table = standard_protein_matrix(matrix);
     let index = |letter: u8| SYMBOLS.iter().position(|&symbol| symbol == letter);
@@ -164,8 +172,9 @@ mod tests {
                 );
             }
         }
-        assert!(FormattingMatrix::new("BLOSUM80").is_none());
         assert!(FormattingMatrix::new("blosum62").is_none());
+        assert!(FormattingMatrix::new("BLOSUM62_20").is_none());
+        assert!(FormattingMatrix::new("IDENTITYX").is_none());
     }
 
     #[test]
@@ -182,5 +191,33 @@ mod tests {
         assert_eq!(matrix.score(b'A', b'A'), 5);
         assert!(matrix.positive(b'I', b'V'));
         assert!(!matrix.positive(b'A', b'R'));
+    }
+
+    #[test]
+    fn all_nine_ncbi_matrices_have_a_formatting_matrix() {
+        // data4xmlformat.cpp:195-212: the nine built-in matrices by their exact names.
+        for matrix in ScoringMatrix::ALL {
+            let formatting = FormattingMatrix::new(matrix.ncbi_name()).expect("built in");
+            let table = standard_protein_matrix(matrix);
+            assert_eq!(formatting.score(b'A', b'A'), i32::from(table.scores[0]));
+            assert_eq!(formatting.score(b'U', b'A'), table.defscore, "{matrix:?}");
+        }
+        // sm_identity.c: 9 on the diagonal but X/X, -5 elsewhere and defscore -5.
+        let identity = FormattingMatrix::new("IDENTITY").expect("IDENTITY");
+        assert_eq!(identity.score(b'W', b'W'), 9);
+        assert_eq!(identity.score(b'X', b'X'), -5);
+        assert_eq!(identity.score(b'I', b'V'), -5);
+        assert!(!identity.positive(b'I', b'V'));
+        // sm_pam30.c: the A row starts 6, -7, -4; defscore -17.
+        let pam30 = FormattingMatrix::new("PAM30").expect("PAM30");
+        assert_eq!(
+            (
+                pam30.score(b'A', b'A'),
+                pam30.score(b'A', b'R'),
+                pam30.score(b'A', b'N')
+            ),
+            (6, -7, -4)
+        );
+        assert_eq!(pam30.score(b'O', b'A'), -17);
     }
 }

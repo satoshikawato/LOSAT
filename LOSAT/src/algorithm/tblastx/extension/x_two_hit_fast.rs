@@ -63,7 +63,41 @@
 //! of that time (`docs/agents/diagnostics.md`, entry `LOSAT_X_TBXUNGAP`). The calls the table
 //! does not cover (the Why section's bounds and X-drop) run `extend_hit_two_hit_reference`.
 //!
-//! No NCBI counterpart for the split itself: the two code paths give the same result.
+//! LOSAT_X_TBXUNGAPSENT (native builds; in the strict set, `=0` turns it off): `two_hit_sent`, the
+//! same extension with walks that the sentinels stop instead of a bound, inlined with the word loop
+//! into the callers' extension code (`extend_hit_two_hit_sent`: the unit path's `x_hit` and the
+//! batched `resolve`, the reference frame loops).
+//! * Instances. The unit path chooses for each unit of its branch-free hit loops
+//!   (LOSAT_X_TBXHITBF; `XPairPar::x_unit_sent`, in the dispatches `scan_unit_or_bf`,
+//!   `scan_unit_batched_or_bf` and `scan_unit_sliced_or_bf` of x_tbx_hitbf.rs) between two
+//!   instances of the loop's function (`const SENT`: `scan_unit_bf`, `scan_unit_batched_bf`,
+//!   `scan_unit_sliced_bf`), so that the instances without the walks keep the machine code they had
+//!   before the switch. The units of the other hit loop (`LOSAT_X_TBXHITBF=0`, the probes of
+//!   `LOSAT_TIMING` and `LOSAT_X_STATS`) take `two_hit`. The reference frame loops (run_impl.rs)
+//!   choose at every call.
+//! * Where. A query context's buffer is `[0, residues.., 0]` and a subject frame's too
+//!   (`translation.rs`, NCBI's NULLB at each end, blast_util.c:438-453); the callers' sequences are
+//!   the residues. A subject frame of more than `MAX_DBSEQ_LEN` (5,000,000) residues is searched in
+//!   overlapping chunks, and a chunk's ends are residues of the frame, so only a chunk that is the
+//!   whole frame takes the path (`sent_subject`, per unit or chunk); the contexts' sentinels are
+//!   checked once per batch (`sent_contexts`). The others take `two_hit`; the debug output of the
+//!   reference frame loops keeps the reference.
+//! * Sentinel. The reference's left walk takes `min(q_r, s_r)` steps and its right walk the room
+//!   left in both sequences; the position one step further is just outside the sequence that set
+//!   the bound, which holds a sentinel. A step on it scores -128 and stops the walk as the bound
+//!   does, with the same best, length and stop position (the argument of the sentinel above: the
+//!   step does not raise the best and makes `best - score >= 128 > x_drop`). Every step before it
+//!   reads the positions the reference reads. The word loop reads the same three positions as in
+//!   `two_hit`, after the same test that they fit.
+//! * Overflow. A walk without a bound would step over a sentinel if its score wrapped. The left walk
+//!   (from 0) and then the right walk (from the left walk's best) read each subject position once at
+//!   most, at +11 at most (`MAX_WORD_SCORE`), so a score stays below `11 * (subject letters + 2)`, and
+//!   it is never below `best - 255` (a step costs 128 at most, and the walk stops once `best - score`
+//!   reaches `x_drop <= 127`); the path takes frames of at most `MAX_SENT_LEN` (`i32::MAX / 16`)
+//!   bytes.
+//!
+//! No NCBI counterpart for the split itself and the switch: they choose between LOSAT code paths
+//! with the same result.
 
 use super::get_score;
 #[cfg(test)]
@@ -99,6 +133,8 @@ unsafe impl Sync for FixedTable {}
 static FIXED_TABLE: FixedTable = FixedTable(std::cell::UnsafeCell::new([0; TABLE_LEN]));
 
 struct State {
+    /// LOSAT_X_TBXUNGAPSENT (native builds, with the table): the walks the sentinels stop.
+    sent: bool,
     /// The table of the walks; `None` (the reference runs) if a score does not fit it.
     #[cfg(not(target_arch = "wasm32"))]
     table: Option<Box<Table>>,
@@ -175,7 +211,12 @@ fn state() -> &'static State {
             *FIXED_TABLE.0.get() = *t;
             &*FIXED_TABLE.0.get()
         });
-        State { table }
+        // LOSAT_X_TBXUNGAPSENT: a strict-set switch on the table walks; the wasm32 builds keep the
+        // walks of line W.
+        let sent = table.is_some()
+            && cfg!(not(target_arch = "wasm32"))
+            && crate::utils::xswitch::on("LOSAT_X_TBXUNGAPSENT");
+        State { sent, table }
     })
 }
 
@@ -321,6 +362,183 @@ pub(super) fn two_hit(
                 left_score,
             )
         };
+        (best, len, s_r + end)
+    } else {
+        (0, 0, s_r)
+    };
+
+    Some((
+        q_r - left_disp,
+        q_r + right_disp,
+        s_r - left_disp,
+        s_r + right_disp,
+        left_score.max(right_score),
+        reached_first_hit,
+        s_last_off,
+    ))
+}
+
+/// Longest subject frame of the sentinel walks (`[0, frame.., 0]` bytes): no score wraps (module
+/// comment, section LOSAT_X_TBXUNGAPSENT).
+const MAX_SENT_LEN: usize = (i32::MAX / 16) as usize;
+const _: () = assert!(11 * (MAX_SENT_LEN as i64 + 3) < i32::MAX as i64);
+
+/// LOSAT_X_TBXUNGAPSENT: whether a batch whose query contexts have the buffers `contexts` may take
+/// the sentinel walks: the switch is on and every buffer is `[0, residues.., 0]`.
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+pub(crate) fn sent_contexts<'a>(mut contexts: impl Iterator<Item = &'a [u8]>) -> bool {
+    if !state().sent {
+        return false;
+    }
+    let ok = contexts.all(|b| b.len() >= 2 && b[0] == 0 && b[b.len() - 1] == 0);
+    if !ok {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXUNGAPSENT", false);
+    }
+    ok
+}
+
+/// LOSAT_X_TBXUNGAPSENT: whether the extensions of the chunk `offset..offset + len` of
+/// `frame[1..frame.len() - 1]` (`frame`: a subject frame's buffer, `[0, residues.., 0]`) take the
+/// sentinel walks: the batch does (`batch`, from [`sent_contexts`]), the chunk is the whole frame
+/// and the buffer has its sentinels and at most `MAX_SENT_LEN` bytes. Otherwise they take
+/// [`two_hit`].
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+#[inline]
+pub(crate) fn sent_subject(batch: bool, frame: &[u8], offset: usize, len: usize) -> bool {
+    if !batch {
+        return false;
+    }
+    let whole = offset == 0
+        && len.checked_add(2) == Some(frame.len())
+        && frame.len() <= MAX_SENT_LEN
+        && frame[0] == 0
+        && frame[len + 1] == 0;
+    crate::utils::xreach::x_reach!("LOSAT_X_TBXUNGAPSENT", whole);
+    whole
+}
+
+/// LOSAT_X_TBXUNGAPSENT: one walk of `s_BlastAaExtendRight` (`RIGHT`, from `start`) or
+/// `s_BlastAaExtendLeft` (from 0) from `qp`, `sp` (the first step's positions; the left walk
+/// goes down), two steps a loop, until the X-drop test (or, right, `score <= 0`) holds: (best,
+/// length, steps before the stop).
+///
+/// SAFETY: walking from `qp`, `sp` in the direction, both sequences reach a sentinel (code 0) with
+/// every position up to it readable; `tab` is the table of `build_table` (code 0 against anything
+/// -128, every other score at most `MAX_WORD_SCORE`); `1 <= x_drop <= 127`; and the score cannot
+/// wrap before the nearer sentinel (`start` plus `MAX_WORD_SCORE` for every step up to it stays
+/// below `i32::MAX`: `two_hit_sent` takes frames of at most `MAX_SENT_LEN` bytes).
+// NCBI reference: aa_ungapped.c:846-866 and 886-921 (module comment).
+#[inline(always)]
+unsafe fn walk_sent<const RIGHT: bool>(
+    tab: *const i8,
+    qp: *const u8,
+    sp: *const u8,
+    x_drop: i32,
+    start: i32,
+) -> (i32, usize, usize) {
+    let mut score = start;
+    let mut best = start;
+    // the offset of the best step; the start value means "no best yet" (length 0)
+    let none: isize = if RIGHT { -1 } else { 1 };
+    let mut best_off = none;
+    let mut off: isize = 0;
+    let dir: isize = if RIGHT { 1 } else { -1 };
+    macro_rules! step {
+        ($l:lifetime) => {{
+            let qc = *qp.offset(off) as usize;
+            let sc = *sp.offset(off) as usize;
+            // SAFETY: q << 8 | s < TABLE_LEN for any two bytes.
+            score += *tab.add(qc << 8 | sc) as i32;
+            if score > best {
+                best = score;
+                best_off = off;
+            }
+            let stop = if RIGHT {
+                score <= 0 || best - score >= x_drop
+            } else {
+                best - score >= x_drop
+            };
+            if stop {
+                break $l;
+            }
+            off += dir;
+        }};
+    }
+    'w: loop {
+        step!('w);
+        step!('w);
+    }
+    let len = if best_off == none {
+        0
+    } else {
+        best_off.unsigned_abs() + 1
+    };
+    (best, len, off.unsigned_abs())
+}
+
+/// LOSAT_X_TBXUNGAPSENT: `two_hit(&q_full[1..q_full.len() - 1], &s_full[1..s_full.len() - 1],
+/// s_left_off, s_right_off, q_right_off, x_drop)` with walks that the sentinels stop instead of a
+/// bound, inlined with the word loop into the callers' extension code. `None` where `two_hit`
+/// returns `None`.
+///
+/// Inlined, the walks reload the table pointer and the X-drop from the stack (one or two loads
+/// every two steps), and a call costs more: on AP027131 x AP027133 (code 4) at 1 thread the
+/// inlined form ran x0.983 of the same function behind a call (`#[inline(never)]`), with 1.6 %
+/// fewer instructions (workstation, 8 alternating rounds).
+///
+/// SAFETY: `q_full` is `[0, residues.., 0]` (a context of a batch [`sent_contexts`] accepted) and
+/// `s_full` the buffer of a subject frame [`sent_subject`] accepted (`[0, residues.., 0]`, at most
+/// `MAX_SENT_LEN` bytes).
+// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
+#[inline(always)]
+pub(super) unsafe fn two_hit_sent(
+    q_full: &[u8],
+    s_full: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    x_drop: i32,
+) -> Option<TwoHit> {
+    debug_assert!(q_full.len() >= 2 && q_full[0] == 0 && q_full[q_full.len() - 1] == 0);
+    debug_assert!(s_full.len() >= 2 && s_full[0] == 0 && s_full[s_full.len() - 1] == 0);
+    debug_assert!(s_full.len() <= MAX_SENT_LEN);
+    let q_len = q_full.len() - 2;
+    let s_len = s_full.len() - 2;
+    if !(1..=MAX_X_DROP).contains(&x_drop)
+        || q_right_off + WORD > q_len
+        || s_right_off + WORD > s_len
+    {
+        return None;
+    }
+    let tab = state().table.as_deref()?.as_ptr();
+    // offset 0 of the reference's sequences; one sentinel before each
+    let qb = q_full.as_ptr().add(1);
+    let sb = s_full.as_ptr().add(1);
+
+    // The best end of the word at R (two_hit.rs, the `k_size` loop; inside both sequences).
+    let qw = qb.add(q_right_off);
+    let sw = sb.add(s_right_off);
+    let mut score = 0i32;
+    let mut seed_score = 0i32;
+    let mut right_d = 0usize;
+    for i in 0..WORD {
+        score += *tab.add((*qw.add(i) as usize) << 8 | *sw.add(i) as usize) as i32;
+        if score > seed_score {
+            seed_score = score;
+            right_d = i + 1;
+        }
+    }
+    let q_r = q_right_off + right_d;
+    let s_r = s_right_off + right_d;
+
+    // left: from (q_r - 1, s_r - 1) down to the first sentinel (index -1 of the shorter side)
+    let (left_score, left_disp, _) =
+        walk_sent::<false>(tab, qb.add(q_r).sub(1), sb.add(s_r).sub(1), x_drop, 0);
+
+    let reached_first_hit = left_disp >= s_r.saturating_sub(s_left_off);
+    let (right_score, right_disp, s_last_off) = if reached_first_hit {
+        // right: from (q_r, s_r) up to the first sentinel (index q_len / s_len)
+        let (best, len, end) = walk_sent::<true>(tab, qb.add(q_r), sb.add(s_r), x_drop, left_score);
         (best, len, s_r + end)
     } else {
         (0, 0, s_r)
@@ -494,6 +712,198 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `[W.., 0, seq.., 0, W..]` with `PAD` letters W around, and the range of `[0, seq.., 0]`:
+    /// a step of the sentinel walks past a sentinel would read a W (+11) and change the result.
+    const PAD: usize = 8;
+    fn with_sentinels(seq: &[u8]) -> (Vec<u8>, std::ops::Range<usize>) {
+        let mut v = vec![20u8; PAD];
+        v.push(0);
+        v.extend_from_slice(seq);
+        v.push(0);
+        let r = PAD..v.len();
+        v.extend(std::iter::repeat_n(20u8, PAD));
+        (v, r)
+    }
+
+    /// One call of the sentinel walks against the reference; they must handle it.
+    fn check_sent(q: &[u8], s: &[u8], sl: usize, sr: usize, qr: usize, d: i32) {
+        let (qb, qr_range) = with_sentinels(q);
+        let (sb, sr_range) = with_sentinels(s);
+        let expect = extend_hit_two_hit_reference(q, s, sl, sr, qr, d, false);
+        // SAFETY: both buffers are [0, residues.., 0] and short.
+        let got = unsafe { two_hit_sent(&qb[qr_range], &sb[sr_range], sl, sr, qr, d) }
+            .expect("the sentinel walks handle the call");
+        assert_eq!(got, expect, "sl={sl} sr={sr} qr={qr} d={d}");
+    }
+
+    fn check_sent_pair(q: &[u8], s: &[u8], rng: &mut Rng, calls: usize, dmax: i32) -> u64 {
+        if q.len() < WORD || s.len() < WORD {
+            return 0;
+        }
+        for _ in 0..calls {
+            let d = 1 + rng.below(dmax as u64) as i32;
+            // the word anywhere, and often at either end of either sequence
+            let qr = match rng.below(8) {
+                0 => 0,
+                1 => q.len() - WORD,
+                _ => rng.below((q.len() - WORD + 1) as u64) as usize,
+            };
+            let sr = match rng.below(8) {
+                0 => 0,
+                1 => s.len() - WORD,
+                _ => rng.below((s.len() - WORD + 1) as u64) as usize,
+            };
+            let sl = match rng.below(16) {
+                0 => sr + 1 + rng.below(3) as usize,
+                1 => usize::MAX - rng.below(3) as usize,
+                _ => sr.saturating_sub(rng.below(60) as usize),
+            };
+            check_sent(q, s, sl, sr, qr, d);
+        }
+        calls as u64
+    }
+
+    // No NCBI counterpart (two LOSAT paths): LOSAT_X_TBXUNGAPSENT against the reference on random
+    // and related sequences (walks that run to the sentinels at both ends), short and long, every
+    // code 1..=27, X-drops up to 127.
+    #[test]
+    fn sentinel_walks_equal_the_reference_on_random_inputs() {
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let mut compared = 0u64;
+        for round in 0..400 {
+            let len = match round % 4 {
+                0 => WORD + rng.below(40) as usize,
+                1 => 20 + rng.below(120) as usize,
+                2 => 100 + rng.below(600) as usize,
+                _ => 600 + rng.below(3000) as usize,
+            };
+            let q = random_seq(&mut rng, len, 1, 28);
+            let rate = 2 + rng.below(40);
+            let s_related = mutate(&mut rng, &q, rate);
+            let extra = rng.below(30) as usize;
+            let s_random = random_seq(&mut rng, len + extra, 1, 28);
+            let dmax = [4, 16, 40, 127][(round / 4 % 4) as usize];
+            compared += check_sent_pair(&q, &s_related, &mut rng, 60, dmax);
+            compared += check_sent_pair(&q, &s_random, &mut rng, 60, dmax);
+            // the subject shorter than the query, and the other way round
+            compared += check_sent_pair(
+                &s_related[..(len / 2 + WORD).min(len)],
+                &q,
+                &mut rng,
+                20,
+                dmax,
+            );
+            compared += check_sent_pair(
+                &q,
+                &s_related[(len / 3).min(len - WORD)..],
+                &mut rng,
+                20,
+                dmax,
+            );
+        }
+        assert!(compared > 60_000);
+    }
+
+    // No NCBI counterpart. Identical sequences of W (+11 a step): both walks run out at the
+    // sentinels (the reference's bound), from every word position, with the subject offset from
+    // the query on both sides.
+    #[test]
+    fn sentinel_walks_stop_at_both_ends_as_the_bound_does() {
+        for (q_len, s_len) in [(3, 3), (3, 9), (9, 3), (17, 17), (40, 25), (25, 40)] {
+            let q = vec![20u8; q_len];
+            let s = vec![20u8; s_len];
+            for qr in 0..=q_len - WORD {
+                for sr in 0..=s_len - WORD {
+                    for sl in [sr.saturating_sub(5), sr, sr + 1, usize::MAX] {
+                        for d in [1, 11, 127] {
+                            check_sent(&q, &s, sl, sr, qr, d);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // No NCBI counterpart. Two-letter alphabets (ties for the best, drops equal to the X-drop)
+    // and a code 0 inside a sequence (it stops a walk as BLAST_SCORE_MIN does), codes 28..=255.
+    #[test]
+    fn sentinel_walks_equal_the_reference_at_ties_inner_sentinels_and_odd_codes() {
+        let mut rng = Rng(0x9E6C_63D0_676A_9A99);
+        for (a, b) in [
+            (1u8, 2u8),
+            (1, 20),
+            (4, 5),
+            (11, 12),
+            (19, 25),
+            (5, 40),
+            (27, 255),
+        ] {
+            for _ in 0..300 {
+                let len = WORD + rng.below(200) as usize;
+                let pick = |rng: &mut Rng| if rng.below(2) == 0 { a } else { b };
+                let q: Vec<u8> = (0..len).map(|_| pick(&mut rng)).collect();
+                let s: Vec<u8> = (0..len + rng.below(10) as usize)
+                    .map(|_| pick(&mut rng))
+                    .collect();
+                let d = 1 + rng.below(12) as i32;
+                check_sent_pair(&q, &s, &mut rng, 20, d);
+                let mut inner = s.clone();
+                let at = rng.below(inner.len() as u64) as usize;
+                inner[at] = 0;
+                check_sent_pair(&q, &inner, &mut rng, 20, 127);
+                check_sent_pair(&inner, &q, &mut rng, 20, 127);
+            }
+        }
+    }
+
+    // No NCBI counterpart. The calls the sentinel walks leave to the reference (as `two_hit`):
+    // X-drops outside 1..=127 and a word that does not fit.
+    #[test]
+    fn sentinel_walks_refuse_what_the_table_cannot_do() {
+        let (qb, qr) = with_sentinels(&[5u8; 50]);
+        let (sb, sr) = with_sentinels(&[5u8; 50]);
+        let (q, s) = (&qb[qr.clone()], &sb[sr.clone()]);
+        // SAFETY: both buffers are [0, residues.., 0].
+        unsafe {
+            assert!(two_hit_sent(q, s, 10, 20, 20, 0).is_none());
+            assert!(two_hit_sent(q, s, 10, 20, 20, 128).is_none());
+            assert!(two_hit_sent(q, s, 10, 20, 48, 16).is_none());
+            assert!(two_hit_sent(q, s, 10, 48, 20, 16).is_none());
+        }
+        check_sent(&[5u8; 50], &[5u8; 50], 10, 20, 20, 127);
+        check_sent(&[5u8; 50], &[5u8; 50], 10, 47, 47, 16);
+        // `extend_hit_two_hit_sent` runs the reference for the X-drops (the callers' words fit).
+        let (qv, sv) = (&qb[qr.start + 1..qr.end - 1], &sb[sr.start + 1..sr.end - 1]);
+        for (sl, srr, qrr, d) in [(10, 20, 20, 0), (10, 20, 20, 128), (10, 47, 47, 0)] {
+            let expect = extend_hit_two_hit_reference(qv, sv, sl, srr, qrr, d, false);
+            // SAFETY: both buffers are [0, residues.., 0].
+            let got =
+                unsafe { super::super::two_hit::extend_hit_two_hit_sent(q, s, sl, srr, qrr, d) };
+            assert_eq!(got, expect, "sl={sl} sr={srr} qr={qrr} d={d}");
+        }
+    }
+
+    // No NCBI counterpart. A chunk takes the sentinel walks only when the batch does, the chunk
+    // is the whole frame and the buffer has its two sentinels; otherwise the walks of `two_hit`.
+    #[test]
+    fn only_a_whole_frame_with_its_sentinels_takes_the_sentinel_walks() {
+        let frame = [0u8, 4, 5, 6, 7, 0];
+        assert!(sent_subject(true, &frame, 0, 4));
+        assert!(!sent_subject(false, &frame, 0, 4));
+        // a chunk of the frame (MAX_DBSEQ_LEN splits frames longer than 5 M letters)
+        assert!(!sent_subject(true, &frame, 1, 3));
+        assert!(!sent_subject(true, &frame, 0, 3));
+        assert!(!sent_subject(true, &frame, 0, usize::MAX));
+        assert!(!sent_subject(true, &[0u8, 4, 5, 6, 7, 8], 0, 4));
+        assert!(!sent_subject(true, &[1u8, 4, 5, 6, 7, 0], 0, 4));
+        // contexts: every buffer needs both sentinels (and the switch)
+        let good: [&[u8]; 2] = [&[0, 4, 5, 6, 0], &[0, 0]];
+        assert_eq!(sent_contexts(good.into_iter()), state().sent);
+        let bad: [&[u8]; 2] = [&[0, 4, 5, 6, 0], &[0, 4, 5]];
+        assert!(!sent_contexts(bad.into_iter()));
+        assert!(!sent_contexts([&[0u8][..]].into_iter()));
     }
 
     // No NCBI counterpart. A gap or sentinel code (0) at every position of the query and of the

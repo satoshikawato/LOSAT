@@ -343,8 +343,81 @@ pub(crate) fn read_query_batches(
     input_records: &[FastaRecord],
     searched: &[FastaRecord],
     input: &crate::blastinput::seq_range::QueryInput,
+    reading: QueryReading,
+    batch_size: u32,
+) -> QueryBatches {
+    read_batches(
+        input_records,
+        searched,
+        input,
+        reading,
+        batch_size,
+        &no_data_batch_error,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:468
+// ```c++
+//             input.Reset(new CBlastInput(&*fasta, 1));
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:88-92
+// ```c++
+//     // Either PSSM or a protein query must be provided
+//     if (m_Pssm.NotEmpty()) {
+//         CPsiBlastValidate::Pssm(*m_Pssm);
+//     } else if (m_Query.NotEmpty()) {
+//         CPsiBlastValidate::QueryFactory(m_Query, *m_OptsHandle);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:636-649
+// ```c++
+//     string excpt_msg("PSI-BLAST only accepts ");
+//     if (qf_type == eQFT_Query) {
+//         excpt_msg += "one protein sequence as query";
+//     } else if (qf_type == eQFT_Subject) {
+//         excpt_msg += "protein sequences as subjects";
+//     } else {
+//         abort();
+//     }
+//
+//     if (qf_type == eQFT_Query) {
+//         if (query_data->GetNumQueries() != 1) {
+//             NCBI_THROW(CBlastException, eInvalidArgument, excpt_msg);
+//         }
+//     }
+// ```
+/// psiblast's query batches (`read_query_batches` with a batch size of 1): a batch holds one
+/// query with letters and the queries without letters before it. Each batch is a `CPsiBlast` of
+/// its own, which takes exactly one query: a batch of several (a query without letters and the
+/// next) stops the run with `BLAST engine error: PSI-BLAST only accepts one protein sequence as
+/// query` (exit 3). A batch of one query without letters (the last records, or a `-query_loc`
+/// interval that starts just past its record's end) crashes NCBI 2.17.0's psiblast (SIGSEGV);
+/// LOSAT rejects it there. A query whose Karlin-Altschul parameters cannot be computed stops the
+/// run at its batch too (`blast_engine.rs` `search`).
+pub(crate) fn read_psiblast_query_batches(
+    input_records: &[FastaRecord],
+    searched: &[FastaRecord],
+    input: &crate::blastinput::seq_range::QueryInput,
+    reading: QueryReading,
+) -> QueryBatches {
+    read_batches(
+        input_records,
+        searched,
+        input,
+        reading,
+        1,
+        &psiblast_batch_error,
+    )
+}
+
+/// `read_query_batches`, where the batch errors after those of NCBI's batch reader (a reader
+/// error, `Empty CBlastQueryVector`) are `batch_error` of the batch's searched queries.
+fn read_batches(
+    input_records: &[FastaRecord],
+    searched: &[FastaRecord],
+    input: &crate::blastinput::seq_range::QueryInput,
     mut reading: QueryReading,
     batch_size: u32,
+    batch_error: &dyn Fn(&[FastaRecord]) -> Option<anyhow::Error>,
 ) -> QueryBatches {
     let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); searched.len()];
     let mut starts = Vec::new();
@@ -393,19 +466,8 @@ pub(crate) fn read_query_batches(
                 .into(),
             );
         }
-        if stop_error.is_none()
-            && searched[start..end]
-                .iter()
-                .all(|record| record.seq().is_empty())
-        {
-            let mut message = String::from("BLAST engine error: ");
-            for _ in start..end {
-                message.push_str("Warning: ");
-                message.push_str(NO_DATA_MESSAGE);
-                message.push(' ');
-            }
-            message.push('\n');
-            stop_error = Some(crate::cli::NativeError { exit: 3, message }.into());
+        if stop_error.is_none() {
+            stop_error = batch_error(&searched[start..end]);
         }
         if let Some(error) = stop_error {
             return QueryBatches {
@@ -426,6 +488,40 @@ pub(crate) fn read_query_batches(
         searched_done: searched.len(),
         starts,
         stop: None,
+    }
+}
+
+/// The error of a blastp or tblastn batch whose queries all have no letters: one `Sequence
+/// contains no data` per query (`read_query_batches`).
+fn no_data_batch_error(batch: &[FastaRecord]) -> Option<anyhow::Error> {
+    if !batch.iter().all(|record| record.seq().is_empty()) {
+        return None;
+    }
+    let mut message = String::from("BLAST engine error: ");
+    for _ in batch {
+        message.push_str("Warning: ");
+        message.push_str(NO_DATA_MESSAGE);
+        message.push(' ');
+    }
+    message.push('\n');
+    Some(crate::cli::NativeError { exit: 3, message }.into())
+}
+
+/// The error of a psiblast batch that `CPsiBlast` does not take (`read_psiblast_query_batches`).
+fn psiblast_batch_error(batch: &[FastaRecord]) -> Option<anyhow::Error> {
+    match batch {
+        [query] if query.seq().is_empty() => Some(anyhow::anyhow!(
+            "a query without letters alone in its batch (a last record without residues, or a -query_loc interval that starts just past the end of its record), with which NCBI BLAST+'s psiblast crashes, is not supported by LOSAT's PSIBLAST"
+        )),
+        [_] => None,
+        _ => Some(
+            crate::cli::NativeError {
+                exit: 3,
+                message: "BLAST engine error: PSI-BLAST only accepts one protein sequence as query\n"
+                    .to_string(),
+            }
+            .into(),
+        ),
     }
 }
 
@@ -455,6 +551,61 @@ mod tests {
         assert_eq!(batches.starts, vec![(0, 0), (2, 2), (4, 4)]);
         let starts: Vec<(usize, usize)> = (0..5).map(|q| batches.start_of(q)).collect();
         assert_eq!(starts, vec![(0, 0), (0, 0), (2, 2), (2, 2), (4, 4)]);
+    }
+
+    // psiblast_app.cpp:468 and psiblast_aux_priv.cpp:636-649: a batch of one letter takes one
+    // query with letters and the queries without letters before it; `CPsiBlast` takes one query
+    // only (NCBI 2.17.0: `tk, empty, pol` stops with this error after tk's report; a last record
+    // without residues crashes it).
+    #[test]
+    fn a_psiblast_batch_holds_one_query() {
+        use crate::algorithm::blastn::blast_engine::QueryReading;
+        use crate::blastinput::fasta_reader::FastaRecord;
+        use crate::blastinput::seq_range::QueryInput;
+        let records = |lengths: &[usize]| -> Vec<FastaRecord> {
+            lengths
+                .iter()
+                .enumerate()
+                .map(|(i, &len)| FastaRecord::new(format!("q{i}"), b"", &vec![b'A'; len]))
+                .collect()
+        };
+        let read = |records: &[FastaRecord]| {
+            let input = QueryInput::whole(records);
+            super::read_psiblast_query_batches(records, records, &input, QueryReading::Records)
+        };
+        let whole = records(&[4, 7, 3]);
+        let batches = read(&whole);
+        assert!(batches.stop.is_none());
+        assert_eq!(batches.starts, vec![(0, 0), (1, 1), (2, 2)]);
+        let joined = records(&[4, 0, 3]);
+        let batches = read(&joined);
+        assert_eq!(batches.starts, vec![(0, 0)]);
+        assert_eq!((batches.input_done, batches.searched_done), (1, 1));
+        let error = batches.stop.expect("two queries in one batch").1;
+        let native = error
+            .downcast_ref::<crate::cli::NativeError>()
+            .expect("an NCBI error");
+        assert_eq!(native.exit, 3);
+        assert_eq!(
+            native.message,
+            "BLAST engine error: PSI-BLAST only accepts one protein sequence as query\n"
+        );
+        for lengths in [&[4, 0][..], &[0][..]] {
+            let alone = records(lengths);
+            let batches = read(&alone);
+            let error = batches.stop.expect("a query without letters alone").1;
+            assert!(error.downcast_ref::<crate::cli::NativeError>().is_none());
+            assert!(error
+                .to_string()
+                .contains("a query without letters alone in its batch"));
+            assert_eq!(batches.starts.len(), lengths.len() - 1);
+        }
+        // blastp's batches of the same records: the record without letters is searched with the
+        // next one, without an error.
+        let input = QueryInput::whole(&joined);
+        let blastp = super::read_query_batches(&joined, &joined, &input, QueryReading::Records, 1);
+        assert!(blastp.stop.is_none());
+        assert_eq!(blastp.starts, vec![(0, 0), (1, 1)]);
     }
 
     #[test]

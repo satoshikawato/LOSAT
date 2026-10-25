@@ -401,6 +401,62 @@ pub fn extend_hit_two_hit(
     )
 }
 
+/// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): `extend_hit_two_hit(&q_full[1..q_full.len() - 1],
+/// &s_full[1..s_full.len() - 1], s_left_off, s_right_off, q_right_off, x_drop, false)` with the
+/// walks that the sentinels of the two buffers stop (x_two_hit_fast.rs).
+///
+/// SAFETY: `q_full` is the buffer of a context of a batch `x_two_hit_fast::sent_contexts`
+/// accepted, and `s_full` the buffer of a subject frame `x_two_hit_fast::sent_subject` accepted.
+// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
+#[inline(always)]
+pub(crate) unsafe fn extend_hit_two_hit_sent(
+    q_full: &[u8],
+    s_full: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    x_drop: i32,
+) -> (usize, usize, usize, usize, i32, bool, usize) {
+    // SAFETY: the caller's.
+    match unsafe {
+        x_two_hit_fast::two_hit_sent(q_full, s_full, s_left_off, s_right_off, q_right_off, x_drop)
+    } {
+        Some(r) => r,
+        None => extend_hit_two_hit_sent_refused(
+            q_full,
+            s_full,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            x_drop,
+        ),
+    }
+}
+
+/// The calls `extend_hit_two_hit_sent` leaves to `extend_hit_two_hit` (an X-drop outside
+/// 1..=127, a word that does not fit), out of the callers' code.
+// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
+#[cold]
+#[inline(never)]
+fn extend_hit_two_hit_sent_refused(
+    q_full: &[u8],
+    s_full: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    x_drop: i32,
+) -> (usize, usize, usize, usize, i32, bool, usize) {
+    extend_hit_two_hit(
+        &q_full[1..q_full.len() - 1],
+        &s_full[1..s_full.len() - 1],
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        x_drop,
+        false,
+    )
+}
+
 /// `extend_hit_two_hit` as written before the table walks: the calls they do not cover (an X-drop
 /// outside 1..=127, a word that does not fit) and the debug output.
 pub(super) fn extend_hit_two_hit_reference(

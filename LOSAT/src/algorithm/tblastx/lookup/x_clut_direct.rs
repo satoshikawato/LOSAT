@@ -1775,6 +1775,40 @@ impl XFlatCompressedLookup {
         subject_length: usize,
         cells: &mut Vec<(i32, u32)>,
     ) {
+        self.x_probe_list::<false>(subject, subject_length, cells)
+    }
+
+    /// PROBE (BPF s4): [`Self::x_probe_list_bf`] out of line; with `UNCHECKED` the letters and the
+    /// presence bits are read without bounds checks where the subject keeps a byte past the last
+    /// word and the bit array covers every index of the word length.
+    #[inline(never)]
+    pub(crate) fn x_probe_list_bf_out<const UNCHECKED: bool>(
+        &self,
+        subject: &[u8],
+        subject_length: usize,
+        cells: &mut Vec<(i32, u32)>,
+    ) {
+        let s_last = (subject_length as i64 - i64::from(self.word_length)).max(0) as usize;
+        let indices = (self.compressed_alphabet_size as u64).pow(self.word_length as u32);
+        let covered = (self.pv.len() as u64) << self.pv_array_bts;
+        if UNCHECKED
+            && subject.len() > s_last + self.word_length as usize
+            && subject_length <= subject.len()
+            && covered >= indices
+        {
+            self.x_probe_list::<true>(subject, subject_length, cells)
+        } else {
+            self.x_probe_list::<false>(subject, subject_length, cells)
+        }
+    }
+
+    #[inline(always)]
+    fn x_probe_list<const UNCHECKED: bool>(
+        &self,
+        subject: &[u8],
+        subject_length: usize,
+        cells: &mut Vec<(i32, u32)>,
+    ) {
         let word_length = usize::try_from(self.word_length)
             .expect("NCBI BLAST compressed word length must fit usize");
         let compressed_alphabet_size = usize::try_from(self.compressed_alphabet_size)
@@ -1792,7 +1826,15 @@ impl XFlatCompressedLookup {
             s_last = 0;
         }
         let s_last = s_last as usize;
-        let byte_at = |i: usize| subject.get(i).copied().unwrap_or(0);
+        // SAFETY (UNCHECKED): the caller checked that the subject has a byte past s_last + word
+        // length, the largest index read in the loop below.
+        let byte_at = |i: usize| {
+            if UNCHECKED {
+                unsafe { *subject.get_unchecked(i) }
+            } else {
+                subject.get(i).copied().unwrap_or(0)
+            }
+        };
 
         let mut s = 0usize;
         let mut index = 0i32;
@@ -1859,7 +1901,13 @@ impl XFlatCompressedLookup {
             index = preshift + compressed_char;
             preshift = compressed_reciprocal_divide(index, recip);
             let ix = index as usize;
-            let bit = (pv[ix >> pv_array_bts] >> (ix & PV_ARRAY_MASK)) & 1;
+            // SAFETY (UNCHECKED): an index is below alphabet^word length, which the bits cover.
+            let word = if UNCHECKED {
+                unsafe { *pv.get_unchecked(ix >> pv_array_bts) }
+            } else {
+                pv[ix >> pv_array_bts]
+            };
+            let bit = (word >> (ix & PV_ARRAY_MASK)) & 1;
             // SAFETY: as in `for_each_cell`.
             unsafe { list.add(listed).write((s as i32, index as u32)) };
             listed += bit as usize;

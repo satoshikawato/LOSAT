@@ -142,6 +142,8 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
                 4 => stage!(4),
                 5 => stage!(5),
                 7 => stage!(7),
+                11 => stage!(11),
+                12 => stage!(12),
                 _ => x_scan_flat_fseed(
                     lookup,
                     subject,
@@ -278,7 +280,7 @@ fn x_scan_flat_fseed<F>(
 // `x_scan_flat_fseed`: 0 that loop; 1 the hits staged as (diagonal, here) in runs of 8 per cell and
 // tested in one loop per 1,024 staged hits; 2 staged as (query offset, subject offset); 3 as 1
 // without the read-ahead of the hits; 4 runs of 16; 5 tested per 256; 7 as 1 without any
-// read-ahead.
+// read-ahead; 11 as 1 with the scan out of line; 12 as 11 without bounds checks in the scan.
 fn x_bpf_s4() -> u32 {
     use std::sync::OnceLock;
     static ARM: OnceLock<u32> = OnceLock::new();
@@ -323,7 +325,11 @@ fn x_scan_flat_stage<const ARM: u32, F>(
 {
     assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
     let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
-    lookup.x_probe_list_bf(subject, subject_length, &mut cells);
+    match ARM {
+        11 => lookup.x_probe_list_bf_out::<false>(subject, subject_length, &mut cells),
+        12 => lookup.x_probe_list_bf_out::<true>(subject, subject_length, &mut cells),
+        _ => lookup.x_probe_list_bf(subject, subject_length, &mut cells),
+    }
     let mut stage = X_STAGE.with(Cell::take).unwrap_or_else(|| {
         Box::new(XStage {
             a: vec![0; X_STAGE_CAP + 16],
@@ -729,6 +735,8 @@ mod tests {
                         arm!(4);
                         arm!(5);
                         arm!(7);
+                        arm!(11);
+                        arm!(12);
                     }
                     total += flat_log.len();
                     diag_offset += length as i32 + window;

@@ -66,6 +66,11 @@ use std::ops::RangeInclusive;
 /// after them. `LOSAT_X_TBNOIDCHUNK`,
 /// `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`,
 /// `LOSAT_X_SEGSHARE` and `LOSAT_X_DEKKER` graduated on 2026-10-22 (see `GRADUATED`).
+/// `LOSAT_X_ERFABSORB` (Spouge's ErfC returns 2.0 below -6 without evaluating ErfImpl,
+/// `stats/spouge.rs`) and `LOSAT_X_SEGTRIMMEMO` (the SEG trim of a segment kept per thread for the
+/// maskers that repeat segments, `utils/x_seg_trim_memo.rs`) graduated on 2026-10-26: they left
+/// `STRICT_SET` and their previous code was deleted (the maskers that do not ask for the memo keep
+/// trimming every segment, a rule of the masker and not a switch).
 /// `LOSAT_X_LINKSLICES` (the groups of the TBLASTX linking call linked as slices of its one list,
 /// `tblastx/x_link_slices.rs`) was added after the change as a switch that is off unless set and
 /// joined the set once it was verified with it on.
@@ -220,7 +225,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_DPNEON2",
     "LOSAT_X_DPNIBBLE",
     "LOSAT_X_DPWINDOW",
-    "LOSAT_X_ERFABSORB",
     "LOSAT_X_FOLDLEAN",
     "LOSAT_X_GREEDYROWFUSE",
     "LOSAT_X_MBFILL",
@@ -243,7 +247,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_RPTSTREAM",
     "LOSAT_X_SEEDCOMPACT",
     "LOSAT_X_SEEDUNMAP",
-    "LOSAT_X_SEGTRIMMEMO",
     "LOSAT_X_SUMPMEMO",
     "LOSAT_X_TBNBATCHRULE",
     "LOSAT_X_TBNDBSTREAM",

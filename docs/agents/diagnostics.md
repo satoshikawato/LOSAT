@@ -380,7 +380,6 @@ export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPNEON2=1
 export LOSAT_X_DPNIBBLE=1
 export LOSAT_X_DPWINDOW=1
-export LOSAT_X_ERFABSORB=1
 export LOSAT_X_FOLDLEAN=1
 export LOSAT_X_GREEDYROWFUSE=1
 export LOSAT_X_MBFILL=1
@@ -403,7 +402,6 @@ export LOSAT_X_QSTREAM=1
 export LOSAT_X_RPTSTREAM=1
 export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDUNMAP=1
-export LOSAT_X_SEGTRIMMEMO=1
 export LOSAT_X_SUMPMEMO=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNDBSTREAM=1
@@ -871,8 +869,8 @@ Same values, faster computation:
   `mask_sequence_reference`, the port of `s_SegSeq`, and a segment of more than 127 letters is trimmed by
   the port of `s_Trim`. The memo falls back to the port of `s_Entropy` for a state vector that does not
   pack (more than 15 letters). The unit tests compare the histogram path with the port on random sequences.
-- `LOSAT_X_SEGTRIMMEMO=1` (speed; in the strict set from the pull request that added it, 2026-10-19;
-  `=0` returns to the previous path) SEG's trim of a candidate segment (the
+- SEGTRIMMEMO (graduated 2026-10-26, in the set from 2026-10-19; no variable; always on for the maskers that
+  ask for it; the trim without the memo went with the variable) (speed) SEG's trim of a candidate segment (the
   port of `s_Trim`: about L^2 / 2 evaluations of `s_GetProb` for a segment of L letters up to
   maxtrim + 1 = 51, about 1,275 for longer ones) is kept per thread by the segment's letters and
   `maxtrim`, and a segment with the same letters takes the stored offsets instead of being trimmed
@@ -934,8 +932,7 @@ Same values, faster computation:
   with the variable.
 - ERFMEMO (graduated 2026-10-22; no variable) Spouge ErfC memoised per thread by the argument's bits;
   always on, `erf_impl_ncbi` computes the missing values.
-- `LOSAT_X_ERFABSORB=1` (speed; in the strict set from the pull request that added it, 2026-10-19;
-  `=0` returns to the previous path) Spouge ErfC returns 2.0 for an
+- ERFABSORB (graduated 2026-10-26, in the set from 2026-10-19; no variable; always on) (speed) Spouge ErfC returns 2.0 for an
   argument below -6 without evaluating ErfImpl. The reference computes `2.0 - ErfImpl(-z, TRUE)`
   there, and ErfImpl of 6 or more is below 2.2e-17 (a fifth of 2^-53; the bound is argued at
   `erfc_ncbi` in `stats/spouge.rs`), so the difference rounds to 2.0. The unit test
@@ -1070,7 +1067,7 @@ Rebuilding less:
   thread) the subject composition was read 9,434 times from 86 different byte strings, all of them
   cache entries (line C, v4-C DECISIONS 25). Each entry holds a pointer and, when the switch is
   on, 232 bytes on the heap. Workstation, one core, 8 rounds (2026-10-19): WSSV x PajaWSV n1 0.978
-  of the time with this switch alone (0.943 with `LOSAT_X_ERFABSORB` as well); max RSS unchanged.
+  of the time with this switch alone (0.943 with ERFABSORB as well); max RSS unchanged.
 - TBNQSIDE (graduated 2026-10-22; no variable; always on) tblastn: query SEG and lookup table
   once per query set (`XQuerySide`); the per-subject build is gone.
 - TBNSSIDE (graduated 2026-10-22; no variable; conditional: its rule stays) tblastn: subject

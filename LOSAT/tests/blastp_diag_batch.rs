@@ -14,8 +14,7 @@
 //! `LOSAT_X_BPDEFER=0`. These tests compare the reports with the reference loop
 //! (`LOSAT_X_BPSEED=0 LOSAT_X_BPDIAG=0`) and the per-hit fused loop, on a generated pair (long
 //! lookup cells from repeats, related proteins for two-hit extensions) at one and four threads and
-//! on the fixture pair at four, run the shadow of `LOSAT_X_BPSEEDSHADOW` (the batched loop against
-//! the reference for every subject), and check from the
+//! on the fixture pair at four, and check from the
 //! `[TIMING] x_bpdiag: mode=<m> cells=<n> batched_hits=<h> candidates=<k>` lines which path ran and
 //! that cells were tested in batches, not only that the report is equal. Each search states the
 //! default it runs with: no variable (the default) or the switches it sets to `0`.
@@ -290,31 +289,6 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
                 counts.len() == 1 && counts[0].cells == 0 && counts[0].hits == 0,
                 "LOSAT_X_BPSEED=0 threads {threads}: {counts:?}"
             );
-        }
-    }
-}
-
-#[test]
-fn the_shadow_compares_the_batched_loop_with_the_reference() {
-    let (query, subject) = generated_pair("shadow");
-    let (reference, _, _) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
-    // The shadow with the switch by default (`LOSAT_X_BPDEFER` on), and with `LOSAT_X_BPDEFER` off.
-    let defaults: [(Vars, bool); 2] = [(&[], true), (&[("LOSAT_X_BPDEFER", "0")], false)];
-    for (default, defer) in defaults {
-        for simd in ["1", "0"] {
-            let mut vars = default.to_vec();
-            vars.extend([("LOSAT_X_BPSEEDSHADOW", "1"), ("LOSAT_X_BPDIAG_SIMD", simd)]);
-            let what = format!("shadow {vars:?}");
-            let (rows, counts, stderr) = blastp(&query, &subject, 1, &vars, &["-outfmt", "6"]);
-            assert!(rows == reference, "{what}: rows differ");
-            assert!(
-                stderr
-                    .lines()
-                    .any(|line| line.starts_with("[X_SHADOW] BPSEED subjects=")
-                        && line.contains(" identical")),
-                "{what}: no shadow line: {stderr}"
-            );
-            check_counts(&counts, simd, defer, &what);
         }
     }
 }

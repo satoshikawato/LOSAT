@@ -66,6 +66,11 @@ use std::ops::RangeInclusive;
 /// after them. `LOSAT_X_TBNOIDCHUNK`,
 /// `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`,
 /// `LOSAT_X_SEGSHARE` and `LOSAT_X_DEKKER` graduated on 2026-10-22 (see `GRADUATED`).
+/// `LOSAT_X_ERFABSORB` (Spouge's ErfC returns 2.0 below -6 without evaluating ErfImpl,
+/// `stats/spouge.rs`) and `LOSAT_X_SEGTRIMMEMO` (the SEG trim of a segment kept per thread for the
+/// maskers that repeat segments, `utils/x_seg_trim_memo.rs`) graduated on 2026-10-26: they left
+/// `STRICT_SET` and their previous code was deleted (the maskers that do not ask for the memo keep
+/// trimming every segment, a rule of the masker and not a switch).
 /// `LOSAT_X_LINKSLICES` (the groups of the TBLASTX linking call linked as slices of its one list,
 /// `tblastx/x_link_slices.rs`) was added after the change as a switch that is off unless set and
 /// joined the set once it was verified with it on.
@@ -103,6 +108,13 @@ use std::ops::RangeInclusive;
 /// extension, `tblastx/extension/x_two_hit_fast.rs`) graduated on 2026-10-26: they left
 /// `STRICT_SET` and their previous code was deleted (the calls the byte table does not cover
 /// still run `extend_hit_two_hit_reference`, a rule of the table walks and not a switch).
+/// `LOSAT_X_TBNHITBF` (the branch-free two-hit loop of TBLASTN's unit path,
+/// `tblastn/x_tbn_hitbf.rs`), `LOSAT_X_TBNLINKWIN` (the linking candidates of a head chosen by
+/// subject position, `tblastn/stage_d_linking/x_link_window.rs`) and `LOSAT_X_TBNSCANBF` (the
+/// lookup scan without a branch on the presence vector, `tblastn/x_scan_bf.rs`) graduated on
+/// 2026-10-26: they left `STRICT_SET` and their previous code was deleted (NCBI's whole-window
+/// loop of the linking call stays as the reference of a unit test, and `XTwoHit::pairs` stays as
+/// the body that the branch-free loop hands the other hits to).
 /// `LOSAT_X_BPDIAG` (the two-hit diagonal test of a lookup cell eight hits at a time,
 /// `blastp/x_seed_fused.rs`) joined after a second run of the same jobs with it on as well.
 /// `LOSAT_X_SEEDCOMPACT` (TBLASTX's unit path keeps the saved init HSPs of a unit as 28-byte
@@ -134,6 +146,9 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BNTABPAR` (BLASTN's outfmt 6 / 7 rows of a report formatted per query on the search's
 /// pool while no LOSAT_X_QBATCHPAR slot exists, `blastn/x_tab_par.rs`) joined the set in the pull
 /// request that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_BNCSR` (the chains of BLASTN's contiguous lookup tables of word sizes 9 to 11 laid out
+/// as CSR and scanned through a prefetch ring, `blastn/x_bn_csr.rs`) joined the set in the pull
+/// request that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_QGROUPPAR` (BLASTN's preliminary gapped loop and traceback of a subject searched on one
 /// thread run per query on the pool, `blastn/blast_engine/x_qgroup_par.rs`) joined the set in the
 /// pull request that added it, after it was verified and timed with it on and off.
@@ -152,6 +167,7 @@ use std::ops::RangeInclusive;
 /// `tblastx/lookup/x_lut_direct.rs`) were added after the change as switches that are off unless
 /// set and joined the set together once they were verified and timed with them on and off.
 pub(crate) const STRICT_SET: &[&str] = &[
+    "LOSAT_X_BNCSR",
     "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNDBSTREAM",
     "LOSAT_X_BNDCONE",
@@ -224,7 +240,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_DPNEON2",
     "LOSAT_X_DPNIBBLE",
     "LOSAT_X_DPWINDOW",
-    "LOSAT_X_ERFABSORB",
     "LOSAT_X_FOLDLEAN",
     "LOSAT_X_GREEDYROWFUSE",
     "LOSAT_X_MBFILL",
@@ -247,18 +262,14 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_RPTSTREAM",
     "LOSAT_X_SEEDCOMPACT",
     "LOSAT_X_SEEDUNMAP",
-    "LOSAT_X_SEGTRIMMEMO",
     "LOSAT_X_SUMPMEMO",
     "LOSAT_X_TBNBATCHRULE",
     "LOSAT_X_TBNDBSTREAM",
     "LOSAT_X_TBNFLOWHELP",
     "LOSAT_X_TBNFRAMEREUSE",
-    "LOSAT_X_TBNHITBF",
     "LOSAT_X_TBNKEEPFEW",
-    "LOSAT_X_TBNLINKWIN",
     "LOSAT_X_TBNOWNPOOLS",
     "LOSAT_X_TBNREDOLPT",
-    "LOSAT_X_TBNSCANBF",
     "LOSAT_X_TBNSCANBYTE",
     "LOSAT_X_TBNSTORE",
     "LOSAT_X_TBNUNGAP",

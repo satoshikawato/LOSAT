@@ -221,9 +221,10 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     let want = frozen(case.name, "out");
     assert!(
         output.stdout == want,
-        "{label}: stdout differs ({} bytes, NCBI wrote {})",
+        "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
         output.stdout.len(),
-        want.len()
+        want.len(),
+        crate::outfmt11_blastx::first_difference(&output.stdout, &want)
     );
     assert_eq!(output.stderr, frozen(case.name, "err"), "{label}: stderr");
 }

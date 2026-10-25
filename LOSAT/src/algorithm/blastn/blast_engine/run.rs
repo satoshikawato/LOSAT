@@ -5359,7 +5359,8 @@ struct BlastnReportInputs<'a> {
     ranges: &'a ReportRanges<'a>,
     /// Per query, plus strand: DUST and, with `-lcase_masking`, the input lowercase.
     query_masks: &'a [Vec<MaskedInterval>],
-    /// The DUST-only masks of every query (outfmt 11's `LCaseMask`); empty without it.
+    /// The DUST-only masks of every query (outfmt 11's `LCaseMask`), or with
+    /// `-window_masker_db` the WindowMasker masks; empty without outfmt 11.
     archive_dust: &'a [Vec<MaskedInterval>],
     lcase_masking: bool,
     /// Per query context (the plus strand of query `q` is context `2 * q`).
@@ -5429,6 +5430,8 @@ struct BlastnReportInputs<'a> {
     /// The DUST options as NCBI's filter string prints them (BLAST XML's `Parameters_filter`);
     /// `None`: no DUST.
     dust: Option<(i32, i32, i32)>,
+    /// `-window_masker_db` as given (the filter string's `W -d <name>;`).
+    window_masker_db: Option<&'a str>,
     /// The database length behind the effective lengths (`-dbsize`, or the total of the
     /// subjects), for the length adjustment that BLAST XML's `Statistics_hsp-len` shows.
     eff_db_length: i64,
@@ -6261,6 +6264,7 @@ fn post_process_hits_and_write(
                 dust_masks: report.archive_dust,
                 unsearched: &unsearched,
                 lcase_masking: report.lcase_masking,
+                window_masker: report.window_masker_db.is_some(),
                 both_strands: report.both_strands,
                 minus_strand: report.minus_strand,
                 spans: report.batch_spans,
@@ -6399,8 +6403,14 @@ fn post_process_hits_and_write(
                 })
                 .collect();
             let version = format!("BLASTN {NCBI_BLASTN_VERSION}");
-            let filter =
-                crate::report::blast_xml::filter::filter_string(report.dust, None, None, true);
+            let filter = crate::report::blast_xml::filter::filter_string(
+                report.dust,
+                None,
+                report
+                    .window_masker_db
+                    .map(crate::report::blast_xml::filter::WindowMasker::Database),
+                true,
+            );
             let subject_records = report.subjects.records();
             let database_length = |rank: usize| report.subjects.len(rank);
             let record_length = |s_idx: usize| {
@@ -7004,7 +7014,8 @@ fn read_cli_subjects(
     })
 }
 
-/// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`), the
+/// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`,
+/// `-window_masker_db`), the
 /// processing of the options, the opening of the database of `-db`, `Query is Empty!`, the
 /// reading of the queries and the search. `subjects` are those of `-subject` (`None` with
 /// `-db`).
@@ -7017,6 +7028,7 @@ fn search_cli(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     args.resolve_dust()?;
+    args.resolve_window_masker()?;
     let query_range = parse_query_range(&args)?;
     process_options(&mut args, outputs)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
@@ -7476,6 +7488,13 @@ fn run_local_formats(
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
     }
+    // The counts file of `-window_masker_db` comes from the caller's counts source (LOSAT
+    // Web's registered inputs); a caller that gives none has no file to read.
+    if args.window_masker_db.is_some() && args.window_masker_counts.is_none() {
+        anyhow::bail!(
+            "-window_masker_db (a WindowMasker counts file) is not supported by LOSAT Web yet"
+        );
+    }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
     QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(outputs.formats.iter().map(|format| format.outfmt))?;
@@ -7493,6 +7512,7 @@ fn run_local_formats(
     };
     check_subjects_not_empty(searched_subjects)?;
     args.resolve_dust()?;
+    args.resolve_window_masker()?;
     let query_range = parse_query_range(&args)?;
     process_options(&mut args, outputs)?;
     search(
@@ -8107,7 +8127,13 @@ enum BatchStage<'a> {
     /// batch that NCBI splits has its preliminary search run in query chunks
     /// (`search_query_chunks`), which need where each query's searched letters start in
     /// its record (`-query_loc`).
-    Search { query_offsets: &'a [usize] },
+    ///
+    /// `query_masks` are the masks of the batch's queries when the loop has made them
+    /// (`-window_masker_db`, whose errors stop the batch before its search); `None`: made here.
+    Search {
+        query_offsets: &'a [usize],
+        query_masks: Option<&'a [Vec<MaskedInterval>]>,
+    },
     /// The preliminary search of one query chunk of a split batch
     /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
     /// spaces of the batch's contexts.
@@ -8324,6 +8350,7 @@ fn run_in_pool(
             false,
             BatchStage::Search {
                 query_offsets: &query_offsets[job.searched.clone()],
+                query_masks: None,
             },
             None,
         )
@@ -8561,6 +8588,89 @@ fn run_in_pool(
                 }
                 .into());
             }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:518-530
+            // ```c
+            //     for(TSeqPos index = 0; index < queries.Size(); index++) {
+            //         ENa_strand strand = eNa_strand_unknown;
+            //
+            //         try {
+            //
+            //             strand = s_BlastSetup_GetStrand(queries.GetStrand(index), prog,
+            //                                           strand_opt);
+            //             ...
+            //             CRef<CBlastQueryFilteredFrames> frame_to_bsl =
+            //                 s_GetRestrictedBlastSeqLocs(queries, index, qinfo, prog);
+            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:149-152
+            // ```c
+            //     // 1. Initialize the query data (borrow it from the factory)
+            //     CRef<ILocalQueryData> query_data(qf->MakeLocalQueryData(&*options));
+            //     retval->m_InternalData->m_Queries = query_data->GetSequenceBlk();
+            //     retval->m_InternalData->m_QueryInfo = query_data->GetQueryInfo();
+            // ```
+            // With `-window_masker_db` the masks come first in each query's set-up: a counts
+            // file NCBI cannot read, or a bad index of its hash table, fails every query of the
+            // batch (`window_masker::batch_error`), also those without letters. The preliminary
+            // search sets up the whole batch (`BlastSetupPreliminarySearchEx`, called by
+            // `CBlastPrelimSearch::x_Init`) before it splits the batch into chunks, so a split
+            // batch fails the same way; its chunks then make their own masks in the search, and
+            // an error there (the whole queries' masks were made) is LOSAT's rejection
+            // (`window_masker::rejection`). The masks made here are those the search uses.
+            let mut window_masker_masks = None;
+            if let Some(window_masker) = &args.window_masker {
+                let searched = batch_records.searched();
+                let masks = match window_masker.build_error() {
+                    Some(error) => Err(error.clone()),
+                    None => window_masker.batch_masks(
+                        searched.iter().map(|record| record.seq()),
+                        QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
+                    ),
+                };
+                if let Err(error) = &masks {
+                    let Some((masker_warnings, failure)) =
+                        super::super::window_masker::batch_error(error, searched.len())
+                    else {
+                        return Err(window_masker_rejection(&args, error));
+                    };
+                    // EXPERIMENT (LOSAT_X_QBATCHPAR): no slot runs while the loop writes.
+                    qbp.finish();
+                    // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
+                    // written when the loop took them.
+                    let before = |outputs: &mut ReportOutputs<'_>| {
+                        write_before_failed_batch(
+                            &args,
+                            queries.before(&kept, start),
+                            ReportSubjects {
+                                source,
+                                shown: &shown,
+                                titles: &titles,
+                            },
+                            &report_ranges,
+                            outputs,
+                            &output_formats,
+                            BatchResults {
+                                hit_lists,
+                                warnings: &warnings[..start],
+                                lengths: &lengths[..start],
+                                unsearched,
+                                query_masks: &query_masks,
+                                context_karlin: &context_karlin,
+                                query_eff_searchsp: &query_eff_searchsp,
+                                batches: &batch_spans,
+                            },
+                        )
+                    };
+                    if stream.acting() {
+                        stream.finish_sam(outputs)?;
+                    } else {
+                        before(outputs)?;
+                    }
+                    outputs.diagnostics.write_all(&batch_title_warnings)?;
+                    outputs.diagnostics.write_all(&masker_warnings)?;
+                    return Err(failure.into());
+                }
+                window_masker_masks = masks.ok();
+            }
             // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
             // ```c
             //         } catch (const CException& e) {
@@ -8672,6 +8782,7 @@ fn run_in_pool(
                         input_start == 0,
                         BatchStage::Search {
                             query_offsets: &query_offsets[start..end],
+                            query_masks: window_masker_masks.as_deref(),
                         },
                         x_keep,
                     )
@@ -9532,14 +9643,34 @@ fn write_reports_untimed(
         (None, SubjectSource::Database(_)) => SubjectLetters::new(&[], None),
     };
     // The archive's `LCaseMask` holds the DUST intervals of every query, valid or not, whether
-    // or not its batch was searched.
+    // or not its batch was searched; with `-window_masker_db` those of WindowMasker (empty for a
+    // query of a batch whose masks failed: its batch writes no archive).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:456-458
+    // ```c
+    //     } else if (m_QueryVector.NotEmpty()) {
+    //         for (CBlastQueryVector::size_type i = 0; i < m_QueryVector->Size(); i++)
+    //             retval.push_back(m_QueryVector->GetMaskedRegions(i));
+    // ```
+    // (`ExtractUserSpecifiedMasks`, which the archive's request reads, remote_blast.cpp:1358-1359:
+    // the query vector's masks after `x_CalculateMasks`, both frames of every interval.)
     let archive_dust = if output_formats.contains(&BlastnOutputFormat::Archive) {
-        let serial = crate::utils::threading::SearchPool::x_serial();
-        super::super::coordination::apply_dust_masking(
-            args,
-            query_records,
-            x_pool.unwrap_or(&serial),
-        )
+        match &args.window_masker {
+            Some(window_masker) => {
+                let minus = QueryStrand::from_option(&args.strand) == QueryStrand::Minus;
+                query_records
+                    .iter()
+                    .map(|record| window_masker.masks(record.seq(), minus).unwrap_or_default())
+                    .collect()
+            }
+            None => {
+                let serial = crate::utils::threading::SearchPool::x_serial();
+                super::super::coordination::apply_dust_masking(
+                    args,
+                    query_records,
+                    x_pool.unwrap_or(&serial),
+                )
+            }
+        }
     } else {
         Vec::new()
     };
@@ -9596,6 +9727,7 @@ fn write_reports_untimed(
         dust: args.dust.params().map(|(level, window, linker)| {
             (level as i32, window as u32 as i32, linker as u32 as i32)
         }),
+        window_masker_db: args.window_masker_db.as_deref(),
         eff_db_length: if args.db_length() > 0 {
             args.db_length()
         } else {
@@ -9714,6 +9846,18 @@ fn context_lengths(
         .checked_mul(effective_query_length)
         .ok_or_else(overflow)?;
     Ok((length_adjustment, effective_search_space))
+}
+
+/// LOSAT's rejection of an error of the masks of `-window_masker_db` that the batch loop does
+/// not report as NCBI does (`window_masker::rejection`).
+fn window_masker_rejection(
+    args: &BlastnArgs,
+    error: &crate::utils::winmask::WinMaskError,
+) -> anyhow::Error {
+    super::super::window_masker::rejection(
+        args.window_masker_db.as_deref().unwrap_or_default(),
+        error,
+    )
 }
 
 /// Searches one query batch against the subjects, with the query block, lookup table and
@@ -10002,8 +10146,20 @@ fn search_query_batch(
     // Diagnostic (LOSAT_TIMING): the batch's DUST for the common line (utils/xtiming.rs); a
     // chunk takes the batch's masks. No NCBI counterpart.
     let t_seg = crate::utils::xtiming::clock();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:445-446
+    // ```c
+    //     TMaskedQueryRegions mqr =
+    //         queries.GetMaskedRegions(query_index);
+    // ```
+    // The batch loop made the masks of `-window_masker_db` when it set the batch up (the
+    // errors stop the batch there); the search takes them.
     let masks = match stage {
-        BatchStage::Search { .. } => query_masks(args, queries, parallel_pool),
+        BatchStage::Search {
+            query_masks: Some(masks),
+            ..
+        } => masks.to_vec(),
+        BatchStage::Search { .. } => query_masks(args, queries, parallel_pool)
+            .map_err(|error| window_masker_rejection(args, &error))?,
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
@@ -10717,7 +10873,7 @@ fn search_query_batch(
     //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
     // ```
     let split_prelim_lists = match stage {
-        BatchStage::Search { query_offsets } if any_valid_context => search_query_chunks(
+        BatchStage::Search { query_offsets, .. } if any_valid_context => search_query_chunks(
             args,
             &seq_data.queries,
             &seq_data.query_masks,
@@ -13349,6 +13505,83 @@ fn search_query_batch(
                                 },
                             );
                         }
+                    } else if let Some(csr) = two_stage.x_mb_csr() {
+                        // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no
+                        // chains; its words with hits (the presence test of `for_each_hit` first)
+                        // go through `x_on_word_csr`, `on_word`'s statements with the cell's run
+                        // (the chain's offsets in the chain's order) instead of the chain walk, in
+                        // the same order, each `RING` words late through the ring that prefetches
+                        // their cells' offsets and runs (`lookup::x_dc_csr`). Every word still
+                        // counts for the debug summary, as in `on_word`. A batch of pairs that
+                        // reached `OFFSET_ARRAY_SIZE` goes before the next word with hits (`on_word`:
+                        // before the next word), with the same pairs, and before that word's warning,
+                        // so the debug output keeps its order. `on_word` keeps its two callers, so its
+                        // code is the one without the switch.
+                        let mut x_on_word_csr =
+                            |(kmer_start, s_range, index): (usize, usize, u64)| {
+                                if offset_pairs_len >= OFFSET_ARRAY_SIZE {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
+                                }
+                                let run: &[u32] = csr.run(index as usize);
+                                if (debug_mode || blastn_debug) && run.len() > 1000 {
+                                    eprintln!(
+                                    "[WARN] Large matches_slice: len={} for kmer at position {}",
+                                    run.len(),
+                                    kmer_start
+                                );
+                                }
+                                for &q_off_1 in run {
+                                    if debug_enabled {
+                                        dbg_seeds_found += 1;
+                                    }
+                                    offset_pairs[offset_pairs_len] = OffsetPair {
+                                        q_off: q_off_1 as usize - 1,
+                                        s_off: kmer_start,
+                                        s_range,
+                                    };
+                                    offset_pairs_len += 1;
+                                }
+                                if offset_pairs_len >= offset_array_size {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
+                                }
+                            };
+                        let mut ring: x_dc_csr::Ring<'_, (usize, usize, u64)> =
+                            x_dc_csr::Ring::new(csr);
+                        let mb_scan_kind =
+                            select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
+                        scan_subject_kmers_with_ranges(
+                            search_seq_packed,
+                            s_len,
+                            word_length,
+                            lut_word_length,
+                            scan_step,
+                            &subject_seq_ranges,
+                            subject_masked,
+                            mb_scan_kind,
+                            |kmer_start, s_range, current_lut_kmer| {
+                                if debug_enabled {
+                                    dbg_total_s_positions += 1;
+                                }
+                                if two_stage.has_hits(current_lut_kmer) {
+                                    ring.push(
+                                        (kmer_start, s_range, current_lut_kmer),
+                                        |w| w.2 as usize,
+                                        &mut x_on_word_csr,
+                                    );
+                                }
+                            },
+                        );
+                        ring.flush(&mut x_on_word_csr);
                     } else {
                         let mb_scan_kind =
                             select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
@@ -18039,7 +18272,8 @@ fn search_query_chunks(
             .iter()
             .map(|part| restrict_masks(&query_masks[part.query], part, query_offsets[part.query]))
             .collect();
-        let part_masks = chunk_query_masks(args, &parts, restricted, parallel_pool);
+        let part_masks = chunk_query_masks(args, &parts, restricted, parallel_pool)
+            .map_err(|error| window_masker_rejection(args, &error))?;
         let batch = search_query_batch(
             args,
             x_query_drop::BatchQueries::Shared(&parts),

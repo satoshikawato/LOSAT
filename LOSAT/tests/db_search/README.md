@@ -46,6 +46,12 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "two volumes, the second without its header file" -blastdb_version 4 -max_file_sz 128B
     rm tests/db_search/vol2_nophr.01.phr
 
+`wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
+`LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:
+
+    makeblastdb -in tests/fixtures/blastn_regression/inputs/s60k.fa -dbtype nucl -out tests/db_search/wm_s60k \
+        -title "s60k Sakai 2000001-2060000 mutated" -blastdb_version 4
+
 `nophr.pin` and `nophr.psq` are copies of `LOSAT/tests/seqdb/db/prot_v4.pin` and `.psq`: the database without
 its header file. `vol2_nophr` (one sequence per volume, `vol2_nophr.pal`) lacks the header file of its second
 volume. NCBI opens a volume's header file when it first reads a header of it, after the search and for the

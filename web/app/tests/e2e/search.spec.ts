@@ -314,11 +314,12 @@ test("the options form: the engine's defaults are not written; tasks, templates 
   await waitStatus(page, 1, 'completed');
   expect((await result(page, 1, 7)).command).toBe('losat tblastx -query query.fa -subject subject.fa -db_gencode 11 -outfmt 7');
 
-  // TBLASTN's subject codes include 32 (the approved exception); its tasks are radio buttons.
+  // TBLASTN's subject codes include 32 (the approved exception); its one task (tblastn-fast is
+  // not offered since #509) is a radio button.
   await program(page, 'tblastn');
   await expect(page.getByTestId('param-db_gencode').locator('option[value="32"]')).toHaveCount(1);
   await expect(page.getByTestId('param-task-field')).toContainText('Algorithm');
-  await expect(page.getByTestId('param-task').getByRole('radio')).toHaveCount(2);
+  await expect(page.getByTestId('param-task').getByRole('radio')).toHaveCount(1);
   await expect(page.getByTestId('param-task-tblastn')).toBeChecked();
 
   // BLASTN: Discontiguous Word Options appear for discontiguous megablast, Template length

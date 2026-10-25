@@ -22,16 +22,15 @@ pub const AA_HITS_PER_CELL: usize = 3;
 // file's private builder pieces).
 #[path = "x_lut_direct.rs"]
 mod x_lut_direct;
-// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): BLASTP's table built in place
-// by the same builder (x_lut_direct.rs); the shadow counter for the exit summary.
-pub(crate) use x_lut_direct::x_bplut_shadow_tables;
-// EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): TBLASTX's full table built in place
+// EXPERIMENT (LOSAT_X_TBXLUT): TBLASTX's full table built in place
 // (x_lut_direct.rs); no NCBI counterpart for the re-export itself.
-pub(crate) use x_lut_direct::{x_tbxlut_reach_stub, x_tbxlut_shadow_tables};
-// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the spares of exact blastp's table built ahead of its block, and
-// the comparison of its shadow mode (x_lut_direct.rs); no NCBI counterpart for the re-export
-// itself.
-pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table, XAaSpares};
+pub(crate) use x_lut_direct::x_tbxlut_reach_stub;
+// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the spares of exact blastp's table built ahead of its block
+// (x_lut_direct.rs); no NCBI counterpart for the re-export itself.
+pub(crate) use x_lut_direct::XAaSpares;
+// The comparison of two tables, for the unit tests (x_lut_direct.rs).
+#[cfg(test)]
+pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table};
 // LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build.
 pub(crate) use x_lut_direct::{x_bx_pooled_builds, x_give_back_pooled};
 // EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
@@ -1445,7 +1444,7 @@ pub fn build_ncbi_lookup(
 //         }
 //     }
 // ```
-/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): [`build_ncbi_lookup`] for
+/// EXPERIMENT (LOSAT_X_BPLUT): [`build_ncbi_lookup`] for
 /// BLASTP; with the switch the table is filled in place from the per-cell counts, in the same
 /// append order as the loop above and BlastAaLookupFinalize (x_lut_direct.rs), so the chains of
 /// the reference builder are never held.
@@ -1456,7 +1455,7 @@ pub(crate) fn x_bp_build_ncbi_lookup(
     check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     x_lut_direct::x_bp_build_lookup(
-        x_lut_direct::x_bplut_mode(),
+        x_lut_direct::x_bplut_on(),
         queries,
         threshold,
         karlin_params,
@@ -1472,7 +1471,7 @@ pub(crate) fn x_bp_build_ncbi_lookup(
 // sfree(lookup->thin_backbone[i]);
 // lookup->thin_backbone[i] = NULL;
 // ```
-/// EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): [`build_ncbi_lookup`] for the full table
+/// EXPERIMENT (LOSAT_X_TBXLUT): [`build_ncbi_lookup`] for the full table
 /// of a TBLASTX query batch. With the switch the table is filled in place from the per-cell counts,
 /// in the same append order as the reference builder and BlastAaLookupFinalize (x_lut_direct.rs),
 /// so no chain is held: NCBI frees each chain as it copies it (above), the reference builder here

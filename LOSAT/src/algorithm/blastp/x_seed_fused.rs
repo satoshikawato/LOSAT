@@ -39,8 +39,7 @@
 //!   write) and the i32 arithmetic of `x_test_hit`, which wraps (see there).
 //!
 //! `LOSAT_X_BPDIAG` is a switch of the strict set: on unless it is `0`.
-//! It needs `LOSAT_X_BPSEED` (or `LOSAT_X_BPSEEDSHADOW`, which then compares
-//! the batched loop with the reference). Without AVX2
+//! It needs `LOSAT_X_BPSEED`. Without AVX2
 //! (another architecture, or an x86-64 CPU without it) the switch keeps the per-hit loop: the
 //! scalar batch was slower than the per-hit loop on both machines it was timed on (2026-10-14,
 //! human block 1 x Species4, one thread, scan_ungapped: workstation 12.56 s against 11.59 s,
@@ -65,8 +64,7 @@
 //! A cell's last batch of fewer than eight hits is the scalar batch, called after the buffer.
 //! `LOSAT_X_BPDEFER` is a switch of the strict set: on unless it is `0`.
 //! It acts only where the AVX2 batch runs (`LOSAT_X_BPDIAG` with AVX2, not
-//! with `LOSAT_X_BPDIAG_SIMD=0`). `LOSAT_X_BPSEEDSHADOW` compares it with the reference like the
-//! other modes.
+//! with `LOSAT_X_BPDIAG_SIMD=0`).
 //!
 //! EXPERIMENT (LOSAT_X_BXDEFER, blastx's switch): blastx's fused loop (`blastx/x_seed_diag.rs`)
 //! takes LOSAT_X_BPDEFER's deferred calls with two changes of the batches
@@ -152,7 +150,7 @@
 //! every few cells.
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF, blastx's switch): `x_scan_two_hit_with(.., branch_free: true, ..)`
-//! finds the cells with hits by the candidate loop of LOSAT_X_TBNSCANBF
+//! finds the cells with hits by the candidate loop of tblastn's branch-free scan
 //! (`tblastn/x_scan_bf.rs`, `x_block_candidates`): the positions of a block of words are written
 //! to a list whose length advances by the presence bit, without a branch on it, and the listed
 //! cells then go to the cell test in position order. The cells, their order and their hit lists
@@ -164,7 +162,7 @@
 //! EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loop (`x_cell_per_hit`: the fused loop without
 //! LOSAT_X_BPDIAG's batches, the default where the CPU has no AVX2, i.e. aarch64 and WebAssembly)
 //! takes the two outcomes most two-hit tests end in, too far and overlap, without a branch (tblastn's
-//! LOSAT_X_TBNHITBF and TBLASTX's LOSAT_X_TBXHITBF do the same in their loops, on tables whose entries
+//! tblastn's branch-free two-hit loop and TBLASTX's LOSAT_X_TBXHITBF do the same in their loops, on tables whose entries
 //! need no sign extension):
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
@@ -226,10 +224,9 @@
 //! compressed table (`x_seed_fused_compressed.rs`). blastp-fast's loop on the flat compressed table
 //! takes the test, without the read-ahead, under its own switch (LOSAT_X_BPFSEED; LOSAT_X_BPHITBF
 //! does not act there). `x_scan_two_hit_hitbf` also reads ahead without a bound check per hit
-//! (`x_cell_per_hit_bf`). With `LOSAT_X_BPSEEDSHADOW` the loop that runs, this
-//! one where the switch acts, is compared with the reference for every subject, and `main` prints
-//! `[X_SHADOW] BPHITBF subjects_compared=N` at exit beside BPSEED's line, N the subjects the loop
-//! with the test scanned.
+//! (`x_cell_per_hit_bf`). With `LOSAT_X_STATS` (and the `xstats` feature) `main` prints
+//! `[X_STATS] BPHITBF subjects=N` at exit when N is not zero, N the subjects the loop with the
+//! test scanned.
 
 use crate::algorithm::tblastn::x_scan_bf::{x_block_candidates, X_BLOCK};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
@@ -820,97 +817,21 @@ struct XDiagTest {
     prefetch: usize,
 }
 
-// No NCBI counterpart: reads the LOSAT_X_BPSEEDSHADOW switch once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPSEEDSHADOW): run the fused loop and the reference for every subject from the
-/// same diagonal table and stop (panic) if the initial HSPs or the table differ. Off unless set.
-pub(crate) fn x_bp_seed_shadow() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BPSEEDSHADOW").is_some())
-}
-
-// No NCBI counterpart: counters of the shadow mode and of the fused loop, for the line at exit.
-static X_SHADOW_SUBJECTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static X_SHADOW_HSPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static X_SHADOW_SHORT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// EXPERIMENT (LOSAT_X_BPHITBF): of the subjects, those the per-hit loop scanned with the
-/// branch-free test.
-static X_SHADOW_HITBF_SUBJECTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// branch-free test (counted with the `xstats` feature, for the line at exit).
+// No NCBI counterpart: a counter; it does not change any value NCBI computes.
+static X_HITBF_SUBJECTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// EXPERIMENT (LOSAT_X_BPSEEDSHADOW): compares one subject's two runs; panics on a difference.
-///
-/// `compare_table` is false for a subject shorter than a word less one letter (one residue with
-/// word size 3): the reference's only word there ends one byte past the subject's buffer, whose
-/// unknown value can make the word index name a cell with hits (NCBI reads the same byte). Such
-/// a hit is the subject's only scan position, so it is never extended, and the entry it leaves
-/// is `window` plus the subject's length behind the next subject's first offset, which every
-/// later hit on the diagonal reads as no previous hit, like any other entry of an earlier
-/// subject. The initial HSPs are compared; the tables then may differ in that entry only.
-pub(crate) fn x_shadow_compare(
-    fused_hsps: &[String],
-    reference_hsps: &[String],
-    fused_diag: &[DiagStruct],
-    reference_diag: &[DiagStruct],
-    compare_table: bool,
-) {
-    if fused_hsps != reference_hsps {
-        let at = fused_hsps
-            .iter()
-            .zip(reference_hsps)
-            .position(|(a, b)| a != b)
-            .unwrap_or(fused_hsps.len().min(reference_hsps.len()));
-        panic!(
-            "LOSAT_X_BPSEEDSHADOW: initial HSPs differ at {at} (fused {} / reference {}): fused {:?} reference {:?}",
-            fused_hsps.len(),
-            reference_hsps.len(),
-            fused_hsps.get(at),
-            reference_hsps.get(at)
-        );
+/// EXPERIMENT (LOSAT_X_BPHITBF): with LOSAT_X_STATS, the `[X_STATS] BPHITBF subjects=N` line at
+/// exit (only when N is not zero).
+// No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
+pub fn x_bp_hit_bf_print_summary() {
+    if std::env::var_os("LOSAT_X_STATS").is_none() {
+        return;
     }
-    if !compare_table {
-        X_SHADOW_SHORT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    } else if let Some(at) = fused_diag
-        .iter()
-        .zip(reference_diag)
-        .position(|(a, b)| a.raw_bits() != b.raw_bits())
-    {
-        panic!(
-            "LOSAT_X_BPSEEDSHADOW: diagonal entry {at} differs: fused {:#x} reference {:#x}",
-            fused_diag[at].raw_bits(),
-            reference_diag[at].raw_bits()
-        );
-    }
-    assert_eq!(fused_diag.len(), reference_diag.len());
-    X_SHADOW_SUBJECTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    X_SHADOW_HSPS.fetch_add(
-        fused_hsps.len() as u64,
-        std::sync::atomic::Ordering::Relaxed,
-    );
-}
-
-/// EXPERIMENT (LOSAT_X_BPSEEDSHADOW): the line at exit with what the shadow mode compared, and with
-/// LOSAT_X_BPHITBF the line of the subjects its loop scanned.
-pub fn x_bp_seed_print_summary() {
-    if x_bp_seed_shadow() {
-        let subjects = X_SHADOW_SUBJECTS.load(std::sync::atomic::Ordering::Relaxed);
-        let hsps = X_SHADOW_HSPS.load(std::sync::atomic::Ordering::Relaxed);
-        let short = X_SHADOW_SHORT.load(std::sync::atomic::Ordering::Relaxed);
-        if subjects == 0 {
-            eprintln!("[X_SHADOW] BPSEED nothing compared (no two-hit scan of an amino-acid lookup table ran)");
-        } else if short == 0 {
-            eprintln!("[X_SHADOW] BPSEED subjects={subjects} initial_hsps={hsps} identical");
-        } else {
-            eprintln!(
-                "[X_SHADOW] BPSEED subjects={subjects} initial_hsps={hsps} identical (tables not compared for {short} subjects shorter than a word)"
-            );
-        }
-        if x_bp_hit_bf() {
-            eprintln!(
-                "[X_SHADOW] BPHITBF subjects_compared={} (of the BPSEED subjects, those the per-hit loop with the branch-free test scanned)",
-                X_SHADOW_HITBF_SUBJECTS.load(std::sync::atomic::Ordering::Relaxed)
-            );
-        }
+    let subjects = X_HITBF_SUBJECTS.load(std::sync::atomic::Ordering::Relaxed);
+    if subjects > 0 {
+        eprintln!("[X_STATS] BPHITBF subjects={subjects}");
     }
 }
 
@@ -1108,8 +1029,8 @@ where
 
 // No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's outcomes.
 /// EXPERIMENT (LOSAT_X_BPHITBF): the branch-free test for a subject when the switch is on, the
-/// loop is a per-hit loop (`per_hit`) and [`XHitBf::new`] finds the subject in range; with
-/// LOSAT_X_BPSEEDSHADOW the subject is counted for the shadow's line.
+/// loop is a per-hit loop (`per_hit`) and [`XHitBf::new`] finds the subject in range; the subject
+/// is counted for the line of LOSAT_X_STATS.
 fn x_hit_bf_for(
     per_hit: bool,
     diag_offset: i32,
@@ -1121,9 +1042,7 @@ fn x_hit_bf_for(
         return None;
     }
     let bf = XHitBf::new(diag_offset, subject_length, window, word_size)?;
-    if x_bp_seed_shadow() {
-        X_SHADOW_HITBF_SUBJECTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
+    crate::utils::xstats::add(&X_HITBF_SUBJECTS, 1);
     Some(bf)
 }
 
@@ -2869,36 +2788,6 @@ impl XContextTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn table(last_hits: &[i32]) -> Vec<DiagStruct> {
-        last_hits
-            .iter()
-            .map(|&last_hit| {
-                let mut entry = DiagStruct::default();
-                entry.set_last_hit(last_hit);
-                entry
-            })
-            .collect()
-    }
-
-    #[test]
-    fn the_shadow_compares_the_table_unless_the_subject_is_shorter_than_a_word() {
-        let hsps = vec!["hsp".to_string()];
-        // A subject shorter than a word less one letter: only the initial HSPs are compared.
-        x_shadow_compare(&hsps, &hsps, &table(&[0, 40]), &table(&[0, 0]), false);
-        x_shadow_compare(&hsps, &hsps, &table(&[0, 40]), &table(&[0, 40]), true);
-        let differs = std::panic::catch_unwind(|| {
-            x_shadow_compare(&hsps, &hsps, &table(&[0, 40]), &table(&[0, 0]), true)
-        });
-        assert!(differs.is_err(), "a table difference stops the run");
-        let hsps_differ = std::panic::catch_unwind(|| {
-            x_shadow_compare(&hsps, &[], &table(&[0]), &table(&[0]), false)
-        });
-        assert!(
-            hsps_differ.is_err(),
-            "an initial HSP difference stops the run"
-        );
-    }
 
     // ---- EXPERIMENT (LOSAT_X_BPDIAG): the batched cell test against the per-hit test ----
 

@@ -342,6 +342,29 @@ pub struct BlastnArgs {
     // ```
     #[arg(long = "lcase_masking", default_value_t = false)]
     pub lcase_masking: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:358-363
+    // ```c++
+    //         arg_desc.AddOptionalKey(kArgWindowMaskerDatabase, "window_masker_db",
+    //                 "Enable WindowMasker filtering using this repeats database.",
+    //                 CArgDescriptions::eString);
+    //         arg_desc.SetDependency(kArgWindowMaskerDatabase,
+    //                                CArgDescriptions::eExcludes,
+    //                                kArgRemote);
+    // ```
+    // Read by the filtering handler after `-dust` (`resolve_window_masker`).
+    #[arg(
+        long = "window_masker_db",
+        value_name = "window_masker_db",
+        help = "Enable WindowMasker filtering using this repeats database."
+    )]
+    pub window_masker_db: Option<String>,
+    /// The masker of `-window_masker_db` (`resolve_window_masker`); `None` without the option.
+    #[arg(skip)]
+    pub window_masker: Option<std::sync::Arc<super::window_masker::WindowMasker>>,
+    /// Where `-window_masker_db` is read from: the file system when `None`; LOSAT Web's adapter
+    /// gives the counts files it holds under their names.
+    #[arg(skip)]
+    pub window_masker_counts: Option<std::sync::Arc<dyn crate::utils::winmask::CountsSource>>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
     // ```c++
     //         arg_desc.AddDefaultKey(kArgStrand, "strand",
@@ -536,6 +559,27 @@ impl BlastnArgs {
     /// ...
     ///         if ( !m_QueryIsProtein && args[kArgDustFiltering]) {
     /// ```
+    /// The filtering handler's `-window_masker_db`, after `-dust`: NCBI's check of the counts
+    /// file (`window_masker::open`), and the masker made from it.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-458
+    /// ```c++
+    ///     if (args.Exist(kArgWindowMaskerDatabase) &&
+    ///         args[kArgWindowMaskerDatabase]) {
+    ///         const string& stat_file = args[kArgWindowMaskerDatabase].AsString();
+    ///         const CSeqMaskerIstatFactory::EStatType type =
+    ///             CSeqMaskerIstatFactory::DiscoverStatType(stat_file);
+    /// ```
+    pub fn resolve_window_masker(&mut self) -> anyhow::Result<()> {
+        if let Some(name) = &self.window_masker_db {
+            let source = super::window_masker::source_of(self.window_masker_counts.as_ref());
+            self.window_masker = Some(std::sync::Arc::new(super::window_masker::open(
+                name, &*source,
+            )?));
+        }
+        Ok(())
+    }
+
     pub fn resolve_dust(&mut self) -> anyhow::Result<()> {
         if self.dust_filtering.is_none()
             && !crate::algorithm::blastn::coordination::task_dust_by_default(&self.task)

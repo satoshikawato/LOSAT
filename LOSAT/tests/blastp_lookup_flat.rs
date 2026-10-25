@@ -7,11 +7,12 @@
 //! well, `LOSAT_X_BPCLUT=0` turns it off), with more than one thread. With it on, the build's two passes run with one latch
 //! each, a block search's table takes the vectors of the previous block's table, and with
 //! `LOSAT_X_BPQBLOCK` the contexts' Karlin blocks are tasks of the build. These tests compare the
-//! reports with the switch off (`LOSAT_X_BPLKPFLAT=0`) and on, with `-subject` and `-db`, and run its shadow mode
-//! (`LOSAT_X_BPLKPFLATSHADOW`), whose line at exit shows that the path ran (tables compared, builds
-//! on the vectors of an earlier table, contexts computed by the tasks); a difference stops the run.
-//! Every run but the default-set test states `LOSAT_X_BPQBLOCK` and `LOSAT_X_BPCLUT` itself, so that
-//! the tests do not depend on the defaults of the strict set.
+//! reports with the switch off (`LOSAT_X_BPLKPFLAT=0`) and on, with `-subject` and `-db`, and read
+//! the `[X_STATS] BPLKPFLAT tables= recycled= recycled_hits=` line of the run with the switch on
+//! (printed with `LOSAT_X_STATS`, when the pool built a table), which shows that the path ran: the
+//! tables built and the builds that took the vectors of an earlier table. Every run but the
+//! default-set test states `LOSAT_X_BPQBLOCK` and `LOSAT_X_BPCLUT` itself, so that the tests do not
+//! depend on the defaults of the strict set.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
 //! ```c
@@ -38,20 +39,29 @@ struct Run {
 }
 
 impl Run {
-    /// The counters of the `[X_SHADOW] <name>` line, which must end with `identical`.
-    fn shadow(&self, name: &str) -> HashMap<String, u64> {
-        let prefix = format!("[X_SHADOW] {name} ");
-        let line = self
-            .stderr
-            .lines()
-            .find(|line| line.starts_with(&prefix))
-            .unwrap_or_else(|| panic!("no {prefix}line in {}", self.stderr));
-        assert!(line.ends_with(" identical"), "{line}");
+    /// The counters of the `[X_STATS] <name>` line (`LOSAT_X_STATS`; printed only when a counter is
+    /// not zero): empty when the run printed none.
+    fn stats(&self, name: &str) -> HashMap<String, u64> {
+        let prefix = format!("[X_STATS] {name} ");
+        let Some(line) = self.stderr.lines().find(|line| line.starts_with(&prefix)) else {
+            return HashMap::new();
+        };
         line[prefix.len()..]
             .split(' ')
             .filter_map(|field| field.split_once('='))
             .map(|(key, value)| (key.to_string(), value.parse().expect("a count")))
             .collect()
+    }
+
+    /// `stats(name)` where the line is expected: fails with the run's stderr when it is missing.
+    fn printed(&self, name: &str) -> HashMap<String, u64> {
+        let counts = self.stats(name);
+        assert!(
+            !counts.is_empty(),
+            "no [X_STATS] {name} line; stderr:\n{}",
+            self.stderr
+        );
+        counts
     }
 
     /// The searches of query sets that ran to their reports (`[TIMING] blastp_total` lines, with
@@ -155,34 +165,25 @@ fn with<'a>(base: &[(&'a str, &'a str)], extra: &[(&'a str, &'a str)]) -> Vec<(&
 
 const ON: (&str, &str) = ("LOSAT_X_BPLKPFLAT", "1");
 const OFF: (&str, &str) = ("LOSAT_X_BPLKPFLAT", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_BPLKPFLATSHADOW", "1");
+const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 
-/// The switch off, on and in its shadow mode give the same report; returns the shadow's counters.
-fn same_reports(
-    subject: &[&OsStr],
-    threads: u32,
-    base: &[(&str, &str)],
-    outfmt: &str,
-) -> HashMap<String, u64> {
+/// The switch off and on give the same report; returns the run with the switch on (the callers read
+/// its `[X_STATS] BPLKPFLAT` line: `printed` where it is expected, `stats` where it may be
+/// missing).
+fn same_reports(subject: &[&OsStr], threads: u32, base: &[(&str, &str)], outfmt: &str) -> Run {
     let off = blastp_fast(subject, threads, &with(base, &[OFF]), outfmt);
     assert!(!off.stdout.is_empty(), "the fixture pair has rows");
-    let on = blastp_fast(subject, threads, &with(base, &[ON]), outfmt);
+    let on = blastp_fast(subject, threads, &with(base, &[ON, STATS]), outfmt);
     assert!(
         on.stdout == off.stdout,
         "{base:?} threads {threads} outfmt {outfmt}: the report differs with the switch"
     );
-    let shadow = blastp_fast(subject, threads, &with(base, &[SHADOW]), outfmt);
-    assert!(
-        shadow.stdout == off.stdout,
-        "{base:?} threads {threads} outfmt {outfmt}: the report differs in the shadow mode"
-    );
-    shadow.shadow("BPLKPFLAT")
+    on
 }
 
 // The block search (every block a search with its own table) at 2 threads, with blocks of one
-// batch: every build is the pool's, compared with the `par_iter` build on fresh vectors, every
-// build after a block's first takes the vectors of the table before it, and every context's Karlin
-// block comes from a task of the build. The thread count only sets how the build is cut into
+// batch: every build is the pool's and every build after a block's first takes the vectors of the
+// table before it. The thread count only sets how the build is cut into
 // chunks, stripes and tasks (the unit tests of `x_clut_par.rs` build at 1, 2, 3 and 7 threads); the
 // other tests where the pool builds run at 4 threads. Blocks of 20,000 letters run in the database
 // test, which takes the same lookup region per block.
@@ -191,52 +192,35 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let base = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPQBLOCK", "1")];
-    let counts = same_reports(&subject, 2, &base, "6");
+    let counts = same_reports(&subject, 2, &base, "6").printed("BPLKPFLAT");
     let what = format!("{counts:?}");
-    assert!(counts["tables_compared"] > 1, "{what}");
-    assert_eq!(counts["outcomes_compared"], 0, "{what}");
-    assert_eq!(counts["recycled"], counts["tables_compared"] - 1, "{what}");
+    assert!(counts["tables"] > 1, "{what}");
+    assert_eq!(counts["recycled"], counts["tables"] - 1, "{what}");
     assert_hits_recycled(&counts, &what);
-    assert_eq!(
-        counts["context_sets_compared"], counts["tables_compared"],
-        "{what}"
-    );
-    assert!(counts["contexts_compared"] > 0, "{what}");
-    assert_eq!(
-        counts["contexts_from_tasks"], counts["contexts_compared"],
-        "{what}"
-    );
 }
 
 // The search of all queries (a pairwise report with `LOSAT_X_BPQBLOCKFMT=0` is not written in blocks):
-// one build, by the pool,
-// whose contexts' Karlin blocks are tasks of the build with `LOSAT_X_BPQBLOCK` set and are
-// computed as without the switch otherwise; no earlier table.
+// one build, by the pool; no earlier table.
 #[test]
 fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    for (letters, tasks) in [("1", true), ("0", false)] {
+    for letters in ["1", "0"] {
         let base = [
             ("LOSAT_X_BPCLUT", "1"),
             ("LOSAT_X_BPQBLOCK", letters),
             ("LOSAT_X_BPQBLOCKFMT", "0"),
         ];
-        let counts = same_reports(&subject, 4, &base, "0");
+        let counts = same_reports(&subject, 4, &base, "0").printed("BPLKPFLAT");
         let what = format!("blocks {letters}: {counts:?}");
-        assert_eq!(counts["tables_compared"], 1, "{what}");
+        assert_eq!(counts["tables"], 1, "{what}");
         assert_eq!(counts["recycled"], 0, "{what}");
         assert_eq!(counts["recycled_hits"], 0, "{what}");
-        assert_eq!(counts["context_sets_compared"], u64::from(tasks), "{what}");
-        assert_eq!(
-            counts["contexts_from_tasks"], counts["contexts_compared"],
-            "{what}"
-        );
     }
 }
 
-// Where the pool does not build the flat table (one thread), the switch changes nothing and its
-// shadow compares nothing. The other case, `LOSAT_X_BPCLUT=0` at 4 threads, runs in
+// Where the pool does not build the flat table (one thread), the switch changes nothing and the run
+// prints no `[X_STATS] BPLKPFLAT` line. The other case, `LOSAT_X_BPCLUT=0` at 4 threads, runs in
 // `the_default_and_the_switches_off_give_one_report` (the same searches, but the switch on by
 // default).
 #[test]
@@ -244,59 +228,16 @@ fn the_switch_does_not_act_without_the_pools_build() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let base = [("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPCLUT", "1")];
-    let counts = same_reports(&subject, 1, &base, "6");
-    assert!(
-        counts.values().all(|&count| count == 0),
-        "one thread: {counts:?}"
-    );
-}
-
-// `LOSAT_X_BPCLUTSHADOW` with the switch: the pool's build (one-latch passes, the vectors that the
-// previous block's pool build gave back, the Karlin tasks) is compared with the serial flat build
-// and the reference's table, which the search uses; the two shadows together as well.
-#[test]
-fn the_clut_shadow_compares_the_switchs_builds() {
-    let subject = subject_file();
-    let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    let base = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPQBLOCK", "1")];
-    let off = blastp_fast(&subject, 4, &with(&base, &[OFF]), "6");
-    for extra in [
-        &[("LOSAT_X_BPCLUTSHADOW", "1"), ON][..],
-        &[("LOSAT_X_BPCLUTSHADOW", "1"), SHADOW][..],
-    ] {
-        let run = blastp_fast(&subject, 4, &with(&base, extra), "6");
-        assert!(run.stdout == off.stdout, "{extra:?}: the report differs");
-        let clut = run.shadow("BPCLUT");
-        assert!(clut["parallel_tables_compared"] > 1, "{extra:?}: {clut:?}");
-        assert_eq!(
-            clut["parallel_tables_compared"], clut["tables_compared"],
-            "{extra:?}: {clut:?}"
-        );
-        if extra.contains(&SHADOW) {
-            let counts = run.shadow("BPLKPFLAT");
-            assert_eq!(
-                counts["tables_compared"], clut["parallel_tables_compared"],
-                "{counts:?}"
-            );
-            assert_eq!(
-                counts["recycled"],
-                counts["tables_compared"] - 1,
-                "{counts:?}"
-            );
-            assert_hits_recycled(&counts, "BPCLUTSHADOW");
-        }
-    }
+    let counts = same_reports(&subject, 1, &base, "6").stats("BPLKPFLAT");
+    assert!(counts.is_empty(), "one thread: {counts:?}");
 }
 
 // Split query batches inside the blocks (`CHUNK_SIZE` 1000, `OVERLAP_CHUNK_SIZE` 100): each query
 // chunk of a split batch is a search of its own inside its block's search (its preliminary stage
 // only), whose table the pool builds and which drops that table when it ends. A chunk takes no
-// spare vectors, so the block's table keeps them and the next block reuses them, with the switch,
-// its shadow, and its shadow with `LOSAT_X_BPCLUTSHADOW` (whose pool tables give their vectors back
-// at once): the shadow compares more tables than there are blocks (the chunks' too), and `recycled`
-// is the blocks after the first. The shadow first builds each table as the switch does and searches
-// with that build, so the run of both shadows also runs `LOSAT_X_BPCLUTSHADOW` with the switch
-// here; that pair without split batches runs in `the_clut_shadow_compares_the_switchs_builds`.
+// spare vectors, so the block's table keeps them and the next block reuses them, with the switch:
+// the pool builds more tables than there are blocks (the chunks' too), and `recycled` is the blocks
+// after the first.
 #[test]
 fn query_chunks_of_split_batches_take_no_spare() {
     let subject = subject_file();
@@ -313,37 +254,15 @@ fn query_chunks_of_split_batches_take_no_spare() {
     assert!(!off.stdout.is_empty(), "the fixture pair has rows");
     let blocks = off.searches();
     assert!(blocks > 1, "{blocks} blocks");
-    let clut_shadow = ("LOSAT_X_BPCLUTSHADOW", "1");
-    for extra in [&[ON][..], &[SHADOW][..], &[clut_shadow, SHADOW][..]] {
-        let run = blastp_fast(&subject, 4, &with(&base, extra), "6");
-        assert!(run.stdout == off.stdout, "{extra:?}: the report differs");
-        assert_eq!(run.searches(), blocks, "{extra:?}");
-        let mut tables = None;
-        if extra.contains(&clut_shadow) {
-            let clut = run.shadow("BPCLUT");
-            assert!(
-                clut["parallel_tables_compared"] > blocks,
-                "{extra:?}: {blocks} blocks, {clut:?}"
-            );
-            tables = Some(clut["parallel_tables_compared"]);
-        }
-        if extra.contains(&SHADOW) {
-            let counts = run.shadow("BPLKPFLAT");
-            let what = format!("{extra:?}: {blocks} blocks, {counts:?}");
-            assert!(counts["tables_compared"] > blocks, "{what}");
-            assert_eq!(
-                tables.unwrap_or(counts["tables_compared"]),
-                counts["tables_compared"],
-                "{what}"
-            );
-            assert_eq!(counts["recycled"], blocks - 1, "{what}");
-            assert_hits_recycled(&counts, &what);
-            assert_eq!(
-                counts["contexts_from_tasks"], counts["contexts_compared"],
-                "{what}"
-            );
-        }
-    }
+    let extra = [ON, STATS];
+    let run = blastp_fast(&subject, 4, &with(&base, &extra), "6");
+    assert!(run.stdout == off.stdout, "{extra:?}: the report differs");
+    assert_eq!(run.searches(), blocks, "{extra:?}");
+    let counts = run.printed("BPLKPFLAT");
+    let what = format!("{extra:?}: {blocks} blocks, {counts:?}");
+    assert!(counts["tables"] > blocks, "{what}");
+    assert_eq!(counts["recycled"], blocks - 1, "{what}");
+    assert_hits_recycled(&counts, &what);
 }
 
 // `-db`: the database search in blocks runs the same lookup region per block. This test also holds
@@ -353,31 +272,17 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
     let db = subject_database();
     let subject = [OsStr::new("-db"), db.as_os_str()];
     let base = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPQBLOCK", "20000")];
-    let counts = same_reports(&subject, 4, &base, "6");
-    assert!(counts["tables_compared"] > 1, "{counts:?}");
-    assert_eq!(counts["outcomes_compared"], 0, "{counts:?}");
-    assert_eq!(
-        counts["recycled"],
-        counts["tables_compared"] - 1,
-        "{counts:?}"
-    );
+    let counts = same_reports(&subject, 4, &base, "6").printed("BPLKPFLAT");
+    assert!(counts["tables"] > 1, "{counts:?}");
+    assert_eq!(counts["recycled"], counts["tables"] - 1, "{counts:?}");
     assert_hits_recycled(&counts, "-db");
-    assert_eq!(
-        counts["context_sets_compared"], counts["tables_compared"],
-        "{counts:?}"
-    );
-    assert!(counts["contexts_compared"] > 0, "{counts:?}");
-    assert_eq!(
-        counts["contexts_from_tasks"], counts["contexts_compared"],
-        "{counts:?}"
-    );
     std::fs::remove_dir_all(db.parent().unwrap()).ok();
 }
 
 // Both switches are on by default: the report with no variable, with either `=0` and with both
-// `=0` is one report, in blocks of one batch at 4 threads. The shadow of `LOSAT_X_BPLKPFLAT` acts
-// only where the pool builds the flat table of `LOSAT_X_BPCLUT` and the switch is on, so with no
-// other variable it compares tables exactly when both are on by default, and nothing with
+// `=0` is one report, in blocks of one batch at 4 threads. `LOSAT_X_BPLKPFLAT` acts only where the
+// pool builds the flat table of `LOSAT_X_BPCLUT` and the switch is on, so with no other variable
+// the run counts tables exactly when both are on by default, and counts nothing with
 // `LOSAT_X_BPCLUT=0`.
 #[test]
 fn the_default_and_the_switches_off_give_one_report() {
@@ -397,21 +302,18 @@ fn the_default_and_the_switches_off_give_one_report() {
             "{vars:?}: the report differs from the default's"
         );
     }
-    let shadow = blastp_fast(&subject, 4, &[block, SHADOW], "6");
-    assert!(shadow.stdout == default.stdout, "the shadow's report");
-    let counts = shadow.shadow("BPLKPFLAT");
+    let on = blastp_fast(&subject, 4, &[block, STATS], "6");
+    assert!(on.stdout == default.stdout, "the run with LOSAT_X_STATS");
+    let counts = on.printed("BPLKPFLAT");
     assert!(
-        counts["tables_compared"] > 1,
-        "no variable but the shadow: the default builds the flat table on the pool: {counts:?}"
+        counts["tables"] > 1,
+        "no variable: the default builds the flat table on the pool: {counts:?}"
     );
-    let off = blastp_fast(&subject, 4, &[block, ("LOSAT_X_BPCLUT", "0"), SHADOW], "6");
+    let off = blastp_fast(&subject, 4, &[block, ("LOSAT_X_BPCLUT", "0"), STATS], "6");
+    assert!(off.stdout == default.stdout, "the report, LOSAT_X_BPCLUT=0");
+    let counts = off.stats("BPLKPFLAT");
     assert!(
-        off.stdout == default.stdout,
-        "the shadow's report, LOSAT_X_BPCLUT=0"
-    );
-    let counts = off.shadow("BPLKPFLAT");
-    assert!(
-        counts.values().all(|&count| count == 0),
+        counts.is_empty(),
         "LOSAT_X_BPCLUT=0 builds no flat table: {counts:?}"
     );
 }

@@ -1,7 +1,7 @@
-//! EXPERIMENT (LOSAT_X_PAIRWISEPAR, shadow LOSAT_X_PAIRWISEPARSHADOW): the per-query parts of the
-//! pairwise reports (outfmt 0) of BLASTN, TBLASTX and BLASTP formatted on the search's pool, and
-//! BLASTN's and BLASTP's outfmt 0 rows (`algorithm/blastn/pairwise.rs`, `pairwise_hits`;
-//! `algorithm/blastp/blast_engine.rs`, `build_pairwise_hits`) made on it.
+//! EXPERIMENT (LOSAT_X_PAIRWISEPAR): the per-query parts of the pairwise reports (outfmt 0) of
+//! BLASTN, TBLASTX and BLASTP formatted on the search's pool, and BLASTN's and BLASTP's outfmt 0
+//! rows (`algorithm/blastn/pairwise.rs`, `pairwise_hits`; `algorithm/blastp/blast_engine.rs`,
+//! `build_pairwise_hits`) made on it.
 //!
 //! The writers (`write_blastn_pairwise_report`, `write_tblastx_pairwise_report`,
 //! `write_blastp_pairwise_report` in `pairwise.rs`) run on the thread of the search's loop while
@@ -51,14 +51,6 @@
 //! Memory: formatted text of at most `WINDOW_BYTES_PER_THREAD` x threads estimated bytes (16 MiB
 //! at 16 threads) plus one piece (`PIECE_BYTES` plus one HSP) at a time, also for one large
 //! query; the groups of one window of queries.
-//!
-//! The shadow (`LOSAT_X_PAIRWISEPARSHADOW`, implies the switch) also writes the report by the
-//! serial writer into memory and compares the bytes (without warnings), and makes BLASTN's and
-//! BLASTP's rows
-//! serially too and compares them (`Debug`); on a difference it prints `[X_SHADOW] PAIRWISEPAR ...
-//! DIFFERENT` and panics; after each report it prints `[X_SHADOW] PAIRWISEPAR queries= chunks=
-//! pieces= bytes= identical` (and `[X_SHADOW] PAIRWISEPARROWS rows= identical` after rows made on
-//! the pool).
 
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -83,19 +75,10 @@ const WINDOW_BYTES_PER_THREAD: usize = 1 << 20;
 
 // No NCBI counterpart: chooses which threads format the report; it does not change any value NCBI
 // computes. Read once per process.
-/// 0 = off, 1 = LOSAT_X_PAIRWISEPAR (a strict-set switch: on unless `LOSAT_X_PAIRWISEPAR` is `0`;
-/// `utils/xswitch.rs`), 2 = LOSAT_X_PAIRWISEPARSHADOW.
-pub(crate) fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_PAIRWISEPARSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_PAIRWISEPAR") {
-            1
-        } else {
-            0
-        }
-    })
+/// LOSAT_X_PAIRWISEPAR, a strict-set switch: on unless it is `0` (`utils/xswitch.rs`).
+pub(crate) fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRWISEPAR"))
 }
 
 /// The pool the pairwise writers format on (`Some` with the switch on and a pool of two threads
@@ -105,7 +88,7 @@ pub(crate) fn pool<'p, 'q>(pool: &'p SearchPool<'q>) -> Option<&'p SearchPool<'q
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ));
-    (PARALLEL && mode() != 0 && pool.enabled() && pool.threads() > 1).then_some(pool)
+    (PARALLEL && on() && pool.enabled() && pool.threads() > 1).then_some(pool)
 }
 
 /// One query's hits by subject, as the serial writers group them: the subjects in the order of
@@ -217,7 +200,7 @@ pub(crate) fn write<S: QuerySections, W: Write>(
     let pool = match pool {
         Some(pool) if probe.is_none() => pool,
         _ => {
-            if mode() != 0 {
+            if on() {
                 crate::utils::xreach::x_reach!("LOSAT_X_PAIRWISEPAR", false);
             }
             return write_serial(
@@ -231,42 +214,6 @@ pub(crate) fn write<S: QuerySections, W: Write>(
         }
     };
     crate::utils::xreach::x_reach!("LOSAT_X_PAIRWISEPAR", true);
-    if mode() == 2 {
-        let (mut serial, mut parallel) = (Vec::new(), Vec::new());
-        write_serial(
-            &mut serial,
-            sections,
-            hits_by_query,
-            subject_titles,
-            None,
-            None,
-        )?;
-        let (chunks, pieces) = write_parallel(
-            &mut parallel,
-            sections,
-            hits_by_query,
-            subject_titles,
-            None,
-            pool,
-        )?;
-        if serial != parallel {
-            let at = serial
-                .iter()
-                .zip(&parallel)
-                .position(|(a, b)| a != b)
-                .unwrap_or(serial.len().min(parallel.len()));
-            different(&format!(
-                "bytes {} / {}, first difference at byte {at}",
-                parallel.len(),
-                serial.len()
-            ));
-        }
-        eprintln!(
-            "[X_SHADOW] PAIRWISEPAR queries={} chunks={chunks} pieces={pieces} bytes={} identical",
-            hits_by_query.len(),
-            serial.len()
-        );
-    }
     write_parallel(
         writer,
         sections,
@@ -432,7 +379,7 @@ fn format_piece<S: QuerySections>(
 }
 
 /// `f` of every item, in order: on `pool`, or in order on this thread without threads (where
-/// `pool` gives `None` and only the shadow's arm comes here).
+/// `pool` gives `None`: the fallback only lets the writer compile there).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -535,31 +482,6 @@ fn write_parallel_with<S: QuerySections, W: Write>(
         first = end;
     }
     Ok((chunks, pieces_written))
-}
-
-// No NCBI counterpart: the shadow's comparison of BLASTN's and BLASTP's rows
-// (LOSAT_X_PAIRWISEPARSHADOW); it does
-// not change any value NCBI computes.
-/// The shadow's check of rows made on the pool against the serial rows (`Debug`).
-pub(crate) fn compare_rows(parallel: &[PairwiseHit], serial: &[PairwiseHit]) {
-    if parallel.len() != serial.len() {
-        different(&format!("rows {} / {}", parallel.len(), serial.len()));
-    }
-    for (index, (a, b)) in parallel.iter().zip(serial).enumerate() {
-        let (a, b) = (format!("{a:?}"), format!("{b:?}"));
-        if a != b {
-            different(&format!("row {index}: {a} / {b}"));
-        }
-    }
-    eprintln!(
-        "[X_SHADOW] PAIRWISEPARROWS rows={} identical",
-        parallel.len()
-    );
-}
-
-fn different(what: &str) -> ! {
-    eprintln!("[X_SHADOW] PAIRWISEPAR DIFFERENT ({what})");
-    panic!("LOSAT_X_PAIRWISEPARSHADOW: the pairwise report formatted on the pool differs from the serial writer");
 }
 
 #[cfg(test)]

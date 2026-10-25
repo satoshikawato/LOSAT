@@ -1,0 +1,476 @@
+name: Release Readiness v0.2.0
+
+# The v0.2.0 release candidate on GitHub (certification set I of docs/release/v0.2.0_certification_plan.md):
+# the eight artifacts of docs/release/v0.2.0_rc_contract.json (five native targets, serial and threaded
+# Wasm, the crate) built from the exact release-candidate commit R, each assembled, extracted and smoked
+# by LOSAT/tests/prepare_release_candidate_v020.py, then downloaded on a fresh runner and verified again
+# (LOSAT/tests/verify_release_archive_v020.py: sha256 against the sidecar, extract, `losat --version`, five
+# smokes), and aggregated into one exact-SHA handoff.
+#
+# Dispatch (a workflow_dispatch workflow must exist on the default branch `main`) with the filled
+# contract committed on R:
+#   gh workflow run release-readiness-v020.yml --repo satoshikawato/LOSAT --ref main -f candidate_sha=<R>
+# The assembler refuses an unfilled contract and a candidate that changes a runtime input after the
+# certified candidate C. Nothing here tags, releases, publishes to a registry, signs or uses a
+# self-hosted runner; the integrated certification (set A) runs locally per the plan.
+
+run-name: Release readiness v0.2.0 ${{ inputs.candidate_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact committed release-candidate SHA R (40 lowercase hex digits)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.candidate_sha }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+
+jobs:
+  threading-regression:
+    uses: ./.github/workflows/wasm-threading.yml
+    with:
+      candidate_sha: ${{ inputs.candidate_sha }}
+      include_serial_compatibility: true
+
+  quality:
+    name: Quality, lineage, and source package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.candidate_sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          components: clippy, rustfmt
+          targets: wasm32-wasip1, wasm32-wasip1-threads
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+
+      - name: Verify exact candidate
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      # The contract must be filled and R must descend from the certified candidate C with no
+      # runtime-input change; checked here first so that a bad candidate fails in seconds, not after
+      # the tests (each artifact job repeats the check).
+      - name: Contract and certification lineage
+        run: |
+          python3 - <<'PY'
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, "LOSAT/tests")
+          import prepare_release_candidate_v020 as rc
+          try:
+              root = Path(".").resolve()
+              rc.validate_candidate(root, os.environ["CANDIDATE_SHA"], rc.load_contract(root))
+          except rc.ReleaseFailure as error:
+              print(f"RC_HANDOFF_FAILED: {error}", file=sys.stderr)
+              raise SystemExit(1)
+          print("contract filled; candidate descends from the certified candidate")
+          PY
+
+      - name: Capture quality metadata
+        run: |
+          mkdir -p .tmp/release-readiness/quality
+          git rev-parse HEAD > .tmp/release-readiness/quality/git-commit.txt
+          rustc -vV > .tmp/release-readiness/quality/rustc-vV.txt
+          cargo -V > .tmp/release-readiness/quality/cargo-V.txt
+          node --version > .tmp/release-readiness/quality/node-version.txt
+
+      - name: Release tooling tests
+        run: |
+          python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v020.py LOSAT/tests/test_verify_release_archive_v020.py
+          python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v010.py
+
+      - name: Pure-Rust runtime boundary
+        run: python3 LOSAT/tests/check_pure_rust_runtime_boundary.py --root .
+
+      - name: Floating-point contract (sources and cargo configuration)
+        run: python3 LOSAT/tests/check_fp_contract.py source
+
+      - name: Format
+        run: cd LOSAT && cargo fmt --check
+
+      - name: Clippy
+        run: cd LOSAT && cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Tests
+        run: cd LOSAT && cargo test --locked --all-features
+        env:
+          LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
+
+      - name: Package the crate and verify the clean install
+        run: |
+          package_target="$RUNNER_TEMP/losat-cargo-package-target"
+          cd LOSAT
+          cargo package --list > ../.tmp/release-readiness/quality/cargo-package-list.txt
+          cargo package --locked \
+            --config "build.target-dir=\"${package_target}\""
+          cd ..
+          python3 LOSAT/tests/prepare_release_candidate_v020.py source \
+            --repo-root . \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --crate "${package_target}/package/LOSAT-0.2.0.crate" \
+            --output-dir .tmp/release-readiness/source
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc-quality-evidence
+          path: .tmp/release-readiness/quality
+          if-no-files-found: error
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc-source-package
+          path: .tmp/release-readiness/source
+          if-no-files-found: error
+          retention-days: 30
+
+  native-artifacts:
+    name: Native artifact ${{ matrix.target_triple }}
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform_id: linux-x64
+            runner: ubuntu-24.04
+            target_triple: x86_64-unknown-linux-gnu
+            executable_suffix: ""
+            python: python3
+          - platform_id: linux-arm64
+            runner: ubuntu-24.04-arm
+            target_triple: aarch64-unknown-linux-gnu
+            executable_suffix: ""
+            python: python3
+          - platform_id: windows-x64
+            runner: windows-2025
+            target_triple: x86_64-pc-windows-msvc
+            executable_suffix: .exe
+            python: python
+          - platform_id: macos-arm64
+            runner: macos-15
+            target_triple: aarch64-apple-darwin
+            executable_suffix: ""
+            python: python3
+          - platform_id: macos-x64
+            runner: macos-15-intel
+            target_triple: x86_64-apple-darwin
+            executable_suffix: ""
+            python: python3
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      TARGET_TRIPLE: ${{ matrix.target_triple }}
+      EXECUTABLE_SUFFIX: ${{ matrix.executable_suffix }}
+      PYTHON: ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.candidate_sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+
+      - name: Verify exact committed candidate SHA
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - name: Build exact native release artifact
+        run: cd LOSAT && cargo build --release --locked
+
+      # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
+      # result *= expl(-z * z) / z;
+      # The shipped binary holds FMA instructions and references to fma only where LOSAT's one
+      # mul_add emulates that line (docs/agents/diagnostics.md, "Floating-point contract"). The
+      # checker reads x86-64 and aarch64 objdump output, so it runs on the two Linux artifacts.
+      - name: Floating-point contract of the artifact
+        if: startsWith(matrix.platform_id, 'linux-')
+        run: python3 LOSAT/tests/check_fp_contract.py binary --losat LOSAT/target/release/losat
+
+      - name: Assemble, extract, and smoke native artifact
+        run: |
+          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
+          # The helper invokes a committed contract search per program without changing or classifying its output.
+          "$PYTHON" LOSAT/tests/prepare_release_candidate_v020.py native \
+            --repo-root . \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --target "$TARGET_TRIPLE" \
+            --binary "LOSAT/target/release/losat${EXECUTABLE_SUFFIX}" \
+            --output-dir ".tmp/release-readiness/native-${{ matrix.platform_id }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc-native-${{ matrix.platform_id }}
+          path: .tmp/release-readiness/native-${{ matrix.platform_id }}
+          if-no-files-found: error
+          retention-days: 30
+
+  serial-wasm-artifact:
+    name: Serial wasm32-wasip1 artifact
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.candidate_sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          targets: wasm32-wasip1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+
+      - name: Verify exact committed candidate SHA
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - name: Build exact serial-Wasm release artifact
+        run: cd LOSAT && cargo build --release --target wasm32-wasip1 --no-default-features --locked
+
+      - name: Assemble, extract, and smoke serial-Wasm artifact
+        run: |
+          # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
+          # The WASI runner supplies the existing CLI inputs and does not implement BLAST behavior.
+          python3 LOSAT/tests/prepare_release_candidate_v020.py wasm \
+            --repo-root . \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --target wasm32-wasip1 \
+            --binary LOSAT/target/wasm32-wasip1/release/losat.wasm \
+            --output-dir .tmp/release-readiness/serial-wasm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc-serial-wasm
+          path: .tmp/release-readiness/serial-wasm
+          if-no-files-found: error
+          retention-days: 30
+
+  threaded-wasm-artifact:
+    name: Threaded wasm32-wasip1-threads artifact
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.candidate_sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          targets: wasm32-wasip1-threads
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+
+      - name: Verify exact committed candidate SHA
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      # The contract's build command. The shared-memory maximum is a link argument of the target's
+      # rustflags in LOSAT/.cargo/config.toml; no RUSTFLAGS variable is set here.
+      - name: Build exact threaded-Wasm release artifact
+        run: cd LOSAT && cargo build --release --target wasm32-wasip1-threads --features wasm-threads --locked
+
+      - name: Assemble, extract, and smoke threaded-Wasm artifact
+        run: |
+          # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+          # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
+          # The threaded WASI runner hosts the command; it implements no BLAST behavior.
+          python3 LOSAT/tests/prepare_release_candidate_v020.py wasm \
+            --repo-root . \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --target wasm32-wasip1-threads \
+            --binary LOSAT/target/wasm32-wasip1-threads/release/losat.wasm \
+            --output-dir .tmp/release-readiness/threaded-wasm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc-threaded-wasm
+          path: .tmp/release-readiness/threaded-wasm
+          if-no-files-found: error
+          retention-days: 30
+
+  # Download -> extract -> version -> five smokes -> hash, on a runner that built nothing.
+  extracted-smoke:
+    name: Extracted smoke ${{ matrix.target_triple }}
+    needs: [quality, native-artifacts, serial-wasm-artifact, threaded-wasm-artifact]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: rc-native-linux-x64
+            runner: ubuntu-24.04
+            target_triple: x86_64-unknown-linux-gnu
+            archive: LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz
+            python: python3
+            wasm: false
+          - artifact: rc-native-linux-arm64
+            runner: ubuntu-24.04-arm
+            target_triple: aarch64-unknown-linux-gnu
+            archive: LOSAT-0.2.0-aarch64-unknown-linux-gnu.tar.gz
+            python: python3
+            wasm: false
+          - artifact: rc-native-windows-x64
+            runner: windows-2025
+            target_triple: x86_64-pc-windows-msvc
+            archive: LOSAT-0.2.0-x86_64-pc-windows-msvc.zip
+            python: python
+            wasm: false
+          - artifact: rc-native-macos-arm64
+            runner: macos-15
+            target_triple: aarch64-apple-darwin
+            archive: LOSAT-0.2.0-aarch64-apple-darwin.tar.gz
+            python: python3
+            wasm: false
+          - artifact: rc-native-macos-x64
+            runner: macos-15-intel
+            target_triple: x86_64-apple-darwin
+            archive: LOSAT-0.2.0-x86_64-apple-darwin.tar.gz
+            python: python3
+            wasm: false
+          - artifact: rc-serial-wasm
+            runner: ubuntu-24.04
+            target_triple: wasm32-wasip1
+            archive: LOSAT-0.2.0-wasm32-wasip1.tar.gz
+            python: python3
+            wasm: true
+          - artifact: rc-threaded-wasm
+            runner: ubuntu-24.04
+            target_triple: wasm32-wasip1-threads
+            archive: LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz
+            python: python3
+            wasm: true
+          - artifact: rc-source-package
+            runner: ubuntu-24.04
+            target_triple: source
+            archive: LOSAT-0.2.0.crate
+            python: python3
+            wasm: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      PYTHON: ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_sha }}
+
+      - name: Verify exact committed candidate SHA
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - uses: actions/setup-node@v4
+        if: ${{ matrix.wasm }}
+        with:
+          node-version: 24.21.0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: .tmp/release-readiness/download
+
+      - name: Verify the downloaded archive (hash, extract, version, five smokes)
+        run: |
+          "$PYTHON" LOSAT/tests/verify_release_archive_v020.py \
+            --repo-root . \
+            --archive ".tmp/release-readiness/download/${{ matrix.archive }}" \
+            --target "${{ matrix.target_triple }}"
+
+  handoff:
+    name: Aggregate exact-SHA RC handoff
+    needs:
+      - quality
+      - native-artifacts
+      - serial-wasm-artifact
+      - threaded-wasm-artifact
+      - extracted-smoke
+      - threading-regression
+    if: >-
+      ${{ always() &&
+          needs.quality.result == 'success' &&
+          needs.threading-regression.result == 'success' &&
+          needs.native-artifacts.result == 'success' &&
+          needs.serial-wasm-artifact.result == 'success' &&
+          needs.threaded-wasm-artifact.result == 'success' &&
+          needs.extracted-smoke.result == 'success' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.candidate_sha }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rc-native-*
+          path: .tmp/release-readiness/inputs
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rc-serial-wasm
+          path: .tmp/release-readiness/inputs
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rc-threaded-wasm
+          path: .tmp/release-readiness/inputs
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rc-source-package
+          path: .tmp/release-readiness/inputs
+
+      - name: Verify checksums and create handoff manifest
+        run: |
+          python3 LOSAT/tests/prepare_release_candidate_v020.py aggregate \
+            --repo-root . \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --input-root .tmp/release-readiness/inputs \
+            --output-dir .tmp/release-readiness/handoff \
+            --workflow-run-id "${{ github.run_id }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LOSAT-v0.2.0-rc-${{ inputs.candidate_sha }}
+          path: .tmp/release-readiness/handoff
+          if-no-files-found: error
+          retention-days: 30

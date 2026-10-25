@@ -887,6 +887,58 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   }
 });
 
+test('-num_alignments 3: the records follow the tabular list, and the texts say only what is known of the outfmt 0 search', async ({ page }) => {
+  // numdesc.blastn.split_na3: outfmt 6 and 7 keep three subjects, outfmt 0 has a hit list of its own (500). The
+  // third subject of the tabular list has no alignment linked to it (as the FakeEngine's third subject has none).
+  await program(page, 'blastn');
+  await task(page, 'blastn');
+  await openParameters(page);
+  await page.getByTestId('param-num_alignments').fill('3');
+  await openFiles(page, 'query', [{ name: 'split_q.fna', text: fasta('outfmt0/numdesc_split_q.fna') }]);
+  await openFiles(page, 'subject', [{ name: 'split_s.fna', text: fasta('outfmt0/numdesc_split_s.fna') }]);
+  await run(page, 1);
+  await openFromQueue(page, 1);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -num_alignments 3');
+  await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', '3');
+  // The notice counts the subjects whose alignments are linked, and says that the search has a hit list of its own.
+  const partial = page.locator('[data-testid="results-notice"][data-kind="outfmt0-partial"]');
+  await expect(partial).toContainText("outfmt 0's alignments are linked to 2 of this query's 3 subjects (BLAST+'s -num_alignments: 3).");
+  await expect(partial).toContainText('Its search has a hit list of its own (500 subjects per query)');
+  await expect(partial).toContainText('an alignment is linked to an HSP only where that search found the same HSP');
+  expect(await text(partial)).not.toMatch(/\bshows the alignments of\b/);
+  // The subject-limit notice is the tabular list's: three subjects is -num_alignments.
+  expect(await noticeKinds(page)).toEqual(['subject-limit']);
+  // The third subject: no outfmt 0 alignment is linked to its HSP.
+  await subjectRows(page).last().click();
+  await show(page, 'alignment');
+  const separate = page.getByTestId('detail-not-in-outfmt0');
+  await expect(separate).toContainText('No outfmt 0 alignment is linked to this HSP. Its search has a hit list of its own (500 subjects per query)');
+  await expect(separate).toContainText('it shows the alignments of its first 3 subjects (-num_alignments).');
+  await expect(separate).toContainText('Those can be other subjects, or other HSPs of a subject, than outfmt 6 and 7 keep.');
+  expect(await text(separate)).not.toMatch(/did not find/);
+  await expect(page.getByTestId('detail-section')).toHaveCount(0);
+});
+
+test('-num_alignments 0: outfmt 6 and 7 have no hits, and the notice says so', async ({ page }) => {
+  await program(page, 'blastn');
+  await task(page, 'blastn');
+  await openParameters(page);
+  await page.getByTestId('param-num_alignments').fill('0');
+  await openFiles(page, 'query', [{ name: 'split_q.fna', text: fasta('outfmt0/numdesc_split_q.fna') }]);
+  await openFiles(page, 'subject', [{ name: 'split_s.fna', text: fasta('outfmt0/numdesc_split_s.fna') }]);
+  await run(page, 1);
+  await openFromQueue(page, 1);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -num_alignments 0');
+  const notice = page.locator('[data-testid="results-notice"][data-kind="no-tabular-hits"]');
+  await expect(notice).toContainText('-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty');
+  expect(await noticeKinds(page)).toEqual(['no-tabular-hits']);
+  if (BUILD_HAS_ENGINE) {
+    // The run is not a failure: outfmt 0 is written, and the diagnostics hold the tabular formats' error.
+    await showOutput(page, 1, 0, false);
+    expect(await text(page.getByTestId('result-output'))).toContain('BLASTN');
+  }
+});
+
 test("BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line", async ({ page }) => {
   // The example of docs/evidence/losat_web_e2c/AUTHORITY.md §P: a one-letter HSP on the minus
   // strand. The FakeEngine writes a one-letter BLASTN HSP for its third query.

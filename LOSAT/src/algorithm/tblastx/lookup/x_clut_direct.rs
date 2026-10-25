@@ -1802,6 +1802,132 @@ impl XFlatCompressedLookup {
         }
     }
 
+    /// PROBE (BPF s4): [`Self::x_probe_list_bf_out`]`::<true>` with two offsets per step where
+    /// both new letters are in the compressed alphabet: the index of `s + 1` is the index of `s`
+    /// over 15 plus the new letter, and the preshift after `s + 1` is the index of `s` over 225 plus
+    /// the new letter over 15 (its scaled value is a multiple of 15), so the chain from preshift to
+    /// preshift takes one multiply per two offsets. The same list.
+    #[inline(never)]
+    pub(crate) fn x_probe_list_pairs(
+        &self,
+        subject: &[u8],
+        subject_length: usize,
+        cells: &mut Vec<(i32, u32)>,
+    ) {
+        let s_last = (subject_length as i64 - i64::from(self.word_length)).max(0) as usize;
+        let covered = (self.pv.len() as u64) << self.pv_array_bts;
+        if !(self.word_length == 5
+            && self.compressed_alphabet_size == 15
+            && self.reciprocal_alphabet_size == 286_331_154
+            && subject.len() > s_last + 5
+            && subject_length <= subject.len()
+            && covered >= 759_375)
+        {
+            return self.x_probe_list::<false>(subject, subject_length, cells);
+        }
+        static T15: std::sync::OnceLock<[i32; 256]> = std::sync::OnceLock::new();
+        let t15 = T15.get_or_init(|| {
+            let mut t = [-1i32; 256];
+            for (b, v) in self.scaled_compress_table_u8.iter().enumerate() {
+                t[b] = if *v >= 0 { *v / 15 } else { *v };
+            }
+            t
+        });
+        let word_length = 5usize;
+        let recip = i64::from(self.reciprocal_alphabet_size);
+        let pv_array_bts = self.pv_array_bts as usize;
+        let table = &self.scaled_compress_table_u8;
+        let pv = &self.pv;
+        cells.clear();
+        // SAFETY: the loop reads up to s_last + word length < subject.len() (checked above).
+        let byte_at = |i: usize| unsafe { *subject.get_unchecked(i) };
+        let div225 = |x: i32| ((x as i64 * 19_088_744) >> 32) as i32;
+
+        let mut s = 0usize;
+        let mut index = 0i32;
+        while s <= s_last {
+            let (computed, skip) = compute_compressed_index_u8(
+                word_length - 1,
+                &subject[s..s + word_length - 1],
+                15,
+                table,
+            );
+            index = computed;
+            if skip == 0 {
+                break;
+            }
+            s += 1;
+        }
+        let mut next_char = if s <= s_last {
+            byte_at(s + word_length - 1)
+        } else {
+            0
+        };
+        let mut preshift = compressed_reciprocal_divide(index, recip);
+        cells.reserve(s_last + 1 - s);
+        let list = cells.as_mut_ptr();
+        let mut listed = 0usize;
+        let bit_of = |ix: usize| {
+            // SAFETY: an index is below 15^5, which the bits cover (checked above).
+            let word = unsafe { *pv.get_unchecked(ix >> pv_array_bts) };
+            (word >> (ix & PV_ARRAY_MASK)) & 1
+        };
+        while s <= s_last {
+            if s < s_last {
+                let b1 = byte_at(s + word_length);
+                let cc0 = table[usize::from(next_char)];
+                let cc1 = table[usize::from(b1)];
+                if (cc0 | cc1) >= 0 {
+                    let i0 = preshift + cc0;
+                    let i1 = compressed_reciprocal_divide(i0, recip) + cc1;
+                    preshift = div225(i0) + t15[usize::from(b1)];
+                    next_char = byte_at(s + word_length + 1);
+                    let bit0 = bit_of(i0 as usize);
+                    // SAFETY: as in `for_each_cell` (each offset adds at most one).
+                    unsafe { list.add(listed).write((s as i32, i0 as u32)) };
+                    listed += bit0 as usize;
+                    let bit1 = bit_of(i1 as usize);
+                    // SAFETY: as above.
+                    unsafe { list.add(listed).write((s as i32 + 1, i1 as u32)) };
+                    listed += bit1 as usize;
+                    s += 2;
+                    continue;
+                }
+            }
+            let mut compressed_char = table[usize::from(next_char)];
+            next_char = byte_at(s + word_length);
+            if compressed_char < 0 {
+                preshift = 0;
+                s += 1;
+                let mut skip = word_length as i32 - 1;
+                while skip != 0 && s <= s_last {
+                    compressed_char = table[usize::from(next_char)];
+                    next_char = byte_at(s + word_length);
+                    if compressed_char < 0 {
+                        skip = word_length as i32 - 1;
+                        preshift = 0;
+                        s += 1;
+                        continue;
+                    }
+                    index = preshift + compressed_char;
+                    preshift = compressed_reciprocal_divide(index, recip);
+                    skip -= 1;
+                    s += 1;
+                }
+                continue;
+            }
+            index = preshift + compressed_char;
+            preshift = compressed_reciprocal_divide(index, recip);
+            let bit = bit_of(index as usize);
+            // SAFETY: as above.
+            unsafe { list.add(listed).write((s as i32, index as u32)) };
+            listed += bit as usize;
+            s += 1;
+        }
+        // SAFETY: the first `listed` places were written above, within the reserve.
+        unsafe { cells.set_len(listed) };
+    }
+
     #[inline(always)]
     fn x_probe_list<const UNCHECKED: bool>(
         &self,

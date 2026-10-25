@@ -148,6 +148,7 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
                 22 => stage!(22),
                 23 => stage!(23),
                 24 => stage!(24),
+                31 => stage!(31),
                 _ => x_scan_flat_fseed(
                     lookup,
                     subject,
@@ -286,7 +287,8 @@ fn x_scan_flat_fseed<F>(
 // without the read-ahead of the hits; 4 runs of 16; 5 tested per 256; 7 as 1 without any
 // read-ahead; 11 as 1 with the scan out of line; 12 as 11 without bounds checks in the scan; 21 as 12
 // with the runs copied in SSE2 registers and the test loop out of line; 22 as 21 tested per 256; 23
-// as 21 with the test loop inline; 24 as 21 with the runs copied as arrays (no intrinsics).
+// as 21 with the test loop inline; 24 as 21 with the runs copied as arrays (no intrinsics); 31 as
+// 21 with the scan two offsets per step (`x_probe_list_pairs`).
 fn x_bpf_s4() -> u32 {
     use std::sync::OnceLock;
     static ARM: OnceLock<u32> = OnceLock::new();
@@ -334,6 +336,7 @@ fn x_scan_flat_stage<const ARM: u32, F>(
     match ARM {
         11 => lookup.x_probe_list_bf_out::<false>(subject, subject_length, &mut cells),
         12 | 21..=24 => lookup.x_probe_list_bf_out::<true>(subject, subject_length, &mut cells),
+        31 => lookup.x_probe_list_pairs(subject, subject_length, &mut cells),
         _ => lookup.x_probe_list_bf(subject, subject_length, &mut cells),
     }
     let mut stage = X_STAGE.with(Cell::take).unwrap_or_else(|| {
@@ -361,7 +364,7 @@ fn x_scan_flat_stage<const ARM: u32, F>(
     let XStage { a, b } = &mut *stage;
     let (a, b) = (&mut a[..], &mut b[..]);
     let mut drain = |w: usize, a: &[u32], b: &[u32]| {
-        if matches!(ARM, 21 | 22 | 24) {
+        if matches!(ARM, 21 | 22 | 24 | 31) {
             x_stage_drain(
                 &a[..w],
                 &b[..w],
@@ -727,7 +730,7 @@ mod tests {
                 let mut bf_diag = vec![DiagStruct::default(); diag_len];
                 let mut fseed_diag = vec![DiagStruct::default(); diag_len];
                 let mut reference_diag = vec![DiagStruct::default(); diag_len];
-                let mut stage_diags = vec![vec![DiagStruct::default(); diag_len]; 25];
+                let mut stage_diags = vec![vec![DiagStruct::default(); diag_len]; 32];
                 let mut diag_offset = window;
                 let mut total = 0usize;
                 for (n, subject) in subjects.iter().enumerate() {
@@ -851,6 +854,7 @@ mod tests {
                         arm!(22);
                         arm!(23);
                         arm!(24);
+                        arm!(31);
                     }
                     total += flat_log.len();
                     diag_offset += length as i32 + window;
@@ -858,6 +862,51 @@ mod tests {
                 assert!(total > 0, "the test reaches the extension");
             }
         }
+    }
+
+    // PROBE (BPF s4): the scan two offsets per step lists what the scan one offset per step lists,
+    // and its division by 225 is exact below 15^5.
+    #[test]
+    fn probe_pairs_scan_is_the_scan() {
+        for x in 0..759_375i64 {
+            assert_eq!((x * 19_088_744) >> 32, x / 225, "x {x}");
+        }
+        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
+        let mut query = Vec::new();
+        let mut locations = Vec::new();
+        for length in [300usize, 500, 200] {
+            let left = query.len() as i32;
+            query.extend((0..length).map(|_| LETTERS[rng.below(LETTERS.len())]));
+            locations.push((left, left + length as i32 - 1));
+            query.push(0);
+        }
+        let flat = match x_try_build_flat_compressed_lookup(5, 1100, &query, &locations, &[0..3]) {
+            Some(XFlatBuild::Table(table)) => table,
+            _ => panic!("flat table"),
+        };
+        let mut checked = 0;
+        for outside_one_in in [0usize, 50, 6, 2] {
+            for _ in 0..200 {
+                let length = 1 + rng.below(400);
+                let mut subject: Vec<u8> = (0..length)
+                    .map(|_| {
+                        if outside_one_in != 0 && rng.below(outside_one_in) == 0 {
+                            OUTSIDE[rng.below(OUTSIDE.len())]
+                        } else {
+                            LETTERS[rng.below(LETTERS.len())]
+                        }
+                    })
+                    .collect();
+                subject.push(0);
+                let mut want = Vec::new();
+                flat.x_probe_list_bf(&subject, length, &mut want);
+                let mut got = Vec::new();
+                flat.x_probe_list_pairs(&subject, length, &mut got);
+                assert_eq!(got, want, "length {length}");
+                checked += want.len();
+            }
+        }
+        assert!(checked > 1000);
     }
 
     // LOSAT_X_BPFSEED's choice: on a table with the branch-free list the fused loop

@@ -437,13 +437,15 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 //                                 CArgDescriptions::eOutputFile);
 // ```
 /// psiblast's NCBI arguments that LOSAT does not run: the PSSM files and inputs (series PS2 to
-/// PS6), PHI-BLAST (PS8), `-gap_trigger`, `-sum_stats`, and the arguments that blastp's engine
+/// PS6), PHI-BLAST (PS8), `-gap_trigger`, `-sum_stats`, `-culling_limit` (blastp runs it since
+/// O3b; psiblast's first round is not compared with NCBI's under it yet), and the arguments that blastp's engine
 /// does not run either (`is_unported_blastp_arg`; psiblast has no database masks and no
 /// `-mt_mode`).
 fn is_unported_psiblast_arg(name: &str) -> bool {
     matches!(
         name,
-        "gap_trigger"
+        "culling_limit"
+            | "gap_trigger"
             | "ignore_msa_master"
             | "in_msa"
             | "in_pssm"

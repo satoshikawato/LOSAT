@@ -116,7 +116,7 @@ which runs slot zero of the search's thread pool (`LOSAT/src/utils/threading.rs`
 | `7` | outfmt 7 text (only for programs that support outfmt 7) |
 | `1` | HSP records as JSON Lines, one object per HSP (§8); BLASTP, TBLASTN, BLASTN and TBLASTX |
 | `2` | JSON response of `describe`, `register` or `scan_end` |
-| `3` | diagnostics that the CLI writes to stderr (warnings), UTF-8, each written once: the CLI's standard error for `-outfmt 6` (that of `-outfmt 7` is the same, and that of `-outfmt 0` has the same lines without the formatting handler's `-num_descriptions` and `Examining 5 or more matches` lines, which `-num_descriptions` / `-num_alignments` can make differ) |
+| `3` | diagnostics that the CLI writes to stderr (warnings), UTF-8, each written once: the CLI's standard error for `-outfmt 6` (that of `-outfmt 7` is the same, and that of `-outfmt 0` has the same lines without the formatting handler's `-num_descriptions` and `Examining 5 or more matches` lines, which `-num_descriptions` / `-num_alignments` can make differ). In a run of two searches in which one failed before it wrote anything (§7), it is that standard error followed by the CLI's standard error for `-outfmt 0`, error included |
 
 The adapter sends each output stream in chunks of 1 MiB as they fill, and the rest when
 the run ends, so an output never has to fit in linear memory as a whole. Stream 2 is
@@ -168,14 +168,24 @@ the WASI imports.
   formats first, then format 0 if its size differs. Without `-num_descriptions` and `-num_alignments` this is the one
   search of today. Each stream is the CLI's output for that format alone with the same options, because the
   hit list size takes part in the search (a smaller list is not a prefix of a larger one: the preliminary list evicts
-  subjects before their alignments are extended). With two searches the run costs about twice the time of one, with
-  the memory of the larger search. A failure of either search fails the run.
-- A hit list size of 0 (`-num_alignments 0`) is NCBI's error `BLAST query/options error: No hits are being saved` for
-  `-outfmt 6` and `-outfmt 7`, while `-outfmt 0` keeps its size (500 or `-num_descriptions`) and is written. The run
-  does not fail then: stream 0 is the CLI's `-outfmt 0` output, streams 6 and 7 and the HSP records (stream 1) are empty,
-  and stream 3 carries the CLI's standard error for the tabular formats (its warnings, then NCBI's error). `-num_descriptions 0
-  -num_alignments 0` makes the hit list of format 0 empty too, and `run` fails with the same error, as the CLI does for every
-  format.
+  subjects before their alignments are extended). With two searches the run costs about twice the time of one. Its
+  memory peak is that of the larger search plus the HSP list of the tabular formats, which stays in memory (about the size of
+  stream 1) while the second search runs (measured: +21.7 MiB on 142.6 MiB for BLASTN of Sakai against EDL933 with
+  `-num_alignments 3`).
+- A search of a two-search run that fails before it has written a byte of its formats does not fail the run when the
+  other search succeeds: the options' checks reject its hit list size, as the CLI rejects that format alone. This
+  is `-num_alignments 0` for the tabular formats (NCBI's error `BLAST query/options error: No hits are being saved`
+  for `-outfmt 6` and `-outfmt 7`, while `-outfmt 0` keeps its size, 500 or `-num_descriptions`), and for BLASTN's format
+  0 a `-num_descriptions` of 2^30 or more (the preliminary hit list size overflows; LOSAT's error, where NCBI
+  crashes), while the tabular formats ignore `-num_descriptions`. The streams of the failed search's formats stay
+  empty; if it is the tabular search there are no HSP records (stream 1), else the records have no `out0`. Stream 3 is
+  the CLI's standard error for the tabular formats (the tabular search's warnings, and NCBI's error when it failed)
+  followed by the CLI's standard error for `-outfmt 0` (the format 0 search's warnings, and its error when it failed):
+  the lines that the CLI user sees running the two formats one after the other, none altered or dropped. When both searches
+  fail, `run` fails with the tabular search's error, as the CLI fails every format (so does `-num_descriptions 0
+  -num_alignments 0`, whose hit lists are both empty and make one search); so does a search that fails after it has
+  written a byte. `validate` accepts the argv when at least one search passes the checks, and reports the tabular
+  search's error otherwise.
 
 ## 8. HSP record
 

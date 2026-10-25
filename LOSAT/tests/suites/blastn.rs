@@ -39,6 +39,8 @@ mod blastn_qbatchpar;
 mod blastn_qctx_sentinel;
 #[path = "../blastn_qgroup_par.rs"]
 mod blastn_qgroup_par;
+#[path = "../blastn_query_drop.rs"]
+mod blastn_query_drop;
 #[path = "../blastn_query_dust_par.rs"]
 mod blastn_query_dust_par;
 #[path = "../blastn_query_prep_par.rs"]

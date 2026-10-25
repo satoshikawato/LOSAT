@@ -314,6 +314,7 @@ export LOSAT_X_BNDCONE=1
 export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
+export LOSAT_X_BNQDROP=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTABPAR=1
@@ -3120,6 +3121,35 @@ Scheduling (each value computed by one thread with the original function; order 
   traceback earlier and that traceback's medium buffers stay in the heap; with the threshold fixed
   (`MALLOC_MMAP_THRESHOLD_=131072`) the run reads 217.2 -> 217.0, and `LOSAT_X_BNLUTDROP=0` reads 217.5 as dev. Time:
   wall x0.997-1.001, cycles:u x0.991-1.000 and instructions:u x0.999-1.000 in every case.
+- `LOSAT_X_BNQDROP=1` (BLASTN, every task, `-subject` and `-db`; in the strict set since 2026-10-25
+  (perf/mb-query-letters, evidence at the end of this entry): on unless it is `0`) a query batch drops its records'
+  letters once it has encoded them (`blastn/blast_engine/x_query_drop.rs`), where no report reads them; with `=0` the
+  records read before the search keep their letters until the search ends, as before. NCBI holds a batch's Bioseqs in its
+  scope until the batch is formatted (`QueryBatchCleanup`, `blastn_app.cpp:277`), beside the search's encoded copy; the
+  drop is memory only. `search_cli` moves the records into a store that the batch loop takes each batch out of
+  (`x_query_stream::Queries::Taken`), and `search_query_batch` drops the letters after their last readers (the encoding
+  and the batch's query chunks), before it builds the lookup tables (`record.sequence = Vec::new()`, as
+  `LOSAT_X_BNSTORE` does with the subjects'); the records keep their IDs, titles and messages, and every length read
+  later comes from the lengths taken before (`query_lengths` in the traceback, the searched lengths for an invalid
+  query's message and the Seq-aligns). A batch split into query chunks cuts them from the records' letters, so it drops
+  them after its chunks, before its traceback; the chunks' own copies keep their letters to the chunk's end, as before.
+  The rule (class conditional, recorded where `search_cli` decides): every output
+  format shows no query letter (`BlastnOutputFormat::reads_query_letters`: outfmt 6, 7, 8, 9, 12 and SAM without both
+  `SQ` and `SR`; BLASTN takes no custom tabular column) and no caller takes the hits' records, no `-query_loc`, no
+  `LOSAT_X_QBATCHPAR` slot may run (the condition `LOSAT_X_QSTREAM`'s rule computes), and the records are read before
+  the search (`LOSAT_X_QSTREAM` not acting; not `run_local`, whose caller holds its records). With `LOSAT_TIMING`
+  `[TIMING] x_bn_q_drop: batches= records= letters=` gives the batches, records and letters dropped. Evidence
+  (workstation node 1, 16 cores with their HT siblings idle, membind 1, cores warmed 3 s before each run; pairs in
+  alternating order; outputs identical; peak `RssAnon` of a 10 ms sample): megablast of E. coli Sakai against MG1655,
+  8 pairs against dev 2683e6c6, `-subject` 131.6 -> 126.4 MiB at one thread and 135.2 -> 129.9 at 16, `-db` 130.9 ->
+  126.3 and 135.5 -> 129.1 (against dev 313fd4e7 131.9 -> 126.5, 135.3 -> 130.2, 130.8 -> 126.4, 134.8 -> 129.8;
+  with outfmt 0, where the rule keeps the letters, 132.0 -> 131.8); megablast of 31,168 D. melanogaster cDNAs against
+  dmel_dna_3M at one thread (37 batches, 89 MB of letters, the peak in the first batches) 219.7 -> 215.3. At 16
+  threads the cDNAs' search keeps its letters (`LOSAT_X_QBATCHPAR`'s slots run); 12 pairs of that unchanged path read
+  wall x1.017 (0.961-1.087, 4 of 12 below 1), cycles:u x1.001 and `RssAnon` 558-621 MiB in both arms. Time elsewhere:
+  wall x0.981-0.999, cycles:u x0.990-1.001, instructions:u x0.998-1.000. Dropping the query chunks' copies before their
+  chunk's scan (an earlier form) saved nothing measurable: blastn of Sakai, whose records `LOSAT_X_QSTREAM` reads,
+  read the same max RSS at one thread.
 - `LOSAT_X_GREEDYROWFUSE=1` (BLASTN megablast, the distances of the non-affine greedy alignment that `x_greedy_row` runs:
   every traceback, and the score-only calls the fused loop GREEDYFUSE declines; speed; in the strict set from the pull
   request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per

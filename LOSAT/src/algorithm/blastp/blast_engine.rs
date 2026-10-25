@@ -1881,7 +1881,20 @@ impl BlastpRuntimeLookup {
 #[derive(Clone, Copy)]
 enum BlastpOffsetPairScanMode {
     OneHit,
+    // The two-hit search scans with the fused loop; the offset-pair two-hit scan stays as the unit tests' reference.
+    #[cfg(test)]
     TwoHit,
+}
+
+impl BlastpOffsetPairScanMode {
+    /// aa_ungapped.c clamps the scan end for the two-hit search only.
+    fn clamps_scan_end(self) -> bool {
+        match self {
+            Self::OneHit => false,
+            #[cfg(test)]
+            Self::TwoHit => true,
+        }
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:86-93
@@ -1947,7 +1960,7 @@ fn blastp_for_each_offset_pair<F>(
     // if (scan_range[2] < scan_range[1])
     //     scan_range[2] = scan_range[1];
     // ```
-    if matches!(scan_mode, BlastpOffsetPairScanMode::TwoHit) && scan_range[2] < scan_range[1] {
+    if scan_mode.clamps_scan_end() && scan_range[2] < scan_range[1] {
         scan_range[2] = scan_range[1];
     }
 
@@ -7324,8 +7337,8 @@ fn blastp_query_frames_marked(
 /// the lookup region of `run_resolved_in_pool` builds them. The threshold takes the x86-64
 /// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). The table is filled in place,
 /// without the reference builder's chains (lookup/x_lut_direct.rs). The build of the next block's table ahead of that block
-/// (LOSAT_X_BPLKPAHEAD, `x_lookup_ahead.rs`) makes the same call with the same arguments
-/// (`blastp_aa_lookup_ahead`).
+/// (LOSAT_X_BPLKPAHEAD, `x_lookup_ahead.rs`, `blastp_aa_lookup_ahead`) takes the same threshold and
+/// query frames and gives the same table; the Karlin parameters it is passed are not used.
 fn blastp_aa_lookup(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],

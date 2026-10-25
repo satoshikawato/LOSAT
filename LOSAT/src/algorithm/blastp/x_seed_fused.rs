@@ -963,9 +963,9 @@ pub(crate) fn x_scan_two_hit<F>(
 }
 
 /// [`x_scan_two_hit_in_with`] with the cells found by [`x_scan_cells_bf`]. Out of line, and with
-/// a closure of its own type, so that its cell tests have the one caller they had when the
-/// loop without [`x_scan_cells_bf`] was another caller (with the same closure type the cell test
-/// had two callers, and that instance ran 2-6 % more instructions).
+/// a closure of its own type, so that its cell tests keep a single caller (when the closure type
+/// was shared with another loop, the cell test had two callers and that instance ran 2-6 % more
+/// instructions).
 #[inline(never)]
 fn x_scan_two_hit_bf<F>(
     mode: XDiagMode,

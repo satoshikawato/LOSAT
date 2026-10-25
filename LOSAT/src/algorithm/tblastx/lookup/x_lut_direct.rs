@@ -1481,8 +1481,8 @@ mod tests {
     //                  calloc(overflow_cells_needed, sizeof(Int4));
     // ```
     /// LOSAT_X_BPLKPAHEAD: the table built ahead on vectors kept by `XAaSpares` (a table given back
-    /// with other values, then moved to the build by `x_make_room`) is `x_bp_build_lookup(true,
-    /// ..)`'s; `x_make_room` allocates only the vectors short of their room, and keeps the calling
+    /// with other values, then moved to the build by `x_make_room`) is `x_bp_build_lookup(..)`'s;
+    /// `x_make_room` allocates only the vectors short of their room, and keeps the calling
     /// thread's neighbour lists for the builds, which give them back.
     #[test]
     fn aa_spares_build_the_bplut_table_on_kept_vectors() {

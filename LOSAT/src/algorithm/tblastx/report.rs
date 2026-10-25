@@ -708,7 +708,10 @@ pub(crate) fn engine_counts(
 /// ```
 /// The minus-frame conversion is NCBI's: it starts one codon after the masked run, so the
 /// last residue of a run is not lowercased (and a run of one residue is empty).
-fn query_dna_masks(stats: &TblastxQueryStats, query_length: usize) -> Vec<(i8, Vec<(i32, i32)>)> {
+pub(super) fn query_dna_masks(
+    stats: &TblastxQueryStats,
+    query_length: usize,
+) -> Vec<(i8, Vec<(i32, i32)>)> {
     let protein_length = |context: usize| {
         if query_length == 0 || query_length <= context % 3 {
             0
@@ -1325,7 +1328,7 @@ pub(crate) fn write_tabular_row<W: Write>(
     )
 }
 
-/// The TBLASTX output formats (`-outfmt` 0, 5, 6, 7, 8, 9, 12, 15 and 16, `tblastx_outfmt`).
+/// The TBLASTX output formats (`-outfmt` 0, 5, 6, 7, 8, 9, 11, 12, 15 and 16, `tblastx_outfmt`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TblastxOutputFormat {
     Pairwise,
@@ -1338,6 +1341,8 @@ pub(crate) enum TblastxOutputFormat {
     /// The XML2 and JSON documents (outfmt 16, 15, 14 and 13), written from the same records as
     /// outfmt 5 (`tblastx/blast_xml.rs`); 14 and 13 as side files with this output as the master.
     Xml2(crate::report::blast_xml2::Xml2Kind),
+    /// The BLAST archive (outfmt 11, `tblastx/archive.rs`): one document per query batch.
+    Archive,
 }
 
 impl TblastxOutputFormat {
@@ -1350,7 +1355,10 @@ impl TblastxOutputFormat {
     /// (`set_displayed_identities`): not the structured formats, which read the engine's counts
     /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5, 15, 16).
     pub(crate) fn reads_displayed_counts(self) -> bool {
-        !matches!(self, Self::Seqalign(_) | Self::Xml | Self::Xml2(_))
+        !matches!(
+            self,
+            Self::Seqalign(_) | Self::Xml | Self::Xml2(_) | Self::Archive
+        )
     }
 
     /// Whether the format is BLAST XML (5) or one of its XML2 / JSON siblings (15, 16), which
@@ -1382,6 +1390,7 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
         Ok(9) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnBinary),
         Ok(12) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::Json),
         Ok(5) => TblastxOutputFormat::Xml,
+        Ok(11) => TblastxOutputFormat::Archive,
         Ok(16) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Single16),
         Ok(15) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Single15),
         Ok(14) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Files14),

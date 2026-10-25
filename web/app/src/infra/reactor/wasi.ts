@@ -6,6 +6,13 @@
 // kept in a small buffer. The engine's warnings do not go there (they are ABI stream 3);
 // the buffer holds what the engine writes when it stops, such as a panic message, so that
 // the host can report it.
+//
+// The shim uses its pointer arguments as they arrive. JavaScript receives a Wasm i32 as a
+// signed number, so a pointer of 2 GiB or more is negative there: the shim's DataView
+// accesses then throw, and its `random_get` (`subarray` with a negative start) writes
+// somewhere else. Every i32 parameter of WASI preview1 is unsigned (pointer, size,
+// descriptor, flags), so the imports pass each one on as its unsigned value; the i64
+// parameters are BigInt and pass unchanged.
 import { ConsoleStdout, File as WasiFile, OpenFile, WASI } from '@bjorn3/browser_wasi_shim';
 
 /** How much of the engine's standard output and error is kept. */
@@ -26,6 +33,25 @@ export interface WasiContext {
 
 type WasiInstance = WASI['inst'] & { exports: { _initialize?: () => unknown } };
 
+type WasiFunction = (...args: Array<number | bigint>) => unknown;
+
+/** The imports with every i32 argument passed on as an unsigned value. */
+export function unsignedImports(imports: Record<string, unknown>): WebAssembly.ModuleImports {
+  const wrapped: Record<string, WasiFunction> = {};
+  for (const [name, value] of Object.entries(imports)) {
+    if (typeof value !== 'function') continue;
+    const call = value as WasiFunction;
+    wrapped[name] = (...args) => {
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (typeof arg === 'number') args[i] = arg >>> 0;
+      }
+      return call(...args);
+    };
+  }
+  return wrapped as WebAssembly.ModuleImports;
+}
+
 export function createWasi(): WasiContext {
   let log = new Uint8Array(0);
   const keep = (bytes: Uint8Array) => {
@@ -39,7 +65,7 @@ export function createWasi(): WasiContext {
   // The shim logs its calls to the console unless debug is off.
   const wasi = new WASI([], [], [stdin, output, output], { debug: false });
   return {
-    imports: wasi.wasiImport as WebAssembly.ModuleImports,
+    imports: unsignedImports(wasi.wasiImport),
     bind(instance) {
       wasi.inst = instance as unknown as WasiInstance;
     },

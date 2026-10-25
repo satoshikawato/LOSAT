@@ -4,7 +4,7 @@
 
 const fs = require("fs");
 const { WASI } = require("wasi");
-const { prepareArtifact } = require("./wasi_artifact");
+const { prepareArtifact, unsignedWasiImports } = require("./wasi_artifact");
 
 // NCBI reference:
 // ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
@@ -45,7 +45,8 @@ const wasi = new WASI({
   // Module reuse is host preparation only; preserve validation and exit status.
   const { module } = prepareArtifact(bytes, "serial-command");
   const instance = await WebAssembly.instantiate(module, {
-    wasi_snapshot_preview1: wasi.wasiImport,
+    // The serial memory has no declared maximum, so it can pass 2 GiB.
+    wasi_snapshot_preview1: unsignedWasiImports(wasi.wasiImport),
   });
   if (typeof instance.exports._start !== "function") {
     throw new Error(

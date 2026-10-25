@@ -263,7 +263,8 @@ their variables mean
 - `LOSAT_X_<NAME>=0` turns one switch off, to find which path a problem comes from. Single
   switches off are a diagnostic aid: `TBNKEEPFEW` only with four or more query batches;
   `TBNBATCHRULE` only where query batches are searched side by side (2 or more threads, four or
-  more batches); `TBNOWNPOOLS` only with `TBNBATCHRULE`, natively; `TBNXLATESIMD` only
+  more batches); `TBNOWNPOOLS` only with `TBNBATCHRULE`, natively; `TBNREDOLPT` only where the
+  composition-based redo runs on the pool (2 to 16 threads, 2 or more matches); `TBNXLATESIMD` only
   on a packed subject (`TBNSTORE`: `-subject`, the plans of `run_local`'s letters; `-db`) and with AVX2; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPSEED` acts on the two-hit seed stage only; `BPDIAG` acts only
   in `BPSEED`'s fused loop and batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
@@ -411,6 +412,7 @@ export LOSAT_X_TBNHITBF=1
 export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNLINKWIN=1
 export LOSAT_X_TBNOWNPOOLS=1
+export LOSAT_X_TBNREDOLPT=1
 export LOSAT_X_TBNSCANBF=1
 export LOSAT_X_TBNSCANBYTE=1
 export LOSAT_X_TBNSTORE=1
@@ -4494,6 +4496,40 @@ Scheduling (each value computed by one thread with the original function; order 
   x0.994-0.999 and instructions x1.004-1.009 of the dev binary.
   WebAssembly (serial WASI command, one Node process per case, CPU 20, 3 rounds, against `=0`): x0.981
   (AP027131 x MG1655, 5.56 -> 5.42 s) and x0.996 (FlyG_b1, 20.46 -> 20.39 s), linear memory equal.
+- `LOSAT_X_TBNREDOLPT=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-25;
+  `=0` turns it off; `tblastn/stage_d_pipeline.rs` `x_redo_lpt`, `x_redo_lpt_order`): the composition-based redo
+  (`-comp_based_stats 2`, the default) of a chunk of matches on the search pool runs in one `rayon::scope` of
+  `min(threads, matches to redo)` tasks instead of a `par_iter` over the chunk: each task holds one of the
+  per-thread redo states and takes the chunk's matches one at a time from one counter, those with the most HSPs in
+  their preliminary list first (equal counts in list order), and puts each result in the match's slot; the
+  results are then applied in list order as before (early termination tested again, heap insertion). The
+  `par_iter` had no `with_max_len(1)`, so rayon cut each chunk (32 matches per thread) into runs of adjacent
+  matches, and the list is in query order: on the human genome the 24 chromosome matches of one protein
+  (30,000-95,000 HSPs each) sat in one run and one thread redid them one after another while the other
+  threads waited (B11f probe, HsG_b4 at 8 threads: 618 s of the redo's 1,087 s were waits). A match's result is
+  a function of its own preliminary list and a redo state carries no value from one match to the next, so the
+  reports are the same (unit tests `the_redo_lpt_order_takes_the_wanted_matches_largest_first`,
+  `the_redo_lpt_scope_returns_the_par_iter_results_by_index`, `a_panicking_redo_match_propagates_and_the_pool_stays_usable`;
+  `tests/tblastn_redo_lpt.rs`). NCBI runs the same matches in one `omp for schedule(static)` (`blast_kappa.c`
+  3448-3451), whose fixed shares have the same problem. Conditional: two or more threads and two or more matches,
+  with at most 16 threads (`X_REDO_LPT_MAX_THREADS`), on each chunk with two or more matches to redo (`x_reach!`);
+  one thread (also each query batch searched side by side with others, on one thread) keeps the loop on the
+  calling thread, and a larger pool the `par_iter`. Measured 2026-10-25 on the workstation (2x Xeon Gold 6338,
+  cores warmed 3 s before each run, pairs alternating in order, `perf stat` walls; this pull request's first
+  commit against its base 313fd4e7; every output of a case the same bytes in both arms), proteins against the
+  human genome (`-db hsap_dna -evalue 1e-5 -max_target_seqs 5`): the 122 proteins of four query batches (HsG_b4)
+  at 8 threads 1,879.9 -> 1,218.7 s (x0.648, one pair, node 0 cores 24-31 with their siblings idle, load 9-50,
+  output sha 7f761059 as before); the first batch alone (35 proteins, 396 matches) at 8 threads 586.6 -> 349.3 s
+  (x0.630, 3 pairs, same cores), at 16 threads 397.2 -> 284.0 s (x0.715, 3 pairs, node 1). At 32 threads (node 1)
+  the batch took 271.5 -> 280.2 s (x1.035; pairs x1.038, x1.035, x0.985), hence the rule: a probe of the items
+  (one line per match) showed the chunk's time is its longest match's (66,169 HSPs, 97-121 s) in both arms at 16
+  and 32 threads; at 16 the `par_iter` gave one thread a run of adjacent heavy matches (redo 226 s against 112 s),
+  at 32 its runs are short and it started the longest match within 1-8 s, while running the 32 heaviest matches
+  at once raised the redo's work by 5 %. Matches with few HSPs (node 1, 8 pairs at 8 / 16 threads): 16 proteins x
+  E. coli x1.007 / x1.000, fly proteins x 5,000 16S x0.998 / x1.014, the same against 2,500 + 5,000 16S around fly
+  chromosome arm 2L (`-subject`) x0.981 / x0.980, against the fly genome x0.987 / x0.994, one protein against the
+  zebrafish genome x1.002 / x1.001. Instructions equal those of the base in every case and arm (x1.0000), `=0`
+  included, and at one thread (the same path). Max RSS within 2 % of the base (HsG_b4 2,813 -> 2,775 MiB).
 - `LOSAT_X_TBNKEEPFEW=1` tblastn (memory; in the strict set from the pull request that added it,
   2026-10-19, with `TBNFRAMEREUSE`; `=0` turns it off; `tblastn/search_seed.rs`
   `XSubjectSide::kept_within_threads`, `tblastn/stage_d_pipeline.rs` `x_searched_side_by_side`): a

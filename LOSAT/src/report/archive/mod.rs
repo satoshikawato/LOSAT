@@ -369,21 +369,35 @@ impl ArchiveHandle {
 }
 
 /// Whether `byte` is one of NCBI's visible characters (`GoodVisibleChar`: `' '` to `'~'`).
-/// NCBI writes `#` for any other byte of a VisibleString and posts a diagnostic for each,
-/// whose text and place LOSAT does not reproduce.
+/// In the text and binary archives NCBI writes `#` for any other byte of a VisibleString and
+/// posts a diagnostic for each, whose text and place LOSAT does not reproduce (XML: see
+/// `ArchiveEncoding::writes_text`).
 fn is_visible(byte: u8) -> bool {
     (0x20..=0x7E).contains(&byte)
 }
 
-/// The refusal of a title with a byte outside `0x20..=0x7E`, which the archive's VisibleString
-/// cannot hold (see `is_visible`). `role` is `query` or `subject`.
+/// The refusal of a title that `encoding` cannot write as NCBI does (`writes_text`: in text
+/// and binary a byte outside `0x20..=0x7E`; in XML NCBI writes the byte, and only a control
+/// byte is refused). `role` is `query` or `subject`. The encoding is the environment's
+/// (`ArchiveEncoding::from_env`).
 pub fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> anyhow::Result<()> {
+    check_titles_for(ArchiveEncoding::from_env(), records, role, label)
+}
+
+/// `check_titles` for a given encoding (a caller that checks record by record reads the
+/// environment once).
+pub fn check_titles_for(
+    encoding: ArchiveEncoding,
+    records: &[FastaRecord],
+    role: &str,
+    label: &str,
+) -> anyhow::Result<()> {
     if let Some(record) = records
         .iter()
-        .find(|record| !record.title.iter().all(|&byte| is_visible(byte)))
+        .find(|record| !encoding.writes_text(&record.title))
     {
         return Err(anyhow::Error::new(TitleRefusal(format!(
-            "the title of the {role} {} has a character outside the visible ASCII range, which is not supported by LOSAT's {label} with -outfmt 11",
+            "the title of the {role} {} has a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML), which is not supported by LOSAT's {label} with -outfmt 11",
             record.local_id
         ))));
     }
@@ -550,6 +564,19 @@ mod tests {
         .to_string();
         assert!(refusal.contains("-window_masker_db path"), "{refusal}");
         assert!(refusal.contains("-outfmt 11"), "{refusal}");
+    }
+
+    #[test]
+    fn titles_with_high_bytes_are_refused_in_text_and_binary_only() {
+        let records = [FastaRecord::new("Query_1", "caf\u{e9}".as_bytes(), b"ACGT")];
+        for encoding in [ArchiveEncoding::Text, ArchiveEncoding::Binary] {
+            let refusal = check_titles_for(encoding, &records, "query", "BLASTN").unwrap_err();
+            assert!(refusal.is::<TitleRefusal>());
+        }
+        assert!(check_titles_for(ArchiveEncoding::Xml, &records, "query", "BLASTN").is_ok());
+        let del = [FastaRecord::new("Query_1", b"ti\x7ftle", b"ACGT")];
+        assert!(check_titles_for(ArchiveEncoding::Xml, &del, "query", "BLASTN").is_ok());
+        assert!(check_titles_for(ArchiveEncoding::Text, &del, "query", "BLASTN").is_err());
     }
 
     #[test]

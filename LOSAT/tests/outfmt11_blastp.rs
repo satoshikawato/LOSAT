@@ -332,8 +332,9 @@ fn the_out_file_receives_the_archive() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A title with a byte outside `0x20..=0x7E` (0x80 and above, and 0x7F) is written as `#` by
-/// NCBI, with a diagnostic per byte: LOSAT refuses it (query, `-subject` and a `-db` name)
+/// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
+/// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
+/// and so does LOSAT): LOSAT refuses it (query, `-subject` and a `-db` name)
 /// before the first byte.
 #[test]
 fn non_ascii_titles_and_database_names_are_refused() {

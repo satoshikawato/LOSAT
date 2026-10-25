@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Patch LOSAT/tests/wasi_thread_host.js (on the runner only) for the n16 OOB repro.
 
-- After a trap in a thread worker's wasi_thread_start, print one PROBE line: the memory length
+- After a trap in a thread worker's wasi_thread_start, print (fs.writeSync: the host ends the
+  process right after) one PROBE line: the memory length
   the worker's isolate now sees, and the start arguments (stack, tls_base, start_func, arg).
   Nothing is read before the trap, so the patch changes no behaviour of a run that does not trap.
 - OOB_REFRESH=1: call memory.grow(0) on the worker's memory right before wasi_thread_start
@@ -18,7 +19,7 @@ new = """        if (process.env.OOB_REFRESH === "1") memory.grow(0);
         } catch (error) {
           // Print the error first; then what this isolate sees as the memory length before and
           // after memory.grow(0), and the start arguments where they are readable.
-          process.stderr.write(`PROBE-ERR ${String(error)}\n`);
+          fs.writeSync(2, `PROBE-ERR ${String(error)}\n`);
           const a = startArg >>> 0, read = buffer => {
             const length = buffer.byteLength, info = { length };
             if (a + 16 <= length) {
@@ -29,7 +30,7 @@ new = """        if (process.env.OOB_REFRESH === "1") memory.grow(0);
             return info;
           };
           const before = read(memory.buffer); memory.grow(0); const after = read(memory.buffer);
-          process.stderr.write(`PROBE ${JSON.stringify({ tid, startArg: a, standby: standby ?? null, before, after })}\n`);
+          fs.writeSync(2, `PROBE ${JSON.stringify({ tid, startArg: a, standby: standby ?? null, before, after })}\n`);
           throw error;
         }
 """

@@ -24,6 +24,8 @@ jobs:
         include:
           - { name: dev-a, ref: '', arms: 'default', runs: 1000 }
           - { name: dev-b, ref: '', arms: 'default', runs: 1000 }
+          - { name: fix-a, ref: '', arms: 'refresh', runs: 1000 }
+          - { name: fix-b, ref: '', arms: 'refresh', runs: 1000 }
     steps:
       - uses: actions/checkout@v4
         with:

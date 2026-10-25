@@ -134,10 +134,11 @@ export async function instantiateThread(
   const start = instance.exports['wasi_thread_start'];
   if (typeof start !== 'function') throw new Error('the threaded engine module lacks wasi_thread_start');
   // The instance is prepared before its thread exists, so it may be older than the memory
-  // the engine grew for that thread's stack and TLS. In V8 another isolate's view of a grown
-  // shared memory is updated later, and atomic accesses are checked against that view: the
-  // thread's first atomic store trapped "memory access out of bounds" in the Node host of
-  // the same ABI (LOSAT/tests/wasi_thread_host.js). memory.grow(0) updates this worker's view.
+  // the engine grew for that thread's stack and TLS. In the Node host of the same ABI
+  // (LOSAT/tests/wasi_thread_host.js), such a worker's view of the memory still ended below
+  // them and the thread's first atomic store trapped "memory access out of bounds" in about
+  // 0.3 % of runs of one 16-thread check; memory.grow(0) updates the worker's view. Not
+  // measured in a browser (docs/evidence/wasm_oob_20261025/).
   return {
     start: (tid, startArg) => {
       memory.grow(0);

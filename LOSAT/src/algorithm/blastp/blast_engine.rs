@@ -3064,6 +3064,7 @@ fn write_blastp_tabular_output(
     subject_ids: &[Arc<[u8]>],
     subject_stitles: &[Arc<[u8]>],
     query_batch_skipped: &[bool],
+    hits_found: Option<&[usize]>,
     context: &ReportContext,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
@@ -3089,7 +3090,7 @@ fn write_blastp_tabular_output(
                 context,
                 query_title,
                 fields,
-                end - start,
+                hits_found.map_or(end - start, |found| found[q_idx]),
                 query_batch_skipped[q_idx],
             )?;
         }
@@ -3198,6 +3199,7 @@ fn write_blastp_tabular_hit_lists(
     subjects: &[EncodedProtein],
     subject_placements: &seq_range::Placements,
     query_batch_skipped: &[bool],
+    hits_found: Option<&[usize]>,
     context: &ReportContext,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
@@ -3222,7 +3224,10 @@ fn write_blastp_tabular_hit_lists(
                 context,
                 &query_titles[q_idx],
                 fields,
-                blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt)),
+                hits_found.map_or_else(
+                    || blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt)),
+                    |found| found[q_idx],
+                ),
                 query_batch_skipped[q_idx],
             )?;
         }
@@ -6129,6 +6134,22 @@ fn resolve_for_formats(
 //                            BlastErrorCode2String(retval));
 //             }
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:277-289
+// ```c++
+//             } catch (const CBlastException& e) {
+//                 // This error message is safe to ignore for a given chunk,
+//                 // because the chunks might end up producing a region of
+//                 // the query for which ungapped Karlin-Altschul blocks
+//                 // cannot be calculated
+//                 const string err_msg1("search cannot proceed due to errors "
+//                                      "in all contexts/frames of query "
+//                                      "sequences");
+//                 const string err_msg2(kBlastErrMsg_CantCalculateUngappedKAParams);
+//                 if (e.GetMsg().find(err_msg1) == NPOS && e.GetMsg().find(err_msg2) == NPOS) {
+//                     throw;
+//                 }
+//             }
+// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:131-137
 // ```c++
 //     // Run the preliminary stage
@@ -6143,7 +6164,10 @@ fn resolve_for_formats(
 /// blastp's `CLocalBlast` does not search such a batch (`CheckInternalData`, local_blast.cpp:
 /// 177-180), but psiblast runs its preliminary search, which fails with `BLAST engine error:
 /// Could not calculate ungapped Karlin-Altschul parameters ...` (exit 3) after the reports of the
-/// queries before and the reader's messages of the batch. Each batch of `batches` holds one query
+/// queries before and the reader's messages of the batch. A query long enough to be split into
+/// chunks (`split_protein_batch`) takes the split search instead, which ignores the chunks' error,
+/// and NCBI's psiblast crashes in the traceback (exit 139; 2.17.0, 20,000 X letters at the default
+/// CHUNK_SIZE): LOSAT rejects it. Each batch of `batches` holds one query
 /// (`read_psiblast_query_batches`); its validity is that of the search's contexts (the query with
 /// its SEG masks, `blastp_query_frames`).
 fn psiblast_stop_at_invalid_query(
@@ -6168,14 +6192,29 @@ fn psiblast_stop_at_invalid_query(
         return batches;
     };
     let (input_start, searched_start) = batches.starts[batch];
+    let query_length = searched_queries[searched_start].seq().len();
+    let error = match crate::blastinput::app::protein_query_split_sizes(args.app.name(), 10000) {
+        Ok(sizes)
+            if crate::algorithm::common::protein_query_split::split_protein_batch(
+                &[query_length],
+                sizes,
+            )
+            .is_none() =>
+        {
+            crate::blastinput::app::engine_error(
+                crate::report::query_warnings::INVALID_QUERY_MESSAGE,
+            )
+        }
+        Ok(_) => anyhow::anyhow!(
+            "a query whose Karlin-Altschul parameters cannot be computed and that is split into chunks (with which NCBI BLAST+'s psiblast crashes) is not supported by LOSAT's PSIBLAST"
+        ),
+        Err(error) => error,
+    };
     let warnings = std::mem::take(&mut batches.warnings[searched_start]);
     batches.starts.truncate(batch);
     batches.input_done = input_start;
     batches.searched_done = searched_start;
-    batches.stop = Some((
-        warnings,
-        crate::blastinput::app::engine_error(crate::report::query_warnings::INVALID_QUERY_MESSAGE),
-    ));
+    batches.stop = Some((warnings, error));
     batches
 }
 
@@ -11316,18 +11355,6 @@ fn run_resolved_in_pool(
             }
             hit_list.sort_by_evalue();
             hit_list.prune_by_size(args.traceback_hitlist_size());
-            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-813
-            // ```c++
-            //         if (results.HasAlignments()) {
-            //     	    CSeq_align_set copy_aln_set;
-            //             CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_HitlistSize);
-            // ```
-            // psiblast's formatter keeps the first `max_target_seqs` subjects of its larger
-            // traceback hit lists (the pairwise report shows at most as many, its numbers of
-            // descriptions and alignments).
-            if args.app == BlastpApp::Psiblast {
-                hit_list.prune_by_size(args.max_target_seqs);
-            }
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:267-275
@@ -11444,6 +11471,33 @@ fn run_resolved_in_pool(
     for hit_list in hit_lists.iter_mut().flatten() {
         hit_list_to_seqalign_order(hit_list);
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:804-813
+    // ```c++
+    //             tabinfo.PrintHeader(strProgVersion, *(bhandle.GetBioseqCore()),
+    //                                 dbname, results.GetRID(), itr_num, aln_set,
+    //                                 subject_bioseq);
+    //         }
+    //
+    //         if (results.HasAlignments()) {
+    //     	    CSeq_align_set copy_aln_set;
+    //             CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_HitlistSize);
+    // ```
+    // psiblast's Seq-aligns are those of its larger traceback hit lists (`traceback_hitlist_size`):
+    // the `# N hits found` line of -outfmt 7 counts them all, and the formatter keeps the first
+    // `max_target_seqs` subjects that have one (the pairwise report shows at most as many, its
+    // numbers of descriptions and alignments).
+    let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
+        hit_lists
+            .iter_mut()
+            .map(|hit_list_opt| {
+                let found = blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt));
+                if let Some(hit_list) = hit_list_opt {
+                    hit_list.prune_by_size(args.max_target_seqs);
+                }
+                found
+            })
+            .collect()
+    });
     let mut engine_counts = super::seqalign::EngineCounts::default();
     recount_pyrrolysine_identities(
         &mut hit_lists,
@@ -12277,6 +12331,7 @@ fn run_resolved_in_pool(
                         &subjects,
                         ranges.subject_placements,
                         &query_batch_skipped,
+                        psiblast_hits_found.as_deref(),
                         &context,
                         probe.as_mut(),
                         warnings.as_mut(),
@@ -12307,6 +12362,7 @@ fn run_resolved_in_pool(
                         &subject_ids,
                         &subject_stitles,
                         &query_batch_skipped,
+                        psiblast_hits_found.as_deref(),
                         &context,
                         probe.as_mut(),
                         warnings.as_mut(),

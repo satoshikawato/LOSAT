@@ -17,3 +17,6 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   one batch of psiblast (`CBlastInput(&*fasta, 1)`), which `CPsiBlast` refuses (`PSI-BLAST only accepts one
   protein sequence as query`).
 - `e_only.faa`: a record without residues alone, on which NCBI 2.17.0 psiblast crashes (LOSAT rejects it).
+- `x1800.faa`: a record of 1,800 X (no valid Karlin-Altschul parameters). With `CHUNK_SIZE=1001` it is
+  not split (1,800 < 2 x (1,001 - 100)) and psiblast stops with the BLAST engine error; with
+  `CHUNK_SIZE=1000` NCBI 2.17.0 splits it and crashes (LOSAT rejects it).

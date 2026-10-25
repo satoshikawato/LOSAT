@@ -613,6 +613,8 @@ pub struct ResolvedBlastpArgs {
     /// The inclusion threshold (`psi_options->inclusion_ethresh`): psiblast's
     /// `-inclusion_ethresh`, or `PSI_INCLUSION_ETHRESH`.
     pub inclusion_ethresh: f64,
+    /// `traceback_hitlist_size`, computed once (psiblast's reads `ADAPTIVE_CBS`).
+    traceback_hitlist: usize,
 }
 
 impl ResolvedBlastpArgs {
@@ -642,6 +644,10 @@ impl ResolvedBlastpArgs {
     /// (`PruneSeqalign` with `m_HitlistSize`, blast_format.cpp:813). The preliminary size is
     /// positive (`validate_requested_blastp_support`).
     pub fn traceback_hitlist_size(&self) -> usize {
+        self.traceback_hitlist
+    }
+
+    fn compute_traceback_hitlist_size(&self) -> usize {
         match self.app {
             BlastpApp::Blastp => self.max_target_seqs,
             BlastpApp::Psiblast => crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
@@ -907,7 +913,7 @@ impl BlastpArgs {
             .matrix_name
             .parse::<ScoringMatrix>()
             .unwrap_or(ScoringMatrix::Blosum62);
-        Ok(ResolvedBlastpArgs {
+        let mut resolved = ResolvedBlastpArgs {
             query: self.query.clone(),
             subject: self.subject.clone().unwrap_or_default(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
@@ -986,7 +992,10 @@ impl BlastpArgs {
             inclusion_ethresh: self
                 .inclusion_ethresh
                 .unwrap_or(super::blast_engine::PSI_INCLUSION_ETHRESH),
-        })
+            traceback_hitlist: 0,
+        };
+        resolved.traceback_hitlist = resolved.compute_traceback_hitlist_size();
+        Ok(resolved)
     }
 }
 

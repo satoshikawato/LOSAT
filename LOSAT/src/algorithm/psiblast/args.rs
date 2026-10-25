@@ -239,7 +239,7 @@ pub struct PsiblastArgs {
         help = "Pseudo-count value used when constructing PSSM"
     )]
     pub pseudocount: i32,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1099-1103
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1100-1104
     // ```c++
     //     // Evalue inclusion threshold
     //     arg_desc.AddDefaultKey(kArgPSIInclusionEThreshold, "ethresh",

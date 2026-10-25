@@ -110,6 +110,11 @@
     ]
    },
    {
+    "flag": "-window_masker_db",
+    "help": "Enable WindowMasker filtering using this repeats database.",
+    "takes_value": true
+   },
+   {
     "flag": "-strand",
     "help": "",
     "takes_value": true,

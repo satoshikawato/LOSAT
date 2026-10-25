@@ -1513,6 +1513,89 @@ thread_local! {
     static X_CROSS_STAGE: std::cell::Cell<Vec<i32>> = const { std::cell::Cell::new(Vec::new()) };
 }
 
+// ---- PROBE (v4-A14 s11, exp/a14-cellhist, never merged): the hits per cell that x_cross_cell
+// stages, and for piece lengths L the pieces per cell and the cells whose piece count differs
+// from the previous cell's (a last-value proxy of the piece loop's exit mispredicts); the same
+// for the inline test `numhits <= AA_HITS_PER_CELL` of the scan.
+#[cfg(target_arch = "x86_64")]
+pub(crate) mod cell_probe {
+    pub(crate) const BINS: usize = 257;
+    pub(crate) const LENS: [usize; 7] = [24, 32, 40, 48, 56, 64, 72];
+
+    pub(crate) struct Probe {
+        pub(crate) hist: [u64; BINS + 1],
+        prev_k: [usize; LENS.len()],
+        pub(crate) pieces: [u64; LENS.len()],
+        pub(crate) changes: [u64; LENS.len()],
+        prev_small: bool,
+        pub(crate) small_changes: u64,
+    }
+
+    impl Probe {
+        const fn new() -> Self {
+            Self {
+                hist: [0; BINS + 1],
+                prev_k: [1; LENS.len()],
+                pieces: [0; LENS.len()],
+                changes: [0; LENS.len()],
+                prev_small: false,
+                small_changes: 0,
+            }
+        }
+
+        pub(crate) fn cell(&mut self, n: usize) {
+            self.hist[n.min(BINS)] += 1;
+            for (i, &l) in LENS.iter().enumerate() {
+                let k = n.div_ceil(l).max(1);
+                self.pieces[i] += k as u64;
+                self.changes[i] += u64::from(k != self.prev_k[i]);
+                self.prev_k[i] = k;
+            }
+            let small = n <= super::AA_HITS_PER_CELL;
+            self.small_changes += u64::from(small != self.prev_small);
+            self.prev_small = small;
+        }
+
+        fn add_to(&mut self, t: &mut Probe) {
+            for (a, b) in t.hist.iter_mut().zip(self.hist.iter_mut()) {
+                *a += std::mem::take(b);
+            }
+            for i in 0..LENS.len() {
+                t.pieces[i] += std::mem::take(&mut self.pieces[i]);
+                t.changes[i] += std::mem::take(&mut self.changes[i]);
+            }
+            t.small_changes += std::mem::take(&mut self.small_changes);
+        }
+    }
+
+    thread_local! {
+        pub(crate) static PROBE: std::cell::RefCell<Probe> = const { std::cell::RefCell::new(Probe::new()) };
+    }
+    static TOTALS: std::sync::Mutex<Probe> = std::sync::Mutex::new(Probe::new());
+
+    /// Once per subject: the thread's counts into the totals.
+    pub(crate) fn flush() {
+        PROBE.with(|p| p.borrow_mut().add_to(&mut TOTALS.lock().unwrap()));
+    }
+
+    pub(crate) fn line() -> String {
+        let t = TOTALS.lock().unwrap();
+        let mut s = String::from(" cellprobe:");
+        for (i, l) in LENS.iter().enumerate() {
+            s.push_str(&format!(" pieces{l}={} changes{l}={}", t.pieces[i], t.changes[i]));
+        }
+        s.push_str(&format!(" small_changes={} hist=", t.small_changes));
+        let mut first = true;
+        for (n, &c) in t.hist.iter().enumerate() {
+            if c != 0 {
+                s.push_str(&format!("{}{n}:{c}", if first { "" } else { "," }));
+                first = false;
+            }
+        }
+        s
+    }
+}
+
 // No NCBI counterpart: NCBI keeps the offset pair of every hit in `offset_pairs`; the stage keeps
 // the entry coordinate and the subject offset of the hits not yet tested.
 /// EXPERIMENT (LOSAT_X_BXCROSS): one subject's view of the stage: two arrays of
@@ -1649,6 +1732,7 @@ unsafe fn x_scan_cells_avx2_cross<
         });
         x_cross_drain::<DEFER, CHUNK, F>(cross, staged, true, table, test, candidate, counts);
     }
+    cell_probe::flush();
     X_CROSS_STAGE.set(stage);
 }
 
@@ -2401,6 +2485,7 @@ where
         table.mask
     );
     counts.diag.add_staged(hits.len());
+    cell_probe::PROBE.with(|p| p.borrow_mut().cell(hits.len()));
     let subject = _mm256_set1_epi32(s);
     let mask = _mm256_set1_epi32(table.mask);
     // The positions in a piece of the lanes of its three registers.

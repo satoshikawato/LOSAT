@@ -441,6 +441,11 @@ pub(crate) fn x_write_timing(out: &mut dyn std::io::Write) -> std::io::Result<()
         #[cfg(target_arch = "x86_64")]
         if matches!(x_cell_mode(), XCellTest::Cross { .. }) {
             write!(out, " cross_splits={}", X_SPLITS.load(Relaxed))?;
+            write!(
+                out,
+                "{}",
+                crate::algorithm::blastp::x_seed_fused::cell_probe::line()
+            )?;
         }
         writeln!(out)?;
     }

@@ -22,10 +22,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: dev-a, ref: '', arms: 'default', runs: 1000 }
-          - { name: dev-b, ref: '', arms: 'default', runs: 1000 }
-          - { name: fix-a, ref: '', arms: 'refresh', runs: 1000 }
-          - { name: fix-b, ref: '', arms: 'refresh', runs: 1000 }
+          # The host of branch fix/wasm-thread-start-bounds (dafbbf0d0, cherry-picked): default = the fix.
+          - { name: fixed-a, ref: '', arms: 'default', runs: 1000 }
+          - { name: fixed-b, ref: '', arms: 'default', runs: 1000 }
     steps:
       - uses: actions/checkout@v4
         with:

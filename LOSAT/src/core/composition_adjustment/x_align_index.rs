@@ -3,16 +3,18 @@
 //! index by subject start, so the two questions asked of the list for every HSP, `s_IsContained`
 //! and `s_WithDistinctEnds`, visit only the alignments whose subject range can meet the new one.
 //!
-//! NCBI walks the whole list each time (`redo_alignment.c` 386-451, 965-997); a (query, subject)
+//! NCBI walks the whole list each time (`redo_alignment.c` 385-450, 965-996); a (query, subject)
 //! match with tens of thousands of HSPs (a protein against a human chromosome) spends most of its
-//! redo there. The answers are the same: `contains` is true when some alignment contains the HSP,
-//! `add_distinct` keeps the new alignment unless some alignment with a shared end scores at least as
-//! well and then removes those with an equal start or end, and `into_list` returns the kept
+//! redo there. The answers are the same: `x_contains` is true when some alignment contains the HSP,
+//! `x_add_distinct` keeps the new alignment unless some alignment with a shared end scores at least
+//! as well and then removes those with an equal start or end, and `x_finish` puts back the kept
 //! alignments newest first, which is the order NCBI's list has (the new alignment goes to the head;
 //! the others keep their order).
 //!
-//! While a list is short (fewer than `X_INDEX_FROM` alignments) it stays NCBI's list and the
-//! original functions answer; past that it moves into the index once.
+//! The redo keeps NCBI's lists (`Vec<Option<Box<BlastCompoAlignment>>>`, one per query) and the
+//! original functions answer while a list is shorter than `X_INDEX_FROM` alignments; a list that
+//! reaches it moves, once, into an `XAlignIndex` of its own. The vector of indexes stays empty
+//! (no allocation) in a redo where no list gets that long, which is most of them.
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
@@ -30,22 +32,18 @@ pub(crate) fn x_redo_contain_idx() -> bool {
 /// The list length from which a query's alignments move into the index.
 pub(crate) const X_INDEX_FROM: usize = 32;
 
-/// The alignments kept for one query.
-pub(crate) struct XAlignSet {
-    /// NCBI's list while the set is not indexed.
-    list: Option<Box<BlastCompoAlignment>>,
-    /// The list's length while not indexed (counted only when `index_from` is set).
-    len: usize,
-    /// `None` keeps NCBI's list for good (the switch is off).
-    index_from: Option<usize>,
-    indexed: bool,
-    /// Indexed: the alignments in the order they were kept; `None` where one was removed.
+/// The indexes of one redo, by query; empty or `None` where the query's list is NCBI's.
+pub(crate) type XAlignIndexes = Vec<Option<Box<XAlignIndex>>>;
+
+/// The alignments kept for one query once its list reached `X_INDEX_FROM`.
+pub(crate) struct XAlignIndex {
+    /// The alignments in the order they were kept; `None` where one was removed.
     slots: Vec<Option<Box<BlastCompoAlignment>>>,
-    /// Indexed: (frame, match start, slot) of each alignment in `slots`.
+    /// (frame, match start, slot) of each alignment in `slots`.
     by_start: BTreeSet<(i32, i32, u32)>,
-    /// Indexed: the frames seen.
+    /// The frames seen.
     frames: Vec<i32>,
-    /// Indexed: the largest and smallest `match_end - match_start` of any alignment added.
+    /// The largest and smallest `match_end - match_start` of any alignment added.
     dmax: i64,
     dmin: i64,
 }
@@ -54,82 +52,26 @@ fn clamp(v: i64) -> i32 {
     v.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
-impl XAlignSet {
-    pub(crate) fn new(index_from: Option<usize>) -> Self {
-        Self {
-            list: None,
-            len: 0,
-            index_from,
-            indexed: false,
-            slots: Vec::new(),
-            by_start: BTreeSet::new(),
-            frames: Vec::new(),
-            dmax: 0,
-            dmin: 0,
-        }
-    }
-
-    /// Whether the set moved into the index.
-    pub(crate) fn indexed(&self) -> bool {
-        self.indexed
-    }
-
-    /// `s_IsContained(in_align, alignments[query_index], lambda)`.
-    pub(crate) fn contains(&self, in_align: &BlastCompoAlignment, lambda: f64) -> bool {
-        if !self.indexed {
-            return is_contained(in_align, &self.list, lambda);
-        }
-        x_contains_indexed(self, in_align, lambda)
-    }
-
-    /// `s_WithDistinctEnds(&newAlign, &alignments[query_index], ..., is_same_adjustment)`.
-    pub(crate) fn add_distinct(
-        &mut self,
-        p_new_align: &mut Option<Box<BlastCompoAlignment>>,
-        is_same_adjustment: bool,
-    ) {
-        if !self.indexed {
-            with_distinct_ends(p_new_align, &mut self.list, is_same_adjustment);
-            if let Some(from) = self.index_from {
-                self.len = list_len(&self.list);
-                if self.len >= from {
-                    self.build_index();
-                }
-            }
-            return;
-        }
-        let Some(new_align) = p_new_align.take() else {
-            return;
-        };
-        x_add_distinct_indexed(self, new_align, is_same_adjustment);
-    }
-
-    /// The kept alignments, newest first (NCBI's list).
-    pub(crate) fn into_list(self) -> Option<Box<BlastCompoAlignment>> {
-        if !self.indexed {
-            return self.list;
-        }
-        let mut head: Option<Box<BlastCompoAlignment>> = None;
-        for mut align in self.slots.into_iter().flatten() {
-            align.next = head;
-            head = Some(align);
-        }
-        head
-    }
-
-    /// Moves NCBI's list (newest first) into the slots (oldest first) and the index.
-    fn build_index(&mut self) {
-        let mut newest_first = Vec::with_capacity(self.len);
-        let mut cur = self.list.take();
+impl XAlignIndex {
+    /// NCBI's list (newest first) moved into the slots (oldest first) and the index.
+    fn from_list(list: Option<Box<BlastCompoAlignment>>) -> Box<Self> {
+        let mut newest_first = Vec::new();
+        let mut cur = list;
         while let Some(mut align) = cur {
             cur = align.next.take();
             newest_first.push(align);
         }
-        self.indexed = true;
-        self.slots.reserve(newest_first.len() * 2);
+        let mut index = Box::new(Self {
+            slots: Vec::with_capacity(newest_first.len() * 2),
+            by_start: BTreeSet::new(),
+            frames: Vec::new(),
+            dmax: 0,
+            dmin: 0,
+        });
         for align in newest_first.into_iter().rev() {
-            self.insert(align);
+            index.insert(align);
         }
+        index
     }
 
     fn insert(&mut self, align: Box<BlastCompoAlignment>) {
@@ -148,16 +90,109 @@ impl XAlignSet {
         self.by_start.insert((align.frame, align.match_start, slot));
         self.slots.push(Some(align));
     }
+
+    /// The kept alignments, newest first (NCBI's list).
+    fn into_list(self) -> Option<Box<BlastCompoAlignment>> {
+        let mut head: Option<Box<BlastCompoAlignment>> = None;
+        for mut align in self.slots.into_iter().flatten() {
+            align.next = head;
+            head = Some(align);
+        }
+        head
+    }
 }
 
-fn list_len(list: &Option<Box<BlastCompoAlignment>>) -> usize {
-    let mut n = 0;
+/// `s_IsContained(in_align, alignments[query_index], lambda)`: from the query's index if it has
+/// one, else from NCBI's list `list`.
+#[inline]
+pub(crate) fn x_contains(
+    indexes: &XAlignIndexes,
+    query_index: usize,
+    list: &Option<Box<BlastCompoAlignment>>,
+    in_align: &BlastCompoAlignment,
+    lambda: f64,
+) -> bool {
+    match indexes.get(query_index) {
+        Some(Some(index)) => x_contains_indexed(index, in_align, lambda),
+        _ => is_contained(in_align, list, lambda),
+    }
+}
+
+/// `s_WithDistinctEnds(&newAlign, &alignments[query_index], ..., is_same_adjustment)`: into the
+/// query's index if it has one, else into NCBI's list `list`, which moves into a new index (and
+/// `list` becomes `None`) once it holds `index_from` alignments (`None`: never, the switch off).
+#[inline]
+pub(crate) fn x_add_distinct(
+    indexes: &mut XAlignIndexes,
+    query_index: usize,
+    list: &mut Option<Box<BlastCompoAlignment>>,
+    p_new_align: &mut Option<Box<BlastCompoAlignment>>,
+    is_same_adjustment: bool,
+    index_from: Option<usize>,
+) {
+    if let Some(Some(index)) = indexes.get_mut(query_index) {
+        if let Some(new_align) = p_new_align.take() {
+            x_add_distinct_indexed(index, new_align, is_same_adjustment);
+        }
+        return;
+    }
+    let head = list
+        .as_deref()
+        .map(|align| align as *const BlastCompoAlignment);
+    with_distinct_ends(p_new_align, list, is_same_adjustment);
+    let Some(from) = index_from else {
+        return;
+    };
+    // The list grew only if the new alignment became its head.
+    if list
+        .as_deref()
+        .map(|align| align as *const BlastCompoAlignment)
+        != head
+        && list_reaches(list, from)
+    {
+        x_start_index(indexes, query_index, list);
+    }
+}
+
+#[inline(never)]
+fn x_start_index(
+    indexes: &mut XAlignIndexes,
+    query_index: usize,
+    list: &mut Option<Box<BlastCompoAlignment>>,
+) {
+    if indexes.len() <= query_index {
+        indexes.resize_with(query_index + 1, || None);
+    }
+    indexes[query_index] = Some(XAlignIndex::from_list(list.take()));
+}
+
+/// Puts each index's alignments back into its query's list, newest first; returns whether any
+/// query had an index.
+pub(crate) fn x_finish(
+    indexes: XAlignIndexes,
+    lists: &mut [Option<Box<BlastCompoAlignment>>],
+) -> bool {
+    let indexed = !indexes.is_empty();
+    for (query_index, index) in indexes.into_iter().enumerate() {
+        if let Some(index) = index {
+            lists[query_index] = index.into_list();
+        }
+    }
+    indexed
+}
+
+/// Whether NCBI's list holds at least `n` alignments (visits at most `n` of them).
+fn list_reaches(list: &Option<Box<BlastCompoAlignment>>, n: usize) -> bool {
+    let mut seen = 0;
     let mut cur = list.as_deref();
     while let Some(align) = cur {
-        n += 1;
+        seen += 1;
+        if seen >= n {
+            return true;
+        }
         cur = align.next.as_deref();
     }
-    n
+    seen >= n
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:980-995
@@ -183,7 +218,7 @@ fn list_len(list: &Option<Box<BlastCompoAlignment>>) -> usize {
 // [subject_end - dmax, subject_offset] only: an `align` that passes has matchStart <= subject_offset
 // and matchEnd >= subject_end, so matchStart >= subject_end - (matchEnd - matchStart) >=
 // subject_end - dmax. The answer does not depend on the order the alignments are met in.
-fn x_contains_indexed(set: &XAlignSet, in_align: &BlastCompoAlignment, lambda: f64) -> bool {
+fn x_contains_indexed(set: &XAlignIndex, in_align: &BlastCompoAlignment, lambda: f64) -> bool {
     let score_thresh = in_align.score as f64 + KAPPA_BIT_TOL * LOCAL_LN2 / lambda;
     let lo = clamp(i64::from(in_align.match_end) - set.dmax);
     let hi = in_align.match_start;
@@ -265,7 +300,7 @@ fn x_contains_indexed(set: &XAlignSet, in_align: &BlastCompoAlignment, lambda: f
 // answer does not depend on the order; the second removes the same alignments and the slots keep
 // the others' order.
 fn x_add_distinct_indexed(
-    set: &mut XAlignSet,
+    set: &mut XAlignIndex,
     new_align: Box<BlastCompoAlignment>,
     is_same_adjustment: bool,
 ) {
@@ -372,85 +407,70 @@ mod tests {
         out
     }
 
-    /// Every `contains` answer and the final list (fields, context tags and order) equal those of
-    /// NCBI's list functions on the same calls, for blastp (frame 0), translated frames, and
-    /// indexes built from the first alignment, from a few, and from `X_INDEX_FROM`.
-    #[test]
-    fn the_index_answers_as_ncbis_list() {
-        let frame_sets: [&[i32]; 3] = [&[0], &[1, 2, 3, -1, -2, -3], &[1, -1]];
-        let index_froms = [Some(0), Some(1), Some(4), Some(X_INDEX_FROM), None];
-        let mut indexed_runs = [0usize; 5];
-        for trial in 0..600u64 {
-            let mut rng = Lcg(trial * 7 + 1);
-            let frames = frame_sets[trial as usize % frame_sets.len()];
-            let which = trial as usize % 5;
-            let index_from = index_froms[which];
-            let mut reference: Option<Box<BlastCompoAlignment>> = None;
-            let mut set = XAlignSet::new(index_from);
-            let lambda = 0.267;
-            for step in 0..400 {
-                if rng.next(2) == 0 {
-                    let probe = random_align(&mut rng, frames, usize::MAX);
-                    assert_eq!(
-                        set.contains(&probe, lambda),
-                        is_contained(&probe, &reference, lambda),
-                        "trial {trial} step {step}"
-                    );
-                } else {
-                    let same = rng.next(2) == 0;
-                    let new_align = random_align(&mut rng, frames, step);
-                    let mut a = Some(new_align.clone());
-                    let mut b = Some(new_align);
-                    with_distinct_ends(&mut a, &mut reference, same);
-                    set.add_distinct(&mut b, same);
-                    assert!(a.is_none() && b.is_none());
-                }
+    /// A redo's per-query state as `blast_redo_one_match_...` holds it: NCBI's lists and the indexes.
+    struct Redo {
+        lists: Vec<Option<Box<BlastCompoAlignment>>>,
+        indexes: XAlignIndexes,
+        index_from: Option<usize>,
+    }
+
+    impl Redo {
+        fn new(queries: usize, index_from: Option<usize>) -> Self {
+            Self {
+                lists: (0..queries).map(|_| None).collect(),
+                indexes: Vec::new(),
+                index_from,
             }
-            indexed_runs[which] += usize::from(set.indexed());
-            assert_eq!(
-                fields(&set.into_list()),
-                fields(&reference),
-                "trial {trial}"
+        }
+
+        fn contains(&self, query: usize, align: &BlastCompoAlignment, lambda: f64) -> bool {
+            x_contains(&self.indexes, query, &self.lists[query], align, lambda)
+        }
+
+        fn add(&mut self, query: usize, align: Box<BlastCompoAlignment>, same: bool) {
+            let mut new_align = Some(align);
+            x_add_distinct(
+                &mut self.indexes,
+                query,
+                &mut self.lists[query],
+                &mut new_align,
+                same,
+                self.index_from,
             );
+            assert!(new_align.is_none());
         }
-        // 120 runs per threshold; `None` never indexes.
-        assert!(
-            indexed_runs[..4].iter().all(|&runs| runs >= 60) && indexed_runs[4] == 0,
-            "runs that reached the index per threshold: {indexed_runs:?}"
-        );
-    }
 
-    #[test]
-    fn an_empty_set_contains_nothing_and_returns_no_list() {
-        let probe = blast_compo_alignment_new(
-            5,
-            EMatrixAdjustRule::DontAdjustMatrix,
-            0,
-            10,
-            0,
-            0,
-            10,
-            1,
-            None,
-        );
-        for index_from in [Some(0), None] {
-            let set = XAlignSet::new(index_from);
-            assert!(!set.contains(&probe, 0.267));
-            assert!(set.into_list().is_none());
+        fn indexed(&self, query: usize) -> bool {
+            matches!(self.indexes.get(query), Some(Some(_)))
+        }
+
+        fn finish(self) -> (Vec<Option<Box<BlastCompoAlignment>>>, bool) {
+            let mut lists = self.lists;
+            let indexed = x_finish(self.indexes, &mut lists);
+            (lists, indexed)
         }
     }
 
-    /// Match coordinates near both ends of i32 (and alignments that span from one end to the
-    /// other, so `dmax` is near 2^32 and the ranges clamp), against NCBI's list functions.
-    #[test]
-    fn coordinates_at_the_ends_of_i32_give_the_same_answers() {
+    /// One random sequence of calls on three queries, against NCBI's list functions: every
+    /// `x_contains` answer and every final list (fields, context tags and order). `ends` puts the
+    /// match coordinates near both ends of i32, with alignments that span from one end to the
+    /// other (so `dmax` is near 2^32 and the ranges clamp). Returns the queries indexed.
+    fn same_as_lists(
+        trial: u64,
+        frames: &[i32],
+        index_from: Option<usize>,
+        steps: usize,
+        ends: bool,
+    ) -> usize {
         const EDGE: i32 = i32::MAX - 1_000;
-        for trial in 0..200u64 {
-            let mut rng = Lcg(trial * 13 + 5);
-            let mut reference: Option<Box<BlastCompoAlignment>> = None;
-            let mut set = XAlignSet::new(Some(if trial % 2 == 0 { 0 } else { 8 }));
-            for step in 0..200 {
-                let mut align = random_align(&mut rng, &[1, -1], step);
+        let mut rng = Lcg(trial * 7 + 1);
+        let mut reference: Vec<Option<Box<BlastCompoAlignment>>> = vec![None, None, None];
+        let mut redo = Redo::new(3, index_from);
+        let lambda = if rng.next(2) == 0 { 0.267 } else { 0.3176 };
+        for step in 0..steps {
+            let query = rng.next(3) as usize;
+            let mut align = random_align(&mut rng, frames, step);
+            if ends {
                 let (ms, me) = match rng.next(6) {
                     0 => (-EDGE, EDGE),
                     1 => (EDGE, -EDGE),
@@ -465,43 +485,104 @@ mod tests {
                 };
                 align.match_start = ms;
                 align.match_end = me;
-                if rng.next(2) == 0 {
-                    assert_eq!(
-                        set.contains(&align, 0.267),
-                        is_contained(&align, &reference, 0.267),
-                        "trial {trial} step {step}"
-                    );
-                } else {
-                    let same = rng.next(2) == 0;
-                    let mut a = Some(align.clone());
-                    let mut b = Some(align);
-                    with_distinct_ends(&mut a, &mut reference, same);
-                    set.add_distinct(&mut b, same);
-                }
             }
+            if rng.next(2) == 0 {
+                assert_eq!(
+                    redo.contains(query, &align, lambda),
+                    is_contained(&align, &reference[query], lambda),
+                    "trial {trial} step {step}"
+                );
+            } else {
+                let same = rng.next(2) == 0;
+                with_distinct_ends(&mut Some(align.clone()), &mut reference[query], same);
+                redo.add(query, align, same);
+            }
+        }
+        let indexed = (0..3).filter(|&query| redo.indexed(query)).count();
+        let (lists, any) = redo.finish();
+        assert_eq!(any, indexed > 0, "trial {trial}");
+        for query in 0..3 {
             assert_eq!(
-                fields(&set.into_list()),
-                fields(&reference),
-                "trial {trial}"
+                fields(&lists[query]),
+                fields(&reference[query]),
+                "trial {trial} query {query}"
             );
+        }
+        indexed
+    }
+
+    /// For blastp (frame 0), translated frames and two frames, and indexes started from the first
+    /// alignment, from a few, from `X_INDEX_FROM` and never (`None`, the switch off).
+    #[test]
+    fn the_index_answers_as_ncbis_list() {
+        let frame_sets: [&[i32]; 3] = [&[0], &[1, 2, 3, -1, -2, -3], &[1, -1]];
+        let index_froms = [Some(0), Some(1), Some(4), Some(X_INDEX_FROM), None];
+        let mut indexed = [0usize; 5];
+        for trial in 0..600u64 {
+            let which = trial as usize % 5;
+            indexed[which] += same_as_lists(
+                trial,
+                frame_sets[trial as usize % 3],
+                index_froms[which],
+                1_200,
+                false,
+            );
+        }
+        // 120 runs (360 queries) per threshold; `None` never indexes.
+        assert!(
+            indexed[..4].iter().all(|&queries| queries >= 120) && indexed[4] == 0,
+            "queries that reached the index per threshold: {indexed:?}"
+        );
+    }
+
+    #[test]
+    fn coordinates_at_the_ends_of_i32_give_the_same_answers() {
+        for trial in 0..200u64 {
+            let index_from = Some(if trial % 2 == 0 { 0 } else { 8 });
+            same_as_lists(trial, &[1, -1], index_from, 600, true);
         }
     }
 
     #[test]
+    fn an_empty_redo_contains_nothing_and_returns_no_list() {
+        let probe = blast_compo_alignment_new(
+            5,
+            EMatrixAdjustRule::DontAdjustMatrix,
+            0,
+            10,
+            0,
+            0,
+            10,
+            1,
+            None,
+        );
+        for index_from in [Some(0), None] {
+            let redo = Redo::new(2, index_from);
+            assert!(!redo.contains(1, &probe, 0.267));
+            let (lists, indexed) = redo.finish();
+            assert!(lists.iter().all(Option::is_none) && !indexed);
+        }
+    }
+
+    /// A list moves into an index when it reaches the threshold, and only that query's; with the
+    /// switch off (`None`) no index is made and the vector of indexes stays unallocated.
+    #[test]
     fn a_list_moves_into_the_index_once_it_reaches_the_threshold() {
         let mut rng = Lcg(11);
-        let mut set = XAlignSet::new(Some(4));
+        let mut redo = Redo::new(3, Some(4));
         let mut step = 0;
-        while !set.indexed() {
-            set.add_distinct(&mut Some(random_align(&mut rng, &[1], step)), true);
+        while !redo.indexed(1) {
+            redo.add(1, random_align(&mut rng, &[1], step), true);
             step += 1;
         }
-        assert!(set.list.is_none());
-        assert!(set.slots.iter().flatten().count() >= 4);
-        let mut off = XAlignSet::new(None);
+        assert!(redo.lists[1].is_none());
+        let index = redo.indexes[1].as_deref().expect("index of query 1");
+        assert!(index.slots.iter().flatten().count() >= 4);
+        assert!(!redo.indexed(0) && !redo.indexed(2));
+        let mut off = Redo::new(3, None);
         for step in 0..200 {
-            off.add_distinct(&mut Some(random_align(&mut rng, &[1], step)), true);
+            off.add(step % 3, random_align(&mut rng, &[1], step), true);
         }
-        assert!(!off.indexed());
+        assert!(off.indexes.is_empty() && off.indexes.capacity() == 0);
     }
 }

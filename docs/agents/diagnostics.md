@@ -4392,28 +4392,34 @@ Scheduling (each value computed by one thread with the original function; order 
   zebrafish genome x1.002 / x1.001. Instructions equal those of the base in every case and arm (x1.0000), `=0`
   included, and at one thread (the same path). Max RSS within 2 % of the base (HsG_b4 2,813 -> 2,775 MiB).
 - `LOSAT_X_REDOCONTAINIDX=1` blastp, blastx and tblastn (speed; in the strict set from the pull request that added
-  it, 2026-10-25; `=0` turns it off; `core/composition_adjustment/x_align_index.rs` `XAlignSet`, used by
-  `redo_alignment.rs` `blast_redo_one_match_with_workspace_queries_and_matrix_observed`): the composition-based
-  redo of one match keeps, for each query, the alignments it has redone so far (NCBI's list `alignments[query_index]`
-  of `Blast_RedoOneMatch`, newest first) and asks two questions of it for every HSP: whether the HSP is contained in
-  an alignment that scores enough more (`s_IsContained`, `redo_alignment.c` 965-996) and, for every new alignment,
-  whether one with a shared end scores at least as well, else which ones it replaces (`s_WithDistinctEnds`, 385-450).
-  NCBI walks the whole list each time, so a match with tens of thousands of HSPs costs the square of that: on the
-  human genome the B11g probe (35 proteins of HsG_b4, 8 threads, 396 matches, 1.35 M HSPs) counted 63 G list nodes
-  visited, 15 ns each (966 thread-s), 99.5 % of them in the 44 matches with lists of 10,000 or more. With the switch
-  a query's list moves, once it holds 32 alignments (`X_INDEX_FROM`), into slots in the order the alignments were
-  kept plus a `BTreeSet` of (frame, match start, slot), and the two questions look only at the alignments whose
-  match start lies where an alignment that answers them can start (bounded by the largest and smallest
-  `match_end - match_start` added so far; the frames of the same sign, or the same frame, as NCBI tests): the
-  probe's shadow index visited 133,594 candidates in 1.9 thread-s and agreed on every call and every final list.
-  The answers do not depend on the order the alignments are met in, the removals are the same alignments, and at the
-  end of the match the slots that hold an alignment are linked newest first, which is the order of NCBI's list (the
-  new alignment goes to the head, the others keep their order), so every value and the report stay the same (unit
-  tests `the_index_answers_as_ncbis_list` (600 random runs against `is_contained` / `with_distinct_ends`),
-  `coordinates_at_the_ends_of_i32_give_the_same_answers`, `a_list_moves_into_the_index_once_it_reaches_the_threshold`;
-  `tests/redo_contain_idx.rs`: one input per program, the switch on and off at 1 and 2 threads). Shorter lists stay NCBI's list and the original functions answer, so matches with few HSPs (most
-  blastp and blastx matches) take the same path as before. Conditional: the new side is a match where some query's
-  list reaches 32 alignments (`x_reach!`, once per match), the reference side one where none does.
+  it, 2026-10-25; `=0` turns it off; `core/composition_adjustment/x_align_index.rs` `x_contains`, `x_add_distinct`,
+  `x_finish`, used by `redo_alignment.rs` `blast_redo_one_match_with_workspace_queries_and_matrix_observed`): the
+  composition-based redo of one match keeps, for each query, the alignments it has redone so far (NCBI's list
+  `alignments[query_index]` of `Blast_RedoOneMatch`, newest first) and asks two questions of it for every HSP:
+  whether the HSP is contained in an alignment that scores enough more (`s_IsContained`, `redo_alignment.c`
+  965-996) and, for every new alignment, whether one with a shared end scores at least as well, else which ones it
+  replaces (`s_WithDistinctEnds`, 385-450). NCBI walks the whole list each time, so a match with tens of thousands
+  of HSPs costs the square of that: on the human genome the B11g probe (35 proteins of HsG_b4, 8 threads, 396
+  matches, 1.35 M HSPs) counted 63 G list nodes visited, 15 ns each (966 thread-s), 99.5 % of them in the 44
+  matches with lists of 10,000 or more. With the switch a query's list moves, once it holds 32 alignments
+  (`X_INDEX_FROM`), into an `XAlignIndex` of its own: the alignments in slots in the order they were kept plus a
+  `BTreeSet` of (frame, match start, slot), and the two questions look only at the alignments whose match start
+  lies where an alignment that answers them can start (bounded by the largest and smallest `match_end -
+  match_start` added so far; the frames of the same sign, or the same frame, as NCBI tests; `s_IsContained`'s
+  candidates nearest start first): the probe's shadow index visited 133,594 candidates in 1.9 thread-s and agreed
+  on every call and every final list. The answers do not depend on the order the alignments are met in, the
+  removals are the same alignments, and at the end of the match the slots that hold an alignment are linked newest
+  first, which is the order of NCBI's list (the new alignment goes to the head, the others keep their order), so
+  every value and the report stay the same (unit tests `the_index_answers_as_ncbis_list` (600 random runs of 1,200
+  calls on three queries against `is_contained` / `with_distinct_ends`), `coordinates_at_the_ends_of_i32_give_the_same_answers`,
+  `a_list_moves_into_the_index_once_it_reaches_the_threshold`; `tests/redo_contain_idx.rs`: one input per program,
+  the switch on and off at 1 and 2 threads). Shorter lists stay NCBI's lists, the original functions answer, and the
+  vector of indexes is not allocated, so matches with few HSPs (most blastp and blastx matches) cost what they
+  did: a first form that wrapped every query's list in a 128-byte set (built, converted and dropped per redo call)
+  added 0.27 % to the instructions of blastp WSSV x PajaWSV, about 50,000 redo calls (callgrind: the redo function
+  itself, `BTreeSet` drops, `memcpy`, `malloc`); the lists-plus-indexes form is within 0.02 % of the base there,
+  with the switch on and off. Conditional: the new side is a match where some query's list reaches 32 alignments
+  (`x_reach!`, once per match), the reference side one where none does.
   MEASURED
 - `LOSAT_X_TBNKEEPFEW=1` tblastn (memory; in the strict set from the pull request that added it,
   2026-10-19, with `TBNFRAMEREUSE`; `=0` turns it off; `tblastn/search_seed.rs`

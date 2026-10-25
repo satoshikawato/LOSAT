@@ -61,7 +61,7 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 use crate::algorithm::blastn::hsp::BlastnOutputFormat;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::QueryInput;
-use crate::sequence::packed_subject::PackedNucleotide;
+use crate::sequence::packed_letters::PackedLetters;
 
 /// No NCBI counterpart: LOSAT_X_BNQDROP (read once).
 pub(super) fn on() -> bool {
@@ -101,7 +101,7 @@ pub(super) struct Store {
     left: Mutex<(std::vec::IntoIter<FastaRecord>, usize)>,
     /// PROBE (LOSAT_X_QPACKPROBE): the packed letters of the records not taken, in step with
     /// `left` (`None`: the record keeps its letters).
-    x_packed: Mutex<std::vec::IntoIter<Option<PackedNucleotide>>>,
+    x_packed: Mutex<std::vec::IntoIter<Option<PackedLetters>>>,
     /// Every record searched whole (no `-query_loc`).
     query_input: QueryInput,
     /// PROBE: the letters and packed bytes held by the records not taken.
@@ -121,9 +121,9 @@ fn x_pack_trace() -> bool {
 }
 
 /// PROBE: packs a record's letters just read (its letters dropped when they pack).
-pub(super) fn x_pack_record(record: &mut FastaRecord, packed: &mut Vec<Option<PackedNucleotide>>) {
+pub(super) fn x_pack_record(record: &mut FastaRecord, packed: &mut Vec<Option<PackedLetters>>) {
     let t0 = std::time::Instant::now();
-    let store = PackedNucleotide::from_subject_letters(&record.sequence);
+    let store = PackedLetters::pack(&record.sequence);
     if let Some(store) = &store {
         PACK_LETTERS.fetch_add(record.sequence.len() as u64, Ordering::Relaxed);
         PACK_BYTES.fetch_add(store.heap_bytes() as u64, Ordering::Relaxed);
@@ -143,7 +143,7 @@ impl Store {
     /// PROBE: the store of records whose letters `x_pack_record` packed.
     pub(super) fn x_new_packed(
         records: Vec<FastaRecord>,
-        packed: Vec<Option<PackedNucleotide>>,
+        packed: Vec<Option<PackedLetters>>,
     ) -> Self {
         assert_eq!(records.len(), packed.len());
         let input_lengths: Vec<usize> = records
@@ -196,7 +196,7 @@ impl Store {
             letters += record.sequence.len() as u64;
             if let Some(Some(store)) = packed.next() {
                 bytes += store.heap_bytes() as u64;
-                store.ascii_into(&mut record.sequence);
+                store.unpack_into(&mut record.sequence);
             }
         }
         UNPACK_NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -233,7 +233,7 @@ impl Store {
         let packed = self.x_packed.lock().unwrap_or_else(PoisonError::into_inner);
         for (record, store) in copy.iter_mut().zip(&packed.as_slice()[from..]) {
             if let Some(store) = store {
-                store.ascii_into(&mut record.sequence);
+                store.unpack_into(&mut record.sequence);
             }
         }
         Some(copy)

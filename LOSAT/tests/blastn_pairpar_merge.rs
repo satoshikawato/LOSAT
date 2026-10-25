@@ -7,7 +7,7 @@
 //! property under test is that the report does not depend on it, and that the default took the
 //! switch's path where its rule says so (`LOSAT_X_REACH`): a stage of 4,096 hits or more on a pool.
 //! The three folds that end in the merge, each against a subject file (`-subject`) at two and four
-//! threads: the one-hit fold of `-task blastn` (LC738874 against LC738868, 17,506 hits in its one
+//! threads (and at four with `LOSAT_X_PAIRPARHOME=0`): the one-hit fold of `-task blastn` (LC738874 against LC738868, 17,506 hits in its one
 //! stage; and 9,800 letters of LC738874, 412 hits, which keeps the sort), the one-hit fold of the
 //! Na table of `-task blastn-short` (the same 9,800 letters, 42,126 hits) and the two-hit fold of
 //! `-task dc-megablast` (Sakai against MG1655, 16,720 hits).
@@ -109,23 +109,33 @@ fn search(
 }
 
 /// For `query` and `extra` against `subject`: the report with the switch off at four threads,
-/// then by default at two and four threads, the same bytes and standard error; the default took
+/// then by default at two and four threads and by default with `LOSAT_X_PAIRPARHOME=0` (the other
+/// participant loop before the merge) at four, the same bytes and standard error; the default took
 /// the switch's path (`own`) or kept the sort (not `own`) in its stages.
 fn check(query: &Path, subject: &Path, extra: &[&str], own: bool) {
     let (expected, expected_stderr) = search(query, subject, extra, 4, &[SWITCH_OFF]);
     assert!(!expected.is_empty(), "{extra:?}: no hits");
-    for threads in [2, 4] {
+    for (threads, home) in [
+        (2, None),
+        (4, None),
+        (4, Some(("LOSAT_X_PAIRPARHOME", "0"))),
+    ] {
         let reach = reach_support::Reach::new("pmerge");
-        let (report, stderr) = search(query, subject, extra, threads, &[reach.var()]);
+        let mut vars = vec![reach.var()];
+        vars.extend(home);
+        let (report, stderr) = search(query, subject, extra, threads, &vars);
         assert!(
             report == expected,
-            "{extra:?} threads {threads}: default differs"
+            "{extra:?} threads {threads} {home:?}: default differs"
         );
-        assert_eq!(stderr, expected_stderr, "{extra:?} threads {threads}");
+        assert_eq!(
+            stderr, expected_stderr,
+            "{extra:?} threads {threads} {home:?}"
+        );
         assert_eq!(
             reach.sides(SWITCH),
             (own, !own),
-            "{extra:?} threads {threads}: sides of {SWITCH}"
+            "{extra:?} threads {threads} {home:?}: sides of {SWITCH}"
         );
     }
 }

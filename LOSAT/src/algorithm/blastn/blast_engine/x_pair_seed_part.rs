@@ -160,13 +160,17 @@ fn merge_on() -> bool {
 }
 
 /// No NCBI counterpart (scheduling only, LOSAT_X_PAIRPARMERGE): the fewest hits of a stage that
-/// `hits_by_strips` orders on the pool (below it the jobs of a scope cost more than the sort),
-/// and the ranges of strips per thread of the pool.
+/// `hits_by_strips` orders on the pool. A bound kept above the estimated crossover (starting the
+/// jobs of a scope takes tens of microseconds, the sort about 50 ns per hit) rather than a
+/// measured one; smaller stages keep the sort.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 const MERGE_POOL_MIN_HITS: usize = 4096;
+/// No NCBI counterpart (scheduling only, LOSAT_X_PAIRPARMERGE): the ranges of strips per thread of
+/// the pool in `hits_by_strips` (more ranges than threads, so that a range with many hits does not
+/// hold the others back).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1237,7 +1241,8 @@ fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize) {
 /// few hits sorted (`hits_of_strips`); the strips are cut into ranges that the pool orders side
 /// by side, each range writing the slice of the output after the hits of the ranges before it.
 /// Returns `false`, having written nothing, where the switch is off, the stage is not on a pool
-/// of two threads or more, or it has fewer than `MERGE_POOL_MIN_HITS` hits (`merge` sorts them).
+/// of two threads or more, has one strip, or has fewer than `MERGE_POOL_MIN_HITS` hits (`merge`
+/// sorts them then).
 fn hits_by_strips(hits: &mut Vec<UngappedHit>, states: &[PartState], strips: usize) -> bool {
     if !merge_on() {
         return false;
@@ -1247,10 +1252,15 @@ fn hits_by_strips(hits: &mut Vec<UngappedHit>, states: &[PartState], strips: usi
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     {
+        // (the pool's size only on a pool: off one, `current_num_threads` would start rayon's
+        // global pool)
+        let threads = if rayon::current_thread_index().is_some() {
+            rayon::current_num_threads()
+        } else {
+            1
+        };
         let total: usize = states.iter().map(|st| st.hits.len()).sum();
-        let threads = rayon::current_num_threads();
-        let pool = rayon::current_thread_index().is_some() && threads >= 2;
-        let own = pool && strips >= 2 && total >= MERGE_POOL_MIN_HITS;
+        let own = threads >= 2 && strips >= 2 && total >= MERGE_POOL_MIN_HITS;
         // (once per stage)
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARMERGE", own);
         if own {

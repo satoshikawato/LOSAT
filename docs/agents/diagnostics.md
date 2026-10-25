@@ -3870,10 +3870,13 @@ Scheduling (each value computed by one thread with the original function; order 
   thread of the pool, which the pool orders side by side (`rayon::scope`); a range starts each partition's cursor at its
   first key of the range (binary search) and writes its hits into its own slice of the list's spare capacity, after the
   hits of the ranges before it. The order is the sort's (keys are unique), so the hits, and everything made from them,
-  are the same. A smaller stage, or one without a pool, keeps the sort (`x_reach!` per stage: the switch's side for a
-  stage it orders). Tests: `hits_by_strips_on_a_pool_is_the_sort_of_merge` (random stages of 1 to 9 partitions and 1 to
+  are the same. A stage of fewer hits (the bound is kept above the estimated crossover: starting a scope's jobs takes
+  tens of microseconds, the sort about 50 ns per hit), of one strip, or without a pool keeps the sort (`x_reach!` per
+  stage: the switch's side for a stage it orders; no stage of the ci_fast blastn fixtures has 4,096 hits, so the reach
+  table marks the new side a gap, which the tests below cover). Tests: `hits_by_strips_on_a_pool_is_the_sort_of_merge` (random stages of 1 to 9 partitions and 1 to
   300 strips, strips without hits, an empty partition, hits already in the list; pools of 2, 3 and 8 threads, 1 to
-  4 x strips ranges) and `LOSAT/tests/blastn_pairpar_merge.rs` (the reports at 2 and 4 threads against `=0`, the
+  4 x strips ranges) and `LOSAT/tests/blastn_pairpar_merge.rs` (the reports at 2 and 4 threads, and at 4 with
+  `LOSAT_X_PAIRPARHOME=0`, against `=0`, the
   one-hit fold of `-task blastn` with 17,506 hits in its stage and with 412, the Na fold of `-task blastn-short`, the
   two-hit fold of `-task dc-megablast`, with the sides of `LOSAT_X_REACH`).
   Default ON since 2026-10-25 (perf/pairpar-merge; EVIDENCE_PR).

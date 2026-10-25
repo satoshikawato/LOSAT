@@ -4,7 +4,7 @@ use super::{
     input::FastaRecord,
     parameters::{effective_lengths, score_block, subject_parameters, ContextParameters},
     preliminary::{gapped, purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
-    query_setup::{batch_ranges, prepare_queries, PreparedQueryBatch, BATCH_SIZE},
+    query_setup::{batch_ranges, PreparedQueryBatch, BATCH_SIZE},
     reader_batch::{prepare_reader_batch, UnitPrep},
     seed::{word_finder, Diagonals, InitHsp, Lookup},
     split::{adjust_chunk_hsps, merge_chunk_hsps, split_queries, QueryChunk},
@@ -584,9 +584,10 @@ pub(crate) fn search_core(
                 prepared, params, ..
             }) => (prepared, params),
             None => {
-                let full = prepare_queries(queries, options)?;
-                let params = score_block(&full);
-                (full, params)
+                let UnitPrep {
+                    prepared, params, ..
+                } = super::reader_batch::prepare_lone_unit(queries, options)?;
+                (prepared, params)
             }
         };
         super::x_timing::batch(XBatch::QuerySetup, x_t);

@@ -5116,8 +5116,9 @@ Scheduling (each value computed by one thread with the original function; order 
   flow writes every batch where the waves wrote it and searches a capped batch with the function it uses for the
   batches it searches with the pool inside; a chunk's subject tasks keep the subjects with something for the sink
   in subject order and the replay gives the sink the calls of the serial chunk loop (`tests/blastx_unit_cap.rs`:
-  reports equal to all three `=0` with K = 2 and 3 at 4 threads, each part off, 16 batches with K = 2, a split
-  query, `-db`). Measured
+  reports equal to all of them `=0` with K = 2 and 3 at 4 threads, each part off, 16 batches with K = 2, a split
+  query, `-db`). With `LOSAT_X_BXCAPFILL` (below) the capped units' subject tasks are smaller with few subjects
+  (at most 64 in the batch flow, 16 in the chunk waves, as here) and the cap's rule counts those tasks. Measured
   2026-10-24 on the workstation (node 1, CPUs 32..32+n-1 with their siblings and the rest of the node idle,
   `--membind=1`, 5 rounds after a warm-up in rotated order, medians; max RSS = max(`%M`, sampled VmHWM); every
   report the same bytes across arms; the pull request's first commit against dev 7164b5f7): bx_800 (the 800 fly
@@ -5130,6 +5131,30 @@ Scheduling (each value computed by one thread with the original function; order 
   at 32 threads 274 -> 210 MiB (one table per thread still alive at once); BXUNITCAP with K + 1 unwritten batches,
   helpers waiting for the batch's thread and only the writing thread spawning batches cost bx_800 x1.07-1.14 at
   16-32 threads, which the three parts of the capped flow above remove.
+- `LOSAT_X_BXCAPFILL=1` or `=f` (BLASTX, memory with few subjects; in the strict set from the pull request that
+  added it, 2026-10-25: on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, f from 2 to 64 tasks per thread,
+  otherwise 4; acts exactly where `LOSAT_X_BXUNITCAP` caps): the capped units keep the threads busy with few subjects
+  too (`blastx/x_bx_mem.rs`). A capped unit's subjects run as tasks of ceil(subjects / (f x ceil(threads / K)))
+  subjects, at least 1 and at most the size without the cap (64 for the batch flow's subject flow, 16 for the
+  chunk waves of a split query; a set keeps that size from 64 x f x ceil(threads / K) subjects, 512 at 16
+  threads), and the cap's rule (K units with a task for every thread) counts those tasks. And the capped batch flow
+  prepares each query batch of at most two search units' letters (translation, query SEG, Karlin blocks:
+  `reader_batch::prepare_lone_unit`, what `search_core` runs when a batch prepares itself) as a task of its own when
+  the reader delivers it, as it prepares the units of a reader batch of several, so that the cap holds only the
+  lookup table's build and the subject search to K at a time. Before, a batch of 64 subjects or fewer had no
+  subject flow, so the cap left the batch flow alone and each thread searched its own batch with its own lookup
+  table (about 6.5 MiB each): 800 cDNAs against 50 yeast proteins at 16 threads took 128 MiB, NCBI `-subject` (one
+  thread) 80 MiB; with the cap forced on (`LOSAT_X_BXSUBJFLOW=4`) the preparation, about half of the work at one
+  thread, ran on K threads: 68 MiB but x1.59. Exactness: schedule only; a batch prepared ahead is prepared by the
+  statements its search runs otherwise, from the same records and options, and a preparation that fails is
+  dropped, so the search prepares again and fails where it failed before (`tests/blastx_unit_cap.rs`: 40 proteins
+  with K = 2 and 3, f = 2, 4 and 8, a split query of 10 proteins, all equal to every part `=0`). With
+  `LOSAT_TIMING` the preparation ahead is not in the batch's `QuerySetup` clock. Measured 2026-10-25 on the
+  workstation (node 0, CPUs 0-15 without siblings, untimed, 3 rounds in rotated order, medians, the same bytes in
+  every arm; dev f24d161f against the pull request's first commit): 800 cDNAs x 50 proteins at 16 threads
+  0.170 -> 0.167 s, 127.5 -> 70.9 MiB; x 200 proteins 0.310 -> 0.229 s (x0.739), 71 -> 74 MiB; AP027131 x 50 / 200
+  proteins x0.958 / x0.997; the full sets (800 cDNAs x 6,600 proteins `-subject` and `-db`, AP027131 x 543) at 16
+  threads x0.996-1.009, +2-3 MiB (the preparations held ahead); at 8 threads (no cap) x0.99-1.01.
 - `LOSAT_X_BXDBSTREAM=1` or `=KiB` (BLASTX `-db`, memory; in the strict set from the pull request that added it:
   on unless `=0`; a value switch, `KiB` from 2 to 1,048,576, otherwise 256): the search reads
   the database's sequences where it searches them, a block at a time, instead of the copy of the whole database that

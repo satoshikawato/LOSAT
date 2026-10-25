@@ -255,11 +255,10 @@ pub(crate) fn prepare_unit(
     })
 }
 
-/// No NCBI counterpart (scheduling only, `LOSAT_X_BXCAPFILL`, `x_bx_mem.rs`): a reader batch of
-/// one unit prepared ahead of its search, by the statements `search::search_core` runs when the
-/// batch prepares itself (`prepare_queries`, `score_block`). Such a batch has no shape (its unit's
-/// values are the batch's) and no cutoff minima to reduce.
-#[cfg(feature = "parallel")]
+/// A reader batch of one unit prepared: its queries translated and filtered, and the statistical
+/// blocks of its contexts. `search::search_core` prepares such a batch with it when it is searched,
+/// and the capped batch flow (`LOSAT_X_BXCAPFILL`, `x_bx_mem.rs`) ahead of its search. Such a batch
+/// has no shape (its unit's values are the batch's) and no cutoff minima to reduce.
 pub(crate) fn prepare_lone_unit(
     queries: &[FastaRecord],
     options: &ResolvedOptions,

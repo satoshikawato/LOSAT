@@ -45,17 +45,24 @@
 //!   not see each other's batches; a search on a pool without them counts process-wide.
 //! - `LOSAT_X_BXCAPFILL[=f]` (built-in f = 4; acts only where `LOSAT_X_BXUNITCAP` caps): the capped
 //!   units keep the threads busy with few subjects too. A capped unit's subjects run as tasks of
-//!   `capped_subjects_per_task` subjects (at most the size without the cap: 64 for the batch flow's
-//!   subject flow, 16 for the chunk waves), so that each of the K units has f tasks per thread it
-//!   is left, and the cap counts those tasks (`unit_cap`); and the capped batch flow prepares each
-//!   query batch (translation, filtering, Karlin blocks: `prepare_queries`, `score_block`) as a
-//!   task of its own outside the K searched at a time, as it prepares the units of a reader batch
-//!   of several (`native.rs` `XUnit::split`, `reader_batch::prepare_lone_unit`), so that only the
-//!   lookup table's build and the subject search wait for the cap. Measured before the change (ws,
-//!   800 cDNAs x 50 yeast proteins `-subject`, 16 threads): one batch per thread 0.23 s and
-//!   122 MiB, the cap with tasks of 4 subjects but the preparation inside the cap 0.36 s and
-//!   68 MiB (the preparation, half of the work at one thread, ran on K threads); NCBI `-subject`
-//!   (one thread) 6.0 s and 80 MiB.
+//!   `capped_subjects_per_task` subjects: f tasks for each of the `ceil(threads / K)` threads a unit
+//!   is left, at least one subject and at most the size without the cap (64 for the batch flow's
+//!   subject flow, 16 for the chunk waves; a set keeps that size from 64 x f x ceil(threads / K)
+//!   subjects, 512 at 16 threads), and the cap's rule counts those tasks (`unit_cap`). And the
+//!   capped batch flow prepares each query batch of at most two search units' letters
+//!   (translation, filtering, Karlin blocks: `reader_batch::prepare_lone_unit`, which
+//!   `search::search_core` runs when a batch prepares itself) as a task of its own when the reader
+//!   delivers it, as it prepares the units of a reader batch of several (`native.rs`
+//!   `XUnit::split`), so that the lookup table's build and the subject search are what the cap
+//!   holds to K at a time (a batch spawned before its preparation ends holds one of the K places
+//!   while it waits). Without it, a unit of 64 subjects or fewer had no subject flow, so the cap
+//!   left the batch flow alone and every thread searched its own batch with its own table; forced
+//!   on, the cap ran the preparation (about half of the work at one thread) on K threads. Measured
+//!   (ws node 0, untimed, 800 cDNAs x 50 yeast proteins `-subject`, 16 threads): one batch per
+//!   thread 0.17 s and 128 MiB; the cap with tasks of 4 subjects but the preparation inside it
+//!   x1.59 and 68 MiB; this switch x0.98 and 71 MiB (NCBI `-subject`, one thread: 6.0 s, 80 MiB);
+//!   200 proteins x0.74. With `LOSAT_TIMING` the preparation ahead is not in the batch's
+//!   `QuerySetup` clock.
 //!
 //! Exactness. A subject's computation depends on the subject and the query chunk alone, not on the
 //! diagonal table it runs on, while no diagonal offset passes 2^30 (`x_subject_flow.rs`, module

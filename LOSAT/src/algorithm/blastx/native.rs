@@ -1654,8 +1654,8 @@ struct XUnit {
     prep: Option<(std::sync::Arc<XReaderPrep>, usize)>,
 }
 
-/// Phase 1 of a reader batch of several units (`reader_batch.rs`): the units' preparations, and
-/// (the flow) the searches that wait for them.
+/// Phase 1 of a reader batch of several units (`reader_batch.rs`), or of one unit prepared ahead
+/// (`LOSAT_X_BXCAPFILL`): the units' preparations, and (the flow) the searches that wait for them.
 #[cfg(feature = "parallel")]
 struct XReaderPrep {
     /// The batch's values that follow from its records; each unit is prepared with them. `None`:
@@ -1711,7 +1711,10 @@ impl XUnit {
     /// The units of a reader batch, in order (the last one marked); a copy of the batch is
     /// shared by them. A batch of several units gets its phase 1 (`prepare_now`, or the flow's
     /// tasks), which its units' searches take; with `ahead` (the capped batch flow,
-    /// `LOSAT_X_BXCAPFILL`) a batch of one unit gets one too (the flow's task, without a shape).
+    /// `LOSAT_X_BXCAPFILL`) a batch of one unit of at most two search units' letters gets one too
+    /// (the flow's task, without a shape). A longer batch (one long query) prepares itself when it
+    /// is searched, as before: preparations held ahead are bounded by letters, not only by the
+    /// flow's count of unwritten batches.
     fn split(
         queries: &[FastaRecord],
         options: &super::args::ResolvedOptions,
@@ -1720,6 +1723,9 @@ impl XUnit {
         let batch = std::sync::Arc::new(queries.to_vec());
         let ranges = super::query_setup::batch_ranges(&batch, BATCH_SIZE);
         let count = ranges.len();
+        let ahead = ahead
+            && count == 1
+            && batch.iter().map(|q| q.sequence.len()).sum::<usize>() <= 2 * BATCH_SIZE;
         let prep = (count > 1 || ahead).then(|| {
             std::sync::Arc::new(XReaderPrep {
                 layout: (count > 1)
@@ -1774,7 +1780,9 @@ impl XUnit {
             return Vec::new();
         };
         // A panic is a failure of phase 1: the unit prepares itself again when it is searched,
-        // and its search raises the panic where the unit is written.
+        // and its search raises the panic where the unit is written. (With `panic = "abort"`, the
+        // release profile, the process ends at the first panic instead, which may be before the
+        // batches ahead of this one are written.)
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             prepare(self.queries(), prep.layout.as_ref())
         })) {

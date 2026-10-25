@@ -165,8 +165,9 @@
 //! - per bucket, in order: each cell's count n (the number of its appends), the starts as the counts'
 //!   prefix sums from the bucket's first slot (the count-and-fill builder's starts, which are the
 //!   prefix sums in index order), the PV bits (shift `PV_ARRAY_BTS` whatever the counts for word
-//!   size 5, as in `x_clut_par.rs`; otherwise the PV array is made after the buckets from the starts)
-//!   and the count of non-empty cells and longest chain; then the fill from a copy of the bucket's
+//!   size 5, as in `x_clut_par.rs`; the bucket fill declines the other word sizes, which
+//!   `-task blastp-fast` does not take) and the count of non-empty cells and longest chain; then the
+//!   fill from a copy of the bucket's
 //!   packed appends (the record of the appends is not read again) in their order, each at its cell's
 //!   cursor, so a cell's slice holds o_0..o_{n-1} as the fill pass leaves it; then o_k goes to slot
 //!   `x_emission_position(k, n)` in each cell of more than 5 offsets, the fill pass's statements.
@@ -174,7 +175,8 @@
 //! differs.
 //!
 //! With more than one thread the search's pool builds the same table (`x_clut_par.rs`, exactness
-//! argument in its header); at one thread the builder above runs.
+//! argument in its header); at one thread (and in builds without threads) the serial builder runs:
+//! the bucket fill, or the count-and-fill builder where it declines.
 //!
 //! A strict-set switch (`utils/xswitch.rs`): on unless `LOSAT_X_BPCLUT=0`.
 //!
@@ -853,7 +855,7 @@ pub(crate) fn x_try_build_flat_compressed_lookup(
     tables: &[std::ops::Range<usize>],
 ) -> Option<XFlatBuild> {
     if x_bpffill_on() {
-        if let Some(built) = x_try_build_flat_by_buckets(
+        match x_try_build_flat_by_buckets(
             word_size,
             scaled_threshold,
             query,
@@ -861,10 +863,12 @@ pub(crate) fn x_try_build_flat_compressed_lookup(
             tables,
             NCBI_OVERFLOW_CELL_CAPACITY,
         ) {
-            crate::utils::xreach::x_reach!("LOSAT_X_BPFFILL", true);
-            return built;
+            XBucketBuild::Built(built) => {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPFFILL", true);
+                return built;
+            }
+            XBucketBuild::Declined => crate::utils::xreach::x_reach!("LOSAT_X_BPFFILL", false),
         }
-        crate::utils::xreach::x_reach!("LOSAT_X_BPFFILL", false);
     }
     x_try_build_flat_with_capacity(
         word_size,
@@ -1133,7 +1137,7 @@ fn x_try_build_flat_with_capacity(
 // computes.
 /// EXPERIMENT (LOSAT_X_BPFFILL): a strict-set switch, on unless it is `0`: the serial builder of the
 /// flat table fills it by buckets of cells (`x_try_build_flat_by_buckets`).
-pub(crate) fn x_bpffill_on() -> bool {
+fn x_bpffill_on() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPFFILL"))
@@ -1150,19 +1154,28 @@ fn x_bucket_packs(letters: usize) -> bool {
     usize::BITS - letters.leading_zeros() + X_BUCKET_SHIFT <= u32::BITS
 }
 
+/// What the bucket fill made.
+enum XBucketBuild {
+    /// `x_try_build_flat_with_capacity`'s outcome: its table, its `TooLarge`, or `None` where the
+    /// table's header cannot be made.
+    Built(Option<XFlatBuild>),
+    /// The count-and-fill builder decides (`x_try_build_flat_by_buckets`).
+    Declined,
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (the loop, see
-// `x_for_each_offset`), :787-849 (the appends, module header), :1182-1242 (`finalize`, see
-// `x_try_build_flat_with_capacity`)
+// `x_for_each_offset`), :787-849 (the appends, module header), :1182-1242 (`finalize`, below)
 // ```c
 //         for (offset = from; offset <= to; offset++){
 //             s_CompressedAddWordHits(&info, query->sequence, offset);
 //         }
 // ```
-/// EXPERIMENT (LOSAT_X_BPFFILL): `x_try_build_flat_with_capacity`'s table (or its `TooLarge`) with
-/// the appends sorted by buckets of 2^`X_BUCKET_SHIFT` cells before they are counted and placed
-/// (module header). `None`: declined (a table's appends pass `overflow_cell_capacity`, or a query
-/// offset does not fit the packed append); the count-and-fill builder then decides. Out of line,
-/// so that the count-and-fill builder keeps its code.
+/// EXPERIMENT (LOSAT_X_BPFFILL): `x_try_build_flat_with_capacity`'s outcome with the appends sorted
+/// by buckets of 2^`X_BUCKET_SHIFT` cells before they are counted and placed (module header).
+/// Declined where a table's appends pass `overflow_cell_capacity`, where the query has 2^22 letters
+/// or more (the packed append) and where the PV shift depends on the counts (word sizes other than
+/// 5, which `-task blastp-fast` does not take). Out of line, so that the count-and-fill builder
+/// keeps its code.
 #[inline(never)]
 fn x_try_build_flat_by_buckets(
     word_size: usize,
@@ -1171,23 +1184,29 @@ fn x_try_build_flat_by_buckets(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     overflow_cell_capacity: usize,
-) -> Option<Option<XFlatBuild>> {
+) -> XBucketBuild {
     if !x_bucket_packs(query.len()) {
-        return None;
+        return XBucketBuild::Declined;
     }
     let Some(header) = XHeader::new(word_size) else {
-        return Some(None);
+        return XBucketBuild::Built(None);
     };
+    let backbone_size = header.backbone_size;
+    // `finalize`'s larger PV shift is `PV_ARRAY_BTS` (word size 5): the layout sets the PV bits.
+    if ilog2(backbone_size / (8 * X_TARGET_PV_BYTES)) != 0 {
+        return XBucketBuild::Declined;
+    }
     let Some(matrix) = build_blosum62_compressed_score_matrix(header.alphabet) else {
-        return Some(None);
+        return XBucketBuild::Built(None);
     };
     let info = CompressedNeighborInfo::new(&matrix, header.alphabet);
     let words = XWords::new(&header, scaled_threshold, &matrix, &info);
-    let backbone_size = header.backbone_size;
     let max_appends = x_max_appends(backbone_size);
 
     // The vectors in the count-and-fill builder's order: the starts (its counts) first, the hits
-    // after the appends, the appends' record dropped at the end.
+    // after the appends; the record of the appends is dropped at the end, the offsets' appends
+    // after the partition (they bound the list of a cell's offsets moved to the scan order: a query
+    // offset appends to a cell at most twice).
     // One more entry: the number of hits.
     let mut starts = vec![0u32; backbone_size + 1];
 
@@ -1220,10 +1239,10 @@ fn x_try_build_flat_by_buckets(
             true
         });
         if too_large {
-            return Some(Some(XFlatBuild::TooLarge));
+            return XBucketBuild::Built(Some(XFlatBuild::TooLarge));
         }
         if declined {
-            return None;
+            return XBucketBuild::Declined;
         }
     }
     let total = targets.len();
@@ -1239,27 +1258,21 @@ fn x_try_build_flat_by_buckets(
     for b in 0..buckets {
         bucket_starts[b + 1] += bucket_starts[b];
     }
-    // The PV shift is `PV_ARRAY_BTS` whatever the counts when the larger shift of `finalize` is
-    // the same (word size 5): then the layout sets the bits.
-    let pv_known = ilog2(backbone_size / (8 * X_TARGET_PV_BYTES)) == 0;
-    let mut pv = if pv_known {
-        vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1]
-    } else {
-        Vec::new()
-    };
+    let mut pv = vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1];
     let mut hits = vec![0i32; total];
     {
         let mut cursors = bucket_starts[..buckets].to_vec();
         let out = hits.as_mut_ptr();
         let mut at = 0usize;
         for &(query_offset, appends) in &per_offset {
+            debug_assert!((query_offset as u32) < 1 << (u32::BITS - X_BUCKET_SHIFT));
             let high = (query_offset as u32) << X_BUCKET_SHIFT;
             let end = at + appends as usize;
             for &index in &targets[at..end] {
                 let cursor = &mut cursors[(index >> X_BUCKET_SHIFT) as usize];
-                // SAFETY: bucket b's cursor starts at `bucket_starts[b]` and moves on once per
-                // append to the bucket, which the histogram counted, so it stays below
-                // `bucket_starts[b + 1] <= total = hits.len()`.
+                // SAFETY: the offsets' appends are `targets` in order, and bucket b's cursor starts
+                // at `bucket_starts[b]` and moves on once per append to the bucket, which the
+                // histogram counted, so it stays below `bucket_starts[b + 1] <= total = hits.len()`.
                 unsafe {
                     out.add(*cursor as usize)
                         .write((high | (index & mask)) as i32)
@@ -1269,11 +1282,38 @@ fn x_try_build_flat_by_buckets(
             at = end;
         }
     }
+    drop(per_offset);
 
     // Per bucket: its appends copied into `targets` (read no more), the counts of its cells, their
     // starts, the PV bits and `finalize`'s statistics, the fill, then the scan order of the cells
     // of more than 5 offsets.
-    let mut cursor = vec![0u32; 1 << X_BUCKET_SHIFT];
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1197-1235
+    // ```c
+    //     for (i = count = 0; i < lookup->backbone_size; i++) {
+    //         if (lookup->backbone[i].num_used)
+    //             count++;
+    //     }
+    //     ...
+    //     pv_array_bts = PV_ARRAY_BTS;
+    //     if (count <= 0.01 * lookup->backbone_size) {
+    //         pv_array_bts += ilog2(lookup->backbone_size / (8 * kTargetPVBytes));
+    //     }
+    //
+    //     pv = lookup->pv = (PV_ARRAY_TYPE *)calloc(
+    //                               (lookup->backbone_size >> pv_array_bts) + 1,
+    //                               sizeof(PV_ARRAY_TYPE));
+    //     ...
+    //     for (i = 0; i < lookup->backbone_size; i++) {
+    //         count = lookup->backbone[i].num_used;
+    //
+    //         if (count > 0) {
+    //             /* set the corresponding bit in the pv_array */
+    //             PV_SET(pv, i, pv_array_bts);
+    //             longest_chain = MAX(count, longest_chain);
+    // ```
+    // `pv_array_bts` is `PV_ARRAY_BTS` whatever `count` (the larger shift is the same, tested
+    // above), so the bits are set as the counts are read.
+    let mut cell_slots = vec![0u32; 1 << X_BUCKET_SHIFT];
     let mut overflowed: Vec<u32> = Vec::new();
     let mut appended: Vec<i32> = Vec::new();
     let mut nonempty_count = 0usize;
@@ -1287,16 +1327,17 @@ fn x_try_build_flat_by_buckets(
         for (to, &from) in part.iter_mut().zip(&hits[lo..hi]) {
             *to = from as u32;
         }
-        let counts = &mut cursor[..cells];
-        counts.fill(0);
+        // Each cell's count, then its cursor.
+        let slots = &mut cell_slots[..cells];
+        slots.fill(0);
         for &packed in part.iter() {
-            counts[(packed & mask) as usize] += 1;
+            slots[(packed & mask) as usize] += 1;
         }
         overflowed.clear();
         let mut slot = lo as u32;
         for (cell, (start, count)) in starts[first..first + cells]
             .iter_mut()
-            .zip(counts.iter_mut())
+            .zip(slots.iter_mut())
             .enumerate()
         {
             let n = *count;
@@ -1304,9 +1345,7 @@ fn x_try_build_flat_by_buckets(
             if n > 0 {
                 nonempty_count += 1;
                 longest_chain = longest_chain.max(n as i32);
-                if pv_known {
-                    compressed_pv_set(&mut pv, first + cell, PV_ARRAY_BTS);
-                }
+                compressed_pv_set(&mut pv, first + cell, PV_ARRAY_BTS);
                 if n > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
                     overflowed.push(cell as u32);
                 }
@@ -1316,7 +1355,7 @@ fn x_try_build_flat_by_buckets(
         }
         let out = hits.as_mut_ptr();
         for &packed in part.iter() {
-            let at = &mut counts[(packed & mask) as usize];
+            let at = &mut slots[(packed & mask) as usize];
             // SAFETY: a cell's cursor starts at its start and moves on once per append to the
             // cell, which the counts counted, so it stays within the bucket's slots `lo..hi`.
             unsafe {
@@ -1329,7 +1368,7 @@ fn x_try_build_flat_by_buckets(
         for &cell in &overflowed {
             let cell = cell as usize;
             let begin = starts[first + cell] as usize;
-            let end = counts[cell] as usize;
+            let end = slots[cell] as usize;
             let n = (end - begin) as u32;
             let slice = &mut hits[begin..end];
             appended.clear();
@@ -1341,22 +1380,12 @@ fn x_try_build_flat_by_buckets(
     }
     starts[backbone_size] = total as u32;
     drop(targets);
-    drop(per_offset);
-
     let mut pv_array_bts = PV_ARRAY_BTS;
     if (nonempty_count as f64) <= 0.01 * (backbone_size as f64) {
         pv_array_bts += ilog2(backbone_size / (8 * X_TARGET_PV_BYTES));
     }
-    if !pv_known {
-        pv = vec![0u32; (backbone_size >> pv_array_bts) + 1];
-        for index in 0..backbone_size {
-            if starts[index] < starts[index + 1] {
-                compressed_pv_set(&mut pv, index, pv_array_bts);
-            }
-        }
-    }
 
-    Some(Some(XFlatBuild::Table(XFlatCompressedLookup {
+    XBucketBuild::Built(Some(XFlatBuild::Table(XFlatCompressedLookup {
         word_length: header.word_length as i32,
         compressed_alphabet_size: header.alphabet as i32,
         reciprocal_alphabet_size: header.reciprocal_alphabet_size,
@@ -2321,21 +2350,23 @@ mod tests {
                     5, threshold, &query, &locations, &tables, capacity,
                 )
                 .expect("word size 5");
-                // Chunks of one append (a test after each query offset with appends, as the
-                // reference tests), of a few, and the default (a test at each table's end).
                 // The bucket fill (LOSAT_X_BPFFILL) builds the same table or declines.
                 match x_try_build_flat_by_buckets(
                     5, threshold, &query, &locations, &tables, capacity,
                 ) {
-                    None => {}
-                    Some(Some(XFlatBuild::Table(flat))) => {
+                    XBucketBuild::Declined => {}
+                    XBucketBuild::Built(Some(XFlatBuild::Table(flat))) => {
                         let reference = reference.as_ref().unwrap_or_else(|_| {
                             panic!("round {round}, capacity {capacity}: buckets built, reference refused")
                         });
                         x_assert_same_compressed_table(&flat, reference);
                     }
-                    Some(_) => panic!("round {round}, capacity {capacity}: buckets refused"),
+                    XBucketBuild::Built(_) => {
+                        panic!("round {round}, capacity {capacity}: buckets refused")
+                    }
                 }
+                // Chunks of one append (a test after each query offset with appends, as the
+                // reference tests), of a few, and the default (a test at each table's end).
                 for chunk in [1, 7, X_COUNT_CHUNK] {
                     let built = x_try_build_flat_with_capacity(
                         5, threshold, &query, &locations, &tables, capacity, chunk,
@@ -2406,26 +2437,60 @@ mod tests {
                     5, threshold, &query, &locations, &tables, capacity,
                 );
                 match (got, want) {
-                    (None, _) => {
+                    (XBucketBuild::Declined, _) => {
                         assert!(
                             capacity < NCBI_OVERFLOW_CELL_CAPACITY,
                             "round {round}: declined"
                         );
                         declined += 1;
                     }
-                    (Some(Some(XFlatBuild::Table(got))), Some(XFlatBuild::Table(want))) => {
+                    (
+                        XBucketBuild::Built(Some(XFlatBuild::Table(got))),
+                        Some(XFlatBuild::Table(want)),
+                    ) => {
                         x_assert_same_flat_tables(&got, &want);
                         overflow_seen |= want.longest_chain > 5;
                         built += 1;
                     }
-                    (Some(_), _) => panic!("round {round}, capacity {capacity}: another outcome"),
+                    (XBucketBuild::Built(_), _) => {
+                        panic!("round {round}, capacity {capacity}: another outcome")
+                    }
                 }
             }
         }
         assert!(built > 0 && declined > 0 && overflow_seen);
-        // The packed append holds offsets below 2^22.
-        assert!(x_bucket_packs((1 << 22) - 1));
-        assert!(!x_bucket_packs(1 << 22));
+        // Offsets up to 2^22 - 1 (bit 31 of the packed append set): a query of 2^22 - 1 letters
+        // with one segment at its end; a query of 2^22 letters is declined, and so is word size 6
+        // (the PV shift depends on the counts).
+        let length = (1usize << 22) - 1;
+        let mut query: Vec<u8> = (0..length)
+            .map(|_| FEW_LETTERS[rng.below(FEW_LETTERS.len())])
+            .collect();
+        let locations = [(length as i32 - 400, length as i32 - 1)];
+        let capacity = NCBI_OVERFLOW_CELL_CAPACITY;
+        let want = x_try_build_flat_with_capacity(
+            5,
+            1100,
+            &query,
+            &locations,
+            &[0..1],
+            capacity,
+            X_COUNT_CHUNK,
+        );
+        let got = x_try_build_flat_by_buckets(5, 1100, &query, &locations, &[0..1], capacity);
+        let (XBucketBuild::Built(Some(XFlatBuild::Table(got))), Some(XFlatBuild::Table(want))) =
+            (got, want)
+        else {
+            panic!("2^22 - 1 letters: not two tables");
+        };
+        assert!(got.hits.iter().any(|&offset| offset >= 1 << 21));
+        x_assert_same_flat_tables(&got, &want);
+        query.push(FEW_LETTERS[0]);
+        let got = x_try_build_flat_by_buckets(5, 1100, &query, &locations, &[0..1], capacity);
+        assert!(matches!(got, XBucketBuild::Declined), "2^22 letters");
+        let got =
+            x_try_build_flat_by_buckets(6, 1100, &query[..1000], &[(0, 999)], &[0..1], capacity);
+        assert!(matches!(got, XBucketBuild::Declined), "word size 6");
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:340-404

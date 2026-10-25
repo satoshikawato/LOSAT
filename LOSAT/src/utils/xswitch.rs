@@ -199,6 +199,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPGAP16",
     "LOSAT_X_BPHITBF",
     "LOSAT_X_BPLISTEDLEAN",
+    "LOSAT_X_BPLKDROP",
     "LOSAT_X_BPLKPAHEAD",
     "LOSAT_X_BPLKPFLAT",
     "LOSAT_X_BPLUT",
@@ -218,6 +219,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPREDOWINEXPAND",
     "LOSAT_X_BPSCANBF",
     "LOSAT_X_BPSEED",
+    "LOSAT_X_BPSEGWIN",
     "LOSAT_X_BPSUBJMETA",
     "LOSAT_X_BPSUBJRUN",
     "LOSAT_X_BPUNGAP",
@@ -297,6 +299,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXRESOLVE",
     "LOSAT_X_TBXRPTPAR",
     "LOSAT_X_TBXSCANBF",
+    "LOSAT_X_TBXSTORE",
     "LOSAT_X_TBXUNITMASK",
 ];
 

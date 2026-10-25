@@ -326,11 +326,13 @@ fn displayed_rows_into(
 /// The letters of the subjects that the displayed rows read, by subject index.
 #[derive(Clone, Copy)]
 pub(crate) enum SubjectLetters<'a> {
-    /// The records of `-subject`: their letters.
+    /// The records of `-subject` (`run_local`'s, or the command line's with LOSAT_X_TBXSTORE=0):
+    /// their letters.
     Records(&'a [FastaRecord]),
     /// The reported sequences of a `-db` search by rank (`ordinals`, the ordinal id of each
-    /// rank, into `stores`): a row reads the letters of its HSP's codons only, made from the
-    /// stored codes (`codon_window`).
+    /// rank, into `stores`), or (LOSAT_X_TBXSTORE) the packed records of `-subject` (ordinals
+    /// `0..n`): a row reads the letters of its HSP's codons only, made from the stored codes
+    /// (`codon_window`).
     Stored {
         stores: &'a [PackedNucleotide],
         ordinals: &'a [u32],

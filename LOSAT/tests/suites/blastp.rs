@@ -35,6 +35,8 @@ mod blastp_query_blocks_fmt;
 mod blastp_redo_db_subjects;
 #[path = "../blastp_redo_fit.rs"]
 mod blastp_redo_fit;
+#[path = "../blastp_redo_memory.rs"]
+mod blastp_redo_memory;
 #[path = "../blastp_redo_par.rs"]
 mod blastp_redo_par;
 #[path = "../blastp_restricted_gapped.rs"]

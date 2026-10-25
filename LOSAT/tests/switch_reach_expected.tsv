@@ -25,6 +25,7 @@ LOSAT_X_BPGAP	blastp	conditional	required	gap	x86_64 with AVX2, BMI1, LZCNT; onl
 LOSAT_X_BPGAP16	blastp	conditional	required	gap	only where BPGAP's vector rows run and its costs fit 16 bits (X-drop and gap_open+gap_extend <= 4096, gap_extend <= 256, largest matrix entry <= 4096); ref gap: needs costs beyond those or a restricted alignment scoring above ~32,700 (unit tests x_bpgap16_* cover both)
 LOSAT_X_BPHITBF	blastp	platform			per-hit loop only: CPUs without AVX2, aarch64, Wasm (AVX2 batches take subjects on x86); not blastp-fast
 LOSAT_X_BPLISTEDLEAN	blastp	conditional	required	gap	-db searches only (every task), not ABI v1 titles; ref gap: cannot happen on the CLI: ABI v1 titles (Web adapter) only
+LOSAT_X_BPLKDROP	blastp	conditional	required	gap	the lookup table dropped before the redo; kept only in the block search of BPQBLOCK at 2+ threads by a block whose table a later block's build takes (all but the last two blocks with BPLKPAHEAD, all but the last without); ref gap: needs a block search of 3+ blocks at 2+ threads (the CI fixtures make at most 2); tests/blastp_redo_memory.rs reaches it
 LOSAT_X_BPLKPAHEAD	blastp	conditional	required	required	only in BPQBLOCK block search (>50,000 query letters, 2+ blocks, supported outfmt), more than one thread
 LOSAT_X_BPLKPFLAT	blastp	conditional	required	required	-task blastp-fast and more than one thread
 LOSAT_X_BPLUT	blastp	always			Default (non-compressed) lookup table filled in place from per-cell counts
@@ -44,6 +45,7 @@ LOSAT_X_BPREDOPAR	blastp	conditional	required	required	more than one thread and 
 LOSAT_X_BPREDOWINEXPAND	blastp	always			acts wherever BPREDOPAR's windowed redo runs (its sides are BPREDOPAR's)
 LOSAT_X_BPSCANBF	blastp	always			Branch-free finding of lookup cells with hits in fused loop
 LOSAT_X_BPSEED	blastp	always			Fused two-hit seed stage: scan and diagonal test in one loop
+LOSAT_X_BPSEGWIN	blastp	conditional	gap	required	only where BPREDOPAR's windowed redo runs (more than one thread, at least two matches) and the store holds 4,096 entries (the switch's value) or more after a window; new gap: the CI fixtures' stores stay below 4,096 entries; tests/blastp_redo_memory.rs reaches it with LOSAT_X_BPSEGWIN=2
 LOSAT_X_BPSUBJMETA	blastp	conditional	required	gap	-subject with query-block path (BPQBLOCK: >50,000 query letters, several blocks, supported outfmt); not -db; ref gap: needs blastp -db with a query > 50,000 letters, outfmt 6, 2+ blocks
 LOSAT_X_BPSUBJRUN	blastp	conditional	required	required	-subject only, 2+ threads and more than one subject; not -db, not 1 thread
 LOSAT_X_BPUNGAP	blastp,blastx	always			Flat BLOSUM62 score table for ungapped extension walks
@@ -142,7 +144,8 @@ LOSAT_X_TBXPIPE	tblastx	conditional	required	required	2+ threads native, 2+ quer
 LOSAT_X_TBXPREFETCH	tblastx	conditional	gap	required	x86-64 only; only units whose diagonal table >= 1,536 KiB (value in KiB); new gap: needs a unit table >= 1,536 KiB (query ~400 kb), x86-64
 LOSAT_X_TBXQFRAMES	tblastx	conditional	required	required	2+ threads, 2+ frames in batch, not -seg no
 LOSAT_X_TBXQSLICE	tblastx	conditional	gap	required	x86-64 only; group span longer than 131,072 letters and span x threads >= 6 Mi letters; new gap: needs a group span > 131,072 letters and span x threads >= 6 Mi, x86-64
-LOSAT_X_TBXRESOLVE	tblastx	conditional	required	required	-subject (or run_local) record with a letter other than A, C, G, T (U included); -db reads stored codes, a record of A, C, G, T only copies its letters; new side: tblastx regression ambig.*, tie.nisland_seg_no, input.rna_*, outfmt0 tblastx.ambig.*
+LOSAT_X_TBXRESOLVE	tblastx	conditional	gap	gap	-subject (or run_local) record with a letter other than A, C, G, T (U included); -db reads stored codes, a record of A, C, G, T only copies its letters; since LOSAT_X_TBXSTORE the CLI searches its records packed, so only run_local (no fixture) and LOSAT_X_TBXSTORE=0 reach it (tests/tblastx_resolve.rs runs =0 of TBXSTORE): both sides gap
 LOSAT_X_TBXRPTPAR	tblastx	conditional	required	required	2+ threads on a pool (native or threaded Wasm); Web format observer keeps rows serial
 LOSAT_X_TBXSCANBF	tblastx	conditional	required	required	only tables with presence bits in under half of backbone cells (query up to about 60 kb)
+LOSAT_X_TBXSTORE	tblastx	conditional	required	gap	CLI -subject (with or without -subject_loc, any thread count): every record packed as read; never -db (stored codes), run_local or -outfmt 11 (records: the archive writes every subject's letters); ref gap: a set with a byte without an ncbi4na code (which the CLI reader never gives: it reads U as T) or a record over u32::MAX bases keeps its letters
 LOSAT_X_TBXUNITMASK	tblastx	conditional	required	required	unmasked table >=4x P cells and P<=256 KiB at 8+ threads, <=4,096 cells at 2-7 threads; ungrouped slices stay unmasked

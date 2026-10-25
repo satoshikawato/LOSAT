@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_PAIRPAR, shadow LOSAT_X_PAIRPARSHADOW): the one-hit seed stage of one
+//! EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the one-hit seed stage of one
 //! subject chunk (scan, lookup chains, word extension, diagonal hash, ungapped extension) with
 //! the scan of the subject cut into strips that the threads of the search pool scan, and the
 //! diagonal-hash fold done by the owner thread in the original scan order.
@@ -81,9 +81,8 @@ use super::{
     COMPRESSION_RATIO,
 };
 use crate::algorithm::blastn::lookup::TwoStageLookup;
-use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 #[path = "x_pair_seed_disc.rs"]
 mod disc;
@@ -98,22 +97,7 @@ pub(super) use na::{run as run_na, NaInputs};
 mod part;
 pub(super) use part::PartScratch;
 
-/// No NCBI counterpart: reads the switches once (LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARSHADOW); they
-/// do not change any value NCBI computes.
-fn switches() -> (bool, bool) {
-    static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();
-    *SWITCHES.get_or_init(|| {
-        (
-            crate::utils::xswitch::on("LOSAT_X_PAIRPAR"),
-            std::env::var_os("LOSAT_X_PAIRPARSHADOW").is_some(),
-        )
-    })
-}
-
-// No NCBI counterpart: counters of the shadow summary and of LOSAT_TIMING (scheduling only).
-static SHADOW_CHUNKS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_HITS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_CELLS: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart: counters of LOSAT_TIMING (scheduling only).
 static X_CHUNKS: AtomicU64 = AtomicU64::new(0);
 static X_STRIPS: AtomicU64 = AtomicU64::new(0);
 static X_SEEDS: AtomicU64 = AtomicU64::new(0);
@@ -235,11 +219,12 @@ fn chunk_free_scope(
 /// No NCBI counterpart (scheduling only): whether the strips take an unmasked chunk that the owner
 /// of the pool this thread runs in (two threads or more) searches by itself, in a search with these
 /// inputs (the names of `Inputs`; `two_stage`: the search's two-stage table, without which the
-/// stage never runs): `chunk_free_scope` with the switch of the table on (LOSAT_X_PAIRPAR, or
-/// LOSAT_X_PAIRPARDISC for a discontiguous table; not a shadow alone), or for a discontiguous
+/// stage never runs): `chunk_free_scope` for a contiguous table, with LOSAT_X_PAIRPARDISC on for
+/// a discontiguous table, or for a discontiguous
 /// table with the diagonal array the scope of `disc::in_scope_array` with LOSAT_X_PAIRPARDISCARR
 /// on. LOSAT_X_BNFEWSUBJ (`x_few_subj.rs`) reads it before it gives a search the shape of a
-/// one-subject search.
+/// one-subject search. (A chunk without a pool is not asked here: for a discontiguous table
+/// LOSAT_X_BNDCONE decides in `disc::run` and `disc::run_array`.)
 pub(super) fn takes_owner_chunks(
     two_stage: Option<&TwoStageLookup>,
     use_array_indexing: bool,
@@ -259,7 +244,7 @@ pub(super) fn takes_owner_chunks(
     } else if disc {
         disc::on()
     } else {
-        switches().0
+        true
     };
     on && chunk_free_scope(
         disc,
@@ -363,6 +348,10 @@ fn plan_strips(
 /// lookup width and step (unmasked subject), from `job.start` to `job.end`; every lookup
 /// chain hit as in `on_word` (the chain order); every pair through `seed_of_pair`.
 fn scan_strip(x: &Inputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
+    // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no chains.
+    if let Some(csr) = x.two_stage.x_mb_csr() {
+        return scan_strip_csr(x, csr, job, out);
+    }
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let packed = x.search_seq_packed;
@@ -392,6 +381,50 @@ fn scan_strip(x: &Inputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
         end,
         &mut on_kmer,
     );
+}
+
+/// EXPERIMENT (LOSAT_X_BNCSR): `scan_strip` over a contiguous table laid out as CSR
+/// (`lookup::x_bn_csr`): the words with hits (the presence test of `for_each_hit` first), in
+/// order, each `RING` words late through `x_dc_csr::Ring` (whose prefetches bring in the cell's
+/// offsets and the ends of its run), then the cell's run, which holds the chain's offsets in the
+/// chain's order; so the same pairs reach `seed_of_pair` in the same order.
+#[inline(never)]
+fn scan_strip_csr(
+    x: &Inputs<'_>,
+    csr: &crate::algorithm::blastn::lookup::x_dc_csr::Csr,
+    job: &StripJob,
+    out: &mut Vec<Seed>,
+) {
+    use crate::algorithm::blastn::lookup::x_dc_csr::Ring;
+    let two_stage = x.two_stage;
+    let s_range = job.s_range;
+    let mut emit = |(kmer_start, index): (usize, u64)| {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
+        // ```c
+        // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
+        // offset_pairs[i++].qs_offsets.s_off = s_off;
+        // ```
+        for &q_off_1 in csr.run(index as usize) {
+            seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+        }
+    };
+    let mut ring: Ring<'_, (usize, u64)> = Ring::new(csr);
+    let mut on_kmer = |kmer_start: usize, current_lut_kmer: u64| {
+        if two_stage.has_hits(current_lut_kmer) {
+            ring.push((kmer_start, current_lut_kmer), |w| w.1 as usize, &mut emit);
+        }
+    };
+    scan_kernel(
+        x.search_seq_packed,
+        x.s_len,
+        two_stage.lut_word_length(),
+        x.scan_step,
+        x.subject_masked,
+        job.start,
+        job.end,
+        &mut on_kmer,
+    );
+    ring.flush(&mut emit);
 }
 
 /// The scan kernel `scan_subject_kmers_with_ranges` picks for this lookup width and step,
@@ -704,9 +737,9 @@ fn fold<const PT: bool>(
         let diag = s_ext_start as isize - q_ext_start as isize;
         let (last_hit, _hit_saved) = {
             // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
-            // of a bucket below the bound.
+            // of a bucket below the bound. (A one-hit table keeps no memo, LOSAT_X_DIAGLV2.)
             let (level, _hit_len, hit_saved) = if x_lv {
-                diag_hash.retrieve_below(
+                diag_hash.retrieve_below::<false>(
                     diag as i32,
                     &x_lv_seeds,
                     s_ext_start + diag_offset as usize,
@@ -802,7 +835,7 @@ fn fold<const PT: bool>(
         // ```
         // (`hit_ready` is still 1 in one-hit mode; the reference keeps this test.)
         if !hit_ready {
-            part::insert::<PT>(
+            part::insert::<PT, false, false>(
                 diag_hash,
                 out,
                 x_key,
@@ -905,7 +938,7 @@ fn fold<const PT: bool>(
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
             //                       hit_ready, s_off_pos, window_size + Delta + 1);
             // ```
-            part::insert::<PT>(
+            part::insert::<PT, false, false>(
                 diag_hash,
                 out,
                 x_key,
@@ -943,19 +976,22 @@ fn fold<const PT: bool>(
         let qe = qs + ungapped.length;
 
         // NCBI architecture: Collect ungapped hit for batch processing
-        ungapped_hits.push(UngappedHit {
-            context_idx: q_idx,
-            query_idx: ctx.query_idx,
-            query_frame: ctx.frame,
-            query_context_offset: ctx.query_offset,
-            seed_q_off: q_off - q_context_start,
-            seed_s_off: s_off,
-            qs,
-            qe,
-            ss,
-            se: ungapped_se,
-            score: ungapped_score,
-        });
+        super::x_push_ungapped(
+            ungapped_hits,
+            UngappedHit {
+                context_idx: q_idx,
+                query_idx: ctx.query_idx,
+                query_frame: ctx.frame,
+                query_context_offset: ctx.query_offset,
+                seed_q_off: q_off - q_context_start,
+                seed_s_off: s_off,
+                qs,
+                qe,
+                ss,
+                se: ungapped_se,
+                score: ungapped_score,
+            },
+        );
         if PT {
             out.hit_keys.push(x_key);
         }
@@ -966,7 +1002,7 @@ fn fold<const PT: bool>(
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                       hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT>(
+        part::insert::<PT, false, false>(
             diag_hash,
             out,
             x_key,
@@ -1137,7 +1173,7 @@ impl<T> Strips<T> {
             }
             assert!(
                 !self.failed.load(Ordering::Acquire),
-                "LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARDISC: a strip scan failed"
+                "PAIRPAR / LOSAT_X_PAIRPARDISC: a strip scan failed"
             );
             match self.claim() {
                 Some(j) => {
@@ -1368,27 +1404,8 @@ fn seed_stage(
     stats
 }
 
-/// The strips path that made a `Stash`: this module (LOSAT_X_PAIRPARSHADOW), the child module
-/// `disc` (LOSAT_X_PAIRPARDISCSHADOW) or the child module `na` (LOSAT_X_PAIRPARNASHADOW).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum StashPath {
-    OneHit,
-    Disc,
-    Na,
-}
-
-/// The result of the shadow computation of one chunk, compared after the reference ran.
-struct Stash {
-    hits: Vec<UngappedHit>,
-    hash: DiagHashTable,
-    path: StashPath,
-}
-
-thread_local! {
-    static STASH: RefCell<Option<Stash>> = const { RefCell::new(None) };
-}
-
-// No NCBI counterpart: a copy of the diagonal hash for the shadow computation.
+// No NCBI counterpart: a copy of the diagonal hash, for the unit tests.
+#[cfg(test)]
 fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
     DiagHashTable {
         num_buckets: h.num_buckets,
@@ -1399,7 +1416,9 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
         offset: h.offset,
         window: h.window,
         max_level: h.max_level.clone(),
-        x_lv_shadow: h.x_lv_shadow,
+        x_last: h.x_last.clone(),
+        #[cfg(debug_assertions)]
+        x_last_fresh: h.x_last_fresh,
     }
 }
 
@@ -1415,10 +1434,9 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
 ///     }
 /// ```
 /// Dispatch of `collect_prelim_hits_for_chunk`: the seed stage of this chunk (the loop above
-/// with its one-hit extension) when the switch is on and the chunk is in scope; `true` means
-/// it has run and the reference scan is skipped. With LOSAT_X_PAIRPARSHADOW the stage runs on
-/// copies of the diagonal hash and the hit list, `false` is returned so the reference runs,
-/// and `shadow_check` compares the two. `fold_scratch` holds the allocations of
+/// with its one-hit extension) when the chunk is in scope (`chunk_free_scope`, a pool of two
+/// threads or more, an unmasked subject, one subject owner); `true` means it has run and the
+/// reference scan is skipped. `fold_scratch` holds the allocations of
 /// LOSAT_X_PAIRPARFOLD's partition tables and buffers (`x_pair_seed_part.rs`; every
 /// partitioned stage copies `diag_hash` into them).
 pub(super) fn run(
@@ -1429,16 +1447,9 @@ pub(super) fn run(
     fold_scratch: &mut PartScratch,
 ) -> bool {
     // A discontiguous megablast table: LOSAT_X_PAIRPARDISC (the diagonal hash) or
-    // LOSAT_X_PAIRPARDISCARR (the diagonal array) and their shadows decide.
+    // LOSAT_X_PAIRPARDISCARR (the diagonal array) decide.
     if x.two_stage.disc().is_some() {
         return disc::run(x, diag_hash, diag_array, ungapped_hits, fold_scratch);
-    }
-    let (on, shadow) = switches();
-    if !on && !shadow {
-        return false;
-    }
-    if shadow {
-        STASH.with(|s| s.borrow_mut().take());
     }
     if !chunk_free_scope(
         false,
@@ -1450,32 +1461,31 @@ pub(super) fn run(
     ) || x.subject_masked
         || !x.one_subject_owner
     {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
         return false;
     }
-    let threads = match pool_threads() {
-        Some(threads) => threads,
-        // the shadow also runs without a pool (strips on this thread)
-        None if shadow => 1,
-        None => return false,
+    let Some(threads) = pool_threads() else {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+        return false;
     };
-    let timing = if shadow { None } else { x.timing };
+    crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", true);
+    let timing = x.timing;
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
     let t_start = timed.then(std::time::Instant::now);
-    let mut shadow_hash = shadow.then(|| copy_hash(diag_hash));
-    let mut shadow_hits: Vec<UngappedHit> = Vec::new();
-    // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold split over the pool's threads (with the shadow,
-    // on the copies, which `shadow_check` compares with the reference's table and hits).
+    // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold split over the pool's threads.
     let fold_part = part::partitions(threads).map(|parts| part::FoldPart {
         scratch: fold_scratch,
         parts,
     });
-    let stats = {
-        let (hash, hits): (&mut DiagHashTable, &mut Vec<UngappedHit>) = match shadow_hash.as_mut() {
-            Some(hash) => (hash, &mut shadow_hits),
-            None => (diag_hash, ungapped_hits),
-        };
-        seed_stage(x, threads, hash, hits, timing, timed, fold_part)
-    };
+    let stats = seed_stage(
+        x,
+        threads,
+        diag_hash,
+        ungapped_hits,
+        timing,
+        timed,
+        fold_part,
+    );
     if let (Some(t_start), Some(timing)) = (t_start, timing) {
         // `[TIMING] scan_lookup`: the time of the stage minus the ungapped extensions, as
         // the reference counts its scan (which also leaves out the last flush). With
@@ -1493,148 +1503,14 @@ pub(super) fn run(
     X_FOLD_NS.fetch_add(stats.fold_ns, Ordering::Relaxed);
     X_OWNER_SCAN_NS.fetch_add(stats.owner_scan_ns, Ordering::Relaxed);
     X_WAIT_NS.fetch_add(stats.wait_ns, Ordering::Relaxed);
-    if let Some(hash) = shadow_hash {
-        STASH.with(|s| {
-            *s.borrow_mut() = Some(Stash {
-                hits: shadow_hits,
-                hash,
-                path: StashPath::OneHit,
-            })
-        });
-        return false;
-    }
     true
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:307-309
-/// ```c
-///     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-///           sizeof(BlastInitHSP), score_compare_match);
-/// ```
-/// LOSAT_X_PAIRPARSHADOW (and LOSAT_X_PAIRPARDISCSHADOW), before the sort above: the hit
-/// list and the diagonal hash the reference built for this chunk against the ones of `run`,
-/// element by element; panics on the first difference. LOSAT_X_PAIRPARDISCARRSHADOW: the hit
-/// list and the diagonal array (`disc::shadow_check_array`).
-pub(super) fn shadow_check(
-    ungapped_hits: &[UngappedHit],
-    diag_hash: &DiagHashTable,
-    hit_level_array: &[DiagStruct],
-    hit_len_array: &[u8],
-) {
-    disc::shadow_check_array(ungapped_hits, hit_level_array, hit_len_array);
-    let Some(stash) = STASH.with(|s| s.borrow_mut().take()) else {
-        return;
-    };
-    let name = match stash.path {
-        StashPath::OneHit => "LOSAT_X_PAIRPARSHADOW",
-        StashPath::Disc => "LOSAT_X_PAIRPARDISCSHADOW",
-        StashPath::Na => "LOSAT_X_PAIRPARNASHADOW",
-    };
-    let key = |h: &UngappedHit| {
-        (
-            h.context_idx,
-            h.query_idx,
-            h.query_frame,
-            h.query_context_offset,
-            h.seed_q_off,
-            h.seed_s_off,
-            h.qs,
-            h.qe,
-            h.ss,
-            h.se,
-            h.score,
-        )
-    };
-    for (i, (r, p)) in ungapped_hits.iter().zip(&stash.hits).enumerate() {
-        assert!(
-            key(r) == key(p),
-            "{name}: ungapped hit {i} differs: reference {:?} strips {:?}",
-            key(r),
-            key(p)
-        );
-    }
-    assert_eq!(
-        ungapped_hits.len(),
-        stash.hits.len(),
-        "{name}: number of ungapped hits differs"
-    );
-    let h = &stash.hash;
-    assert!(
-        (h.num_buckets, h.occupancy, h.capacity, h.offset, h.window)
-            == (
-                diag_hash.num_buckets,
-                diag_hash.occupancy,
-                diag_hash.capacity,
-                diag_hash.offset,
-                diag_hash.window
-            ),
-        "{name}: diagonal hash header differs: reference occupancy {} capacity {} strips occupancy {} capacity {}",
-        diag_hash.occupancy,
-        diag_hash.capacity,
-        h.occupancy,
-        h.capacity
-    );
-    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): both folds keep the level bounds alike.
-    assert!(
-        h.max_level == diag_hash.max_level,
-        "{name}: the level bounds of the diagonal hash (LOSAT_X_DIAGLV) differ"
-    );
-    if let Some(b) = (0..diag_hash.backbone.len()).find(|&b| diag_hash.backbone[b] != h.backbone[b])
-    {
-        panic!(
-            "{name}: diagonal hash bucket {b} differs: reference head {} strips head {}",
-            diag_hash.backbone[b], h.backbone[b]
-        );
-    }
-    let cell = |c: &super::DiagHashCell| (c.diag, c.level, c.hit_saved, c.hit_len, c.next);
-    let used = diag_hash.occupancy as usize;
-    for (i, (r, p)) in diag_hash.chain[..used]
-        .iter()
-        .zip(&h.chain[..used])
-        .enumerate()
-    {
-        let (r, p) = (cell(r), cell(p));
-        assert!(
-            r == p,
-            "{name}: diagonal hash cell {i} differs: reference {r:?} strips {p:?}"
-        );
-    }
-    match stash.path {
-        StashPath::Disc => {
-            disc::count_shadow(ungapped_hits.len(), diag_hash.occupancy);
-            return;
-        }
-        StashPath::Na => {
-            na::count_shadow(ungapped_hits.len(), diag_hash.occupancy);
-            return;
-        }
-        StashPath::OneHit => {}
-    }
-    SHADOW_CHUNKS.fetch_add(1, Ordering::Relaxed);
-    SHADOW_HITS.fetch_add(ungapped_hits.len() as u64, Ordering::Relaxed);
-    SHADOW_CELLS.fetch_add(diag_hash.occupancy as u64, Ordering::Relaxed);
-}
-
-/// No NCBI counterpart: the one summary line of LOSAT_X_PAIRPARSHADOW, and with LOSAT_TIMING
-/// the counters of LOSAT_X_PAIRPAR, on stderr at the end of the search; then those of
+/// No NCBI counterpart: with LOSAT_TIMING the counters of PAIRPAR, on stderr at the end of the
+/// search; then those of
 /// LOSAT_X_PAIRPARDISC (child module `disc`) and LOSAT_X_PAIRPARNA (child module `na`).
 pub(super) fn summary() {
-    let (on, shadow) = switches();
-    if shadow {
-        let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
-        let lookup = &crate::algorithm::blastn::lookup::x_mb_lookup_par::SHADOW_TABLES;
-        let lookup_cells = &crate::algorithm::blastn::lookup::x_mb_lookup_par::SHADOW_CELLS;
-        eprintln!(
-            "[X_PAIRPARSHADOW] blastn: lookup tables equal={} (elements {}), seed chunks equal={} (ungapped hits {}, hash cells {}){}",
-            load(lookup),
-            load(lookup_cells),
-            load(&SHADOW_CHUNKS),
-            load(&SHADOW_HITS),
-            load(&SHADOW_CELLS),
-            part::shadow_fields(part::ONE_HIT)
-        );
-    }
-    if (on || shadow) && std::env::var_os("LOSAT_TIMING").is_some() {
+    if std::env::var_os("LOSAT_TIMING").is_some() {
         let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
         let s = |c: &AtomicU64| c.load(Ordering::Relaxed) as f64 / 1e9;
         eprintln!(
@@ -1726,10 +1602,10 @@ mod tests {
         }
         if op.pass {
             decisions.push(2);
-            hash.insert(op.diag, op.ungapped_end, 0, true, op.s_off_pos, window);
+            hash.insert_plain(op.diag, op.ungapped_end, 0, true, op.s_off_pos, window);
         } else {
             decisions.push(1);
-            hash.insert(
+            hash.insert_plain(
                 op.diag,
                 op.s_end_pos,
                 op.s_end_pos - op.s_off_pos,
@@ -1764,7 +1640,7 @@ mod tests {
                 .collect();
             // cells left at `last_hit = -window` by a reset with a window
             for &d in diags.iter().take(3) {
-                start.insert(d, -table_window, 0, false, -table_window, window);
+                start.insert_plain(d, -table_window, 0, false, -table_window, window);
             }
             let n = 200 + rng.below(3000) as usize;
             let mut s = -20i32;
@@ -2056,61 +1932,58 @@ mod tests {
                     "case {case} threads {threads}"
                 );
             }
-            // LOSAT_X_DIAGLV (`x_diag_lv.rs`): on a table with level bounds (and with the
-            // shadow, which walks and checks every skipped bucket) the serial fold and the
+            // LOSAT_X_DIAGLV (`x_diag_lv.rs`): on a table with level bounds the serial fold and the
             // strips on 1, 2, 3 and 7 threads skip walks and give the hits and the table of
             // the fold without bounds, and the same bounds.
-            for shadow in [false, true] {
-                let new_lv_hash = || {
-                    let mut h = new_hash();
-                    h.x_lv_start(shadow);
-                    h
-                };
-                let mut lv_hash = new_lv_hash();
-                let mut lv_hits = Vec::new();
-                let before = super::super::x_diag_lv::test_skips();
-                fold::<false>(
-                    &x,
-                    &seeds,
-                    &mut lv_hash,
-                    &mut lv_hits,
-                    None,
-                    &mut pause,
-                    &mut FoldCounts::default(),
-                    &mut part::PartOut::default(),
-                    &[],
-                );
-                let skipped = super::super::x_diag_lv::test_skips() - before;
-                assert!(skipped > 0, "case {case}: no walk skipped");
-                assert_eq!(lv_hits.iter().map(key).collect::<Vec<_>>(), serial_keys);
-                assert_eq!(
-                    hash_state(&lv_hash),
-                    hash_state(&serial_hash),
-                    "case {case}"
-                );
-                for threads in [1usize, 2, 3, 7] {
-                    let pool = rayon::ThreadPoolBuilder::new()
-                        .num_threads(threads)
-                        .build()
-                        .unwrap();
-                    let (state, keys, max_level, skipped) = pool.install(|| {
-                        let mut hash = new_lv_hash();
-                        let mut hits = Vec::new();
-                        let before = super::super::x_diag_lv::test_skips();
-                        seed_stage(&x, threads, &mut hash, &mut hits, None, false, None);
-                        (
-                            hash_state(&hash),
-                            hits.iter().map(key).collect::<Vec<_>>(),
-                            hash.max_level.clone(),
-                            super::super::x_diag_lv::test_skips() - before,
-                        )
-                    });
-                    let at = format!("case {case} threads {threads} shadow {shadow}");
-                    assert!(skipped > 0, "{at}: no walk skipped");
-                    assert_eq!(keys, serial_keys, "{at}");
-                    assert_eq!(state, hash_state(&serial_hash), "{at}");
-                    assert_eq!(max_level, lv_hash.max_level, "{at}");
-                }
+            let new_lv_hash = || {
+                let mut h = new_hash();
+                h.x_lv_start();
+                h
+            };
+            let mut lv_hash = new_lv_hash();
+            let mut lv_hits = Vec::new();
+            let before = super::super::x_diag_lv::test_skips();
+            fold::<false>(
+                &x,
+                &seeds,
+                &mut lv_hash,
+                &mut lv_hits,
+                None,
+                &mut pause,
+                &mut FoldCounts::default(),
+                &mut part::PartOut::default(),
+                &[],
+            );
+            let skipped = super::super::x_diag_lv::test_skips() - before;
+            assert!(skipped > 0, "case {case}: no walk skipped");
+            assert_eq!(lv_hits.iter().map(key).collect::<Vec<_>>(), serial_keys);
+            assert_eq!(
+                hash_state(&lv_hash),
+                hash_state(&serial_hash),
+                "case {case}"
+            );
+            for threads in [1usize, 2, 3, 7] {
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .unwrap();
+                let (state, keys, max_level, skipped) = pool.install(|| {
+                    let mut hash = new_lv_hash();
+                    let mut hits = Vec::new();
+                    let before = super::super::x_diag_lv::test_skips();
+                    seed_stage(&x, threads, &mut hash, &mut hits, None, false, None);
+                    (
+                        hash_state(&hash),
+                        hits.iter().map(key).collect::<Vec<_>>(),
+                        hash.max_level.clone(),
+                        super::super::x_diag_lv::test_skips() - before,
+                    )
+                });
+                let at = format!("case {case} threads {threads}");
+                assert!(skipped > 0, "{at}: no walk skipped");
+                assert_eq!(keys, serial_keys, "{at}");
+                assert_eq!(state, hash_state(&serial_hash), "{at}");
+                assert_eq!(max_level, lv_hash.max_level, "{at}");
             }
             // LOSAT_X_PAIRPARFOLD (`x_pair_seed_part.rs`): the fold split into 2, 3, 7, 8 and 16
             // partitions on 1..8 threads, on tables with and without level bounds, for two
@@ -2124,7 +1997,7 @@ mod tests {
                 let new_table = || {
                     let mut h = new_hash();
                     if levels {
-                        h.x_lv_start(false);
+                        h.x_lv_start();
                     }
                     h
                 };

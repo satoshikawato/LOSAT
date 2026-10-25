@@ -750,8 +750,10 @@ for (const c of PROGRAM_CASES) {
     if ((await page.getByTestId('dotplot-scale-note').count()) === 0) {
       expect(Math.min(Math.abs(width! - height! * ratio), Math.abs(height! - width! / ratio))).toBeLessThanOrEqual(0.5);
     } else expect(Math.min(width!, height!)).toBe(120);
-    // The axis titles as drawn: the IDs and the units of the visible spans.
+    // The axis titles as drawn: the IDs and the units of the visible spans. The plot is drawn on
+    // an animation frame, after the attributes above are rendered, so the titles are waited for.
     const titles = async () => JSON.parse((await canvas.getAttribute('data-titles'))!) as [string, string];
+    await expect(canvas).toHaveAttribute('data-titles', /^\[/);
     expect((await titles())[1]).toMatch(new RegExp(`^Subject ${literal(fields[1]!)} \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})\\)$`));
     if (c.id === 'tblastn') {
       // TBLASTN's pair is to scale at 1280 px, its protein axis drawn at 3 nt per aa, which its title

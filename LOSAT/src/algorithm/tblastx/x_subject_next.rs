@@ -43,10 +43,11 @@
 //! not depend on which thread searched which subject or in which order: each subject's HSPs are
 //! sent as one list (`WorkerState::tx`) and `report::final_hit_order` orders them by query and
 //! subject index, as for rayon's pieces, whose order of completion is not fixed either. The
-//! tables of LOSAT_X_SEEDRELEASE count the subjects whose stages have ended, not their order.
+//! tables of the seed release (`x_seed_release.rs`) count the subjects whose stages have ended, not
+//! their order.
 //!
 //! The threads run their loops as one broadcast job each, not as jobs a thread may steal, so a
-//! thread that waits inside a search (the unit path of LOSAT_X_PAIRPAR runs a subject's units on
+//! thread that waits inside a search (the unit path of PAIRPAR runs a subject's units on
 //! the pool) runs only stolen units, which end on their own. A loop never waits: it takes indices
 //! until the counter passes the last one. A panic in a search stops the other loops before their
 //! next subject, and `rayon::broadcast` raises it on the calling thread.
@@ -56,8 +57,7 @@ use std::sync::OnceLock;
 
 // No NCBI counterpart: the variable is read once per process; it chooses how the subject loop is
 // scheduled, not a value NCBI computes.
-/// LOSAT_X_TBXNEXT: a strict-set switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is
-/// not set; `utils/xswitch.rs`).
+/// LOSAT_X_TBXNEXT: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
 pub(super) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXNEXT"))
@@ -229,7 +229,14 @@ mod tests {
                     if i == 10 {
                         panic!("subject 10");
                     }
-                    std::hint::black_box(work(i + 4));
+                    // About 50 µs a subject: the other threads take subjects until the panicking
+                    // one has printed its message and unwound to `take_subjects`, and with
+                    // subjects of about 1 µs (`work(i + 4)`) they took all of them on a Windows
+                    // runner at opt-level 3 (2026-10-23). All of them now take seconds.
+                    std::hint::black_box(
+                        (0..50_000u64)
+                            .fold(i as u64, |acc, x| acc.wrapping_mul(31).wrapping_add(x)),
+                    );
                 });
             })
         }));

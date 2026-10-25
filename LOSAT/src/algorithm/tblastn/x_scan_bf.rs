@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBNSCANBF): tblastn's lookup scan without a branch on the presence
+//! Tblastn's lookup scan without a branch on the presence
 //! vector.
 //!
 //! NCBI's scan (c++/src/algo/blast/core/blast_aascan.c:75-127, `s_BlastAaScanSubject`, kept
@@ -20,13 +20,13 @@
 //! `X_SCAN_BF_SLACK` entries after `array_size`; the entries past the returned count are not
 //! part of the result.
 //!
-//! The switch is read once. It is in the strict set (`utils/xswitch.rs`): on unless
-//! `LOSAT_X_TBNSCANBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_X_STATS` set,
-//! `main` prints `[X_STATS] TBNSCANBF units_bf= calls_bf= units_ref= calls_ref=` at exit (the scan
-//! units of the unit path scanned by this loop and by NCBI's, and the scan calls they took; a call
-//! more than the unit's ranges is a stop and resume), when the search scanned any. blastp keeps the
+//! The unit path of every search scans with this loop where `x_scan_byte.rs` does not (the former
+//! switch `LOSAT_X_TBNSCANBF` graduated on 2026-10-26). With `LOSAT_X_STATS` set,
+//! `main` prints `[X_STATS] TBNSCANBF units= calls=` at exit (the scan units of the unit path
+//! scanned by this loop, and the scan calls they took; a call more than the unit's ranges is a stop
+//! and resume), when the search scanned any. blastp keeps the
 //! scan of `tblastx/blast_aascan.rs`; blastx calls this scan and the candidate loop
-//! (`x_block_candidates`) under its own switch, LOSAT_X_BXSCANBF (`blastx/x_seed_scan.rs`); TBLASTX
+//! (`x_block_candidates`) always (LOSAT_X_BXSCANBF graduated 2026-10-26, `blastx/x_seed_scan.rs`); TBLASTX
 //! scans each subject range with this loop under its own switch, LOSAT_X_TBXSCANBF
 //! (`tblastx/x_scan_bf.rs`).
 
@@ -37,54 +37,41 @@ use crate::algorithm::tblastx::lookup::{
 use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// EXPERIMENT (LOSAT_X_TBNSCANBF): subject words looked at before their hits are copied.
+/// Subject words looked at before their hits are copied.
 pub(crate) const X_BLOCK: usize = 256;
 
-/// EXPERIMENT (LOSAT_X_TBNSCANBF): offset-array entries needed after `array_size` (a cell's
+/// Offset-array entries needed after `array_size` (a cell's
 /// hits are written as `AA_HITS_PER_CELL` pairs, also when the array is full).
 pub(crate) const X_SCAN_BF_SLACK: usize = AA_HITS_PER_CELL;
 
-// No NCBI counterpart: reads LOSAT_X_TBNSCANBF once; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNSCANBF): whether tblastn scans with `x_scan_one_range_bf`; a switch
-/// of the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
-pub(super) fn x_tbn_scan_bf() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSCANBF"))
-}
-
 // No NCBI counterpart: LOSAT_X_STATS counters that tell which scan ran; they do not change any
 // value NCBI computes.
-/// Scan units of the unit path and their scan calls, by `x_scan_one_range_bf` (`[0]`) and by
-/// NCBI's loop (`[1]`).
-static UNITS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-static CALLS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+/// Scan units of the unit path and their scan calls, by `x_scan_one_range_bf`.
+static UNITS: AtomicU64 = AtomicU64::new(0);
+static CALLS: AtomicU64 = AtomicU64::new(0);
 
-/// EXPERIMENT (LOSAT_X_TBNSCANBF): whether the `[X_STATS] TBNSCANBF` counters are kept
+/// Whether the `[X_STATS] TBNSCANBF` counters are kept
 /// (`LOSAT_X_STATS` set).
 pub(super) fn x_stats() -> bool {
     static STATS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *STATS.get_or_init(|| std::env::var_os("LOSAT_X_STATS").is_some())
 }
 
-/// EXPERIMENT (LOSAT_X_TBNSCANBF): counts one scan unit and its `calls` for the
+/// Counts one scan unit and its `calls` for the
 /// `[X_STATS] TBNSCANBF` line.
-pub(super) fn x_count_unit(bf: bool, calls: u64) {
-    let side = usize::from(!bf);
-    UNITS[side].fetch_add(1, Ordering::Relaxed);
-    CALLS[side].fetch_add(calls, Ordering::Relaxed);
+pub(super) fn x_count_unit(calls: u64) {
+    UNITS.fetch_add(1, Ordering::Relaxed);
+    CALLS.fetch_add(calls, Ordering::Relaxed);
 }
 
 /// The `[X_STATS] TBNSCANBF` line (printed by `main` at exit) with `LOSAT_X_STATS`, when a
 /// search scanned units of the unit path.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
-    let units = UNITS.each_ref().map(|units| units.load(Ordering::Relaxed));
-    let calls = CALLS.each_ref().map(|calls| calls.load(Ordering::Relaxed));
-    if x_stats() && units[0] + units[1] > 0 {
-        eprintln!(
-            "[X_STATS] TBNSCANBF units_bf={} calls_bf={} units_ref={} calls_ref={}",
-            units[0], calls[0], units[1], calls[1]
-        );
+    let units = UNITS.load(Ordering::Relaxed);
+    let calls = CALLS.load(Ordering::Relaxed);
+    if x_stats() && units > 0 {
+        eprintln!("[X_STATS] TBNSCANBF units={units} calls={calls}");
     }
 }
 
@@ -110,7 +97,7 @@ pub fn print_summary() {
 // }
 // s_range[1] = (Int4)(s - subject->sequence);
 // ```
-/// EXPERIMENT (LOSAT_X_TBNSCANBF): `s_blast_aa_scan_subject_one_range` with the presence test
+/// `s_blast_aa_scan_subject_one_range` with the presence test
 /// made branch-free (see the module text). Same arguments, same result, same `s_range`;
 /// `offset_pairs` must hold `array_size + X_SCAN_BF_SLACK` entries.
 pub(crate) fn x_scan_one_range_bf(
@@ -206,10 +193,10 @@ pub(crate) fn x_scan_one_range_bf(
     totalhits
 }
 
-/// EXPERIMENT (LOSAT_X_TBNSCANBF): the mask of a table of word size 3 and 5-bit letters.
+/// The mask of a table of word size 3 and 5-bit letters.
 const X_MASK_W3C5: usize = (1 << 15) - 1;
 
-/// EXPERIMENT (LOSAT_X_TBNSCANBF): `x_candidates::<3, 5>` for the mask `X_MASK_W3C5`, as a
+/// `x_candidates::<3, 5>` for the mask `X_MASK_W3C5`, as a
 /// counted loop over the new letters with the candidate's position kept shifted: the same
 /// rolling index (`ComputeTableIndexIncremental`), presence test and candidates.
 #[inline(always)]
@@ -249,7 +236,7 @@ fn x_candidates_w3c5(
     n
 }
 
-/// EXPERIMENT (LOSAT_X_TBNSCANBF): writes the candidates of the words `block.0 ..= block.1`
+/// Writes the candidates of the words `block.0 ..= block.1`
 /// (`position << 32 | index`, the list's length advanced by the presence bit) and returns how
 /// many; `index` is the rolling index of the word before `block.0` and becomes that of
 /// `block.1`. `table` = (word size, letter width, mask); `pv` is the table's presence vector.
@@ -275,7 +262,7 @@ pub(crate) fn x_block_candidates(
     }
 }
 
-/// EXPERIMENT (LOSAT_X_TBNSCANBF): [`x_block_candidates`] for one table shape. `WORD` and
+/// [`x_block_candidates`] for one table shape. `WORD` and
 /// `CHARSIZE` are the table's word size and letter width when known at compile time, 0 to read
 /// them from `table` (word size, letter width, mask).
 #[inline(always)]

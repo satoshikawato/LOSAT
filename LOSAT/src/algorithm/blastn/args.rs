@@ -201,8 +201,8 @@ pub struct BlastnArgs {
     ///         align_length * hit_options->percent_identity) ||
     ///         align_length < hit_options->min_hit_length) ;
     /// ```
-    #[arg(long = "perc_identity", default_value_t = 0.0, value_parser = blastn_percentage)]
-    pub percent_identity: f64,
+    #[arg(long = "perc_identity", value_parser = blastn_percentage)]
+    pub percent_identity: Option<f64>,
     /// Minimum hit length for filtering HSPs (Blast_HSPTest).
     ///
     /// Default: 0 (disabled, matches NCBI BLAST default from calloc initialization).
@@ -342,6 +342,29 @@ pub struct BlastnArgs {
     // ```
     #[arg(long = "lcase_masking", default_value_t = false)]
     pub lcase_masking: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:358-363
+    // ```c++
+    //         arg_desc.AddOptionalKey(kArgWindowMaskerDatabase, "window_masker_db",
+    //                 "Enable WindowMasker filtering using this repeats database.",
+    //                 CArgDescriptions::eString);
+    //         arg_desc.SetDependency(kArgWindowMaskerDatabase,
+    //                                CArgDescriptions::eExcludes,
+    //                                kArgRemote);
+    // ```
+    // Read by the filtering handler after `-dust` (`resolve_window_masker`).
+    #[arg(
+        long = "window_masker_db",
+        value_name = "window_masker_db",
+        help = "Enable WindowMasker filtering using this repeats database."
+    )]
+    pub window_masker_db: Option<String>,
+    /// The masker of `-window_masker_db` (`resolve_window_masker`); `None` without the option.
+    #[arg(skip)]
+    pub window_masker: Option<std::sync::Arc<super::window_masker::WindowMasker>>,
+    /// Where `-window_masker_db` is read from: the file system when `None`; LOSAT Web's adapter
+    /// gives the counts files it holds under their names.
+    #[arg(skip)]
+    pub window_masker_counts: Option<std::sync::Arc<dyn crate::utils::winmask::CountsSource>>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
     // ```c++
     //         arg_desc.AddDefaultKey(kArgStrand, "strand",
@@ -395,8 +418,8 @@ pub struct BlastnArgs {
     // ```
     /// If the query range of a hit is enveloped by that of at least this many
     /// higher-scoring hits, delete the hit (default: 0, no culling).
-    #[arg(long, default_value_t = 0, value_parser = nonnegative_ncbi_integer)]
-    pub culling_limit: i32,
+    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: Option<i32>,
     // NCBI blastn has no such option (the LOSAT-only option was removed, AGENTS.md rule 5).
     #[arg(skip = false)]
     pub verbose: bool,
@@ -436,6 +459,30 @@ pub struct BlastnArgs {
     // are set (`blastinput/app.rs` `parse_formatting_string` and `report_format`).
     #[arg(long, default_value = "0", value_name = "SPEC")]
     pub outfmt: String,
+
+    /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search
+    /// reads the arguments (`archive::handle_for`).
+    #[arg(skip)]
+    pub archive: Option<crate::report::archive::ArchiveHandle>,
+
+    /// The command line of the run as the SAM `@PG` line shows it: every argument followed by
+    /// one space, raw bytes (`GetCmdlineArgs`); `None` where there is no command line (the
+    /// library, ABI v1). Set by `run` from the process's arguments.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:878-885
+    /// ```c++
+    /// string
+    /// GetCmdlineArgs(const CNcbiArguments & a)
+    /// {
+    /// 	string cmd = kEmptyStr;
+    /// 	for(unsigned int i=0; i < a.Size(); i++) {
+    /// 		cmd += a[i] + " ";
+    /// 	}
+    /// 	return cmd;
+    /// }
+    /// ```
+    #[arg(skip)]
+    pub command_line: Option<Vec<u8>>,
 }
 
 impl BlastnArgs {
@@ -471,6 +518,18 @@ impl BlastnArgs {
     /// ```c++
     ///     SetDbLength(0);
     /// ```
+    /// `-perc_identity`, 0 (disabled) when it is not given. The BLAST archive records whether
+    /// it was given (`percent_identity`).
+    pub fn percent_identity_value(&self) -> f64 {
+        self.percent_identity.unwrap_or(0.0)
+    }
+
+    /// `-culling_limit`, 0 (no culling) when it is not given. The BLAST archive records
+    /// whether it was given (`culling_limit`).
+    pub fn culling_limit_value(&self) -> i32 {
+        self.culling_limit.unwrap_or(0)
+    }
+
     pub fn db_length(&self) -> i64 {
         self.dbsize.unwrap_or(0)
     }
@@ -500,6 +559,27 @@ impl BlastnArgs {
     /// ...
     ///         if ( !m_QueryIsProtein && args[kArgDustFiltering]) {
     /// ```
+    /// The filtering handler's `-window_masker_db`, after `-dust`: NCBI's check of the counts
+    /// file (`window_masker::open`), and the masker made from it.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-458
+    /// ```c++
+    ///     if (args.Exist(kArgWindowMaskerDatabase) &&
+    ///         args[kArgWindowMaskerDatabase]) {
+    ///         const string& stat_file = args[kArgWindowMaskerDatabase].AsString();
+    ///         const CSeqMaskerIstatFactory::EStatType type =
+    ///             CSeqMaskerIstatFactory::DiscoverStatType(stat_file);
+    /// ```
+    pub fn resolve_window_masker(&mut self) -> anyhow::Result<()> {
+        if let Some(name) = &self.window_masker_db {
+            let source = super::window_masker::source_of(self.window_masker_counts.as_ref());
+            self.window_masker = Some(std::sync::Arc::new(super::window_masker::open(
+                name, &*source,
+            )?));
+        }
+        Ok(())
+    }
+
     pub fn resolve_dust(&mut self) -> anyhow::Result<()> {
         if self.dust_filtering.is_none()
             && !crate::algorithm::blastn::coordination::task_dust_by_default(&self.task)

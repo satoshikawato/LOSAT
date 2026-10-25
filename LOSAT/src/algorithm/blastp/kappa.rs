@@ -87,9 +87,12 @@ pub(crate) struct BlastpTraceHspTarget {
 // s_Blast_HSPGetNumIdentitiesAndPositives(...)
 // ```
 pub(crate) fn blastp_trace_hsp_target() -> Option<BlastpTraceHspTarget> {
+    if !crate::utils::xdiag::ON {
+        return None;
+    }
     static TARGET: OnceLock<Option<BlastpTraceHspTarget>> = OnceLock::new();
     *TARGET.get_or_init(|| {
-        let value = std::env::var("LOSAT_DEBUG_BLASTP_TRACE_HSP").ok()?;
+        let value = crate::utils::xdiag::var("LOSAT_DEBUG_BLASTP_TRACE_HSP").ok()?;
         let fields: Vec<&str> = value.split(',').map(str::trim).collect();
         match fields.as_slice() {
             [q_idx, s_idx, q_start, q_end, s_start, s_end] => Some(BlastpTraceHspTarget {
@@ -301,7 +304,7 @@ struct CachedSubjectRangeData {
 // later query-subject pairs while preserving the same returned sequence bytes.
 pub(crate) struct BlastpKappaSubjectRangeCache {
     masked_ranges: HashMap<(i32, i32, i32), CachedSubjectRangeData>,
-    // EXPERIMENT (LOSAT_X_SEGSHARE): when set, used instead of `masked_ranges`.
+    // Graduated 2026-10-22 (was `LOSAT_X_SEGSHARE`): when set, used instead of `masked_ranges`.
     x_shared: Option<std::sync::Arc<XSharedSubjectRanges>>,
 }
 
@@ -315,14 +318,14 @@ pub(crate) struct BlastpKappaSubjectRangeCache {
 // SEG of the subject range depends on the range and the SEG parameters only, so one masked copy
 // serves every query that reaches the same range. Placement of an identical result; no value is
 // computed differently.
-/// EXPERIMENT (LOSAT_X_SEGSHARE): one store of masked subject ranges for all
+/// Graduated 2026-10-22 (was `LOSAT_X_SEGSHARE`): one store of masked subject ranges for all
 /// queries of a search.
 ///
 /// The serial redo keeps a single `BlastpKappaSubjectRangeCache` for the whole
 /// search, so a subject is SEG-masked once however many queries hit it. The
 /// query-parallel redo creates one cache per query, in which a subject range
 /// is never looked up twice, so every (query, subject) pair runs SEG again.
-/// With the switch on those per-query caches read and write this store. The
+/// Those per-query caches read and write this store. The
 /// entry for a key is the value the serial cache holds for it: the masked
 /// range and its bias flag depend on the subject range only. Two threads may
 /// compute the same entry at the same time; they then store equal values.
@@ -349,24 +352,33 @@ impl XSharedSubjectRanges {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
-}
 
-// No NCBI counterpart: reads the LOSAT_X_SEGSHARE / LOSAT_X_SEGSHARESHADOW switches once; it does
-// not change any value NCBI computes.
-/// 0 = off, 1 = `LOSAT_X_SEGSHARE`, 2 = `LOSAT_X_SEGSHARESHADOW` (every hit is
-/// computed again and compared).
-pub(crate) fn x_seg_share() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_SEGSHARESHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_SEGSHARE") {
-            1
-        } else {
-            0
+    // No NCBI counterpart: memory only (LOSAT_X_BPSEGWIN, `x_redo_par::x_bp_seg_win`); it changes
+    // no value NCBI computes.
+    /// Drops every entry and the maps' room. A range looked up afterwards is masked again, into the
+    /// value it had: an entry depends on its key only.
+    pub(crate) fn x_clear(&self) {
+        for shard in &self.shards {
+            *shard
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = HashMap::new();
         }
-    })
+    }
+
+    // No NCBI counterpart: memory only (LOSAT_X_BPSEGWIN's size rule); it changes no value NCBI
+    // computes.
+    /// The number of entries (LOSAT_X_BPSEGWIN's rule, after a window: the sum of the shards').
+    pub(crate) fn x_len(&self) -> usize {
+        self.shards
+            .iter()
+            .map(|shard| {
+                shard
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .len()
+            })
+            .sum()
+    }
 }
 
 impl BlastpKappaSubjectRangeCache {
@@ -379,7 +391,7 @@ impl BlastpKappaSubjectRangeCache {
 
     // No NCBI counterpart: constructor that selects the search-wide store (see
     // XSharedSubjectRanges); it does not change any value NCBI computes.
-    /// EXPERIMENT (LOSAT_X_SEGSHARE): a cache backed by the search-wide store.
+    /// A cache backed by the search-wide store (`None`: the cache keeps its own map).
     pub(crate) fn x_with_shared(shared: Option<std::sync::Arc<XSharedSubjectRanges>>) -> Self {
         Self {
             masked_ranges: HashMap::new(),
@@ -397,7 +409,7 @@ impl BlastpKappaSubjectRangeCache {
         //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
         //                                              subject_maybe_biased);
         // ```
-        // Dispatch point: with the switch on, a cached SEG result is read from the shared store
+        // Dispatch point: with a shared store, a cached SEG result is read from it
         // instead of the per-query map. The stored value is what s_DoSegSequenceData left in the
         // buffer for this range.
         if let Some(shared) = &self.x_shared {
@@ -628,7 +640,7 @@ fn redo_preliminary_blastp_hit(
     // matchStart = gap_align->subject_start + subject_range->begin;
     // matchEnd   = gap_align->subject_stop  + subject_range->begin;
     // ```
-    if std::env::var_os("LOSAT_DEBUG_BLASTP_WSSV").is_some()
+    if crate::utils::xdiag::var_os("LOSAT_DEBUG_BLASTP_WSSV").is_some()
         && query_start == 78
         && query_end == 789
         && subject_start == 0
@@ -828,160 +840,6 @@ const BLASTP_REDO_ALIGN_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallb
     free_align_traceback: None,
 };
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:305-354
-// ```c
-// s_HSPListFromDistinctAlignments(BlastHSPList *hsp_list,
-//                                 BlastCompo_Alignment ** alignments,
-//                                 int oid,
-//                                 const BlastQueryInfo* queryInfo,
-//                                 int frame)
-// {
-//     ...
-//     editScript = align->context;
-//     ...
-//     Blast_HSPInit(..., align->score, &editScript, &new_hsp);
-// }
-// ```
-#[cfg(test)]
-fn redone_hit_from_alignment(
-    align: &BlastCompoAlignment,
-    template_hit: &BlastpPreliminaryHsp,
-) -> Option<RedoneBlastpHit> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1598-1606,1620-1643,326-331;
-    // c++/src/algo/blast/core/blast_gapalign.c:4620-4653
-    // ```c
-    // seqData->buffer = calloc((self->length + 2), sizeof(Uint1));
-    // for (idx = 0; idx < seqData->length; idx++) {
-    //     seqData->data[idx] = origData[idx];
-    // }
-    // *seqData->data++ = '\0';
-    // if ((! (fence_hit && *fence_hit)) && (q_start < q_length) && (s_start < s_length)) {
-    //     found_end = TRUE;
-    //     gap_align->query_stop = q_start + private_q_length + 1;
-    //     gap_align->subject_stop = s_start + private_s_length + 1;
-    // }
-    // status = Blast_HSPInit(align->queryStart, align->queryEnd,
-    //     align->matchStart, align->matchEnd, ...);
-    // ```
-    // The actual BLASTP protein-range getter copies NCBISTDAA 0..27,
-    // adds NULLB=0, and SEG writes X=21; it never constructs FENCE_SENTRY=201.
-    // Valid seeded starts therefore reach found_end=TRUE. Report conversion
-    // enforces that domain; it must never silently drop a signed raw payload.
-    let query_start = usize::try_from(align.query_start)
-        .expect("NCBI full-protein Kappa query start must be non-negative");
-    let query_end = usize::try_from(align.query_end)
-        .expect("NCBI full-protein Kappa query end must be non-negative");
-    let subject_start = usize::try_from(align.match_start)
-        .expect("NCBI full-protein Kappa subject start must be non-negative");
-    let subject_end = usize::try_from(align.match_end)
-        .expect("NCBI full-protein Kappa subject end must be non-negative");
-    let gap_info = match align.context.as_ref() {
-        Some(BlastCompoAlignmentContext::EditScript(edit_script)) => Some(edit_script.clone()),
-        None => None,
-        Some(BlastCompoAlignmentContext::PreliminaryHspIndex(_)) => return None,
-    };
-
-    Some(RedoneBlastpHit {
-        hit: Hit {
-            identity: 0.0,
-            length: 0,
-            mismatch: 0,
-            gapopen: 0,
-            q_start: query_start + 1,
-            q_end: query_end,
-            s_start: subject_start + 1,
-            s_end: subject_end,
-            e_value: 0.0,
-            bit_score: 0.0,
-            num_ident: 0,
-            query_frame: template_hit.query_frame,
-            query_length: template_hit.query_length,
-            q_idx: template_hit.q_idx,
-            s_idx: template_hit.s_idx,
-            raw_score: align.score,
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
-            // ```c
-            // typedef struct BlastHSP {
-            //    BlastSeg query;
-            //    BlastSeg subject;
-            // } BlastHSP;
-            // ```
-            sort_query_offset: 0,
-            sort_query_end: 0,
-            sort_subject_offset: 0,
-            sort_subject_end: 0,
-            has_sort_offsets: false,
-            gap_info,
-            num_positives: 0,
-        },
-        query_start: align.query_start,
-        query_end: align.query_end,
-        subject_start: align.match_start,
-        subject_end: align.match_end,
-    })
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:305-354
-// ```c
-// s_HSPListFromDistinctAlignments(BlastHSPList *hsp_list,
-//                                 BlastCompo_Alignment ** alignments,
-//                                 int oid,
-//                                 const BlastQueryInfo* queryInfo,
-//                                 int frame)
-// {
-//     ...
-//     editScript = align->context;
-//     ...
-//     Blast_HSPInit(..., align->score, &editScript, &new_hsp);
-// }
-// ```
-#[cfg(test)]
-fn hits_from_distinct_alignments(
-    alignments: &Option<Box<BlastCompoAlignment>>,
-    template_hit: &BlastpPreliminaryHsp,
-) -> Vec<RedoneBlastpHit> {
-    let mut hits = Vec::new();
-    let mut current = alignments.as_deref();
-    while let Some(align) = current {
-        if let Some(hit) = redone_hit_from_alignment(align, template_hit) {
-            hits.push(hit);
-        }
-        current = align.next.as_deref();
-    }
-    hits
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:305-354
-// ```c
-// s_HSPListFromDistinctAlignments(BlastHSPList *hsp_list,
-//                                 BlastCompo_Alignment ** alignments,
-//                                 int oid,
-//                                 const BlastQueryInfo* queryInfo,
-//                                 int frame)
-// {
-//     ...
-//     Blast_HSPListSortByScore(hsp_list);
-// }
-// ```
-#[cfg(test)]
-fn hsplist_from_redone_hits(
-    redone_hits: &[RedoneBlastpHit],
-    oid: u32,
-    query_index: u32,
-) -> BlastpHspList {
-    let mut hsp_list = BlastpHspList {
-        oid,
-        query_index,
-        hsps: redone_hits
-            .iter()
-            .map(|redone_hit| BlastpHsp::from_hit(redone_hit.hit.clone()))
-            .collect(),
-        best_evalue: i32::MAX as f64,
-    };
-    sort_hsplist_by_score(&mut hsp_list);
-    hsp_list
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:323-329
 // ```c
 // GapEditScript * editScript = align->context;
@@ -1067,6 +925,22 @@ fn redone_hit_from_alignment_owned(
     })
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:305-354
+// ```c
+// s_HSPListFromDistinctAlignments(BlastHSPList *hsp_list,
+//                                 BlastCompo_Alignment ** alignments,
+//                                 int oid,
+//                                 const BlastQueryInfo* queryInfo,
+//                                 int frame)
+// {
+//     ...
+//     editScript = align->context;
+//     ...
+//     Blast_HSPInit(..., align->score, &editScript, &new_hsp);
+//     ...
+//     Blast_HSPListSortByScore(hsp_list);
+// }
+// ```
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3656-3661
 // ```c
 // s_HSPListFromDistinctAlignments(hsp_list,
@@ -1266,32 +1140,25 @@ fn build_subject_range_data(
         });
 
     if should_apply_seg {
-        // EXPERIMENT (LOSAT_X_SEGSHARESHADOW): a hit that is computed again below.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
         // ```c
         //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
         //                                              subject_maybe_biased);
         // ```
-        // Shadow check: on a shared-store hit the range is still masked here and compared with the
-        // stored copy (assert). No value NCBI computes is changed.
-        let mut x_expected: Option<CachedSubjectRangeData> = None;
+        // A cached SEG result of this range (this cache or the shared store) replaces the call.
         if let Some(cache) = subject_range_cache.as_mut() {
             if let Some(cached) = cache.get(matching_seq, subject_range) {
-                if cache.x_shared.is_some() && x_seg_share() == 2 {
-                    x_expected = Some(cached);
-                } else {
-                    record_blastp_kappa_range_event(&BLASTP_KAPPA_SUBJECT_SEG_CACHE_HITS);
-                    record_blastp_kappa_range_counter(
-                        &BLASTP_KAPPA_SUBJECT_RANGE_BYTES_COPIED,
-                        cached.subject.length.max(0) as usize,
-                    );
-                    return BlastRedoRangeResult {
-                        query,
-                        subject: cached.subject,
-                        subject_maybe_biased: cached.subject_maybe_biased,
-                        x_subject_composition: cached.x_composition,
-                    };
-                }
+                record_blastp_kappa_range_event(&BLASTP_KAPPA_SUBJECT_SEG_CACHE_HITS);
+                record_blastp_kappa_range_counter(
+                    &BLASTP_KAPPA_SUBJECT_RANGE_BYTES_COPIED,
+                    cached.subject.length.max(0) as usize,
+                );
+                return BlastRedoRangeResult {
+                    query,
+                    subject: cached.subject,
+                    subject_maybe_biased: cached.subject_maybe_biased,
+                    x_subject_composition: cached.x_composition,
+                };
             }
             record_blastp_kappa_range_event(&BLASTP_KAPPA_SUBJECT_SEG_CACHE_MISSES);
         }
@@ -1324,19 +1191,9 @@ fn build_subject_range_data(
         //     }
         //     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
         // ```
-        let x_composition = (x_compo_reuse() != 0)
+        let x_composition = x_compo_reuse()
             .then(|| std::sync::Arc::new(XSubjectComposition(read_aa_composition(subject.data()))));
-        if let Some(expected) = x_expected {
-            assert!(
-                expected.subject.buffer == subject.buffer
-                    && expected.subject.data_offset == subject.data_offset
-                    && expected.subject.length == subject.length
-                    && expected.subject_maybe_biased == subject_maybe_biased
-                    && expected.x_composition == x_composition,
-                "LOSAT_X_SEGSHARESHADOW: shared masked subject range differs"
-            );
-            crate::utils::xstats::SEG_SHARE_CHECKED.fetch_add(1, AtomicOrdering::Relaxed);
-        } else if let Some(cache) = subject_range_cache.as_mut() {
+        if let Some(cache) = subject_range_cache.as_mut() {
             cache.insert(
                 matching_seq,
                 subject_range,
@@ -2287,7 +2144,7 @@ pub(crate) fn postprocess_preliminary_hits(
 //                                     &subject_composition,
 //                                     subject.length,
 // ```
-// EXPERIMENT (LOSAT_X_NEWTONLANES), BLASTP: for a group of local matches of one query (those without
+// Newton lanes, BLASTP: for a group of local matches of one query (those without
 // HSPs, or already ended by `BlastCompo_EarlyTermination` with the current heaps, are skipped), the
 // input of each match's first `Blast_AdjustScores` call as the redo of `postprocess_preliminary_hits`
 // builds it: preliminary hits, incoming alignments, protein windows, the first window with an
@@ -2434,6 +2291,22 @@ mod tests {
         }
     }
 
+    /// The list `reap_contained_hits` works on: each hit through `BlastpHsp::from_hit`, sorted by
+    /// score as `hsplist_from_distinct_alignments` does.
+    fn hsp_list_of(redone_hits: &[RedoneBlastpHit]) -> BlastpHspList {
+        let mut hsp_list = BlastpHspList {
+            oid: 0,
+            query_index: 0,
+            hsps: redone_hits
+                .iter()
+                .map(|redone_hit| BlastpHsp::from_hit(redone_hit.hit.clone()))
+                .collect(),
+            best_evalue: i32::MAX as f64,
+        };
+        sort_hsplist_by_score(&mut hsp_list);
+        hsp_list
+    }
+
     fn make_hit(score: i32, q_start: usize, q_end: usize, s_start: usize, s_end: usize) -> Hit {
         Hit {
             identity: 0.0,
@@ -2494,7 +2367,7 @@ mod tests {
         };
 
         let kept_hits = vec![outer.clone(), inner];
-        let mut hsp_list = hsplist_from_redone_hits(&kept_hits, 0, 0);
+        let mut hsp_list = hsp_list_of(&kept_hits);
         reap_contained_hits(&mut hsp_list);
         assert_eq!(hsp_list.hsps.len(), 1);
         assert_eq!(hsp_list.hsps[0].raw_score, outer.hit.raw_score);
@@ -2519,7 +2392,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hits_from_distinct_alignments_uses_edit_script_context() {
+    fn test_hsplist_from_distinct_alignments_uses_edit_script_context() {
         let template_hit = BlastpPreliminaryHsp {
             query_start: 0,
             query_end: 20,
@@ -2564,21 +2437,21 @@ mod tests {
             ])),
         ));
 
-        let hits = hits_from_distinct_alignments(&alignments, &template_hit);
+        let hits = hsplist_from_distinct_alignments(alignments, &template_hit, 0, 0, false).hsps;
         assert_eq!(hits.len(), 2);
-        assert_eq!(hits[0].hit.raw_score, 80);
-        assert_eq!(hits[1].hit.raw_score, 70);
+        assert_eq!(hits[0].raw_score, 80);
+        assert_eq!(hits[1].raw_score, 70);
         assert_eq!(
-            hits[0].hit.gap_info,
+            hits[0].gap_info,
             Some(vec![
                 crate::common::GapEditOp::Sub(10),
                 crate::common::GapEditOp::Del(1),
                 crate::common::GapEditOp::Sub(9),
             ])
         );
-        assert_eq!(hits[0].hit.q_start, 1);
-        assert_eq!(hits[0].hit.s_start, 5);
-        assert_eq!(hits[0].hit.s_idx, 9);
+        assert_eq!(hits[0].q_start, 1);
+        assert_eq!(hits[0].s_start, 5);
+        assert_eq!(hits[0].s_idx, 9);
     }
 
     // EXPERIMENT (LOSAT_X_BPREDOFIT): the list built with fitted room is the list built by `push`.
@@ -2943,7 +2816,7 @@ mod tests {
     // ```
     #[test]
     fn x_masked_subject_range_carries_the_composition_of_its_bytes() {
-        if x_compo_reuse() == 0 {
+        if !x_compo_reuse() {
             return;
         }
         let mut matching_residues = vec![1u8; 80];
@@ -3281,7 +3154,7 @@ mod tests {
                 subject_end: 170,
             },
         ];
-        let mut hsp_list = hsplist_from_redone_hits(&hits, 0, 0);
+        let mut hsp_list = hsp_list_of(&hits);
         reap_contained_hits(&mut hsp_list);
         assert_eq!(hsp_list.hsps.len(), 2);
         assert_eq!(hsp_list.hsps[0].raw_score, 100);
@@ -3345,7 +3218,7 @@ mod tests {
             },
         ];
         hits[0].hit.query_frame = 1;
-        let mut hsp_list = hsplist_from_redone_hits(&hits, 0, 0);
+        let mut hsp_list = hsp_list_of(&hits);
         hsp_list.hsps[0].subject_frame = 0;
         hsp_list.hsps[1].subject_frame = 1;
 

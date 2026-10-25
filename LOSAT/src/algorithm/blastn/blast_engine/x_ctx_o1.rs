@@ -1,7 +1,6 @@
-//! EXPERIMENT (LOSAT_X_CTXO1, a strict-set switch; shadow LOSAT_X_CTXO1SHADOW, off unless set to
-//! any value): the context of a query offset in constant time, from the layout of the
-//! concatenated query, instead of a binary search over the contexts (`LOSAT_X_CTXFAST`) or a
-//! table of four bytes per query letter (`direct_map`).
+//! EXPERIMENT (LOSAT_X_CTXO1, a strict-set switch): the context of a query offset in constant time,
+//! from the layout of the concatenated query, instead of a binary search over the contexts (the
+//! runs of `QueryContextIndex`) or a table of four bytes per query letter (`direct_map`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-242
 //! ```c

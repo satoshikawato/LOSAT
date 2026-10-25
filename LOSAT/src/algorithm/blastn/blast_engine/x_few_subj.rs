@@ -1,7 +1,7 @@
 //! EXPERIMENT (LOSAT_X_BNFEWSUBJ, a strict-set switch): a `-subject` search whose longest 5 Mb
 //! work unit is a large part of its letters searches its subjects one at a time, and a subject's
 //! batch of chunks the same way its chunks one at a time, each on the whole pool with the subject
-//! scan in strips (`x_pair_seed.rs`, LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARDISC and
+//! scan in strips (`x_pair_seed.rs`, PAIRPAR, LOSAT_X_PAIRPARDISC and
 //! LOSAT_X_PAIRPARDISCARR).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426
@@ -47,12 +47,12 @@
 //! starts from one scratch (`new_state`) and searches the subjects in OID order, so every subject
 //! meets the scratch history it meets at one thread (the diagonal hash, kept across chunks with an
 //! advancing offset, included); only the stages inside a chunk use the pool, each with its own
-//! exactness argument and shadow. `sink` receives the subjects in OID order in both shapes (the
+//! exactness argument. `sink` receives the subjects in OID order in both shapes (the
 //! parallel one hands them over in order: collected, or streamed with LOSAT_X_BNSTREAM). The
 //! chunks of a batch searched in order are the one-thread loop's statements (search with
 //! `reuse_prelim_hits`, merge, `-subject_besthit`, buffer back), and the parallel batch merges its
 //! chunks' lists in the same order. The parts that come on with the shape (strips, per-query
-//! gapped stages, speculative traceback) have their own shadows and gates.
+//! gapped stages, speculative traceback) have their own exactness arguments and gates.
 //!
 //! The rule (scheduling only; no NCBI counterpart): the subject tasks take at least the time of
 //! their longest work unit (a 5 Mb chunk, `MAX_DBSEQ_LEN`, or a shorter subject: the chunks of a
@@ -74,8 +74,7 @@ use super::MAX_DBSEQ_LEN;
 
 // No NCBI counterpart: reads the LOSAT_X_BNFEWSUBJ switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BNFEWSUBJ): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set.
+/// EXPERIMENT (LOSAT_X_BNFEWSUBJ): a strict-set switch, on unless it is `0`.
 pub(super) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNFEWSUBJ"))
@@ -194,7 +193,7 @@ mod tests {
     }
 
     // The cells of the probe (the switch is on by default in a test run, as in the strict set,
-    // unless the test runs with LOSAT_X_DEFAULT=0 or LOSAT_X_BNFEWSUBJ=0).
+    // unless the test runs with LOSAT_X_BNFEWSUBJ=0).
     #[test]
     fn the_rule_follows_the_probe() {
         let subjects = |lengths: &[usize], threads, kind| {

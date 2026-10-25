@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_QGROUPPAR, shadow LOSAT_X_QGROUPPARSHADOW): the gapped stages of a
+//! EXPERIMENT (LOSAT_X_QGROUPPAR): the gapped stages of a
 //! blastn query batch against one subject run per query on the search pool: the preliminary
 //! gapped loop with its purge, and the traceback loop with its two purges and the
 //! re-evaluation between them.
@@ -22,7 +22,7 @@
 //! in one order (score order for the preliminary loop, the hit lists' order for the traceback),
 //! with one interval tree. `search_query_batch` does the same on the thread that owns the subject;
 //! with one subject (`-subject` with one record) the other threads of the pool only compute
-//! alignments ahead of that loop (LOSAT_X_AHEAD), which leaves most of them waiting: at 16 threads
+//! alignments ahead of that loop (the look-ahead of `utils/xahead.rs`), which leaves most of them waiting: at 16 threads
 //! the two loops, the purges and the sorts around them were 57 % of a blastn batch's wall
 //! (31,168 cDNAs against 3 Mb; v4-D session 8 probe).
 //!
@@ -31,12 +31,12 @@
 //! an endpoint with the new one (which rejects the new HSP or unlinks an old one) also compares
 //! only HSPs of the same context; both walks visit every node that can hold such an HSP, so the
 //! tree's shape (which depends on what else it holds) cannot change an answer, and the
-//! LOSAT_X_ITREEFAST grid gives the tree's yes / no (`interval_tree.rs`). Only the trace reads
+//! interval-tree grid gives the tree's yes / no (`interval_tree.rs`). Only the trace reads
 //! which HSP contains another, and the trace keeps the owner loop. The purges sort by context
 //! first and compare only within a context (`purge_prelim_hits_with_common_endpoints`,
 //! `purge_hsps_with_common_endpoints_ex`), the re-evaluation and the identity test read one HSP
 //! and its context's cutoff and statistics, the alignment scratch carries nothing from one call
-//! to the next that changes a result (LOSAT_X_AHEAD's helpers already compute with scratch of
+//! to the next that changes a result (the look-ahead helpers already compute with scratch of
 //! their own), and the sorts are stable. So running the loop of one query over that query's HSPs,
 //! in the relative order they have in the batch's list, with a tree of its own, gives the HSPs the
 //! batch's loop gives for that query, in the same relative order.
@@ -69,19 +69,14 @@
 //! The queries are handed out to the threads from an atomic counter, the query with the most HSPs
 //! first (the counts are known before each stage), each thread with its own tree and alignment
 //! scratch; measured on 5,000 cDNAs, that order keeps 16 threads 0.99 busy where contiguous groups
-//! of queries kept them 0.66-0.79 busy. The owner loop with LOSAT_X_AHEAD stays where a batch has
+//! of queries kept them 0.66-0.79 busy. The owner loop with the look-ahead stays where a batch has
 //! fewer than two queries with HSPs or one query holds more than a quarter of the stage's HSPs (a
 //! long genome query: the loop's helpers then do better than the queries), for a subject searched
 //! in chunks in parallel, and on the diagnostic paths (`-verbose`, LOSAT_DEBUG_BLASTN,
 //! BLEMIR_DEBUG, LOSAT_DEBUG_COORDS, the trace of `utils/blastn_trace`), which print in the loop's
 //! order.
 //!
-//! The shadow runs both forms of each stage and compares the lists element by element (every
-//! field, through `Debug`, which prints floats exactly); on a difference it prints
-//! `[X_SHADOW] QGROUPPAR ... DIFFERENT` and panics, otherwise `main` prints
-//! `[X_SHADOW] QGROUPPAR prelim= traceback= hsps= diffs=0 identical` at exit (`prelim=` and
-//! `traceback=` count the stages compared, `hsps=` the HSPs compared). The search keeps the owner
-//! loop's lists. With `LOSAT_X_STATS`, `main` prints
+//! With `LOSAT_X_STATS`, `main` prints
 //! `[X_STATS] QGROUPPAR prelim= prelim_queries= traceback= traceback_queries= owner=` when a stage
 //! was planned: the stages run per query, the query tasks they ran and the stages with HSPs that
 //! kept the owner loop by the rule. With `LOSAT_WASI_THREADS_DEBUG=1` each stage run per query
@@ -91,8 +86,7 @@
 //! stages' wall times.
 //!
 //! The chunk's ungapped hits are grouped by query in place (a counting sort's destinations, 4
-//! bytes per hit, applied by swaps), so the stage holds no second copy of them; the shadow keeps
-//! one for the owner loop.
+//! bytes per hit, applied by swaps), so the stage holds no second copy of them.
 //!
 //! Programs that reach it: BLASTN only (megablast, dc-megablast, blastn, blastn-short), from
 //! `search_query_batch` (the loop, a LOSAT_X_QBATCHPAR slot of two or more threads, and a `-db`
@@ -109,32 +103,13 @@ use crate::utils::threading::SearchPool;
 ))]
 use rayon::prelude::*;
 
-// No NCBI counterpart: reads the switches once (LOSAT_X_QGROUPPAR is a strict-set switch: on
-// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; the shadow, off unless set to any
-// value, implies the switch). They choose between two LOSAT code paths with the same result and
-// change no value NCBI computes.
-/// 0 = off, 1 = LOSAT_X_QGROUPPAR, 2 = LOSAT_X_QGROUPPARSHADOW.
-fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_QGROUPPARSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_QGROUPPAR") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-/// Whether the stages may run per query (the switch or its shadow).
+// No NCBI counterpart: reads the switch once (LOSAT_X_QGROUPPAR is a strict-set switch: on
+// unless it is `0`). It chooses between two LOSAT code paths with the same result and changes no
+// value NCBI computes.
+/// Whether the stages may run per query (the switch).
 pub(super) fn on() -> bool {
-    mode() != 0
-}
-
-/// Whether both forms run and are compared.
-pub(super) fn shadow() -> bool {
-    mode() == 2
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_QGROUPPAR"))
 }
 
 // No NCBI counterpart: counters of the summary lines; they change no value NCBI computes.
@@ -143,12 +118,8 @@ static PRELIM_QUERIES: AtomicU64 = AtomicU64::new(0);
 static TRACEBACK: AtomicU64 = AtomicU64::new(0);
 static TRACEBACK_QUERIES: AtomicU64 = AtomicU64::new(0);
 static OWNER: AtomicU64 = AtomicU64::new(0);
-static COMPARED_PRELIM: AtomicU64 = AtomicU64::new(0);
-static COMPARED_TRACEBACK: AtomicU64 = AtomicU64::new(0);
-static COMPARED_HSPS: AtomicU64 = AtomicU64::new(0);
-static DIFFS: AtomicU64 = AtomicU64::new(0);
 
-/// Which stage a plan or a comparison is for.
+/// Which stage a plan is for.
 #[derive(Clone, Copy)]
 pub(super) enum Stage {
     Prelim,
@@ -195,10 +166,13 @@ pub(super) fn plan(counts: &[u32], stage: Stage) -> Option<Vec<u32>> {
     match choose(counts) {
         Choice::Empty => return None,
         Choice::Owner => {
+            crate::utils::xreach::x_reach!("LOSAT_X_QGROUPPAR", false);
             OWNER.fetch_add(1, Ordering::Relaxed);
             return None;
         }
-        Choice::Queries => {}
+        Choice::Queries => {
+            crate::utils::xreach::x_reach!("LOSAT_X_QGROUPPAR", true);
+        }
     }
     let mut order: Vec<u32> = (0..counts.len() as u32)
         .filter(|&query| counts[query as usize] > 0)
@@ -349,45 +323,9 @@ pub(super) fn sort_stable<T: Send>(
     items.sort_by(compare);
 }
 
-/// The shadow's comparison of the owner loop's list (`slow`) with the per-query form's (`fast`):
-/// counts the comparison, and on a difference prints the `DIFFERENT` line and panics.
-pub(super) fn compare<T: std::fmt::Debug>(stage: Stage, slow: &[T], fast: &[T]) {
-    let (compared, name) = match stage {
-        Stage::Prelim => (&COMPARED_PRELIM, "preliminary"),
-        Stage::Traceback => (&COMPARED_TRACEBACK, "traceback"),
-    };
-    compared.fetch_add(1, Ordering::Relaxed);
-    COMPARED_HSPS.fetch_add(slow.len() as u64, Ordering::Relaxed);
-    let first = (0..slow.len().max(fast.len()))
-        .find(|&at| format!("{:?}", slow.get(at)) != format!("{:?}", fast.get(at)));
-    if let Some(at) = first {
-        DIFFS.fetch_add(1, Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] QGROUPPAR {} HSPs {} / {} DIFFERENT (first at {}: {:?} / {:?})",
-            name,
-            slow.len(),
-            fast.len(),
-            at,
-            slow.get(at),
-            fast.get(at)
-        );
-        panic!("LOSAT_X_QGROUPPARSHADOW: the {name} HSPs of the query tasks differ from the loop's at {at}");
-    }
-}
-
-/// The lines `main` prints at exit: the shadow's summary (with the shadow) and the counters (with
-/// `LOSAT_X_STATS`, when a stage was planned). No NCBI counterpart: it prints counters and changes no value NCBI computes.
+/// The line `main` prints at exit: the counters (with `LOSAT_X_STATS`, when a stage was planned).
+/// No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub(super) fn print_summary() {
-    if shadow() {
-        let diffs = DIFFS.load(Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] QGROUPPAR prelim={} traceback={} hsps={} diffs={diffs} {}",
-            COMPARED_PRELIM.load(Ordering::Relaxed),
-            COMPARED_TRACEBACK.load(Ordering::Relaxed),
-            COMPARED_HSPS.load(Ordering::Relaxed),
-            if diffs == 0 { "identical" } else { "DIFFERENT" }
-        );
-    }
     let planned = PRELIM.load(Ordering::Relaxed)
         + TRACEBACK.load(Ordering::Relaxed)
         + OWNER.load(Ordering::Relaxed);
@@ -471,18 +409,6 @@ mod tests {
             Ok(())
         })
         .unwrap();
-    }
-
-    #[test]
-    #[should_panic(expected = "differ from the loop's at 1")]
-    fn compare_panics_on_a_difference() {
-        compare(Stage::Prelim, &[1, 2, 3], &[1, 5, 3]);
-    }
-
-    #[test]
-    #[should_panic(expected = "differ from the loop's at 2")]
-    fn compare_panics_on_a_length_mismatch() {
-        compare(Stage::Traceback, &[1, 2], &[1, 2, 3]);
     }
 
     /// On a pool of four threads every query of the order runs exactly once and its result lands

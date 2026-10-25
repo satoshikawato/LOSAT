@@ -518,21 +518,12 @@ impl Eq for XSubjectComposition {}
 //     }
 //     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
 // ```
-// No NCBI counterpart: the switch, read once per process. 0 reads every subject composition,
-// 1 keeps the composition of the bytes blastp's SEG cache holds and reuses it, 2 does so and
-// reads the bytes again to compare (`LOSAT_X_BPCOMPOREUSESHADOW`).
-pub(crate) fn x_compo_reuse() -> u8 {
+// No NCBI counterpart: the switch, read once per process. Off reads every subject composition,
+// on keeps the composition of the bytes blastp's SEG cache holds and reuses it.
+pub(crate) fn x_compo_reuse() -> bool {
     use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if !crate::utils::xswitch::on("LOSAT_X_BPCOMPOREUSE") {
-            0
-        } else if std::env::var_os("LOSAT_X_BPCOMPOREUSESHADOW").is_some() {
-            2
-        } else {
-            1
-        }
-    })
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPCOMPOREUSE"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:934-936
@@ -548,13 +539,6 @@ pub(crate) fn x_whole_subject_composition(
     range: &BlastRedoRangeResult,
 ) -> BlastAminoAcidComposition {
     if let Some(stored) = &range.x_subject_composition {
-        if x_compo_reuse() == 2 {
-            let fresh = XSubjectComposition(read_aa_composition(range.subject.data()));
-            assert!(
-                fresh == **stored,
-                "LOSAT_X_BPCOMPOREUSESHADOW: stored subject composition differs"
-            );
-        }
         return stored.0.clone();
     }
     read_aa_composition(range.subject.data())
@@ -1754,7 +1738,7 @@ fn mask_translated_subject_seg(translation: &mut [u8]) -> Result<bool> {
     }
     let data_len = translation.len() - 1;
     let data = &mut translation[1..data_len];
-    // EXPERIMENT (LOSAT_X_SEGTRIMMEMO): the windows of one subject overlap from query to query, so
+    // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the windows of one subject overlap from query to query, so
     // this masker takes the trim of a segment trimmed before on this thread from its memo.
     let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1)).x_with_trim_memo();
     let intervals = masker.mask_sequence(data);
@@ -2549,17 +2533,16 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
 //                 if ( !adjust_search_failed ) {
 //                     newAlign = callbacks->redo_one_alignment(
 // ```
-// No NCBI counterpart: LOSAT_X_BXPAR probe. It records, per match, whether `Blast_AdjustScores`
-// ran (bit 0) and whether an alignment was redone first (bit 1), so a caller that redoes matches
-// out of order can tell which matrix a redo used. It is read by the BLASTX parallel redo and
-// does not change any value NCBI computes.
+// No NCBI counterpart: probe of the BLASTX parallel redo. It records, per match, whether
+// `Blast_AdjustScores` ran (bit 0) and whether an alignment was redone first (bit 1), so a caller
+// that redoes matches out of order can tell which matrix a redo used. It is read by the BLASTX
+// parallel redo and does not change any value NCBI computes.
 thread_local! {
-    /// EXPERIMENT (LOSAT_X_BXPAR): what one match did with the matrix it was
-    /// handed.  Bit 0: an adjustment succeeded (the matrix was replaced); bit 1:
-    /// an alignment was redone before that, i.e. with the matrix left behind by
-    /// an earlier match (redo_alignment.c:1232-1259 skips `Blast_AdjustScores`
-    /// for a protein subject unless `hsp_index == 0`).  A caller that redoes
-    /// matches out of order resets this before a match and reads it afterwards.
+    /// What one match did with the matrix it was handed.  Bit 0: an adjustment succeeded (the
+    /// matrix was replaced); bit 1: an alignment was redone before that, i.e. with the matrix left
+    /// behind by an earlier match (redo_alignment.c:1232-1259 skips `Blast_AdjustScores` for a
+    /// protein subject unless `hsp_index == 0`).  A caller that redoes matches out of order resets
+    /// this before a match and reads it afterwards.
     pub(crate) static X_REDO_PROBE: Cell<u8> = const { Cell::new(0) };
 }
 
@@ -2590,7 +2573,7 @@ thread_local! {
 // No NCBI counterpart: identifies one `get_range` call of the window loop (window, HSP index, and the
 // `nearIdenticalStatus` and `subject_maybe_biased` values it is called with); the arguments of the
 // call are fixed by these. It does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_NEWTONLANES): key of a `get_range` result made ahead.
+/// Key of a `get_range` result made ahead.
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct XLaneRangeKey {
     window: usize,
@@ -2643,7 +2626,7 @@ const X_LANES_PREFETCH_INPUTS: usize = 32;
 //                                     &subject_composition,
 //                                     subject.length,
 // ```
-// EXPERIMENT (LOSAT_X_NEWTONLANES), TBLASTN (translated subject, protein query): a replica of the
+// Newton lanes, TBLASTN (translated subject, protein query): a replica of the
 // window loop of `blast_redo_one_match_with_workspace_queries_and_matrix_observed` from window
 // `first_window` on: the same `query_info` choice, the same near-identical test and `get_range` calls
 // with the same arguments (results kept in `ranges` for the loop), and the subject composition of
@@ -2881,8 +2864,8 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
     //         return 1;
     // ```
     let mut adjusted_matrix = matrix_state.take();
-    // EXPERIMENT (LOSAT_X_NEWTONLANES): TBLASTN Newton inputs of the coming windows solved ahead,
-    // four per vector (x_newton_lanes.rs); their get_range results are kept for this loop.
+    // TBLASTN Newton inputs of the coming windows solved ahead, four per vector (eight on aarch64,
+    // x_newton_lanes.rs); their get_range results are kept for this loop.
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1143-1143
     // ```c
     //     for (window_index = 0;  window_index < nWindows;  window_index++) {
@@ -2891,16 +2874,18 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
     // `Blast_AdjustScores` calls; a result is used only by a call with the same input bits, and a kept
     // range only by the `get_range` call with the same window, HSP index and flags. It does not change
     // any value NCBI computes.
-    let x_lanes_on = super::x_newton_lanes::mode() != 0
-        && params.subject_is_translated
-        && !params.query_is_translated
+    let x_lanes_tblastn = params.subject_is_translated && !params.query_is_translated;
+    let x_lanes_on = x_lanes_tblastn
         && params.compo_adjust_mode != BlastCompoAdjustMode::NoCompositionBasedStats;
+    if x_lanes_tblastn {
+        crate::utils::xreach::x_reach!("LOSAT_X_NEWTONLANES", x_lanes_on);
+    }
     let mut x_next_prefetch = 0usize;
     let mut x_lane_ranges: Vec<(XLaneRangeKey, BlastRedoRangeResult)> = Vec::new();
 
     for (window_index, window) in windows.iter().enumerate() {
-        // No NCBI counterpart: LOSAT_X_NEWTONLANES prefetch (see above); it does not change any value
-        // NCBI computes.
+        // No NCBI counterpart: Newton lanes prefetch (see above); it does not change any value NCBI
+        // computes.
         if x_lanes_on && window_index >= x_next_prefetch {
             x_next_prefetch = x_newton_lanes_prefetch_windows(
                 &windows,
@@ -2979,9 +2964,9 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                 //         &subject_maybe_biased
                 // );
                 // ```
-                // No NCBI counterpart: with LOSAT_X_NEWTONLANES the result of this call made ahead (same
-                // window, HSP index, near-identical status and bias flag) is used; the shadow mode makes
-                // the call as well and compares. It does not change any value NCBI computes.
+                // No NCBI counterpart: the result of this call made ahead (same window, HSP index,
+                // near-identical status and bias flag) is used. It does not change any value NCBI
+                // computes.
                 let x_stored = if x_lanes_on {
                     x_take_lane_range(
                         &mut x_lane_ranges,
@@ -2996,23 +2981,6 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                     None
                 };
                 let next_range = if let Some(stored) = x_stored {
-                    if super::x_newton_lanes::mode() == 2 {
-                        let fresh = (callbacks.get_range)(
-                            matching_seq,
-                            &window.subject_range,
-                            &query_info.seq,
-                            &window.query_range,
-                            query_info.words.as_deref(),
-                            window_align_head,
-                            near_identical,
-                            subject_maybe_biased,
-                            params,
-                        )?;
-                        assert!(
-                            fresh == stored,
-                            "LOSAT_X_NEWTONLANESSHADOW: stored get_range result differs"
-                        );
-                    }
                     stored
                 } else {
                     (callbacks.get_range)(

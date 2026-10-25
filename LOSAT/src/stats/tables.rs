@@ -1,3 +1,7 @@
+use super::protein_options::{
+    gap_costs_row, protein_gap_existence_extend_params, scoring_matrix_table,
+};
+use super::protein_tables::ProteinTableRow;
 use crate::config::{NuclScoringSpec, ProteinScoringSpec, ScoringMatrix};
 
 /// Karlin-Altschul statistical parameters
@@ -204,132 +208,6 @@ const BLASTN_3_2: &[ParamEntry] = &[ParamEntry::new(5, 5, 0.208, 0.030, 0.072, 2
 const BLASTN_5_4: &[ParamEntry] = &[
     ParamEntry::new(10, 6, 0.163, 0.068, 0.16, 1.0, -19.0),
     ParamEntry::new(8, 6, 0.146, 0.039, 0.11, 1.3, -29.0),
-];
-
-// ============================================================================
-// PROTEIN STATISTICAL PARAMETERS (from NCBI blast_stat.c)
-// ============================================================================
-
-/// BLOSUM45 parameters
-const BLOSUM45: &[ParamEntry] = &[
-    ParamEntry::new(i32::MAX, i32::MAX, 0.2291, 0.0924, 0.2514, 0.9113, -5.7),
-    ParamEntry::new(13, 3, 0.207, 0.049, 0.14, 1.5, -22.0),
-    ParamEntry::new(12, 3, 0.199, 0.039, 0.11, 1.8, -34.0),
-    ParamEntry::new(11, 3, 0.190, 0.031, 0.095, 2.0, -38.0),
-    ParamEntry::new(10, 3, 0.179, 0.023, 0.075, 2.4, -51.0),
-    ParamEntry::new(16, 2, 0.210, 0.051, 0.14, 1.5, -24.0),
-    ParamEntry::new(15, 2, 0.203, 0.041, 0.12, 1.7, -31.0),
-    ParamEntry::new(14, 2, 0.195, 0.032, 0.10, 1.9, -36.0),
-    ParamEntry::new(13, 2, 0.185, 0.024, 0.084, 2.2, -45.0),
-    ParamEntry::new(12, 2, 0.171, 0.016, 0.061, 2.8, -65.0),
-    ParamEntry::new(19, 1, 0.205, 0.040, 0.11, 1.9, -43.0),
-    ParamEntry::new(18, 1, 0.198, 0.032, 0.10, 2.0, -43.0),
-    ParamEntry::new(17, 1, 0.189, 0.024, 0.079, 2.4, -57.0),
-    ParamEntry::new(16, 1, 0.176, 0.016, 0.063, 2.8, -67.0),
-];
-
-/// BLOSUM50 parameters
-const BLOSUM50: &[ParamEntry] = &[
-    ParamEntry::new(i32::MAX, i32::MAX, 0.2318, 0.112, 0.3362, 0.6895, -4.0),
-    ParamEntry::new(13, 3, 0.212, 0.063, 0.19, 1.1, -16.0),
-    ParamEntry::new(12, 3, 0.206, 0.055, 0.17, 1.2, -18.0),
-    ParamEntry::new(11, 3, 0.197, 0.042, 0.14, 1.4, -25.0),
-    ParamEntry::new(10, 3, 0.186, 0.031, 0.11, 1.7, -34.0),
-    ParamEntry::new(9, 3, 0.172, 0.022, 0.082, 2.1, -48.0),
-    ParamEntry::new(16, 2, 0.215, 0.066, 0.20, 1.05, -15.0),
-    ParamEntry::new(15, 2, 0.210, 0.058, 0.17, 1.2, -20.0),
-    ParamEntry::new(14, 2, 0.202, 0.045, 0.14, 1.4, -27.0),
-    ParamEntry::new(13, 2, 0.193, 0.035, 0.12, 1.6, -32.0),
-    ParamEntry::new(12, 2, 0.181, 0.025, 0.095, 1.9, -41.0),
-    ParamEntry::new(19, 1, 0.212, 0.057, 0.18, 1.2, -21.0),
-    ParamEntry::new(18, 1, 0.207, 0.050, 0.15, 1.4, -28.0),
-    ParamEntry::new(17, 1, 0.198, 0.037, 0.12, 1.6, -33.0),
-    ParamEntry::new(16, 1, 0.186, 0.025, 0.10, 1.9, -42.0),
-    ParamEntry::new(15, 1, 0.171, 0.015, 0.063, 2.7, -76.0),
-];
-
-/// BLOSUM62 parameters (default for protein)
-const BLOSUM62: &[ParamEntry] = &[
-    ParamEntry::new(i32::MAX, i32::MAX, 0.3176, 0.134, 0.4012, 0.7916, -3.2),
-    ParamEntry::new(11, 2, 0.297, 0.082, 0.27, 1.1, -10.0),
-    ParamEntry::new(10, 2, 0.291, 0.075, 0.23, 1.3, -15.0),
-    ParamEntry::new(9, 2, 0.279, 0.058, 0.19, 1.5, -19.0),
-    ParamEntry::new(8, 2, 0.264, 0.045, 0.15, 1.8, -26.0),
-    ParamEntry::new(7, 2, 0.239, 0.027, 0.10, 2.5, -46.0),
-    ParamEntry::new(6, 2, 0.201, 0.012, 0.061, 3.3, -58.0),
-    ParamEntry::new(13, 1, 0.292, 0.071, 0.23, 1.2, -11.0),
-    ParamEntry::new(12, 1, 0.283, 0.059, 0.19, 1.5, -19.0),
-    ParamEntry::new(11, 1, 0.267, 0.041, 0.14, 1.9, -30.0),
-    ParamEntry::new(10, 1, 0.243, 0.024, 0.10, 2.5, -44.0),
-    ParamEntry::new(9, 1, 0.206, 0.010, 0.052, 4.0, -87.0),
-];
-
-/// BLOSUM80 parameters
-const BLOSUM80: &[ParamEntry] = &[
-    ParamEntry::new(i32::MAX, i32::MAX, 0.3430, 0.177, 0.6568, 0.5222, -1.6),
-    ParamEntry::new(25, 2, 0.342, 0.17, 0.66, 0.52, -1.6),
-    ParamEntry::new(13, 2, 0.336, 0.15, 0.57, 0.59, -3.0),
-    ParamEntry::new(9, 2, 0.319, 0.11, 0.42, 0.76, -6.0),
-    ParamEntry::new(8, 2, 0.308, 0.090, 0.35, 0.89, -9.0),
-    ParamEntry::new(7, 2, 0.293, 0.070, 0.27, 1.1, -14.0),
-    ParamEntry::new(6, 2, 0.268, 0.045, 0.19, 1.4, -19.0),
-    ParamEntry::new(11, 1, 0.314, 0.095, 0.35, 0.90, -9.0),
-    ParamEntry::new(10, 1, 0.299, 0.071, 0.27, 1.1, -14.0),
-    ParamEntry::new(9, 1, 0.279, 0.048, 0.20, 1.4, -19.0),
-];
-
-/// BLOSUM90 parameters
-const BLOSUM90: &[ParamEntry] = &[
-    ParamEntry::new(i32::MAX, i32::MAX, 0.3346, 0.190, 0.7547, 0.4434, -1.4),
-    ParamEntry::new(9, 2, 0.310, 0.12, 0.46, 0.67, -6.0),
-    ParamEntry::new(8, 2, 0.300, 0.099, 0.39, 0.76, -7.0),
-    ParamEntry::new(7, 2, 0.283, 0.072, 0.30, 0.93, -11.0),
-    ParamEntry::new(6, 2, 0.259, 0.048, 0.22, 1.2, -16.0),
-    ParamEntry::new(11, 1, 0.302, 0.093, 0.39, 0.78, -8.0),
-    ParamEntry::new(10, 1, 0.290, 0.075, 0.28, 1.04, -15.0),
-    ParamEntry::new(9, 1, 0.265, 0.044, 0.20, 1.3, -19.0),
-];
-
-/// PAM30 parameters
-const PAM30: &[ParamEntry] = &[
-    ParamEntry::new(i32::MAX, i32::MAX, 0.3400, 0.283, 1.754, 0.1938, -0.3),
-    ParamEntry::new(7, 2, 0.305, 0.15, 0.87, 0.35, -3.0),
-    ParamEntry::new(6, 2, 0.287, 0.11, 0.68, 0.42, -4.0),
-    ParamEntry::new(5, 2, 0.264, 0.079, 0.45, 0.59, -7.0),
-    ParamEntry::new(10, 1, 0.309, 0.15, 0.88, 0.34, -3.0),
-    ParamEntry::new(9, 1, 0.294, 0.11, 0.61, 0.48, -6.0),
-    ParamEntry::new(8, 1, 0.270, 0.072, 0.40, 0.68, -10.0),
-];
-
-/// PAM70 parameters
-const PAM70: &[ParamEntry] = &[
-    ParamEntry::new(i32::MAX, i32::MAX, 0.3345, 0.229, 1.029, 0.3250, -0.9),
-    ParamEntry::new(8, 2, 0.301, 0.12, 0.54, 0.56, -5.0),
-    ParamEntry::new(7, 2, 0.286, 0.093, 0.43, 0.67, -7.0),
-    ParamEntry::new(6, 2, 0.264, 0.064, 0.29, 0.90, -12.0),
-    ParamEntry::new(11, 1, 0.305, 0.12, 0.52, 0.59, -6.0),
-    ParamEntry::new(10, 1, 0.291, 0.091, 0.41, 0.71, -9.0),
-    ParamEntry::new(9, 1, 0.270, 0.060, 0.28, 0.97, -14.0),
-];
-
-/// PAM250 parameters
-const PAM250: &[ParamEntry] = &[
-    ParamEntry::new(i32::MAX, i32::MAX, 0.2252, 0.0868, 0.2223, 0.98, -5.0),
-    ParamEntry::new(15, 3, 0.205, 0.049, 0.13, 1.6, -23.0),
-    ParamEntry::new(14, 3, 0.200, 0.043, 0.12, 1.7, -26.0),
-    ParamEntry::new(13, 3, 0.194, 0.036, 0.10, 1.9, -31.0),
-    ParamEntry::new(12, 3, 0.186, 0.029, 0.085, 2.2, -41.0),
-    ParamEntry::new(11, 3, 0.174, 0.020, 0.070, 2.5, -48.0),
-    ParamEntry::new(17, 2, 0.204, 0.047, 0.12, 1.7, -28.0),
-    ParamEntry::new(16, 2, 0.198, 0.038, 0.11, 1.8, -29.0),
-    ParamEntry::new(15, 2, 0.191, 0.031, 0.087, 2.2, -44.0),
-    ParamEntry::new(14, 2, 0.182, 0.024, 0.073, 2.5, -53.0),
-    ParamEntry::new(13, 2, 0.171, 0.017, 0.059, 2.9, -64.0),
-    ParamEntry::new(21, 1, 0.205, 0.045, 0.11, 1.8, -34.0),
-    ParamEntry::new(20, 1, 0.199, 0.037, 0.10, 1.9, -35.0),
-    ParamEntry::new(19, 1, 0.192, 0.029, 0.083, 2.3, -52.0),
-    ParamEntry::new(18, 1, 0.183, 0.021, 0.070, 2.6, -60.0),
-    ParamEntry::new(17, 1, 0.171, 0.014, 0.052, 3.3, -86.0),
 ];
 
 /// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:405-419
@@ -615,49 +493,77 @@ impl NuclValues {
     }
 }
 
-/// Look up Karlin-Altschul parameters for protein scoring scheme
-pub fn lookup_protein_params(spec: &ProteinScoringSpec) -> KarlinParams {
-    let gap_open = spec.gap_open;
-    let gap_extend = spec.gap_extend;
-
-    let table: &[ParamEntry] = match spec.matrix {
-        ScoringMatrix::Blosum45 => BLOSUM45,
-        ScoringMatrix::Blosum50 => BLOSUM50,
-        ScoringMatrix::Blosum62 => BLOSUM62,
-        ScoringMatrix::Blosum80 => BLOSUM80,
-        ScoringMatrix::Blosum90 => BLOSUM90,
-        ScoringMatrix::Pam30 => PAM30,
-        ScoringMatrix::Pam70 => PAM70,
-        ScoringMatrix::Pam250 => PAM250,
-    };
-
-    // Find matching gap penalties
-    for entry in table {
-        if entry.gap_open == gap_open && entry.gap_extend == gap_extend {
-            return entry.to_karlin_params();
-        }
-    }
-
-    // If no exact match, try to find closest match
-    // First, try ungapped (first entry with MAX values)
-    if !table.is_empty() {
-        // Look for the "best" entry (typically gap_open=11, gap_extend=1 for BLOSUM62)
-        for entry in table {
-            if entry.gap_open != i32::MAX {
-                return entry.to_karlin_params();
-            }
-        }
-        return table[0].to_karlin_params();
-    }
-
-    // Default BLOSUM62 with gap_open=11, gap_extend=1
+/// Lambda, K, H, alpha and beta of a protein table row (NCBI's columns 3-7).
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3617-3623, 3078-3081
+/// ```c
+///                kbp->Lambda = values[index][3];
+///                kbp->K = values[index][4];
+///                kbp->logK = log(kbp->K);
+///                kbp->H = values[index][5];
+/// ...
+///          if (alpha)
+///             alpha_array[index] = values[index][6];
+///          if (beta)
+///             beta_array[index] = values[index][7];
+/// ```
+fn protein_row_params(row: &ProteinTableRow) -> KarlinParams {
     KarlinParams {
-        lambda: 0.267,
-        k: 0.041,
-        h: 0.14,
-        alpha: 1.9,
-        beta: -30.0,
+        lambda: row.0[3],
+        k: row.0[4],
+        h: row.0[5],
+        alpha: row.0[6],
+        beta: row.0[7],
     }
+}
+
+/// The gapped Karlin-Altschul parameters of a protein scoring scheme: the table row of its
+/// gap costs (`Blast_KarlinBlkGappedLoadFromTables` for Lambda, K and H, `BLAST_GetAlphaBeta`
+/// for alpha and beta).
+///
+/// A gapped search checks the gap costs against the table before it starts
+/// (`BLAST_ValidateOptions`, `protein_options::validate_protein_options`; blastx accepts 11/1
+/// only), so costs outside the table are a LOSAT defect here: it panics instead of reading
+/// another row. NCBI does not check them for an ungapped search, which no LOSAT protein program
+/// runs yet; a change that opens `-ungapped` must not call this with unchecked costs.
+///
+/// `BLAST_GetAlphaBeta` searches from row 1, so the ungapped row's costs (32767/32767, which
+/// the validation accepts) get Lambda, K and H from row 0 and the alpha and beta that
+/// `BLAST_CalcEffLengths` starts with, 0 and 0.
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3117-3126
+/// ```c
+///      else {
+///        for(i = 1; i < num_values; i++) {
+///     if ((gapOpen_arr[i] == gap_open) &&
+///         (gapExtend_arr[i] == gap_extend)) {
+///       (*alpha) = alpha_arr[i];
+///       (*beta) = beta_arr[i];
+///       break;
+///     }
+///        }
+///      }
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:705
+/// ```c
+///    double alpha=0, beta=0; /*alpha and beta for new scoring system */
+/// ```
+pub fn lookup_protein_params(spec: &ProteinScoringSpec) -> KarlinParams {
+    let table = scoring_matrix_table(spec.matrix);
+    let row = gap_costs_row(table, spec.gap_open, spec.gap_extend).unwrap_or_else(|| {
+        panic!(
+            "gap costs {}/{} are not in NCBI's {} table; they are validated before the search",
+            spec.gap_open, spec.gap_extend, table.name
+        )
+    });
+    let mut params = protein_row_params(row);
+    // Gapped rows never carry the ungapped row's costs, so only row 0 misses the search from
+    // row 1.
+    if std::ptr::eq(row, &table.values[0]) {
+        params.alpha = 0.0;
+        params.beta = 0.0;
+    }
+    params
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_options.c:908-936
@@ -670,26 +576,18 @@ pub fn lookup_protein_params(spec: &ProteinScoringSpec) -> KarlinParams {
 // }
 // ```
 pub fn protein_scoring_supported(spec: &ProteinScoringSpec) -> bool {
-    let table: &[ParamEntry] = match spec.matrix {
-        ScoringMatrix::Blosum45 => BLOSUM45,
-        ScoringMatrix::Blosum50 => BLOSUM50,
-        ScoringMatrix::Blosum62 => BLOSUM62,
-        ScoringMatrix::Blosum80 => BLOSUM80,
-        ScoringMatrix::Blosum90 => BLOSUM90,
-        ScoringMatrix::Pam30 => PAM30,
-        ScoringMatrix::Pam70 => PAM70,
-        ScoringMatrix::Pam250 => PAM250,
-    };
-
-    table
-        .iter()
-        .any(|entry| entry.gap_open == spec.gap_open && entry.gap_extend == spec.gap_extend)
+    gap_costs_row(
+        scoring_matrix_table(spec.matrix),
+        spec.gap_open,
+        spec.gap_extend,
+    )
+    .is_some()
 }
 
-/// Look up UNGAPPED Karlin-Altschul parameters for protein scoring scheme.
+/// Look up UNGAPPED Karlin-Altschul parameters for protein scoring scheme: the first row of
+/// the matrix's table (gap costs INT2_MAX).
 ///
 /// NCBI BLAST uses ungapped params (kbp_std) for gap_trigger calculation.
-/// These are stored as the first entry in each matrix table with gap_open=MAX, gap_extend=MAX.
 ///
 /// Reference: ncbi-blast blast_parameters.c:340-345
 /// ```c
@@ -698,41 +596,18 @@ pub fn protein_scoring_supported(spec: &ProteinScoringSpec) -> bool {
 ///    gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
 /// }
 /// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3128-3130
+/// ```c
+///    else if (num_values > 0) {
+///      (*alpha) = alpha_arr[0];
+///      (*beta) = beta_arr[0];
+/// ```
 pub fn lookup_protein_params_ungapped(matrix: ScoringMatrix) -> KarlinParams {
-    let table: &[ParamEntry] = match matrix {
-        ScoringMatrix::Blosum45 => BLOSUM45,
-        ScoringMatrix::Blosum50 => BLOSUM50,
-        ScoringMatrix::Blosum62 => BLOSUM62,
-        ScoringMatrix::Blosum80 => BLOSUM80,
-        ScoringMatrix::Blosum90 => BLOSUM90,
-        ScoringMatrix::Pam30 => PAM30,
-        ScoringMatrix::Pam70 => PAM70,
-        ScoringMatrix::Pam250 => PAM250,
-    };
-
-    // Ungapped params are stored with gap_open=MAX, gap_extend=MAX (first entry)
-    for entry in table {
-        if entry.gap_open == i32::MAX && entry.gap_extend == i32::MAX {
-            return entry.to_karlin_params();
-        }
-    }
-
-    // Fallback: first entry should be ungapped
-    if !table.is_empty() {
-        return table[0].to_karlin_params();
-    }
-
-    // Default BLOSUM62 ungapped
-    KarlinParams {
-        lambda: 0.3176,
-        k: 0.134,
-        h: 0.4012,
-        alpha: 0.7916,
-        beta: -3.2,
-    }
+    protein_row_params(&scoring_matrix_table(matrix).values[0])
 }
 
-/// Look up GAPPED Karlin-Altschul parameters for protein scoring scheme.
+/// Look up GAPPED Karlin-Altschul parameters for protein scoring scheme: the row of the
+/// matrix's preferred gap costs (BLOSUM62 11/1).
 ///
 /// NCBI BLAST uses gapped params (kbp_gap_std with gap_open=11, gap_extend=1 for BLOSUM62)
 /// for length_adjustment calculation in BLAST_CalcEffLengths.
@@ -746,40 +621,27 @@ pub fn lookup_protein_params_ungapped(matrix: ScoringMatrix) -> KarlinParams {
 ///
 /// For tblastx, scoring_options->gapped_calculation = TRUE (default),
 /// so BLAST_GetAlphaBeta returns gapped alpha/beta values.
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3107-3116
+/// ```c
+///    if (gapped) {
+///      if ((0 == gap_open) && (0 == gap_extend)) {
+///        for(i = 1; i < num_values; i++) {
+///     if(pref_flags[i]==BLAST_MATRIX_BEST) {
+///       (*alpha) = alpha_arr[i];
+///       (*beta) = beta_arr[i];
+///       break;
+///     }
+///        }
+/// ```
 pub fn lookup_protein_params_gapped(matrix: ScoringMatrix) -> KarlinParams {
-    let table: &[ParamEntry] = match matrix {
-        ScoringMatrix::Blosum45 => BLOSUM45,
-        ScoringMatrix::Blosum50 => BLOSUM50,
-        ScoringMatrix::Blosum62 => BLOSUM62,
-        ScoringMatrix::Blosum80 => BLOSUM80,
-        ScoringMatrix::Blosum90 => BLOSUM90,
-        ScoringMatrix::Pam30 => PAM30,
-        ScoringMatrix::Pam70 => PAM70,
-        ScoringMatrix::Pam250 => PAM250,
-    };
-
-    // Gapped params: gap_open=11, gap_extend=1 (BLOSUM62 default)
-    for entry in table {
-        if entry.gap_open == 11 && entry.gap_extend == 1 {
-            return entry.to_karlin_params();
-        }
-    }
-
-    // Fallback: first non-ungapped entry
-    for entry in table {
-        if entry.gap_open != i32::MAX {
-            return entry.to_karlin_params();
-        }
-    }
-
-    // Default BLOSUM62 gapped (11/1)
-    KarlinParams {
-        lambda: 0.267,
-        k: 0.041,
-        h: 0.14,
-        alpha: 1.9,
-        beta: -30.0,
-    }
+    let (gap_open, gap_extend) = protein_gap_existence_extend_params(matrix.ncbi_name())
+        .expect("every matrix has a BEST row");
+    lookup_protein_params(&ProteinScoringSpec {
+        matrix,
+        gap_open,
+        gap_extend,
+    })
 }
 
 #[cfg(test)]
@@ -881,6 +743,258 @@ mod tests {
         assert!(values(&spec(5, -4, 0, 0))
             .unwrap_err()
             .starts_with("Gap existence and extension values 0 and 0 are not supported"));
+    }
+
+    // The protein rows that this file carried as literals before the tables were read from
+    // protein_tables.rs (dev fb8b10ee6): (gap open, gap extend, Lambda, K, H, alpha, beta),
+    // i32::MAX marking the ungapped row.
+    const LITERAL_BLOSUM45: &[ParamEntry] = &[
+        ParamEntry::new(i32::MAX, i32::MAX, 0.2291, 0.0924, 0.2514, 0.9113, -5.7),
+        ParamEntry::new(13, 3, 0.207, 0.049, 0.14, 1.5, -22.0),
+        ParamEntry::new(12, 3, 0.199, 0.039, 0.11, 1.8, -34.0),
+        ParamEntry::new(11, 3, 0.190, 0.031, 0.095, 2.0, -38.0),
+        ParamEntry::new(10, 3, 0.179, 0.023, 0.075, 2.4, -51.0),
+        ParamEntry::new(16, 2, 0.210, 0.051, 0.14, 1.5, -24.0),
+        ParamEntry::new(15, 2, 0.203, 0.041, 0.12, 1.7, -31.0),
+        ParamEntry::new(14, 2, 0.195, 0.032, 0.10, 1.9, -36.0),
+        ParamEntry::new(13, 2, 0.185, 0.024, 0.084, 2.2, -45.0),
+        ParamEntry::new(12, 2, 0.171, 0.016, 0.061, 2.8, -65.0),
+        ParamEntry::new(19, 1, 0.205, 0.040, 0.11, 1.9, -43.0),
+        ParamEntry::new(18, 1, 0.198, 0.032, 0.10, 2.0, -43.0),
+        ParamEntry::new(17, 1, 0.189, 0.024, 0.079, 2.4, -57.0),
+        ParamEntry::new(16, 1, 0.176, 0.016, 0.063, 2.8, -67.0),
+    ];
+
+    const LITERAL_BLOSUM50: &[ParamEntry] = &[
+        ParamEntry::new(i32::MAX, i32::MAX, 0.2318, 0.112, 0.3362, 0.6895, -4.0),
+        ParamEntry::new(13, 3, 0.212, 0.063, 0.19, 1.1, -16.0),
+        ParamEntry::new(12, 3, 0.206, 0.055, 0.17, 1.2, -18.0),
+        ParamEntry::new(11, 3, 0.197, 0.042, 0.14, 1.4, -25.0),
+        ParamEntry::new(10, 3, 0.186, 0.031, 0.11, 1.7, -34.0),
+        ParamEntry::new(9, 3, 0.172, 0.022, 0.082, 2.1, -48.0),
+        ParamEntry::new(16, 2, 0.215, 0.066, 0.20, 1.05, -15.0),
+        ParamEntry::new(15, 2, 0.210, 0.058, 0.17, 1.2, -20.0),
+        ParamEntry::new(14, 2, 0.202, 0.045, 0.14, 1.4, -27.0),
+        ParamEntry::new(13, 2, 0.193, 0.035, 0.12, 1.6, -32.0),
+        ParamEntry::new(12, 2, 0.181, 0.025, 0.095, 1.9, -41.0),
+        ParamEntry::new(19, 1, 0.212, 0.057, 0.18, 1.2, -21.0),
+        ParamEntry::new(18, 1, 0.207, 0.050, 0.15, 1.4, -28.0),
+        ParamEntry::new(17, 1, 0.198, 0.037, 0.12, 1.6, -33.0),
+        ParamEntry::new(16, 1, 0.186, 0.025, 0.10, 1.9, -42.0),
+        ParamEntry::new(15, 1, 0.171, 0.015, 0.063, 2.7, -76.0),
+    ];
+
+    const LITERAL_BLOSUM62: &[ParamEntry] = &[
+        ParamEntry::new(i32::MAX, i32::MAX, 0.3176, 0.134, 0.4012, 0.7916, -3.2),
+        ParamEntry::new(11, 2, 0.297, 0.082, 0.27, 1.1, -10.0),
+        ParamEntry::new(10, 2, 0.291, 0.075, 0.23, 1.3, -15.0),
+        ParamEntry::new(9, 2, 0.279, 0.058, 0.19, 1.5, -19.0),
+        ParamEntry::new(8, 2, 0.264, 0.045, 0.15, 1.8, -26.0),
+        ParamEntry::new(7, 2, 0.239, 0.027, 0.10, 2.5, -46.0),
+        ParamEntry::new(6, 2, 0.201, 0.012, 0.061, 3.3, -58.0),
+        ParamEntry::new(13, 1, 0.292, 0.071, 0.23, 1.2, -11.0),
+        ParamEntry::new(12, 1, 0.283, 0.059, 0.19, 1.5, -19.0),
+        ParamEntry::new(11, 1, 0.267, 0.041, 0.14, 1.9, -30.0),
+        ParamEntry::new(10, 1, 0.243, 0.024, 0.10, 2.5, -44.0),
+        ParamEntry::new(9, 1, 0.206, 0.010, 0.052, 4.0, -87.0),
+    ];
+
+    const LITERAL_BLOSUM80: &[ParamEntry] = &[
+        ParamEntry::new(i32::MAX, i32::MAX, 0.3430, 0.177, 0.6568, 0.5222, -1.6),
+        ParamEntry::new(25, 2, 0.342, 0.17, 0.66, 0.52, -1.6),
+        ParamEntry::new(13, 2, 0.336, 0.15, 0.57, 0.59, -3.0),
+        ParamEntry::new(9, 2, 0.319, 0.11, 0.42, 0.76, -6.0),
+        ParamEntry::new(8, 2, 0.308, 0.090, 0.35, 0.89, -9.0),
+        ParamEntry::new(7, 2, 0.293, 0.070, 0.27, 1.1, -14.0),
+        ParamEntry::new(6, 2, 0.268, 0.045, 0.19, 1.4, -19.0),
+        ParamEntry::new(11, 1, 0.314, 0.095, 0.35, 0.90, -9.0),
+        ParamEntry::new(10, 1, 0.299, 0.071, 0.27, 1.1, -14.0),
+        ParamEntry::new(9, 1, 0.279, 0.048, 0.20, 1.4, -19.0),
+    ];
+
+    const LITERAL_BLOSUM90: &[ParamEntry] = &[
+        ParamEntry::new(i32::MAX, i32::MAX, 0.3346, 0.190, 0.7547, 0.4434, -1.4),
+        ParamEntry::new(9, 2, 0.310, 0.12, 0.46, 0.67, -6.0),
+        ParamEntry::new(8, 2, 0.300, 0.099, 0.39, 0.76, -7.0),
+        ParamEntry::new(7, 2, 0.283, 0.072, 0.30, 0.93, -11.0),
+        ParamEntry::new(6, 2, 0.259, 0.048, 0.22, 1.2, -16.0),
+        ParamEntry::new(11, 1, 0.302, 0.093, 0.39, 0.78, -8.0),
+        ParamEntry::new(10, 1, 0.290, 0.075, 0.28, 1.04, -15.0),
+        ParamEntry::new(9, 1, 0.265, 0.044, 0.20, 1.3, -19.0),
+    ];
+
+    const LITERAL_PAM30: &[ParamEntry] = &[
+        ParamEntry::new(i32::MAX, i32::MAX, 0.3400, 0.283, 1.754, 0.1938, -0.3),
+        ParamEntry::new(7, 2, 0.305, 0.15, 0.87, 0.35, -3.0),
+        ParamEntry::new(6, 2, 0.287, 0.11, 0.68, 0.42, -4.0),
+        ParamEntry::new(5, 2, 0.264, 0.079, 0.45, 0.59, -7.0),
+        ParamEntry::new(10, 1, 0.309, 0.15, 0.88, 0.34, -3.0),
+        ParamEntry::new(9, 1, 0.294, 0.11, 0.61, 0.48, -6.0),
+        ParamEntry::new(8, 1, 0.270, 0.072, 0.40, 0.68, -10.0),
+    ];
+
+    const LITERAL_PAM70: &[ParamEntry] = &[
+        ParamEntry::new(i32::MAX, i32::MAX, 0.3345, 0.229, 1.029, 0.3250, -0.9),
+        ParamEntry::new(8, 2, 0.301, 0.12, 0.54, 0.56, -5.0),
+        ParamEntry::new(7, 2, 0.286, 0.093, 0.43, 0.67, -7.0),
+        ParamEntry::new(6, 2, 0.264, 0.064, 0.29, 0.90, -12.0),
+        ParamEntry::new(11, 1, 0.305, 0.12, 0.52, 0.59, -6.0),
+        ParamEntry::new(10, 1, 0.291, 0.091, 0.41, 0.71, -9.0),
+        ParamEntry::new(9, 1, 0.270, 0.060, 0.28, 0.97, -14.0),
+    ];
+
+    const LITERAL_PAM250: &[ParamEntry] = &[
+        ParamEntry::new(i32::MAX, i32::MAX, 0.2252, 0.0868, 0.2223, 0.98, -5.0),
+        ParamEntry::new(15, 3, 0.205, 0.049, 0.13, 1.6, -23.0),
+        ParamEntry::new(14, 3, 0.200, 0.043, 0.12, 1.7, -26.0),
+        ParamEntry::new(13, 3, 0.194, 0.036, 0.10, 1.9, -31.0),
+        ParamEntry::new(12, 3, 0.186, 0.029, 0.085, 2.2, -41.0),
+        ParamEntry::new(11, 3, 0.174, 0.020, 0.070, 2.5, -48.0),
+        ParamEntry::new(17, 2, 0.204, 0.047, 0.12, 1.7, -28.0),
+        ParamEntry::new(16, 2, 0.198, 0.038, 0.11, 1.8, -29.0),
+        ParamEntry::new(15, 2, 0.191, 0.031, 0.087, 2.2, -44.0),
+        ParamEntry::new(14, 2, 0.182, 0.024, 0.073, 2.5, -53.0),
+        ParamEntry::new(13, 2, 0.171, 0.017, 0.059, 2.9, -64.0),
+        ParamEntry::new(21, 1, 0.205, 0.045, 0.11, 1.8, -34.0),
+        ParamEntry::new(20, 1, 0.199, 0.037, 0.10, 1.9, -35.0),
+        ParamEntry::new(19, 1, 0.192, 0.029, 0.083, 2.3, -52.0),
+        ParamEntry::new(18, 1, 0.183, 0.021, 0.070, 2.6, -60.0),
+        ParamEntry::new(17, 1, 0.171, 0.014, 0.052, 3.3, -86.0),
+    ];
+
+    #[test]
+    fn protein_table_rows_equal_the_former_literals_bit_for_bit() {
+        let bits = |p: KarlinParams| [p.lambda, p.k, p.h, p.alpha, p.beta].map(f64::to_bits);
+        let literal_tables: [(ScoringMatrix, &[ParamEntry]); 8] = [
+            (ScoringMatrix::Blosum45, LITERAL_BLOSUM45),
+            (ScoringMatrix::Blosum50, LITERAL_BLOSUM50),
+            (ScoringMatrix::Blosum62, LITERAL_BLOSUM62),
+            (ScoringMatrix::Blosum80, LITERAL_BLOSUM80),
+            (ScoringMatrix::Blosum90, LITERAL_BLOSUM90),
+            (ScoringMatrix::Pam30, LITERAL_PAM30),
+            (ScoringMatrix::Pam70, LITERAL_PAM70),
+            (ScoringMatrix::Pam250, LITERAL_PAM250),
+        ];
+        let mut rows = 0;
+        for (matrix, entries) in literal_tables {
+            for entry in entries {
+                let mut expected = entry.to_karlin_params();
+                // Two literals were not NCBI's: blast_stat.c:410, the PAM70 ungapped beta is
+                // -0.7 (the literal said -0.9); :384, the PAM30 10/1 alpha is 0.35 (0.34).
+                if matrix == ScoringMatrix::Pam70 && entry.gap_open == i32::MAX {
+                    expected.beta = -0.7;
+                }
+                if matrix == ScoringMatrix::Pam30 && (entry.gap_open, entry.gap_extend) == (10, 1) {
+                    expected.alpha = 0.35;
+                }
+                let got = if entry.gap_open == i32::MAX {
+                    lookup_protein_params_ungapped(matrix)
+                } else {
+                    let spec = ProteinScoringSpec {
+                        matrix,
+                        gap_open: entry.gap_open,
+                        gap_extend: entry.gap_extend,
+                    };
+                    assert!(protein_scoring_supported(&spec), "{matrix:?} {entry:?}");
+                    lookup_protein_params(&spec)
+                };
+                assert_eq!(bits(got), bits(expected), "{matrix:?} {entry:?}");
+                rows += 1;
+            }
+        }
+        assert_eq!(rows, 90);
+    }
+
+    #[test]
+    fn every_gap_cost_row_of_ncbis_tables_is_found() {
+        // NCBI blast_stat.c:183-587: 98 rows, 9 of them ungapped. The literal tables had 82
+        // gapped rows; PAM30 15/3, 14/2, 14/1, 13/3, PAM70 11/2, 12/3 and IDENTITY 15/2 are
+        // the others.
+        let mut gapped = 0;
+        for matrix in ScoringMatrix::ALL {
+            let table = scoring_matrix_table(matrix);
+            assert_eq!(table.name, matrix.ncbi_name());
+            for row in &table.values[1..] {
+                let spec = ProteinScoringSpec {
+                    matrix,
+                    gap_open: row.0[0] as i32,
+                    gap_extend: row.0[1] as i32,
+                };
+                let params = lookup_protein_params(&spec);
+                assert_eq!(
+                    [params.lambda, params.k, params.h, params.alpha, params.beta],
+                    [row.0[3], row.0[4], row.0[5], row.0[6], row.0[7]]
+                );
+                gapped += 1;
+            }
+        }
+        assert_eq!(gapped, 89);
+        let pam30 = lookup_protein_params(&ProteinScoringSpec {
+            matrix: ScoringMatrix::Pam30,
+            gap_open: 15,
+            gap_extend: 3,
+        });
+        assert_eq!((pam30.lambda, pam30.k, pam30.h), (0.339, 0.28, 1.70));
+        let identity = lookup_protein_params(&ProteinScoringSpec {
+            matrix: ScoringMatrix::Identity,
+            gap_open: 15,
+            gap_extend: 2,
+        });
+        assert_eq!(
+            (identity.lambda, identity.k, identity.h),
+            (0.2835, 0.255, 1.49)
+        );
+        assert!(!protein_scoring_supported(&ProteinScoringSpec {
+            matrix: ScoringMatrix::Blosum62,
+            gap_open: 5,
+            gap_extend: 5,
+        }));
+    }
+
+    #[test]
+    fn the_ungapped_rows_costs_get_no_alpha_and_beta() {
+        // BLAST_GetAlphaBeta (blast_stat.c:3117-3126) searches from row 1; BLAST_CalcEffLengths
+        // starts alpha and beta at 0 (blast_setup.c:705). Lambda, K and H are row 0's
+        // (Blast_KarlinBlkGappedLoadFromTables searches from row 0).
+        for matrix in ScoringMatrix::ALL {
+            let spec = ProteinScoringSpec {
+                matrix,
+                gap_open: 32767,
+                gap_extend: 32767,
+            };
+            assert!(protein_scoring_supported(&spec));
+            let params = lookup_protein_params(&spec);
+            let ungapped = lookup_protein_params_ungapped(matrix);
+            assert_eq!(
+                [params.lambda, params.k, params.h, params.alpha, params.beta],
+                [ungapped.lambda, ungapped.k, ungapped.h, 0.0, 0.0],
+                "{matrix:?}"
+            );
+            for row in &scoring_matrix_table(matrix).values[1..] {
+                assert!(row.0[0] != 32767.0 && row.0[1] != 32767.0);
+            }
+        }
+    }
+
+    #[test]
+    fn gapped_lookup_reads_the_best_row() {
+        let blosum62 = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
+        assert_eq!(
+            (blosum62.lambda, blosum62.k, blosum62.alpha, blosum62.beta),
+            (0.267, 0.041, 1.9, -30.0)
+        );
+        let blosum45 = lookup_protein_params_gapped(ScoringMatrix::Blosum45);
+        assert_eq!((blosum45.lambda, blosum45.k), (0.195, 0.032));
+    }
+
+    #[test]
+    #[should_panic(expected = "gap costs 5/5 are not in NCBI's BLOSUM62 table")]
+    fn gap_costs_outside_the_table_are_a_defect() {
+        lookup_protein_params(&ProteinScoringSpec {
+            matrix: ScoringMatrix::Blosum62,
+            gap_open: 5,
+            gap_extend: 5,
+        });
     }
 
     #[test]

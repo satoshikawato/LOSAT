@@ -29,7 +29,6 @@ use anyhow::{bail, Context, Result};
 ))]
 use rayon::prelude::*;
 
-use crate::algorithm::blastp::x_redo_subjects::XRedoDbSubj;
 use crate::algorithm::common::database as shared;
 pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -48,8 +47,8 @@ use super::{
     EncodedProtein, PrelimSink, XPrelimHsp,
 };
 
-// EXPERIMENT (LOSAT_X_BPDBCUT / LOSAT_X_BPDBCUTSHADOW): the blocks of the preliminary stage cut by
-// the database size and the thread count.
+// EXPERIMENT (LOSAT_X_BPDBCUT): the blocks of the preliminary stage cut by the database size and
+// the thread count.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -57,10 +56,9 @@ use super::{
 mod x_db_cut;
 mod x_listed_lean;
 mod x_redo_db_subjects;
-pub(super) use x_listed_lean::{
-    x_bp_listed_lean, x_bp_listed_lean_print_summary,
-    x_shadow_compare as x_listed_lean_shadow_compare, XListedLean,
-};
+#[cfg(test)]
+pub(super) use x_listed_lean::x_assert_same_titles_and_letters;
+pub(super) use x_listed_lean::x_bp_listed_lean;
 pub(super) use x_redo_db_subjects::XShownResidues;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
@@ -295,15 +293,7 @@ pub(super) fn blastp_database_search_space(
 /// is an error that names its ordinal id.
 fn prepare_search_block(block: &mut SequenceBlock) -> Result<()> {
     let sequences = block.len();
-    let mut gaps = 0usize;
-    let mut invalid = false;
-    for residue in block.protein_bytes_mut() {
-        if *residue == NCBISTDAA_O {
-            *residue = ncbistdaa::X;
-        }
-        gaps += usize::from(*residue == NCBISTDAA_GAP);
-        invalid |= usize::from(*residue) >= BLASTAA_SIZE;
-    }
+    let (gaps, invalid) = read_o_as_x(block.protein_bytes_mut());
     // A well-formed block holds one sentinel byte before its first sequence and one
     // after every sequence, and no other byte 0: with as many bytes 0 as sentinels, the
     // sentinels in place leave none inside a sequence.
@@ -320,6 +310,41 @@ fn prepare_search_block(block: &mut SequenceBlock) -> Result<()> {
         shared::check_protein_sequence(block.protein_with_sentinels(i), ordinal, PROGRAM)?;
     }
     bail!("a database block is not well-formed, which is not supported by LOSAT's BLASTP")
+}
+
+// No NCBI counterpart: LOSAT's check of a block's bytes (`prepare_search_block`; O read as X is
+// NCBI's rule, quoted there). The bytes are taken in runs of 224 (7 x 32: at most 255, so that a
+// run's count of gap bytes fits a `u8`, and a whole number of vectors), every byte is written back
+// (O as X, any other byte unchanged), and the count and the flag are made with `u8` lanes, so the
+// compiler works on 16 bytes (32 with AVX2) at a time with no branch per byte. Counted in a `usize`
+// per byte, every byte was widened to a 64-bit counter on 64-bit targets, with a branch for the
+// write of each byte, and the loop took 38 % of the cycles of a one-thread blastp-fast `-db`
+// search (one 357-residue query against UniRef50 volume 00). The values are those of the
+// byte-by-byte loop.
+/// Reads O as X in `bytes`; returns the number of gap bytes, and whether a byte is no NCBIstdaa
+/// residue (28 or more).
+fn read_o_as_x(bytes: &mut [u8]) -> (usize, bool) {
+    const _: () = assert!(BLASTAA_SIZE <= u8::MAX as usize);
+    const BLASTAA_SIZE_U8: u8 = BLASTAA_SIZE as u8;
+    const RUN: usize = 224;
+    let mut gaps = 0usize;
+    let mut invalid = 0u8;
+    for run in bytes.chunks_mut(RUN) {
+        let mut run_gaps = 0u8;
+        for residue in run.iter_mut() {
+            let byte = if *residue == NCBISTDAA_O {
+                ncbistdaa::X
+            } else {
+                *residue
+            };
+            *residue = byte;
+            // At most `RUN` (< 256) per run: the sum does not wrap.
+            run_gaps = run_gaps.wrapping_add(u8::from(byte == NCBISTDAA_GAP));
+            invalid |= u8::from(byte >= BLASTAA_SIZE_U8);
+        }
+        gaps += usize::from(run_gaps);
+    }
+    (gaps, invalid != 0)
 }
 
 /// Reads the block `range` and prepares it for the search (`prepare_search_block`).
@@ -466,16 +491,14 @@ where
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let blocks_per_thread = 1;
-    // EXPERIMENT (LOSAT_X_BPDBCUT / LOSAT_X_BPDBCUTSHADOW): `database/x_db_cut.rs`.
+    // EXPERIMENT (LOSAT_X_BPDBCUT): `database/x_db_cut.rs`.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     {
-        let mode = x_db_cut::x_bp_db_cut();
-        if mode != x_db_cut::XDbCut::Off {
+        if x_db_cut::x_bp_db_cut() {
             return x_db_cut::x_search_blocks_cut(
-                mode,
                 database,
                 pool,
                 window,
@@ -496,16 +519,6 @@ where
         process_subject,
         sink,
     )
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPDBCUTSHADOW): the shadow mode's line at exit.
-pub(super) fn x_bp_db_cut_print_summary() {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    x_db_cut::x_bp_db_cut_print_summary();
 }
 
 /// `search_blocks` with blocks of at most `block_bytes` and rounds of `blocks_per_thread`
@@ -649,17 +662,15 @@ pub(super) struct ListedSubjects {
     /// read (`x_read_shown`): a subject whose residues no report reads holds its length only
     /// (`aa_seq` empty).
     pub(super) encoded: Vec<EncodedProtein>,
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): where the redo reads the subjects (`Off`: `encoded`).
-    x_mode: XRedoDbSubj,
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): whether the redo reads the subjects from the database
+    /// (`x_list`; else from `encoded`).
+    x_database: bool,
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the number of residues of each subject, by rank (`x_list`;
     /// empty without the switch).
     x_lengths: Vec<u32>,
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): whether a read of the redo or of the first Newton problems
     /// found a pyrrolysine (O), by rank (`x_list`; empty without the switch).
     x_has_o: Vec<std::sync::atomic::AtomicBool>,
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJSHADOW): the copy that `read` makes, by rank (empty
-    /// without the shadow mode).
-    x_shadow_copy: Vec<EncodedProtein>,
 }
 
 impl ListedSubjects {
@@ -717,10 +728,9 @@ impl ListedSubjects {
         Ok(Self {
             ordinals,
             encoded,
-            x_mode: XRedoDbSubj::Off,
+            x_database: false,
             x_lengths: Vec::new(),
             x_has_o: Vec::new(),
-            x_shadow_copy: Vec::new(),
         })
     }
 
@@ -1205,6 +1215,98 @@ pub(super) fn x_titles_read_allow_blocks(
     (0..db.num_seqs()).all(allowed)
 }
 
+// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the block search of outfmt 15 and 16. Besides what outfmt 5
+// reads (`x_titles_read_allow_blocks`) they read, for each subject with hits, the Blast-def-line
+// taxid (`SeqDb::defline_taxids`, a decode apart from the titles') and, when `taxdb.bti` is on the
+// search path, the taxonomy database (`shared::read_reported_taxids`): its opening, the lookup of
+// the taxid, and a scientific name that NCBI's stream can write (`names::check_text`). The search
+// of all queries makes those refusals before its first byte; a block would make them after the
+// earlier blocks' bytes. So the block search is taken only where none can fail for any subject
+// of the database: every sequence's taxid reads, and `shared::taxdb_may_refuse` (OF5b, the one
+// implementation of "can a lookup of this database refuse?", DECISIONS 34 and 38) says no. That
+// check answers from the smaller side: one pass over the taxonomy database when it is the smaller
+// one (NCBI's real taxdb has no refusable record, so no taxid lookup and no pass over the
+// database's taxids), else the database's taxids, sorted and deduplicated, looked up. It has its
+// own taxonomy handle, so the run's open messages stay for the report. This is conservative,
+// since the report reads the taxids of the subjects with hits only.
+// The titles and the taxid decodes are read in one pass over the headers (`SeqDb::visit_deflines_taxids`,
+// one read per `HEADER_RANGE_SEQS` sequences, as `x_titles_read_allow_blocks` reads them); no set of
+// taxids is built here.
+// No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): `x_titles_read_allow_blocks` and `x_taxids_allow_blocks`
+/// in one pass over the headers: whether every sequence of the database has one definition line
+/// that reads and holds no byte outside ' ' ..= '~', its taxid reads, and no lookup of the
+/// taxonomy database can be refused (`shared::taxdb_may_refuse`). Read in `pool`; a failure is
+/// `false`. It writes nothing and changes no state of the run. With `LOSAT_X_DBIDXREAD=0` the two
+/// checks run one after the other, one sequence at a time.
+pub(super) fn x_titles_taxids_allow_blocks(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> bool {
+    let db = &database.db;
+    if crate::seqdb::x_dbidxread() == crate::seqdb::XDbIdxRead::Off {
+        return x_titles_read_allow_blocks(database, pool) && x_taxids_allow_blocks(database, pool);
+    }
+    let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
+    let readable_range = |range: &BlockRange| -> bool {
+        db.visit_deflines_taxids(*range, |_ordinal, deflines| match deflines {
+            // The taxid `read_reported_taxids` takes of a sequence: its first definition
+            // line's.
+            Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
+            Err(_) => false,
+        })
+    };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let readable = if pool.enabled() {
+        pool.install(|| ranges.par_iter().all(readable_range))
+    } else {
+        ranges.iter().all(readable_range)
+    };
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let readable = {
+        let _ = pool;
+        ranges.iter().all(readable_range)
+    };
+    readable && !shared::taxdb_may_refuse(db)
+}
+
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): whether every sequence's taxid reads and no lookup of the
+/// taxonomy database can be refused (`shared::taxdb_may_refuse`, which is `false` where
+/// `taxdb.bti` is not found). One sequence at a time (`LOSAT_X_DBIDXREAD=0`); see
+/// `x_titles_taxids_allow_blocks`.
+fn x_taxids_allow_blocks(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> bool {
+    let db = &database.db;
+    let reads = |ordinal: u32| db.defline_taxids(ordinal).is_ok();
+    let count = db.num_seqs();
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let all_read = if pool.enabled() {
+        pool.install(|| (0..count).into_par_iter().with_min_len(4096).all(reads))
+    } else {
+        (0..count).all(reads)
+    };
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let all_read = {
+        let _ = pool;
+        (0..count).all(reads)
+    };
+    all_read && !shared::taxdb_may_refuse(db)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1224,6 +1326,81 @@ mod tests {
     fn open(name: &str) -> BlastpDatabase {
         BlastpDatabase::open(&fixture(name), &ApplicationSettings::default())
             .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+    }
+
+    // The byte-by-byte loop that `read_o_as_x` replaces.
+    fn read_o_as_x_by_byte(bytes: &mut [u8]) -> (usize, bool) {
+        let mut gaps = 0usize;
+        let mut invalid = false;
+        for residue in bytes {
+            if *residue == NCBISTDAA_O {
+                *residue = ncbistdaa::X;
+            }
+            gaps += usize::from(*residue == NCBISTDAA_GAP);
+            invalid |= usize::from(*residue) >= BLASTAA_SIZE;
+        }
+        (gaps, invalid)
+    }
+
+    // Lengths across the runs of 224 bytes, gap bytes from none to all, O, the last residue
+    // (27), the first byte that is none (28) and 255: the bytes and both values are those of the
+    // byte-by-byte loop.
+    #[test]
+    fn read_o_as_x_gives_the_values_of_the_byte_by_byte_loop() {
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut flagged = 0usize;
+        for length in [0usize, 1, 2, 223, 224, 225, 447, 448, 449, 1_000, 4_096] {
+            for gap_every in [0u64, 1, 2, 7, 300] {
+                for wrong in [None, Some(27u8), Some(28), Some(255)] {
+                    let bytes: Vec<u8> = (0..length)
+                        .map(|_| {
+                            let r = next();
+                            if gap_every != 0 && r % gap_every == 0 {
+                                NCBISTDAA_GAP
+                            } else if r % 11 == 0 {
+                                NCBISTDAA_O
+                            } else if r % 97 == 0 {
+                                wrong.unwrap_or(1)
+                            } else {
+                                1 + (r % 25) as u8
+                            }
+                        })
+                        .collect();
+                    let mut runs = bytes.clone();
+                    let mut by_byte = bytes;
+                    let expected = read_o_as_x_by_byte(&mut by_byte);
+                    flagged += usize::from(expected.1);
+                    assert_eq!(
+                        read_o_as_x(&mut runs),
+                        expected,
+                        "length {length}, a gap every {gap_every}, {wrong:?}"
+                    );
+                    assert_eq!(runs, by_byte);
+                }
+            }
+        }
+        assert!(flagged > 20, "cases with a byte of 28 or more: {flagged}");
+        // Every byte a gap: a full run holds 224, the largest count of a run.
+        let mut gaps = vec![NCBISTDAA_GAP; 1_000];
+        assert_eq!(read_o_as_x(&mut gaps), (1_000, false));
+        // A byte of 28 alone, first in the second run and last of the input; O at the end of
+        // the first run and first in the second.
+        for (length, at) in [(2usize, 1usize), (300, 224), (511, 510)] {
+            let mut bytes = vec![1u8; length];
+            bytes[at] = 28;
+            assert_eq!(read_o_as_x(&mut bytes), (0, true), "28 at {at} of {length}");
+        }
+        let mut bytes = vec![1u8; 300];
+        bytes[223] = NCBISTDAA_O;
+        bytes[224] = NCBISTDAA_O;
+        assert_eq!(read_o_as_x(&mut bytes), (0, false));
+        assert_eq!((bytes[223], bytes[224]), (ncbistdaa::X, ncbistdaa::X));
     }
 
     fn blosum62_gapped() -> KarlinParams {
@@ -1692,7 +1869,7 @@ mod tests {
     mod x_db_cut_blocks {
         use super::super::x_db_cut::{
             x_count_blocks, x_cut_block_bytes, x_db_cut_block_bytes, x_search_blocks_cut,
-            x_sequence_bytes, XDbCut,
+            x_sequence_bytes,
         };
         use super::*;
         use std::path::{Path, PathBuf};
@@ -1701,13 +1878,13 @@ mod tests {
 
         /// What the recording kernel saw (sorted by ordinal id) and the listed ordinal ids of a
         /// search of `database` at `threads` threads in rounds of `blocks_per_thread` blocks per
-        /// thread: `search_blocks_of` with blocks of `block_bytes` (`Err`), or the cut's driver
-        /// in a mode (`Ok`).
+        /// thread: `search_blocks_of` with blocks of `block_bytes` (`Some`), or the cut's driver
+        /// (`None`).
         fn search(
             database: &BlastpDatabase,
             threads: usize,
             blocks_per_thread: usize,
-            how: std::result::Result<XDbCut, u64>,
+            block_bytes: Option<u64>,
         ) -> Result<(Seen, Vec<u32>)> {
             let window = 40;
             let seen = std::sync::Mutex::new(Vec::new());
@@ -1716,9 +1893,8 @@ mod tests {
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                 let new_scratch = || BlastpSubjectScratch::new(16, 64, window, 21);
                 let kernel = recording_kernel(window, &seen);
-                match how {
-                    Ok(mode) => x_search_blocks_cut(
-                        mode,
+                match block_bytes {
+                    None => x_search_blocks_cut(
                         database,
                         pool,
                         window,
@@ -1731,7 +1907,7 @@ mod tests {
                             prelim_hitlist_size: 500,
                         },
                     ),
-                    Err(block_bytes) => search_blocks_of(
+                    Some(block_bytes) => search_blocks_of(
                         database,
                         pool,
                         window,
@@ -1896,7 +2072,7 @@ mod tests {
             assert_eq!(multi.total_letters(), letters as u64);
             assert_eq!(single.db.volumes().len(), 1);
             assert!(multi.db.volumes().len() > 2, "{}", multi.db.volumes().len());
-            let (reference, reference_listed) = search(&single, 1, 2, Err(BLOCK_BYTES)).unwrap();
+            let (reference, reference_listed) = search(&single, 1, 2, Some(BLOCK_BYTES)).unwrap();
             assert_eq!(reference.len(), lengths.len());
             assert_eq!(reference_listed.len(), 100);
             assert_eq!(x_count_blocks(&single.db, BLOCK_BYTES), 1);
@@ -1919,8 +2095,7 @@ mod tests {
                 }
                 for blocks_per_thread in [2, BLOCKS_PER_THREAD] {
                     for (what, db) in [("one volume", &single), ("volumes", &multi)] {
-                        let (seen, listed) =
-                            search(db, threads, blocks_per_thread, Ok(XDbCut::On)).unwrap();
+                        let (seen, listed) = search(db, threads, blocks_per_thread, None).unwrap();
                         let context = format!(
                             "{what}, {threads} threads, {blocks_per_thread} blocks per thread"
                         );
@@ -1928,13 +2103,6 @@ mod tests {
                         assert_eq!(listed, reference_listed, "{context}");
                     }
                 }
-            }
-            // The shadow searches twice (the kernel sees every sequence twice) and finds the
-            // lists equal.
-            for threads in [2usize, 7] {
-                let (seen, listed) = search(&multi, threads, 2, Ok(XDbCut::Shadow)).unwrap();
-                assert_eq!(seen.len(), 2 * lengths.len());
-                assert_eq!(listed, reference_listed);
             }
             let _ = std::fs::remove_dir_all(single_dir);
             let _ = std::fs::remove_dir_all(multi_dir);
@@ -1969,30 +2137,28 @@ mod tests {
                     std::fs::write(&psq, &bytes).unwrap();
                 }
                 let database = open_path(&name);
-                let expected = error_text(search(&database, 1, 2, Err(BLOCK_BYTES)));
+                let expected = error_text(search(&database, 1, 2, Some(BLOCK_BYTES)));
                 assert!(
                     expected.contains("passes the end of the file"),
                     "{expected}"
                 );
                 assert_eq!(
-                    error_text(search(&database, 4, 2, Err(BLOCK_BYTES))),
+                    error_text(search(&database, 4, 2, Some(BLOCK_BYTES))),
                     expected
                 );
                 for threads in [2usize, 4, 7] {
                     let cut = cut_of(&database, threads);
                     // Without the one-thread order's error, the cut's own error differs.
-                    let own = error_text(search(&database, threads, 2, Err(cut)));
+                    let own = error_text(search(&database, threads, 2, Some(cut)));
                     assert_ne!(own, expected, "{threads} threads");
                     if gap {
                         assert!(own.contains("holds a gap character"), "{own}");
                     }
-                    for mode in [XDbCut::On, XDbCut::Shadow] {
-                        assert_eq!(
-                            error_text(search(&database, threads, 2, Ok(mode))),
-                            expected,
-                            "{threads} threads, {mode:?}"
-                        );
-                    }
+                    assert_eq!(
+                        error_text(search(&database, threads, 2, None)),
+                        expected,
+                        "{threads} threads"
+                    );
                 }
             }
             let _ = std::fs::remove_dir_all(dir);
@@ -2024,8 +2190,7 @@ mod tests {
         let mut copied_lists = make();
         let copied = ListedSubjects::read(&database, &mut copied_lists, &mut []).unwrap();
         let mut lists = make();
-        let listed =
-            ListedSubjects::x_list(&database, &mut lists, &mut [], XRedoDbSubj::On).unwrap();
+        let listed = ListedSubjects::x_list(&database, &mut lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [0, 2, 7, 9]);
         assert_eq!(listed.ordinals, copied.ordinals);
         assert!(listed.encoded.is_empty());
@@ -2070,8 +2235,7 @@ mod tests {
             (XShownResidues::Final, &[][..], [false, true, false, true]),
             (XShownResidues::Listed, &[][..], [true; 4]),
         ] {
-            let mut shown =
-                ListedSubjects::x_list(&database, &mut make(), &mut [], XRedoDbSubj::On).unwrap();
+            let mut shown = ListedSubjects::x_list(&database, &mut make(), &mut []).unwrap();
             // The redo reads the subjects of the final lists (and finds the O of p03).
             for rank in [1, 3] {
                 shown.redo_subjects(&database).read(rank).unwrap();
@@ -2229,8 +2393,8 @@ mod tests {
             .unwrap();
         lean.check_reported_titles(&hit_lists).unwrap();
         assert_eq!(lean.stitles(), records.stitles());
-        // The shadow's comparison: titles, flags and every letter.
-        x_listed_lean_shadow_compare(&lean, &records);
+        // Titles, flags and every letter against the stored residues.
+        x_assert_same_titles_and_letters(&lean, &records);
     }
 
     // blast_seqalign.cpp:1569-1582 and seqdbvol.cpp:2302-2310: NCBI opens a volume's
@@ -2459,6 +2623,58 @@ mod tests {
             .collect();
         renamed.sort();
         assert_eq!(renamed, [(0, 0), (2, 2)]);
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the one pass over the headers (`SeqDb::visit_deflines_taxids`)
+    // gives the answer of the two checks it replaces (`x_titles_read_allow_blocks`, then
+    // `x_taxids_allow_blocks` one sequence at a time), for a database whose headers read, one with
+    // taxids, an alias of volumes, and one whose header file is missing, at one thread and in a pool.
+    #[test]
+    fn titles_and_taxids_in_one_pass_give_the_answers_of_the_two_checks() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let paja = manifest_dir.join("tests/db_search/paja_taxid");
+        let dir = std::env::temp_dir().join(format!(
+            "losat-db-qblock-onepass-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        for ext in ["pin", "psq"] {
+            std::fs::copy(paja.with_extension(ext), dir.join(format!("nohdr.{ext}"))).unwrap();
+        }
+        let mut databases = vec![
+            (open("prot_v4"), true),
+            (open("prot_mv"), true),
+            (
+                BlastpDatabase::open(paja.to_str().unwrap(), &ApplicationSettings::default())
+                    .unwrap(),
+                true,
+            ),
+        ];
+        // A database whose header file is missing: the search of all queries reports NCBI's error.
+        if let Ok(missing) = BlastpDatabase::open(
+            dir.join("nohdr").to_str().unwrap(),
+            &ApplicationSettings::default(),
+        ) {
+            databases.push((missing, false));
+        }
+        for (database, readable) in &databases {
+            for threads in [1, 4] {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    let two = x_titles_read_allow_blocks(database, pool)
+                        && x_taxids_allow_blocks(database, pool);
+                    assert_eq!(two, *readable);
+                    assert_eq!(
+                        x_titles_taxids_allow_blocks(database, pool),
+                        two,
+                        "threads {threads}"
+                    );
+                    Ok(())
+                })
+                .unwrap();
+            }
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search of `-db` runs only when every definition

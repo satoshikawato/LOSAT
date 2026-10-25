@@ -1,4 +1,4 @@
-//! `LOSAT_X_TBXBAND` on whole runs of the binary: the unit path of `LOSAT_X_PAIRPAR` takes a query
+//! `LOSAT_X_TBXBAND` on whole runs of the binary: the unit path takes a query
 //! batch whose longest context and longest subject chunk are both longer than the slack of the
 //! reference's diagonal table (`guard` in `src/algorithm/tblastx/x_pair_par.rs`, which the switch no
 //! longer applies; module doc item 3 for why the units stay exact), when the subject chunks have at
@@ -8,8 +8,9 @@
 //! table of 4,096 cells, a slack of about 290); the subject is MjeNMV's first 9,000 bases (frames of
 //! about 3,000 letters: the band) or the PemoMJNVA genome (frames of about 99,000 letters: the
 //! memory rule keeps the guard without `LOSAT_X_TBXUNITMASK`, masked units with it).
-//! `LOSAT_X_PAIRPARGATE` still decides after the guards: at one thread the batch keeps the reference
-//! loop ("fallback: cost"), at several the units split the one subject over the pool.
+//! `LOSAT_X_PAIRPARGATE` still decides after the guards: at one thread the batch (about 3,800
+//! letters, under the 5,000 of `LOSAT_X_PAIRPARN1`) keeps the reference loop ("fallback: cost"), at
+//! several the units split the one subject over the pool.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
 //! ```c
@@ -22,11 +23,9 @@
 //! ...
 //! diag_table->diag_mask = diag_array_length-1;
 //! ```
-//! The switch is in the strict set (on unless `LOSAT_X_TBXBAND=0`, or `LOSAT_X_DEFAULT=0` and it is
-//! not set). The tests compare the reports of the default and of `LOSAT_X_TBXBAND=0`, read
-//! `[X_STATS] PAIRPAR ... units= fallback_guard= fallback_cost= band=`, and run the unit path's
-//! shadow (`LOSAT_X_PAIRPARSHADOW=1`, which compares the units with the reference loop on every
-//! subject and stops at the first difference).
+//! The switch is in the strict set (on unless `LOSAT_X_TBXBAND=0`). The tests compare the reports
+//! of the default and of `LOSAT_X_TBXBAND=0`, read `[X_STATS] PAIRPAR ... units= fallback_guard=
+//! fallback_cost= band=`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -152,30 +151,11 @@ fn a_band_batch_takes_the_units_at_several_threads_with_the_same_report() {
             (0, 0, 1),
             "threads {threads}: the batch of the band"
         );
-        // The shadow compares the units with the reference loop on the subject.
-        let (shadowed, shadow) = tblastx(&q, &s, threads, &[("LOSAT_X_PAIRPARSHADOW", "1")]);
-        assert!(
-            shadowed == reference,
-            "threads {threads}: the shadow's report differs"
-        );
-        assert_eq!(
-            counters(
-                &shadow,
-                "[X_SHADOW] PAIRPAR ",
-                ["subjects_compared", "fallback_guard", "band"]
-            ),
-            [1, 0, 1],
-            "threads {threads}"
-        );
-        assert!(
-            shadow.contains("(combined_ungapped_hits identical)"),
-            "{shadow}"
-        );
     }
 }
 
-// At one thread `LOSAT_X_PAIRPARGATE` keeps the reference loop for this small table, with the switch
-// as without it.
+// At one thread `LOSAT_X_PAIRPARGATE` keeps the reference loop for this batch (under the 5,000
+// letters of `LOSAT_X_PAIRPARN1`), with the switch as without it.
 #[test]
 fn the_cost_gate_still_decides_at_one_thread() {
     let q = query("MjeNMV.fasta", 1_900);
@@ -195,7 +175,7 @@ const MASK_BAND_ONLY: (&str, &str) = ("LOSAT_X_TBXUNITMASK", "2");
 // A subject longer than the reference table's cells (the PemoMJNVA genome): without
 // `LOSAT_X_TBXUNITMASK` the memory rule keeps the guard (the reference loop at several threads);
 // with it (the default) the units take the batch, every one on a masked table, with the same
-// report, and the shadow finds the reference loop's lists.
+// report.
 #[test]
 fn a_subject_longer_than_the_table_takes_masked_units() {
     let q = query("MjeNMV.fasta", 1_900);
@@ -228,28 +208,6 @@ fn a_subject_longer_than_the_table_takes_masked_units() {
             counters(&on, "[X_STATS] TBXUNITMASK ", ["units_masked"]),
             [units],
             "threads {threads}: every unit's chunk is longer than the reference table"
-        );
-        let (shadowed, shadow) = tblastx(&q, &genome, threads, &[("LOSAT_X_PAIRPARSHADOW", "1")]);
-        assert!(
-            shadowed == reference,
-            "threads {threads}: the shadow's report differs"
-        );
-        assert_eq!(
-            counters(
-                &shadow,
-                "[X_SHADOW] PAIRPAR ",
-                ["subjects_compared", "fallback_guard", "band"]
-            ),
-            [1, 0, 1],
-            "threads {threads}"
-        );
-        assert!(
-            counters(&shadow, "[X_SHADOW] TBXUNITMASK ", ["units_masked"])[0] > 0,
-            "{shadow}"
-        );
-        assert!(
-            shadow.contains("(combined_ungapped_hits identical)"),
-            "{shadow}"
         );
         // The band batch's rule alone (chunks longer than the reference table) masks every unit.
         let (report, band_only) = tblastx(&q, &genome, threads, &[STATS, MASK_BAND_ONLY]);

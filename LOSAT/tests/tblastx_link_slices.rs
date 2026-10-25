@@ -1,14 +1,10 @@
-//! The linking groups of TBLASTX as sub-slices of the sorted HSP list with
-//! `LOSAT_X_LINKSLICES` (`src/algorithm/tblastx/x_link_slices.rs`) on whole searches.
+//! The linking groups of TBLASTX as sub-slices of the sorted HSP list
+//! (`src/algorithm/tblastx/x_link_slices.rs`) on whole searches.
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is
-//! `0`, or `LOSAT_X_DEFAULT=0` and its variable is not set. With it on, the linking call of the
-//! in-place path (`x_hsp_inplace.rs`) links its groups where they lie in the sorted list instead
-//! of cutting them into Vecs and copying the linked groups into a new list.
-//! `LOSAT_X_LINKSLICESSHADOW` runs the group step of every linking call both ways and stops at
-//! the first difference. Every test reads the `[X_STATS] LINKSLICES` or `[X_SHADOW] LINKSLICES`
-//! line to check that the path ran, not only that the report is equal. Both lines are printed
-//! only while the switch (or its shadow) is on.
+//! The linking call of the in-place path (`x_hsp_inplace.rs`) links its groups where they lie in
+//! the sorted list instead of cutting them into Vecs and copying the linked groups into a new
+//! list. Every test reads the `[X_STATS] LINKSLICES` line to check that the path ran, not only
+//! that the report is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531
 //! ```c
@@ -45,17 +41,11 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-const SWITCH: (&str, &str) = ("LOSAT_X_LINKSLICES", "1");
-const SWITCH_OFF: (&str, &str) = ("LOSAT_X_LINKSLICES", "0");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
-const IN_PLACE: (&str, &str) = ("LOSAT_X_HSPINPLACE", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_LINKSLICESSHADOW", "1");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const THREADS: [u32; 2] = [1, 4];
 
 /// One TBLASTX run of the fixture pair (`-outfmt 6` on standard output) with the given
-/// variables as its only `LOSAT_*` variables that choose a code path. `LOSAT_X_DEFAULT` of the
-/// test's own environment is dropped as well: every test states the default it runs with.
+/// variables as its only `LOSAT_*` variables that choose a code path.
 /// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more
 /// than one thread, and it selects nothing. The run must exit with 0. Returns the report and
@@ -117,15 +107,6 @@ fn stats(stderr: &str) -> Option<[u64; 4]> {
     )
 }
 
-/// `[X_SHADOW] LINKSLICES`: linkings, hits_compared.
-fn shadow(stderr: &str) -> Option<[u64; 2]> {
-    counters(
-        stderr,
-        "[X_SHADOW] LINKSLICES ",
-        ["linkings", "hits_compared"],
-    )
-}
-
 /// `[X_STATS] HSPINPLACE`: linkings, hits, groups.
 fn in_place_stats(stderr: &str) -> Option<[u64; 3]> {
     counters(
@@ -135,13 +116,26 @@ fn in_place_stats(stderr: &str) -> Option<[u64; 3]> {
     )
 }
 
-/// The checks every run with the path on shares: the stats line is there, the subject's two
+/// `[X_STATS] PAIRPAR`: units. At one thread the cost rule sends the fixture pair to the reference
+/// frame loop (`units=0`), at four threads it runs its units.
+fn check_path(stderr: &str, threads: u32, what: &str) {
+    let [units] = counters(stderr, "[X_STATS] PAIRPAR ", ["units"])
+        .unwrap_or_else(|| panic!("{what}: no [X_STATS] PAIRPAR line:\n{stderr}"));
+    if threads == 1 {
+        assert_eq!(units, 0, "{what}: the frame loop:\n{stderr}");
+    } else {
+        assert!(units > 0, "{what}: the unit path:\n{stderr}");
+    }
+}
+
+/// The checks every run shares: the stats line is there, the subject's two
 /// linking calls went through the path, every group of the in-place path was linked as a slice
 /// (the groups of the `HSPINPLACE` line of the same run), no call went back to the cut, and the
 /// pool was used only with more than one thread. Returns (linkings, groups).
 fn check_stats(stderr: &str, threads: u32, what: &str) -> (u64, u64) {
     let [linkings, groups, parallel_linkings, legacy_fallbacks] =
         stats(stderr).unwrap_or_else(|| panic!("{what}: no [X_STATS] LINKSLICES line:\n{stderr}"));
+    check_path(stderr, threads, what);
     assert_eq!(linkings, 2, "{what}:\n{stderr}");
     assert!(groups >= linkings, "{what}:\n{stderr}");
     assert_eq!(legacy_fallbacks, 0, "{what}:\n{stderr}");
@@ -165,90 +159,21 @@ fn check_stats(stderr: &str, threads: u32, what: &str) -> (u64, u64) {
 //    hp_frame_start[frame_index]->prev = hp_start;
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
-// The default search (no variable for the switch): the report is NCBI's, both linking calls link
-// their groups as slices, the groups are those of the in-place path with the switch off
-// (`LOSAT_X_LINKSLICES=0`), and the numbers are the same with one thread and four.
+// The default search: the report is NCBI's, both linking calls link their groups as slices, and
+// the numbers are the same with one thread and four.
 #[test]
-fn the_switch_gives_ncbis_report_with_the_groups_linked_as_slices() {
+fn the_default_search_gives_ncbis_report_with_the_groups_linked_as_slices() {
     let expected = ncbi_report();
     let mut seen = Vec::new();
     for threads in THREADS {
-        let (report, without) = tblastx(threads, &[SWITCH_OFF, STATS]);
-        assert_eq!(report, expected, "threads {threads}, without the switch");
-        assert_eq!(stats(&without), None, "threads {threads}:\n{without}");
-        let [_, hits, groups_without] = in_place_stats(&without)
-            .unwrap_or_else(|| panic!("threads {threads}: no [X_STATS] HSPINPLACE:\n{without}"));
-
         let (report, stderr) = tblastx(threads, &[STATS]);
         assert_eq!(report, expected, "threads {threads}");
-        assert_eq!(shadow(&stderr), None, "threads {threads}:\n{stderr}");
         let what = format!("threads {threads}");
         let (_, groups) = check_stats(&stderr, threads, &what);
-        assert_eq!(groups, groups_without, "{what}:\n{stderr}");
-        assert_eq!(
-            in_place_stats(&stderr).map(|[_, hits, _]| hits),
-            Some(hits),
-            "{what}:\n{stderr}"
-        );
+        assert!(in_place_stats(&stderr).is_some(), "{what}:\n{stderr}");
         seen.push(groups);
     }
     assert_eq!(seen[0], seen[1], "the groups do not depend on the threads");
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1080-1082
-// ```c
-// for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
-//    hsp_list->hsp_array[index] = H->hsp;
-// ```
-// The shadow stays opt-in (set to any value) and wins over the switch's variable, whatever it
-// says. It compares the group step of every linking call with today's statements: the run ends
-// without a difference, the report is NCBI's, and the shadow line counts both linking calls and
-// the HSPs of both lists.
-#[test]
-fn the_shadow_compares_every_linking_call() {
-    let expected = ncbi_report();
-    for threads in THREADS {
-        let what = format!("shadow, threads {threads}");
-        let (report, stderr) = tblastx(threads, &[SHADOW]);
-        assert_eq!(report, expected, "{what}");
-        let [linkings, hits_compared] = shadow(&stderr)
-            .unwrap_or_else(|| panic!("{what}: no [X_SHADOW] LINKSLICES line:\n{stderr}"));
-        assert_eq!(linkings, 2, "{what}:\n{stderr}");
-        assert!(hits_compared >= linkings, "{what}:\n{stderr}");
-        assert_eq!(stats(&stderr), None, "{what}:\n{stderr}");
-
-        // The HSPs of the two linking calls: `hsps=` of the timer's `x_link1` and `x_link2` lines.
-        let (report, stderr) = tblastx(threads, &[SHADOW, STATS, ("LOSAT_TIMING", "1")]);
-        assert_eq!(report, expected, "{what}");
-        check_stats(&stderr, threads, &what);
-        let hits: u64 = ["x_link1", "x_link2"]
-            .iter()
-            .map(|name| {
-                let prefix = format!("[TIMING] {name}: ");
-                let line = stderr
-                    .lines()
-                    .find_map(|line| line.strip_prefix(prefix.as_str()))
-                    .unwrap_or_else(|| panic!("{what}: no [TIMING] {name} line:\n{stderr}"));
-                count(line, "hsps")
-            })
-            .sum();
-        assert_eq!(
-            shadow(&stderr),
-            Some([2, hits]),
-            "every HSP of both linking calls is compared ({what}):\n{stderr}"
-        );
-
-        // The shadow wins over `LOSAT_X_LINKSLICES=0` and runs under `LOSAT_X_DEFAULT=0` with
-        // the in-place path set, where the switch alone would be off.
-        let (report, stderr) = tblastx(threads, &[SWITCH_OFF, SHADOW, STATS]);
-        assert_eq!(report, expected, "{what}");
-        assert_eq!(shadow(&stderr), Some([2, hits]), "{what}:\n{stderr}");
-        let what = format!("shadow, LOSAT_X_DEFAULT=0 with the in-place path, threads {threads}");
-        let (report, stderr) = tblastx(threads, &[DEFAULT_OFF, IN_PLACE, SHADOW, STATS]);
-        assert_eq!(report, expected, "{what}");
-        check_stats(&stderr, threads, &what);
-        assert_eq!(shadow(&stderr), Some([2, hits]), "{what}:\n{stderr}");
-    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,483-486
@@ -260,80 +185,24 @@ fn the_shadow_compares_every_linking_call() {
 //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_RevCompareHSPsTbx);
 // ```
-// The switch (on by default, no variable) and its shadow together with the other variables of
-// the linking call: the index sorts of LOSAT_X_LINKSORT turned off (it is in the strict set, so
-// the other runs sort with it), the shadow of the in-place path (which also runs the reference
-// body and compares the whole call), the literal port (LOSAT_LINKING_LEGACY: its groups are
-// linked on copies of the slices and written back, never handed back to the cut), the literal
-// port beside the default kernel (LOSAT_LINK_FAST_SHADOW), and the reference frame loop
-// (LOSAT_X_PAIRPAR=0). The report is NCBI's and the path ran in every run.
+// The slices together with the other variables of the linking call: the literal port
+// (LOSAT_LINKING_LEGACY: its groups are linked on copies of the slices and written back, never
+// handed back to the cut) and the literal port beside the default kernel
+// (LOSAT_LINK_FAST_SHADOW). Threads 1 and 4 cover the reference frame loop and the unit path. The
+// report is NCBI's and the path ran in every run.
 #[test]
-fn the_switch_and_its_shadow_with_the_other_linking_variables() {
+fn the_path_with_the_other_linking_variables() {
     let expected = ncbi_report();
-    let others: [(&str, &str); 5] = [
-        ("LOSAT_X_LINKSORT", "0"),
-        ("LOSAT_X_HSPINPLACESHADOW", "1"),
+    let others: [(&str, &str); 2] = [
         ("LOSAT_LINKING_LEGACY", "1"),
         ("LOSAT_LINK_FAST_SHADOW", "1"),
-        ("LOSAT_X_PAIRPAR", "0"),
     ];
     for threads in THREADS {
         for other in others {
-            for path in [&[][..], &[SHADOW][..]] {
-                let what = format!("{path:?} {other:?} threads {threads}");
-                let switches = [&[STATS, other][..], path].concat();
-                let (report, stderr) = tblastx(threads, &switches);
-                assert_eq!(report, expected, "{what}");
-                check_stats(&stderr, threads, &what);
-                if !path.is_empty() {
-                    let [linkings, compared] = shadow(&stderr).unwrap_or_else(|| {
-                        panic!("{what}: no [X_SHADOW] LINKSLICES line:\n{stderr}")
-                    });
-                    assert_eq!(linkings, 2, "{what}:\n{stderr}");
-                    assert!(compared >= 2, "{what}:\n{stderr}");
-                }
-                if other.0 == "LOSAT_X_HSPINPLACESHADOW" {
-                    let [_, compared_linkings] =
-                        counters(&stderr, "[X_SHADOW] HSPINPLACE ", ["sorts", "linkings"])
-                            .unwrap_or_else(|| {
-                                panic!("{what}: no [X_SHADOW] HSPINPLACE:\n{stderr}")
-                            });
-                    assert_eq!(compared_linkings, 2, "{what}:\n{stderr}");
-                }
-            }
-        }
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start = s_LinkHSPStructReset(hp_start);
-//    hp_start->next = hp_frame_start[frame_index];
-// ```
-// `LOSAT_X_DEFAULT=0` (with the switch set: the run that the variable gave before the switch
-// joined the set) and `LOSAT_X_HSPINPLACE=0` (the switch on by default) leave every linking call
-// to the reference body, which this switch does not touch: it changes nothing there, and its
-// lines show that no linking call went through it (every counter 0). The report is NCBI's.
-#[test]
-fn the_reference_body_does_not_reach_the_switch() {
-    let expected = ncbi_report();
-    let references: [&[(&str, &str)]; 2] = [&[DEFAULT_OFF, SWITCH], &[("LOSAT_X_HSPINPLACE", "0")]];
-    for reference in references {
-        for threads in THREADS {
-            let what = format!("{reference:?} threads {threads}");
-            let switches = [&[STATS][..], reference].concat();
-            let (report, stderr) = tblastx(threads, &switches);
+            let what = format!("{other:?} threads {threads}");
+            let (report, stderr) = tblastx(threads, &[STATS, other]);
             assert_eq!(report, expected, "{what}");
-            assert_eq!(stats(&stderr), Some([0; 4]), "{what}:\n{stderr}");
-            assert_eq!(shadow(&stderr), None, "{what}:\n{stderr}");
-
-            let switches = [&[SHADOW, STATS][..], reference].concat();
-            let (report, stderr) = tblastx(threads, &switches);
-            assert_eq!(report, expected, "{what}");
-            assert_eq!(stats(&stderr), Some([0; 4]), "{what}:\n{stderr}");
-            assert_eq!(shadow(&stderr), Some([0; 2]), "{what}:\n{stderr}");
+            check_stats(&stderr, threads, &what);
         }
     }
 }
@@ -376,13 +245,11 @@ fn count(line: &str, name: &str) -> u64 {
         .unwrap_or_else(|| panic!("no number after {name}= in {line}"))
 }
 
-// No NCBI counterpart (a timer). With the switch (on by default, no variable), the `x_link1`
-// line of LOSAT_TIMING is printed with its seven steps in their order, the steps add up to its
-// `sum` (seven values rounded to a millisecond against their rounded sum), and its sizes (calls,
-// HSPs, groups, largest group) are those of the same search with `LOSAT_X_LINKSLICES=0`. No
-// time is compared with a bound.
+// No NCBI counterpart (a timer). The `x_link1` line of LOSAT_TIMING is printed with its seven
+// steps in their order, and the steps add up to its `sum` (seven values rounded to a
+// millisecond against their rounded sum). No time is compared with a bound.
 #[test]
-fn the_timer_counts_the_steps_of_the_linking_call_with_the_switch() {
+fn the_timer_counts_the_steps_of_the_linking_call() {
     const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
     const STEPS: [&str; 7] = [
         "reset",
@@ -396,10 +263,6 @@ fn the_timer_counts_the_steps_of_the_linking_call_with_the_switch() {
     let expected = ncbi_report();
     for threads in THREADS {
         let what = format!("timing, threads {threads}");
-        let (report, without) = tblastx(threads, &[SWITCH_OFF, TIMING]);
-        assert_eq!(report, expected, "{what}");
-        let (_, line_without) = link_timing(&without);
-
         let (report, stderr) = tblastx(threads, &[TIMING]);
         assert_eq!(report, expected, "{what}");
         let (pairs, line) = link_timing(&stderr);
@@ -413,54 +276,6 @@ fn the_timer_counts_the_steps_of_the_linking_call_with_the_switch() {
             "{what}: the steps add up to {step_sum} ms, sum is {} ms: {line}",
             sum[0].1
         );
-        for name in ["calls", "hsps", "groups", "largest_group"] {
-            assert_eq!(
-                count(&line, name),
-                count(&line_without, name),
-                "{what}: {name}: {line} / {line_without}"
-            );
-        }
         assert!(count(&line, "calls") >= 1, "{what}: {line}");
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start = s_LinkHSPStructReset(hp_start);
-//    hp_start->next = hp_frame_start[frame_index];
-// ```
-// With `LOSAT_X_LINKSLICES=0`, or with `LOSAT_X_DEFAULT=0` and no variable for the switch (the
-// in-place path set, so that its group step is reached), the statements of the in-place path run
-// as before the switch existed: no LINKSLICES line is printed, and the report is NCBI's.
-// `LOSAT_X_LINKSLICES=0` wins over the default, and `LOSAT_X_LINKSLICES=1` over
-// `LOSAT_X_DEFAULT=0` (the run with the in-place path set that follows).
-#[test]
-fn the_switch_follows_its_variable_and_the_global_one() {
-    let expected = ncbi_report();
-    let offs: [&[(&str, &str)]; 4] = [
-        &[SWITCH_OFF],
-        &[DEFAULT_OFF],
-        &[DEFAULT_OFF, IN_PLACE],
-        &[DEFAULT_OFF, IN_PLACE, SWITCH_OFF],
-    ];
-    for off in offs {
-        for threads in THREADS {
-            let what = format!("{off:?} threads {threads}");
-            let switches = [&[STATS][..], off].concat();
-            let (report, stderr) = tblastx(threads, &switches);
-            assert_eq!(report, expected, "{what}");
-            assert_eq!(stats(&stderr), None, "{what}:\n{stderr}");
-            assert_eq!(shadow(&stderr), None, "{what}:\n{stderr}");
-        }
-    }
-    // The run that the variable gave before the switch joined the set: the path runs.
-    for threads in THREADS {
-        let what = format!("LOSAT_X_DEFAULT=0 with the variable, threads {threads}");
-        let (report, stderr) = tblastx(threads, &[DEFAULT_OFF, IN_PLACE, SWITCH, STATS]);
-        assert_eq!(report, expected, "{what}");
-        check_stats(&stderr, threads, &what);
-        assert_eq!(shadow(&stderr), None, "{what}:\n{stderr}");
     }
 }

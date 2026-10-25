@@ -4,7 +4,7 @@
 
 use super::get_score;
 use super::ungapped::extend_hit_ungapped;
-// EXPERIMENT (LOSAT_X_TBXUNGAP): x_two_hit_fast.rs.
+// The table walks of the two-hit extension (x_two_hit_fast.rs).
 use super::x_two_hit_fast;
 
 // Import the internal extension functions from ungapped module
@@ -370,9 +370,9 @@ fn extend_right_ungapped(
 ///
 /// # Arguments
 /// * `x_drop` - X-drop threshold (LOSAT default: 11, NCBI standard: 7)
-// EXPERIMENT (LOSAT_X_TBXUNGAP / LOSAT_X_TBXUNGAPSHADOW): the same values from the table walks of
-// x_two_hit_fast.rs, which hand back to `extend_hit_two_hit_reference` what they do not cover; the
-// debug output (`debug_ext`) stays with the reference.
+// The values come from the table walks of x_two_hit_fast.rs, which hand back to
+// `extend_hit_two_hit_reference` what they do not cover; the debug output (`debug_ext`) stays
+// with the reference.
 #[inline]
 pub fn extend_hit_two_hit(
     q_seq: &[u8],
@@ -384,30 +384,10 @@ pub fn extend_hit_two_hit(
     debug_ext: bool,
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
     if !debug_ext {
-        match x_two_hit_fast::mode() {
-            0 => {}
-            1 => {
-                if let Some(r) = x_two_hit_fast::two_hit(
-                    q_seq,
-                    s_seq,
-                    s_left_off,
-                    s_right_off,
-                    q_right_off,
-                    x_drop,
-                ) {
-                    return r;
-                }
-            }
-            _ => {
-                return x_two_hit_fast::shadow(
-                    q_seq,
-                    s_seq,
-                    s_left_off,
-                    s_right_off,
-                    q_right_off,
-                    x_drop,
-                )
-            }
+        if let Some(r) =
+            x_two_hit_fast::two_hit(q_seq, s_seq, s_left_off, s_right_off, q_right_off, x_drop)
+        {
+            return r;
         }
     }
     extend_hit_two_hit_reference(
@@ -421,8 +401,8 @@ pub fn extend_hit_two_hit(
     )
 }
 
-/// `extend_hit_two_hit` as written before LOSAT_X_TBXUNGAP (the path with the switch off, and
-/// the debug output).
+/// `extend_hit_two_hit` as written before the table walks: the calls they do not cover (an X-drop
+/// outside 1..=127, a word that does not fit) and the debug output.
 pub(super) fn extend_hit_two_hit_reference(
     q_seq: &[u8],
     s_seq: &[u8],

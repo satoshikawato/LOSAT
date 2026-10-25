@@ -203,6 +203,20 @@ impl PackedNucleotide {
     /// bytes those of its preliminary stage. A run may hold the code of `A`, `C`, `G` or `T`
     /// (another letter than the stored base); it is kept, as the letters show it.
     pub fn from_stored(packed: &[u8], length: usize, runs: &[AmbiguityRun]) -> Self {
+        Self::from_stored_box(packed.into(), length, runs)
+    }
+
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `from_stored` of the packed bytes held in `packed`, a
+    /// buffer of a database read cut to them (`seqdb::SequenceBlock::x_into_nucleotide_packed`):
+    /// the store keeps the buffer instead of a copy (glibc shrinks a mapped buffer in place, and
+    /// the pages beyond the packed bytes go back). No NCBI counterpart: only where the bytes are
+    /// held.
+    pub fn x_from_stored_buffer(packed: Vec<u8>, length: usize, runs: &[AmbiguityRun]) -> Self {
+        Self::from_stored_box(packed.into_boxed_slice(), length, runs)
+    }
+
+    /// `from_stored` of packed bytes already held in `packed`.
+    fn from_stored_box(packed: Box<[u8]>, length: usize, runs: &[AmbiguityRun]) -> Self {
         let mut clipped: Vec<AmbiguityRun> = Vec::with_capacity(runs.len());
         let mut in_order = true;
         let mut previous_end = 0usize;
@@ -226,7 +240,7 @@ impl PackedNucleotide {
             });
         }
         let mut store = Self {
-            packed: packed.into(),
+            packed,
             length,
             ambiguity: Box::default(),
             lowercase: Box::default(),
@@ -401,8 +415,8 @@ impl PackedNucleotide {
     }
 
     /// The bases as packed, one `A`, `C`, `G` or `T` per base: every ambiguous base resolved as
-    /// NCBI's subject set-up resolves it (the letters TBLASTN's preliminary stage translates,
-    /// `resolve_local_subject_ncbi2na`).
+    /// NCBI's subject set-up resolves it (the draws the live TBLASTN subject translation makes
+    /// for a record's letters, `x_subject_ncbi2na`).
     pub fn resolved_letters_into(&self, out: &mut Vec<u8>) {
         self.unpack_into(out, *b"ACGT");
     }
@@ -545,8 +559,8 @@ mod tests {
             assert_eq!(out, ncbi4na);
             store.blastna_into(&mut out);
             assert_eq!(out, encode_iupac_to_blastna(&seq));
-            // TBLASTN's seed input (`resolve_local_subject_ncbi2na`): the letters' ncbi4na codes
-            // resolved by `CRandom(length)`, as letters
+            // The letters' ncbi4na codes resolved by `CRandom(length)`, as letters, the way the
+            // live TBLASTN subject translation (`x_subject_ncbi2na`) resolves a record's letters.
             store.resolved_letters_into(&mut out);
             let resolved: Vec<u8> =
                 crate::core::blast_encoding::resolve_ncbi4na_to_ncbi2na(&ncbi4na)
@@ -715,6 +729,20 @@ mod tests {
                     assert_eq!(out, &blastna[1..=length], "{name} {i}: blastna");
                     let codes = ncbi_letters(packed, length, &runs);
                     assert_stored_forms(&store, packed, &codes, &format!("{name} {i}"));
+                    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): the store of the sequence read alone, in
+                    // the buffer of its read, is the same.
+                    let alone = db
+                        .x_read_sequence_mapped(range.first_ordinal + i as u32)
+                        .unwrap();
+                    assert_eq!(
+                        PackedNucleotide::x_from_stored_buffer(
+                            alone.x_into_nucleotide_packed(),
+                            length,
+                            &runs
+                        ),
+                        store,
+                        "{name} {i}: the store of the read buffer"
+                    );
                     checked += 1;
                 }
             }

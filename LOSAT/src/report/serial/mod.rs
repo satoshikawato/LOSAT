@@ -13,7 +13,8 @@
 //!
 //! `real` holds the real-number digits of every object stream; `encoder` the object-stream
 //! calls that the type writers make, with one implementation per format (`asn_text`,
-//! `json`, `asn_ber`); `seqalign` the Seq-annot of Seq-aligns of outfmt 8, 9 and 12 (`write_query`).
+//! `json`, `asn_ber`); `seqalign` the Seq-annot of Seq-aligns of outfmt 8, 9 and 12 (`write_query`; the per-query
+//! step `write_query_to` and the hit-list loop `write_hit_list_seqaligns` that the programs share).
 
 pub mod asn_ber;
 pub mod asn_text;
@@ -24,10 +25,13 @@ pub mod seqalign;
 mod x87;
 pub mod xml;
 
+pub(crate) use seqalign::{write_hit_list_seqaligns, write_query_to};
 pub use seqalign::{write_query, SeqAlignError, SerialFormat};
 
 #[cfg(test)]
 mod asn_ber_tests;
+#[cfg(test)]
+mod asn_text_octets_tests;
 #[cfg(test)]
 mod real_tests;
 #[cfg(test)]

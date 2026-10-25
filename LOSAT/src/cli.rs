@@ -353,7 +353,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "ungapped"
             | "use_index"
             | "version"
-            | "window_masker_db"
             | "window_masker_taxid"
             | "window_size"
             | "xdrop_gap"
@@ -402,7 +401,6 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "searchsp"
             | "seqidlist"
             | "show_gis"
-            | "soft_masking"
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
@@ -669,7 +667,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "searchsp"
             | "seqidlist"
             | "show_gis"
-            | "soft_masking"
             | "sorthits"
             | "sorthsps"
             | "strand"
@@ -988,4 +985,35 @@ mod tests {
         };
         assert_eq!(args.query.into_os_string(), OsString::from_vec(name));
     }
+}
+
+/// The process's arguments as NCBI's `GetCmdlineArgs` joins them for the `@PG` line of a SAM
+/// report: every argument (the program name first) followed by one space, as raw bytes where
+/// the system keeps them (Unix), else lossily decoded.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:878-885
+/// ```c++
+/// string
+/// GetCmdlineArgs(const CNcbiArguments & a)
+/// {
+/// 	string cmd = kEmptyStr;
+/// 	for(unsigned int i=0; i < a.Size(); i++) {
+/// 		cmd += a[i] + " ";
+/// 	}
+/// 	return cmd;
+/// }
+/// ```
+pub fn command_line_bytes() -> Vec<u8> {
+    let mut line = Vec::new();
+    for argument in std::env::args_os() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            line.extend_from_slice(argument.as_bytes());
+        }
+        #[cfg(not(unix))]
+        line.extend_from_slice(argument.to_string_lossy().as_bytes());
+        line.push(b' ');
+    }
+    line
 }

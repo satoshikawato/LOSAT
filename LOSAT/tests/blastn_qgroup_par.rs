@@ -1,4 +1,3 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The gapped stages of a blastn subject run per query on the search pool (`LOSAT_X_QGROUPPAR`,
 //! `src/algorithm/blastn/blast_engine/x_qgroup_par.rs`) on whole searches.
 //!
@@ -6,21 +5,20 @@
 //! with the same result: the preliminary gapped loop and the traceback of the subject run on the
 //! owner thread over all queries in one order, or per query on the pool. So the property under
 //! test is that the report does not depend on it: for megablast, blastn, dc-megablast and
-//! blastn-short with several queries (pieces of LC738874 with microsatellites, runs of `N`, lower
-//! case letters, a poly-A query and two very short ones) against LC738868 at 1 and 4 threads, the
-//! searches with `LOSAT_X_QGROUPPAR=0`, by default and with the shadow (`LOSAT_X_QGROUPPARSHADOW`,
-//! which also runs the owner loop and compares every HSP of both stages) give the same bytes. The
-//! same holds in `LOSAT_X_QBATCHPAR` slots of two threads and for batches split into query chunks.
-//! With `LOSAT_X_STATS` the counters show which form ran: per query at 4 threads, the owner loop
-//! where one query holds most of the HSPs. That the bytes equal NCBI's is the business of the
-//! blastn fixtures.
+//! blastn-short with several queries (pieces of LC738874, or of LC738868 itself for megablast and
+//! dc-megablast, with microsatellites, runs of `N`, lower case letters, a poly-A query, one of 20
+//! letters and one of 300 `N` followed by 400 letters) against LC738868 at 1 and 4 threads, the
+//! searches with `LOSAT_X_QGROUPPAR=0` and by default give the same bytes. The same holds in
+//! `LOSAT_X_QBATCHPAR` slots of two threads and for batches split into query chunks. With
+//! `LOSAT_X_STATS` the counters show which form ran: per query at 4 threads, the owner loop where
+//! one query holds most of the HSPs. That the bytes equal NCBI's is the business of the blastn
+//! fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const OFF: (&str, &str) = ("LOSAT_X_QGROUPPAR", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_QGROUPPARSHADOW", "1");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 
 fn fasta(name: &str) -> PathBuf {
@@ -176,7 +174,7 @@ fn blastn(
     (output.stdout, stderr)
 }
 
-/// A number of the `[X_SHADOW] QGROUPPAR` or `[X_STATS] QGROUPPAR` line of `stderr`.
+/// A number of the `[X_STATS] QGROUPPAR` line of `stderr`.
 fn field(stderr: &str, line_start: &str, name: &str) -> u64 {
     let line = stderr
         .lines()
@@ -188,31 +186,24 @@ fn field(stderr: &str, line_start: &str, name: &str) -> u64 {
         .unwrap_or_else(|| panic!("no {name} in: {line}"))
 }
 
-/// The shadow's line says `diffs=0 identical`; returns its `(prelim, traceback, hsps)`.
-fn shadow_counts(stderr: &str) -> (u64, u64, u64) {
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with("[X_SHADOW] QGROUPPAR "))
-        .unwrap_or_else(|| panic!("no shadow line:\n{stderr}"));
-    assert!(line.ends_with(" diffs=0 identical"), "{line}");
-    let at = "[X_SHADOW] QGROUPPAR ";
+/// The `(prelim, traceback)` stages that ran per query, from the `[X_STATS] QGROUPPAR` line of
+/// `stderr`; `(0, 0)` when the line is not printed (no stage was planned).
+fn stats_counts(stderr: &str) -> (u64, u64) {
+    let at = "[X_STATS] QGROUPPAR ";
+    if !stderr.lines().any(|line| line.starts_with(at)) {
+        return (0, 0);
+    }
     (
         field(stderr, at, "prelim="),
         field(stderr, at, "traceback="),
-        field(stderr, at, "hsps="),
     )
 }
 
-/// For one task: the search with the switch off at one thread, then off, by default and with the
-/// shadow at 1 and 4 threads, all with the same bytes; the default writes nothing to standard
-/// error, the shadow one line, which counts stages compared only at 4 threads. Returns the shadow's
-/// counts at 4 threads.
-fn check_task(
-    queries: &Queries,
-    task: &str,
-    extra: &[&str],
-    env: &[(&str, &str)],
-) -> (u64, u64, u64) {
+/// For one task: the search with the switch off at one thread, then off at 4 threads, and by
+/// default and by default with `LOSAT_X_STATS` at 1 and 4 threads, all with the same bytes; all but
+/// the runs with `LOSAT_X_STATS` write nothing to standard error, those the counters of the stages
+/// that ran per query, none at one thread. Returns the counts at 4 threads.
+fn check_task(queries: &Queries, task: &str, extra: &[&str], env: &[(&str, &str)]) -> (u64, u64) {
     let mut args = vec!["-task", task];
     args.extend_from_slice(extra);
     let with = |more: &[(&'static str, &'static str)]| -> Vec<(&str, &str)> {
@@ -221,27 +212,30 @@ fn check_task(
     let (expected, expected_stderr) = blastn(queries, &args, 1, &with(&[OFF]));
     assert!(!expected.is_empty(), "{task}: no hits");
     assert_eq!(expected_stderr, "", "{task}");
-    let mut counts = (0, 0, 0);
+    let mut counts = (0, 0);
     for threads in [1, 4] {
-        let (report, stderr) = blastn(queries, &args, threads, &with(&[OFF]));
-        assert!(report == expected, "{task} threads {threads}: off differs");
-        assert_eq!(stderr, "", "{task} threads {threads}");
+        // At one thread the search with the switch off is `expected` itself.
+        if threads > 1 {
+            let (report, stderr) = blastn(queries, &args, threads, &with(&[OFF]));
+            assert!(report == expected, "{task} threads {threads}: off differs");
+            assert_eq!(stderr, "", "{task} threads {threads}");
+        }
         let (report, stderr) = blastn(queries, &args, threads, &with(&[]));
         assert!(
             report == expected,
             "{task} threads {threads}: default differs"
         );
         assert_eq!(stderr, "", "{task} threads {threads}");
-        let (report, stderr) = blastn(queries, &args, threads, &with(&[SHADOW]));
+        let (report, stderr) = blastn(queries, &args, threads, &with(&[STATS]));
         assert!(
             report == expected,
-            "{task} threads {threads}: shadow differs"
+            "{task} threads {threads}: default with statistics differs"
         );
-        let shadow = shadow_counts(&stderr);
+        let stages = stats_counts(&stderr);
         if threads == 1 {
-            assert_eq!(shadow, (0, 0, 0), "{task}");
+            assert_eq!(stages, (0, 0), "{task}");
         } else {
-            counts = shadow;
+            counts = stages;
         }
     }
     counts
@@ -249,31 +243,32 @@ fn check_task(
 
 #[test]
 fn megablast_stages_per_query() {
-    let (prelim, traceback, hsps) = check_task(&Queries::subject_pieces(), "megablast", &[], &[]);
-    assert!(
-        prelim > 0 && traceback > 0 && hsps > 0,
-        "{prelim} {traceback} {hsps}"
-    );
-}
-
-#[test]
-fn blastn_stages_per_query() {
-    let (prelim, traceback, hsps) = check_task(&Queries::pieces(), "blastn", &[], &[]);
-    assert!(
-        prelim > 0 && traceback > 0 && hsps > 0,
-        "{prelim} {traceback} {hsps}"
-    );
-}
-
-#[test]
-fn dc_megablast_stages_per_query() {
-    let (prelim, traceback, _) = check_task(&Queries::subject_pieces(), "dc-megablast", &[], &[]);
+    let (prelim, traceback) = check_task(&Queries::subject_pieces(), "megablast", &[], &[]);
     assert!(prelim > 0 && traceback > 0, "{prelim} {traceback}");
 }
 
 #[test]
+fn blastn_stages_per_query() {
+    let (prelim, traceback) = check_task(&Queries::pieces(), "blastn", &[], &[]);
+    assert!(prelim > 0 && traceback > 0, "{prelim} {traceback}");
+}
+
+#[test]
+fn dc_megablast_stages_per_query() {
+    let (prelim, traceback) = check_task(&Queries::subject_pieces(), "dc-megablast", &[], &[]);
+    assert!(prelim > 0 && traceback > 0, "{prelim} {traceback}");
+}
+
+// blastn-short at `-evalue 10` instead of the task's 1000. At 10 every query keeps its hits and a
+// search writes 53,000 rows in 1.5 CPU s instead of 359,000 in 6-8 s. At 4 threads the second of
+// the two batches runs both stages per query; the first (piece0-2, piece2 with about two thirds of
+// its HSPs) keeps the owner loop. At 1000 the poly-A query holds more than a quarter of the second
+// batch's traceback HSPs, so that traceback keeps the owner loop too.
+#[test]
 fn blastn_short_stages_per_query() {
-    check_task(&Queries::pieces(), "blastn-short", &[], &[]);
+    let (prelim, traceback) =
+        check_task(&Queries::pieces(), "blastn-short", &["-evalue", "10"], &[]);
+    assert!(prelim > 0 && traceback > 0, "{prelim} {traceback}");
 }
 
 // Lower-case masking and other scores (other cutoffs per context).
@@ -308,7 +303,7 @@ fn masking_and_other_scores() {
 #[test]
 fn slots_and_split_batches() {
     let queries = Queries::pieces();
-    let (_, traceback, _) = check_task(
+    let (_, traceback) = check_task(
         &queries,
         "blastn",
         &[],

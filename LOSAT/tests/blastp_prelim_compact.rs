@@ -1,19 +1,40 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp's preliminary hit lists with `LOSAT_X_BPPCOMPACT` (`src/algorithm/blastp/x_prelim_compact.rs`)
 //! on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on by default, unless its
-//! variable is `0`, or `LOSAT_X_DEFAULT=0` and its variable is not set. With it on, the subject
+//! variable is `0`. With it on, the subject
 //! scan keeps each preliminary HSP as a 64-byte element and the redo reads the hit lists rebuilt
-//! from them. Every test states the default it runs with: the reference is `LOSAT_X_DEFAULT=0`
-//! (every switch off), and the searches with the switch on are the default (with
-//! `LOSAT_X_BPQBLOCK=0` where one line per search is counted) and `LOSAT_X_DEFAULT=0` with
-//! `LOSAT_X_BPPCOMPACT=1`, the run the variable gave before it joined the set;
-//! `LOSAT_X_BPPCOMPACT=0` gives no line. These tests compare the reports: with one and four
-//! threads, with `LOSAT_X_BPPFREE`, in the blocks of `LOSAT_X_BPQBLOCK` and with query chunks
-//! (`CHUNK_SIZE`); they check from the `[TIMING] x_bppcompact: expanded_lists=<n>` lines that
-//! compact lists were expanded, and that the shadow mode (`LOSAT_X_BPPCOMPACT=shadow`) compared
+//! from them. Every test states the default it runs with: the reference is the search of all
+//! queries with the switch off (`LOSAT_X_BPQBLOCK=0 LOSAT_X_BPPCOMPACT=0`), and the search with
+//! the switch on is the default (with `LOSAT_X_BPQBLOCK=0` where one line per search is
+//! counted, and blocks of 1,000 letters where one line per block is); `LOSAT_X_BPPCOMPACT=0` gives
+//! no line. These tests compare the outfmt 6 reports
+//! (every report is written from the redo's results, which read the expanded lists), one search
+//! for each place where these searches expand the lists: the one-thread redo (each query's list
+//! when it reaches it), the windows of the redo at four threads (`LOSAT_X_BPREDOWINEXPAND`, in
+//! blocks of `LOSAT_X_BPQBLOCK`) and the end of a query chunk's search
+//! (`CHUNK_SIZE`). They check from the `[TIMING] x_bppcompact: expanded_lists=<n>` lines that
+//! compact lists were expanded, from the `[TIMING] x_bpredopar:` lines that the redo ran in
+//! windows, and that the shadow mode (`LOSAT_X_BPPCOMPACT=shadow`) compared
 //! lists (`[X_SHADOW] BPPCOMPACT compared=<n>`; it panics on a difference).
+//!
+//! The searches run five of the fixture's 101 queries (`queries`), one of them the fixture's only
+//! query without a preliminary list. The compact lists read no size that the five change: a list
+//! is expanded where a search reaches it whatever its length, and no preliminary list is full
+//! (the fixture has 124 subjects; the rule of a full list is the unit test
+//! `hit_list_helpers_keep_the_same_lists_on_both_types` in `x_prelim_compact.rs`). A default
+//! window of the redo (64 jobs per thread) holds all the jobs of a search here, so the search with
+//! query chunks runs in windows of one job per thread (`SMALL_WINDOWS`), several of them;
+//! the expansion ahead over several windows of compact lists runs on all 101 queries in
+//! `blastp_redo_par.rs`, which compares `LOSAT_X_BPREDOWINEXPAND=0` (every list expanded before a
+//! redo of more than one thread) with the windows, small and default. The default blocks of
+//! 50,000 letters run in the default test of `blastp_query_blocks.rs`.
+//!
+//! Other files run the compact lists (the default) beside other settings:
+//! `blastp_prelim_free.rs` compares `LOSAT_X_BPPFREE=0` with the default at one and four
+//! threads, in outfmt 6 and 0 and in blocks; `blastp_query_blocks.rs` runs blocks of 1 and 1,000
+//! letters at one and four threads; `blastp_hsp_tie_order.rs` runs a four-thread search of one
+//! query against one subject (one match, no windows), whose list is expanded before the redo.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1523-1539
 //! ```c
@@ -33,25 +54,66 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BPPCOMPACT", "0");
 const BLOCKS_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCK", "0");
+/// The batches of `queries`: {BDT62581.1}, {BDT62582.1, BDT62583.1}, {BDT62584.1} and
+/// {BDT62553.1} (a batch takes records while it holds fewer letters).
+const BATCH: (&str, &str) = ("BATCH_SIZE", "500");
+/// Blocks of several batches of `queries` (a block takes batches while it holds fewer letters):
+/// {BDT62581.1 to BDT62583.1} (1,595 letters) and {BDT62584.1, BDT62553.1}.
+const TWO_BLOCKS: (&str, &str) = ("LOSAT_X_BPQBLOCK", "1000");
+/// A batch of `queries` is split into chunks when it holds at least twice `CHUNK_SIZE -
+/// OVERLAP_CHUNK_SIZE` letters (700): {BDT62582.1, BDT62583.1} (897 letters) into two, the first
+/// of which holds parts of both queries, and {BDT62584.1} (944) into two; {BDT62581.1} (698) and
+/// {BDT62553.1} are not split.
+const CHUNKS: [(&str, &str); 2] = [("CHUNK_SIZE", "450"), ("OVERLAP_CHUNK_SIZE", "100")];
+/// Windows of the redo of one job per thread (`LOSAT_X_BPREDOPARWINDOW`, as in
+/// `blastp_redo_par.rs`; the default holds 64 jobs per thread).
+const SMALL_WINDOWS: (&str, &str) = ("LOSAT_X_BPREDOPARWINDOW", "1");
 
-/// One blastp run of the fixture pair (two related nimavirus proteomes) with the given variables
-/// as its only `LOSAT_*` and query-batch variables, and `extra` arguments.
-/// `LOSAT_X_DEFAULT` of the test's own environment is dropped as well: every test states the
-/// default it runs with.
+/// The queries of the searches, in a directory of the test `tag` (the tests run at once; the test
+/// removes it): four consecutive records of `MeenMJNV.faa`, BDT62581.1 (698 letters, one
+/// subject), BDT62582.1 (268, another), BDT62583.1 (629, no rows but a preliminary list) and
+/// BDT62584.1 (944, five subjects), then BDT62553.1 (174), which has no preliminary list. Each
+/// of the four has one; one search costs 0.1-0.2 CPU s (one of all 101 queries 3-9 s).
+fn queries(tag: &str) -> PathBuf {
+    let text = std::fs::read_to_string(fixture("MeenMJNV.faa")).unwrap();
+    let records: Vec<String> = text
+        .split('>')
+        .filter(|record| !record.is_empty())
+        .map(|record| format!(">{record}"))
+        .collect();
+    let first = records
+        .iter()
+        .position(|record| record.starts_with(">BDT62581.1 "))
+        .expect("the record is in the fixture");
+    let no_list = records
+        .iter()
+        .find(|record| record.starts_with(">BDT62553.1 "))
+        .expect("the record is in the fixture");
+    let dir = std::env::temp_dir().join(format!("losat-bppcompact-q-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("queries.faa");
+    std::fs::write(&path, records[first..first + 4].concat() + no_list).unwrap();
+    path
+}
+
+/// One blastp run of `query` against the subject proteome (the fixture pair is two related
+/// nimavirus proteomes) with the given variables as its only `LOSAT_*` and query-batch variables,
+/// and `extra` arguments.
 /// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
 /// one thread, and it selects nothing; without the caller's value a file of the tests is named.
 /// The run must exit with 0. Returns the standard output, the numbers of lists that the
-/// `[TIMING] x_bppcompact` lines report (one per search of a query set) and the number of lists
-/// on the `[X_SHADOW] BPPCOMPACT` line, if any.
+/// `[TIMING] x_bppcompact` lines report (one per search of a query set), the number of lists
+/// on the `[X_SHADOW] BPPCOMPACT` line, if any, and the windows of each `[TIMING] x_bpredopar:`
+/// line (one per search whose redo ran in windows).
 fn blastp(
+    query: &Path,
     threads: u32,
     vars: &[(&str, &str)],
     extra: &[&str],
-) -> (Vec<u8>, Vec<usize>, Option<usize>) {
+) -> (Vec<u8>, Vec<usize>, Option<usize>, Vec<usize>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -72,7 +134,7 @@ fn blastp(
     let output = command
         .arg("blastp")
         .arg("-query")
-        .arg(fixture("MeenMJNV.faa"))
+        .arg(query)
         .arg("-subject")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-evalue", "0.001"])
@@ -97,140 +159,120 @@ fn blastp(
             .and_then(|rest| rest.split_whitespace().next())
             .map(|count| count.parse().expect("a count of lists"))
     });
-    (output.stdout, expanded, compared)
+    let redo_windows = stderr
+        .lines()
+        .filter(|line| line.starts_with("[TIMING] x_bpredopar: "))
+        .map(|line| {
+            line.split(' ')
+                .find_map(|field| field.strip_prefix("windows="))
+                .and_then(|count| count.parse().ok())
+                .unwrap_or_else(|| panic!("windows= in {line}"))
+        })
+        .collect();
+    (output.stdout, expanded, compared, redo_windows)
 }
 
 #[test]
 fn compact_lists_give_the_reports_of_the_full_lists() {
-    let batch = ("BATCH_SIZE", "3000");
-    for outfmt in ["6", "0"] {
-        for threads in [1, 4] {
-            let (reference, reference_expanded, _) =
-                blastp(threads, &[batch, DEFAULT_OFF], &["-outfmt", outfmt]);
-            assert!(!reference.is_empty(), "the fixture pair has a report");
-            assert!(
-                reference_expanded.is_empty(),
-                "no line with LOSAT_X_DEFAULT=0"
-            );
-            let (report, expanded, _) = blastp(
-                threads,
-                &[batch, BLOCKS_OFF, SWITCH_OFF],
-                &["-outfmt", outfmt],
-            );
-            assert!(report == reference, "the switch off: the report differs");
-            assert!(
-                expanded.is_empty(),
-                "no line with the switch off: {expanded:?}"
-            );
-            for vars in [
-                &[batch, BLOCKS_OFF][..],
-                &[batch, BLOCKS_OFF, ("LOSAT_X_BPPFREE", "1")][..],
-                &[batch, DEFAULT_OFF, ("LOSAT_X_BPPCOMPACT", "1")][..],
-                &[
-                    batch,
-                    DEFAULT_OFF,
-                    ("LOSAT_X_BPPCOMPACT", "1"),
-                    ("LOSAT_X_BPPFREE", "1"),
-                ][..],
-            ] {
-                let (report, expanded, _) = blastp(threads, vars, &["-outfmt", outfmt]);
-                assert!(
-                    report == reference,
-                    "{vars:?} outfmt {outfmt} threads {threads}: the report differs"
-                );
-                assert!(
-                    expanded.len() == 1 && expanded[0] > 0,
-                    "{vars:?} outfmt {outfmt} threads {threads}: {expanded:?}"
-                );
-            }
-        }
-    }
+    let query = queries("full");
+    let (reference, reference_expanded, _, _) = blastp(
+        &query,
+        1,
+        &[BATCH, BLOCKS_OFF, SWITCH_OFF],
+        &["-outfmt", "6"],
+    );
+    assert!(!reference.is_empty(), "the queries have a report");
+    assert!(
+        reference_expanded.is_empty(),
+        "no line with the switch off: {reference_expanded:?}"
+    );
+    // One thread: the redo expands each query's list when it reaches it, in one search of all
+    // queries (one line, a list per query that has one; the loop passes BDT62553.1 by).
+    let (rows, expanded, _, _) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", "6"]);
+    assert!(rows == reference, "threads 1: the report differs");
+    assert_eq!(expanded, [4], "threads 1");
+    // Four threads: the window of the redo expands the lists as it reaches them, in the two blocks
+    // of `TWO_BLOCKS` (one window each), one line per block. The report is the one-thread
+    // search's.
+    let (rows, expanded, _, redo_windows) =
+        blastp(&query, 4, &[BATCH, TWO_BLOCKS], &["-outfmt", "6"]);
+    assert!(
+        rows == reference,
+        "threads 4, two blocks: the report differs"
+    );
+    assert_eq!(
+        expanded,
+        [3, 1],
+        "threads 4, two blocks: one line per block"
+    );
+    assert_eq!(
+        redo_windows,
+        [1, 1],
+        "threads 4, two blocks: the redo in windows"
+    );
+    std::fs::remove_dir_all(query.parent().unwrap()).unwrap();
 }
 
 #[test]
-fn compact_lists_in_query_blocks_and_chunks_give_the_same_rows() {
-    let batch = ("BATCH_SIZE", "3000");
-    let chunks = [("CHUNK_SIZE", "1000"), ("OVERLAP_CHUNK_SIZE", "100")];
-    for threads in [1, 4] {
-        let (reference, _, _) = blastp(threads, &[batch, DEFAULT_OFF], &["-outfmt", "6"]);
-        // The default blocks (50,000 letters; the fixture's queries have 77,448), one batch per
-        // block, and the run the two variables gave before they joined the set.
-        for vars in [
-            &[batch][..],
-            &[batch, ("LOSAT_X_BPQBLOCK", "1")][..],
-            &[
-                batch,
-                DEFAULT_OFF,
-                ("LOSAT_X_BPQBLOCK", "1"),
-                ("LOSAT_X_BPPCOMPACT", "1"),
-            ][..],
-        ] {
-            let (rows, expanded, _) = blastp(threads, vars, &["-outfmt", "6"]);
-            assert!(
-                rows == reference,
-                "threads {threads} {vars:?}: block rows differ"
-            );
-            assert!(
-                expanded.len() > 1,
-                "threads {threads} {vars:?}: one line per block, {expanded:?}"
-            );
-        }
-        let (chunk_reference, _, _) = blastp(
-            threads,
-            &[batch, chunks[0], chunks[1], DEFAULT_OFF],
-            &["-outfmt", "6"],
-        );
-        for vars in [
-            &[batch, chunks[0], chunks[1], BLOCKS_OFF][..],
-            &[
-                batch,
-                chunks[0],
-                chunks[1],
-                DEFAULT_OFF,
-                ("LOSAT_X_BPPCOMPACT", "1"),
-            ][..],
-        ] {
-            let (chunk_rows, chunk_expanded, _) = blastp(threads, vars, &["-outfmt", "6"]);
-            assert!(
-                chunk_rows == chunk_reference,
-                "threads {threads} {vars:?}: rows with query chunks differ"
-            );
-            assert!(
-                chunk_expanded.len() == 1 && chunk_expanded[0] > 0,
-                "threads {threads} {vars:?}: {chunk_expanded:?}"
-            );
-        }
-    }
+fn compact_lists_of_query_chunks_give_the_same_rows() {
+    let query = queries("chunks");
+    // Each chunk's search (`CHUNKS`: two of each split batch) expands its lists, one per query
+    // part (five), before the chunk merge; at four threads the windows of the redo
+    // (`SMALL_WINDOWS`, several) then read the merged lists beside the compact list of
+    // BDT62581.1, which they expand: six in all.
+    let (reference, _, _, _) = blastp(
+        &query,
+        4,
+        &[
+            BATCH,
+            CHUNKS[0],
+            CHUNKS[1],
+            SMALL_WINDOWS,
+            BLOCKS_OFF,
+            SWITCH_OFF,
+        ],
+        &["-outfmt", "6"],
+    );
+    let vars = &[BATCH, CHUNKS[0], CHUNKS[1], SMALL_WINDOWS, BLOCKS_OFF][..];
+    let (rows, expanded, _, redo_windows) = blastp(&query, 4, vars, &["-outfmt", "6"]);
+    assert!(rows == reference, "{vars:?}: rows with query chunks differ");
+    assert_eq!(expanded, [6], "{vars:?}");
+    assert!(
+        redo_windows.len() == 1 && redo_windows[0] > 1,
+        "{vars:?}: several windows, {redo_windows:?}"
+    );
+    std::fs::remove_dir_all(query.parent().unwrap()).unwrap();
 }
 
 #[test]
 fn shadow_mode_compares_every_list() {
-    let batch = ("BATCH_SIZE", "3000");
-    let chunks = [("CHUNK_SIZE", "1000"), ("OVERLAP_CHUNK_SIZE", "100")];
+    let query = queries("shadow");
     let shadow = ("LOSAT_X_BPPCOMPACT", "shadow");
-    for threads in [1, 4] {
-        let (reference, _, _) = blastp(threads, &[batch, DEFAULT_OFF], &["-outfmt", "6"]);
-        // `LOSAT_X_DEFAULT=0` is the run the variable gave before it joined the set; the other
-        // arm runs the shadow with every other switch on (one search of all queries).
-        for default in [DEFAULT_OFF, BLOCKS_OFF] {
-            let (rows, _, compared) = blastp(threads, &[batch, default, shadow], &["-outfmt", "6"]);
-            assert!(
-                rows == reference,
-                "threads {threads} {default:?}: shadow rows differ"
-            );
-            assert!(
-                compared.is_some_and(|lists| lists > 0),
-                "threads {threads} {default:?}: {compared:?}"
-            );
-            let (_, _, chunk_compared) = blastp(
-                threads,
-                &[batch, chunks[0], chunks[1], default, shadow],
-                &["-outfmt", "6"],
-            );
-            assert!(
-                chunk_compared.is_some_and(|lists| lists > compared.unwrap()),
-                "threads {threads} {default:?}: query chunks add their lists, {chunk_compared:?}"
-            );
-        }
-    }
+    // The shadow mode compares the lists before the redo at any thread count; four threads.
+    let (reference, _, _, _) = blastp(
+        &query,
+        4,
+        &[BATCH, BLOCKS_OFF, SWITCH_OFF],
+        &["-outfmt", "6"],
+    );
+    // The shadow runs with every other switch on (one search of all queries): a list per query
+    // that has one (BDT62553.1 has neither list).
+    let (rows, _, compared, _) = blastp(&query, 4, &[BATCH, BLOCKS_OFF, shadow], &["-outfmt", "6"]);
+    assert!(rows == reference, "the shadow rows differ");
+    assert_eq!(compared, Some(4), "a list per query that has one");
+    // With query chunks: the five lists of the chunks' query parts where each chunk's search ends,
+    // the lists of the batch search of the three split queries before the merged lists replace
+    // them, and BDT62581.1's list before the redo.
+    let (_, _, chunk_compared, _) = blastp(
+        &query,
+        4,
+        &[BATCH, CHUNKS[0], CHUNKS[1], BLOCKS_OFF, shadow],
+        &["-outfmt", "6"],
+    );
+    assert_eq!(
+        chunk_compared,
+        Some(5 + 3 + 1),
+        "query chunks add their lists"
+    );
+    std::fs::remove_dir_all(query.parent().unwrap()).unwrap();
 }

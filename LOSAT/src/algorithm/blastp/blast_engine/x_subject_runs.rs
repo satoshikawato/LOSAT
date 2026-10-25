@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_BPSUBJRUN / LOSAT_X_BPSUBJRUNSHADOW): the parallel preliminary loop of a
-//! `-subject` search in runs of consecutive subjects, one diagonal table fill per run.
+//! EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel preliminary loop of a `-subject` search in runs of
+//! consecutive subjects, one diagonal table fill per run.
 //!
 //! Without the switch, the parallel loop of `run_resolved_in_pool` searches each subject on its own:
 //! `for_each_init` makes a new `BlastpSubjectScratch` for every piece rayon splits the subjects into
@@ -53,32 +53,17 @@
 //! window, so this holds for every subject shorter than 2^29 letters. Only one subject of more than
 //! 2^29 letters in one-hit mode could leave a wrapped entry that a later subject of its run reads
 //! differently from a cleared one; there the run path keeps the leftovers as the one-thread loop
-//! and NCBI do, and it is the loop without the switch that departs from them. The shadow's
-//! recompute would show such a difference; its table check, which reads the sign-extended field,
-//! would not.
+//! and NCBI do, and it is the loop without the switch that departs from them.
 //!
 //! Which thread
 //! searches a run and in what order the runs end change nothing: the results are merged by
 //! subject index, and no floating-point operation changes order.
 //!
-//! A strict-set switch (`utils/xswitch.rs`): on unless `LOSAT_X_BPSUBJRUN=0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set. It acts only where
+//! A strict-set switch (`utils/xswitch.rs`): on unless `LOSAT_X_BPSUBJRUN=0`.
+//! It acts only where
 //! the parallel loop runs: a `-subject` search with more than one thread whose subjects
 //! `blastp_should_parallelize_stage` gives to the pool. The one-thread loop and the database path
 //! (`-db`) already search with one table and are not changed.
-//!
-//! `LOSAT_X_BPSUBJRUNSHADOW=1` (shadow mode, implies the switch): before each later subject of a
-//! run, the run's offset is compared with `blastp_subject_diag_offsets` (a wrong offset) and every
-//! entry of the table is checked to read as a cleared one at that offset (`x_first_uncleared`: an
-//! entry left above the offset, as a reset that did not clear the table would leave, fails); then
-//! every subject is searched again with a second scratch of the task, as the loop without the
-//! switch searches it (`prepare_independent_subject` at the same offset), and the two results are
-//! compared (every HSP list of every query, every field). The first difference stops the run
-//! (panic) after printing the line that is otherwise printed at exit:
-//! `[X_SHADOW] BPSUBJRUN searches= runs= subjects= fills_saved= resets_in_runs= subjects_compared=
-//! tables_checked= identical` (`fills_saved`: subjects searched without a fill of their own;
-//! `resets_in_runs`: INT4_MAX / 4 resets that happened inside a run; `tables_checked`: tables found
-//! to read as cleared before a later subject of a run).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:160-172
 //! ```c
@@ -159,38 +144,19 @@
 //! ```
 
 use std::ops::Range;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
-use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::utils::threading::SearchPool;
 
 use super::{BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, EncodedProtein};
 
-/// EXPERIMENT (LOSAT_X_BPSUBJRUN): the mode the variables select.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum XSubjRun {
-    Off,
-    On,
-    Shadow,
-}
-
-// No NCBI counterpart: reads the LOSAT_X_BPSUBJRUN / LOSAT_X_BPSUBJRUNSHADOW switches once; it does
-// not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPSUBJRUN): a strict-set switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-/// and it is not set); `LOSAT_X_BPSUBJRUNSHADOW` (any value, not part of the set) selects the
-/// shadow mode.
-pub(super) fn x_bp_subj_run() -> XSubjRun {
-    static MODE: OnceLock<XSubjRun> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPSUBJRUNSHADOW").is_some() {
-            XSubjRun::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_BPSUBJRUN") {
-            XSubjRun::On
-        } else {
-            XSubjRun::Off
-        }
-    })
+// No NCBI counterpart: reads the LOSAT_X_BPSUBJRUN switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPSUBJRUN): a strict-set switch (on unless it is `0`).
+pub(super) fn x_bp_subj_run() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPSUBJRUN"))
 }
 
 // No NCBI counterpart: how the subjects are cut into runs; it changes no value NCBI computes (any
@@ -234,61 +200,6 @@ fn x_cut_runs(lengths: &[usize], parts: usize) -> Vec<Range<usize>> {
     runs
 }
 
-static X_SEARCHES: AtomicU64 = AtomicU64::new(0);
-static X_RUNS: AtomicU64 = AtomicU64::new(0);
-static X_SUBJECTS: AtomicU64 = AtomicU64::new(0);
-static X_FILLS_SAVED: AtomicU64 = AtomicU64::new(0);
-static X_RESETS_IN_RUNS: AtomicU64 = AtomicU64::new(0);
-static X_SUBJECTS_COMPARED: AtomicU64 = AtomicU64::new(0);
-static X_TABLES_CHECKED: AtomicU64 = AtomicU64::new(0);
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-fn x_shadow_print_line(identical: bool) {
-    eprintln!(
-        "[X_SHADOW] BPSUBJRUN searches={} runs={} subjects={} fills_saved={} resets_in_runs={} subjects_compared={} tables_checked={}{}",
-        X_SEARCHES.load(Ordering::Relaxed),
-        X_RUNS.load(Ordering::Relaxed),
-        X_SUBJECTS.load(Ordering::Relaxed),
-        X_FILLS_SAVED.load(Ordering::Relaxed),
-        X_RESETS_IN_RUNS.load(Ordering::Relaxed),
-        X_SUBJECTS_COMPARED.load(Ordering::Relaxed),
-        X_TABLES_CHECKED.load(Ordering::Relaxed),
-        if identical { " identical" } else { " DIFFERENT" },
-    );
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPSUBJRUNSHADOW): the line `main` prints at exit.
-pub(crate) fn x_bp_subj_run_print_summary() {
-    if x_bp_subj_run() == XSubjRun::Shadow {
-        x_shadow_print_line(true);
-    }
-}
-
-// No NCBI counterpart: the shadow mode's check stops the run on a difference.
-fn x_shadow_difference(message: String) -> ! {
-    // The panic ends the run before `main` prints the line at exit: it is printed here.
-    x_shadow_print_line(false);
-    panic!("[X_SHADOW] BPSUBJRUN {message}");
-}
-
-// No NCBI counterpart: a check of the shadow mode (the property in the module's header); it
-// changes no value NCBI computes.
-/// The first entry of `table` that does not read as a cleared entry at the diagonal offset
-/// `diag_offset` for every subject offset: an entry with flag 0 must have
-/// `last_hit <= diag_offset - window`, an entry with flag 1 `last_hit <= diag_offset`.
-fn x_first_uncleared(table: &[DiagStruct], diag_offset: i32, window: i32) -> Option<usize> {
-    let flag0_bound = i64::from(diag_offset) - i64::from(window);
-    table.iter().position(|entry| {
-        let last_hit = i64::from(entry.last_hit());
-        if entry.flag() == 0 {
-            last_hit > flag0_bound
-        } else {
-            last_hit > i64::from(diag_offset)
-        }
-    })
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
 // ```c
 //     /* iterate over all subject sequences */
@@ -305,23 +216,17 @@ fn x_first_uncleared(table: &[DiagStruct], diag_offset: i32, window: i32) -> Opt
 //         }
 // ```
 /// The subjects of one run, `run`, searched with `scratch` into `slots` (the run's slots of the
-/// subject results), and with `reference` (shadow mode) searched again as the loop without the
-/// switch searches them and compared.
-#[allow(clippy::too_many_arguments)]
+/// subject results).
 fn x_search_run<K>(
     scratch: &mut BlastpSubjectScratch,
-    mut reference: Option<&mut BlastpSubjectScratch>,
     run: Range<usize>,
     slots: &mut [Option<BlastpSubjectResult>],
     subjects: &[EncodedProtein],
     subject_diag_offsets: &[i32],
-    window: i32,
     process_subject: &K,
 ) where
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
 {
-    let shadow = reference.is_some();
-    let (mut resets, mut checked) = (0u64, 0u64);
     for (s_idx, slot) in run.clone().zip(slots.iter_mut()) {
         let diag_offset = subject_diag_offsets[s_idx];
         if s_idx == run.start {
@@ -333,27 +238,7 @@ fn x_search_run<K>(
         } else {
             // The previous subject's `finish_subject` (`Blast_ExtendWordExit`) left the
             // one-thread order's offset, and its entries read as cleared ones (module header).
-            if shadow {
-                if scratch.diag_offset != diag_offset {
-                    x_shadow_difference(format!(
-                        "subject {s_idx}: the run's diagonal offset is {}, the one-thread order's {diag_offset}",
-                        scratch.diag_offset
-                    ));
-                }
-                if let Some(entry) = x_first_uncleared(&scratch.diag_array, diag_offset, window) {
-                    x_shadow_difference(format!(
-                        "subject {s_idx}: diagonal entry {entry} (last_hit {}, flag {}) does not read as cleared at offset {diag_offset}",
-                        scratch.diag_array[entry].last_hit(),
-                        scratch.diag_array[entry].flag()
-                    ));
-                }
-                checked += 1;
-            } else {
-                debug_assert_eq!(scratch.diag_offset, diag_offset, "subject {s_idx}");
-            }
-            if diag_offset < subject_diag_offsets[s_idx - 1] {
-                resets += 1;
-            }
+            debug_assert_eq!(scratch.diag_offset, diag_offset, "subject {s_idx}");
             // Every per-subject reset of `prepare_independent_subject` but the table's fill.
             scratch.reset_subject_state();
         }
@@ -364,50 +249,20 @@ fn x_search_run<K>(
             BlastpSubjectRef::of(&subjects[s_idx]),
             &mut subject_result,
         );
-        if let Some(reference) = reference.as_deref_mut() {
-            reference.prepare_independent_subject(diag_offset);
-            let mut expected = BlastpSubjectResult::new(s_idx);
-            process_subject(
-                reference,
-                s_idx,
-                BlastpSubjectRef::of(&subjects[s_idx]),
-                &mut expected,
-            );
-            let lists = format!("{:?}", subject_result.query_hsp_lists);
-            let expected_lists = format!("{:?}", expected.query_hsp_lists);
-            let compact = format!("{:?}", subject_result.x_compact_hsp_lists);
-            let expected_compact = format!("{:?}", expected.x_compact_hsp_lists);
-            if lists != expected_lists || compact != expected_compact {
-                x_shadow_difference(format!(
-                    "subject {s_idx}: the run's result differs from the result of a cleared table: {lists} {compact} / {expected_lists} {expected_compact}"
-                ));
-            }
-            X_SUBJECTS_COMPARED.fetch_add(1, Ordering::Relaxed);
-        }
         *slot = Some(subject_result);
-    }
-    if shadow {
-        X_RUNS.fetch_add(1, Ordering::Relaxed);
-        X_SUBJECTS.fetch_add(run.len() as u64, Ordering::Relaxed);
-        X_FILLS_SAVED.fetch_add(run.len() as u64 - 1, Ordering::Relaxed);
-        X_RESETS_IN_RUNS.fetch_add(resets, Ordering::Relaxed);
-        X_TABLES_CHECKED.fetch_add(checked, Ordering::Relaxed);
     }
 }
 
 /// The runs `runs` searched by `workers` tasks of the current rayon pool (one `rayon::scope`),
-/// each with one scratch made by `new_scratch` when it takes its first run (two in shadow mode),
-/// into `subject_results` (one slot per subject, every slot of a run written by its task).
-#[allow(clippy::too_many_arguments)]
+/// each with one scratch made by `new_scratch` when it takes its first run, into `subject_results`
+/// (one slot per subject, every slot of a run written by its task).
 fn x_search_runs<S, K>(
     workers: usize,
     runs: &[Range<usize>],
     subjects: &[EncodedProtein],
     subject_diag_offsets: &[i32],
-    window: i32,
     new_scratch: &S,
     process_subject: &K,
-    shadow: bool,
     subject_results: &mut [Option<BlastpSubjectResult>],
 ) where
     S: Fn() -> BlastpSubjectScratch + Sync,
@@ -430,25 +285,21 @@ fn x_search_runs<S, K>(
         for _ in 0..workers.clamp(1, runs.len().max(1)) {
             scope.spawn(|_| {
                 let mut scratch: Option<BlastpSubjectScratch> = None;
-                let mut reference: Option<BlastpSubjectScratch> = None;
                 loop {
                     let index = next_run.fetch_add(1, Ordering::Relaxed);
                     let Some(run) = runs.get(index) else {
                         break;
                     };
                     let scratch = scratch.get_or_insert_with(new_scratch);
-                    let reference = shadow.then(|| reference.get_or_insert_with(new_scratch));
                     let mut slots = run_slots[index]
                         .lock()
                         .unwrap_or_else(PoisonError::into_inner);
                     x_search_run(
                         scratch,
-                        reference,
                         run.clone(),
                         &mut slots,
                         subjects,
                         subject_diag_offsets,
-                        window,
                         process_subject,
                     );
                 }
@@ -461,15 +312,12 @@ fn x_search_runs<S, K>(
 // their tasks); it changes no value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel loop of a `-subject` search in runs of
 /// subjects (module header) on `pool`, into `subject_results`.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn x_search_subject_runs<S, K>(
     pool: &SearchPool<'_>,
     subjects: &[EncodedProtein],
     subject_diag_offsets: &[i32],
-    window: i32,
     new_scratch: &S,
     process_subject: &K,
-    shadow: bool,
     subject_results: &mut [Option<BlastpSubjectResult>],
 ) where
     S: Fn() -> BlastpSubjectScratch + Sync,
@@ -478,19 +326,14 @@ pub(super) fn x_search_subject_runs<S, K>(
     let workers = pool.threads().max(1);
     let lengths: Vec<usize> = subjects.iter().map(|subject| subject.aa_len).collect();
     let runs = x_cut_runs(&lengths, workers.saturating_mul(X_PARTS_PER_THREAD));
-    if shadow {
-        X_SEARCHES.fetch_add(1, Ordering::Relaxed);
-    }
     pool.install(|| {
         x_search_runs(
             workers,
             &runs,
             subjects,
             subject_diag_offsets,
-            window,
             new_scratch,
             process_subject,
-            shadow,
             subject_results,
         )
     });
@@ -500,9 +343,27 @@ pub(super) fn x_search_subject_runs<S, K>(
 mod tests {
     use super::super::blastp_subject_diag_offsets;
     use super::*;
+    use crate::algorithm::tblastx::blast_extend::DiagStruct;
 
     const WINDOW: i32 = 40;
     const TABLE: i32 = 64;
+
+    // No NCBI counterpart: a check of the unit kernel (the property in the module's header); it
+    // changes no value NCBI computes.
+    /// The first entry of `table` that does not read as a cleared entry at the diagonal offset
+    /// `diag_offset` for every subject offset: an entry with flag 0 must have
+    /// `last_hit <= diag_offset - window`, an entry with flag 1 `last_hit <= diag_offset`.
+    fn x_first_uncleared(table: &[DiagStruct], diag_offset: i32, window: i32) -> Option<usize> {
+        let flag0_bound = i64::from(diag_offset) - i64::from(window);
+        table.iter().position(|entry| {
+            let last_hit = i64::from(entry.last_hit());
+            if entry.flag() == 0 {
+                last_hit > flag0_bound
+            } else {
+                last_hit > i64::from(diag_offset)
+            }
+        })
+    }
 
     /// Lengths from a fixed linear congruential sequence: some subjects without letters, the
     /// others of 1-599 letters.
@@ -604,29 +465,13 @@ mod tests {
     /// offset, and the first entry that did not read as cleared.
     type Seen = (usize, i32, Option<usize>);
 
-    /// How the test kernel ends a subject.
-    #[derive(Clone, Copy, PartialEq)]
-    enum Kernel {
-        /// As `process_subject`: entries written below the next offset, then `finish_subject`.
-        Correct,
-        /// The offset is not advanced.
-        NoFinish,
-        /// At INT4_MAX / 4 the offset goes back to `window` but the table is not cleared.
-        MissedReset,
-        /// An entry is left where the next subject's test reads it (`last_hit` above that
-        /// subject's offset less `window`).
-        EntryTooHigh,
-    }
-
     /// The subjects searched in runs by `threads` tasks with a kernel that writes entries as
-    /// `process_subject` writes them (or as `kernel` breaks that), records what it saw, and
-    /// moves the offset with `finish_subject`.
+    /// `process_subject` writes them, records what it saw, and moves the offset with
+    /// `finish_subject`.
     fn search(
         lengths: &[usize],
         threads: usize,
         parts: usize,
-        shadow: bool,
-        kernel: Kernel,
     ) -> (Vec<Seen>, Vec<Option<BlastpSubjectResult>>) {
         let subjects = proteins(lengths);
         let offsets = blastp_subject_diag_offsets(&subjects, WINDOW);
@@ -653,22 +498,7 @@ mod tests {
                 entry.set_last_hit(offset + (k as i32 * 13) % length);
                 entry.set_flag((k % 2) as u32);
             }
-            match kernel {
-                Kernel::Correct => scratch.finish_subject(subject.aa_len, WINDOW),
-                Kernel::NoFinish => {}
-                Kernel::MissedReset => {
-                    if scratch.diag_offset >= i32::MAX / 4 {
-                        scratch.diag_offset = WINDOW;
-                    } else {
-                        scratch.finish_subject(subject.aa_len, WINDOW);
-                    }
-                }
-                Kernel::EntryTooHigh => {
-                    // One above the highest `last_hit` the next subject reads as cleared.
-                    scratch.diag_array[s_idx % TABLE as usize].set_last_hit(offset + length + 1);
-                    scratch.finish_subject(subject.aa_len, WINDOW);
-                }
-            }
+            scratch.finish_subject(subject.aa_len, WINDOW);
         };
         let mut results: Vec<Option<BlastpSubjectResult>> = std::iter::repeat_with(|| None)
             .take(lengths.len())
@@ -683,10 +513,8 @@ mod tests {
                 &runs,
                 &subjects,
                 &offsets,
-                WINDOW,
                 &new_scratch,
                 &process_subject,
-                shadow,
                 &mut results,
             )
         });
@@ -696,12 +524,11 @@ mod tests {
     }
 
     /// Every subject with letters searched at the one-thread order's offset from a table that
-    /// reads as cleared, `times` times, and every slot filled with its subject's result.
+    /// reads as cleared, and every slot filled with its subject's result.
     fn assert_one_thread_offsets(
         lengths: &[usize],
         seen: &[Seen],
         results: &[Option<BlastpSubjectResult>],
-        times: usize,
         what: &str,
     ) {
         let offsets = blastp_subject_diag_offsets(&proteins(lengths), WINDOW);
@@ -709,7 +536,7 @@ mod tests {
             .iter()
             .enumerate()
             .filter(|&(_, &length)| length > 0)
-            .flat_map(|(s_idx, _)| std::iter::repeat_n((s_idx, offsets[s_idx], None), times))
+            .map(|(s_idx, _)| (s_idx, offsets[s_idx], None))
             .collect();
         assert_eq!(seen, expected.as_slice(), "{what}");
         for (s_idx, result) in results.iter().enumerate() {
@@ -727,18 +554,9 @@ mod tests {
             let lengths = lengths(150, seed);
             for threads in [1, 2, 3, 7] {
                 for parts in [1, 2, 5, threads * 4, 150, 400] {
-                    for shadow in [false, true] {
-                        let (seen, results) =
-                            search(&lengths, threads, parts, shadow, Kernel::Correct);
-                        let what = format!("seed {seed} threads {threads} parts {parts}");
-                        assert_one_thread_offsets(
-                            &lengths,
-                            &seen,
-                            &results,
-                            1 + usize::from(shadow),
-                            &what,
-                        );
-                    }
+                    let (seen, results) = search(&lengths, threads, parts);
+                    let what = format!("seed {seed} threads {threads} parts {parts}");
+                    assert_one_thread_offsets(&lengths, &seen, &results, &what);
                 }
             }
         }
@@ -757,49 +575,10 @@ mod tests {
         assert!(resets >= 2, "{offsets:?}");
         for threads in [1, 2, 3] {
             for parts in [1, 2, 3] {
-                for shadow in [false, true] {
-                    let (seen, results) = search(&lengths, threads, parts, shadow, Kernel::Correct);
-                    let what = format!("threads {threads} parts {parts} shadow {shadow}");
-                    assert_one_thread_offsets(
-                        &lengths,
-                        &seen,
-                        &results,
-                        1 + usize::from(shadow),
-                        &what,
-                    );
-                }
+                let (seen, results) = search(&lengths, threads, parts);
+                let what = format!("threads {threads} parts {parts}");
+                assert_one_thread_offsets(&lengths, &seen, &results, &what);
             }
         }
-    }
-
-    /// The panic message of a shadow search with `kernel`, which must stop it.
-    fn shadow_stops(lengths: &[usize], kernel: Kernel) -> String {
-        let lengths = lengths.to_vec();
-        let panic = std::panic::catch_unwind(move || {
-            search(&lengths, 2, 1, true, kernel);
-        })
-        .expect_err("the shadow must stop the run");
-        panic
-            .downcast_ref::<String>()
-            .cloned()
-            .or_else(|| panic.downcast_ref::<&str>().map(|text| text.to_string()))
-            .unwrap_or_default()
-    }
-
-    // The shadow's checks catch a run that searches a subject at another offset, a reset that does
-    // not clear the table, and an entry left where the next subject reads it.
-    #[test]
-    fn the_shadow_stops_a_wrong_offset_a_missed_reset_and_a_stale_entry() {
-        let short = [50, 60, 70, 80];
-        let message = shadow_stops(&short, Kernel::NoFinish);
-        assert!(
-            message.contains("[X_SHADOW] BPSUBJRUN") && message.contains("offset"),
-            "{message}"
-        );
-        let long = [200_000_000, 200_000_000, 200_000_000, 200_000_000, 50];
-        let message = shadow_stops(&long, Kernel::MissedReset);
-        assert!(message.contains("does not read as cleared"), "{message}");
-        let message = shadow_stops(&short, Kernel::EntryTooHigh);
-        assert!(message.contains("does not read as cleared"), "{message}");
     }
 }

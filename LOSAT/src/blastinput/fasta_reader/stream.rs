@@ -30,6 +30,9 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 // 	return false;
 // ```
 pub(crate) fn stream_is_empty<R: Read + Seek>(stream: &mut FastaStream<R>) -> bool {
+    if stream.no_position {
+        return false;
+    }
     let input = &mut stream.input;
     let position = match input.stream_position() {
         Ok(position) => position,
@@ -138,6 +141,9 @@ pub(crate) struct FastaStream<R: Read> {
     /// Whether lines are copied from the buffered input at once while no pushback buffer
     /// is active (LOSAT's speed). Tests turn it off to compare with one byte at a time.
     pub(crate) bulk: bool,
+    /// Whether the input has no stream position, as a pipe has none (`tellg() < 0` of
+    /// `IsIStreamEmpty`; `input_files::has_stream_position`): then it is never empty.
+    no_position: bool,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
 // ```c++
@@ -204,6 +210,7 @@ impl<R: Read> FastaStream<R> {
             backend_available: None,
             get_area: true,
             bulk: true,
+            no_position: false,
         }
     }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
@@ -768,7 +775,11 @@ impl<R: Read> FastaStream<R> {
 // sgetn may span windows when the preserved allocation is larger than 8191.
 fn file_available(file: &mut std::fs::File) -> std::io::Result<usize> {
     let metadata = file.metadata()?;
-    if metadata.is_file() {
+    // Windows reports a pipe or a console as a file whose position can be read
+    // (`input_files::has_stream_position`); elsewhere `stream_position` below fails on one.
+    if metadata.is_file()
+        && (cfg!(not(windows)) || crate::blastinput::input_files::has_stream_position(file))
+    {
         let position = file.stream_position()?;
         Ok(metadata.len().saturating_sub(position) as usize)
     } else {
@@ -837,7 +848,9 @@ impl FastaStream<std::fs::File> {
     //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
     // ```
     pub(crate) fn from_file(input: std::fs::File) -> Self {
+        let no_position = !crate::blastinput::input_files::has_stream_position(&input);
         let mut stream = Self::new(input);
+        stream.no_position = no_position;
         stream.backend_available = Some(file_available);
         stream
     }
@@ -870,7 +883,9 @@ impl FastaStream<std::fs::File> {
     /// `stdin_q_lost_g55_pipe` and `stdin_q_lost_g55_file` keep the tail that a file named by
     /// its path loses).
     pub(crate) fn from_standard_input(input: std::fs::File) -> Self {
+        let no_position = !crate::blastinput::input_files::has_stream_position(&input);
         let mut stream = Self::new(input);
+        stream.no_position = no_position;
         stream.backend_available = Some(|_| Ok(0));
         stream.get_area = false;
         stream

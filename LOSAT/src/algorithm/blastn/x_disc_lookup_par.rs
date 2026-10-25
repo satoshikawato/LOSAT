@@ -1,8 +1,8 @@
 //! EXPERIMENT (LOSAT_X_DISCLUTPAR, in the strict set: default ON since 2026-10-17, off with
-//! `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0`; shadow LOSAT_X_DISCLUTPARSHADOW): the
+//! `LOSAT_X_DISCLUTPAR=0`): the
 //! discontiguous megablast tables of `build_disc_mb_lookup` (`s_FillDiscMBTable`) filled by the
 //! threads of the search pool, each thread owning a fixed set of table cells of both templates'
-//! tables. The plan of the cells and the pool test are those of LOSAT_X_PAIRPAR's megablast table
+//! tables. The plan of the cells and the pool test are those of PAIRPAR's megablast table
 //! (`x_mb_lookup_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:754-767,775-786,788-804
@@ -116,7 +116,7 @@
 //! same start `v` (0 in every build: the arrays are allocated zeroed, as NCBI's `calloc`). No job
 //! reads or writes `helper_array` or `helper_array2` (the jobs' `SharedTables` holds neither), the
 //! flush runs after the last join, and their only readers are after the fill
-//! (`build_disc_mb_lookup`: `disc_longest_chain` and the shadow; the arrays are dropped there).
+//! (`build_disc_mb_lookup`: `disc_longest_chain`; the arrays are dropped there).
 //!
 //! Why three phases (scheduling only): in a first version every worker read every word and applied
 //! those of its cells, writing `next_pos[index]` itself; each worker then paid the whole read
@@ -222,53 +222,40 @@
 //! `coordination::determine_template`); then they build this table too. The callers in
 //! `x_pair_seed_disc.rs` are unit tests (on the test thread, so the original loop).
 //!
-//! The shadow implies the switch: after the tables are built, it builds them again the other
-//! way (serially with the original loop when the pool built them; with four parts one after
-//! another when no pool was there) and compares every element of every array and the longest
-//! chain. A difference prints `[X_SHADOW] DISCLUTPAR ... DIFFERENT ...` and panics; at exit
-//! `main` prints `[X_SHADOW] DISCLUTPAR tables=<compared> pool=<built on a pool>
-//! two_templates=<of them with two templates> cells=<elements compared> diffs=0 identical`.
 //! With LOSAT_TIMING (any switch state) `main` prints `[TIMING] disc_lookup_build: <s>s
 //! (builds=<n> parallel=<n on a pool>)` when at least one table was built: `<s>` is the sum of
-//! the wall times of every build of the process (allocation, fill and longest chain, not the
-//! shadow's second build); with LOSAT_X_QBATCHPAR it includes the slots' builds, which run
-//! concurrently. A second line, `[TIMING] disc_lookup_split: alloc= loop= pool_fill= chain=
-//! chunks= read_wall= read_max= read_sum= read_late= update_... link_... buckets_peak=
-//! x_prefault_wall= x_prefault_max= x_prefault_sum= x_prefault_late= x_prefault_rounds=
-//! x_prefault_touches=`, splits the same builds: the allocation of the tables, the fill by the
-//! original loop, the fill on the pool (the prefault rounds included) and the longest chain
-//! (seconds, summed); then, for the pool fills only (not the shadow's partitioned build), their
-//! chunks, and per phase (read = A, update = B, link = C), summed over the chunks: the calling
-//! worker's wall time from before the phase's first job to the return of its last (`wall`), the
-//! longest job (`max`), the jobs' summed running time (`sum`) and the latest start of a job after
-//! the phase began (`late`); the most the buckets of one fill reserved (both templates); and the
-//! same four times of the prefault rounds (phase P), the number of rounds and the zeros they
+//! the wall times of every build of the process (allocation, fill and longest chain); with
+//! LOSAT_X_QBATCHPAR it includes the slots' builds, which run concurrently. A second line,
+//! `[TIMING] disc_lookup_split: alloc= loop= pool_fill= chain= chunks= read_wall= read_max=
+//! read_sum= read_late= update_... link_... buckets_peak= x_prefault_wall= x_prefault_max=
+//! x_prefault_sum= x_prefault_late= x_prefault_rounds= x_prefault_touches=`, splits the same
+//! builds: the allocation of the tables, the fill by the original loop, the fill on the pool (the
+//! prefault rounds included) and the longest chain (seconds, summed); then, for the pool fills
+//! only, their chunks, and per phase (read = A, update = B, link = C), summed over the chunks: the
+//! calling worker's wall time from before the phase's first job to the return of its last (`wall`),
+//! the longest job (`max`), the jobs' summed running time (`sum`) and the latest start of a job
+//! after the phase began (`late`); the most the buckets of one fill reserved (both templates); and
+//! the same four times of the prefault rounds (phase P), the number of rounds and the zeros they
 //! wrote (one per page touched). The jobs' start and end are taken only with LOSAT_TIMING.
 
 use super::x_mb_lookup_par::{plan, pool_threads, Shared, K_COMPRESSION_FACTOR_SHIFT};
 use super::{
-    build_unmasked_ranges, disc_longest_chain, fill_disc_mb_tables, DiscTables, DiscTablesRef,
-    DiscWords, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK,
+    build_unmasked_ranges, DiscTables, DiscWords, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK,
 };
+#[cfg(test)]
+use super::{disc_longest_chain, fill_disc_mb_tables};
 use crate::algorithm::blastn::disc_lookup::compute_discontiguous_index;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
-/// No NCBI counterpart: reads the switches once (LOSAT_X_DISCLUTPAR, in the strict set: on
-/// unless `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0`; LOSAT_X_DISCLUTPARSHADOW, off unless set
-/// to any value, implies the switch). They choose between two LOSAT code paths with the same
-/// result and change no value NCBI computes.
-fn switches() -> (bool, bool) {
-    static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();
-    *SWITCHES.get_or_init(|| {
-        let shadow = std::env::var_os("LOSAT_X_DISCLUTPARSHADOW").is_some();
-        (
-            shadow || crate::utils::xswitch::on("LOSAT_X_DISCLUTPAR"),
-            shadow,
-        )
-    })
+/// No NCBI counterpart: reads LOSAT_X_DISCLUTPAR once (a switch of the strict set: on unless
+/// `LOSAT_X_DISCLUTPAR=0`). It chooses between two LOSAT code paths with the same result and
+/// changes no value NCBI computes.
+fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DISCLUTPAR"))
 }
 
 /// No NCBI counterpart: the number of workers of the fill when `on`, i.e. the size of the
@@ -280,23 +267,15 @@ fn parts_for(on: bool) -> Option<usize> {
     pool_threads()
 }
 
-/// No NCBI counterpart: dispatch test of `build_disc_mb_lookup` (the switch, or its shadow, and
-/// a search pool of two threads or more).
+/// No NCBI counterpart: dispatch test of `build_disc_mb_lookup` (the switch and a search pool of
+/// two threads or more).
 pub(super) fn parts() -> Option<usize> {
-    parts_for(switches().0)
+    let parts = parts_for(on());
+    if on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_DISCLUTPAR", parts.is_some());
+    }
+    parts
 }
-
-/// No NCBI counterpart: LOSAT_X_DISCLUTPARSHADOW is set.
-pub(super) fn shadow() -> bool {
-    switches().1
-}
-
-// No NCBI counterpart: counters of the shadow's summary line.
-static SHADOW_TABLES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_POOL_TABLES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_TWO_TEMPLATE_TABLES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_CELLS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_DIFFS: AtomicU64 = AtomicU64::new(0);
 
 // No NCBI counterpart: the summed wall time of the builds, their number and the number built on a
 // pool, for LOSAT_TIMING (any switch state); they change no value NCBI computes.
@@ -408,8 +387,7 @@ impl BuildClock {
     }
 }
 
-/// The `[TIMING]` lines (with LOSAT_TIMING, when a table was built) and the shadow's summary line
-/// (with LOSAT_X_DISCLUTPARSHADOW), printed by `main` at exit.
+/// The `[TIMING]` lines (with LOSAT_TIMING, when a table was built), printed by `main` at exit.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
@@ -453,17 +431,6 @@ pub fn print_summary() {
             load(&PREFAULT_TOUCHES)
         ));
         eprintln!("{split}");
-    }
-    if shadow() {
-        let diffs = load(&SHADOW_DIFFS);
-        eprintln!(
-            "[X_SHADOW] DISCLUTPAR tables={} pool={} two_templates={} cells={} diffs={diffs} {}",
-            load(&SHADOW_TABLES),
-            load(&SHADOW_POOL_TABLES),
-            load(&SHADOW_TWO_TEMPLATE_TABLES),
-            load(&SHADOW_CELLS),
-            if diffs == 0 { "identical" } else { "DIFFERENT" }
-        );
     }
 }
 
@@ -1210,7 +1177,7 @@ impl Fill<'_, '_> {
     /// word comes (here, the cell is empty before the first chunk). The later chunks run without
     /// marks (`read::<false>`) and without the round; their first writes to other pages are the
     /// loop's (a read, then the write). This needs the three arrays zeroed at the start of the
-    /// fill, as their callers allocate them (NCBI's `calloc`: `build_disc_mb_lookup`, the shadow).
+    /// fill, as their callers allocate them (NCBI's `calloc`: `build_disc_mb_lookup`).
     ///
     /// Pages and max RSS: at the granularity of 4 KiB pages the round touches only pages the fill
     /// writes, so the 4 KiB pages it maps are pages the fill maps anyway. Under transparent huge
@@ -1470,7 +1437,7 @@ fn run_phase<F: Fn(usize) + Sync>(
 ///          mb_lt->hashtable2[ecode2] = index;
 /// ```
 /// Fills the tables as the word loop of `fill_disc_mb_tables` does, with `parts` workers on the
-/// search pool (or one after another, `in_pool == false`, for the shadow without a pool).
+/// search pool (or one after another, `in_pool == false`, for the unit tests without a pool).
 pub(super) fn fill(parts: usize, words: &DiscWords<'_>, tables: DiscTables<'_>, in_pool: bool) {
     fill_with(
         parts,
@@ -1951,7 +1918,7 @@ fn fill_with<P: Fn(u8) + Sync>(
         #[cfg(test)]
         unmarked_reads: AtomicUsize::new(0),
     };
-    // LOSAT_TIMING's split covers the pool fills only (not the shadow's partitioned build).
+    // LOSAT_TIMING's split covers the pool fills only.
     let mut clock = (in_pool && timing_on()).then(|| JobClock::new(parts));
     let measure = clock.is_some() || cfg!(test);
     let mut stats = FillStats::default();
@@ -2068,114 +2035,6 @@ pub(super) fn nonzero_pages(v: &[u32]) -> std::collections::BTreeSet<usize> {
         i = end;
     }
     pages
-}
-
-/// No NCBI counterpart (scheduling only): the parts of the shadow's partitioned build when no
-/// pool built the tables (as `x_mb_lookup_par::shadow_check`).
-const SHADOW_PARTS_OFF_POOL: usize = 4;
-
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786,803-804,808-824
-/// ```c
-///          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-///          mb_lt->hashtable[ecode1] = index;
-/// ...
-///          mb_lt->next_pos2[index] = mb_lt->hashtable2[ecode2];
-///          mb_lt->hashtable2[ecode2] = index;
-/// ...
-///    longest_chain = 2;
-///    for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-///        longest_chain = MAX(longest_chain, helper_array[index]);
-/// ```
-/// LOSAT_X_DISCLUTPARSHADOW: builds the tables again the other way (with the original loop when
-/// the pool built `built`, `pool_parts` = `Some`; otherwise partitioned in four parts one after
-/// another) and compares every element of every array and the longest chain; panics at the first
-/// difference after printing it.
-pub(super) fn shadow_check(
-    words: &DiscWords<'_>,
-    pool_parts: Option<usize>,
-    built: &DiscTablesRef<'_>,
-    longest_chain: usize,
-) {
-    let mut hashtable = vec![0u32; built.hashtable.len()];
-    let mut next_pos = vec![0u32; built.next_pos.len()];
-    let mut helper_array = vec![0u32; built.helper_array.len()];
-    let mut hashtable2 = vec![0u32; built.hashtable2.len()];
-    let mut next_pos2 = vec![0u32; built.next_pos2.len()];
-    let mut helper_array2 = vec![0u32; built.helper_array2.len()];
-    let mut pv_array = vec![0 as PvArrayType; built.pv_array.len()];
-    let tables = DiscTables {
-        hashtable: &mut hashtable,
-        next_pos: &mut next_pos,
-        helper_array: &mut helper_array,
-        hashtable2: &mut hashtable2,
-        next_pos2: &mut next_pos2,
-        helper_array2: &mut helper_array2,
-        pv_array: &mut pv_array,
-        pv_array_bts: built.pv_array_bts,
-    };
-    let other = match pool_parts {
-        Some(_) => {
-            fill_disc_mb_tables(words, tables);
-            "serial"
-        }
-        None => {
-            fill(SHADOW_PARTS_OFF_POOL, words, tables, false);
-            "partitioned"
-        }
-    };
-    let other_chain = disc_longest_chain(&helper_array, &helper_array2, words.two_templates);
-    let mut difference = None;
-    for (name, have, again) in [
-        ("hashtable", built.hashtable, hashtable.as_slice()),
-        ("next_pos", built.next_pos, next_pos.as_slice()),
-        ("helper_array", built.helper_array, helper_array.as_slice()),
-        ("hashtable2", built.hashtable2, hashtable2.as_slice()),
-        ("next_pos2", built.next_pos2, next_pos2.as_slice()),
-        (
-            "helper_array2",
-            built.helper_array2,
-            helper_array2.as_slice(),
-        ),
-        ("pv_array", built.pv_array, pv_array.as_slice()),
-    ] {
-        if let Some(i) = (0..have.len()).find(|&i| have[i] != again[i]) {
-            difference = Some(format!(
-                "{name}[{i}]: built {} {other} {}",
-                have[i], again[i]
-            ));
-            break;
-        }
-    }
-    if difference.is_none() && longest_chain != other_chain {
-        difference = Some(format!(
-            "longest_chain: built {longest_chain} {other} {other_chain}"
-        ));
-    }
-    if let Some(what) = difference {
-        SHADOW_DIFFS.fetch_add(1, Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] DISCLUTPAR DIFFERENT {what} (pool parts {pool_parts:?}, compared with the {other} build; template_length {}, two_templates {})",
-            words.template_length, words.two_templates
-        );
-        panic!("LOSAT_X_DISCLUTPARSHADOW: the discontiguous megablast tables differ: {what}");
-    }
-    SHADOW_TABLES.fetch_add(1, Ordering::Relaxed);
-    SHADOW_POOL_TABLES.fetch_add(u64::from(pool_parts.is_some()), Ordering::Relaxed);
-    SHADOW_TWO_TEMPLATE_TABLES.fetch_add(u64::from(words.two_templates), Ordering::Relaxed);
-    SHADOW_CELLS.fetch_add(
-        [
-            built.hashtable.len(),
-            built.next_pos.len(),
-            built.helper_array.len(),
-            built.hashtable2.len(),
-            built.next_pos2.len(),
-            built.helper_array2.len(),
-            built.pv_array.len(),
-        ]
-        .iter()
-        .sum::<usize>() as u64,
-        Ordering::Relaxed,
-    );
 }
 
 #[cfg(test)]
@@ -2806,20 +2665,6 @@ mod tests {
         .unwrap();
     }
 
-    /// The tables of `b` as the shadow reads them.
-    fn tables_ref(b: &Built, pv_array_bts: usize) -> DiscTablesRef<'_> {
-        DiscTablesRef {
-            hashtable: &b.hashtable,
-            next_pos: &b.next_pos,
-            helper_array: &b.helper_array,
-            hashtable2: &b.hashtable2,
-            next_pos2: &b.next_pos2,
-            helper_array2: &b.helper_array2,
-            pv_array: &b.pv_array,
-            pv_array_bts,
-        }
-    }
-
     /// `DiscWords` of `case` with the templates of `combo`.
     fn words_of<'a>(
         case: &'a Case,
@@ -2840,144 +2685,6 @@ mod tests {
                 crate::algorithm::blastn::disc_lookup::DiscTemplateType::Contiguous
             },
             two_templates,
-        }
-    }
-
-    // The shadow passes equal tables both ways (built on a pool: compared with the original loop;
-    // built serially: compared with the partitioned fill) and counts them.
-    #[test]
-    fn shadow_check_passes_equal_tables() {
-        let mut rng = Lcg(0x5AAD_0001);
-        let case = random_case(&mut rng);
-        let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
-        let approx: usize = case.queries.iter().map(Vec::len).sum();
-        for combo in [
-            (11usize, DiscWordType::Coding, 18usize),
-            (12, DiscWordType::TwoTemplates, 21),
-        ] {
-            let (_, bts) = compute_mb_pv_params(1 << (2 * combo.0), approx, false, combo.0);
-            let words = words_of(&case, &query_refs, combo);
-            let before = SHADOW_TABLES.load(Ordering::Relaxed);
-            let two_before = SHADOW_TWO_TEMPLATE_TABLES.load(Ordering::Relaxed);
-            let serial = build(&case, combo, How::Serial);
-            shadow_check(
-                &words,
-                None,
-                &tables_ref(&serial, bts),
-                serial.longest_chain,
-            );
-            let parted = build(&case, combo, How::Parts(3, false));
-            shadow_check(
-                &words,
-                Some(3),
-                &tables_ref(&parted, bts),
-                parted.longest_chain,
-            );
-            assert!(SHADOW_TABLES.load(Ordering::Relaxed) >= before + 2);
-            if combo.1 == DiscWordType::TwoTemplates {
-                assert!(SHADOW_TWO_TEMPLATE_TABLES.load(Ordering::Relaxed) >= two_before + 2);
-            }
-        }
-    }
-
-    // A table with one element changed (a second-template chain link, the last element of
-    // `next_pos2`) makes the shadow panic.
-    #[test]
-    #[should_panic(expected = "LOSAT_X_DISCLUTPARSHADOW")]
-    fn shadow_check_panics_on_a_difference() {
-        let mut rng = Lcg(0x5AAD_0002);
-        let case = Case {
-            queries: vec![(0..3000).map(|_| rng.below(4) as u8).collect()],
-            offsets: vec![0],
-            masks: Vec::new(),
-        };
-        let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
-        let combo = (11usize, DiscWordType::TwoTemplates, 16usize);
-        let (_, bts) = compute_mb_pv_params(1 << 22, 3000, false, 11);
-        let words = words_of(&case, &query_refs, combo);
-        let mut b = build(&case, combo, How::Serial);
-        let last = b.next_pos2.len() - 1;
-        b.next_pos2[last] ^= 1;
-        shadow_check(&words, Some(2), &tables_ref(&b, bts), b.longest_chain);
-    }
-
-    // The shadow compares every array and the longest chain: correct tables with one element of
-    // one array changed (or the longest chain off by one) make it panic, naming that array,
-    // whichever array it is, when it compares with the original loop (tables built on a pool) and
-    // with the partitioned fill (tables built without one). A shadow that skipped an array would
-    // pass that array's change.
-    #[test]
-    fn shadow_check_compares_every_array() {
-        use std::panic::{catch_unwind, AssertUnwindSafe};
-        let mut rng = Lcg(0x5AAD_0003);
-        let case = Case {
-            queries: vec![(0..3000).map(|_| rng.below(4) as u8).collect()],
-            offsets: vec![0],
-            masks: Vec::new(),
-        };
-        let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
-        let combo = (11usize, DiscWordType::TwoTemplates, 16usize);
-        let (_, bts) = compute_mb_pv_params(1 << 22, 3000, false, 11);
-        let words = words_of(&case, &query_refs, combo);
-        let good = build(&case, combo, How::Serial);
-        assert_not_trivial(&good, true);
-        for pool_parts in [Some(2), None] {
-            shadow_check(
-                &words,
-                pool_parts,
-                &tables_ref(&good, bts),
-                good.longest_chain,
-            );
-        }
-        let flip = |v: &mut [u32]| {
-            // An element the fill wrote, when there is one (a chain head, a link, a counter).
-            let i = v.iter().position(|&x| x > 1).unwrap_or(v.len() / 2);
-            v[i] ^= 1;
-        };
-        for target in [
-            "hashtable",
-            "next_pos",
-            "helper_array",
-            "hashtable2",
-            "next_pos2",
-            "helper_array2",
-            "pv_array",
-            "longest_chain",
-        ] {
-            let mut b = good.clone();
-            match target {
-                "hashtable" => flip(&mut b.hashtable),
-                "next_pos" => flip(&mut b.next_pos),
-                "helper_array" => flip(&mut b.helper_array),
-                "hashtable2" => flip(&mut b.hashtable2),
-                "next_pos2" => flip(&mut b.next_pos2),
-                "helper_array2" => flip(&mut b.helper_array2),
-                "pv_array" => flip(&mut b.pv_array),
-                _ => b.longest_chain += 1,
-            }
-            assert!(b != good, "{target} unchanged");
-            for pool_parts in [Some(2), None] {
-                let result = catch_unwind(AssertUnwindSafe(|| {
-                    shadow_check(&words, pool_parts, &tables_ref(&b, bts), b.longest_chain)
-                }));
-                let payload = result
-                    .err()
-                    .unwrap_or_else(|| panic!("{target} {pool_parts:?}: the shadow passed"));
-                let message = payload
-                    .downcast_ref::<String>()
-                    .cloned()
-                    .or_else(|| payload.downcast_ref::<&str>().map(|m| m.to_string()))
-                    .unwrap_or_default();
-                let named = if target == "longest_chain" {
-                    "differ: longest_chain: ".to_string()
-                } else {
-                    format!("differ: {target}[")
-                };
-                assert!(
-                    message.starts_with("LOSAT_X_DISCLUTPARSHADOW") && message.contains(&named),
-                    "{target} {pool_parts:?}: {message}"
-                );
-            }
         }
     }
 
@@ -3785,9 +3492,9 @@ mod tests {
     }
 
     // EXPERIMENT (LOSAT_X_DCCSR): the CSR built on the pool, in chunks of any size, is the serial
-    // build's and lists the chains of the original loop (`x_dc_csr::shadow_check` compares every
-    // cell's run with its chain, the presence vector, the counters, the longest chain and the
-    // two builds; it panics on a difference).
+    // build's and lists the chains of the original loop (`x_dc_csr::x_assert_runs_are_the_chains`
+    // compares every cell's run with its chain, the presence vector, the counters, the longest
+    // chain and the two builds; it panics on a difference).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -3810,7 +3517,7 @@ mod tests {
             &mut helper,
             chunk,
         );
-        super::super::x_dc_csr::shadow_check(
+        super::super::x_dc_csr::x_assert_runs_are_the_chains(
             &words,
             &csr,
             true,
@@ -3916,7 +3623,7 @@ mod tests {
                 approx,
             );
             let disc = lookup.disc().expect("a discontiguous table");
-            assert_eq!(disc.x_csr().is_some(), super::super::x_dc_csr::switches().0);
+            assert_eq!(disc.x_csr().is_some(), super::super::x_dc_csr::on());
             assert_eq!(lookup.longest_chain(), reference.longest_chain);
             let mut chain = Vec::new();
             for cell in (0..reference.hashtable.len()).step_by(3) {

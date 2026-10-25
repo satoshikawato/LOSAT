@@ -2,31 +2,32 @@
 //! LOSAT_X_QBATCHPAR slot) needs them (`LOSAT_X_QSTREAM`,
 //! `src/algorithm/blastn/blast_engine/x_query_stream.rs`), on whole searches.
 //!
-//! The switch is in the strict set since 2026-10-18 (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set), with a rule (off for `-task megablast`, for a file shorter than twice the
+//! The switch is in the strict set since 2026-10-18 (on unless it is `0`),
+//! with a rule (off for `-task megablast`, for a file shorter than twice the
 //! largest query batch, and where LOSAT_X_QBATCHPAR's slots may read at least half of the file
-//! ahead; not the shadow). It chooses when LOSAT reads the same records: all of them before the
+//! ahead). It chooses when LOSAT reads the same records: all of them before the
 //! search, or a first reading that keeps their lengths and a second one batch by batch, which it does only where the reports may be written
-//! batch by batch (LOSAT_X_RPTSTREAM on; off, the shadow line says `off=reports`).
-//! So the property under test is that nothing a run writes depends on it: for megablast, blastn
-//! and dc-megablast, outfmt 0, 6 and 7, at 1 and 4 threads, with small query batches
-//! (`BATCH_SIZE`), with LOSAT_X_RPTSTREAM off and on, the searches without the switch, with it and
-//! with the shadow (`LOSAT_X_QSTREAMSHADOW`, which also reads the whole file the
-//! old way and compares the records of every batch and every slot's copy) give the same exit
-//! status, standard output (or `-out` file) and standard error (the shadow's line taken out), and
-//! the shadow line shows that the batches were read again (with LOSAT_X_RPTSTREAM). For megablast
-//! the rule keeps the switch from acting (`off=megablast`), so there only the shadow, which ignores
-//! the rule, reads the batches again and is compared; blastn and dc-megablast act with the switch
-//! (the tests keep `BATCH_SIZE` small, so the batch part of the rule does not apply). The same
-//! holds with LOSAT_X_QBATCHPAR slots reading the records of the batches they search ahead, with
-//! `-query_loc` (skipped records and queries without data), `-subject_loc` and `-lcase_masking`,
-//! with `-max_target_seqs`, `-max_hsps` and `-subject_besthit`, with the reader's warnings and
-//! errors (late in the file, and in the first record, before any output), a batch of queries
-//! without letters, LOSAT's refusals that come before every report (LOSAT_X_RPTSTREAM then keeps
-//! its reports after the loop, and the records of every batch are kept for them), LOSAT_X_RPTSTREAM's
-//! shadow (the same), and `-db`. Standard input and a pipe are read once (the shadow line names
-//! why), and the switch is on by default and off by its rule. That those bytes equal NCBI's is the business of the
-//! blastn fixtures.
+//! batch by batch (LOSAT_X_RPTSTREAM on; off, the `[X_STATS]` line says `off=reports`).
+//! So the property under test is that nothing a run writes depends on it: for blastn and
+//! dc-megablast, outfmt 0, 6 and 7, at 1 and 4 threads, with small query batches (`BATCH_SIZE`)
+//! and LOSAT_X_RPTSTREAM on, the searches without the switch and with it give the same exit
+//! status, standard output (or `-out` file) and standard error, and the `[X_STATS] QSTREAM` line
+//! (the arm with `LOSAT_X_STATS`; its lines are taken out of the comparison) shows that the
+//! batches were read again (the tests keep `BATCH_SIZE` small, so the batch part of the rule does
+//! not apply). Where the switch does not act (its rule, or LOSAT_X_RPTSTREAM off), `run.rs` reads
+//! the records before the search as without the switch (`read_queries`, `Store::off`), so one
+//! case each shows why and the same bytes: LOSAT_X_RPTSTREAM off (`off=reports`), `-task
+//! megablast` (`off=megablast`) and LOSAT_X_QBATCHPAR slots (`off=slots`). The same holds with
+//! `-out` files, with `-query_loc` (skipped records and queries without data), `-subject_loc` and
+//! `-lcase_masking`, with `-max_target_seqs`, `-max_hsps` and `-subject_besthit`, with the
+//! reader's warnings and errors (late in the file, and in the first record, before any output), a
+//! batch of queries without letters, LOSAT's refusals that come before every report
+//! (LOSAT_X_RPTSTREAM then keeps its reports after the loop, and for a refusal that comes when
+//! they are written the records of every batch are kept for them), and `-db`. Those cases run at
+//! one thread count each, 1 or 4: the switch reads records on other threads only for the slots,
+//! and its rule reads the thread count only for the slots' window. Standard input and a pipe are
+//! read once (the `[X_STATS]` line names why), and the switch is on by default and off by its
+//! rule. That those bytes equal NCBI's is the business of the blastn fixtures.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -54,16 +55,13 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
 ];
 
 const SWITCH: (&str, &str) = ("LOSAT_X_QSTREAM", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_QSTREAMSHADOW", "1");
 const RPTSTREAM: (&str, &str) = ("LOSAT_X_RPTSTREAM", "1");
-const RPTSTREAMSHADOW: (&str, &str) = ("LOSAT_X_RPTSTREAMSHADOW", "1");
 const QBATCHPAR: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
 /// Two slots whatever QBATCHPAR's own choice of the layout (its tuning variable), so that slots run.
 const TWO_SLOTS: (&str, &str) = ("LOSAT_X_QBATCHPARSLOTS", "2");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const TASKS: [&str; 3] = ["megablast", "blastn", "dc-megablast"];
-/// The reports after the loop, and each batch's when the loop takes it.
-const REPORTS: [&[(&str, &str)]; 2] = [&[], &[RPTSTREAM]];
+/// The tasks the switch acts for (its rule keeps it off for megablast).
+const ACTING: [&str; 2] = ["blastn", "dc-megablast"];
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -249,56 +247,67 @@ fn blastn(args: &[&str], threads: u32, switches: &[(&str, &str)], out: Option<&P
     blastn_with_input(args, threads, switches, out, None)
 }
 
-/// The shadow's numbers: `[X_SHADOW] QSTREAM batches=B records=R slots=S off=O identical`.
+/// The numbers of the `[X_STATS] QSTREAM records=R read=N batches=B slots=S ... off=O` line, and
+/// `precomputed=` of the `[X_STATS] QBATCHPAR` line where there is one (LOSAT_X_QBATCHPAR on).
 #[derive(Debug)]
-struct Shadow {
+struct Numbers {
     batches: u64,
-    records: u64,
+    read: u64,
     slots: u64,
     off: String,
+    precomputed: Option<u64>,
 }
 
-/// Takes the shadow's line out of `run`'s standard error (also the line of LOSAT_X_RPTSTREAM's
-/// shadow, which must say `identical`).
-fn take_shadow_line(run: &mut Run) -> Shadow {
+/// Takes the `[X_STATS]` lines out of `run`'s standard error and returns the numbers of the
+/// `[X_STATS] QSTREAM` line (and of the `[X_STATS] QBATCHPAR` line).
+fn take_stats_lines(run: &mut Run) -> Numbers {
     let text = String::from_utf8_lossy(&run.stderr).into_owned();
     let lines: Vec<&str> = text
         .split_inclusive('\n')
-        .filter(|line| line.starts_with("[X_SHADOW] QSTREAM "))
+        .filter(|line| line.starts_with("[X_STATS] QSTREAM "))
         .collect();
-    assert_eq!(lines.len(), 1, "one shadow line:\n{text}");
+    assert_eq!(lines.len(), 1, "one QSTREAM line:\n{text}");
     let line = lines[0].trim_end();
-    assert!(line.ends_with(" identical"), "{line}");
     let field = |name: &str| -> String {
         line.split_whitespace()
             .find_map(|word| word.strip_prefix(name))
             .unwrap_or_else(|| panic!("no {name} in: {line}"))
             .to_string()
     };
-    let shadow = Shadow {
+    let numbers = Numbers {
         batches: field("batches=").parse().unwrap(),
-        records: field("records=").parse().unwrap(),
+        read: field("read=").parse().unwrap(),
         slots: field("slots=").parse().unwrap(),
         off: field("off="),
+        precomputed: text
+            .lines()
+            .find(|line| line.starts_with("[X_STATS] QBATCHPAR "))
+            .map(|line| {
+                line.split_whitespace()
+                    .find_map(|word| word.strip_prefix("precomputed="))
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or_else(|| panic!("no precomputed= in: {line}"))
+            }),
     };
     run.stderr = text
         .split_inclusive('\n')
-        .filter(|line| !line.starts_with("[X_SHADOW] QSTREAM "))
+        .filter(|line| !line.starts_with("[X_STATS] "))
         .collect::<String>()
         .into_bytes();
-    shadow
+    numbers
 }
 
-/// The run without the switch, with it and with the shadow (with `extra` switches in all three):
-/// the same status, report and standard error. Returns the off run and the shadow's numbers.
-fn same_three_with_input(
+/// The run without the switch and with it (with `extra` switches in both), and with it and
+/// `LOSAT_X_STATS`: the same status, report and standard error (the counters' lines taken out of
+/// the last). Returns the off run and the counters of the `[X_STATS] QSTREAM` line.
+fn same_two_with_input(
     what: &str,
     args: &[&str],
     threads: u32,
     extra: &[(&str, &str)],
     out: Option<&Path>,
     stdin: Option<&[u8]>,
-) -> (Run, Shadow) {
+) -> (Run, Numbers) {
     let off = blastn_with_input(args, threads, extra, out, stdin);
     let mut with = extra.to_vec();
     with.push(SWITCH);
@@ -307,189 +316,148 @@ fn same_three_with_input(
         on == off,
         "{what} threads {threads} {extra:?}: on differs\n{on:?}\n{off:?}"
     );
-    let mut with = extra.to_vec();
-    with.push(SHADOW);
-    let mut shadow = blastn_with_input(args, threads, &with, out, stdin);
-    let numbers = take_shadow_line(&mut shadow);
+    with.push(STATS);
+    let mut counted = blastn_with_input(args, threads, &with, out, stdin);
+    let numbers = take_stats_lines(&mut counted);
     assert!(
-        shadow == off,
-        "{what} threads {threads} {extra:?}: shadow differs\n{shadow:?}\n{off:?}"
+        counted == off,
+        "{what} threads {threads} {extra:?}: on with statistics differs\n{counted:?}\n{off:?}"
     );
     (off, numbers)
 }
 
-fn same_three(
+fn same_two(
     what: &str,
     args: &[&str],
     threads: u32,
     extra: &[(&str, &str)],
     out: Option<&Path>,
-) -> (Run, Shadow) {
-    same_three_with_input(what, args, threads, extra, out, None)
+) -> (Run, Numbers) {
+    same_two_with_input(what, args, threads, extra, out, None)
 }
 
-/// The shadow read every batch again: about a dozen batches, each record compared (the 19 input
+/// The switch read every batch again: about a dozen batches, each record read (the 19 input
 /// records at least once).
-fn read_batch_by_batch(what: &str, shadow: &Shadow) {
+fn read_batch_by_batch(what: &str, numbers: &Numbers) {
     assert!(
-        shadow.off == "none" && shadow.batches >= 8 && shadow.records >= 19,
-        "{what}: {shadow:?}"
+        numbers.off == "none" && numbers.batches >= 8 && numbers.read >= 19,
+        "{what}: {numbers:?}"
     );
 }
 
-/// With LOSAT_X_RPTSTREAM (`reports`) the shadow read every batch again; without it the switch
-/// did not act (`off=reports`: the records are read before the search).
-fn read_as_the_reports_need(what: &str, reports: &[(&str, &str)], shadow: &Shadow) {
-    if reports.is_empty() {
+/// With LOSAT_X_RPTSTREAM (`reports`) the switch read every batch again, except for megablast (its
+/// rule: `off=megablast`); without it the switch did not act (`off=reports`: the records are read
+/// before the search).
+fn read_as_the_reports_need(what: &str, task: &str, reports: &[(&str, &str)], numbers: &Numbers) {
+    if reports.is_empty() || task == "megablast" {
+        let why = if reports.is_empty() {
+            "reports"
+        } else {
+            "megablast"
+        };
         assert!(
-            shadow.off == "reports" && shadow.batches == 0 && shadow.records == 0,
-            "{what}: {shadow:?}"
+            numbers.off == why && numbers.batches == 0 && numbers.read == 0,
+            "{what}: {numbers:?}"
         );
     } else {
-        read_batch_by_batch(what, shadow);
+        read_batch_by_batch(what, numbers);
     }
 }
 
-/// Every task, outfmt 0, 6 and 7, 1 and 4 threads, the reports after the loop and per batch
-/// (LOSAT_X_RPTSTREAM): the off bytes, with every batch read again and the warnings of the reader
-/// and of the invalid queries on standard error.
+/// blastn and dc-megablast, outfmt 0, 6 and 7, 1 and 4 threads, the reports per batch
+/// (LOSAT_X_RPTSTREAM): the off bytes, with every batch read again, and the warnings of the
+/// reader and of the invalid queries on standard error. Where the switch does not act (its rule
+/// for megablast; LOSAT_X_RPTSTREAM off) the records are read as without it: one case each.
 #[test]
 fn every_task_format_thread_count_and_report_mode_gives_the_off_bytes() {
     let dir = TempDir::new("formats");
     let query = queries(&dir, "q.fa", b"");
     let subject = fasta("LC738868.fasta");
-    for task in TASKS {
+    let mut cases = Vec::new();
+    for task in ACTING {
         for outfmt in ["0", "6", "7"] {
             for threads in [1, 4] {
-                for reports in REPORTS {
-                    let args = [
-                        "-task",
-                        task,
-                        "-query",
-                        query.to_str().unwrap(),
-                        "-subject",
-                        subject.to_str().unwrap(),
-                        "-outfmt",
-                        outfmt,
-                    ];
-                    let what = format!("{task} outfmt {outfmt}");
-                    let (off, shadow) = same_three(&what, &args, threads, reports, None);
-                    assert_eq!(off.status, Some(0), "{what}");
-                    assert!(!off.report.is_empty(), "{what}: no report");
-                    let stderr = String::from_utf8_lossy(&off.stderr);
-                    assert!(
-                        stderr.contains("FASTA-Reader: Ignoring invalid residues")
-                            && stderr.contains("Sequence contains no data"),
-                        "{what}: {stderr}"
-                    );
-                    read_as_the_reports_need(&what, reports, &shadow);
-                    assert_eq!(shadow.slots, 0, "{what}");
-                }
+                cases.push((task, outfmt, threads, &[RPTSTREAM][..]));
             }
         }
     }
+    cases.push(("megablast", "6", 4, &[RPTSTREAM][..]));
+    cases.push(("blastn", "0", 4, &[][..]));
+    for (task, outfmt, threads, reports) in cases {
+        let args = [
+            "-task",
+            task,
+            "-query",
+            query.to_str().unwrap(),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            outfmt,
+        ];
+        let what = format!("{task} outfmt {outfmt} {reports:?}");
+        let (off, numbers) = same_two(&what, &args, threads, reports, None);
+        assert_eq!(off.status, Some(0), "{what}");
+        assert!(!off.report.is_empty(), "{what}: no report");
+        let stderr = String::from_utf8_lossy(&off.stderr);
+        assert!(
+            stderr.contains("FASTA-Reader: Ignoring invalid residues")
+                && stderr.contains("Sequence contains no data"),
+            "{what}: {stderr}"
+        );
+        read_as_the_reports_need(&what, task, reports, &numbers);
+        assert_eq!(numbers.slots, 0, "{what}");
+    }
 }
 
-/// `-out` files, LOSAT_X_QBATCHPAR's slots (two slots of two threads, `LOSAT_X_QBATCHPARSLOTS=2`,
-/// which copy the records of the batches they search ahead of the loop), and LOSAT_X_RPTSTREAM's
-/// shadow (the records of every batch kept for its comparison): the off bytes; the slots did
-/// search batches with records read again.
+/// `-out` files (each format once, with a task the switch acts for) and LOSAT_X_QBATCHPAR's slots
+/// (two slots of two threads, `LOSAT_X_QBATCHPARSLOTS=2`): the off bytes; the slots did search
+/// batches ahead of the loop (`precomputed=`), with the switch kept off by its rule on this small
+/// file (`off=slots`), so the records are read as without it, whatever the task (one case).
 #[test]
-fn out_files_qbatchpar_slots_and_the_report_shadow_give_the_off_bytes() {
+fn out_files_and_qbatchpar_slots_give_the_off_bytes() {
     let dir = TempDir::new("slots");
     let query = queries(&dir, "q.fa", b"");
     let subject = fasta("LC738868.fasta");
     let out = dir.path("report.txt");
-    for task in TASKS {
-        for outfmt in ["0", "6", "7"] {
-            let args = [
-                "-task",
-                task,
-                "-query",
-                query.to_str().unwrap(),
-                "-subject",
-                subject.to_str().unwrap(),
-                "-outfmt",
-                outfmt,
-            ];
-            let what = format!("{task} outfmt {outfmt} -out");
-            let (off, shadow) = same_three(&what, &args, 4, &[RPTSTREAM], Some(&out));
-            assert!(!off.report.is_empty(), "{what}");
-            read_batch_by_batch(&what, &shadow);
-            let what = format!("{task} outfmt {outfmt} RPTSTREAMSHADOW");
-            let (off, shadow) = same_three(&what, &args, 4, &[RPTSTREAMSHADOW], None);
-            assert!(!off.report.is_empty(), "{what}");
-            read_batch_by_batch(&what, &shadow);
-            let stderr = String::from_utf8_lossy(&off.stderr);
-            assert!(
-                stderr.contains("[X_SHADOW] RPTSTREAM ") && stderr.contains(" off=none identical"),
-                "{what}: {stderr}"
-            );
-            for reports in REPORTS {
-                let mut extra = vec![QBATCHPAR, TWO_SLOTS];
-                extra.extend_from_slice(reports);
-                let what = format!("{task} outfmt {outfmt} QBATCHPAR {reports:?}");
-                let (off, shadow) = same_three(&what, &args, 4, &extra, None);
-                assert!(!off.report.is_empty(), "{what}");
-                read_as_the_reports_need(&what, reports, &shadow);
-                assert_eq!(shadow.slots > 0, !reports.is_empty(), "{what}: {shadow:?}");
-                // The slots searched batches ahead of the loop. The switch does not act here: its
-                // rule (`off=megablast`, and `off=slots` for the forced slots on this small file);
-                // the shadow, which ignores the rule, read copies of the records again for the
-                // slots (with LOSAT_X_RPTSTREAM).
-                for (mode, acting) in [(SWITCH, false), (SHADOW, true)] {
-                    let mut with = extra.clone();
-                    with.extend_from_slice(&[mode, STATS]);
-                    let stats = blastn(&args, 4, &with, None);
-                    let stderr = String::from_utf8_lossy(&stats.stderr);
-                    let what = format!("{what} {mode:?}");
-                    let number = |prefix: &str, name: &str| -> u64 {
-                        stderr
-                            .lines()
-                            .find(|line| line.starts_with(prefix))
-                            .and_then(|line| {
-                                line.split_whitespace()
-                                    .find_map(|word| word.strip_prefix(name))
-                            })
-                            .and_then(|value| value.parse().ok())
-                            .unwrap_or_else(|| panic!("{what}: {stderr}"))
-                    };
-                    assert!(
-                        number("[X_STATS] QBATCHPAR ", "precomputed=") > 0,
-                        "{what}: {stderr}"
-                    );
-                    let why = if reports.is_empty() {
-                        Some("reports")
-                    } else if acting {
-                        None
-                    } else if task == "megablast" {
-                        Some("megablast")
-                    } else {
-                        Some("slots")
-                    };
-                    match why {
-                        Some(why) => assert!(
-                            stderr.contains("[X_STATS] QSTREAM records=0 read=0 ")
-                                && stderr.contains(&format!(" off={why}")),
-                            "{what}: {stderr}"
-                        ),
-                        None => assert!(
-                            number("[X_STATS] QSTREAM ", "slots=") > 0
-                                && number("[X_STATS] QSTREAM ", "read=")
-                                    == number("[X_STATS] QSTREAM ", "records="),
-                            "{what}: {stderr}"
-                        ),
-                    }
-                }
-            }
-        }
+    let args = |task, outfmt| {
+        [
+            "-task",
+            task,
+            "-query",
+            query.to_str().unwrap(),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            outfmt,
+        ]
+    };
+    for (task, outfmt) in [("blastn", "0"), ("dc-megablast", "6"), ("blastn", "7")] {
+        let what = format!("{task} outfmt {outfmt} -out");
+        let (off, numbers) = same_two(&what, &args(task, outfmt), 4, &[RPTSTREAM], Some(&out));
+        assert!(!off.report.is_empty(), "{what}");
+        read_batch_by_batch(&what, &numbers);
     }
+    let what = "blastn outfmt 7 QBATCHPAR";
+    let extra = [QBATCHPAR, TWO_SLOTS, RPTSTREAM];
+    let (off, numbers) = same_two(what, &args("blastn", "7"), 4, &extra, None);
+    assert!(!off.report.is_empty(), "{what}");
+    assert!(
+        numbers.off == "slots" && numbers.slots == 0 && numbers.read == 0,
+        "{what}: {numbers:?}"
+    );
+    // The slots searched batches ahead of the loop (the run with the counters).
+    assert!(
+        numbers
+            .precomputed
+            .is_some_and(|precomputed| precomputed > 0),
+        "{what}: {numbers:?}"
+    );
 }
 
 /// `-query_loc` (a range that skips the records without letters and the two-letter one, and one
 /// that makes the two-letter record a query without data), `-subject_loc` with `-lcase_masking`
 /// (queries with lower case runs), and `-max_target_seqs`, `-max_hsps` and `-subject_besthit`:
-/// the off bytes, with the reports after the loop and per batch.
+/// the off bytes, with the reports per batch, each case at one thread count.
 #[test]
 fn ranges_masks_and_hit_list_options_give_the_off_bytes() {
     let dir = TempDir::new("ranges");
@@ -504,15 +472,17 @@ fn ranges_masks_and_hit_list_options_give_the_off_bytes() {
     record(&mut text, b"LC738868 in lower and upper case", &lower);
     let subject = dir.path("lower.fa");
     std::fs::write(&subject, text).unwrap();
-    let cases: [(&str, &[&str]); 5] = [
-        ("blastn", &["-outfmt", "0", "-query_loc", "100-1500"]),
-        ("megablast", &["-outfmt", "6", "-query_loc", "3-1000"]),
+    let cases: [(&str, u32, &[&str]); 5] = [
+        ("blastn", 1, &["-outfmt", "0", "-query_loc", "100-1500"]),
+        ("blastn", 4, &["-outfmt", "6", "-query_loc", "3-1000"]),
         (
             "dc-megablast",
+            4,
             &["-outfmt", "7", "-query_loc", "100-1500", "-lcase_masking"],
         ),
         (
             "dc-megablast",
+            1,
             &[
                 "-outfmt",
                 "0",
@@ -523,6 +493,7 @@ fn ranges_masks_and_hit_list_options_give_the_off_bytes() {
         ),
         (
             "blastn",
+            4,
             &[
                 "-outfmt",
                 "7",
@@ -534,7 +505,7 @@ fn ranges_masks_and_hit_list_options_give_the_off_bytes() {
             ],
         ),
     ];
-    for (task, extra) in cases {
+    for (task, threads, extra) in cases {
         let mut args = vec![
             "-task",
             task,
@@ -544,29 +515,19 @@ fn ranges_masks_and_hit_list_options_give_the_off_bytes() {
             subject.to_str().unwrap(),
         ];
         args.extend_from_slice(extra);
-        for threads in [1, 4] {
-            for reports in REPORTS {
-                let what = format!("{task} {extra:?}");
-                let (off, shadow) = same_three(&what, &args, threads, reports, None);
-                assert_eq!(off.status, Some(0), "{what}");
-                assert!(!off.report.is_empty(), "{what}");
-                // The reader's warning of the record with digits (cut with `-query_loc`: the
-                // warning is the whole record's, written with its batch).
-                assert!(
-                    String::from_utf8_lossy(&off.stderr)
-                        .contains("FASTA-Reader: Ignoring invalid residues"),
-                    "{what}: {}",
-                    String::from_utf8_lossy(&off.stderr)
-                );
-                read_as_the_reports_need(&what, reports, &shadow);
-            }
-        }
-        // LOSAT_X_QBATCHPAR's slots copy the records of the batches they search, cut to the range.
-        let what = format!("{task} {extra:?} QBATCHPAR");
-        let (off, shadow) = same_three(&what, &args, 4, &[QBATCHPAR, TWO_SLOTS, RPTSTREAM], None);
+        let what = format!("{task} {extra:?}");
+        let (off, numbers) = same_two(&what, &args, threads, &[RPTSTREAM], None);
         assert_eq!(off.status, Some(0), "{what}");
-        read_batch_by_batch(&what, &shadow);
-        assert!(shadow.slots > 0, "{what}: {shadow:?}");
+        assert!(!off.report.is_empty(), "{what}");
+        // The reader's warning of the record with digits (cut with `-query_loc`: the warning is
+        // the whole record's, written with its batch).
+        assert!(
+            String::from_utf8_lossy(&off.stderr)
+                .contains("FASTA-Reader: Ignoring invalid residues"),
+            "{what}: {}",
+            String::from_utf8_lossy(&off.stderr)
+        );
+        read_batch_by_batch(&what, &numbers);
     }
 }
 
@@ -574,7 +535,8 @@ fn ranges_masks_and_hit_list_options_give_the_off_bytes() {
 /// late in the file; a batch of queries without letters; with `-query_loc`, a batch of skipped
 /// records only), a reader error in the first record (before any output), and LOSAT's refusals,
 /// which come before every report (a subject id that a later batch reaches, scoring without
-/// Karlin-Altschul values, a negative `CHUNK_SIZE`): the off bytes, status and standard error.
+/// Karlin-Altschul values, a negative `CHUNK_SIZE`): the off bytes, status and standard error,
+/// with the reports per batch and tasks the switch acts for (each query with each format once).
 #[test]
 fn errors_and_refusals_give_the_off_bytes() {
     let dir = TempDir::new("errors");
@@ -612,7 +574,11 @@ fn errors_and_refusals_give_the_off_bytes() {
             false,
         ),
     ] {
-        for (task, outfmt) in [("megablast", "7"), ("blastn", "0"), ("dc-megablast", "6")] {
+        for (task, outfmt, threads) in [
+            ("blastn", "0", 1),
+            ("blastn", "7", 4),
+            ("dc-megablast", "6", 4),
+        ] {
             let args = [
                 "-task",
                 task,
@@ -623,32 +589,26 @@ fn errors_and_refusals_give_the_off_bytes() {
                 "-outfmt",
                 outfmt,
             ];
-            for threads in [1, 4] {
-                for reports in REPORTS {
-                    let what = format!("{task} outfmt {outfmt} {query:?}");
-                    let (off, shadow) = same_three(&what, &args, threads, reports, None);
-                    assert_eq!(off.status, Some(status), "{what}");
-                    assert!(
-                        String::from_utf8_lossy(&off.stderr).contains(error),
-                        "{what}: {}",
-                        String::from_utf8_lossy(&off.stderr)
-                    );
-                    if reports.is_empty() {
-                        read_as_the_reports_need(&what, reports, &shadow);
-                    } else if before {
-                        assert!(!off.report.is_empty(), "{what}");
-                        read_batch_by_batch(&what, &shadow);
-                    } else {
-                        // Only the outfmt 0 prolog comes before the error (written before the
-                        // first batch is read).
-                        assert!(
-                            outfmt == "0" || off.report.is_empty(),
-                            "{what}: {}",
-                            String::from_utf8_lossy(&off.report)
-                        );
-                        assert_eq!((shadow.off.as_str(), shadow.records), ("none", 0));
-                    }
-                }
+            let what = format!("{task} outfmt {outfmt} {query:?}");
+            let (off, numbers) = same_two(&what, &args, threads, &[RPTSTREAM], None);
+            assert_eq!(off.status, Some(status), "{what}");
+            assert!(
+                String::from_utf8_lossy(&off.stderr).contains(error),
+                "{what}: {}",
+                String::from_utf8_lossy(&off.stderr)
+            );
+            if before {
+                assert!(!off.report.is_empty(), "{what}");
+                read_batch_by_batch(&what, &numbers);
+            } else {
+                // Only the outfmt 0 prolog comes before the error (written before the first batch
+                // is read).
+                assert!(
+                    outfmt == "0" || off.report.is_empty(),
+                    "{what}: {}",
+                    String::from_utf8_lossy(&off.report)
+                );
+                assert_eq!((numbers.off.as_str(), numbers.read), ("none", 0));
             }
         }
     }
@@ -664,7 +624,7 @@ fn errors_and_refusals_give_the_off_bytes() {
     let skipped = queries(&dir, "skipped.fa", &tail);
     let args = [
         "-task",
-        "megablast",
+        "blastn",
         "-query",
         skipped.to_str().unwrap(),
         "-subject",
@@ -674,17 +634,15 @@ fn errors_and_refusals_give_the_off_bytes() {
         "-query_loc",
         "100-1500",
     ];
-    for reports in REPORTS {
-        let (off, shadow) = same_three("skipped", &args, 4, reports, None);
-        assert_eq!(
-            off.status,
-            Some(3),
-            "{:?}",
-            String::from_utf8_lossy(&off.stderr)
-        );
-        assert!(String::from_utf8_lossy(&off.stderr).contains("Empty CBlastQueryVector"));
-        read_as_the_reports_need("skipped", reports, &shadow);
-    }
+    let (off, numbers) = same_two("skipped", &args, 4, &[RPTSTREAM], None);
+    assert_eq!(
+        off.status,
+        Some(3),
+        "{:?}",
+        String::from_utf8_lossy(&off.stderr)
+    );
+    assert!(String::from_utf8_lossy(&off.stderr).contains("Empty CBlastQueryVector"));
+    read_batch_by_batch("skipped", &numbers);
     // LOSAT's refusals: a subject id that only the last batches reach, scoring without
     // Karlin-Altschul values, a negative CHUNK_SIZE.
     let query = queries(&dir, "q.fa", b"");
@@ -700,7 +658,7 @@ fn errors_and_refusals_give_the_off_bytes() {
     let plain = |subject: &Path| -> Vec<String> {
         [
             "-task",
-            "megablast",
+            "blastn",
             "-query",
             query.to_str().unwrap(),
             "-subject",
@@ -711,9 +669,11 @@ fn errors_and_refusals_give_the_off_bytes() {
         .map(String::from)
         .to_vec()
     };
-    let ids = plain(&refused);
+    // dc-megablast: only the queries of the last batches hit the second subject (blastn hits it
+    // from the first batch on).
+    let mut ids = plain(&refused);
+    ids[1] = "dc-megablast".to_string();
     let mut scoring = plain(&subject);
-    scoring[1] = "blastn".to_string();
     scoring.extend(
         [
             "-reward",
@@ -728,36 +688,30 @@ fn errors_and_refusals_give_the_off_bytes() {
         .map(String::from),
     );
     let chunks = [("CHUNK_SIZE", "-5"), ("OVERLAP_CHUNK_SIZE", "-10")];
-    for reports in REPORTS {
-        for (what, args, env) in [
-            ("Subject_ id", &ids, &[][..]),
-            ("scoring", &scoring, &[][..]),
-            ("CHUNK_SIZE", &plain(&subject), &chunks[..]),
-        ] {
-            let args: Vec<&str> = args.iter().map(String::as_str).collect();
-            let mut extra = env.to_vec();
-            extra.extend_from_slice(reports);
-            let (off, shadow) = same_three(what, &args, 4, &extra, None);
-            assert_ne!(off.status, Some(0), "{what}: the refusal");
-            assert!(
-                off.report.is_empty(),
-                "{what}: no report before the refusal"
-            );
-            // With LOSAT_X_RPTSTREAM the switch acts (that switch then keeps the reports after
-            // the loop, so the records of every batch are kept for them).
-            let expected = if reports.is_empty() {
-                "reports"
-            } else {
-                "none"
-            };
-            assert_eq!(shadow.off, expected, "{what}");
-        }
+    for (what, args, env) in [
+        ("Subject_ id", &ids, &[][..]),
+        ("scoring", &scoring, &[][..]),
+        ("CHUNK_SIZE", &plain(&subject), &chunks[..]),
+    ] {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let mut extra = env.to_vec();
+        extra.push(RPTSTREAM);
+        let (off, numbers) = same_two(what, &args, 4, &extra, None);
+        assert_ne!(off.status, Some(0), "{what}: the refusal");
+        assert!(
+            off.report.is_empty(),
+            "{what}: no report before the refusal"
+        );
+        // The switch acts and LOSAT_X_RPTSTREAM keeps the reports after the loop. The Subject_ id
+        // is refused when they are written, so the records of every batch are kept for them; the
+        // other two are refused in the first batch's search.
+        assert_eq!(numbers.off, "none", "{what}");
     }
 }
 
 /// Standard input (`-query -`) and a pipe (`-query /dev/stdin` with standard input a pipe) are
-/// read once, before the search, with the switch too: the off bytes, and the shadow line names
-/// why.
+/// read once, before the search, with the switch too: the off bytes, and the counters' line names
+/// why (with the reports per batch: without them the line says `off=reports`, as for a file).
 #[test]
 fn standard_input_and_pipes_are_read_once() {
     let subject = fasta("LC738868.fasta");
@@ -777,26 +731,19 @@ fn standard_input_and_pipes_are_read_once() {
             "-outfmt",
             "6",
         ];
-        for reports in REPORTS {
-            let (off, shadow) = same_three_with_input(path, &args, 4, reports, None, Some(&text));
-            assert_eq!(off.status, Some(0), "{path}");
-            assert!(!off.report.is_empty(), "{path}");
-            let expected = if reports.is_empty() {
-                "reports"
-            } else {
-                reason
-            };
-            assert_eq!(
-                (shadow.off.as_str(), shadow.batches, shadow.records),
-                (expected, 0, 0),
-                "{path}"
-            );
-        }
+        let (off, numbers) = same_two_with_input(path, &args, 4, &[RPTSTREAM], None, Some(&text));
+        assert_eq!(off.status, Some(0), "{path}");
+        assert!(!off.report.is_empty(), "{path}");
+        assert_eq!(
+            (numbers.off.as_str(), numbers.batches, numbers.read),
+            (reason, 0, 0),
+            "{path}"
+        );
     }
 }
 
 /// A database (`-db`, made by `losat makedb` from four genomes): the off bytes, every format,
-/// the reports after the loop and per batch.
+/// each at one thread count, the reports per batch.
 #[test]
 fn a_database_search_gives_the_off_bytes() {
     let dir = TempDir::new("db");
@@ -815,11 +762,10 @@ fn a_database_search_gives_the_off_bytes() {
         .output()
         .expect("run losat makedb");
     assert!(output.status.success(), "makedb");
-    for (task, outfmt) in [
-        ("megablast", "0"),
-        ("blastn", "6"),
-        ("dc-megablast", "7"),
-        ("megablast", "7"),
+    for (task, outfmt, threads) in [
+        ("dc-megablast", "0", 4),
+        ("blastn", "6", 1),
+        ("dc-megablast", "7", 4),
     ] {
         let args = [
             "-task",
@@ -831,27 +777,22 @@ fn a_database_search_gives_the_off_bytes() {
             "-outfmt",
             outfmt,
         ];
-        for threads in [1, 4] {
-            for reports in REPORTS {
-                let what = format!("-db {task} outfmt {outfmt}");
-                let (off, shadow) = same_three(&what, &args, threads, reports, None);
-                assert_eq!(off.status, Some(0), "{what}");
-                assert!(!off.report.is_empty(), "{what}");
-                read_as_the_reports_need(&what, reports, &shadow);
-            }
-        }
+        let what = format!("-db {task} outfmt {outfmt}");
+        let (off, numbers) = same_two(&what, &args, threads, &[RPTSTREAM], None);
+        assert_eq!(off.status, Some(0), "{what}");
+        assert!(!off.report.is_empty(), "{what}");
+        read_batch_by_batch(&what, &numbers);
     }
 }
 
 /// The switch is on by default (an empty value): with LOSAT_X_RPTSTREAM it reads the batches
-/// again (its `[X_STATS]` line with `off=none`); with `LOSAT_X_QSTREAM=0`, or `LOSAT_X_DEFAULT=0`
-/// and no value, the records are read before the search (no line). Its rule, where the line says
-/// why and the shadow still reads the batches again: `-task megablast` (`off=megablast`); a file
-/// shorter than twice the largest batch (`off=batch`; here `BATCH_SIZE` half the file's bytes plus
-/// one, and half the file's bytes on); where the slots of LOSAT_X_QBATCHPAR may run, a file
-/// shorter than twice what their budget holds (`off=slots`; a budget set by
-/// `LOSAT_X_QBATCHPARMEM` for a small file at 2 threads, none at one thread). The bytes are the
-/// same.
+/// again (its `[X_STATS]` line with `off=none`); with `LOSAT_X_QSTREAM=0` the records are read
+/// before the search (no line). Its rule, where the line says why: `-task megablast`
+/// (`off=megablast`); a file shorter than twice the largest batch (`off=batch`; here `BATCH_SIZE`
+/// half the file's bytes plus one, and half the file's bytes on); where the slots of
+/// LOSAT_X_QBATCHPAR may run, a file shorter than twice what their budget holds (`off=slots`; a
+/// budget set by `LOSAT_X_QBATCHPARMEM` for a small file at 2 threads, none at one thread). The
+/// bytes are the same.
 #[test]
 fn the_switch_is_on_by_default() {
     let dir = TempDir::new("default");
@@ -884,16 +825,11 @@ fn the_switch_is_on_by_default() {
         read.contains(" off=none") && read.contains(" read=19 "),
         "{read}"
     );
-    for switches in [
-        &[RPTSTREAM, STATS][..],
-        &[RPTSTREAM, STATS, default, ("LOSAT_X_DEFAULT", "0")],
-    ] {
-        let off = blastn(&blastn_args, 4, switches, None);
-        assert_eq!(line(&off), "", "{switches:?}");
-        assert_eq!((off.status, &off.report), (on.status, &on.report));
-    }
-    // The rule: (task, threads, switches, the line's `off=`); each against the switch `0`, and the
-    // shadow, which ignores the rule.
+    let switches = &[RPTSTREAM, STATS][..];
+    let off = blastn(&blastn_args, 4, switches, None);
+    assert_eq!(line(&off), "", "{switches:?}");
+    assert_eq!((off.status, &off.report), (on.status, &on.report));
+    // The rule: (task, threads, switches, the line's `off=`); each against the switch `0`.
     let half = std::fs::metadata(&query).unwrap().len() / 2;
     let (batch_off, batch_on) = ((half + 1).to_string(), half.to_string());
     let slots = [
@@ -940,19 +876,11 @@ fn the_switch_is_on_by_default() {
             (off.status, &off.report),
             "{what}"
         );
-        let mut shadow = switches.clone();
-        shadow.push(SHADOW);
-        let shadowed = blastn(&args(task), threads, &shadow, None);
-        let read = line(&shadowed);
-        assert!(read.contains(" off=none"), "{what} shadow: {read}");
-        assert_eq!(shadowed.status, off.status, "{what} shadow");
-        assert!(shadowed.report == off.report, "{what} shadow");
     }
 }
 
 /// The records of the batches are kept only where a writer reads them after their batch: none
-/// with LOSAT_X_RPTSTREAM acting (each batch's records are dropped after its reports), every
-/// searched record with its shadow (which writes the reports after the loop to compare).
+/// with LOSAT_X_RPTSTREAM acting (each batch's records are dropped after its reports).
 #[test]
 fn the_records_are_kept_only_for_a_writer_after_the_loop() {
     let dir = TempDir::new("kept");
@@ -983,5 +911,53 @@ fn the_records_are_kept_only_for_a_writer_after_the_loop() {
     };
     assert_eq!(kept(&[SWITCH, RPTSTREAM, STATS]), "0");
     assert_eq!(kept(&[SWITCH, RPTSTREAM, STATS, QBATCHPAR, TWO_SLOTS]), "0");
-    assert_eq!(kept(&[SWITCH, RPTSTREAMSHADOW, STATS]), "19");
+
+    // LOSAT_X_RPTSTREAM on but refusing the search (a `-dbsize` whose search space could
+    // overflow: `off=search_space`) while the switch acts: the reports are written after the
+    // loop from the records it kept, and the bytes are those without the switch.
+    let mut huge = args.to_vec();
+    huge.extend_from_slice(&["-dbsize", "1200000000000000"]);
+    let stats_line = |stderr: &str, name: &str| -> String {
+        stderr
+            .lines()
+            .find(|line| line.starts_with(name))
+            .unwrap_or_else(|| panic!("no {name} line: {stderr}"))
+            .to_string()
+    };
+    let refused = blastn(&huge, 4, &[SWITCH, RPTSTREAM, STATS], None);
+    let stderr = String::from_utf8_lossy(&refused.stderr).into_owned();
+    let rpt = stats_line(&stderr, "[X_STATS] RPTSTREAM ");
+    assert!(
+        rpt.split_whitespace()
+            .any(|word| word == "off=search_space"),
+        "{rpt}"
+    );
+    let stream = stats_line(&stderr, "[X_STATS] QSTREAM ");
+    assert!(
+        stream.split_whitespace().any(|word| word == "off=none"),
+        "{stream}"
+    );
+    let kept_records: u64 = stream
+        .split_whitespace()
+        .find_map(|word| word.strip_prefix("kept="))
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(|| panic!("{stream}"));
+    assert!(kept_records > 0, "{stream}");
+    let zero = blastn(&huge, 4, &[RPTSTREAM, ("LOSAT_X_QSTREAM", "0")], None);
+    assert_eq!(refused.status, Some(0), "{stderr}");
+    assert!(!refused.report.is_empty(), "{stderr}");
+    let without_stats = |stderr: &str| -> String {
+        stderr
+            .split_inclusive('\n')
+            .filter(|line| !line.starts_with("[X_STATS] "))
+            .collect()
+    };
+    assert_eq!(
+        (refused.status, &refused.report, without_stats(&stderr)),
+        (
+            zero.status,
+            &zero.report,
+            without_stats(&String::from_utf8_lossy(&zero.stderr))
+        )
+    );
 }

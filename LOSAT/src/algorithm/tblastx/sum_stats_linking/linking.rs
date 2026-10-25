@@ -34,9 +34,9 @@ use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_re
 
 use super::params::LinkingParams;
 
-// EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW): the HSP list sorted, grouped, put
-// together and replayed without a second whole copy alive; a child module of this file so that it
-// uses the comparators, per-group functions and replay below unchanged (see tblastx/x_hsp_inplace.rs).
+// The HSP list sorted, linked as sub-slices and replayed without a second whole copy alive; a
+// child module of this file so that it uses the comparators, per-group functions and replay below
+// unchanged (see tblastx/x_hsp_inplace.rs).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-480
 // ```c
@@ -46,13 +46,12 @@ use super::params::LinkingParams;
 //    link_hsp_array[index] = (LinkHSPStruct*) calloc(1, sizeof(LinkHSPStruct));
 //    link_hsp_array[index]->hsp = hsp_array[index];
 // ```
-// NCBI works on one array of pointers to the HSPs; the module is used only when one of its switches
-// is set.
+// NCBI works on one array of pointers to the HSPs.
 #[path = "../x_hsp_inplace.rs"]
 pub(crate) mod x_hsp_inplace;
 pub use x_hsp_inplace::print_summary as x_hsp_inplace_print_summary;
 
-// EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW): the index sorts of
+// The index sorts of
 // `x_hsp_inplace` as one final sort instead of two and, for long lists, as stable parallel sorts;
 // a child module of this file so that it names the comparators below unchanged (see
 // tblastx/x_link_sort.rs).
@@ -65,16 +64,14 @@ pub use x_hsp_inplace::print_summary as x_hsp_inplace_print_summary;
 //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_FwdCompareHSPsTransl);
 // ```
-// NCBI's qsort is not stable; the module returns the order of LOSAT's stable sorts and is used
-// only when one of its switches is set.
+// NCBI's qsort is not stable; the module returns the order of LOSAT's stable sorts.
 #[path = "../x_link_sort.rs"]
 mod x_link_sort;
 pub use x_link_sort::print_summary as x_link_sort_print_summary;
 
-// EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW): the groups of the
-// linking call of `x_hsp_inplace` linked as disjoint sub-slices of the one sorted list instead of
-// Vecs cut off it and put together again; a child module of this file so that it calls the
-// per-group functions below unchanged (see tblastx/x_link_slices.rs).
+// The groups of the linking call of `x_hsp_inplace` linked as disjoint sub-slices of the one
+// sorted list instead of Vecs cut off it and put together again; a child module of this file so
+// that it calls the per-group functions below unchanged (see tblastx/x_link_slices.rs).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
 // ```c
@@ -85,8 +82,7 @@ pub use x_link_sort::print_summary as x_link_sort_print_summary;
 //    hp_frame_start[frame_index]->prev = hp_start;
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
-// NCBI's groups are sublists of the one sorted array, linked in place; the module is used only
-// when one of its switches is set.
+// NCBI's groups are sublists of the one sorted array, linked in place.
 #[path = "../x_link_slices.rs"]
 mod x_link_slices;
 pub use x_link_slices::print_summary as x_link_slices_print_summary;
@@ -134,17 +130,27 @@ static TRACE_LINK_SELECTIONS: OnceLock<bool> = OnceLock::new();
 
 #[inline(always)]
 fn trace_hsp_target() -> Option<TraceHspTarget> {
+    if !crate::utils::xdiag::ON {
+        return None;
+    }
     *TRACE_HSP_TARGET.get_or_init(|| parse_trace_hsp_target_env("LOSAT_TRACE_HSP"))
 }
 
 #[inline(always)]
 fn trace_chain_target() -> Option<TraceHspTarget> {
+    if !crate::utils::xdiag::ON {
+        return None;
+    }
     *TRACE_CHAIN_TARGET.get_or_init(|| parse_trace_hsp_target_env("LOSAT_TRACE_CHAIN_HSP"))
 }
 
 #[inline(always)]
 fn trace_link_selection_summaries() -> bool {
-    *TRACE_LINK_SELECTIONS.get_or_init(|| std::env::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some())
+    if !crate::utils::xdiag::ON {
+        return false;
+    }
+    *TRACE_LINK_SELECTIONS
+        .get_or_init(|| crate::utils::xdiag::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some())
 }
 
 /// Use the literal O(n^2)-per-pass port (`link_hsp_group_ncbi`) instead of the
@@ -154,10 +160,10 @@ fn legacy_linking_requested() -> bool {
     static LEGACY: OnceLock<bool> = OnceLock::new();
     *LEGACY.get_or_init(|| {
         std::env::var_os("LOSAT_LINKING_LEGACY").is_some()
-            || std::env::var_os("LOSAT_TRACE_HSP").is_some()
-            || std::env::var_os("LOSAT_TRACE_CHAIN_HSP").is_some()
-            || std::env::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some()
-            || std::env::var_os("LOSAT_DEBUG_CHAINING").is_some()
+            || crate::utils::xdiag::var_os("LOSAT_TRACE_HSP").is_some()
+            || crate::utils::xdiag::var_os("LOSAT_TRACE_CHAIN_HSP").is_some()
+            || crate::utils::xdiag::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some()
+            || crate::utils::xdiag::var_os("LOSAT_DEBUG_CHAINING").is_some()
     })
 }
 
@@ -191,7 +197,7 @@ fn link_shadow_enabled() -> bool {
 // print and does not alter the linking algorithm or runtime output.
 #[inline(always)]
 fn parse_trace_hsp_target_env(var_name: &str) -> Option<TraceHspTarget> {
-    let raw = std::env::var(var_name).ok()?;
+    let raw = crate::utils::xdiag::var(var_name).ok()?;
     let parts: Vec<&str> = raw
         .split(|c: char| c == ',' || c == ':' || c == ';' || c.is_whitespace())
         .filter(|p| !p.is_empty())
@@ -365,10 +371,10 @@ fn fwd_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
 //       s_FwdCompareHSPsTransl);
 // ```
 #[inline]
-fn sort_hsps_by_ncbi_link_order(
-    hits: &mut [UngappedHit],
-    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
-) {
+fn sort_hsps_by_ncbi_link_order<C>(hits: &mut [UngappedHit], compare: C)
+where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
+{
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
     // ```c
     // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
@@ -660,10 +666,9 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
         return hits;
     }
 
-    // EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW), dispatch: the steps of this
-    // function on one list (sort in place, groups cut off the end of the list, exact-capacity
-    // assembly, output replay in place) with the same per-group calls; see x_hsp_inplace.rs for
-    // why it is the same list. With the switch off, and with LOSAT_DEBUG_CUTOFFS or
+    // Dispatch: the steps of this function on one list (sort in place, groups linked as
+    // sub-slices of the list, output replay in place) with the same per-group calls; see
+    // x_hsp_inplace.rs for why it is the same list. With LOSAT_DEBUG_CUTOFFS or
     // LOSAT_DIAGNOSTICS, the body below runs on the untouched input.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486,990-994
@@ -680,20 +685,18 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     //          s_FwdCompareHSPsTransl);
     // ```
     // NCBI sorts and regroups one array of pointers and never copies the HSPs.
-    if x_hsp_inplace::mode() != 0 {
-        match x_hsp_inplace::linking_dispatch(
-            hits,
-            params,
-            linking_params,
-            query_contexts,
-            subject_frame_bases,
-            length_adj_per_context,
-            eff_searchsp_per_context,
-            allow_parallel,
-        ) {
-            Ok(linked) => return linked,
-            Err(untouched) => hits = untouched,
-        }
+    match x_hsp_inplace::linking_dispatch(
+        hits,
+        params,
+        linking_params,
+        query_contexts,
+        subject_frame_bases,
+        length_adj_per_context,
+        eff_searchsp_per_context,
+        allow_parallel,
+    ) {
+        Ok(linked) => return linked,
+        Err(untouched) => hits = untouched,
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-480
@@ -729,7 +732,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     // Debug output for cutoffs (controlled by LOSAT_DEBUG_CUTOFFS env var)
     static DEBUG_CUTOFFS_PRINTED: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);
-    if std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok()
+    if crate::utils::xenv::debug_cutoffs_is_ok()
         && !DEBUG_CUTOFFS_PRINTED.swap(true, std::sync::atomic::Ordering::SeqCst)
     {
         eprintln!("=== LOSAT Linking Cutoffs Debug ===");
@@ -1400,7 +1403,7 @@ fn link_hsp_group_incremental(
 //    hp_frame_start[frame_index]->prev = hp_start;
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
-// EXPERIMENT (LOSAT_X_LINKSLICES, tblastx/x_link_slices.rs): `link_hsp_group_incremental` on the
+// `link_hsp_group_incremental` for `x_link_slices.rs` on the
 // group's records where they lie, a sub-slice of the linking call's list, as NCBI links a sublist
 // of its one array. The same kernel with the same arguments; under LOSAT_LINK_FAST_SHADOW the
 // literal port links a copy of the group (`to_vec`, as `clone` above) and the two results must be
@@ -1646,7 +1649,8 @@ fn link_hsp_group_ncbi(
     // Debug: trace a specific HSP (via LOSAT_TRACE_HSP) through linking.
     // Also supports legacy `LOSAT_DEBUG_CHAINING` to enable debug prints.
     let trace_target = trace_hsp_target();
-    let debug_chaining = trace_target.is_some() || std::env::var("LOSAT_DEBUG_CHAINING").is_ok();
+    let debug_chaining =
+        trace_target.is_some() || crate::utils::xdiag::var("LOSAT_DEBUG_CHAINING").is_ok();
     let trace_chain_target = trace_chain_target();
     let trace_link_selections = trace_link_selection_summaries();
 

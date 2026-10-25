@@ -4,19 +4,10 @@
 //!
 //! This module provides input handling for BLAST searches
 //! including argument parsing and FASTA input processing.
-//!
-//! # Structure
-//!
-//! - `blast_args` - Common argument handling
-//! - `blastn_args` - BLASTN-specific arguments
-//! - `blastp_args` - BLASTP-specific arguments
-//! - `tblastx_args` - TBLASTX-specific arguments
+//! The arguments of each program are `algorithm::<program>::args`.
 
 // NCBI app/blast/blast_app_util.hpp and blastinput/blast_args.cpp: the application layer.
 pub mod app;
-pub mod blast_args;
-pub mod blastn_args;
-pub mod blastp_args;
 // NCBI blastinput/blast_fasta_input.cpp, objtools/readers/fasta.cpp, util/line_reader.cpp:
 // the FASTA input of BLASTN, TBLASTX, TBLASTN and BLASTP.
 pub mod fasta_reader;
@@ -31,7 +22,6 @@ pub mod report_counts;
 // NCBI blastinput/blast_input_aux.cpp:145-179 and blast_fasta_input.cpp:433-460: the
 // `-query_loc` and `-subject_loc` ranges.
 pub mod seq_range;
-pub mod tblastx_args;
 
 // NCBI blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
 pub mod value_parsers;

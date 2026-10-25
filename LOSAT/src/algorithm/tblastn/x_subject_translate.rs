@@ -1,5 +1,6 @@
-//! EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the six translated frames of a
-//! TBLASTN subject read from tables, as NCBI makes them from the compressed subject.
+//! The six translated frames of a TBLASTN subject read from tables, as NCBI makes them from the
+//! compressed subject (graduated 2026-10-22: `LOSAT_X_TBNXLATE` and `LOSAT_X_TBNXLATESHADOW` are
+//! gone, this is the only translation).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1071-1074,1080-1090
 //! ```c
@@ -21,30 +22,29 @@
 //!                   nucl_length, nucl_seq, frame, translation_buffer+offset);
 //! ```
 //! The preliminary search reads the subject in ncbi2na, so `BLAST_GetAllTranslations` takes this
-//! branch: one table of 64 residues per strand and one table read per codon. The reference path
-//! of LOSAT (`resolve_local_subject_ncbi2na`, then `tblastx::translation::generate_frames`)
-//! reaches the same residues through letters: the subject as ncbi4na, as ncbi2na, as "ACGT", its
-//! reverse complement, and `GeneticCode::get` per codon. With `LOSAT_X_TBNXLATE` the subject is
-//! turned into ncbi2na in one pass and the frames are read from the two tables. The tables are
-//! filled from the reference path's own functions, so every residue is the reference's by
-//! construction; the ambiguous letters draw from the same generator with the same seed in the
-//! same order.
-//!
-//! `LOSAT_X_TBNXLATE` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. `LOSAT_X_TBNXLATESHADOW` is not: it counts when set to
-//! any value and wins over the switch. They act where the subject plans of the unit path are made
-//! (`search_seed::x_scan_plan`, `LOSAT_X_TBNPAR`, on by default); the reference loop that
-//! searches a subject without that switch translates it itself and reads neither variable.
-//! `LOSAT_X_TBNXLATESHADOW` makes both translations for every such plan and stops the search
-//! if a frame, a unit or an error differs.
+//! branch: one table of 64 residues per strand and one table read per codon. The subject is turned
+//! into ncbi2na in one pass and the frames are read from the two tables. The tables are filled
+//! from `GeneticCode::get` and `aa_char_to_ncbistdaa`, so every residue is the one the letter-wise
+//! translation of `tblastx::translation::generate_frames` gives; the ambiguous letters draw from
+//! the same generator with the same seed in the same order (`resolve_local_subject_ncbi2na`, kept in
+//! this module's tests as the reference).
 //!
 //! A packed subject (`LOSAT_X_TBNSTORE`, every `-db` sequence) is translated from its packed
 //! bytes (`x_packed_frames`), 32 codons of a phase at a time with AVX2 (`LOSAT_X_TBNXLATESIMD`,
-//! in the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; elsewhere
+//! in the strict set: on unless it is `0`; elsewhere
 //! eight at a time from one word). With `LOSAT_X_STATS` set, `main` prints `[X_STATS]
 //! TBNXLATESIMD codons_vector= codons_scalar=` at exit, when a packed subject was translated.
+//!
+//! A long packed subject whose plan is made for its search alone (the search keeps no subject
+//! plans for several query batches) gets a plan without residues (`x_packed_lean_plan`;
+//! `LOSAT_X_TBNUNITXLATE`, in the strict set: on unless it is `0`): its frames have their lengths
+//! only, and each (frame, chunk) unit translates the residues it reads into a buffer of its thread
+//! (`x_unit_residues`), one strand of one phase from the packed bytes, by the same tables and loops
+//! (32 codons with AVX2, else eight from one word; counted in `[X_STATS] TBNXLATESIMD`). With
+//! `LOSAT_X_STATS` set, `main` prints `[X_STATS] TBNUNITXLATE plans= units= residues=` when a plan
+//! without residues was made.
 
-use super::search_seed::{translated_chunk_scan_ranges, XSubjectPlan};
+use super::search_seed::{translated_chunk_scan_ranges, TranslatedChunk, XSubjectPlan};
 use crate::algorithm::tblastx::constants::SENTINEL_BYTE;
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::core::blast_encoding::{iupacna_to_ncbi4na, NcbiRandom};
@@ -54,78 +54,39 @@ use anyhow::{bail, Result};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
-/// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): which translation makes a subject
-/// plan.
-// No NCBI counterpart: names the LOSAT code path; it does not change any value NCBI computes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum XTranslate {
-    /// The reference path.
-    Reference,
-    /// The tables.
-    Tables,
-    /// Both; the search stops if they differ.
-    Shadow,
-}
-
-// No NCBI counterpart: reads the LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW variables once; it
-// does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): `LOSAT_X_TBNXLATE` is a strict-set
-/// switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set); the shadow counts when
-/// set to any value and wins.
-pub(super) fn x_translate() -> XTranslate {
-    static MODE: OnceLock<XTranslate> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_TBNXLATESHADOW").is_some() {
-            XTranslate::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_TBNXLATE") {
-            XTranslate::Tables
-        } else {
-            XTranslate::Reference
-        }
-    })
-}
-
-// No NCBI counterpart: counters for the shadow summary and LOSAT_X_STATS that tell which
-// translation ran; they do not change any value NCBI computes.
-/// Subject plans made from the tables (in shadow mode the table half of each comparison).
-static TABLE_PLANS: AtomicU64 = AtomicU64::new(0);
-/// Shadow mode: the subjects whose two plans were compared, the translated residues in them
-/// (sentinels included), and the subjects that both translations refused with the same error.
-static SHADOW_PLANS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_RESIDUES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_ERRORS: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart: counter for LOSAT_X_STATS that tells how the packed subjects were
+// translated; it does not change any value NCBI computes.
 /// The codons of packed subjects read by the vector loop (`[0]`) and by the word loop or one at
 /// a time (`[1]`).
 static PACKED_CODONS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 
-/// The summary lines (printed by `main` at exit): the shadow summaries (`LOSAT_X_TBNKEEPFEWSHADOW`
-/// and this one), and with LOSAT_X_STATS the number of subject plans made from the tables.
+// No NCBI counterpart: counters for LOSAT_X_STATS; they do not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the plans without residues, the units that translated their
+/// residues and those residues (with LOSAT_X_STATS).
+static UNIT_RESIDUES: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+
+// No NCBI counterpart: reads LOSAT_X_STATS once; it does not change any value NCBI computes.
+fn x_stats() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_STATS").is_some())
+}
+
+/// The summary lines (printed by `main` at exit) with LOSAT_X_STATS: the codons of packed subjects
+/// read by the vector loop and the units that translated their residues.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
-    super::search_seed::x_keep_few_print_summary();
-    if x_translate() == XTranslate::Shadow {
-        let plans = SHADOW_PLANS.load(Ordering::Relaxed);
-        let errors = SHADOW_ERRORS.load(Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] TBNXLATE plans_compared={plans} residues_compared={} errors_compared={errors} ({})",
-            SHADOW_RESIDUES.load(Ordering::Relaxed),
-            if plans + errors == 0 {
-                "nothing compared: no subject plan of the unit path was made"
-            } else {
-                "frames, units and errors identical"
-            }
-        );
-    }
     if std::env::var_os("LOSAT_X_STATS").is_some() {
-        eprintln!(
-            "[X_STATS] TBNXLATE table_plans={}",
-            TABLE_PLANS.load(Ordering::Relaxed)
-        );
         let [vector, scalar] = PACKED_CODONS
             .each_ref()
             .map(|codons| codons.load(Ordering::Relaxed));
         if vector + scalar > 0 {
             eprintln!("[X_STATS] TBNXLATESIMD codons_vector={vector} codons_scalar={scalar}");
+        }
+        let [plans, units, residues] = UNIT_RESIDUES
+            .each_ref()
+            .map(|count| count.load(Ordering::Relaxed));
+        if plans > 0 {
+            eprintln!("[X_STATS] TBNUNITXLATE plans={plans} units={units} residues={residues}");
         }
     }
 }
@@ -154,7 +115,7 @@ const X_AMBIGUOUS: u8 = 0x10;
 // value of `A`, `C`, `G`, `T` (either case), the flagged ncbi4na value of a gap or an ambiguous
 // letter, or `X_NOT_A_LETTER`. It is filled from the reference path's own
 // `iupacna_to_ncbi4na`, with the reference path's rule for `U`.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): what a subject byte is, in one read.
+/// What a subject byte is, in one read.
 fn x_letter_table() -> &'static [u8; 256] {
     static TABLE: OnceLock<[u8; 256]> = OnceLock::new();
     TABLE.get_or_init(|| {
@@ -205,7 +166,7 @@ fn x_letter_table() -> &'static [u8; 256] {
 // ```
 // One draw per gap or ambiguous letter: two bits of it for a gap or `N`, otherwise the set bit
 // of the ncbi4na value that the draw picks.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): the ncbi2na value drawn for a gap or an ambiguous letter
+/// The ncbi2na value drawn for a gap or an ambiguous letter
 /// with the ncbi4na value `mask`.
 fn x_draw_base(mask: u8, random: &mut NcbiRandom) -> u8 {
     if mask == 0 || mask == 0x0F {
@@ -254,7 +215,10 @@ fn x_draw_base(mask: u8, random: &mut NcbiRandom) -> u8 {
 // every letter before its first draw; this loop may have drawn for the letters before the
 // byte it stops at. The error is the same one, for the first such byte of the subject, and
 // the draws made before it are dropped with the generator, which belongs to this call.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): `resolve_local_subject_ncbi2na` as ncbi2na values (0 A, 1 C,
+// NCBI c++/src/algo/blast/api/blast_objmgr_tools.cpp:428-473 resolves the ambiguities during
+// the ncbi2na encoding; c++/src/algo/blast/api/blast_setup_cxx.cpp:742-745,830-853 keeps the
+// ncbi4na sequence for the later reevaluation.
+/// `resolve_local_subject_ncbi2na` as ncbi2na values (0 A, 1 C,
 /// 2 G, 3 T) instead of letters.
 fn x_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
     let length = u32::try_from(subject.len())?;
@@ -278,7 +242,7 @@ fn x_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
     Ok(ncbi2na)
 }
 
-/// EXPERIMENT (LOSAT_X_TBNXLATE): the residue (ncbistdaa) of every codon of one genetic code,
+/// The residue (ncbistdaa) of every codon of one genetic code,
 /// by the three ncbi2na values of the plus strand in sequence order.
 // No NCBI counterpart for the type: the two arrays are NCBI's `translation_table` and
 // `translation_table_rc` (see `x_codon_tables`).
@@ -320,7 +284,7 @@ struct XCodonTables {
 // gives for that codon as letters (`GeneticCode::get`, then `aa_char_to_ncbistdaa`, the two
 // calls of `tblastx::translation::codon_to_aa_ncbistdaa`), so a table read returns the
 // reference path's residue. The tables of a genetic code are made once per process.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): the two codon tables of the genetic code `db_gencode`.
+/// The two codon tables of the genetic code `db_gencode`.
 fn x_codon_tables(db_gencode: u8) -> Result<&'static XCodonTables> {
     static TABLES: [OnceLock<XCodonTables>; 256] = [const { OnceLock::new() }; 256];
     let cell = &TABLES[db_gencode as usize];
@@ -360,7 +324,7 @@ fn x_codon_tables(db_gencode: u8) -> Result<&'static XCodonTables> {
 // ```
 // The index of three ncbi2na values in a codon table. The values are below 4, so the mask
 // changes nothing; it tells the compiler that the index is below 64.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): where a codon is in a table of `XCodonTables`.
+/// Where a codon is in a table of `XCodonTables`.
 #[inline(always)]
 fn x_codon_index(codon: &[u8]) -> usize {
     (((codon[0] as usize) << 4) | ((codon[1] as usize) << 2) | (codon[2] as usize)) & 63
@@ -399,7 +363,7 @@ fn x_codon_index(codon: &[u8]) -> usize {
 // subject and its reverse complement: frame `i + 1` holds the codons of `seq[i..]`, frame
 // `-(i + 1)` those of `revcomp(seq)[i..]`, which are the plus-strand triplets of
 // `seq[..len - i]` counted from its end.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): `generate_frames` from ncbi2na values and the codon tables.
+/// The frames `generate_frames` gives, made from ncbi2na values and the codon tables.
 fn x_generate_frames(ncbi2na: &[u8], tables: &XCodonTables) -> Vec<QueryFrame> {
     let seq_len = ncbi2na.len();
     let mut frames = Vec::with_capacity(6);
@@ -441,7 +405,7 @@ fn x_generate_frames(ncbi2na: &[u8], tables: &XCodonTables) -> Vec<QueryFrame> {
 // ```
 // One translated frame: the sentinel, the residues, the sentinel, and the fields that
 // `generate_frames` gives a frame (`translate_sequence` for the bytes and the length).
-/// EXPERIMENT (LOSAT_X_TBNXLATE): a frame of `aa_len` residues.
+/// A frame of `aa_len` residues.
 #[inline(always)]
 fn x_frame(
     frame: i8,
@@ -470,10 +434,10 @@ fn x_frame(
 //                                      subject->gen_code_string, &translation_buffer,
 //                                      &frame_offsets, NULL);
 // ```
-// The subject plan as the reference closure of `x_scan_plan` makes it, with the frames from the
-// tables. The chunks and scan ranges of the frames come from the same function as there
+// The subject plan as `x_scan_plan` makes it, with the frames from the tables. The chunks and
+// scan ranges of the frames come from the same function as there
 // (`translated_chunk_scan_ranges`), in the same order.
-/// EXPERIMENT (LOSAT_X_TBNXLATE): the plan of one subject from the tables.
+/// The plan of one subject from the tables.
 fn x_table_plan(subject: &[u8], db_gencode: u8, mask_lowercase: bool) -> Result<XSubjectPlan> {
     let tables = x_codon_tables(db_gencode)?;
     let ncbi2na = x_subject_ncbi2na(subject)?;
@@ -497,42 +461,13 @@ fn x_table_plan(subject: &[u8], db_gencode: u8, mask_lowercase: bool) -> Result<
             units.push((index, chunk, ranges));
         }
     }
-    TABLE_PLANS.fetch_add(1, Ordering::Relaxed);
     Ok(XSubjectPlan { frames, units })
 }
 
-// No NCBI counterpart: the comparison of the shadow mode; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_TBNXLATESHADOW): what differs between the plan from the tables and the
-/// reference plan of one subject, `None` when nothing does. Two errors are the same when their
-/// texts are.
-fn x_plan_difference(
-    tables: &Result<XSubjectPlan>,
-    reference: &Result<Arc<XSubjectPlan>>,
-) -> Option<String> {
-    let (tables, reference) = match (tables, reference) {
-        (Ok(tables), Ok(reference)) => (tables, reference),
-        (Err(tables), Err(reference)) => {
-            let (tables, reference) = (format!("{tables:#}"), format!("{reference:#}"));
-            return (tables != reference)
-                .then(|| format!("error \"{tables}\" for the reference's \"{reference}\""));
-        }
-        (Ok(_), Err(reference)) => {
-            return Some(format!(
-                "a plan for the reference's error \"{reference:#}\""
-            ))
-        }
-        (Err(tables), Ok(_)) => {
-            return Some(format!("error \"{tables:#}\" for a plan of the reference"))
-        }
-    };
-    x_plan_fields_difference(tables, reference)
-}
-
-// No NCBI counterpart: the comparison of two plans of one subject for the shadow modes; it does
-// not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNXLATESHADOW, LOSAT_X_TBNKEEPFEWSHADOW): what differs between two plans
-/// of one subject, `None` when nothing does.
+// No NCBI counterpart: the comparison of two plans of one subject for the tests; it does not
+// change any value NCBI computes.
+/// What differs between two plans of one subject, `None` when nothing does.
+#[cfg(test)]
 pub(super) fn x_plan_fields_difference(
     tables: &XSubjectPlan,
     reference: &XSubjectPlan,
@@ -600,42 +535,14 @@ pub(super) fn x_plan_fields_difference(
 //                                      subject->gen_code_string, &translation_buffer,
 //                                      &frame_offsets, NULL);
 // ```
-// Dispatch point: how the translation of one subject is made. `Reference`: the closure of
-// `x_scan_plan`, as before. `Tables`: `x_table_plan`. `Shadow`: both, and the search stops if a
-// frame, a unit or an error differs; the plan from the tables is the one searched.
-/// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the plan of one subject.
+// The translation of one subject is made from the tables (`x_table_plan`).
+/// The plan of one subject.
 pub(super) fn x_subject_plan(
-    mode: XTranslate,
     subject: &[u8],
     db_gencode: u8,
     mask_lowercase: bool,
-    reference: impl Fn() -> Result<Arc<XSubjectPlan>>,
 ) -> Result<Arc<XSubjectPlan>> {
-    match mode {
-        XTranslate::Reference => reference(),
-        XTranslate::Tables => x_table_plan(subject, db_gencode, mask_lowercase).map(Arc::new),
-        XTranslate::Shadow => {
-            let tables = x_table_plan(subject, db_gencode, mask_lowercase);
-            let reference = reference();
-            if let Some(difference) = x_plan_difference(&tables, &reference) {
-                panic!(
-                    "LOSAT_X_TBNXLATESHADOW: the subject translation from the tables differs from the reference one (subject of {} bases, genetic code {db_gencode}): {difference}",
-                    subject.len()
-                );
-            }
-            match &tables {
-                Ok(plan) => {
-                    SHADOW_PLANS.fetch_add(1, Ordering::Relaxed);
-                    let residues: usize = plan.frames.iter().map(|frame| frame.aa_seq.len()).sum();
-                    SHADOW_RESIDUES.fetch_add(residues as u64, Ordering::Relaxed);
-                }
-                Err(_) => {
-                    SHADOW_ERRORS.fetch_add(1, Ordering::Relaxed);
-                }
-            }
-            tables.map(Arc::new)
-        }
-    }
+    x_table_plan(subject, db_gencode, mask_lowercase).map(Arc::new)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058,1063-1064
@@ -673,7 +580,7 @@ fn x_frame_capacity(length: usize) -> usize {
 // No NCBI counterpart: reads the LOSAT_X_TBNFRAMEREUSE variable once; it does not change any value
 // NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it a thread keeps the frames of a
+/// it is `0`. With it a thread keeps the frames of a
 /// dropped subject plan (`x_reuse_frame`) for the next plan it translates from a packed subject
 /// (`x_frame_buffer`).
 fn x_frame_reuse() -> bool {
@@ -698,10 +605,14 @@ thread_local! {
 /// whose other bytes the caller writes, every one of them. With the switch, a frame of at most
 /// `X_REUSED_FRAME` bytes is one this thread kept (`x_reuse_frame`), its bytes not cleared, which
 /// saves the allocation and the zero fill of a new one; otherwise a new zeroed frame of
-/// `x_frame_capacity`.
+/// `x_frame_capacity`. EXPERIMENT (LOSAT_X_TBNDBSTREAM): while a `-db` stream is open, a frame of
+/// `X_MAPPED_FRAME` bytes or more is an idle buffer of `utils::x_mapped::X_BYTES` that touched at
+/// most twice its bytes, if it holds one (its pages resident), zeroed to `length`.
 fn x_frame_buffer(length: usize) -> Vec<u8> {
     let kept = if length <= X_REUSED_FRAME && x_frame_reuse() {
         X_FRAMES.with(|frames| frames.borrow_mut().pop())
+    } else if length >= X_MAPPED_FRAME && super::x_db_stream::x_frames_pooled() {
+        crate::utils::x_mapped::X_BYTES.x_take_near(length)
     } else {
         None
     };
@@ -730,8 +641,14 @@ fn x_frame_buffer(length: usize) -> Vec<u8> {
 /// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): keeps `frame`, a frame of a dropped subject plan, for
 /// this thread's next `x_frame_buffer`, if the switch is on, its capacity is at most
 /// `X_REUSED_FRAME` and the thread keeps fewer than `X_REUSED_FRAMES`; drops it otherwise.
-pub(super) fn x_reuse_frame(frame: Vec<u8>) {
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): while a `-db` stream is open, a frame of a capacity of
+/// `X_MAPPED_FRAME` bytes or more goes to `utils::x_mapped::X_BYTES` instead (which frees the idle
+/// buffers beyond its bound).
+pub(super) fn x_reuse_frame(mut frame: Vec<u8>) {
     if frame.capacity() == 0 || frame.capacity() > X_REUSED_FRAME || !x_frame_reuse() {
+        if frame.capacity() >= X_MAPPED_FRAME && super::x_db_stream::x_frames_pooled() {
+            crate::utils::x_mapped::X_BYTES.give(&mut frame);
+        }
         return;
     }
     // A thread that is ending keeps nothing.
@@ -764,22 +681,20 @@ pub(super) fn x_reuse_frame(frame: Vec<u8>) {
 // `seq[..length - i]` counted from its end). So the codons of one phase (`p % 3`) fill one plus
 // frame forward and one minus frame backward, and every residue is the one `x_generate_frames`
 // puts there.
-/// EXPERIMENT (LOSAT_X_TBNSTORE): `x_generate_frames` of a packed subject's codes.
-fn x_packed_frames(
-    store: &crate::sequence::packed_subject::PackedNucleotide,
-    tables: &XCodonTables,
-) -> Vec<QueryFrame> {
-    x_packed_frames_with(store, tables, x_xlate_simd())
+/// EXPERIMENT (LOSAT_X_TBNSTORE): `x_generate_frames` of a packed subject's codes, from its packed
+/// bytes (`PackedNucleotide::packed`) and its length `seq_len`.
+fn x_packed_frames(packed: &[u8], seq_len: usize, tables: &XCodonTables) -> Vec<QueryFrame> {
+    x_packed_frames_with(packed, seq_len, tables, x_xlate_simd())
 }
 
 /// EXPERIMENT (LOSAT_X_TBNSTORE / LOSAT_X_TBNXLATESIMD): [`x_packed_frames`], with the vector
 /// loop when `simd` (and the CPU has it).
 fn x_packed_frames_with(
-    store: &crate::sequence::packed_subject::PackedNucleotide,
+    packed: &[u8],
+    seq_len: usize,
     tables: &XCodonTables,
     simd: bool,
 ) -> Vec<QueryFrame> {
-    let seq_len = store.len();
     let frame_count = (0..3).filter(|&i| i + 3 <= seq_len).count();
     // x_phase_residues writes every residue (positions 1 to aa_len) of the frames.
     let empty_frame = |i: usize| x_frame_buffer((seq_len - i) / 3 + 2);
@@ -792,10 +707,10 @@ fn x_packed_frames_with(
         // from the last one down, of minus frame `-(r + 1)`, which has as many
         let codons = (seq_len - phase) / 3;
         let minus = &mut reverse[(seq_len - phase) % 3];
-        vector += x_phase_residues(store.packed(), phase, codons, tables, plus, minus, simd);
+        vector += x_phase_residues(packed, phase, codons, tables, plus, minus, simd);
         all += codons;
     }
-    if all > 0 && std::env::var_os("LOSAT_X_STATS").is_some() {
+    if all > 0 && x_stats() {
         PACKED_CODONS[0].fetch_add(vector as u64, Ordering::Relaxed);
         PACKED_CODONS[1].fetch_add((all - vector) as u64, Ordering::Relaxed);
     }
@@ -921,7 +836,7 @@ fn x_phase_words<const PHASE: usize>(
 // computes.
 /// EXPERIMENT (LOSAT_X_TBNXLATESIMD): whether a packed subject's frames are read with the
 /// vector loop (AVX2 on x86_64; elsewhere the variable changes nothing); a switch of the strict
-/// set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+/// set, on unless it is `0`.
 fn x_xlate_simd() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNXLATESIMD"))
@@ -1051,8 +966,13 @@ fn x_packed_plan(
     store: &crate::sequence::packed_subject::PackedNucleotide,
     db_gencode: u8,
 ) -> Result<XSubjectPlan> {
+    x_bytes_plan(store.packed(), store.len(), db_gencode)
+}
+
+/// EXPERIMENT (LOSAT_X_TBNSTORE): [`x_packed_plan`] of a subject's packed bytes and length.
+fn x_bytes_plan(packed: &[u8], length: usize, db_gencode: u8) -> Result<XSubjectPlan> {
     let tables = x_codon_tables(db_gencode)?;
-    let frames = x_packed_frames(store, tables);
+    let frames = x_packed_frames(packed, length, tables);
     let negative_first_length = frames
         .iter()
         .find(|frame| frame.frame == -1)
@@ -1082,48 +1002,434 @@ fn x_packed_plan(
 //                                      subject->gen_code_string, &translation_buffer,
 //                                      &frame_offsets, NULL);
 // ```
-// Dispatch point: a packed subject is translated from its codes (`x_packed_plan`) whichever
-// translation the variables select, since the reference path reads letters. With
-// `LOSAT_X_TBNXLATESHADOW` the letters the reference path reads (the resolved bases) are made
-// too and the search stops if the two plans differ.
-/// EXPERIMENT (LOSAT_X_TBNSTORE): the plan of one packed subject; `reference` makes the plan of
-/// the letters it is given.
+// A packed subject is translated from its codes (`x_packed_plan`).
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the plan of one packed subject.
 pub(super) fn x_packed_subject_plan(
-    mode: XTranslate,
     store: &crate::sequence::packed_subject::PackedNucleotide,
     db_gencode: u8,
-    reference: impl Fn(&[u8]) -> Result<Arc<XSubjectPlan>>,
 ) -> Result<Arc<XSubjectPlan>> {
-    let packed = x_packed_plan(store, db_gencode);
-    if mode == XTranslate::Shadow {
-        let mut letters = Vec::new();
-        store.resolved_letters_into(&mut letters);
-        if let Some(difference) = x_plan_difference(&packed, &reference(&letters)) {
-            panic!(
-                "LOSAT_X_TBNXLATESHADOW: the subject translation from the packed subject differs from the reference one (subject of {} bases, genetic code {db_gencode}): {difference}",
-                store.len()
-            );
-        }
-        match &packed {
-            Ok(plan) => {
-                SHADOW_PLANS.fetch_add(1, Ordering::Relaxed);
-                let residues: usize = plan.frames.iter().map(|frame| frame.aa_seq.len()).sum();
-                SHADOW_RESIDUES.fetch_add(residues as u64, Ordering::Relaxed);
-            }
-            Err(_) => {
-                SHADOW_ERRORS.fetch_add(1, Ordering::Relaxed);
+    x_packed_plan(store, db_gencode).map(Arc::new)
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): [`x_packed_subject_plan`] of a database sequence's packed
+/// bytes and length, read in a block of the sequence file (`XDbStream::plan_with`), without its
+/// store: the plan reads nothing else of a packed subject.
+pub(super) fn x_packed_bytes_plan(
+    packed: &[u8],
+    length: usize,
+    db_gencode: u8,
+) -> Result<Arc<XSubjectPlan>> {
+    x_bytes_plan(packed, length, db_gencode).map(Arc::new)
+}
+
+// No NCBI counterpart: reads LOSAT_X_TBNUNITXLATE once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): whether the units of a long packed subject translate their
+/// own residues (`x_packed_lean_plan`, `x_unit_residues`) instead of reading the frames of the
+/// plan. A switch of the strict set (`utils/xswitch.rs`), on unless it is `0`.
+fn x_units_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNUNITXLATE"))
+}
+
+// No NCBI counterpart for the rule: NCBI translates the six frames of every subject into one
+// buffer (blast_engine.c:772-775). A frame of `X_MAPPED_FRAME` bytes or more is mapped when it is
+// made and unmapped when its plan is dropped (`x_frame_capacity`); on a genome database that is
+// six fresh frames of up to 83 MB per chromosome, made by one thread before the units of the
+// chromosome start, and their pages are faulted in and returned again (human genome, one protein,
+// 16 threads: 5.2 GiB at most, most of it the frames of the chromosomes searched at the same
+// time). A unit reads its chunk and nothing else.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): whether the plan of a packed subject of `length` bases
+/// made for its search alone (a search that keeps no subject plans, `XSubjectSide`) is made
+/// without residues (`x_packed_lean_plan`): with the switch, when its first frame has
+/// `X_MAPPED_FRAME` bytes or more (the frames that are mapped on Linux with glibc; the rule is the
+/// same everywhere).
+pub(super) fn x_units_translate(length: usize) -> bool {
+    x_units_on() && length / 3 + 2 >= X_MAPPED_FRAME
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+// ```c
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ...
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// The frames and units of `x_packed_plan`, without residues: a frame's length is that of the
+// frame `x_packed_frames` makes, `(length - i) / 3` for frames `i + 1` and `-(i + 1)`, and the
+// units follow from the lengths alone (no lowercase masking).
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the plan of one packed subject whose frames have an empty
+/// `aa_seq`; each unit makes its residues with `x_unit_residues`.
+pub(super) fn x_packed_lean_plan(
+    store: &crate::sequence::packed_subject::PackedNucleotide,
+    db_gencode: u8,
+) -> Result<Arc<XSubjectPlan>> {
+    // An unknown genetic code is refused here, as by x_packed_plan.
+    x_codon_tables(db_gencode)?;
+    let seq_len = store.len();
+    let mut frames = Vec::with_capacity(6);
+    for sign in [1i8, -1] {
+        for i in 0..3usize {
+            if i + 3 <= seq_len {
+                frames.push(QueryFrame {
+                    frame: sign * (i as i8 + 1),
+                    aa_seq: Vec::new(),
+                    aa_seq_nomask: None,
+                    aa_len: (seq_len - i) / 3,
+                    orig_len: seq_len,
+                    seg_masks: Vec::new(),
+                });
             }
         }
     }
-    packed.map(Arc::new)
+    let negative_first_length = frames
+        .iter()
+        .find(|frame| frame.frame == -1)
+        .map(|frame| frame.aa_len)
+        .unwrap_or(0);
+    let mut units = Vec::new();
+    for (index, frame) in frames.iter().enumerate() {
+        for (chunk, ranges) in translated_chunk_scan_ranges(
+            &[],
+            frame.frame,
+            frame.aa_len,
+            negative_first_length,
+            false,
+        )? {
+            units.push((index, chunk, ranges));
+        }
+    }
+    super::x_subject_store::x_count_packed_plan();
+    if x_stats() {
+        UNIT_RESIDUES[0].fetch_add(1, Ordering::Relaxed);
+    }
+    Ok(Arc::new(XSubjectPlan { frames, units }))
+}
+
+// No NCBI counterpart for the margin: NCBI's scan reads the letters of its chunk
+// (aa_ungapped.c:496-501), as the scan loops here do (their blocks follow the scan range); one of
+// them (x_scan_byte) also looks at the length of the slice it is given before its last block.
+// With a margin past the chunk, or the frame's end sentinel when it is nearer, a unit's slice is
+// longer than every read and makes that choice as the frame's slice does; 4,096 residues are
+// 0.08 % of a chunk of 5,000,000.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the residues a unit's translation runs past its chunk.
+const X_UNIT_MARGIN: usize = 4096;
+
+// No NCBI counterpart: the range of a unit's translation (`X_UNIT_MARGIN`); it computes no value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): positions `from..to` of the frame's `aa_seq` that the unit
+/// of `chunk` reads: from the chunk's first residue to `X_UNIT_MARGIN` past its end, or to the
+/// end sentinel.
+fn x_unit_range(aa_len: usize, chunk: TranslatedChunk) -> (usize, usize) {
+    let from = 1 + chunk.offset;
+    (from, (aa_len + 2).min(from + chunk.length + X_UNIT_MARGIN))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812
+// ```c
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// The part of `subject->sequence` a unit reads, made when the unit runs.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the residues of `frame` (of a plan without residues) that
+/// the unit of `chunk` reads, made into `buffer`; returns the range of `buffer` that holds them,
+/// from the chunk's first residue on (see `x_unit_range`).
+pub(super) fn x_unit_residues(
+    store: &crate::sequence::packed_subject::PackedNucleotide,
+    db_gencode: u8,
+    frame: &QueryFrame,
+    chunk: TranslatedChunk,
+    buffer: &mut Vec<u8>,
+) -> Result<std::ops::Range<usize>> {
+    let tables = x_codon_tables(db_gencode)?;
+    let (from, to) = x_unit_range(frame.aa_len, chunk);
+    let (range, codons, vector) = x_frame_residues(
+        store,
+        tables,
+        frame.frame,
+        frame.aa_len,
+        from,
+        to,
+        buffer,
+        x_xlate_simd(),
+    );
+    if x_stats() {
+        UNIT_RESIDUES[1].fetch_add(1, Ordering::Relaxed);
+        UNIT_RESIDUES[2].fetch_add(range.len() as u64, Ordering::Relaxed);
+        PACKED_CODONS[0].fetch_add(vector as u64, Ordering::Relaxed);
+        PACKED_CODONS[1].fetch_add((codons - vector) as u64, Ordering::Relaxed);
+    }
+    Ok(range)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1080-1090 (see
+// `x_packed_frames`)
+// The residues at positions `from..to` of the `aa_seq` that `x_packed_frames` makes for frame
+// `frame`: residue `i` of plus frame `r + 1` is the codon at base `r + 3 * i`; residue `i` of
+// minus frame `-(r + 1)` is codon `aa_len - 1 - i` of the phase `p` with `(length - p) % 3 == r`,
+// read from the reverse table. The codons are read from the packed bytes that start with the one
+// holding the first codon's first base; when that base is the byte's last (a phase of 3 within
+// the byte, which the loops do not take) the codon before it is read too and left out.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): positions `from..to` (`1 <= from <= to <= aa_len + 2`) of
+/// frame `frame` of `store` (`aa_len` residues), made into `buffer` by one strand of one phase;
+/// returns the range of `buffer` that holds them, the codons read and those the vector loop read.
+/// `simd`: the vector loop where the CPU has it. The buffer only grows (its other bytes are left
+/// as they are), so a thread's buffer is filled with zeros once.
+#[allow(clippy::too_many_arguments)]
+fn x_frame_residues(
+    store: &crate::sequence::packed_subject::PackedNucleotide,
+    tables: &XCodonTables,
+    frame: i8,
+    aa_len: usize,
+    from: usize,
+    to: usize,
+    buffer: &mut Vec<u8>,
+    simd: bool,
+) -> (std::ops::Range<usize>, usize, usize) {
+    let seq_len = store.len();
+    assert!(1 <= from && from <= to && to <= aa_len + 2);
+    // residues `i0..i1`; position `aa_len + 1` is the end sentinel
+    let (i0, i1) = (from - 1, (to - 1).min(aa_len));
+    let sentinel = from < to && to == aa_len + 2;
+    if i0 >= i1 {
+        if !sentinel {
+            return (0..0, 0, 0);
+        }
+        if buffer.is_empty() {
+            buffer.push(0);
+        }
+        buffer[0] = SENTINEL_BYTE;
+        return (0..1, 0, 0);
+    }
+    let r = usize::from(frame.unsigned_abs()) - 1;
+    let phase = if frame > 0 { r } else { (seq_len - r) % 3 };
+    let codons = (seq_len - phase) / 3;
+    assert_eq!(codons, aa_len, "frame {frame} of {seq_len} bases");
+    // the first codon read, in the phase's order (a minus frame's residues run backwards)
+    let mut first_codon = if frame > 0 { i0 } else { codons - i1 };
+    let mut back = 0;
+    if (phase + 3 * first_codon) % 4 == 3 {
+        first_codon -= 1;
+        back = 1;
+    }
+    let count = i1 - i0 + back;
+    let first_base = phase + 3 * first_codon;
+    let byte = first_base / 4;
+    let packed = store.packed();
+    // the bytes of the codons, and 32 more for the groups of the loops
+    let end = packed
+        .len()
+        .min(byte + (first_base % 4 + 3 * count).div_ceil(4) + 32);
+    if buffer.len() < count + 2 {
+        buffer.resize(count + 2, 0);
+    }
+    let bytes = &packed[byte..end];
+    let out = &mut buffer[..count + 2];
+    let vector = if frame > 0 {
+        x_phase_one::<false>(bytes, first_base % 4, count, tables, out, simd)
+    } else {
+        x_phase_one::<true>(bytes, first_base % 4, count, tables, out, simd)
+    };
+    // codon `j` read is at `buffer[1 + j]` (plus) or `buffer[count - j]` (minus)
+    let start = if frame > 0 { 1 + back } else { 1 };
+    let mut length = i1 - i0;
+    if sentinel {
+        buffer[start + length] = SENTINEL_BYTE;
+        length += 1;
+    }
+    (start..start + length, count, vector)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
+// `x_phase_words`)
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): [`x_phase_residues`] for one strand: codon `j` at
+/// `out[1 + j]` (forward table) or, with `MINUS`, at `out[codons - j]` (reverse table). Returns
+/// the codons the vector loop read.
+fn x_phase_one<const MINUS: bool>(
+    packed: &[u8],
+    phase: usize,
+    codons: usize,
+    tables: &XCodonTables,
+    out: &mut [u8],
+    simd: bool,
+) -> usize {
+    assert!(phase < 3 && out.len() == codons + 2);
+    let mut j = 0;
+    #[cfg(target_arch = "x86_64")]
+    if simd && x_avx2_available() {
+        // SAFETY: the CPU has AVX2; the bounds are checked inside.
+        j = unsafe { x_phase_one_avx2::<MINUS>(packed, phase, codons, tables, out) };
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = simd;
+    let vector = j;
+    let table = if MINUS {
+        &tables.reverse
+    } else {
+        &tables.forward
+    };
+    let shift = 58 - 2 * phase;
+    while j + 8 <= codons && j / 8 * 6 + 8 <= packed.len() {
+        let at = j / 8 * 6;
+        let word = u64::from_be_bytes(packed[at..at + 8].try_into().unwrap());
+        if MINUS {
+            let out8: &mut [u8; 8] = (&mut out[codons - j - 7..=codons - j]).try_into().unwrap();
+            for i in 0..8 {
+                out8[7 - i] = table[((word >> (shift - 6 * i)) & 63) as usize];
+            }
+        } else {
+            let out8: &mut [u8; 8] = (&mut out[1 + j..9 + j]).try_into().unwrap();
+            for i in 0..8 {
+                out8[i] = table[((word >> (shift - 6 * i)) & 63) as usize];
+            }
+        }
+        j += 8;
+    }
+    for j in j..codons {
+        let codon = x_packed_codon(packed, phase + 3 * j);
+        if MINUS {
+            out[codons - j] = table[codon];
+        } else {
+            out[1 + j] = table[codon];
+        }
+    }
+    vector
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
+// `x_phase_residues_avx2`)
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): [`x_phase_residues_avx2`] for one strand; returns the
+/// codons done (a multiple of 32).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn x_phase_one_avx2<const MINUS: bool>(
+    packed: &[u8],
+    phase: usize,
+    codons: usize,
+    tables: &XCodonTables,
+    out: &mut [u8],
+) -> usize {
+    use std::arch::x86_64::*;
+    let values = if MINUS {
+        &tables.reverse
+    } else {
+        &tables.forward
+    };
+    // SAFETY: 16 bytes of the 64.
+    let table = |k: usize| {
+        _mm256_broadcastsi128_si256(unsafe { _mm_loadu_si128(values.as_ptr().add(16 * k).cast()) })
+    };
+    let t = [table(0), table(1), table(2), table(3)];
+    let spread = _mm256_setr_epi8(
+        1, 0, 2, 1, 4, 3, 5, 4, 7, 6, 8, 7, 10, 9, 11, 10, 1, 0, 2, 1, 4, 3, 5, 4, 7, 6, 8, 7, 10,
+        9, 11, 10,
+    );
+    let backward = _mm256_setr_epi8(
+        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6,
+        5, 4, 3, 2, 1, 0,
+    );
+    let left = _mm_cvtsi32_si128(2 * phase as i32);
+    let right = _mm_cvtsi32_si128(8 - 2 * phase as i32);
+    let keep_left = _mm256_set1_epi8((0xFFu8 << (2 * phase)) as i8);
+    let keep_right = _mm256_set1_epi8(((1u16 << (2 * phase)) - 1) as u8 as i8);
+    let mut j = 0;
+    while j + 32 <= codons && 3 * j / 4 + 29 <= packed.len() {
+        // SAFETY: bytes `3 * j / 4 ..+ 29` are in `packed` (checked above).
+        let at = unsafe { packed.as_ptr().add(3 * j / 4) };
+        let (bytes, next) = unsafe {
+            (
+                _mm256_loadu2_m128i(at.add(12).cast(), at.cast()),
+                _mm256_loadu2_m128i(at.add(13).cast(), at.add(1).cast()),
+            )
+        };
+        // the codons of the group as in `x_phase_residues_avx2`
+        let shifted = _mm256_or_si256(
+            _mm256_and_si256(_mm256_sll_epi16(bytes, left), keep_left),
+            _mm256_and_si256(_mm256_srl_epi16(next, right), keep_right),
+        );
+        let spread = _mm256_shuffle_epi8(shifted, spread);
+        let index = _mm256_or_si256(
+            _mm256_mulhi_epu16(
+                _mm256_and_si256(spread, _mm256_set1_epi32(0x0FC0_FC00)),
+                _mm256_set1_epi32(0x0400_0040),
+            ),
+            _mm256_mullo_epi16(
+                _mm256_and_si256(spread, _mm256_set1_epi32(0x003F_03F0)),
+                _mm256_set1_epi32(0x0100_0010),
+            ),
+        );
+        let bit4 = _mm256_slli_epi16(index, 3);
+        let bit5 = _mm256_slli_epi16(index, 2);
+        let low = _mm256_blendv_epi8(
+            _mm256_shuffle_epi8(t[0], index),
+            _mm256_shuffle_epi8(t[1], index),
+            bit4,
+        );
+        let high = _mm256_blendv_epi8(
+            _mm256_shuffle_epi8(t[2], index),
+            _mm256_shuffle_epi8(t[3], index),
+            bit4,
+        );
+        let residues = _mm256_blendv_epi8(low, high, bit5);
+        // SAFETY: `out[1 + j..1 + j + 32]` and `out[codons - j - 31..=codons - j]` lie in `out`
+        // (`j + 32 <= codons`, length `codons + 2`).
+        unsafe {
+            if MINUS {
+                _mm256_storeu_si256(
+                    out.as_mut_ptr().add(codons - j - 31).cast(),
+                    _mm256_permute4x64_epi64(_mm256_shuffle_epi8(residues, backward), 0x4E),
+                );
+            } else {
+                _mm256_storeu_si256(out.as_mut_ptr().add(1 + j).cast(), residues);
+            }
+        }
+        j += 32;
+    }
+    j
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::search_seed::{resolve_local_subject_ncbi2na, x_scan_plan};
+    use super::super::search_seed::x_scan_plan;
     use super::*;
     use crate::algorithm::tblastx::translation::generate_frames;
     use crate::config::ScoringMatrix;
+
+    // NCBI reference: c++/src/algo/blast/core/blast_encoding.c:95-103 and
+    // c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474,515-520
+    // static unsigned char ctable[16] = {0xFF,0,1,0xFF,2,0xFF,0xFF,0xFF,
+    //                                    3,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+    // CRandom random(base_length);
+    // if (b == 0 || b == 0x0F) ncbi2na[i] = random.GetRand() & 0x3;
+    // else { int pick = random.GetRand() % bitcount; /* pick a set bit */ }
+    // The uncompressed ncbi4na sequence is retained by SetupSubjects_OMF for
+    // traceback reevaluation; these resolved bases are preliminary-search input.
+    fn resolve_local_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
+        u32::try_from(subject.len())?;
+        let ncbi4na = subject
+            .iter()
+            .map(|&base| {
+                // TBLASTN reads the IUPAC letters without `U`.
+                crate::core::blast_encoding::iupacna_to_ncbi4na(base)
+                    .filter(|_| !base.eq_ignore_ascii_case(&b'U'))
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "TBLASTN subject base '{}' is not implemented",
+                            base as char
+                        )
+                    })
+            })
+            .collect::<Result<Vec<u8>>>()?;
+        Ok(
+            crate::core::blast_encoding::resolve_ncbi4na_to_ncbi2na(&ncbi4na)
+                .into_iter()
+                .map(|code| b"ACGT"[code as usize])
+                .collect(),
+        )
+    }
 
     // No NCBI counterpart: the three helpers below prepare the inputs of the tests; they compute
     // no value NCBI computes.
@@ -1136,9 +1442,9 @@ mod tests {
         codes
     }
 
-    /// The reference plan of one subject: a copy of the reference closure of `x_scan_plan`.
-    /// `x_table_plans_are_the_reference_plans` compares it with what `x_scan_plan` itself
-    /// gives for every subject it takes, so the copy cannot drift from that closure.
+    /// The reference plan of one subject: the letter-wise translation of
+    /// `tblastx::translation::generate_frames` (after `resolve_local_subject_ncbi2na`), which the
+    /// tables must reproduce.
     fn reference_plan(
         subject: &[u8],
         db_gencode: u8,
@@ -1165,6 +1471,34 @@ mod tests {
             }
         }
         Ok(Arc::new(XSubjectPlan { frames, units }))
+    }
+
+    // No NCBI counterpart: the comparison of two plans for the tests; it computes no value NCBI
+    // computes.
+    /// What differs between the plan from the tables and the plan of the letter-wise reference
+    /// (`reference_plan`) of one subject, `None` when nothing does. Two errors are the same when
+    /// their texts are.
+    fn x_plan_difference(
+        tables: &Result<XSubjectPlan>,
+        reference: &Result<Arc<XSubjectPlan>>,
+    ) -> Option<String> {
+        let (tables, reference) = match (tables, reference) {
+            (Ok(tables), Ok(reference)) => (tables, reference),
+            (Err(tables), Err(reference)) => {
+                let (tables, reference) = (format!("{tables:#}"), format!("{reference:#}"));
+                return (tables != reference)
+                    .then(|| format!("error \"{tables}\" for the reference's \"{reference}\""));
+            }
+            (Ok(_), Err(reference)) => {
+                return Some(format!(
+                    "a plan for the reference's error \"{reference:#}\""
+                ))
+            }
+            (Err(tables), Ok(_)) => {
+                return Some(format!("error \"{tables:#}\" for a plan of the reference"))
+            }
+        };
+        x_plan_fields_difference(tables, reference)
     }
 
     /// `length` letters of `alphabet`, drawn by a fixed linear congruential sequence.
@@ -1351,7 +1685,7 @@ mod tests {
         let mut compared = 0usize;
         let mut residues = 0usize;
         let mut scan_plans = 0usize;
-        // One lookup table for every call of `x_scan_plan` (as `LOSAT_X_TBNQSIDE` shares it).
+        // One lookup table for every call of `x_scan_plan` (as `XQuerySide` shares it).
         let query: &[u8] = b"MKVLAAGIVGLLLAQWSTRE";
         let lookup = OnceLock::new();
         for (which, alphabet) in alphabets.iter().enumerate() {
@@ -1376,18 +1710,17 @@ mod tests {
                         assert_eq!(plan.frames.len(), 2 * length.saturating_sub(2).min(3));
                         residues += plan.frames.iter().map(|f| f.aa_len).sum::<usize>();
                         compared += 1;
-                        // The plan `x_scan_plan` makes (by its reference closure unless the
-                        // test run has one of the variables set) is the copy's too.
+                        // The plan `x_scan_plan` makes is the reference's too.
                         let scan = x_scan_plan(
                             &[query],
-                            crate::sequence::packed_subject::SubjectNt::Letters(&subject),
+                            crate::sequence::packed_subject::SubjectNt::Letters(&subject).into(),
                             db_gencode,
                             None,
                             11,
                             mask_lowercase,
                             ScoringMatrix::Blosum62,
                             3,
-                            Some(&lookup),
+                            &lookup,
                             None,
                         )
                         .unwrap();
@@ -1446,35 +1779,28 @@ mod tests {
     //                                      subject->gen_code_string, &translation_buffer,
     //                                      &frame_offsets, NULL);
     // ```
-    // The three ways of `x_subject_plan` give one plan, and `x_scan_plan` (whichever way the
-    // environment of the test run selects) gives it too. A subject with a byte that is no
-    // letter gives the reference path's error in all three.
+    // `x_subject_plan` gives the reference plan, and `x_scan_plan` gives it too. A subject with a
+    // byte that is no letter gives the reference path's error.
     #[test]
-    fn x_subject_plans_agree_in_every_mode_and_with_the_scan_plan() {
+    fn x_subject_plans_agree_with_the_reference_and_the_scan_plan() {
         let subject = letters(b"ACGTACGTACGTacgtnRY", 3_001, 11);
+        let lookup = OnceLock::new();
         for (db_gencode, mask_lowercase) in [(1, false), (1, true), (4, true), (11, false)] {
-            let reference = || reference_plan(&subject, db_gencode, mask_lowercase);
-            let expected = reference();
-            for mode in [
-                XTranslate::Reference,
-                XTranslate::Tables,
-                XTranslate::Shadow,
-            ] {
-                let plan = x_subject_plan(mode, &subject, db_gencode, mask_lowercase, reference)
-                    .map(|plan| Arc::try_unwrap(plan).ok().expect("one owner"));
-                assert_eq!(x_plan_difference(&plan, &expected), None, "{mode:?}");
-            }
+            let expected = reference_plan(&subject, db_gencode, mask_lowercase);
+            let plan = x_subject_plan(&subject, db_gencode, mask_lowercase)
+                .map(|plan| Arc::try_unwrap(plan).ok().expect("one owner"));
+            assert_eq!(x_plan_difference(&plan, &expected), None);
             let query: &[u8] = b"MKVLAAGIVGLLLAQWSTRE";
             let scan = x_scan_plan(
                 &[query],
-                crate::sequence::packed_subject::SubjectNt::Letters(&subject),
+                crate::sequence::packed_subject::SubjectNt::Letters(&subject).into(),
                 db_gencode,
                 None,
                 11,
                 mask_lowercase,
                 ScoringMatrix::Blosum62,
                 3,
-                None,
+                &lookup,
                 None,
             )
             .unwrap()
@@ -1484,22 +1810,16 @@ mod tests {
         }
         let mut bad = subject.clone();
         bad[1_500] = b'u';
-        let reference = || reference_plan(&bad, 1, false);
-        let expected = reference().err().expect("no letter").to_string();
+        let expected = reference_plan(&bad, 1, false)
+            .err()
+            .expect("no letter")
+            .to_string();
         assert_eq!(expected, "TBLASTN subject base 'u' is not implemented");
-        for mode in [
-            XTranslate::Reference,
-            XTranslate::Tables,
-            XTranslate::Shadow,
-        ] {
-            let error = x_subject_plan(mode, &bad, 1, false, reference)
-                .err()
-                .expect("no letter");
-            assert_eq!(error.to_string(), expected, "{mode:?}");
-        }
+        let error = x_subject_plan(&bad, 1, false).err().expect("no letter");
+        assert_eq!(error.to_string(), expected);
     }
 
-    // No NCBI counterpart: the comparison of the shadow mode. It must see a changed residue, a
+    // No NCBI counterpart: the comparison helper of these tests. It must see a changed residue, a
     // changed field of a frame, a missing frame, changed units and a different error.
     #[test]
     fn x_plan_difference_sees_every_part_of_a_plan() {
@@ -1566,7 +1886,7 @@ mod tests {
     // masking: every length from 0 to 40 bases, lengths around the blocks of `x_packed_frames`
     // (every remainder of a block and of a frame), of the four bases, with lowercase runs, of
     // every IUPAC letter with gaps, and of `N` only; for every genetic code on the long subjects.
-    // In every mode of the variables, and as `x_scan_plan` makes it from the store.
+    // And as `x_scan_plan` makes it from the store.
     #[test]
     fn x_packed_plans_are_the_reference_plans() {
         use crate::sequence::packed_subject::{PackedNucleotide, SubjectNt};
@@ -1606,27 +1926,16 @@ mod tests {
                     if db_gencode != 11 {
                         continue;
                     }
-                    for mode in [
-                        XTranslate::Reference,
-                        XTranslate::Tables,
-                        XTranslate::Shadow,
-                    ] {
-                        let plan = x_packed_subject_plan(mode, &store, db_gencode, |letters| {
-                            reference_plan(letters, db_gencode, false)
-                        })
-                        .map(|plan| Arc::try_unwrap(plan).ok().expect("one owner"));
-                        assert_eq!(x_plan_difference(&plan, &reference), None, "{mode:?}");
-                    }
                     let scan = x_scan_plan(
                         &[query],
-                        SubjectNt::Packed(&store),
+                        SubjectNt::Packed(&store).into(),
                         db_gencode,
                         None,
                         11,
                         false,
                         ScoringMatrix::Blosum62,
                         3,
-                        Some(&lookup),
+                        &lookup,
                         None,
                     )
                     .unwrap();
@@ -1646,14 +1955,14 @@ mod tests {
         let scan = |store: &PackedNucleotide, mask_lowercase: bool| {
             x_scan_plan(
                 &[query],
-                SubjectNt::Packed(store),
+                SubjectNt::Packed(store).into(),
                 1,
                 None,
                 11,
                 mask_lowercase,
                 ScoringMatrix::Blosum62,
                 3,
-                Some(&lookup),
+                &lookup,
                 None,
             )
         };
@@ -1689,7 +1998,7 @@ mod tests {
                 let tables = x_codon_tables(db_gencode).unwrap();
                 let expected = x_generate_frames(&codes, tables);
                 for simd in [false, true] {
-                    let frames = x_packed_frames_with(&store, tables, simd);
+                    let frames = x_packed_frames_with(store.packed(), length, tables, simd);
                     assert_eq!(frames.len(), expected.len(), "{length} bases, simd {simd}");
                     for (frame, reference) in frames.iter().zip(&expected) {
                         assert_eq!(
@@ -1721,36 +2030,6 @@ mod tests {
         if x_avx2_available() {
             assert!(vector_codons > 30_000, "{vector_codons}");
         }
-    }
-
-    // No NCBI counterpart: the shadow mode stops the search when the plan of a packed subject
-    // differs from the reference plan of its letters.
-    #[test]
-    #[should_panic(
-        expected = "LOSAT_X_TBNXLATESHADOW: the subject translation from the packed subject differs"
-    )]
-    fn x_shadow_mode_stops_on_a_difference_of_a_packed_plan() {
-        let subject = letters(b"ACGT", 300, 5);
-        let other = letters(b"ACGT", 300, 6);
-        let store =
-            crate::sequence::packed_subject::PackedNucleotide::from_subject_letters(&subject)
-                .unwrap();
-        let _ = x_packed_subject_plan(XTranslate::Shadow, &store, 1, |_| {
-            reference_plan(&other, 1, false)
-        });
-    }
-
-    // No NCBI counterpart: the shadow mode stops the search when the two plans differ.
-    #[test]
-    #[should_panic(
-        expected = "LOSAT_X_TBNXLATESHADOW: the subject translation from the tables differs"
-    )]
-    fn x_shadow_mode_stops_on_a_difference() {
-        let subject = letters(b"ACGT", 300, 5);
-        let other = letters(b"ACGT", 300, 6);
-        let _ = x_subject_plan(XTranslate::Shadow, &subject, 1, false, || {
-            reference_plan(&other, 1, false)
-        });
     }
 
     // No NCBI counterpart: test of LOSAT_X_TBNFRAMEREUSE; it does not change any value NCBI computes.
@@ -1795,5 +2074,252 @@ mod tests {
             drop(packed(&short, 1));
         }
         assert!(X_FRAMES.with(|kept| kept.borrow().len()) <= X_REUSED_FRAMES);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
+    // `x_phase_words`)
+    // One strand of one phase read by the word loop alone and with the vector loop first is the
+    // strand `x_phase_residues` writes: every length from 0 to 400 bases (every phase of the last
+    // bytes, groups of 8 and 32 codons and the codons after them) and some long ones, every phase,
+    // three genetic codes, written over a buffer of other bytes; the vector loop takes the groups
+    // where the CPU has it.
+    #[test]
+    fn x_one_strand_of_a_phase_is_that_strand_of_both() {
+        use crate::sequence::packed_subject::PackedNucleotide;
+        let mut vector_codons = 0usize;
+        let lengths = (0..=400).chain([1_000, 4_999, 49_151, 49_153, 100_003]);
+        for length in lengths {
+            let subject = letters(b"ACGTACGTN", length, length as u64 + 11);
+            let store = PackedNucleotide::from_subject_letters(&subject).expect("letters");
+            for db_gencode in [1, 4, 11] {
+                let tables = x_codon_tables(db_gencode).unwrap();
+                for phase in (0..3).filter(|&phase| phase + 3 <= length) {
+                    let codons = (length - phase) / 3;
+                    let mut plus = vec![0u8; codons + 2];
+                    let mut minus = vec![0u8; codons + 2];
+                    x_phase_residues(
+                        store.packed(),
+                        phase,
+                        codons,
+                        tables,
+                        &mut plus,
+                        &mut minus,
+                        false,
+                    );
+                    for simd in [false, true] {
+                        let mut one = vec![0xAB; codons + 2];
+                        x_phase_one::<false>(store.packed(), phase, codons, tables, &mut one, simd);
+                        assert_eq!(one[1..=codons], plus[1..=codons], "{length} {phase} {simd}");
+                        one.fill(0xCD);
+                        x_phase_one::<true>(store.packed(), phase, codons, tables, &mut one, simd);
+                        assert_eq!(
+                            one[1..=codons],
+                            minus[1..=codons],
+                            "{length} {phase} {simd}"
+                        );
+                    }
+                    #[cfg(target_arch = "x86_64")]
+                    if x_avx2_available() && db_gencode == 1 {
+                        let mut one = vec![0u8; codons + 2];
+                        // SAFETY: the CPU has AVX2.
+                        vector_codons += unsafe {
+                            x_phase_one_avx2::<true>(
+                                store.packed(),
+                                phase,
+                                codons,
+                                tables,
+                                &mut one,
+                            )
+                        };
+                    }
+                }
+            }
+        }
+        #[cfg(target_arch = "x86_64")]
+        if x_avx2_available() {
+            assert!(vector_codons > 90_000, "{vector_codons}");
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812 (a unit reads
+    // `subject->sequence` of its frame from its chunk on)
+    // Positions `from..to` of every frame made by one strand are those of the frame
+    // `x_packed_frames` makes: every range of the short frames, and on the longer ones the ranges
+    // that start and end around the frame's ends, around a group of 32 codons and at a codon whose
+    // first base is a byte's last, with and without the vector loop, into one buffer whose bytes
+    // are those of the range before; every genetic code on one subject.
+    #[test]
+    fn x_frame_residues_of_a_range_are_the_frames() {
+        use crate::sequence::packed_subject::PackedNucleotide;
+        let mut buffer = Vec::new();
+        let mut ranges = 0usize;
+        for length in (0..=40).chain([99, 100, 101, 1_000, 4_999, 49_153]) {
+            let subject = letters(b"ACGTACGTN", length, length as u64 + 13);
+            let store = PackedNucleotide::from_subject_letters(&subject).expect("letters");
+            let codes = if length == 4_999 {
+                genetic_codes()
+            } else {
+                vec![1, 11]
+            };
+            for db_gencode in codes {
+                let tables = x_codon_tables(db_gencode).unwrap();
+                for frame in x_packed_frames_with(store.packed(), store.len(), tables, false) {
+                    let aa_len = frame.aa_len;
+                    let points: Vec<usize> = if aa_len <= 14 {
+                        (1..=aa_len + 2).collect()
+                    } else {
+                        let mut points: Vec<usize> = [1, 2, 3, 4, 5, 6, 31, 32, 33, 34, 35]
+                            .into_iter()
+                            .chain((aa_len - 12..=aa_len + 2).filter(|&p| p >= 1))
+                            .chain((aa_len / 2..aa_len / 2 + 5).map(|p| p.max(1)))
+                            .filter(|&p| p <= aa_len + 2)
+                            .collect();
+                        points.sort_unstable();
+                        points.dedup();
+                        points
+                    };
+                    for &from in &points {
+                        for &to in points.iter().filter(|&&to| to >= from) {
+                            for simd in [false, true] {
+                                let (range, _, _) = x_frame_residues(
+                                    &store,
+                                    tables,
+                                    frame.frame,
+                                    aa_len,
+                                    from,
+                                    to,
+                                    &mut buffer,
+                                    simd,
+                                );
+                                assert_eq!(
+                                    buffer[range],
+                                    frame.aa_seq[from..to],
+                                    "{length} bases, code {db_gencode}, frame {}, {from}..{to}, simd {simd}",
+                                    frame.frame
+                                );
+                                ranges += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(ranges > 100_000, "{ranges}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812 (the
+    // frames' lengths and the chunks of each frame)
+    // A plan without residues has the frames of `x_packed_plan` with an empty `aa_seq` and the
+    // same units, and the residues each unit makes are the frame's from its chunk to the margin or
+    // the frame's end sentinel: every length from 0 to 40 bases and some longer ones, two genetic
+    // codes; an unknown genetic code is refused as by `x_packed_plan`.
+    #[test]
+    fn x_lean_plans_are_the_plans_without_residues() {
+        use crate::sequence::packed_subject::PackedNucleotide;
+        let mut buffer = Vec::new();
+        for length in (0..=40).chain([1_000, 4_999, 100_003]) {
+            let subject = letters(b"ACGTMRSVWYHKDBN-acgtn", length, length as u64 + 17);
+            let store = PackedNucleotide::from_subject_letters(&subject).expect("letters");
+            for db_gencode in [1, 11] {
+                let plan = x_packed_plan(&store, db_gencode).unwrap();
+                let lean = x_packed_lean_plan(&store, db_gencode).unwrap();
+                assert_eq!(lean.frames.len(), plan.frames.len(), "{length} bases");
+                for (lean, frame) in lean.frames.iter().zip(&plan.frames) {
+                    assert!(lean.aa_seq.is_empty() && lean.aa_seq_nomask.is_none());
+                    assert_eq!(
+                        (lean.frame, lean.aa_len, lean.orig_len, &lean.seg_masks),
+                        (frame.frame, frame.aa_len, frame.orig_len, &frame.seg_masks),
+                        "{length} bases"
+                    );
+                }
+                assert_eq!(lean.units, plan.units, "{length} bases");
+                for (index, chunk, _) in &lean.units {
+                    let range = x_unit_residues(
+                        &store,
+                        db_gencode,
+                        &lean.frames[*index],
+                        *chunk,
+                        &mut buffer,
+                    )
+                    .unwrap();
+                    let frame = &plan.frames[*index];
+                    let (from, to) = x_unit_range(frame.aa_len, *chunk);
+                    assert_eq!(to, frame.aa_len + 2, "one chunk ends at the sentinel");
+                    assert_eq!(buffer[range], frame.aa_seq[from..to], "{length} bases");
+                }
+            }
+        }
+        let store = PackedNucleotide::from_subject_letters(b"ACGTACGTACGTACG").unwrap();
+        let refused = |plan: Result<Arc<XSubjectPlan>>| format!("{:#}", plan.err().unwrap());
+        assert_eq!(
+            refused(x_packed_lean_plan(&store, 7)),
+            refused(x_packed_plan(&store, 7).map(Arc::new))
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-264 (chunks of
+    // MAX_DBSEQ_LEN residues overlapping by DBSEQ_CHUNK_OVERLAP)
+    // A subject whose frames have three chunks each (30 Mb of random bases): the plan without
+    // residues has the 18 units of `x_packed_plan`, and each unit's residues, made with and
+    // without the vector loop, are the frame's from the chunk's first residue to 4,096 past its
+    // last: the first chunk of each frame; the second (whose margin passes the short third) and
+    // the third end at the end sentinel. Its first frame is one the plan of a search leaves out
+    // (`x_units_translate`, with the switch).
+    #[test]
+    fn x_units_of_a_frame_of_three_chunks_read_the_frames_residues() {
+        use crate::sequence::packed_subject::PackedNucleotide;
+        let length: usize = 30_000_301;
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let packed: Vec<u8> = (0..length.div_ceil(4))
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (state >> 56) as u8
+            })
+            .collect();
+        let store = PackedNucleotide::from_stored(&packed, length, &[]);
+        let plan = x_packed_plan(&store, 1).unwrap();
+        let lean = x_packed_lean_plan(&store, 1).unwrap();
+        assert_eq!(lean.units, plan.units);
+        assert_eq!(lean.units.len(), 18);
+        assert!(lean.units.chunks(3).all(|units| units[0].0 == units[2].0));
+        let tables = x_codon_tables(1).unwrap();
+        let mut buffer = Vec::new();
+        // units whose residues end 4,096 past the chunk, and at the end sentinel
+        let (mut margin, mut sentinel) = (0, 0);
+        for (index, chunk, _) in &lean.units {
+            let frame = &plan.frames[*index];
+            let (from, to) = x_unit_range(frame.aa_len, *chunk);
+            if to == from + chunk.length + 4_096 {
+                margin += 1;
+            } else {
+                assert_eq!(to, frame.aa_len + 2);
+                assert!(from + chunk.length + 4_096 > to);
+                sentinel += 1;
+            }
+            for simd in [true, false] {
+                let (range, _, _) = x_frame_residues(
+                    &store,
+                    tables,
+                    frame.frame,
+                    frame.aa_len,
+                    from,
+                    to,
+                    &mut buffer,
+                    simd,
+                );
+                assert!(
+                    buffer[range] == frame.aa_seq[from..to],
+                    "frame {} chunk at {}, simd {simd}",
+                    frame.frame,
+                    chunk.offset
+                );
+            }
+        }
+        assert_eq!((margin, sentinel), (6, 12));
+        assert_eq!(x_units_translate(length), x_units_on());
+        assert!(!x_units_translate(3 * (X_MAPPED_FRAME - 2) - 1));
+        assert_eq!(x_units_translate(3 * (X_MAPPED_FRAME - 2)), x_units_on());
     }
 }

@@ -24,6 +24,13 @@ import {
   renewalReason,
 } from '../../src/infra/engine-worker/policy';
 import { EngineRuntime } from '../../src/infra/engine-worker/runtime';
+import { warmUp, warmUpInputs } from '../../src/infra/engine-worker/warm-up';
+
+// The runtime's calls of the warm-up are counted; the warm-up itself runs as it is.
+vi.mock('../../src/infra/engine-worker/warm-up', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/infra/engine-worker/warm-up')>();
+  return { ...actual, warmUp: vi.fn(actual.warmUp) };
+});
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';
 
 describe('chooseThreads', () => {
@@ -228,6 +235,20 @@ describe('EngineRuntime.prepare', () => {
     expect(calls).toEqual({ serial: 1, threads: 0 });
   });
 
+  it('warms up once per argv, ignores a warm-up that the instance cannot run, and keeps the instance', async () => {
+    const { runtime, calls } = setup();
+    vi.mocked(warmUp).mockClear();
+    const argv = ['tblastx', '-query', 'q.fa', '-subject', 's.fa'];
+    // The module's exports only return 2: the warm-up's register finds no response.
+    await runtime.prepare(1, argv);
+    await runtime.prepare(1, [...argv]);
+    await runtime.prepare(1, [...argv, '-seg', 'no']);
+    await runtime.prepare(1);
+    expect(vi.mocked(warmUp).mock.calls.map(([, called]) => called)).toEqual([argv, [...argv, '-seg', 'no']]);
+    expect(vi.mocked(warmUp).mock.results.map((result) => result.value)).toEqual([false, false]);
+    expect(calls.serial).toBe(1);
+  });
+
   it('records that the threaded engine cannot start, and then prepares the serial one', async () => {
     const { runtime, calls } = setup();
     // Node is not cross-origin isolated: the threaded instance cannot start.
@@ -310,9 +331,17 @@ describe('ReactorAbi', () => {
 const reactors = findReactors();
 
 describe.skipIf(reactors === undefined)('the built reactors', () => {
-  it('are the two reactor kinds, with the shared memory of the certified threaded build (plan TD-7)', () => {
+  it('are the two reactor kinds, with the shared memory that the threaded build declares (plan TD-7)', () => {
     expect(inspectReactor(reactors!.serial.bytes).kind).toBe('serial-reactor');
-    expect(inspectReactor(reactors!.threads.bytes)).toMatchObject({ kind: 'threaded-reactor', memory: { maximum: 16384, shared: true } });
+    const threaded = inspectReactor(reactors!.threads.bytes);
+    expect(threaded).toMatchObject({ kind: 'threaded-reactor', memory: { shared: true } });
+    // The maximum that build_reactors.py recorded: 65,535 pages, or 16,384 in a build from
+    // before the 1 GiB limit was lifted (plan DW-28).
+    const recorded = JSON.parse(readFileSync(`${reactors!.dir}/artifacts.json`, 'utf8')) as {
+      artifacts: { threads: { memory: { maximum: number } } };
+    };
+    expect(threaded.memory.maximum).toBe(recorded.artifacts.threads.memory.maximum);
+    expect([16_384, 65_535]).toContain(threaded.memory.maximum);
     // The served threaded module is the artifact with the shared-memory guard.
     expect(reactors!.threads.sha256).not.toBe(reactors!.threads.artifactSha256);
     const sha256 = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -421,5 +450,43 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
     const gap = await checker.check('blastp', 'subject', new TextEncoder().encode('>p\nMK\n>?10\nMK\n'));
     expect(gap.ok).toBe(false);
     expect(!gap.ok && gap.message).toMatch(/not supported by LOSAT Web/);
+  });
+});
+
+describe.skipIf(reactors === undefined)('the warm-up on the serial reactor', () => {
+  const open = async () => (await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource))).abi;
+  // Streams 0, 6 and 7 (the three output formats) of one search on an instance.
+  const search = (abi: ReactorAbi, argv: readonly string[], query: Uint8Array, subject: Uint8Array) => {
+    const q = abi.register(argv[0]!, 0, query).handle;
+    const s = abi.register(argv[0]!, 1, subject).handle;
+    const out: Record<number, string> = { 0: '', 6: '', 7: '' };
+    const decoder = new TextDecoder();
+    abi.run(argv, q, s, (stream, bytes) => {
+      if (stream in out) out[stream] += decoder.decode(bytes);
+    });
+    abi.release(q);
+    abi.release(s);
+    return out;
+  };
+
+  for (const program of PROGRAMS.filter((p) => p.unavailable === undefined)) {
+    it(`${program.id}: runs on the built-in sequences, which have hits, and leaves the next search as on a new instance`, async () => {
+      const argv = [program.id, '-query', 'query.fa', '-subject', 'subject.fa'];
+      const inputs = warmUpInputs(program.id);
+      const fresh = search(await open(), [...argv, '-num_threads', '1'], inputs.query, inputs.subject);
+      // A hit for each of the three blocks.
+      expect(fresh[6]!.trim().split('\n').length).toBeGreaterThanOrEqual(3);
+      const abi = await open();
+      // A region of the user's input is left out of the warm-up's argv.
+      expect(warmUp(abi, [...argv, '-query_loc', '5000-6000'])).toBe(true);
+      expect(search(abi, [...argv, '-num_threads', '1'], inputs.query, inputs.subject)).toEqual(fresh);
+    });
+  }
+
+  it('reports an argv that the engine refuses, and the instance still runs searches', async () => {
+    const abi = await open();
+    expect(warmUp(abi, ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-word_size', '-1'])).toBe(false);
+    expect(abi.stoppedBy).toBeUndefined();
+    expect(warmUp(abi, ['blastn', '-query', 'q.fa', '-subject', 's.fa'])).toBe(true);
   });
 });

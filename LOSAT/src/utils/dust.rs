@@ -8,51 +8,6 @@
 
 use std::collections::VecDeque;
 
-// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:136-141
-// ```c
-// for( ; it != iend; ++it, ++count, --pos ) {
-//     Uint1 cnt = counts[*it];
-//     add_triplet_info( score, counts, *it );
-//
-//     if( cnt > 0 && score*10 > thresholds_[count] ) {
-// ```
-// Reads the LOSAT_X_DUSTFAST switch once. `TripletWindow::find_perfect` uses it to choose
-// between the port of this loop and the one-pass merge that builds the same list.
-fn x_dust_fast() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DUSTFAST"))
-}
-
-/// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:243-253
-/// ```c
-///         while( !done && it.GetPos() <= stop )
-///         {
-///             save_masked_regions( *res.get(), w.start(), start );
-/// ...
-///             if( w.shift_window( t ) ) {
-///                 if( w.needs_processing() ) {
-///                     w.find_perfect();
-/// ```
-/// Reads the LOSAT_X_DUSTRING / LOSAT_X_DUSTSHADOW switches once. The mode chooses which
-/// window type runs this loop: the ported `TripletWindow` (0), the ring-buffer
-/// `XTripletWindow` (1), or both with a comparison (2).
-/// EXPERIMENT: 0 = reference window, 1 = LOSAT_X_DUSTRING (the same steps on
-/// a fixed ring buffer), 2 = LOSAT_X_DUSTSHADOW (both, compared).
-fn x_dust_ring() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_DUSTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_DUSTRING") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/util/random_gen.cpp:241-264
 // ```c
 // static const CRandom::TValue sm_State[CRandom::kStateSize] = {
@@ -190,8 +145,6 @@ impl PerfectInterval {
 
 /// DUST masker implementation following NCBI BLAST's symmetric DUST algorithm
 pub struct DustMasker {
-    #[allow(dead_code)]
-    level: u32,
     window: usize,
     linker: usize,
     low_k: u8,
@@ -215,7 +168,6 @@ impl DustMasker {
         }
 
         Self {
-            level: params.level,
             window: params.window,
             linker: params.linker,
             low_k,
@@ -226,19 +178,6 @@ impl DustMasker {
     /// Create a DUST masker with default parameters
     pub fn with_defaults() -> Self {
         Self::new(20, 64, 1)
-    }
-
-    /// Convert a nucleotide base to 2-bit encoding (NCBI2NA format)
-    /// A=0, C=1, G=2, T/U=3
-    #[inline]
-    fn encode_base(base: u8) -> Option<u8> {
-        match base {
-            b'A' | b'a' => Some(0),
-            b'C' | b'c' => Some(1),
-            b'G' | b'g' => Some(2),
-            b'T' | b't' | b'U' | b'u' => Some(3),
-            _ => None, // Ambiguous bases
-        }
     }
 
     #[inline]
@@ -263,15 +202,6 @@ impl DustMasker {
         }
     }
 
-    #[inline]
-    #[allow(dead_code)]
-    fn encode_triplet(b1: u8, b2: u8, b3: u8) -> Option<u8> {
-        let e1 = Self::encode_base(b1)?;
-        let e2 = Self::encode_base(b2)?;
-        let e3 = Self::encode_base(b3)?;
-        Some((e1 << 4) | (e2 << 2) | e3)
-    }
-
     /// Mask a sequence and return the list of masked intervals
     pub fn mask_sequence(&self, seq: &[u8]) -> Vec<MaskedInterval> {
         if seq.len() < 3 {
@@ -293,22 +223,13 @@ impl DustMasker {
         //     if( w.start() > 0 ) start += w.start();
         //     else break;
         // ```
-        // Dispatch point of LOSAT_X_DUSTRING / LOSAT_X_DUSTSHADOW. `mask_subsequence_reference`
-        // ports this function. The ring-buffer version runs the same steps and only needs a
-        // window of at most `X_RING` (64, the largest NCBI window); a larger window uses the
-        // reference. In mode 2 both run and `assert!` compares the intervals.
-        match x_dust_ring() {
-            1 if self.window <= X_RING => self.x_mask_subsequence(seq, start, stop),
-            2 if self.window <= X_RING => {
-                let fast = self.x_mask_subsequence(seq, start, stop);
-                let reference = self.mask_subsequence_reference(seq, start, stop);
-                assert!(
-                    fast == reference,
-                    "LOSAT_X_DUSTSHADOW: ring-buffer DUST differs from the reference"
-                );
-                reference
-            }
-            _ => self.mask_subsequence_reference(seq, start, stop),
+        // `mask_subsequence_reference` ports this function. The ring-buffer version (was
+        // LOSAT_X_DUSTRING) runs the same steps and only needs a window of at most `X_RING` (64, the
+        // largest NCBI window); a larger window uses the reference.
+        if self.window <= X_RING {
+            self.x_mask_subsequence(seq, start, stop)
+        } else {
+            self.mask_subsequence_reference(seq, start, stop)
         }
     }
 
@@ -328,9 +249,8 @@ impl DustMasker {
     // This is `CSymDustMasker::operator()` with the window in `XTripletWindow` and the base
     // codes from `X_BASE_CODE`. The bases are converted in the same order, so a random
     // number for an `N` is drawn at the same point. It gives the same intervals.
-    // EXPERIMENT (LOSAT_X_DUSTRING): `mask_subsequence_reference` step for
-    // step, with the window in `XTripletWindow` and the base codes from a
-    // table.
+    // `mask_subsequence_reference` step for step, with the window in `XTripletWindow` and the
+    // base codes from a table.
     fn x_mask_subsequence(&self, seq: &[u8], start: usize, stop: usize) -> Vec<MaskedInterval> {
         let mut result = Vec::new();
 
@@ -649,7 +569,7 @@ static X_BASE_CODE: [u8; 256] = {
 /// The same state as NCBI's `triplets` class. Only the container for `triplet_list_`
 /// differs (a fixed ring instead of a `std::deque`). The perfect list `P` is passed to
 /// each method instead of being held by reference.
-/// EXPERIMENT (LOSAT_X_DUSTRING): `TripletWindow` with the triplet deque in a
+/// `TripletWindow` (was LOSAT_X_DUSTRING) with the triplet deque in a
 /// fixed ring buffer. Deque index `i` (0 = newest, as after `push_front`) is
 /// `ring[(head + i) % X_RING]`; every method below is the `TripletWindow`
 /// method of the same name with only that substitution.
@@ -913,10 +833,8 @@ impl<'a> XTripletWindow<'a> {
     ///                         perfect( pos, stop_ + 1,
     ///                         max_perfect_score, count ) );
     /// ```
-    /// The one-pass merge of `TripletWindow::x_find_perfect_merge` (see there), reading the
+    /// The one-pass merge of `TripletWindow::find_perfect` (see there), reading the
     /// triplets from the ring.
-    /// `TripletWindow::x_find_perfect_merge` (the `LOSAT_X_DUSTFAST` form of
-    /// `find_perfect`, which builds the same list) over the ring buffer.
     #[inline(never)]
     fn find_perfect(&mut self, perfect_list: &mut VecDeque<PerfectInterval>) {
         let suffix_len = self.stop - self.l;
@@ -1138,26 +1056,6 @@ impl<'a> TripletWindow<'a> {
         true
     }
 
-    fn find_perfect(&mut self, perfect_list: &mut VecDeque<PerfectInterval>) {
-        // NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:118,136-141,161-163
-        // ```c
-        // inline void CSymDustMasker::triplets::find_perfect()
-        // ...
-        // for( ; it != iend; ++it, ++count, --pos ) {
-        //     Uint1 cnt = counts[*it];
-        // ...
-        //         perfect_iter = P.insert(
-        //                 perfect( pos, stop_ + 1,
-        //                 max_perfect_score, count ) );
-        // ```
-        // Dispatch point of LOSAT_X_DUSTFAST. `find_perfect_reference` ports this function. The
-        // merge builds the same list of perfect intervals in one pass.
-        if x_dust_fast() {
-            return self.x_find_perfect_merge(perfect_list);
-        }
-        self.find_perfect_reference(perfect_list)
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:123-166
     // ```c
     // Uint4 count = stop_ - L; // count is the suffix length
@@ -1175,9 +1073,8 @@ impl<'a> TripletWindow<'a> {
     // Same walk over the triplets with the same tests and the same integer updates. Only
     // the list update differs: NCBI inserts into a `std::list`; here the old list and the
     // new elements are merged into a new vector in the order the inserts would give. The
-    // argument is in the comment below. LOSAT_X_DUSTSHADOW and the random test compare it
-    // with the port.
-    // EXPERIMENT (LOSAT_X_DUSTFAST): the same list, built by one merge pass.
+    // argument is in the comment below. (Was LOSAT_X_DUSTFAST; the literal std::list port
+    // that it replaced was deleted when the merge graduated.)
     //
     // NCBI reference: ncbi-blast/c++/src/algo/dustmask/symdust.cpp:137-166
     // ```c
@@ -1212,7 +1109,7 @@ impl<'a> TripletWindow<'a> {
     // max_perfect_score/max_len unchanged (it compares the element with
     // itself), so the result is the old list with the new elements merged in
     // at the positions where the walk stood.
-    fn x_find_perfect_merge(&mut self, perfect_list: &mut VecDeque<PerfectInterval>) {
+    fn find_perfect(&mut self, perfect_list: &mut VecDeque<PerfectInterval>) {
         let suffix_len = self.stop - self.l;
         if suffix_len >= self.triplet_list.len() {
             return;
@@ -1276,79 +1173,8 @@ impl<'a> TripletWindow<'a> {
             perfect_list.extend(merged);
         }
     }
-
-    fn find_perfect_reference(&mut self, perfect_list: &mut VecDeque<PerfectInterval>) {
-        let suffix_len = self.stop - self.l;
-
-        if suffix_len >= self.triplet_list.len() {
-            return;
-        }
-
-        let mut counts = self.c_v;
-        let mut score = self.r_v;
-        let mut max_perfect_score = 0u32;
-        let mut max_len = 0usize;
-
-        // NCBI: pos = L - 1, count starts at suffix_len and increments each iteration
-        // it = triplet_list_.begin() + count (starts at suffix_len index)
-        let mut pos = self.l.saturating_sub(1);
-        let mut perfect_idx = 0usize;
-        let mut count = suffix_len; // This is the candidate interval length variable
-
-        // Iterate from suffix_len to end of triplet_list
-        for idx in suffix_len..self.triplet_list.len() {
-            let triplet = self.triplet_list[idx];
-            let cnt = counts[triplet as usize];
-            Self::add_triplet(&mut score, &mut counts, triplet);
-
-            // Use count for threshold lookup (NCBI: thresholds_[count])
-            if cnt > 0 && count < self.thresholds.len() && score * 10 > self.thresholds[count] {
-                while perfect_idx < perfect_list.len() && pos <= perfect_list[perfect_idx].start {
-                    let p = &perfect_list[perfect_idx];
-                    if max_perfect_score == 0
-                        || max_len * p.score as usize > max_perfect_score as usize * p.len
-                    {
-                        max_perfect_score = p.score;
-                        max_len = p.len;
-                    }
-                    perfect_idx += 1;
-                }
-
-                if max_perfect_score == 0
-                    || score as usize * max_len >= max_perfect_score as usize * count
-                {
-                    max_perfect_score = score;
-                    max_len = count;
-                    // NCBI reference: ncbi-blast/c++/src/algo/dustmask/symdust.cpp:156-163
-                    // ```c
-                    // if( max_perfect_score == 0 || score*max_len >= max_perfect_score*count ) {
-                    //     max_perfect_score = score;
-                    //     max_len = count;
-                    //     perfect_iter = P.insert(
-                    //             perfect_iter, perfect( pos, stop_ + 1,
-                    //             max_perfect_score, count ) );
-                    // }
-                    // ```
-                    let interval =
-                        PerfectInterval::new(pos, self.stop + 1, max_perfect_score, count);
-                    if perfect_idx < perfect_list.len() {
-                        perfect_list.insert(perfect_idx, interval);
-                    } else {
-                        perfect_list.push_back(interval);
-                    }
-                }
-            }
-
-            // Increment count each iteration (NCBI: ++count in for-loop header)
-            count += 1;
-            if pos > 0 {
-                pos -= 1;
-            }
-        }
-    }
 }
 
-/// Check if a position is within any masked interval
 pub fn is_position_masked(intervals: &[MaskedInterval], pos: usize) -> bool {
     intervals.iter().any(|interval| interval.contains(pos))
 }
@@ -1365,27 +1191,6 @@ pub fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usiz
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_encode_base() {
-        assert_eq!(DustMasker::encode_base(b'A'), Some(0));
-        assert_eq!(DustMasker::encode_base(b'a'), Some(0));
-        assert_eq!(DustMasker::encode_base(b'C'), Some(1));
-        assert_eq!(DustMasker::encode_base(b'G'), Some(2));
-        assert_eq!(DustMasker::encode_base(b'T'), Some(3));
-        assert_eq!(DustMasker::encode_base(b'U'), Some(3));
-        assert_eq!(DustMasker::encode_base(b'N'), None);
-    }
-
-    #[test]
-    fn test_encode_triplet() {
-        // AAA = 0b000000 = 0
-        assert_eq!(DustMasker::encode_triplet(b'A', b'A', b'A'), Some(0));
-        // TTT = 0b111111 = 63
-        assert_eq!(DustMasker::encode_triplet(b'T', b'T', b'T'), Some(63));
-        // ACG = 0b000110 = 6
-        assert_eq!(DustMasker::encode_triplet(b'A', b'C', b'G'), Some(6));
-    }
 
     #[test]
     fn test_simple_repeat() {

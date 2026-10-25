@@ -1,21 +1,11 @@
-//! Internal NCBI TBLASTN two-hit WordFinder path for the BLOSUM62/word-3 profile.
-//! The public search remains unsupported; this is a bounded Stage C diagnostic.
+//! Internal NCBI TBLASTN two-hit WordFinder of the (frame, chunk) units of the preliminary search
+//! (`XTwoHit`).
 
 #[cfg(test)]
-use super::search_seed::resolve_local_subject_ncbi2na;
-use super::search_seed::{
-    encode_tblastn_lookup_query, scan_protein_words_by_chunk, Seed, SeedScanEvent, TranslatedChunk,
-};
-use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
+use super::search_seed::encode_tblastn_lookup_query;
 use crate::algorithm::blastp::extension::extend_two_hit;
-#[cfg(test)]
-use crate::algorithm::tblastx::translation::generate_frames;
-use crate::algorithm::tblastx::translation::QueryFrame;
+use crate::algorithm::blastp::x_ungapped_fast;
 use crate::config::ScoringMatrix;
-#[cfg(test)]
-use crate::utils::genetic_code::GeneticCode;
-use crate::utils::seg::SegParams;
-use anyhow::{ensure, Result};
 
 // NCBI reference: c++/include/algo/blast/core/blast_extend.h:142-163
 // typedef struct BlastUngappedData { Int4 q_start, s_start, length, score; } ...;
@@ -68,348 +58,6 @@ impl Diagonals {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_engine.c:804-841
-// for (context=first_context; context<=last_context; context++) {
-//     subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-//     status = s_BlastSearchEngineOneContext(...);
-// }
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:478-614
-// scansub = (TAaScanSubjectFunction)(lookup->scansub_callback);
-// hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-// for (i = 0; i < hits; ++i) { /* two-hit diagonal state and extension */ }
-// Blast_ExtendWordExit(ewp, subject->length);
-#[allow(dead_code)]
-pub(super) fn find_blosum62_word3_init_hsps(
-    query: &[u8],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    window: i32,
-    x_dropoff: i32,
-    cutoff_score: i32,
-    mask_lowercase: bool,
-) -> Result<Vec<InitHsp>> {
-    find_blosum62_word3_init_hsps_multi(
-        &[query],
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        window,
-        &[x_dropoff],
-        &[cutoff_score],
-        mask_lowercase,
-    )
-}
-
-// NCBI c++/src/algo/blast/core/aa_ungapped.c:547-583:
-// curr_context = BSearchContextInfo(query_offset, query_info);
-// if (query_offset - diff <
-//     query_info->contexts[curr_context].query_offset) { ... continue; }
-// cutoffs = word_params->cutoffs + curr_context;
-// s_BlastAaExtendTwoHit(..., query, ..., query_offset, ...);
-// NCBI c++/src/algo/blast/core/blast_extend.c:46-65:
-// while (diag_array_length < (qlen+window_size)) diag_array_length <<= 1;
-// Keep one diagonal table for the concatenated protein queries.
-#[allow(dead_code)]
-pub(super) fn find_blosum62_word3_init_hsps_multi(
-    queries: &[&[u8]],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    window: i32,
-    x_dropoffs: &[i32],
-    cutoff_scores: &[i32],
-    mask_lowercase: bool,
-) -> Result<Vec<InitHsp>> {
-    find_protein_init_hsps_multi(
-        queries,
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        window,
-        x_dropoffs,
-        cutoff_scores,
-        mask_lowercase,
-        ScoringMatrix::Blosum62,
-        3,
-    )
-}
-
-// NCBI c++/src/algo/blast/core/aa_ungapped.c:516-614:
-// diff < wordsize controls the second hit; s_BlastAaExtendTwoHit uses
-// wordsize and score_params->matrix before saving/sorting each HSP list.
-#[allow(dead_code)]
-pub(super) fn find_protein_init_hsps_multi(
-    queries: &[&[u8]],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    window: i32,
-    x_dropoffs: &[i32],
-    cutoff_scores: &[i32],
-    mask_lowercase: bool,
-    matrix: ScoringMatrix,
-    word_size: usize,
-) -> Result<Vec<InitHsp>> {
-    let mut all_hits = Vec::new();
-    find_protein_init_hsps_by_chunk(
-        queries,
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        window,
-        x_dropoffs,
-        cutoff_scores,
-        mask_lowercase,
-        matrix,
-        word_size,
-        |event| {
-            if let InitStageEvent::Chunk(_, _, _, chunk_hits) = event {
-                all_hits.extend_from_slice(chunk_hits);
-            }
-            Ok(())
-        },
-    )?;
-    Ok(all_hits)
-}
-
-// NCBI c++/src/algo/blast/core/blast_engine.c:478-552,840-850:
-// WordFinder and GetGappedScore operate on one chunk; the frame's
-// HSPListAppend occurs before scanning the next translated frame.
-pub(super) enum InitStageEvent<'a> {
-    Chunk(&'a QueryFrame, TranslatedChunk, &'a [Seed], &'a [InitHsp]),
-    FrameEnd(&'a QueryFrame),
-}
-
-// NCBI c++/src/algo/blast/core/blast_engine.c:478-552,804-841:
-// BlastInitHitListReset(init_hitlist); WordFinder(..., init_hitlist, ...);
-// if (init_hitlist->total == 0) continue;
-// GetGappedScore(..., init_hitlist, &hsp_list, ...);
-// Deliver each score-sorted initial HSP list before the next chunk scan.
-pub(super) fn find_protein_init_hsps_by_chunk(
-    queries: &[&[u8]],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    window: i32,
-    x_dropoffs: &[i32],
-    cutoff_scores: &[i32],
-    mask_lowercase: bool,
-    matrix: ScoringMatrix,
-    word_size: usize,
-    on_event: impl FnMut(InitStageEvent<'_>) -> Result<()>,
-) -> Result<()> {
-    find_protein_init_hsps_by_chunk_with_mask_mode(
-        queries,
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        window,
-        x_dropoffs,
-        cutoff_scores,
-        mask_lowercase,
-        matrix,
-        word_size,
-        false,
-        on_event,
-    )
-}
-
-// NCBI c++/src/algo/blast/core/blast_setup.c:614-638:
-// mask_at_hash = SBlastFilterOptionsMaskAtHash(filter_options);
-// if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
-// BLAST_ComplementMaskLocations(..., filter_maskloc, lookup_segments);
-// Soft masking retains the unmasked WordFinder query while lookup still
-// excludes the SEG intervals used by the candidate scanner.
-pub(super) fn find_protein_init_hsps_by_chunk_with_mask_mode(
-    queries: &[&[u8]],
-    subject: &[u8],
-    db_gencode: u8,
-    seg: Option<&SegParams>,
-    threshold: i32,
-    window: i32,
-    x_dropoffs: &[i32],
-    cutoff_scores: &[i32],
-    mask_lowercase: bool,
-    matrix: ScoringMatrix,
-    word_size: usize,
-    soft_masking: bool,
-    mut on_event: impl FnMut(InitStageEvent<'_>) -> Result<()>,
-) -> Result<()> {
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:547-583:
-    // cutoffs = word_params->cutoffs + curr_context;
-    // Require one cutoff per protein query for the indexed read.
-    ensure!(
-        x_dropoffs.len() == queries.len() && cutoff_scores.len() == queries.len(),
-        "one WordFinder x-drop and cutoff per query context"
-    );
-    // NCBI c++/src/algo/blast/core/blast_query_info.c:246-250:
-    // last context's query_offset + query_length is the sequence length;
-    // each preceding protein context ends with one NULLB separator.
-    let mut query_sequence = Vec::new();
-    let mut context_offsets = Vec::with_capacity(queries.len());
-    for query in queries {
-        context_offsets.push(i32::try_from(query_sequence.len())?);
-        // NCBI c++/src/algo/blast/core/blast_setup.c:614-625:
-        // if (!mask_at_hash) BlastSetUp_MaskQuery(query_blk, ...);
-        let frame = if soft_masking {
-            encode_protein_query_frame_with_seg(query, None)
-        } else {
-            encode_tblastn_lookup_query(query, seg, mask_lowercase)
-        };
-        query_sequence.extend_from_slice(&frame.aa_seq[1..]);
-    }
-    let mut diagonals = Diagonals::new(query_sequence.len().saturating_sub(1), window);
-    let word_size_i32 = i32::try_from(word_size)?;
-
-    scan_protein_words_by_chunk(
-        queries,
-        subject,
-        db_gencode,
-        seg,
-        threshold,
-        mask_lowercase,
-        matrix,
-        word_size,
-        |scan_event| {
-            let (frame, chunk, seeds) = match scan_event {
-                SeedScanEvent::FrameEnd(frame) => {
-                    on_event(InitStageEvent::FrameEnd(frame))?;
-                    return Ok(());
-                }
-                SeedScanEvent::Chunk(frame, chunk, seeds) => (frame, chunk, seeds),
-            };
-            // NCBI c++/src/algo/blast/core/blast_engine.c:478-552:
-            // WordFinder and GetGappedScore run before the next chunk scan.
-            let mut hits = Vec::new();
-            let subject_sequence = &frame.aa_seq[1 + chunk.offset..1 + chunk.offset + chunk.length];
-            for &seed in seeds {
-                let q = seed.query_offset as i32;
-                let s = seed.subject_offset as i32;
-                // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:516-547
-                // diag_coord = (query_offset - subject_offset) & diag_mask;
-                // if (diag_array[diag_coord].flag) {
-                //     if (subject_offset + diag_offset < last_hit) continue;
-                //     last_hit = subject_offset + diag_offset; flag = 0;
-                // } else {
-                //     last_hit = diag_array[diag_coord].last_hit - diag_offset;
-                //     diff = subject_offset - last_hit;
-                //     if (diff >= window) { last_hit = subject_offset + diag_offset; continue; }
-                //     if (diff < wordsize) continue;
-                // }
-                let index = ((q - s) & diagonals.mask) as usize;
-                let (last_hit, flag) = &mut diagonals.entries[index];
-                if *flag {
-                    if s + diagonals.offset < *last_hit {
-                        continue;
-                    }
-                    *last_hit = s + diagonals.offset;
-                    *flag = false;
-                    continue;
-                }
-                let previous = *last_hit - diagonals.offset;
-                let diff = s - previous;
-                if diff >= window {
-                    *last_hit = s + diagonals.offset;
-                    continue;
-                }
-                if diff < word_size_i32 {
-                    continue;
-                }
-                // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:550-588
-                // if (query_offset - diff < query_info->contexts[curr_context].query_offset)
-                //     { last_hit = subject_offset + diag_offset; continue; }
-                // score = s_BlastAaExtendTwoHit(matrix, subject, query,
-                //         last_hit + wordsize, subject_offset, query_offset,
-                //         cutoffs->x_dropoff, ..., wordsize, &right_extend, &s_last_off);
-                // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
-                // NCBI c++/src/algo/blast/core/aa_ungapped.c:562-579:
-                // curr_context = BSearchContextInfo(query_offset, query_info);
-                // if (query_offset - diff <
-                //     query_info->contexts[curr_context].query_offset) continue;
-                let context = context_offsets.partition_point(|&offset| offset <= q) - 1;
-                if q - diff < context_offsets[context] {
-                    *last_hit = s + diagonals.offset;
-                    continue;
-                }
-                // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
-                // s_BlastAaExtendTwoHit(matrix, ..., wordsize, ...);
-                let result = extend_two_hit(
-                    matrix,
-                    &query_sequence,
-                    subject_sequence,
-                    (previous + word_size_i32) as usize,
-                    s as usize,
-                    q as usize,
-                    x_dropoffs[context],
-                    word_size,
-                );
-                let Some(result) = result else {
-                    continue;
-                };
-                // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
-                // cutoffs = word_params->cutoffs + curr_context;
-                // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
-                if result.ungapped_data.score >= cutoff_scores[context] {
-                    hits.push(InitHsp {
-                        frame: frame.frame,
-                        chunk_offset: seed.chunk_offset,
-                        q_seed: seed.query_offset,
-                        s_seed: seed.subject_offset,
-                        q_start: result.ungapped_data.q_start,
-                        s_start: result.ungapped_data.s_start,
-                        length: result.ungapped_data.length,
-                        score: result.ungapped_data.score,
-                    });
-                }
-                // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:588-607
-                // if (right_extend) {
-                //     diag_array[diag_coord].flag = 1;
-                //     diag_array[diag_coord].last_hit =
-                //         s_last_off - (wordsize - 1) + diag_offset;
-                // } else { last_hit = subject_offset + diag_offset; }
-                if result.right_extend {
-                    *flag = true;
-                    *last_hit = result.s_last_off - (word_size_i32 - 1) + diagonals.offset;
-                } else {
-                    *last_hit = s + diagonals.offset;
-                }
-            }
-            // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
-            // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
-            // Blast_InitHitListSortByScore(init_hitlist);
-            // NCBI c++/src/algo/blast/core/blast_extend.c:273-313:
-            // compare score DESC, subject start ASC, length DESC, query start ASC.
-            // NCBI reference: c++/src/algo/blast/core/blast_extend.c:306-310
-            // ```c
-            //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-            //           sizeof(BlastInitHSP), score_compare_match);
-            // ```
-            // Stable, as glibc's qsort under the pinned NCBI BLAST+ (TN-5).
-            hits.sort_by(|a, b| {
-                b.score
-                    .cmp(&a.score)
-                    .then(a.s_start.cmp(&b.s_start))
-                    .then(b.length.cmp(&a.length))
-                    .then(a.q_start.cmp(&b.q_start))
-            });
-            // NCBI c++/src/algo/blast/core/aa_ungapped.c:609-614:
-            // Blast_ExtendWordExit(ewp, subject->length);
-            diagonals.finish_frame(chunk.length);
-            on_event(InitStageEvent::Chunk(frame, chunk, seeds, &hits))?;
-            Ok(())
-        },
-    )
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-547
 // ```c
 //             diag_coord = (query_offset - subject_offset) & diag_mask;
@@ -439,7 +87,7 @@ pub(super) fn find_protein_init_hsps_by_chunk_with_mask_mode(
 // unit. Each unit starts from the state of a fresh table, which is what the offset update at the
 // end of the previous WordFinder call gives (see the comment above), so units can run in any order
 // or at the same time.
-// EXPERIMENT (LOSAT_X_TBNPAR): the two-hit pass of one (frame, chunk) unit on its
+// The two-hit pass of one (frame, chunk) unit on its
 // own diagonal array.  NCBI c++/src/algo/blast/core/blast_extend.c:162-175 ends a
 // WordFinder call with `diag_table->offset += subject_length + window`, which
 // makes every entry of the previous call older than a full window: the first hit
@@ -455,9 +103,51 @@ pub(super) struct XTwoHit<'a> {
     pub matrix: ScoringMatrix,
     pub window: i32,
     pub word_size: usize,
+    /// EXPERIMENT (LOSAT_X_TBNUNGAP): the extension takes LOSAT_X_BPUNGAP's walks
+    /// ([`x_tbn_ungap`]).
+    x_ungap_fast: bool,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1088-1096
+// ```c
+// static Int4
+// s_BlastAaExtendTwoHit(Int4 ** matrix,
+//                       const BLAST_SequenceBlk * subject,
+//                       const BLAST_SequenceBlk * query,
+//                       Int4 s_left_off, Int4 s_right_off,
+//                       Int4 q_right_off, Int4 dropoff,
+//                       Int4 * hsp_q, Int4 * hsp_s, Int4 * hsp_len,
+//                       Boolean use_pssm, Int4 word_size,
+//                       Boolean * right_extend, Int4 * s_last_off)
+// ```
+// EXPERIMENT (LOSAT_X_TBNUNGAP): the two-hit extension of tblastn's word finder (`XTwoHit::pairs`)
+// with BLASTP's byte-table walks (`blastp/x_ungapped_fast.rs`, LOSAT_X_BPUNGAP, whose module doc
+// gives why the result is the reference's): the same statements in the same order, a residue pair
+// scored from one signed byte (`q << 5 | s`) instead of the matrix row, and the bounds of each walk
+// computed from the slice lengths as the reference computes them, so the walks stop where the
+// reference's do on every unit, also on a chunk that ends inside a frame. An extension whose codes
+// or X-drop the byte table does not cover (a code >= 32, an X-drop outside 1..=127, a word of more
+// than 11 residues) runs the reference. The table holds BLOSUM62's scores, the matrix of every
+// default tblastn search; another matrix keeps the reference. The walks read the table whatever
+// LOSAT_X_BPUNGAP says, so the path is taken only where `build_table` gives one (every BLOSUM62
+// score fits a byte; were it not so, the table the walks read would be the zeros of
+// `x_ungapped_fast::state`'s fallback). A strict-set switch (`utils/xswitch.rs`): on unless
+// `LOSAT_X_TBNUNGAP=0`.
+/// Whether a word finder with `matrix` takes LOSAT_X_BPUNGAP's walks (BLOSUM62, switch on).
+fn x_tbn_ungap(matrix: ScoringMatrix) -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| {
+        crate::utils::xswitch::on("LOSAT_X_TBNUNGAP") && x_ungapped_fast::build_table().is_some()
+    }) {
+        return false;
+    }
+    let own = matrix == ScoringMatrix::Blosum62;
+    crate::utils::xreach::x_reach!("LOSAT_X_TBNUNGAP", own);
+    own
 }
 
 impl<'a> XTwoHit<'a> {
+    #[cfg(test)]
     pub(super) fn new(
         query_sequence: &'a [u8],
         context_offsets: &'a [i32],
@@ -520,23 +210,8 @@ impl<'a> XTwoHit<'a> {
             matrix,
             window,
             word_size,
+            x_ungap_fast: x_tbn_ungap(matrix),
         }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:63-64,145-146
-    // ```c
-    //                 diag_table->offset = window_size;
-    //                 diag_table->window = window_size;
-    // ...
-    //         diag_table->hit_level_array = (DiagStruct *)
-    //             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-    // ```
-    // A new unit starts from the state of a freshly allocated table: offset = window_size and all
-    // entries zero (calloc).
-    /// Start a new unit (the state of `Diagonals::new`).
-    pub(super) fn reset(&mut self) {
-        self.diagonals.offset = self.window;
-        self.diagonals.entries.fill((0, false));
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:608-609
@@ -556,8 +231,8 @@ impl<'a> XTwoHit<'a> {
     // The end of NCBI's WordFinder call for one (frame, chunk). Every entry the unit wrote holds
     // at most `offset + subject_length - 1`, so after the step each one lies more than a window
     // behind any hit of the next unit: its first hit on a diagonal only records `last_hit` and
-    // clears `flag` (the tests of `pairs`), as on the table `reset` gives. Instead of `reset`
-    // before the next unit, this is what the next unit sees.
+    // clears `flag` (the tests of `pairs`), as on a table made afresh by `Diagonals::new`. The
+    // next unit sees this instead of a new table.
     /// End a unit of `subject_length` residues as NCBI does (the table is kept).
     pub(super) fn exit(&mut self, subject_length: usize) {
         self.diagonals.finish_frame(subject_length);
@@ -590,9 +265,8 @@ impl<'a> XTwoHit<'a> {
     //                         s_last_off - (wordsize - 1) + diag_offset;
     // ```
     // The body is the per-hit loop of the two-hit word finder (the same tests, extension and HSP
-    // saving as in find_protein_init_hsps_by_chunk_with_mask_mode), run on one filled offset array.
-    /// The loop body of `find_protein_init_hsps_by_chunk_with_mask_mode` for one
-    /// filled offset array.
+    // saving of aa_ungapped.c:516-606), run on one filled offset array.
+    /// The loop body of the two-hit word finder for one filled offset array.
     #[inline]
     pub(super) fn pairs(
         &mut self,
@@ -640,16 +314,34 @@ impl<'a> XTwoHit<'a> {
             }
             // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
             // s_BlastAaExtendTwoHit(matrix, ..., wordsize, ...);
-            let result = extend_two_hit(
-                self.matrix,
-                self.query_sequence,
-                subject_sequence,
-                (previous + word_size_i32) as usize,
-                s as usize,
-                q as usize,
-                self.x_dropoffs[context],
-                word_size,
-            );
+            let reference = || {
+                extend_two_hit(
+                    self.matrix,
+                    self.query_sequence,
+                    subject_sequence,
+                    (previous + word_size_i32) as usize,
+                    s as usize,
+                    q as usize,
+                    self.x_dropoffs[context],
+                    word_size,
+                )
+            };
+            // EXPERIMENT (LOSAT_X_TBNUNGAP): the byte-table walks (`x_tbn_ungap`); `None` = an
+            // extension outside the table's range, which runs the reference.
+            let result = if self.x_ungap_fast {
+                x_ungapped_fast::two_hit(
+                    self.query_sequence,
+                    subject_sequence,
+                    (previous + word_size_i32) as usize,
+                    s as usize,
+                    q as usize,
+                    self.x_dropoffs[context],
+                    word_size,
+                )
+                .unwrap_or_else(reference)
+            } else {
+                reference()
+            };
             let Some(result) = result else {
                 continue;
             };
@@ -679,7 +371,7 @@ impl<'a> XTwoHit<'a> {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (the tests of
     // `pairs`; tblastn/x_tbn_hitbf.rs module doc)
-    // EXPERIMENT (LOSAT_X_TBNHITBF): `x_hits_bf` takes the too-far and overlap outcomes; the
+    // `x_hits_bf` takes the too-far and overlap outcomes; the
     // body of `pairs` runs on each hit it stops at (a flag-1 cell or a candidate), in order.
     /// `pairs` with the too-far and overlap outcomes taken by `x_tbn_hitbf::x_hits_bf`; `pairs`
     /// itself when `x_tbn_hitbf::fits` does not hold.
@@ -719,50 +411,6 @@ impl<'a> XTwoHit<'a> {
         }
     }
 
-    // No NCBI counterpart: runs `pairs` and `x_pairs_bf` on one offset array and compares them
-    // (LOSAT_X_TBNHITBFSHADOW); the table and init HSPs kept are those of `x_pairs_bf`.
-    /// EXPERIMENT (LOSAT_X_TBNHITBFSHADOW): `pairs` on a copy of the table, then `x_pairs_bf`;
-    /// panics at the first difference of the init HSPs or of the tables.
-    #[inline(never)]
-    pub(super) fn x_pairs_bf_shadow(
-        &mut self,
-        frame: i8,
-        chunk_offset: u32,
-        subject_sequence: &[u8],
-        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
-        hits: &mut Vec<InitHsp>,
-    ) {
-        let outside = !super::x_tbn_hitbf::fits(self.window, self.word_size);
-        super::x_tbn_hitbf::x_shadow_count(pairs.len(), outside);
-        if outside {
-            self.pairs(frame, chunk_offset, subject_sequence, pairs, hits);
-            return;
-        }
-        if pairs.is_empty() {
-            return;
-        }
-        let before = self.diagonals.entries.clone();
-        let mut reference_hits = Vec::new();
-        self.pairs(
-            frame,
-            chunk_offset,
-            subject_sequence,
-            pairs,
-            &mut reference_hits,
-        );
-        let reference_table = std::mem::replace(&mut self.diagonals.entries, before);
-        let start = hits.len();
-        self.x_pairs_bf(frame, chunk_offset, subject_sequence, pairs, hits);
-        super::x_tbn_hitbf::x_shadow_compare(
-            frame,
-            chunk_offset,
-            &hits[start..],
-            &reference_hits,
-            &self.diagonals.entries,
-            &reference_table,
-        );
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:274-309
     // ```c
     //     if (0 == (result = BLAST_CMP(h2->ungapped_data->score,
@@ -795,6 +443,10 @@ impl<'a> XTwoHit<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::tblastn::search_gapped::{
+        preliminary_stages, preliminary_stages_of, word_finder_profile,
+    };
+    use crate::sequence::packed_subject::SubjectNt;
     use std::fs;
 
     // NCBI c++/src/algo/blast/core/blast_engine.c:259-310,478-487:
@@ -887,20 +539,23 @@ mod tests {
                 }
             })
             .collect();
-        let actual = find_protein_init_hsps_multi(
+        let actual = preliminary_stages(
             &refs,
             subject,
             1,
-            None,
-            16,
-            60,
-            &[21, 21, 0],
-            &[0, 0, i32::MAX],
-            false,
-            ScoringMatrix::Blosum45,
-            2,
+            word_finder_profile(
+                None,
+                16,
+                60,
+                &[21, 21, 0],
+                &[0, 0, i32::MAX],
+                false,
+                ScoringMatrix::Blosum45,
+                2,
+            ),
         )
-        .unwrap();
+        .unwrap()
+        .initial;
         if actual != expected {
             let first = actual
                 .iter()
@@ -948,18 +603,23 @@ mod tests {
                 }
             })
             .collect();
-        let actual = find_blosum62_word3_init_hsps_multi(
+        let actual = preliminary_stages(
             &refs,
             subject,
             1,
-            None,
-            13,
-            40,
-            &[16, 16, 0],
-            &[0, 0, i32::MAX],
-            false,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16, 16, 0],
+                &[0, 0, i32::MAX],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
         )
-        .unwrap();
+        .unwrap()
+        .initial;
         if actual != expected {
             let first = actual
                 .iter()
@@ -990,34 +650,44 @@ mod tests {
         let queries = read_fasta(&format!("{root}query.faa"));
         let refs: Vec<&[u8]> = queries.iter().map(|(_, seq)| seq.as_slice()).collect();
         let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
-        let equal = find_blosum62_word3_init_hsps_multi(
+        let equal = preliminary_stages(
             &refs,
             subject,
             1,
-            None,
-            13,
-            40,
-            &[16, 16, 0],
-            &[20, 393, i32::MAX],
-            false,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16, 16, 0],
+                &[20, 393, i32::MAX],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
         )
-        .unwrap();
+        .unwrap()
+        .initial;
         assert!(equal.iter().any(|h| h.score == 20 && h.q_seed < 121));
         assert!(equal
             .iter()
             .any(|h| h.score == 393 && (121..192).contains(&h.q_seed)));
-        let above = find_blosum62_word3_init_hsps_multi(
+        let above = preliminary_stages(
             &refs,
             subject,
             1,
-            None,
-            13,
-            40,
-            &[16, 16, 0],
-            &[21, 394, i32::MAX],
-            false,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16, 16, 0],
+                &[21, 394, i32::MAX],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
         )
-        .unwrap();
+        .unwrap()
+        .initial;
         assert!(!above.iter().any(|h| h.score == 20 && h.q_seed < 121));
         assert!(!above
             .iter()
@@ -1066,18 +736,23 @@ mod tests {
             })
             .collect();
         assert_eq!(expected.len(), 32);
-        let actual = find_blosum62_word3_init_hsps_multi(
+        let actual = preliminary_stages(
             &refs,
             subject,
             1,
-            None,
-            13,
-            40,
-            &[16, 1, 0],
-            &[0, 0, i32::MAX],
-            false,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16, 1, 0],
+                &[0, 0, i32::MAX],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
         )
-        .unwrap();
+        .unwrap()
+        .initial;
         if actual != expected {
             let first = actual
                 .iter()
@@ -1124,8 +799,14 @@ mod tests {
             .collect();
         let mut actual = Vec::new();
         for (id, subject) in &subjects {
-            for hit in
-                find_blosum62_word3_init_hsps(query, subject, 1, None, 13, 40, 16, 0, true).unwrap()
+            for hit in preliminary_stages(
+                &[query],
+                subject,
+                1,
+                word_finder_profile(None, 13, 40, &[16], &[0], true, ScoringMatrix::Blosum62, 3),
+            )
+            .unwrap()
+            .initial
             {
                 actual.push((id.clone(), hit));
             }
@@ -1162,8 +843,14 @@ mod tests {
                 }
             })
             .collect();
-        let actual =
-            find_blosum62_word3_init_hsps(query, subject, 1, None, 13, 40, 16, 0, false).unwrap();
+        let actual = preliminary_stages(
+            &[query],
+            subject,
+            1,
+            word_finder_profile(None, 13, 40, &[16], &[0], false, ScoringMatrix::Blosum62, 3),
+        )
+        .unwrap()
+        .initial;
         assert_eq!(actual, expected);
     }
 
@@ -1203,8 +890,23 @@ mod tests {
                 }
             })
             .collect();
-        let actual =
-            find_blosum62_word3_init_hsps(query, subject, 32, None, 13, 40, 16, 13, false).unwrap();
+        let actual = preliminary_stages(
+            &[query],
+            subject,
+            32,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16],
+                &[13],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
+        )
+        .unwrap()
+        .initial;
         assert_eq!(actual, expected);
     }
 
@@ -1253,24 +955,31 @@ mod tests {
         assert!(observed.iter().all(|pair| *pair == (16, 0)));
         let mut actual = Vec::new();
         for (id, subject) in &subjects {
-            for hit in find_blosum62_word3_init_hsps(query, subject, 1, None, 13, 40, 16, 0, false)
-                .unwrap()
+            for hit in preliminary_stages(
+                &[query],
+                subject,
+                1,
+                word_finder_profile(None, 13, 40, &[16], &[0], false, ScoringMatrix::Blosum62, 3),
+            )
+            .unwrap()
+            .initial
             {
                 actual.push((id.clone(), hit));
             }
         }
         assert_eq!(actual, expected);
     }
-    // NCBI c++/src/algo/blast/core/blast_engine.c:478-552:
-    // s_GetNextSubjectChunk precedes each WordFinder call and the hit list
-    // is reset before the next chunk. Subject offsets stay chunk-local.
-    #[test]
-    fn long_subject_chunk_wordfinder_hsps_match_ncbi() {
+    // No NCBI counterpart: the inputs and NCBI's initial HSPs of the long-subject tests below
+    // (docs/evidence/tlosan_stage_c/long_chunk_20260924): a 15,000,962-base subject whose frames
+    // have two chunks each.
+    fn long_chunk_case() -> (Vec<u8>, Vec<u8>, Vec<InitHsp>) {
         let root = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../docs/evidence/tlosan_stage_c/"
         );
-        let query = &read_fasta(&format!("{root}long_chunk_20260924/query.faa"))[0].1;
+        let query = read_fasta(&format!("{root}long_chunk_20260924/query.faa"))[0]
+            .1
+            .clone();
         let inserts = read_fasta(&format!("{root}run_20260923/subjects.fna"));
         let plus1 = &inserts.iter().find(|(id, _)| id == "plus1").unwrap().1;
         assert_eq!(plus1.len(), 362);
@@ -1303,12 +1012,91 @@ mod tests {
                 }
             })
             .collect();
+        (query, subject, expected)
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_engine.c:478-552:
+    // s_GetNextSubjectChunk precedes each WordFinder call and the hit list
+    // is reset before the next chunk. Subject offsets stay chunk-local.
+    #[test]
+    fn long_subject_chunk_wordfinder_hsps_match_ncbi() {
+        let (query, subject, expected) = long_chunk_case();
+        let query = &query;
         // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
         // cutoffs = word_params->cutoffs + curr_context;
         // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
         // Retained long-fixture PARAM rows give cutoff 28.
-        let actual =
-            find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 28, false).unwrap();
+        let actual = preliminary_stages(
+            &[query],
+            &subject,
+            1,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16],
+                &[28],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
+        )
+        .unwrap()
+        .initial;
+        assert_eq!(actual, expected);
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_engine.c:478-552,805-812 (above)
+    // The same subject packed, as every `-db` sequence is: with LOSAT_X_TBNUNITXLATE its plan has
+    // no residues (its first frame has more than 1 MiB), and each unit translates its chunk and
+    // 4,096 residues past it (the first chunk of a frame) or to the end sentinel (the second) when
+    // it runs; the initial HSPs are NCBI's either way.
+    #[test]
+    fn long_packed_subject_chunk_wordfinder_hsps_match_ncbi() {
+        let (query, subject, expected) = long_chunk_case();
+        let store =
+            crate::sequence::packed_subject::PackedNucleotide::from_subject_letters(&subject)
+                .expect("letters");
+        let plan = super::super::search_seed::x_scan_plan(
+            &[&query],
+            SubjectNt::Packed(&store).into(),
+            1,
+            None,
+            13,
+            false,
+            ScoringMatrix::Blosum62,
+            3,
+            &std::sync::OnceLock::new(),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(plan.subject.units.len(), 12);
+        let lean = super::super::x_subject_translate::x_units_translate(subject.len());
+        assert!(plan
+            .subject
+            .frames
+            .iter()
+            .all(|frame| frame.aa_seq.is_empty() == lean));
+        drop(plan);
+        // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590 (above): cutoff 28.
+        let actual = preliminary_stages_of(
+            &[&query],
+            SubjectNt::Packed(&store),
+            1,
+            word_finder_profile(
+                None,
+                13,
+                40,
+                &[16],
+                &[28],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
+        )
+        .unwrap()
+        .initial;
         assert_eq!(actual, expected);
     }
     // NCBI c++/src/algo/blast/core/blast_engine.c:283-310:
@@ -1332,23 +1120,31 @@ mod tests {
             subject.extend_from_slice(b"ATG");
         }
         subject[14_999_700..15_000_000].make_ascii_lowercase();
-        let resolved = resolve_local_subject_ncbi2na(&subject).unwrap();
-        let code = GeneticCode::try_from_id(1).unwrap();
-        let frames = generate_frames(&resolved, &code);
-        let negative_first_length = frames.iter().find(|f| f.frame == -1).unwrap().aa_len;
-        let actual_ranges: Vec<_> = frames
+        // The (frame, chunk, scan ranges) units the search runs: the unit path's plan.
+        let plan = super::super::search_seed::x_scan_plan(
+            &[query],
+            SubjectNt::Letters(&subject).into(),
+            1,
+            None,
+            13,
+            true,
+            ScoringMatrix::Blosum62,
+            3,
+            &std::sync::OnceLock::new(),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        let actual_ranges: Vec<_> = plan
+            .subject
+            .units
             .iter()
-            .flat_map(|frame| {
-                super::super::search_seed::translated_chunk_scan_ranges(
-                    &subject,
-                    frame.frame,
-                    frame.aa_len,
-                    negative_first_length,
-                    true,
+            .map(|(frame_index, chunk, ranges)| {
+                (
+                    plan.subject.frames[*frame_index].frame,
+                    chunk.length,
+                    ranges.clone(),
                 )
-                .unwrap()
-                .into_iter()
-                .map(|(chunk, ranges)| (frame.frame, chunk.length, ranges))
             })
             .collect();
         assert_eq!(
@@ -1357,8 +1153,7 @@ mod tests {
                 "{root}masked_chunk_boundary_20260924/chunk_ranges.tsv"
             ))
         );
-        drop(frames);
-        drop(resolved);
+        drop(plan);
         let trace = fs::read_to_string(format!(
             "{root}masked_chunk_boundary_20260924/frame_chunks.tsv"
         ))
@@ -1385,8 +1180,14 @@ mod tests {
         // cutoffs = word_params->cutoffs + curr_context;
         // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
         // Retained long-fixture PARAM rows give cutoff 28.
-        let actual =
-            find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 28, true).unwrap();
+        let actual = preliminary_stages(
+            &[query],
+            &subject,
+            1,
+            word_finder_profile(None, 13, 40, &[16], &[28], true, ScoringMatrix::Blosum62, 3),
+        )
+        .unwrap()
+        .initial;
         assert_eq!(actual, expected);
     }
     // NCBI c++/src/algo/blast/core/blast_engine.c:283-310,478-500:
@@ -1421,23 +1222,31 @@ mod tests {
                 (f[2].parse().unwrap(), f[3].parse().unwrap())
             })
             .collect();
-        let resolved = resolve_local_subject_ncbi2na(&subject).unwrap();
-        let code = GeneticCode::try_from_id(1).unwrap();
-        let frames = generate_frames(&resolved, &code);
-        let negative_first_length = frames.iter().find(|f| f.frame == -1).unwrap().aa_len;
-        let actual_ranges: Vec<_> = frames
+        // The (frame, chunk, scan ranges) units the search runs: the unit path's plan.
+        let plan = super::super::search_seed::x_scan_plan(
+            &[query],
+            SubjectNt::Letters(&subject).into(),
+            1,
+            None,
+            13,
+            true,
+            ScoringMatrix::Blosum62,
+            3,
+            &std::sync::OnceLock::new(),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        let actual_ranges: Vec<_> = plan
+            .subject
+            .units
             .iter()
-            .flat_map(|frame| {
-                super::super::search_seed::translated_chunk_scan_ranges(
-                    &subject,
-                    frame.frame,
-                    frame.aa_len,
-                    negative_first_length,
-                    true,
+            .map(|(frame_index, chunk, ranges)| {
+                (
+                    plan.subject.frames[*frame_index].frame,
+                    chunk.length,
+                    ranges.clone(),
                 )
-                .unwrap()
-                .into_iter()
-                .map(|(chunk, ranges)| (frame.frame, chunk.length, ranges))
             })
             .collect();
         assert_eq!(
@@ -1451,8 +1260,7 @@ mod tests {
             actual_ranges,
             ncbi_chunk_range_rows(&format!("{root}no_range_middle_20260924/chunk_ranges.tsv"))
         );
-        drop(frames);
-        drop(resolved);
+        drop(plan);
         let expected: Vec<_> = trace
             .lines()
             .filter(|line| line.starts_with("INIT\t"))
@@ -1475,8 +1283,14 @@ mod tests {
         // cutoffs = word_params->cutoffs + curr_context;
         // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
         // Retained long-fixture PARAM rows give cutoff 30.
-        let actual =
-            find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 30, true).unwrap();
+        let actual = preliminary_stages(
+            &[query],
+            &subject,
+            1,
+            word_finder_profile(None, 13, 40, &[16], &[30], true, ScoringMatrix::Blosum62, 3),
+        )
+        .unwrap()
+        .initial;
         assert_eq!(actual, expected);
     }
 
@@ -1521,12 +1335,12 @@ mod tests {
     //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
     //         }
     // ```
-    // LOSAT_X_TBNSTATE: one table carried through many units with `exit` after each, as NCBI's
-    // thread carries it through its subjects, gives every unit the hits of a cleared table
-    // (`reset`): from a new table, across the clear near INT4_MAX / 4, and when `with_table`
-    // takes it over for another query set of the same table length. The units are fragments of
-    // the queries with substitutions, so that two-hit extensions (and the `flag` path after a
-    // right extension) happen on many diagonals.
+    // The unit path's kept state: one table carried through many units with `exit` after each, as
+    // NCBI's thread carries it through its subjects, gives every unit the hits of a cleared table
+    // (a table made afresh): from a new table, across the clear near INT4_MAX / 4, and when
+    // `with_table` takes it over for another query set of the same table length. The units are
+    // fragments of the queries with substitutions, so that two-hit extensions (and the `flag` path
+    // after a right extension) happen on many diagonals.
     #[test]
     fn x_two_hit_table_kept_across_units_gives_the_hits_of_a_cleared_table() {
         let mut seed = 0x2545_f491_u64;
@@ -1567,25 +1381,33 @@ mod tests {
         let x_dropoffs = [16, 16, 16];
         let cutoffs = [24, 24, 24];
         let window = 40;
-        /// The hits of every unit in turn: on a cleared table (`reset` first) or on the kept one
-        /// (`exit` after).
-        fn hits_of(
-            two_hit: &mut XTwoHit<'_>,
+        /// The hits of every unit in turn, each on a table made afresh by `fresh` (a cleared table).
+        fn cleared_hits<'q>(
+            fresh: impl Fn() -> XTwoHit<'q>,
             query: &[u8],
             units: &[Vec<u8>],
-            keep: bool,
         ) -> Vec<Vec<InitHsp>> {
             units
                 .iter()
                 .map(|unit| {
-                    if !keep {
-                        two_hit.reset();
-                    }
+                    let mut hits = Vec::new();
+                    fresh().pairs(1, 0, unit, &x_word_pairs(query, unit), &mut hits);
+                    hits
+                })
+                .collect()
+        }
+        /// The hits of every unit in turn on one kept table (`exit` after each unit).
+        fn kept_hits(
+            two_hit: &mut XTwoHit<'_>,
+            query: &[u8],
+            units: &[Vec<u8>],
+        ) -> Vec<Vec<InitHsp>> {
+            units
+                .iter()
+                .map(|unit| {
                     let mut hits = Vec::new();
                     two_hit.pairs(1, 0, unit, &x_word_pairs(query, unit), &mut hits);
-                    if keep {
-                        two_hit.exit(unit.len());
-                    }
+                    two_hit.exit(unit.len());
                     hits
                 })
                 .collect()
@@ -1604,13 +1426,13 @@ mod tests {
                 3,
             )
         };
-        let cleared = hits_of(&mut new_a(None), &query_a, &units, false);
+        let cleared = cleared_hits(|| new_a(None), &query_a, &units);
         let found: usize = cleared.iter().map(Vec::len).sum();
         assert!(found >= 60, "the units must give hits ({found})");
 
         let mut kept = new_a(None);
         assert_eq!(
-            hits_of(&mut kept, &query_a, &units, true),
+            kept_hits(&mut kept, &query_a, &units),
             cleared,
             "kept table"
         );
@@ -1619,7 +1441,7 @@ mod tests {
         let start = i32::MAX / 4 - 5_000;
         near_limit.diagonals.offset = start;
         assert_eq!(
-            hits_of(&mut near_limit, &query_a, &units, true),
+            kept_hits(&mut near_limit, &query_a, &units),
             cleared,
             "across the clear"
         );
@@ -1644,7 +1466,7 @@ mod tests {
                 3,
             )
         };
-        let cleared_b = hits_of(&mut new_b(None), &query_b, &units, false);
+        let cleared_b = cleared_hits(|| new_b(None), &query_b, &units);
         let table = near_limit.into_table();
         let entries = table.entries.as_ptr();
         let mut taken_over = new_b(Some(table));
@@ -1654,7 +1476,7 @@ mod tests {
             "the table must be taken over"
         );
         assert_eq!(
-            hits_of(&mut taken_over, &query_b, &units, true),
+            kept_hits(&mut taken_over, &query_b, &units),
             cleared_b,
             "taken over"
         );
@@ -1678,7 +1500,7 @@ mod tests {
         );
     }
 
-    // LOSAT_X_TBNHITBF: `x_pairs_bf` against `pairs` on units made as in the test above (fragments
+    // `x_pairs_bf` against `pairs` on units made as in the test above (fragments
     // of the queries with substitutions, so that extensions and flag-1 cells occur), on cleared
     // tables, on a kept table and across the clear near INT4_MAX / 4, for windows 40 and
     // wordsize + 1; each unit's offset pairs come in arrays of random lengths, as the scan fills
@@ -1752,8 +1574,8 @@ mod tests {
                 }
                 for (u, unit) in units.iter().enumerate() {
                     if mode == "cleared" {
-                        reference.reset();
-                        branch_free.reset();
+                        reference = new();
+                        branch_free = new();
                     }
                     let pairs = x_word_pairs(&query, unit);
                     // The reference one hit at a time, its outcomes counted from the cell before.
@@ -1803,35 +1625,99 @@ mod tests {
         );
     }
 
-    // LOSAT_X_TBNHITBFSHADOW: the shadow keeps the branch-free run's init HSPs and table, which are
-    // those of `pairs`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1088-1091
+    // ```c
+    // static Int4
+    // s_BlastAaExtendTwoHit(Int4 ** matrix,
+    //                       const BLAST_SequenceBlk * subject,
+    //                       const BLAST_SequenceBlk * query,
+    // ```
+    // EXPERIMENT (LOSAT_X_TBNUNGAP): the word finder with the byte-table walks gives, unit after
+    // unit on one kept table (`exit` after each), the init HSPs and the diagonal table of the word
+    // finder with the reference extension: on whole units and on units cut short (a chunk that ends
+    // inside a frame), with stop codons and X among the subject letters, and with a context whose
+    // X-drop the byte table does not cover (the reference runs for its candidates).
     #[test]
-    fn x_pairs_bf_shadow_keeps_the_hits_of_pairs() {
-        let raw: &[u8] = b"MKVLAAGIVGLLLAQWERTYIPASDFGHKLCVNM";
-        let (query, offsets) = x_concatenated(&[raw]);
-        let mut encoded =
-            encode_tblastn_lookup_query(raw, None, false).aa_seq[1..=raw.len()].to_vec();
-        encoded.extend_from_within(..);
-        let new = || {
-            XTwoHit::new(
-                &query,
-                &offsets,
-                &[16],
-                &[10],
-                ScoringMatrix::Blosum62,
-                40,
-                3,
-            )
+    fn x_byte_table_walks_give_the_reference_hits_and_table() {
+        let mut seed = 0x9e37_79b9_u64;
+        let mut next = move |bound: usize| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((seed >> 33) as usize) % bound
         };
-        let pairs = x_word_pairs(&query, &encoded);
-        let mut reference = new();
-        let mut expected = Vec::new();
-        reference.pairs(1, 0, &encoded, &pairs, &mut expected);
-        let mut shadow = new();
-        let mut got = Vec::new();
-        shadow.x_pairs_bf_shadow(1, 0, &encoded, &pairs, &mut got);
-        assert!(!expected.is_empty());
-        assert_eq!(got, expected);
-        assert_eq!(shadow.x_table(), reference.x_table());
+        const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+        const SUBJECT_LETTERS: &[u8] = b"ACDEFGHIKLMNPQRSTVWYX*";
+        fn random(letters: &[u8], length: usize, next: &mut dyn FnMut(usize) -> usize) -> Vec<u8> {
+            (0..length).map(|_| letters[next(letters.len())]).collect()
+        }
+        let queries: Vec<Vec<u8>> = [170, 80, 230]
+            .into_iter()
+            .map(|length| random(RESIDUES, length, &mut next))
+            .collect();
+        let mut units = Vec::new();
+        for _ in 0..60 {
+            let mut unit = random(SUBJECT_LETTERS, next(40), &mut next);
+            for _ in 0..1 + next(3) {
+                let query = &queries[next(queries.len())];
+                let start = next(query.len() - 30);
+                let end = (start + 30 + next(80)).min(query.len());
+                for &residue in &query[start..end] {
+                    unit.push(if next(100) < 15 {
+                        SUBJECT_LETTERS[next(SUBJECT_LETTERS.len())]
+                    } else {
+                        residue
+                    });
+                }
+                unit.extend(random(SUBJECT_LETTERS, next(30), &mut next));
+            }
+            units.push(
+                encode_tblastn_lookup_query(&unit, None, false).aa_seq[1..=unit.len()].to_vec(),
+            );
+        }
+        let set: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+        let (query, offsets) = x_concatenated(&set);
+        let cutoffs = [24, 24, 24];
+        for x_dropoffs in [[16, 16, 16], [16, 300, 7]] {
+            let new = |fast: bool| {
+                let mut two_hit = XTwoHit::with_table(
+                    None,
+                    &query,
+                    &offsets,
+                    &x_dropoffs,
+                    &cutoffs,
+                    ScoringMatrix::Blosum62,
+                    40,
+                    3,
+                );
+                two_hit.x_ungap_fast = fast;
+                two_hit
+            };
+            let (mut fast, mut reference) = (new(true), new(false));
+            let mut found = 0;
+            for unit in &units {
+                for end in [unit.len(), unit.len() * 2 / 3] {
+                    let unit = &unit[..end];
+                    let pairs = x_word_pairs(&query, unit);
+                    let (mut got, mut want) = (Vec::new(), Vec::new());
+                    fast.pairs(1, 0, unit, &pairs, &mut got);
+                    reference.pairs(1, 0, unit, &pairs, &mut want);
+                    assert_eq!(got, want, "X-drops {x_dropoffs:?}: init HSPs");
+                    assert_eq!(
+                        fast.diagonals.entries, reference.diagonals.entries,
+                        "X-drops {x_dropoffs:?}: diagonal table"
+                    );
+                    found += got.len();
+                    fast.exit(unit.len());
+                    reference.exit(unit.len());
+                }
+            }
+            assert!(
+                found >= 60,
+                "X-drops {x_dropoffs:?}: the units must give hits ({found})"
+            );
+        }
+        // The rule: another matrix keeps the reference extension.
+        assert!(!x_tbn_ungap(ScoringMatrix::Blosum45));
     }
 }

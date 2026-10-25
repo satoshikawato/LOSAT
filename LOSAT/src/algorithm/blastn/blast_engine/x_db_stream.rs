@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BNDBSTREAM / LOSAT_X_BNDBSTREAMSHADOW): the parallel preliminary stage of
+//! EXPERIMENT (LOSAT_X_BNDBSTREAM): the parallel preliminary stage of
 //! a `-db` search without rounds. The pool threads claim the blocks once each in ordinal order,
 //! and one of them (the owner) hands each block's results to the hit lists in that order while
 //! the others go on with the next blocks (`x_bnstream::search_in_order`, the driver of the
@@ -52,20 +52,11 @@
 //! (blast_engine.c:1409, 1553-1554, quoted above `search_blocks`); the hand-over in ordinal order
 //! keeps the order of its one-thread loop.
 //!
-//! `LOSAT_X_BNDBSTREAM` is a switch of the strict set: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. It acts for every BLASTN task with `-db` at more than
+//! `LOSAT_X_BNDBSTREAM` is a switch of the strict set: on unless it is `0`.
+//! It acts for every BLASTN task with `-db` at more than
 //! one thread; at one thread the blocks are searched one after another, as without it.
-//!
-//! `LOSAT_X_BNDBSTREAMSHADOW=1` (shadow mode, implies the switch): each parallel preliminary stage
-//! runs twice, with the window and with the rounds, and compares every result handed to the hit
-//! lists (ordinal and `Debug` text, in order), the errors' texts and the counts of good initial
-//! extensions; the count is left as one search leaves it and the results are merged once. A
-//! difference prints `[X_SHADOW] BNDBSTREAM ... DIFFERENT` and stops the run (panic); otherwise
-//! `[X_SHADOW] BNDBSTREAM searches=<parallel stages> blocks=<blocks> merged=<results compared>
-//! identical` at exit.
 
-use std::fmt::Debug;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 use anyhow::Result;
@@ -73,28 +64,13 @@ use anyhow::Result;
 use crate::seqdb::{BlockRange, SeqDb};
 use crate::utils::threading::SearchPool;
 
-use super::{block_subject, search_read_error, search_rounds, BlastnSubjectRef};
+use super::{block_subject, search_read_error, BlastnSubjectRef};
 
-/// No NCBI counterpart: the modes of LOSAT_X_BNDBSTREAM.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum XDbStream {
-    Off,
-    On,
-    Shadow,
-}
-
-/// No NCBI counterpart (scheduling only): the mode of LOSAT_X_BNDBSTREAM.
-pub(super) fn x_bn_db_stream() -> XDbStream {
-    static MODE: OnceLock<XDbStream> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BNDBSTREAMSHADOW").is_some() {
-            XDbStream::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_BNDBSTREAM") {
-            XDbStream::On
-        } else {
-            XDbStream::Off
-        }
-    })
+/// No NCBI counterpart (scheduling only): whether LOSAT_X_BNDBSTREAM is on (a strict-set switch:
+/// on unless it is `0`).
+pub(super) fn x_bn_db_stream() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNDBSTREAM"))
 }
 
 // No NCBI counterpart (scheduling only): the window; it changes no value NCBI computes.
@@ -136,8 +112,7 @@ fn blocks_of(db: &SeqDb, first_ordinal: u32, block_bytes: u64, max: usize) -> Ve
 // ```
 /// The window over the whole database: its blocks of at most `block_bytes`, `segment` blocks
 /// after `segment` blocks (`X_SEGMENT_BLOCKS`), through `search_window`; the first error in
-/// ordinal order is returned after the blocks before it are merged. Also returns the number of
-/// blocks searched.
+/// ordinal order is returned after the blocks before it are merged.
 fn stream_blocks<T, R, I, K, M>(
     db: &SeqDb,
     pool: &SearchPool<'_>,
@@ -146,7 +121,7 @@ fn stream_blocks<T, R, I, K, M>(
     new_scratch: &I,
     search: &K,
     merge: &mut M,
-) -> (Result<()>, u64)
+) -> Result<()>
 where
     R: Send,
     I: Fn() -> T + Sync + Send,
@@ -154,115 +129,42 @@ where
     M: FnMut(u32, R) + Send,
 {
     let mut next_ordinal = 0u32;
-    let mut blocks_searched = 0u64;
     loop {
         let blocks = blocks_of(db, next_ordinal, block_bytes, segment.max(1));
         let Some(last) = blocks.last() else {
-            return (Ok(()), blocks_searched);
+            return Ok(());
         };
         next_ordinal = last.end_ordinal();
-        blocks_searched += blocks.len() as u64;
-        if let Err(error) = search_window(db, pool, &blocks, new_scratch, search, merge) {
-            return (Err(error), blocks_searched);
-        }
+        search_window(db, pool, &blocks, new_scratch, search, merge)?;
     }
 }
 
-/// The preliminary stage of `search_blocks_of` at more than one thread with LOSAT_X_BNDBSTREAM
-/// (`mode` On or Shadow): the blocks of at most `block_bytes` searched by the threads of `pool`
-/// and their results passed to `merge` in ordinal order (module documentation). The shadow
-/// mode compares the results with those of the rounds of `blocks_per_thread` blocks per thread.
-#[allow(clippy::too_many_arguments)]
+/// The preliminary stage of `search_blocks_of` at more than one thread with LOSAT_X_BNDBSTREAM:
+/// the blocks of at most `block_bytes` searched by the threads of `pool` and their results passed
+/// to `merge` in ordinal order (module documentation).
 pub(super) fn x_search_blocks_stream<T, R, I, K, M>(
-    mode: XDbStream,
     db: &SeqDb,
     pool: &SearchPool<'_>,
     block_bytes: u64,
-    blocks_per_thread: usize,
     new_scratch: &I,
     search: &K,
     merge: &mut M,
-    extends: &AtomicU64,
 ) -> Result<()>
 where
-    R: Send + Debug,
+    R: Send,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,
 {
-    if mode != XDbStream::Shadow {
-        return stream_blocks(
-            db,
-            pool,
-            block_bytes,
-            X_SEGMENT_BLOCKS,
-            new_scratch,
-            search,
-            merge,
-        )
-        .0;
-    }
-    let mut found: Vec<(u32, R)> = Vec::new();
-    let before = extends.load(Ordering::Relaxed);
-    let (result, blocks) = stream_blocks(
+    stream_blocks(
         db,
         pool,
         block_bytes,
         X_SEGMENT_BLOCKS,
         new_scratch,
         search,
-        &mut |ordinal, kept| found.push((ordinal, kept)),
-    );
-    let counted = extends.load(Ordering::Relaxed);
-    let mut expected: Vec<(u32, String)> = Vec::new();
-    let expected_result = search_rounds(
-        db,
-        pool,
-        block_bytes,
-        blocks_per_thread,
-        new_scratch,
-        search,
-        &mut |ordinal, kept| expected.push((ordinal, format!("{kept:?}"))),
-    );
-    // The rounds searched the database once more: leave the count as one search leaves it.
-    let counted_ref = extends.load(Ordering::Relaxed).wrapping_sub(counted);
-    extends.store(counted, Ordering::Relaxed);
-    let compared = match (&result, &expected_result) {
-        (Ok(()), Ok(())) => {
-            let counted_window = counted.wrapping_sub(before);
-            if counted_window != counted_ref {
-                x_shadow_difference(format!(
-                    "{counted_window} good initial extensions counted, {counted_ref} in rounds"
-                ));
-            }
-            x_compare_merged(&found, &expected)
-        }
-        (Err(error), Err(expected_error)) => {
-            let (text, expected_text) = (format!("{error:#}"), format!("{expected_error:#}"));
-            if text != expected_text {
-                x_shadow_difference(format!(
-                    "the search's error differs from the one in rounds: {text} / {expected_text}"
-                ));
-            }
-            // Both stop at the first failing block in ordinal order, with the same blocks: the
-            // blocks before it are merged alike.
-            x_compare_merged(&found, &expected)
-        }
-        (Ok(()), Err(expected)) => x_shadow_difference(format!(
-            "the search succeeded; in rounds it failed: {expected:#}"
-        )),
-        (Err(error), Ok(())) => x_shadow_difference(format!(
-            "the search failed, in rounds it succeeded: {error:#}"
-        )),
-    };
-    X_SEARCHES.fetch_add(1, Ordering::Relaxed);
-    X_BLOCKS.fetch_add(blocks, Ordering::Relaxed);
-    X_MERGED.fetch_add(compared, Ordering::Relaxed);
-    result?;
-    for (ordinal, kept) in found {
-        merge(ordinal, kept);
-    }
-    Ok(())
+        merge,
+    )
 }
 
 // No NCBI counterpart (scheduling only): the window (module documentation).
@@ -289,7 +191,7 @@ where
             return Ok(Vec::new());
         }
         let range = blocks[i];
-        let block = db.read_block(range).map_err(search_read_error)?;
+        let block = super::x_read_block(db, range).map_err(search_read_error)?;
         let mut kept = Vec::new();
         for j in 0..block.len() {
             let ordinal = range.first_ordinal + j as u32;
@@ -297,6 +199,7 @@ where
                 kept.push((ordinal, result));
             }
         }
+        super::x_done_block(block);
         Ok(kept)
     };
     let window = pool
@@ -337,70 +240,11 @@ where
     }
 }
 
-// No NCBI counterpart: the shadow mode's counters and line; they change no value NCBI computes.
-static X_SEARCHES: AtomicU64 = AtomicU64::new(0);
-static X_BLOCKS: AtomicU64 = AtomicU64::new(0);
-static X_MERGED: AtomicU64 = AtomicU64::new(0);
-
-fn x_shadow_print_line(identical: bool) {
-    eprintln!(
-        "[X_SHADOW] BNDBSTREAM searches={} blocks={} merged={}{}",
-        X_SEARCHES.load(Ordering::Relaxed),
-        X_BLOCKS.load(Ordering::Relaxed),
-        X_MERGED.load(Ordering::Relaxed),
-        if identical {
-            " identical"
-        } else {
-            " DIFFERENT"
-        },
-    );
-}
-
-// No NCBI counterpart: prints counters.
-/// The shadow mode's line at exit.
-pub(super) fn x_bn_db_stream_print_summary() {
-    if x_bn_db_stream() == XDbStream::Shadow {
-        x_shadow_print_line(true);
-    }
-}
-
-// No NCBI counterpart: stops the run at the shadow's first difference.
-fn x_shadow_difference(message: String) -> ! {
-    x_shadow_print_line(false);
-    panic!("[X_SHADOW] BNDBSTREAM {message}");
-}
-
-// No NCBI counterpart: the shadow's comparison.
-fn x_compare_merged<R: Debug>(found: &[(u32, R)], expected: &[(u32, String)]) -> u64 {
-    if found.len() != expected.len() {
-        x_shadow_difference(format!(
-            "{} results merged, {} in rounds",
-            found.len(),
-            expected.len()
-        ));
-    }
-    for (index, ((ordinal, result), (expected_ordinal, expected_text))) in
-        found.iter().zip(expected).enumerate()
-    {
-        if ordinal != expected_ordinal {
-            x_shadow_difference(format!(
-                "result {index} merged for sequence {ordinal}, in rounds for sequence {expected_ordinal}"
-            ));
-        }
-        let text = format!("{result:?}");
-        if &text != expected_text {
-            x_shadow_difference(format!(
-                "the result of sequence {ordinal} differs from the one in rounds: {text} / {expected_text}"
-            ));
-        }
-    }
-    found.len() as u64
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::BlastnDatabase;
+    use super::super::{search_rounds, BlastnDatabase};
     use super::*;
+    use std::sync::atomic::AtomicU64;
 
     fn open(name: &str) -> BlastnDatabase {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -422,9 +266,8 @@ mod tests {
     }
 
     // Every sequence is searched once, the kept results reach `merge` once each in ordinal
-    // order, the count of good initial extensions is one search's, and a thread makes one scratch
-    // at most: at 1 to 8 threads, blocks of one sequence (1 byte) to the whole database, with the
-    // window and in the shadow mode.
+    // order, and a thread makes one scratch at most: at 1 to 8 threads, blocks of one sequence
+    // (1 byte) to the whole database.
     #[test]
     fn the_window_merges_in_ordinal_order_once() {
         let database = open("nucl_mv");
@@ -435,51 +278,44 @@ mod tests {
             .filter(|ordinal| ordinal % 3 != 2)
             .map(|ordinal| (ordinal, work(ordinal)))
             .collect();
-        for mode in [XDbStream::On, XDbStream::Shadow] {
-            for threads in 1..=8 {
-                for block_bytes in [1u64, 40, 1 << 20] {
-                    let extends = AtomicU64::new(7);
-                    let scratches = AtomicU64::new(0);
-                    let mut merged: Vec<(u32, u64)> = Vec::new();
-                    crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
-                        x_search_blocks_stream(
-                            mode,
-                            db,
-                            pool,
-                            block_bytes,
-                            2,
-                            &|| {
-                                scratches.fetch_add(1, Ordering::Relaxed);
-                                Vec::<u32>::new()
-                            },
-                            &|seen: &mut Vec<u32>, ordinal: u32, subject: BlastnSubjectRef<'_>| {
-                                assert!(subject.length > 0);
-                                // a scratch sees its sequences in increasing order
-                                assert!(seen.last().is_none_or(|&last| last < ordinal));
-                                seen.push(ordinal);
-                                extends.fetch_add(3, Ordering::Relaxed);
-                                (ordinal % 3 != 2).then(|| work(ordinal))
-                            },
-                            &mut |ordinal, kept| merged.push((ordinal, kept)),
-                            &extends,
-                        )
-                    })
-                    .unwrap();
-                    let case = format!("{mode:?} threads {threads} block_bytes {block_bytes}");
-                    assert_eq!(merged, want, "{case}");
-                    assert_eq!(
-                        extends.load(Ordering::Relaxed),
-                        7 + 3 * u64::from(sequences),
-                        "{case}"
-                    );
-                    if mode == XDbStream::On {
-                        assert!(
-                            (1..=threads as u64).contains(&scratches.load(Ordering::Relaxed)),
-                            "{case}: {} scratches",
-                            scratches.load(Ordering::Relaxed)
-                        );
-                    }
-                }
+        for threads in 1..=8 {
+            for block_bytes in [1u64, 40, 1 << 20] {
+                let searched = AtomicU64::new(0);
+                let scratches = AtomicU64::new(0);
+                let mut merged: Vec<(u32, u64)> = Vec::new();
+                crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
+                    x_search_blocks_stream(
+                        db,
+                        pool,
+                        block_bytes,
+                        &|| {
+                            scratches.fetch_add(1, Ordering::Relaxed);
+                            Vec::<u32>::new()
+                        },
+                        &|seen: &mut Vec<u32>, ordinal: u32, subject: BlastnSubjectRef<'_>| {
+                            assert!(subject.length > 0);
+                            // a scratch sees its sequences in increasing order
+                            assert!(seen.last().is_none_or(|&last| last < ordinal));
+                            seen.push(ordinal);
+                            searched.fetch_add(1, Ordering::Relaxed);
+                            (ordinal % 3 != 2).then(|| work(ordinal))
+                        },
+                        &mut |ordinal, kept| merged.push((ordinal, kept)),
+                    )
+                })
+                .unwrap();
+                let case = format!("threads {threads} block_bytes {block_bytes}");
+                assert_eq!(merged, want, "{case}");
+                assert_eq!(
+                    searched.load(Ordering::Relaxed),
+                    u64::from(sequences),
+                    "{case}"
+                );
+                assert!(
+                    (1..=threads as u64).contains(&scratches.load(Ordering::Relaxed)),
+                    "{case}: {} scratches",
+                    scratches.load(Ordering::Relaxed)
+                );
             }
         }
     }
@@ -508,8 +344,7 @@ mod tests {
         assert_eq!(rest[0].first_ordinal, 5);
     }
 
-    // Segments of 1, 5 and 64 blocks: every kept result once, in ordinal order, and the blocks
-    // counted.
+    // Segments of 1, 5 and 64 blocks: every kept result once, in ordinal order.
     #[test]
     fn segments_merge_in_ordinal_order_once() {
         let database = open("nucl_mv");
@@ -518,26 +353,24 @@ mod tests {
         for threads in [2usize, 5] {
             for segment in [1usize, 5, 64] {
                 let mut merged = Vec::new();
-                let (result, blocks) =
-                    crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
-                        Ok(stream_blocks(
-                            db,
-                            pool,
-                            1,
-                            segment,
-                            &|| (),
-                            &|_: &mut (), ordinal: u32, _: BlastnSubjectRef<'_>| {
-                                (ordinal % 2 == 0).then_some(ordinal)
-                            },
-                            &mut |ordinal, kept| {
-                                assert_eq!(ordinal, kept);
-                                merged.push(ordinal);
-                            },
-                        ))
-                    })
-                    .unwrap();
+                let result = crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
+                    Ok(stream_blocks(
+                        db,
+                        pool,
+                        1,
+                        segment,
+                        &|| (),
+                        &|_: &mut (), ordinal: u32, _: BlastnSubjectRef<'_>| {
+                            (ordinal % 2 == 0).then_some(ordinal)
+                        },
+                        &mut |ordinal, kept| {
+                            assert_eq!(ordinal, kept);
+                            merged.push(ordinal);
+                        },
+                    ))
+                })
+                .unwrap();
                 result.unwrap();
-                assert_eq!(blocks, 12, "threads {threads} segment {segment}");
                 assert_eq!(merged, want, "threads {threads} segment {segment}");
             }
         }
@@ -590,7 +423,7 @@ mod tests {
                                 rounds.push(o);
                             },
                         );
-                        let (window_result, _) = stream_blocks(
+                        let window_result = stream_blocks(
                             db,
                             pool,
                             block_bytes,

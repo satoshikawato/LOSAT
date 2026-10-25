@@ -384,8 +384,6 @@ pub trait ResultsObserver {
     ) {
     }
 }
-struct NoopResults;
-impl ResultsObserver for NoopResults {}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1917-1934
 // ```c++
 //
@@ -543,22 +541,6 @@ impl HspList {
     }
     pub(crate) fn sort_evalue(&mut self) {
         self.hsps.sort_by(compare_hsp);
-    }
-    pub(crate) fn linked(&self) -> LinkedHspList {
-        LinkedHspList {
-            hsps: self
-                .hsps
-                .iter()
-                .enumerate()
-                .map(|(source_index, h)| LinkedHsp {
-                    hsp: h.hsp.clone(),
-                    num: h.num,
-                    evalue: h.evalue,
-                    source_index,
-                })
-                .collect(),
-            best_evalue: self.best_evalue,
-        }
     }
 }
 pub(crate) fn compare_list(a: &HspList, b: &HspList) -> Ordering {
@@ -1084,9 +1066,6 @@ impl HspStream {
     // /** Free the writer
     //  * @param writer The writer to free [in]
     // ```
-    pub fn write(&mut self, oid: usize, hsps: Vec<Hsp>) -> Result<Vec<HspList>> {
-        self.write_observed(oid, hsps, &mut NoopResults)
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:105-161
     // ```c++
     //    /* Rearrange HSPs into multiple hit lists if more than one query */
@@ -1218,9 +1197,6 @@ impl HspStream {
     // /** Prohibit any future writing to the HSP stream when all results are written.
     //  * Also perform sorting of results here to prepare them for reading.
     // ```
-    pub fn finalize(&mut self) {
-        self.finalize_observed(&mut NoopResults);
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:105-130
     // ```c++
     //       return;
@@ -1347,9 +1323,6 @@ impl HspStream {
     //        for (j = 0; j < hitlist->hsplist_count; j++)
     //            Blast_HSPListSortByScore(hitlist->hsplist_array[j]);
     // ```
-    pub fn merge(&mut self, chunk_stream: Self, chunk: &QueryChunk) -> Result<Vec<HspList>> {
-        self.merge_observed(chunk_stream, chunk, &mut NoopResults)
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:419-421
     // ```c++
     //
@@ -1560,9 +1533,6 @@ impl HspStream {
     //       qsort(hsp_stream->sorted_hsplists, num_hsplists,
     //                     sizeof(BlastHSPList *), s_SortHSPListByOid);
     // ```
-    pub fn close(&mut self) {
-        self.close_observed(&mut NoopResults);
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:145-164
     // ```c++
     //        if (hsp_stream->sort_by_score->sort_on_read) {
@@ -1615,9 +1585,6 @@ impl HspStream {
     //
     //    }
     // ```
-    pub fn read(&mut self) -> Option<HspList> {
-        self.read_observed(&mut NoopResults)
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:145-164
     // ```c++
     //        if (hsp_stream->sort_by_score->sort_on_read) {
@@ -1683,9 +1650,6 @@ impl HspStream {
     //
     //    return kBlastHSPStream_Success;
     // ```
-    pub fn batch_read(&mut self) -> Vec<HspList> {
-        self.batch_read_observed(&mut NoopResults)
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:145-164
     // ```c++
     //        if (hsp_stream->sort_by_score->sort_on_read) {

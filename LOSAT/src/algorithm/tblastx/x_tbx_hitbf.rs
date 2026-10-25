@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBXHITBF / LOSAT_X_TBXHITBFSHADOW): the hit loop of a unit of the unit path
+//! EXPERIMENT (LOSAT_X_TBXHITBF): the hit loop of a unit of the unit path
 //! (x_pair_par.rs `scan_unit`, x_tbx_extbatch.rs `scan_unit_batched`, and the scan in slices of
 //! LOSAT_X_TBXQSLICE, x_tbx_qslice.rs `scan_unit_sliced`) with the too-far and overlap outcomes of
 //! the two-hit test taken without a branch. A child module of x_pair_par.rs.
@@ -69,11 +69,9 @@
 //! keeps the 31-bit field's truncation (memory `losat-no-ncbi-bug-reproduction`, 2026-10-12); the
 //! batch guard `last_hit_fits` already keeps the units of the unit path inside it.
 //!
-//! The rule: the switch is in the strict set (on unless `LOSAT_X_TBXHITBF` is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set); the probes of LOSAT_TIMING / LOSAT_X_STATS run the
-//! reference loop (they count every outcome). `LOSAT_X_TBXHITBFSHADOW=1` (turns the path on) runs
-//! the reference loop and this one on each unit inside `fits`, each on a fresh table, and stops at
-//! the first difference of the saved records or of the final table.
+//! The rule: the switch is in the strict set (on unless `LOSAT_X_TBXHITBF` is `0`);
+//! the probes of LOSAT_TIMING / LOSAT_X_STATS run the
+//! reference loop (they count every outcome).
 //!
 //! On wasm32 (LOSAT Web) `x_hits_bf` runs as `x_hits_bf_split`: a function of its own,
 //! `x_hits_bf_run`, takes the hits up to the first one for the per-hit body (flag 1 or a candidate)
@@ -85,34 +83,18 @@
 //! or wrote six of them for every hit; no value of `x_hits_bf_run`'s loop lives across a call.
 //! Native builds keep the one loop.
 
-use super::x_tbx_extbatch::{XShadowList, XShadowRef};
 use super::x_tbx_qslice::XSliced;
 use super::*;
-
-// No NCBI counterpart: counters of LOSAT_X_TBXHITBFSHADOW (units compared, records compared, units
-// outside `fits`); they do not change any value NCBI computes.
-static HB_SHADOW_UNITS: AtomicU64 = AtomicU64::new(0);
-static HB_SHADOW_RECORDS: AtomicU64 = AtomicU64::new(0);
-static HB_OUTSIDE: AtomicU64 = AtomicU64::new(0);
 
 /// `fits`: chunk length + window stays below this (2^29; module doc).
 const X_HITBF_LIMIT: i64 = 1 << 29;
 
 // No NCBI counterpart: which hit loop the units of the unit path use (scheduling only). Read once
 // per process, as the other modes of x_pair_par.rs.
-/// 0 = off, 1 = LOSAT_X_TBXHITBF (a strict-set switch, `utils/xswitch.rs`), 2 =
-/// LOSAT_X_TBXHITBFSHADOW (set to any value; turns the path on).
-fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_TBXHITBFSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_TBXHITBF") {
-            1
-        } else {
-            0
-        }
-    })
+/// LOSAT_X_TBXHITBF: a strict-set switch (`utils/xswitch.rs`).
+fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXHITBF"))
 }
 
 // No NCBI counterpart: the range in which `x_hits_bf` takes the reference's outcomes (module doc).
@@ -125,31 +107,24 @@ pub(super) fn fits(chunk_length: usize, window: i32, wordsize: i32) -> bool {
         && (chunk_length as i64) + (window as i64) < X_HITBF_LIMIT
 }
 
-// No NCBI counterpart: the switch's mode `m` for one unit (module doc).
-/// The mode a unit runs: `m`, or 0 (the reference loop) when the unit is outside `fits`.
-fn unit_mode(m: u8, chunk_length: usize, window: i32, wordsize: i32) -> u8 {
-    if m == 0 {
-        return 0;
+// No NCBI counterpart: the switch `on` for one unit (module doc).
+/// Whether a unit runs the branch-free loop: the switch is on and the unit is inside `fits`
+/// (otherwise the reference loop).
+fn unit_bf(on: bool, chunk_length: usize, window: i32, wordsize: i32) -> bool {
+    if !on {
+        return false;
     }
-    if !fits(chunk_length, window, wordsize) {
-        if m == 2 {
-            HB_OUTSIDE.fetch_add(1, AtomicOrdering::Relaxed);
-        }
-        return 0;
-    }
-    m
+    let inside = fits(chunk_length, window, wordsize);
+    crate::utils::xreach::x_reach!("LOSAT_X_TBXHITBF", inside);
+    inside
 }
 
-/// The summary line of the shadow.
-// No NCBI counterpart: prints counters; it does not change any value NCBI computes.
-pub(super) fn print_summary() {
-    if mode() == 2 {
-        eprintln!(
-            "[X_SHADOW] TBXHITBF units_compared={} records_compared={} outside={} (records and unit tables identical)",
-            HB_SHADOW_UNITS.load(AtomicOrdering::Relaxed),
-            HB_SHADOW_RECORDS.load(AtomicOrdering::Relaxed),
-            HB_OUTSIDE.load(AtomicOrdering::Relaxed)
-        );
+// No NCBI counterpart: records that a batch left with the reference loop (the unit path does not
+// run for it) has the switch on and does not use it (`LOSAT_X_REACH`).
+/// LOSAT_X_TBXHITBF: a batch the unit path does not take runs the reference loop.
+pub(super) fn x_reach_not_taken() {
+    if on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXHITBF", false);
     }
 }
 
@@ -377,66 +352,22 @@ unsafe fn x_hits_bf_run<C: XCells>(
     end
 }
 
-// No NCBI counterpart: compares two LOSAT scans of one unit (LOSAT_X_TBXHITBFSHADOW).
-/// Panics with the unit at the first difference of the records or of the tables.
-fn shadow_compare<S: XShadowList>(
-    scan: &str,
-    inp: &XSubject<'_>,
-    unit: &XUnit,
-    records: &S,
-    reference: &S,
-    diag: &[DiagStruct],
-    reference_diag: &[DiagStruct],
-) {
-    if records != reference || diag != reference_diag {
-        let cell = diag.iter().zip(reference_diag).position(|(a, b)| a != b);
-        panic!(
-            "LOSAT_X_TBXHITBFSHADOW: {scan}: subject {} frame {} chunk {} group {}: records {} vs {} (first difference at {}), first table difference at {:?}",
-            inp.s_idx,
-            unit.f,
-            unit.k,
-            unit.g,
-            records.len_of(),
-            reference.len_of(),
-            records.first_difference(reference),
-            cell
-        );
-    }
-    HB_SHADOW_UNITS.fetch_add(1, AtomicOrdering::Relaxed);
-    HB_SHADOW_RECORDS.fetch_add(records.len_of() as u64, AtomicOrdering::Relaxed);
-}
-
 impl XPairPar {
     // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the units without probes (`run_unit`,
     // `run_unit_compact`) by the switch and `fits`.
-    /// `scan_unit` without probes, or its branch-free hit loop (LOSAT_X_TBXHITBFSHADOW: both,
-    /// compared).
+    /// `scan_unit` without probes, or its branch-free hit loop.
     #[inline(always)]
-    pub(super) fn scan_unit_or_bf<S: XShadowList, const PF: bool>(
+    pub(super) fn scan_unit_or_bf<S: XInitSink, const PF: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        let m = unit_mode(mode(), unit.chunk.length, inp.window, inp.wordsize);
-        self.scan_unit_mode::<S, PF>(m, unit, inp, scratch, init_hsps);
-    }
-
-    /// `scan_unit_or_bf` in mode `m` (0, 1 or 2 as `mode`; the caller has applied `fits`).
-    #[inline(always)]
-    fn scan_unit_mode<S: XShadowList, const PF: bool>(
-        &self,
-        m: u8,
-        unit: &XUnit,
-        inp: &XSubject<'_>,
-        scratch: &mut XScratch,
-        init_hsps: &mut S,
-    ) {
-        match m {
-            0 => self.scan_unit::<S, XNoProbe, PF>(unit, inp, scratch, init_hsps, &mut XNoProbe),
-            1 => self.scan_unit_bf::<S, PF>(unit, inp, scratch, init_hsps),
-            _ => self.scan_unit_bf_shadow::<S, PF>(unit, inp, scratch, init_hsps),
+        if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
+            self.scan_unit_bf::<S, PF>(unit, inp, scratch, init_hsps);
+        } else {
+            self.scan_unit::<S, XNoProbe, PF>(unit, inp, scratch, init_hsps, &mut XNoProbe);
         }
     }
 
@@ -454,72 +385,21 @@ impl XPairPar {
         self.scan_unit_hits::<S, XNoProbe, PF, true>(unit, inp, scratch, init_hsps, &mut XNoProbe);
     }
 
-    // EXPERIMENT (LOSAT_X_TBXHITBFSHADOW): the reference loop (with its own probe type, so that the
-    // shadow adds no caller to the instance the units run) on a fresh table into its own list, then
-    // the branch-free loop, compared.
-    /// The branch-free scan of one unit, compared with `scan_unit`.
-    #[cold]
-    #[inline(never)]
-    fn scan_unit_bf_shadow<S: XShadowList, const PF: bool>(
-        &self,
-        unit: &XUnit,
-        inp: &XSubject<'_>,
-        scratch: &mut XScratch,
-        init_hsps: &mut S,
-    ) {
-        let mut reference = S::default();
-        self.scan_unit::<S, XShadowRef, PF>(unit, inp, scratch, &mut reference, &mut XShadowRef);
-        let reference_diag = scratch.diag.clone();
-        self.scan_unit_bf::<S, PF>(unit, inp, scratch, init_hsps);
-        shadow_compare(
-            "scan_unit",
-            inp,
-            unit,
-            init_hsps,
-            &reference,
-            &scratch.diag,
-            &reference_diag,
-        );
-    }
-
     // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the batched scan (LOSAT_X_TBXEXTBATCH) by the
     // switch and `fits`.
-    /// `scan_unit_batched` with full batches, or its branch-free hit loop
-    /// (LOSAT_X_TBXHITBFSHADOW: both, compared).
+    /// `scan_unit_batched` with full batches, or its branch-free hit loop.
     #[inline(always)]
-    pub(super) fn scan_unit_batched_or_bf<S: XShadowList, const PF: bool>(
+    pub(super) fn scan_unit_batched_or_bf<S: XInitSink, const PF: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        let m = unit_mode(mode(), unit.chunk.length, inp.window, inp.wordsize);
-        self.scan_unit_batched_mode::<S, PF>(m, unit, inp, scratch, init_hsps);
-    }
-
-    /// `scan_unit_batched_or_bf` in mode `m` (as `scan_unit_mode`).
-    #[inline(always)]
-    fn scan_unit_batched_mode<S: XShadowList, const PF: bool>(
-        &self,
-        m: u8,
-        unit: &XUnit,
-        inp: &XSubject<'_>,
-        scratch: &mut XScratch,
-        init_hsps: &mut S,
-    ) {
-        match m {
-            0 => {
-                self.scan_unit_batched::<S, PF>(
-                    unit,
-                    inp,
-                    scratch,
-                    init_hsps,
-                    x_tbx_extbatch::BATCH,
-                );
-            }
-            1 => self.scan_unit_batched_bf::<S, PF>(unit, inp, scratch, init_hsps),
-            _ => self.scan_unit_batched_bf_shadow::<S, PF>(unit, inp, scratch, init_hsps),
+        if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
+            self.scan_unit_batched_bf::<S, PF>(unit, inp, scratch, init_hsps);
+        } else {
+            self.scan_unit_batched::<S, PF>(unit, inp, scratch, init_hsps, x_tbx_extbatch::BATCH);
         }
     }
 
@@ -542,66 +422,23 @@ impl XPairPar {
         );
     }
 
-    // EXPERIMENT (LOSAT_X_TBXHITBFSHADOW): the batched scan with the loop before the switch, then
-    // with the branch-free loop, each on a fresh table, compared.
-    /// The branch-free batched scan of one unit, compared with `scan_unit_batched`.
-    #[cold]
-    #[inline(never)]
-    fn scan_unit_batched_bf_shadow<S: XShadowList, const PF: bool>(
+    // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the scan in slices (LOSAT_X_TBXQSLICE) by the
+    // switch and `fits`.
+    /// `scan_unit_sliced` (batched extensions with `B`, the prefetch with `PF`), or its
+    /// branch-free hit loop.
+    #[inline(always)]
+    pub(super) fn scan_unit_sliced_or_bf<S: XInitSink, const B: bool, const PF: bool>(
         &self,
+        group: &XSliced,
         unit: &XUnit,
         inp: &XSubject<'_>,
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        let mut reference = S::default();
-        self.scan_unit_batched::<S, PF>(unit, inp, scratch, &mut reference, x_tbx_extbatch::BATCH);
-        let reference_diag = scratch.diag.clone();
-        self.scan_unit_batched_bf::<S, PF>(unit, inp, scratch, init_hsps);
-        shadow_compare(
-            "scan_unit_batched",
-            inp,
-            unit,
-            init_hsps,
-            &reference,
-            &scratch.diag,
-            &reference_diag,
-        );
-    }
-
-    // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the scan in slices (LOSAT_X_TBXQSLICE) by the
-    // switch and `fits`.
-    /// `scan_unit_sliced` (batched extensions with `B`, the prefetch with `PF`), or its
-    /// branch-free hit loop (LOSAT_X_TBXHITBFSHADOW: both, compared). Returns the number of slices
-    /// scanned.
-    #[inline(always)]
-    pub(super) fn scan_unit_sliced_or_bf<S: XShadowList, const B: bool, const PF: bool>(
-        &self,
-        group: &XSliced,
-        unit: &XUnit,
-        inp: &XSubject<'_>,
-        scratch: &mut XScratch,
-        init_hsps: &mut S,
-    ) -> u64 {
-        let m = unit_mode(mode(), unit.chunk.length, inp.window, inp.wordsize);
-        self.scan_unit_sliced_mode::<S, B, PF>(m, group, unit, inp, scratch, init_hsps)
-    }
-
-    /// `scan_unit_sliced_or_bf` in mode `m` (as `scan_unit_mode`).
-    #[inline(always)]
-    pub(super) fn scan_unit_sliced_mode<S: XShadowList, const B: bool, const PF: bool>(
-        &self,
-        m: u8,
-        group: &XSliced,
-        unit: &XUnit,
-        inp: &XSubject<'_>,
-        scratch: &mut XScratch,
-        init_hsps: &mut S,
-    ) -> u64 {
-        match m {
-            0 => self.scan_unit_sliced::<S, B, PF>(group, unit, inp, scratch, init_hsps),
-            1 => self.scan_unit_sliced_bf::<S, B, PF>(group, unit, inp, scratch, init_hsps),
-            _ => self.scan_unit_sliced_bf_shadow::<S, B, PF>(group, unit, inp, scratch, init_hsps),
+        if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
+            self.scan_unit_sliced_bf::<S, B, PF>(group, unit, inp, scratch, init_hsps);
+        } else {
+            self.scan_unit_sliced::<S, B, PF>(group, unit, inp, scratch, init_hsps);
         }
     }
 
@@ -615,37 +452,8 @@ impl XPairPar {
         inp: &XSubject<'_>,
         scratch: &mut XScratch,
         init_hsps: &mut S,
-    ) -> u64 {
-        self.scan_unit_sliced_hits::<S, B, PF, true>(group, unit, inp, scratch, init_hsps)
-    }
-
-    // EXPERIMENT (LOSAT_X_TBXHITBFSHADOW): the scan in slices with the loop before the switch,
-    // then with the branch-free loop, each on a fresh table, compared (the records in scan order).
-    /// The branch-free scan in slices of one unit, compared with `scan_unit_sliced`.
-    #[cold]
-    #[inline(never)]
-    fn scan_unit_sliced_bf_shadow<S: XShadowList, const B: bool, const PF: bool>(
-        &self,
-        group: &XSliced,
-        unit: &XUnit,
-        inp: &XSubject<'_>,
-        scratch: &mut XScratch,
-        init_hsps: &mut S,
-    ) -> u64 {
-        let mut reference = S::default();
-        self.scan_unit_sliced::<S, B, PF>(group, unit, inp, scratch, &mut reference);
-        let reference_diag = scratch.diag.clone();
-        let scans = self.scan_unit_sliced_bf::<S, B, PF>(group, unit, inp, scratch, init_hsps);
-        shadow_compare(
-            "scan_unit_sliced",
-            inp,
-            unit,
-            init_hsps,
-            &reference,
-            &scratch.diag,
-            &reference_diag,
-        );
-        scans
+    ) {
+        self.scan_unit_sliced_hits::<S, B, PF, true>(group, unit, inp, scratch, init_hsps);
     }
 }
 
@@ -1039,7 +847,6 @@ mod tests {
                 .collect();
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts),
-                shadow: false,
                 stub: false,
                 sliced: None,
                 mask_rule: None,
@@ -1174,115 +981,10 @@ mod tests {
         assert!(!fits(100, 40, 0));
         assert!(!fits(usize::MAX, 40, 3));
         assert!(!fits(100, i32::MAX, 3));
-        for m in [0u8, 1, 2] {
-            assert_eq!(unit_mode(m, 100, 40, 3), m);
-            assert_eq!(unit_mode(m, top - 39, 40, 3), 0);
-            assert_eq!(unit_mode(m, 100, 3, 3), 0);
+        for on in [false, true] {
+            assert_eq!(unit_bf(on, 100, 40, 3), on);
+            assert!(!unit_bf(on, top - 39, 40, 3));
+            assert!(!unit_bf(on, 100, 3, 3));
         }
-    }
-
-    // No NCBI counterpart: the shadow's two scans of each unit (LOSAT_X_TBXHITBFSHADOW), for the
-    // unit scan and the batched one.
-    #[test]
-    fn the_shadow_compares_both_scans() {
-        let alphabet: Vec<u8> = "ACDEKLMNPQRSTVWY"
-            .bytes()
-            .map(crate::utils::matrix::aa_char_to_ncbistdaa)
-            .collect();
-        let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-        let mut rng = Rng(0x5a5a_0bf0_0000_0003);
-        let frames: Vec<QueryFrame> = [1i8, 2, -1]
-            .iter()
-            .map(|&f| frame(f, &residues(&mut rng, 300, &alphabet, &[])))
-            .collect();
-        let s_frames = frames.clone();
-        let (lookup, contexts) = build_ncbi_lookup(&[frames], 11, &params, true);
-        let cutoff_scores = vec![12; contexts.len()];
-        let x_dropoff_per_context = vec![16; contexts.len()];
-        let pp = XPairPar {
-            groups: build_groups(&lookup, &contexts),
-            shadow: false,
-            stub: false,
-            sliced: None,
-            mask_rule: None,
-            extents: Vec::new(),
-        };
-        let inp = XSubject {
-            s_frames_preliminary: &s_frames,
-            s_frames: &s_frames,
-            contexts: &contexts,
-            cutoff_scores: &cutoff_scores,
-            x_dropoff_per_context: &x_dropoff_per_context,
-            window: 40,
-            wordsize: 3,
-            s_idx: 0,
-            s_len: 999,
-        };
-        let mut scratch = XScratch::new(false);
-        let before = HB_SHADOW_UNITS.load(AtomicOrdering::Relaxed);
-        let mut units = 0u64;
-        for (f, s_frame) in s_frames.iter().enumerate() {
-            let chunk = SubjectChunk {
-                offset: 0,
-                length: s_frame.aa_len,
-                overlap: 0,
-            };
-            for g in 0..pp.groups.len() {
-                if pp.groups[g].lookup.longest_chain <= 0 {
-                    continue;
-                }
-                let unit = XUnit { f, k: 0, chunk, g };
-                let mut reference: Vec<XUnitHsp> = Vec::new();
-                pp.scan_unit::<_, _, false>(
-                    &unit,
-                    &inp,
-                    &mut scratch,
-                    &mut reference,
-                    &mut XNoProbe,
-                );
-                let mut shadowed: Vec<XUnitHsp> = Vec::new();
-                pp.scan_unit_mode::<_, false>(2, &unit, &inp, &mut scratch, &mut shadowed);
-                assert_eq!(shadowed, reference);
-                let mut batched: Vec<XUnitHsp> = Vec::new();
-                pp.scan_unit_batched_mode::<_, false>(2, &unit, &inp, &mut scratch, &mut batched);
-                assert_eq!(batched, reference);
-                units += 2;
-            }
-        }
-        assert!(units > 0);
-        assert!(HB_SHADOW_UNITS.load(AtomicOrdering::Relaxed) >= before + units);
-    }
-
-    // No NCBI counterpart: the shadow stops at a difference.
-    #[test]
-    #[should_panic(expected = "LOSAT_X_TBXHITBFSHADOW: scan_unit")]
-    fn the_shadow_stops_at_a_difference() {
-        let s_frames = vec![frame(1, &[1, 2, 3])];
-        let inp = XSubject {
-            s_frames_preliminary: &s_frames,
-            s_frames: &s_frames,
-            contexts: &[],
-            cutoff_scores: &[],
-            x_dropoff_per_context: &[],
-            window: 40,
-            wordsize: 3,
-            s_idx: 0,
-            s_len: 999,
-        };
-        let unit = XUnit {
-            f: 0,
-            k: 0,
-            chunk: SubjectChunk {
-                offset: 0,
-                length: 3,
-                overlap: 0,
-            },
-            g: 0,
-        };
-        let diag = vec![DiagStruct::default(); 4];
-        let mut other = diag.clone();
-        other[2].set_raw_bits(41);
-        let records: Vec<XUnitHsp> = Vec::new();
-        shadow_compare("scan_unit", &inp, &unit, &records, &records, &diag, &other);
     }
 }

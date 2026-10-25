@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW; BPCLUT is a strict-set switch): the compressed lookup table of
+//! EXPERIMENT (LOSAT_X_BPCLUT; BPCLUT is a strict-set switch): the compressed lookup table of
 //! blastp-fast (`CompressedAaLookupTable`) built flat, in three passes (count, layout, fill): each
 //! cell's hits lie in one contiguous slice, already in the order NCBI's compressed scan copies them,
 //! and the scans read a cell as that slice.
@@ -150,19 +150,14 @@
 //! With more than one thread the search's pool builds the same table (`x_clut_par.rs`, exactness
 //! argument in its header); at one thread the builder above runs.
 //!
-//! A strict-set switch (`utils/xswitch.rs`): on unless `LOSAT_X_BPCLUT=0`, or `LOSAT_X_DEFAULT=0` and it
-//! is not set. `LOSAT_X_BPCLUTSHADOW` (not in the set) builds both tables, compares
-//! them (every cell's sequence, the PV array, the header) and the refusal, and searches with the
-//! reference's table; with more than one thread it also builds the pool's table and compares it with
-//! the flat one, slot for slot.
+//! A strict-set switch (`utils/xswitch.rs`): on unless `LOSAT_X_BPCLUT=0`.
 //!
 //! `LOSAT_X_BPLKPFLAT` (also a strict-set switch, and it acts only where the flat table is built) changes only how the pool's build is
 //! scheduled and where its vectors come from (`x_clut_par.rs`, exactness argument in its header): one
 //! latch per pass, the table's `starts` and `hits` taken from the previous table of a block search
 //! (`XFlatSpare`), and tasks of another computation (the contexts' Karlin blocks of
 //! `blastp/x_query_blocks.rs`) run by the appends pass after its chunks (`XExtraTasks`).
-//! `LOSAT_X_BPLKPFLATSHADOW` builds the table again with the `par_iter` passes on fresh vectors and
-//! compares the two, slot for slot. `LOSAT_X_BPLKPAHEAD` (a strict-set switch since 2026-10-17) runs
+//! `LOSAT_X_BPLKPAHEAD` (a strict-set switch since 2026-10-17) runs
 //! the same build for the next query block ahead of that block, on vectors that the block search's
 //! thread allocated (`XFlatArgs::x_ahead`, `XFlatSpare::x_make_room`).
 
@@ -181,68 +176,31 @@ use std::sync::{Mutex, PoisonError};
 #[path = "x_clut_par.rs"]
 mod x_clut_par;
 
-// No NCBI counterpart: reads the switches once; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW): `LOSAT_X_BPCLUT` is a strict-set switch (on
-/// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set); `LOSAT_X_BPCLUTSHADOW` (any value, not
-/// part of the set) selects the shadow mode. 0 = off (the reference builder), 1 = the flat table,
-/// 2 = shadow (both builders, compared; the reference's table used).
-pub(crate) fn x_bpclut_mode() -> u8 {
+// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPCLUT): a strict-set switch, on unless it is `0`: the flat table
+/// (`true`) or the reference builder (`false`).
+pub(crate) fn x_bpclut_on() -> bool {
     use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPCLUTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_BPCLUT") {
-            1
-        } else {
-            0
-        }
-    })
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPCLUT"))
 }
 
-// No NCBI counterpart: counters of the shadow mode, for the line at exit.
-static X_SHADOW_TABLES: AtomicU64 = AtomicU64::new(0);
-static X_SHADOW_REFUSED: AtomicU64 = AtomicU64::new(0);
-static X_SHADOW_HITS: AtomicU64 = AtomicU64::new(0);
-static X_SHADOW_PARALLEL_TABLES: AtomicU64 = AtomicU64::new(0);
-static X_SHADOW_PARALLEL_REFUSED: AtomicU64 = AtomicU64::new(0);
-
-/// EXPERIMENT (LOSAT_X_BPCLUTSHADOW): the shadow mode's line at exit (printed by `main`).
-// No NCBI counterpart: prints counters; it does not change any value NCBI computes.
-pub fn x_bpclut_print_summary() {
-    if x_bpclut_mode() == 2 {
-        let tables = X_SHADOW_TABLES.load(Ordering::Relaxed);
-        let refused = X_SHADOW_REFUSED.load(Ordering::Relaxed);
-        let hits = X_SHADOW_HITS.load(Ordering::Relaxed);
-        let parallel_tables = X_SHADOW_PARALLEL_TABLES.load(Ordering::Relaxed);
-        let parallel_refused = X_SHADOW_PARALLEL_REFUSED.load(Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] BPCLUT tables_compared={tables} refusals_compared={refused} hits={hits} parallel_tables_compared={parallel_tables} parallel_refusals_compared={parallel_refused} identical"
-        );
-    }
-}
-
-/// EXPERIMENT (LOSAT_X_BPLKPFLAT / LOSAT_X_BPLKPFLATSHADOW): the mode the variables select.
+/// EXPERIMENT (LOSAT_X_BPLKPFLAT): the mode the variable selects.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum XLkpFlat {
     #[default]
     Off,
     On,
-    Shadow,
 }
 
-// No NCBI counterpart: reads the LOSAT_X_BPLKPFLAT / LOSAT_X_BPLKPFLATSHADOW switches once; it does
-// not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPFLAT): a strict-set switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-/// and it is not set); `LOSAT_X_BPLKPFLATSHADOW` (any value, not part of the set) selects the shadow
-/// mode, which implies the switch.
+// No NCBI counterpart: reads the LOSAT_X_BPLKPFLAT switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPLKPFLAT): a strict-set switch (on unless it is `0`).
 pub(crate) fn x_bplkpflat_mode() -> XLkpFlat {
     use std::sync::OnceLock;
     static MODE: OnceLock<XLkpFlat> = OnceLock::new();
     *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPLKPFLATSHADOW").is_some() {
-            XLkpFlat::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_BPLKPFLAT") {
+        if crate::utils::xswitch::on("LOSAT_X_BPLKPFLAT") {
             XLkpFlat::On
         } else {
             XLkpFlat::Off
@@ -250,46 +208,28 @@ pub(crate) fn x_bplkpflat_mode() -> XLkpFlat {
     })
 }
 
-// No NCBI counterpart: counters of the LOSAT_X_BPLKPFLATSHADOW line at exit.
+// No NCBI counterpart: counters of the `[X_STATS] BPLKPFLAT` line at exit (LOSAT_X_STATS); they do
+// not change any value NCBI computes.
 static X_LKPFLAT_TABLES: AtomicU64 = AtomicU64::new(0);
-static X_LKPFLAT_OUTCOMES: AtomicU64 = AtomicU64::new(0);
 static X_LKPFLAT_RECYCLED: AtomicU64 = AtomicU64::new(0);
 static X_LKPFLAT_RECYCLED_HITS: AtomicU64 = AtomicU64::new(0);
-static X_LKPFLAT_CONTEXT_SETS: AtomicU64 = AtomicU64::new(0);
-static X_LKPFLAT_CONTEXTS: AtomicU64 = AtomicU64::new(0);
-static X_LKPFLAT_CONTEXTS_FROM_TASKS: AtomicU64 = AtomicU64::new(0);
 
-// No NCBI counterpart: a counter of the shadow mode; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPFLATSHADOW): one set of `contexts` contexts compared, `from_tasks` of
-/// them computed by the extra tasks of a build (`blastp/x_query_blocks.rs`).
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-pub(crate) fn x_lkpflat_count_contexts(contexts: usize, from_tasks: usize) {
-    X_LKPFLAT_CONTEXT_SETS.fetch_add(1, Ordering::Relaxed);
-    X_LKPFLAT_CONTEXTS.fetch_add(contexts as u64, Ordering::Relaxed);
-    X_LKPFLAT_CONTEXTS_FROM_TASKS.fetch_add(from_tasks as u64, Ordering::Relaxed);
-}
-
-/// EXPERIMENT (LOSAT_X_BPLKPFLATSHADOW): the shadow mode's line at exit (printed by `main`):
-/// `tables_compared` and `outcomes_compared` (refusals, `TooLarge`) count the pool's builds, which
-/// are all compared; `recycled` and `recycled_hits` the builds whose `starts`, and whose `hits`,
-/// are the buffer of an earlier table (`hits` only where it had the room).
+/// EXPERIMENT (LOSAT_X_BPLKPFLAT): with `LOSAT_X_STATS`, the line at exit (printed by `main`) when
+/// the pool built a table: `tables` the flat tables the switch's build made; `recycled` and
+/// `recycled_hits` the builds whose `starts`, and whose `hits`, are the buffer of an earlier table
+/// (`hits` only where it had the room).
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn x_bplkpflat_print_summary() {
-    if x_bplkpflat_mode() == XLkpFlat::Shadow {
+    if std::env::var_os("LOSAT_X_STATS").is_some() {
         let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] BPLKPFLAT tables_compared={} outcomes_compared={} recycled={} recycled_hits={} context_sets_compared={} contexts_compared={} contexts_from_tasks={} identical",
-            load(&X_LKPFLAT_TABLES),
-            load(&X_LKPFLAT_OUTCOMES),
-            load(&X_LKPFLAT_RECYCLED),
-            load(&X_LKPFLAT_RECYCLED_HITS),
-            load(&X_LKPFLAT_CONTEXT_SETS),
-            load(&X_LKPFLAT_CONTEXTS),
-            load(&X_LKPFLAT_CONTEXTS_FROM_TASKS),
-        );
+        let tables = load(&X_LKPFLAT_TABLES);
+        let recycled = load(&X_LKPFLAT_RECYCLED);
+        let recycled_hits = load(&X_LKPFLAT_RECYCLED_HITS);
+        if tables != 0 || recycled != 0 || recycled_hits != 0 {
+            eprintln!(
+                "[X_STATS] BPLKPFLAT tables={tables} recycled={recycled} recycled_hits={recycled_hits}"
+            );
+        }
     }
 }
 
@@ -440,6 +380,9 @@ pub(crate) struct XFlatCompressedLookup {
     pub(crate) compressed_alphabet_size: i32,
     pub(crate) reciprocal_alphabet_size: i32,
     pub(crate) longest_chain: i32,
+    /// The cells with hits (`finalize`'s `count`). EXPERIMENT (LOSAT_X_BPCLUTSCANBF): chooses how
+    /// `for_each_cell` lists the offsets ([`XFlatCompressedLookup::x_scan_bf_pays`]).
+    pub(crate) used_cells: usize,
     pub(crate) pv: Vec<u32>,
     pub(crate) pv_array_bts: i32,
     pub(crate) scaled_compress_table_u8: [i32; 256],
@@ -1136,6 +1079,7 @@ fn x_try_build_flat_with_capacity(
         compressed_alphabet_size: header.alphabet as i32,
         reciprocal_alphabet_size: header.reciprocal_alphabet_size,
         longest_chain,
+        used_cells: nonempty_count,
         pv,
         pv_array_bts: pv_array_bts as i32,
         scaled_compress_table_u8: build_scaled_compress_table_u8(&header.scaled_compress_table),
@@ -1366,7 +1310,13 @@ impl XFlatCompressedLookup {
     /// The scan of `x_seed_fused_compressed::x_scan_cells` (the rounds of the two-hit scan of a
     /// subject's one range, without the offset-pair array) on the flat table: calls
     /// `visit(subject_offset, hits)` for every cell found, with its slice. `cells` is scratch.
-    pub(crate) fn for_each_cell<V>(
+    ///
+    /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): with `BRANCH_FREE` the offsets are listed without a branch on
+    /// the presence bit, as `x_seed_fused::x_scan_cells_bf` lists them: every offset that reaches
+    /// `PV_TEST` is written at the list's end, and the list's length advances by the bit. The list
+    /// holds the same offsets and indices in the same order, so the calls are the same; `cells`
+    /// then reserves a place for every offset of the subject.
+    pub(crate) fn for_each_cell<const BRANCH_FREE: bool, V>(
         &self,
         subject: &[u8],
         subject_length: usize,
@@ -1430,6 +1380,15 @@ impl XFlatCompressedLookup {
         };
         let mut preshift = compressed_reciprocal_divide(index, recip);
 
+        // EXPERIMENT (LOSAT_X_BPCLUTSCANBF): a place for every offset from `s` to `s_last` (`s <=
+        // s_last + 1` here), written through `list`; `listed` of them are the list.
+        let list = if BRANCH_FREE {
+            cells.reserve(s_last + 1 - s);
+            cells.as_mut_ptr()
+        } else {
+            std::ptr::null_mut()
+        };
+        let mut listed = 0usize;
         while s <= s_last {
             let mut compressed_char = scaled_compress_table[usize::from(next_char)];
             next_char = byte_at(s + word_length);
@@ -1459,10 +1418,23 @@ impl XFlatCompressedLookup {
             preshift = compressed_reciprocal_divide(index, recip);
 
             // index = preshift + compressed_char >= 0: both terms are (from) non-negative letters.
-            if compressed_pv_test(pv, index as usize, pv_array_bts) {
+            if BRANCH_FREE {
+                // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
+                let ix = index as usize;
+                let bit = (pv[ix >> pv_array_bts] >> (ix & PV_ARRAY_MASK)) & 1;
+                // SAFETY: each offset tested adds at most one to `listed`, so with `s0` the offset
+                // at the reserve, `listed <= s - s0 < s_last + 1 - s0`: inside the reserve of the
+                // empty `cells`.
+                unsafe { list.add(listed).write((s as i32, index as u32)) };
+                listed += bit as usize;
+            } else if compressed_pv_test(pv, index as usize, pv_array_bts) {
                 cells.push((s as i32, index as u32));
             }
             s += 1;
+        }
+        if BRANCH_FREE {
+            // SAFETY: the first `listed` places were written above, within the reserve.
+            unsafe { cells.set_len(listed) };
         }
 
         let starts = &self.starts;
@@ -1482,6 +1454,46 @@ impl XFlatCompressedLookup {
             }
         }
     }
+
+    // No NCBI counterpart: chooses LOSAT's list form; both list the same offsets.
+    /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): whether blastp-fast lists this table's offsets without a
+    /// branch (`for_each_cell::<true, _>`): at least [`x_scan_bf_min`] of every 10,000 backbone
+    /// cells have hits. With fewer, few offsets pass `PV_TEST`, the branch is mostly predicted and
+    /// the list's store at every offset costs more than the mispredicts it saves.
+    pub(crate) fn x_scan_bf_pays(&self) -> bool {
+        x_dense_enough(self.used_cells, self.starts.len() - 1, x_scan_bf_min())
+    }
+}
+
+// No NCBI counterpart: the rule of LOSAT_X_BPCLUTSCANBFMIN; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): `used` of `cells` backbone cells reach `min` per 10,000 (a
+/// `min` above 10,000 takes no table).
+fn x_dense_enough(used: usize, cells: usize, min: u64) -> bool {
+    u128::from(used as u64) * 10_000 >= u128::from(min) * cells as u128
+}
+
+// No NCBI counterpart: a tuning value of LOSAT's list form; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPCLUTSCANBFMIN): the built-in value of [`x_scan_bf_min`]. Natively 500: on
+/// the workstation the branch-free list cost x1.07 the cycles at 234 used cells per 10,000, x1.00 at
+/// 442, x0.96 at 728 and x0.80 at 2,260. On wasm32 0 (every table): in Node the loop with the branch
+/// is the slower one at every density measured, the branch-free list x0.81 the time at 119 and x0.80
+/// at 234.
+const X_SCAN_BF_MIN: u64 = if cfg!(target_arch = "wasm32") { 0 } else { 500 };
+
+// No NCBI counterpart: reads LOSAT_X_BPCLUTSCANBFMIN once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPCLUTSCANBFMIN): the fewest backbone cells with hits, per 10,000, for which
+/// blastp-fast's scan lists the offsets without a branch (built-in [`X_SCAN_BF_MIN`]); `0` every
+/// table; a value that is not a number takes the built-in one.
+fn x_scan_bf_min() -> u64 {
+    static MIN: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *MIN.get_or_init(|| {
+        std::env::var("LOSAT_X_BPCLUTSCANBFMIN")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(X_SCAN_BF_MIN)
+    })
 }
 
 // No NCBI counterpart: how many cells ahead `for_each_cell` reads the slice bounds and the hits. Tuning
@@ -1515,14 +1527,11 @@ pub(crate) enum XCompressedLookup {
 //                                     query, locations);
 //     s_CompressedLookupFinalize(lookup);
 // ```
-/// EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW): `try_build_blosum62_compressed_lookup` for
-/// BLASTP. Mode 0 calls it; mode 1 builds the flat table (the reference builder where it declines), on
-/// `pool`'s threads when it has more than one (`x_clut_par.rs`); mode 2 builds both, and the flat table
-/// on `pool`'s threads too when it has more than one, compares the refusals and the tables (panics on a
-/// difference) and returns the reference's. `x_flat_args` goes to the pool's build
-/// (LOSAT_X_BPLKPFLAT); in mode 2 the pool's table then gives its vectors to the spare, so that the
-/// next build reuses them as in mode 1. A build ahead of its block (`XFlatArgs::x_ahead`,
-/// LOSAT_X_BPLKPAHEAD) is only the pool's build of mode 1; elsewhere it returns `None` at once.
+/// EXPERIMENT (LOSAT_X_BPCLUT): `try_build_blosum62_compressed_lookup` for BLASTP. With the switch
+/// off it calls it; on, it builds the flat table (the reference builder where it declines), on
+/// `pool`'s threads when it has more than one (`x_clut_par.rs`). `x_flat_args` goes to the pool's
+/// build (LOSAT_X_BPLKPFLAT). A build ahead of its block (`XFlatArgs::x_ahead`, LOSAT_X_BPLKPAHEAD)
+/// is only the pool's build with the switch on; elsewhere it returns `None` at once.
 pub(crate) fn x_bp_build_compressed_lookup(
     word_size: usize,
     scaled_threshold: i32,
@@ -1532,93 +1541,30 @@ pub(crate) fn x_bp_build_compressed_lookup(
     pool: &SearchPool<'_>,
     x_flat_args: XFlatArgs<'_>,
 ) -> Option<Result<XCompressedLookup, ()>> {
-    if x_flat_args.x_ahead && (x_bpclut_mode() != 1 || !x_pool_builds(pool)) {
+    if x_flat_args.x_ahead && (!x_bpclut_on() || !x_pool_builds(pool)) {
         return None;
     }
     let reference = || {
         try_build_blosum62_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
     };
-    match x_bpclut_mode() {
-        0 => reference().map(|built| built.map(XCompressedLookup::Reference)),
-        1 => {
-            match x_build_flat_in_pool(
-                word_size,
-                scaled_threshold,
-                query,
-                locations,
-                tables,
-                pool,
-                x_flat_args,
-            )? {
-                XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
-                XFlatBuild::Refused => Some(Err(())),
-                // LOSAT_X_BPLKPAHEAD: a build ahead of its block runs no reference builder; the block
-                // builds its table itself (`XFlatArgs::x_ahead`).
-                XFlatBuild::TooLarge if x_flat_args.x_ahead => None,
-                XFlatBuild::TooLarge => {
-                    reference().map(|built| built.map(XCompressedLookup::Reference))
-                }
-            }
-        }
-        _ => {
-            let built = reference()?;
-            let flat = x_try_build_flat_compressed_lookup(
-                word_size,
-                scaled_threshold,
-                query,
-                locations,
-                tables,
-            )?;
-            match (&built, &flat) {
-                (Ok(reference), XFlatBuild::Table(flat)) => {
-                    x_assert_same_compressed_table(flat, reference);
-                    X_SHADOW_TABLES.fetch_add(1, Ordering::Relaxed);
-                    X_SHADOW_HITS.fetch_add(flat.hits.len() as u64, Ordering::Relaxed);
-                }
-                (Err(()), XFlatBuild::Refused) => {
-                    X_SHADOW_REFUSED.fetch_add(1, Ordering::Relaxed);
-                }
-                (_, XFlatBuild::TooLarge) => {}
-                (Ok(_), XFlatBuild::Refused) | (Err(()), XFlatBuild::Table(_)) => panic!(
-                    "LOSAT_X_BPCLUTSHADOW: refusal differs (reference refused: {}, flat refused: {})",
-                    built.is_err(),
-                    matches!(flat, XFlatBuild::Refused)
-                ),
-            }
-            if x_pool_builds(pool) {
-                let parallel = x_build_flat_in_pool(
-                    word_size,
-                    scaled_threshold,
-                    query,
-                    locations,
-                    tables,
-                    pool,
-                    x_flat_args,
-                )?;
-                match (&flat, &parallel) {
-                    (XFlatBuild::Table(flat), XFlatBuild::Table(parallel)) => {
-                        x_assert_same_flat_tables(parallel, flat);
-                        X_SHADOW_PARALLEL_TABLES.fetch_add(1, Ordering::Relaxed);
-                    }
-                    (XFlatBuild::Refused, XFlatBuild::Refused) => {
-                        X_SHADOW_PARALLEL_REFUSED.fetch_add(1, Ordering::Relaxed);
-                    }
-                    (XFlatBuild::TooLarge, _) | (_, XFlatBuild::TooLarge) => {}
-                    (XFlatBuild::Table(_), XFlatBuild::Refused)
-                    | (XFlatBuild::Refused, XFlatBuild::Table(_)) => panic!(
-                        "LOSAT_X_BPCLUTSHADOW: parallel refusal differs (serial refused: {}, parallel refused: {})",
-                        matches!(flat, XFlatBuild::Refused),
-                        matches!(parallel, XFlatBuild::Refused)
-                    ),
-                }
-                // EXPERIMENT (LOSAT_X_BPLKPFLAT): the pool's table is not searched here; its vectors
-                // go to the next build, as the searched table's do in mode 1.
-                if let (Some(spare), XFlatBuild::Table(parallel)) = (x_flat_args.spare, parallel) {
-                    spare.give(parallel);
-                }
-            }
-            Some(built.map(XCompressedLookup::Reference))
-        }
+    if !x_bpclut_on() {
+        return reference().map(|built| built.map(XCompressedLookup::Reference));
+    }
+    match x_build_flat_in_pool(
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        pool,
+        x_flat_args,
+    )? {
+        XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+        XFlatBuild::Refused => Some(Err(())),
+        // LOSAT_X_BPLKPAHEAD: a build ahead of its block runs no reference builder; the block
+        // builds its table itself (`XFlatArgs::x_ahead`).
+        XFlatBuild::TooLarge if x_flat_args.x_ahead => None,
+        XFlatBuild::TooLarge => reference().map(|built| built.map(XCompressedLookup::Reference)),
     }
 }
 
@@ -1673,16 +1619,16 @@ pub(crate) fn x_build_flat_in_pool(
     x_try_build_flat_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
 }
 
-// No NCBI counterpart: compares two of LOSAT's flat tables (the shadow's and the tests' check).
-/// EXPERIMENT (LOSAT_X_BPCLUTSHADOW): panics unless the two flat tables are equal, field by field and
-/// slot by slot.
+// No NCBI counterpart: compares two of LOSAT's flat tables (the tests' check).
+/// Panics unless the two flat tables are equal, field by field and slot by slot.
+#[cfg(test)]
 pub(crate) fn x_assert_same_flat_tables(got: &XFlatCompressedLookup, want: &XFlatCompressedLookup) {
-    x_assert_same_flat_tables_as("LOSAT_X_BPCLUTSHADOW: parallel", got, want);
+    x_assert_same_flat_tables_as("flat tables:", got, want);
 }
 
-// No NCBI counterpart: compares two of LOSAT's flat tables (the shadows' and the tests' check).
-/// EXPERIMENT (LOSAT_X_BPCLUTSHADOW, LOSAT_X_BPLKPFLATSHADOW): `x_assert_same_flat_tables` with the
-/// messages starting with `what`.
+// No NCBI counterpart: compares two of LOSAT's flat tables (the tests' check).
+/// `x_assert_same_flat_tables` with the messages starting with `what`.
+#[cfg(test)]
 pub(crate) fn x_assert_same_flat_tables_as(
     what: &str,
     got: &XFlatCompressedLookup,
@@ -1693,6 +1639,7 @@ pub(crate) fn x_assert_same_flat_tables_as(
             && got.compressed_alphabet_size == want.compressed_alphabet_size
             && got.reciprocal_alphabet_size == want.reciprocal_alphabet_size
             && got.longest_chain == want.longest_chain
+            && got.used_cells == want.used_cells
             && got.pv_array_bts == want.pv_array_bts
             && got.scaled_compress_table_u8 == want.scaled_compress_table_u8,
         "{what} table header differs"
@@ -1718,14 +1665,15 @@ pub(crate) fn x_assert_same_flat_tables_as(
     }
 }
 
-/// EXPERIMENT (LOSAT_X_BPCLUTSHADOW): panics unless `flat` is `reference` (every cell's hits in the
-/// reference's scan order, the PV array, the scan's parameters).
+/// Panics unless `flat` is `reference` (every cell's hits in the reference's scan order, the PV
+/// array, the scan's parameters).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:337-348
 // ```c
 //           numhits = backbone_cell->num_used;
 //           ...
 //              dest[0].qs_offsets.q_off = backbone_cell->query_offset;
 // ```
+#[cfg(test)]
 pub(crate) fn x_assert_same_compressed_table(
     flat: &XFlatCompressedLookup,
     reference: &BlastCompressedAaLookupTable,
@@ -1737,19 +1685,19 @@ pub(crate) fn x_assert_same_compressed_table(
             && flat.longest_chain == reference.longest_chain
             && flat.pv_array_bts == reference.pv_array_bts
             && flat.scaled_compress_table_u8 == reference.scaled_compress_table_u8,
-        "LOSAT_X_BPCLUTSHADOW: table header differs"
+        "compressed table: table header differs"
     );
-    assert!(flat.pv == reference.pv, "LOSAT_X_BPCLUTSHADOW: pv differs");
+    assert!(flat.pv == reference.pv, "compressed table: pv differs");
     assert_eq!(
         flat.starts.len(),
         reference.backbone.len() + 1,
-        "LOSAT_X_BPCLUTSHADOW: backbone size differs"
+        "compressed table: backbone size differs"
     );
     for (index, cell) in reference.backbone.iter().enumerate() {
         let hits = flat.cell(index);
         assert!(
             hits.len() == cell.num_used as usize,
-            "LOSAT_X_BPCLUTSHADOW: cell {index} count differs ({} vs {})",
+            "compressed table: cell {index} count differs ({} vs {})",
             hits.len(),
             cell.num_used
         );
@@ -1757,7 +1705,7 @@ pub(crate) fn x_assert_same_compressed_table(
             let order = reference.query_offsets_in_scan_order(index);
             assert!(
                 hits == order.as_slice(),
-                "LOSAT_X_BPCLUTSHADOW: cell {index} differs ({hits:?} vs {order:?})"
+                "compressed table: cell {index} differs ({hits:?} vs {order:?})"
             );
         }
     }
@@ -2129,7 +2077,8 @@ mod tests {
     // ```
     // The scans: on random subjects (letters outside the alphabet none, rare, frequent; short
     // subjects), the flat `scan_subject` gives the reference's hits and rounds for arrays from the
-    // longest cell up, and `for_each_cell` gives the same hits.
+    // longest cell up, and `for_each_cell` gives the same hits, with the branch-free list too
+    // (LOSAT_X_BPCLUTSCANBF); `used_cells` counts the cells with hits.
     #[test]
     fn flat_scans_give_the_reference_scans_hits() {
         let mut rng = XorShift(0x3c6e_f372_fe94_f82b);
@@ -2149,6 +2098,8 @@ mod tests {
                 5, threshold, &query, &locations, &tables,
             ));
             assert!(reference.longest_chain > 5, "cells with overflow lists");
+            let used = flat.starts.windows(2).filter(|w| w[1] > w[0]).count();
+            assert!(used > 0 && flat.used_cells == used, "used cells");
             let longest = reference.longest_chain as usize;
             let mut subjects = Vec::new();
             for outside_one_in in [0usize, 50, 6, 2] {
@@ -2184,11 +2135,36 @@ mod tests {
                     expected.get_or_insert(want);
                 }
                 let mut fused = Vec::new();
-                flat.for_each_cell(subject, length, &mut cells, |s, hits| {
+                flat.for_each_cell::<false, _>(subject, length, &mut cells, |s, hits| {
                     fused.extend(hits.iter().map(|&q| (s as u32, q as u32)));
                 });
                 assert_eq!(Some(fused), expected, "subject {n}: for_each_cell");
+                // LOSAT_X_BPCLUTSCANBF: the branch-free list, on the used scratch and on a new one.
+                for mut scratch in [std::mem::take(&mut cells), Vec::new()] {
+                    let mut fused = Vec::new();
+                    flat.for_each_cell::<true, _>(subject, length, &mut scratch, |s, hits| {
+                        fused.extend(hits.iter().map(|&q| (s as u32, q as u32)));
+                    });
+                    assert_eq!(
+                        Some(fused),
+                        expected,
+                        "subject {n}: branch-free for_each_cell"
+                    );
+                    cells = scratch;
+                }
             }
         }
+    }
+
+    // LOSAT_X_BPCLUTSCANBFMIN: a table takes the branch-free list from `min` used cells per 10,000 up;
+    // `0` takes it for every table, an empty one included.
+    #[test]
+    fn the_branch_free_list_starts_at_min_used_cells_per_ten_thousand() {
+        assert!(x_dense_enough(500, 10_000, 500));
+        assert!(!x_dense_enough(499, 10_000, 500));
+        assert!(x_dense_enough(37_969, 759_376, 500));
+        assert!(!x_dense_enough(37_968, 759_376, 500));
+        assert!(x_dense_enough(0, 759_376, 0));
+        assert!(!x_dense_enough(759_376, 759_376, u64::MAX));
     }
 }

@@ -3,10 +3,24 @@ name: Nightly
 # Heavy checks kept off pull requests: every capture case (including the long
 # TBLASTX manifest cases) against the S02 baseline and the frozen hashes, and the
 # WASI command/reactor matrix with the NCBI comparison oracle.
+#
+# GitHub starts a schedule only on the default branch, main, which moves only when dev is
+# promoted: on 2026-10-25 seven scheduled runs in a row had tested one main commit while dev,
+# the branch work pull requests merge into, was 1,086 commits ahead. So a scheduled run also
+# starts a run of dev (job `dev`), a workflow_dispatch run that runs dev's own copy of this file
+# (main's copy can lag dev's scripts: it built `--bin LOSAT` after dev renamed it `losat`). The
+# mail of a failed run goes to the user who started it, and github-actions[bot] starts the run
+# of dev, so job `dev` also fails when the last completed run of dev did not pass: the scheduled
+# run's mail reports it, a day later.
 on:
   schedule:
     - cron: '17 18 * * *'
   workflow_dispatch:
+    inputs:
+      start_dev:
+        description: Also start a run of dev and check its last run, as the schedule does
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -53,3 +67,33 @@ jobs:
 
   wasm:
     uses: ./.github/workflows/wasm-threading.yml
+
+  dev:
+    name: start the run of dev
+    if: github.event_name == 'schedule' || inputs.start_dev
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Start a run of dev and check the last completed one
+        run: |
+          set -euo pipefail
+          last=$(gh run list --workflow nightly.yml --branch dev --event workflow_dispatch \
+            --status completed --limit 1 --json conclusion,headSha,url \
+            --jq '.[] | [.conclusion, .headSha, .url] | @tsv')
+          gh workflow run nightly.yml --ref dev
+          echo "Started a nightly run of dev."
+          if [ -z "$last" ]; then
+            echo "No completed nightly run of dev yet."
+            exit 0
+          fi
+          read -r conclusion sha url <<< "$last"
+          if [ "$conclusion" != success ]; then
+            echo "::error::The last nightly run of dev (${sha:0:9}) ended '$conclusion': $url"
+            exit 1
+          fi
+          echo "The last nightly run of dev (${sha:0:9}) passed: $url"

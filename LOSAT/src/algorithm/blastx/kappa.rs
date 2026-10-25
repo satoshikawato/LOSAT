@@ -161,12 +161,21 @@ pub fn redo_params(
     let scaled_lambda = ka.lambda / scale;
     let ideal = compute_blosum62_ideal_karlin_params().map_err(anyhow::Error::msg)?;
     let do_link = link_parameters(options).is_some();
-    let cutoff = parameters
-        .iter()
-        .filter(|p| p.valid)
-        .map(|p| p.hit_cutoff)
-        .min()
-        .context("BLASTX Kappa requires a valid context")?;
+    // `hit_params->cutoff_score_min` is that of the query batch: the reader batch when the unit
+    // is a part of one (`reader_batch.rs`).
+    let cutoff = match batch
+        .reader_shape
+        .as_deref()
+        .and_then(|shape| shape.redo_cutoff_min)
+    {
+        Some(batch_min) => batch_min,
+        None => parameters
+            .iter()
+            .filter(|p| p.valid)
+            .map(|p| p.hit_cutoff)
+            .min()
+            .context("BLASTX Kappa requires a valid context")?,
+    };
     let extension_final = (options.gap_x_dropoff_final * std::f64::consts::LN_2 / ka.lambda)
         .max(options.gap_x_dropoff * std::f64::consts::LN_2 / ka.lambda)
         as i32;
@@ -320,21 +329,14 @@ fn get_range<'a>(
         //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
         //                                              subject_maybe_biased);
         // ```
-        // Dispatch point of LOSAT_X_BXSEGMEMO / LOSAT_X_BXSEGMEMOSHADOW: with the switch the
-        // intervals come from a per-thread memo of the last subject's SEG (byte-equal input, the
-        // same masker call on a miss; x_seg_memo.rs); without it the masker runs here.
-        let intervals = if super::x_seg_memo::x_bxsegmemo_mode() != 0 {
-            super::x_seg_memo::x_subject_seg(subject.data(), |data| {
-                SegMasker::with_params(&SegParams::new(10, 1.8, 2.1))
-                    .keeping_all_left_segments()
-                    .mask_sequence(data)
-            })
-        } else {
+        // The intervals come from a per-thread memo of the last subject's SEG (byte-equal input,
+        // the same masker call on a miss; x_seg_memo.rs).
+        let intervals = super::x_seg_memo::x_subject_seg(subject.data(), |data| {
             // BLASTX keeps LOSAT's former SEG until SX (plan DW-10).
             SegMasker::with_params(&SegParams::new(10, 1.8, 2.1))
                 .keeping_all_left_segments()
-                .mask_sequence(subject.data())
-        };
+                .mask_sequence(data)
+        });
         biased = !intervals.is_empty();
         for interval in intervals {
             for residue in &mut subject.buffer[1 + interval.start..1 + interval.end] {
@@ -588,30 +590,6 @@ const CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
 //                                         &LambdaRatio            // local
 //                                 );
 // ```
-pub(crate) fn redo_context(
-    input: &[PreliminaryHsp],
-    context_index: usize,
-    infos: &[BlastCompoQueryInfo],
-    subject: &[u8],
-    params: &BlastRedoAlignParams,
-    lambda: f64,
-    scratch: &mut GapAlignScratch,
-    workspace: &mut BlastCompositionWorkspace,
-    matrix_state: &mut Option<AdjustedProteinMatrix>,
-) -> Result<BlastRedoOneMatchResult> {
-    redo_context_observed(
-        input,
-        context_index,
-        infos,
-        subject,
-        params,
-        lambda,
-        scratch,
-        workspace,
-        matrix_state,
-        &mut |_| {},
-    )
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3641
 // ```c++
 //                                 Blast_RedoOneMatch(
@@ -1074,7 +1052,7 @@ pub struct KappaState {
     // ```
     // NCBI builds one query_info per thread (query_info_tld). Here the query information is never
     // written during the redo, so the per-thread states share one copy. Placement only.
-    // EXPERIMENT (LOSAT_X_BXPAR): read-only, shared with the per-thread copies.
+    // Read-only, shared with the per-thread copies.
     infos: std::sync::Arc<Vec<BlastCompoQueryInfo>>,
     lambda: f64,
     scratch: GapAlignScratch,
@@ -1162,9 +1140,8 @@ impl KappaState {
     // Each NCBI thread owns an NRrecord (composition workspace), a redo_align_params and a matrix.
     // This builds the same per-thread objects for one more Rust thread; the query information is
     // shared because it is read-only.
-    /// EXPERIMENT (LOSAT_X_BXPAR): a second state for another thread, as NCBI
-    /// c++/src/algo/blast/core/blast_kappa.c:3244-3340 allocates per thread
-    /// (`redo_align_params_tld`, `gap_align_tld`, `NRrecord_tld`); the query
+    /// A second state for another thread, as NCBI c++/src/algo/blast/core/blast_kappa.c:3244-3340
+    /// allocates per thread (`redo_align_params_tld`, `gap_align_tld`, `NRrecord_tld`); the query
     /// information is read-only and shared.
     pub(crate) fn x_for_thread(
         &self,
@@ -1270,13 +1247,13 @@ impl KappaState {
     // Blast_RedoOneMatch call to the next on that thread. x_take_matrix and x_set_matrix move it
     // between Rust states so that a match redone out of order sees the matrix it would have seen in
     // stream order.
-    /// EXPERIMENT (LOSAT_X_BXPAR): the matrix a match leaves for the next one.
+    /// The matrix a match leaves for the next one.
     pub(crate) fn x_take_matrix(&mut self) -> Option<AdjustedProteinMatrix> {
         self.matrix.take()
     }
     // No NCBI counterpart: see x_take_matrix above (the matrix hand-over is a placement of the same
     // value); it does not change any value NCBI computes.
-    /// EXPERIMENT (LOSAT_X_BXPAR): hand a match the matrix of its predecessor.
+    /// Hand a match the matrix of its predecessor.
     pub(crate) fn x_set_matrix(&mut self, matrix: Option<AdjustedProteinMatrix>) {
         self.matrix = matrix;
     }

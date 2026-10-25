@@ -6,6 +6,7 @@ use super::{
     parameters::{subject_parameters, ContextParameters},
     preliminary::PreliminaryHsp,
     query_setup::PreparedQueryBatch,
+    reader_batch::UnitPrep,
     results::{
         prelim_hitlist_size, subject_besthit, CompoHeap, HeapEntry, HitList, Hsp, HspList,
         HspStream,
@@ -263,8 +264,8 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
     fn early(&mut self, _evalue: f64, _queries: usize, _decision: bool) {}
     // No NCBI counterpart: tells the search whether any observer callback records something; it
     // does not change any value NCBI computes.
-    /// EXPERIMENT (LOSAT_X_BXPAR): true when no callback records anything, so
-    /// that work may be done out of order (and some of it twice).
+    /// True when no callback records anything, so that work may be done out of order (and some of
+    /// it twice).
     fn x_passive(&self) -> bool {
         false
     }
@@ -277,24 +278,15 @@ impl RuntimeObserver for Noop {
     }
 }
 
-// No NCBI counterpart: reads the LOSAT_X_BXLEAN switch once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BXLEAN): leave out work whose result nothing reads: the
-/// copy of every candidate HSP kept for an observer when there is none, and
-/// the tree and DP scratch of a (chunk, subject) pair without an initial HSP.
-pub(crate) fn x_bx_lean() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLEAN"))
-}
-
-// No NCBI counterpart: reads the LOSAT_X_BXPAR switch once; it does not change any value NCBI
-// computes.
-// EXPERIMENT (LOSAT_X_BXPAR): parallel BLASTX stages.
-pub(crate) fn x_bx_parallel() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXPAR"))
+// No NCBI counterpart: the rule of one parallel BLASTX stage and the record of the side the stage
+// took (`LOSAT_X_REACH`); it does not change any value NCBI computes.
+/// Whether a parallel stage runs: `rule` holds. Records the side taken. The stages that do not
+/// run (one thread, no pool, a small batch) run the serial reference code.
+#[cfg(feature = "parallel")]
+pub(crate) fn x_bx_par_rule(rule: impl FnOnce() -> bool) -> bool {
+    let own = rule();
+    crate::utils::xreach::x_reach!("LOSAT_X_BXPAR", own);
+    own
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3499-3502
@@ -313,10 +305,9 @@ pub(crate) fn x_bx_parallel() -> bool {
 // ```
 // One XKappaWorker is the Rust counterpart of the per-thread state NCBI keeps in NRrecord_tld,
 // redo_align_params_tld and matrix_tld. It is used by one thread at a time.
-// One pool slot's Kappa state.  SAFETY of `Send`: the only non-Send field is the
-// `context` cell of the gapping parameters, which `redo_context_observed` fills
-// for one synchronous call and restores before returning; the state is only
-// reached through its mutex.
+// One pool slot's Kappa state.  SAFETY of `Send`: the only non-Send field is the `context` cell of
+// the gapping parameters, which `redo_context_observed` fills for one synchronous call and restores
+// before returning; the state is only reached through its mutex.
 #[cfg(feature = "parallel")]
 struct XKappaWorker(KappaState);
 #[cfg(feature = "parallel")]
@@ -337,9 +328,8 @@ unsafe impl Send for XKappaWorker {}
 // subject only when hsp_index == 0 (line 1233), so a match can read the matrix its predecessor left
 // behind. X_REDO_PROBE records whether that happened; if it did the result is dropped and the match
 // is redone in stream order.
-/// EXPERIMENT (LOSAT_X_BXPAR): redo one match without knowing the matrix its
-/// predecessor leaves behind.  `None` when the match would have used that
-/// matrix (it is then redone in order); otherwise the finished list, its best
+/// Redo one match without knowing the matrix its predecessor leaves behind.  `None` when the match
+/// would have used that matrix (it is then redone in order); otherwise the finished list, its best
 /// score, and the matrix this match leaves (`None` if it leaves the old one).
 #[cfg(feature = "parallel")]
 #[allow(clippy::type_complexity)]
@@ -359,7 +349,7 @@ fn x_speculate_match(
     use crate::core::composition_adjustment::redo_alignment::X_REDO_PROBE;
     worker.x_set_matrix(None);
     X_REDO_PROBE.with(|probe| probe.set(0));
-    let encoded = subjects.encoded(list.oid);
+    let encoded = subjects.read_encoded(list.oid).ok()?;
     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
     let redone = worker
         .redo_list_observed(&input, batch, &encoded, &mut |_| {})
@@ -394,46 +384,10 @@ pub fn search_internal<'a>(
 ) -> Result<Vec<BatchResults>> {
     search_internal_observed(records, subjects, options, &mut Noop)
 }
-// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
-// ```c
-//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                 results = lcl_blast.Run();
-// ```
-// NCBI builds a CLocalBlast, and so its worker threads, for every query batch. LOSAT_X_BXPOOL keeps
-// one pool for all batches. Reuse of threads only.
-/// EXPERIMENT (LOSAT_X_BXPOOL): `LOSAT_X_BXPOOL` set.
-pub(crate) fn x_bx_pool() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXPOOL"))
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262,289-291
-// ```c
-//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-// ...
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-// ...
-//             	ITERATE(CSearchResultSet, result, *results) {
-//                	    formatter.PrintOneResultSet(**result, query_batch);
-//             	}
-// ```
-// NCBI searches one query batch and prints its results before it takes the next. With
-// LOSAT_X_BXBATCH several small batches are searched together and printed in input order
-// afterwards.
-/// EXPERIMENT (LOSAT_X_BXBATCH): `LOSAT_X_BXBATCH` set (needs LOSAT_X_BXPOOL).
-pub(crate) fn x_bx_batch() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXBATCH"))
-}
-
-// No NCBI counterpart: when the queued batches of LOSAT_X_BXBATCH are searched (as a flow instead
-// of waves); the reports, their order and the values in them are those of the waves.
-/// EXPERIMENT (LOSAT_X_BXFLOW): a switch of the strict set, on unless `LOSAT_X_BXFLOW=0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set (acts with LOSAT_X_BXBATCH and LOSAT_X_BXPOOL).
+// No NCBI counterpart: when the queued batches (2+ threads, several query batches) are searched (as
+// a flow instead of waves); the reports, their order and the values in them are those of the waves.
+/// EXPERIMENT (LOSAT_X_BXFLOW): a switch of the strict set, on unless `LOSAT_X_BXFLOW=0`
+///  (acts with several query batches at 2+ threads).
 pub(crate) fn x_bx_flow() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -443,13 +397,12 @@ pub(crate) fn x_bx_flow() -> bool {
 thread_local! {
     // No NCBI counterpart: flag for the batched search (a thread that runs one whole batch must not
     // start parallel work of its own); it does not change any value NCBI computes.
-    // EXPERIMENT (LOSAT_X_BXBATCH): set while this thread runs a search that
-    // must not start parallel work of its own.
+    // Set while this thread runs a search that must not start parallel work of its own.
     static X_INNER_SERIAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 // No NCBI counterpart: reads the flag above; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BXBATCH): true inside `x_search_internal_serial`.
+/// True inside `x_search_internal_serial`.
 pub(crate) fn x_inner_serial() -> bool {
     X_INNER_SERIAL.with(std::cell::Cell::get)
 }
@@ -481,20 +434,31 @@ impl Drop for XInnerSerial {
 // NCBI runs the single-threaded search (CPrelimSearchRunner) when IsMultiThreaded() is false. This
 // is search_internal run on one thread, whatever thread that is, so that several batches can run
 // side by side.
-/// EXPERIMENT (LOSAT_X_BXBATCH): `search_internal` as the one-thread search,
-/// whatever thread it is called on. The caller runs several of these side by
-/// side; each takes the serial path of every stage.
+/// `search_internal` as the one-thread search, whatever thread it is called on. The caller runs
+/// several of these side by side; each takes the serial path of every stage.
 pub fn x_search_internal_serial<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
 ) -> Result<Vec<BatchResults>> {
+    x_search_unit_serial(records, subjects, options, None)
+}
+
+/// `x_search_internal_serial` for one unit of a reader batch of several, prepared in phase 1
+/// (`reader_batch.rs`); `None`: `records` are the reader batch (or the whole batch is one unit).
+pub(crate) fn x_search_unit_serial<'a>(
+    records: &[FastaRecord],
+    subjects: impl Into<Subjects<'a>>,
+    options: &ResolvedOptions,
+    prep: Option<UnitPrep>,
+) -> Result<Vec<BatchResults>> {
     let _serial = XInnerSerial::enter();
-    x_search_internal_in_pool(
+    x_search_unit_in_pool(
         records,
         subjects,
         options,
         &crate::utils::threading::SearchPool::x_serial(),
+        prep,
     )
 }
 
@@ -506,13 +470,24 @@ pub fn x_search_internal_serial<'a>(
 // ```
 // The search of one query batch (lcl_blast.Run()) on a pool that the caller keeps. The search
 // itself is search_internal.
-/// EXPERIMENT (LOSAT_X_BXPOOL): `search_internal` on a pool that the caller
-/// keeps for all its query batches.
+/// `search_internal` on a pool that the caller keeps for all its query batches.
 pub fn x_search_internal_in_pool<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
     pool: &crate::utils::threading::SearchPool<'_>,
+) -> Result<Vec<BatchResults>> {
+    x_search_unit_in_pool(records, subjects, options, pool, None)
+}
+
+/// `x_search_internal_in_pool` for one unit of a reader batch of several, prepared in phase 1
+/// (`reader_batch.rs`); `None`: `records` are the reader batch (or the whole batch is one unit).
+pub(crate) fn x_search_unit_in_pool<'a>(
+    records: &[FastaRecord],
+    subjects: impl Into<Subjects<'a>>,
+    options: &ResolvedOptions,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    prep: Option<UnitPrep>,
 ) -> Result<Vec<BatchResults>> {
     let subjects = subjects.into();
     let mut observer = Noop;
@@ -521,13 +496,15 @@ pub fn x_search_internal_in_pool<'a>(
         ungapped_link_state: None,
         options,
         subjects,
+        x_cursor: subjects.x_cursor(),
+        x_residues: subjects.x_residue_pass(),
         db_length: subjects.total_length()?,
         ordinal: 0,
         stream: None,
         chunk: None,
         output: Vec::new(),
     };
-    search_core(records, subjects, options, false, &mut pipeline, pool)?;
+    search_core(records, subjects, options, false, &mut pipeline, pool, prep)?;
     Ok(pipeline.output)
 }
 
@@ -569,6 +546,8 @@ pub fn search_internal_observed<'a>(
         ungapped_link_state: None,
         options,
         subjects,
+        x_cursor: subjects.x_cursor(),
+        x_residues: subjects.x_residue_pass(),
         db_length: subjects.total_length()?,
         ordinal: 0,
         stream: None,
@@ -576,7 +555,7 @@ pub fn search_internal_observed<'a>(
         output: Vec::new(),
     };
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
-        search_core(records, subjects, options, false, &mut pipeline, pool)
+        search_core(records, subjects, options, false, &mut pipeline, pool, None)
     })?;
     Ok(pipeline.output)
 }
@@ -585,11 +564,28 @@ struct Runtime<'a> {
     observer: &'a mut dyn RuntimeObserver,
     options: &'a ResolvedOptions,
     subjects: Subjects<'a>,
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the lengths that the sink reads of a database read in
+    /// blocks.
+    x_cursor: Option<super::x_db_stream::XCursor<'a>>,
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the residues that the `-ungapped` sink reads of a database
+    /// read in blocks.
+    x_residues: Option<super::x_db_stream::XPass<'a>>,
     db_length: i64,
     ordinal: usize,
     stream: Option<HspStream>,
     chunk: Option<HspStream>,
     output: Vec<BatchResults>,
+}
+
+impl Runtime<'_> {
+    /// The length of subject `oid`, read in the sink's order (`LOSAT_X_BXDBSTREAM`: from the
+    /// index, `x_db_stream::XCursor`).
+    fn subject_length(&mut self, oid: usize) -> Result<usize> {
+        match &mut self.x_cursor {
+            Some(cursor) => cursor.length(oid),
+            None => Ok(self.subjects.length(oid)),
+        }
+    }
 }
 impl PreliminarySink for Runtime<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
@@ -746,7 +742,7 @@ impl PreliminarySink for Runtime<'_> {
     // No NCBI counterpart: tells the search whether the containment callback is read; it does not
     // change any value NCBI computes.
     fn x_wants_containment(&self) -> bool {
-        !(x_bx_lean() && self.observer.x_passive())
+        !self.observer.x_passive()
     }
     fn preliminary_purge(
         &mut self,
@@ -803,7 +799,7 @@ impl PreliminarySink for Runtime<'_> {
     ) -> Result<()> {
         self.ungapped_link_state = prepared;
         if let Some(prepared) = prepared {
-            let length = self.subjects.length(oid) as i32;
+            let length = self.subject_length(oid)? as i32;
             let link = super::linking::link_parameters(self.options)
                 .expect("ungapped sum-stat parameters");
             self.observer
@@ -982,7 +978,20 @@ impl PreliminarySink for Runtime<'_> {
         //          }
         // ```
         if !self.options.gapped {
-            let encoded = self.subjects.encoded(oid);
+            // EXPERIMENT (LOSAT_X_BXDBSTREAM): with the database read in blocks, the length from
+            // the index (`XCursor`), and the residues, which only `identity_and_positive` reads,
+            // only of a subject with HSPs, from the sink's own pass (`XPass`).
+            let x_length = if self.x_cursor.is_some() {
+                Some(self.subject_length(oid)?)
+            } else {
+                None
+            };
+            let encoded = match &mut self.x_residues {
+                Some(pass) if !input.is_empty() => pass.view(oid)?.encoded(oid),
+                Some(_) => std::borrow::Cow::Borrowed(&[][..]),
+                None => self.subjects.encoded(oid),
+            };
+            let subject_length = x_length.unwrap_or(encoded.len());
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1789
             // ```c++
             // {
@@ -1013,8 +1022,7 @@ impl PreliminarySink for Runtime<'_> {
             // ```
             if !input.is_empty() {
                 if let Some(link) = super::linking::link_parameters(self.options) {
-                    self.observer
-                        .link_run(self.subjects.length(oid) as i32, false, &link);
+                    self.observer.link_run(subject_length as i32, false, &link);
                 }
             }
             let mut linked = super::statistics::evaluate_ungapped(
@@ -1022,7 +1030,7 @@ impl PreliminarySink for Runtime<'_> {
                 batch,
                 params,
                 self.options,
-                encoded.len() as i32,
+                subject_length as i32,
                 self.ungapped_link_state,
             )?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-676
@@ -1164,8 +1172,7 @@ impl PreliminarySink for Runtime<'_> {
             // ```
             if !input.is_empty() {
                 if let Some(link) = super::linking::link_parameters(self.options) {
-                    self.observer
-                        .link_run(self.subjects.length(oid) as i32, false, &link);
+                    self.observer.link_run(subject_length as i32, false, &link);
                 }
             }
             let mut linked = super::statistics::evaluate_ungapped(
@@ -1173,7 +1180,7 @@ impl PreliminarySink for Runtime<'_> {
                 batch,
                 params,
                 self.options,
-                encoded.len() as i32,
+                subject_length as i32,
                 self.ungapped_link_state,
             )?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-676
@@ -1290,10 +1297,10 @@ impl PreliminarySink for Runtime<'_> {
         //            compare with sum e-values. Use decay rate to compensate for
         //            multiple tests. */
         // ```
+        let subject_length = self.subject_length(oid)? as i32;
         if !input.is_empty() {
             if let Some(link) = super::linking::link_parameters(self.options) {
-                self.observer
-                    .link_run(self.subjects.length(oid) as i32, true, &link);
+                self.observer.link_run(subject_length, true, &link);
             }
         }
         let mut linked = evaluate_gapped(
@@ -1301,7 +1308,7 @@ impl PreliminarySink for Runtime<'_> {
             batch,
             params,
             self.options,
-            self.subjects.length(oid) as i32,
+            subject_length,
             self.db_length,
             1.0,
         )?;
@@ -1718,11 +1725,10 @@ impl PreliminarySink for Runtime<'_> {
                 matches.push(list);
             }
             super::x_timing::end(XEnd::Read, x_t);
-            // EXPERIMENT (LOSAT_X_BXPAR): redo the matches of one batch on the
-            // search pool before walking them in stream order.  A match is a
-            // function of its own HSP list and of the matrix left by the match
-            // before it; `x_speculate_match` returns a result only when the
-            // latter was never read, and reports the matrix the match leaves.
+            // Redo the matches of one batch on the search pool before walking them in stream order.
+            // A match is a function of its own HSP list and of the matrix left by the match before
+            // it; `x_speculate_match` returns a result only when the latter was never read, and
+            // reports the matrix the match leaves.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451,3499-3502
             // ```c
             // #pragma omp for schedule(static)
@@ -1758,13 +1764,13 @@ impl PreliminarySink for Runtime<'_> {
             // One Kappa state per pool thread, as NCBI keeps one NRrecord, redo_align_params and
             // matrix per thread.
             #[cfg(feature = "parallel")]
-            let x_workers = if x_bx_parallel()
-                && self.observer.x_passive()
-                && !x_inner_serial()
-                && rayon::current_thread_index().is_some()
-                && rayon::current_num_threads() > 1
-                && matches.len() > 1
-            {
+            let x_workers = if x_bx_par_rule(|| {
+                self.observer.x_passive()
+                    && !x_inner_serial()
+                    && rayon::current_thread_index().is_some()
+                    && rayon::current_num_threads() > 1
+                    && matches.len() > 1
+            }) {
                 (0..rayon::current_num_threads())
                     .map(|_| {
                         Ok(std::sync::Mutex::new(XKappaWorker(state.x_for_thread(
@@ -1786,14 +1792,12 @@ impl PreliminarySink for Runtime<'_> {
             // No NCBI counterpart: stage report for the thread-use statistics; it does not change
             // any value NCBI computes.
             #[cfg(feature = "parallel")]
-            if x_bx_parallel() {
-                crate::utils::threading::report_stage(
-                    "blastx",
-                    "kappa_redo",
-                    matches.len(),
-                    !x_workers.is_empty(),
-                );
-            }
+            crate::utils::threading::report_stage(
+                "blastx",
+                "kappa_redo",
+                matches.len(),
+                !x_workers.is_empty(),
+            );
             // No NCBI counterpart: counters of speculative results used and matches redone in
             // order; it does not change any value NCBI computes.
             let mut x_reused = 0usize;
@@ -1909,7 +1913,7 @@ impl PreliminarySink for Runtime<'_> {
                 } else {
                     x_serial += 1;
                     let x_t = super::x_timing::lap();
-                    let encoded = self.subjects.encoded(list.oid);
+                    let encoded = self.subjects.read_encoded(list.oid)?;
                     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
                     let redone =
                         state.redo_list_observed(&input, batch, &encoded, &mut |event| {
@@ -2217,7 +2221,7 @@ impl PreliminarySink for Runtime<'_> {
             //         ASSERT(batches);
             // ```
             for lists in result_batches {
-                let encoded = self.subjects.encoded(lists[0].oid);
+                let encoded = self.subjects.read_encoded(lists[0].oid)?;
                 for list in lists {
                     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:402-407

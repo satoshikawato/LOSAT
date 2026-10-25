@@ -21,7 +21,7 @@ const section = (id, bytes) => [id, ...uleb(bytes.length), ...bytes];
 const body = (ops) => { const b = [0, ...ops, 0x0b]; return [...uleb(b.length), ...b]; };
 const args = [0x20, 0, 0x20, 1, 0x20, 2];
 
-function fixture({ shared = true, extra = [], custom = true } = {}) {
+function fixture({ shared = true, extra = [], custom = true, maximum = 4 } = {}) {
   // Imported function, table and global exercise index counting. All original
   // calls, exports and element-segment function indices must remain valid.
   return Buffer.from([
@@ -30,7 +30,7 @@ function fixture({ shared = true, extra = [], custom = true } = {}) {
     ...section(1, [1, 0x60, 3, 0x7f, 0x7f, 0x7f, 0]),
     ...section(2, vector([
       [...name("env"), ...name("noop"), 0, 0],
-      [...name("env"), ...name("memory"), 2, shared ? 3 : 1, 1, 4],
+      [...name("env"), ...name("memory"), 2, shared ? 3 : 1, 1, ...uleb(maximum)],
       [...name("env"), ...name("table"), 1, 0x70, 1, 1, 1],
       [...name("env"), ...name("global"), 3, 0x7f, 0],
     ])),
@@ -118,6 +118,54 @@ test("opcode-looking constants, SIMD immediates, locals and memargs are not rewr
   assert.equal(guarded.fill, 1);
   assert.equal(guarded.copy, 1);
   instance(guarded.bytes).exports.extra0(0, 0, 0);
+});
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// Host memory boundary only. LOSAT's threaded modules declare 65,535 pages
+// (LOSAT/.cargo/config.toml). The guard's ranges are unsigned 64-bit, so fills and
+// copies across 2 GiB and up to the last byte behave as in the original module.
+test("fill and copy across 2 GiB and at the top of a 65,535-page memory match original Wasm", (t) => {
+  const pages = 65535, end = pages * 65536, half = 2 ** 31;
+  const windows = [[half - 64, 128], [end - 64, 64]];
+  const grown = (bytes) => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: pages, shared: true });
+    memory.grow(pages - 1); // address space only: untouched pages are not resident
+    return instance(bytes, memory);
+  };
+  let original, guarded;
+  try {
+    original = grown(fixture({ maximum: pages }));
+    guarded = grown(guardSharedMemory(fixture({ maximum: pages })).bytes);
+  } catch (err) {
+    if (!(err instanceof RangeError)) throw err;
+    t.skip(`this machine cannot reserve two 4 GiB memories: ${err.message}`);
+    return;
+  }
+  assert.equal(guarded.memory.buffer.byteLength, end);
+  const cases = [
+    ["fill", [end - 16, 0x5a, 16]], ["fill", [half - 8, 0x33, 16]], ["fill", [end, 1, 0]],
+    ["fill", [end - 16, 1, 17]], ["fill", [end + 1, 1, 0]], ["fill", [2 ** 32 - 16, 1, 32]],
+    ["copy", [end - 16, half - 8, 16]], ["copy", [half - 8, end - 16, 16]], ["copy", [half, half - 4, 32]],
+    ["copy", [end, end, 0]], ["copy", [end - 8, half, 16]], ["copy", [half, end - 8, 16]],
+  ];
+  for (const [operation, parameters] of cases) {
+    for (const i of [original, guarded]) {
+      for (const [at, length] of windows) {
+        const view = new Uint8Array(i.memory.buffer, at, length);
+        for (let p = 0; p < length; p += 1) view[p] = (at + p) & 255;
+      }
+    }
+    let trapped = false;
+    try { original.exports[operation](...parameters); }
+    catch (err) { assert.ok(err instanceof WebAssembly.RuntimeError); trapped = true; }
+    if (trapped) assert.throws(() => guarded.exports[operation](...parameters), WebAssembly.RuntimeError);
+    else guarded.exports[operation](...parameters);
+    for (const [at, length] of windows) {
+      assert.deepEqual(new Uint8Array(guarded.memory.buffer, at, length),
+        new Uint8Array(original.memory.buffer, at, length), `${operation}(${parameters}) at ${at}`);
+    }
+  }
 });
 
 test("invalid modules and unsupported memory layout fail explicitly", () => {

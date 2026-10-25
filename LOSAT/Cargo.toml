@@ -2,6 +2,7 @@
 name = "LOSAT"
 version = "0.2.0"
 edition = "2021"
+autotests = false
 description = "Pure-Rust local BLAST with NCBI-verified fixtures, genetic-code exceptions, and command-WASI support"
 license = "MIT"
 repository = "https://github.com/satoshikawato/LOSAT"
@@ -12,7 +13,6 @@ exclude = [
     ".tmp/",
     "tests/",
     "losat_out/",
-    "LOSAT/",
     "**/*.pyc",
     "**/*.tmp",
     "**/*.orig",
@@ -25,6 +25,41 @@ crate-type = ["rlib", "cdylib"]
 [[bin]]
 name = "losat"
 path = "src/main.rs"
+
+# The files of tests/ are modules of six suite binaries (tests/suites/<name>.rs, one `#[path]` module per
+# file) instead of one binary each; the two files that change the process environment stay alone.
+# tests/suite_layout.rs checks that every file is in exactly one test binary.
+[[test]]
+name = "blastn"
+path = "tests/suites/blastn.rs"
+
+[[test]]
+name = "blastp"
+path = "tests/suites/blastp.rs"
+
+[[test]]
+name = "blastx"
+path = "tests/suites/blastx.rs"
+
+[[test]]
+name = "tblastn"
+path = "tests/suites/tblastn.rs"
+
+[[test]]
+name = "tblastx"
+path = "tests/suites/tblastx.rs"
+
+[[test]]
+name = "common"
+path = "tests/suites/common.rs"
+
+[[test]]
+name = "blastn_report_stream_api"
+path = "tests/blastn_report_stream_api.rs"
+
+[[test]]
+name = "unit_tests"
+path = "tests/unit_tests.rs"
 
 [dependencies]
 anyhow = "1.0"
@@ -55,6 +90,11 @@ rustc-hash = "1.1"
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "=0.38.44", default-features = false, features = ["std"] }
 
+# Windows file-handle type (`GetFileType`, `GetConsoleMode`) for the stream-position test of
+# `IsIStreamEmpty` (`input_files::has_stream_position`); only the three features those need.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console"] }
+
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
@@ -62,6 +102,10 @@ getrandom = { version = "0.2", features = ["js"] }
 default = ["parallel"]
 # EXPERIMENT: work counters (off by default so they cost nothing)
 xstats = []
+# Diagnostic-only: the trace, debug, dump and profile variables that no test, script or CI step
+# sets (`utils/xdiag.rs`, docs/agents/diagnostics.md "Diagnostic build"). A build without it ignores
+# them and says so on stderr. No NCBI counterpart.
+diagnostics = []
 parallel = ["rayon", "num_cpus"]
 # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 # ```c
@@ -100,7 +144,9 @@ codegen-units = 1
 panic = "abort"
 opt-level = 3
 
-# Optimized test code, as in CI; the test profile keeps the dev profile's debug
-# assertions and overflow checks.
+# Optimized test code; the test profile keeps the dev profile's debug assertions
+# and overflow checks. CI builds it at opt-level 3 with line tables only
+# (CARGO_PROFILE_TEST_* in .github/workflows/ci.yml and platform-checks.yml): the
+# tests ran 5 % faster than at level 1, and line tables cut the build by a fifth.
 [profile.test]
 opt-level = 1

@@ -1,0 +1,146 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt11/arch_bx_s.faa).
+           2 sequences; 279 total letters
+
+
+
+Query= i1 ok
+
+Length=48
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp1 subject protein alpha                                             35.4    2e-09
+sp2 subject protein beta, distant                                     22.3    7e-05
+
+
+> sp1 subject protein alpha
+Length=137
+
+ Score = 35.4 bits (80),  Expect = 2e-09, Method: Compositional matrix adjust.
+ Identities = 16/16 (100%), Positives = 16/16 (100%), Gaps = 0/16 (0%)
+ Frame = +1
+
+Query  1   MWMEHSVLKAVFAVRR  48
+           MWMEHSVLKAVFAVRR
+Sbjct  1   MWMEHSVLKAVFAVRR  16
+
+
+> sp2 subject protein beta, distant
+Length=142
+
+ Score = 22.3 bits (46),  Expect = 7e-05, Method: Compositional matrix adjust.
+ Identities = 9/9 (100%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = +1
+
+Query  4   WMEHSVLKA  30
+           WMEHSVLKA
+Sbjct  2   WMEHSVLKA  10
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4464
+
+
+Query= i2 two bases
+
+Length=2
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= i3 all N
+
+Length=30
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= i4 ok
+
+Length=48
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp2 subject protein beta, distant                                     30.8    7e-08
+sp1 subject protein alpha                                             15.8    0.013
+
+
+> sp2 subject protein beta, distant
+Length=142
+
+ Score = 30.8 bits (68),  Expect = 7e-08, Method: Composition-based stats.
+ Identities = 15/15 (100%), Positives = 15/15 (100%), Gaps = 0/15 (0%)
+ Frame = +1
+
+Query  1   SVLKADQLQLRKVMD  45
+           SVLKADQLQLRKVMD
+Sbjct  6   SVLKADQLQLRKVMD  20
+
+
+> sp1 subject protein alpha
+Length=137
+
+ Score = 15.8 bits (29),  Expect = 0.013, Method: Composition-based stats.
+ Identities = 10/15 (67%), Positives = 10/15 (67%), Gaps = 0/15 (0%)
+ Frame = +1
+
+Query  1   SVLKADQLQLRKVMD  45
+           SVLKA     RKVMD
+Sbjct  6   SVLKAVFAVRRKVMD  20
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4464
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt11/arch_bx_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 279
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

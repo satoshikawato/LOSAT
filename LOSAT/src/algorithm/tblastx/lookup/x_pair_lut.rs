@@ -1,10 +1,10 @@
-//! EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the lookup tables of the TBLASTX unit
-//! path (`tblastx/x_pair_par.rs`, LOSAT_X_PAIRPAR), one per query-context group, built directly
+//! EXPERIMENT (PAIRLUT, graduated on 2026-10-22: no variable): the lookup tables of the TBLASTX
+//! unit path (`tblastx/x_pair_par.rs`), one per query-context group, built directly
 //! from the query instead of being filtered out of the batch's full table.
 //!
 //! This file is a child module of `x_lut_direct.rs` (declared there with `#[path]`, as that file
-//! is for `backbone.rs`), so it uses the neighbour lists of LOSAT_X_BXLUT (`x_target_list`, the
-//! per-thread memo) and the reference builder pieces of `backbone.rs` (`prepare_lookup_query`,
+//! is for `backbone.rs`), so it uses the neighbour lists of the in-place builder (`x_target_list`,
+//! the per-thread memo) and the reference builder pieces of `backbone.rs` (`prepare_lookup_query`,
 //! `blast_lookup_index_query_exact_matches`) without changing them.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:92-94,105-115
@@ -120,10 +120,9 @@
 //! filter of the full table has; with more than `X_MAX_GROUPS` contexts a group holds several
 //! contexts and item 3 is checked per group, not per context.
 //!
-//! `LOSAT_X_PAIRLUTSHADOW=1` builds the full table and `build_groups` as before and the direct
-//! groups as well, and stops at the first difference (`x_assert_same_group`,
-//! `x_assert_stub_scalars`, `x_assert_same_contexts`); the search then uses the tables it used
-//! before.
+//! The unit tests of `x_pair_par.rs` build the full table and `build_groups` as well and stop at
+//! the first difference (`x_assert_same_group`, `x_assert_stub_scalars`,
+//! `x_assert_same_contexts`).
 
 use super::*;
 
@@ -498,11 +497,7 @@ impl XPairLutQuery {
         let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
         let mut totals: Vec<i64> = vec![0; backbone_size];
         for table in groups {
-            assert_eq!(
-                table.backbone.len(),
-                backbone_size,
-                "LOSAT_X_PAIRLUT: group backbone size"
-            );
+            assert_eq!(table.backbone.len(), backbone_size, "group backbone size");
             for (total, cell) in totals.iter_mut().zip(&table.backbone) {
                 *total += i64::from(cell.num_used);
             }
@@ -549,10 +544,11 @@ impl XPairLutQuery {
 //                 dest += overflow_cursor;
 //                 overflow_cursor += lookup->thin_backbone[i][1];
 // ```
-// No computation: LOSAT_X_PAIRLUTSHADOW compares every field of the two tables of a group (the
-// cells, the overflow array, the presence vector and the header) and the bounds of the entries.
-/// EXPERIMENT (LOSAT_X_PAIRLUTSHADOW): assert that the direct table of group `g` equals the one
-/// `build_groups` filtered out of the full table, field by field.
+// No computation: the unit tests compare every field of the two tables of a group (the cells, the
+// overflow array, the presence vector and the header) and the bounds of the entries.
+/// Assert that the direct table of group `g` equals the one `build_groups` filtered out of the
+/// full table, field by field.
+#[cfg(test)]
 pub(crate) fn x_assert_same_group(
     g: usize,
     direct: &BlastAaLookupTable,
@@ -563,12 +559,12 @@ pub(crate) fn x_assert_same_group(
     assert_eq!(
         direct.backbone.len(),
         reference.backbone.len(),
-        "LOSAT_X_PAIRLUTSHADOW: group {g}: backbone size differs"
+        "group {g}: backbone size differs"
     );
     for (idx, (a, b)) in direct.backbone.iter().zip(&reference.backbone).enumerate() {
         assert!(
             a.num_used == b.num_used && a.entries == b.entries,
-            "LOSAT_X_PAIRLUTSHADOW: group {g}: backbone cell {idx} differs (direct {} {:?} vs reference {} {:?})",
+            "group {g}: backbone cell {idx} differs (direct {} {:?} vs reference {} {:?})",
             a.num_used,
             a.entries,
             b.num_used,
@@ -578,28 +574,25 @@ pub(crate) fn x_assert_same_group(
     assert_eq!(
         direct.overflow.len(),
         reference.overflow.len(),
-        "LOSAT_X_PAIRLUTSHADOW: group {g}: overflow size differs"
+        "group {g}: overflow size differs"
     );
     if let Some(at) =
         (0..direct.overflow.len()).find(|&i| direct.overflow[i] != reference.overflow[i])
     {
         panic!(
-            "LOSAT_X_PAIRLUTSHADOW: group {g}: overflow entry {at} differs (direct {} vs reference {})",
+            "group {g}: overflow entry {at} differs (direct {} vs reference {})",
             direct.overflow[at], reference.overflow[at]
         );
     }
-    assert!(
-        direct.pv == reference.pv,
-        "LOSAT_X_PAIRLUTSHADOW: group {g}: pv differs"
-    );
+    assert!(direct.pv == reference.pv, "group {g}: pv differs");
     assert_eq!(
         direct.longest_chain, reference.longest_chain,
-        "LOSAT_X_PAIRLUTSHADOW: group {g}: longest_chain differs"
+        "group {g}: longest_chain differs"
     );
     x_assert_same_header("group", g, direct, reference);
     assert_eq!(
         direct_bounds, reference_bounds,
-        "LOSAT_X_PAIRLUTSHADOW: group {g}: q_min / q_max differ (direct vs reference)"
+        "group {g}: q_min / q_max differ (direct vs reference)"
     );
 }
 
@@ -618,6 +611,7 @@ pub(crate) fn x_assert_same_group(
 // ```
 // No computation: the header fields of two tables compared (all but `longest_chain`, which the
 // callers compare with the value that applies).
+#[cfg(test)]
 fn x_assert_same_header(
     what: &str,
     g: usize,
@@ -634,7 +628,7 @@ fn x_assert_same_header(
             && direct.mask == reference.mask
             && direct.threshold == reference.threshold
             && direct.row_max == reference.row_max,
-        "LOSAT_X_PAIRLUTSHADOW: {what} {g}: table header differs"
+        "{what} {g}: table header differs"
     );
 }
 
@@ -647,17 +641,18 @@ fn x_assert_same_header(
 // No computation: the stub must carry the values the reference code reads from the full table
 // (`longest_chain` for the offset-pair array, the header for the context search) and the full
 // table's array sizes with no entry.
-/// EXPERIMENT (LOSAT_X_PAIRLUTSHADOW): assert that the stub has the full table's header fields
-/// and `longest_chain`, the full table's backbone and pv sizes, and no entry.
+/// Assert that the stub has the full table's header fields and `longest_chain`, the full table's
+/// backbone and pv sizes, and no entry.
+#[cfg(test)]
 pub(crate) fn x_assert_stub_scalars(stub: &BlastAaLookupTable, full: &BlastAaLookupTable) {
     x_assert_same_header("stub", 0, stub, full);
     assert_eq!(
         stub.longest_chain, full.longest_chain,
-        "LOSAT_X_PAIRLUTSHADOW: stub: longest_chain differs from the full table"
+        "stub: longest_chain differs from the full table"
     );
     assert!(
         stub.backbone.len() == full.backbone.len() && stub.pv.len() == full.pv.len(),
-        "LOSAT_X_PAIRLUTSHADOW: stub: backbone or pv size differs from the full table"
+        "stub: backbone or pv size differs from the full table"
     );
     assert!(
         stub.overflow.is_empty()
@@ -666,7 +661,7 @@ pub(crate) fn x_assert_stub_scalars(stub: &BlastAaLookupTable, full: &BlastAaLoo
                 .backbone
                 .iter()
                 .all(|cell| cell.num_used == 0 && cell.entries == [0; AA_HITS_PER_CELL]),
-        "LOSAT_X_PAIRLUTSHADOW: stub: the stub table must have no entry"
+        "stub: the stub table must have no entry"
     );
 }
 
@@ -680,16 +675,17 @@ pub(crate) fn x_assert_stub_scalars(stub: &BlastAaLookupTable, full: &BlastAaLoo
 //    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
 // ```
 // No computation: the contexts handed out with the stub come from the same `prepare_lookup_query`
-// as those `build_ncbi_lookup` returns; the shadow checks that they are the same, field by field
+// as those `build_ncbi_lookup` returns; the unit tests check that they are the same, field by field
 // (the Karlin parameters bitwise).
-/// EXPERIMENT (LOSAT_X_PAIRLUTSHADOW): assert that two context lists are equal.
+/// Assert that two context lists are equal.
+#[cfg(test)]
 pub(crate) fn x_assert_same_contexts(direct: &[QueryContext], reference: &[QueryContext]) {
-    x_assert_same_contexts_as("LOSAT_X_PAIRLUTSHADOW:", direct, reference);
+    x_assert_same_contexts_as("", direct, reference);
 }
 
-// No NCBI counterpart: the check of `x_assert_same_contexts` for another shadow.
-/// EXPERIMENT (LOSAT_X_PAIRLUTSHADOW, LOSAT_X_BPLKPFLATSHADOW): `x_assert_same_contexts` with the
-/// messages starting with `what`.
+// No NCBI counterpart: the check of `x_assert_same_contexts` for other unit tests.
+/// `x_assert_same_contexts` with the messages starting with `what`.
+#[cfg(test)]
 pub(crate) fn x_assert_same_contexts_as(
     what: &str,
     direct: &[QueryContext],

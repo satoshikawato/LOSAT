@@ -115,15 +115,22 @@ pub(crate) fn cutoffs(
     subject_length: i32,
     db_length: i64,
 ) -> ([i32; 2], f64) {
-    let ka = params
-        .iter()
-        .filter(|p| p.valid && p.ungapped.lambda > 0.0)
-        .min_by(|a, b| a.ungapped.lambda.partial_cmp(&b.ungapped.lambda).unwrap())
-        .expect("valid context")
-        .ungapped;
-    let last = batch.contexts.last().unwrap();
+    // The smallest lambda, the average query length and `cutoff_score_min` are those of the
+    // query batch: the reader batch when the unit is a part of one (`reader_batch.rs`).
+    let shape = batch.reader_shape.as_deref();
+    let ka = match shape.and_then(|shape| shape.smallest_lambda) {
+        Some(smallest) => smallest,
+        None => {
+            params
+                .iter()
+                .filter(|p| p.valid && p.ungapped.lambda > 0.0)
+                .min_by(|a, b| a.ungapped.lambda.partial_cmp(&b.ungapped.lambda).unwrap())
+                .expect("valid context")
+                .ungapped
+        }
+    };
     let mut query_length =
-        (last.offset as i32 + last.length as i32 - 1) / batch.contexts.len() as i32;
+        (batch.batch_concatenated_length() as i32 - 1) / batch.batch_context_count() as i32;
     let value = (ka.k * query_length as f64 * subject_length as f64).ln() / ka.h;
     let expected = (value + if value >= 0.0 { 0.5 } else { -0.5 }) as i32;
     query_length = (query_length - expected).max(1);
@@ -140,14 +147,16 @@ pub(crate) fn cutoffs(
         let big = (x.ln() / ka.lambda).floor() as i32 + 1;
         x = y * (50 * 50) as f64;
         x /= 0.5 + 1.0e-9;
-        let small = ((x.ln() / ka.lambda).floor() as i32 + 1).max(
-            params
+        let cutoff_score_min = match shape.and_then(|shape| shape.word_cutoff_min) {
+            Some(batch_min) => batch_min,
+            None => params
                 .iter()
                 .filter(|p| p.valid)
                 .map(|p| p.word_cutoff)
                 .min()
                 .unwrap(),
-        );
+        };
+        let small = ((x.ln() / ka.lambda).floor() as i32 + 1).max(cutoff_score_min);
         ([small, big], 0.5)
     } else {
         ([0, (x.ln() / ka.lambda).floor() as i32 + 1], 0.0)

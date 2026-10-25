@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_BPSUBJMETA / LOSAT_X_BPSUBJMETASHADOW): the subjects' tabular IDs and titles
-//! of the blastp block search (`LOSAT_X_BPQBLOCK`, `x_query_blocks.rs`) made once for all blocks.
+//! EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular IDs and titles of the blastp block search
+//! (`LOSAT_X_BPQBLOCK`, `x_query_blocks.rs`) made once for all blocks.
 //!
 //! Without the switch every block's search (`run_resolved_in_pool`) makes one title `Arc` per
 //! subject before its lookup table, and its output stage makes every subject's tabular ID
@@ -41,18 +41,7 @@
 //! search's peak (about 80 B per subject: about 0.5 MiB for 6,600 subjects, 8 MiB per 100k), and are
 //! freed when the block search ends.
 //!
-//! `LOSAT_X_BPSUBJMETA` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set.
-//!
-//! `LOSAT_X_BPSUBJMETASHADOW=1` (shadow mode, implies the switch): in each block whose output stage
-//! takes the stored IDs, the IDs and titles are made again as without the switch and compared with
-//! the stored ones element for element: each subject's `tabular_subject_id` result, its title, and
-//! the result of `tabular_subject_ids` (the shown IDs, or the error's text). The first difference
-//! stops the run (panic) after printing the line that is otherwise printed at exit: `[X_SHADOW]
-//! BPSUBJMETA blocks= subjects_compared= identical` (`blocks`: output stages that took the stored
-//! values; `subjects_compared`: the subjects compared in them). The output stage of a block's
-//! tabular report (outfmt 6, or 7 with `LOSAT_X_BPQBLOCKFMT`) makes the IDs and is counted; an
-//! outfmt 0 report (`LOSAT_X_BPQBLOCKFMT`) makes none.
+//! `LOSAT_X_BPSUBJMETA` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-227
 //! ```c++
@@ -70,34 +59,16 @@
 //! NCBI makes a subject's ID from its Bioseq each time a row is written; the ID depends on the
 //! record only, so one value per subject serves every block. Reuse only.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use crate::blastinput::fasta_reader::FastaRecord;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum XSubjMeta {
-    Off,
-    On,
-    Shadow,
-}
-
-// No NCBI counterpart: reads the LOSAT_X_BPSUBJMETA / LOSAT_X_BPSUBJMETASHADOW switches once; it
-// does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPSUBJMETA): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BPSUBJMETASHADOW` (any value) selects the shadow
-/// mode.
-pub(crate) fn x_bp_subj_meta() -> XSubjMeta {
-    static MODE: OnceLock<XSubjMeta> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPSUBJMETASHADOW").is_some() {
-            XSubjMeta::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_BPSUBJMETA") {
-            XSubjMeta::On
-        } else {
-            XSubjMeta::Off
-        }
-    })
+// No NCBI counterpart: reads the LOSAT_X_BPSUBJMETA switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPSUBJMETA): a strict-set switch, on unless it is `0`.
+pub(crate) fn x_bp_subj_meta() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPSUBJMETA"))
 }
 
 /// EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular ID results, shown IDs and titles, by
@@ -110,16 +81,14 @@ pub(crate) struct XSubjectMeta {
     shown: Vec<Arc<[u8]>>,
     /// `Arc::from(record.title())` of each subject, as `run_resolved_in_pool` makes them.
     titles: Vec<Arc<[u8]>>,
-    /// The shadow mode (`LOSAT_X_BPSUBJMETASHADOW`) was on when they were made.
-    shadow: bool,
 }
 
 impl XSubjectMeta {
     // No NCBI counterpart: values NCBI makes per row, made once (module comment above).
-    /// The values of `records`, with the shadow mode's flag `shadow`. The block plan
-    /// (`x_query_block_plan`) has already computed each ID once; this second pass (about 1-2 ms for
-    /// 6,600 subjects) is kept so that the plan's hunks stay unchanged.
-    pub(crate) fn new(records: &[FastaRecord], shadow: bool) -> Self {
+    /// The values of `records`. The block plan (`x_query_block_plan`) has already computed each ID
+    /// once; this second pass (about 1-2 ms for 6,600 subjects) is kept so that the plan's hunks
+    /// stay unchanged.
+    pub(crate) fn new(records: &[FastaRecord]) -> Self {
         let ids = super::tabular_subject_id_results(records);
         let shown = ids
             .iter()
@@ -129,21 +98,18 @@ impl XSubjectMeta {
             .iter()
             .map(|record| Arc::from(record.title()))
             .collect();
-        Self {
-            ids,
-            shown,
-            titles,
-            shadow,
-        }
+        Self { ids, shown, titles }
     }
 
     // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
     /// The values of the block search's subject `records` when the switch is on and there are
     /// records (a `-db` search has none), else `None`.
     pub(crate) fn x_for_block_search(records: &[FastaRecord]) -> Option<Self> {
-        let mode = x_bp_subj_meta();
-        (mode != XSubjMeta::Off && !records.is_empty())
-            .then(|| Self::new(records, mode == XSubjMeta::Shadow))
+        let on = x_bp_subj_meta();
+        if on {
+            crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJMETA", !records.is_empty());
+        }
+        (on && !records.is_empty()).then(|| Self::new(records))
     }
 
     /// Each subject's `tabular_subject_id` result (`None`: the ID cannot be written).
@@ -160,124 +126,6 @@ impl XSubjectMeta {
     pub(crate) fn titles(&self) -> &[Arc<[u8]>] {
         &self.titles
     }
-
-    /// Whether the shadow mode compares the values of each block.
-    pub(crate) fn shadow(&self) -> bool {
-        self.shadow
-    }
-
-    // No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
-    /// EXPERIMENT (LOSAT_X_BPSUBJMETASHADOW): the stored values against those made again for a
-    /// block of `records` as without the switch: `reference_ids` (`tabular_subject_id_results`),
-    /// the titles, and `reference` (`tabular_subject_ids` of the block's hit lists) against
-    /// `cached` (the result the block takes). Panics at the first difference.
-    pub(crate) fn x_shadow_compare(
-        &self,
-        records: &[FastaRecord],
-        reference_ids: &[Option<Arc<[u8]>>],
-        reference: &anyhow::Result<Vec<Arc<[u8]>>>,
-        cached: &anyhow::Result<&[Arc<[u8]>]>,
-    ) {
-        if self.ids.len() != records.len()
-            || reference_ids.len() != records.len()
-            || self.titles.len() != records.len()
-            || self.shown.len() != records.len()
-        {
-            x_shadow_difference(format!(
-                "{} records, {} reference IDs, {} stored IDs, {} shown IDs, {} titles",
-                records.len(),
-                reference_ids.len(),
-                self.ids.len(),
-                self.shown.len(),
-                self.titles.len()
-            ));
-        }
-        for (index, record) in records.iter().enumerate() {
-            if self.ids[index].as_deref() != reference_ids[index].as_deref() {
-                x_shadow_difference(format!(
-                    "subject {index}: stored ID {:?}, reference {:?}",
-                    self.ids[index].as_deref().map(String::from_utf8_lossy),
-                    reference_ids[index].as_deref().map(String::from_utf8_lossy)
-                ));
-            }
-            if *self.titles[index] != *record.title() {
-                x_shadow_difference(format!(
-                    "subject {index}: stored title {:?}, reference {:?}",
-                    String::from_utf8_lossy(&self.titles[index]),
-                    String::from_utf8_lossy(record.title())
-                ));
-            }
-        }
-        match (reference, cached) {
-            (Ok(reference), Ok(cached)) => {
-                if reference.len() != cached.len() {
-                    x_shadow_difference(format!(
-                        "{} shown IDs, reference {}",
-                        cached.len(),
-                        reference.len()
-                    ));
-                }
-                for (index, (reference, cached)) in reference.iter().zip(cached.iter()).enumerate()
-                {
-                    if **reference != **cached {
-                        x_shadow_difference(format!(
-                            "subject {index}: shown ID {:?}, reference {:?}",
-                            String::from_utf8_lossy(cached),
-                            String::from_utf8_lossy(reference)
-                        ));
-                    }
-                }
-            }
-            (Err(reference), Err(cached)) => {
-                let (reference, cached) = (format!("{reference:#}"), format!("{cached:#}"));
-                if reference != cached {
-                    x_shadow_difference(format!("error {cached:?}, reference {reference:?}"));
-                }
-            }
-            (reference, cached) => x_shadow_difference(format!(
-                "result {:?}, reference {:?}",
-                cached
-                    .as_ref()
-                    .map(|ids| ids.len())
-                    .map_err(|e| e.to_string()),
-                reference.as_ref().map(Vec::len).map_err(|e| e.to_string())
-            )),
-        }
-        X_BLOCKS.fetch_add(1, Ordering::Relaxed);
-        X_SUBJECTS_COMPARED.fetch_add(records.len() as u64, Ordering::Relaxed);
-    }
-}
-
-static X_BLOCKS: AtomicU64 = AtomicU64::new(0);
-static X_SUBJECTS_COMPARED: AtomicU64 = AtomicU64::new(0);
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-fn x_shadow_print_line(identical: bool) {
-    eprintln!(
-        "[X_SHADOW] BPSUBJMETA blocks={} subjects_compared={}{}",
-        X_BLOCKS.load(Ordering::Relaxed),
-        X_SUBJECTS_COMPARED.load(Ordering::Relaxed),
-        if identical {
-            " identical"
-        } else {
-            " DIFFERENT"
-        },
-    );
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPSUBJMETASHADOW): the line `main` prints at exit.
-pub(crate) fn x_bp_subj_meta_print_summary() {
-    if x_bp_subj_meta() == XSubjMeta::Shadow {
-        x_shadow_print_line(true);
-    }
-}
-
-// No NCBI counterpart: the shadow mode's check stops the run on a difference.
-fn x_shadow_difference(message: String) -> ! {
-    // The panic ends the run before `main` prints the line at exit: it is printed here.
-    x_shadow_print_line(false);
-    panic!("[X_SHADOW] BPSUBJMETA {message}");
 }
 
 #[cfg(test)]
@@ -359,7 +207,7 @@ mod tests {
     #[test]
     fn stored_values_are_the_per_block_values() {
         let records = records();
-        let meta = XSubjectMeta::new(&records, false);
+        let meta = XSubjectMeta::new(&records);
         let reference_ids = tabular_subject_id_results(&records);
         assert_eq!(meta.ids().len(), records.len());
         for (index, record) in records.iter().enumerate() {
@@ -398,7 +246,7 @@ mod tests {
     #[test]
     fn the_check_gives_the_per_block_result_and_error() {
         let records = records();
-        let meta = XSubjectMeta::new(&records, true);
+        let meta = XSubjectMeta::new(&records);
         let cases: Vec<Vec<Option<BlastpHitList>>> = vec![
             vec![],
             vec![None, hit_list(&[0, 2, 5])],
@@ -439,31 +287,5 @@ mod tests {
             format!("{error:#}").starts_with("subject record 8 (Subject_"),
             "{error:#}"
         );
-    }
-
-    // The shadow's comparison stops at a stored value that differs (here: the titles and IDs of
-    // other records), after printing its line.
-    #[test]
-    fn the_shadow_stops_at_a_difference() {
-        let records = records();
-        let mut others = records.clone();
-        others.swap(0, 2);
-        let meta = XSubjectMeta::new(&others, true);
-        let reference_ids = tabular_subject_id_results(&records);
-        let reference = tabular_subject_ids(&[], &records);
-        let cached: anyhow::Result<&[Arc<[u8]>]> = Ok(meta.shown());
-        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            meta.x_shadow_compare(&records, &reference_ids, &reference, &cached)
-        }))
-        .expect_err("a difference");
-        let message = panic.downcast_ref::<String>().cloned().unwrap_or_default();
-        assert!(
-            message.starts_with("[X_SHADOW] BPSUBJMETA subject 0: stored ID"),
-            "{message}"
-        );
-        // The same records compare equal.
-        let meta = XSubjectMeta::new(&records, true);
-        let cached: anyhow::Result<&[Arc<[u8]>]> = Ok(meta.shown());
-        meta.x_shadow_compare(&records, &reference_ids, &reference, &cached);
     }
 }

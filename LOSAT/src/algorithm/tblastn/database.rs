@@ -37,13 +37,15 @@ use super::stage_d_pipeline::DatabaseNumbers;
 use super::stage_d_results::KappaResultHitList;
 
 /// The program that LOSAT's refusals name.
-const PROGRAM: &str = "TBLASTN";
+pub(super) const PROGRAM: &str = "TBLASTN";
 
 /// The database of a `-db` search: the opened database and its name as NCBI keeps it
 /// (`TblastnArgs::database_name`: the `-db` value without white space at its ends).
 pub(super) struct TblastnDatabase {
     db: SeqDb,
     name: String,
+    /// The taxonomy database of the run, opened by the XML2 and JSON formats only.
+    taxdb: shared::TaxdbRun,
 }
 
 impl TblastnDatabase {
@@ -74,6 +76,7 @@ impl TblastnDatabase {
         Ok(Self {
             db,
             name: name.to_string(),
+            taxdb: shared::TaxdbRun::default(),
         })
     }
 
@@ -106,10 +109,45 @@ impl TblastnDatabase {
         shared::pairwise_database(&self.db, &self.name)
     }
 
+    /// The Blast-def-line taxid of each reported sequence by rank and what the taxonomy
+    /// database says about it, for the XML2 and JSON formats
+    /// (`algorithm::common::database::read_reported_taxids`); the sequences of `hitlists` with
+    /// HSPs are the reported ones (their subject index is the rank, `reported_subjects`).
+    pub(super) fn read_taxids(
+        &self,
+        reported: &ReportedSubjects,
+        hitlists: &[KappaResultHitList],
+    ) -> Result<XmlTaxa> {
+        let ranks: std::collections::BTreeSet<usize> = hitlists
+            .iter()
+            .flat_map(KappaResultHitList::lists)
+            .filter(|list| !list.hsps.hsps.is_empty())
+            .map(|list| list.oid as usize)
+            .collect();
+        let (taxids, taxonomy, notes) = shared::read_reported_taxids(
+            &self.db,
+            &self.taxdb,
+            &reported.ordinals,
+            &ranks,
+            PROGRAM,
+        )?;
+        Ok(XmlTaxa {
+            taxids,
+            taxonomy,
+            notes,
+        })
+    }
+
     /// Every sequence of the database by ordinal id, packed
     /// (`algorithm::common::database::read_nucleotide_stores`).
     pub(super) fn read_stores(&self) -> Result<Vec<PackedNucleotide>> {
         shared::read_nucleotide_stores(&self.db, PROGRAM)
+    }
+
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the database read where it is searched by `threads`
+    /// threads, after the checks of `read_stores` (`x_db_stream.rs`).
+    pub(super) fn x_stream(&self, threads: usize) -> Result<super::x_db_stream::XDbStream<'_>> {
+        super::x_db_stream::XDbStream::new(&self.db, threads, || self.read_stores())
     }
 }
 
@@ -151,6 +189,17 @@ pub(super) fn read_titles(
     Ok(())
 }
 
+/// What the XML2 and JSON formats show of a database sequence beyond its title: its
+/// Blast-def-line taxid and the taxonomy database's answer, by rank (empty for the other
+/// formats and for `-subject`: every taxid is then 0), and NCBI's messages about the taxonomy
+/// database, which are written at the first `Hit` that needs them.
+#[derive(Default)]
+pub(super) struct XmlTaxa {
+    pub(super) taxids: Vec<i32>,
+    pub(super) taxonomy: Vec<crate::report::blast_xml::HitTaxonomy>,
+    pub(super) notes: shared::TaxdbNotes,
+}
+
 /// The database sequences that the reports show, by rank (`reported_subjects`).
 pub(super) struct ReportedSubjects {
     /// The ordinal id of each rank, ascending.
@@ -167,12 +216,14 @@ pub(super) struct ReportedSubjects {
 /// ordinal id, so every comparison that breaks a tie by the subject index gives the same
 /// order), and their records (`titles`) and packed subjects (`stores`, by ordinal id) are
 /// kept for the reports. A reported sequence whose stored title LOSAT does not report as
-/// NCBI does is LOSAT's refusal.
+/// NCBI does is LOSAT's refusal. EXPERIMENT (LOSAT_X_TBNDBSTREAM): the packed subjects are read
+/// from the database (`SubjectLetters::Stream`, one read each) instead of cloned from the copy.
 pub(super) fn reported_subjects(
     titles: &DatabaseTitles,
     hitlists: &mut [KappaResultHitList],
-    stores: &[PackedNucleotide],
+    stores: super::x_subject_store::SubjectLetters<'_>,
 ) -> Result<ReportedSubjects> {
+    use super::x_subject_store::SubjectLetters;
     for hitlist in hitlists.iter_mut() {
         hitlist.drop_zero_score_hsps();
     }
@@ -202,13 +253,16 @@ pub(super) fn reported_subjects(
             title: stored.title.clone(),
             sequence: Vec::new(),
             warnings: Vec::new(),
+            source: Default::default(),
         });
-        kept.push(
-            stores
+        kept.push(match stores {
+            SubjectLetters::Stream(stream) => stream.read(ordinal as usize)?,
+            SubjectLetters::Packed(stores) => stores
                 .get(ordinal as usize)
                 .with_context(|| format!("database sequence {ordinal} was not read"))?
                 .clone(),
-        );
+            SubjectLetters::Records(_) => unreachable!("a -db search holds no records"),
+        });
     }
     Ok(ReportedSubjects {
         ordinals,

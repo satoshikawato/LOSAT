@@ -23,6 +23,10 @@
 //! the idle workers of a `par_iter` would; it spins or sleeps only when no job is pending. The jobs
 //! it can run are those nested stages' (the loops are broadcast jobs, which no other thread runs),
 //! and they end on their own.
+//!
+//! No item is searched before every thread has started its loop (`wait_for_every_loop`): a
+//! thread also runs its own broadcast job inside a wait for a nested job, so a loop started after
+//! the thread took a job of an item's nested stage would run above that unfinished job.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -229,6 +233,28 @@ fn run_pending_job() -> bool {
     false
 }
 
+/// No NCBI counterpart (scheduling only): each thread of the pass counts itself in `started` and
+/// waits until all `threads` have, so that no item is searched (and no nested job of an item can
+/// be taken) before every thread has started its loop. rayon-core 1.13 runs a thread's own
+/// broadcast job wherever the thread looks for work, also inside a join wait
+/// (`WorkerThread::take_local_job` pops the broadcast deque after the local one, and
+/// `join_context` calls it): a thread that stole a job of an item's nested parallel stage before
+/// it started its loop ran the loop nested above that job, the loop waited for room in the window,
+/// the window for that item, and the item for the job below it (the assist test hung for hours on a
+/// loaded host). Once every thread has started, none has a loop left to start.
+fn wait_for_every_loop(started: &AtomicUsize, threads: usize) {
+    started.fetch_add(1, Ordering::AcqRel);
+    let mut idle = 0u32;
+    while started.load(Ordering::Acquire) < threads {
+        idle = idle.saturating_add(1);
+        if idle < 128 {
+            std::hint::spin_loop();
+        } else {
+            std::thread::yield_now();
+        }
+    }
+}
+
 /// No NCBI counterpart: a helper's wait for room in the window. A native helper sleeps
 /// `micros`; a wasm helper yields instead, because `std::thread::sleep` panics under the
 /// browser's WASI shim (@bjorn3/browser_wasi_shim 0.4.2 returns from `poll_oneoff` without
@@ -254,7 +280,13 @@ fn pause(micros: u64) {
 ///
 /// The threads run their loops as one broadcast job each, not as jobs that a thread may steal:
 /// a thread that waits inside a search (a nested parallel stage) runs only stolen jobs that end
-/// on their own, never a second loop that would wait for the search it interrupted.
+/// on their own, never a second loop that would wait for the search it interrupted. No item is
+/// searched before every thread has started its loop (`wait_for_every_loop`), so that no thread
+/// starts its own loop inside a wait for an item's nested job either. Callers must run one pass
+/// at a time per pool (the code does not check it): a pass started inside an item, or beside
+/// another pass (from the items of a parallel stage), could start its loops above the other
+/// pass's items and wait there, at its start or for its window (a pass inside an item of a pass
+/// without `assist` never fills its start, because the outer loops run no pending job).
 pub(super) fn search_in_order<S, R: Send>(
     n: usize,
     window: usize,
@@ -275,8 +307,10 @@ pub(super) fn search_in_order<S, R: Send>(
         let shared = &shared;
         // The first thread to start its job is the owner.
         let owner = Mutex::new(Some(hand_over));
-        rayon::broadcast(|_| {
+        let started = AtomicUsize::new(0);
+        rayon::broadcast(|ctx| {
             let hand_over = owner.lock().unwrap_or_else(|e| e.into_inner()).take();
+            wait_for_every_loop(&started, ctx.num_threads());
             match hand_over {
                 Some(hand_over) => shared.owner(init, search, hand_over),
                 None => shared.helper(init, search),
@@ -377,6 +411,64 @@ mod tests {
             });
             assert_eq!(handed, want, "assist {assist}");
         }
+    }
+
+    // A thread of the pool that is busy when the pass starts holds back every item until it has
+    // started its loop (`wait_for_every_loop`): before then it could take a nested job of an item
+    // and start its loop inside the wait for that job.
+    #[test]
+    fn no_item_is_searched_before_every_thread_has_started_its_loop() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+        use std::time::Duration;
+        let pool = pool(4);
+        let busy = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        {
+            let (busy, release) = (Arc::clone(&busy), Arc::clone(&release));
+            pool.spawn(move || {
+                busy.store(true, Ordering::SeqCst);
+                while !release.load(Ordering::SeqCst) {
+                    std::hint::spin_loop();
+                }
+            });
+        }
+        while !busy.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        let releaser = {
+            let release = Arc::clone(&release);
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(200));
+                release.store(true, Ordering::SeqCst);
+            })
+        };
+        // items searched while the busy thread had not been released
+        let early = AtomicUsize::new(0);
+        let handed = pool.install(|| {
+            let mut handed = Vec::new();
+            search_in_order(
+                32,
+                4,
+                true,
+                &|| (),
+                &|_: &mut (), i| {
+                    if !release.load(Ordering::SeqCst) {
+                        early.fetch_add(1, Ordering::SeqCst);
+                    }
+                    work(i)
+                },
+                &mut |i, _| handed.push(i),
+            );
+            handed
+        });
+        releaser.join().unwrap();
+        assert_eq!(handed, (0..32).collect::<Vec<_>>());
+        assert_eq!(
+            early.load(Ordering::SeqCst),
+            0,
+            "items were searched before the busy thread started its loop"
+        );
     }
 
     // With `assist`, the threads that wait for the window run the chunks that a slow item's
@@ -508,5 +600,81 @@ mod tests {
             &mut |i, value| handed.push((i, value)),
         );
         assert_eq!(handed, (0..20).map(|i| (i, i * 2)).collect::<Vec<_>>());
+    }
+
+    // B17 probe (run by hand with `--ignored`): many passes whose first item hands out nested jobs
+    // at once, on more threads than CPUs. A pool thread that steals one of those jobs before it
+    // has started its loop runs the loop nested inside the stolen job's join wait (rayon-core 1.13
+    // `take_local_job` pops the thread's own broadcast deque there), above unfinished work of item
+    // 0. A pass that makes no progress for LOSAT_B17_STALL_S seconds ends the process (exit 3).
+    #[test]
+    #[ignore]
+    fn probe_b17_many_passes_with_a_nested_first_item() {
+        use rayon::prelude::*;
+        use std::time::{Duration, Instant};
+        let var = |name: &str, default: usize| {
+            std::env::var(name)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(default)
+        };
+        let threads = var("LOSAT_B17_THREADS", 32);
+        let passes = var("LOSAT_B17_PASSES", 100_000);
+        let stall = var("LOSAT_B17_STALL_S", 20) as u64;
+        let assist = var("LOSAT_B17_ASSIST", 1) == 1;
+        let chunks = var("LOSAT_B17_CHUNKS", 256);
+        let done = AtomicUsize::new(0);
+        let start = Instant::now();
+        let light =
+            |x: usize| (0..200u64).fold(x as u64, |a, y| a.wrapping_mul(31).wrapping_add(y));
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let mut last = 0;
+                let mut since = Instant::now();
+                loop {
+                    std::thread::sleep(Duration::from_millis(200));
+                    let now = done.load(Ordering::Relaxed);
+                    if now >= passes {
+                        return;
+                    }
+                    if now != last {
+                        last = now;
+                        since = Instant::now();
+                    } else if since.elapsed() > Duration::from_secs(stall) {
+                        eprintln!(
+                            "B17 HANG at pass {now} of {passes} after {:.1} s (threads {threads} assist {assist})",
+                            start.elapsed().as_secs_f64()
+                        );
+                        std::process::exit(3);
+                    }
+                }
+            });
+            pool(threads).install(|| {
+                for p in 0..passes {
+                    search_in_order(
+                        16,
+                        2,
+                        assist,
+                        &|| (),
+                        &|_: &mut (), i: usize| -> u64 {
+                            if i == 0 {
+                                (0..chunks)
+                                    .into_par_iter()
+                                    .map(light)
+                                    .reduce(|| 0, u64::wrapping_add)
+                            } else {
+                                light(i)
+                            }
+                        },
+                        &mut |_, _| {},
+                    );
+                    done.store(p + 1, Ordering::Relaxed);
+                }
+            });
+        });
+        eprintln!(
+            "B17 {passes} passes in {:.3} s (threads {threads} assist {assist})",
+            start.elapsed().as_secs_f64()
+        );
     }
 }

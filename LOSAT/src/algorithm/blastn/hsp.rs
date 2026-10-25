@@ -35,9 +35,13 @@ pub enum BlastnOutputFormat {
     Seqalign(crate::report::serial::SerialFormat),
     /// BLAST XML (outfmt 5; `report::blast_xml`, through `algorithm::blastn::blast_xml`).
     Xml,
-    /// The XML2 / JSON documents of outfmt 16 and 15 (`report::blast_xml2`, through the same
+    /// The XML2 / JSON documents of outfmt 16, 15, 14 and 13 (`report::blast_xml2`, through the same
     /// `algorithm::blastn::blast_xml`).
     Xml2(crate::report::blast_xml2::Xml2Kind),
+    /// The BLAST archive (outfmt 11; `report::archive`, through `algorithm::blastn::archive`).
+    Archive,
+    /// SAM (outfmt 17; `report::sam`, through `algorithm::blastn::sam`).
+    Sam(crate::report::sam::SamSpec),
 }
 
 impl BlastnOutputFormat {
@@ -68,18 +72,27 @@ impl BlastnOutputFormat {
     ///         /// JSON seq-align
     ///         eJsonSeqalign,
     /// ```
-    pub(crate) fn of(format: ReportFormat) -> anyhow::Result<Self> {
+    ///
+    /// `spec` is the custom specification of the choice (`FormatChoice::spec`), which only
+    /// SAM reads here (`SQ`, `SR`).
+    pub(crate) fn of(format: ReportFormat, spec: &str) -> anyhow::Result<Self> {
         match format {
+            ReportFormat::Sam => Ok(BlastnOutputFormat::Sam(crate::report::sam::SamSpec::parse(
+                spec,
+            ))),
             ReportFormat::Pairwise => Ok(BlastnOutputFormat::Pairwise),
             ReportFormat::Tabular => Ok(BlastnOutputFormat::Tabular),
             ReportFormat::TabularWithComments => Ok(BlastnOutputFormat::TabularWithComments),
             ReportFormat::Xml => Ok(BlastnOutputFormat::Xml),
-            ReportFormat::Xml2S => Ok(BlastnOutputFormat::Xml2(
-                crate::report::blast_xml2::Xml2Kind::Single16,
-            )),
-            ReportFormat::JsonS => Ok(BlastnOutputFormat::Xml2(
-                crate::report::blast_xml2::Xml2Kind::Single15,
-            )),
+            ReportFormat::ArchiveFormat => Ok(BlastnOutputFormat::Archive),
+            // 16, 15, 14 and 13 (the last two write files next to `-out`: only the command line
+            // reaches them, `run_local` has no output file).
+            ReportFormat::Xml2S | ReportFormat::JsonS | ReportFormat::Xml2 | ReportFormat::Json => {
+                Ok(BlastnOutputFormat::Xml2(
+                    crate::report::blast_xml2::Xml2Kind::of(format)
+                        .expect("an XML2 or JSON document format"),
+                ))
+            }
             other => match crate::report::serial::SerialFormat::of(other) {
                 Some(serial) => Ok(BlastnOutputFormat::Seqalign(serial)),
                 None => anyhow::bail!(
@@ -103,8 +116,20 @@ impl BlastnOutputFormat {
     pub(crate) fn writes_query_warnings(self) -> bool {
         !matches!(
             self,
-            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Xml | BlastnOutputFormat::Xml2(_)
+            BlastnOutputFormat::Seqalign(_)
+                | BlastnOutputFormat::Xml
+                | BlastnOutputFormat::Xml2(_)
+                | BlastnOutputFormat::Archive
+                | BlastnOutputFormat::Sam(_)
         )
+    }
+
+    /// The SAM document of outfmt 17.
+    pub(crate) fn sam_spec(self) -> Option<crate::report::sam::SamSpec> {
+        match self {
+            BlastnOutputFormat::Sam(spec) => Some(spec),
+            _ => None,
+        }
     }
 
     /// Whether the report is a structured XML / JSON document of the queries' final hit lists:
@@ -114,7 +139,7 @@ impl BlastnOutputFormat {
         matches!(self, BlastnOutputFormat::Xml | BlastnOutputFormat::Xml2(_))
     }
 
-    /// The XML2 / JSON document of outfmt 15 and 16.
+    /// The XML2 / JSON document of outfmt 13 to 16.
     pub(crate) fn xml2_kind(self) -> Option<crate::report::blast_xml2::Xml2Kind> {
         match self {
             BlastnOutputFormat::Xml2(kind) => Some(kind),
@@ -129,6 +154,23 @@ impl BlastnOutputFormat {
             self,
             BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments
         )
+    }
+
+    /// Whether the report reads the queries' letters (EXPERIMENT, LOSAT_X_BNQDROP's rule): the
+    /// HSP rows of outfmt 0 and of the XML / JSON documents, the archive's Bioseqs and DUST, and
+    /// SAM's SEQ where the query is the target (`SQ SR`). The tabular formats (BLASTN takes no
+    /// custom columns), the Seq-aligns and the other SAM documents show none.
+    pub(crate) fn reads_query_letters(self) -> bool {
+        match self {
+            BlastnOutputFormat::Tabular
+            | BlastnOutputFormat::TabularWithComments
+            | BlastnOutputFormat::Seqalign(_) => false,
+            BlastnOutputFormat::Sam(spec) => spec.sequence && spec.subject_as_reference,
+            BlastnOutputFormat::Pairwise
+            | BlastnOutputFormat::Xml
+            | BlastnOutputFormat::Xml2(_)
+            | BlastnOutputFormat::Archive => true,
+        }
     }
 }
 
@@ -1148,118 +1190,219 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
         }
-        if output_format == BlastnOutputFormat::TabularWithComments {
-            let query_title = query_titles
-                .get(q_idx)
-                .map(|title| title.as_ref())
-                .unwrap_or(b"unknown");
-            write_blastn_outfmt7_header(
-                writer,
-                query_title,
-                subject_title,
-                (!unsearched.get(q_idx).copied().unwrap_or(false))
-                    .then(|| blastn_hsp_count(hit_list_opt.as_ref())),
-            )?;
-        }
-        let hit_list = match hit_list_opt {
-            Some(value) => value,
-            None => continue,
-        };
-        for hsp_list in &hit_list.hsplist_array {
-            for hsp in &hsp_list.hsps {
-                let query_id = query_ids
-                    .get(hsp.q_idx as usize)
-                    .map(|id| id.as_ref())
-                    .unwrap_or(b"unknown");
-                let subject_id = subject_ids
-                    .get(hsp.s_idx as usize)
-                    .map(|id| id.as_ref())
-                    .unwrap_or(b"unknown");
-                // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-                // ```c
-                // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-                //     // Add tab in front of field, except for the first field.
-                //     if (iter != m_FieldsToShow.begin())
-                //         m_Ostream << m_FieldDelimiter;
-                //     x_PrintField(*iter);
-                // }
-                // m_Ostream << "\n";
-                // ```
-                if blastn_trace::should_trace_range(
-                    "hitlist",
-                    hsp.q_idx * 2 + if hsp.query_frame < 0 { 1 } else { 0 },
-                    hsp.s_idx as usize,
-                    &String::from_utf8_lossy(subject_id),
-                    hsp.internal_q_offset_0,
-                    hsp.internal_q_end_0,
-                    hsp.internal_s_offset_0,
-                    hsp.internal_s_end_0,
-                    hsp.query_length,
-                    hsp.query_frame,
-                ) {
-                    blastn_trace::log(
-                        "hitlist",
-                        format!(
-                            "query={} subject={} q={}..{} s={}..{} raw_score={} bit_score={:.12} evalue={:.12e} length={} identities={} mismatches={} gapopen={}",
-                            String::from_utf8_lossy(query_id),
-                            String::from_utf8_lossy(subject_id),
-                            hsp.q_start,
-                            hsp.q_end,
-                            hsp.s_start,
-                            hsp.s_end,
-                            hsp.raw_score,
-                            hsp.bit_score,
-                            hsp.e_value,
-                            hsp.length,
-                            hsp.num_ident,
-                            hsp.mismatch,
-                            hsp.gapopen
-                        ),
-                    );
-                }
-                // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-                // ```c
-                // void CBlastTabularInfo::Print()
-                // {
-                //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-                //         if (iter != m_FieldsToShow.begin())
-                //             m_Ostream << m_FieldDelimiter;
-                //         x_PrintField(*iter);
-                //     }
-                //     m_Ostream << "\n";
-                // }
-                // ```
-                // One printed row is one HSP; the probe marks it without changing it.
-                if let Some(probe) = probe.as_mut() {
-                    writer.flush()?;
-                    probe.begin(hsp_index);
-                }
-                write_hit_fields_bytes(
-                    writer,
-                    query_id,
-                    subject_id,
-                    hsp.identity,
-                    hsp.num_ident,
-                    hsp.length,
-                    hsp.mismatch,
-                    hsp.gapopen,
+        write_query_rows(
+            writer,
+            q_idx,
+            hit_list_opt.as_ref(),
+            query_ids,
+            subject_ids,
+            output_format,
+            query_titles,
+            subject_title,
+            unsearched,
+            &config,
+            &mut hsp_index,
+            probe.as_deref_mut(),
+        )?;
+    }
+    write_tabular_epilog(writer, output_format, epilog)
+}
+
+/// One query's lines of `write_output_blastn_hitlists_to_writer` (outfmt 7's header, then one row
+/// per HSP of its final hit list), without the warnings that come before them. `hsp_index` counts
+/// the rows written so far (the format observer's HSP index). The EXPERIMENT LOSAT_X_BNTABPAR
+/// (`x_tab_par.rs`) formats pieces of queries into buffers with `write_query_header` and
+/// `write_hsp_rows`, the two parts of this function, on the search's pool.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:828-832
+/// ```c
+/// ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
+///         const CSeq_align& s = **itr;
+///         tabinfo.SetFields(s, *m_Scope, &m_ScoringMatrix);
+///         tabinfo.Print();
+/// }
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_query_rows<W: Write>(
+    writer: &mut W,
+    q_idx: usize,
+    hit_list_opt: Option<&BlastnHitList>,
+    query_ids: &[Arc<[u8]>],
+    subject_ids: &[Arc<[u8]>],
+    output_format: BlastnOutputFormat,
+    query_titles: &[Arc<[u8]>],
+    subject_title: &str,
+    unsearched: &[bool],
+    config: &OutputConfig,
+    hsp_index: &mut HspIndex,
+    mut probe: Option<&mut FormatProbe<'_>>,
+) -> io::Result<()> {
+    write_query_header(
+        writer,
+        q_idx,
+        hit_list_opt,
+        output_format,
+        query_titles,
+        subject_title,
+        unsearched,
+    )?;
+    let hit_list = match hit_list_opt {
+        Some(value) => value,
+        None => return Ok(()),
+    };
+    for hsp_list in &hit_list.hsplist_array {
+        write_hsp_rows(
+            writer,
+            &hsp_list.hsps,
+            query_ids,
+            subject_ids,
+            config,
+            hsp_index,
+            probe.as_deref_mut(),
+        )?;
+    }
+    Ok(())
+}
+
+/// outfmt 7's header lines of query `q_idx` (nothing for outfmt 6), the first lines of
+/// `write_query_rows`.
+pub(crate) fn write_query_header<W: Write>(
+    writer: &mut W,
+    q_idx: usize,
+    hit_list_opt: Option<&BlastnHitList>,
+    output_format: BlastnOutputFormat,
+    query_titles: &[Arc<[u8]>],
+    subject_title: &str,
+    unsearched: &[bool],
+) -> io::Result<()> {
+    if output_format == BlastnOutputFormat::TabularWithComments {
+        let query_title = query_titles
+            .get(q_idx)
+            .map(|title| title.as_ref())
+            .unwrap_or(b"unknown");
+        write_blastn_outfmt7_header(
+            writer,
+            query_title,
+            subject_title,
+            (!unsearched.get(q_idx).copied().unwrap_or(false))
+                .then(|| blastn_hsp_count(hit_list_opt)),
+        )?;
+    }
+    Ok(())
+}
+
+/// One row per HSP of `hsps` (`write_query_rows`' rows of one HSP list, or a run of them).
+/// `hsp_index` counts the rows written so far (the format observer's HSP index).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_hsp_rows<W: Write>(
+    writer: &mut W,
+    hsps: &[BlastnHsp],
+    query_ids: &[Arc<[u8]>],
+    subject_ids: &[Arc<[u8]>],
+    config: &OutputConfig,
+    hsp_index: &mut HspIndex,
+    mut probe: Option<&mut FormatProbe<'_>>,
+) -> io::Result<()> {
+    for hsp in hsps {
+        let query_id = query_ids
+            .get(hsp.q_idx as usize)
+            .map(|id| id.as_ref())
+            .unwrap_or(b"unknown");
+        let subject_id = subject_ids
+            .get(hsp.s_idx as usize)
+            .map(|id| id.as_ref())
+            .unwrap_or(b"unknown");
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+        // ```c
+        // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+        //     // Add tab in front of field, except for the first field.
+        //     if (iter != m_FieldsToShow.begin())
+        //         m_Ostream << m_FieldDelimiter;
+        //     x_PrintField(*iter);
+        // }
+        // m_Ostream << "\n";
+        // ```
+        if blastn_trace::should_trace_range(
+            "hitlist",
+            hsp.q_idx * 2 + if hsp.query_frame < 0 { 1 } else { 0 },
+            hsp.s_idx as usize,
+            &String::from_utf8_lossy(subject_id),
+            hsp.internal_q_offset_0,
+            hsp.internal_q_end_0,
+            hsp.internal_s_offset_0,
+            hsp.internal_s_end_0,
+            hsp.query_length,
+            hsp.query_frame,
+        ) {
+            blastn_trace::log(
+                "hitlist",
+                format!(
+                    "query={} subject={} q={}..{} s={}..{} raw_score={} bit_score={:.12} evalue={:.12e} length={} identities={} mismatches={} gapopen={}",
+                    String::from_utf8_lossy(query_id),
+                    String::from_utf8_lossy(subject_id),
                     hsp.q_start,
                     hsp.q_end,
                     hsp.s_start,
                     hsp.s_end,
-                    hsp.e_value,
+                    hsp.raw_score,
                     hsp.bit_score,
-                    &config,
-                )?;
-                if let Some(probe) = probe.as_mut() {
-                    writer.flush()?;
-                    probe.end(hsp_index);
-                }
-                hsp_index += 1;
-            }
+                    hsp.e_value,
+                    hsp.length,
+                    hsp.num_ident,
+                    hsp.mismatch,
+                    hsp.gapopen
+                ),
+            );
         }
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+        // ```c
+        // void CBlastTabularInfo::Print()
+        // {
+        //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+        //         if (iter != m_FieldsToShow.begin())
+        //             m_Ostream << m_FieldDelimiter;
+        //         x_PrintField(*iter);
+        //     }
+        //     m_Ostream << "\n";
+        // }
+        // ```
+        // One printed row is one HSP; the probe marks it without changing it.
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.begin(*hsp_index);
+        }
+        write_hit_fields_bytes(
+            writer,
+            query_id,
+            subject_id,
+            hsp.identity,
+            hsp.num_ident,
+            hsp.length,
+            hsp.mismatch,
+            hsp.gapopen,
+            hsp.q_start,
+            hsp.q_end,
+            hsp.s_start,
+            hsp.s_end,
+            hsp.e_value,
+            hsp.bit_score,
+            config,
+        )?;
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.end(*hsp_index);
+        }
+        *hsp_index += 1;
     }
+    Ok(())
+}
 
+/// The line after the last query's lines (outfmt 7's count of queries, when `epilog`).
+pub(crate) fn write_tabular_epilog<W: Write>(
+    writer: &mut W,
+    output_format: BlastnOutputFormat,
+    epilog: Option<usize>,
+) -> io::Result<()> {
     // `PrintEpilog` writes the last line; an error in a later query batch skips it.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1429-1430
     // ```c

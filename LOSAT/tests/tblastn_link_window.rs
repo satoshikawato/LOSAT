@@ -1,5 +1,5 @@
-//! tblastn's linking candidates chosen by subject position (`LOSAT_X_TBNLINKWIN`, in the strict
-//! set; `src/algorithm/tblastn/stage_d_linking/x_link_window.rs`) on whole searches.
+//! tblastn's linking candidates chosen by subject position (`src/algorithm/tblastn/stage_d_linking/x_link_window.rs`;
+//! the former switch `LOSAT_X_TBNLINKWIN` graduated on 2026-10-26) on whole searches.
 //!
 //! NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723
 //! ```c
@@ -9,12 +9,12 @@
 //!            if (s_LinkedHSPSetsAdmissible(head_hsp, lhsp,
 //!                                          link_hsp_params, program)) {
 //! ```
-//! The switch tests the candidates of NCBI's window less those that cannot be admissible, in
+//! The search tests the candidates of NCBI's window less those that cannot be admissible, in
 //! NCBI's order (the unit test `x_chosen_candidates_give_the_links_of_the_whole_window` compares
-//! the links), so a search with it gives the report of NCBI's loop (`LOSAT_X_TBNLINKWIN=0`). It is
-//! on by default, off with `=0`, and off with `LOSAT_X_DEFAULT=0` unless its variable is set. These
-//! tests compare the reports and read the `[X_STATS] TBNLINKWIN heads= window= chosen=
-//! shadow_heads=` line (`LOSAT_X_STATS=1`, printed when a list was linked with the switch).
+//! the links with NCBI's whole window), so its report is that of NCBI's loop (the frozen NCBI
+//! hashes of the fast regressions check that). These tests compare the reports at one and four
+//! threads and read the `[X_STATS] TBNLINKWIN heads= window= chosen=` line (`LOSAT_X_STATS=1`,
+//! printed when a list was linked).
 //!
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` and all 115 of them; the
 //! subject is `tests/fasta/MelaMJNV.fasta`.
@@ -72,14 +72,14 @@ fn tblastn(query: &Path, threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>
 }
 
 /// The fields of the one `[X_STATS] TBNLINKWIN` line; `None` without the line.
-fn stats(stderr: &str) -> Option<[u64; 4]> {
+fn stats(stderr: &str) -> Option<[u64; 3]> {
     let lines: Vec<_> = stderr
         .lines()
         .filter(|line| line.starts_with("[X_STATS] TBNLINKWIN "))
         .collect();
     assert!(lines.len() <= 1, "one line per process:\n{stderr}");
     let line = lines.first()?;
-    Some(["heads", "window", "chosen", "shadow_heads"].map(|field| {
+    Some(["heads", "window", "chosen"].map(|field| {
         line.split_whitespace()
             .find_map(|word| word.strip_prefix(field)?.strip_prefix('='))
             .unwrap_or_else(|| panic!("no {field} in {line}"))
@@ -88,53 +88,19 @@ fn stats(stderr: &str) -> Option<[u64; 4]> {
     }))
 }
 
-const OFF: (&str, &str) = ("LOSAT_X_TBNLINKWIN", "0");
-const ON: (&str, &str) = ("LOSAT_X_TBNLINKWIN", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBNLINKWINSHADOW", "1");
-const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
-
-// NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723 (above). The default, the shadow
-// (every head's whole window tested as well) and four threads give the report of NCBI's loop
-// (`=0`); the line is there with the switch and not without it, and fewer candidates were tested
-// than the windows held.
+// NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723 (above). The report does not
+// depend on the threads; the line is there, and fewer candidates were tested than the windows held.
 #[test]
-fn the_report_is_that_of_ncbis_loop() {
+fn the_report_is_the_same_at_every_thread_count_and_the_lookup_ran() {
     for query in queries() {
-        let (expected, stderr) = tblastn(query, 1, &[OFF]);
+        let (expected, stderr) = tblastn(query, 1, &[]);
         assert!(
             !expected.is_empty(),
             "{query:?}: the search must report hits"
         );
-        assert_eq!(stats(&stderr), None, "{query:?}: no line with =0");
-        let (report, stderr) = tblastn(query, 1, &[]);
-        assert!(
-            report == expected,
-            "{query:?}: the default changes the report"
-        );
-        let [heads, window, chosen, shadow] = stats(&stderr).expect("a line by default");
+        let [heads, window, chosen] = stats(&stderr).expect("a line");
         assert!(heads > 0 && chosen <= window, "{query:?}");
-        assert_eq!(shadow, 0, "{query:?}");
-        let (report, stderr) = tblastn(query, 1, &[SHADOW]);
-        assert!(report == expected, "{query:?}: shadow");
-        let [heads, .., shadow] = stats(&stderr).expect("a line with the shadow");
-        assert!(heads > 0 && shadow > 0, "{query:?}");
-        for variables in [&[][..], &[OFF]] {
-            let (report, _) = tblastn(query, 4, variables);
-            assert!(report == expected, "{query:?} {variables:?}: four threads");
-        }
+        let (report, _) = tblastn(query, 4, &[]);
+        assert!(report == expected, "{query:?}: four threads");
     }
-}
-
-// No NCBI counterpart: with `LOSAT_X_DEFAULT=0` the switch is off unless its variable is set, as
-// before it joined the set; the report does not change either way.
-#[test]
-fn the_previous_default_leaves_it_off_unless_set() {
-    let [one, _] = queries();
-    let (expected, _) = tblastn(one, 1, &[]);
-    let (report, stderr) = tblastn(one, 1, &[PREVIOUS]);
-    assert!(report == expected);
-    assert_eq!(stats(&stderr), None);
-    let (report, stderr) = tblastn(one, 1, &[PREVIOUS, ON]);
-    assert!(report == expected);
-    assert!(stats(&stderr).expect("a line when set")[0] > 0);
 }

@@ -29,6 +29,7 @@ const { WASI } = require("node:wasi");
 
 const ROOT = path.resolve(__dirname, "../../..");
 const { createThreadHost } = require(path.join(ROOT, "LOSAT/tests/wasi_thread_host"));
+const { unsignedWasiImports } = require(path.join(ROOT, "LOSAT/tests/wasi_artifact"));
 
 const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7] };
 const WITH_HITS = new Set(["blastp", "tblastn", "blastn", "tblastx"]);
@@ -59,8 +60,10 @@ class Reactor {
     this.streams = new Map();
   }
 
+  // Pointers and lengths are unsigned; JavaScript receives an i32 as a signed number
+  // (docs/web/abi_v2.md §6), so a pointer of 2 GiB or more arrives negative.
   emit(stream, ptr, len) {
-    const chunk = Buffer.from(new Uint8Array(this.memory().buffer, ptr, len));
+    const chunk = Buffer.from(new Uint8Array(this.memory().buffer, ptr >>> 0, len >>> 0));
     if (!this.streams.has(stream)) this.streams.set(stream, []);
     this.streams.get(stream).push(chunk);
   }
@@ -74,7 +77,7 @@ class Reactor {
 
   error() {
     const e = this.exports;
-    return Buffer.from(new Uint8Array(this.memory().buffer, e.losat_web2_last_error_ptr(), e.losat_web2_last_error_len())).toString();
+    return Buffer.from(new Uint8Array(this.memory().buffer, e.losat_web2_last_error_ptr() >>> 0, e.losat_web2_last_error_len() >>> 0)).toString();
   }
 
   // Calls an export; Buffer and string arguments become (ptr, len) pairs.
@@ -83,7 +86,7 @@ class Reactor {
     for (const arg of args) {
       if (typeof arg === "number") { flat.push(arg); continue; }
       const bytes = Buffer.isBuffer(arg) ? arg : Buffer.from(arg);
-      const ptr = e.losat_web2_alloc(bytes.length);
+      const ptr = e.losat_web2_alloc(bytes.length) >>> 0;
       new Uint8Array(this.memory().buffer, ptr, bytes.length).set(bytes);
       allocations.push([ptr, bytes.length]);
       flat.push(ptr, bytes.length);
@@ -101,7 +104,7 @@ async function openSerial(wasmPath) {
   const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env: {} });
   let reactor;
   const imports = {
-    wasi_snapshot_preview1: wasi.wasiImport,
+    wasi_snapshot_preview1: unsignedWasiImports(wasi.wasiImport),
     losat_host: { emit: (stream, ptr, len) => reactor.emit(stream, ptr, len) },
   };
   const { instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), imports);
@@ -160,7 +163,7 @@ function checkFailure(run, expected, program, label) {
   assert.ok(expected.outputs.get(0).length > 0, `${label}: the CLI's outfmt 0 file has the prolog`);
 }
 
-function checkHits(streams, program, label) {
+function checkHits(streams, program, label, queryIds) {
   const records = (streams.get(1) || Buffer.alloc(0)).toString().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   // A stream without bytes (a search without hits) is never emitted.
   const out6 = streams.get(6) || Buffer.alloc(0), out0 = streams.get(0) || Buffer.alloc(0);
@@ -176,6 +179,13 @@ function checkHits(streams, program, label) {
     assert.equal(row.trimEnd(), rows[index], `${label}: out6 of HSP ${index}`);
     const fields = row.trimEnd().split("\t");
     assert.deepEqual(fields.slice(6, 10).map(Number), [record.q_start, record.q_end, record.s_start, record.s_end], `${label}: coordinates of HSP ${index}`);
+    // The records come in query order, each with the index of its query among the registered
+    // records (a block search numbers a block's queries from the block's first query); where the
+    // query's id (`register`'s response) is an accession-like word, it is the row's qseqid.
+    assert.ok(record.q_idx < queryIds.length, `${label}: q_idx of HSP ${index} within the registered queries`);
+    if (index > 0) assert.ok(record.q_idx >= records[index - 1].q_idx, `${label}: q_idx order at HSP ${index}`);
+    const id = queryIds[record.q_idx];
+    if (/^[A-Za-z_]+[0-9]+(\.[0-9]+)?$/.test(id)) assert.equal(fields[0], id, `${label}: q_idx of HSP ${index}`);
     // A subject beyond the alignments that outfmt 0 shows (for example BLASTN's 250) has
     // no section and no heading.
     if (record.out0 === null) {
@@ -298,6 +308,7 @@ async function main() {
       }
       const q = reactor.call("losat_web2_register", program, 0, fs.readFileSync(query));
       assert.ok(q.status > 0, `register query: ${q.error}`);
+      const queryIds = JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
       for (const threads of engine.threads) {
         const argv = [...search.argv, "-num_threads", String(threads)].join("\0");
         const run = reactor.call("losat_web2_run", argv, q.status, subjects.get(subjectKey));
@@ -321,7 +332,7 @@ async function main() {
         }
         assert.equal(sha256(run.streams.get(3) || Buffer.alloc(0)), sha256(expected.stderr), `${label}: diagnostics`);
         row.diagnostics = sha256(expected.stderr);
-        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label) : null;
+        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds) : null;
         results.push(row);
         console.log(`ok ${label}`);
       }

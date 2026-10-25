@@ -1,7 +1,6 @@
-//! EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW): the TBLASTX HSP list is sorted,
-//! cut into linking groups, put together again and replayed into NCBI's output order without a
-//! second whole copy of the list alive. Only where the records lie changes; every comparison,
-//! every per-group linking call and every value written is the reference's.
+//! The TBLASTX HSP list is sorted, linked as sub-slices and replayed into NCBI's output order
+//! without a second whole copy of the list alive. Only where the records lie changes; every
+//! comparison, every per-group linking call and every value written is the reference's.
 //!
 //! This file is a child module of `sum_stats_linking/linking.rs` (declared there with `#[path]`,
 //! as `lookup/x_lut_direct.rs` is for `backbone.rs`), so it uses that file's comparators,
@@ -93,88 +92,76 @@
 //! ```
 //! NCBI sorts arrays of pointers in place, runs its frame groups as sublists of the one sorted
 //! array and writes the final order back into the same `hsp_array`: it never holds a second copy
-//! of the HSPs. LOSAT's reference path owns complete `UngappedHit` records (88 bytes) and copies
+//! of the HSPs. LOSAT owns complete `UngappedHit` records (88 bytes); the first LOSAT form copied
 //! the whole list at each of these steps (`hits.to_vec()` in every sort, groups grown by `push`
-//! while the sorted list is drained, a result grown by `extend`, a cloned replay). This path keeps
-//! one list.
+//! while the sorted list is drained, a result grown by `extend`, a cloned replay). This path
+//! keeps one list. The statements of that first form are described below as "the reference". Its
+//! linking body in `linking.rs` (the push grouping, the clones, the two reference sorts and the
+//! replay) remains: `LOSAT_DEBUG_CUTOFFS` and `LOSAT_DIAGNOSTICS` still take it (`gate()`), and
+//! the unit tests compare this path with it. Its index-replay sort copy is gone.
 //!
-//! # Why the result is the reference's (each point checked against the code it replaces)
+//! # Why the result is the reference's (each point checked against the code it replaced)
 //!
-//! 1. Sort (`sort_in_place`; reference `sort_ungapped_hits_by_index_replay`,
-//!    `ungapped_hit_sort.rs`). The reference sorts the indices `0..n` with `slice::sort_by` and a
-//!    comparator that reads only the two records, taken from an untouched copy of the list. This
-//!    path makes the same `sort_by` call on the same initial indices and reads the records from
-//!    the list itself, which is not written during the sort: the same records at the same
-//!    indices, so the same comparison results in the same sequence and the same index order.
-//!    The reference then writes `hits[dst] = original[indices[dst]]`; `apply_permutation_in_place`
-//!    produces exactly that arrangement by walking each cycle of the permutation with swaps
-//!    (after the walk of a cycle every position `dst` of it holds the record that was at
-//!    `indices[dst]`, and the cycle's first record has travelled to the position that asks for
-//!    it). No record is cloned, so no field can change.
-//! 2. Groups (`groups_off_the_end`; reference `linking.rs`, the `current_group.push(hit)` loop).
-//!    The reference starts a new group at a record whose `translated_context_group` or sign of
-//!    `s_frame` differs from the record before it, so its groups are the maximal runs of
-//!    consecutive records of the sorted list, in list order. This path finds the same run starts
-//!    with the same two tests on the same neighbours, cuts the runs off the end of the list
-//!    (`Vec::split_off` copies the tail records, in order, into a Vec of exactly that size), keeps
-//!    the remaining head as the first group, and reverses the group list: the same groups with
-//!    the same records in the same order. Only the capacity of the Vecs differs, which neither
-//!    kernel reads (they index, read and write the records and return the same Vec).
+//! 1. Sort (`sort_in_place`). The reference sorted the indices `0..n` with `slice::sort_by` and
+//!    a comparator that reads only the two records, taken from an untouched copy of the list.
+//!    This path sorts the same initial indices (`x_link_sort::sort_indices`, which returns the
+//!    same order as that `sort_by`) and reads the records from the list itself, which is not
+//!    written during the sort: the same records at the same indices, so the same comparison
+//!    results in the same sequence and the same index order. The reference then wrote
+//!    `hits[dst] = original[indices[dst]]`; `apply_permutation_in_place` produces exactly that
+//!    arrangement by walking each cycle of the permutation with swaps (after the walk of a cycle
+//!    every position `dst` of it holds the record that was at `indices[dst]`, and the cycle's
+//!    first record has travelled to the position that asks for it). No record is cloned, so no
+//!    field can change.
+//! 2. Groups (`group_starts`, `x_link_slices.rs`). The reference started a new group at a record
+//!    whose `translated_context_group` or sign of `s_frame` differs from the record before it
+//!    (`current_group.push(hit)` loop), so its groups are the maximal runs of consecutive records
+//!    of the sorted list, in list order. `group_starts` finds the same run starts with the same
+//!    two tests on the same neighbours, and `x_link_slices.rs` links the runs where they lie, as
+//!    disjoint sub-slices of the one list: the same groups with the same records in the same
+//!    order, with no cut and no second list.
 //! 3. Per-group linking. The same functions (`link_hsp_group_incremental`, or
 //!    `link_hsp_group_ncbi` when the literal port is asked for) with the same arguments, serially
-//!    in group order or on the pool exactly as in the reference (`into_par_iter().enumerate()`,
-//!    indexed collect, sort by index). The scratch buffers handed to the kernels start empty
+//!    in group order or on the pool. The scratch buffers handed to the kernels start empty
 //!    unless the literal port can run (`LOSAT_LINKING_LEGACY`, a linking trace, or
 //!    `LOSAT_LINK_FAST_SHADOW`): the incremental kernel never touches them, and the literal port
 //!    clears and reserves them itself for every group (`pool_hsp_links.clear(); .reserve(n)`,
 //!    `pool_lh_helpers.clear(); .resize(..)`), so their initial capacity changes no value.
-//! 4. Assembly (`assemble`). The reference concatenates the linked groups in group order
-//!    (`ordered.extend(processed)`, or `flat_map` over the index-sorted pool results). This path
-//!    extends one Vec of exact capacity with the groups in the same order.
+//! 4. Assembly. The reference concatenated the linked groups in group order. The groups lie in
+//!    group order inside the one list, so there is nothing to put together.
 //! 5. Output order (`replay_in_place`; reference: two `sort_linked_hsp_references` calls and
-//!    `replay_ncbi_output_list`). The reference stable-sorts a Vec of references that starts in
+//!    `replay_ncbi_output_list`, which the `LOSAT_DEBUG_CUTOFFS` / `LOSAT_DIAGNOSTICS` body still
+//!    runs). The reference stable-sorts a Vec of references that starts in
 //!    list order, twice; this path stable-sorts the indices `0..n` with the same two comparators
-//!    applied to the same records, so `order[i]` is the list position of the reference's
-//!    `sorted_hits[i]`. The walk is the reference's statement for statement with
-//!    `results[order[i]]` in place of `sorted_hits[i]`: the same `id_to_index`, the same skip of
-//!    chain members, the same `num` writes, the same stops, hence the same `replayed_indices`.
-//!    The reference returns clones of `sorted_hits[replayed_indices[k]]`, taken after all `num`
-//!    writes. When `replayed_indices` is a permutation of `0..n` (every record exactly once,
-//!    which is what linked chains give), moving the records by that permutation gives the same
-//!    list; otherwise (a record left out or reached twice) this path returns the reference's own
-//!    expression, the clones. Both outcomes are counted.
+//!    applied to the same records (`x_link_sort::final_sort`, one sort with the same result), so
+//!    `order[i]` is the list position of the reference's `sorted_hits[i]`. The walk is the
+//!    reference's statement for statement with `results[order[i]]` in place of `sorted_hits[i]`:
+//!    the same `id_to_index`, the same skip of chain members, the same `num` writes, the same
+//!    stops, hence the same `replayed_indices`. The reference returns clones of
+//!    `sorted_hits[replayed_indices[k]]`, taken after all `num` writes. When `replayed_indices`
+//!    is a permutation of `0..n` (every record exactly once, which is what linked chains give),
+//!    moving the records by that permutation gives the same list; otherwise (a record left out
+//!    or reached twice) this path returns the reference's own expression, the clones. Both
+//!    outcomes are counted.
 //!
-//! The reference functions keep their bodies; each has one dispatch at its head. A linking call
-//! with `LOSAT_DEBUG_CUTOFFS` or `LOSAT_DIAGNOSTICS` set runs the reference body (its debug output
-//! lives there).
+//! A linking call with `LOSAT_DEBUG_CUTOFFS` or `LOSAT_DIAGNOSTICS` set runs the reference body
+//! in `linking.rs` (its debug output lives there); its first sort is the sort of item 1.
 //!
-//! `LOSAT_X_HSPINPLACESHADOW=1` runs every sort call and every linking call both ways (the
-//! reference on a clone of the input), compares the two results record by record, every field,
-//! `e_value` by bits, stops at the first difference and continues with the reference's result;
-//! the summary is printed by `main`.
-//!
-//! EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW, on by default as a strict-set switch):
-//! the two index sort sites of this file (`sort_in_place`, `replay_in_place_counted`) then call
-//! `x_link_sort.rs`, which returns the same index order from one final sort instead of two and
-//! from a stable parallel sort for long lists (its header has the argument). With the switch off
-//! the statements described in items 1 and 5 run.
-//!
-//! EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW, on by default as a strict-set
-//! switch): `link_in_place` then hands the group step to `x_link_slices.rs`, which links the
-//! groups as disjoint sub-slices of the one sorted list (the runs `group_starts` finds, as in
-//! item 2), so items 2-4 need neither the cut nor the assembly (its header has the argument).
-//! With the switch off the statements described in items 2-4 run; with its shadow they run, and
-//! their result is compared with the slices on a copy of the list.
+//! The index sort sites of this file (`sort_in_place`, `replay_in_place_counted`) call
+//! `x_link_sort.rs`, which returns the index order of the reference's sorts from one final sort
+//! instead of two and from a stable parallel sort for long lists (its header has the argument).
+//! The group step of `link_in_place` is `x_link_slices.rs`, which links the groups as disjoint
+//! sub-slices of the one sorted list (its header has the argument).
 
 use super::*;
 // Diagnostic (LOSAT_TIMING): the clock of a linking call (tblastx/x_link_timing.rs). It reads
 // the clock only in a call the batch function armed, and the linking reads nothing from it.
-use crate::algorithm::tblastx::x_link_timing::{KernelTimes, LinkLap, LinkStage};
+use crate::algorithm::tblastx::x_link_timing::{LinkLap, LinkStage};
+#[cfg(test)]
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
-// No NCBI counterpart: counters for LOSAT_X_STATS and the shadow summary; they do not change any
-// value NCBI computes.
+// No NCBI counterpart: counters for LOSAT_X_STATS; they do not change any value NCBI computes.
 static SORTS: AtomicU64 = AtomicU64::new(0);
 static LINKINGS: AtomicU64 = AtomicU64::new(0);
 static HITS: AtomicU64 = AtomicU64::new(0);
@@ -183,38 +170,13 @@ static REPLAY_INPLACE: AtomicU64 = AtomicU64::new(0);
 static REPLAY_FALLBACKS: AtomicU64 = AtomicU64::new(0);
 static GATE_REFERENCE: AtomicU64 = AtomicU64::new(0);
 
-// No NCBI counterpart: how the shadow reaches a reference body that has the dispatch at its head.
-// The shadow sets the flag of the calling thread and calls the reference function; the dispatch at
-// the head of that call takes the flag and lets the body run. Nothing between the two can hand the
-// thread to other work, and the two reference functions have separate flags, so the sort inside a
-// reference linking call is shadowed as well. The unit tests reach the reference bodies the same
-// way (`tests::reference_sort`, `tests::reference_linking`), with the switch on as well; nothing
-// else sets a flag, so a search with the switch on only reads them.
+// No NCBI counterpart: how a unit test reaches the reference linking body, which has the dispatch
+// at its head. The test sets the flag of the calling thread and calls the reference function; the
+// dispatch at the head of that call takes the flag and lets the body run. Nothing else sets the
+// flag (`tests::reference_linking`), so a search never reads it.
+#[cfg(test)]
 thread_local! {
-    static SORT_REFERENCE_CALL: Cell<bool> = const { Cell::new(false) };
     static LINKING_REFERENCE_CALL: Cell<bool> = const { Cell::new(false) };
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486
-// ```c
-// /* Sort by (reverse) position. */
-// if (kTranslatedQuery) {
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTbx);
-// ```
-// Dispatch switch: 0 = the reference (copying) path, 1 = this path, 2 = both, compared.
-/// 0 = off, 1 = LOSAT_X_HSPINPLACE, 2 = LOSAT_X_HSPINPLACESHADOW.
-pub(crate) fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_HSPINPLACESHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_HSPINPLACE") {
-            1
-        } else {
-            0
-        }
-    })
 }
 
 // No NCBI counterpart: the reference linking body prints the LOSAT_DEBUG_CUTOFFS block and passes
@@ -224,36 +186,23 @@ fn gate() -> bool {
     *GATE.get_or_init(|| std::env::var_os("LOSAT_DEBUG_CUTOFFS").is_some() || diagnostics_enabled())
 }
 
-/// The summary lines (printed by `main` at exit): the shadow summary and the LOSAT_X_STATS
-/// counters.
+/// The summary line (printed by `main` at exit): the LOSAT_X_STATS counters.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
-    let m = mode();
-    if m == 0 {
+    if std::env::var_os("LOSAT_X_STATS").is_none() {
         return;
     }
     let load = |c: &AtomicU64| c.load(AtomicOrdering::Relaxed);
-    if m == 2 {
-        eprintln!(
-            "[X_SHADOW] HSPINPLACE sorts={} linkings={} hits_compared={} replay_fallbacks={}",
-            load(&SORTS),
-            load(&LINKINGS),
-            load(&HITS),
-            load(&REPLAY_FALLBACKS)
-        );
-    }
-    if std::env::var_os("LOSAT_X_STATS").is_some() {
-        eprintln!(
-            "[X_STATS] HSPINPLACE sorts={} linkings={} hits={} groups={} replay_inplace={} replay_fallbacks={} gate_reference={}",
-            load(&SORTS),
-            load(&LINKINGS),
-            load(&HITS),
-            load(&GROUPS),
-            load(&REPLAY_INPLACE),
-            load(&REPLAY_FALLBACKS),
-            load(&GATE_REFERENCE)
-        );
-    }
+    eprintln!(
+        "[X_STATS] HSPINPLACE sorts={} linkings={} hits={} groups={} replay_inplace={} replay_fallbacks={} gate_reference={}",
+        load(&SORTS),
+        load(&LINKINGS),
+        load(&HITS),
+        load(&GROUPS),
+        load(&REPLAY_INPLACE),
+        load(&REPLAY_FALLBACKS),
+        load(&GATE_REFERENCE)
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
@@ -266,11 +215,7 @@ pub fn print_summary() {
 /// Rearranges `items` so that `items[dst]` is the element that was at `source[dst]`. `source` must
 /// be a permutation of `0..items.len()`; it is left as the identity.
 fn apply_permutation_in_place<T>(items: &mut [T], source: &mut [usize]) {
-    assert_eq!(
-        items.len(),
-        source.len(),
-        "LOSAT_X_HSPINPLACE: permutation length"
-    );
+    assert_eq!(items.len(), source.len(), "permutation length");
     for start in 0..source.len() {
         let mut dst = start;
         loop {
@@ -297,25 +242,22 @@ fn apply_permutation_in_place<T>(items: &mut [T], source: &mut [usize]) {
 //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_RevCompareHSPsTbx);
 // ```
-// The index sort of `sort_ungapped_hits_by_index_replay` (same `sort_by`, same comparator, same
-// records at the same indices), then the records moved instead of copied and cloned back.
-// `site` names the caller for LOSAT_X_LINKSORT and is not read with that switch off.
+// The index sort of `sort_ungapped_hits_by_index_replay` (same comparator, same records at the
+// same indices), then the records moved instead of copied and cloned back. `site` names the
+// caller for `x_link_sort`.
 /// The result of `sort_ungapped_hits_by_index_replay` without a copy of the list.
-fn sort_in_place(
-    hits: &mut [UngappedHit],
-    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
-    site: x_link_sort::Site,
-) {
+fn sort_in_place<C>(hits: &mut [UngappedHit], compare: C, site: x_link_sort::Site)
+where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
+{
     if hits.len() <= 1 {
         return;
     }
     let mut indices: Vec<usize> = (0..hits.len()).collect();
     {
         let original: &[UngappedHit] = hits;
-        // EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW), dispatch: the same index order
-        // from a stable parallel sort when the list is long and the call may use the pool
-        // (tblastx/x_link_sort.rs, item 2 of its header). With the switch off the statement
-        // below runs.
+        // The same index order from a stable parallel sort when the list is long and the call may
+        // use the pool (tblastx/x_link_sort.rs, item 2 of its header).
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486
         // ```c
@@ -327,13 +269,7 @@ fn sort_in_place(
         //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
         //               ScoreCompareHSPs);
         // ```
-        if x_link_sort::mode() != 0 {
-            x_link_sort::sort_indices(&mut indices, original, compare, site);
-        } else {
-            indices.sort_by(|&lhs_index, &rhs_index| {
-                compare(&original[lhs_index], &original[rhs_index])
-            });
-        }
+        x_link_sort::sort_indices(&mut indices, original, compare, site);
     }
     apply_permutation_in_place(hits, &mut indices);
 }
@@ -343,28 +279,12 @@ fn sort_in_place(
 // for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
 //    hsp_list->hsp_array[index] = H->hsp;
 // ```
-// No computation: the shadow compares the two lists, every field of every HSP, and stops at the
-// first difference. A new field of `UngappedHit` does not compile here until it is compared.
-/// Shadow check: `actual` (this path) against `reference`, record by record.
-fn shadow_compare(what: &str, actual: &[UngappedHit], reference: &[UngappedHit]) {
-    shadow_compare_as("LOSAT_X_HSPINPLACESHADOW", what, actual, reference);
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1080-1082
-// ```c
-// for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
-//    hsp_list->hsp_array[index] = H->hsp;
-// ```
-// No computation: the comparison of `shadow_compare` with the name of the shadow switch that
-// stops the run at the start of its message (LOSAT_X_LINKSLICESSHADOW uses it as well,
-// tblastx/x_link_slices.rs).
-/// Shadow check of `switch`: `actual` (the new path) against `reference`, record by record.
-pub(super) fn shadow_compare_as(
-    switch: &str,
-    what: &str,
-    actual: &[UngappedHit],
-    reference: &[UngappedHit],
-) {
+// No computation: the unit tests of this file and of `x_link_slices.rs` compare two lists record
+// by record, every field, `e_value` by bits, and stop at the first difference. A new field of
+// `UngappedHit` does not compile here until it is compared.
+/// Test check: `actual` (the in-place or sliced path) against `reference`, record by record.
+#[cfg(test)]
+pub(super) fn x_assert_same_hits(what: &str, actual: &[UngappedHit], reference: &[UngappedHit]) {
     fn same(a: &UngappedHit, b: &UngappedHit) -> bool {
         let UngappedHit {
             q_idx,
@@ -424,7 +344,7 @@ pub(super) fn shadow_compare_as(
         match (actual.get(k), reference.get(k)) {
             (Some(a), Some(b)) if same(a, b) => {}
             (a, b) => panic!(
-                "{switch}: {what}, index {k} differs (in place {} hits, reference {} hits): in place {a:?} vs reference {b:?}",
+                "{what}, index {k} differs (in place {} hits, reference {} hits): in place {a:?} vs reference {b:?}",
                 actual.len(),
                 reference.len()
             ),
@@ -437,49 +357,15 @@ pub(super) fn shadow_compare_as(
 //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
 //               ScoreCompareHSPs);
 // ```
-// The dispatch of `sort_ungapped_hits_by_index_replay` (called after its `len <= 1` return, only
-// when the switch or its shadow is on).
-/// `true`: `hits` is sorted (in place, or by both ways and compared). `false`: the caller's
-/// reference body sorts it.
-pub(crate) fn sort_dispatch(
-    hits: &mut [UngappedHit],
-    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
-) -> bool {
-    let m = mode();
-    if m == 0 {
-        return false;
-    }
-    if SORT_REFERENCE_CALL.with(|flag| flag.replace(false)) {
-        // A call for the reference body: the shadow's own (below) or a unit test's.
-        return false;
-    }
-    match m {
-        1 => {
-            sort_in_place(hits, compare, x_link_sort::Site::Dispatch);
-            SORTS.fetch_add(1, AtomicOrdering::Relaxed);
-            HITS.fetch_add(hits.len() as u64, AtomicOrdering::Relaxed);
-            true
-        }
-        _ => {
-            let mut reference = hits.to_vec();
-            SORT_REFERENCE_CALL.with(|flag| flag.set(true));
-            crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_replay(
-                &mut reference,
-                compare,
-            );
-            assert!(
-                !SORT_REFERENCE_CALL.with(|flag| flag.get()),
-                "LOSAT_X_HSPINPLACESHADOW: the reference sort did not reach its dispatch"
-            );
-            sort_in_place(hits, compare, x_link_sort::Site::Dispatch);
-            shadow_compare("sort", hits, &reference);
-            SORTS.fetch_add(1, AtomicOrdering::Relaxed);
-            HITS.fetch_add(reference.len() as u64, AtomicOrdering::Relaxed);
-            // The search continues with the reference's result.
-            hits.clone_from_slice(&reference);
-            true
-        }
-    }
+// The sort of `sort_ungapped_hits_by_index_replay` (called after its `len <= 1` return).
+/// Sorts `hits` in place.
+pub(crate) fn sort_dispatch<C>(hits: &mut [UngappedHit], compare: C)
+where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
+{
+    sort_in_place(hits, compare, x_link_sort::Site::Dispatch);
+    SORTS.fetch_add(1, AtomicOrdering::Relaxed);
+    HITS.fetch_add(hits.len() as u64, AtomicOrdering::Relaxed);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:513-534
@@ -500,8 +386,8 @@ pub(crate) fn sort_dispatch(
 // ```
 // NCBI's groups are sublists of the sorted array (`hp_frame_start`, `hp_frame_number`). The same
 // run starts as the reference's push loop: the test of a record against the one before it. This
-// loop is the one `groups_off_the_end` ran in its body; LOSAT_X_LINKSLICES
-// (tblastx/x_link_slices.rs) finds its groups with the same function.
+// loop is the one the reference's push loop ran; `x_link_slices.rs` finds its groups with this
+// function.
 /// The list positions where a group of the reference's grouping starts, after the first: every
 /// `index >= 1` whose record differs from the record before it in `translated_context_group` or
 /// in the sign of `s_frame`, in increasing order.
@@ -522,47 +408,6 @@ pub(super) fn group_starts(hits: &[UngappedHit]) -> Vec<usize> {
     starts
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:513-534
-// ```c
-// Int4 strand_factor = (kTranslatedQuery ? 3 : 1);
-// for (index=0;index<number_of_hsps;index++)
-// {
-//   H=link_hsp_array[index];
-// ...
-//   if (H->prev != NULL &&
-//       ((H->hsp->context/strand_factor) !=
-//        (H->prev->hsp->context/strand_factor) ||
-//        (SIGN(H->hsp->subject.frame) != SIGN(H->prev->hsp->subject.frame))))
-//   { /* If frame switches, then start new list. */
-//      hp_frame_number[cur_frame]--;
-//      hp_frame_number[++cur_frame]++;
-//      hp_frame_start[cur_frame] = H;
-// ```
-// The run starts of `group_starts`, then the runs are cut off the end of the list so that the
-// list and the groups together never hold more than the list plus the one group being cut
-// (module doc, item 2).
-/// The reference's groups (maximal runs of one `translated_context_group` and one sign of
-/// `s_frame`, in list order) as exactly sized Vecs.
-fn groups_off_the_end(mut hits: Vec<UngappedHit>) -> Vec<Vec<UngappedHit>> {
-    if hits.is_empty() {
-        return Vec::new();
-    }
-    let starts = group_starts(&hits);
-    // The list may arrive with spare capacity (it was grown by `extend`): give it back first.
-    hits.shrink_to_fit();
-    let mut frame_groups: Vec<Vec<UngappedHit>> = Vec::with_capacity(starts.len() + 1);
-    for &start in starts.iter().rev() {
-        // `start >= 1`: the tail records move, in order, into a Vec of exactly their number.
-        let group = hits.split_off(start);
-        hits.shrink_to(start);
-        frame_groups.push(group);
-    }
-    // What is left is the first group.
-    frame_groups.push(hits);
-    frame_groups.reverse();
-    frame_groups
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:448-454
 // ```c
 // hsp_array = hsp_list->hsp_array;
@@ -574,7 +419,7 @@ fn groups_off_the_end(mut hits: Vec<UngappedHit>) -> Vec<Vec<UngappedHit>> {
 // The scratch of the literal port `link_hsp_group_ncbi`, sized as in the reference when that port
 // can run. The incremental kernel does not use it, so it then starts empty (module doc, item 3):
 // the reference's capacity is 88 bytes per HSP of the whole list for every linking thread.
-// LOSAT_X_LINKSLICES (tblastx/x_link_slices.rs) makes its scratch with this function as well.
+// `x_link_slices.rs` makes its scratch with this function.
 pub(super) fn buffer_pools(
     initial_lh_size: usize,
     total_hits: usize,
@@ -593,8 +438,8 @@ pub(super) fn buffer_pools(
     }
 }
 
-/// The values every per-group linking call of one linking call shares. LOSAT_X_LINKSLICES
-/// (tblastx/x_link_slices.rs) hands the same values to the same per-group functions.
+/// The values every per-group linking call of one linking call shares (`x_link_slices.rs` hands
+/// them to the per-group functions).
 pub(super) struct GroupArgs<'a> {
     pub(super) use_legacy: bool,
     pub(super) diag_enabled: bool,
@@ -606,72 +451,6 @@ pub(super) struct GroupArgs<'a> {
     pub(super) length_adj_per_context: &'a [i64],
     pub(super) eff_searchsp_per_context: &'a [i64],
     pub(super) log_k_by_ctx: &'a [f64],
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start = s_LinkHSPStructReset(hp_start);
-//    hp_start->next = hp_frame_start[frame_index];
-//    hp_frame_start[frame_index]->prev = hp_start;
-//    number_of_hsps = hp_frame_number[frame_index];
-// ```
-// One group through the reference's per-group function with the reference's arguments.
-fn link_one_group(
-    group_hits: Vec<UngappedHit>,
-    args: &GroupArgs<'_>,
-    pool: &mut BufferPools,
-) -> Vec<UngappedHit> {
-    if args.use_legacy {
-        link_hsp_group_ncbi(
-            group_hits,
-            args.params,
-            args.cutoffs,
-            args.linking_params.gap_decay_rate,
-            args.diag_enabled,
-            args.linking_params.subject_len_nucl,
-            args.query_contexts,
-            args.subject_frame_bases,
-            args.length_adj_per_context,
-            args.eff_searchsp_per_context,
-            args.log_k_by_ctx,
-            &mut pool.lh_helpers,
-            &mut pool.hsp_links,
-        )
-    } else {
-        link_hsp_group_incremental(
-            group_hits,
-            args.params,
-            args.cutoffs,
-            args.linking_params.gap_decay_rate,
-            args.linking_params.subject_len_nucl,
-            args.query_contexts,
-            args.subject_frame_bases,
-            args.length_adj_per_context,
-            args.eff_searchsp_per_context,
-            args.log_k_by_ctx,
-            &mut pool.lh_helpers,
-            &mut pool.hsp_links,
-        )
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1080-1082
-// ```c
-// for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
-//    hsp_list->hsp_array[index] = H->hsp;
-// ```
-// NCBI's groups stay in the one array. Here the linked groups go back into one list in group
-// order, the reference's concatenation, with one allocation of the exact size; each group's
-// memory is released as soon as its records are in the list (module doc, item 4).
-/// The linked groups, in group order, as one list of capacity `total`.
-fn assemble(groups: impl Iterator<Item = Vec<UngappedHit>>, total: usize) -> Vec<UngappedHit> {
-    let mut ordered: Vec<UngappedHit> = Vec::with_capacity(total);
-    for group in groups {
-        ordered.extend(group);
-    }
-    ordered
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
@@ -720,11 +499,13 @@ fn assemble(groups: impl Iterator<Item = Vec<UngappedHit>>, total: usize) -> Vec
 // for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
 //    hsp_list->hsp_array[index] = H->hsp;
 // ```
-// The two final sorts on indices instead of references, the walk of `replay_ncbi_output_list`
-// with `results[order[i]]` for its `sorted_hits[i]`, and the records moved into the replayed
-// order when it holds every record exactly once (module doc, item 5).
-/// The result of the reference's two final sorts and `replay_ncbi_output_list` for a list of at
-/// least two HSPs, without a second list unless the replay leaves a record out or repeats one.
+// The reference's two final sorts as one composite sort on indices (`x_link_sort::final_sort`),
+// the walk of `replay_ncbi_output_list` with `results[order[i]]` for its `sorted_hits[i]`, and
+// the records moved into the replayed order when it holds every record exactly once (module
+// doc, item 5).
+/// The result of the reference's two final sorts (one composite sort here) and
+/// `replay_ncbi_output_list` for a list of at least two HSPs, without a second list unless the
+/// replay leaves a record out or repeats one.
 fn replay_in_place(
     results: Vec<UngappedHit>,
     lap: &mut LinkLap,
@@ -755,8 +536,7 @@ fn replay_in_place(
 //    hsp_list->hsp_array[index] = H->hsp;
 // ```
 // The body of `replay_in_place`; the flag says which of the two outcomes produced the list.
-// `allow_parallel` is the linking call's, for LOSAT_X_LINKSORT; it is not read with that switch
-// off.
+// `allow_parallel` is the linking call's, for `x_link_sort`.
 /// The replayed list and whether it was made in place (`true`) or by the reference's clones.
 fn replay_in_place_counted(
     mut results: Vec<UngappedHit>,
@@ -765,11 +545,9 @@ fn replay_in_place_counted(
 ) -> (Vec<UngappedHit>, bool) {
     let n = results.len();
     let mut order: Vec<usize> = (0..n).collect();
-    // EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW), dispatch: the index order of the
-    // two sorts below from one stable sort with `s_FwdCompareHSPsTransl`, ties by
-    // `s_RevCompareHSPsTransl`, on the pool when the list is long and the call may use it
-    // (tblastx/x_link_sort.rs, items 1 and 2 of its header). With the switch off the two sorts
-    // below run.
+    // The index order of the two reference sorts from one stable sort with
+    // `s_FwdCompareHSPsTransl`, ties by `s_RevCompareHSPsTransl`, on the pool when the list is
+    // long and the call may use it (tblastx/x_link_sort.rs, items 1 and 2 of its header).
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
     // ```c
@@ -779,22 +557,11 @@ fn replay_in_place_counted(
     //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
     //          s_FwdCompareHSPsTransl);
     // ```
-    if x_link_sort::mode() != 0 {
-        x_link_sort::final_sort(
-            &mut order,
-            &results,
-            x_link_sort::Site::Final(allow_parallel),
-        );
-    } else {
-        for compare in [
-            rev_compare_hsps_transl as fn(&UngappedHit, &UngappedHit) -> Ordering,
-            fwd_compare_hsps_transl,
-        ] {
-            let records: &[UngappedHit] = &results;
-            // Stable, as `sort_linked_hsp_references`: comparator-equal records keep their order.
-            order.sort_by(|&lhs, &rhs| compare(&records[lhs], &records[rhs]));
-        }
-    }
+    x_link_sort::final_sort(
+        &mut order,
+        &results,
+        x_link_sort::Site::Final(allow_parallel),
+    );
     lap.lap(LinkStage::FinalSorts);
 
     let max_link_id = results
@@ -963,7 +730,7 @@ fn link_in_place(
     //          s_RevCompareHSPsTbx);
     // ```
     // The reference's `sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx)`.
-    // `allow_parallel` goes to the sort for LOSAT_X_LINKSORT (tblastx/x_link_sort.rs).
+    // `allow_parallel` goes to the sort (tblastx/x_link_sort.rs).
     lap.lap(LinkStage::Reset);
     sort_in_place(
         &mut hits,
@@ -985,13 +752,8 @@ fn link_in_place(
     //    H->prev->next = NULL;
     //    H->prev = NULL;
     // ```
-    let total_hits = hits.len(); // NCBI: hsp_list->hspcnt
-
-    // EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW), dispatch: the
-    // groups linked as disjoint sub-slices of the one sorted list, with no cut and no second list
-    // (tblastx/x_link_slices.rs, exactness argument in its header). With the switch off the
-    // statements of the `else` branch run as before. With its shadow they run as well, and the
-    // slices link a copy of the sorted list, which is compared with their result.
+    // The groups linked as disjoint sub-slices of the one sorted list, with no cut and no second
+    // list (tblastx/x_link_slices.rs, exactness argument in its header).
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
     // ```c
@@ -1003,62 +765,9 @@ fn link_in_place(
     //    number_of_hsps = hp_frame_number[frame_index];
     // ```
     // NCBI links its groups as sublists of the one sorted array.
-    let slices_mode = x_link_slices::mode();
-    let results: Vec<UngappedHit> = if slices_mode == 1 {
-        let (linked, groups) = x_link_slices::link_groups(
-            hits,
-            &x_link_slices::Call {
-                params,
-                cutoffs: &cutoffs,
-                linking_params,
-                query_contexts,
-                subject_frame_bases,
-                length_adj_per_context,
-                eff_searchsp_per_context,
-                log_k_by_ctx: &log_k_by_ctx,
-                allow_parallel,
-            },
-            &mut lap,
-        );
-        GROUPS.fetch_add(groups as u64, AtomicOrdering::Relaxed);
-        linked
-    } else {
-        // LOSAT_X_LINKSLICESSHADOW: a copy of the sorted list for the slices, compared below.
-        let shadow_copy = (slices_mode == 2).then(|| hits.clone());
-        let frame_groups = groups_off_the_end(hits);
-        lap.lap(LinkStage::Groups);
-        lap.sizes(total_hits, frame_groups.iter().map(Vec::len));
-        let kernel_times = lap.kernels();
-        GROUPS.fetch_add(frame_groups.len() as u64, AtomicOrdering::Relaxed);
-
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-        // ```c
-        // for (frame_index=0; frame_index<num_query_frames; frame_index++)
-        // {
-        //    hp_start = s_LinkHSPStructReset(hp_start);
-        //    hp_start->next = hp_frame_start[frame_index];
-        //    hp_frame_start[frame_index]->prev = hp_start;
-        //    number_of_hsps = hp_frame_number[frame_index];
-        // ```
-        // The groups are linked in frame_index order or, as in the reference, on the pool with the
-        // results put back into that order.
-        crate::utils::threading::report_stage(
-            "tblastx",
-            "linking",
-            frame_groups.len(),
-            allow_parallel
-                && frame_groups.len() > 1
-                && cfg!(all(
-                    feature = "parallel",
-                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                )),
-        );
-        let initial_lh_size = (total_hits + 5).max(1024); // NCBI: MAX(1024, hspcnt+5)
-        let use_legacy = legacy_linking_requested();
-        let literal_port = use_legacy || link_shadow_enabled();
-        let args = GroupArgs {
-            use_legacy,
-            diag_enabled: diagnostics_enabled(),
+    let (results, groups) = x_link_slices::link_groups(
+        hits,
+        &x_link_slices::Call {
             params,
             cutoffs: &cutoffs,
             linking_params,
@@ -1067,92 +776,11 @@ fn link_in_place(
             length_adj_per_context,
             eff_searchsp_per_context,
             log_k_by_ctx: &log_k_by_ctx,
-        };
-
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        let results: Vec<UngappedHit> = if allow_parallel && frame_groups.len() > 1 {
-            thread_local! {
-                static POOLS: RefCell<Option<BufferPools>> = const { RefCell::new(None) };
-            }
-
-            let mut indexed_results: Vec<(usize, Vec<UngappedHit>)> = frame_groups
-                .into_par_iter()
-                .enumerate()
-                .map(|(group_idx, group_hits)| {
-                    POOLS.with(|pools| {
-                        let mut pools_opt = pools.borrow_mut();
-                        let pool = pools_opt.get_or_insert_with(|| {
-                            buffer_pools(initial_lh_size, total_hits, literal_port)
-                        });
-                        (
-                            group_idx,
-                            kernel_times.time(|| link_one_group(group_hits, &args, pool)),
-                        )
-                    })
-                })
-                .collect();
-
-            // Sort by group index to preserve NCBI processing order
-            indexed_results.sort_by_key(|(idx, _)| *idx);
-            lap.lap(LinkStage::Kernels);
-
-            let ordered = assemble(
-                indexed_results.into_iter().map(|(_, hits)| hits),
-                total_hits,
-            );
-            lap.lap(LinkStage::Assemble);
-            ordered
-        } else {
-            link_groups_serially(
-                frame_groups,
-                &args,
-                initial_lh_size,
-                total_hits,
-                literal_port,
-                &mut lap,
-                &kernel_times,
-            )
-        };
-
-        #[cfg(any(
-            not(feature = "parallel"),
-            all(target_arch = "wasm32", not(feature = "wasm-threads"))
-        ))]
-        let results: Vec<UngappedHit> = link_groups_serially(
-            frame_groups,
-            &args,
-            initial_lh_size,
-            total_hits,
-            literal_port,
-            &mut lap,
-            &kernel_times,
-        );
-
-        // LOSAT_X_LINKSLICESSHADOW: the slices on the copy against the list above, record by
-        // record; the search continues with the list above.
-        if let Some(copy) = shadow_copy {
-            x_link_slices::shadow(
-                copy,
-                &results,
-                &x_link_slices::Call {
-                    params,
-                    cutoffs: &cutoffs,
-                    linking_params,
-                    query_contexts,
-                    subject_frame_bases,
-                    length_adj_per_context,
-                    eff_searchsp_per_context,
-                    log_k_by_ctx: &log_k_by_ctx,
-                    allow_parallel,
-                },
-            );
-        }
-        lap.add_kernels(&kernel_times);
-        results
-    };
+            allow_parallel,
+        },
+        &mut lap,
+    );
+    GROUPS.fetch_add(groups as u64, AtomicOrdering::Relaxed);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
     // ```c
@@ -1171,39 +799,6 @@ fn link_in_place(
     replayed
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start = s_LinkHSPStructReset(hp_start);
-//    hp_start->next = hp_frame_start[frame_index];
-//    hp_frame_start[frame_index]->prev = hp_start;
-//    number_of_hsps = hp_frame_number[frame_index];
-// ```
-// The reference's serial loop: the groups in frame_index order with one scratch. Each kernel
-// returns the Vec it was given, which stays where it is until all groups are linked; the list
-// that takes them is allocated only then (no kernel runs while that list is being filled).
-fn link_groups_serially(
-    mut frame_groups: Vec<Vec<UngappedHit>>,
-    args: &GroupArgs<'_>,
-    initial_lh_size: usize,
-    total_hits: usize,
-    literal_port: bool,
-    lap: &mut LinkLap,
-    kernel_times: &KernelTimes,
-) -> Vec<UngappedHit> {
-    let mut pools = buffer_pools(initial_lh_size, total_hits, literal_port);
-    for slot in frame_groups.iter_mut() {
-        let group_hits = std::mem::take(slot);
-        *slot = kernel_times.time(|| link_one_group(group_hits, args, &mut pools));
-    }
-    drop(pools);
-    lap.lap(LinkStage::Kernels);
-    let ordered = assemble(frame_groups.into_iter(), total_hits);
-    lap.lap(LinkStage::Assemble);
-    ordered
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1773-1776
 // ```c
 //     /* Remove any information on number of linked HSPs from previous
@@ -1212,9 +807,9 @@ fn link_groups_serially(
 //         hsp_list->hsp_array[index]->num = 1;
 // ```
 // The dispatch of `apply_sum_stats_even_gap_linking_with_parallel` (called after its empty-list
-// return and before it touches the list, only when the switch or its shadow is on).
-/// `Ok`: the linked list (this path, or both ways compared and the reference's result). `Err`:
-/// the untouched input, for the caller's reference body.
+// return and before it touches the list).
+/// `Ok`: the linked list (this path). `Err`: the untouched input, for the caller's reference body
+/// (`LOSAT_DEBUG_CUTOFFS` or `LOSAT_DIAGNOSTICS`, or a unit test's reference call).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn linking_dispatch(
     hits: Vec<UngappedHit>,
@@ -1226,35 +821,18 @@ pub(super) fn linking_dispatch(
     eff_searchsp_per_context: &[i64],
     allow_parallel: bool,
 ) -> Result<Vec<UngappedHit>, Vec<UngappedHit>> {
-    let m = mode();
-    if m == 0 {
-        return Err(hits);
-    }
+    // A unit test's call for the reference body (`tests::reference_linking`).
+    #[cfg(test)]
     if LINKING_REFERENCE_CALL.with(|flag| flag.replace(false)) {
-        // A call for the reference body: the shadow's own (below) or a unit test's.
         return Err(hits);
     }
     if gate() {
         GATE_REFERENCE.fetch_add(1, AtomicOrdering::Relaxed);
         return Err(hits);
     }
-    if m == 1 {
-        LINKINGS.fetch_add(1, AtomicOrdering::Relaxed);
-        HITS.fetch_add(hits.len() as u64, AtomicOrdering::Relaxed);
-        return Ok(link_in_place(
-            hits,
-            params,
-            linking_params,
-            query_contexts,
-            subject_frame_bases,
-            length_adj_per_context,
-            eff_searchsp_per_context,
-            allow_parallel,
-        ));
-    }
-
-    let reference_input = hits.clone();
-    let actual = link_in_place(
+    LINKINGS.fetch_add(1, AtomicOrdering::Relaxed);
+    HITS.fetch_add(hits.len() as u64, AtomicOrdering::Relaxed);
+    Ok(link_in_place(
         hits,
         params,
         linking_params,
@@ -1263,35 +841,13 @@ pub(super) fn linking_dispatch(
         length_adj_per_context,
         eff_searchsp_per_context,
         allow_parallel,
-    );
-    LINKING_REFERENCE_CALL.with(|flag| flag.set(true));
-    let reference = apply_sum_stats_even_gap_linking_with_parallel(
-        reference_input,
-        params,
-        linking_params,
-        query_contexts,
-        subject_frame_bases,
-        length_adj_per_context,
-        eff_searchsp_per_context,
-        allow_parallel,
-    );
-    assert!(
-        !LINKING_REFERENCE_CALL.with(|flag| flag.get()),
-        "LOSAT_X_HSPINPLACESHADOW: the reference linking call did not reach its dispatch"
-    );
-    shadow_compare("linking", &actual, &reference);
-    LINKINGS.fetch_add(1, AtomicOrdering::Relaxed);
-    HITS.fetch_add(reference.len() as u64, AtomicOrdering::Relaxed);
-    // The search continues with the reference's result.
-    Ok(reference)
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::tests::{fast_test_contexts, fast_test_cutoffs, mock_hit};
     use super::*;
-    use crate::algorithm::tblastx::blast_gapalign::score_compare_ungapped_hits_ncbi;
-    use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_replay;
 
     /// xorshift64, for reproducible random lists (as in the linking fuzz test).
     struct Rng(u64);
@@ -1316,30 +872,6 @@ mod tests {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
-    // ```c
-    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //               ScoreCompareHSPs);
-    // ```
-    // No computation: the tests compare with the reference bodies, and the switch is on by
-    // default, so the call goes past the dispatch as the shadow's own call does.
-    /// The body of `sort_ungapped_hits_by_index_replay`, whatever the switch says. The dispatch
-    /// takes the flag when the call reaches it: not with the switch off, and not for a list of
-    /// at most one HSP, which returns before it.
-    fn reference_sort(
-        hits: &mut [UngappedHit],
-        compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
-    ) {
-        SORT_REFERENCE_CALL.with(|flag| flag.set(true));
-        sort_ungapped_hits_by_index_replay(hits, compare);
-        let left = SORT_REFERENCE_CALL.with(|flag| flag.replace(false));
-        assert_eq!(
-            left,
-            mode() == 0 || hits.len() <= 1,
-            "the dispatch of the reference sort takes the flag when it is reached"
-        );
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486
     // ```c
     // /* Sort by (reverse) position. */
@@ -1347,12 +879,10 @@ mod tests {
     //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
     //          s_RevCompareHSPsTbx);
     // ```
-    // No computation: as `reference_sort`, for the linking call. The reference linking body
-    // sorts the list once with the index-replay sort, on the calling thread, before anything
-    // else can sort; the second flag sends that sort to its reference body as well.
-    /// The body of `apply_sum_stats_even_gap_linking_with_parallel` with the reference sort
-    /// inside, whatever the switch says. The linking dispatch takes its flag unless the list is
-    /// empty, the sort dispatch unless the list has at most one HSP; neither with the switch off.
+    // No computation: the test calls the reference linking body past the dispatch. That body
+    // sorts the list once with the index-replay sort, which is the in-place sort here as well.
+    /// The body of `apply_sum_stats_even_gap_linking_with_parallel`. The linking dispatch takes
+    /// the flag unless the list is empty.
     #[allow(clippy::too_many_arguments)]
     fn reference_linking(
         hits: Vec<UngappedHit>,
@@ -1366,7 +896,6 @@ mod tests {
     ) -> Vec<UngappedHit> {
         let n = hits.len();
         LINKING_REFERENCE_CALL.with(|flag| flag.set(true));
-        SORT_REFERENCE_CALL.with(|flag| flag.set(true));
         let linked = apply_sum_stats_even_gap_linking_with_parallel(
             hits,
             params,
@@ -1378,16 +907,10 @@ mod tests {
             allow_parallel,
         );
         let linking_left = LINKING_REFERENCE_CALL.with(|flag| flag.replace(false));
-        let sort_left = SORT_REFERENCE_CALL.with(|flag| flag.replace(false));
         assert_eq!(
             linking_left,
-            mode() == 0 || n == 0,
+            n == 0,
             "the dispatch of the reference linking call takes the flag when it is reached"
-        );
-        assert_eq!(
-            sort_left,
-            mode() == 0 || n <= 1,
-            "the sort of the reference linking call takes the flag when it reaches its dispatch"
         );
         linked
     }
@@ -1403,8 +926,8 @@ mod tests {
             );
             assert_eq!(format!("{a:?}"), format!("{b:?}"), "{label}: HSP {index}");
         }
-        // The shadow's comparison must agree with the one above.
-        shadow_compare(label, actual, expected);
+        // The comparison of `x_assert_same_hits` must agree with the one above.
+        x_assert_same_hits(label, actual, expected);
     }
 
     const FRAMES: [i8; 6] = [1, 2, 3, -1, -2, -3];
@@ -1489,173 +1012,6 @@ mod tests {
                 check(rng.shuffled(n), &format!("random {round}"));
             }
         }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
-    // ```c
-    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //               ScoreCompareHSPs);
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486,991-994
-    // ```c
-    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //          s_RevCompareHSPsTbx);
-    // ...
-    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //          s_RevCompareHSPsTransl);
-    //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //          s_FwdCompareHSPsTransl);
-    // ```
-    // The in-place sort against the reference index-replay sort, with each of the four NCBI
-    // comparators LOSAT sorts HSP lists with, on lists with many comparator-equal HSPs.
-    #[test]
-    fn sort_in_place_equals_the_index_replay_sort() {
-        let comparators: [(&str, fn(&UngappedHit, &UngappedHit) -> Ordering); 4] = [
-            ("ScoreCompareHSPs", score_compare_ungapped_hits_ncbi),
-            ("s_RevCompareHSPsTbx", rev_compare_hsps_tbx),
-            ("s_RevCompareHSPsTransl", rev_compare_hsps_transl),
-            ("s_FwdCompareHSPsTransl", fwd_compare_hsps_transl),
-        ];
-        let mut rng = Rng(0x0123_4567_89AB_CDEF);
-        let mut equal_neighbours = 0usize;
-        for n in [0usize, 1, 2, 3, 17, 256, 5000] {
-            for span in [3u64, 40, 100_000] {
-                for (name, compare) in comparators {
-                    let hits = random_hits(&mut rng, n, span, 2);
-                    let mut expected = hits.clone();
-                    reference_sort(&mut expected, compare);
-                    let mut actual = hits;
-                    sort_in_place(&mut actual, compare, x_link_sort::Site::Dispatch);
-                    assert_same_list(&format!("{name} n {n} span {span}"), &actual, &expected);
-                    equal_neighbours += actual
-                        .windows(2)
-                        .filter(|pair| compare(&pair[0], &pair[1]) == Ordering::Equal)
-                        .count();
-                }
-            }
-        }
-        // The lists must hold comparator-equal HSPs, whose order only stability decides.
-        assert!(equal_neighbours > 1000, "{equal_neighbours}");
-    }
-
-    /// The grouping loop of `apply_sum_stats_even_gap_linking_with_parallel`, statement for
-    /// statement.
-    fn push_grouping(hits: Vec<UngappedHit>) -> Vec<Vec<UngappedHit>> {
-        let mut frame_groups: Vec<Vec<UngappedHit>> = Vec::new();
-        let mut current_group: Vec<UngappedHit> = Vec::new();
-
-        for hit in hits {
-            let ctx_group = translated_context_group(&hit);
-            let s_sign = hit.s_frame.signum();
-
-            if let Some(prev) = current_group.last() {
-                let prev_ctx_group = translated_context_group(prev);
-                let prev_s_sign = prev.s_frame.signum();
-
-                if prev_ctx_group != ctx_group || prev_s_sign != s_sign {
-                    // Frame switch - start new group
-                    if !current_group.is_empty() {
-                        frame_groups.push(std::mem::take(&mut current_group));
-                    }
-                }
-            }
-            current_group.push(hit);
-        }
-        if !current_group.is_empty() {
-            frame_groups.push(current_group);
-        }
-        frame_groups
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531
-    // ```c
-    // if (H->prev != NULL &&
-    //     ((H->hsp->context/strand_factor) !=
-    //      (H->prev->hsp->context/strand_factor) ||
-    //      (SIGN(H->hsp->subject.frame) != SIGN(H->prev->hsp->subject.frame))))
-    // { /* If frame switches, then start new list. */
-    //    hp_frame_number[cur_frame]--;
-    //    hp_frame_number[++cur_frame]++;
-    //    hp_frame_start[cur_frame] = H;
-    //    H->prev->next = NULL;
-    //    H->prev = NULL;
-    // ```
-    // The groups cut off the end of the list against the reference's push loop: no HSP, one HSP,
-    // one group, many groups (sorted lists of one and of three queries), groups of one HSP each,
-    // and a list that arrives with spare capacity. Every group Vec must be exactly sized.
-    #[test]
-    fn groups_cut_off_the_end_equal_the_push_grouping() {
-        fn check(hits: Vec<UngappedHit>, label: &str) -> usize {
-            let expected = push_grouping(hits.clone());
-            let actual = groups_off_the_end(hits);
-            assert_eq!(actual.len(), expected.len(), "{label}: number of groups");
-            for (index, (a, b)) in actual.iter().zip(&expected).enumerate() {
-                assert_same_list(&format!("{label}: group {index}"), a, b);
-                assert_eq!(
-                    a.capacity(),
-                    a.len(),
-                    "{label}: group {index} is exactly sized"
-                );
-            }
-            actual.len()
-        }
-
-        let mut rng = Rng(0xD1B5_4A32_D192_ED03);
-        assert_eq!(check(Vec::new(), "no HSP"), 0);
-        assert_eq!(check(random_hits(&mut rng, 1, 50, 1), "one HSP"), 1);
-
-        // One group: one query strand and one subject strand.
-        let mut one_group = random_hits(&mut rng, 300, 50, 1);
-        for hit in one_group.iter_mut() {
-            hit.q_frame = 2;
-            hit.s_frame = -1;
-        }
-        assert_eq!(check(one_group, "one group"), 1);
-
-        // Sorted lists, as the linking call makes them: 4 groups per query.
-        for queries in [1usize, 3] {
-            for n in [2usize, 5, 64, 3000] {
-                let mut hits = random_hits(&mut rng, n, 60, queries);
-                sort_in_place(
-                    &mut hits,
-                    rev_compare_hsps_tbx,
-                    x_link_sort::Site::First(false),
-                );
-                let groups = check(hits, &format!("sorted, {queries} queries, n {n}"));
-                assert!(groups <= 4 * queries);
-                if n == 3000 {
-                    assert_eq!(groups, 4 * queries);
-                }
-            }
-        }
-
-        // Groups of one HSP each: every neighbour differs in the subject strand or the query.
-        let mut singles = random_hits(&mut rng, 97, 50, 1);
-        for (index, hit) in singles.iter_mut().enumerate() {
-            hit.q_idx = (index / 2) as u32;
-            hit.q_frame = 1;
-            hit.s_frame = if index % 2 == 0 { 1 } else { -1 };
-        }
-        assert_eq!(check(singles, "groups of one HSP"), 97);
-
-        // Runs of random lengths, in a list with spare capacity (grown by push).
-        let mut runs: Vec<UngappedHit> = Vec::new();
-        let mut expected_groups = 0usize;
-        let mut index = 0usize;
-        for run in 0..40 {
-            expected_groups += 1;
-            for _ in 0..1 + rng.below(if run % 5 == 0 { 400 } else { 6 }) {
-                let mut hit = random_hit(&mut rng, index, 50, 1);
-                hit.q_idx = (run / 2) as u32;
-                hit.q_frame = 3;
-                hit.s_frame = if run % 2 == 0 { -2 } else { 3 };
-                runs.push(hit);
-                index += 1;
-            }
-        }
-        runs.reserve(runs.len() + 3);
-        assert!(runs.capacity() > runs.len());
-        assert_eq!(check(runs, "runs with spare capacity"), expected_groups);
     }
 
     /// The end of the reference linking call: its two final sorts and its replay.
@@ -1947,7 +1303,8 @@ mod tests {
                 rev_compare_hsps_tbx,
                 x_link_sort::Site::First(false),
             );
-            most_groups = most_groups.max(groups_off_the_end(sorted).len());
+            most_groups =
+                most_groups.max(group_starts(&sorted).len() + usize::from(!sorted.is_empty()));
         }
         if cases >= 400 {
             // The lists must exercise chains and every group of two queries.
@@ -1957,43 +1314,5 @@ mod tests {
             );
             assert_eq!(most_groups, 8);
         }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1080-1082
-    // ```c
-    // for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
-    //    hsp_list->hsp_array[index] = H->hsp;
-    // ```
-    // The shadow's comparison must see a difference in any field, also one of E-value bits only
-    // and one of length.
-    #[test]
-    fn shadow_compare_sees_every_kind_of_difference() {
-        let mut rng = Rng(0x5851_F42D_4C95_7F2D);
-        let reference = random_hits(&mut rng, 6, 50, 1);
-        shadow_compare("equal lists", &reference, &reference.clone());
-
-        let differs = |change: &dyn Fn(&mut Vec<UngappedHit>)| {
-            let mut actual = reference.clone();
-            change(&mut actual);
-            std::panic::catch_unwind(|| shadow_compare("test", &actual, &reference)).is_err()
-        };
-        assert!(differs(&|hits| hits[3].num += 1));
-        assert!(differs(&|hits| hits[0].chain_next_link_id = Some(0)));
-        assert!(differs(&|hits| hits[5].hsp_link_num = 9));
-        assert!(differs(
-            &|hits| hits[2].start_of_chain = !hits[2].start_of_chain
-        ));
-        assert!(differs(&|hits| hits.swap(1, 4)));
-        assert!(differs(&|hits| {
-            hits.pop();
-        }));
-        // 0.0 and -0.0 are equal as numbers; the comparison is of bits.
-        let mut zero = reference.clone();
-        zero[1].e_value = 0.0;
-        let mut negative_zero = zero.clone();
-        negative_zero[1].e_value = -0.0;
-        assert!(
-            std::panic::catch_unwind(|| shadow_compare("zero", &negative_zero, &zero)).is_err()
-        );
     }
 }

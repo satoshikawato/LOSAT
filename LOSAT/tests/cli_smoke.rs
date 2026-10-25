@@ -37,8 +37,7 @@ fn losat_binary() -> PathBuf {
 fn clean_losat_command() -> Command {
     let mut command = Command::new(losat_binary());
     for (name, _) in std::env::vars_os() {
-        // LOSAT_X_DEFAULT stays (src/utils/xswitch.rs): with 0 the run is on the reference paths.
-        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
+        if name.to_string_lossy().starts_with("LOSAT_") {
             command.env_remove(name);
         }
     }
@@ -99,6 +98,38 @@ fn cli_help_and_version_are_available_without_inputs() {
         "--version should not write stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+// No NCBI counterpart: LOSAT_STARTUP_TRACE is a LOSAT diagnostic variable; it does not change any
+// value NCBI computes.
+// CI's `--all-features` run checks the feature side of this test (the trace line, no notice); a
+// default `cargo test` checks the other (the notice line, no trace). `ci_fast_regressions.py`
+// checks the notice on the default release binary.
+#[test]
+fn startup_trace_needs_the_diagnostics_feature() {
+    let plain = clean_losat_command()
+        .arg("--version")
+        .output()
+        .expect("run LOSAT");
+    let traced = clean_losat_command()
+        .arg("--version")
+        .env("LOSAT_STARTUP_TRACE", "1")
+        .output()
+        .expect("run LOSAT");
+    assert!(plain.status.success() && traced.status.success());
+    assert_eq!(plain.stdout, traced.stdout);
+    assert!(
+        plain.stderr.is_empty(),
+        "--version should not write stderr: {}",
+        String::from_utf8_lossy(&plain.stderr)
+    );
+    let expected = if cfg!(feature = "diagnostics") {
+        "[startup] enter main\n"
+    } else {
+        "LOSAT_STARTUP_TRACE is ignored: this losat was built without the diagnostics feature \
+         (docs/agents/diagnostics.md, \"Diagnostic build\")\n"
+    };
+    assert_eq!(String::from_utf8_lossy(&traced.stderr), expected);
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639

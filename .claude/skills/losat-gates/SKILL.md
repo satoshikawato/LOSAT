@@ -18,7 +18,8 @@ stays in a log file.
 NCBI divergences remain open. App commits follow `web/AGENTS.md`.
 
 Notation: `$N` = the LOSAT release binary under test; all cargo calls use
-`RUSTUP_TOOLCHAIN=1.92.0` and `--target-dir "$BUILD_ROOT/<purpose>"`; run from the worktree root.
+`RUSTUP_TOOLCHAIN=1.92.0` and the worktree's `--target-dir "$BUILD_ROOT/wt-<topic>"` (skill
+`losat-worktree`); run from the worktree root.
 
 ## Which tier
 
@@ -36,10 +37,10 @@ Engine:
 
 ```bash
 cd LOSAT && cargo fmt --check                                                   # ~12 s
-cargo build --release --locked --target-dir "$BUILD_ROOT/native"                # ~1 min incremental
+cargo build --release --locked --target-dir "$BUILD_ROOT/wt-<topic>"            # ~1 min warm
 export LOSAT_BLASTX_WORKER_LOG="$BUILD_ROOT/blastx-worker.log"
-cargo test --locked --all-features --lib --target-dir "$BUILD_ROOT/test" <module path>   # inline tests
-cargo test --locked --all-features --test <binary> --target-dir "$BUILD_ROOT/test" <filter>   # integration
+cargo test --locked --all-features --lib --target-dir "$BUILD_ROOT/wt-<topic>" <module path>   # inline tests
+cargo test --locked --all-features --test <suite> --target-dir "$BUILD_ROOT/wt-<topic>" <file>::<filter>   # integration, e.g. --test blastn blastn_strand::
 cd .. && python3 docs/evidence/losat_web_e2a/check_losat.py --losat "$N" --threads 1 --programs <touched>   # ~26 s
 ```
 
@@ -47,7 +48,7 @@ plus the one focused fixture from the stage's `AUTHORITY.md`. Adapter: `cargo fm
 `cargo test --locked` in `web/adapter` (1-2 min). App: `cd web/app && npm run check` (median
 77 s); `npm ci` only when `package-lock.json` changed.
 
-- A bare `cargo test <filter>` builds and links all ten test binaries (the lib tests and the nine under `LOSAT/tests/`) and the bin before it filters.
+- A bare `cargo test <filter>` builds and links every test binary before it filters: the lib tests, the bin, and the eight under `LOSAT/tests/` (the suites blastn, blastp, blastx, tblastn, tblastx and common in `tests/suites/`, plus blastn_report_stream_api and unit_tests). A plain `cargo test --test <suite>` runs all of that suite's files' tests at once, up to the CPU count, so a timing gate passes `-- --test-threads N`.
 - `LOSAT/Cargo.toml` sets `[profile.test] opt-level = 1`, as CI does, so `CARGO_PROFILE_TEST_OPT_LEVEL=1` is no longer needed.
 
 ## Standard (end of a step and before every push; 10-25 minutes)
@@ -90,11 +91,11 @@ below only when its condition holds:
 | V-PERF (`perf_cases.py run ... --repeat 3`; settle cases over +5% with `--repeat 5`, not 10, Owner 2026-10-01) | 2-3 min, quiet machine | hot loops, threading, or output writers changed (plan §6.2 limits the +5% rule to the S02-S04 and SX refactors) |
 | Independent audit (`losat-reviewer`, one angle per agent, at most two running searches) | first round about 73 min | new NCBI-ported behavior or a release-facing claim; not for a change proven byte-identical by capture |
 | App gate `docs/evidence/losat_web_w3/run_gate.sh` | 19.5 min; `LOSAT_WEB_GATE_STEPS=after-review` 11.8 min after a review fix | end of an app stage |
-| Nightly (`gh workflow run nightly.yml`; do not rerun locally) | about 2 h on GitHub | release candidate, or `LOSAT/src` changed since the last green nightly |
+| Nightly (`gh workflow run nightly.yml`; do not rerun locally) | about 2 h on GitHub | release candidate, or `LOSAT/src` changed since the last green nightly of the branch (the schedule runs `main` and `dev`: `gh run list --workflow nightly.yml --branch dev`) |
 
 ## GitHub CI
 
-A PR runs `ci.yml` (`rust` 2.9 min; `fast output regressions` 4.5 min with all programs) and,
-when `web/**` or `LOSAT/src/**` changed, `web.yml` (about 20 min; the `adapter` job reruns V-ABI
-quick). Nightly runs `--all-cases` and the WASI matrix (median 120 min). Do not rerun locally
-what CI runs for the same commit.
+A PR runs `ci.yml` (`rust` about 35 min: lint and two cargo-nextest shards; `fast output
+regressions` 4.5 min with all programs) and, when `web/**` or `LOSAT/src/**` changed, `web.yml`
+(about 20 min; the `adapter` job reruns V-ABI quick). Nightly runs `--all-cases` and the WASI
+matrix (median 120 min). Do not rerun locally what CI runs for the same commit.

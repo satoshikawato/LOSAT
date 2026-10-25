@@ -460,21 +460,60 @@ fn defaults_and_task_overrides_remain_distinct() {
     };
     assert_eq!(a.resolve().unwrap().evalue, 42.0);
     // NCBI api/blast_options_handle.cpp:381-402: blastp-fast (word size 5, threshold 20)
-    // runs; blastp-short (word size 2, PAM30) is rejected where the search starts.
+    // runs; blastp-short (word size 2, PAM30) is rejected when the arguments are parsed.
     let Commands::Blastp(a) = parse("blastp", &["-task", "blastp-fast"]).unwrap().command else {
         panic!()
     };
     let resolved = a.resolve().unwrap();
     assert_eq!((resolved.word_size, resolved.threshold), (5, 20.0));
     LOSAT::algorithm::blastp::blast_engine::check_options(&a).unwrap();
-    let Commands::Blastp(a) = parse("blastp", &["-task", "blastp-short"]).unwrap().command else {
+    let error = parse("blastp", &["-task", "blastp-short"]).unwrap_err();
+    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    assert_eq!(error.exit_code(), 2);
+    let text = LOSAT::cli::render_message(&error);
+    assert!(
+        text.contains("invalid value 'blastp-short' for '-task <TASK>'")
+            && text.contains("-word_size 2 (the lookup table) is not supported by LOSAT's BLASTP"),
+        "{text}"
+    );
+    // The search entrance still refuses the task (a defensive check) when it is set by hand.
+    let Commands::Blastp(mut a) = parse("blastp", &[]).unwrap().command else {
         panic!()
     };
+    a.task = "blastp-short".into();
     assert_eq!(a.resolve().unwrap().evalue, 20000.0);
     assert!(LOSAT::algorithm::blastp::blast_engine::check_options(&a)
         .unwrap_err()
         .to_string()
         .contains("not supported by LOSAT's BLASTP"));
+    // The same for TBLASTN: tblastn-fast (the compressed lookup table) fails at the parse.
+    parse("tblastn", &["-task", "tblastn"]).unwrap();
+    let error = parse("tblastn", &["-task", "tblastn-fast"]).unwrap_err();
+    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    assert_eq!(error.exit_code(), 2);
+    let text = LOSAT::cli::render_message(&error);
+    assert!(
+        text.contains("invalid value 'tblastn-fast' for '-task <TASK>'")
+            && text.contains(
+                "-task tblastn-fast (word size 5 with the compressed lookup table) is not supported by LOSAT's TBLASTN"
+            ),
+        "{text}"
+    );
+    // A task that is not an NCBI task keeps clap's list of the accepted names.
+    for (program, other, listed) in [
+        ("blastp", "blastp-x", "blastp-fast"),
+        ("tblastn", "tblastn-x", "tblastn"),
+    ] {
+        let text = LOSAT::cli::render_message(&parse(program, &["-task", other]).unwrap_err());
+        assert!(
+            text.contains("possible values") && text.contains(listed),
+            "{text}"
+        );
+        assert!(
+            !text.contains("-short") && !text.contains("tblastn-fast"),
+            "{text}"
+        );
+    }
     // blast_args.cpp:3158-3163 (CArgAllowStringSet): the task names are case-sensitive.
     assert!(parse("blastp", &["-task", "BLASTP"]).is_err());
     // NCBI blast_args.cpp:2800-2803: the default -outfmt is 0, which BLASTN and TBLASTX
@@ -951,7 +990,6 @@ const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 const CUSTOM: &[&str] = &["blastp", "blastx"];
 const NO_CUSTOM: &[&str] = &["blastn", "tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
-const NOT_BLASTP_BLASTN: &[&str] = &["blastx", "tblastn", "tblastx"];
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
     "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
@@ -1011,6 +1049,7 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "0 delim", None, INVALID_DELIMITER),
         (ALL, "abc delim", None, INVALID_DELIMITER),
         (ALL, "99 delimiter qaccver", None, INVALID_DELIMITER),
+        (ALL, "17 delim SQ", None, INVALID_DELIMITER),
         // NCBI's errors after the inputs are opened: the formats of other programs, and the
         // XInclude formats written to standard output.
         (NOT_BLASTN, "17", None, NcbiLater("SAM format is only applicable to blastn")),
@@ -1029,7 +1068,7 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "18", None, UNSUPPORTED),
         (ALL, "20", None, UNSUPPORTED),
         // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c), 5 in
-        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in BLASTP and BLASTN (OF5a), NCBI dropping a custom specification
+        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in every program (BLASTP and BLASTN: OF5a; BLASTX, TBLASTN and TBLASTX: OF5b), NCBI dropping a custom specification
         // (blast_args.cpp:2844-2851); the others not yet.
         (ALL, "8", None, Writes(AsnText)),
         (ALL, "12", None, Writes(JsonSeqalign)),
@@ -1039,16 +1078,25 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, " 5 std", None, Writes(Xml)),
         (ALL, "9", None, Writes(AsnBinary)),
         (ALL, " 9 std", None, Writes(AsnBinary)),
-        (ALL, "11", None, UNSUPPORTED),
-        (ALL, "13", Some("o.json"), UNSUPPORTED),
-        (ALL, "14", Some("o.xml"), UNSUPPORTED),
-        (&["blastp", "blastn"], "15", None, Writes(JsonS)),
-        (&["blastp", "blastn"], "16", None, Writes(Xml2S)),
-        (&["blastp", "blastn"], " 16 std", None, Writes(Xml2S)),
-        (NOT_BLASTP_BLASTN, "15", None, UNSUPPORTED),
-        (NOT_BLASTP_BLASTN, "16", None, UNSUPPORTED),
-        (&["blastn"], "17", None, UNSUPPORTED),
-        (&["blastn"], "17 qseqid", None, UNSUPPORTED),
+        // 11 (the BLAST archive, OF8a and OF8b): BLASTN, BLASTP, BLASTX and TBLASTN so far; NCBI
+        // ignores a specification after it.
+        (&["blastn", "blastp", "blastx", "tblastn"], "11", None, Writes(ArchiveFormat)),
+        (&["blastn", "blastp", "blastx", "tblastn"], " 11 qseqid", None, Writes(ArchiveFormat)),
+        (&["tblastx"], "11", None, UNSUPPORTED),
+        // 13 and 14 (BLAST JSON and XML2 as side files and a master file at `-out`): every
+        // program (BLASTP and BLASTN: OF5c part 1; BLASTX, TBLASTN and TBLASTX: part 2).
+        (ALL, "13", Some("o.json"), Writes(Json)),
+        (ALL, "14", Some("o.xml"), Writes(Xml2)),
+        (ALL, " 14 std", Some("o"), Writes(Xml2)),
+        (ALL, "15", None, Writes(JsonS)),
+        (ALL, "16", None, Writes(Xml2S)),
+        (ALL, " 16 std", None, Writes(Xml2S)),
+        // SAM (OF6): BLASTN alone writes it, reading the words SQ and SR and ignoring the rest and a
+        // delimiter (`CBlast_SAM_Formatter::x_ProcessCustomSpec`).
+        (&["blastn"], "17", None, Writes(Sam)),
+        (&["blastn"], "17 qseqid", None, Writes(Sam)),
+        (&["blastn"], " 17 SQ SR ", None, Writes(Sam)),
+        (&["blastn"], "17 delim=, SQ", None, Writes(Sam)),
     ]
 };
 
@@ -1139,9 +1187,10 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
             assert!(!text.contains("seg_window") && !text.contains("dust_window"));
             // NCBI's BLASTP tasks and flags are options (blast_args.cpp:803-806,3158-3163).
             if program == "blastp" {
-                for option in ["blastp-short", "blastp-fast", "-use_sw_tback"] {
+                for option in ["blastp-fast", "-use_sw_tback"] {
                     assert!(text.contains(option), "{text}");
                 }
+                assert!(!text.contains("blastp-short"), "{text}");
             }
         }
     }
@@ -1164,9 +1213,9 @@ fn culling_limit_is_read_as_ncbi_does() {
         let limit = |words: &[&str]| -> Result<i32, String> {
             match parse(program, words) {
                 Ok(cli) => match cli.command {
-                    Commands::Blastn(args) => Ok(args.culling_limit),
-                    Commands::Blastp(args) => Ok(args.culling_limit),
-                    Commands::Tblastn(args) => Ok(args.culling_limit),
+                    Commands::Blastn(args) => Ok(args.culling_limit_value()),
+                    Commands::Blastp(args) => Ok(args.culling_limit_value()),
+                    Commands::Tblastn(args) => Ok(args.culling_limit_value()),
                     _ => unreachable!("{program}"),
                 },
                 Err(error) => Err(LOSAT::cli::render_message(&error)),

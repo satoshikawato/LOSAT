@@ -21,7 +21,7 @@ use LOSAT::api::local_blast::{run_local_tblastn, FormatOutput, OutputSink, Repor
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 7] = ["0", "6", "7", "8", "9", "12", "5"];
+const FORMATS: [&str; 10] = ["0", "6", "7", "8", "9", "12", "5", "15", "16", "11"];
 /// The formats of the saved NCBI outputs (`docs/evidence/tlosan_stage_g/`).
 const SAVED_FORMATS: [&str; 3] = ["0", "6", "7"];
 
@@ -283,9 +283,9 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9 and 12 write no
-            // query result warnings, so their CLI runs equal `run_local` with that format alone.
-            if matches!(*outfmt, "5" | "8" | "9" | "12") {
+            // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9, 11, 12, 15 and 16 write
+            // no query result warnings, so their CLI runs equal `run_local` with that format alone.
+            if matches!(*outfmt, "5" | "8" | "9" | "11" | "12" | "15" | "16") {
                 // (The `-max_target_seqs 1` warning of the arguments stays.)
                 assert!(
                     !String::from_utf8_lossy(&cli_stderr).contains("Query_3"),
@@ -490,9 +490,9 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
             );
             drop(outputs);
             // BLAST XML: NCBI crashes on the punctuation-only title of a subject with hits
-            // (outfmt 0 and 5 alike), so LOSAT refuses it and writes nothing.
-            if outfmt == "5" && defline == ", ," {
-                let error = result.expect_err("outfmt 5 refuses the punctuation title");
+            // (outfmt 0, 5, 15 and 16 alike), so LOSAT refuses it and writes nothing.
+            if matches!(outfmt, "5" | "15" | "16") && defline == ", ," {
+                let error = result.expect_err("outfmt 5, 15 and 16 refuse the punctuation title");
                 assert!(error.to_string().contains("crashes on"), "{error}");
                 assert!(report.is_empty(), "nothing is written");
                 continue;

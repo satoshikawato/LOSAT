@@ -1,11 +1,10 @@
-//! EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0` or `LOSAT_X_DEFAULT=0`): the subject loop
-//! of a query chunk as a flow of tasks of `k` consecutive subjects (64, as `LOSAT_X_BXCHUNK`, when
-//! the variable is `1` or not a number from 2 to 65,536), searched ahead by the other threads of
-//! the pool and handed
-//! to the sink in subject order by the thread that runs the loop. Shadow:
-//! `LOSAT_X_BXSUBJFLOWSHADOW`.
+//! EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0`):
+//! the subject loop of a query chunk as a flow of tasks of `k` consecutive subjects
+//! (`search::X_BX_CHUNK` = 64, the waves' subjects per worker, when the variable is `1` or not a
+//! number from 2 to 65,536), searched ahead by the other threads of the pool and handed to the sink
+//! in subject order by the thread that runs the loop. Shadow: `LOSAT_X_BXSUBJFLOWSHADOW`.
 //!
-//! The waves of `search::search_core` (`LOSAT_X_BXCHUNK`) search `threads x 64` subjects, wait for
+//! The waves of `search::search_core` search `threads x X_BX_CHUNK` (= 64) subjects, wait for
 //! the slowest worker of the wave, then hand the wave's subjects to the sink on one thread while
 //! the other threads wait for the next wave. Here the helpers of `utils::xahead` search the tasks
 //! up to a window ahead of the owner (the thread of the loop) without stopping between waves; the
@@ -53,7 +52,9 @@ type Task = (
 /// EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k]): subjects per task; `None` when the switch is off.
 pub(super) fn subjects_per_task() -> Option<usize> {
     static K: OnceLock<Option<usize>> = OnceLock::new();
-    *K.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXSUBJFLOW", 2..=65_536, 64))
+    *K.get_or_init(|| {
+        crate::utils::xswitch::value("LOSAT_X_BXSUBJFLOW", 2..=65_536, super::X_BX_CHUNK)
+    })
 }
 
 /// No NCBI counterpart: reads the shadow switch; it does not change any value NCBI computes.
@@ -73,15 +74,62 @@ pub(super) fn chosen(
     subjects: Subjects<'_>,
 ) -> Option<usize> {
     let k = subjects_per_task()?;
-    if diagnostics || !pool.enabled() || pool.threads() < 2 || subjects.len() <= k {
-        return None;
+    let own = fits(k, pool, diagnostics, options, subjects);
+    crate::utils::xreach::x_reach!("LOSAT_X_BXSUBJFLOW", own);
+    own.then_some(k)
+}
+
+/// No NCBI counterpart: `chosen`'s rule for tasks of `k` subjects, without recording a side.
+pub(super) fn fits(
+    k: usize,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    diagnostics: bool,
+    options: &ResolvedOptions,
+    subjects: Subjects<'_>,
+) -> bool {
+    !(diagnostics || !pool.enabled() || pool.threads() < 2 || subjects.len() <= k)
+        && offsets_stay_below_2_30(options.window_size, subjects.longest_length())
+}
+
+/// No NCBI counterpart: the fewest subjects per pool thread with which `LOSAT_X_BXCHUNKFLOW`
+/// searches the chunks of a split query one after another (`chunks_in_order`): four tasks of 64.
+const CHUNK_FLOW_SUBJECTS_PER_THREAD: usize = 256;
+/// No NCBI counterpart: the fewest subjects in all for `chunks_in_order`: 32 tasks of 64.
+const CHUNK_FLOW_MIN_SUBJECTS: usize = 2_048;
+
+/// EXPERIMENT (LOSAT_X_BXCHUNKFLOW, in the strict set: on unless `=0`): whether
+/// the chunks of a split query are searched one after another, each chunk's subjects as the flow
+/// on the whole pool, instead of side by side, one chunk per thread. It holds
+/// where the flow runs in each chunk (`chosen`) and there are at least
+/// `CHUNK_FLOW_SUBJECTS_PER_THREAD` subjects per thread and `CHUNK_FLOW_MIN_SUBJECTS` subjects.
+/// With fewer subjects per thread the flow leaves threads idle in every chunk; with fewer subjects
+/// in all, each chunk's setup on the loop's thread (its lookup table, the helpers' start)
+/// outweighs the flow at two to four threads. There the chunks side by side are faster. The rule
+/// counts subjects, not tasks, so that `LOSAT_X_BXSUBJFLOW=k` does not move it. No NCBI
+/// counterpart: it chooses between two schedules of the same chunk loop and changes no value NCBI
+/// computes (the sink sees the chunks in order either way, `search::search_core`).
+pub(super) fn chunks_in_order(
+    pool: &crate::utils::threading::SearchPool<'_>,
+    diagnostics: bool,
+    options: &ResolvedOptions,
+    subjects: Subjects<'_>,
+) -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCHUNKFLOW")) {
+        return false;
     }
-    offsets_stay_below_2_30(options.window_size, subjects.longest_length()).then_some(k)
+    let own = subjects_per_task().is_some_and(|k| {
+        fits(k, pool, diagnostics, options, subjects)
+            && subjects.len()
+                >= CHUNK_FLOW_MIN_SUBJECTS.max(CHUNK_FLOW_SUBJECTS_PER_THREAD * pool.threads())
+    });
+    crate::utils::xreach::x_reach!("LOSAT_X_BXCHUNKFLOW", own);
+    own
 }
 
 /// No NCBI counterpart: whether `-window_size` plus twice the longest subject is at most 2^28,
 /// so that no diagonal offset of any table history passes 2^30 (module comment).
-fn offsets_stay_below_2_30(window_size: i32, longest: usize) -> bool {
+pub(super) fn offsets_stay_below_2_30(window_size: i32, longest: usize) -> bool {
     u64::try_from(window_size)
         .ok()
         .and_then(|window| window.checked_add(2 * longest as u64))
@@ -133,7 +181,15 @@ fn search_task(
     x_containment: bool,
 ) -> Task {
     let mut kept = Vec::new();
-    for oid in task * k..subjects.len().min((task + 1) * k) {
+    let (first, end) = (task * k, subjects.len().min((task + 1) * k));
+    // EXPERIMENT (LOSAT_X_BXDBSTREAM): the task's subjects, read at once when the subjects are read
+    // in blocks; an error stops the flow at the task's first subject.
+    let x_block = match subjects.x_read_range(first, end) {
+        Ok(block) => block,
+        Err(error) => return (kept, Some((first, error))),
+    };
+    let subjects = subjects.x_with_block(x_block.as_ref());
+    for oid in first..end {
         match compute_subject(
             subjects,
             batch,
@@ -210,8 +266,9 @@ fn x_shadow_check(kept: &[(usize, SubjectComputation)], failed_at: Option<usize>
 /// ```
 /// The subject loop of one query chunk: every subject of `subjects` in oid order, with the sink
 /// calls of the waves' replay loop (`subject_start`, `containment`, `preliminary_purge`,
-/// `subject`); `diagonals` is the owner's table, `helper_tables` one table per helper. Returns the
-/// number of subjects handed to the sink.
+/// `subject`); `diagonals` is the owner's table, `helper_tables` one table per helper (its own, or
+/// with `LOSAT_X_BXDIAGKEEP` the one its thread keeps, `x_bx_mem::XScratch`). Returns the number of
+/// subjects handed to the sink.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     k: usize,
@@ -221,14 +278,23 @@ pub(super) fn run(
     options: &ResolvedOptions,
     lookup: &Lookup,
     diagonals: &mut Diagonals,
-    helper_tables: Vec<Diagonals>,
+    helper_tables: Vec<super::x_bx_mem::XScratch<'_>>,
     xdrop: i32,
     db_length: i64,
     x_containment: bool,
     sink: &mut impl PreliminarySink,
 ) -> Result<usize> {
     let tasks = subjects.len().div_ceil(k);
-    let compute = |task: usize, table: &mut Diagonals| {
+    // The fused loop's choice for the lookup table, worked out here once for every helper (a
+    // helper's thread may have searched another table's tasks in between).
+    let x_ratio =
+        crate::algorithm::blastx::seed::x_seed_diag::x_shared_table_ratio(lookup, options);
+    let compute = |task: usize, scratch: &mut super::x_bx_mem::XScratch<'_>| {
+        crate::algorithm::blastx::seed::x_seed_diag::x_take_table_ratio(lookup, x_ratio);
+        let table = match scratch.get() {
+            Ok(table) => table,
+            Err(error) => return (Vec::new(), Some((task * k, error))),
+        };
         search_task(
             task,
             k,
@@ -245,15 +311,22 @@ pub(super) fn run(
     };
     // Four tasks per thread ahead of the owner: a helper always finds one while the owner hands a
     // task to the sink, and the tasks held at once stay few (only subjects with hits are kept).
-    let ahead = crate::utils::xahead::Ahead::new(4 * (helper_tables.len() + 1));
+    // Inside the capped batch flow (LOSAT_X_BXUNITCAP), the helpers leave once every task is
+    // claimed: the other batches searched at the time want the threads (x_bx_mem.rs).
+    let ahead = if super::x_bx_mem::in_capped_batch() {
+        crate::utils::xahead::Ahead::x_new_leaving(4 * (helper_tables.len() + 1))
+    } else {
+        crate::utils::xahead::Ahead::new(4 * (helper_tables.len() + 1))
+    };
     let x_t = super::super::x_timing::lap();
     let mut call = 0usize;
+    let mut own = super::x_bx_mem::XScratch::Borrowed(diagonals);
     let result = crate::utils::xahead::with_helpers(Some(&ahead), helper_tables, &compute, || {
         for task in 0..tasks {
             ahead.announce(task, tasks, |_| true);
-            let (kept, error) = match ahead.take(task, diagonals, &compute) {
+            let (kept, error) = match ahead.take(task, &mut own, &compute) {
                 Some(value) => value,
-                None => compute(task, diagonals),
+                None => compute(task, &mut own),
             };
             if shadow() {
                 // The owner searches the task again on its own table (one that has seen other
@@ -261,7 +334,7 @@ pub(super) fn run(
                 x_shadow_check(
                     &kept,
                     error.as_ref().map(|(oid, _)| *oid),
-                    &compute(task, diagonals),
+                    &compute(task, &mut own),
                 );
             }
             let end = error

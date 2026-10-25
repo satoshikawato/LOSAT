@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_PAIRPARNA, shadow LOSAT_X_PAIRPARNASHADOW): the one-hit seed stage of
+//! EXPERIMENT (LOSAT_X_PAIRPARNA): the one-hit seed stage of
 //! one subject chunk searched with a table that is not two-stage (a lookup width equal to the
 //! word size: `-task blastn-short`'s word 7, and word sizes 4 to 8 with a large enough query,
 //! `coordination.rs` `finalize_task_config`), with the subject scan cut into strips that the
@@ -6,7 +6,7 @@
 //! order (by the owner, or split by diagonal-hash bucket over the pool with
 //! LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`). The scheduling (`plan_strips`, `run_strips`,
 //! `part::seed_stage_part`) and the scan kernels (`scan_kernel`) are those of
-//! `LOSAT_X_PAIRPAR` in the parent module.
+//! PAIRPAR in the parent module.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
 //! ```c
@@ -58,7 +58,7 @@
 //! Scope (anything else returns `false`, and the reference code runs): no two-stage table,
 //! the diagonal hash (query longer than 8000), `window_size == 0` (one hit), `scan_range ==
 //! 0`, an unmasked subject, no debug, trace or window diagnostics, one subject searched by the
-//! owner of a pool of two threads or more (the shadow also runs without a pool).
+//! owner of a pool of two threads or more.
 //!
 //! Strip size: a lookup hit is a seed here (no word extension filters it), about 100 per
 //! subject offset for 30,000 24-mers against a 3 Mb genome (297.7 M pairs), so the strips are
@@ -75,24 +75,18 @@ use super::super::{
     QueryContextIndex, UngappedHit,
 };
 use super::{
-    copy_hash, part, plan_strips, pool_threads, run_strips, scan_kernel, FoldCounts, PartScratch,
-    Seed, StageStats, Stash, StashPath, StripJob, STASH,
+    part, plan_strips, pool_threads, run_strips, scan_kernel, FoldCounts, PartScratch, Seed,
+    StageStats, StripJob,
 };
 use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
-/// No NCBI counterpart: reads the switches once (LOSAT_X_PAIRPARNA, a strict-set switch: on
-/// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; LOSAT_X_PAIRPARNASHADOW, off
-/// unless set to any value); they do not change any value NCBI computes.
-fn switches() -> (bool, bool) {
-    static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();
-    *SWITCHES.get_or_init(|| {
-        (
-            crate::utils::xswitch::on("LOSAT_X_PAIRPARNA"),
-            std::env::var_os("LOSAT_X_PAIRPARNASHADOW").is_some(),
-        )
-    })
+/// No NCBI counterpart: reads LOSAT_X_PAIRPARNA once (a strict-set switch: on unless it is `0`);
+/// it does not change any value NCBI computes.
+fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRPARNA"))
 }
 
 /// No NCBI counterpart (scheduling only): the strips per thread asked of `plan_strips` (its
@@ -101,10 +95,7 @@ fn switches() -> (bool, bool) {
 const STRIPS_PER_THREAD: usize = 512;
 const AHEAD_PER_THREAD: usize = 2;
 
-// No NCBI counterpart: counters of the shadow summary and of LOSAT_TIMING (scheduling only).
-static SHADOW_CHUNKS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_HITS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_CELLS: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart: counters of LOSAT_TIMING (scheduling only).
 static X_CHUNKS: AtomicU64 = AtomicU64::new(0);
 static X_STRIPS: AtomicU64 = AtomicU64::new(0);
 static X_SEEDS: AtomicU64 = AtomicU64::new(0);
@@ -345,10 +336,11 @@ fn fold_na<const PT: bool>(
         // if(!rc)  last_hit = 0;
         // ```
         // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
-        // of a bucket below the bound (`s_off_pos` below).
+        // of a bucket below the bound (`s_off_pos` below). (A one-hit table keeps no memo,
+        // LOSAT_X_DIAGLV2.)
         let (last_hit, _hit_saved) = {
             let (level, _hit_len, hit_saved) = if x_lv {
-                diag_hash.retrieve_below(
+                diag_hash.retrieve_below::<false>(
                     diag as i32,
                     &x_lv_seeds,
                     kmer_start + diag_offset as usize,
@@ -512,7 +504,7 @@ fn fold_na<const PT: bool>(
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
             //                       hit_ready, s_off_pos, window_size + Delta + 1);
             // ```
-            part::insert::<PT>(
+            part::insert::<PT, false, false>(
                 diag_hash,
                 out,
                 x_key,
@@ -531,19 +523,22 @@ fn fold_na<const PT: bool>(
         }
 
         // NCBI architecture: Collect ungapped hit for batch processing
-        ungapped_hits.push(UngappedHit {
-            context_idx: q_idx,
-            query_idx: ctx.query_idx,
-            query_frame: ctx.frame,
-            query_context_offset: ctx.query_offset,
-            seed_q_off: q_off,
-            seed_s_off: s_off,
-            qs,
-            qe,
-            ss,
-            se: ungapped_se,
-            score: ungapped_score,
-        });
+        super::super::x_push_ungapped(
+            ungapped_hits,
+            UngappedHit {
+                context_idx: q_idx,
+                query_idx: ctx.query_idx,
+                query_frame: ctx.frame,
+                query_context_offset: ctx.query_offset,
+                seed_q_off: q_off,
+                seed_s_off: s_off,
+                qs,
+                qe,
+                ss,
+                se: ungapped_se,
+                score: ungapped_score,
+            },
+        );
         if PT {
             out.hit_keys.push(x_key);
         }
@@ -554,7 +549,7 @@ fn fold_na<const PT: bool>(
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                       hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT>(
+        part::insert::<PT, false, false>(
             diag_hash,
             out,
             x_key,
@@ -694,60 +689,47 @@ fn seed_stage(
 /// Dispatch of `collect_prelim_hits_for_chunk` for a table that is not two-stage: the seed
 /// stage of this chunk (the loop above with its one-hit extension) when LOSAT_X_PAIRPARNA is
 /// on and the chunk is in scope; `true` means it has run and the reference scan is skipped.
-/// With LOSAT_X_PAIRPARNASHADOW the stage runs on copies of the diagonal hash and the hit
-/// list, `false` is returned so the reference runs, and the parent's `shadow_check` compares
-/// the two. `fold_scratch` holds the allocations of LOSAT_X_PAIRPARFOLD's partition tables
-/// and buffers (`x_pair_seed_part.rs`).
+/// `fold_scratch` holds the allocations of LOSAT_X_PAIRPARFOLD's partition tables and buffers
+/// (`x_pair_seed_part.rs`).
 pub(in super::super) fn run(
     x: &NaInputs<'_>,
     diag_hash: &mut DiagHashTable,
     ungapped_hits: &mut Vec<UngappedHit>,
     fold_scratch: &mut PartScratch,
 ) -> bool {
-    let (on, shadow) = switches();
-    if !on && !shadow {
+    if !on() {
         return false;
     }
-    if shadow {
-        STASH.with(|s| s.borrow_mut().take());
-    }
     if !in_scope(x) {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", false);
         return false;
     }
     let threads = match pool_threads() {
         Some(threads) => threads,
-        // the shadow also runs without a pool (strips on this thread)
-        None if shadow => 1,
-        None => return false,
+        None => {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", false);
+            return false;
+        }
     };
-    let timing = if shadow { None } else { x.timing };
+    crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", true);
+    let timing = x.timing;
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
     let t_start = timed.then(std::time::Instant::now);
-    let mut shadow_hash = shadow.then(|| copy_hash(diag_hash));
-    let mut shadow_hits: Vec<UngappedHit> = Vec::new();
-    // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold split over the pool's threads (with the shadow,
-    // on the copies, which the parent's `shadow_check` compares with the reference's table and
-    // hits).
+    // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold split over the pool's threads.
     let fold_part = part::partitions(threads).map(|parts| part::FoldPart {
         scratch: fold_scratch,
         parts,
     });
-    let stats = {
-        let (hash, hits): (&mut DiagHashTable, &mut Vec<UngappedHit>) = match shadow_hash.as_mut() {
-            Some(hash) => (hash, &mut shadow_hits),
-            None => (diag_hash, ungapped_hits),
-        };
-        seed_stage(
-            x,
-            threads,
-            STRIPS_PER_THREAD * threads.max(4),
-            hash,
-            hits,
-            timing,
-            timed,
-            fold_part,
-        )
-    };
+    let stats = seed_stage(
+        x,
+        threads,
+        STRIPS_PER_THREAD * threads.max(4),
+        diag_hash,
+        ungapped_hits,
+        timing,
+        timed,
+        fold_part,
+    );
     if let (Some(t_start), Some(timing)) = (t_start, timing) {
         // `[TIMING] scan_lookup`: the time of the stage minus the ungapped extensions, as
         // the reference counts its scan. With LOSAT_X_PAIRPARFOLD only the owner's extensions
@@ -765,41 +747,14 @@ pub(in super::super) fn run(
     X_FOLD_NS.fetch_add(stats.fold_ns, Ordering::Relaxed);
     X_OWNER_SCAN_NS.fetch_add(stats.owner_scan_ns, Ordering::Relaxed);
     X_WAIT_NS.fetch_add(stats.wait_ns, Ordering::Relaxed);
-    if let Some(hash) = shadow_hash {
-        STASH.with(|s| {
-            *s.borrow_mut() = Some(Stash {
-                hits: shadow_hits,
-                hash,
-                path: StashPath::Na,
-            })
-        });
-        return false;
-    }
     true
 }
 
-/// No NCBI counterpart: one chunk compared equal by the parent's `shadow_check`.
-pub(super) fn count_shadow(hits: usize, cells: u32) {
-    SHADOW_CHUNKS.fetch_add(1, Ordering::Relaxed);
-    SHADOW_HITS.fetch_add(hits as u64, Ordering::Relaxed);
-    SHADOW_CELLS.fetch_add(u64::from(cells), Ordering::Relaxed);
-}
-
-/// No NCBI counterpart: the one summary line of LOSAT_X_PAIRPARNASHADOW, and with
-/// LOSAT_TIMING the counters of LOSAT_X_PAIRPARNA, on stderr at the end of the search.
+/// No NCBI counterpart: with LOSAT_TIMING the counters of LOSAT_X_PAIRPARNA, on stderr at the
+/// end of the search.
 pub(super) fn summary() {
-    let (on, shadow) = switches();
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
-    if shadow {
-        eprintln!(
-            "[X_PAIRPARNASHADOW] blastn: seed chunks equal={} (ungapped hits {}, hash cells {}){}",
-            load(&SHADOW_CHUNKS),
-            load(&SHADOW_HITS),
-            load(&SHADOW_CELLS),
-            part::shadow_fields(part::NA_ONE_HIT)
-        );
-    }
-    if (on || shadow) && std::env::var_os("LOSAT_TIMING").is_some() {
+    if on() && std::env::var_os("LOSAT_TIMING").is_some() {
         let s = |c: &AtomicU64| c.load(Ordering::Relaxed) as f64 / 1e9;
         eprintln!(
             "[TIMING] x_pairparna_seed: chunks={} strips={} seeds={} skipped={} fold={:.3}s owner_scan={:.3}s owner_wait={:.3}s{}",

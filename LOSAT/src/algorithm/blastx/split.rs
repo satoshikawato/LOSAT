@@ -382,7 +382,13 @@ pub fn split_queries(
 ) -> Result<Vec<QueryChunk>> {
     let mut size = CHUNK_SIZE;
     let length = records.iter().map(|r| r.sequence.len()).sum();
-    let mut count = calculate_num_chunks(&mut size, length, records.len());
+    // `num_queries` is the query batch's: with a reader batch of several units it is the reader
+    // batch's (`reader_batch.rs`), and a batch of several queries is not split.
+    let num_queries = full
+        .reader_shape
+        .as_deref()
+        .map_or(records.len(), |shape| shape.query_count);
+    let mut count = calculate_num_chunks(&mut size, length, num_queries);
     if !options.gapped {
         count = 1;
     }
@@ -394,9 +400,8 @@ pub fn split_queries(
             prepared: full.clone(),
         }]);
     }
-    // EXPERIMENT (LOSAT_X_BXPAR): a chunk's query setup (translation, SEG) reads
-    // only its own slice of the query, so the chunks can be prepared on the
-    // search pool; the corrections below still run in chunk order.
+    // A chunk's query setup (translation, SEG) reads only its own slice of the query, so the chunks
+    // can be prepared on the search pool; the corrections below still run in chunk order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-249
     // ```c
     //         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
@@ -471,15 +476,15 @@ pub fn split_queries(
     //                 CRef<ILocalQueryData> query_data(
     //                         chunk_qf->MakeLocalQueryData( &*m_Options ) );
     // ```
-    // Dispatch point: with LOSAT_X_BXPAR on and inside the search pool, the chunks are prepared in
+    // Dispatch point: inside the search pool of 2+ threads, the chunks are prepared in
     // parallel; otherwise the loop below prepares them one after another as NCBI does. The chunks
     // are collected in index order and the corrections that follow still run in chunk order.
     #[cfg(feature = "parallel")]
-    if super::runtime::x_bx_parallel()
-        && !super::runtime::x_inner_serial()
-        && rayon::current_thread_index().is_some()
-        && rayon::current_num_threads() > 1
-    {
+    if super::runtime::x_bx_par_rule(|| {
+        !super::runtime::x_inner_serial()
+            && rayon::current_thread_index().is_some()
+            && rayon::current_num_threads() > 1
+    }) {
         use rayon::prelude::*;
         chunks = (0..count)
             .into_par_iter()

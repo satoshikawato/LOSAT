@@ -57,8 +57,7 @@
    {
     "flag": "-perc_identity",
     "help": "Percent identity threshold for filtering HSPs (Blast_HSPTest)",
-    "takes_value": true,
-    "default": "0"
+    "takes_value": true
    },
    {
     "flag": "-max_target_seqs",
@@ -111,6 +110,11 @@
     ]
    },
    {
+    "flag": "-window_masker_db",
+    "help": "Enable WindowMasker filtering using this repeats database.",
+    "takes_value": true
+   },
+   {
     "flag": "-strand",
     "help": "",
     "takes_value": true,
@@ -144,8 +148,7 @@
    {
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
-    "takes_value": true,
-    "default": "0"
+    "takes_value": true
    }
   ]
  },
@@ -185,13 +188,12 @@
     "default": "blastp",
     "choices": [
      "blastp",
-     "blastp-fast",
-     "blastp-short"
+     "blastp-fast"
     ]
    },
    {
     "flag": "-evalue",
-    "help": "Expectation value (E) threshold for saving hits [default: 10; 20000 for blastp-short]",
+    "help": "Expectation value (E) threshold for saving hits [default: 10]",
     "takes_value": true
    },
    {
@@ -201,7 +203,7 @@
    },
    {
     "flag": "-word_size",
-    "help": "Word size for wordfinder algorithm [default: 3; 5 for blastp-fast, 2 for blastp-short]",
+    "help": "Word size for wordfinder algorithm [default: 3; 5 for blastp-fast]",
     "takes_value": true
    },
    {
@@ -241,7 +243,7 @@
    },
    {
     "flag": "-matrix",
-    "help": "Scoring matrix name [default: BLOSUM62; PAM30 for blastp-short]",
+    "help": "Scoring matrix name [default: BLOSUM62]",
     "takes_value": true
    },
    {
@@ -263,6 +265,11 @@
    {
     "flag": "-seg",
     "help": "SEG: no, yes, or \"WINDOW LOCUT HICUT\" [default: no]",
+    "takes_value": true
+   },
+   {
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks [default: false]",
     "takes_value": true
    },
    {
@@ -321,8 +328,7 @@
     "takes_value": true,
     "default": "tblastn",
     "choices": [
-     "tblastn",
-     "tblastn-fast"
+     "tblastn"
     ]
    },
    {
@@ -332,7 +338,7 @@
    },
    {
     "flag": "-word_size",
-    "help": "Word size for wordfinder algorithm [default: 3; 5 for tblastn-fast]",
+    "help": "Word size for wordfinder algorithm [default: 3]",
     "takes_value": true
    },
    {
@@ -363,7 +369,7 @@
    },
    {
     "flag": "-threshold",
-    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for tblastn-fast]",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7]",
     "takes_value": true
    },
    {
@@ -561,6 +567,11 @@
     "help": "SEG: no, yes, or WINDOW LOCUT HICUT",
     "takes_value": true,
     "default": "12 2.2 2.5"
+   },
+   {
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks [default: false]",
+    "takes_value": true
    },
    {
     "flag": "-window_size",

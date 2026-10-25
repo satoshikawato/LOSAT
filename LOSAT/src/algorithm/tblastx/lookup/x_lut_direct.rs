@@ -1,6 +1,6 @@
-//! EXPERIMENT (LOSAT_X_BXLUT / LOSAT_X_BXLUTSHADOW): the BLASTX protein lookup table filled in
-//! place, with the neighbour-word sets memoised per thread (LOSAT_X_BPLKPAHEAD: or kept by the
-//! blastp block search for its builds ahead, `XAaSpares`).
+//! The BLASTX protein lookup table filled in place, with the neighbour-word sets memoised per
+//! thread (LOSAT_X_BPLKPAHEAD: or kept by the blastp block search for its builds ahead,
+//! `XAaSpares`).
 //!
 //! NCBI builds the table in two steps: `s_AddNeighboringWords` appends, for every distinct
 //! query word in ascending backbone index, the word's query offsets to the chain of every
@@ -59,7 +59,7 @@
 use super::*;
 use std::cell::RefCell;
 
-// EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the per-group tables of the TBLASTX unit
+// EXPERIMENT (PAIRLUT): the per-group tables of the TBLASTX unit
 // path built by this file's count, layout and fill passes on the lookup locations of one group; a
 // child module so that it uses `x_target_list` and the memo below unchanged (see x_pair_lut.rs).
 //
@@ -78,22 +78,6 @@ use std::cell::RefCell;
 #[path = "x_pair_lut.rs"]
 pub(crate) mod x_pair_lut;
 
-/// EXPERIMENT (LOSAT_X_BXLUT): 0 = off (reference builder), 1 = in-place builder,
-/// 2 = shadow (`LOSAT_X_BXLUTSHADOW`: both builders, compared).
-pub(super) fn x_bxlut_mode() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BXLUTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_BXLUT") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
 /// Neighbour lists of one (matrix, threshold, word length, alphabet) setting, by source cell.
 struct XNeighborMemo {
     key: (ScoringMatrix, i32, usize, usize),
@@ -102,6 +86,169 @@ struct XNeighborMemo {
 
 thread_local! {
     static X_MEMO: RefCell<Option<XNeighborMemo>> = const { RefCell::new(None) };
+}
+
+// No NCBI counterpart (buffer reuse and one memo for all threads; the table is the one
+// `x_build_direct` builds): LOSAT_X_BXLUTPOOL, in the strict set (on unless `=0` or
+// `LOSAT_X_DEFAULT=0`). NCBI builds a BLASTX table with calloc'd vectors and frees them with the
+// search (blast_aalookup.c BlastAaLookupTableNew / BlastAaLookupFinalize, cited above). LOSAT builds
+// one per query batch or chunk searched side by side; a thread's glibc arena keeps what the thread
+// allocated after it is freed, so every building thread kept a table's worth (3-6 MiB with the
+// build's counts, exact backbone and its own neighbour memo). Pooled builds read one set of
+// neighbour lists shared by all threads (`XSharedMemo`, filled as the per-thread memo is), take the
+// table's vectors from the tables dropped before (`x_give_back_pooled`) and the build's counts and
+// exact backbone from the builds before (`XBuildTemps`), each cleared and zero-filled to the sizes
+// of the new table as calloc gives them; the pool holds as many sets as builds and tables were alive
+// at once. The values written are those of `x_build_direct`.
+/// Whether BLASTX builds its tables pooled (`LOSAT_X_BXLUTPOOL`).
+pub(crate) fn x_bx_lut_pool() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLUTPOOL"))
+}
+
+// No NCBI counterpart: buffer reuse only (above).
+/// Whether a BLASTX table is built pooled, so that its vectors go back to the pool when it is
+/// dropped: the switch is on and the in-place builder runs (diagnostics mode runs the reference
+/// builder, whose tables are freed as before).
+pub(crate) fn x_bx_pooled_builds() -> bool {
+    x_bx_lut_pool() && !diagnostics_enabled()
+}
+
+/// No NCBI counterpart (memoised neighbour lists shared by threads, `XNeighborMemo` otherwise).
+struct XSharedMemo {
+    key: (ScoringMatrix, i32, usize, usize),
+    lists: Box<[std::sync::OnceLock<Box<[u16]>>]>,
+}
+
+// No NCBI counterpart: the shared neighbour lists of the last key built pooled.
+static X_SHARED_MEMO: std::sync::Mutex<Option<std::sync::Arc<XSharedMemo>>> =
+    std::sync::Mutex::new(None);
+
+// No NCBI counterpart: the shared lists for `key` (a new set where the kept one has another key).
+fn x_shared_memo(
+    key: (ScoringMatrix, i32, usize, usize),
+    backbone_size: usize,
+) -> std::sync::Arc<XSharedMemo> {
+    let mut kept = x_pool_lock(&X_SHARED_MEMO);
+    if let Some(memo) = kept
+        .as_ref()
+        .filter(|m| m.key == key && m.lists.len() == backbone_size)
+    {
+        return std::sync::Arc::clone(memo);
+    }
+    let memo = std::sync::Arc::new(XSharedMemo {
+        key,
+        lists: (0..backbone_size)
+            .map(|_| std::sync::OnceLock::new())
+            .collect(),
+    });
+    *kept = Some(std::sync::Arc::clone(&memo));
+    memo
+}
+
+/// No NCBI counterpart: the neighbour lists a build reads, its thread's or the shared ones.
+enum XLists<'a> {
+    Own(&'a mut Vec<Option<Box<[u16]>>>),
+    Shared(&'a [std::sync::OnceLock<Box<[u16]>>]),
+}
+
+impl XLists<'_> {
+    // No NCBI counterpart: the memo's lookup (the lists are those s_AddWordHitsCore would produce).
+    fn get_or_make(&mut self, idx: usize, make: impl FnOnce() -> Box<[u16]>) -> &[u16] {
+        match self {
+            Self::Own(lists) => lists[idx].get_or_insert_with(make),
+            Self::Shared(lists) => lists[idx].get_or_init(make),
+        }
+    }
+
+    // No NCBI counterpart: as `get_or_make`, for a cell the count pass listed.
+    fn get(&self, idx: usize) -> &[u16] {
+        match self {
+            Self::Own(lists) => lists[idx].as_deref(),
+            Self::Shared(lists) => lists[idx].get().map(|list| &list[..]),
+        }
+        .expect("listed in the count pass")
+    }
+}
+
+/// No NCBI counterpart: a build's temporary vectors, kept between pooled builds.
+#[derive(Default)]
+struct XBuildTemps {
+    counts: Vec<u32>,
+    base: Vec<u32>,
+    fill: Vec<u32>,
+    chains: Option<LookupBackboneChains>,
+}
+
+// SAFETY: the exact backbone's block pointers point into slabs it owns (boxes, which do not move
+// when the backbone moves) and are only read through it; a kept backbone is reset (every cell
+// empty, every slab spare) before the next build, so no pointer outlives its build. The kept
+// temporaries are moved between threads under the pool's lock, never shared.
+unsafe impl Send for XBuildTemps {}
+
+// No NCBI counterpart: the kept build temporaries and table vectors (buffer reuse only).
+static X_BX_TEMPS: std::sync::Mutex<Vec<XBuildTemps>> = std::sync::Mutex::new(Vec::new());
+static X_BX_TABLES: std::sync::Mutex<Vec<XAaVectors>> = std::sync::Mutex::new(Vec::new());
+
+// No NCBI counterpart: a lock held only around a move (a poisoned lock's value is still valid).
+fn x_pool_lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+// No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them); one
+// short of room is replaced by one of `n` entries, or with `slack` (the overflow, whose length
+// changes from table to table) `n + n / 4`, not the doubling of `resize`.
+fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
+    if vector.capacity() < n {
+        vector = Vec::with_capacity(if slack { n + n / 4 } else { n });
+    }
+    vector.clear();
+    vector.resize(n, T::default());
+    vector
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 (see
+// `x_build_direct`)
+// ```c
+//     for (i = 0; i < lookup->backbone_size; i++) {
+//         if (exact_backbone[i] != NULL) {
+//             s_AddWordHits(lookup, matrix, query->sequence,
+//                           exact_backbone[i], query_bias, row_max);
+// ```
+/// [`x_build_direct`] with the shared neighbour lists and kept vectors (`LOSAT_X_BXLUTPOOL`).
+pub(super) fn x_build_direct_pooled(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    let mut unused = None;
+    x_build_direct_in(
+        prepared,
+        threshold,
+        matrix,
+        word_length,
+        &mut unused,
+        None,
+        true,
+    )
+    .map(|table| table.expect("pooled vectors grow to any table"))
+}
+
+// No NCBI counterpart: buffer reuse (`LOSAT_X_BXLUTPOOL`); NCBI frees the vectors.
+/// Keeps `table`'s backbone, overflow and pv vectors for the next pooled build (the table is left
+/// empty).
+pub(crate) fn x_give_back_pooled(table: &mut BlastAaLookupTable) {
+    let vectors = XAaVectors {
+        backbone: std::mem::take(&mut table.backbone),
+        overflow: std::mem::take(&mut table.overflow),
+        pv: std::mem::take(&mut table.pv),
+    };
+    if !vectors.is_empty() {
+        x_pool_lock(&X_BX_TABLES).push(vectors);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:321-336
@@ -192,11 +339,11 @@ fn x_locked<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 impl XAaSpares {
     // No NCBI counterpart: where the build ahead applies; it reads switches and changes no value
     // NCBI computes.
-    /// Whether exact blastp's table is built by [`x_build_direct`] (`LOSAT_X_BPLUT`, mode 1,
+    /// Whether exact blastp's table is built by [`x_build_direct`] (`LOSAT_X_BPLUT` on,
     /// outside diagnostics mode, whose reference builder prints its phases), the build
     /// [`Self::x_build_ahead`] makes.
     pub(crate) fn x_applies() -> bool {
-        x_bplut_mode() == 1 && !diagnostics_enabled()
+        x_bplut_on() && !diagnostics_enabled()
     }
 
     // No NCBI counterpart: buffer reuse only (`XAaSpares`).
@@ -276,14 +423,14 @@ impl XAaSpares {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
-    // `x_dispatch`)
+    // `build_ncbi_lookup_from_prepared`)
     // ```c
     //     for (i = 0; i < lookup->backbone_size; i++) {
     //         if (exact_backbone[i] != NULL) {
     //             s_AddWordHits(lookup, matrix, query->sequence,
     //                           exact_backbone[i], query_bias, row_max);
     // ```
-    /// `x_bp_build_lookup(1, queries, threshold, karlin_params, check_ideal)` (where
+    /// `x_bp_build_lookup(true, queries, threshold, karlin_params, check_ideal)` (where
     /// [`Self::x_applies`]), the table built on the vectors `x_make_room` kept and with the
     /// neighbour lists kept here (both taken while it builds and given back after, the vectors only
     /// where no table was made). `None` where no table was made: the vectors lack the room, or the
@@ -308,6 +455,7 @@ impl XAaSpares {
             LOOKUP_WORD_LENGTH,
             &mut memo,
             Some(&mut room),
+            false,
         );
         *x_locked(&self.memo) = memo;
         *x_locked(&self.ahead) = room;
@@ -513,9 +661,9 @@ fn x_target_list(
 //             for (j=0; j <lookup->thin_backbone[i][1]; j++)
 //                 dest[j] = lookup->thin_backbone[i][j + 2];
 // ```
-/// EXPERIMENT (LOSAT_X_BXLUT): the table `build_lookup_from_prepared` returns, built without
-/// chains (see the module comment). `Err(prepared)` when the reference builder must run
-/// (diagnostics mode, or a backbone index wider than 16 bits).
+/// The table `build_lookup_from_prepared` returns, built without chains (see the module
+/// comment). `Err(prepared)` when the reference builder must run (diagnostics mode, or a
+/// backbone index wider than 16 bits).
 pub(super) fn x_build_direct(
     prepared: PreparedLookupQuery,
     threshold: i32,
@@ -530,6 +678,7 @@ pub(super) fn x_build_direct(
             word_length,
             &mut memo.borrow_mut(),
             None,
+            false,
         )
         .map(|table| table.expect("fresh vectors have the room for any table"))
     })
@@ -546,6 +695,7 @@ fn x_build_direct_in(
     word_length: usize,
     memo: &mut Option<XNeighborMemo>,
     room: Option<&mut XAaVectors>,
+    pooled: bool,
 ) -> std::result::Result<Option<BlastAaLookupTable>, PreparedLookupQuery> {
     let alphabet_size = LOOKUP_ALPHABET_SIZE;
     let charsize = ilog2(alphabet_size) + 1;
@@ -576,7 +726,18 @@ fn x_build_direct_in(
         })
         .collect();
     // The reference exact backbone (blast_aalookup.c:448-456).
-    let mut exact_backbone = LookupBackboneChains::new(backbone_size);
+    let mut temps = if pooled {
+        x_pool_lock(&X_BX_TEMPS).pop().unwrap_or_default()
+    } else {
+        XBuildTemps::default()
+    };
+    let mut exact_backbone = match temps.chains.take() {
+        Some(mut chains) => {
+            chains.x_reset(backbone_size);
+            chains
+        }
+        None => LookupBackboneChains::new(backbone_size),
+    };
     let mut skipped_invalid_residue = 0usize;
     blast_lookup_index_query_exact_matches(
         &mut exact_backbone,
@@ -589,9 +750,11 @@ fn x_build_direct_in(
     );
 
     let key = (matrix, threshold, word_length, alphabet_size);
-    if memo
-        .as_ref()
-        .is_none_or(|m| m.key != key || m.lists.len() != backbone_size)
+    let shared = pooled.then(|| x_shared_memo(key, backbone_size));
+    if shared.is_none()
+        && memo
+            .as_ref()
+            .is_none_or(|m| m.key != key || m.lists.len() != backbone_size)
     {
         *memo = Some(XNeighborMemo {
             key,
@@ -600,16 +763,23 @@ fn x_build_direct_in(
                 .collect(),
         });
     }
-    let lists = &mut memo.as_mut().expect("memo set above").lists;
+    let mut lists = match &shared {
+        Some(shared) => XLists::Shared(&shared.lists),
+        None => XLists::Own(&mut memo.as_mut().expect("memo set above").lists),
+    };
 
     // Count pass: count[w] = number of appends the reference makes to cell w.
-    let mut counts: Vec<u32> = vec![0; backbone_size];
+    let mut counts: Vec<u32> = if pooled {
+        x_zeroed(std::mem::take(&mut temps.counts), backbone_size, false)
+    } else {
+        vec![0; backbone_size]
+    };
     for idx in 0..backbone_size {
         let Some(offset_list) = exact_backbone[idx].as_deref() else {
             continue;
         };
         let k = lookup_chain_num_used(offset_list) as u32;
-        let list = lists[idx].get_or_insert_with(|| {
+        let list = lists.get_or_make(idx, || {
             // blast_aalookup.c:490: w = query + offset_list[2];
             let first = usize::try_from(offset_list[2]).expect("NCBI BLAST query offset must fit");
             x_target_list(
@@ -640,6 +810,14 @@ fn x_build_direct_in(
         }
     }
     let (mut backbone, mut pv, mut overflow) = match room {
+        None if pooled => {
+            let kept = x_pool_lock(&X_BX_TABLES).pop().unwrap_or_default();
+            (
+                x_zeroed(kept.backbone, backbone_size, false),
+                x_zeroed(kept.pv, pv_size, false),
+                x_zeroed(kept.overflow, overflow_size, true),
+            )
+        }
         None => (
             vec![BackboneCell::default(); backbone_size],
             vec![0u32; pv_size],
@@ -650,7 +828,11 @@ fn x_build_direct_in(
             None => return Ok(None),
         },
     };
-    let mut base: Vec<u32> = vec![0; backbone_size];
+    let mut base: Vec<u32> = if pooled {
+        x_zeroed(std::mem::take(&mut temps.base), backbone_size, false)
+    } else {
+        vec![0; backbone_size]
+    };
     let mut overflow_cursor = 0usize;
     for (idx, &count) in counts.iter().enumerate() {
         if count == 0 {
@@ -666,14 +848,18 @@ fn x_build_direct_in(
     }
 
     // Fill pass: the reference's appends, in the reference's order.
-    let mut fill: Vec<u32> = vec![0; backbone_size];
+    let mut fill: Vec<u32> = if pooled {
+        x_zeroed(std::mem::take(&mut temps.fill), backbone_size, false)
+    } else {
+        vec![0; backbone_size]
+    };
     for idx in 0..backbone_size {
         let Some(offset_list) = exact_backbone[idx].as_deref() else {
             continue;
         };
         // query_bias is 0 here (build_lookup_from_prepared passes 0).
         let offsets = lookup_chain_entries(offset_list);
-        let list = lists[idx].as_deref().expect("listed in the count pass");
+        let list = lists.get(idx);
         for &w in list {
             let w = w as usize;
             let at = fill[w] as usize;
@@ -687,6 +873,14 @@ fn x_build_direct_in(
         }
     }
 
+    if pooled {
+        x_pool_lock(&X_BX_TEMPS).push(XBuildTemps {
+            counts,
+            base,
+            fill,
+            chains: Some(exact_backbone),
+        });
+    }
     Ok(Some(BlastAaLookupTable {
         backbone,
         overflow,
@@ -722,158 +916,81 @@ fn x_build_direct_in(
 //         }
 //     }
 // ```
-/// EXPERIMENT (LOSAT_X_BXLUT / LOSAT_X_BXLUTSHADOW): the switch's dispatch for
-/// `build_ncbi_lookup_from_prepared`. `Ok(table)` when this module produced the table (with
-/// the shadow switch: the reference table, after comparing it with the in-place one);
-/// `Err(prepared)` hands the input back to the reference builder (switch off, or not
-/// applicable).
-pub(super) fn x_dispatch(
-    prepared: PreparedLookupQuery,
-    threshold: i32,
-    matrix: ScoringMatrix,
-    word_length: usize,
-) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
-    match x_bxlut_mode() {
-        0 => Err(prepared),
-        1 => x_build_direct(prepared, threshold, matrix, word_length),
-        _ => {
-            let copy = PreparedLookupQuery {
-                concat_query: prepared.concat_query.clone(),
-                lookup_locations: prepared.lookup_locations.clone(),
-                frame_bases: prepared.frame_bases.clone(),
-                contexts: prepared.contexts.clone(),
-                skipped_seg_mask: prepared.skipped_seg_mask,
-            };
-            let reference = build_lookup_from_prepared(prepared, threshold, matrix, word_length).0;
-            if let Ok(direct) = x_build_direct(copy, threshold, matrix, word_length) {
-                x_assert_same_table(&direct, &reference);
-                X_SHADOW_TABLES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
-            Ok(reference)
-        }
-    }
-}
-
-/// EXPERIMENT (LOSAT_X_BXLUTSHADOW): tables compared so far.
-pub(crate) static X_SHADOW_TABLES: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-/// EXPERIMENT (LOSAT_X_BXLUTSHADOW): `Some(tables compared)` in shadow mode, for the exit summary.
-pub(crate) fn x_shadow_tables() -> Option<u64> {
-    (x_bxlut_mode() == 2).then(|| X_SHADOW_TABLES.load(std::sync::atomic::Ordering::Relaxed))
-}
-
-/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): 0 = off (`build_ncbi_lookup`),
-/// 1 = BLASTP's table built in place by [`x_build_direct`], 2 = shadow (both builders, compared).
+/// EXPERIMENT (LOSAT_X_BPLUT): `true` = BLASTP's table built in place by [`x_build_direct`],
+/// `false` = off (`build_ncbi_lookup`).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
-// `LOSAT_X_BPLUT` is a strict-set switch; the shadow variable is read first, as "set to any value".
-pub(super) fn x_bplut_mode() -> u8 {
+// `LOSAT_X_BPLUT` is a strict-set switch.
+pub(super) fn x_bplut_on() -> bool {
     use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPLUTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_BPLUT") {
-            1
-        } else {
-            0
-        }
-    })
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLUT"))
 }
 
-/// EXPERIMENT (LOSAT_X_BPLUTSHADOW): BLASTP tables compared so far.
-static X_BPLUT_SHADOW_TABLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// EXPERIMENT (LOSAT_X_BPLUTSHADOW): `Some(tables compared)` in shadow mode, for the exit summary.
-// No NCBI counterpart: reads a counter.
-pub(crate) fn x_bplut_shadow_tables() -> Option<u64> {
-    (x_bplut_mode() == 2).then(|| X_BPLUT_SHADOW_TABLES.load(std::sync::atomic::Ordering::Relaxed))
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see `x_dispatch`)
-// ```c
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         if (exact_backbone[i] != NULL) {
-//             s_AddWordHits(lookup, matrix, query->sequence,
-//                           exact_backbone[i], query_bias, row_max);
-//             sfree(exact_backbone[i]);
-//         }
-//     }
-// ```
-/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): `build_ncbi_lookup` for BLASTP. Mode 0 calls
-/// it; mode 1 prepares the query as `build_ncbi_lookup_for_profile(.., Blosum62,
+// No NCBI counterpart: the BLASTP choice between the reference builder and the in-place builder
+// (`build_ncbi_lookup_from_prepared` in backbone.rs carries the NCBI code); it changes no value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLUT): `build_ncbi_lookup` for BLASTP. With `direct` false it calls it;
+/// with `direct` true it prepares the query as `build_ncbi_lookup_for_profile(.., Blosum62,
 /// LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`] (the same table without
 /// the chains, so without the chains' memory while it is built), falling back to the reference
-/// builder where that declines; mode 2 builds both, compares them field by field (panics on a
-/// difference) and returns the reference's.
+/// builder where that declines.
 pub(super) fn x_bp_build_lookup(
-    mode: u8,
+    direct: bool,
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     karlin_params: &KarlinParams,
     check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    x_build_ncbi_lookup_counted(
-        mode,
-        &X_BPLUT_SHADOW_TABLES,
+    x_build_ncbi_lookup_with(
+        direct,
         queries,
         threshold,
         karlin_params,
         check_ideal,
+        |_| {},
     )
 }
 
-/// EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): 0 = off (`build_ncbi_lookup`, the chain
-/// builder), 1 = TBLASTX's full table built in place by [`x_build_direct`], 2 = shadow (both
-/// builders, compared).
+/// EXPERIMENT (LOSAT_X_TBXLUT): `true` = TBLASTX's full table built in place by [`x_build_direct`],
+/// `false` = off (`build_ncbi_lookup`, the chain builder).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result. A strict-set
-// switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; `utils/xswitch.rs`); the
-// shadow variable is read first.
-pub(super) fn x_tbxlut_mode() -> u8 {
+// switch (on unless it is `0`; `utils/xswitch.rs`).
+pub(super) fn x_tbxlut_on() -> bool {
     use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_TBXLUTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_TBXLUT") {
-            1
-        } else {
-            0
-        }
-    })
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXLUT"))
 }
 
-/// EXPERIMENT (LOSAT_X_TBXLUTSHADOW): TBLASTX full tables compared so far.
-static X_TBXLUT_SHADOW_TABLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// EXPERIMENT (LOSAT_X_TBXLUTSHADOW): `Some(tables compared)` in shadow mode, for the exit summary.
-// No NCBI counterpart: reads a counter.
-pub(crate) fn x_tbxlut_shadow_tables() -> Option<u64> {
-    (x_tbxlut_mode() == 2)
-        .then(|| X_TBXLUT_SHADOW_TABLES.load(std::sync::atomic::Ordering::Relaxed))
+// No NCBI counterpart: records the side the switch took (`LOSAT_X_REACH`).
+/// EXPERIMENT (LOSAT_X_TBXLUT): a batch whose unit path builds its group tables directly
+/// (PAIRLUT) builds no full table, so the switch is not used for it.
+pub(crate) fn x_tbxlut_reach_stub() {
+    if x_tbxlut_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXLUT", false);
+    }
 }
 
-/// EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): `build_ncbi_lookup` for the full table of
-/// a TBLASTX query batch (the table of the reference frame loop), with TBLASTX's mode and shadow
-/// counter; the same builder as BLASTP's [`x_bp_build_lookup`].
+/// EXPERIMENT (LOSAT_X_TBXLUT): `build_ncbi_lookup` for the full table of
+/// a TBLASTX query batch (the table of the reference frame loop), with TBLASTX's switch; the same
+/// builder as BLASTP's [`x_bp_build_lookup`].
 pub(super) fn x_tbx_build_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     karlin_params: &KarlinParams,
     check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    x_build_ncbi_lookup_counted(
-        x_tbxlut_mode(),
-        &X_TBXLUT_SHADOW_TABLES,
+    x_build_ncbi_lookup_with(
+        x_tbxlut_on(),
         queries,
         threshold,
         karlin_params,
         check_ideal,
+        |direct| crate::utils::xreach::x_reach!("LOSAT_X_TBXLUT", direct),
     )
 }
 
 /// The query of `queries` prepared as `build_ncbi_lookup_for_profile(.., Blosum62,
-/// LOOKUP_WORD_LENGTH)` prepares it (modes 1 and 2 of [`x_build_ncbi_lookup_counted`], and
+/// LOOKUP_WORD_LENGTH)` prepares it ([`x_build_ncbi_lookup_with`] with the switch on, and
 /// [`XAaSpares::x_build_ahead`]).
 fn x_bp_prepared_query(queries: &[Vec<QueryFrame>], check_ideal: bool) -> PreparedLookupQuery {
     let matrix = ScoringMatrix::Blosum62;
@@ -890,57 +1007,48 @@ fn x_bp_prepared_query(queries: &[Vec<QueryFrame>], check_ideal: bool) -> Prepar
     )
 }
 
-/// The body of [`x_bp_build_lookup`] and [`x_tbx_build_lookup`]: mode 0 calls
-/// `build_ncbi_lookup`; mode 1 prepares the query as `build_ncbi_lookup_for_profile(..,
-/// Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`], falling back
-/// to the reference builder where that declines; mode 2 builds both, compares them field by field
-/// (panics on a difference), counts the table in `shadow_tables` and returns the reference's.
-fn x_build_ncbi_lookup_counted(
-    mode: u8,
-    shadow_tables: &std::sync::atomic::AtomicU64,
+/// The body of [`x_bp_build_lookup`] and [`x_tbx_build_lookup`]: with `direct` false it calls
+/// `build_ncbi_lookup`; with `direct` true it prepares the query as
+/// `build_ncbi_lookup_for_profile(.., Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with
+/// [`x_build_direct`], falling back to the reference builder where that declines. `reach` is called
+/// with `direct` true with whether the direct builder built the table (`LOSAT_X_REACH`).
+fn x_build_ncbi_lookup_with(
+    direct: bool,
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     karlin_params: &KarlinParams,
     check_ideal: bool,
+    reach: fn(bool),
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    if mode == 0 {
+    if !direct {
         return build_ncbi_lookup(queries, threshold, karlin_params, check_ideal);
     }
     let matrix = ScoringMatrix::Blosum62;
     let prepared = x_bp_prepared_query(queries, check_ideal);
-    if mode == 1 {
-        // build_lookup_from_prepared returns the prepared contexts unchanged.
-        let contexts = prepared.contexts.clone();
-        return match x_build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
-            Ok(table) => (table, contexts),
-            Err(prepared) => {
-                build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH)
-            }
-        };
+    // build_lookup_from_prepared returns the prepared contexts unchanged.
+    let contexts = prepared.contexts.clone();
+    match x_build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
+        Ok(table) => {
+            reach(true);
+            (table, contexts)
+        }
+        Err(prepared) => {
+            reach(false);
+            build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH)
+        }
     }
-    let copy = PreparedLookupQuery {
-        concat_query: prepared.concat_query.clone(),
-        lookup_locations: prepared.lookup_locations.clone(),
-        frame_bases: prepared.frame_bases.clone(),
-        contexts: prepared.contexts.clone(),
-        skipped_seg_mask: prepared.skipped_seg_mask,
-    };
-    let reference = build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH);
-    if let Ok(direct) = x_build_direct(copy, threshold, matrix, LOOKUP_WORD_LENGTH) {
-        x_assert_same_table(&direct, &reference.0);
-        shadow_tables.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-    reference
 }
 
-/// EXPERIMENT (LOSAT_X_BXLUTSHADOW): assert that two tables are equal field by field.
+/// Assert that two tables are equal field by field (the unit tests).
+#[cfg(test)]
 pub(super) fn x_assert_same_table(direct: &BlastAaLookupTable, reference: &BlastAaLookupTable) {
-    x_assert_same_table_as("LOSAT_X_BXLUTSHADOW:", direct, reference);
+    x_assert_same_table_as("lookup table:", direct, reference);
 }
 
-// No NCBI counterpart: a check of the shadow modes; it changes no value NCBI computes.
+// No NCBI counterpart: a check of the unit tests; it changes no value NCBI computes.
 /// Whether two tables are equal field by field ([`x_assert_same_table_as`] names the first
 /// difference).
+#[cfg(test)]
 pub(crate) fn x_same_table(a: &BlastAaLookupTable, b: &BlastAaLookupTable) -> bool {
     a.backbone.len() == b.backbone.len()
         && a.backbone
@@ -961,9 +1069,10 @@ pub(crate) fn x_same_table(a: &BlastAaLookupTable, b: &BlastAaLookupTable) -> bo
         && a.row_max == b.row_max
 }
 
-// No NCBI counterpart: a check of the shadow modes; it changes no value NCBI computes.
+// No NCBI counterpart: a check of the unit tests; it changes no value NCBI computes.
 /// Asserts that two tables are equal field by field; the first difference panics with a message
 /// that starts with `prefix`.
+#[cfg(test)]
 pub(crate) fn x_assert_same_table_as(
     prefix: &str,
     direct: &BlastAaLookupTable,
@@ -1120,6 +1229,58 @@ mod tests {
     //             /* set the corresponding bit in the pv_array */
     //             PV_SET(pv, i, PV_ARRAY_BTS);
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:321-336
+    // ```c
+    //       lookup->thick_backbone =
+    //             calloc(lookup->backbone_size, sizeof(AaLookupBackboneCell));
+    // ```
+    // LOSAT_X_BXLUTPOOL: a table built on vectors another table and another build left (cleared
+    // and zero-filled as calloc gives them) and with the neighbour lists shared by all threads is
+    // the reference table: after a smaller and a larger table, with two tables alive at once, and
+    // after the shared lists change key.
+    #[test]
+    fn pooled_tables_equal_the_reference_on_kept_vectors() {
+        let mut seed = 23u64;
+        let mut low_complexity = vec![1u8; 400];
+        low_complexity.extend(residues(&mut seed, 60));
+        let small = vec![vec![frame(residues(&mut seed, 300), vec![], 1)]];
+        let large = vec![
+            vec![
+                frame(residues(&mut seed, 2_500), vec![(100, 140)], 1),
+                frame(low_complexity, vec![(350, 399)], -1),
+            ],
+            vec![frame(residues(&mut seed, 1_800), vec![], 2)],
+        ];
+        let pooled = |queries: &[Vec<QueryFrame>], threshold: i32, matrix: ScoringMatrix| {
+            let reference =
+                build_lookup_from_prepared(prepared(queries, matrix), threshold, matrix, 3).0;
+            let table = match x_build_direct_pooled(prepared(queries, matrix), threshold, matrix, 3)
+            {
+                Ok(table) => table,
+                Err(_) => panic!("in-place builder declined"),
+            };
+            x_assert_same_table(&table, &reference);
+            table
+        };
+        for (queries, threshold) in [(&small, 12), (&large, 11), (&small, 13), (&large, 12)] {
+            let mut table = pooled(queries, threshold, ScoringMatrix::Blosum62);
+            x_give_back_pooled(&mut table);
+            assert!(table.backbone.is_empty() && table.overflow.is_empty() && table.pv.is_empty());
+        }
+        let mut first = pooled(&large, 12, ScoringMatrix::Blosum62);
+        let mut second = pooled(&small, 12, ScoringMatrix::Blosum62);
+        x_give_back_pooled(&mut first);
+        x_give_back_pooled(&mut second);
+        for (queries, threshold, matrix) in [
+            (&small, 12, ScoringMatrix::Blosum45),
+            (&large, 11, ScoringMatrix::Pam30),
+            (&large, 12, ScoringMatrix::Blosum62),
+        ] {
+            let mut table = pooled(queries, threshold, matrix);
+            x_give_back_pooled(&mut table);
+        }
+    }
+
     #[test]
     fn in_place_table_of_an_all_masked_query_is_empty() {
         let mut seed = 11u64;
@@ -1138,12 +1299,17 @@ mod tests {
         assert_eq!(table.longest_chain, 0);
     }
 
-    /// BLASTP's builder in `mode` against `build_ncbi_lookup`: every table field and every
-    /// context field. Returns the overflow length.
-    fn same_bp(mode: u8, queries: &[Vec<QueryFrame>], threshold: i32, check_ideal: bool) -> usize {
+    /// BLASTP's builder (in place with `direct`) against `build_ncbi_lookup`: every table field and
+    /// every context field. Returns the overflow length.
+    fn same_bp(
+        direct: bool,
+        queries: &[Vec<QueryFrame>],
+        threshold: i32,
+        check_ideal: bool,
+    ) -> usize {
         let params = blosum62_ideal_karlin_params();
         let (reference, ref_contexts) = build_ncbi_lookup(queries, threshold, &params, check_ideal);
-        let (got, contexts) = x_bp_build_lookup(mode, queries, threshold, &params, check_ideal);
+        let (got, contexts) = x_bp_build_lookup(direct, queries, threshold, &params, check_ideal);
         x_assert_same_table(&got, &reference);
         assert_eq!(contexts.len(), ref_contexts.len());
         for (a, b) in contexts.iter().zip(&ref_contexts) {
@@ -1199,11 +1365,9 @@ mod tests {
             bp_query(residues(&mut seed, 60), vec![(0, 59)], true),
         ];
         let mut overflow_seen = false;
-        for mode in [1, 2] {
-            for check_ideal in [false, true] {
-                for threshold in [0, 11, 12, 13, 21] {
-                    overflow_seen |= same_bp(mode, &queries, threshold, check_ideal) > 0;
-                }
+        for check_ideal in [false, true] {
+            for threshold in [0, 11, 12, 13, 21] {
+                overflow_seen |= same_bp(true, &queries, threshold, check_ideal) > 0;
             }
         }
         assert!(overflow_seen, "the fixture must reach the overflow array");
@@ -1211,10 +1375,9 @@ mod tests {
         let short: Vec<Vec<QueryFrame>> = (0..3)
             .map(|_| bp_query(residues(&mut seed, 15), vec![], false))
             .collect();
-        same_bp(1, &short, i32::MIN, false);
-        same_bp(2, &short, i32::MIN, false);
-        // Mode 0 is the reference itself.
-        same_bp(0, &queries, 11, false);
+        same_bp(true, &short, i32::MIN, false);
+        // With the switch off the builder is the reference itself.
+        same_bp(false, &queries, 11, false);
     }
 
     /// The query offsets of every cell of `table`, as the scan reads them.
@@ -1264,7 +1427,7 @@ mod tests {
             .collect();
         let params = blosum62_ideal_karlin_params();
         let mut long_cells = 0;
-        for mode in [0, 1] {
+        for direct in [false, true] {
             for (set, threshold) in [
                 (&queries, 0),
                 (&queries, 11),
@@ -1272,13 +1435,13 @@ mod tests {
                 (&short, 1),
                 (&short, i32::MIN),
             ] {
-                let (table, _) = x_bp_build_lookup(mode, set, threshold, &params, false);
+                let (table, _) = x_bp_build_lookup(direct, set, threshold, &params, false);
                 for hits in cell_lists(&table) {
                     let mut sorted = hits.to_vec();
                     sorted.sort_unstable();
                     assert!(
                         sorted.windows(2).all(|pair| pair[0] != pair[1]),
-                        "mode {mode} threshold {threshold}: a cell lists an offset twice: {hits:?}"
+                        "direct {direct} threshold {threshold}: a cell lists an offset twice: {hits:?}"
                     );
                     long_cells += usize::from(hits.len() > 16);
                 }
@@ -1301,11 +1464,11 @@ mod tests {
         ]
     }
 
-    /// `x_bp_build_lookup(1, ..)`'s table and contexts are those of `got`: every table field, and
-    /// every context field (the Karlin blocks by their bits).
+    /// `x_bp_build_lookup(true, ..)`'s table and contexts are those of `got`: every table field,
+    /// and every context field (the Karlin blocks by their bits).
     fn assert_same_bp(got: &(BlastAaLookupTable, Vec<QueryContext>), queries: &[Vec<QueryFrame>]) {
         let params = blosum62_ideal_karlin_params();
-        let (want, want_contexts) = x_bp_build_lookup(1, queries, 11, &params, false);
+        let (want, want_contexts) = x_bp_build_lookup(true, queries, 11, &params, false);
         x_assert_same_table_as("ahead:", &got.0, &want);
         assert!(x_same_table(&got.0, &want));
         assert_eq!(got.1.len(), want_contexts.len());
@@ -1331,7 +1494,7 @@ mod tests {
     //                  calloc(overflow_cells_needed, sizeof(Int4));
     // ```
     /// LOSAT_X_BPLKPAHEAD: the table built ahead on vectors kept by `XAaSpares` (a table given back
-    /// with other values, then moved to the build by `x_make_room`) is `x_bp_build_lookup(1,
+    /// with other values, then moved to the build by `x_make_room`) is `x_bp_build_lookup(true,
     /// ..)`'s; `x_make_room` allocates only the vectors short of their room, and keeps the calling
     /// thread's neighbour lists for the builds, which give them back.
     #[test]
@@ -1339,7 +1502,7 @@ mod tests {
         let mut seed = 41u64;
         let queries = bp_queries(&mut seed);
         let params = blosum62_ideal_karlin_params();
-        let (first, _) = x_bp_build_lookup(1, &queries, 11, &params, false);
+        let (first, _) = x_bp_build_lookup(true, &queries, 11, &params, false);
         let (backbone, pv, overflow) = (first.backbone.len(), first.pv.len(), first.overflow.len());
         assert!(overflow > 0, "the fixture must reach the overflow array");
         assert!(X_MEMO.with(|memo| memo.borrow().is_some()));
@@ -1391,7 +1554,7 @@ mod tests {
         assert!(x_locked(&spares.block).is_empty());
         // Its own vectors are kept (those given back meanwhile are dropped); only a vector short of
         // its room is replaced.
-        let (other_table, _) = x_bp_build_lookup(1, &queries, 11, &params, false);
+        let (other_table, _) = x_bp_build_lookup(true, &queries, 11, &params, false);
         spares.give(other_table);
         assert_eq!(spares.x_make_room(backbone, pv, overflow, overflow), 0);
         assert_eq!(addresses(&x_locked(&spares.ahead)), given);
@@ -1425,7 +1588,7 @@ mod tests {
         let mut seed = 43u64;
         let queries = bp_queries(&mut seed);
         let params = blosum62_ideal_karlin_params();
-        let (table, _) = x_bp_build_lookup(1, &queries, 11, &params, false);
+        let (table, _) = x_bp_build_lookup(true, &queries, 11, &params, false);
         let (backbone, pv, overflow) = (table.backbone.len(), table.pv.len(), table.overflow.len());
         for (b, p, o) in [
             (backbone, pv, overflow - 1),
@@ -1453,14 +1616,14 @@ mod tests {
         }
     }
 
-    /// LOSAT_X_BPLKPAHEADSHADOW: the comparison finds one backbone cell, one overflow entry, one pv
-    /// bit and one header field that differ, and names the first difference after its prefix.
+    /// The comparison finds one backbone cell, one overflow entry, one pv bit and one header field
+    /// that differ, and names the first difference after its prefix.
     #[test]
     fn same_table_finds_one_cell_entry_bit_or_field() {
         let mut seed = 47u64;
         let queries = bp_queries(&mut seed);
         let params = blosum62_ideal_karlin_params();
-        let build = || x_bp_build_lookup(1, &queries, 11, &params, false).0;
+        let build = || x_bp_build_lookup(true, &queries, 11, &params, false).0;
         let want = build();
         assert!(x_same_table(&build(), &want));
         let cell = want

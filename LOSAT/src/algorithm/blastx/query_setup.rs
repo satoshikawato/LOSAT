@@ -59,7 +59,13 @@ pub struct PreparedQueryBatch {
     pub sequence_start: Vec<u8>,
     pub sequence_start_nomask: Vec<u8>,
     pub lookup_segments: Vec<(i32, i32)>,
-    pub split_eligible: bool,
+    /// The values NCBI takes of the query batch (reader batch) that this unit is a part of, when
+    /// the batch is searched in several units (`reader_batch.rs`); `None` when the unit is the
+    /// whole batch.
+    pub(crate) reader_shape: Option<std::sync::Arc<super::reader_batch::ReaderBatchShape>>,
+    /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): whether `sequence_start` is on the path of the seed
+    /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`; false with the switch off).
+    pub(crate) x_ungap_sent: bool,
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:123-136
 // ```c++
@@ -109,13 +115,13 @@ pub const BATCH_SIZE: usize = 10002;
 //         } else {
 //             // programmer error, CBlastInputSource should only return Seq-locs
 // ```
-pub fn batch_ranges(records: &[FastaRecord]) -> Vec<std::ops::Range<usize>> {
+pub fn batch_ranges(records: &[FastaRecord], batch_size: usize) -> Vec<std::ops::Range<usize>> {
     let mut result = Vec::new();
     let mut start = 0;
     while start < records.len() {
         let mut end = start;
         let mut length = 0;
-        while end < records.len() && length < BATCH_SIZE {
+        while end < records.len() && length < batch_size {
             length += records[end].sequence.len();
             end += 1;
         }
@@ -123,6 +129,19 @@ pub fn batch_ranges(records: &[FastaRecord]) -> Vec<std::ops::Range<usize>> {
         start = end;
     }
     result
+}
+// No NCBI counterpart of its own: context `i` (frames 1, 2, 3, -1, -2, -3) of a query of `letters`
+// nucleotides as `prepare_queries` lays the contexts out (blast_setup_cxx.cpp:191-219, cited
+// there): the frame's protein length, and whether the context's strand is searched (a context
+// of a strand not searched has length 0).
+pub(crate) fn context_frame(letters: usize, i: usize, strand: &str) -> (usize, bool) {
+    let len = letters.saturating_sub(i % 3) / 3;
+    let enabled = match strand {
+        "plus" => i < 3,
+        "minus" => i >= 3,
+        _ => true,
+    };
+    (len, enabled)
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:71-88
 // ```c++
@@ -248,14 +267,9 @@ pub fn prepare_queries(
             } else {
                 -((i - 2) as i8)
             };
-            let len = record.sequence.len().saturating_sub(i % 3) / 3;
+            let (len, enabled) = context_frame(record.sequence.len(), i, &options.strand);
             max_length = max_length.max(len);
             min_length = min_length.min(len);
-            let enabled = match options.strand.as_str() {
-                "plus" => i < 3,
-                "minus" => i >= 3,
-                _ => true,
-            };
             let length = if enabled { len } else { 0 };
             let lowercase_masks = if enabled {
                 dna_to_protein_masks(&record.lowercase_masks, record.sequence.len(), frame)
@@ -359,15 +373,14 @@ pub fn prepare_queries(
         )
         // BLASTX keeps LOSAT's former SEG until SX (plan DW-10).
         .keeping_all_left_segments()
-        // EXPERIMENT (LOSAT_X_SEGTRIMMEMO): the chunks of a split query (split.rs) are masked
+        // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the chunks of a split query (split.rs) are masked
         // again after the whole query, mostly over the same segments, so this masker takes the
         // trim of a segment trimmed before on this thread from its memo.
         .x_with_trim_memo()
     });
-    // EXPERIMENT (LOSAT_X_BXPAR): SEG reads only the residues of its own context
-    // and the hard masking below writes only there, so the contexts of a large
-    // batch (the six frames of the full query) are filtered on the search pool
-    // before the loop consumes the intervals in context order.
+    // SEG reads only the residues of its own context and the hard masking below writes only there,
+    // so the contexts of a large batch (the six frames of the full query) are filtered on the
+    // search pool before the loop consumes the intervals in context order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
     // ```c
     //     for (context = query_info->first_context;
@@ -383,18 +396,18 @@ pub fn prepare_queries(
     //                                                       blast_message);
     // ```
     // NCBI filters the contexts one after another in this loop. SEG of one context reads only that
-    // context, so with LOSAT_X_BXPAR the contexts of a large batch are filtered in parallel and the
-    // intervals are kept in seg_ready; the loop below still consumes them in context order.
+    // context, so with a pool of 2+ threads the contexts of a large batch are filtered in parallel
+    // and the intervals are kept in seg_ready; the loop below still consumes them in context order.
     #[allow(unused_mut)]
     let mut seg_ready: Vec<Option<Vec<(i32, i32)>>> = Vec::new();
     #[cfg(feature = "parallel")]
     if let Some(masker) = seg_masker.as_ref() {
-        if super::runtime::x_bx_parallel()
-            && buffer.len() >= 60_000
-            && !super::runtime::x_inner_serial()
-            && rayon::current_thread_index().is_some()
-            && rayon::current_num_threads() > 1
-        {
+        if super::runtime::x_bx_par_rule(|| {
+            buffer.len() >= 60_000
+                && !super::runtime::x_inner_serial()
+                && rayon::current_thread_index().is_some()
+                && rayon::current_num_threads() > 1
+        }) {
             use rayon::prelude::*;
             let buffer = &buffer;
             // Diagnostic (LOSAT_TIMING): the parallel SEG's wall time for the common line
@@ -472,6 +485,8 @@ pub fn prepare_queries(
         );
     }
     let lookup_segments = complement_masks(&contexts);
+    let x_ungap_sent =
+        super::seed::x_ungap_sent::query_fits(&buffer, options.word_size, options.window_size);
     Ok(PreparedQueryBatch {
         original_lengths: records.iter().map(|r| r.sequence.len()).collect(),
         contexts,
@@ -481,7 +496,8 @@ pub fn prepare_queries(
         sequence_start: buffer,
         sequence_start_nomask: nomask,
         lookup_segments,
-        split_eligible: records.len() == 1 && options.gapped,
+        reader_shape: None,
+        x_ungap_sent,
     })
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:923-929
@@ -883,12 +899,47 @@ mod tests {
             sequence: vec![b'A'; n],
             lowercase_masks: vec![],
             warnings: vec![],
+            source: None,
         };
         assert_eq!(
-            batch_ranges(&[record(10001), record(1), record(3)]),
+            batch_ranges(&[record(10001), record(1), record(3)], BATCH_SIZE),
             vec![0..2, 2..3]
         );
-        assert_eq!(batch_ranges(&[record(10002), record(3)]), vec![0..1, 1..2]);
-        assert_eq!(batch_ranges(&[record(10003), record(3)]), vec![0..1, 1..2]);
+        assert_eq!(
+            batch_ranges(&[record(10002), record(3)], BATCH_SIZE),
+            vec![0..1, 1..2]
+        );
+        assert_eq!(
+            batch_ranges(&[record(10003), record(3)], BATCH_SIZE),
+            vec![0..1, 1..2]
+        );
+    }
+
+    // `BATCH_SIZE` sets the limit (`GetQueryBatchSize`): the record that crosses it ends its
+    // batch, and a limit above the default keeps the longer batch whole.
+    #[test]
+    fn the_batch_size_is_the_limit_of_a_batch() {
+        let record = |n| FastaRecord {
+            internal_id: String::new(),
+            title: String::new(),
+            sequence: vec![b'A'; n],
+            lowercase_masks: vec![],
+            warnings: vec![],
+            source: None,
+        };
+        let records = [
+            record(100),
+            record(100),
+            record(100),
+            record(100),
+            record(100),
+        ];
+        assert_eq!(batch_ranges(&records, 200), vec![0..2, 2..4, 4..5]);
+        assert_eq!(batch_ranges(&records, 201), vec![0..3, 3..5]);
+        assert_eq!(
+            batch_ranges(&records, 1),
+            vec![0..1, 1..2, 2..3, 3..4, 4..5]
+        );
+        assert_eq!(batch_ranges(&records, 30000), vec![0..5]);
     }
 }

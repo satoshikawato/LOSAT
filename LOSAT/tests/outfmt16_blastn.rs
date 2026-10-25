@@ -29,7 +29,7 @@ fn temp_dir(stem: &str) -> PathBuf {
         .expect("system time before Unix epoch")
         .as_nanos();
     let dir = std::env::temp_dir().join(format!(
-        "losat_outfmt16_{stem}_{}_{}",
+        "losat_outfmt16_blastn_{stem}_{}_{}",
         std::process::id(),
         nanos
     ));
@@ -40,7 +40,7 @@ fn temp_dir(stem: &str) -> PathBuf {
 fn command(env: &[(&str, &str)]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
+        if name.to_string_lossy().starts_with("LOSAT_") {
             command.env_remove(name);
         }
     }

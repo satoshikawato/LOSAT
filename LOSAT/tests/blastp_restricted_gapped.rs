@@ -2,10 +2,9 @@
 //! and without `LOSAT_X_BPGAP`, against NCBI BLAST+ 2.17.0.
 //!
 //! `LOSAT_X_BPGAP` is in the strict set (`src/utils/xswitch.rs`): it is on by default, unless its
-//! variable is `0`, or `LOSAT_X_DEFAULT=0` and its variable is not set. Every test states the
-//! default it runs with: the report is NCBI's with no variable, with `LOSAT_X_BPGAP=0`, with
-//! `LOSAT_X_DEFAULT=0` and with `LOSAT_X_DEFAULT=0 LOSAT_X_BPGAP=1` (the run the variable gave
-//! before it joined the set).
+//! variable is `0`. Every test states the
+//! default it runs with: the report is NCBI's with no variable, with `LOSAT_X_BPGAP=0` and with
+//! `LOSAT_X_BPGAP16=0` (the sixteen-bit rows, also in the set).
 //!
 //! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:3777-3786,3955-3957
 //! ```c
@@ -22,16 +21,16 @@
 //!                gap_align->score >= restricted_cutoff) {
 //! ```
 //! The blastp fixtures of `ci_fast_regressions.py` and `check_losat.py` never reach this path
-//! (LOSAT_X_BPGAPSHADOW compared nothing on any of them): it needs a query whose best ungapped
-//! alignment scores below 0.68 of the cutoff, and the cutoff grows with the search space. The
-//! inputs here are generated:
+//! (`[X_STATS] BPGAP` counted no restricted alignment on any of them): it needs a query whose best
+//! ungapped alignment scores below 0.68 of the cutoff, and the cutoff grows with the search space.
+//! The inputs here are generated:
 //! - four random queries;
 //! - 1,500 random subjects of 400 letters (0.6 Mb);
 //! - at subjects 0, 375, 750 and 1,125, a copy of each query with 60 % of its letters replaced
 //!   and an insertion or deletion about every eighth letter. These copies give gapped alignments
 //!   above the cutoff whose ungapped pieces are short.
 //!
-//! On x86_64 with AVX2, LOSAT_X_BPGAPSHADOW printed `compared=380` on these inputs, and
+//! On x86_64 with AVX2, `[X_STATS] BPGAP` counted `fast=380` on these inputs, and
 //! `LOSAT_TIMING` counted five exact redos. The expected rows are NCBI BLAST+ 2.17.0's
 //! (`blastp -outfmt "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore score"
 //! -evalue 0.001 -query query.faa -subject subject.faa`), on the files this test writes.
@@ -39,8 +38,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
-
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 const OUTFMT: &str = "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore score";
 
@@ -148,7 +145,11 @@ fn inputs() -> &'static (PathBuf, PathBuf) {
                 }
             })
             .collect();
-        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("blastp_restricted_gapped");
+        // One directory per process: nextest runs each test in a process of its own, and a
+        // process that wrote these files again while another one's search read them cut its input.
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join("blastp_restricted_gapped")
+            .join(std::process::id().to_string());
         std::fs::create_dir_all(&dir).expect("work directory");
         let files = (dir.join("query.faa"), dir.join("subject.faa"));
         std::fs::write(&files.0, fasta(&queries)).expect("query file");
@@ -159,8 +160,7 @@ fn inputs() -> &'static (PathBuf, PathBuf) {
 
 /// One BLASTP run with `variables` and no other `LOSAT_*` variable except
 /// `LOSAT_BLASTX_WORKER_LOG` (a build with the worker probe writes to it as soon as a pool
-/// starts, so the caller's value is kept, or a file of the tests is named). `LOSAT_X_DEFAULT` of
-/// the test's own environment is dropped too: every test states the default it runs with.
+/// starts, so the caller's value is kept, or a file of the tests is named).
 /// Returns the report and standard error.
 fn blastp(threads: usize, variables: &[(&str, &str)]) -> (String, String) {
     const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
@@ -214,8 +214,7 @@ fn restricted_gapped_alignments_match_ncbi_with_and_without_the_switch() {
         for variables in [
             &[][..],
             &[("LOSAT_X_BPGAP", "0")][..],
-            &[DEFAULT_OFF][..],
-            &[DEFAULT_OFF, ("LOSAT_X_BPGAP", "1")][..],
+            &[("LOSAT_X_BPGAP16", "0")][..],
         ] {
             let (report, _) = blastp(threads, variables);
             assert_eq!(report, NCBI_ROWS, "{threads} threads, {variables:?}");
@@ -223,28 +222,27 @@ fn restricted_gapped_alignments_match_ncbi_with_and_without_the_switch() {
     }
 }
 
+/// `[X_STATS] BPGAP fast= not_taken=`: the restricted alignments the vector kernel computed
+/// and those it passed on to the reference function. With the kernel on this CPU every
+/// alignment of the fixture is its own and the report is NCBI's.
 #[test]
-fn the_shadow_mode_compares_the_restricted_alignments() {
-    let (report, stderr) = blastp(1, &[("LOSAT_X_BPGAPSHADOW", "1")]);
+fn the_vector_kernel_computes_the_restricted_alignments_of_the_fixture() {
+    let (report, stderr) = blastp(1, &[("LOSAT_X_STATS", "1")]);
     assert_eq!(report, NCBI_ROWS);
     let line = stderr
         .lines()
-        .find(|line| line.starts_with("[X_SHADOW] BPGAP "))
-        .unwrap_or_else(|| panic!("no shadow line in {stderr:?}"));
+        .find(|line| line.starts_with("[X_STATS] BPGAP "))
+        .unwrap_or_else(|| panic!("no BPGAP line in {stderr:?}"));
     let count = |key: &str| -> u64 {
         line.split_whitespace()
             .find_map(|field| field.strip_prefix(key))
             .and_then(|value| value.parse().ok())
             .unwrap_or_else(|| panic!("no {key} in {line:?}"))
     };
-    let (compared, not_taken) = (count("compared="), count("not_taken="));
+    let (fast, not_taken) = (count("fast="), count("not_taken="));
     if vector_kernel_runs() {
-        assert!(compared > 0 && not_taken == 0, "{line}");
-        assert!(
-            line.ends_with("(every restricted gapped alignment identical)"),
-            "{line}"
-        );
+        assert!(fast > 0 && not_taken == 0, "{line}");
     } else {
-        assert!(compared == 0 && not_taken > 0, "{line}");
+        assert!(fast == 0 && not_taken > 0, "{line}");
     }
 }

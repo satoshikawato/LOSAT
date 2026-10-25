@@ -10,7 +10,7 @@ use crate::stats::spouge::{blast_spouge_stoe, BlastGumbelBlk};
 use crate::stats::sum_statistics::{gap_decay_divisor, uneven_gap_sum_e};
 use crate::stats::tables::KarlinParams;
 
-// EXPERIMENT (LOSAT_X_TBNLINKWIN): the candidates of a head chosen by subject position.
+// The candidates of a head chosen by subject position.
 mod x_link_window;
 pub use x_link_window::print_summary as x_link_window_print_summary;
 
@@ -369,9 +369,12 @@ pub(super) fn link_preliminary_hsps(
                 .then(work[a].value.hsp.s_start.cmp(&work[b].value.hsp.s_start))
         });
         let end_index = query_end_prefix_index(&work, &offset_order);
-        // EXPERIMENT (LOSAT_X_TBNLINKWIN): the lookup by subject position.
-        let mut x_window = x_link_window::x_tbn_link_window()
-            .then(|| x_link_window::XLinkWindow::new(&work, &offset_order, link));
+        // The lookup by subject position.
+        let mut x_window = Some(x_link_window::XLinkWindow::new(&work, &offset_order, link));
+        #[cfg(test)]
+        if x_link_window::x_whole_window_forced() {
+            x_window = None;
+        }
         let mut head = None;
         let mut index = 0;
         while index < score_order.len() {
@@ -410,10 +413,11 @@ pub(super) fn link_preliminary_hsps(
             let mut best_evalue = work[current].value.evalue;
             let mut best = None;
             let mut best_sum_score = 0.0;
-            // EXPERIMENT (LOSAT_X_TBNLINKWIN): the candidates of the window that can be
+            // The candidates of the window that can be
             // admissible, in the same order.
             let candidates = match x_window.as_mut() {
-                Some(window) => window.candidates(&work, &offset_order, current, left, right, link),
+                Some(window) => window.candidates(&work, &offset_order, current, left, right),
+                // NCBI's whole window: the reference of the unit test only.
                 None => &offset_order[left..right],
             };
             for &candidate in candidates {
@@ -994,7 +998,7 @@ mod tests {
             compo_early_termination, CompoHeap, CompoHeapRecord,
         };
         use crate::algorithm::tblastn::search_gapped::{
-            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile, TargetTranslation,
+            preliminary_hsps_of_letters, PreliminaryProfile, TargetTranslation,
         };
         use crate::algorithm::tblastn::stage_d_kappa_params::{
             local_extension_final_xdrop, local_kappa_redo_params,
@@ -1157,8 +1161,7 @@ mod tests {
         };
         let mut retained: Vec<(usize, LinkedHspList)> = Vec::new();
         for (oid, subject) in subjects.iter().enumerate() {
-            let (preliminary, _) =
-                preliminary_protein_hsps_in_ncbi_order(&[&query], subject, 1, profile).unwrap();
+            let preliminary = preliminary_hsps_of_letters(&[&query], subject, 1, profile).unwrap();
             let expected = before.get(&oid).map(Vec::as_slice).unwrap_or(&[]);
             assert_eq!(preliminary.len(), expected.len(), "OID {oid} prelink count");
             for ((context, hsp), row) in preliminary.iter().zip(expected) {

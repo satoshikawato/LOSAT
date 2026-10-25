@@ -208,21 +208,7 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
             .read_block(range)
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
-            let length = block
-                .nucleotide_len(i)
-                .map_err(|error| search_read_error(error, program))?;
-            // NCBI's preliminary search reads the 2-bit data only; it reads the ambiguity
-            // data in the traceback, of the reported sequences. LOSAT reads them for every
-            // sequence here, so data it cannot read are LOSAT's refusal, not an NCBI error.
-            let runs = block.ambiguity_runs(i).map_err(|error| {
-                refusal(
-                    &format!(
-                        "the ambiguity data of database sequence {} cannot be read ({error})",
-                        range.first_ordinal + i as u32
-                    ),
-                    program,
-                )
-            })?;
+            let (length, runs) = stored_parts(&block, i, range.first_ordinal + i as u32, program)?;
             stores.push(PackedNucleotide::from_stored(
                 block.nucleotide_packed(i),
                 length,
@@ -232,6 +218,128 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
         next_ordinal = range.end_ordinal();
     }
     Ok(stores)
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the checks of `read_nucleotide_stores` without the copy. The
+/// database is read in the same blocks, and every sequence's length and ambiguity runs are read
+/// with the same errors in the same order; only the lengths are kept, by ordinal id. A search
+/// that reads its subjects where it searches them (`x_read_nucleotide_store`) fails the query
+/// batch that the copy would fail, with the same text. A block of one sequence (one longer than
+/// a block, or the last of its volume) is checked without its 2-bit data
+/// (`SeqDb::x_nucleotide_check`): a human chromosome is not read here only to be dropped.
+pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<usize>> {
+    let mut lengths = Vec::with_capacity(db.num_seqs() as usize);
+    let mut next_ordinal = 0u32;
+    while let Some(range) = db.next_block(next_ordinal, STORE_BLOCK_BYTES) {
+        if range.len() == 1 {
+            let (length, ambiguity) = db
+                .x_nucleotide_check(range)
+                .map_err(|error| search_read_error(error, program))?;
+            // The error of `stored_parts`.
+            ambiguity.ambiguity_runs(0).map_err(|error| {
+                refusal(
+                    &format!(
+                        "the ambiguity data of database sequence {} cannot be read ({error})",
+                        range.first_ordinal
+                    ),
+                    program,
+                )
+            })?;
+            lengths.push(length);
+            next_ordinal = range.end_ordinal();
+            continue;
+        }
+        let block = db
+            .read_block(range)
+            .map_err(|error| search_read_error(error, program))?;
+        for i in 0..block.len() {
+            let (length, _) = stored_parts(&block, i, range.first_ordinal + i as u32, program)?;
+            lengths.push(length);
+        }
+        next_ordinal = range.end_ordinal();
+    }
+    Ok(lengths)
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): sequence `ordinal` of `db` as `read_nucleotide_stores` packs
+/// it (`PackedNucleotide::from_stored` of the stored 2-bit data, length and ambiguity runs), read
+/// with one read of the sequence file. The errors are those of `read_nucleotide_stores` for the
+/// same sequence. With `mapped`, the bytes are read into a buffer that glibc maps from 1 MiB on,
+/// taken from `utils::x_mapped::X_BYTES` when it holds one (`SeqDb::x_read_sequence_mapped`), and
+/// the store is that buffer cut to the 2-bit data (`PackedNucleotide::x_from_stored_buffer`): a
+/// long sequence read for a while and dropped gives its pages back (a store is not given to the
+/// pool, which forgets the buffer). Without it they are read as `SeqDb::read_sequence` reads
+/// them (the heap of the thread), where a dropped store's pages serve the next read.
+pub(crate) fn x_read_nucleotide_store(
+    db: &SeqDb,
+    ordinal: u32,
+    program: &str,
+    mapped: bool,
+) -> Result<PackedNucleotide> {
+    let block = if mapped {
+        db.x_read_sequence_mapped(ordinal)
+    } else {
+        db.read_sequence(ordinal)
+    }
+    .map_err(|error| search_read_error(error, program))?;
+    let (length, runs) = stored_parts(&block, 0, ordinal, program)?;
+    let packed = block.x_into_nucleotide_packed();
+    if crate::utils::x_mapped::x_is_mapped(packed.capacity()) {
+        crate::utils::x_mapped::X_BYTES.x_disown(&packed);
+    }
+    Ok(PackedNucleotide::x_from_stored_buffer(
+        packed, length, &runs,
+    ))
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): sequence `i` of `block` (ordinal id `ordinal`), a block of
+/// `SeqDb::read_block`, as `read_nucleotide_stores` packs it, with its errors.
+pub(crate) fn x_nucleotide_store_in(
+    block: &crate::seqdb::SequenceBlock,
+    i: usize,
+    ordinal: u32,
+    program: &str,
+) -> Result<PackedNucleotide> {
+    let (length, runs) = stored_parts(block, i, ordinal, program)?;
+    Ok(PackedNucleotide::from_stored(
+        block.nucleotide_packed(i),
+        length,
+        &runs,
+    ))
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the length of sequence `i` of `block` (ordinal id
+/// `ordinal`), with the errors of `x_nucleotide_store_in`, without the store.
+pub(crate) fn x_nucleotide_length_in(
+    block: &crate::seqdb::SequenceBlock,
+    i: usize,
+    ordinal: u32,
+    program: &str,
+) -> Result<usize> {
+    stored_parts(block, i, ordinal, program).map(|(length, _)| length)
+}
+
+/// The length and the ambiguity runs of sequence `i` of `block` (ordinal id `ordinal`), with the
+/// errors of `read_nucleotide_stores` (which reads every sequence through it). NCBI's preliminary
+/// search reads the 2-bit data only; it reads the ambiguity data in the traceback, of the
+/// reported sequences. LOSAT reads them for every sequence, so data it cannot read are LOSAT's
+/// refusal, not an NCBI error.
+fn stored_parts(
+    block: &crate::seqdb::SequenceBlock,
+    i: usize,
+    ordinal: u32,
+    program: &str,
+) -> Result<(usize, Vec<crate::seqdb::AmbiguityRun>)> {
+    let length = block
+        .nucleotide_len(i)
+        .map_err(|error| search_read_error(error, program))?;
+    let runs = block.ambiguity_runs(i).map_err(|error| {
+        refusal(
+            &format!("the ambiguity data of database sequence {ordinal} cannot be read ({error})"),
+            program,
+        )
+    })?;
+    Ok((length, runs))
 }
 
 /// NCBI's error of a database file that cannot be read during the preliminary search
@@ -565,6 +673,12 @@ impl StoredProteins {
         &self.bytes[self.starts[ordinal]..self.starts[ordinal + 1]]
     }
 
+    /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `residues_with_sentinel` with the sentinel before the
+    /// residues (the store's first byte, or the sentinel after the sequence before).
+    pub(crate) fn x_residues_with_sentinels(&self, ordinal: usize) -> &[u8] {
+        &self.bytes[self.starts[ordinal] - 1..self.starts[ordinal + 1]]
+    }
+
     /// The total length of the index files.
     pub(crate) fn total_length(&self) -> u64 {
         self.total_length
@@ -613,6 +727,33 @@ pub(crate) fn read_protein_stores(db: &SeqDb, program: &str) -> Result<StoredPro
         starts,
         total_length: db.total_length(),
     })
+}
+
+/// EXPERIMENT (LOSAT_X_BXDBSTREAM): `read_protein_stores` without the store: the same reads in
+/// the same blocks and the same checks in the same order, with the same errors, the number of
+/// residues of each sequence handed to `each` (ordinal id, residues) and its bytes dropped with
+/// its block. A search that reads the sequences again later (BLASTX's passes,
+/// `blastx/x_db_stream.rs`) knows from it that they read, and what the store's
+/// `max_length` would be.
+pub(crate) fn x_check_protein_stores(
+    db: &SeqDb,
+    program: &str,
+    mut each: impl FnMut(u32, usize),
+) -> Result<()> {
+    let mut next_ordinal = 0u32;
+    while let Some(range) = db.next_block(next_ordinal, PROTEIN_STORE_BLOCK_BYTES) {
+        let block = db
+            .read_block(range)
+            .map_err(|error| search_read_error(error, program))?;
+        for i in 0..block.len() {
+            let with_sentinels = block.protein_with_sentinels(i);
+            let ordinal = range.first_ordinal + i as u32;
+            check_protein_sequence(with_sentinels, u64::from(ordinal), program)?;
+            each(ordinal, with_sentinels.len() - 2);
+        }
+        next_ordinal = range.end_ordinal();
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -716,8 +857,55 @@ mod tests {
 /// them for both; the ABI callers that ask for both do not see them twice.
 #[derive(Default)]
 pub(crate) struct TaxdbRun {
-    lazy: std::sync::OnceLock<crate::seqdb::taxdb::LazyTaxDb>,
+    lazy: std::sync::Mutex<Option<std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>>>,
     volume_lookups: std::sync::Mutex<std::collections::HashSet<(usize, i32)>>,
+}
+
+impl TaxdbRun {
+    /// The run's taxonomy database, a handle that opens it at its first name asked for.
+    fn taxdb(
+        &self,
+        search_path: &crate::seqdb::SearchPath,
+    ) -> std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb> {
+        let mut lazy = self.lazy.lock().expect("the taxonomy database");
+        std::sync::Arc::clone(lazy.get_or_insert_with(|| {
+            std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(search_path.clone()))
+        }))
+    }
+}
+
+/// LOSAT's refusal of a taxonomy database name or record (`read_reported_taxids`): a scientific
+/// name NCBI's XML stream cannot write, or a record NCBI reads from unmapped memory. A run that
+/// holds its XML2 or JSON document drops it on this error and no other (BLASTX,
+/// `XmlRefusal::of_taxonomy`); the other errors of the lookups (a read error of a file) are not
+/// refusals, and the held document is written as NCBI writes what it has.
+#[derive(Debug)]
+pub(crate) struct TaxonomyRefusal(String);
+
+impl std::fmt::Display for TaxonomyRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for TaxonomyRefusal {}
+
+/// [`taxdb_error`] for the tests of the callers' error handling.
+#[cfg(test)]
+pub(crate) fn taxdb_error_for_tests(error: SeqDbError) -> anyhow::Error {
+    taxdb_error(error, "BLASTX")
+}
+
+/// The error of a taxonomy database lookup or open: [`TaxonomyRefusal`] for a refusal of the
+/// reader (`SeqDbError::Unsupported`), [`database_error`] for the others.
+fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
+    let refused = matches!(error, SeqDbError::Unsupported { .. });
+    let error = database_error(error, program);
+    if refused {
+        anyhow::Error::new(TaxonomyRefusal(format!("{error:#}")))
+    } else {
+        error
+    }
 }
 
 /// The Blast-def-line taxid of each reported subject by rank (0 for none and for a subject
@@ -752,7 +940,6 @@ pub(crate) fn read_reported_taxids(
     TaxdbNotes,
 )> {
     use crate::report::blast_xml::HitTaxonomy;
-    use crate::seqdb::taxdb::LazyTaxDb;
     let mut taxids = vec![0; ordinals.len()];
     for &rank in reported {
         let defline_taxids = db
@@ -767,15 +954,13 @@ pub(crate) fn read_reported_taxids(
     let Some(search_path) = db.search_path() else {
         return Ok((taxids, Vec::new(), TaxdbNotes::default()));
     };
-    let taxdb = run.lazy.get_or_init(|| LazyTaxDb::new(search_path.clone()));
+    let taxdb = run.taxdb(search_path);
     let mut notes = TaxdbNotes {
         program: program.to_ascii_lowercase(),
         ..TaxdbNotes::default()
     };
     // NCBI opens the database at its first lookup; the texts are written at the first `Hit`.
-    notes.open = taxdb
-        .open()
-        .map_err(|error| database_error(error, program))?;
+    notes.open = taxdb.open().map_err(|error| taxdb_error(error, program))?;
     let mut asked: std::collections::BTreeMap<i32, HitTaxonomy> = Default::default();
     let mut taxonomy = vec![HitTaxonomy::Unnamed; taxids.len()];
     notes.volumes = vec![0; taxids.len()];
@@ -800,7 +985,7 @@ pub(crate) fn read_reported_taxids(
             let mut messages = Vec::new();
             taxdb
                 .names(taxid, &mut messages)
-                .map_err(|error| database_error(error, program))?;
+                .map_err(|error| taxdb_error(error, program))?;
             notes.lookups.insert((volume, taxid), messages);
         }
         // The lookup of the `Hit` (`CSeqDB::GetTaxInfo`).
@@ -808,11 +993,17 @@ pub(crate) fn read_reported_taxids(
             let mut messages = Vec::new();
             let found = taxdb
                 .names(taxid, &mut messages)
-                .map_err(|error| database_error(error, program))?;
+                .map_err(|error| taxdb_error(error, program))?;
             let answer = match found {
                 Some(names) => {
                     crate::report::blast_xml::names::check_text(&names.scientific_name).map_err(
-                        |refusal| refusal.error(program, "a taxonomy database scientific name"),
+                        |refusal| {
+                            anyhow::Error::new(TaxonomyRefusal(
+                                refusal
+                                    .error(program, "a taxonomy database scientific name")
+                                    .to_string(),
+                            ))
+                        },
                     )?;
                     HitTaxonomy::Named(names.scientific_name)
                 }
@@ -823,6 +1014,121 @@ pub(crate) fn read_reported_taxids(
         taxonomy[rank] = asked[&taxid].clone();
     }
     Ok((taxids, taxonomy, notes))
+}
+
+/// How many taxonomy database entries cost as much to check as one database sequence: the
+/// taxonomy side is chosen when `entries <= TAXDB_ENTRIES_PER_SEQUENCE * sequences`. Measured
+/// (OF5b fix, 1 thread, hot page cache): the pass over NCBI's taxdb takes 0.15 s for 2,314,695
+/// entries (about 0.065 us each), the database side 0.25 s for 2,000,000 sequences (about
+/// 0.125 us each), so an entry costs about half a sequence.
+const TAXDB_ENTRIES_PER_SEQUENCE: u64 = 2;
+
+/// The most database sequences the per-sequence side of [`taxdb_may_refuse`] reads after the
+/// taxonomy side found a record that could be refused (about 0.3 us each, so a few seconds);
+/// a larger database is held without reading it.
+const PREPASS_DB_SEQUENCES_MAX: u64 = 1 << 22;
+
+/// Whether [`read_reported_taxids`] could refuse for some sequence of the database, which a
+/// run that writes its batches one by one cannot take back (OF5b BLASTX, DECISIONS 32): a
+/// scientific name NCBI's XML stream cannot write, a record past the last mapped page of
+/// `taxdb.btd`, or a header or the taxonomy database that cannot be read. A superset of what a
+/// search reports: limits (`-gilist`, `-taxidlist`) and the hits themselves are ignored.
+/// `false` without `taxdb.bti` on the search path and for a database without taxids.
+///
+/// The answer comes from whichever side is cheaper: the taxonomy side when the entries of
+/// `taxdb.bti` (from its header) number at most [`TAXDB_ENTRIES_PER_SEQUENCE`] times the
+/// sequences of the database (`SeqDb::num_seqs`), else the database side:
+/// * [`taxdb_side`]: one sequential pass over the taxonomy database asks whether any taxid's
+///   lookup could be refused; none -> `false`, without reading the database. This is the
+///   normal case for NCBI's taxdb, so the cost does not grow with the database.
+/// * [`database_side`]: the first definition line's taxid of every sequence, each distinct
+///   non-zero one looked up. It decides the cases the taxonomy side leaves open. When the
+///   taxonomy side ran first (the taxonomy database has at most twice as many entries as the
+///   database has sequences) and found something, a database of more than
+///   [`PREPASS_DB_SEQUENCES_MAX`] sequences is held without this pass.
+///
+/// "No hold" means that no lookup of the run can refuse after a byte: the taxonomy side proves it
+/// for every taxid, the database side for every taxid the database holds.
+///
+/// It has its own taxonomy handle (`LazyTaxDb`), so the run's [`TaxdbRun`], its volume lookups
+/// and the notes that [`TaxdbPrinter`] writes are as they would be without this call. That
+/// handle and the run's are two opens of the same files, which differ only if `taxdb.bti` or
+/// `taxdb.btd` is replaced while the run goes on (the run opens its handle at its first lookup,
+/// possibly many batches after this call): the run can then refuse after bytes were written.
+/// NCBI reads the two files at its first lookup too, and a replaced file gives it a mixed
+/// result as well; this is not guarded (DECISIONS 32).
+pub(crate) fn taxdb_may_refuse(db: &SeqDb) -> bool {
+    use crate::seqdb::taxdb::LazyTaxDb;
+    if !db.taxdb_found() {
+        return false;
+    }
+    let Some(search_path) = db.search_path() else {
+        return false;
+    };
+    let taxdb = LazyTaxDb::new(search_path.clone());
+    let sequences = u64::from(db.num_seqs());
+    // An index that cannot be opened is left to the database side, which asks for a name only
+    // when a sequence has a taxid.
+    let taxdb_first = taxdb.entry_count().map_or(false, |entries| {
+        entries <= TAXDB_ENTRIES_PER_SEQUENCE * sequences
+    });
+    if taxdb_first {
+        if taxdb_side(&taxdb) == Some(false) {
+            return false;
+        }
+        if sequences > PREPASS_DB_SEQUENCES_MAX {
+            return true;
+        }
+    }
+    database_side(db, &taxdb)
+}
+
+/// The taxonomy side of [`taxdb_may_refuse`]: `Some(false)` when no lookup of any taxid can be
+/// refused or give a scientific name that `names::check_text` refuses
+/// ([`crate::seqdb::taxdb::TaxDb::any_lookup_may_refuse`]); `Some(true)` when one can; `None` when
+/// the taxonomy database cannot be opened or read, which only the lookups of the database's taxids
+/// can answer.
+fn taxdb_side(taxdb: &crate::seqdb::taxdb::LazyTaxDb) -> Option<bool> {
+    taxdb
+        .any_lookup_may_refuse(&|name| crate::report::blast_xml::names::check_text(name).is_err())
+        .ok()
+}
+
+/// The database side of [`taxdb_may_refuse`]: whether the lookup of the first definition line's
+/// taxid of some sequence would be refused, looking each distinct non-zero taxid up with the
+/// `names` + `names::check_text` code `read_reported_taxids` uses. The headers are read in
+/// ranges of [`crate::seqdb::HEADER_RANGE_SEQS`] sequences, one read per MiB
+/// ([`SeqDb::visit_defline_taxids`]). A header that cannot be read answers `true`. Memory: the
+/// distinct taxids, nothing per sequence.
+fn database_side(db: &SeqDb, taxdb: &crate::seqdb::taxdb::LazyTaxDb) -> bool {
+    let mut seen: std::collections::HashSet<i32> = Default::default();
+    let mut refused = false;
+    for range in db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS) {
+        let whole = db.visit_defline_taxids(range, |_ordinal, defline_taxids| {
+            let Ok(defline_taxids) = defline_taxids else {
+                refused = true;
+                return false;
+            };
+            // One definition line per sequence (`read_reported_taxids`).
+            let taxid = defline_taxids.first().copied().unwrap_or(0);
+            if taxid == 0 || !seen.insert(taxid) {
+                return true;
+            }
+            let mut messages = Vec::new();
+            refused = match taxdb.names(taxid, &mut messages) {
+                Err(_) => true,
+                Ok(Some(names)) => {
+                    crate::report::blast_xml::names::check_text(&names.scientific_name).is_err()
+                }
+                Ok(None) => false,
+            };
+            !refused
+        });
+        if !whole {
+            return refused;
+        }
+    }
+    false
 }
 
 /// NCBI's messages about the taxonomy database that are not the lookup of a `Hit`: the texts of
@@ -957,5 +1263,153 @@ mod taxdb_notes_tests {
             lines(&mut none.printer(), 0, 9606, &HitTaxonomy::Unnamed),
             ""
         );
+    }
+}
+
+#[cfg(test)]
+mod taxdb_prepass_tests {
+    //! `taxdb_may_refuse`: the answer of the lookup of every sequence's taxid, with the
+    //! databases of `tests/fixtures/outfmt16/db` (`sprot_tax`: two sequences, taxid 9606;
+    //! `sprot_mixtax`: those two with taxid 10090 and a third with taxid 9606) and the taxonomy
+    //! databases of `tests/seqdb/taxdb`.
+    use super::*;
+    use crate::seqdb::alias::SearchPath;
+    use crate::seqdb::SeqType;
+    use std::path::{Path, PathBuf};
+
+    fn root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests")
+    }
+
+    /// The database `name` of `tests/fixtures/outfmt16/db` opened with `BLASTDB=taxdb`
+    /// (`None`: not set), from an empty current directory.
+    fn database(name: &str, taxdb: Option<&Path>) -> SeqDb {
+        let cwd = std::env::temp_dir().join(format!("losat_prepass_cwd_{}", std::process::id()));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+        let path = root().join("fixtures/outfmt16/db").join(name);
+        SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap()
+    }
+
+    fn variant(name: &str) -> PathBuf {
+        root().join("seqdb/taxdb").join(name)
+    }
+
+    #[test]
+    fn names_that_can_be_written_do_not_hold() {
+        for name in ["sprot_tax", "sprot_mixtax"] {
+            let db = database(name, Some(&variant("good")));
+            assert!(db.taxdb_found());
+            assert!(!taxdb_may_refuse(&db), "{name}");
+        }
+        // 10090 has a common name and a kingdom with bytes >= 0x80 in this taxonomy database,
+        // which XML2 does not write: only the scientific name is checked.
+        let db = database("sprot_mixtax", Some(&variant("high_bytes_latin1")));
+        assert!(!taxdb_may_refuse(&db));
+    }
+
+    #[test]
+    fn a_name_that_cannot_be_written_holds_whether_or_not_the_taxid_is_reported() {
+        // sprot_tax: 9606 is the taxid of both sequences. sprot_mixtax: 9606 belongs to the
+        // third sequence only, which a search for the first two never reports.
+        for name in ["sprot_tax", "sprot_mixtax"] {
+            let db = database(name, Some(&variant("high_bytes_utf8")));
+            assert!(taxdb_may_refuse(&db), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_record_past_the_last_page_holds() {
+        // The record of 10090 (entry 3) ends at the offset of entry 4: 5000 bytes, past the
+        // 4096-byte page that ends the mapping of the small `taxdb.btd`.
+        let dir = std::env::temp_dir().join(format!("losat_prepass_btd_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::copy(variant("good").join("taxdb.btd"), dir.join("taxdb.btd")).unwrap();
+        let mut index = std::fs::read(variant("good").join("taxdb.bti")).unwrap();
+        let at = 24 + 8 * 4 + 4;
+        index[at..at + 4].copy_from_slice(&5000u32.to_be_bytes());
+        std::fs::write(dir.join("taxdb.bti"), &index).unwrap();
+        assert!(taxdb_may_refuse(&database("sprot_mixtax", Some(&dir))));
+        // 9606 (entry 2) is fine: the database with that taxid alone does not hold.
+        assert!(!taxdb_may_refuse(&database("sprot_tax", Some(&dir))));
+    }
+
+    #[test]
+    fn a_missing_or_damaged_taxdb_that_ncbi_survives_does_not_hold() {
+        // No `taxdb.bti` on the search path: the formats write no name.
+        let db = database("sprot_mixtax", None);
+        assert!(!db.taxdb_found());
+        assert!(!taxdb_may_refuse(&db));
+        // NCBI turns a wrong magic number into a message and N/A (`expected.tsv`).
+        let db = database("sprot_mixtax", Some(&variant("bad_magic")));
+        assert!(!taxdb_may_refuse(&db));
+    }
+
+    #[test]
+    fn the_two_sides_agree_and_the_taxonomy_side_alone_clears_a_good_taxdb() {
+        use crate::seqdb::taxdb::LazyTaxDb;
+        for (taxonomy, expected) in [
+            ("good", Some(false)),
+            ("high_bytes_latin1", Some(false)),
+            ("high_bytes_utf8", Some(true)),
+            ("offset_next_past_end", Some(true)),
+            ("bad_magic", Some(false)),
+            // Not checked: whatever the pass says, the answer is the database side's.
+            ("unsorted_adjacent", None),
+        ] {
+            for name in ["sprot", "sprot_tax", "sprot_mixtax"] {
+                let db = database(name, Some(&variant(taxonomy)));
+                let taxdb = LazyTaxDb::new(db.search_path().unwrap().clone());
+                let side = taxdb_side(&taxdb);
+                if let Some(side) = side {
+                    // The taxonomy side is a superset of the database side.
+                    assert!(side || !database_side(&db, &taxdb), "{taxonomy} {name}");
+                    if !side {
+                        assert!(!taxdb_may_refuse(&db), "{taxonomy} {name}");
+                    }
+                }
+                if name == "sprot_mixtax" && expected.is_some() {
+                    assert_eq!(side, expected, "{taxonomy}");
+                }
+                // The database side alone and the dispatch give one answer.
+                assert_eq!(
+                    taxdb_may_refuse(&db),
+                    database_side(&db, &LazyTaxDb::new(db.search_path().unwrap().clone())),
+                    "{taxonomy} {name}"
+                );
+            }
+        }
+    }
+
+    /// Times the taxonomy side on a real NCBI `taxdb` (`LOSAT_TEST_NCBI_TAXDB=<dir with taxdb.bti
+    /// and taxdb.btd>`): `cargo test --release`-like timing of one pass, and whether any record
+    /// of it could be refused. Ignored: it needs the 190 MB download of OF5b's fix.
+    #[test]
+    #[ignore]
+    fn real_ncbi_taxdb_walk() {
+        use crate::seqdb::taxdb::LazyTaxDb;
+        let Some(dir) = std::env::var_os("LOSAT_TEST_NCBI_TAXDB") else {
+            return;
+        };
+        let cwd = std::env::temp_dir();
+        let search = SearchPath::new(&cwd, Some(&dir), None).unwrap();
+        let taxdb = LazyTaxDb::new(search);
+        let entries = taxdb.entry_count().unwrap();
+        for _ in 0..3 {
+            let start = std::time::Instant::now();
+            let answer = taxdb_side(&taxdb);
+            eprintln!(
+                "real taxdb: {entries} entries, taxonomy side {answer:?} in {:?}",
+                start.elapsed()
+            );
+            assert_eq!(answer, Some(false));
+        }
+    }
+
+    #[test]
+    fn a_database_without_taxids_does_not_hold() {
+        let db = database("sprot", Some(&variant("high_bytes_utf8")));
+        assert!(db.taxdb_found());
+        assert!(!taxdb_may_refuse(&db));
     }
 }

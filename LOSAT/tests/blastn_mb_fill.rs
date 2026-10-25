@@ -1,0 +1,133 @@
+//! The run-based one-thread fill of the megablast table (`LOSAT_X_MBFILL`,
+//! `src/algorithm/blastn/x_mb_fill.rs`) on whole searches.
+//!
+//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is
+//! `0`. It chooses between two LOSAT code
+//! paths that build the same table, so the property under test is that the report does not
+//! depend on it: the default run and `LOSAT_X_MBFILL=0` give the same bytes and print nothing on
+//! standard error, and the default run takes the run-based fill (`LOSAT_X_REACH`, on the targets
+//! where the fill takes its path: x86_64 and wasm32). Two searches build the
+//! table on one thread: megablast (the contiguous megablast table) and blastn (word size 11 on a
+//! query of 4,000 letters, fewer than 12,000 on both strands: the small table's two-stage form,
+//! with its cells in the order of indexing) of a query cut from LC738874 with runs of N, against
+//! LC738868; at four threads the pool builds the table and the report is the same. That those
+//! bytes equal NCBI's is the business of the fixture suites.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+mod reach_support;
+
+const SWITCH_OFF: (&str, &str) = ("LOSAT_X_MBFILL", "0");
+
+fn fasta(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fasta")
+        .join(name)
+}
+
+/// A directory of its own per test and process (the tests of this binary run in parallel).
+struct TestDir(PathBuf);
+
+impl TestDir {
+    fn new(test: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("losat-mbfill-{test}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("make the test directory");
+        TestDir(dir)
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+}
+
+fn letters(path: &Path) -> String {
+    let text = std::fs::read_to_string(path).expect("read the FASTA file");
+    text.lines()
+        .skip_while(|line| !line.starts_with('>'))
+        .skip(1)
+        .take_while(|line| !line.starts_with('>'))
+        .map(str::trim)
+        .collect()
+}
+
+/// The two queries: the first 60,000 letters of LC738874 with runs of 1 to 7 N every 7,000
+/// letters (words stop at them), for megablast; its first 4,000 letters, for blastn.
+fn queries(dir: &TestDir) -> [(&'static str, PathBuf); 2] {
+    let genome = letters(&fasta("LC738874.fasta"));
+    let mut long: Vec<u8> = genome.as_bytes()[..60_000].to_vec();
+    for (k, start) in (3_000..60_000).step_by(7_000).enumerate() {
+        for letter in &mut long[start..start + 1 + k % 7] {
+            *letter = b'N';
+        }
+    }
+    let long = String::from_utf8(long).unwrap();
+    let mb = dir.0.join("q60000n.fna");
+    std::fs::write(&mb, format!(">q60000n\n{long}\n")).expect("write the query");
+    let bn = dir.0.join("q4000n.fna");
+    std::fs::write(&bn, format!(">q4000n\n{}\n", &long[..4_000])).expect("write the query");
+    [("megablast", mb), ("blastn", bn)]
+}
+
+/// One search of `query` against LC738868 (`-outfmt 6` on standard output) with the given
+/// variables as its only `LOSAT_*` variables that choose a code path.
+/// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
+/// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more
+/// than one thread, and it selects nothing. Returns the report and the standard error.
+fn search(task: &str, query: &Path, threads: u32, switches: &[(&str, &str)]) -> (Vec<u8>, String) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
+            command.env_remove(name);
+        }
+    }
+    let output = command
+        .arg("blastn")
+        .arg("-query")
+        .arg(query)
+        .arg("-subject")
+        .arg(fasta("LC738868.fasta"))
+        .args(["-task", task])
+        .args(["-outfmt", "6"])
+        .args(["-num_threads", &threads.to_string()])
+        .envs(switches.iter().copied())
+        .output()
+        .expect("run LOSAT");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(
+        output.status.success(),
+        "{task} {switches:?} threads {threads}: {stderr}"
+    );
+    (output.stdout, stderr)
+}
+
+// The default one-thread search runs the run-based fill; `LOSAT_X_MBFILL=0`
+// runs the queued loop, and at four threads the pool fills the table. The
+// reports are equal, no run prints a line on standard error, and the default one-thread run takes
+// the run-based fill where the fill takes its path.
+#[test]
+fn the_report_does_not_depend_on_the_run_based_fill() {
+    let dir = TestDir::new("report");
+    for (task, query) in queries(&dir) {
+        let reach = reach_support::Reach::new("mbfill");
+        let (default, default_stderr) = search(task, &query, 1, &[reach.var()]);
+        assert!(!default.is_empty(), "{task}: no hits");
+        assert_eq!(default_stderr, "", "{task}");
+        if cfg!(any(target_arch = "x86_64", target_arch = "wasm32")) {
+            assert!(
+                reach.sides("LOSAT_X_MBFILL").0,
+                "{task}: the run-based fill did not take the table"
+            );
+        }
+        let (report, stderr) = search(task, &query, 1, &[SWITCH_OFF]);
+        assert_eq!(report, default, "{task} {SWITCH_OFF:?}");
+        assert_eq!(stderr, "", "{task} {SWITCH_OFF:?}");
+        let (report, stderr) = search(task, &query, 4, &[]);
+        assert_eq!(report, default, "{task} threads 4");
+        assert_eq!(stderr, "", "{task} threads 4");
+    }
+}

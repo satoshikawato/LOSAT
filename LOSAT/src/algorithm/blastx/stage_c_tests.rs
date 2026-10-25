@@ -343,6 +343,7 @@ fn unported_long_subject_chunking_is_rejected_before_search() {
         sequence: vec![b'W'; 5_000_001],
         lowercase_masks: Vec::new(),
         warnings: Vec::new(),
+        source: None,
     };
     let error = super::search::search_preliminary(&records, &[subject], &o)
         .err()

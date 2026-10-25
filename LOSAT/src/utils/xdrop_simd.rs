@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_DPFAST / LOSAT_X_DPSHADOW): row-wise SIMD X-drop dynamic programming
+//! Row-wise SIMD X-drop dynamic programming
 //! that is intended to return exactly what the scalar transliterations of
 //! NCBI `Blast_SemiGappedAlign` / `ALIGN_EX` return.
 //!
@@ -100,17 +100,18 @@
 //! use `Blast_SemiGappedAlign` with `score_only` TRUE (preliminary gapped score) and with
 //! `score_only` FALSE, which calls `ALIGN_EX` (traceback). blastn uses
 //! `s_BlastAlignPackedNucl` (preliminary score on the packed subject) and `ALIGN_EX` on
-//! one byte per base (traceback). LOSAT_X_DPFAST runs the vector kernels below for all
-//! of these.
+//! one byte per base (traceback). The vector kernels below run for all of these.
+//! (The scalar ports stay for the calls the kernels decline.)
 //!
 //! How the module relates to that code. Each row of the DP is the same recurrence as the
 //! cited loops. The diagonal term (`next_score`), the column gap (`best_gap`) and the
 //! X-drop test are evaluated lane by lane, in blocks of 8 (16-bit) or 16 (8-bit) cells.
 //! The row gap (`score_gap_row`), which the C loop carries from cell to cell, is a decayed
 //! prefix maximum over the lanes. The script bits have the values of the NCBI `SCRIPT_*`
-//! constants, and the traceback walk is the C walk. The argument above is why the cells that
-//! are kept have the C values. LOSAT_X_DPSHADOW and the random test
-//! (`simd_kernels_match_scalar_loops_on_random_problems`) compare every result with the
+//! constants (or are the four-bit codes of them, `LOSAT_X_DPNIBBLE`), and the traceback walk is
+//! the C walk. The argument above is why the cells that
+//! are kept have the C values. The random test
+//! (`simd_kernels_match_scalar_loops_on_random_problems`) compares results with the
 //! scalar loop. The module is integer arithmetic only. A problem that does not fit the lanes
 //! is not handled here and the scalar port runs.
 
@@ -144,6 +145,39 @@ const SCRIPT_EXTEND_GAP_B: u8 = 0x40;
 // The same sentinel value as NCBI. The kernels stop at it as `ALIGN_EX` does (lines 571-575 of
 // `blast_gapalign.c`).
 const FENCE_SENTRY: u8 = 201;
+
+// No NCBI counterpart: the traceback rows at four bits per cell (`LOSAT_X_DPNIBBLE`). NCBI keeps one
+// byte of `SCRIPT_*` bits per cell (`edit_script`). With the switch on, the kernels store a code of
+// four bits instead, two cells per byte (cell 2k in the low half of byte k of the row, cell 2k + 1
+// in the high half), and the walk follows the codes (`kernel::finish`), giving each operation its
+// NCBI value. Bits 0-1 hold
+// the operation (0 = `SCRIPT_GAP_IN_A`, 1 = `SCRIPT_SUB`, 2 = `SCRIPT_GAP_IN_B`: the NCBI value / 3),
+// bit 2 `SCRIPT_EXTEND_GAP_A`, bit 3 `SCRIPT_EXTEND_GAP_B`. The kernels compute the code with the
+// same comparisons as the byte, so each cell keeps the script NCBI gives it.
+const NIB_SUB: u8 = 1;
+const NIB_EXTEND_GAP_A: u8 = 4;
+const NIB_EXTEND_GAP_B: u8 = 8;
+
+/// No NCBI counterpart: the values a kernel adds up for a cell's script (`SCRIPT_SUB`,
+/// `SCRIPT_EXTEND_GAP_A`, `SCRIPT_EXTEND_GAP_B`), as NCBI bytes or as four-bit codes (`NIB`).
+/// The kernels read them in `const` blocks: a branch on `NIB` that the MIR inliner copies into a
+/// kernel changes its register allocation (one byte per cell: +0.85 % instructions at one
+/// thread).
+#[inline(always)]
+pub(crate) const fn script_codes(nib: bool) -> (u8, u8, u8) {
+    if nib {
+        (NIB_SUB, NIB_EXTEND_GAP_A, NIB_EXTEND_GAP_B)
+    } else {
+        (SCRIPT_SUB, SCRIPT_EXTEND_GAP_A, SCRIPT_EXTEND_GAP_B)
+    }
+}
+
+/// No NCBI counterpart: the bytes a traceback row of `cells` cells takes (two cells per byte with
+/// `NIB`, rounded up), without a branch (`script_codes`).
+#[inline(always)]
+pub(crate) const fn trace_bytes(nib: bool, cells: usize) -> usize {
+    (cells + nib as usize) >> nib as usize
+}
 
 // No NCBI counterpart: lane padding, 16-bit value range and the largest score the vector
 // path accepts. A problem outside these limits is not handled and the scalar port runs; the
@@ -429,6 +463,110 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
     Some(t)
 }
 
+// No NCBI counterpart: `Rows` and the only code that sets its fields.
+mod rows {
+    /// No NCBI counterpart (memory placement only): a row of the vector kernels whose first
+    /// element lies on a 64-byte boundary. The 256-bit kernels store 32 bytes at `PAD + first`
+    /// plus multiples of 32 bytes and load the same places in the next row; from a buffer at
+    /// glibc's 16-byte alignment half of those stores could cross a cache line, and a split store
+    /// does not forward to the load after it (an offset set by the heap's history: one more
+    /// allocation elsewhere made blastn's 16-thread search 2 % slower with three times the blocked
+    /// store forwards). The values and the lengths are those of the `Vec` before. The fields are
+    /// private to `rows`, so that only `new` and `resize` set `ptr` and `len`.
+    pub(super) struct Rows<T> {
+        v: Vec<T>,
+        /// `v`'s element on the boundary (`v` is never pushed to, so its buffer does not move).
+        ptr: *mut T,
+        len: usize,
+    }
+
+    // SAFETY: `ptr` points into `v` (or dangles with `len` 0) and is sent and shared only together
+    // with `v`, so `Rows<T>` is `Send` / `Sync` when `Vec<T>` is.
+    unsafe impl<T: Send> Send for Rows<T> {}
+    unsafe impl<T: Sync> Sync for Rows<T> {}
+
+    impl<T: Copy + Default> Rows<T> {
+        pub(super) fn new(len: usize) -> Self {
+            let mut r = Rows {
+                v: Vec::new(),
+                ptr: std::ptr::NonNull::dangling().as_ptr(),
+                len: 0,
+            };
+            r.resize(len, T::default());
+            r
+        }
+
+        /// `Vec::resize`: the rows only grow (`grow`).
+        pub(super) fn resize(&mut self, len: usize, value: T) {
+            if len <= self.len {
+                self.len = len;
+                return;
+            }
+            let slack = 64 / std::mem::size_of::<T>();
+            let mut v = vec![value; len + slack];
+            // `align_offset` gives `usize::MAX` only for a pointer it cannot align, which `v`'s
+            // buffer (aligned for `T`) never is; if it ever did, the rows would start at `v`'s first
+            // element, which changes only the speed.
+            let off = v.as_ptr().align_offset(64);
+            let off = if off <= slack { off } else { 0 };
+            v[off..off + self.len].copy_from_slice(self);
+            // SAFETY: `off + len <= v.len()`. `Vec::as_mut_ptr` makes no reference to `v`'s
+            // elements, so the pointer may reach all of them.
+            let ptr = unsafe { v.as_mut_ptr().add(off) };
+            *self = Rows { v, ptr, len };
+        }
+    }
+
+    impl<T> Rows<T> {
+        /// `Vec::as_ptr`: the row's first element without a slice made first, so that a pointer a
+        /// kernel takes stays valid when the row is then read or written through `Deref` /
+        /// `DerefMut` or another `as_ptr` / `as_mut_ptr` call, as Miri accepts for a `Vec` (a
+        /// pointer from the slice's method comes from a slice that the next `deref` or `deref_mut`
+        /// of the row can invalidate).
+        #[inline(always)]
+        pub(super) fn as_ptr(&self) -> *const T {
+            self.ptr
+        }
+
+        /// `Vec::as_mut_ptr`; see `as_ptr`.
+        #[inline(always)]
+        pub(super) fn as_mut_ptr(&mut self) -> *mut T {
+            self.ptr
+        }
+    }
+
+    impl<T> std::ops::Deref for Rows<T> {
+        type Target = [T];
+        #[inline(always)]
+        fn deref(&self) -> &[T] {
+            // SAFETY: `ptr .. ptr + len` lies in `v`, or `len` is 0 and `ptr` is dangling (`new`);
+            // only `new` and `resize` set them.
+            unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+        }
+    }
+
+    impl<T> std::ops::DerefMut for Rows<T> {
+        #[inline(always)]
+        fn deref_mut(&mut self) -> &mut [T] {
+            // SAFETY: as `deref`, and `&mut self` borrows `v` uniquely.
+            unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
+        }
+    }
+
+    impl<T: PartialEq> PartialEq for Rows<T> {
+        fn eq(&self, other: &Self) -> bool {
+            **self == **other
+        }
+    }
+
+    impl<T: std::fmt::Debug> std::fmt::Debug for Rows<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            (**self).fmt(f)
+        }
+    }
+}
+use rows::Rows;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:462-468,476-479
 // ```c
 //     if (num_extra_cells > gap_align->dp_mem_alloc) {
@@ -442,15 +580,15 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
 // The vector kernels' rows (`best`, `best_gap` of `score_array`, here `H` and `E`), the traceback
 // rows (`edit_script`) and the operation list. Kept between calls like `gap_align->dp_mem`.
 pub(crate) struct XdropScratch {
-    ha: Vec<i16>,
-    hb: Vec<i16>,
-    e: Vec<i16>,
+    ha: Rows<i16>,
+    hb: Rows<i16>,
+    e: Rows<i16>,
     // 8-bit path
-    h8a: Vec<u8>,
-    h8b: Vec<u8>,
-    e8: Vec<u8>,
+    h8a: Rows<u8>,
+    h8b: Rows<u8>,
+    e8: Rows<u8>,
     dirty8: usize,
-    sb: Vec<u8>,
+    sb: Rows<u8>,
     sb_filled: usize,
     fence_k: usize,
     bad_k: usize,
@@ -462,27 +600,38 @@ pub(crate) struct XdropScratch {
     surv: Vec<u64>,
     /// Traceback operations in walk order (alignment end -> start), run-length encoded.
     pub ops: Vec<(u8, u32)>,
+    /// The column of lane 0 of the rows (`ha` .. `e8`, `sb`): a kernel moves its lanes down when
+    /// the band moves right (`x_shift`), so the rows hold the band and not every column before it.
+    x_sh: usize,
+    /// The band start, in lanes, at which a kernel moves its rows (`LOSAT_X_DPWINDOW`); `usize::MAX`
+    /// when they hold every column.
+    x_win_at: usize,
+    /// Whether the kernels write `trace` as four-bit codes, two cells per byte (`LOSAT_X_DPNIBBLE`;
+    /// `NIB_SUB`; a search's scratch follows `x_dp_nibble_here`); the walk reads the rows the same
+    /// way.
+    x_nib: bool,
 }
 
 impl XdropScratch {
-    /// No NCBI counterpart: an empty scratch when the kernel is off, so that a search without the
-    /// switch allocates nothing for it; it does not change any value NCBI computes.
+    /// No NCBI counterpart: an empty scratch when the target has no vector kernel, so that a
+    /// search there allocates nothing for it; it does not change any value NCBI computes.
     ///
-    /// The scratch of a search: empty unless the kernel is switched on, so
-    /// that a search without the switch allocates nothing for it.
+    /// The scratch of a search: empty unless the vector kernels are compiled for the target.
     pub(crate) fn for_search() -> Self {
-        if mode() != 0 {
-            return Self::new();
+        if KERNEL_COMPILED {
+            let mut sc = Self::new();
+            sc.x_nib = x_dp_nibble_here();
+            return sc;
         }
         Self {
-            ha: Vec::new(),
-            hb: Vec::new(),
-            e: Vec::new(),
-            h8a: Vec::new(),
-            h8b: Vec::new(),
-            e8: Vec::new(),
+            ha: Rows::new(0),
+            hb: Rows::new(0),
+            e: Rows::new(0),
+            h8a: Rows::new(0),
+            h8b: Rows::new(0),
+            e8: Rows::new(0),
             dirty8: 0,
-            sb: Vec::new(),
+            sb: Rows::new(0),
             sb_filled: 0,
             fence_k: usize::MAX,
             bad_k: usize::MAX,
@@ -493,6 +642,9 @@ impl XdropScratch {
             rows: Vec::new(),
             surv: Vec::new(),
             ops: Vec::new(),
+            x_sh: 0,
+            x_win_at: x_dp_window_at(),
+            x_nib: x_dp_nibble(),
         }
     }
 
@@ -506,14 +658,14 @@ impl XdropScratch {
     // The initial allocation, like the first `dp_mem` allocation.
     pub(crate) fn new() -> Self {
         Self {
-            ha: vec![0; 1024],
-            hb: vec![0; 1024],
-            e: vec![0; 1024],
-            h8a: vec![0; 1024],
-            h8b: vec![0; 1024],
-            e8: vec![0; 1024],
+            ha: Rows::new(1024),
+            hb: Rows::new(1024),
+            e: Rows::new(1024),
+            h8a: Rows::new(1024),
+            h8b: Rows::new(1024),
+            e8: Rows::new(1024),
             dirty8: 0,
-            sb: vec![0; 1024],
+            sb: Rows::new(1024),
             sb_filled: 0,
             fence_k: usize::MAX,
             bad_k: usize::MAX,
@@ -524,6 +676,9 @@ impl XdropScratch {
             rows: Vec::new(),
             surv: vec![0; 64],
             ops: Vec::new(),
+            x_sh: 0,
+            x_win_at: x_dp_window_at(),
+            x_nib: x_dp_nibble(),
         }
     }
 
@@ -590,7 +745,119 @@ impl XdropScratch {
         self.trace.clear();
         self.rows.clear();
         self.ops.clear();
+        self.x_sh = 0;
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:641-649
+    // ```c
+    //         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
+    //
+    //             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
+    //                                           2 * gap_align->dp_mem_alloc);
+    // ```
+    // NCBI's `score_array` is indexed by column and grows to the last column of the band, like
+    // these rows before `LOSAT_X_DPWINDOW`. Here a kernel whose band start `first` reached
+    // `x_win_at` moves the lanes from `d` on down to lane 0 (`d` a multiple of 64 with at least 64
+    // lanes left below `first`) and lowers every column it keeps by `d`; `x_sh` adds `d` back
+    // where a column leaves the kernel (the best cell, the start of a traceback row). The lanes
+    // keep their values, the `d` lanes freed at the top are zero as lanes never written are, and
+    // the lanes below `first` are not read, so the DP is the same; only the rows' length changes.
+    // `wide`: the 16-bit rows (`ha`, `hb`, `e`), else the 8-bit ones (`h8a`, `h8b`, `e8`).
+    #[cold]
+    #[inline(never)]
+    fn x_shift(&mut self, d: usize, wide: bool) {
+        crate::utils::xreach::x_reach!("LOSAT_X_DPWINDOW", true);
+        if wide {
+            let n = self.dirty + 2 * PAD + 32;
+            x_shift_lanes(&mut self.ha, d, n);
+            x_shift_lanes(&mut self.hb, d, n);
+            x_shift_lanes(&mut self.e, d, n);
+            self.dirty = self.dirty.saturating_sub(d);
+        } else {
+            let n = self.dirty8 + 2 * PAD + 32;
+            x_shift_lanes(&mut self.h8a, d, n);
+            x_shift_lanes(&mut self.h8b, d, n);
+            x_shift_lanes(&mut self.e8, d, n);
+            self.dirty8 = self.dirty8.saturating_sub(d);
+        }
+        // `sb[PAD + k + 1]` holds column `k + x_sh`; lanes past `sb_filled` are filled before use
+        let n = (PAD + self.sb_filled + 1 + 32).min(self.sb.len());
+        if PAD + d < n {
+            self.sb.copy_within(PAD + d..n, PAD);
+        }
+        self.sb_filled = self.sb_filled.saturating_sub(d);
+        if self.fence_k != usize::MAX {
+            self.fence_k = self.fence_k.saturating_sub(d);
+        }
+        if self.bad_k != usize::MAX {
+            self.bad_k = self.bad_k.saturating_sub(d);
+        }
+        self.x_sh += d;
+    }
+}
+
+// No NCBI counterpart: lanes `PAD + d .. n` of one row move to `PAD ..`, and the `d` lanes at the
+// top become zero (`x_shift`).
+fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
+    let n = n.min(v.len());
+    if PAD + d < n {
+        v.copy_within(PAD + d..n, PAD);
+        v[n - d..n].fill(T::default());
+    } else if PAD < n {
+        v[PAD..n].fill(T::default());
+    }
+}
+
+/// No NCBI counterpart: `LOSAT_X_DPWINDOW` (strict set, a value switch): the band start, in
+/// lanes, at which the vector kernels move their rows down (`XdropScratch::x_shift`); built-in
+/// 1024, at least 128. Off: the rows hold every column up to the band's end, as before.
+pub(crate) fn x_dp_window_at() -> usize {
+    use std::sync::OnceLock;
+    static AT: OnceLock<usize> = OnceLock::new();
+    *AT.get_or_init(|| {
+        crate::utils::xswitch::value("LOSAT_X_DPWINDOW", 128..=usize::MAX, 1024)
+            .unwrap_or(usize::MAX)
+    })
+}
+
+/// No NCBI counterpart: `LOSAT_X_DPNIBBLE` (strict set): the vector kernels keep the traceback rows
+/// at four bits per cell, two cells per byte (`NIB_SUB`). Off: one byte per cell, as before.
+pub(crate) fn x_dp_nibble() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DPNIBBLE"))
+}
+
+/// No NCBI counterpart: the rule of `LOSAT_X_DPNIBBLE` for the scratch of a search
+/// (`XdropScratch::for_search`): four-bit codes when the scratch is made on a thread of a Rayon
+/// pool, that is in a search on two threads or more (its pool, or the one-thread pools of the
+/// blastn query-batch slots); one byte per cell on the calling thread of a one-thread search,
+/// which has no pool. One thread keeps the bytes because there the codes' packing cost time
+/// (Sakai x EDL933 x1.009) and the memory they save is one trace. Memory only: both layouts give
+/// every script NCBI gives.
+fn x_dp_nibble_here() -> bool {
+    if !x_dp_nibble() {
+        return false;
+    }
+    let pooled = x_in_pool();
+    crate::utils::xreach::x_reach!("LOSAT_X_DPNIBBLE", pooled);
+    pooled
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_in_pool() -> bool {
+    rayon::current_thread_index().is_some()
+}
+
+#[cfg(any(
+    not(feature = "parallel"),
+    all(target_arch = "wasm32", not(feature = "wasm-threads"))
+))]
+fn x_in_pool() -> bool {
+    false
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:612-613,732
@@ -658,6 +925,17 @@ mod arch {
     #[inline(always)]
     pub unsafe fn store<T>(p: *mut T, v: V) {
         _mm_storeu_si128(p as *mut V, v)
+    }
+    /// 16 four-bit codes (bytes <= 15) to 8 bytes in the low half, byte k = code 2k | code 2k+1 << 4.
+    #[inline(always)]
+    pub unsafe fn nibs(v: V) -> V {
+        let m = _mm_maddubs_epi16(v, _mm_set1_epi16(0x1001));
+        _mm_packus_epi16(m, m)
+    }
+    /// The low 8 bytes of `v`.
+    #[inline(always)]
+    pub unsafe fn store64<T>(p: *mut T, v: V) {
+        _mm_storel_epi64(p as *mut V, v)
     }
     #[inline(always)]
     pub unsafe fn adds16(a: V, b: V) -> V {
@@ -831,6 +1109,17 @@ mod arch {
     #[inline(always)]
     pub unsafe fn store<T>(p: *mut T, v: V) {
         v128_store(p as *mut v128, v)
+    }
+    /// 16 four-bit codes (bytes <= 15) to 8 bytes in the low half, byte k = code 2k | code 2k+1 << 4.
+    #[inline(always)]
+    pub unsafe fn nibs(v: V) -> V {
+        let w = v128_or(v, u16x8_shr(v, 4));
+        i8x16_shuffle::<0, 2, 4, 6, 8, 10, 12, 14, 0, 2, 4, 6, 8, 10, 12, 14>(w, w)
+    }
+    /// The low 8 bytes of `v`.
+    #[inline(always)]
+    pub unsafe fn store64<T>(p: *mut T, v: V) {
+        v128_store64_lane::<0>(v, p as *mut u64)
     }
     #[inline(always)]
     pub unsafe fn adds16(a: V, b: V) -> V {
@@ -1023,6 +1312,18 @@ mod arch {
     #[inline(always)]
     pub unsafe fn store<T>(p: *mut T, v: V) {
         vst1q_u8(p as *mut u8, v)
+    }
+    /// 16 four-bit codes (bytes <= 15) to 8 bytes in the low half, byte k = code 2k | code 2k+1 << 4.
+    #[inline(always)]
+    pub unsafe fn nibs(v: V) -> V {
+        let w = vreinterpretq_u16_u8(v);
+        let n = vmovn_u16(vsraq_n_u16::<4>(w, w));
+        vcombine_u8(n, n)
+    }
+    /// The low 8 bytes of `v`.
+    #[inline(always)]
+    pub unsafe fn store64<T>(p: *mut T, v: V) {
+        vst1_u8(p as *mut u8, vget_low_u8(v))
     }
     #[inline(always)]
     pub unsafe fn adds16(a: V, b: V) -> V {
@@ -1405,6 +1706,80 @@ mod kernel {
         check_fence: bool,
         sc: &mut XdropScratch,
     ) -> Option<XdropResult> {
+        if !TB || sc.x_nib {
+            align_body_rows::<TB, TB>(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        } else {
+            align_body_bytes(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        }
+    }
+
+    // No NCBI counterpart: the traceback of `align_body` with one byte per cell (`LOSAT_X_DPNIBBLE=0`). Off
+    // x86_64 it is a function of its own, so that the default entry keeps one traceback body.
+    #[cfg_attr(target_arch = "x86_64", inline(always))]
+    #[cfg_attr(not(target_arch = "x86_64"), inline(never))]
+    unsafe fn align_body_bytes(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
+        align_body_rows::<true, false>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
+    }
+
+    // No NCBI counterpart: the kernel of `align_body` for one trace layout (`NIB`: four-bit codes,
+    // `LOSAT_X_DPNIBBLE`).
+    #[inline(always)]
+    unsafe fn align_body_rows<const TB: bool, const NIB: bool>(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
         sc.ops.clear();
         if len1 == 0 || len2 == 0 {
             return Some(XdropResult {
@@ -1460,7 +1835,7 @@ mod kernel {
         }
         sc.dirty = b_size;
         if TB {
-            sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
+            sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
             sc.rows.push((0, 0, b_size as u32));
         }
 
@@ -1476,9 +1851,9 @@ mod kernel {
             kcross: load(core::hint::black_box(&KCROSS).as_ptr()),
             kb7: load(core::hint::black_box(&KB7).as_ptr()),
             xv: splat16(x as i16),
-            c3: splat16(SCRIPT_SUB as i16),
-            c10: splat16(SCRIPT_EXTEND_GAP_A as i16),
-            c40: splat16(SCRIPT_EXTEND_GAP_B as i16),
+            c3: splat16(const { script_codes(NIB).0 } as i16),
+            c10: splat16(const { script_codes(NIB).1 } as i16),
+            c40: splat16(const { script_codes(NIB).2 } as i16),
         };
         let zero_v = zero();
         let static_tabs: Option<*const u8> = match scores {
@@ -1498,12 +1873,26 @@ mod kernel {
         let mut wend = [b_size, 0usize];
         let mut cur = 0usize; // buffer holding the previous row
 
+        // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
+        // `sc.x_sh`
+        let win_at = sc.x_win_at;
+        let mut len2 = len2;
         for a in 1..=len1 {
+            if first >= win_at {
+                let d = (first - 64) & !63;
+                sc.x_shift(d, true);
+                first -= d;
+                b_size -= d;
+                len2 -= d;
+                wend[0] = wend[0].saturating_sub(d);
+                wend[1] = wend[1].saturating_sub(d);
+            }
             sc.ensure(b_size + num_extra + 64);
             if sc.sb_filled < b_size {
                 let to = (b_size + 64).min(len2 + 1);
+                let sh = sc.x_sh;
                 for k in sc.sb_filled..to {
-                    let ch = s.get(k);
+                    let ch = s.get(k + sh);
                     if ch as usize >= ncols {
                         if check_fence && ch == FENCE_SENTRY {
                             if sc.fence_k == usize::MAX {
@@ -1609,7 +1998,9 @@ mod kernel {
                     (d0, sc0) = block::<TB>(&c, &mut rs, hr, hw, e, b0, s_lo, Some(m0));
                     (d1, sc1) = block::<TB>(&c, &mut rs, hr, hw, e, b0 + 8, s_hi, Some(m1));
                 }
-                if TB {
+                if TB && NIB {
+                    store64(tr.add((b0 - first) >> 1), nibs(packus16(sc0, sc1)));
+                } else if TB {
                     store(tr.add(b0 - first), packus16(sc0, sc1));
                 }
                 // 2 bits per lane, 32 bits per iteration
@@ -1647,14 +2038,18 @@ mod kernel {
             wend[wi] = proc_end;
             cur = wi;
             if rs.slow != 0 {
-                b_off = rs.rec_b;
+                b_off = rs.rec_b + sc.x_sh;
                 a_off = a;
                 best_rel = lane0(rs.bestv) - bias;
             }
             if TB {
-                sc.trace.set_len(row_off + proc_end - first);
-                sc.rows
-                    .push((row_off as u32, first as u32, (proc_end - first) as u32));
+                sc.trace
+                    .set_len(row_off + trace_bytes(NIB, proc_end - first));
+                sc.rows.push((
+                    row_off as u32,
+                    (first + sc.x_sh) as u32,
+                    (proc_end - first) as u32,
+                ));
             }
             if fence_row {
                 fence_hit = true;
@@ -1693,7 +2088,7 @@ mod kernel {
         }
 
         let best = base + best_rel;
-        finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+        finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
     }
 
     // No NCBI counterpart: shuffle and mask constants of the 8-bit lanes; they do not change any
@@ -1851,6 +2246,85 @@ mod kernel {
         check_fence: bool,
         sc: &mut XdropScratch,
     ) -> Option<XdropResult> {
+        if !TB || sc.x_nib {
+            align_body8_rows::<TB, TB>(
+                q,
+                s,
+                scores,
+                max_m,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        } else {
+            align_body8_bytes(
+                q,
+                s,
+                scores,
+                max_m,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                check_fence,
+                sc,
+            )
+        }
+    }
+
+    // No NCBI counterpart: the traceback of `align_body8` with one byte per cell (`LOSAT_X_DPNIBBLE=0`). Off
+    // x86_64 it is a function of its own, so that the default entry keeps one traceback body.
+    #[cfg_attr(target_arch = "x86_64", inline(always))]
+    #[cfg_attr(not(target_arch = "x86_64"), inline(never))]
+    unsafe fn align_body8_bytes(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        max_m: i32,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
+        align_body8_rows::<true, false>(
+            q,
+            s,
+            scores,
+            max_m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
+    }
+
+    // No NCBI counterpart: the kernel of `align_body8` for one trace layout (`NIB`: four-bit codes,
+    // `LOSAT_X_DPNIBBLE`).
+    #[inline(always)]
+    unsafe fn align_body8_rows<const TB: bool, const NIB: bool>(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        max_m: i32,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
         sc.ops.clear();
         if len1 == 0 || len2 == 0 {
             return Some(XdropResult {
@@ -1902,7 +2376,7 @@ mod kernel {
         }
         sc.dirty8 = b_size;
         if TB {
-            sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
+            sc.trace.resize(trace_bytes(NIB, b_size), SCRIPT_GAP_IN_A);
             sc.rows.push((0, 0, b_size as u32));
         }
 
@@ -1926,9 +2400,9 @@ mod kernel {
             kcross: load(core::hint::black_box(&KCROSS8).as_ptr()),
             kb15: load(core::hint::black_box(&KB15).as_ptr()),
             xv: splat8(sat(x)),
-            c3: splat8(SCRIPT_SUB as i8),
-            c10: splat8(SCRIPT_EXTEND_GAP_A as i8),
-            c40: splat8(SCRIPT_EXTEND_GAP_B as i8),
+            c3: splat8(const { script_codes(NIB).0 } as i8),
+            c10: splat8(const { script_codes(NIB).1 } as i8),
+            c40: splat8(const { script_codes(NIB).2 } as i8),
         };
         let zero_v = zero();
         let static_tabs: Option<*const u8> = match scores {
@@ -1947,12 +2421,26 @@ mod kernel {
         let mut wend = [b_size, 0usize];
         let mut cur = 0usize;
 
+        // band window (LOSAT_X_DPWINDOW, `XdropScratch::x_shift`): columns below are relative to
+        // `sc.x_sh`
+        let win_at = sc.x_win_at;
+        let mut len2 = len2;
         for a in 1..=len1 {
+            if first >= win_at {
+                let d = (first - 64) & !63;
+                sc.x_shift(d, false);
+                first -= d;
+                b_size -= d;
+                len2 -= d;
+                wend[0] = wend[0].saturating_sub(d);
+                wend[1] = wend[1].saturating_sub(d);
+            }
             sc.ensure(b_size + num_extra + 64);
             if sc.sb_filled < b_size {
                 let to = (b_size + 64).min(len2 + 1);
+                let sh = sc.x_sh;
                 for k in sc.sb_filled..to {
-                    let ch = s.get(k);
+                    let ch = s.get(k + sh);
                     if ch as usize >= ncols {
                         if check_fence && ch == FENCE_SENTRY {
                             if sc.fence_k == usize::MAX {
@@ -2053,7 +2541,9 @@ mod kernel {
                     let m0 = load(LANE_MASK8.as_ptr().add(16 - n));
                     (d0, sc0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv, Some(m0));
                 }
-                if TB {
+                if TB && NIB {
+                    store64(tr.add((b0 - first) >> 1), nibs(sc0));
+                } else if TB {
                     store(tr.add(b0 - first), sc0);
                 }
                 // 1 bit per lane, 16 bits per iteration
@@ -2091,14 +2581,18 @@ mod kernel {
             wend[wi] = proc_end;
             cur = wi;
             if rs.slow != 0 {
-                b_off = rs.rec_b;
+                b_off = rs.rec_b + sc.x_sh;
                 a_off = a;
                 best_rel = lane0_u8(rs.bestv) - bias;
             }
             if TB {
-                sc.trace.set_len(row_off + proc_end - first);
-                sc.rows
-                    .push((row_off as u32, first as u32, (proc_end - first) as u32));
+                sc.trace
+                    .set_len(row_off + trace_bytes(NIB, proc_end - first));
+                sc.rows.push((
+                    row_off as u32,
+                    (first + sc.x_sh) as u32,
+                    (proc_end - first) as u32,
+                ));
             }
             if fence_row {
                 fence_hit = true;
@@ -2134,7 +2628,7 @@ mod kernel {
         }
 
         let best = base + best_rel;
-        finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+        finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:682-727
@@ -2153,7 +2647,7 @@ mod kernel {
     ///
     /// Result assembly and traceback walk shared by both lane widths.
     #[inline(always)]
-    pub(super) unsafe fn finish<const TB: bool>(
+    pub(super) unsafe fn finish<const TB: bool, const NIB: bool>(
         sc: &mut XdropScratch,
         a_off: usize,
         b_off: usize,
@@ -2196,9 +2690,22 @@ mod kernel {
         //     GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
         // }
         // ```
+        // the script bits of the rows: NCBI bytes, or four-bit codes (`NIB`, `LOSAT_X_DPNIBBLE`); the
+        // walk below runs on the codes themselves, so a step reads its cell with no table between
+        let (op_mask, ext_a, ext_b, gap_a, gap_b) = if NIB {
+            (3, NIB_EXTEND_GAP_A, NIB_EXTEND_GAP_B, 0, 2)
+        } else {
+            (
+                SCRIPT_OP_MASK,
+                SCRIPT_EXTEND_GAP_A,
+                SCRIPT_EXTEND_GAP_B,
+                SCRIPT_GAP_IN_A,
+                SCRIPT_GAP_IN_B,
+            )
+        };
         let mut a_index = a_off;
         let mut b_index = b_off;
-        let mut script = SCRIPT_SUB;
+        let mut script = const { script_codes(NIB).0 };
         while a_index > 0 || b_index > 0 {
             if a_index >= sc.rows.len() {
                 break;
@@ -2211,34 +2718,40 @@ mod kernel {
             if b_rel >= len as usize {
                 break;
             }
-            let next = *sc.trace.get_unchecked(off as usize + b_rel);
-            match script & SCRIPT_OP_MASK {
-                x if x == SCRIPT_GAP_IN_A => {
-                    script = next & SCRIPT_OP_MASK;
-                    if next & SCRIPT_EXTEND_GAP_A != 0 {
-                        script = SCRIPT_GAP_IN_A;
+            let next = if NIB {
+                let pair = *sc.trace.get_unchecked(off as usize + (b_rel >> 1));
+                (pair >> ((b_rel & 1) << 2)) & 15
+            } else {
+                *sc.trace.get_unchecked(off as usize + b_rel)
+            };
+            match script & op_mask {
+                x if x == gap_a => {
+                    script = next & op_mask;
+                    if next & ext_a != 0 {
+                        script = gap_a;
                     }
                 }
-                x if x == SCRIPT_GAP_IN_B => {
-                    script = next & SCRIPT_OP_MASK;
-                    if next & SCRIPT_EXTEND_GAP_B != 0 {
-                        script = SCRIPT_GAP_IN_B;
+                x if x == gap_b => {
+                    script = next & op_mask;
+                    if next & ext_b != 0 {
+                        script = gap_b;
                     }
                 }
                 _ => {
-                    script = next & SCRIPT_OP_MASK;
+                    script = next & op_mask;
                 }
             }
-            let op = script & SCRIPT_OP_MASK;
-            if op == SCRIPT_GAP_IN_A {
+            let op = script & op_mask;
+            if op == gap_a {
                 b_index = b_index.saturating_sub(1);
-            } else if op == SCRIPT_GAP_IN_B {
+            } else if op == gap_b {
                 a_index = a_index.saturating_sub(1);
             } else {
                 a_index = a_index.saturating_sub(1);
                 b_index = b_index.saturating_sub(1);
             }
-            push_op(&mut sc.ops, op);
+            // the NCBI operation: a code's operation times SCRIPT_SUB (0, 3, 6)
+            push_op(&mut sc.ops, if NIB { op * SCRIPT_SUB } else { op });
         }
         Some(XdropResult {
             a_offset: a_off,
@@ -2318,8 +2831,10 @@ mod kernel {
 }
 
 /// No NCBI counterpart: whether the vector kernels of this file (`mod kernel`) are compiled for
-/// the target: x86_64, wasm32 built with simd128, and aarch64 (NEON).
-const KERNEL_COMPILED: bool = cfg!(any(
+/// the target: x86_64, wasm32 built with simd128, and aarch64 (NEON). The call sites run the
+/// scalar port of the X-drop where it is false, because `xdrop_align` returns `None` for every
+/// call there and would only build the kernel's tables before the scalar port runs.
+pub(crate) const KERNEL_COMPILED: bool = cfg!(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128"),
     target_arch = "aarch64"
@@ -2330,46 +2845,6 @@ const KERNEL_COMPILED: bool = cfg!(any(
 ///     if (!score_only) {
 ///         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
 /// ```
-/// Reads the LOSAT_X_DPFAST / LOSAT_X_DPSHADOW switches once. The mode only chooses whether the
-/// scalar port of these functions (0), the vector kernels (1), or both with a comparison (2) run.
-///
-/// 0 = scalar only, 1 = SIMD, 2 = SIMD and compare every call with the scalar kernel.
-/// LOSAT_X_DPFAST is on by default (`utils/xswitch.rs`); on a target without a vector kernel
-/// (`KERNEL_COMPILED` false) the mode stays 0, because `xdrop_align` returns `None` for every
-/// call there and mode 1 would only build the kernel's tables before the scalar port runs.
-/// On aarch64 mode 1 also needs LOSAT_X_DPNEON (`neon_on`), which is on by default as well.
-pub(crate) fn mode() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_DPSHADOW").is_some() {
-            2
-        } else if KERNEL_COMPILED && crate::utils::xswitch::on("LOSAT_X_DPFAST") && neon_on() {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-/// No NCBI counterpart: EXPERIMENT (LOSAT_X_DPNEON, a switch of the strict set,
-/// `utils/xswitch.rs`: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set): on
-/// aarch64 the NEON build of the vector kernels runs only while this switch is on; off, aarch64
-/// keeps the scalar port, as before the NEON layer existed. Always true on the other targets.
-/// LOSAT_X_DPSHADOW (mode 2) runs and compares the kernels whatever it says. EXPERIMENT
-/// (LOSAT_X_DPNEON2, off unless set): that variable turns the NEON kernels on as well, with the
-/// two-register kernels of `x_xdrop_neon2.rs` first (`x_extra_switches`).
-fn neon_on() -> bool {
-    #[cfg(target_arch = "aarch64")]
-    {
-        crate::utils::xswitch::on("LOSAT_X_DPNEON") || x_neon2::switch_on()
-    }
-    #[cfg(not(target_arch = "aarch64"))]
-    {
-        true
-    }
-}
-
 /// No NCBI counterpart: checks the CPU features at run time (LOSAT_X_DPNOAVX turns the AVX
 /// level off for timing); it does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
@@ -2426,13 +2901,13 @@ fn fits_8bit(scores: &Scores<'_>, gap_open: i32, gap_extend: i32, x_drop: i32) -
     }
 }
 
-// EXPERIMENT (LOSAT_X_DPAVX2): 256-bit AVX2 kernels (16 x i16, 32 x i8), x86_64 only. A child
+// EXPERIMENT: 256-bit AVX2 kernels (16 x i16, 32 x i8), x86_64 only. A child
 // module, so that it uses this module's private items (lookup tables, scratch, traceback walk)
 // without changing them.
 #[cfg(target_arch = "x86_64")]
 #[path = "x_xdrop_avx2.rs"]
 mod x_avx2;
-// EXPERIMENT (LOSAT_X_DPW128): the 128-bit kernels with the per-row savings of the 256-bit ones,
+// EXPERIMENT: the 128-bit kernels with the per-row savings of the 256-bit ones,
 // over the same `arch` layer (x86_64 SSE4.1 / AVX-128 builds, wasm32 simd128 and aarch64 NEON). A
 // child module like `x_avx2`.
 #[cfg(any(
@@ -2442,7 +2917,7 @@ mod x_avx2;
 ))]
 #[path = "x_xdrop_w128.rs"]
 mod x_w128;
-// EXPERIMENT (LOSAT_X_DPNEON2): the 256-bit kernels of `x_xdrop_avx2.rs` on aarch64 NEON, each
+// LOSAT_X_DPNEON2 (on unless `=0`): the 256-bit kernels of `x_xdrop_avx2.rs` on aarch64 NEON, each
 // vector in two registers. A child module like `x_avx2`.
 #[cfg(target_arch = "aarch64")]
 #[path = "x_xdrop_neon2.rs"]
@@ -2451,13 +2926,13 @@ mod x_neon2;
 #[path = "x_xdrop_capture.rs"]
 mod x_capture;
 
-/// No NCBI counterpart: reads the LOSAT_X_DPAVX2 and LOSAT_X_DPCAPTURE switches once; it does not
+/// No NCBI counterpart: reads the CPU tests and the LOSAT_X_DPCAPTURE switch once; it does not
 /// change any value NCBI computes. Bit 0: try the 256-bit kernels first (set only when the CPU
-/// has AVX2); bit 1: record a sample of the calls. 0 (both off) leaves `xdrop_align` as it was.
-/// Bit 2 (EXPERIMENT, LOSAT_X_DPW128): try the 128-bit kernels of `x_xdrop_w128.rs` after the
+/// has AVX2); bit 1: record a sample of the calls (LOSAT_X_DPCAPTURE).
+/// Bit 2 (EXPERIMENT): try the 128-bit kernels of `x_xdrop_w128.rs` after the
 /// 256-bit ones (set only when the CPU runs the 128-bit kernels; always on wasm32 simd128 and
-/// aarch64). Bit 3 (EXPERIMENT, LOSAT_X_DPNEON2, aarch64 only): try the two-register NEON kernels
-/// of `x_xdrop_neon2.rs` first, where bit 0 stands on x86_64. Bit 4 (LOSAT_X_DPEMASK, with bit 0):
+/// aarch64). Bit 3 (LOSAT_X_DPNEON2, on unless `=0`, aarch64 only): try the two-register NEON
+/// kernels of `x_xdrop_neon2.rs` first, where bit 0 stands on x86_64. Bit 4 (LOSAT_X_DPEMASK, with bit 0):
 /// the 8-bit 256-bit kernel's `EM` instances (no E clearing at the row end, see `x_xdrop_avx2.rs`).
 fn x_extra_switches() -> u8 {
     use std::sync::OnceLock;
@@ -2466,7 +2941,7 @@ fn x_extra_switches() -> u8 {
         let mut on = 0u8;
         #[cfg(target_arch = "x86_64")]
         {
-            if x_avx2::switch_on() {
+            if x_avx2::available() {
                 on |= 1;
                 if x_avx2::emask_on() {
                     on |= 16;
@@ -2485,7 +2960,7 @@ fn x_extra_switches() -> u8 {
             target_arch = "aarch64"
         ))]
         {
-            if x_w128::switch_on() {
+            if x_w128::available() {
                 on |= 4;
             }
         }
@@ -2508,17 +2983,15 @@ fn x_extra_switches() -> u8 {
 ///     if (!score_only) {
 ///         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
 /// ```
-/// EXPERIMENT dispatch point of LOSAT_X_DPAVX2 and LOSAT_X_DPCAPTURE, ahead of the 128-bit
-/// dispatch in `xdrop_align`. With LOSAT_X_DPAVX2 the 256-bit kernel (`x_xdrop_avx2.rs`) runs
+/// EXPERIMENT dispatch point of the 256-bit kernels and LOSAT_X_DPCAPTURE, ahead of the 128-bit
+/// dispatch in `xdrop_align`. On a CPU with AVX2 the 256-bit kernel (`x_xdrop_avx2.rs`) runs
 /// the same recurrence (`tb == false`: `Blast_SemiGappedAlign` score-only and
 /// `s_BlastAlignPackedNucl`; `tb == true`: `ALIGN_EX`) and returns exactly what the 128-bit
 /// kernel returns; when it returns None the 128-bit dispatch runs (and may itself leave the call
-/// to the scalar port). The argument for the equality is at the head of `x_xdrop_avx2.rs`. The
-/// call sites' LOSAT_X_DPSHADOW comparison applies to whatever `xdrop_align` returns, so it
-/// covers the 256-bit kernels as well. LOSAT_X_DPCAPTURE records every Nth call of a thread
-/// (inputs and result); the call itself runs through `xdrop_align` unchanged. With
-/// LOSAT_X_DPW128 the 128-bit kernels of `x_xdrop_w128.rs` are tried next (see the comment at
-/// that step).
+/// to the scalar port). The argument for the equality is at the head of `x_xdrop_avx2.rs`.
+/// LOSAT_X_DPCAPTURE records every Nth call of a thread
+/// (inputs and result); the call itself runs through `xdrop_align` unchanged. The 128-bit
+/// kernels of `x_xdrop_w128.rs` are tried next (see the comment at that step).
 ///
 /// `Some(r)`: the call is answered with `r`; `None`: run the 128-bit dispatch.
 #[inline]
@@ -2593,12 +3066,11 @@ fn x_extra_dispatch(
             }
         }
     }
-    // EXPERIMENT (LOSAT_X_DPNEON2): on aarch64 the two-register NEON kernels of `x_xdrop_neon2.rs`
-    // take the place of the 256-bit kernels: the same recurrence, the same lanes per block and
+    // LOSAT_X_DPNEON2 (on unless `=0`): on aarch64 the two-register NEON kernels of
+    // `x_xdrop_neon2.rs` take the place of the 256-bit kernels: the same recurrence, the same lanes per block and
     // band steps as `x_xdrop_avx2.rs`, so exactly what the 128-bit kernel returns (the argument is
     // at the head of that file). When they return None (a row-gap precondition, or a problem the
-    // 128-bit kernel declines too) the next dispatch runs. The call sites' LOSAT_X_DPSHADOW
-    // comparison covers them as well.
+    // 128-bit kernel declines too) the next dispatch runs.
     #[cfg(target_arch = "aarch64")]
     {
         if on & 8 != 0 {
@@ -2628,14 +3100,13 @@ fn x_extra_dispatch(
     //     if (!score_only) {
     //         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
     // ```
-    // EXPERIMENT (LOSAT_X_DPW128): where the 128-bit dispatch below would run (after the 256-bit
+    // EXPERIMENT: where the 128-bit dispatch below would run (after the 256-bit
     // kernels, which keep priority), the 128-bit kernels of `x_xdrop_w128.rs` run the same
     // recurrence (`tb == false`: `Blast_SemiGappedAlign` score-only and `s_BlastAlignPackedNucl`;
     // `tb == true`: `ALIGN_EX`) with the per-row savings of the 256-bit kernels and return exactly
     // what the 128-bit kernel returns (the argument, item by item, is at the head of that file).
     // When they return None (the row-gap precondition, or a problem the 128-bit kernel declines
-    // too) the 128-bit dispatch runs. The call sites' LOSAT_X_DPSHADOW comparison applies to
-    // whatever `xdrop_align` returns, so it covers these kernels as well.
+    // too) the 128-bit dispatch runs.
     #[cfg(any(
         target_arch = "x86_64",
         all(target_arch = "wasm32", target_feature = "simd128"),
@@ -2680,10 +3151,10 @@ fn x_extra_dispatch(
 ///     if (!score_only) {
 ///         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
 /// ```
-/// Dispatch point of LOSAT_X_DPFAST / LOSAT_X_DPSHADOW for all callers. `tb == false` stands for
+/// Dispatch point of the vector kernels for all callers. `tb == false` stands for
 /// `score_only` (`Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl`), `tb == true` for `ALIGN_EX`.
 /// It picks the AVX or SSE build and the 8-bit or 16-bit lanes. `None` means that the caller must
-/// run the scalar port of the C function; callers do so, and compare when the mode is 2.
+/// run the scalar port of the C function; callers do so.
 ///
 /// Score-only (`tb == false`) or traceback X-drop alignment.
 /// `None` means "not handled here": the caller must run the scalar kernel.
@@ -2700,8 +3171,8 @@ pub(crate) fn xdrop_align(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
-    // EXPERIMENT (LOSAT_X_DPAVX2, LOSAT_X_DPCAPTURE): see `x_extra_dispatch`. With both
-    // switches off this is one read of a value set once, and the code below runs as before.
+    // EXPERIMENT (256-bit and 128-bit kernels, LOSAT_X_DPCAPTURE): see `x_extra_dispatch`. This
+    // is one read of a value set once; when the dispatch returns None the code below runs.
     let on = x_extra_switches();
     if on != 0 {
         if let Some(r) = x_extra_dispatch(
@@ -3207,6 +3678,33 @@ mod tests {
     //     if (!score_only) {
     //         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
     // ```
+    // `Rows` (memory placement only): the first element on a 64-byte boundary at every length
+    // the scratch takes, the contents kept when the rows grow, as `Vec::resize`.
+    #[test]
+    fn rows_start_on_64_byte_boundaries_and_keep_their_values_when_they_grow() {
+        fn check<T: Copy + Default + PartialEq + std::fmt::Debug + From<u8>>() {
+            let mut r = Rows::<T>::new(1024);
+            assert_eq!(r.len(), 1024);
+            assert_eq!(r.as_ptr() as usize % 64, 0);
+            for (i, x) in r.iter_mut().enumerate() {
+                *x = T::from((i % 251) as u8);
+            }
+            for len in [1030usize, 2100, 4096, 9001] {
+                r.resize(len, T::default());
+                assert_eq!(r.len(), len);
+                assert_eq!(r.as_ptr() as usize % 64, 0, "len {len}");
+                assert!(r[..1024]
+                    .iter()
+                    .enumerate()
+                    .all(|(i, &x)| x == T::from((i % 251) as u8)));
+                assert!(r[1024..].iter().all(|&x| x == T::default()));
+            }
+            assert_eq!(Rows::<T>::new(0).len(), 0);
+        }
+        check::<u8>();
+        check::<i16>();
+    }
+
     // Random problems (matrices of 16 and 28 letters, several gap costs and X-drop values,
     // some with a fence sentinel) are run through `reference` and `xdrop_align`. The
     // offsets, score, fence flag, edit script and cell count are compared.
@@ -3220,6 +3718,10 @@ mod tests {
         let mut sc = XdropScratch::new();
         let (mut handled, mut fences, mut ops_total) = (0usize, 0usize, 0usize);
         for case in 0..cases {
+            // band window (LOSAT_X_DPWINDOW): rows moved from band start 128 or 320 on, or never
+            sc.x_win_at = [128, 320, usize::MAX][case % 3];
+            // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
+            sc.x_nib = case % 2 == 0;
             let n = if rng.below(2) == 0 { 16 } else { 28 };
             let scale = if rng.below(3) == 0 { 32 } else { 1 };
             let max_len = if rng.below(5) == 0 { 2500 } else { 300 };
@@ -3304,6 +3806,210 @@ mod tests {
                 "the SIMD kernel handled {handled} of {cases} cases"
             );
             assert!(fences > 0 && ops_total > 0);
+        }
+    }
+
+    // No NCBI counterpart: the band window of the vector kernels (`XdropScratch::x_shift`,
+    // `LOSAT_X_DPWINDOW`). Long problems whose band moves right (both scores of the blastn task
+    // and a protein matrix, score-only and traceback, forward columns) run with the rows moved
+    // from band start 128 on and with every column held: the offsets, score, fence flag, edit
+    // script and cell count are equal, equal to the scalar loops, and the moved rows stay short.
+    #[test]
+    fn band_window_keeps_every_result() {
+        let mut rng = Rng(0x5851_F42D_4C95_7F2D);
+        let (mut on, mut off) = (XdropScratch::new(), XdropScratch::new());
+        (on.x_win_at, off.x_win_at) = (128, usize::MAX);
+        let (mut shifted, mut handled) = (0usize, 0usize);
+        for case in 0..40 {
+            let n = if case % 2 == 0 { 16 } else { 28 };
+            let len = 1500 + rng.below(2500) as usize;
+            let p = random_problem(&mut rng, n, 1, len);
+            let (go, ge, x) = if case % 4 < 2 {
+                (5, 2, 110)
+            } else {
+                (11, 1, 38)
+            };
+            let (len1, len2) = (p.q.len(), p.s.len());
+            if len2 == 0 {
+                continue;
+            }
+            let rows = RowSeq::Bytes {
+                data: &p.q,
+                base: -1,
+                step: 1,
+            };
+            let cols = ColSeq {
+                data: &p.s,
+                base: 0,
+                step: 1,
+                zero_from: len2,
+            };
+            let scores = Scores::Flat { data: &p.m, n };
+            for tb in [false, true] {
+                let expected = reference(&p, len1, len2, go, ge, x, tb, false);
+                let a = xdrop_align(
+                    &rows, &cols, &scores, len1, len2, go, ge, x, tb, tb, &mut on,
+                );
+                let moved = on.x_sh;
+                let rows_len = on.h8a.len().max(on.ha.len());
+                let b = xdrop_align(
+                    &rows, &cols, &scores, len1, len2, go, ge, x, tb, tb, &mut off,
+                );
+                let (Some(a), Some(b)) = (a, b) else {
+                    continue;
+                };
+                handled += 1;
+                assert_eq!(a, b, "case {case} tb={tb} len1={len1} len2={len2}");
+                assert_eq!(on.ops, off.ops, "case {case} tb={tb} traceback");
+                assert_eq!(
+                    (a.a_offset, a.b_offset, a.score, a.fence_hit),
+                    (expected.0, expected.1, expected.2, expected.3),
+                    "case {case} tb={tb} against the scalar loops"
+                );
+                assert_eq!(on.ops, expected.4, "case {case} tb={tb} scalar traceback");
+                if moved > 0 {
+                    shifted += 1;
+                    assert!(
+                        rows_len <= 2048,
+                        "case {case}: rows of {rows_len} lanes after moving {moved} columns"
+                    );
+                }
+            }
+        }
+        // every vector kernel moves its rows, the NEON2 ones (LOSAT_X_DPNEON2) too
+        if cfg!(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128"),
+            target_arch = "aarch64"
+        )) {
+            assert!(
+                handled > 40 && shifted > 20,
+                "handled {handled}, moved {shifted}"
+            );
+        }
+    }
+
+    // No NCBI counterpart: the traceback rows at four bits per cell (`LOSAT_X_DPNIBBLE`). Long
+    // tracebacks (both scores of the blastn task and a protein matrix, 8-bit and 16-bit lanes) run
+    // with four-bit codes and with one byte per cell: the offsets, score, fence flag, edit script
+    // and cell count are equal, equal to the scalar loops; the rows have the same bands and each
+    // takes half its cells' bytes, rounded up.
+    #[test]
+    fn nibble_trace_keeps_every_result() {
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let (mut on, mut off) = (XdropScratch::new(), XdropScratch::new());
+        (on.x_nib, off.x_nib) = (true, false);
+        let mut handled = 0usize;
+        for case in 0..40 {
+            let n = if case % 2 == 0 { 16 } else { 28 };
+            // scale 32 leaves the 8-bit lanes (16-bit kernels)
+            let scale = if case % 3 == 2 { 32 } else { 1 };
+            let len = 1500 + rng.below(2500) as usize;
+            let p = random_problem(&mut rng, n, scale, len);
+            let (go, ge, x) = if case % 4 < 2 {
+                (5 * scale, 2 * scale, 110 * scale)
+            } else {
+                (11 * scale, scale, 38 * scale)
+            };
+            let (len1, len2) = (p.q.len(), p.s.len());
+            if len2 == 0 {
+                continue;
+            }
+            let rows = RowSeq::Bytes {
+                data: &p.q,
+                base: -1,
+                step: 1,
+            };
+            let cols = ColSeq {
+                data: &p.s,
+                base: 0,
+                step: 1,
+                zero_from: len2,
+            };
+            let scores = Scores::Flat { data: &p.m, n };
+            let expected = reference(&p, len1, len2, go, ge, x, true, false);
+            let a = xdrop_align(
+                &rows, &cols, &scores, len1, len2, go, ge, x, true, true, &mut on,
+            );
+            let b = xdrop_align(
+                &rows, &cols, &scores, len1, len2, go, ge, x, true, true, &mut off,
+            );
+            assert_eq!(a.is_some(), b.is_some(), "case {case}: one layout declined");
+            let (Some(a), Some(b)) = (a, b) else {
+                continue;
+            };
+            handled += 1;
+            assert_eq!(a, b, "case {case} len1={len1} len2={len2}");
+            assert_eq!(on.ops, off.ops, "case {case} traceback");
+            assert_eq!(
+                (a.a_offset, a.b_offset, a.score, a.fence_hit),
+                (expected.0, expected.1, expected.2, expected.3),
+                "case {case} against the scalar loops"
+            );
+            assert_eq!(on.ops, expected.4, "case {case} scalar traceback");
+            let bands = |r: &[(u32, u32, u32)]| r.iter().map(|x| (x.1, x.2)).collect::<Vec<_>>();
+            assert_eq!(bands(&on.rows), bands(&off.rows), "case {case} rows");
+            for w in on.rows.windows(2) {
+                assert_eq!(w[1].0 - w[0].0, (w[0].2 + 1) / 2, "case {case} row bytes");
+            }
+            assert_eq!(
+                off.trace.len(),
+                off.rows.iter().map(|r| r.2 as usize).sum::<usize>()
+            );
+            assert_eq!(
+                on.trace.len(),
+                on.rows
+                    .iter()
+                    .map(|r| (r.2 as usize + 1) / 2)
+                    .sum::<usize>(),
+                "case {case} trace bytes"
+            );
+        }
+        if cfg!(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128"),
+            target_arch = "aarch64"
+        )) {
+            assert!(handled > 30, "handled {handled}");
+        }
+    }
+
+    // No NCBI counterpart: `nibs` of the `arch` layer (`LOSAT_X_DPNIBBLE`) against its definition
+    // on random codes: byte k of the low half = code 2k | code 2k+1 << 4.
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn nibs_pairs_adjacent_codes() {
+        // the x86_64 `arch` layer runs inside the kernels' SSSE3 / SSE4.1 entries (`x86_entry!`)
+        #[cfg(target_arch = "x86_64")]
+        if !is_x86_feature_detected!("ssse3") {
+            return;
+        }
+        let mut rng = Rng(0x0123_4567_89AB_CDEF);
+        for _ in 0..1000 {
+            let mut v = [0u8; 16];
+            for b in v.iter_mut() {
+                *b = rng.below(16) as u8;
+            }
+            let mut out = [0xAAu8; 16];
+            // SAFETY: SSSE3 was detected above (x86_64); simd128 and NEON are compile-time features
+            // of the wasm32 and aarch64 builds; the pointers cover 16 bytes.
+            unsafe {
+                super::arch::store64(
+                    out.as_mut_ptr(),
+                    super::arch::nibs(super::arch::load(v.as_ptr())),
+                );
+            }
+            for k in 0..8 {
+                assert_eq!(out[k], v[2 * k] | v[2 * k + 1] << 4, "byte {k} of {v:?}");
+            }
+            assert!(
+                out[8..].iter().all(|&b| b == 0xAA),
+                "store64 wrote past 8 bytes"
+            );
         }
     }
 }

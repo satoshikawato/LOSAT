@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_RPTSTREAM, shadow LOSAT_X_RPTSTREAMSHADOW): blastn writes the reports of
+//! EXPERIMENT (LOSAT_X_RPTSTREAM): blastn writes the reports of
 //! each query batch when the batch loop of `run_in_pool` takes the batch, and drops its final hit
 //! lists, as NCBI prints each batch's result sets in its batch loop; without the switch the loop
 //! keeps the final lists of every batch and writes all reports after the loop.
@@ -94,6 +94,15 @@
 //! them); `-verbose` and the debug output (`x_debug_output`, the list LOSAT_X_QBATCHPAR uses); and
 //! the refusals above. The command line (`-out` file or standard output) and ABI v1 are streamed.
 //!
+//! Outfmt 17 (SAM) streams also where a stored title or ambiguity data of the database could be
+//! refused in a later batch (`Off::Titles`, `Off::Ambiguity`; `Ready::sam_despite`): the document
+//! is written only by `SamDocument::finish`, which no refusal of LOSAT's follows, and a SAM report
+//! call writes nothing to standard error (`writes_query_warnings`), so a refusal in a later batch
+//! still finds nothing written, as in the one call after the loop.
+//! `finish_sam` at NCBI's five error sites writes the document of the batches before as in the off
+//! path. Memory: the records of the batches before are rendered text, and each batch's lists are
+//! dropped, as for any streamed search.
+//!
 //! Memory: a batch's lists, flags, masks, Karlin-Altschul blocks and search spaces are dropped
 //! after its write, and so are its queries' warnings. Kept for the whole search, as without the
 //! switch: one (empty) warnings slot per query, and with `-db` the stored title of every distinct
@@ -107,20 +116,12 @@
 //! build at once, then ends it after the reports of the batches taken so far, possibly in the
 //! middle of one (what its buffered writer had flushed).
 //!
-//! The shadow (`LOSAT_X_RPTSTREAMSHADOW`, implies the switch) keeps the final lists and values of
-//! every batch as the off path does, copies every byte that the batch writes send to each format
-//! and to standard error, and at the end (and on the error paths that write the reports of the
-//! batches before, and on LOSAT's errors of a batch, where the off path writes none) writes the
-//! reports the off path's way into memory and compares the bytes: on a difference it prints
-//! `[X_SHADOW] RPTSTREAM ... DIFFERENT` and panics; at the end of the search it prints
-//! `[X_SHADOW] RPTSTREAM batches= bytes= checks= off= identical` (batches: the batches whose
-//! reports were written by the loop; bytes: the bytes compared; checks: the comparisons; off: why
-//! the switch did not act, `none` when it did). With `LOSAT_X_STATS` and the switch,
-//! `[X_STATS] RPTSTREAM batches= queries= off= one_batch= check_s=` (`one_batch`: 1 when the
-//! checks were skipped for a search of one batch; `check_s`: the seconds of `check`, the `-db`
-//! pass included).
+//! With `LOSAT_X_STATS` and the switch,
+//! `[X_STATS] RPTSTREAM batches= queries= off= one_batch= check_s=` (batches: the batches whose
+//! reports were written by the loop; off: why the switch did not act, `none` when it did;
+//! `one_batch`: 1 when the checks were skipped for a search of one batch; `check_s`: the seconds of
+//! `check`, the `-db` pass included).
 
-use std::io::{self, Write};
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
@@ -129,6 +130,7 @@ use anyhow::Result;
 use crate::api::local_blast::{FormatOutput, OutputSink, ReportOutputs};
 use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
 use crate::config::NuclScoringSpec;
+use crate::report::sam::SamDocument;
 use crate::stats::NuclValues;
 use crate::utils::dust::MaskedInterval;
 use crate::utils::threading::SearchPool;
@@ -138,34 +140,20 @@ use super::{
     BlastnOutputFormat, QueryBatching, SubjectLetters, SubjectRanges, SubjectSource,
 };
 
-// No NCBI counterpart: reads the switches once (LOSAT_X_RPTSTREAM is a strict-set switch since
-// 2026-10-17: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; the shadow, off
-// unless set to any value, implies the switch). They choose when LOSAT writes the same reports.
-/// 0 = off, 1 = LOSAT_X_RPTSTREAM, 2 = LOSAT_X_RPTSTREAMSHADOW.
-fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_RPTSTREAMSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_RPTSTREAM") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-/// Whether the switch (or its shadow) is set: the reports may be written batch by batch, so a
-/// batch's query records need not outlive the batch (LOSAT_X_QSTREAM reads them per batch only
-/// then, `x_query_stream`).
+// No NCBI counterpart: reads the switch once (LOSAT_X_RPTSTREAM is a strict-set switch since
+// 2026-10-17: on unless it is `0`). It chooses when LOSAT writes the same reports.
+/// Whether the switch is on: the reports may be written batch by batch, so a batch's query
+/// records need not outlive the batch (LOSAT_X_QSTREAM reads them per batch only then,
+/// `x_query_stream`).
 pub(super) fn switch_on() -> bool {
-    mode() != 0
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_RPTSTREAM"))
 }
 
 /// Why the reports of a search are written after its batch loop (`Stream::start`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Off {
-    /// Neither switch is set.
+    /// The switch is off (`LOSAT_X_RPTSTREAM=0`).
     NotSet,
     /// Hit records, a format observer, a file sink, or two or more formats (`ReportOutputs` other
     /// than one format of the command line's kind).
@@ -183,9 +171,11 @@ pub(super) enum Off {
     SearchSpace,
     /// A subject of the set whose tabular id LOSAT refuses.
     SubjectIds,
-    /// A database whose definition lines do not all read as the reports read them.
+    /// A database whose definition lines do not all read as the reports read them (outfmt 17
+    /// streams all the same).
     Titles,
-    /// A database sequence whose ambiguity data the traceback cannot decode.
+    /// A database sequence whose ambiguity data the traceback cannot decode (outfmt 17 streams
+    /// all the same).
     Ambiguity,
 }
 
@@ -217,22 +207,14 @@ pub(super) struct SubjectCache {
 }
 
 /// What the report calls of a search wrote before a call (`write_reports`): the number of
-/// queries whose reports were written, and the subject values made once. The default is the
-/// off path's single call.
-#[derive(Clone, Copy, Default)]
+/// queries whose reports were written, the subject values made once, and the SAM document that
+/// the calls add to (outfmt 17 writes its document at the end: `SamDocument`). The default is
+/// the off path's single call.
+#[derive(Default)]
 pub(super) struct Written<'a> {
     pub(super) queries: usize,
     pub(super) subjects: Option<&'a SubjectCache>,
-}
-
-/// The bytes that the batch writes sent to each format and to standard error, and the
-/// comparisons made (the shadow).
-struct Shadow {
-    outfmts: Vec<String>,
-    formats: Vec<Vec<u8>>,
-    diagnostics: Vec<u8>,
-    checks: u64,
-    compared: u64,
+    pub(super) sam: Option<&'a mut SamDocument>,
 }
 
 /// What `check` found where the switch acts: the subject values made once (a subject set of a
@@ -240,14 +222,22 @@ struct Shadow {
 struct Ready {
     cache: Option<SubjectCache>,
     one_batch: bool,
+    /// Outfmt 17 streams although the stored data of a later batch could be refused by LOSAT
+    /// (`Off::Titles` or `Off::Ambiguity`; the module doc has the reason).
+    sam_despite: Option<Off>,
 }
 
-/// The streaming of one search's reports: whether it acts (`off`), what it has written, and the
-/// shadow's copies. Its drop prints the summary lines.
+/// The streaming of one search's reports: whether it acts (`off`) and what it has written. Its
+/// drop prints the summary line.
 pub(super) struct Stream {
     off: Option<Off>,
     cache: Option<SubjectCache>,
-    shadow: Option<Shadow>,
+    /// The SAM document of the run (outfmt 17 joins the streaming: its records are held as
+    /// rendered bytes until the last call, or an NCBI error, writes it).
+    sam: Option<SamDocument>,
+    /// Why the stored data of the database could be refused in a later batch, where outfmt 17
+    /// streams all the same (`Ready::sam_despite`).
+    sam_despite: Option<Off>,
     batches: u64,
     queries: usize,
     one_batch: bool,
@@ -272,7 +262,7 @@ impl Stream {
     ) -> Self {
         let started = std::time::Instant::now();
         let checked = check(
-            mode(),
+            switch_on(),
             args,
             outputs,
             output_formats,
@@ -284,25 +274,29 @@ impl Stream {
             pool,
         );
         let check_seconds = started.elapsed().as_secs_f64();
-        let (off, cache, one_batch) = match checked {
-            Ok(Ready { cache, one_batch }) => (None, cache, one_batch),
-            Err(off) => (Some(off), None, false),
+        let (off, cache, one_batch, sam_despite) = match checked {
+            Ok(Ready {
+                cache,
+                one_batch,
+                sam_despite,
+            }) => (None, cache, one_batch, sam_despite),
+            Err(off) => (Some(off), None, false, None),
         };
-        let shadow = (mode() == 2 && off.is_none()).then(|| Shadow {
-            outfmts: outputs
-                .formats
-                .iter()
-                .map(|format| format.outfmt.to_string())
-                .collect(),
-            formats: vec![Vec::new(); outputs.formats.len()],
-            diagnostics: Vec::new(),
-            checks: 0,
-            compared: 0,
-        });
+        if switch_on() {
+            crate::utils::xreach::x_reach!("LOSAT_X_RPTSTREAM", off.is_none());
+        }
+        // NCBI writes the document when its formatter is destroyed, whatever the number of
+        // batches (`CBlast_SAM_Formatter`): the stream holds it for the calls.
+        let sam = output_formats
+            .iter()
+            .find_map(|format| format.sam_spec())
+            .filter(|_| off.is_none())
+            .map(|spec| sam_document(args, spec));
         Stream {
             off,
             cache,
-            shadow,
+            sam,
+            sam_despite,
             batches: 0,
             queries: 0,
             one_batch,
@@ -315,13 +309,8 @@ impl Stream {
         self.off.is_none()
     }
 
-    /// Whether the off path's values are kept for the shadow's comparison.
-    pub(super) fn shadow(&self) -> bool {
-        self.shadow.is_some()
-    }
-
     /// Writes the reports of one batch of `queries` queries (or, with `epilog`, the epilogs) to
-    /// `outputs` with `write`, which gets what earlier calls wrote. The shadow copies the bytes.
+    /// `outputs` with `write`, which gets what earlier calls wrote.
     pub(super) fn write<F>(
         &mut self,
         outputs: &mut ReportOutputs<'_>,
@@ -336,41 +325,9 @@ impl Stream {
         let written = Written {
             queries: self.queries,
             subjects: self.cache.as_ref(),
+            sam: self.sam.as_mut(),
         };
-        let result = match self.shadow.as_mut() {
-            None => write(outputs, written),
-            Some(shadow) => {
-                let outfmts: Vec<&str> =
-                    outputs.formats.iter().map(|format| format.outfmt).collect();
-                let mut tees: Vec<SinkTee<'_, '_>> = outputs
-                    .formats
-                    .iter_mut()
-                    .zip(shadow.formats.iter_mut())
-                    .map(|(format, copy)| SinkTee {
-                        sink: &mut format.sink,
-                        copy,
-                    })
-                    .collect();
-                let mut diagnostics = WriteTee {
-                    inner: &mut *outputs.diagnostics,
-                    copy: &mut shadow.diagnostics,
-                };
-                let mut teed = ReportOutputs {
-                    formats: tees
-                        .iter_mut()
-                        .zip(outfmts)
-                        .map(|(tee, outfmt)| FormatOutput {
-                            outfmt,
-                            sink: OutputSink::Writer(tee),
-                        })
-                        .collect(),
-                    diagnostics: &mut diagnostics,
-                    hits: None,
-                    observer: None,
-                };
-                write(&mut teed, written)
-            }
-        };
+        let result = write(outputs, written);
         if !epilog {
             self.batches += 1;
         }
@@ -378,104 +335,55 @@ impl Stream {
         result
     }
 
-    /// The shadow: writes with `write_old` (the off path's call) into memory and compares the
-    /// bytes with those that the batch writes sent (`what` names the place in a difference).
-    /// Without the shadow nothing runs.
-    pub(super) fn check<F>(&mut self, what: &str, write_old: F)
-    where
-        F: FnOnce(&mut ReportOutputs<'_>) -> Result<()>,
-    {
-        let Some(shadow) = self.shadow.as_mut() else {
-            return;
-        };
-        let mut formats: Vec<Vec<u8>> = vec![Vec::new(); shadow.outfmts.len()];
-        let mut diagnostics = Vec::new();
-        let result = {
-            let mut memory = ReportOutputs {
-                formats: shadow
-                    .outfmts
-                    .iter()
-                    .zip(formats.iter_mut())
-                    .map(|(outfmt, bytes)| FormatOutput {
-                        outfmt,
-                        sink: OutputSink::Writer(bytes),
-                    })
-                    .collect(),
-                diagnostics: &mut diagnostics,
-                hits: None,
-                observer: None,
-            };
-            write_old(&mut memory)
-        };
-        shadow.checks += 1;
-        let difference = match result {
-            Err(error) => Some(format!(
-                "the reports written after the loop fail: {error:#}"
-            )),
-            Ok(()) => formats
-                .iter()
-                .zip(&shadow.formats)
-                .enumerate()
-                .find_map(|(index, (old, streamed))| {
-                    first_difference(old, streamed).map(|at| {
-                        format!(
-                            "format {index} ({}) differs at byte {at} of {} / {}",
-                            shadow.outfmts[index],
-                            old.len(),
-                            streamed.len()
-                        )
-                    })
-                })
-                .or_else(|| {
-                    first_difference(&diagnostics, &shadow.diagnostics).map(|at| {
-                        format!(
-                            "the standard error differs at byte {at} of {} / {}",
-                            diagnostics.len(),
-                            shadow.diagnostics.len()
-                        )
-                    })
-                }),
-        };
-        if let Some(difference) = difference {
-            eprintln!(
-                "[X_SHADOW] RPTSTREAM batches={} checks={} DIFFERENT ({what}: {difference})",
-                self.batches, shadow.checks
-            );
-            panic!("LOSAT_X_RPTSTREAMSHADOW: the reports written batch by batch differ from those written after the loop");
+    /// Writes the SAM document of the batches taken so far, if it holds a record: NCBI's
+    /// formatter is destroyed when an error leaves the `try` block that holds it, so the
+    /// records of the batches before the error are written before the error's lines
+    /// (`blastn_app.cpp:186-327`). The off path does the same in its `write_before_failed_batch`
+    /// call.
+    pub(super) fn finish_sam(&mut self, outputs: &mut ReportOutputs<'_>) -> Result<()> {
+        if !self.sam.as_ref().is_some_and(SamDocument::has_records) {
+            return Ok(());
         }
-        shadow.compared +=
-            formats.iter().map(|bytes| bytes.len() as u64).sum::<u64>() + diagnostics.len() as u64;
+        self.write(outputs, 0, true, |outputs, written| {
+            let document = written.sam.expect("the stream holds a SAM document");
+            // One format: more are never streamed (`Off::Outputs`).
+            let mut writer = outputs.formats[0].sink.open()?;
+            document.finish(&mut writer)?;
+            writer.flush()?;
+            Ok(())
+        })
     }
 }
 
-// No NCBI counterpart: the summary lines of the switch (with LOSAT_X_STATS) and of the shadow;
-// they print counters and change no value NCBI computes.
+// No NCBI counterpart: the summary line of the switch (with LOSAT_X_STATS); it prints counters and
+// changes no value NCBI computes.
 impl Drop for Stream {
     fn drop(&mut self) {
-        if mode() == 0 {
+        if !switch_on() {
             return;
         }
         let off = self.off.map_or("none", Off::name);
         if std::env::var_os("LOSAT_X_STATS").is_some() {
             eprintln!(
-                "[X_STATS] RPTSTREAM batches={} queries={} off={off} one_batch={} check_s={:.4}",
+                "[X_STATS] RPTSTREAM batches={} queries={} off={off} one_batch={} check_s={:.4} sam_despite={}",
                 self.batches,
                 self.queries,
                 u8::from(self.one_batch),
-                self.check_seconds
-            );
-        }
-        if mode() == 2 {
-            let (checks, compared) = self
-                .shadow
-                .as_ref()
-                .map_or((0, 0), |shadow| (shadow.checks, shadow.compared));
-            eprintln!(
-                "[X_SHADOW] RPTSTREAM batches={} bytes={compared} checks={checks} off={off} identical",
-                self.batches
+                self.check_seconds,
+                self.sam_despite.map_or("none", Off::name)
             );
         }
     }
+}
+
+/// The SAM document of an outfmt 17 report with `spec`: `args` give the command line that its
+/// `@PG` line shows (`BlastnArgs::command_line`).
+pub(super) fn sam_document(args: &BlastnArgs, spec: crate::report::sam::SamSpec) -> SamDocument {
+    SamDocument::new(
+        spec,
+        crate::algorithm::blastn::hsp::NCBI_BLASTN_VERSION,
+        args.command_line.clone(),
+    )
 }
 
 /// The query input of the searched queries `searched` (a batch's), numbered from 0 as the batch's
@@ -496,74 +404,11 @@ pub(super) fn batch_input(query_input: &QueryInput, searched: Range<usize>) -> Q
     }
 }
 
-/// The first byte at which `a` and `b` differ (or the shorter one's length), `None` if equal.
-fn first_difference(a: &[u8], b: &[u8]) -> Option<usize> {
-    if a == b {
-        return None;
-    }
-    Some(
-        a.iter()
-            .zip(b)
-            .position(|(left, right)| left != right)
-            .unwrap_or(a.len().min(b.len())),
-    )
-}
-
-/// A format's sink during a batch write of the shadow: the bytes go to the sink and are copied.
-/// A sink of the command line or of ABI v1 is a writer (the file sink is not streamed, `check`);
-/// `Stdout` is written unbuffered, the same bytes in the same order.
-struct SinkTee<'s, 'r> {
-    sink: &'s mut OutputSink<'r>,
-    copy: &'s mut Vec<u8>,
-}
-
-impl Write for SinkTee<'_, '_> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let written = match self.sink {
-            OutputSink::Writer(writer) => writer.write(buf)?,
-            OutputSink::Stdout => io::stdout().write(buf)?,
-            OutputSink::File(_) => {
-                return Err(io::Error::other(
-                    "LOSAT_X_RPTSTREAM does not stream a file sink",
-                ))
-            }
-        };
-        self.copy.extend_from_slice(&buf[..written]);
-        Ok(written)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        match self.sink {
-            OutputSink::Writer(writer) => writer.flush(),
-            OutputSink::Stdout => io::stdout().flush(),
-            OutputSink::File(_) => Ok(()),
-        }
-    }
-}
-
-/// Standard error during a batch write of the shadow: the bytes go to it and are copied.
-struct WriteTee<'s> {
-    inner: &'s mut (dyn Write + Send),
-    copy: &'s mut Vec<u8>,
-}
-
-impl Write for WriteTee<'_> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let written = self.inner.write(buf)?;
-        self.copy.extend_from_slice(&buf[..written]);
-        Ok(written)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.inner.flush()
-    }
-}
-
 /// Why the switch does not act for this search, or what it needs where it does (`Stream::start`;
-/// the module doc has the reasons). `mode` is `mode()` (a parameter for the unit tests).
+/// the module doc has the reasons). `on` is `switch_on()` (a parameter for the unit tests).
 #[allow(clippy::too_many_arguments)]
 fn check(
-    mode: u8,
+    on: bool,
     args: &BlastnArgs,
     outputs: &ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
@@ -574,7 +419,7 @@ fn check(
     batching: QueryBatching,
     pool: &SearchPool<'_>,
 ) -> std::result::Result<Ready, Off> {
-    if mode == 0 {
+    if !on {
         return Err(Off::NotSet);
     }
     if outputs.hits.is_some()
@@ -626,6 +471,7 @@ fn check(
         return Ok(Ready {
             cache: None,
             one_batch: true,
+            sam_despite: None,
         });
     }
     // The scoring of `search_query_batch` (`context_blocks`: `NuclValues::gapped` fails exactly
@@ -695,13 +541,31 @@ fn check(
             Ok(Ready {
                 cache: Some(SubjectCache { ids, titles, masks }),
                 one_batch: false,
+                sam_despite: None,
             })
         }
         SubjectSource::Database(db) => match database::x_streaming_refusal(db, pool) {
+            // Outfmt 17 writes no byte before its end (`SamDocument::finish`, which no refusal of
+            // LOSAT's follows) and nothing to standard error with its report calls (a SAM format
+            // writes no query warnings, `writes_query_warnings`), so a
+            // refusal in a later batch (a stored title, ambiguity data) still finds nothing
+            // written, as in the one call after the loop: the stream acts.
+            Some(off @ (Off::Titles | Off::Ambiguity))
+                if output_formats
+                    .iter()
+                    .any(|format| format.sam_spec().is_some()) =>
+            {
+                Ok(Ready {
+                    cache: None,
+                    one_batch: false,
+                    sam_despite: Some(off),
+                })
+            }
             Some(off) => Err(off),
             None => Ok(Ready {
                 cache: None,
                 one_batch: false,
+                sam_despite: None,
             }),
         },
     }
@@ -751,47 +615,6 @@ mod tests {
         assert_eq!(batch.ordinals, [1, 2]);
     }
 
-    // EXPERIMENT (LOSAT_X_RPTSTREAMSHADOW): the shadow's tees send every byte on and copy it.
-    #[test]
-    fn the_tees_send_and_copy_every_byte() {
-        let mut target: Vec<u8> = Vec::new();
-        let mut copy = Vec::new();
-        {
-            let mut sink = OutputSink::Writer(&mut target);
-            let mut tee = SinkTee {
-                sink: &mut sink,
-                copy: &mut copy,
-            };
-            tee.write_all(b"row 1\n").unwrap();
-            write!(tee, "row {}\n", 2).unwrap();
-            tee.flush().unwrap();
-        }
-        assert_eq!(target, b"row 1\nrow 2\n");
-        assert_eq!(copy, target);
-        let mut errors: Vec<u8> = Vec::new();
-        let mut copy = Vec::new();
-        {
-            let mut tee = WriteTee {
-                inner: &mut errors,
-                copy: &mut copy,
-            };
-            tee.write_all(b"Warning: one\n").unwrap();
-        }
-        assert_eq!(
-            (errors.as_slice(), copy.as_slice()),
-            (&b"Warning: one\n"[..], &b"Warning: one\n"[..])
-        );
-        let path = std::path::Path::new("never-created");
-        let mut sink = OutputSink::File(path);
-        let mut copy = Vec::new();
-        let mut tee = SinkTee {
-            sink: &mut sink,
-            copy: &mut copy,
-        };
-        assert!(tee.write_all(b"x").is_err(), "a file sink is not streamed");
-        assert!(!path.exists());
-    }
-
     /// The arguments of a `blastn` command line (`extra` after `-query q -subject s`).
     fn args(extra: &[&str]) -> BlastnArgs {
         use clap::Parser;
@@ -817,13 +640,14 @@ mod tests {
             title: title.to_vec(),
             sequence: b"ACGTTGCA".iter().copied().cycle().take(letters).collect(),
             warnings: Vec::new(),
+            source: Default::default(),
         }
     }
 
     /// `check` for queries of 1,000 letters each (`queries`), first batches of `batch_size`
     /// letters, the subjects `subjects` and the outputs `outputs`.
     fn checked(
-        mode: u8,
+        on: bool,
         extra: &[&str],
         subjects: &[crate::blastinput::fasta_reader::FastaRecord],
         queries: usize,
@@ -833,7 +657,7 @@ mod tests {
     ) -> std::result::Result<Ready, Off> {
         checked_as(
             &[BlastnOutputFormat::Tabular],
-            mode,
+            on,
             extra,
             subjects,
             queries,
@@ -847,7 +671,7 @@ mod tests {
     #[allow(clippy::too_many_arguments)]
     fn checked_as(
         formats: &[BlastnOutputFormat],
-        mode: u8,
+        on: bool,
         extra: &[&str],
         subjects: &[crate::blastinput::fasta_reader::FastaRecord],
         queries: usize,
@@ -877,7 +701,7 @@ mod tests {
         // A one-thread pool (the `-db` pass is not reached for a subject set).
         let pool = SearchPool::x_serial();
         check(
-            mode,
+            on,
             &args,
             &*outputs,
             formats,
@@ -913,12 +737,12 @@ mod tests {
         let single =
             |sink: &mut Vec<u8>, errors: &mut Vec<u8>| -> std::result::Result<Ready, Off> {
                 let mut outputs = ReportOutputs::single("6", OutputSink::Writer(sink), errors);
-                checked(1, &[], &good, 10, 4000, plain, &mut outputs)
+                checked(true, &[], &good, 10, 4000, plain, &mut outputs)
             };
         // Not set.
         let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors);
         assert_eq!(
-            checked(0, &[], &good, 10, 4000, plain, &mut outputs).err(),
+            checked(false, &[], &good, 10, 4000, plain, &mut outputs).err(),
             Some(Off::NotSet)
         );
         drop(outputs);
@@ -927,7 +751,7 @@ mod tests {
         let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors);
         outputs.hits = Some(&mut on_hits);
         assert_eq!(
-            checked(1, &[], &good, 10, 4000, plain, &mut outputs).err(),
+            checked(true, &[], &good, 10, 4000, plain, &mut outputs).err(),
             Some(Off::Outputs)
         );
         drop(outputs);
@@ -938,14 +762,14 @@ mod tests {
             sink: OutputSink::Writer(&mut two),
         });
         assert_eq!(
-            checked(1, &[], &good, 10, 4000, plain, &mut outputs).err(),
+            checked(true, &[], &good, 10, 4000, plain, &mut outputs).err(),
             Some(Off::Outputs)
         );
         drop(outputs);
         let path = std::path::Path::new("never-created");
         let mut outputs = ReportOutputs::single("6", OutputSink::File(path), &mut errors);
         assert_eq!(
-            checked(1, &[], &good, 10, 4000, plain, &mut outputs).err(),
+            checked(true, &[], &good, 10, 4000, plain, &mut outputs).err(),
             Some(Off::Outputs)
         );
         drop(outputs);
@@ -955,11 +779,11 @@ mod tests {
         assert_eq!(ready.cache.as_ref().map(|cache| cache.ids.len()), Some(2));
         // One batch (20,000 letters): no check, nothing made ahead, even with a refused id.
         let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors);
-        let ready = checked(1, &[], &refused, 10, 20_000, plain, &mut outputs).expect("acts");
+        let ready = checked(true, &[], &refused, 10, 20_000, plain, &mut outputs).expect("acts");
         assert!(ready.one_batch && ready.cache.is_none());
         // Several batches: the refusals that could come after the first batch.
         assert_eq!(
-            checked(1, &[], &refused, 10, 4000, plain, &mut outputs).err(),
+            checked(true, &[], &refused, 10, 4000, plain, &mut outputs).err(),
             Some(Off::SubjectIds)
         );
         let scoring = [
@@ -975,12 +799,12 @@ mod tests {
             "1",
         ];
         assert_eq!(
-            checked(1, &scoring, &good, 10, 4000, plain, &mut outputs).err(),
+            checked(true, &scoring, &good, 10, 4000, plain, &mut outputs).err(),
             Some(Off::Scoring)
         );
         assert_eq!(
             checked(
-                1,
+                true,
                 &["-dbsize", "9000000000000000000"],
                 &good,
                 10,
@@ -993,7 +817,7 @@ mod tests {
         );
         assert_eq!(
             checked(
-                1,
+                true,
                 &[],
                 &good,
                 10,
@@ -1004,8 +828,6 @@ mod tests {
             .err(),
             Some(Off::ChunkSize)
         );
-        // The shadow mode checks the same.
-        assert!(checked(2, &[], &good, 10, 4000, plain, &mut outputs).is_ok());
         // BLAST XML, XML2 and JSON (outfmt 5, 16 and 15) are never streamed, with one batch
         // (20,000 letters) or several.
         for batch_size in [20_000, 4000] {
@@ -1019,18 +841,10 @@ mod tests {
                 )],
             ] {
                 assert_eq!(
-                    checked_as(&xml, 1, &[], &good, 10, batch_size, plain, &mut outputs).err(),
+                    checked_as(&xml, true, &[], &good, 10, batch_size, plain, &mut outputs).err(),
                     Some(Off::Xml)
                 );
             }
         }
-    }
-
-    #[test]
-    fn the_first_difference_is_the_first_unequal_byte_or_the_shorter_length() {
-        assert_eq!(first_difference(b"abc", b"abc"), None);
-        assert_eq!(first_difference(b"abc", b"abd"), Some(2));
-        assert_eq!(first_difference(b"ab", b"abc"), Some(2));
-        assert_eq!(first_difference(b"", b"a"), Some(0));
     }
 }

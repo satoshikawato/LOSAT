@@ -8,7 +8,8 @@ docs/evidence/losat_web_e1a/capture_outputs.py and checks, per case:
 - the frozen expected hash (Gate A, TLOSAN Stage G), with the known mismatches of
   frozen_mismatch_allowlist.json (a stale entry fails);
 the -subject fixtures of outfmt0_manifest.tsv (docs/evidence/losat_web_e2a/check_losat.py: outfmt 0/6/7
-and the 8/9/12 rows sa.* and the 5 rows of BLASTN and BLASTP) of the selected programs at 1 and 4 threads, for BLASTN the frozen NCBI outputs of
+and the 8/9/12 rows sa.* and the 5 rows of BLASTN and BLASTP; its rows of outfmt 13 and 14 run with
+`-out` and compare the master and side files, xinclude_fixtures.py) of the selected programs at 1 and 4 threads, for BLASTN the frozen NCBI outputs of
 blastn_regression_fixtures.py (preliminary hit lists, batches, split, ambiguity,
 lowercase masking) and for TBLASTX those of tblastx_regression_fixtures.py (query
 batches, warnings, hit lists, ambiguity, empty inputs, failed writes); for each
@@ -205,6 +206,34 @@ def run_fasta_input_fixtures(losat: Path, programs: set[str], out: Path, jobs: i
     return failures, seconds
 
 
+# What a build without the `diagnostics` feature writes for a set diagnostic variable (LOSAT/src/utils/xdiag.rs).
+STARTUP_TRACE_NOTICE = ("LOSAT_STARTUP_TRACE is ignored: this losat was built without the diagnostics feature "
+                        "(docs/agents/diagnostics.md, \"Diagnostic build\")\n")
+
+
+def check_startup_trace_notice(losat: Path) -> list[str]:
+    """`losat --version` with LOSAT_STARTUP_TRACE=1 on the DEFAULT release binary: the same stdout as the plain
+    run and the notice line as the only stderr. Every other CI test build is `--all-features`, which reads the
+    variable, so this run is what checks the default side."""
+    base = {key: value for key, value in os.environ.items() if not key.startswith("LOSAT_")}
+    plain = subprocess.run([str(losat), "--version"], capture_output=True, env=base)
+    traced = subprocess.run([str(losat), "--version"], capture_output=True,
+                            env={**base, "LOSAT_STARTUP_TRACE": "1"})
+    failures = []
+    if plain.returncode != 0 or traced.returncode != 0:
+        failures.append(f"`losat --version` exited with {plain.returncode} (plain) and {traced.returncode} "
+                        "(LOSAT_STARTUP_TRACE=1)")
+    if plain.stderr != b"":
+        failures.append(f"`losat --version` wrote to stderr without a diagnostic variable: {plain.stderr!r}")
+    if plain.stdout != traced.stdout:
+        failures.append("LOSAT_STARTUP_TRACE=1 changed the stdout of `losat --version`")
+    if traced.stderr.decode(errors="replace") != STARTUP_TRACE_NOTICE:
+        failures.append("`losat --version` with LOSAT_STARTUP_TRACE=1 did not write exactly the notice of a "
+                        "default build (--losat must be a default build, without --features diagnostics): "
+                        f"stderr {traced.stderr.decode(errors='replace')!r}")
+    return failures
+
+
 def run_fixtures(losat: Path, programs: set[str], out: Path) -> list[str]:
     failures = []
     selected = [program for program in OUTFMT0_PROGRAMS if program in programs]
@@ -288,6 +317,7 @@ def main() -> int:
         summary["cases"] = len(rows)
         failures, allowed = check_rows(rows, read_tsv(BASELINE), Allowlist(), programs, args.all_cases)
         started = time.perf_counter()
+        failures += check_startup_trace_notice(losat)
         failures += run_fixtures(losat, programs, out)
         summary["fixture_seconds"] = round(time.perf_counter() - started, 1)
         fasta_failures, fasta_seconds = run_fasta_input_fixtures(losat, programs, out, args.jobs)

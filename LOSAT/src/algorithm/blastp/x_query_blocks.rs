@@ -65,10 +65,6 @@
 //!   before. The other refusals are those of outfmt 6 above.
 //! - nothing else is written to standard error while a block is searched (only the debug trace and
 //!   `LOSAT_TIMING`'s lines, which each block prints for itself).
-//! The shadow (LOSAT_X_BPQBLOCKFMTSHADOW, implies the switch) keeps a copy of the bytes that the
-//! blocks write to the output and to standard error (`XCopyWriter`), then searches all queries
-//! again, writes their report and warnings into memory and compares both streams
-//! (`x_block_shadow_compare`), for every format the block search takes.
 //!
 //! With `-db` the kernel runs over the database's subjects one after the other on one diagonal
 //! table (`blast_engine/database.rs` `search_blocks`, whose blocks start at the one-thread
@@ -116,9 +112,9 @@
 //! (`x_block_words_fit`, tested before the first block), so that the reference path's refusal,
 //! which comes before any row, is never made in a later block.
 //!
-//! LOSAT_X_BPQBLOCKSA (strict set, `x_bp_qblock_sa`, outfmt 8, 9 and 12) and LOSAT_X_BPQBLOCKXML
+//! LOSAT_X_BPQBLOCKSA (strict set, `x_bp_qblock_sa`, outfmt 8, 9, 11 and 12) and LOSAT_X_BPQBLOCKXML
 //! (strict set, `x_bp_qblock_xml`, outfmt 5) take the other formats of one blastp report; both act
-//! only with `LOSAT_X_BPQBLOCK`, and the shadow implies both:
+//! only with `LOSAT_X_BPQBLOCK`:
 //! - outfmt 8, 9 and 12 (Seq-annot of Seq-aligns as ASN.1 text, BER and JSON): NCBI writes one
 //!   self-contained Seq-annot per query that has alignments, at once, a new object stream for each,
 //!   and writes no prolog and no epilog for them. LOSAT's writer keeps nothing from one query to the
@@ -145,6 +141,75 @@
 //!   only a subject with hits), and with `-db` the definition lines as for outfmt 8
 //!   (`database::x_titles_read_allow_blocks`). Otherwise the search of all queries refuses where
 //!   it does today; the file sink is not created before then.
+//! - outfmt 13 to 16 (LOSAT_X_BPQBLOCKXML2, strict set, `x_bp_qblock_xml2`; BLAST JSON and XML2, single
+//!   stream (15, 16) or side files and a master file (13, 14)):
+//!   NCBI writes one complete document per query (`x_PrintXML2Report`), `PrintProlog` the start of the
+//!   whole document and `PrintEpilog` its end; JSON joins the documents with `,\n`; a `-subject`
+//!   run (`m_IsBl2Seq`) holds each document until the next arrives and writes the last in
+//!   `PrintEpilog`. Nothing else in a document depends on another query: the values are those of
+//!   outfmt 5's records (run values fixed, the query's statistics, messages and masks its own;
+//!   the `searched` flag of the query's batch, a batch property, and blocks are whole batches).
+//!   The framing state that outlives a report (the count of documents written, whether the start
+//!   was written, the held document) moves from block to block (`Xml2Carry`, taken from a block's
+//!   document and put into the next block's, `BlastpReports::x_xml2_carry`); the epilog flag is
+//!   the last block's, as for outfmt 5. The refusals before the first byte are those of outfmt 5
+//!   (the same `x_block_xml_run_allowed` and `x_block_xml_subjects_allowed`, and with `-db`
+//!   `x_titles_read_allow_blocks`) and the taxid and taxonomy database ones of the two formats
+//!   (`database::x_titles_taxids_allow_blocks`: the titles and the taxid decodes in one pass over the
+//!   headers, so every sequence's taxid reads, and then OF5b's `taxdb_may_refuse`, the one
+//!   implementation of "can a lookup of this database be refused?" (DECISIONS 34 and 38): where
+//!   `taxdb.bti` is not found it is `false` at once; else it answers from the smaller side, one pass
+//!   over the taxonomy database or the database's taxids looked up). The taxonomy database's messages on standard error are written at the first `Hit`
+//!   that needs them (`TaxdbNotes`): the run's `TaxdbRun` (the database opened once, the (volume,
+//!   taxid) lookups already made) lives on the `-db` database, so a block writes the messages
+//!   that no block before it wrote, at the `Hit` that first needs them, which is the place in
+//!   the search of all queries.
+//!   Outfmt 13 and 14 write the n-th report to the side file `<base>_<n>.json` / `.xml` next to `-out`
+//!   (`FsSideFiles`) and, in the epilog, the master file on `-out` that lists files `1..=written`.
+//!   The side files and the master are made by the same `Xml2Document` as outfmt 15 and 16, and the
+//!   only state of it that outlives a report (the number `written`, which numbers the next side file
+//!   and ends the master's list, `started`, and the held report of a `-subject` run) is in `Xml2Carry`;
+//!   `FsSideFiles` keeps nothing between calls (`create(n)` truncates `<base>_<n>.ext`, `listed(n)`
+//!   drops the directory, both from `-out`, which is the run's). So the blocks' side files are those of
+//!   the search of all queries, numbered over the run (a held `-subject` report is written as the next
+//!   number when the next report arrives, in the next block), and the last block's epilog writes the
+//!   same master. The refusals before the first byte are those of outfmt 15 and 16 (the report bytes
+//!   are the same); the names of the side files depend on `-out` only, not on the hits. The failures
+//!   are the same in both searches because the reports are written one after the other in query order
+//!   and a report's write is the only place that opens or writes a side file: a side file n that cannot
+//!   be opened stops the run at report n ("Command line argument error: Cannot open output file",
+//!   status 1), and a write error on it ("BLAST failed to write output", status 6, DECISIONS 35), with
+//!   side files `1..n-1` written and the master empty (it is written in the epilog only); nothing else
+//!   reaches standard error between the reports (the taxonomy database's messages come at the `Hit` that
+//!   needs them, in query order; a query's warnings before its report). The input files (queries,
+//!   subjects, lists) are read before the first block, so a side file that has the name of one of
+//!   them does not change what a later block reads.
+//! - outfmt 11 (the BLAST archive, under LOSAT_X_BPQBLOCKSA as outfmt 8, 9 and 12; no new switch.
+//!   `LOSAT_X_BPQBLOCKSA=0` keeps 8, 9, 11 and 12 on the search of all queries): NCBI writes one
+//!   `Blast4-archive` per query batch, straight after the batch's search (`blastp_app.cpp`), and
+//!   no prolog or epilog. A batch's document is made from the batch's own data: its queries'
+//!   Bioseqs, the Seq-aligns of its final hit lists (as outfmt 8), the SEG masks of its queries,
+//!   the blocks and search space of its first query, the `-subject` Bioseqs or the `-db` name
+//!   (fixed inputs), the request's options (fixed inputs) and, as options of the request, the
+//!   `EffectiveSearchSpace` of the batch. Blocks are whole batches (above) and the batches in a
+//!   block are those of the whole input, so every document the block search writes is the one the
+//!   search of all queries writes. The run-level state is the `ArchiveHandle`, one per run and
+//!   shared by the blocks (`ResolvedBlastpArgs::archive` is an `Arc`): it carries (1) the
+//!   `EffectiveSearchSpace` of the last searched batch, which an unsearched batch (every query
+//!   invalid) repeats and which is absent before the first searched one, and (2) the messages
+//!   saved since the last archive (the diagnostics stream is a `DiagTee`; each batch's reader
+//!   messages are written, so saved, just before the batch's document, and the messages an option
+//!   handler or the subject reader wrote before the first batch go to the first document). Both
+//!   are updated by a document in the order the documents are written, which is the order of the
+//!   blocks, so a block sees what the search of all queries has at that batch. The refusals
+//!   before the first byte are those of outfmt 8 (with `-db` the definition lines,
+//!   `database::x_titles_read_allow_blocks`: the archive reads the same Seq-ids) and the titles
+//!   and `-db` name that the archive cannot write (a byte outside `0x20..=0x7E`, `check_titles`),
+//!   which `search_cli` checks for every record before the search starts. The errors that NCBI
+//!   turns into an error archive (`run`) come after the documents of the batches before, from
+//!   the same handle. In a call of several outputs, hit records or an observer
+//!   (LOSAT_X_BPQBLOCKWEB) the plan is refused for 11 as for 15 and 16: the handle's muting and
+//!   messages with several formats were argued for the CLI's shape.
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
 //! ```c++
 //!         if (results.HasAlignments()) {
@@ -170,9 +235,42 @@
 //!         	incremental_struct->m_IterationNum++;
 //! ```
 //!
+//! LOSAT_X_BPQBLOCKWEB (strict set, `x_bp_qblock_web`; acts only with `LOSAT_X_BPQBLOCK`) takes a
+//! `run_local` call with several outputs, the hit records or an observer (ABI v2 of the Web build
+//! asks for outfmt 0, 6 and 7, the records and the byte ranges of each HSP in each output), when
+//! every output of several is a writer of the caller, no `-db` is searched and an observer comes
+//! with the records. Each block's call writes all the outputs, in the order asked:
+//! - each output's bytes are those of the one-output case above: what is not per query (the prolog,
+//!   the epilog, the counts of outfmt 7 and 5) is set per block for every output alike
+//!   (`BlastpReports`), each output's writer writes only to its own sink, and with several outputs
+//!   the sinks are the caller's writers, unbuffered (a stream that two outputs share would get each
+//!   block's formats in turn, so several outputs need writers; one output may also be standard
+//!   output or a file, as above). The checks of the refusals that depend on the hits are made for
+//!   every kind of report among the outputs before the first block. The warnings go with the first
+//!   output, query by query, in every block.
+//! - the final list of all queries is the blocks' lists one after the other: it is ordered by query,
+//!   then by subject, then by HSP (`hsp.rs`'s final sort), and a query's list does not depend on the
+//!   other queries (above). A record's `q_idx` is its block's first query plus its index in the
+//!   block; `s_idx` and the subject's length come from the call's one subject set (`-subject` only:
+//!   with `-db` they would rank the subjects that the call's lists name); no other field holds a
+//!   value of the whole search. The block search hands the records of all blocks to the caller's
+//!   sink once, after the last block, as the search of all queries hands its one list once (before
+//!   its reports; no caller reads the records before the reports).
+//! - an observer event's index is that of the HSP in the final list: the block's index plus the
+//!   number of HSPs of the blocks before (`XOffsetObserver`, counted from the block's records, which is
+//!   why an observer needs them); its position is read by the caller from its own writer, whose bytes
+//!   are those of the search of all queries. Each format's events come in the same order as in the
+//!   search of all queries; between formats they alternate block by block, and an observer reads
+//!   each format's events apart (the ABI orders the events within a stream only).
+//! An outfmt 13 to 16 output (LOSAT_X_BPQBLOCKXML2) does not take blocks in such a call: the
+//! document's run-level frame and `Xml2Carry` were argued and checked for a call of one output
+//! (the CLI's shape) only, so `x_query_block_plan` records `XBlockFormat::Xml2` for the reach check
+//! and then refuses the plan when the call has several outputs, hit records or an observer; the
+//! search of all queries runs, as it did before either switch (Owner-delegated 2026-10-22).
+//!
 //! `LOSAT_X_BPQBLOCK` is a value switch of the strict set (`utils/xswitch.rs`): a positive number
 //! of query letters (the block closes at the first batch end at or past it), 50,000 when it is
-//! not set or is not a positive number. `0`, or `LOSAT_X_DEFAULT=0` with the variable not set,
+//! not set or is not a positive number. `0`,
 //! turns the block path off.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
@@ -293,11 +391,11 @@ use std::path::Path;
 
 use super::encoding::EncodedProtein;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bpclut_mode, x_bplkpflat_mode, x_pool_builds, XFlatArgs, XFlatSpare, XLkpFlat,
+    x_bpclut_on, x_bplkpflat_mode, x_pool_builds, XFlatArgs, XFlatSpare, XLkpFlat,
 };
 use crate::algorithm::tblastx::lookup::{QueryContext, XAaSpares};
 use crate::algorithm::tblastx::translation::QueryFrame;
-use crate::api::local_blast::OutputSink;
+use crate::api::local_blast::{FormatObserver, HspIndex, OutputSink};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::RangedBatch;
 use crate::utils::threading::SearchPool;
@@ -306,59 +404,41 @@ use crate::utils::threading::SearchPool;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 use {
-    crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-        x_lkpflat_count_contexts, XExtraTasks,
-    },
-    crate::algorithm::tblastx::lookup::x_pair_lut::x_assert_same_contexts_as,
-    crate::algorithm::tblastx::lookup::XBlosum62LookupQuery,
-    crate::stats::KarlinParams,
+    crate::algorithm::tblastx::lookup::compressed::x_clut_direct::XExtraTasks,
+    crate::algorithm::tblastx::lookup::XBlosum62LookupQuery, crate::stats::KarlinParams,
     std::sync::OnceLock,
 };
 
 // No NCBI counterpart: reads the LOSAT_X_BPQBLOCK switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): the number of query letters of a block, or `None` (off). A
-/// strict-set value switch: the positive integer given, else 50,000; `None` for `0`, or for
-/// `LOSAT_X_DEFAULT=0` with the variable not set.
+/// strict-set value switch: the positive integer given, else 50,000; `None` for `0`.
 pub(crate) fn x_bp_qblock() -> Option<usize> {
     use std::sync::OnceLock;
     static N: OnceLock<Option<usize>> = OnceLock::new();
     *N.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BPQBLOCK", 1..=usize::MAX, 50_000))
 }
 
-// No NCBI counterpart: reads LOSAT_X_BPQBLOCKFMT (a strict-set switch: on unless it is `0`, or
-// `LOSAT_X_DEFAULT=0` and it is not set) and its shadow LOSAT_X_BPQBLOCKFMTSHADOW (off unless set to
-// any value; it implies the switch) once. They choose which reports the block search writes, not
-// any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): 0 = the block search only for one outfmt 6 report, 1 = for one
-/// report of outfmt 0, 6 or 7, 2 = the shadow (`x_block_shadow_compare`).
-pub(crate) fn x_bp_qblock_fmt() -> u8 {
+// No NCBI counterpart: reads LOSAT_X_BPQBLOCKFMT (a strict-set switch: on unless it is `0`) once.
+// It chooses which reports the block search writes, not any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): whether the block search also takes one report of outfmt 0 or
+/// 7 (with LOSAT_X_BPQBLOCKWEB also several reports of these and the others the block search
+/// takes); off, only one outfmt 6 report.
+pub(crate) fn x_bp_qblock_fmt() -> bool {
     use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPQBLOCKFMTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_BPQBLOCKFMT") {
-            1
-        } else {
-            0
-        }
-    })
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPQBLOCKFMT"))
 }
 
 // No NCBI counterpart: reads LOSAT_X_BPQBLOCKSA and LOSAT_X_BPQBLOCKXML (strict-set switches: on
-// unless `0`, or `LOSAT_X_DEFAULT=0` and not set) once; the shadow (LOSAT_X_BPQBLOCKFMTSHADOW) implies
-// both, as it implies LOSAT_X_BPQBLOCKFMT. They choose which reports the block search writes, not any
-// value NCBI computes.
+// unless `0`) once. They choose which reports the block search writes, not any value NCBI
+// computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKSA): whether the block search also takes one Seq-annot report
-/// (outfmt 8, 9 or 12). Acts only with `LOSAT_X_BPQBLOCK`.
+/// (outfmt 8, 9 or 12) or the BLAST archive (outfmt 11). Acts only with `LOSAT_X_BPQBLOCK`.
 pub(crate) fn x_bp_qblock_sa() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var_os("LOSAT_X_BPQBLOCKFMTSHADOW").is_some()
-            || crate::utils::xswitch::on("LOSAT_X_BPQBLOCKSA")
-    })
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPQBLOCKSA"))
 }
 
 /// EXPERIMENT (LOSAT_X_BPQBLOCKXML): whether the block search also takes one BLAST XML report
@@ -366,10 +446,27 @@ pub(crate) fn x_bp_qblock_sa() -> bool {
 pub(crate) fn x_bp_qblock_xml() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var_os("LOSAT_X_BPQBLOCKFMTSHADOW").is_some()
-            || crate::utils::xswitch::on("LOSAT_X_BPQBLOCKXML")
-    })
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPQBLOCKXML"))
+}
+
+/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): whether the block search also takes one XML2 or JSON report
+/// (outfmt 13 to 16). Acts only with `LOSAT_X_BPQBLOCK`.
+pub(crate) fn x_bp_qblock_xml2() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPQBLOCKXML2"))
+}
+
+// No NCBI counterpart: reads LOSAT_X_BPQBLOCKWEB (a strict-set switch: on unless `0`) once. It
+// chooses which calls the block search takes, not any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKWEB): whether the block search also takes a `run_local` call with
+/// more than one output, the hit records or an observer (ABI v2 of the Web build: outfmt 0, 6 and
+/// 7, the records and the byte ranges), each output a writer of the caller and no `-db`. Acts only
+/// with `LOSAT_X_BPQBLOCK`.
+pub(crate) fn x_bp_qblock_web() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPQBLOCKWEB"))
 }
 
 // No NCBI counterpart: the reports the block search writes; it does not change any value NCBI
@@ -382,10 +479,63 @@ pub(crate) enum XBlockReport {
     Tabular,
     /// Outfmt 0 (LOSAT_X_BPQBLOCKFMT).
     Pairwise,
-    /// Outfmt 8, 9 and 12 (LOSAT_X_BPQBLOCKSA).
+    /// Outfmt 8, 9, 11 and 12 (LOSAT_X_BPQBLOCKSA).
     Seqalign,
     /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
     Xml,
+    /// Outfmt 13 to 16 (LOSAT_X_BPQBLOCKXML2). The framing state (the count of reports, which
+    /// numbers the side files of 13 and 14) moves from block to block (`Xml2Carry`).
+    Xml2,
+}
+
+impl XBlockReport {
+    /// Whether the report is a BLAST XML document of outfmt 5, 15 or 16, whose names the writer
+    /// refuses before its first byte.
+    pub(crate) fn is_xml(self) -> bool {
+        matches!(self, XBlockReport::Xml | XBlockReport::Xml2)
+    }
+}
+
+// No NCBI counterpart: names which switches decide the block search of a call for `x_reach!`; it
+// does not change any value NCBI computes.
+/// A switch besides LOSAT_X_BPQBLOCK that governs a search whose block plan is made
+/// (`LOSAT_X_REACH`): the format switch of each output (outfmt 6 has none), and for a call of
+/// several outputs, the hit records or an observer the switch of `run_local`. The plan's refusals
+/// before it looks at a call's outputs record none.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum XBlockFormat {
+    /// Outfmt 0 and 7 (LOSAT_X_BPQBLOCKFMT).
+    Fmt,
+    /// Outfmt 8, 9, 11 and 12 (LOSAT_X_BPQBLOCKSA).
+    Seqalign,
+    /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
+    Xml,
+    /// Outfmt 13 to 16 (LOSAT_X_BPQBLOCKXML2).
+    Xml2,
+    /// Several outputs, the hit records or an observer (LOSAT_X_BPQBLOCKWEB).
+    Web,
+}
+
+// No NCBI counterpart: records which side the block-search switches took; it does not change any
+// value NCBI computes.
+/// `LOSAT_X_REACH`: the search took the block search (`own`) or the search of all queries, for
+/// LOSAT_X_BPQBLOCK and each switch of `formats`, each while it is on.
+pub(crate) fn x_reach_block_search(formats: &[XBlockFormat], own: bool) {
+    use crate::utils::xreach::x_reach;
+    if x_bp_qblock().is_none() {
+        return;
+    }
+    x_reach!("LOSAT_X_BPQBLOCK", own);
+    for format in formats {
+        match format {
+            XBlockFormat::Fmt if x_bp_qblock_fmt() => x_reach!("LOSAT_X_BPQBLOCKFMT", own),
+            XBlockFormat::Seqalign if x_bp_qblock_sa() => x_reach!("LOSAT_X_BPQBLOCKSA", own),
+            XBlockFormat::Xml if x_bp_qblock_xml() => x_reach!("LOSAT_X_BPQBLOCKXML", own),
+            XBlockFormat::Xml2 if x_bp_qblock_xml2() => x_reach!("LOSAT_X_BPQBLOCKXML2", own),
+            XBlockFormat::Web if x_bp_qblock_web() => x_reach!("LOSAT_X_BPQBLOCKWEB", own),
+            _ => {}
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
@@ -467,63 +617,36 @@ fn x_all_in_groups(
     allowed(0..count)
 }
 
-// No NCBI counterpart: a copy of what LOSAT writes, for the shadow (LOSAT_X_BPQBLOCKFMTSHADOW); it
-// does not change any byte written.
-/// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): a writer that keeps a copy of the bytes it passes on
-/// when `copy` is set (the shadow), and only passes them on otherwise.
-pub(crate) struct XCopyWriter<'a, W: Write + ?Sized> {
-    pub(crate) inner: &'a mut W,
-    pub(crate) copy: Option<Vec<u8>>,
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
+// ```c
+// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+// ```
+// Every format prints from the final result set of its call; a block's call numbers the HSPs of
+// its own list from 0. No NCBI counterpart for the offset: it maps a block's numbers to those of
+// the list of all queries, the blocks' lists one after the other.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the caller's observer for one block, whose HSP indices are
+/// those of the block's list plus `base`, the number of HSPs of the blocks before.
+pub(crate) struct XOffsetObserver<'a> {
+    pub(crate) inner: &'a mut (dyn FormatObserver + Send),
+    pub(crate) base: HspIndex,
 }
 
-impl<W: Write + ?Sized> Write for XCopyWriter<'_, W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let written = self.inner.write(buf)?;
-        if let Some(copy) = self.copy.as_mut() {
-            copy.extend_from_slice(&buf[..written]);
-        }
-        Ok(written)
+impl FormatObserver for XOffsetObserver<'_> {
+    fn hsp_begin(&mut self, format: usize, hsp: HspIndex) {
+        self.inner.hsp_begin(format, self.base + hsp);
     }
 
-    fn flush(&mut self) -> io::Result<()> {
-        self.inner.flush()
+    fn hsp_end(&mut self, format: usize, hsp: HspIndex) {
+        self.inner.hsp_end(format, self.base + hsp);
     }
-}
 
-// No NCBI counterpart: the check of the shadow (LOSAT_X_BPQBLOCKFMTSHADOW); it does not change any
-// value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): compares what the block search wrote (`blocks`, its
-/// output and its warnings) with what the search of all queries wrote into memory (`reference`).
-/// On a difference it prints `[X_SHADOW] BPQBLOCKFMT ... DIFFERENT` and panics; otherwise
-/// `[X_SHADOW] BPQBLOCKFMT blocks= bytes= stderr_bytes= identical`.
-pub(crate) fn x_block_shadow_compare(
-    blocks: usize,
-    written: (&[u8], &[u8]),
-    reference: (&[u8], &[u8]),
-) {
-    for (stream, block_bytes, reference_bytes) in [
-        ("output", written.0, reference.0),
-        ("stderr", written.1, reference.1),
-    ] {
-        if block_bytes != reference_bytes {
-            let at = block_bytes
-                .iter()
-                .zip(reference_bytes)
-                .position(|(a, b)| a != b)
-                .unwrap_or(block_bytes.len().min(reference_bytes.len()));
-            eprintln!(
-                "[X_SHADOW] BPQBLOCKFMT {stream} DIFFERENT at byte {at} (blocks {} bytes, search of all queries {} bytes)",
-                block_bytes.len(),
-                reference_bytes.len()
-            );
-            panic!("LOSAT_X_BPQBLOCKFMTSHADOW: the block search's {stream} differs from the search of all queries");
-        }
+    fn subject_begin(&mut self, format: usize, first_hsp: HspIndex) {
+        self.inner.subject_begin(format, self.base + first_hsp);
     }
-    eprintln!(
-        "[X_SHADOW] BPQBLOCKFMT blocks={blocks} bytes={} stderr_bytes={} identical",
-        written.0.len(),
-        written.1.len()
-    );
+
+    fn subject_end(&mut self, format: usize, first_hsp: HspIndex) {
+        self.inner.subject_end(format, self.base + first_hsp);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-287
@@ -728,10 +851,10 @@ pub(crate) fn x_bp_lookup_query(
 // No NCBI counterpart: where LOSAT_X_BPLKPFLAT acts; it reads switches and changes no value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT): the switch's mode (`x_bplkpflat_mode`) where `pool` builds
-/// blastp-fast's flat table (`LOSAT_X_BPCLUT` or `LOSAT_X_BPCLUTSHADOW`, and `x_pool_builds`: a pool
+/// blastp-fast's flat table (`LOSAT_X_BPCLUT`, and `x_pool_builds`: a pool
 /// of more than one thread, `lookup/x_clut_par.rs`), else `Off`.
 fn x_lkpflat_mode_for_pool(pool: &SearchPool<'_>) -> XLkpFlat {
-    if x_bpclut_mode() != 0 && x_pool_builds(pool) {
+    if x_bpclut_on() && x_pool_builds(pool) {
         x_bplkpflat_mode()
     } else {
         XLkpFlat::Off
@@ -769,8 +892,8 @@ pub(crate) fn x_bp_lookup_spares<'p>(
 /// (`blast_engine/x_lookup_ahead.rs`): the switch is on, the table is built in place
 /// (`XAaSpares::x_applies`), and the pool has more than one thread (`x_pool_builds`).
 pub(crate) fn x_bp_aa_spares<'p>(pool: &SearchPool<'p>) -> Option<&'p XAaSpares> {
-    use super::blast_engine::x_lookup_ahead::{x_bp_lkp_ahead, XLkpAhead};
-    if x_bp_lkp_ahead() == XLkpAhead::Off || !XAaSpares::x_applies() || !x_pool_builds(pool) {
+    use super::blast_engine::x_lookup_ahead::x_bp_lkp_ahead;
+    if !x_bp_lkp_ahead() || !XAaSpares::x_applies() || !x_pool_builds(pool) {
         return None;
     }
     pool.x_ext::<XBlockSubjects>()
@@ -825,6 +948,9 @@ impl<'a> XLookupFlat<'a> {
         x_for: XLookupFor,
     ) -> (Self, Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
         let mode = x_lkpflat_mode_for_pool(pool);
+        if x_bplkpflat_mode() != XLkpFlat::Off {
+            crate::utils::xreach::x_reach!("LOSAT_X_BPLKPFLAT", mode != XLkpFlat::Off);
+        }
         let spare = match x_for {
             XLookupFor::Search => x_bp_lookup_spare(pool),
             XLookupFor::QueryChunk => None,
@@ -886,8 +1012,6 @@ impl<'a> XLookupFlat<'a> {
         let (query, locations, contexts) = lookup_query.without_karlin(query_frames, word_size);
         let frames: Vec<&QueryFrame> = query_frames.iter().flatten().collect();
         let karlin = XKarlinTasks {
-            query_frames,
-            word_size,
             done: frames.iter().map(|_| OnceLock::new()).collect(),
             frames,
             lookup_query,
@@ -936,40 +1060,17 @@ impl<'a> XLookupFlat<'a> {
     /// blocks that the build's tasks computed and computes the others here; the tasks do not run
     /// where the pool's build falls back to the serial builder (a backbone too large for its
     /// stripes, `x_try_build_flat_parallel_with`); a build that fails before its passes ends the search before
-    /// this call. Without Karlin tasks it does nothing. With the shadow mode, compares the query,
-    /// the segments and the contexts with `x_bp_lookup_query`'s, the Karlin blocks bit for bit
-    /// (panics on a difference). Returns the number of contexts the tasks computed (for the tests;
-    /// the shadow counts them as well).
-    pub(crate) fn finish(
-        self,
-        contexts: &mut [QueryContext],
-        query: &[u8],
-        locations: &[(i32, i32)],
-        pool: &SearchPool<'_>,
-    ) -> usize {
+    /// this call. Without Karlin tasks it does nothing. Returns the number of contexts the tasks
+    /// computed (for the tests).
+    pub(crate) fn finish(self, contexts: &mut [QueryContext]) -> usize {
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         if let Some(karlin) = self.karlin {
-            let from_tasks = karlin.fill(contexts);
-            if self.mode == XLkpFlat::Shadow {
-                let (reference_query, reference_locations, reference_contexts) =
-                    x_bp_lookup_query(karlin.query_frames, karlin.word_size, pool);
-                assert!(
-                    reference_query == query && reference_locations == locations,
-                    "LOSAT_X_BPLKPFLATSHADOW: lookup query differs"
-                );
-                x_assert_same_contexts_as(
-                    "LOSAT_X_BPLKPFLATSHADOW:",
-                    contexts,
-                    &reference_contexts,
-                );
-                x_lkpflat_count_contexts(contexts.len(), from_tasks);
-            }
-            return from_tasks;
+            return karlin.fill(contexts);
         }
-        let _ = (contexts, query, locations, pool);
+        let _ = contexts;
         0
     }
 }
@@ -994,8 +1095,6 @@ impl<'a> XLookupFlat<'a> {
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 struct XKarlinTasks<'a> {
-    query_frames: &'a [Vec<QueryFrame>],
-    word_size: usize,
     /// The frames in the order of the contexts.
     frames: Vec<&'a QueryFrame>,
     lookup_query: XBlosum62LookupQuery,
@@ -1135,33 +1234,30 @@ mod tests {
                 x_assert_same_contexts(&pool_contexts, &contexts);
                 // LOSAT_X_BPLKPFLAT: the Karlin blocks as extra tasks of the pool's build of the
                 // flat table (every one of them at 3 and 7 threads; at one thread the serial builder
-                // runs none and `finish` computes them all), with the shadow's checks too.
-                for mode in [XLkpFlat::On, XLkpFlat::Shadow] {
-                    let from_tasks =
-                        crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
-                            let (flat, flat_query, flat_locations, mut flat_contexts) =
-                                XLookupFlat::with_karlin_tasks(&frames, 5, mode, None);
-                            assert_eq!(flat_query, query);
-                            assert_eq!(flat_locations, locations);
-                            let built = x_build_flat_in_pool(
-                                5,
-                                1100,
-                                &flat_query,
-                                &flat_locations,
-                                &[0..flat_locations.len()],
-                                pool,
-                                flat.build_args(),
-                            );
-                            assert!(matches!(built, Some(XFlatBuild::Table(_))));
-                            let from_tasks =
-                                flat.finish(&mut flat_contexts, &flat_query, &flat_locations, pool);
-                            x_assert_same_contexts(&flat_contexts, &contexts);
-                            Ok(from_tasks)
-                        })
-                        .expect("pool");
-                    let expected = if threads > 1 { contexts.len() } else { 0 };
-                    assert_eq!(from_tasks, expected, "threads {threads}, {mode:?}");
-                }
+                // runs none and `finish` computes them all).
+                let from_tasks =
+                    crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                        let (flat, flat_query, flat_locations, mut flat_contexts) =
+                            XLookupFlat::with_karlin_tasks(&frames, 5, XLkpFlat::On, None);
+                        assert_eq!(flat_query, query);
+                        assert_eq!(flat_locations, locations);
+                        let built = x_build_flat_in_pool(
+                            5,
+                            1100,
+                            &flat_query,
+                            &flat_locations,
+                            &[0..flat_locations.len()],
+                            pool,
+                            flat.build_args(),
+                        );
+                        assert!(matches!(built, Some(XFlatBuild::Table(_))));
+                        let from_tasks = flat.finish(&mut flat_contexts);
+                        x_assert_same_contexts(&flat_contexts, &contexts);
+                        Ok(from_tasks)
+                    })
+                    .expect("pool");
+                let expected = if threads > 1 { contexts.len() } else { 0 };
+                assert_eq!(from_tasks, expected, "threads {threads}");
             }
         }
     }

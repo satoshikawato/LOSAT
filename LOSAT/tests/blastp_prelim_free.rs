@@ -1,17 +1,22 @@
-// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp's preliminary hit lists with `LOSAT_X_BPPFREE` (`src/algorithm/blastp/x_prelim_free.rs`)
 //! on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on by default, unless its
-//! variable is `0`, or `LOSAT_X_DEFAULT=0` and its variable is not set. With it on, a reaped
+//! variable is `0`. With it on, a reaped
 //! preliminary HSP list gives back its spare room and the serial redo (one thread) frees each
 //! query's preliminary list after its redo. Every test states the default it runs with: the
-//! reference is `LOSAT_X_DEFAULT=0` (every switch off) and the searches with the switch on are the
-//! default (with `LOSAT_X_BPQBLOCK=0` where one line per search is counted) and
-//! `LOSAT_X_DEFAULT=0` with `LOSAT_X_BPPFREE=1`, the run the variable gave before it joined the
-//! set; `LOSAT_X_BPPFREE=0` gives no line. These tests compare the reports, alone and with the
+//! reference is the search of all queries with the switch off (`LOSAT_X_BPQBLOCK=0
+//! LOSAT_X_BPPFREE=0`) and the search with the switch on is the default (with
+//! `LOSAT_X_BPQBLOCK=0` where one line per search is counted); `LOSAT_X_BPPFREE=0` gives no
+//! line. These tests compare the reports, alone and with the
 //! block search of `LOSAT_X_BPQBLOCK`, and check from the `[TIMING] x_bppfree: freed_lists=<n>`
 //! lines that the serial redo freed lists, not only that the report is equal.
+//! The switch acts on each query's lists, so three queries of the fixture are enough (`queries`),
+//! each its own query batch (`BATCH`); the block test sets the blocks' letters so that there are
+//! two and three blocks. `blastp_redo_par.rs` runs all the fixture's queries (batches of 3,000
+//! letters) at one and four threads with the switch on by default: a query without a preliminary
+//! list, batches of many queries, and (with `LOSAT_X_BPPFREE=1`) the release of the lists window
+//! by window in the redo of `LOSAT_X_BPREDOPAR`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3734-3738
 //! ```c
@@ -30,20 +35,47 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// One blastp run of the fixture pair (two related nimavirus proteomes) with the given variables
-/// as its only `LOSAT_*` variables that choose a code path, and `extra` arguments.
-/// `LOSAT_X_DEFAULT` of the test's own environment is dropped as well: every test states the
-/// default it runs with.
+const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BPPFREE", "0");
+const BLOCKS_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCK", "0");
+/// Each query its own batch: the three queries of `queries` have 629, 944 and 918 letters.
+const BATCH: (&str, &str) = ("BATCH_SIZE", "500");
+
+/// Three records of the fixture's query proteome (`MeenMJNV.faa`) from BDT62583.1 on, written to a
+/// directory of the test `tag`: BDT62583.1 (629 letters), which has preliminary matches but none
+/// within the E-value after the redo (no hits), then BDT62584.1 (944) and BDT62585.1 (918), which
+/// have hits.
+fn queries(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("losat-bppfree-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let text = std::fs::read_to_string(fixture("MeenMJNV.faa")).unwrap();
+    let start = text
+        .find(">BDT62583.1 ")
+        .expect("the record is in the fixture");
+    let mut end = start;
+    for _ in 0..3 {
+        end = text[end + 1..]
+            .find("\n>")
+            .map_or(text.len(), |at| end + 1 + at + 1);
+    }
+    let path = dir.join("queries.faa");
+    std::fs::write(&path, &text[start..end]).unwrap();
+    path
+}
+
+/// One blastp run of `query` against the fixture's subject proteome (`MejoMJNV.faa`, a nimavirus
+/// related to the queries') with the given variables as its only `LOSAT_*` variables that choose
+/// a code path, and `extra` arguments.
 /// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
 /// one thread, and it selects nothing; without the caller's value a file of the tests is named.
 /// `BATCH_SIZE` is the test's own. The run must exit with 0. Returns the standard output and the
 /// numbers of lists that the `[TIMING] x_bppfree` lines report, one per search of a query set.
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
-const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BPPFREE", "0");
-const BLOCKS_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCK", "0");
-
-fn blastp(threads: u32, vars: &[(&str, &str)], extra: &[&str]) -> (Vec<u8>, Vec<usize>) {
+fn blastp(
+    query: &Path,
+    threads: u32,
+    vars: &[(&str, &str)],
+    extra: &[&str],
+) -> (Vec<u8>, Vec<usize>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -64,7 +96,7 @@ fn blastp(threads: u32, vars: &[(&str, &str)], extra: &[&str]) -> (Vec<u8>, Vec<
     let output = command
         .arg("blastp")
         .arg("-query")
-        .arg(fixture("MeenMJNV.faa"))
+        .arg(query)
         .arg("-subject")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-evalue", "0.001"])
@@ -89,40 +121,36 @@ fn blastp(threads: u32, vars: &[(&str, &str)], extra: &[&str]) -> (Vec<u8>, Vec<
 
 #[test]
 fn freed_lists_give_the_reports_of_the_kept_lists() {
-    let batch = ("BATCH_SIZE", "3000");
+    let query = queries("reports");
     for outfmt in ["6", "0"] {
         for threads in [1, 4] {
-            let (reference, reference_freed) =
-                blastp(threads, &[batch, DEFAULT_OFF], &["-outfmt", outfmt]);
-            assert!(!reference.is_empty(), "the fixture pair has a report");
-            assert!(reference_freed.is_empty(), "no line with LOSAT_X_DEFAULT=0");
-            let (report, freed) = blastp(
+            let (reference, reference_freed) = blastp(
+                &query,
                 threads,
-                &[batch, BLOCKS_OFF, SWITCH_OFF],
+                &[BATCH, BLOCKS_OFF, SWITCH_OFF],
                 &["-outfmt", outfmt],
             );
-            assert!(report == reference, "the switch off: the report differs");
-            assert!(freed.is_empty(), "no line with the switch off: {freed:?}");
-            for vars in [
-                &[batch, BLOCKS_OFF][..],
-                &[batch, DEFAULT_OFF, ("LOSAT_X_BPPFREE", "1")][..],
-            ] {
-                let (report, freed) = blastp(threads, vars, &["-outfmt", outfmt]);
+            assert!(!reference.is_empty(), "the queries have a report");
+            assert!(
+                reference_freed.is_empty(),
+                "no line with the switch off: {reference_freed:?}"
+            );
+            let vars = &[BATCH, BLOCKS_OFF][..];
+            let (report, freed) = blastp(&query, threads, vars, &["-outfmt", outfmt]);
+            assert!(
+                report == reference,
+                "{vars:?} outfmt {outfmt} threads {threads}: the report differs"
+            );
+            assert_eq!(
+                freed.len(),
+                1,
+                "{vars:?} outfmt {outfmt} threads {threads}: {freed:?}"
+            );
+            if threads == 1 {
                 assert!(
-                    report == reference,
-                    "{vars:?} outfmt {outfmt} threads {threads}: the report differs"
+                    freed[0] > 0,
+                    "{vars:?} outfmt {outfmt}: the serial redo freed no list"
                 );
-                assert_eq!(
-                    freed.len(),
-                    1,
-                    "{vars:?} outfmt {outfmt} threads {threads}: {freed:?}"
-                );
-                if threads == 1 {
-                    assert!(
-                        freed[0] > 0,
-                        "{vars:?} outfmt {outfmt}: the serial redo freed no list"
-                    );
-                }
             }
         }
     }
@@ -130,25 +158,25 @@ fn freed_lists_give_the_reports_of_the_kept_lists() {
 
 #[test]
 fn freed_lists_in_query_blocks_give_the_rows_of_the_search_of_all_queries() {
-    let batch = ("BATCH_SIZE", "3000");
+    let query = queries("blocks");
     for threads in [1, 4] {
-        let (reference, _) = blastp(threads, &[batch, DEFAULT_OFF], &["-outfmt", "6"]);
-        // The default blocks (50,000 letters; the fixture's queries have 77,448), one batch per
-        // block, and the run the two variables gave before they joined the set.
-        for vars in [
-            &[batch][..],
-            &[batch, ("LOSAT_X_BPQBLOCK", "1")][..],
-            &[
-                batch,
-                DEFAULT_OFF,
-                ("LOSAT_X_BPQBLOCK", "1"),
-                ("LOSAT_X_BPPFREE", "1"),
-            ][..],
+        let (reference, _) = blastp(
+            &query,
+            threads,
+            &[BATCH, BLOCKS_OFF, SWITCH_OFF],
+            &["-outfmt", "6"],
+        );
+        // Blocks of 1,500 letters (BDT62583.1 and BDT62584.1, two batches, then BDT62585.1), as the
+        // default blocks of 50,000 letters hold several batches; and one batch per block.
+        for (vars, blocks) in [
+            (&[BATCH, ("LOSAT_X_BPQBLOCK", "1500")][..], 2),
+            (&[BATCH, ("LOSAT_X_BPQBLOCK", "1")][..], 3),
         ] {
-            let (rows, freed) = blastp(threads, vars, &["-outfmt", "6"]);
+            let (rows, freed) = blastp(&query, threads, vars, &["-outfmt", "6"]);
             assert!(rows == reference, "threads {threads} {vars:?}: rows differ");
-            assert!(
-                freed.len() > 1,
+            assert_eq!(
+                freed.len(),
+                blocks,
                 "threads {threads} {vars:?}: one line per block, {freed:?}"
             );
             if threads == 1 {

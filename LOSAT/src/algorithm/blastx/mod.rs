@@ -44,6 +44,7 @@ pub mod input;
 //                                          & buf.get()[offset], gc);
 // ```
 pub mod query_setup;
+pub(crate) mod reader_batch;
 pub use args::BlastxArgs;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:960-985
@@ -335,11 +336,15 @@ pub mod kappa;
 //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
 //                                              subject_maybe_biased);
 // ```
-// EXPERIMENT (LOSAT_X_BXSEGMEMO): the redo-stage subject SEG memoised per subject.
+// The redo-stage subject SEG memoised per subject.
 mod x_seg_memo;
 
 // Diagnostic (LOSAT_TIMING): the stage times of a BLASTX run. No NCBI counterpart.
 mod x_timing;
+
+// EXPERIMENT (LOSAT_X_BXDBSTREAM): `-db` read in blocks where it is searched, instead of a copy of
+// the whole database.
+pub(crate) mod x_db_stream;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1508
 // ```c++
@@ -445,6 +450,7 @@ mod even_gap;
 pub mod report;
 // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
+mod archive;
 mod blast_xml;
 mod seqalign;
 

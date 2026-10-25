@@ -50,7 +50,9 @@ use std::sync::OnceLock;
 
 pub use alias::SearchPath;
 pub use header::Defline;
-pub use volume::{AmbiguityRun, SequenceBlock, Volume, BLASTNA_SENTINEL};
+pub use volume::{
+    AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, BLASTNA_SENTINEL, FENCE_SENTRY,
+};
 
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): how the volumes read their index files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,33 +61,20 @@ pub(crate) enum XDbIdxRead {
     Off,
     /// The arrays are read from the open file where they are needed (`IndexFile::open`).
     On,
-    /// `On`, with the held arrays beside them, compared with every read.
-    Shadow,
 }
 
-// No NCBI counterpart: reads the LOSAT_X_DBIDXREAD / LOSAT_X_DBIDXREADSHADOW switches once; it does
-// not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_DBIDXREAD): a strict-set switch, on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-/// and it is not set; `LOSAT_X_DBIDXREADSHADOW` (any value) selects the shadow mode.
+// No NCBI counterpart: reads the LOSAT_X_DBIDXREAD switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_DBIDXREAD): a strict-set switch, on unless it is `0`.
 pub(crate) fn x_dbidxread() -> XDbIdxRead {
     static MODE: OnceLock<XDbIdxRead> = OnceLock::new();
     *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_DBIDXREADSHADOW").is_some() {
-            XDbIdxRead::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_DBIDXREAD") {
+        if crate::utils::xswitch::on("LOSAT_X_DBIDXREAD") {
             XDbIdxRead::On
         } else {
             XDbIdxRead::Off
         }
     })
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_DBIDXREADSHADOW): the line `main` prints at exit.
-pub fn x_dbidxread_print_summary() {
-    if x_dbidxread() == XDbIdxRead::Shadow {
-        index::x_shadow_print_line(true);
-    }
 }
 
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): the most sequences of a range of
@@ -828,6 +817,43 @@ impl SeqDb {
         })
     }
 
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the block of the sequences `first_ordinal..end_ordinal`
+    /// that the volume of `first_ordinal` holds (to `end_ordinal` or to the end of the volume),
+    /// found without reading the index (`next_block` reads it to cut by bytes). `None` when the
+    /// range is empty or `first_ordinal` is past the last sequence.
+    pub fn x_block_range(&self, first_ordinal: u32, end_ordinal: u32) -> Option<BlockRange> {
+        if first_ordinal >= end_ordinal {
+            return None;
+        }
+        let (volume, first) = self.find_volume(first_ordinal).ok()?;
+        let end = self.volumes[volume]
+            .num_oids()
+            .min(first.saturating_add(end_ordinal - first_ordinal));
+        Some(BlockRange {
+            volume,
+            first,
+            end,
+            first_ordinal,
+        })
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the numbers of residues of the proteins of
+    /// `x_block_range(first_ordinal, end_ordinal)`, from the index alone
+    /// (`Volume::x_protein_lengths`).
+    pub fn x_protein_lengths(
+        &self,
+        first_ordinal: u32,
+        end_ordinal: u32,
+    ) -> Result<Vec<u32>, SeqDbError> {
+        let Some(range) = self.x_block_range(first_ordinal, end_ordinal) else {
+            return Err(SeqDbError::Range(format!(
+                "ordinal ids {first_ordinal}..{end_ordinal} are not a non-empty range of the database ({} sequences)",
+                self.num_seqs()
+            )));
+        };
+        self.volumes[range.volume].x_protein_lengths(range.first, range.end)
+    }
+
     /// Reads the sequences of `range` with one positioned read.
     pub fn read_block(&self, range: BlockRange) -> Result<SequenceBlock, SeqDbError> {
         let Some(volume) = self.volumes.get(range.volume) else {
@@ -838,6 +864,23 @@ impl SeqDb {
             )));
         };
         volume.read_block(range.first, range.end, range.first_ordinal)
+    }
+
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the length and the ambiguity data that
+    /// `read_block(range)` gives the one nucleotide of `range`, read without its 2-bit data, with
+    /// the errors of `read_block` (`Volume::x_nucleotide_check`).
+    pub fn x_nucleotide_check(
+        &self,
+        range: BlockRange,
+    ) -> Result<(usize, SequenceBlock), SeqDbError> {
+        let Some(volume) = self.volumes.get(range.volume) else {
+            return Err(SeqDbError::Range(format!(
+                "volume {} is outside the database ({} volumes)",
+                range.volume,
+                self.volumes.len()
+            )));
+        };
+        volume.x_nucleotide_check(range.first, range.end, range.first_ordinal)
     }
 
     /// Reads the one sequence `ordinal` (for traceback and reports).
@@ -853,12 +896,71 @@ impl SeqDb {
         self.volumes[volume].protein_length(oid)
     }
 
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_block` with the bytes in a buffer that glibc maps
+    /// from 1 MiB on (`Volume::x_read_block_mapped`).
+    pub fn x_read_block_mapped(&self, range: BlockRange) -> Result<SequenceBlock, SeqDbError> {
+        let Some(volume) = self.volumes.get(range.volume) else {
+            return Err(SeqDbError::Range(format!(
+                "volume {} is outside the database ({} volumes)",
+                range.volume,
+                self.volumes.len()
+            )));
+        };
+        volume.x_read_block_mapped(range.first, range.end, range.first_ordinal)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_sequence` with the bytes in a buffer that glibc maps
+    /// from 1 MiB on.
+    pub fn x_read_sequence_mapped(&self, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
+        let (volume, first) = self.find_volume(ordinal)?;
+        self.volumes[volume].x_read_block_mapped(first, first + 1, ordinal)
+    }
+
     /// Whether the ambiguity data of nucleotide `ordinal` decode
     /// (`Volume::check_ambiguity`: `SequenceBlock::ambiguity_runs`' error,
     /// read without the letters).
     pub fn check_ambiguity(&self, ordinal: u32) -> Result<(), SeqDbError> {
         let (volume, oid) = self.find_volume(ordinal)?;
         self.volumes[volume].check_ambiguity(oid, ordinal)
+    }
+
+    /// The length in bases of nucleotide `ordinal`, read from the index and the last byte of
+    /// its packed bases (no letters).
+    pub fn nucleotide_length(&self, ordinal: u32) -> Result<usize, SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.volumes[volume].nucleotide_length(oid, ordinal)
+    }
+
+    /// The IUPAC letters `[from, to)` of nucleotide `ordinal`: the bases of the range and the
+    /// ambiguity runs that overlap it, read without the rest of the sequence.
+    pub fn nucleotide_iupac_range(
+        &self,
+        ordinal: u32,
+        from: usize,
+        to: usize,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.volumes[volume].nucleotide_iupac_range(oid, ordinal, from, to)
+    }
+
+    /// The length and the ambiguity runs of nucleotide `ordinal`, read once for any number of
+    /// [`SeqDb::nucleotide_iupac_range_with`] calls on it.
+    pub fn nucleotide_ambiguity(&self, ordinal: u32) -> Result<NucleotideAmbiguity, SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.volumes[volume].nucleotide_ambiguity(oid, ordinal)
+    }
+
+    /// [`SeqDb::nucleotide_iupac_range`] with the length and the runs of
+    /// [`SeqDb::nucleotide_ambiguity`] for the same `ordinal`: one read of the range's bytes.
+    pub fn nucleotide_iupac_range_with(
+        &self,
+        ordinal: u32,
+        from: usize,
+        to: usize,
+        ambiguity: &NucleotideAmbiguity,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.volumes[volume].nucleotide_iupac_range_with(oid, ordinal, from, to, ambiguity)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2222-2241
@@ -924,6 +1026,7 @@ impl SeqDb {
                     title: defline.title,
                     bl_ord_id: bl_ord_id as u32,
                     replaced_title_bytes: defline.replaced_title_bytes,
+                    taxid: defline.taxid,
                 })
             })
             .collect()
@@ -957,10 +1060,31 @@ impl SeqDb {
     /// the sequences of `range` in order until `visit` returns false; returns whether every
     /// call returned true. The headers of the range are read with one read of the index file
     /// and one read of the header file per MiB (`Volume::visit_deflines`) instead of two reads
-    /// per sequence. `LOSAT_X_DBIDXREADSHADOW` compares every result with `deflines`'.
+    /// per sequence.
     pub fn visit_deflines(
         &self,
         range: BlockRange,
+        visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
+    ) -> bool {
+        self.visit_deflines_as(range, false, visit)
+    }
+
+    /// `visit_deflines`, with the `taxid` of each definition line decoded (the decode of
+    /// `defline_taxids`, which also gives the titles): the titles and the taxids of a range in one
+    /// pass over its headers. A record whose taxid does not decode is an `Err`, as in
+    /// `defline_taxids`.
+    pub fn visit_deflines_taxids(
+        &self,
+        range: BlockRange,
+        visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
+    ) -> bool {
+        self.visit_deflines_as(range, true, visit)
+    }
+
+    fn visit_deflines_as(
+        &self,
+        range: BlockRange,
+        want_taxid: bool,
         mut visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
     ) -> bool {
         let Some(vol) = self.volumes.get(range.volume) else {
@@ -968,35 +1092,46 @@ impl SeqDb {
                 visit(range.first_ordinal, Err(volume_range_error(range, self)))
             });
         };
-        let shadow = x_dbidxread() == XDbIdxRead::Shadow;
-        vol.visit_deflines(
+        vol.visit_deflines_as(
             range.first,
             range.end,
             HEADER_PIECE_BYTES,
+            want_taxid,
             &mut |oid, deflines| {
                 let ordinal = range.first_ordinal + (oid - range.first);
                 let deflines = self.ordinal_deflines(range.volume, ordinal, deflines);
-                if shadow {
-                    let expected = self.deflines(ordinal);
-                    if x_result_text(&deflines) != x_result_text(&expected) {
-                        index::x_shadow_difference(format!(
-                        "the definition lines of sequence {ordinal} read in a range differ: {} \
-                         where deflines gives {}",
-                        x_result_text(&deflines),
-                        x_result_text(&expected)
-                    ));
-                    }
-                }
                 visit(ordinal, deflines)
             },
+        )
+    }
+
+    /// `visit(ordinal, self.defline_taxids(ordinal))` for the sequences of `range` in order until
+    /// `visit` returns false; returns whether every call returned true. The headers of the range
+    /// are read as [`SeqDb::visit_deflines`] reads them (one read of the index file and one read of
+    /// the header file per MiB), decoded as `defline_taxids` decodes them: the taxdb pre-pass of
+    /// BLASTX 15/16 (`algorithm::common::database::taxdb_may_refuse`) walks the database with it.
+    pub fn visit_defline_taxids(
+        &self,
+        range: BlockRange,
+        mut visit: impl FnMut(u32, Result<Vec<i32>, SeqDbError>) -> bool,
+    ) -> bool {
+        let Some(vol) = self.volumes.get(range.volume) else {
+            return range.is_empty().then_some(true).unwrap_or_else(|| {
+                visit(range.first_ordinal, Err(volume_range_error(range, self)))
+            });
+        };
+        vol.visit_defline_taxids(
+            range.first,
+            range.end,
+            HEADER_PIECE_BYTES,
+            &mut |oid, taxids| visit(range.first_ordinal + (oid - range.first), taxids),
         )
     }
 
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): calls `visit(ordinal, self.check_ambiguity(ordinal))`
     /// for the sequences of `range` in order until `visit` returns false; returns whether every
     /// call returned true. The offsets of the range are read at once
-    /// (`Volume::visit_ambiguity`). `LOSAT_X_DBIDXREADSHADOW` compares every result with
-    /// `check_ambiguity`'s.
+    /// (`Volume::visit_ambiguity`).
     pub fn visit_ambiguity(
         &self,
         range: BlockRange,
@@ -1007,24 +1142,12 @@ impl SeqDb {
                 visit(range.first_ordinal, Err(volume_range_error(range, self)))
             });
         };
-        let shadow = x_dbidxread() == XDbIdxRead::Shadow;
         vol.visit_ambiguity(
             range.first,
             range.end,
             range.first_ordinal,
             &mut |oid, result| {
                 let ordinal = range.first_ordinal + (oid - range.first);
-                if shadow {
-                    let expected = self.check_ambiguity(ordinal);
-                    if x_result_text(&result) != x_result_text(&expected) {
-                        index::x_shadow_difference(format!(
-                        "the ambiguity check of sequence {ordinal} read in a range differs: {} \
-                         where check_ambiguity gives {}",
-                        x_result_text(&result),
-                        x_result_text(&expected)
-                    ));
-                    }
-                }
                 visit(ordinal, result)
             },
         )
@@ -1037,15 +1160,6 @@ fn volume_range_error(range: BlockRange, db: &SeqDb) -> SeqDbError {
         range.volume,
         db.volumes.len()
     ))
-}
-
-// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_DBIDXREADSHADOW): a result as the shadow compares it (an error by its text).
-fn x_result_text<T: std::fmt::Debug>(result: &Result<T, SeqDbError>) -> String {
-    match result {
-        Ok(value) => format!("Ok({value:?})"),
-        Err(error) => format!("Err({error})"),
-    }
 }
 
 /// Number of leading values of the ascending `range` for which `fits` holds.
@@ -1072,4 +1186,7 @@ pub struct OrdinalDefline {
     /// Number of stored title bytes outside ' ' ..= '~' that were read as '#'
     /// (`Defline::replaced_title_bytes`).
     pub replaced_title_bytes: usize,
+    /// `Defline::taxid`: 0 unless the definition lines were read with their taxids
+    /// ([`SeqDb::visit_deflines_taxids`]).
+    pub taxid: i32,
 }

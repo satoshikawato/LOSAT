@@ -16,9 +16,8 @@ use super::kappa::{
 };
 use super::kappa_heap::{compo_early_termination, CompoHeap, CompoHeapRecord};
 use super::search_gapped::{
-    full_translation_traceback_with_matrix_and_events_with_mask_mode_owned,
-    preliminary_protein_hsps_in_ncbi_order, GappedHsp, PreliminaryProfile, TargetTranslation,
-    TracebackOwnedHsp,
+    full_translation_traceback_with_matrix_and_events_with_mask_mode_owned, GappedHsp,
+    PreliminaryProfile, TargetTranslation, TracebackOwnedHsp,
 };
 use super::stage_d_kappa_params::{local_extension_final_xdrop, local_kappa_redo_params};
 use super::stage_d_linking::{
@@ -31,7 +30,7 @@ use super::stage_d_results::{
 use super::stage_d_stats::{
     local_parameters_for_call, LocalParameterCall, LocalParameterOptions, LocalSubjectParameters,
 };
-use super::x_subject_store::SubjectLetters;
+use super::x_subject_store::{SubjectLetters, XPrelimSubject};
 use crate::algorithm::blastn::query_split::SplitSizes;
 use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
@@ -347,8 +346,7 @@ pub(super) fn run_local_for_report_threads(
 // ```
 // One query batch searched on a pool that the caller keeps (the port of CLocalBlast::Run for the
 // batch, with its report data).
-/// EXPERIMENT (LOSAT_X_TBNPAR): `run_local_for_report_threads` on a pool that
-/// the caller keeps for all its query batches.
+/// `run_local_for_report_threads` on a pool that the caller keeps for all its query batches.
 pub(super) fn x_run_local_for_report_in_pool(
     queries: &[Vec<u8>],
     subjects: SubjectLetters<'_>,
@@ -392,19 +390,20 @@ pub(super) type XBatchReport = (
 // No NCBI counterpart: reads the LOSAT_X_TBNBATCHRULE variable once; it does not change any value
 // NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNBATCHRULE): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only together with
-/// `LOSAT_X_TBNBATCH`.
+/// it is `0`. It acts only where query batches are
+/// searched side by side (`x_side_by_side_batches`).
 #[cfg(feature = "parallel")]
 fn x_tbn_batch_rule() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNBATCHRULE"))
 }
 
-/// EXPERIMENT (LOSAT_X_TBNBATCHRULE): subject bases up to which `LOSAT_X_TBNBATCH` searches
-/// query batches side by side whatever the number of subjects. Side by side, the serial parts
+/// EXPERIMENT (LOSAT_X_TBNBATCHRULE): subject bases up to which query batches are searched side
+/// by side whatever the number of subjects. Side by side, the serial parts
 /// of each batch (query masking, lookup table) overlap; one after another, the pool shares each
 /// batch's subjects out. Timed on the workstation (perf-si-20261012, session 17) against
-/// `LOSAT_X_TBNBATCH=0` with batches a multiple of the threads, at 8 and 16 threads: side by
+/// the batches one after another (`LOSAT_X_TBNBATCH=0`, a variable that graduated 2026-10-22)
+/// with batches a multiple of the threads, at 8 and 16 threads: side by
 /// side took 0.26-0.96 of the time on sets of 0.3 to 15.7 Mb (one to 5,000 subjects), 0.94-1.00
 /// on 14,000 16S records (20.2 Mb), and 1.00-1.18 on 28,036 16S records (40.6 Mb) and on the
 /// fly transcriptome (94 Mb).
@@ -414,7 +413,7 @@ const X_SIDE_BY_SIDE_MAX_BASES: usize = 24_000_000;
 // No NCBI counterpart: chooses which query batches are searched side by side, each on one
 // thread; every batch is searched as NCBI searches it and the reports keep the batch order.
 /// EXPERIMENT (LOSAT_X_TBNBATCHRULE): how many of the first `batches` query batches
-/// `LOSAT_X_TBNBATCH` searches side by side; the rest are searched one after another with the
+/// are searched side by side; the rest are searched one after another with the
 /// pool inside each.
 ///
 /// Side by side only when the subjects hold at most `X_SIDE_BY_SIDE_MAX_BASES`, or when there
@@ -443,9 +442,9 @@ fn x_batches_side_by_side(
 
 // No NCBI counterpart: chooses which query batches are searched side by side, each on one
 // thread; every batch is searched as NCBI searches it and the reports keep the batch order.
-/// EXPERIMENT (LOSAT_X_TBNBATCH, LOSAT_X_TBNBATCHRULE): how many of the first `batches` query
-/// batches `LOSAT_X_TBNBATCH` searches side by side at `threads` threads: none unless `allowed`
-/// (`LOSAT_X_TBNSSIDE` with four or more batches, and subject plans that would fit,
+/// Graduated 2026-10-22 (was `LOSAT_X_TBNBATCH`): how many of the first `batches` query
+/// batches are searched side by side at `threads` threads: none unless `allowed`
+/// (four or more batches, and subject plans that would fit,
 /// `XSubjectSide::all_fit`); with `LOSAT_X_TBNBATCHRULE` those of `x_batches_side_by_side`;
 /// without it every batch, once there is at least one per thread.
 #[cfg(feature = "parallel")]
@@ -484,7 +483,7 @@ fn x_own_pool_batches(left: usize, subject_bases: usize, subjects: usize, thread
 // No NCBI counterpart: decides whether the subject plans of a search are kept; it does not change
 // any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNKEEPFEW): true when a search of `batches` query batches (four or more,
-/// with `LOSAT_X_TBNSSIDE`) at `threads` threads searches some of them side by side
+/// as the plans are kept) at `threads` threads searches some of them side by side
 /// (`x_side_by_side_batches`) or at the same time on pools of their own (`x_own_pool_batches`).
 /// Such a search keeps its plans, as before: batches searched at the same time share one plan of
 /// each subject, and those after the first ones read them instead of making them again. Side by
@@ -497,7 +496,7 @@ fn x_own_pool_batches(left: usize, subject_bases: usize, subjects: usize, thread
 fn x_searched_side_by_side(subjects: SubjectLetters<'_>, batches: usize, threads: usize) -> bool {
     #[cfg(feature = "parallel")]
     {
-        if threads < 2 || !crate::utils::xswitch::on("LOSAT_X_TBNBATCH") {
+        if threads < 2 {
             return false;
         }
         let fits = super::search_seed::XSubjectSide::all_fit(subjects.lengths());
@@ -516,11 +515,12 @@ fn x_searched_side_by_side(subjects: SubjectLetters<'_>, batches: usize, threads
 // No NCBI counterpart: reads the LOSAT_X_TBNOWNPOOLS variable once; it does not change any value
 // NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only together with
-/// `LOSAT_X_TBNBATCH` and `LOSAT_X_TBNBATCHRULE`, and only natively: in WebAssembly only the
-/// main thread can start threads (the WASI thread hosts give a thread a `thread-spawn` that
-/// fails, `tests/wasi_thread_host.js` and `web/app/src/infra/reactor/instance.ts`), and each own
-/// pool is built on a thread of its own, so its threads could not start there (os error 6).
+/// it is `0`. It acts only together with
+/// `LOSAT_X_TBNBATCHRULE`, on the batches that are not searched side by side, and only natively: in
+/// WebAssembly only the main thread can start threads (the WASI thread hosts give a thread a
+/// `thread-spawn` that fails, `tests/wasi_thread_host.js` and
+/// `web/app/src/infra/reactor/instance.ts`), and each own pool is built on a thread of its own, so
+/// its threads could not start there (os error 6).
 #[cfg(feature = "parallel")]
 fn x_tbn_own_pools() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -560,11 +560,12 @@ fn x_batches_on_own_pools(
     } else {
         threads / 2
     };
-    if few_subjects && left >= 2 && left <= most {
+    let own_pools = if few_subjects && left >= 2 && left <= most {
         left
     } else {
         0
-    }
+    };
+    own_pools
 }
 
 /// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the threads of the `index`-th of `pools` pools that share
@@ -574,9 +575,10 @@ fn x_own_pool_threads(threads: usize, pools: usize, index: usize) -> usize {
     threads / pools + usize::from(index < threads % pools)
 }
 
-/// EXPERIMENT (LOSAT_X_TBNPAR, LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the query batches
+/// Graduated 2026-10-22 (was `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`): the query batches
 /// `ranges` of `search` (`args.rs`) searched ahead, each with its range, in the order of
-/// `ranges`; `None` when the switches leave the batches to the reference loop.
+/// `ranges`; `None` when `ranges` is empty; the caller's loop then searches its batches (args.rs
+/// passes none when the database's sequences could not be read).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
 /// ```c++
@@ -589,15 +591,14 @@ fn x_own_pool_threads(threads: usize, pools: usize, index: usize) -> usize {
 /// ```
 /// NCBI searches each batch on its own (`CLocalBlast` per batch); a batch reads nothing
 /// another batch writes, so only the order of the reports matters, and the caller appends
-/// them in the order of `ranges`. With `LOSAT_X_TBNPAR` one search pool serves every
-/// batch instead of one pool per batch; with `LOSAT_X_TBNSSIDE` and four or more batches the
+/// them in the order of `ranges`. One search pool serves every
+/// batch instead of one pool per batch; with four or more batches the
 /// subject plans (translations, masks) are made once for the search and shared through the
 /// pool (a search of fewer batches keeps none, `XSubjectSide::KEEP_FROM_BATCHES`, and with
 /// `LOSAT_X_TBNKEEPFEW` nor does one that searches its batches one after another and whose
 /// plans exceed what its threads have in flight, `XSubjectSide::kept_within_threads`,
-/// `x_searched_side_by_side`); with `LOSAT_X_TBNBATCH` (and `LOSAT_X_TBNSSIDE`, four
-/// or more batches, plans that would fit, and at least one batch per thread) the batches are
-/// searched side by side, each as the one-thread search. The
+/// `x_searched_side_by_side`); with four or more batches, plans that would fit, and at least
+/// one batch per thread the batches are searched side by side, each as the one-thread search. The
 /// first failing batch in the order of `ranges` gives the error, as in the reference loop.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn x_search_batches<'p>(
@@ -633,29 +634,28 @@ pub(super) fn x_search_batches<'p>(
     // (XSubjectSide::for_batches) and each plan is dropped after its subject, as in NCBI. With
     // LOSAT_X_TBNKEEPFEW a search of more batches keeps none either unless its plans hold no
     // more than its threads could have in flight (XSubjectSide::kept_within_threads) or it
-    // searches batches side by side (x_searched_side_by_side). The gate
-    // below reads the switch and not the object, so the number of batches does not decide which
-    // loop searches them, and the layout of the batches (side by side, own pools) is decided
-    // as before by the switch and the number of batches, whether or not the plans are kept.
-    let x_subject_side_on = super::search_seed::XSubjectSide::enabled();
+    // searches batches side by side (x_searched_side_by_side). The number of batches does not
+    // decide which loop searches them, and the layout of the batches (side by side, own pools)
+    // is decided by the number of batches, whether or not the plans are kept.
     #[cfg(feature = "parallel")]
-    let x_ssided_layout =
-        x_subject_side_on && ranges.len() >= super::search_seed::XSubjectSide::KEEP_FROM_BATCHES;
-    let x_keep = !x_subject_side_on
-        || ranges.len() < super::search_seed::XSubjectSide::KEEP_FROM_BATCHES
+    let x_ssided_layout = ranges.len() >= super::search_seed::XSubjectSide::KEEP_FROM_BATCHES;
+    let x_keep = ranges.len() < super::search_seed::XSubjectSide::KEEP_FROM_BATCHES
         || !super::search_seed::XSubjectSide::keep_few()
         || super::search_seed::XSubjectSide::kept_within_threads(subjects.lengths(), threads)
         || x_searched_side_by_side(subjects, ranges.len(), threads);
+    // The plans are dropped (the switch's own path) or kept as before.
+    if ranges.len() >= super::search_seed::XSubjectSide::KEEP_FROM_BATCHES
+        && super::search_seed::XSubjectSide::keep_few()
+    {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNKEEPFEW", !x_keep);
+    }
     let x_subject_side = super::search_seed::XSubjectSide::for_batches(
-        x_subject_side_on && x_keep,
+        x_keep,
         ranges.len(),
         subjects.count(),
         first.genetic_code,
         first.mask_lowercase,
     );
-    if !(x_tbn_parallel() && (threads > 1 || x_subject_side_on)) {
-        return Ok(None);
-    }
     let search_in = |range: std::ops::Range<usize>, pool: &SearchPool<'_>| {
         x_run_local_for_report_in_pool(
             &queries[range.clone()],
@@ -681,10 +681,10 @@ pub(super) fn x_search_batches<'p>(
             None => pool,
         };
         let mut searched = Vec::with_capacity(ranges.len());
-        // EXPERIMENT (LOSAT_X_TBNBATCH): search the batches side by side, each as the
-        // one-thread search. The serial parts of a batch (query masking, lookup table,
+        // Graduated 2026-10-22 (was `LOSAT_X_TBNBATCH`): search the batches side by side, each as
+        // the one-thread search. The serial parts of a batch (query masking, lookup table,
         // linking, the hand-over between stages) then no longer leave the other threads
-        // idle. It needs LOSAT_X_TBNSSIDE with four or more batches, and subject plans that
+        // idle. It needs four or more batches, and subject plans that
         // would fit (XSubjectSide::all_fit); and at least one batch per thread (with fewer,
         // each batch uses the pool inside). The batches share the kept plans
         // (LOSAT_X_TBNKEEPFEW keeps them for such a search, x_searched_side_by_side); without
@@ -702,10 +702,10 @@ pub(super) fn x_search_batches<'p>(
         // 						chunk_num ++;
         // ```
         // Dispatch point: NCBI has a mode that searches several query batches at once as nodes of a
-        // master node (-mt_mode 1). Here, with LOSAT_X_TBNSSIDE, four or more batches, plans that
+        // master node (-mt_mode 1). Here, with four or more batches, plans that
         // would fit and at least one batch per thread, the batches are searched side by side, each
         // as the one-thread search, and the reports are returned in batch order.
-        if crate::utils::xswitch::on("LOSAT_X_TBNBATCH") && pool.enabled() {
+        if pool.enabled() {
             let fits = super::search_seed::XSubjectSide::all_fit(subjects.lengths());
             let bases = subjects.lengths().fold(0usize, usize::saturating_add);
             let side_by_side = x_side_by_side_batches(
@@ -715,6 +715,12 @@ pub(super) fn x_search_batches<'p>(
                 pool.threads(),
                 x_ssided_layout && fits,
             );
+            // The sides are recorded here, where the batches are dispatched (the same helpers also
+            // decide whether plans are kept, x_searched_side_by_side).
+            crate::utils::xreach::x_reach!("LOSAT_X_TBNBATCH", side_by_side > 0);
+            if x_ssided_layout && fits && x_tbn_batch_rule() {
+                crate::utils::xreach::x_reach!("LOSAT_X_TBNBATCHRULE", side_by_side > 0);
+            }
             // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the batches left after those, at the same time
             // on pools of their own (x_batches_on_own_pools).
             let own_pools = x_own_pool_batches(
@@ -723,6 +729,9 @@ pub(super) fn x_search_batches<'p>(
                 subjects.count(),
                 pool.threads(),
             );
+            if x_tbn_own_pools() && x_tbn_batch_rule() {
+                crate::utils::xreach::x_reach!("LOSAT_X_TBNOWNPOOLS", own_pools > 0);
+            }
             if crate::utils::threading::diagnostics_enabled() {
                 eprintln!(
                     "[losat-thread-stage] program=tblastn stage=query_batches batches={} threads={} side_by_side={} one_after_another={} own_pools={}",
@@ -1263,6 +1272,12 @@ fn run_local_search_with_pool(
             observer.as_deref_mut(),
         );
     }
+    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): with a `-db` stream, the subjects of the lists, each read
+    // when first aligned, held until the redo ends.
+    let x_stage = super::x_db_stream::XStageSubjects::new(
+        subjects,
+        preliminary_lists.iter().map(|(_, oid, _)| *oid),
+    );
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2352-2384,2418-2479,
     // 3099-3110,3290-3302:
@@ -1345,7 +1360,7 @@ fn run_local_search_with_pool(
     let mut owned_lists = HashMap::new();
     let mut scratch = GapAlignScratch::new();
     let mut workspace = BlastCompositionWorkspace::new_blosum62();
-    // EXPERIMENT (LOSAT_X_TBNPAR): everything one (query, subject) match needs
+    // Everything one (query, subject) match needs
     // between the early-termination test and the heap insertion, as a function of
     // the match alone.  NCBI c++/src/algo/blast/core/blast_kappa.c:3525-3736 keeps
     // the same state thread-local (matrix, NRrecord, gapAlign) for its redo loop.
@@ -1372,8 +1387,9 @@ fn run_local_search_with_pool(
                      workspace: &mut BlastCompositionWorkspace|
      -> Result<Option<(CompoHeapRecord, KappaResultList)>> {
         // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form: the redo and
-        // the translations below read windows of it, as NCBI's do.
-        let subject = subjects.nt(oid);
+        // the translations below read windows of it, as NCBI's do. EXPERIMENT (LOSAT_X_TBNDBSTREAM):
+        // a `-db` sequence is read once for the redo (`x_stage`).
+        let subject = x_stage.nt(oid)?;
         let incoming: Vec<_> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
         // The matrix that the match's adjustments leave, for the engine positives
         // (`postredo_engine_positives`).
@@ -1523,7 +1539,7 @@ fn run_local_search_with_pool(
             }
         }
     };
-    // EXPERIMENT (LOSAT_X_TBNPAR): redo the matches of one batch on the search
+    // Redo the matches of one batch on the search
     // pool, then apply early termination and the heap updates in list order.  A
     // match is a function of its own preliminary list; the only state shared
     // between matches is the heap array, which only this thread touches.
@@ -1534,24 +1550,21 @@ fn run_local_search_with_pool(
     // #pragma omp flush(interrupt)
     //             if (!interrupt) {
     // ```
-    // NCBI redoes the matches in this omp loop. With LOSAT_X_TBNPAR the matches of a batch are
+    // NCBI redoes the matches in this omp loop. The matches of a batch are
     // redone on the pool by redo_item and then applied in list order (early termination is tested
     // again in order). A match depends only on its own preliminary list.
     #[cfg(feature = "parallel")]
-    let parallel_redo =
-        x_tbn_parallel() && pool.is_some_and(SearchPool::enabled) && preliminary_lists.len() > 1;
+    let parallel_redo = pool.is_some_and(SearchPool::enabled) && preliminary_lists.len() > 1;
     #[cfg(not(feature = "parallel"))]
     let parallel_redo = false;
     // No NCBI counterpart: stage report for the thread-use statistics; it does not change any value
     // NCBI computes.
-    if x_tbn_parallel() {
-        crate::utils::threading::report_stage(
-            "tblastn",
-            "kappa_redo",
-            preliminary_lists.len(),
-            parallel_redo,
-        );
-    }
+    crate::utils::threading::report_stage(
+        "tblastn",
+        "kappa_redo",
+        preliminary_lists.len(),
+        parallel_redo,
+    );
     if parallel_redo {
         #[cfg(feature = "parallel")]
         {
@@ -1595,28 +1608,51 @@ fn run_local_search_with_pool(
                     .iter()
                     .map(|(_, _, list)| !compo_early_termination(list.best_evalue, &heaps))
                     .collect();
-                let computed: Vec<_> = pool.install(|| {
-                    batch
-                        .par_iter()
-                        .zip(wanted.par_iter())
-                        .map(|((context, oid, list), &wanted)| {
-                            if !wanted {
-                                return None;
-                            }
-                            let slot = rayon::current_thread_index().unwrap_or(0) % states.len();
-                            let mut guard = states[slot].lock().expect("TBLASTN redo worker state");
-                            let worker = &mut *guard;
-                            Some(redo_item(
-                                *context,
-                                *oid,
-                                list,
-                                &worker.params,
-                                &mut worker.scratch,
-                                &mut worker.workspace,
-                            ))
-                        })
-                        .collect()
-                });
+                let lpt = x_tbn_redo_lpt() && {
+                    let acts = pool.threads() <= X_REDO_LPT_MAX_THREADS
+                        && wanted.iter().filter(|&&wanted| wanted).count() > 1;
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNREDOLPT", acts);
+                    acts
+                };
+                let computed: Vec<_> = if lpt {
+                    let order = x_redo_lpt_order(&wanted, |index| batch[index].2.hsps.len());
+                    x_redo_lpt(pool, &states, batch.len(), &order, |worker, index| {
+                        let (context, oid, list) = &batch[index];
+                        redo_item(
+                            *context,
+                            *oid,
+                            list,
+                            &worker.params,
+                            &mut worker.scratch,
+                            &mut worker.workspace,
+                        )
+                    })
+                } else {
+                    pool.install(|| {
+                        batch
+                            .par_iter()
+                            .zip(wanted.par_iter())
+                            .map(|((context, oid, list), &wanted)| {
+                                if !wanted {
+                                    return None;
+                                }
+                                let slot =
+                                    rayon::current_thread_index().unwrap_or(0) % states.len();
+                                let mut guard =
+                                    states[slot].lock().expect("TBLASTN redo worker state");
+                                let worker = &mut *guard;
+                                Some(redo_item(
+                                    *context,
+                                    *oid,
+                                    list,
+                                    &worker.params,
+                                    &mut worker.scratch,
+                                    &mut worker.workspace,
+                                ))
+                            })
+                            .collect()
+                    })
+                };
                 for ((context, oid, list), result) in batch.iter().zip(computed) {
                     if compo_early_termination(list.best_evalue, &heaps) {
                         continue;
@@ -1644,6 +1680,12 @@ fn run_local_search_with_pool(
             }
         }
     } else {
+        // One thread (also a query batch searched side by side with others, on one thread each) or
+        // one match: the redo runs here, outside LOSAT_X_TBNREDOLPT's rule.
+        #[cfg(feature = "parallel")]
+        if x_tbn_redo_lpt() {
+            crate::utils::xreach::x_reach!("LOSAT_X_TBNREDOLPT", false);
+        }
         for (context, oid, list) in preliminary_lists {
             // NCBI c++/src/algo/blast/core/blast_kappa.c:3383-3427,3525-3736:
             // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
@@ -1694,50 +1736,6 @@ fn run_local_search_with_pool(
     Ok(results)
 }
 
-// No NCBI counterpart: reads the LOSAT_X_TBNPAR switch once; it does not change any value NCBI
-// computes.
-// EXPERIMENT (LOSAT_X_TBNPAR): intra-subject parallelism of the TBLASTN search.
-pub(super) fn x_tbn_parallel() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNPAR"))
-}
-
-// No NCBI counterpart: reads the LOSAT_X_TBNOIDCHUNK switch once; it does not change any value
-// NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
-#[cfg(feature = "parallel")]
-fn x_tbn_oid_chunk() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNOIDCHUNK"))
-}
-
-// No NCBI counterpart: reads the LOSAT_X_TBNOIDNEXT switch once; it does not change any value
-// NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNOIDNEXT): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only where `LOSAT_X_TBNOIDCHUNK`
-/// makes the chunks.
-#[cfg(feature = "parallel")]
-fn x_tbn_oid_next() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNOIDNEXT"))
-}
-
-// No NCBI counterpart: reads the LOSAT_X_TBNOIDUNITS switch once; it does not change any value
-// NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNOIDUNITS): a switch of the strict set (`utils/xswitch.rs`), on unless
-/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only where `LOSAT_X_TBNOIDCHUNK`
-/// makes the chunks.
-#[cfg(feature = "parallel")]
-fn x_tbn_oid_units() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNOIDUNITS"))
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:153-154
 // ```c++
 //     BlastSeqSrcSetNumberOfThreads(m_InternalData->m_SeqSrc->GetPointer(),
@@ -1771,7 +1769,7 @@ fn x_tbn_oid_units() -> bool {
 // database file; its F is the size of the sequence file `makeblastdb` writes for the same set,
 // a quarter byte per base. LOSAT's tblastn has no `-db` yet (`args.rs` rejects it); it would
 // pass the largest file of the database. Scheduling only: the number enters no computation.
-/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the bases one chunk of subjects may hold.
+/// Graduated 2026-10-22 (was `LOSAT_X_TBNOIDCHUNK`): the bases one chunk of subjects may hold.
 #[cfg(feature = "parallel")]
 fn x_oid_chunk_bases(threads: usize, largest_file: u64) -> u64 {
     // NCBI's Int8 `GetSliceSize() / (4*m_NumThreads) + 1`; usize fits u64 on every target.
@@ -1783,7 +1781,7 @@ fn x_oid_chunk_bases(threads: usize, largest_file: u64) -> u64 {
 
 // No NCBI counterpart: the size of the `.nsq` file that `makeblastdb` writes for the subjects,
 // as F of `x_oid_chunk_bases` for `-subject`; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): ceil(bases of all subjects / 4).
+/// ceil(bases of all subjects / 4).
 #[cfg(feature = "parallel")]
 fn x_subject_file_size(subjects: SubjectLetters<'_>) -> u64 {
     let bases = subjects.lengths().fold(0u64, |sum, length| {
@@ -1811,7 +1809,7 @@ fn x_subject_file_size(subjects: SubjectLetters<'_>) -> u64 {
 // compares the OID after the next one with the end, so the last subject of a database always
 // starts a chunk of its own, and a chunk never crosses a volume; LOSAT does not copy these, as
 // `-subject` has one volume and the rest is scheduling only.
-/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the end of the chunk of subjects that starts at `begin`.
+/// The end of the chunk of subjects that starts at `begin`.
 #[cfg(feature = "parallel")]
 fn x_oid_chunk_end(subjects: SubjectLetters<'_>, begin: usize, bases: u64) -> usize {
     let length = |oid: usize| u64::try_from(subjects.length(oid)).unwrap_or(u64::MAX);
@@ -1835,51 +1833,6 @@ fn x_oid_chunk_end(subjects: SubjectLetters<'_>, begin: usize, bases: u64) -> us
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-347
 // ```c++
 //     begin_chunk = * state_obj;
-//
-//     // fill the cache for all sequence in mmaped slice
-//     if (m_NumThreads) {
-//         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
-//         x_FillSeqBuffer(buffer, begin_chunk);
-//         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
-// ...
-//     *state_obj = end_chunk;
-// ```
-// Each NCBI search thread takes the next chunk when it is free. One entry into LOSAT's pool
-// takes the next chunks (x_chunks_per_entry), and each chunk is one task. Scheduling only.
-/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the chunks of the entry that starts at `begin`, at most
-/// `count` of them.
-#[cfg(feature = "parallel")]
-fn x_entry_chunks(
-    subjects: SubjectLetters<'_>,
-    begin: usize,
-    count: usize,
-    bases: u64,
-) -> Vec<std::ops::Range<usize>> {
-    let mut chunks = Vec::new();
-    let mut start = begin;
-    while chunks.len() < count.max(1) && start < subjects.count() {
-        let end = x_oid_chunk_end(subjects, start, bases);
-        chunks.push(start..end);
-        start = end;
-    }
-    chunks
-}
-
-// No NCBI counterpart: NCBI's threads take chunks without entries, and its budget over four
-// times the threads gives each thread about four chunks of a slice. An entry of four chunks per
-// thread does the same inside LOSAT's entries: the pool hands each chunk to whichever thread is
-// free, so at the end of an entry a thread waits for about one chunk, not for the slowest of one
-// chunk per thread, and less than that when it takes part of the subjects of a chunk another
-// thread is still searching. Scheduling only.
-/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the chunks one entry into the pool takes.
-#[cfg(feature = "parallel")]
-fn x_chunks_per_entry(threads: usize) -> usize {
-    threads.saturating_mul(4).max(1)
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-347
-// ```c++
-//     begin_chunk = * state_obj;
 // ...
 //         x_FillSeqBuffer(buffer, begin_chunk);
 //         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
@@ -1887,17 +1840,26 @@ fn x_chunks_per_entry(threads: usize) -> usize {
 //     *state_obj = end_chunk;
 // ```
 // The chunks NCBI's threads take one after another, all of them: each starts where the last one
-// ended. Scheduling only.
-/// EXPERIMENT (LOSAT_X_TBNOIDNEXT): every chunk of the subjects, in OID order.
+// ended. Each NCBI search thread takes the next chunk when it is free; LOSAT's pool takes the
+// chunks and each chunk is one task. Scheduling only.
+/// Graduated 2026-10-22 (was `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDCHUNK`): every chunk of the
+/// subjects, in OID order.
 #[cfg(feature = "parallel")]
 fn x_all_chunks(subjects: SubjectLetters<'_>, bases: u64) -> Vec<std::ops::Range<usize>> {
-    x_entry_chunks(subjects, 0, usize::MAX, bases)
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < subjects.count() {
+        let end = x_oid_chunk_end(subjects, start, bases);
+        chunks.push(start..end);
+        start = end;
+    }
+    chunks
 }
 
 // No NCBI counterpart: NCBI's threads write their lists into the shared HSP stream at once. The
 // lists of chunks finished ahead of the oldest one LOSAT has not reduced yet wait, at most this
 // many chunks beyond it, so that their memory stays bounded. Scheduling only.
-/// EXPERIMENT (LOSAT_X_TBNOIDNEXT): the chunks taken or waiting beyond the oldest one not reduced.
+/// The chunks taken or waiting beyond the oldest one not reduced.
 #[cfg(feature = "parallel")]
 fn x_flow_window(threads: usize) -> usize {
     threads.saturating_mul(4).max(1)
@@ -1937,6 +1899,111 @@ struct XRedoWorker {
 // through its mutex, so it is never observed mid-call by another thread.
 #[cfg(feature = "parallel")]
 unsafe impl Send for XRedoWorker {}
+
+// No NCBI counterpart: reads the LOSAT_X_TBNREDOLPT variable once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNREDOLPT): a switch of the strict set (`utils/xswitch.rs`), on unless
+/// it is `0`. It acts only where the redo runs on the search pool (two or more threads, two or
+/// more matches), with at most `X_REDO_LPT_MAX_THREADS` threads, on a chunk with two or more
+/// matches to redo.
+#[cfg(feature = "parallel")]
+fn x_tbn_redo_lpt() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNREDOLPT"))
+}
+
+// No NCBI counterpart: chooses how the threads share a chunk's matches; it changes no value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_TBNREDOLPT): the most threads with which a chunk's matches run largest
+/// first (`x_redo_lpt`); a larger pool keeps the `par_iter`. Measured on the workstation (2026-10-25,
+/// the first query batch of 35 human proteins against the human genome): the chunk's time is its
+/// longest match's at 16 and 32 threads (work / threads below it). At 16 threads the `par_iter`
+/// gave one thread a run of adjacent heavy matches (redo 226 s, largest first 112 s); at 32 its
+/// runs are short and it started the longest match within 1-8 s, so starting it first saved
+/// little, while running the 32 heaviest matches at once raised the redo's work by 5 % (each
+/// scans lists of tens of thousands of HSPs): x1.035 of the run time.
+#[cfg(feature = "parallel")]
+const X_REDO_LPT_MAX_THREADS: usize = 16;
+
+// No NCBI counterpart: the order in which the threads take a chunk's matches; it changes no value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNREDOLPT): the indices of the `wanted` matches by `hsps(index)` (the
+/// number of HSPs of the match's preliminary list), largest first; matches with as many HSPs in
+/// index order. A redo's cost grows with its list, whatever the function, so any such cost gives
+/// this order.
+#[cfg(feature = "parallel")]
+fn x_redo_lpt_order(wanted: &[bool], hsps: impl Fn(usize) -> usize) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..wanted.len()).filter(|&index| wanted[index]).collect();
+    order.sort_by_key(|&index| (std::cmp::Reverse(hsps(index)), index));
+    order
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3447-3449,3493-3497
+// ```c
+//         int b;
+// #pragma omp for schedule(static)
+//         for (b = 0; b < numMatches; ++b) {
+// ...
+//                 seqSrc               = seqsrc_tld[tid];
+//                 scoringParams        = score_params_tld[tid];
+//                 hitParams            = hit_params_tld[tid];
+// ```
+// No NCBI counterpart for the order: NCBI's threads take fixed shares of its loop; here the
+// threads take the matches one at a time, largest first. Scheduling only.
+/// EXPERIMENT (LOSAT_X_TBNREDOLPT): `run(worker, index)` for every index of `order`, in one
+/// `rayon::scope` on `pool` of `min(workers, order)` tasks, task `t` with `workers[t]`. Each task
+/// takes the next index of `order` from one counter until none is left, and puts each result in
+/// the index's slot. Returns the results of a chunk of `matches` matches by index, `None` where
+/// `order` does not name the index (a match early termination ends before the chunk).
+///
+/// Why the results are the `par_iter` path's: a match's result is a function of its preliminary
+/// list (`redo_item` with the same arguments); a worker carries no value from one match to the
+/// next (the `par_iter` path also gives one worker the matches of whichever thread holds it); the
+/// results are read by index, so the in-order apply sees the same sequence, errors included. The
+/// order only changes which thread computes what, and when; no floating-point operation changes
+/// order, the matches share no reduction. A task holds its own worker and waits for nothing but a
+/// `-db` sequence another thread is reading (`XDbStream::read_shared`), a read that runs no rayon
+/// work; a match runs none either, so no task depends on a task that could be stolen below it.
+#[cfg(feature = "parallel")]
+#[inline(never)]
+fn x_redo_lpt<W, R>(
+    pool: &SearchPool<'_>,
+    workers: &[std::sync::Mutex<W>],
+    matches: usize,
+    order: &[usize],
+    run: impl Fn(&mut W, usize) -> R + Sync,
+) -> Vec<Option<R>>
+where
+    W: Send,
+    R: Send + Sync,
+{
+    // A disabled pool would run the scope on the global pool, not the search pool.
+    debug_assert!(pool.enabled());
+    let slots: Vec<std::sync::OnceLock<R>> =
+        (0..matches).map(|_| std::sync::OnceLock::new()).collect();
+    let next = AtomicUsize::new(0);
+    let (slots_ref, next, run) = (&slots, &next, &run);
+    pool.install(|| {
+        rayon::scope(|scope| {
+            for worker in &workers[..workers.len().min(order.len())] {
+                scope.spawn(move |_| {
+                    let mut guard = worker.lock().expect("TBLASTN redo worker state");
+                    while let Some(&index) = order.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        let result = run(&mut guard, index);
+                        assert!(
+                            slots_ref[index].set(result).is_ok(),
+                            "match {index} ran twice"
+                        );
+                    }
+                });
+            }
+        });
+    });
+    slots
+        .into_iter()
+        .map(std::sync::OnceLock::into_inner)
+        .collect()
+}
 
 // The per-context cutoffs of the preliminary stage of a query set.
 struct ContextCutoffArrays {
@@ -2217,7 +2284,7 @@ fn query_set_setup(
     // BlastAaLookupTableNew(..., lookup_options->word_size, ...);
     // The active matrix determines context validity; the active word size
     // determines the lookup state used by Stage C.
-    // EXPERIMENT (LOSAT_X_LUTSPLIT): only the contexts are used here.
+    // Only the contexts are used here (graduated 2026-10-22, was LOSAT_X_LUTSPLIT).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2792
     // ```c
     //       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
@@ -2454,8 +2521,6 @@ fn run_preliminary_subjects_into(
     // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
     // Finish search, link/direct E-value and preliminary reap inside one subject
     // job, before its OID-ordered list enters the shared collector.
-    // EXPERIMENT (LOSAT_X_TBNPAR): with one job per subject the pool is busy with
-    // subjects; otherwise the units of the single subject use it.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
     // ```c
     //     /* iterate over all subject sequences */
@@ -2468,11 +2533,14 @@ fn run_preliminary_subjects_into(
     // collection finishes before the OID-ordered shared collector below.
     let parallel_selected = pool.is_some_and(SearchPool::enabled) && subjects.count() > 1;
     let unit_pool = if parallel_selected { None } else { pool };
-    // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the bases one chunk may hold, from the size of the
-    // sequence file of the subjects (x_oid_chunk_bases); none without the switch.
+    // Graduated 2026-10-22 (was `LOSAT_X_TBNOIDCHUNK`): the bases one chunk may hold, from the
+    // size of the sequence file of the subjects (x_oid_chunk_bases); none when the subjects are
+    // not searched on the pool.
+    #[cfg(feature = "parallel")]
+    crate::utils::xreach::x_reach!("LOSAT_X_TBNOIDCHUNK", parallel_selected);
     #[cfg(feature = "parallel")]
     let x_chunk_bases = match pool {
-        Some(pool) if parallel_selected && x_tbn_oid_chunk() => Some(x_oid_chunk_bases(
+        Some(pool) if parallel_selected => Some(x_oid_chunk_bases(
             pool.threads(),
             x_subject_file_size(subjects),
         )),
@@ -2486,26 +2554,28 @@ fn run_preliminary_subjects_into(
     //
     //         if (status == SUBJECT_SPLIT_DONE) break;
     // ```
-    // EXPERIMENT (LOSAT_X_TBNOIDUNITS): NCBI's thread searches the chunks of its subject one after
-    // another. A subject longer than a chunk's budget, a chunk of its own, runs its (frame, chunk)
-    // units on the pool as the single subject of a search does, so that threads without a chunk
-    // to search take them; its merge, linking and reaping stay on its thread after its last unit.
-    // The other subjects, and every subject without the switch, keep `unit_pool`. Scheduling only.
+    // Graduated 2026-10-22 (was `LOSAT_X_TBNOIDUNITS`): NCBI's thread searches the chunks of its
+    // subject one after another. A subject longer than a chunk's budget, a chunk of its own, runs
+    // its (frame, chunk) units on the pool as the single subject of a search does, so that threads
+    // without a chunk to search take them; its merge, linking and reaping stay on its thread after
+    // its last unit. The other subjects keep `unit_pool`. Scheduling only.
     #[cfg(feature = "parallel")]
-    let x_units_beyond = x_chunk_bases.filter(|_| x_tbn_oid_units());
-    let x_unit_pool = |subject: SubjectNt<'_>| {
+    let x_units_beyond = x_chunk_bases;
+    let x_unit_pool = |subject: XPrelimSubject<'_>| {
         #[cfg(feature = "parallel")]
-        if x_units_beyond
-            .is_some_and(|bases| u64::try_from(subject.len()).unwrap_or(u64::MAX) > bases)
-        {
-            return pool;
+        if let Some(bases) = x_units_beyond {
+            let beyond = u64::try_from(subject.len()).unwrap_or(u64::MAX) > bases;
+            crate::utils::xreach::x_reach!("LOSAT_X_TBNOIDUNITS", beyond);
+            if beyond {
+                return pool;
+            }
         }
         #[cfg(not(feature = "parallel"))]
         let _ = subject;
         unit_pool
     };
-    // EXPERIMENT (LOSAT_X_TBNQSIDE): query frames and lookup table of this
-    // query set, built by the first subject that needs them.
+    // The query frames and lookup table of this query set, built by the first subject that
+    // needs them.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
     // ```c
     //        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
@@ -2515,9 +2585,9 @@ fn run_preliminary_subjects_into(
     //                                  query, lookup_segments, 0);
     // ```
     // NCBI builds the lookup table once per query batch; this value lets the subjects of the batch
-    // share the query frames and the table (LOSAT_X_TBNQSIDE).
+    // share the query frames and the table (`XQuerySide`).
     let x_query_side = super::search_gapped::XQuerySide::new();
-    // EXPERIMENT (LOSAT_X_TBNSSIDE): the subject plans the owner of the search
+    // The subject plans (was LOSAT_X_TBNSSIDE) the owner of the search
     // attached to the pool; `subjects` is its subject list.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
     // ```c
@@ -2527,12 +2597,12 @@ fn run_preliminary_subjects_into(
     //                                      &frame_offsets, NULL);
     // ```
     // The subject plans (translations) attached to the pool by the owner of the search
-    // (LOSAT_X_TBNSSIDE); a reuse of the translation NCBI makes for each subject.
+    // (`XSubjectSide`); a reuse of the translation NCBI makes for each subject.
     let x_subject_side = pool.and_then(|pool| pool.x_ext::<super::search_seed::XSubjectSide>());
     // No NCBI counterpart: x_oid is only the index of the subject among the shared subject plans;
     // it does not change any value NCBI computes.
     let subject_core = |x_oid: usize,
-                        subject: SubjectNt<'_>|
+                        subject: XPrelimSubject<'_>|
      -> Result<(Vec<(usize, GappedHsp)>, LinkedHspList)> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1412-1413,1469-1470
         // ```c
@@ -2543,15 +2613,14 @@ fn run_preliminary_subjects_into(
         //           s_BlastSearchEngineCore(program_number, query, query_info,
         // ```
         // Dispatch point: the call that runs the preliminary stage for one subject
-        // (s_BlastSearchEngineCore). preliminary_protein_hsps_for_search chooses the original
-        // port or the unit-wise stage by switch.
+        // (s_BlastSearchEngineCore). preliminary_protein_hsps_for_search runs the unit-wise stage.
         let preliminary = super::search_gapped::preliminary_protein_hsps_for_search(
             inputs.queries,
             subject,
             inputs.genetic_code,
             inputs.search,
             x_unit_pool(subject),
-            x_query_side.as_ref(),
+            &x_query_side,
             x_subject_side.map(|side| (side, x_oid)),
         )?;
         // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
@@ -2617,10 +2686,10 @@ fn run_preliminary_subjects_into(
     //        != BLAST_SEQSRC_EOF) {
     // Keep at most one pool-sized batch of subject results before OID reduction;
     // memory follows NCBI's bounded number of workers, not total subject count.
-    // With LOSAT_X_TBNOIDCHUNK the batch is four chunks of subjects per worker
-    // (x_chunks_per_entry), cut by residues as NCBI's database reader cuts them for its search
-    // threads (x_entry_chunks), so the lists of the subjects of at most that many chunks wait
-    // for the reduction; a subject's translation still lives only while its worker searches it.
+    // The subjects are cut into chunks by residues as NCBI's database reader cuts them for its
+    // search threads (x_all_chunks), and the flow of chunks (`x_oid_flow.rs`) keeps the lists of
+    // at most `x_flow_window` chunks waiting for the reduction; a subject's translation still
+    // lives only while its worker searches it.
     #[cfg(feature = "parallel")]
     let mut parallel_batch = std::collections::VecDeque::new();
     #[cfg(feature = "parallel")]
@@ -2631,10 +2700,6 @@ fn run_preliminary_subjects_into(
     let peak = AtomicUsize::new(0);
     #[cfg(feature = "parallel")]
     let mut workers = std::collections::BTreeSet::new();
-    // No NCBI counterpart: counts the entries into the pool for the diagnostic line below; it does
-    // not change any value NCBI computes.
-    #[cfg(feature = "parallel")]
-    let mut x_pool_entries = 0usize;
     #[cfg(feature = "parallel")]
     let search = |x_oid: usize| {
         if diagnose {
@@ -2647,17 +2712,23 @@ fn run_preliminary_subjects_into(
         }
         (result, rayon::current_thread_index())
     };
-    // EXPERIMENT (LOSAT_X_TBNOIDNEXT): every chunk of LOSAT_X_TBNOIDCHUNK handed to the threads
-    // when they are free (`x_oid_flow.rs`); the lists come back below chunk by chunk in OID order.
+    // Graduated 2026-10-22 (was `LOSAT_X_TBNOIDNEXT`): every chunk handed to the threads when
+    // they are free (`x_oid_flow.rs`); the lists come back below chunk by chunk in OID order.
     #[cfg(feature = "parallel")]
-    let x_flow = match x_chunk_bases {
-        Some(bases) if x_tbn_oid_next() => Some(super::x_oid_flow::XOidFlow::new(
+    crate::utils::xreach::x_reach!("LOSAT_X_TBNOIDNEXT", x_chunk_bases.is_some());
+    // LOSAT_X_TBNFLOWHELP: the threads that wait in the flow run the pool's jobs; no flow, no wait.
+    #[cfg(feature = "parallel")]
+    if super::x_oid_flow::x_flow_help().is_some() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNFLOWHELP", x_chunk_bases.is_some());
+    }
+    #[cfg(feature = "parallel")]
+    let x_flow = x_chunk_bases.map(|bases| {
+        super::x_oid_flow::XOidFlow::new(
             x_all_chunks(subjects, bases),
             x_flow_window(pool.map_or(1, SearchPool::threads)),
             pool.map_or(1, SearchPool::threads).saturating_sub(1),
-        )),
-        _ => None,
-    };
+        )
+    });
     #[cfg(feature = "parallel")]
     let x_flow_search = |x_oid: usize| search(x_oid);
     // The OID-ordered reduction below, as one closure so that it can run inside the scope whose
@@ -2670,8 +2741,6 @@ fn run_preliminary_subjects_into(
             #[cfg(feature = "parallel")]
             let (preliminary, linked) = if parallel_selected {
                 if parallel_batch.is_empty() {
-                    let pool = pool.expect("parallel pool selected");
-                    // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): four chunks of subjects per thread.
                     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:338-341
                     // ```c++
                     //     if (m_NumThreads) {
@@ -2679,40 +2748,18 @@ fn run_preliminary_subjects_into(
                     //         x_FillSeqBuffer(buffer, begin_chunk);
                     //         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
                     // ```
-                    // Dispatch point: the chunks this entry into the pool takes (x_entry_chunks), one
-                    // task each, or one subject per thread without the switch. The subjects are
-                    // searched by the same call as before and their lists are taken in OID order
-                    // below. NCBI's thread searches the subjects of its chunk one after another;
-                    // here they are a parallel range inside the chunk's task, so a thread that runs
-                    // out of chunks at the end of an entry takes part of a chunk another thread is
+                    // Dispatch point: the next chunk in OID order from the flow (`x_oid_flow.rs`).
+                    // The subjects are searched by the same call as before and their lists are
+                    // taken in OID order. NCBI's thread searches the subjects of its chunk one
+                    // after another; here they are a parallel range inside the chunk's task, so
+                    // a thread that runs out of chunks takes part of a chunk another thread is
                     // still searching instead of waiting for all of it (a subject longer than a
-                    // chunk's budget is a chunk of its own). The ordered collect keeps the subject
-                    // order. Scheduling only.
-                    // EXPERIMENT (LOSAT_X_TBNOIDNEXT): the next chunk in OID order from the flow.
-                    let batch: Vec<_> = if let Some(flow) = x_flow.as_ref() {
-                        flow.next_in_order(&x_flow_search)?
-                            .context("missing ordered TBLASTN subject chunk")?
-                    } else if let Some(bases) = x_chunk_bases {
-                        x_pool_entries += 1;
-                        let chunks = x_entry_chunks(
-                            subjects,
-                            oid,
-                            x_chunks_per_entry(pool.threads()),
-                            bases,
-                        );
-                        let lists: Vec<Vec<_>> = pool.install(|| {
-                            chunks
-                                .par_iter()
-                                .with_max_len(1)
-                                .map(|chunk| chunk.clone().into_par_iter().map(&search).collect())
-                                .collect()
-                        });
-                        lists.into_iter().flatten().collect()
-                    } else {
-                        x_pool_entries += 1;
-                        let end = oid.saturating_add(pool.threads()).min(subjects.count());
-                        pool.install(|| (oid..end).into_par_iter().map(&search).collect())
-                    };
+                    // chunk's budget is a chunk of its own). The ordered collect keeps the
+                    // subject order. Scheduling only.
+                    let flow = x_flow.as_ref().expect("the flow of a selected pool");
+                    let batch: Vec<_> = flow
+                        .next_in_order(&x_flow_search)?
+                        .context("missing ordered TBLASTN subject chunk")?;
                     if diagnose {
                         workers.extend(batch.iter().filter_map(|(_, worker)| *worker));
                     }
@@ -2751,7 +2798,7 @@ fn run_preliminary_subjects_into(
     //         (*thread)->Run();
     //     }
     // ```
-    // EXPERIMENT (LOSAT_X_TBNOIDNEXT): NCBI runs its search threads side by side until the
+    // NCBI runs its search threads side by side until the
     // subjects run out. With the flow the other threads of the pool take chunks for the whole
     // search while this thread reduces (and searches when the next chunk is not ready); the flow
     // is closed when the reduction ends, fails or panics, so the scope always ends.
@@ -2770,13 +2817,17 @@ fn run_preliminary_subjects_into(
     }
     #[cfg(not(feature = "parallel"))]
     reduce_subjects()?;
+    #[cfg(feature = "parallel")]
+    if let Some(line) = x_flow.as_ref().and_then(|flow| flow.stats_line()) {
+        eprintln!("{line}");
+    }
     // NCBI c++/src/algo/blast/core/blast_engine.c:1659-1668:
     // /* Use a local diagnostics structure, because the one passed in an input
     //    argument can be shared between multiple threads */
     #[cfg(feature = "parallel")]
     if parallel_selected && diagnose {
-        // EXPERIMENT (LOSAT_X_TBNOIDNEXT): with the flow the search is one entry; the line adds
-        // its chunks and the most finished chunks that waited for the reduction at once.
+        // The search is one entry into the pool; the line adds its chunks and the most finished
+        // chunks that waited for the reduction at once.
         let x_flow_fields = x_flow.as_ref().map_or(String::new(), |flow| {
             format!(
                 " flow_chunks={} flow_peak_waiting={}",
@@ -2784,12 +2835,9 @@ fn run_preliminary_subjects_into(
                 flow.peak_waiting()
             )
         });
-        if x_flow.is_some() {
-            x_pool_entries = 1;
-        }
         eprintln!(
-            "[losat-thread-activity] program=tblastn stage=subject_core work_items={} worker_slots={:?} peak_active={} pool_entries={}{}",
-            subjects.count(), workers, peak.load(Ordering::SeqCst), x_pool_entries, x_flow_fields
+            "[losat-thread-activity] program=tblastn stage=subject_core work_items={} worker_slots={:?} peak_active={} pool_entries=1{}",
+            subjects.count(), workers, peak.load(Ordering::SeqCst), x_flow_fields
         );
     }
     Ok(())
@@ -2894,10 +2942,20 @@ fn finish_local_mode0_no_sum_stats(
                 .collect::<Vec<_>>()
         })
         .collect();
-    // The letters of the subject in hand (made from its packed form with LOSAT_X_TBNSTORE).
-    let mut x_letters = Vec::new();
+    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): with a `-db` stream, the subjects of the lists, each read
+    // when first aligned, held until the traceback ends.
+    let x_stage = super::x_db_stream::XStageSubjects::new(
+        subjects,
+        preliminary_lists.iter().map(|(_, oid, _)| *oid),
+    );
     for (context, oid, preliminary) in preliminary_lists {
-        let subject = subjects.letters(oid, &mut x_letters);
+        // The subject as the readers of windows take it: the record's letters, or its store (every
+        // `-db` sequence; with EXPERIMENT LOSAT_X_TBNSTORE every `-subject` record), whose windows
+        // the translations make when they read them (`TargetTranslation`). The whole subject's
+        // letters are made only for a list retried after a fence, whose frames NCBI translates
+        // whole (one window for all of them). EXPERIMENT (LOSAT_X_TBNDBSTREAM): a `-db` sequence is
+        // read once for the traceback (`x_stage`).
+        let subject = x_stage.nt(oid)?;
         let input: Vec<_> = preliminary.hsps.iter().map(|linked| linked.hsp).collect();
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536:
         // traceback uses the selected scoring matrix and gap costs.
@@ -2977,7 +3035,7 @@ fn finish_local_mode0_no_sum_stats(
         if post.hsps.is_empty() {
             continue;
         }
-        let mut target = TargetTranslation::new(subject, code);
+        let mut target = TargetTranslation::of(subject, code);
         let mut owned: Vec<Option<TracebackOwnedHsp>> = traced.into_iter().map(Some).collect();
         let payloads = post
             .hsps
@@ -6019,64 +6077,25 @@ mod tests {
                 "{lengths:?} from {begin}, {bases} bases"
             );
         }
-        // An entry takes the given number of chunks from `begin`, fewer at the end of the
-        // subjects, and at least one chunk; four per thread.
+        // `x_all_chunks` takes every chunk from the first subject on, in OID order.
         let subjects = set(&[50, 5, 5, 5, 5, 50, 5]);
         assert_eq!(
-            x_entry_chunks(
-                SubjectLetters::Records(&subject_slices(&subjects)),
-                0,
-                3,
-                12
-            ),
-            [0..1, 1..3, 3..5]
+            x_all_chunks(SubjectLetters::Records(&subject_slices(&subjects)), 12),
+            [0..1, 1..3, 3..5, 5..6, 6..7]
         );
-        assert_eq!(
-            x_entry_chunks(
-                SubjectLetters::Records(&subject_slices(&subjects)),
-                5,
-                3,
-                12
-            ),
-            [5..6, 6..7]
-        );
-        assert_eq!(
-            x_entry_chunks(
-                SubjectLetters::Records(&subject_slices(&subjects)),
-                0,
-                0,
-                12
-            ),
-            [0..1]
-        );
-        assert!(x_entry_chunks(
-            SubjectLetters::Records(&subject_slices(&subjects)),
-            7,
-            3,
-            12
-        )
-        .is_empty());
-        assert_eq!(x_chunks_per_entry(8), 32);
-        assert_eq!(x_chunks_per_entry(1), 4);
-        assert_eq!(x_chunks_per_entry(0), 1);
-        assert_eq!(x_chunks_per_entry(usize::MAX), usize::MAX);
+        assert!(x_all_chunks(SubjectLetters::Records(&[]), 12).is_empty());
         // 240 subjects of 1,000 bases at 4 threads (tests/tblastn_oid_chunk.rs): 3,751 bases, three
-        // subjects per chunk, sixteen chunks and 48 subjects per entry.
+        // subjects per chunk, 80 chunks in all.
         let subjects = set(&[1_000; 240]);
         let bases = x_oid_chunk_bases(
             4,
             x_subject_file_size(SubjectLetters::Records(&subject_slices(&subjects))),
         );
         assert_eq!(bases, 3_751);
-        let entry = x_entry_chunks(
-            SubjectLetters::Records(&subject_slices(&subjects)),
-            0,
-            x_chunks_per_entry(4),
-            bases,
-        );
-        assert_eq!(entry.len(), 16);
-        assert_eq!(entry[..2], [0..3, 3..6]);
-        assert_eq!(entry[15], 45..48);
+        let all = x_all_chunks(SubjectLetters::Records(&subject_slices(&subjects)), bases);
+        assert_eq!(all.len(), 80);
+        assert_eq!(all[..2], [0..3, 3..6]);
+        assert_eq!(all[79], 237..240);
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
@@ -6089,12 +6108,12 @@ mod tests {
     //                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
     // ```
     // NCBI searches every batch with the same code, whatever their number. A search of fewer than
-    // four batches keeps no subject plans (LOSAT_X_TBNSSIDE), and that does not move it to the
-    // other loop: x_search_batches takes the batches by the switches alone, at one thread too, and
-    // gives the report of run_local_for_report_threads, with the plans kept (four batches) and
-    // without (one, two, three).
+    // four batches keeps no subject plans (XSubjectSide::KEEP_FROM_BATCHES), and that does not
+    // move it to the other loop: x_search_batches takes the batches whatever their number, at one
+    // thread too, and gives the report of run_local_for_report_threads, with the plans kept (four
+    // batches) and without (one, two, three).
     #[test]
-    fn x_search_batches_takes_one_batch_by_the_switches_alone() {
+    fn x_search_batches_takes_the_batches_whatever_their_number() {
         let queries = vec![b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ".to_vec(); 4];
         let subjects: Vec<Vec<u8>> = (0..2usize)
             .map(|n| {
@@ -6116,7 +6135,6 @@ mod tests {
             engine_positives: false,
             culling_limit: 0,
         };
-        let taken = x_tbn_parallel() && super::super::search_seed::XSubjectSide::enabled();
         for ranges in [
             vec![0..1],
             vec![0..1, 1..2],
@@ -6134,10 +6152,7 @@ mod tests {
                 1,
             )
             .unwrap();
-            assert_eq!(
-                searched.as_ref().map(Vec::len),
-                taken.then_some(ranges.len())
-            );
+            assert_eq!(searched.as_ref().map(Vec::len), Some(ranges.len()));
             for (range, (results, parameters, _, validity)) in searched.into_iter().flatten() {
                 let (reference, reference_parameters, _, reference_validity) =
                     run_local_for_report_threads(
@@ -6188,7 +6203,6 @@ mod tests {
         assert!(!super::super::search_seed::XSubjectSide::kept_within_threads(lengths(), 2));
         assert!(
             x_searched_side_by_side(SubjectLetters::Records(&subject_slices(&subjects)), 4, 2)
-                || !crate::utils::xswitch::on("LOSAT_X_TBNBATCH")
                 || !x_tbn_batch_rule()
         );
         assert_eq!(
@@ -6220,10 +6234,7 @@ mod tests {
             2,
         )
         .unwrap();
-        let Some(searched) = searched else {
-            assert!(!x_tbn_parallel());
-            return;
-        };
+        let searched = searched.expect("two threads search the batches on the pool");
         assert_eq!(
             searched
                 .iter()
@@ -6275,10 +6286,6 @@ mod tests {
         let side_by_side = |batches, threads| {
             x_searched_side_by_side(SubjectLetters::Records(&slices), batches, threads)
         };
-        if !crate::utils::xswitch::on("LOSAT_X_TBNBATCH") {
-            assert!(!side_by_side(8, 4) && !side_by_side(16, 8));
-            return;
-        }
         if !x_tbn_batch_rule() {
             return;
         }
@@ -6358,5 +6365,152 @@ mod tests {
             (0..7).map(|i| x_own_pool_threads(16, 7, i)).sum::<usize>(),
             16
         );
+    }
+
+    /// A fixed xorshift sequence.
+    #[cfg(feature = "parallel")]
+    struct XorShift(u64);
+
+    #[cfg(feature = "parallel")]
+    impl XorShift {
+        fn below(&mut self, bound: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % bound as u64) as usize
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBNREDOLPT): the order names each wanted match once, by HSPs largest
+    // first, ties in index order, and no match early termination ended.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn the_redo_lpt_order_takes_the_wanted_matches_largest_first() {
+        assert!(x_redo_lpt_order(&[], |_| 0).is_empty());
+        assert!(x_redo_lpt_order(&[false, false], |_| 1).is_empty());
+        let hsps = [3, 9, 3, 0, 9, 4];
+        assert_eq!(
+            x_redo_lpt_order(&[true; 6], |index| hsps[index]),
+            [1, 4, 5, 0, 2, 3]
+        );
+        assert_eq!(
+            x_redo_lpt_order(&[true, false, true, true, true, false], |index| hsps[index]),
+            [4, 0, 2, 3]
+        );
+        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
+        for len in [1, 2, 7, 64, 256] {
+            // Few distinct HSP counts (many ties), and many.
+            for distinct in [1, 3, 100_000] {
+                let hsps: Vec<usize> = (0..len).map(|_| rng.below(distinct)).collect();
+                let wanted: Vec<bool> = (0..len).map(|_| rng.below(4) != 0).collect();
+                let order = x_redo_lpt_order(&wanted, |index| hsps[index]);
+                let mut named = order.clone();
+                named.sort_unstable();
+                let expected: Vec<usize> = (0..len).filter(|&index| wanted[index]).collect();
+                assert_eq!(named, expected, "the wanted matches, once each");
+                for pair in order.windows(2) {
+                    let (a, b) = (pair[0], pair[1]);
+                    assert!(
+                        hsps[a] > hsps[b] || (hsps[a] == hsps[b] && a < b),
+                        "match {a} ({} HSPs) before match {b} ({} HSPs)",
+                        hsps[a],
+                        hsps[b]
+                    );
+                }
+            }
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBNREDOLPT): the scope returns what the `par_iter` path returns for the
+    // same chunk (`Some(run(match))` where wanted, `None` elsewhere, by index), runs each wanted
+    // match once, and gives each task one worker of its own; also when a match runs nested
+    // parallel work, where a thread that waits in it may run another task's loop.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn the_redo_lpt_scope_returns_the_par_iter_results_by_index() {
+        let mut rng = XorShift(0x9e37_79b9_7f4a_7c15);
+        for threads in [2, 3, 7] {
+            crate::utils::threading::with_search_pool(threads, "tblastn", |pool| {
+                for matches in [0_usize, 1, 2, 5, 40, 256] {
+                    let hsps: Vec<usize> = (0..matches).map(|_| rng.below(50)).collect();
+                    let wanted: Vec<bool> = (0..matches).map(|_| rng.below(5) != 0).collect();
+                    let order = x_redo_lpt_order(&wanted, |index| hsps[index]);
+                    // Each worker records the matches it ran.
+                    let workers: Vec<std::sync::Mutex<Vec<usize>>> =
+                        (0..threads).map(|_| Default::default()).collect();
+                    let run = |index: usize| -> (usize, u64) {
+                        let nested: u64 =
+                            (0..64_u64).into_par_iter().map(|x| x * index as u64).sum();
+                        (index * 3 + hsps[index], nested)
+                    };
+                    let results = x_redo_lpt(pool, &workers, matches, &order, |ran, index| {
+                        assert!(rayon::current_thread_index().is_some(), "on the pool");
+                        ran.push(index);
+                        run(index)
+                    });
+                    let par_iter: Vec<Option<(usize, u64)>> = pool.install(|| {
+                        (0..matches)
+                            .into_par_iter()
+                            .zip(wanted.par_iter())
+                            .map(|(index, &wanted)| wanted.then(|| run(index)))
+                            .collect()
+                    });
+                    assert_eq!(results, par_iter, "threads {threads} matches {matches}");
+                    let ran: Vec<Vec<usize>> = workers
+                        .into_iter()
+                        .map(|worker| worker.into_inner().unwrap())
+                        .collect();
+                    let tasks = threads.min(order.len());
+                    assert!(
+                        ran[tasks..].iter().all(Vec::is_empty),
+                        "only the first {tasks} workers ran"
+                    );
+                    let mut all: Vec<usize> = ran.concat();
+                    all.sort_unstable();
+                    let mut expected = order.clone();
+                    expected.sort_unstable();
+                    assert_eq!(all, expected, "each wanted match once");
+                    // One worker runs its matches in the order's order.
+                    for worker in &ran {
+                        let position = |index: &usize| order.iter().position(|o| o == index);
+                        assert!(worker.windows(2).all(|w| position(&w[0]) < position(&w[1])));
+                    }
+                }
+                Ok(())
+            })
+            .expect("a pool");
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBNREDOLPT): a match that panics: the panic comes out of the scope (the
+    // other tasks finish first, so nothing hangs) and the same pool computes the next chunk, with
+    // workers made again as the search would make them.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn a_panicking_redo_match_propagates_and_the_pool_stays_usable() {
+        for threads in [2, 3, 7] {
+            crate::utils::threading::with_search_pool(threads, "tblastn", |pool| {
+                let matches = 40_usize;
+                let order: Vec<usize> = (0..matches).collect();
+                let run = |panicking: bool| {
+                    let workers: Vec<std::sync::Mutex<()>> =
+                        (0..threads).map(|_| Default::default()).collect();
+                    x_redo_lpt(pool, &workers, matches, &order, |_, index| {
+                        assert!(
+                            !(panicking && (index == 5 || index == 30)),
+                            "match {index} panics"
+                        );
+                        index * 3
+                    })
+                };
+                let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(true)));
+                assert!(caught.is_err(), "threads {threads}: the panic was lost");
+                let expected: Vec<Option<usize>> =
+                    (0..matches).map(|index| Some(index * 3)).collect();
+                assert_eq!(run(false), expected, "threads {threads}");
+                Ok(())
+            })
+            .expect("a pool");
+        }
     }
 }

@@ -1,0 +1,68 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_15",
+          "query_title": "BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 408,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|41",
+                  "accession": "41",
+                  "title": "BDT63539.1 wsv306-like protein [Pasiphaea japonica whispovirus]"
+                }
+              ],
+              "len": 153,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 86.2705,
+                  "score": 212,
+                  "evalue": 2.43863e-22,
+                  "identity": 42,
+                  "positive": 73,
+                  "query_from": 259,
+                  "query_to": 383,
+                  "hit_from": 6,
+                  "hit_to": 137,
+                  "align_len": 132,
+                  "gaps": 7,
+                  "qseq": "LQFHCNEEMNAGIMMAAYQD-NDGNILPICVCTYPYYLTGPTCKHRTYNRVVDYELWEKTGYADFLTDPFNDYKKANRICKSKTINTTAVFDERDGCFYCQP------LAAHFAQSLQMRGPYEPALILDKD",
+                  "hseq": "MKYLCDKEMHAGKAKAIYKNLVSGKYISKCTCLYPKYHTGPTCKQKTYCYVIYHDKWQTTSHPNFLHDPIQHFQIAEDVCRELKNNTRAIYNPKRGHIVCPPILKLVKIALTHRVALTHRGFHKPCFIIKRN",
+                  "midline": "+++ C++EM+AG   A Y++   G  +  C C YP Y TGPTCK +TY  V+ ++ W+ T + +FL DP   ++ A  +C+    NT A+++ + G   C P      +A     +L  RG ++P  I+ ++"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 67,
+            "eff_space": 20792816,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+}

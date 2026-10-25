@@ -45,7 +45,7 @@ export class StorageFullError extends Error {
  * Results kept in memory (no OPFS) may take at most this many bytes in a tab (S09). Memory
  * is then the only copy of the results, so running out of it would end the tab and lose
  * every result; the budget makes it the same recoverable failure as a full OPFS instead.
- * The engine's own memory comes on top (up to 1 GiB for the threaded module, plan TD-7).
+ * The engine's own memory comes on top (up to 4 GiB less one page, plan TD-7).
  */
 export const MEMORY_RESULTS_CAPACITY_BYTES = 512 * 1024 * 1024;
 

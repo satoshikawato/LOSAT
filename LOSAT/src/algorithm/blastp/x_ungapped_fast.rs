@@ -1,6 +1,6 @@
-//! EXPERIMENT (LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW): the BLOSUM62 protein
-//! ungapped extension (`s_BlastAaExtendOneHit`, `s_BlastAaExtendTwoHit` and the
-//! `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks they share) with a tighter inner loop.
+//! EXPERIMENT (LOSAT_X_BPUNGAP): the BLOSUM62 protein ungapped extension (`s_BlastAaExtendOneHit`,
+//! `s_BlastAaExtendTwoHit` and the `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks they share)
+//! with a tighter inner loop.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883
 //! ```c
@@ -49,7 +49,6 @@ use super::extension::{
     BlastpOneHitUngappedResult, BlastpTwoHitUngappedResult, BlastpUngappedData,
 };
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, BLAST_SCORE_MIN};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// Codes below this index the table; `q << 5 | s` is the index.
@@ -61,18 +60,19 @@ const MAX_DROPOFF: i32 = 127;
 /// Longest word whose sentinel sum stays below zero (11 * 11 < 128).
 const MAX_WORD_SIZE: usize = 11;
 
-type Table = [i8; TABLE_LEN];
+pub(crate) type Table = [i8; TABLE_LEN];
 
 struct State {
-    /// 0 = off, 1 = LOSAT_X_BPUNGAP, 2 = LOSAT_X_BPUNGAPSHADOW (both paths, compared).
-    mode: u8,
+    /// LOSAT_X_BPUNGAP (and the table fits a byte).
+    on: bool,
     table: Box<Table>,
 }
 
-/// The table of the walks, `None` if a score does not fit a byte.
+/// The table of the walks, `None` if a score does not fit a byte (`x_ungapped_sent.rs` scores
+/// with it too).
 // NCBI reference: aa_ungapped.c:804-883 `matrix[q[i]][s[i]]`; the scores are those of the
 // function the reference walks call.
-fn build_table() -> Option<Box<Table>> {
+pub(crate) fn build_table() -> Option<Box<Table>> {
     let mut t = Box::new([0i8; TABLE_LEN]);
     for q in 0..CODES {
         for s in 0..CODES {
@@ -92,55 +92,29 @@ fn build_table() -> Option<Box<Table>> {
 fn state() -> &'static State {
     static STATE: OnceLock<State> = OnceLock::new();
     STATE.get_or_init(|| {
-        // `LOSAT_X_BPUNGAP` is a strict-set switch; the shadow variable is read first, as "set to
-        // any value".
-        let requested = if std::env::var_os("LOSAT_X_BPUNGAPSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_BPUNGAP") {
-            1
-        } else {
-            0
-        };
-        // The table is built in every mode (the tests use it); a score that does not fit a byte
-        // keeps the switch off.
+        // `LOSAT_X_BPUNGAP` is a strict-set switch.
+        let requested = crate::utils::xswitch::on("LOSAT_X_BPUNGAP");
+        // The table is built in every mode (the tests use it, and tblastn's LOSAT_X_TBNUNGAP reads
+        // it whatever this switch says, after its own `build_table` check); a score that does not
+        // fit a byte keeps the switch off.
         match build_table() {
             Some(table) => State {
-                mode: requested,
+                on: requested,
                 table,
             },
             None => State {
-                mode: 0,
+                on: false,
                 table: Box::new([0i8; TABLE_LEN]),
             },
         }
     })
 }
 
-/// 0 = off, 1 = LOSAT_X_BPUNGAP, 2 = LOSAT_X_BPUNGAPSHADOW.
+/// Whether `LOSAT_X_BPUNGAP` is on (and the table fits a byte).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 #[inline]
-pub(crate) fn mode() -> u8 {
-    state().mode
-}
-
-static SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
-
-/// Counts one compared extension (shadow mode).
-// No NCBI counterpart: a counter.
-#[inline]
-pub(crate) fn count_shadow() {
-    SHADOW_COMPARED.fetch_add(1, Ordering::Relaxed);
-}
-
-/// The summary line (printed by `main` at exit), only in shadow mode.
-// No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
-pub fn print_shadow_stats() {
-    if mode() == 2 {
-        eprintln!(
-            "[X_SHADOW] BPUNGAP compared={} (ungapped extensions identical)",
-            SHADOW_COMPARED.load(Ordering::Relaxed)
-        );
-    }
+pub(crate) fn on() -> bool {
+    state().on
 }
 
 /// What one walk returns: best score, length, step at which the loop left, and the OR of every

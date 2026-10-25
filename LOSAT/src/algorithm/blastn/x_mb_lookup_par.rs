@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_PAIRPAR, shadow LOSAT_X_PAIRPARSHADOW): the megablast lookup table of
+//! EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the megablast lookup table of
 //! `build_mb_lookup` filled by the threads of the search pool, each thread owning a fixed set
 //! of table cells.
 //!
@@ -40,17 +40,16 @@
 //! its chain (`hashtable` and the `next_pos` links of its words), its presence bit and its
 //! counter; `longest_chain` is then computed from the same counters by the original code.
 //! The words of a worker are applied in reading order (a first-in first-out delay of 16
-//! words on x86_64, for a prefetch, as LOSAT_X_MBDELAY does). Workers write disjoint
+//! words on x86_64, for a prefetch, as `x_fill_mb_queued` does). Workers write disjoint
 //! elements, so the number of workers changes the running time only.
 //!
 //! The re-threading of `ascending_cells` (blast_lookup.c:74-76 order, see `build_mb_lookup`)
 //! touches the same cells and links of the same words, so each worker applies it to its own
 //! words.
 //!
-//! EXPERIMENT (LOSAT_X_MBLUTPAD; off unless set, not in the strict set; since LOSAT_X_MBLUTONCE is
-//! on by default (2026-10-18) it acts only with `LOSAT_X_MBLUTONCE=0`, as the read-once fill always
-//! uses its copies): private counters and
-//! presence-vector words. The blocks are dealt round robin, so one 64-byte line of
+//! Private counters and presence-vector words, which the read-once fill of LOSAT_X_MBLUTONCE
+//! (`x_mb_lookup_once.rs`) counts into; the fill of this module updates the shared arrays itself.
+//! The blocks are dealt round robin, so one 64-byte line of
 //! `helper_array` (16 counters, one per 2048-cell block when `pv_array_bts <= 11`, as for every
 //! table of `lut_word_length` 12 or less) holds the counters of up to 16 different workers, and a
 //! line of `pv_array` holds the presence-vector words of `16 >> (11 - pv_array_bts)` blocks when
@@ -64,14 +63,14 @@
 //! tables), inside the fills:
 //! 115 M demand reads found their line modified in another core (`ocr.demand_data_rd.l3_hit.
 //! snoop_hitm`), against 0.07 M for the serial loop and 0.13 M when one thread ran every worker's
-//! part one after another; with the private copies 0.8 M. The stores of `next_pos` still take
+//! part one after another; with per-thread private copies (a padded fill since removed) 0.8 M. The stores of `next_pos` still take
 //! lines from other cores (each worker writes the offsets of its own words, which interleave
 //! with the other workers'; 32 M such stores in that run), but stores wait in the store buffer;
 //! writing `next_pos` afterwards by spans of offsets removed them and cost more than it saved
 //! (lists of 8 bytes a word and their growth), so it is not done.
-//! With the switch each worker counts into a private copy of `helper_array` and sets its bits in a
+//! Each worker of the read-once fill counts into a private copy of `helper_array` and sets its bits in a
 //! private copy of `pv_array`, each a whole number of 64-byte lines starting on a line boundary
-//! (`Lines`), and at the end of its part adds its own blocks' counters into `helper_array`
+//! (`Lines`), zeroed in its first job, and after its last chunk adds its own blocks' counters into `helper_array`
 //! (`saturating_add`) and ORs its own blocks' presence-vector words into `pv_array`.
 //!
 //! Why the counters and presence bits are the loop's. Counter `h` covers the cells
@@ -89,7 +88,7 @@
 //! `helper_array` or `pv_array` before the fill returns (`longest_chain` and the presence tests of
 //! the scan come after). The re-threading of `ascending_cells` changes no counter and no bit. The
 //! update of `hashtable` and `next_pos` is the original statement for statement. So every element
-//! of the four arrays, and `longest_chain`, is the loop's; the switch changes the running time
+//! of the four arrays, and `longest_chain`, is the loop's; the copies change the running time
 //! only. Memory: two private copies per worker, `ceil(hashsize / 2048 / 16)` and
 //! `ceil(pv_size / 16)` lines of 64 bytes: 32 KiB + 128 KiB (`pv_array_bts` 9) or 32 + 64 KiB (10)
 //! per worker for a `lut_word_length` 12 table, 8 + 128 KiB (7) or 8 + 64 KiB (8) at 11. All
@@ -113,13 +112,11 @@
 //! wasm32) the buffer has the fill's size and is freed at the end of the fill: those allocators
 //! return large blocks themselves, and there is no threshold to keep low.
 //!
-//! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set since 2026-10-18: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set): `fill`
+//! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set since 2026-10-18: on unless it is `0`): `fill`
 //! hands the table to the read-once fill of `x_mb_lookup_once.rs` (its first dispatch), in which
 //! each query position is read by one worker and each word handed to the owner of its cell,
-//! instead of every worker reading every word as above. That fill always counts into the private
-//! copies of this module (`Copies`, `Unready::zeroed`, `flush_private`), so `LOSAT_X_MBLUTPAD`
-//! only matters with it off.
+//! instead of every worker reading every word as above. That fill counts into the private
+//! copies of this module (`Copies`, `Unready::zeroed`, `flush_private`).
 
 use super::{build_unmasked_ranges, MaskedInterval, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -137,19 +134,10 @@ use std::sync::OnceLock;
 /// `kCompressionFactor`, the number of cells that share one counter.
 pub(super) const K_COMPRESSION_FACTOR_SHIFT: usize = 11;
 
-/// No NCBI counterpart: reads the switches once; they do not change any value NCBI computes.
-/// (LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARSHADOW, LOSAT_X_MBLUTPAD, LOSAT_X_MBLUTONCE; LOSAT_X_MBLUTPAD
-/// is off unless set to any value and not in the strict set, LOSAT_X_MBLUTONCE is in it)
-fn switches() -> (bool, bool, bool, bool) {
-    static SWITCHES: OnceLock<(bool, bool, bool, bool)> = OnceLock::new();
-    *SWITCHES.get_or_init(|| {
-        (
-            crate::utils::xswitch::on("LOSAT_X_PAIRPAR"),
-            std::env::var_os("LOSAT_X_PAIRPARSHADOW").is_some(),
-            std::env::var_os("LOSAT_X_MBLUTPAD").is_some(),
-            crate::utils::xswitch::on("LOSAT_X_MBLUTONCE"),
-        )
-    })
+/// No NCBI counterpart: reads LOSAT_X_MBLUTONCE once; it does not change any value NCBI computes.
+fn once() -> bool {
+    static ONCE: OnceLock<bool> = OnceLock::new();
+    *ONCE.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBLUTONCE"))
 }
 
 /// No NCBI counterpart: LOSAT_TIMING is set (read once).
@@ -159,7 +147,7 @@ pub(super) fn timing_on() -> bool {
 }
 
 // No NCBI counterpart (LOSAT_TIMING only): the `[TIMING] x_mb_lookup_*` counters of every megablast
-// table build of the process (not the shadow's second build).
+// table build of the process.
 static BUILD_NANOS: AtomicU64 = AtomicU64::new(0);
 static ALLOC_NANOS: AtomicU64 = AtomicU64::new(0);
 static LOOP_NANOS: AtomicU64 = AtomicU64::new(0);
@@ -167,7 +155,6 @@ static POOL_FILL_NANOS: AtomicU64 = AtomicU64::new(0);
 static CHAIN_NANOS: AtomicU64 = AtomicU64::new(0);
 static BUILDS: AtomicU64 = AtomicU64::new(0);
 static BUILDS_ON_POOL: AtomicU64 = AtomicU64::new(0);
-static BUILDS_PADDED: AtomicU64 = AtomicU64::new(0);
 static BUILDS_ONCE: AtomicU64 = AtomicU64::new(0);
 
 /// No NCBI counterpart: the marks of one `build_mb_lookup` for the `[TIMING]` lines (only with
@@ -225,57 +212,26 @@ impl BuildClock {
         CHAIN_NANOS.fetch_add(ns(chain, end), r);
         BUILDS.fetch_add(1, r);
         BUILDS_ON_POOL.fetch_add(u64::from(on_pool), r);
-        BUILDS_PADDED.fetch_add(u64::from(filled.padded), r);
         BUILDS_ONCE.fetch_add(u64::from(filled.once), r);
     }
 }
 
-/// No NCBI counterpart: shadow counters of LOSAT_X_MBLUTPAD (tables whose second build was the
-/// padded fill, and their elements).
-static SHADOW_PADDED_TABLES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_PADDED_CELLS: AtomicU64 = AtomicU64::new(0);
-/// No NCBI counterpart: shadow counters of LOSAT_X_MBLUTONCE (tables whose second build was the
-/// read-once fill, and their elements).
-static SHADOW_ONCE_TABLES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_ONCE_CELLS: AtomicU64 = AtomicU64::new(0);
-
-/// No NCBI counterpart: printed by `main` at exit. With LOSAT_X_MBLUTPAD and LOSAT_X_PAIRPARSHADOW,
-/// `[X_SHADOW] MBLUTPAD tables=<compared> cells=<elements compared> diffs=0 identical` (a
-/// difference panics in `shadow_check`, so the line only ever says 0); the same with
-/// LOSAT_X_MBLUTONCE for the tables whose second build was the read-once fill, `[X_SHADOW]
-/// MBLUTONCE tables= cells= diffs=0 identical` (with both switches the read-once fill makes the
-/// second build, and the MBLUTPAD line says `tables=0`). With LOSAT_TIMING, when at
+/// No NCBI counterpart: printed by `main` at exit. With LOSAT_TIMING, when at
 /// least one megablast table was built, the `[TIMING] x_mb_lookup_build` and `[TIMING]
 /// x_mb_lookup_split` lines (`x_`: end-of-run counters of an experiment, as `[TIMING]
 /// x_pairpar_seed`), and `[TIMING] x_mb_lookup_once` when the read-once fill built one
 /// (`x_mb_lookup_once::print_timing`). They print counters and change no value NCBI computes.
 pub(super) fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
-    let (_, shadow, pad, once) = switches();
-    if shadow && pad {
-        eprintln!(
-            "[X_SHADOW] MBLUTPAD tables={} cells={} diffs=0 identical",
-            load(&SHADOW_PADDED_TABLES),
-            load(&SHADOW_PADDED_CELLS)
-        );
-    }
-    if shadow && once {
-        eprintln!(
-            "[X_SHADOW] MBLUTONCE tables={} cells={} diffs=0 identical",
-            load(&SHADOW_ONCE_TABLES),
-            load(&SHADOW_ONCE_CELLS)
-        );
-    }
     if !timing_on() || load(&BUILDS) == 0 {
         return;
     }
     let s = |c: &AtomicU64| load(c) as f64 / 1e9;
     eprintln!(
-        "[TIMING] x_mb_lookup_build: {:.3}s (builds={} parallel={} padded={} once={})",
+        "[TIMING] x_mb_lookup_build: {:.3}s (builds={} parallel={} once={})",
         s(&BUILD_NANOS),
         load(&BUILDS),
         load(&BUILDS_ON_POOL),
-        load(&BUILDS_PADDED),
         load(&BUILDS_ONCE)
     );
     eprintln!(
@@ -287,11 +243,6 @@ pub(super) fn print_summary() {
     );
     super::x_mb_lookup_once::print_timing();
 }
-
-/// No NCBI counterpart: shadow counters for the summary line (tables compared).
-pub(crate) static SHADOW_TABLES: AtomicU64 = AtomicU64::new(0);
-/// No NCBI counterpart: shadow counters for the summary line (cells compared).
-pub(crate) static SHADOW_CELLS: AtomicU64 = AtomicU64::new(0);
 
 /// No NCBI counterpart: the number of threads of the search pool this thread runs in, when
 /// there is one with two threads or more (scheduling only). Also the dispatch test of
@@ -320,20 +271,24 @@ pub(super) fn pool_threads() -> Option<usize> {
 ///              if (!(ecode & 1)) {
 ///                  if ((counts[ecode / 2] >> 4) >= max_word_count) {
 /// ```
-/// Dispatch test of `build_mb_lookup`: the number of workers when the switch is on, the
-/// search runs on a pool of two threads or more, and the table is the plain one (`eligible`:
-/// no database word counts, no debug counters). `None` runs the original loops.
+/// Dispatch test of `build_mb_lookup`: the number of workers when the search runs on a pool of
+/// two threads or more and the table is the plain one (`eligible`: no database word counts, no
+/// debug counters). `None` runs the original loops.
 pub(super) fn parts(eligible: bool) -> Option<usize> {
-    let (on, shadow, _, _) = switches();
-    if !on || shadow || !eligible {
+    let once = once();
+    if !eligible {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+        if once {
+            crate::utils::xreach::x_reach!("LOSAT_X_MBLUTONCE", false);
+        }
         return None;
     }
-    pool_threads()
-}
-
-/// No NCBI counterpart: LOSAT_X_PAIRPARSHADOW is set.
-pub(super) fn shadow() -> bool {
-    switches().1
+    let parts = pool_threads();
+    crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", parts.is_some());
+    if once {
+        crate::utils::xreach::x_reach!("LOSAT_X_MBLUTONCE", parts.is_some());
+    }
+    parts
 }
 
 /// The tables `build_mb_lookup` fills (NCBI `BlastMBLookupTable` fields and its local
@@ -395,7 +350,7 @@ impl<T: Copy> Shared<T> {
     }
 }
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): sixteen 32-bit words on a 64-byte line of their own.
+/// No NCBI counterpart (LOSAT_X_MBLUTONCE): sixteen 32-bit words on a 64-byte line of their own.
 #[derive(Clone, Copy)]
 #[repr(C, align(64))]
 pub(super) struct Line([u32; 16]);
@@ -403,15 +358,15 @@ pub(super) struct Line([u32; 16]);
 const _: () = assert!(std::mem::size_of::<Line>() == 64 && std::mem::align_of::<Line>() == 64);
 const _: () = assert!(std::mem::size_of::<PvArrayType>() == std::mem::size_of::<u32>());
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): Linux with glibc, where the buffers of the copies are
+/// No NCBI counterpart (LOSAT_X_MBLUTONCE): Linux with glibc, where the buffers of the copies are
 /// kept from fill to fill (`SPARE_LINES`) and given at least 32 MiB + 4 KiB (`lines_capacity`).
 const GLIBC: bool = cfg!(all(target_os = "linux", target_env = "gnu"));
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): a list of kept buffers (`SPARE_LINES`; the tests use
+/// No NCBI counterpart (LOSAT_X_MBLUTONCE): a list of kept buffers (`SPARE_LINES`; the tests use
 /// lists of their own).
 type SpareLines = std::sync::Mutex<Vec<Vec<Line>>>;
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the line buffers of finished fills, kept for the next
+/// No NCBI counterpart (LOSAT_X_MBLUTONCE): the line buffers of finished fills, kept for the next
 /// fills and never freed, on Linux with glibc only (`GLIBC`). glibc raises its mmap threshold to the
 /// size of a mapped block of up to 32 MiB when the block is freed, after which the search's other
 /// allocations of up to that size stay in malloc's arenas: on the workstation (megablast of 31,168
@@ -432,7 +387,7 @@ type SpareLines = std::sync::Mutex<Vec<Vec<Line>>>;
 /// only hold memory (in the Web engine for the life of a reactor reused across searches).
 static SPARE_LINES: SpareLines = std::sync::Mutex::new(Vec::new());
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the capacity, in lines, of a new buffer for `n` lines. On
+/// No NCBI counterpart (LOSAT_X_MBLUTONCE): the capacity, in lines, of a new buffer for `n` lines. On
 /// Linux with glibc at least glibc's largest dynamic mmap threshold (`DEFAULT_MMAP_THRESHOLD_MAX`, 32
 /// MiB on 64-bit) and one page more, the rule of `x_frame_capacity` in
 /// `tblastn/x_subject_translate.rs` (LOSAT_X_TBNSTORE): glibc maps such a block and unmaps it when it
@@ -446,7 +401,7 @@ pub(super) fn lines_capacity(n: usize) -> usize {
     }
 }
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): an empty buffer with room for `n` lines. On Linux with
+/// No NCBI counterpart (LOSAT_X_MBLUTONCE): an empty buffer with room for `n` lines. On Linux with
 /// glibc the largest buffer kept in `spare` when its lock is free and the buffer is large enough;
 /// one too small is freed here, never grown (`SPARE_LINES`). Otherwise a new buffer of
 /// `lines_capacity(n)` lines.
@@ -468,13 +423,12 @@ fn take_lines(spare: &SpareLines, n: usize) -> Vec<Line> {
     Vec::with_capacity(lines_capacity(n))
 }
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the private copies of all workers in one buffer of the
+/// No NCBI counterpart (LOSAT_X_MBLUTONCE): the private copies of all workers in one buffer of the
 /// calling thread, not zeroed by it (one buffer per fill, on Linux with glibc kept from fill to fill:
 /// `SPARE_LINES`; so the workers' own malloc arenas take nothing), `stride` lines per worker: first
 /// the copy of `helper_array` (`counter_lines`), then that of `pv_array`. Each worker's lines start
 /// on a line boundary and are a whole number of lines, so no two workers' copies share a line; each
-/// worker zeroes its own lines (`Unready::zeroed`). Empty, and no buffer, when the switch is off.
-/// `spare`: where the buffer comes from and goes back to (`SPARE_LINES`).
+/// worker zeroes its own lines (`Unready::zeroed`). `spare`: where the buffer comes from and goes back to (`SPARE_LINES`).
 pub(super) struct Copies {
     lines: Vec<Line>,
     counter_lines: usize,
@@ -484,23 +438,18 @@ pub(super) struct Copies {
 }
 
 impl Copies {
-    pub(super) fn new(pad: bool, parts: usize, helper_len: usize, pv_len: usize) -> Self {
-        Self::with_spare(&SPARE_LINES, pad, parts, helper_len, pv_len)
+    pub(super) fn new(parts: usize, helper_len: usize, pv_len: usize) -> Self {
+        Self::with_spare(&SPARE_LINES, parts, helper_len, pv_len)
     }
 
     /// `new` with the kept buffers of `spare` (the tests use lists of their own).
     fn with_spare(
         spare: &'static SpareLines,
-        pad: bool,
         parts: usize,
         helper_len: usize,
         pv_len: usize,
     ) -> Self {
-        let (counter_lines, pv_lines) = if pad {
-            (helper_len.div_ceil(16), pv_len.div_ceil(16))
-        } else {
-            (0, 0)
-        };
+        let (counter_lines, pv_lines) = (helper_len.div_ceil(16), pv_len.div_ceil(16));
         let stride = counter_lines + pv_lines;
         let n = stride * parts;
         Self {
@@ -516,8 +465,7 @@ impl Copies {
         }
     }
 
-    /// The workers' copies, not yet zeroed, in part order (each `stride` lines; empty slices when
-    /// the switch is off).
+    /// The workers' copies, not yet zeroed, in part order (each `stride` lines).
     pub(super) fn parts(&mut self) -> impl Iterator<Item = Unready<'_>> {
         let (stride, counter_lines, parts) = (self.stride, self.counter_lines, self.parts);
         let mut rest = &mut self.lines.spare_capacity_mut()[..stride * parts];
@@ -544,7 +492,7 @@ impl Drop for Copies {
     }
 }
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): one worker's copies before it zeroes them.
+/// No NCBI counterpart (LOSAT_X_MBLUTONCE): one worker's copies before it zeroes them.
 pub(super) struct Unready<'a> {
     lines: &'a mut [std::mem::MaybeUninit<Line>],
     counter_lines: usize,
@@ -568,7 +516,7 @@ impl<'a> Unready<'a> {
     }
 }
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): a worker's private copy of `helper_array` or
+/// No NCBI counterpart (LOSAT_X_MBLUTONCE): a worker's private copy of `helper_array` or
 /// `pv_array` (element `i` in line `i / 16`).
 pub(super) struct Lines<'a> {
     lines: &'a mut [Line],
@@ -586,8 +534,7 @@ impl Lines<'_> {
     }
 }
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the private copies of one worker (empty when the
-/// switch is off).
+/// No NCBI counterpart (LOSAT_X_MBLUTONCE): the private copies of one worker.
 pub(super) struct Private<'a> {
     pub(super) counters: Lines<'a>,
     pub(super) pv: Lines<'a>,
@@ -595,25 +542,19 @@ pub(super) struct Private<'a> {
 
 #[cfg(test)]
 impl Private<'_> {
-    /// Whether either copy holds a non-zero element (the tests' check that the padded path ran).
+    /// Whether either copy holds a non-zero element (the tests' check that the copies took values).
     pub(super) fn has_values(&self) -> bool {
         let any = |l: &Lines<'_>| l.lines.iter().any(|line| line.0.iter().any(|&v| v != 0));
         any(&self.counters) || any(&self.pv)
     }
 }
 
-/// No NCBI counterpart (scheduling only): what one fill did. `padded`: the fill of this module used
-/// the private copies (LOSAT_X_MBLUTPAD); `once`: the read-once fill (LOSAT_X_MBLUTONCE,
-/// `x_mb_lookup_once.rs`, which always uses them) made the table; for `[TIMING]
-/// x_mb_lookup_build`'s `padded=` and `once=` and the shadow's counters. In tests also
-/// `parts_with_values`, the number of parts (owners for the read-once fill) whose private copies
-/// held a non-zero element before their flush.
+/// No NCBI counterpart (scheduling only): what one fill did. `once`: the read-once fill
+/// (LOSAT_X_MBLUTONCE, `x_mb_lookup_once.rs`) made the table; for `[TIMING] x_mb_lookup_build`'s
+/// `once=`.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct FillStats {
-    pub(super) padded: bool,
     pub(super) once: bool,
-    #[cfg(test)]
-    pub(super) parts_with_values: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -638,12 +579,10 @@ impl SharedTables {
     //          mb_lt->hashtable[ecode] = index;
     // ```
     // The update of one word, as in the loop of `build_mb_lookup` (same statements);
-    // the presence bit is set in the presence-vector word this worker owns. With `PAD`
-    // (LOSAT_X_MBLUTPAD) the counter and the presence bit go to the worker's private copies
-    // (module documentation); without it this is the original update.
+    // the presence bit is set in the presence-vector word this worker owns.
     /// SAFETY: the worker owns the block of `bucket` and the word at `q_off_1`.
     #[inline(always)]
-    unsafe fn apply<const PAD: bool>(self, bucket: usize, q_off_1: u32, x: &mut Private<'_>) {
+    unsafe fn apply(self, bucket: usize, q_off_1: u32) {
         unsafe {
             let head = self.hashtable.get(bucket);
             if head == 0 {
@@ -656,22 +595,13 @@ impl SharedTables {
                 let array_idx = bucket >> self.pv_array_bts;
                 if array_idx < self.pv_array.len {
                     let bit = (1 as PvArrayType) << (bucket & PV_ARRAY_MASK);
-                    if PAD {
-                        *x.pv.slot(array_idx) |= bit;
-                    } else {
-                        self.pv_array
-                            .set(array_idx, self.pv_array.get(array_idx) | bit);
-                    }
+                    self.pv_array
+                        .set(array_idx, self.pv_array.get(array_idx) | bit);
                 }
             } else {
                 let h = bucket >> K_COMPRESSION_FACTOR_SHIFT;
-                if PAD {
-                    let c = x.counters.slot(h);
-                    *c = c.saturating_add(1);
-                } else {
-                    self.helper_array
-                        .set(h, self.helper_array.get(h).saturating_add(1));
-                }
+                self.helper_array
+                    .set(h, self.helper_array.get(h).saturating_add(1));
             }
             self.next_pos.set(q_off_1 as usize, head);
             self.hashtable.set(bucket, q_off_1);
@@ -697,20 +627,8 @@ impl SharedTables {
 ///             continue;
 /// ```
 /// One worker: the word loop of `build_mb_lookup` (same reading order, same resets), applying
-/// the update only to the words whose cell block `owner` gives to `part`. With `PAD`
-/// (LOSAT_X_MBLUTPAD) the counters and presence bits go to private copies, which the worker zeroes
-/// first and adds into `helper_array` and `pv_array` for its own blocks at the end (module
-/// documentation). Returns, in tests, whether the copies held a value before that flush (false
-/// otherwise).
-fn fill_part<const PAD: bool>(
-    part: u8,
-    owner: &[u8],
-    block_shift: usize,
-    words: &Words<'_>,
-    t: SharedTables,
-    x: Unready<'_>,
-) -> bool {
-    let mut x = x.zeroed();
+/// the update only to the words whose cell block `owner` gives to `part`.
+fn fill_part(part: u8, owner: &[u8], block_shift: usize, words: &Words<'_>, t: SharedTables) {
     let lut_word_length = words.lut_word_length;
     let mut own_words: Vec<(u32, u32)> = Vec::new();
     #[cfg(target_arch = "x86_64")]
@@ -778,7 +696,7 @@ fn fill_part<const PAD: bool>(
                         let (b, q) = x_ring[slot];
                         // SAFETY: the cell block of `b` is owned by this part; `q` is the
                         // offset of one of this part's words.
-                        unsafe { t.apply::<PAD>(b as usize, q, &mut x) };
+                        unsafe { t.apply(b as usize, q) };
                     }
                     x_ring[slot] = (bucket as u32, q_off_1);
                     x_ring_len += 1;
@@ -786,7 +704,7 @@ fn fill_part<const PAD: bool>(
                 #[cfg(not(target_arch = "x86_64"))]
                 {
                     // SAFETY: as above.
-                    unsafe { t.apply::<PAD>(bucket, q_off_1, &mut x) };
+                    unsafe { t.apply(bucket, q_off_1) };
                 }
             }
         }
@@ -797,7 +715,7 @@ fn fill_part<const PAD: bool>(
         for k in x_ring_len - pending..x_ring_len {
             let (b, q) = x_ring[k % X_DELAY];
             // SAFETY: as above.
-            unsafe { t.apply::<PAD>(b as usize, q, &mut x) };
+            unsafe { t.apply(b as usize, q) };
         }
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:74-76
@@ -821,17 +739,9 @@ fn fill_part<const PAD: bool>(
             }
         }
     }
-    #[cfg(test)]
-    let held = PAD && x.has_values();
-    #[cfg(not(test))]
-    let held = false;
-    if PAD {
-        flush_private(part, owner, block_shift, t, &x);
-    }
-    held
 }
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): adds the counters and ORs the presence-vector words
+/// No NCBI counterpart (LOSAT_X_MBLUTONCE): adds the counters and ORs the presence-vector words
 /// of `part`'s own blocks from its private copies into `helper_array` and `pv_array` (module
 /// documentation: these elements are written by no other worker, and their copies hold exactly
 /// the loop's increments and bits).
@@ -890,10 +800,10 @@ pub(super) fn plan(table_size: usize, pv_array_bts: usize, parts: usize) -> (usi
 ///          mb_lt->hashtable[ecode] = index;
 /// ```
 /// Fills the tables as the word loop of `build_mb_lookup` does, with `parts` workers on the
-/// search pool (or one after another, `in_pool == false`, for the shadow without a pool).
-/// Returns what the fill did (the private copies of LOSAT_X_MBLUTPAD, the read-once fill of
-/// LOSAT_X_MBLUTONCE). `resident`: `hashtable` is a kept table whose pages are mapped
-/// (LOSAT_X_MBLUTKEEP), on which the read-once fill skips its prefault round.
+/// search pool (or one after another, `in_pool == false`, where the unit tests run it without a
+/// pool). Returns what the fill did (the read-once fill of LOSAT_X_MBLUTONCE or not). `resident`:
+/// `hashtable` is a kept table whose pages are mapped (LOSAT_X_MBLUTKEEP), on which the read-once
+/// fill skips its prefault round.
 pub(super) fn fill(
     parts: usize,
     words: &Words<'_>,
@@ -901,16 +811,13 @@ pub(super) fn fill(
     in_pool: bool,
     resident: bool,
 ) -> FillStats {
-    let (_, _, pad, once) = switches();
-    fill_mode(pad, once, true, parts, words, tables, in_pool, resident)
+    fill_mode(once(), true, parts, words, tables, in_pool, resident)
 }
 
-/// No NCBI counterpart: `fill` with LOSAT_X_MBLUTPAD given as `pad` and LOSAT_X_MBLUTONCE as
-/// `once` (the tests take each). `timed`: a build of the search (not the shadow's second build),
-/// whose read-once phases LOSAT_TIMING's `[TIMING] x_mb_lookup_once` line counts. `resident`:
-/// as `fill`'s.
+/// No NCBI counterpart: `fill` with LOSAT_X_MBLUTONCE given as `once` (the tests take each).
+/// `timed`: a build of the search, whose read-once phases LOSAT_TIMING's `[TIMING]
+/// x_mb_lookup_once` line counts. `resident`: as `fill`'s.
 fn fill_mode(
-    pad: bool,
     once: bool,
     timed: bool,
     parts: usize,
@@ -920,33 +827,18 @@ fn fill_mode(
     resident: bool,
 ) -> FillStats {
     // Dispatch point of LOSAT_X_MBLUTONCE (first): each query position read once, the words
-    // handed to the owners of their cells (`x_mb_lookup_once.rs`, which always counts into the
-    // private copies of LOSAT_X_MBLUTPAD); off, the fill of this module.
+    // handed to the owners of their cells (`x_mb_lookup_once.rs`, which counts into private
+    // copies); off, the fill of this module.
     if once {
-        let _stats = super::x_mb_lookup_once::fill(parts, words, tables, in_pool, timed, resident);
-        return FillStats {
-            padded: false,
-            once: true,
-            #[cfg(test)]
-            parts_with_values: _stats.owners_with_values,
-        };
+        let _ = super::x_mb_lookup_once::fill(parts, words, tables, in_pool, timed, resident);
+        return FillStats { once: true };
     }
-    // Dispatch point of LOSAT_X_MBLUTPAD: private counters and presence-vector words (module
-    // documentation); off, the original fill.
-    if pad {
-        fill_with::<true>(parts, words, tables, in_pool)
-    } else {
-        fill_with::<false>(parts, words, tables, in_pool)
-    }
+    fill_with(parts, words, tables, in_pool)
 }
 
-/// No NCBI counterpart: `fill` with the private copies of LOSAT_X_MBLUTPAD (`PAD`) or without.
-fn fill_with<const PAD: bool>(
-    parts: usize,
-    words: &Words<'_>,
-    tables: Tables<'_>,
-    in_pool: bool,
-) -> FillStats {
+/// No NCBI counterpart: `fill` without the read-once fill (the shared arrays are updated by the
+/// owners of the cells).
+fn fill_with(parts: usize, words: &Words<'_>, tables: Tables<'_>, in_pool: bool) -> FillStats {
     let table_size = tables.hashtable.len();
     let (block_shift, owner) = plan(table_size, tables.pv_array_bts, parts);
     let parts = parts.clamp(1, 255);
@@ -958,44 +850,16 @@ fn fill_with<const PAD: bool>(
         helper_array: Shared::new(tables.helper_array),
     };
     let owner = owner.as_slice();
-    let mut copies = Copies::new(PAD, parts, shared.helper_array.len, shared.pv_array.len);
-    let mut copies = copies.parts();
-    #[cfg(test)]
-    let held = std::sync::atomic::AtomicUsize::new(0);
-    let note = |had: bool| {
-        #[cfg(test)]
-        held.fetch_add(usize::from(had), Ordering::Relaxed);
-        #[cfg(not(test))]
-        let _ = had;
-    };
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let ran = in_pool && {
-        let first = copies.next().expect("one part at least");
-        let note = &note;
         rayon::scope(|scope| {
-            for (part, x) in (1..parts).zip(copies.by_ref()) {
-                scope.spawn(move |_| {
-                    note(fill_part::<PAD>(
-                        part as u8,
-                        owner,
-                        block_shift,
-                        words,
-                        shared,
-                        x,
-                    ))
-                });
+            for part in 1..parts {
+                scope.spawn(move |_| fill_part(part as u8, owner, block_shift, words, shared));
             }
-            note(fill_part::<PAD>(
-                0,
-                owner,
-                block_shift,
-                words,
-                shared,
-                first,
-            ));
+            fill_part(0, owner, block_shift, words, shared);
         });
         true
     };
@@ -1008,133 +872,11 @@ fn fill_with<const PAD: bool>(
         false
     };
     if !ran {
-        for (part, x) in (0..parts).zip(copies) {
-            note(fill_part::<PAD>(
-                part as u8,
-                owner,
-                block_shift,
-                words,
-                shared,
-                x,
-            ));
+        for part in 0..parts {
+            fill_part(part as u8, owner, block_shift, words, shared);
         }
     }
-    FillStats {
-        padded: PAD,
-        once: false,
-        #[cfg(test)]
-        parts_with_values: held.into_inner(),
-    }
-}
-
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091,1104-1106
-/// ```c
-///          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-///          mb_lt->hashtable[ecode] = index;
-/// ...
-///    longest_chain = 2;
-///    for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-///        longest_chain = MAX(longest_chain, helper_array[index]);
-/// ```
-/// LOSAT_X_PAIRPARSHADOW: builds the tables again with the partitioned fill (on the pool when
-/// there is one, otherwise with four parts one after another) and stops at the first element
-/// that differs from the tables the original loop built.
-/// With LOSAT_X_MBLUTONCE the second build is the read-once fill; otherwise, with
-/// LOSAT_X_MBLUTPAD, the padded fill.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn shadow_check(
-    words: &Words<'_>,
-    pv_array_bts: usize,
-    hashtable: &[u32],
-    next_pos: &[u32],
-    pv_array: &[PvArrayType],
-    helper_array: &[u32],
-    longest_chain: usize,
-) {
-    let (_, _, pad, once) = switches();
-    shadow_check_mode(
-        pad,
-        once,
-        words,
-        pv_array_bts,
-        hashtable,
-        next_pos,
-        pv_array,
-        helper_array,
-        longest_chain,
-    );
-}
-
-/// No NCBI counterpart: `shadow_check` with LOSAT_X_MBLUTPAD given as `pad` and
-/// LOSAT_X_MBLUTONCE as `once`.
-#[allow(clippy::too_many_arguments)]
-fn shadow_check_mode(
-    pad: bool,
-    once: bool,
-    words: &Words<'_>,
-    pv_array_bts: usize,
-    hashtable: &[u32],
-    next_pos: &[u32],
-    pv_array: &[PvArrayType],
-    helper_array: &[u32],
-    longest_chain: usize,
-) {
-    let mut x_hashtable = vec![0u32; hashtable.len()];
-    let mut x_next_pos = vec![0u32; next_pos.len()];
-    let mut x_pv_array = vec![0 as PvArrayType; pv_array.len()];
-    let mut x_helper_array = vec![0u32; helper_array.len()];
-    let (parts, in_pool) = match pool_threads() {
-        Some(threads) => (threads, true),
-        None => (4, false),
-    };
-    let x_stats = fill_mode(
-        pad,
-        once,
-        false,
-        parts,
-        words,
-        Tables {
-            hashtable: &mut x_hashtable,
-            next_pos: &mut x_next_pos,
-            pv_array: &mut x_pv_array,
-            pv_array_bts,
-            helper_array: &mut x_helper_array,
-        },
-        in_pool,
-        false,
-    );
-    let mut x_longest_chain = 2usize;
-    for &value in &x_helper_array {
-        x_longest_chain = x_longest_chain.max(value as usize);
-    }
-    for (name, reference, partitioned) in [
-        ("hashtable", hashtable, x_hashtable.as_slice()),
-        ("next_pos", next_pos, x_next_pos.as_slice()),
-        ("pv_array", pv_array, x_pv_array.as_slice()),
-        ("helper_array", helper_array, x_helper_array.as_slice()),
-    ] {
-        if let Some(i) = (0..reference.len()).find(|&i| reference[i] != partitioned[i]) {
-            panic!(
-                "LOSAT_X_PAIRPARSHADOW: megablast lookup {name}[{i}] differs: reference {} partitioned {} (parts {parts}, lut_word_length {}, ascending_cells {}, padded {pad}, once {once})",
-                reference[i], partitioned[i], words.lut_word_length, words.ascending_cells
-            );
-        }
-    }
-    assert_eq!(
-        longest_chain, x_longest_chain,
-        "LOSAT_X_PAIRPARSHADOW: megablast lookup longest_chain differs (parts {parts}, padded {pad}, once {once})"
-    );
-    SHADOW_TABLES.fetch_add(1, Ordering::Relaxed);
-    let cells = (hashtable.len() + next_pos.len() + pv_array.len() + helper_array.len()) as u64;
-    SHADOW_CELLS.fetch_add(cells, Ordering::Relaxed);
-    if x_stats.padded {
-        SHADOW_PADDED_TABLES.fetch_add(1, Ordering::Relaxed);
-        SHADOW_PADDED_CELLS.fetch_add(cells, Ordering::Relaxed);
-    }
-    if x_stats.once {
-        SHADOW_ONCE_TABLES.fetch_add(1, Ordering::Relaxed);
-        SHADOW_ONCE_CELLS.fetch_add(cells, Ordering::Relaxed);
-    }
+    FillStats { once: false }
 }
 
 #[cfg(test)]
@@ -1221,7 +963,7 @@ pub(super) mod tests {
     /// loop's statements, part by part; checked against the loop below), for the tests of
     /// `x_mb_lookup_once.rs`.
     pub(crate) fn fill_old(parts: usize, words: &Words<'_>, tables: Tables<'_>) {
-        fill_mode(false, false, false, parts, words, tables, false, false);
+        fill_mode(false, false, parts, words, tables, false, false);
     }
 
     #[test]
@@ -1258,10 +1000,9 @@ pub(super) mod tests {
                     kmer_mask: (1u64 << (2 * lut_word_length)) - 1,
                     ascending_cells,
                 };
-                // The fill of this module (LOSAT_X_MBLUTPAD as set; the read-once fill has its
-                // own tests in `x_mb_lookup_once.rs`).
+                // The fill of this module (the read-once fill has its own tests in
+                // `x_mb_lookup_once.rs`).
                 fill_mode(
-                    switches().2,
                     false,
                     false,
                     parts,
@@ -1332,7 +1073,6 @@ pub(super) mod tests {
                         ascending_cells,
                     };
                     fill_mode(
-                        switches().2,
                         false,
                         false,
                         threads,
@@ -1356,7 +1096,7 @@ pub(super) mod tests {
         }
     }
 
-    // LOSAT_X_MBLUTPAD: the tables of one case, built by the unpadded fill in one part (the loop's
+    // The tables of one case, built by the fill of this module in one part (the loop's
     // statements in reading order; the tests above check it against `build_two_stage_lookup`),
     // from start values `helper0` / `pv0` of the counters and presence-vector words.
     struct Built {
@@ -1368,7 +1108,6 @@ pub(super) mod tests {
     }
 
     fn build_with(
-        pad: bool,
         parts: usize,
         in_pool: bool,
         words: &Words<'_>,
@@ -1386,7 +1125,6 @@ pub(super) mod tests {
         };
         assert_eq!(b.pv_array.len(), pv_len);
         b.stats = fill_mode(
-            pad,
             false,
             false,
             parts,
@@ -1426,17 +1164,17 @@ pub(super) mod tests {
             .collect()
     }
 
-    // LOSAT_X_MBLUTPAD on real pools of 2, 3, 5 and 16 threads (and off the pool with the same
-    // parts): every element of the four arrays and the longest chain equal the unpadded fill's
+    // The fill on real pools of 2, 3, 5 and 16 threads (and off the pool with the same
+    // parts): every element of the four arrays and the longest chain equal the one-part fill's
     // and `build_two_stage_lookup`'s, for random cases (ambiguity codes, masks, several queries,
     // `lut_word_length` 4..12, both `ascending_cells`) and for `lut_word_length` 11 and 12 tables
-    // whose presence-vector words share lines between blocks (`pv_array_bts` 8 to 10).
+    // (`pv_array_bts` 8 to 10).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     #[test]
-    fn padded_fill_gives_the_loops_tables_on_pools() {
+    fn fill_gives_the_loops_tables_on_pools() {
         let mut rng = Lcg(0x0B1D_5EED);
         let mut cases = Vec::new();
         for case in 0..8 {
@@ -1454,7 +1192,7 @@ pub(super) mod tests {
             let q = repeat_case(&mut rng, 40_000);
             cases.push((vec![q], vec![0], vec![Vec::new()], lut + 5, lut, asc));
         }
-        let mut seen_shared_pv_lines = 0;
+        let mut seen_large_tables = 0;
         for (case, (queries, offsets, masks, word_length, lut_word_length, asc)) in
             cases.iter().enumerate()
         {
@@ -1478,7 +1216,7 @@ pub(super) mod tests {
                 mb.pv_array_bts,
             );
             if mb.hashtable.len() >= 1 << 22 && mb.pv_array_bts > 7 {
-                seen_shared_pv_lines += 1;
+                seen_large_tables += 1;
             }
             let helper0 = vec![0u32; (mb.hashtable.len() >> 11).max(1)];
             let pv0 = vec![0 as PvArrayType; mb.pv_array.len()];
@@ -1491,7 +1229,7 @@ pub(super) mod tests {
                 kmer_mask: (1u64 << (2 * lut_word_length)) - 1,
                 ascending_cells: *asc,
             };
-            let loop_built = build_with(false, 1, false, &words, shape, &helper0, &pv0);
+            let loop_built = build_with(1, false, &words, shape, &helper0, &pv0);
             assert_eq!(loop_built.hashtable, mb.hashtable, "case {case}");
             assert_eq!(loop_built.next_pos, mb.next_pos, "case {case}");
             assert_eq!(loop_built.pv_array, mb.pv_array, "case {case}");
@@ -1505,29 +1243,10 @@ pub(super) mod tests {
                     .num_threads(threads)
                     .build()
                     .unwrap();
-                let padded =
-                    pool.install(|| build_with(true, threads, true, &words, shape, &helper0, &pv0));
-                assert_same(&loop_built, &padded, &format!("case {case} pool {threads}"));
-                let unpadded = pool
-                    .install(|| build_with(false, threads, true, &words, shape, &helper0, &pv0));
-                assert_same(
-                    &loop_built,
-                    &unpadded,
-                    &format!("case {case} pool {threads} off"),
-                );
-                // The padded fill ran and its copies took the counts and bits: in the repeat
-                // cases (the last three) at least two parts held values before their flush; the
-                // unpadded fill has no copies.
-                assert!(padded.stats.padded && !unpadded.stats.padded, "case {case}");
-                assert_eq!(unpadded.stats.parts_with_values, 0, "case {case}");
-                if case >= 8 && threads >= 3 {
-                    assert!(
-                        padded.stats.parts_with_values >= 2,
-                        "case {case} pool {threads}: {:?}",
-                        padded.stats
-                    );
-                }
-                let serial = build_with(true, threads, false, &words, shape, &helper0, &pv0);
+                let pooled =
+                    pool.install(|| build_with(threads, true, &words, shape, &helper0, &pv0));
+                assert_same(&loop_built, &pooled, &format!("case {case} pool {threads}"));
+                let serial = build_with(threads, false, &words, shape, &helper0, &pv0);
                 assert_same(
                     &loop_built,
                     &serial,
@@ -1536,117 +1255,13 @@ pub(super) mod tests {
             }
         }
         assert!(
-            seen_shared_pv_lines >= 3,
-            "the lut 11 / 12 cases ({seen_shared_pv_lines})"
+            seen_large_tables >= 3,
+            "the lut 11 / 12 cases ({seen_large_tables})"
         );
     }
 
-    // LOSAT_X_MBLUTPAD from start values other than 0 (production starts at 0): the flush's
-    // `saturating_add` gives the loop's saturating increments (counters starting at u32::MAX,
-    // u32::MAX - 0..6, 0 or a hash value), and the OR keeps start bits; some counters saturate,
-    // and zero-start counters with no repeat stay 0 (checked for the lut 11 and 12 tables).
-    #[test]
-    fn padded_flush_matches_the_loop_from_any_start() {
-        let mut rng = Lcg(0x5A7_0F1D);
-        for (lut, asc) in [(8usize, false), (11, true), (12, false)] {
-            let q = repeat_case(&mut rng, 30_000);
-            let queries = vec![q];
-            let query_refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-            let offsets = vec![0i32];
-            let masks = vec![Vec::new()];
-            let reference = build_two_stage_lookup(
-                &query_refs,
-                &offsets,
-                lut + 4,
-                lut,
-                &masks,
-                None,
-                0,
-                30_000,
-                asc,
-            );
-            let mb = &reference.mb_lookup;
-            let shape = (
-                mb.hashtable.len(),
-                mb.next_pos.len(),
-                mb.pv_array.len(),
-                mb.pv_array_bts,
-            );
-            let helper_len = (mb.hashtable.len() >> 11).max(1);
-            let helper0: Vec<u32> = (0..helper_len)
-                .map(|h| match h % 4 {
-                    0 => u32::MAX,
-                    1 => u32::MAX - (h as u32 % 7),
-                    2 => 0,
-                    _ => (h as u32).wrapping_mul(2_654_435_761),
-                })
-                .collect();
-            let pv0: Vec<PvArrayType> = (0..mb.pv_array.len())
-                .map(|w| {
-                    if w % 3 == 0 {
-                        (w as u32).wrapping_mul(40_503)
-                    } else {
-                        0
-                    }
-                })
-                .collect();
-            let words = Words {
-                queries_blastna: &query_refs,
-                query_offsets: &offsets,
-                query_masks: &masks,
-                word_length: lut + 4,
-                lut_word_length: lut,
-                kmer_mask: (1u64 << (2 * lut)) - 1,
-                ascending_cells: asc,
-            };
-            let loop_built = build_with(false, 1, false, &words, shape, &helper0, &pv0);
-            let zero_built = build_with(
-                false,
-                1,
-                false,
-                &words,
-                shape,
-                &vec![0u32; helper_len],
-                &vec![0 as PvArrayType; mb.pv_array.len()],
-            );
-            let mut saturated = 0;
-            let mut zero_stays = 0;
-            for h in 0..helper_len {
-                let n = zero_built.helper_array[h];
-                let (s, v) = (helper0[h], loop_built.helper_array[h]);
-                assert_eq!(v, s.saturating_add(n), "lut {lut} counter {h}");
-                saturated += usize::from(s != u32::MAX && s.checked_add(n).is_none());
-                zero_stays += usize::from(s == 0 && n == 0);
-            }
-            if lut >= 11 {
-                assert!(
-                    saturated > 0 && zero_stays > 0,
-                    "lut {lut}: {saturated} {zero_stays}"
-                );
-            }
-            for parts in [2usize, 3, 5, 16] {
-                let padded = build_with(true, parts, false, &words, shape, &helper0, &pv0);
-                assert_same(&loop_built, &padded, &format!("lut {lut} parts {parts}"));
-            }
-            #[cfg(all(
-                feature = "parallel",
-                any(not(target_arch = "wasm32"), feature = "wasm-threads")
-            ))]
-            for threads in [2usize, 3, 5, 16] {
-                let pool = rayon::ThreadPoolBuilder::new()
-                    .num_threads(threads)
-                    .build()
-                    .unwrap();
-                let padded =
-                    pool.install(|| build_with(true, threads, true, &words, shape, &helper0, &pv0));
-                assert_same(&loop_built, &padded, &format!("lut {lut} pool {threads}"));
-            }
-        }
-    }
-
-    // LOSAT_X_MBLUTPAD: each worker's copies are a whole number of 64-byte lines starting on a line
-    // boundary, the workers' copies are disjoint and in part order, zeroed, and the switch off
-    // allocates nothing.
+    // Each worker's copies are a whole number of 64-byte lines starting on a line boundary, the
+    // workers' copies are disjoint and in part order, and zeroed.
     #[test]
     fn private_copies_have_lines_of_their_own() {
         assert_eq!(std::mem::size_of::<Line>(), 64);
@@ -1659,7 +1274,7 @@ pub(super) mod tests {
             (16, 2048, 32768),
             (16, 8192, 16384),
         ] {
-            let mut copies = Copies::new(true, parts, helper_len, pv_len);
+            let mut copies = Copies::new(parts, helper_len, pv_len);
             let stride = helper_len.div_ceil(16) + pv_len.div_ceil(16);
             assert!(copies.lines.capacity() >= stride * parts);
             let base = copies.lines.as_ptr() as usize;
@@ -1692,18 +1307,9 @@ pub(super) mod tests {
                 assert!(pair[0].1 <= pair[1].0, "parts {parts}: copies overlap");
             }
         }
-        let mut off = Copies::new(false, 16, 8192, 32768);
-        assert_eq!(off.lines.capacity(), 0);
-        assert_eq!(
-            off.parts()
-                .map(Unready::zeroed)
-                .filter(|x| x.counters.lines.is_empty() && x.pv.lines.is_empty())
-                .count(),
-            16
-        );
     }
 
-    // LOSAT_X_MBLUTPAD's kept buffers, on a list of this test's own (the module's other tests run at
+    // The kept buffers, on a list of this test's own (the module's other tests run at
     // the same time on `SPARE_LINES`). On Linux with glibc a fill takes the largest kept buffer when
     // it is large enough; one too small is freed and the fill gets a new buffer of
     // `lines_capacity(n)` lines (32 MiB + 4 KiB or more), not the old one grown (std's aligned
@@ -1729,7 +1335,7 @@ pub(super) mod tests {
         assert_eq!(lines_capacity(mapped + 7), mapped + 7);
 
         // The first fill makes a new buffer of `lines_capacity(n)` lines.
-        let copies = Copies::with_spare(&SPARE, true, parts, helper_len, pv_len);
+        let copies = Copies::with_spare(&SPARE, parts, helper_len, pv_len);
         let first = at(&copies);
         assert!(first.1 >= lines_capacity(n));
         drop(copies);
@@ -1738,21 +1344,21 @@ pub(super) mod tests {
             assert!(kept().is_empty(), "kept off glibc");
             SPARE.lock().unwrap().push(Vec::with_capacity(4 * n));
             let before = kept();
-            drop(Copies::with_spare(&SPARE, true, parts, helper_len, pv_len));
+            drop(Copies::with_spare(&SPARE, parts, helper_len, pv_len));
             assert_eq!(kept(), before, "taken or kept off glibc");
             SPARE.lock().unwrap().clear();
             return;
         }
         assert_eq!(kept(), [first], "Drop gives the buffer back");
         // The next fill takes it, and gives it back.
-        let copies = Copies::with_spare(&SPARE, true, parts, helper_len, pv_len);
+        let copies = Copies::with_spare(&SPARE, parts, helper_len, pv_len);
         assert_eq!(at(&copies), first);
         assert!(kept().is_empty());
         drop(copies);
         assert_eq!(kept(), [first]);
         // With a smaller buffer kept too, the fill takes the largest.
         SPARE.lock().unwrap().push(Vec::with_capacity(n));
-        let copies = Copies::with_spare(&SPARE, true, parts, helper_len, pv_len);
+        let copies = Copies::with_spare(&SPARE, parts, helper_len, pv_len);
         assert_eq!(at(&copies), first, "not the largest kept buffer");
         let small = kept();
         assert_eq!(small.len(), 1);
@@ -1765,7 +1371,7 @@ pub(super) mod tests {
         assert_eq!(kept(), small, "kept although the lock was taken");
         // A fill larger than the only kept buffer: that one is freed, and the fill gets a new
         // buffer of `lines_capacity` lines, not the old one grown to its size.
-        let copies = Copies::with_spare(&SPARE, true, 2 * parts, helper_len, pv_len);
+        let copies = Copies::with_spare(&SPARE, 2 * parts, helper_len, pv_len);
         assert!(
             copies.lines.capacity() >= lines_capacity(2 * n),
             "grown to {} lines instead of a new buffer of {}",
@@ -1777,7 +1383,7 @@ pub(super) mod tests {
         assert_eq!(kept().len(), 1);
         // More than 32 MiB of copies (205 parts of 160 KiB, not touched here): the kept buffer is
         // too small, and the fill gets a new one of its own size.
-        let copies = Copies::with_spare(&SPARE, true, 205, 8192, 32768);
+        let copies = Copies::with_spare(&SPARE, 205, 8192, 32768);
         assert_eq!(copies.stride, 2560);
         assert!(copies.lines.capacity() >= 205 * 2560);
         assert!(kept().is_empty());
@@ -1786,52 +1392,15 @@ pub(super) mod tests {
         SPARE.lock().unwrap().clear();
     }
 
-    // The padded update writes the private copies only: a regression to the shared arrays (just
-    // as exact, but the false sharing the switch removes) is caught here.
-    #[test]
-    fn padded_apply_writes_private_copies_only() {
-        let lut = 8usize;
-        let table = 1usize << (2 * lut);
-        let (pv_len, bts) = super::super::compute_mb_pv_params(table, 30_000, false, lut);
-        let helper_len = table.div_ceil(2048).max(1);
-        let mut hashtable = vec![0u32; table];
-        let mut next_pos = vec![0u32; 10];
-        let mut pv = vec![0 as PvArrayType; pv_len];
-        let mut helper = vec![0u32; helper_len];
-        let t = SharedTables {
-            hashtable: Shared::new(&mut hashtable),
-            next_pos: Shared::new(&mut next_pos),
-            pv_array: Shared::new(&mut pv),
-            pv_array_bts: bts,
-            helper_array: Shared::new(&mut helper),
-        };
-        let mut copies = Copies::new(true, 1, helper_len, pv_len);
-        let mut x = copies.parts().next().unwrap().zeroed();
-        let bucket = 4097usize;
-        // SAFETY: one worker owns every cell and word here.
-        unsafe {
-            t.apply::<true>(bucket, 1, &mut x);
-            t.apply::<true>(bucket, 2, &mut x);
-            t.apply::<true>(bucket, 3, &mut x);
-        }
-        assert_eq!(x.counters.get(bucket >> 11), 2);
-        assert_ne!(x.pv.get(bucket >> bts), 0);
-        drop(x);
-        assert!(helper.iter().all(|&v| v == 0), "shared counters written");
-        assert!(pv.iter().all(|&v| v == 0), "shared presence words written");
-        assert_eq!(hashtable[bucket], 3);
-        assert_eq!(&next_pos[1..4], &[0, 1, 2]);
-    }
-
     // Many parts: off the pool 64 / 254 / 255 / 256 / 300 parts (the last two clamp to 255), on a
     // 64-thread pool 64 and 255 parts (more parts than threads, and at lut 8 more parts than
-    // blocks); lut 8 / 11 / 12; the padded fill equals the loop.
+    // blocks); lut 8 / 11 / 12; the fill equals the loop.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     #[test]
-    fn padded_fill_with_many_parts_gives_the_loops_tables() {
+    fn fill_with_many_parts_gives_the_loops_tables() {
         let mut rng = Lcg(0x00C0_FFEE);
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(64)
@@ -1850,9 +1419,11 @@ pub(super) mod tests {
             let reference =
                 build_two_stage_lookup(&refs, &offsets, lut + 4, lut, &masks, None, 0, approx, asc);
             let mb = &reference.mb_lookup;
+            // (a table laid out as CSR, LOSAT_X_BNCSR, gives its chains back as the fill's arrays)
+            let (hashtable, next_pos) = reference.x_chain_arrays(queries[0].len() + 1);
             let shape = (
-                mb.hashtable.len(),
-                mb.next_pos.len(),
+                hashtable.len(),
+                next_pos.len(),
                 mb.pv_array.len(),
                 mb.pv_array_bts,
             );
@@ -1865,19 +1436,18 @@ pub(super) mod tests {
                 kmer_mask: (1u64 << (2 * lut)) - 1,
                 ascending_cells: asc,
             };
-            let helper0 = vec![0u32; (mb.hashtable.len() >> 11).max(1)];
+            let helper0 = vec![0u32; (hashtable.len() >> 11).max(1)];
             let pv0 = vec![0 as PvArrayType; mb.pv_array.len()];
-            let loop_built = build_with(false, 1, false, &words, shape, &helper0, &pv0);
-            assert_eq!(loop_built.hashtable, mb.hashtable);
-            assert_eq!(loop_built.next_pos, mb.next_pos);
+            let loop_built = build_with(1, false, &words, shape, &helper0, &pv0);
+            assert_eq!(loop_built.hashtable, hashtable);
+            assert_eq!(loop_built.next_pos, next_pos);
             assert_eq!(loop_built.pv_array, mb.pv_array);
             for parts in [64usize, 254, 255, 256, 300] {
-                let b = build_with(true, parts, false, &words, shape, &helper0, &pv0);
+                let b = build_with(parts, false, &words, shape, &helper0, &pv0);
                 assert_same(&loop_built, &b, &format!("lut {lut} parts {parts}"));
             }
             for parts in [64usize, 255] {
-                let b =
-                    pool.install(|| build_with(true, parts, true, &words, shape, &helper0, &pv0));
+                let b = pool.install(|| build_with(parts, true, &words, shape, &helper0, &pv0));
                 assert_same(&loop_built, &b, &format!("lut {lut} pool 64 parts {parts}"));
             }
         }
@@ -1919,7 +1489,7 @@ pub(super) mod tests {
                             pv_array_bts: bts,
                             helper_array: Shared::new(&mut helper),
                         };
-                        let mut copies = Copies::new(true, parts, helper_len, pv_len);
+                        let mut copies = Copies::new(parts, helper_len, pv_len);
                         assert!(copies.lines.capacity() >= parts * per_part, "lut {lut}");
                         assert_eq!(copies.stride, per_part, "lut {lut}");
                         for (p, x) in copies.parts().enumerate() {
@@ -1950,96 +1520,5 @@ pub(super) mod tests {
             }
         }
         assert!(shapes > 1000, "{shapes}");
-    }
-
-    // The shadow (`LOSAT_X_PAIRPARSHADOW`) with the padded second build: equal tables pass, and a
-    // difference in any one of the four arrays or the longest chain stops it.
-    #[test]
-    fn shadow_with_padding_compares_every_array() {
-        let mut rng = Lcg(0xC0FF_EE11);
-        let q = repeat_case(&mut rng, 20_000);
-        let queries = vec![q];
-        let query_refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-        let offsets = vec![0i32];
-        let masks = vec![Vec::new()];
-        let lut = 11usize;
-        let reference = build_two_stage_lookup(
-            &query_refs,
-            &offsets,
-            16,
-            lut,
-            &masks,
-            None,
-            0,
-            1_000_000,
-            false,
-        );
-        let mb = &reference.mb_lookup;
-        let shape = (
-            mb.hashtable.len(),
-            mb.next_pos.len(),
-            mb.pv_array.len(),
-            mb.pv_array_bts,
-        );
-        let words = Words {
-            queries_blastna: &query_refs,
-            query_offsets: &offsets,
-            query_masks: &masks,
-            word_length: 16,
-            lut_word_length: lut,
-            kmer_mask: (1u64 << (2 * lut)) - 1,
-            ascending_cells: false,
-        };
-        let helper_len = (mb.hashtable.len() >> 11).max(1);
-        let b = build_with(
-            false,
-            1,
-            false,
-            &words,
-            shape,
-            &vec![0u32; helper_len],
-            &vec![0 as PvArrayType; mb.pv_array.len()],
-        );
-        let chain = b
-            .helper_array
-            .iter()
-            .fold(2usize, |m, &v| m.max(v as usize));
-        let check = |b: &Built, chain: usize| {
-            shadow_check_mode(
-                true,
-                false,
-                &words,
-                mb.pv_array_bts,
-                &b.hashtable,
-                &b.next_pos,
-                &b.pv_array,
-                &b.helper_array,
-                chain,
-            )
-        };
-        check(&b, chain);
-        let h = b.helper_array.iter().position(|&v| v > 0).unwrap();
-        let w = b.pv_array.iter().position(|&v| v != 0).unwrap();
-        let cell = b.hashtable.iter().position(|&v| v != 0).unwrap();
-        let q = b.next_pos.iter().position(|&v| v != 0).unwrap();
-        for which in 0..5 {
-            let mut c = Built {
-                hashtable: b.hashtable.clone(),
-                next_pos: b.next_pos.clone(),
-                pv_array: b.pv_array.clone(),
-                helper_array: b.helper_array.clone(),
-                stats: b.stats,
-            };
-            let mut c_chain = chain;
-            match which {
-                0 => c.hashtable[cell] += 1,
-                1 => c.next_pos[q] += 1,
-                2 => c.pv_array[w] ^= 1,
-                3 => c.helper_array[h] -= 1,
-                _ => c_chain += 1,
-            }
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(&c, c_chain)));
-            assert!(r.is_err(), "difference {which} not caught");
-        }
     }
 }

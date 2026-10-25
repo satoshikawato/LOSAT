@@ -257,7 +257,7 @@ fn parse_blastn_args(
         word_size: None,
         num_threads: 1,
         evalue: Some(10.0),
-        percent_identity: 0.0,
+        percent_identity: None,
         min_hit_length: 0,
         max_target_seqs: None,
         num_descriptions: None,
@@ -277,15 +277,21 @@ fn parse_blastn_args(
         dust_filtering: None,
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
+        // The frozen web ABI v1 (plan TD-1) has no WindowMasker.
+        window_masker_db: None,
+        window_masker: None,
+        window_masker_counts: None,
         strand: "both".to_string(),
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,
         subject_loc: None,
         subject_besthit: false,
-        culling_limit: 0,
+        culling_limit: None,
         verbose: false,
         scan_step: 0,
         outfmt: "6".to_string(),
+        archive: None,
+        command_line: None,
     };
 
     let mut index = 0;
@@ -386,9 +392,10 @@ fn parse_tblastx_args(
         qcov_hsp_perc: None,
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
         seg: "yes".to_string(),
+        soft_masking: None,
         window_size: 40,
         outfmt: "6".to_string(),
-        culling_limit: 0,
+        culling_limit: None,
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,
         subject_loc: None,
@@ -536,7 +543,7 @@ fn parse_blastp_args(
         num_alignments: None,
         max_hsps_per_subject: None,
         qcov_hsp_perc: None,
-        culling_limit: 0,
+        culling_limit: None,
         ungapped: false,
         window_size: None,
         matrix: None,
@@ -544,11 +551,13 @@ fn parse_blastp_args(
         gap_extend: None,
         comp_based_stats: "2".to_string(),
         seg: None,
+        soft_masking: None,
         use_sw_tback: false,
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,
         subject_loc: None,
         outfmt: "6".to_string(),
+        archive: None,
     };
 
     let mut index = 0;

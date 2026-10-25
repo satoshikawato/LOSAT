@@ -101,7 +101,45 @@ fn ncbi2na_unpack_base(byte: u8, n: u8) -> u8 {
 ///    ungapped_data->length = (Int4)(q_end - q_beg);
 /// }
 /// ```
+///
+/// With `LOSAT_X_BNUNGAPCOUNT` (in the strict set) the same loops run with their step counts
+/// worked out first (`x_ungap_count.rs`); `=0` runs the ported loops below.
+#[inline(always)]
 pub fn extend_hit_ungapped_exact_ncbi(
+    q_seq: &[u8],        // BLASTNA (1 byte/base)
+    s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
+    q_off: usize,
+    s_off: usize,
+    subject_len: usize,
+    x_dropoff: i32,
+    matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
+) -> UngappedData {
+    if super::x_ungap_count::on() {
+        super::x_ungap_count::extend_hit_ungapped_exact_counted(
+            q_seq,
+            s_seq_packed,
+            q_off,
+            s_off,
+            subject_len,
+            x_dropoff,
+            matrix,
+        )
+    } else {
+        extend_hit_ungapped_exact_ported(
+            q_seq,
+            s_seq_packed,
+            q_off,
+            s_off,
+            subject_len,
+            x_dropoff,
+            matrix,
+        )
+    }
+}
+
+/// The port of `s_NuclUngappedExtendExact` above, loop for loop (`LOSAT_X_BNUNGAPCOUNT=0`).
+#[inline(never)]
+pub(crate) fn extend_hit_ungapped_exact_ported(
     q_seq: &[u8],        // BLASTNA (1 byte/base)
     s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
     q_off: usize,
@@ -1082,8 +1120,8 @@ pub fn extend_hit_ungapped(
     );
 
     // Debug coordinate tracking
-    // No NCBI counterpart: LOSAT_DEBUG_COORDS only prints a debug line; LOSAT_X_ENVCACHE only
-    // reads the variable once; it does not change any value NCBI computes.
+    // No NCBI counterpart: LOSAT_DEBUG_COORDS only prints a debug line (the variable is
+    // read once); it does not change any value NCBI computes.
     if crate::utils::xenv::debug_coords_is_ok() {
         eprintln!(
             "[UNGAPPED] q_pos={}, s_pos={}, best_i={}, best_j={} -> q=[{}, {}), s=[{}, {}), score={}",

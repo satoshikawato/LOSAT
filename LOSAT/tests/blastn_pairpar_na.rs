@@ -2,17 +2,15 @@
 //! (`LOSAT_X_PAIRPARNA`, `src/algorithm/blastn/blast_engine/x_pair_seed_na.rs`) on whole
 //! searches.
 //!
-//! The switch is in the strict set (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not
-//! set). It chooses between two LOSAT code paths with the same result: the subject scan cut
-//! into strips that the pool threads scan, and the diagonal-hash fold in the scan order (by the
-//! owner, or split by diagonal-hash bucket with `LOSAT_X_PAIRPARFOLD`), or the scan and fold of
-//! the reference code. So the property under test is that the report does not depend on it:
-//! `-task blastn-short` (word 7) and word sizes 6 and 8 with the switch at 1, 2 and 4 threads
-//! give the bytes of the search at one thread (where the stage does not act), and so do the
-//! switch at `0` and `LOSAT_X_DEFAULT=0` at 4 threads, and the shadow run (`LOSAT_X_PAIRPARNASHADOW`,
-//! which computes the stage on copies and compares the hit list and the whole diagonal hash
-//! with the reference code for every chunk) gives them too and compares at least one chunk.
-//! That those bytes equal NCBI's is the business of the blastn-short fixtures
+//! The switch is in the strict set (on unless it is `0`). It chooses between two LOSAT code paths
+//! with the same result: the subject scan cut into strips that the pool threads scan, and the
+//! diagonal-hash fold in the scan order (by the owner, or split by diagonal-hash bucket with
+//! `LOSAT_X_PAIRPARFOLD`), or the scan and fold of the reference code. So the property under test
+//! is that the report does not depend on it: `-task blastn-short` (word 7) and word sizes 6 and 8
+//! with the switch at 1, 2 and 4 threads give the bytes of the search at one thread (where the
+//! stage does not act), and so do the switch at `0` at 4 threads; `LOSAT_X_REACH` shows that the
+//! stage took the search at 2 and 4 threads and not at 1 or with the switch at `0`. That those
+//! bytes equal NCBI's is the business of the blastn-short fixtures
 //! (`tests/blastn_regression_fixtures.py`).
 //!
 //! The input is one subject (the stage takes a search of one subject by the owner of a pool of
@@ -26,10 +24,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+mod reach_support;
+
 const SWITCH: (&str, &str) = ("LOSAT_X_PAIRPARNA", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_PAIRPARNASHADOW", "1");
 const OFF: (&str, &str) = ("LOSAT_X_PAIRPARNA", "0");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -83,7 +81,11 @@ fn query_file(name: &str, count: usize, length: impl Fn(usize) -> usize) -> Path
             String::from_utf8(seq).unwrap()
         ));
     }
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("blastn_pairpar_na");
+    // One directory per process: nextest runs each test in a process of its own, and a
+    // process that wrote these files again while another one's search read them cut its input.
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("blastn_pairpar_na")
+        .join(std::process::id().to_string());
     std::fs::create_dir_all(&dir).expect("work directory");
     let file = dir.join(format!("{name}.fa"));
     std::fs::write(&file, text).expect("query file");
@@ -161,49 +163,39 @@ fn stage_chunks(stderr: &str) -> u64 {
 }
 
 /// For one word size: the search without a variable at one thread, then with the switch at 1,
-/// 2 and 4 threads, without a variable, with the owner's fold (`LOSAT_X_PAIRPARFOLD=0`), with
-/// the switch at `0` and with `LOSAT_X_DEFAULT=0` at 4 threads (the same bytes, nothing on
-/// standard error), then the shadow at 4 threads, at 4 threads with `LOSAT_X_DIAGLV=0` (the
-/// diagonal-hash retrieve without level bounds) and at 1 thread (the same bytes, and its summary
-/// line with at least one chunk compared).
+/// 2 and 4 threads, without a variable, with the owner's fold (`LOSAT_X_PAIRPARFOLD=0`), without
+/// level bounds (`LOSAT_X_DIAGLV=0`, the diagonal-hash retrieve without them) and with the
+/// switch at `0` at 4 threads (the same bytes, nothing on standard error; the stage took the
+/// search at 2 and 4 threads only, with the switch on).
 fn check(task_args: &[&str]) {
     let query = queries();
     let (expected, expected_stderr) = blastn(query, task_args, 1, &[]);
     assert!(!expected.is_empty(), "{task_args:?}: no hits");
     assert_eq!(expected_stderr, "", "{task_args:?}");
     let owner_fold = [SWITCH, ("LOSAT_X_PAIRPARFOLD", "0")];
+    let no_levels = [SWITCH, ("LOSAT_X_DIAGLV", "0")];
     for (threads, switches) in [
         (1, &[SWITCH][..]),
         (2, &[SWITCH][..]),
         (4, &[SWITCH][..]),
         (4, &[][..]),
         (4, &owner_fold[..]),
+        (4, &no_levels[..]),
         (4, &[OFF][..]),
-        (4, &[DEFAULT_OFF][..]),
     ] {
-        let (report, stderr) = blastn(query, task_args, threads, switches);
+        let reach = reach_support::Reach::new("pairparna");
+        let with_reach = [switches, &[reach.var()]].concat();
+        let (report, stderr) = blastn(query, task_args, threads, &with_reach);
         assert!(
             report == expected,
             "{task_args:?} threads {threads}: the report differs with {switches:?}"
         );
         assert_eq!(stderr, "", "{task_args:?} threads {threads} {switches:?}");
-    }
-    let no_levels = [SHADOW, ("LOSAT_X_DIAGLV", "0")];
-    for (threads, switches) in [(4, &[SHADOW][..]), (4, &no_levels[..]), (1, &[SHADOW][..])] {
-        let (report, stderr) = blastn(query, task_args, threads, switches);
-        assert!(
-            report == expected,
-            "{task_args:?} threads {threads}: the report differs with {switches:?}"
+        assert_eq!(
+            reach.sides("LOSAT_X_PAIRPARNA").0,
+            threads > 1 && !switches.contains(&OFF),
+            "{task_args:?} threads {threads} {switches:?}: the stage's chunks"
         );
-        let line = stderr
-            .lines()
-            .find(|line| line.starts_with("[X_PAIRPARNASHADOW] blastn: seed chunks equal="))
-            .unwrap_or_else(|| panic!("{task_args:?}: no summary line:\n{stderr}"));
-        assert!(
-            !line.starts_with("[X_PAIRPARNASHADOW] blastn: seed chunks equal=0 "),
-            "{task_args:?} threads {threads}: {line}"
-        );
-        assert_eq!(stderr.lines().count(), 1, "{task_args:?}: {stderr}");
     }
 }
 
@@ -225,21 +217,19 @@ fn masked_queries_give_the_same_report() {
 }
 
 // Word size 5 (its own table width, more pairs per subject offset): the default at 4 threads
-// and the shadow give the report of one thread.
+// gives the report of one thread, and the stage took the search.
 #[test]
 fn word_size_5_gives_the_same_report() {
     let task_args = ["-task", "blastn-short", "-word_size", "5"];
     let (expected, _) = blastn(queries(), &task_args, 1, &[]);
     assert!(!expected.is_empty(), "no hits");
-    let (report, stderr) = blastn(queries(), &task_args, 4, &[]);
+    let reach = reach_support::Reach::new("pairparna-word5");
+    let (report, stderr) = blastn(queries(), &task_args, 4, &[reach.var()]);
     assert!(report == expected, "the report differs at 4 threads");
     assert_eq!(stderr, "");
-    let (report, stderr) = blastn(queries(), &task_args, 4, &[SHADOW]);
-    assert!(report == expected, "the report differs with {SHADOW:?}");
     assert!(
-        stderr.starts_with("[X_PAIRPARNASHADOW] blastn: seed chunks equal=")
-            && !stderr.starts_with("[X_PAIRPARNASHADOW] blastn: seed chunks equal=0 "),
-        "{stderr}"
+        reach.sides("LOSAT_X_PAIRPARNA").0,
+        "the stage took no chunk"
     );
 }
 
@@ -254,8 +244,8 @@ fn word_sizes_6_and_8_give_the_same_report() {
 
 // The switch-on runs of `check` compare bytes only, which a stage that silently stopped
 // running would pass too: with LOSAT_TIMING the stage prints how many chunks it took. It runs
-// by default (no variable) and with the switch set; with the switch at `0` or
-// `LOSAT_X_DEFAULT=0` it does not (no line). It takes none at one thread (no pool) and none for
+// by default (no variable) and with the switch set; with the switch at `0` it does
+// not (no line). It takes none at one thread (no pool) and none for
 // a query block under 8000 letters (the diagonal array), and the report is the same there.
 #[test]
 fn the_stage_runs_only_in_its_scope() {
@@ -270,14 +260,13 @@ fn the_stage_runs_only_in_its_scope() {
             "{switches:?}: the stage took no chunk:\n{stderr}"
         );
     }
-    for switches in [[OFF, timing], [DEFAULT_OFF, timing]] {
-        let (report, stderr) = blastn(queries(), &task_args, 4, &switches);
-        assert!(report == expected, "the report differs with {switches:?}");
-        assert!(
-            !stderr.contains("x_pairparna_seed"),
-            "{switches:?}: the stage ran:\n{stderr}"
-        );
-    }
+    let switches = [OFF, timing];
+    let (report, stderr) = blastn(queries(), &task_args, 4, &switches);
+    assert!(report == expected, "the report differs with {switches:?}");
+    assert!(
+        !stderr.contains("x_pairparna_seed"),
+        "{switches:?}: the stage ran:\n{stderr}"
+    );
     let (report, stderr) = blastn(queries(), &task_args, 1, &[SWITCH, timing]);
     assert!(report == expected, "the report differs at one thread");
     assert_eq!(stage_chunks(&stderr), 0, "{stderr}");

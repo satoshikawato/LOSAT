@@ -164,6 +164,17 @@ impl DbFile {
 
     /// The bytes of `start..end` as a new buffer.
     pub fn read_range(&self, start: u64, end: u64) -> Result<Vec<u8>, SeqDbError> {
+        self.read_range_in(start, end, false)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_range` into a buffer taken from or sized
+    /// by `utils::x_mapped::X_BYTES.reserve` (a mapped buffer from 1 MiB on, given back with
+    /// `x_mapped::X_BYTES.give`). No NCBI counterpart: only where the bytes are kept.
+    pub fn x_read_range_mapped(&self, start: u64, end: u64) -> Result<Vec<u8>, SeqDbError> {
+        self.read_range_in(start, end, true)
+    }
+
+    fn read_range_in(&self, start: u64, end: u64, mapped: bool) -> Result<Vec<u8>, SeqDbError> {
         if end < start {
             return Err(SeqDbError::Format {
                 path: self.path.clone(),
@@ -185,9 +196,41 @@ impl DbFile {
             path: self.path.clone(),
             message: format!("byte range {start}..{end} does not fit in memory"),
         })?;
-        let mut buf = vec![0u8; len];
+        let mut buf = if mapped {
+            let mut buf = Vec::new();
+            crate::utils::x_mapped::X_BYTES.reserve(&mut buf, len);
+            buf.resize(len, 0u8);
+            buf
+        } else {
+            vec![0u8; len]
+        };
         self.read_exact_at(&mut buf, start)?;
         Ok(buf)
+    }
+
+    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the checks of `read_range(start, end)` before its buffer
+    /// is allocated, with the same errors in the same order, without the read.
+    pub fn x_check_range(&self, start: u64, end: u64) -> Result<(), SeqDbError> {
+        if end < start {
+            return Err(SeqDbError::Format {
+                path: self.path.clone(),
+                message: format!("byte range {start}..{end} ends before it starts"),
+            });
+        }
+        if end > self.len {
+            return Err(SeqDbError::Format {
+                path: self.path.clone(),
+                message: format!(
+                    "byte range {start}..{end} passes the end of the file ({} bytes)",
+                    self.len
+                ),
+            });
+        }
+        usize::try_from(end - start).map_err(|_| SeqDbError::Format {
+            path: self.path.clone(),
+            message: format!("byte range {start}..{end} does not fit in memory"),
+        })?;
+        Ok(())
     }
 
     /// The whole file.

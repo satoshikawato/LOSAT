@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBNHITBF): the two-hit loop of tblastn's unit path (`XTwoHit::pairs`)
+//! The two-hit loop of tblastn's unit path (`XTwoHit::pairs`)
 //! with its two common outcomes, too far and overlap, taken without a branch.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-551
@@ -67,54 +67,20 @@
 //! is a power of two and its `mask` is that length minus one (`Diagonals::new`), so this is the
 //! reference's index, and it is never past the end of the table.
 //!
-//! The switch is read once. It is in the strict set (`utils/xswitch.rs`): on unless
-//! `LOSAT_X_TBNHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. With
-//! `LOSAT_X_TBNHITBFSHADOW` set (any value; it turns the path on) each offset array the scan fills
-//! runs the loop before the switch on a copy of the table and then the branch-free one, and the
-//! init HSPs and every cell of the table must be equal; `main` prints
-//! `[X_SHADOW] TBNHITBF arrays_compared= hits_compared= outside=` at exit when the unit path filled
-//! any offset array (one per scan call, empty ones included). TBLASTX's unit scan has a loop of this
-//! form under its own switch, LOSAT_X_TBXHITBF.
+//! The loop runs for every offset array of the unit path (the former switch `LOSAT_X_TBNHITBF`
+//! graduated on 2026-10-26). TBLASTX's unit scan has a loop of this form under its own switch,
+//! LOSAT_X_TBXHITBF.
 
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-/// EXPERIMENT (LOSAT_X_TBNHITBF): which loop runs the two-hit test of the unit path.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum XHitLoop {
-    /// `XTwoHit::pairs`, the loop before the switch.
-    Reference,
-    /// `XTwoHit::x_pairs_bf`.
-    BranchFree,
-    /// `XTwoHit::x_pairs_bf_shadow`: both, compared (LOSAT_X_TBNHITBFSHADOW).
-    Shadow,
-}
-
-// No NCBI counterpart: reads LOSAT_X_TBNHITBF and LOSAT_X_TBNHITBFSHADOW once; it does not change
-// any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNHITBF): the loop the unit path runs. LOSAT_X_TBNHITBF is a switch of
-/// the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; the shadow wins.
-pub(super) fn x_hit_loop() -> XHitLoop {
-    static LOOP: std::sync::OnceLock<XHitLoop> = std::sync::OnceLock::new();
-    *LOOP.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_TBNHITBFSHADOW").is_some() {
-            XHitLoop::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_TBNHITBF") {
-            XHitLoop::BranchFree
-        } else {
-            XHitLoop::Reference
-        }
-    })
-}
-
-/// EXPERIMENT (LOSAT_X_TBNHITBF): whether `x_hits_bf` gives the reference's outcomes for this
+/// Whether `x_hits_bf` gives the reference's outcomes for this
 /// window and word size (module doc): `0 <= wordsize < window`.
 pub(super) fn fits(window: i32, word_size: usize) -> bool {
     i32::try_from(word_size).is_ok_and(|word_size| word_size < window)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (module doc).
-/// EXPERIMENT (LOSAT_X_TBNHITBF): the hits of `pairs` from the first, each on its cell of
+/// The hits of `pairs` from the first, each on its cell of
 /// `entries` (`(last_hit, flag)`), up to the first that is a flag-1 cell or a candidate for the
 /// extension; returns the number of hits taken (`pairs.len()` when there is no such hit). The
 /// hits taken are too far (`last_hit = s + offset`) or overlap (no change). The outcomes are
@@ -168,55 +134,6 @@ pub(super) fn x_hits_bf(
     }
     // SAFETY: start <= p <= end, both in `pairs`.
     unsafe { p.offset_from(start) as usize }
-}
-
-// No NCBI counterpart: LOSAT_X_TBNHITBFSHADOW counters; they do not change any value NCBI
-// computes.
-/// Offset arrays compared, their hits, and offset arrays outside `fits` (run by `pairs` only).
-static SHADOW: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
-
-/// EXPERIMENT (LOSAT_X_TBNHITBFSHADOW): counts one offset array of `hits` hits, compared or
-/// outside `fits`.
-pub(super) fn x_shadow_count(hits: usize, outside: bool) {
-    if outside {
-        SHADOW[2].fetch_add(1, Ordering::Relaxed);
-    } else {
-        SHADOW[0].fetch_add(1, Ordering::Relaxed);
-        SHADOW[1].fetch_add(hits as u64, Ordering::Relaxed);
-    }
-}
-
-// No NCBI counterpart: compares two LOSAT runs of one offset array (LOSAT_X_TBNHITBFSHADOW).
-/// Panics at the first difference of the init HSPs or of the tables.
-pub(super) fn x_shadow_compare<H: PartialEq>(
-    frame: i8,
-    chunk_offset: u32,
-    hits: &[H],
-    reference_hits: &[H],
-    table: &[(i32, bool)],
-    reference_table: &[(i32, bool)],
-) {
-    if hits != reference_hits || table != reference_table {
-        let hit = hits.iter().zip(reference_hits).position(|(a, b)| a != b);
-        let cell = table.iter().zip(reference_table).position(|(a, b)| a != b);
-        panic!(
-            "LOSAT_X_TBNHITBFSHADOW: frame {frame} chunk at {chunk_offset}: {} init HSPs vs {} (first difference at {hit:?}), first table difference at {cell:?}",
-            hits.len(),
-            reference_hits.len()
-        );
-    }
-}
-
-/// The `[X_SHADOW] TBNHITBF` line (printed by `main` at exit) with LOSAT_X_TBNHITBFSHADOW, when
-/// the unit path filled any offset array.
-// No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
-pub fn print_summary() {
-    let [arrays, hits, outside] = SHADOW.each_ref().map(|count| count.load(Ordering::Relaxed));
-    if arrays + outside > 0 {
-        eprintln!(
-            "[X_SHADOW] TBNHITBF arrays_compared={arrays} hits_compared={hits} outside={outside} (init HSPs and tables identical)"
-        );
-    }
 }
 
 #[cfg(test)]
@@ -369,29 +286,5 @@ mod tests {
     fn an_empty_table_takes_no_hit() {
         let pairs = [BlastOffsetPair { q_off: 1, s_off: 0 }];
         assert_eq!(x_hits_bf(&mut [], 40, 40, 3, &pairs), 0);
-    }
-
-    #[test]
-    fn the_shadow_compare_accepts_equal_runs() {
-        x_shadow_compare(1, 0, &[1, 2], &[1, 2], &[(5, false)], &[(5, false)]);
-    }
-
-    #[test]
-    #[should_panic(expected = "first table difference at Some(1)")]
-    fn the_shadow_compare_stops_at_a_table_difference() {
-        x_shadow_compare(
-            1,
-            0,
-            &[1],
-            &[1],
-            &[(5, false), (6, true)],
-            &[(5, false), (6, false)],
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "first difference at Some(0)")]
-    fn the_shadow_compare_stops_at_an_init_hsp_difference() {
-        x_shadow_compare(1, 0, &[2], &[1], &[(5, false)], &[(5, false)]);
     }
 }

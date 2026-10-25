@@ -14,7 +14,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  rust:
+  # The checks of `rust` other than cargo test; the tests run in `rust-tests`, and `rust` (the check
+  # the rulesets require) passes when both jobs do.
+  rust-lint:
+    name: rust lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +37,8 @@ jobs:
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_pure_rust_runtime_boundary.py'
       - name: Release-candidate tooling tests
         run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v010.py
+      - name: Release-candidate v0.2.0 tooling tests
+        run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v020.py LOSAT/tests/test_verify_release_archive_v020.py
       - name: Regression tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_ci_fast_regressions.py'
       # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
@@ -64,25 +69,69 @@ jobs:
         run: python3 scripts/changelog_fragments.py check
       - run: cd LOSAT && cargo fmt --check
       - run: cd LOSAT && cargo clippy --all-targets --all-features -- -D warnings
-      - run: cd LOSAT && cargo test --all-features
+
+  # cargo test --all-features in two shards on two runners (cargo-nextest, `--partition count:k/2`:
+  # each test binary's tests in turn to the shards). Four vCPUs shaped like a runner's (two cores
+  # and their hyperthreads) stayed busy: the tests of all binaries packed by nextest ran only 10 %
+  # faster than cargo test's one binary at a time (2026-10-22); the blastp integration tests search
+  # a proteome pair dozens of times each.
+  rust-tests:
+    name: cargo test (${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      # Optimized test code; the test profile keeps the dev profile's debug assertions and
+      # overflow checks. Set for the job, so that rust-cache's key (it hashes the CARGO_*
+      # variables it sees) keeps the dependencies built at this level.
+      CARGO_PROFILE_TEST_OPT_LEVEL: '3'
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+      # cache-on-failure: a red push run still saves the dependencies it built (the crate's
+      # tests run after them), so that pull request shards do not build them cold until the
+      # next green push run.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LOSAT -> target
+          cache-on-failure: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: cargo nextest run --all-features
+        run: cd LOSAT && cargo nextest run --all-features --no-fail-fast --partition count:${{ matrix.shard }}/2
         env:
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
-          # Optimized test code; the test profile keeps the dev profile's debug
-          # assertions and overflow checks.
-          CARGO_PROFILE_TEST_OPT_LEVEL: '1'
-      # The performance switches are on by default (LOSAT/src/utils/xswitch.rs), so the run
-      # above tests the new paths. This one keeps the reference paths under test. It leaves out
-      # the test files marked "CI reference step: skipped": each of their runs sets its own
-      # LOSAT_* variables, so it would repeat the run above (LOSAT/tests/reference_step_targets.sh).
-      - name: cargo test on the reference paths (LOSAT_X_DEFAULT=0)
-        run: |
-          cd LOSAT
-          targets=$(bash tests/reference_step_targets.sh)
-          cargo test --all-features $targets
+      # nextest runs no doc tests.
+      - name: cargo test --all-features --doc
+        if: matrix.shard == 1
+        run: cd LOSAT && cargo test --all-features --doc
+
+  # The check to require in the rulesets: it always runs and fails if a job above failed or was
+  # cancelled.
+  rust:
+    name: rust
+    if: always()
+    needs: [rust-lint, rust-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any job failed or was cancelled
         env:
-          LOSAT_X_DEFAULT: '0'
-          LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker-reference.log
-          CARGO_PROFILE_TEST_OPT_LEVEL: '1'
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" = failure ] || [ "$r" = cancelled ]; then
+              echo "A job did not succeed." >&2
+              exit 1
+            fi
+          done
 
   regressions:
     name: fast output regressions
@@ -127,18 +176,20 @@ jobs:
           sudo ln -sfn "$GITHUB_WORKSPACE" /mnt/c/Users/genom/GitHub/LOSAT
       - name: Output hashes, frozen hashes and outfmt 0 fixtures
         if: steps.select.outputs.programs != 'none'
+        # LOSAT_X_REACH (LOSAT/src/utils/xreach.rs): every run records which side its conditional
+        # performance switches took; it changes no output.
+        env:
+          LOSAT_X_REACH: ${{ github.workspace }}/.tmp/switch-reach
         run: |
           python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/losat \
             --out .tmp/fast-regressions --programs "${{ steps.select.outputs.programs }}"
-      # The same checks with the performance switches off (LOSAT/src/utils/xswitch.rs): the
-      # reference paths must keep giving the frozen bytes.
-      - name: The same on the reference paths (LOSAT_X_DEFAULT=0)
+      # Every side of a conditional switch that switch_reach_expected.tsv requires was taken by
+      # some fixture above (a switch's own path and its reference path while it is on).
+      - name: Conditional switches reached both sides
         if: steps.select.outputs.programs != 'none'
-        env:
-          LOSAT_X_DEFAULT: '0'
         run: |
-          python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/losat \
-            --out .tmp/fast-regressions-reference --programs "${{ steps.select.outputs.programs }}"
+          python3 LOSAT/tests/switch_reach_check.py --dir .tmp/switch-reach \
+            --programs "${{ steps.select.outputs.programs }}"
       - uses: actions/upload-artifact@v4
         if: always() && steps.select.outputs.programs != 'none'
         with:
@@ -149,7 +200,5 @@ jobs:
             .tmp/fast-regressions/timing.tsv
             .tmp/fast-regressions/outfmt0-fixtures-*.tsv
             .tmp/fast-regressions/*-regression-fixtures.tsv
-            .tmp/fast-regressions-reference/summary.json
-            .tmp/fast-regressions-reference/hashes.tsv
           if-no-files-found: warn
           retention-days: 14

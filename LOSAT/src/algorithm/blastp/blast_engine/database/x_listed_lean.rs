@@ -1,6 +1,5 @@
-//! EXPERIMENT (LOSAT_X_BPLISTEDLEAN / LOSAT_X_BPLISTEDLEANSHADOW): the reports of a `-db` search
-//! read the letters of the listed subjects from their stored residues and hold the titles of the
-//! reported subjects only.
+//! EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the reports of a `-db` search read the letters of the
+//! listed subjects from their stored residues and hold the titles of the reported subjects only.
 //!
 //! Without the switch, `ListedSubjects::read_titles` makes one `FastaRecord` per listed subject
 //! (every subject of the preliminary hit lists): its letters in ASCII and its stored title, empty
@@ -27,55 +26,27 @@
 //! mapped database files when it formats a hit (`CSeqDBVol::x_GetHdrAsn1Binary`, quoted above
 //! `read_titles`).
 //!
-//! `LOSAT_X_BPLISTEDLEAN` is a switch of the strict set: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. It acts for every task of BLASTP with `-db`, in the
+//! `LOSAT_X_BPLISTEDLEAN` is a switch of the strict set: on unless it is `0`.
+//! It acts for every task of BLASTP with `-db`, in the
 //! search of all queries and in the blocks of `LOSAT_X_BPQBLOCK` (not with ABI v1's titles, which
 //! read the records).
-//!
-//! `LOSAT_X_BPLISTEDLEANSHADOW=1` (shadow mode, implies the switch): `read_titles` runs too, first,
-//! and its records are compared with the lean titles rank by rank: every title, every flag of
-//! replaced title bytes, and every letter against the stored residue's `ncbistdaa_to_ascii`. The
-//! first difference stops the run (panic) after printing the line that is otherwise printed at
-//! exit: `[X_SHADOW] BPLISTEDLEAN searches= ranks= reported= letters= identical` (`ranks`: listed
-//! subjects compared; `reported`: those with a title read; `letters`: letters compared).
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
 
+#[cfg(test)]
+use super::ncbistdaa_to_ascii;
 use super::{
-    ncbistdaa_to_ascii, shared, BlastpDatabase, BlastpHitList, ListedShown, ListedSubjects,
-    ListedTitles, PROGRAM,
+    shared, BlastpDatabase, BlastpHitList, ListedShown, ListedSubjects, ListedTitles, PROGRAM,
 };
 
-/// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): how the reports of a `-db` search hold the listed subjects.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::algorithm::blastp::blast_engine) enum XListedLean {
-    /// One record per listed subject, with its letters (`ListedSubjects::read_titles`).
-    Off,
-    /// The titles of the reported subjects; the letters from the stored residues.
-    On,
-    /// `On`, with the records of `Off` made too and compared.
-    Shadow,
-}
-
-// No NCBI counterpart: reads the LOSAT_X_BPLISTEDLEAN / LOSAT_X_BPLISTEDLEANSHADOW switches once;
-// it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): a strict-set switch, on unless it is `0`, or
-/// `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BPLISTEDLEANSHADOW` (any value) selects the
-/// shadow mode.
-pub(in crate::algorithm::blastp::blast_engine) fn x_bp_listed_lean() -> XListedLean {
-    static MODE: OnceLock<XListedLean> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPLISTEDLEANSHADOW").is_some() {
-            XListedLean::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_BPLISTEDLEAN") {
-            XListedLean::On
-        } else {
-            XListedLean::Off
-        }
-    })
+// No NCBI counterpart: reads the LOSAT_X_BPLISTEDLEAN switch once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): a strict-set switch, on unless it is `0`.
+pub(in crate::algorithm::blastp::blast_engine) fn x_bp_listed_lean() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLISTEDLEAN"))
 }
 
 impl ListedSubjects {
@@ -110,12 +81,6 @@ impl ListedSubjects {
                 replaced_title_bytes[rank] = stored.replaced_bytes;
             }
         }
-        if x_bp_listed_lean() == XListedLean::Shadow {
-            X_REPORTED.fetch_add(
-                read.iter().filter(|&&read| read).count() as u64,
-                Ordering::Relaxed,
-            );
-        }
         Ok(ListedTitles {
             listed: self,
             shown: ListedShown::Lean(titles),
@@ -124,83 +89,48 @@ impl ListedSubjects {
     }
 }
 
-static X_SEARCHES: AtomicU64 = AtomicU64::new(0);
-static X_RANKS: AtomicU64 = AtomicU64::new(0);
-static X_REPORTED: AtomicU64 = AtomicU64::new(0);
-static X_LETTERS: AtomicU64 = AtomicU64::new(0);
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-fn x_shadow_print_line(identical: bool) {
-    eprintln!(
-        "[X_SHADOW] BPLISTEDLEAN searches={} ranks={} reported={} letters={}{}",
-        X_SEARCHES.load(Ordering::Relaxed),
-        X_RANKS.load(Ordering::Relaxed),
-        X_REPORTED.load(Ordering::Relaxed),
-        X_LETTERS.load(Ordering::Relaxed),
-        if identical { " identical" } else { "" }
-    );
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLISTEDLEANSHADOW): the shadow mode's line at exit.
-pub(in crate::algorithm::blastp) fn x_bp_listed_lean_print_summary() {
-    if x_bp_listed_lean() == XListedLean::Shadow {
-        x_shadow_print_line(true);
-    }
-}
-
-// No NCBI counterpart: the shadow mode's check stops the run on a difference.
-fn x_shadow_difference(message: String) -> ! {
-    // The panic ends the run before `main` prints the line at exit: it is printed here.
-    x_shadow_print_line(false);
-    panic!("[X_SHADOW] BPLISTEDLEAN {message}");
-}
-
-// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLISTEDLEANSHADOW): the lean titles (`lean`) against the records of
-/// `read_titles` (`records`) of the same search, rank by rank: the title, the flag of replaced
-/// title bytes and every letter (the stored residue's `ncbistdaa_to_ascii`).
-pub(in crate::algorithm::blastp::blast_engine) fn x_shadow_compare(
+// No NCBI counterpart: a check of the unit tests; it changes no value NCBI computes.
+/// The lean titles (`lean`) against the records of `read_titles` (`records`) of the same search,
+/// rank by rank: the title, the flag of replaced title bytes and every letter (the stored
+/// residue's `ncbistdaa_to_ascii`).
+#[cfg(test)]
+pub(in crate::algorithm::blastp::blast_engine) fn x_assert_same_titles_and_letters(
     lean: &ListedTitles<'_>,
     records: &ListedTitles<'_>,
 ) {
-    X_SEARCHES.fetch_add(1, Ordering::Relaxed);
     let listed = lean.listed;
     let (ListedShown::Lean(titles), ListedShown::Records(records_of)) =
         (&lean.shown, &records.shown)
     else {
-        x_shadow_difference("the lean titles against the records: wrong kinds".to_string());
+        panic!("the lean titles against the records: wrong kinds");
     };
-    if titles.len() != listed.ordinals.len() || records_of.len() != listed.ordinals.len() {
-        x_shadow_difference(format!(
-            "ranks: lean titles {} / records {} / listed {}",
-            titles.len(),
-            records_of.len(),
-            listed.ordinals.len()
-        ));
-    }
+    assert!(
+        titles.len() == listed.ordinals.len() && records_of.len() == listed.ordinals.len(),
+        "ranks: lean titles {} / records {} / listed {}",
+        titles.len(),
+        records_of.len(),
+        listed.ordinals.len()
+    );
     for (rank, record) in records_of.iter().enumerate() {
         let ordinal = listed.ordinals[rank];
-        if titles[rank][..] != record.title[..] {
-            x_shadow_difference(format!("rank {rank} (ordinal {ordinal}): title"));
-        }
-        if lean.replaced_title_bytes[rank] != records.replaced_title_bytes[rank] {
-            x_shadow_difference(format!(
-                "rank {rank} (ordinal {ordinal}): replaced title bytes"
-            ));
-        }
+        assert!(
+            titles[rank][..] == record.title[..],
+            "rank {rank} (ordinal {ordinal}): title"
+        );
+        assert_eq!(
+            lean.replaced_title_bytes[rank], records.replaced_title_bytes[rank],
+            "rank {rank} (ordinal {ordinal}): replaced title bytes"
+        );
         let stored = &listed.encoded[rank];
         let residues = &stored.aa_seq[1..=stored.aa_len];
         let letters = record.seq();
-        if residues.len() != letters.len()
-            || residues
-                .iter()
-                .zip(letters)
-                .any(|(&residue, &letter)| ncbistdaa_to_ascii(residue) as u8 != letter)
-        {
-            x_shadow_difference(format!("rank {rank} (ordinal {ordinal}): letters"));
-        }
-        X_LETTERS.fetch_add(letters.len() as u64, Ordering::Relaxed);
+        assert!(
+            residues.len() == letters.len()
+                && residues
+                    .iter()
+                    .zip(letters)
+                    .all(|(&residue, &letter)| ncbistdaa_to_ascii(residue) as u8 == letter),
+            "rank {rank} (ordinal {ordinal}): letters"
+        );
     }
-    X_RANKS.fetch_add(records_of.len() as u64, Ordering::Relaxed);
 }

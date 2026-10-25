@@ -133,14 +133,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                 };
                 let s_idx = first.s_idx as usize;
                 let subject = subjects.get(s_idx, PROGRAM)?;
-                let hit = XmlHit {
-                    id: &subject.id,
-                    title: &subject.title,
-                    accession: &subject.accession,
-                    len: xml.subjects.length(s_idx),
-                    taxid: subject.taxid,
-                    taxonomy: &subject.taxonomy,
-                };
+                let hit = XmlHit::of(subject, xml.subjects.length(s_idx));
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.
                 if let Some(warnings) = warnings.as_deref_mut() {

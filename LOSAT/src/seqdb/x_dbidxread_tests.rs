@@ -88,23 +88,21 @@ fn summary(index: &Result<IndexFile, SeqDbError>) -> String {
     text
 }
 
-/// `IndexFile::open` of `bytes` (written to `path`) with checks of `chunk` entries, with and
-/// without the shadow, against `IndexFile::parse`.
+/// `IndexFile::open` of `bytes` (written to `path`) with checks of `chunk` entries, against
+/// `IndexFile::parse`.
 fn check_open(bytes: &[u8], path: &Path, seqtype: SeqType, chunks: &[usize]) {
     std::fs::write(path, bytes).unwrap();
     let expected = summary(&IndexFile::parse(bytes, seqtype, path));
     for &chunk in chunks {
-        for shadow in [false, true] {
-            let file = DbFile::open(path).unwrap();
-            let got = summary(&IndexFile::open_checked(file, seqtype, shadow, chunk));
-            assert_eq!(
-                got,
-                expected,
-                "{} ({} bytes), chunk {chunk}, shadow {shadow}",
-                path.display(),
-                bytes.len()
-            );
-        }
+        let file = DbFile::open(path).unwrap();
+        let got = summary(&IndexFile::open_checked(file, seqtype, chunk));
+        assert_eq!(
+            got,
+            expected,
+            "{} ({} bytes), chunk {chunk}",
+            path.display(),
+            bytes.len()
+        );
     }
 }
 

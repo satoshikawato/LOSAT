@@ -20,8 +20,8 @@ use crate::blastinput::seq_range::{
     QueryInput, RangeRole, SequenceRange,
 };
 
-// EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW): the seed stage of a subject as units of
-// (subject frame, chunk, query context) on the search pool; a child module of this file so that
+// EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the seed stage of a subject as units
+// of (subject frame, chunk, query context) on the search pool; a child module of this file so that
 // it uses the chunk helpers below unchanged (see tblastx/x_pair_par.rs).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-516
@@ -33,15 +33,15 @@ use crate::blastinput::seq_range::{
 // ...
 //     for (i = 0; i < hits; ++i) {
 // ```
-// The module ports the per-hit body of this loop and runs it per query context; it is used only
-// when one of its switches is set.
+// The module ports the per-hit body of this loop and runs it per query context; it is used
+// where its rule (`x_pair_par::decide`) takes the batch.
 #[path = "../x_pair_par.rs"]
 mod x_pair_par;
 pub use x_pair_par::print_summary as x_pair_par_print_summary;
 
-// EXPERIMENT (LOSAT_X_SEEDRELEASE): the seed-stage tables of a query batch are held by two
+// The seed-stage tables of a query batch are held by two
 // per-batch states (the lookup table; the unit path with its group tables) and reached only
-// through one stage of each per subject; with the switch on they are freed when the batch's
+// through one stage of each per subject; they are freed when the batch's
 // last stage of that kind ends, before the last subject's HSP list is merged and linked (see
 // tblastx/x_seed_release.rs). A child module of this file, as x_pair_par is.
 //
@@ -74,7 +74,6 @@ mod x_search_timing;
 // that context, so where it runs is scheduling only.
 #[path = "../x_query_frames.rs"]
 mod x_query_frames;
-pub use x_query_frames::print_summary as x_query_frames_print_summary;
 // EXPERIMENT (LOSAT_X_TBXNEXT): the subjects of the parallel subject loop handed to the threads one
 // at a time, each thread taking the next subject when it is free, with one worker state per
 // thread (see tblastx/x_subject_next.rs). A child module of this file, as x_seed_release is.
@@ -1089,13 +1088,13 @@ fn search_cli(
             }
         }
     }
-    // The BLAST XML (outfmt 5) cannot write a `-db` name outside US-ASCII: refused before the
-    // search (`names::check_database_name`).
+    // The BLAST XML (outfmt 5, and the XML2 and JSON documents of 16 and 15) cannot write a
+    // `-db` name outside US-ASCII: refused before the search (`names::check_database_name`).
     if let Some(database) = database.as_ref() {
         if outputs
             .formats
             .iter()
-            .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Xml)
+            .any(|format| report::output_format(format.outfmt).is_structured_xml())
         {
             crate::report::blast_xml::names::check_database_name("TBLASTX", database.name())?;
         }
@@ -1221,7 +1220,7 @@ pub(crate) fn run_local_with(
     }
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`); `search` checks the formats again.
-    check_report_formats(outputs)?;
+    check_report_formats(outputs, None)?;
     // No NCBI counterpart: ABI v1 is frozen (plan TD-1; line OF, outfmt-20261019 DECISIONS
     // 10): it adds no format, so it refuses the Seq-annot formats (outfmt 8, 9, 12) with the
     // message that `check_report_formats` gave them before TBLASTX wrote them.
@@ -1269,13 +1268,16 @@ pub(crate) fn run_local_with(
 
 /// Each requested format as NCBI reads `-outfmt`: NCBI's errors, and a rejection of a
 /// format that LOSAT's TBLASTX does not write.
-fn check_report_formats(outputs: &ReportOutputs<'_>) -> Result<()> {
+///
+/// `out` is the run's `-out`: outfmt 13 and 14 write side files next to it, and fail on standard
+/// output (`xinclude_check_for`). `run_local` has no output file.
+fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
     use crate::blastinput::app;
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        if app::report_format(&choice, app::Program::Tblastx, None)?.is_none() {
+        if app::report_format(&choice, app::Program::Tblastx, out)?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastx)?;
-            app::xinclude_check(&choice)?;
+            app::xinclude_check_for(&choice, out)?;
         }
     }
     Ok(())
@@ -1362,7 +1364,7 @@ fn search(
     // The XInclude formats written to standard output fail after the formatter is made
     // (`check_report_formats`: `xinclude_check`), as the other format checks of each
     // requested format.
-    check_report_formats(outputs)?;
+    check_report_formats(outputs, args.out.as_deref())?;
     // LOSAT's limits come where NCBI starts the search, after its checks.
     check_losat_limits(&args)?;
     crate::blastinput::app::check_unsupported_environment("TBLASTX")?;
@@ -1530,6 +1532,9 @@ pub(crate) struct TblastxReportRun<'a> {
     /// The subject set's numbers (the BLAST XML computes a query's length adjustment again
     /// from them).
     pub numbers: &'a SubjectSetNumbers,
+    /// `-db`, XML2 and JSON: the taxid of each reported sequence by rank and what the taxonomy
+    /// database says about it (empty for the other formats).
+    pub xml_taxa: &'a super::super::database::XmlTaxa,
     /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Checks`).
     pub v1_titles: bool,
     /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the pool the report stage runs on (tblastx/x_rpt_par.rs),
@@ -1886,10 +1891,10 @@ fn write_tblastx_outputs(
     // The `Query=` and `# Query:` text of each query: its title bytes.
     let query_titles: Vec<&[u8]> = run.queries.iter().map(|query| query.title()).collect();
     let unsearched: Vec<bool> = run.searched.iter().map(|&searched| !searched).collect();
-    let mut format_warnings = Some(crate::report::query_warnings::QueryWarnings {
-        before: run.warnings,
-        sink: &mut *outputs.diagnostics,
-    });
+    // The warnings of each query are written before its report, once, with the first format
+    // (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
+    // diagnostics at every format.
+    let mut warning_lines = Some(run.warnings);
     let observer = &mut outputs.observer;
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(&output_formats).enumerate()
@@ -1897,8 +1902,12 @@ fn write_tblastx_outputs(
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
-        // The warnings are written once, with the first format (`QueryWarnings`).
-        let mut warnings = format_warnings.take();
+        let mut warnings = (warning_lines.is_some()
+            || matches!(output_format, report::TblastxOutputFormat::Xml2(_)))
+        .then(|| crate::report::query_warnings::QueryWarnings {
+            before: warning_lines.take().unwrap_or(&[]),
+            sink: &mut *outputs.diagnostics,
+        });
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
         // ```c
         // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
@@ -2026,6 +2035,23 @@ fn write_tblastx_outputs(
             // The document of every query; the hits are the final list after `shift_to_records`
             // (record coordinates), the rows are read from the searched letters.
             report::TblastxOutputFormat::Xml => super::super::blast_xml::write_tblastx_xml(
+                &mut crate::report::blast_xml::BlastXmlWriter::new(0),
+                false,
+                &mut writer,
+                &hits,
+                run,
+                warnings.as_mut(),
+            )?,
+            // The XML2 and JSON documents (outfmt 16 and 15, and 14 and 13 as side files next to
+            // `-out` with this output as the master file): the same records, written by
+            // `Xml2Writer`.
+            report::TblastxOutputFormat::Xml2(kind) => super::super::blast_xml::write_tblastx_xml(
+                &mut crate::report::blast_xml2::Xml2Writer::for_run(
+                    kind,
+                    super::super::blast_xml::xml2_run(run),
+                    run.args.out.as_deref(),
+                ),
+                true,
                 &mut writer,
                 &hits,
                 run,
@@ -2067,14 +2093,10 @@ fn write_tblastx_outputs(
         }
         writer.flush()?;
     }
-    // EXPERIMENT (LOSAT_X_TBXRPTPARSHADOW): the shadow's line after the reports.
-    if run.x_pool.is_some() {
-        crate::algorithm::tblastx::x_rpt_par::print_shadow_summary();
-    }
     // Without an output format the warnings are written all at once.
-    if let Some(warnings) = format_warnings {
-        for query_warnings in warnings.before {
-            warnings.sink.write_all(query_warnings)?;
+    if let Some(lines) = warning_lines {
+        for query_warnings in lines {
+            outputs.diagnostics.write_all(query_warnings)?;
         }
     }
     Ok(())
@@ -2188,7 +2210,7 @@ fn run_in_pool(
     batch_size: u32,
     v1_titles: bool,
 ) -> Result<()> {
-    check_report_formats(outputs)?;
+    check_report_formats(outputs, args.out.as_deref())?;
     let query_records = query_runs.records;
     let input = query_runs.input;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
@@ -2266,9 +2288,7 @@ fn run_in_pool(
     };
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if let Some(plan) = x_plan {
-        let compare: &x_batch_pipe::XCompare<'_, TblastxBatch> = &x_pipe_compare;
-        if let Some(pipe) = x_batch_pipe::XPipe::new(plan, search_subjects.count(), search, compare)
-        {
+        if let Some(pipe) = x_batch_pipe::XPipe::new(plan, search_subjects.count(), search) {
             let result = rayon::in_place_scope(|scope| {
                 let _closer = pipe.closer();
                 batch_loop(&mut |range| pipe.take(scope, range))
@@ -2286,9 +2306,10 @@ fn run_in_pool(
 // "Off"). No NCBI counterpart.
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 fn x_pipe_wanted(parallel_pool: &crate::utils::threading::SearchPool<'_>) -> bool {
-    x_batch_pipe::on()
-        && x_seed_release::on()
-        && parallel_pool.enabled()
+    if !x_batch_pipe::on() {
+        return false;
+    }
+    let wanted = parallel_pool.enabled()
         && parallel_pool.threads() > 1
         && rayon::current_thread_index().is_some()
         && !std::env::vars_os().any(|(name, _)| {
@@ -2298,7 +2319,12 @@ fn x_pipe_wanted(parallel_pool: &crate::utils::threading::SearchPool<'_>) -> boo
         && trace_hsp_target().is_none()
         && !diagnostics_enabled()
         && !crate::utils::threading::diagnostics_enabled()
-        && !stage_dump::enabled()
+        && !stage_dump::enabled();
+    // The batches that start early are marked where they start (`XPipe::seed_ended`).
+    if !wanted {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXPIPE", false);
+    }
+    wanted
 }
 
 // EXPERIMENT (LOSAT_X_TBXPIPE): the batches `run_batch_loop` will search unless a search fails, in
@@ -2348,40 +2374,6 @@ fn x_pipe_plan(
         input_start = input_end;
     }
     plan
-}
-
-// EXPERIMENT (LOSAT_X_TBXPIPESHADOW): two results of one batch compared: `searched`, the query
-// statistics, and the hits with every field (`Debug`), each subject's in its list order (the
-// order of the subjects' lists depends on which subject ended first, in the loop's searches as
-// well; `report::final_hit_order` orders them). No NCBI counterpart.
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-fn x_pipe_compare(taken: &TblastxBatch, reference: &TblastxBatch) -> Option<String> {
-    if taken.searched != reference.searched {
-        return Some(format!(
-            "searched {} / {}",
-            taken.searched, reference.searched
-        ));
-    }
-    let (queries, reference_queries) = (
-        format!("{:?}", taken.queries),
-        format!("{:?}", reference.queries),
-    );
-    if queries != reference_queries {
-        return Some(format!("query statistics {queries} / {reference_queries}"));
-    }
-    let by_subject = |hits: &[TblastxHsp]| -> Vec<String> {
-        let mut hits: Vec<&TblastxHsp> = hits.iter().collect();
-        hits.sort_by_key(|hsp| (hsp.hit.q_idx, hsp.hit.s_idx));
-        hits.iter().map(|hsp| format!("{hsp:?}")).collect()
-    };
-    let (hits, reference_hits) = (by_subject(&taken.hits), by_subject(&reference.hits));
-    if hits.len() != reference_hits.len() {
-        return Some(format!("{} hits / {}", hits.len(), reference_hits.len()));
-    }
-    hits.iter()
-        .zip(&reference_hits)
-        .position(|(hit, reference_hit)| hit != reference_hit)
-        .map(|index| format!("hit {index}: {} / {}", hits[index], reference_hits[index]))
 }
 
 /// The batch loop of `run_in_pool`: reads the batches, checks them, takes each one's search
@@ -2800,6 +2792,21 @@ impl BatchReports<'_> {
                 )
             }
         };
+        // `-db`, XML2 and JSON: the taxid of each reported sequence, and what the taxonomy
+        // database says about it (the refusals of both come before any byte).
+        let xml_taxa = match (&self.subjects, &database) {
+            (ShownSubjects::Database { database, .. }, Some(shown))
+                if outputs.formats.iter().any(|format| {
+                    matches!(
+                        report::output_format(format.outfmt),
+                        report::TblastxOutputFormat::Xml2(_)
+                    )
+                }) =>
+            {
+                database.read_taxids(&shown.reported.ordinals)?
+            }
+            _ => Default::default(),
+        };
         let written = write_tblastx_outputs(
             hits,
             outputs,
@@ -2816,6 +2823,7 @@ impl BatchReports<'_> {
                 ranges: self.query_runs,
                 epilog,
                 numbers: self.numbers,
+                xml_taxa: &xml_taxa,
                 v1_titles: self.v1_titles,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
                 x_pairwise_pool: crate::report::x_pairwise_par::pool(self.x_search_pool),
@@ -2836,7 +2844,18 @@ impl BatchReports<'_> {
         warnings: &[Vec<u8>],
     ) -> Result<()> {
         if done.searched.is_empty() {
-            write_pairwise_prologs(outputs, self.args, self.subjects, false)
+            write_pairwise_prologs(outputs, self.args, self.subjects, false)?;
+            // The XML2 and JSON documents start with their prolog too.
+            for format in outputs.formats.iter_mut() {
+                if let report::TblastxOutputFormat::Xml2(kind) =
+                    report::output_format(format.outfmt)
+                {
+                    let mut writer = format.sink.open()?;
+                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+                    writer.flush()?;
+                }
+            }
+            Ok(())
         } else {
             self.write(outputs, done, warnings, false)
         }
@@ -2875,7 +2894,7 @@ fn search_query_batch(
     // ```
     // LOSAT-only existing diagnostics: capture configuration once per search;
     // the NCBI extension inputs and all biological decisions stay unchanged.
-    let extension_debug_enabled = std::env::var("LOSAT_DEBUG_EXTENSION").is_ok();
+    let extension_debug_enabled = crate::utils::xdiag::var("LOSAT_DEBUG_EXTENSION").is_ok();
     // Optional timing breakdown (disabled by default to preserve output/parity logs)
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
     let t_total = Instant::now();
@@ -2959,7 +2978,7 @@ fn search_query_batch(
     let ungapped_params_for_xdrop = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
 
     let diag_enabled = diagnostics_enabled();
-    let debug_cutoffs_all = std::env::var_os("LOSAT_DEBUG_CUTOFFS_ALL").is_some();
+    let debug_cutoffs_all = crate::utils::xdiag::var_os("LOSAT_DEBUG_CUTOFFS_ALL").is_some();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
     // ```c
     // #if _BLAST_DEBUG
@@ -2970,16 +2989,16 @@ fn search_query_batch(
     // #endif /* _BLAST_DEBUG */
     // ```
     let debug_output_filter = std::env::var_os("LOSAT_DEBUG_OUTPUT_FILTER").is_some();
-    let debug_hsp_saving = std::env::var_os("LOSAT_DEBUG_HSP_SAVING").is_some();
+    let debug_hsp_saving = crate::utils::xdiag::var_os("LOSAT_DEBUG_HSP_SAVING").is_some();
     let diagnostics = std::sync::Arc::new(DiagnosticCounters::default());
 
     // Debug: optional scan output dump around a specific subject offset.
     // The offset_pairs correspond to s_BlastAaScanSubject copy loop.
     // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:99-115
-    let scan_debug_center = std::env::var("LOSAT_DEBUG_SCAN_SOFF")
+    let scan_debug_center = crate::utils::xdiag::var("LOSAT_DEBUG_SCAN_SOFF")
         .ok()
         .and_then(|v| v.parse::<i32>().ok());
-    let scan_debug_window = std::env::var("LOSAT_DEBUG_SCAN_WINDOW")
+    let scan_debug_window = crate::utils::xdiag::var("LOSAT_DEBUG_SCAN_WINDOW")
         .ok()
         .and_then(|v| v.parse::<i32>().ok())
         .unwrap_or(0);
@@ -3059,8 +3078,21 @@ fn search_query_batch(
         // Dispatch point (LOSAT_X_TBXQFRAMES, strict set): with two or more threads the frames
         // are masked on the search pool, one task per frame; otherwise, and with the switch off,
         // the frames are masked one after the other as before (tblastx/x_query_frames.rs, which
-        // holds the per-frame body `mask_frame`).
-        x_query_frames::mask(&mut query_frames, &seg, parallel_pool);
+        // holds the per-frame bodies `mask_frame` and `mask_frame_soft`).
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
+        // ```c
+        //     if (!mask_at_hash) {
+        //         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+        //                              program_number);
+        //     }
+        // ```
+        // `-soft_masking true` keeps the intervals for the lookup table and the frames' letters.
+        if args.soft_masking() {
+            x_query_frames::mask_soft(&mut query_frames, &seg, parallel_pool);
+        } else {
+            x_query_frames::mask(&mut query_frames, &seg, parallel_pool);
+        }
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     }
 
@@ -3084,14 +3116,14 @@ fn search_query_batch(
     // ```
     // The x86-64 conversion: `INT_MIN` for a threshold beyond `Int4` (every word).
     //
-    // EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW), dispatch point 0 (per batch, at the
-    // lookup build): when LOSAT_X_PAIRPAR will run the seed stage of every subject of this batch
+    // EXPERIMENT (PAIRLUT, graduated on 2026-10-22), dispatch point 0 (per batch, at the
+    // lookup build): when PAIRPAR will run the seed stage of every subject of this batch
     // as units, the units' tables (one per query-context group) are built directly from the
     // query, and `lookup` becomes a stub with the full table's header and no entries
     // (x_pair_par.rs `lut_build`; lookup/x_pair_lut.rs for why the tables are the same). The
     // inputs are the ones dispatch point 1 below gives `prepare`, by the same expressions;
-    // `prepare` decides again and stops the run if it disagrees. Without the switch, in shadow
-    // mode, or when the unit path will not run, the reference builder below runs as before.
+    // `prepare` decides again and stops the run if it disagrees. When the unit path will not run,
+    // the reference builder below runs.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
     // ```c
@@ -3101,34 +3133,34 @@ fn search_query_batch(
     // BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
     //                           query, lookup_segments, 0);
     // ```
-    let mut x_pair_lut_batch = if x_pair_par::lut_mode() == 0 {
-        None
-    } else {
-        x_pair_par::lut_build(x_pair_par::XLutEarly {
-            query_frames: &query_frames,
-            threshold: crate::core::blast_util::ncbi_int4_from_double(args.threshold),
-            window,
-            subjects,
-            debugging: trace_hsp_target().is_some()
-                || scan_debug_range.is_some()
-                || extension_debug_enabled
-                || diag_enabled
-                || debug_hsp_saving,
-            requested_parallel,
-            use_serial_scan_chunks,
-            pool: parallel_pool,
-        })
-    };
+    let mut x_pair_lut_batch = x_pair_par::lut_build(x_pair_par::XLutEarly {
+        query_frames: &query_frames,
+        threshold: crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+        window,
+        subjects,
+        debugging: trace_hsp_target().is_some()
+            || scan_debug_range.is_some()
+            || extension_debug_enabled
+            || diag_enabled
+            || debug_hsp_saving,
+        requested_parallel,
+        use_serial_scan_chunks,
+        pool: parallel_pool,
+    });
     let x_pair_lut_stub = x_pair_lut_batch
         .as_mut()
         .and_then(x_pair_par::XLutBatch::take_stub);
     // True when `lookup` is the stub: the reference frame loop must then run zero times
     // (asserted at dispatch point 2).
     let x_pair_lut_is_stub = x_pair_lut_stub.is_some();
-    // Dispatch point (LOSAT_X_TBXLUT, off unless set): the full table of the batch from the chain
-    // builder (`build_ncbi_lookup`) or filled in place from per-cell counts; the same table.
+    // Dispatch point (LOSAT_X_TBXLUT, on unless `LOSAT_X_TBXLUT=0`): the full table of the batch
+    // from the chain builder (`build_ncbi_lookup`) or filled in place from per-cell counts; the
+    // same table.
     let (lookup, contexts) = match x_pair_lut_stub {
-        Some(stub) => stub,
+        Some(stub) => {
+            crate::algorithm::tblastx::lookup::x_tbxlut_reach_stub();
+            stub
+        }
         None => crate::algorithm::tblastx::lookup::x_tbx_build_ncbi_lookup(
             &query_frames,
             crate::core::blast_util::ncbi_int4_from_double(args.threshold),
@@ -3364,12 +3396,12 @@ fn search_query_batch(
         crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
     // EXPERIMENT (LOSAT_X_TBXSCANBF): whether the reference frame loop scans this batch's table with
     // the branch-free loop (decided once per table).
-    let x_scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup);
+    let x_scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_choice(&lookup);
 
-    // EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW), dispatch point 1 (per batch): the
-    // gates and the exactness guards (the first one only without LOSAT_X_TBXBAND), then one lookup
-    // table per query context (each backbone chain filtered to the context, order kept). None
-    // (switch off, gate or guard) keeps the reference loop for every subject of the batch.
+    // EXPERIMENT (PAIRPAR), dispatch point 1 (per batch): the gates, the exactness guards (the
+    // first one only without LOSAT_X_TBXBAND) and the cost rule, then one lookup table per query
+    // context (each backbone chain filtered to the context, order kept). None (a gate, a guard
+    // or the cost rule) keeps the reference loop for every subject of the batch.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
     // ```c
@@ -3403,20 +3435,24 @@ fn search_query_batch(
             || diag_enabled
             || debug_hsp_saving,
         chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
-        // LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW: the groups built at dispatch point 0.
+        // PAIRLUT: the groups built at dispatch point 0.
         lut: x_pair_lut_batch,
         // LOSAT_X_PAIRPARGATE: the thread count and threshold dispatch point 0 decided with.
         threads: parallel_pool.threads(),
         threshold: crate::core::blast_util::ncbi_int4_from_double(args.threshold),
     });
-    // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 1 (per batch): the batch's tables move
+    // The reference frame loop scans the batch's table (LOSAT_X_TBXSCANBF's choice above).
+    if x_pair_par_batch.is_none() {
+        crate::algorithm::tblastx::x_scan_bf::x_reach_scan_bf(x_scan_bf);
+    }
+    // Dispatch point 1 of the seed release (per batch): the batch's tables move
     // into two holders, `x_seed_batch.lookup` (the lookup table) and `x_seed_batch.units` (the
     // unit path with its group tables). From here on they are reached only through the stages
-    // that each call of `process_subject` opens (dispatch point 2), and with the switch on the
+    // that each call of `process_subject` opens (dispatch point 2), and the
     // batch's last units stage frees the unit path (dispatch point 3) and its last lookup stage
     // the lookup table (dispatch point 5). `x_worker_diag_cells` is the size the workers'
-    // diagonal tables are created with: `diag_array_size`, or 0 with the switch on when the
-    // unit path takes every subject without its shadow, so that the reference frame loop, the
+    // diagonal tables are created with: `diag_array_size`, or 0 when the
+    // unit path takes every subject, so that the reference frame loop, the
     // only reader of that table, runs for none.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1004
@@ -3865,7 +3901,7 @@ fn search_query_batch(
         // dispatch point 5 below with the subject's HSPs, or with none when the closure returns
         // before it (tblastx/x_batch_pipe.rs). Nothing without the pipe.
         let mut x_pipe_seed = x_batch_pipe::XSeedGuard::new(x_seed_end);
-        // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 2 (per subject): the seed stage of
+        // Dispatch point 2 of the seed release (per subject): the seed stage of
         // this subject holds the batch's lookup table through `x_seed_stage` and the unit path
         // through `x_units_stage`. `lookup_ref` borrows from the first and `x_pair_par_ref`
         // from the second, so neither can be used after its stage has ended (`x_units_stage`
@@ -3915,19 +3951,15 @@ fn search_query_batch(
         //       subject_blk->length, frame, retval->translations[context], gen_code_string);
         // }
         // ```
-        // The letters and the preliminary bases of the subject (`Subjects::with_search_bases`:
-        // a database sequence's are made from its store, D2) live only while it is translated.
-        //
-        // EXPERIMENT (LOSAT_X_TBXFRAMES): only the frames the preliminary stage translates are
-        // made here, in windows (`Subjects::x_preliminary_frames`). For a subject with ambiguous
-        // bases the frames of its letters (`s_frames`) are made after the seed stage, once the
-        // preliminary frames are freed, and only when HSPs are left for the re-evaluation
-        // (`x_letter_frames_later`, below); until then `s_frames` is empty and the HSP lists
-        // index the preliminary frames, which have the same number and lengths
-        // (`s_frames_listed`). For a subject without ambiguous bases both are the same frames.
-        let x_frames_late = crate::algorithm::tblastx::subjects::x_frames_late();
+        // Only the frames the preliminary stage translates are made here, in windows
+        // (`Subjects::x_preliminary_frames`). For a subject with ambiguous bases the frames of
+        // its letters (`s_frames`) are made after the seed stage, once the preliminary frames
+        // are freed, and only when HSPs are left for the re-evaluation (`x_letter_frames_later`,
+        // below); until then `s_frames` is empty and the HSP lists index the preliminary frames,
+        // which have the same number and lengths (`s_frames_listed`). For a subject without
+        // ambiguous bases both are the same frames.
         let mut x_letter_frames_later = false;
-        let (s_frames, s_frames_preliminary_owned) = if x_frames_late {
+        let (s_frames, s_frames_preliminary_owned) = {
             let (frames, of_letters) = subjects.x_preliminary_frames(s_idx, &db_code);
             if of_letters {
                 (frames, None)
@@ -3935,13 +3967,6 @@ fn search_query_batch(
                 x_letter_frames_later = true;
                 (Vec::new(), Some(frames))
             }
-        } else {
-            subjects.with_search_bases(s_idx, |letters, bases| {
-                (
-                    generate_frames(letters, &db_code),
-                    bases.map(|bases| generate_frames(bases, &db_code)),
-                )
-            })
         };
         let s_frames_report = &s_frames;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:772-775
@@ -4021,10 +4046,9 @@ fn search_query_batch(
         // Reference: blast_engine.c:438 BlastHSPList* combined_hsp_list
         let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
 
-        // EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW), dispatch point 2 (per subject):
-        // the unit path fills `combined_ungapped_hits` and the frame slice below becomes empty, so
-        // the reference frame loop (unchanged) runs zero times. In shadow mode the slice is kept,
-        // the loop runs, and the two lists are compared after it.
+        // EXPERIMENT (PAIRPAR), dispatch point 2 (per subject): the unit path fills
+        // `combined_ungapped_hits` and the frame slice below becomes empty, so the reference
+        // frame loop (unchanged) runs zero times.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805,835-844
         // ```c
@@ -4037,14 +4061,14 @@ fn search_query_batch(
         // The unit path returns the list this frame loop builds (same calls, same order of
         // the appended frame lists); see x_pair_par.rs for why it is the same list.
         //
-        // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 3 (per subject): the unit path runs
+        // Dispatch point 3 of the seed release (per subject): the unit path runs
         // in two calls, the units (`run_subject_units`, the only reader of the group tables)
         // and the merge of their lists (`merge_subject`, a function without `self`), and the
         // units stage of this subject ends between them. What is still needed of the unit path
-        // is read before that: `x_pair_par_stub` for the assertion below and `x_shadow`. After
-        // `x_units_stage.end()` neither `x` nor `x_pair_par_ref` can be used. With the switch
-        // on, the batch's last units stage frees the unit path there, before the merge, where
-        // the seed stage's memory peaks; with the switch off the end only counts down.
+        // is read before that: `x_pair_par_stub` for the assertion below. After
+        // `x_units_stage.end()` neither `x` nor `x_pair_par_ref` can be used. The batch's last
+        // units stage frees the unit path there, before the merge, where the seed stage's
+        // memory peaks.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:561-562
         // ```c
@@ -4054,7 +4078,6 @@ fn search_query_batch(
         // NCBI converts and merges its init HSPs with the lookup table still allocated (freed
         // with the search's internal data); that conversion reads no lookup table.
         let x_pair_par_stub = x_pair_par_ref.is_some_and(|x| x.stub());
-        let mut x_pair_par_shadow: Option<Vec<UngappedHit>> = None;
         let s_frames_preliminary: &[QueryFrame] = match x_pair_par_ref {
             Some(x) => {
                 let x_subject = x_pair_par::XSubject {
@@ -4071,18 +4094,12 @@ fn search_query_batch(
                 x_lap.lap(XStage::Prepare);
                 let x_units = x.run_subject_units(&x_subject, parallel_pool);
                 x_lap.lap(XStage::Units);
-                let x_shadow = x.shadow();
                 x_units_stage.end();
                 x_lap.lap(XStage::UnitsRelease);
                 let x_hits = x_pair_par::XPairPar::merge_subject(x_units, &x_subject);
                 x_lap.lap(XStage::Merge);
-                if x_shadow {
-                    x_pair_par_shadow = Some(x_hits);
-                    s_frames_preliminary
-                } else {
-                    combined_ungapped_hits = x_hits;
-                    &[]
-                }
+                combined_ungapped_hits = x_hits;
+                &[]
             }
             None => {
                 x_lap.lap(XStage::Prepare);
@@ -4091,7 +4108,7 @@ fn search_query_batch(
                 s_frames_preliminary
             }
         };
-        // EXPERIMENT (LOSAT_X_PAIRLUT): with the direct group tables the batch's `lookup` is a
+        // EXPERIMENT (PAIRLUT): with the direct group tables the batch's `lookup` is a
         // stub without entries, so a scan of it by the frame loop below would find no hit. The
         // unit path above must have taken the subject (empty frame slice); anything else stops
         // the run here.
@@ -4105,15 +4122,14 @@ fn search_query_batch(
         if x_pair_lut_is_stub {
             assert!(
                 s_frames_preliminary.is_empty() && x_pair_par_stub,
-                "LOSAT_X_PAIRLUT: the reference frame loop would scan the stub lookup table (subject {s_idx})"
+                "PAIRLUT: the reference frame loop would scan the stub lookup table (subject {s_idx})"
             );
         }
-        // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 4 (per subject): the frame loop below
-        // indexes the worker's diagonal table through a raw pointer with `diag_mask`. With the
-        // switch on, a worker of a batch that the unit path takes without its shadow has a
-        // table of zero cells, and the worker that ended the batch's last lookup stage has
-        // dropped its table. The loop must then run zero times; anything else stops the run
-        // here, whatever the switch says.
+        // Dispatch point 4 of the seed release (per subject): the frame loop below
+        // indexes the worker's diagonal table through a raw pointer with `diag_mask`. A worker
+        // of a batch that the unit path takes has a table of zero cells, and the worker that ended
+        // the batch's last lookup stage has dropped its table. The loop must then run zero times;
+        // anything else stops the run here.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
         // ```c
@@ -4125,7 +4141,7 @@ fn search_query_batch(
         // ```
         assert!(
             s_frames_preliminary.is_empty() || diag_array.len() == diag_array_size as usize,
-            "LOSAT_X_SEEDRELEASE: the reference frame loop would run without the worker's diagonal table (subject {s_idx})"
+            "the reference frame loop would run without the worker's diagonal table (subject {s_idx})"
         );
 
         for (s_f_idx, s_frame) in s_frames_preliminary.iter().enumerate() {
@@ -4713,9 +4729,9 @@ fn search_query_batch(
                 TblastxChunkScanResult { chunk, hits, stats }
             };
 
-            // EXPERIMENT (LOSAT_X_SEEDBUCKET): `scan_chunk_plain` above is the reference
-            // loop, untouched.  This variant appends the hits of every scan call to
-            // per-diagonal-range buckets and runs the same per-hit body (the macro
+            // EXPERIMENT (SEEDBUCKET, graduated on 2026-10-22: no variable): `scan_chunk_plain`
+            // above is the reference loop, untouched.  This variant appends the hits of every scan
+            // call to per-diagonal-range buckets and runs the same per-hit body (the macro
             // below, a copy of the loop body of `scan_chunk_plain`) bucket by bucket,
             // then puts the saved HSPs back into scan order.  See `x_seed_bucket`.
             //
@@ -4766,13 +4782,6 @@ fn search_query_batch(
                     diag_mask as u32,
                 );
                 let x_bucket_budget = crate::algorithm::tblastx::x_seed_bucket::budget();
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:507
-                // ```c
-                // totalhits += hits;
-                // ```
-                // The lookup hits of this scan, in 64 bits (NCBI: an Int4 for its statistics). Only the
-                // shadow mode reports it; it does not change any value NCBI computes.
-                let mut x_scan_hits: u64 = 0;
                 // Per-flush positions of the HSPs the current flush has saved.
                 let mut seq_keys: Vec<u32> = Vec::new();
                 let diag_offset_value: i32 = *diag_offset;
@@ -5300,7 +5309,6 @@ fn search_query_batch(
                             let pair = unsafe { &*offset_pairs_ptr.add(i) };
                             buckets.push(pair.q_off, pair.s_off);
                         }
-                        x_scan_hits += hits as u64;
                         if buckets.flush_due(x_bucket_budget) {
                             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
                             // ```c
@@ -5326,13 +5334,6 @@ fn search_query_batch(
                 // The saved HSPs are in scan order here, as in C: every flush restored its own. The
                 // score sort below (sort_init_hsps_by_score_ncbi, with its NCBI reference) is stable,
                 // so the order of comparator-equal HSPs matters.
-                //
-                // No NCBI counterpart: the shadow mode's record of the most lookup hits one scan went
-                // through; it does not change any value NCBI computes.
-                if crate::algorithm::tblastx::x_seed_bucket::mode() == 2 {
-                    crate::algorithm::tblastx::x_seed_bucket::SHADOW_MAX_SCAN_HITS
-                        .fetch_max(x_scan_hits, AtomicOrdering::Relaxed);
-                }
 
                 // [C] Blast_ExtendWordExit(ewp, subject->length);
                 //
@@ -5371,9 +5372,9 @@ fn search_query_batch(
                 TblastxChunkScanResult { chunk, hits, stats }
             };
 
-            // EXPERIMENT (LOSAT_X_SEEDBUCKET): 0 = scan order, 1 = bucketed (only for
-            // tables of at least LOSAT_X_SEEDBUCKET_MIN_CELLS cells), 2 = both (the
-            // bucketed one on a copy of the diagonal table), compared.
+            // EXPERIMENT (SEEDBUCKET): the scan order (`scan_chunk_plain`) or the bucketed order
+            // (`scan_chunk_bucketed`, only for tables of at least LOSAT_X_SEEDBUCKET_MIN_CELLS
+            // cells).
             //
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
             // ```c
@@ -5385,9 +5386,9 @@ fn search_query_batch(
             // ...
             //         diag_coord = (query_offset - subject_offset) & diag_mask;
             // ```
-            // Dispatch point of LOSAT_X_SEEDBUCKET / LOSAT_X_SEEDBUCKETSHADOW: mode 0 runs scan_chunk_plain
-            // (the port of the C loop), mode 1 scan_chunk_bucketed, mode 2 runs both and compares. A traced
-            // or debugged run always uses scan_chunk_plain.
+            // Dispatch point of SEEDBUCKET: `scan_chunk_plain` (the port of the C loop), or
+            // `scan_chunk_bucketed` for a table of at least the minimum cells. A traced or debugged
+            // run always uses `scan_chunk_plain`.
             let scan_chunk = |chunk: SubjectChunk,
                               offset_pairs: &mut [OffsetPair],
                               diag_array: &mut [DiagStruct],
@@ -5396,97 +5397,24 @@ fn search_query_batch(
              -> TblastxChunkScanResult {
                 // The debug/trace paths exist only in the reference loop.
                 let x_debugging = scan_debug_range.is_some() || trace_hsp_target().is_some();
-                match crate::algorithm::tblastx::x_seed_bucket::mode_for(diag_array.len()) {
-                    1 if !x_debugging => scan_chunk_bucketed(
+                if crate::algorithm::tblastx::x_seed_bucket::bucketed(diag_array.len())
+                    && !x_debugging
+                {
+                    scan_chunk_bucketed(
                         chunk,
                         offset_pairs,
                         diag_array,
                         diag_offset,
                         scan_chunk_size,
-                    ),
-                    2 => {
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516,588-591
-                        // ```c
-                        // Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-                        // Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-                        // ...
-                        // diag_coord = (query_offset - subject_offset) & diag_mask;
-                        // ...
-                        //     if (score >= cutoffs->cutoff_score)
-                        //         BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                        // ```
-                        // Shadow mode: the bucketed order runs on a copy of the diagonal table, the scan-order loop on
-                        // the real one. The assertions below compare the diagonal offset, every diagonal cell (the
-                        // packed last_hit and flag), and every HSP of the result field by field. A difference aborts.
-                        let mut diag_copy = diag_array.to_vec();
-                        let mut offset_copy = *diag_offset;
-                        let shadow = scan_chunk_bucketed(
-                            chunk,
-                            offset_pairs,
-                            &mut diag_copy,
-                            &mut offset_copy,
-                            scan_chunk_size,
-                        );
-                        let reference = scan_chunk_plain(
-                            chunk,
-                            offset_pairs,
-                            diag_array,
-                            diag_offset,
-                            scan_chunk_size,
-                        );
-                        assert_eq!(
-                            offset_copy, *diag_offset,
-                            "LOSAT_X_SEEDBUCKETSHADOW: diag offset differs"
-                        );
-                        assert!(
-                            diag_copy
-                                .iter()
-                                .zip(diag_array.iter())
-                                .all(|(a, b)| a.raw_bits() == b.raw_bits()),
-                            "LOSAT_X_SEEDBUCKETSHADOW: diagonal table differs after the chunk"
-                        );
-                        assert_eq!(
-                            shadow.hits.len(),
-                            reference.hits.len(),
-                            "LOSAT_X_SEEDBUCKETSHADOW: hit count differs"
-                        );
-                        for (k, (a, b)) in shadow.hits.iter().zip(reference.hits.iter()).enumerate()
-                        {
-                            assert!(
-                                a.q_idx == b.q_idx
-                                    && a.s_idx == b.s_idx
-                                    && a.ctx_idx == b.ctx_idx
-                                    && a.s_f_idx == b.s_f_idx
-                                    && a.q_frame == b.q_frame
-                                    && a.s_frame == b.s_frame
-                                    && a.q_aa_start == b.q_aa_start
-                                    && a.q_aa_end == b.q_aa_end
-                                    && a.s_aa_start == b.s_aa_start
-                                    && a.s_aa_end == b.s_aa_end
-                                    && a.q_seed_off == b.q_seed_off
-                                    && a.s_seed_off == b.s_seed_off
-                                    && a.q_orig_len == b.q_orig_len
-                                    && a.s_orig_len == b.s_orig_len
-                                    && a.raw_score == b.raw_score
-                                    && a.e_value.to_bits() == b.e_value.to_bits()
-                                    && a.num_ident == b.num_ident
-                                    && a.hsp_list_order == b.hsp_list_order,
-                                "LOSAT_X_SEEDBUCKETSHADOW: hit {k} differs: {a:?} vs {b:?}"
-                            );
-                        }
-                        crate::algorithm::tblastx::x_seed_bucket::SHADOW_CHUNKS
-                            .fetch_add(1, AtomicOrdering::Relaxed);
-                        crate::algorithm::tblastx::x_seed_bucket::SHADOW_HITS
-                            .fetch_add(reference.hits.len() as u64, AtomicOrdering::Relaxed);
-                        reference
-                    }
-                    _ => scan_chunk_plain(
+                    )
+                } else {
+                    scan_chunk_plain(
                         chunk,
                         offset_pairs,
                         diag_array,
                         diag_offset,
                         scan_chunk_size,
-                    ),
+                    )
                 }
             };
 
@@ -5728,22 +5656,10 @@ fn search_query_batch(
         } // End of subject frame loop
         x_lap.lap(XStage::FrameLoop);
 
-        // EXPERIMENT (LOSAT_X_PAIRPARSHADOW), dispatch point 3 (per subject): the unit path's
-        // list against the reference loop's, every field; the first difference stops the run.
-        //
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:844
-        // ```c
-        // if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
-        // ```
-        // The list compared is the one the frame loop above has appended (hsp_list_out).
-        if let Some(x_hits) = &x_pair_par_shadow {
-            x_pair_par::shadow_compare(s_idx, x_hits, &combined_ungapped_hits);
-        }
-
-        // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 5 (per subject): the seed stage of
+        // Dispatch point 5 of the seed release (per subject): the seed stage of
         // this subject ends here; nothing below reads the batch's lookup table (`end` consumes
         // the stage that `lookup_ref` borrows from; the unit path's stage ended at dispatch
-        // point 3) or the worker's diagonal table. With the switch on, the batch's last lookup
+        // point 3) or the worker's diagonal table. The batch's last lookup
         // stage frees the lookup table and returns true, and this worker, which gets no
         // further subject, drops its diagonal table before the linking call below, where the
         // heap of the search peaks.
@@ -5799,11 +5715,9 @@ fn search_query_batch(
             // Source: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
             base += f.aa_seq.len() as i32 - 1;
         }
-        // EXPERIMENT (LOSAT_X_TBXFRAMES): nothing below reads the preliminary frames (the seed
-        // stage has ended); they are freed before the linking call, where the heap peaks.
-        if x_frames_late {
-            drop(s_frames_preliminary_owned);
-        }
+        // Nothing below reads the preliminary frames (the seed stage has ended); they are freed
+        // before the linking call, where the heap peaks.
+        drop(s_frames_preliminary_owned);
 
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899
         // ```c
@@ -5890,9 +5804,9 @@ fn search_query_batch(
         // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
         // Perform batch reevaluation on all HSPs after merging all frames
         //
-        // EXPERIMENT (LOSAT_X_TBXFRAMES): a subject with ambiguous bases gets the frames of its
-        // letters here, after its preliminary frames were freed, when HSPs are left for the
-        // re-evaluation (none are read otherwise).
+        // A subject with ambiguous bases gets the frames of its letters here, after its
+        // preliminary frames were freed, when HSPs are left for the re-evaluation (none are read
+        // otherwise).
         let x_letter_frames: Vec<QueryFrame>;
         let (s_frames, s_frames_report): (&[QueryFrame], &[QueryFrame]) = if x_letter_frames_later {
             x_letter_frames = if prelinked_ungapped_hits.is_empty() {
@@ -6195,7 +6109,7 @@ fn search_query_batch(
                 // score against the preserved unmasked query copy used for identity
                 // reporting. Normal runtime behavior is unchanged unless both
                 // LOSAT_TRACE_HSP and LOSAT_TRACE_HSP_MASKS are set.
-                if std::env::var_os("LOSAT_TRACE_HSP_MASKS").is_some() {
+                if crate::utils::xdiag::var_os("LOSAT_TRACE_HSP_MASKS").is_some() {
                     if let Some(target) = trace_hsp_target() {
                         if trace_match_target(target, q_start, q_end, s_start, s_end) {
                             // NCBI uses query_nomask = query_blk->sequence_nomask + query_offset,
@@ -6469,6 +6383,13 @@ fn search_query_batch(
     let mut single_state: Option<WorkerState> = None;
     #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
     let mut threaded_wasi_subject_hit_batches: Option<Vec<(usize, Vec<TblastxHsp>)>> = None;
+    // LOSAT_X_TBXNEXT: its loop takes the subjects of a parallel search of several subjects.
+    if x_subject_next::on() {
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_TBXNEXT",
+            use_parallel && !use_serial_scan_chunks && subjects.count() > 1
+        );
+    }
 
     #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
     if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {

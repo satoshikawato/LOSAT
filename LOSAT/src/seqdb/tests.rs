@@ -252,6 +252,58 @@ fn check_deflines_and_single_reads(db: &SeqDb, entries: &[Entry], name: &str) {
     ));
 }
 
+/// The length and the letters of ranges of a nucleotide sequence, read without the rest of
+/// the sequence, are those NCBI reads back (the whole sequence, ambiguity codes included).
+fn check_nucleotide_ranges(db: &SeqDb, entries: &[Entry], name: &str) {
+    for entry in entries {
+        let what = format!("{name} ordinal {}", entry.ordinal);
+        assert_eq!(
+            db.nucleotide_length(entry.ordinal).unwrap(),
+            entry.seq.len(),
+            "{what}: length"
+        );
+        let n = entry.seq.len();
+        let mut ranges = vec![(0, n), (0, 0), (n, n)];
+        for (from, to) in [
+            (0, 1),
+            (1, 5),
+            (3, 4),
+            (2, 9),
+            (n / 2, n),
+            (n.saturating_sub(7), n),
+        ] {
+            if from <= to && to <= n {
+                ranges.push((from, to));
+            }
+        }
+        for step in [1usize, 3, 5, 61] {
+            for from in (0..n).step_by(step.max(1)) {
+                ranges.push((from, (from + step + 2).min(n)));
+            }
+        }
+        let ambiguity = db.nucleotide_ambiguity(entry.ordinal).unwrap();
+        assert_eq!(ambiguity.length(), n, "{what}: cached length");
+        for (from, to) in ranges {
+            assert_eq!(
+                db.nucleotide_iupac_range(entry.ordinal, from, to).unwrap(),
+                entry.seq[from..to],
+                "{what}: letters {from}..{to}"
+            );
+            assert_eq!(
+                db.nucleotide_iupac_range_with(entry.ordinal, from, to, &ambiguity)
+                    .unwrap(),
+                entry.seq[from..to],
+                "{what}: cached letters {from}..{to}"
+            );
+        }
+        assert!(db
+            .nucleotide_iupac_range_with(entry.ordinal, 0, n + 1, &ambiguity)
+            .is_err());
+        assert!(db.nucleotide_iupac_range(entry.ordinal, 0, n + 1).is_err());
+        assert!(db.nucleotide_iupac_range(entry.ordinal, 2, 1).is_err());
+    }
+}
+
 fn check_info(db: &SeqDb, name: &str) {
     let info = expected_info(name);
     assert_eq!(db.title(), info["title"].as_bytes(), "{name}: title");
@@ -285,6 +337,9 @@ fn check_against_ncbi(name: &str, seqtype: SeqType) -> (SeqDb, Vec<Entry>) {
         check_database(&db, &entries, max_bytes, name);
     }
     check_deflines_and_single_reads(&db, &entries, name);
+    if seqtype == SeqType::Nucleotide {
+        check_nucleotide_ranges(&db, &entries, name);
+    }
     (db, entries)
 }
 
@@ -1167,6 +1222,93 @@ fn ambiguity_data_that_do_not_fit_the_sequence() {
         block.nucleotide_blastna(0),
         Err(SeqDbError::Format { message, .. }) if message.contains("shorter than their count")
     ));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `SeqDb::x_nucleotide_check` of a block of one sequence and
+/// `read_block` of the same block give the same length and ambiguity runs, or the same errors.
+/// Returns whether they failed.
+fn check_as_read_block(db: &SeqDb, range: BlockRange, what: &str) -> bool {
+    let text = |error: SeqDbError| error.to_string();
+    let read = db.read_block(range).map_err(text);
+    let check = db.x_nucleotide_check(range).map_err(text);
+    match (read, check) {
+        (Ok(block), Ok((length, ambiguity))) => {
+            assert_eq!(Ok(length), block.nucleotide_len(0).map_err(text), "{what}");
+            let runs = block.ambiguity_runs(0).map_err(text);
+            assert_eq!(ambiguity.ambiguity_runs(0).map_err(text), runs, "{what}");
+            runs.is_err()
+        }
+        (read, check) => {
+            assert_eq!(read.map(|_| ()), check.map(|_| ()), "{what}");
+            true
+        }
+    }
+}
+
+#[test]
+fn x_nucleotide_check_reads_what_read_block_gives_one_sequence() {
+    // Every sequence of the nucleotide fixtures, a block of its own: both ambiguity formats, the
+    // count zero, one base, version 4 and 5 volumes.
+    for name in ["nucl_v4", "nucl_v5", "nucl_mv"] {
+        let db = SeqDb::open(&db_name(name), SeqType::Nucleotide).unwrap();
+        for ordinal in 0..db.num_seqs() {
+            let range = db.next_block(ordinal, 0).unwrap();
+            assert_eq!(range.len(), 1);
+            assert!(!check_as_read_block(
+                &db,
+                range,
+                &format!("{name} {ordinal}")
+            ));
+        }
+    }
+    // n05 of nucl_v4 (74 bases, ambiguity data at 64..80 of the sequence file; see
+    // `ambiguity_data_that_do_not_fit_the_sequence`) damaged, and the sequence file cut inside
+    // its 2-bit data, inside its ambiguity data and before it.
+    let dir = temp_dir("x-check");
+    copy_database("nucl_v4", &["nin", "nsq", "nhr"], &dir);
+    let name = dir.join("nucl_v4").to_str().unwrap().to_string();
+    let path = dir.join("nucl_v4.nsq");
+    let original = std::fs::read(&path).unwrap();
+    let mut long_count = original.clone();
+    long_count[64..68].copy_from_slice(&[0, 0, 0, 9]);
+    let mut remainder = original.clone();
+    remainder[63] ^= 1;
+    for (what, bytes) in [
+        ("count past the end", long_count),
+        ("remainder", remainder),
+        ("cut in the 2-bit data", original[..50].to_vec()),
+        ("cut in the ambiguity data", original[..70].to_vec()),
+        ("cut before the sequence", original[..40].to_vec()),
+    ] {
+        std::fs::write(&path, bytes).unwrap();
+        let db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
+        for ordinal in 0..db.num_seqs() {
+            let range = db.next_block(ordinal, 0).unwrap();
+            let failed = check_as_read_block(&db, range, &format!("{what} {ordinal}"));
+            if ordinal == 4 {
+                assert_eq!(failed, what != "remainder", "{what}");
+            }
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn x_check_range_gives_the_errors_of_read_range() {
+    let dir = temp_dir("x-check-range");
+    let path = dir.join("ten");
+    std::fs::write(&path, [7u8; 10]).unwrap();
+    let file = file::DbFile::open(&path).unwrap();
+    for (start, end) in [(3, 2), (0, 11), (10, 11), (0, 10), (10, 10), (4, 6)] {
+        assert_eq!(
+            file.x_check_range(start, end).map_err(|e| e.to_string()),
+            file.read_range(start, end)
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            "{start}..{end}"
+        );
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

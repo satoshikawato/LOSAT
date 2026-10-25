@@ -97,11 +97,27 @@ impl ShownSubjects<'_> {
 //     ...
 // }
 // Each requested format prints the same final result without searching again.
-#[allow(clippy::too_many_arguments)]
+/// The number of the BLAST archive among the formats (outfmt 11).
+pub(super) const ARCHIVE_FORMAT: i32 = 11;
+
 /// The format number of a checked `-outfmt` value, as NCBI's `ParseFormattingString` reads
 /// it (a custom specification of outfmt 0 is ignored); -1 for a value it does not read.
 pub(super) fn format_number(outfmt: &str) -> i32 {
     crate::blastinput::app::parse_formatting_string(outfmt).map_or(-1, |choice| choice.number)
+}
+
+/// The XML2 / JSON document of a checked `-outfmt` value (16, 15, 14 or 13; `None` for the
+/// others). Outfmt 13 and 14 write side files next to `-out`: only the command line reaches them
+/// (`run_local` stops at NCBI's XInclude check).
+pub(super) fn xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
+    use crate::blastinput::app::ReportFormat;
+    crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(format_number(outfmt))?)
+}
+
+/// Whether a checked `-outfmt` value is a format of the structured XML family that takes the
+/// path of outfmt 5: BLAST XML (5) and the XML2 and JSON documents (16, 15, 14, 13).
+pub(super) fn is_structured_xml(outfmt: &str) -> bool {
+    format_number(outfmt) == 5 || xml2_kind(outfmt).is_some()
 }
 
 /// The ranges of a search as the reports use them: where the searched letters of each
@@ -135,6 +151,9 @@ pub(super) fn render(
     query_warning_lines: &[Vec<u8>],
     ranges: &ReportRanges<'_>,
     xml_values: super::blast_xml::XmlValues,
+    xml_taxa: super::database::XmlTaxa,
+    out: Option<&std::path::Path>,
+    archive: Option<&super::archive::ArchiveRender<'_>>,
 ) -> Result<()> {
     ensure!(
         query_records.len() == hitlists.len(),
@@ -147,12 +166,39 @@ pub(super) fn render(
         hitlist.drop_zero_score_hsps();
     }
     let hitlists: &[KappaResultHitList] = hitlists;
-    // BLAST XML (outfmt 5): its texts are made, and what NCBI cannot write is refused, before
-    // any format writes (`-out` is already created, empty, as NCBI's).
+    // BLAST XML (outfmt 5, and the XML2 and JSON documents of 15 and 16): its texts are made,
+    // and what NCBI cannot write is refused, before any format writes (`-out` is already
+    // created, empty, as NCBI's).
+    //
+    // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
+    // fails for a matrix of its formatting table's that it does not know when it makes the
+    // first report's data: the start alone is written then (probe `tblastn_sub_lcmatrix`).
+    if outputs
+        .formats
+        .iter()
+        .any(|format| is_structured_xml(format.outfmt))
+    {
+        if let Err(error) =
+            super::blast_xml::unsupported_matrix(matrix_name, !query_records.is_empty())
+        {
+            for format in outputs.formats.iter_mut() {
+                if let Some(kind) = xml2_kind(format.outfmt) {
+                    let mut writer = format.sink.open()?;
+                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+                    writer.flush()?;
+                }
+            }
+            return Err(error);
+        }
+    }
+    let xml_is_xml2 = outputs
+        .formats
+        .iter()
+        .any(|format| xml2_kind(format.outfmt).is_some());
     let xml = if outputs
         .formats
         .iter()
-        .any(|format| format_number(format.outfmt) == 5)
+        .any(|format| is_structured_xml(format.outfmt))
     {
         Some(super::blast_xml::prepare(
             xml_values,
@@ -163,10 +209,13 @@ pub(super) fn render(
             hitlists,
             parameters,
             query_validity,
+            query_batch_skipped,
             scoring,
             matrix_name,
             seg,
             ranges,
+            xml_is_xml2,
+            xml_taxa,
         )?)
     } else {
         None
@@ -215,17 +264,28 @@ pub(super) fn render(
         hits_sink(pairwise_hits);
     }
     // The warnings of each query are written before its report, once, with the first
-    // format (`QueryWarnings`).
-    let mut format_warnings = Some(crate::report::query_warnings::QueryWarnings {
-        before: query_warning_lines,
-        sink: &mut *outputs.diagnostics,
-    });
+    // format (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
+    // diagnostics at every format.
+    let mut warning_lines = Some(query_warning_lines);
     let observer = &mut outputs.observer;
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
+        // The warnings that a format other than the archive writes are not the archive's
+        // messages (a call with several formats, `run_local`).
+        if let Some(archive) = archive {
+            archive
+                .handle
+                .set_muted(format_number(format.outfmt) != ARCHIVE_FORMAT);
+        }
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
-        let mut warnings = format_warnings.take();
+        let mut warnings = (warning_lines.is_some()
+            || xml2_kind(format.outfmt).is_some()
+            || format_number(format.outfmt) == ARCHIVE_FORMAT)
+            .then(|| crate::report::query_warnings::QueryWarnings {
+                before: warning_lines.take().unwrap_or(&[]),
+                sink: &mut *outputs.diagnostics,
+            });
         let mut writer = format.sink.open()?;
         match format_number(format.outfmt) {
             6 | 7 => write_tabular(
@@ -269,6 +329,7 @@ pub(super) fn render(
                 .as_ref()
                 .expect("XML prepared for TBLASTN outfmt 5")
                 .write(
+                    &mut crate::report::blast_xml::BlastXmlWriter::new(0),
                     &mut writer,
                     query_records,
                     subject_letters,
@@ -279,6 +340,33 @@ pub(super) fn render(
                     ranges,
                     warnings.as_mut(),
                 )?,
+            // The XML2 and JSON documents (outfmt 16 and 15, and 14 and 13 as side files next to
+            // `out` with this output as the master file): the same records, written by
+            // `Xml2Writer`.
+            13..=16 => {
+                let kind = xml2_kind(format.outfmt).expect("a checked XML2 or JSON format");
+                let xml = xml
+                    .as_ref()
+                    .expect("XML prepared for TBLASTN outfmt 13 to 16");
+                xml.write(
+                    &mut crate::report::blast_xml2::Xml2Writer::for_run(kind, xml.xml2_run(), out),
+                    &mut writer,
+                    query_records,
+                    subject_letters,
+                    hitlists,
+                    genetic_code,
+                    seg,
+                    mask_lowercase,
+                    ranges,
+                    warnings.as_mut(),
+                )?;
+                // A run that stops before its first report (a database whose sequences cannot
+                // be read) still writes the document's start, which NCBI writes before the
+                // search.
+                if query_records.is_empty() && !ranges.epilog {
+                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+                }
+            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
             // ```c++
             //     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
@@ -308,9 +396,49 @@ pub(super) fn render(
                 ranges,
                 warnings.as_mut(),
             )?,
+            // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:295
+            // ```c++
+            //                 if (fmt_args->ArchiveFormatRequested(args)) {
+            //                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+            //                     m_Bah.ResetMessages();
+            // ```
+            // One BLAST archive per query batch (`archive`).
+            ARCHIVE_FORMAT => {
+                let archive = archive.expect("a BLAST archive request has its handle");
+                let gapped = lookup_protein_params(&ProteinScoringSpec {
+                    matrix: scoring.matrix,
+                    gap_open: scoring.gap_open,
+                    gap_extend: scoring.gap_extend,
+                });
+                super::archive::write_tblastn_archives(
+                    archive,
+                    &super::archive::ArchiveData {
+                        queries: query_records,
+                        subject_records,
+                        subject_letters,
+                        shown,
+                        hitlists,
+                        parameters,
+                        ungapped_karlin,
+                        query_validity,
+                        query_batch_skipped,
+                        gapped,
+                        seg,
+                        mask_lowercase,
+                        ranges,
+                    },
+                    warnings.as_mut(),
+                    &mut writer,
+                )?
+            }
             _ => bail!("unsupported TBLASTN outfmt {}", format.outfmt),
         }
         writer.flush()?;
+    }
+    // The messages that `search` writes after the formats (the stop messages) are the archive's
+    // again, whichever format came last (as in blastn and blastp).
+    if let Some(archive) = archive {
+        archive.handle.set_muted(false);
     }
     Ok(())
 }
@@ -612,6 +740,27 @@ mod tests {
     use crate::api::local_blast::{FormatOutput, OutputSink};
     use crate::utils::seg::SegParams;
 
+    // Outfmt 5 and the XML2 and JSON documents (16 and 15) take the structured-XML path of
+    // `render`; no other format does.
+    #[test]
+    fn the_xml_family_is_5_and_13_to_16() {
+        use crate::report::blast_xml2::Xml2Kind;
+        for (outfmt, kind, structured) in [
+            ("5", None, true),
+            ("13", Some(Xml2Kind::Files13), true),
+            ("14", Some(Xml2Kind::Files14), true),
+            ("15", Some(Xml2Kind::Single15), true),
+            ("16", Some(Xml2Kind::Single16), true),
+            (" 16 std", Some(Xml2Kind::Single16), true),
+            ("0", None, false),
+            ("6", None, false),
+            ("12", None, false),
+        ] {
+            assert_eq!(xml2_kind(outfmt), kind, "{outfmt}");
+            assert_eq!(is_structured_xml(outfmt), structured, "{outfmt}");
+        }
+    }
+
     // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
     // results = lcl_blast.Run(); formatter.PrintOneResultSet(**result, query);
     // Compare complete saved formatter bytes after the Stage D local search.
@@ -716,7 +865,13 @@ mod tests {
                 super::super::blast_xml::XmlValues {
                     expect: 10.0,
                     soft_masking: false,
+                    gapped: true,
+                    cbs: 2,
+                    db_gencode: 1,
                 },
+                Default::default(),
+                None,
+                None,
             )
             .unwrap();
             drop(outputs);
@@ -1157,13 +1312,9 @@ fn aligned_sequences(
             (subject.fetch(start, start + length, window_buffer), first)
         }
     };
+    let display = crate::algorithm::tblastx::report::DisplayCode::new(code);
     let displayed_subject = |s: usize| -> u8 {
-        crate::algorithm::tblastx::report::display_residue(
-            nucleotides,
-            frame,
-            (base + s as isize) as usize - first,
-            code,
-        )
+        display.residue(nucleotides, frame, (base + s as isize) as usize - first)
     };
     const NCBISTDAA_TO_AA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
     let mut query_string = String::new();

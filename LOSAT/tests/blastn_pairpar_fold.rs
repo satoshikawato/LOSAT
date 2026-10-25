@@ -2,17 +2,17 @@
 //! (`LOSAT_X_PAIRPARFOLD`, `src/algorithm/blastn/blast_engine/x_pair_seed_part.rs`) on whole
 //! searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set). It chooses between
-//! two LOSAT code paths with the same result: the word hits of the strips paths
-//! (`LOSAT_X_PAIRPAR`, on by default, for megablast and blastn; `LOSAT_X_PAIRPARDISC` for
+//! The switch is off in these searches unless they set it (it is in the strict set since
+//! 2026-10-17; `PREVIOUS_DEFAULT` below turns it off). It chooses between two LOSAT code paths
+//! with the same result: the word hits of the strips paths
+//! (PAIRPAR, which has no variable, for megablast and blastn; `LOSAT_X_PAIRPARDISC` for
 //! dc-megablast) folded into the diagonal hash by the owner thread in scan order, or by every
 //! thread of the pool, each into the buckets of its partition, with the hits and the table's
 //! cell numbers put back in the reference order. So the property under test is that the report
 //! does not depend on it: with the switch at 2, 4 and 8 threads (also with `LOSAT_X_DIAGLV`),
-//! and with the strips shadows (`LOSAT_X_PAIRPARSHADOW`, `LOSAT_X_PAIRPARDISCSHADOW`, which run
-//! the partitioned stage on copies and compare the hit list and the whole diagonal hash with
-//! the reference fold for every chunk), the searches give the bytes of the search without it at
-//! one thread. That those bytes equal NCBI's is the business of the BLASTN fixtures.
+//! and (dc-megablast) with the stage's `[TIMING]` line showing every chunk folded in one partition
+//! per thread, the searches give the bytes of the search without it at one thread. That those
+//! bytes equal NCBI's is the business of the BLASTN fixtures.
 //!
 //! The query (LC738874, 287 kb) makes a query block longer than 8000 letters, so the searches
 //! use the diagonal hash, and the one subject (LC738868) is searched by the owner of the pool,
@@ -22,10 +22,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and
-/// LOSAT_X_MBLUTONCE on 2026-10-18 (perf/bn-memory-rules; under LOSAT_X_PAIRPARSHADOW it adds its
-/// own shadow line), each `0`, the default before, unless the search sets it: every search here
-/// runs as it was written, with the switches off that it does not name (the default runs in
-/// `default_bundle.rs`).
+/// LOSAT_X_MBLUTONCE on 2026-10-18 (perf/bn-memory-rules), each `0`, the default before, unless the
+/// search sets it: every search here runs as it was written, with the switches off that it does not
+/// name (the default runs in `default_bundle.rs`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),
@@ -43,6 +42,9 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
 ];
 
 const SWITCH: (&str, &str) = ("LOSAT_X_PAIRPARFOLD", "1");
+/// LOSAT_X_PAIRPARHOME (strict set, on unless `0`): the partitions' home participants; `0` the
+/// way of sharing the folds before it.
+const HOME_OFF: (&str, &str) = ("LOSAT_X_PAIRPARHOME", "0");
 const PAIRPARDISC: (&str, &str) = ("LOSAT_X_PAIRPARDISC", "1");
 const DIAGLV: (&str, &str) = ("LOSAT_X_DIAGLV", "1");
 
@@ -116,47 +118,29 @@ fn blastn(dir: &Path, task: &str, threads: u32, switches: &[(&str, &str)]) -> (V
     (output.stdout, stderr)
 }
 
-/// The fields of a strips shadow's line (`prefix`, the only line of `stderr` besides the
-/// lines that start with one of `others`): the chunks compared, then `fold=`, `merges=` and
-/// `partitions=`.
-fn shadow_fields(stderr: &str, prefix: &str, others: &[&str], at: &str) -> (u64, String, u64, u64) {
+/// The `chunks=`, `merges=` and `partitions=` fields of a strips stage's `[TIMING]` line (the
+/// line of `stderr` that starts with `prefix`).
+fn stage_fields(stderr: &str, prefix: &str, at: &str) -> (u64, u64, u64) {
     let line = stderr
         .lines()
         .find(|line| line.starts_with(prefix))
-        .unwrap_or_else(|| panic!("{at}: no shadow line:\n{stderr}"));
-    for other in stderr.lines().filter(|l| *l != line) {
-        assert!(
-            others.iter().any(|o| other.starts_with(o)),
-            "{at}: unexpected standard error line: {other}"
-        );
-    }
-    let field = |name: &str| -> String {
+        .unwrap_or_else(|| panic!("{at}: no {prefix} line:\n{stderr}"));
+    let number = |name: &str| -> u64 {
         line.split_whitespace()
             .find_map(|word| word.strip_prefix(name))
+            .and_then(|value| value.parse().ok())
             .unwrap_or_else(|| panic!("{at}: no {name} in: {line}"))
-            .to_string()
     };
-    let number = |name: &str| -> u64 {
-        field(name)
-            .parse()
-            .unwrap_or_else(|_| panic!("{at}: {name} in: {line}"))
-    };
-    let (merges, partitions) = (number("merges="), number("partitions="));
-    let chunks = line
-        .split("seed chunks equal=")
-        .nth(1)
-        .and_then(|rest| rest.split_whitespace().next())
-        .and_then(|value| value.parse().ok())
-        .unwrap_or_else(|| panic!("{at}: no seed chunks in: {line}"));
-    (chunks, field("fold="), merges, partitions)
+    (number("chunks="), number("merges="), number("partitions="))
 }
 
 /// For one task: the search without the switch at one thread, then at 2, 4 and 8 threads
-/// without the switch, with it, with it and `LOSAT_X_DIAGLV`, and with it and the strips
-/// shadow (`shadow`, whose line starts with `prefix`): the same bytes every time, nothing on
-/// standard error without the shadow, and the shadow's line says that it compared chunks
-/// folded in partitions, one per thread. `extra` goes to every run but the first.
-fn check(dir: &Path, task: &str, extra: &[(&str, &str)], shadow: (&str, &str), prefix: &str) {
+/// without the switch, with it, with it and `LOSAT_X_DIAGLV`, with it and `LOSAT_X_PAIRPARHOME=0`,
+/// and, if there is one, with it and `LOSAT_TIMING`, whose `[TIMING]` line of the strips stage
+/// (`stage`, the line's prefix) says that it folded chunks in partitions, one per thread: the same
+/// bytes every time, nothing on standard error without `LOSAT_TIMING`. `extra` goes to every run
+/// but the first.
+fn check(dir: &Path, task: &str, extra: &[(&str, &str)], stage: Option<&str>) {
     let (expected, expected_stderr) = blastn(dir, task, 1, &[]);
     assert!(!expected.is_empty(), "{task}: no hits");
     assert_eq!(expected_stderr, "", "{task}");
@@ -168,26 +152,29 @@ fn check(dir: &Path, task: &str, extra: &[(&str, &str)], shadow: (&str, &str), p
             "{at}: the report differs without the switch"
         );
         assert_eq!(stderr, "", "{at}");
-        for more in [&[SWITCH][..], &[SWITCH, DIAGLV][..]] {
+        for more in [
+            &[SWITCH][..],
+            &[SWITCH, DIAGLV][..],
+            &[SWITCH, HOME_OFF][..],
+        ] {
             let mut on = extra.to_vec();
             on.extend_from_slice(more);
             let (report, stderr) = blastn(dir, task, threads, &on);
             assert!(report == expected, "{at}: the report differs with {more:?}");
             assert_eq!(stderr, "", "{at} {more:?}");
         }
+        let Some(prefix) = stage else {
+            continue;
+        };
         let mut on = extra.to_vec();
-        on.extend_from_slice(&[SWITCH, shadow]);
+        on.extend_from_slice(&[SWITCH, ("LOSAT_TIMING", "1")]);
         let (report, stderr) = blastn(dir, task, threads, &on);
         assert!(
             report == expected,
-            "{at}: the report differs with {shadow:?}"
+            "{at}: the report differs with LOSAT_TIMING"
         );
-        // (`LOSAT_X_PAIRPARSHADOW` also names the shadow of TBLASTX's own `PAIRPAR`, whose
-        // line says it compared nothing)
-        let (chunks, fold, merges, partitions) =
-            shadow_fields(&stderr, prefix, &["[X_SHADOW] PAIRPAR "], &at);
-        assert!(chunks > 0, "{at}: no chunk compared:\n{stderr}");
-        assert_eq!(fold, "part", "{at}");
+        let (chunks, merges, partitions) = stage_fields(&stderr, prefix, &at);
+        assert!(chunks > 0, "{at}: no chunk taken:\n{stderr}");
         assert_eq!(
             merges, chunks,
             "{at}: chunks not folded in partitions:\n{stderr}"
@@ -199,25 +186,13 @@ fn check(dir: &Path, task: &str, extra: &[(&str, &str)], shadow: (&str, &str), p
 #[test]
 fn megablast_gives_the_same_report_with_the_partitioned_fold() {
     let dir = TestDir::new("megablast");
-    check(
-        &dir,
-        "megablast",
-        &[],
-        ("LOSAT_X_PAIRPARSHADOW", "1"),
-        "[X_PAIRPARSHADOW] blastn:",
-    );
+    check(&dir, "megablast", &[], None);
 }
 
 #[test]
 fn blastn_gives_the_same_report_with_the_partitioned_fold() {
     let dir = TestDir::new("blastn");
-    check(
-        &dir,
-        "blastn",
-        &[],
-        ("LOSAT_X_PAIRPARSHADOW", "1"),
-        "[X_PAIRPARSHADOW] blastn:",
-    );
+    check(&dir, "blastn", &[], None);
 }
 
 #[test]
@@ -227,13 +202,11 @@ fn dc_megablast_gives_the_same_report_with_the_partitioned_fold() {
         &dir,
         "dc-megablast",
         &[PAIRPARDISC],
-        ("LOSAT_X_PAIRPARDISCSHADOW", "1"),
-        "[X_PAIRPARDISCSHADOW] blastn:",
+        Some("[TIMING] x_pairpardisc_seed:"),
     );
 }
 
-// Without `LOSAT_X_PAIRPARDISC` dc-megablast has no strips path, so the switch changes nothing
-// and its shadow line says that no chunk was folded in partitions.
+// Without `LOSAT_X_PAIRPARDISC` dc-megablast has no strips path, so the switch changes nothing.
 #[test]
 fn dc_megablast_without_its_strips_path_is_not_taken() {
     let dir = TestDir::new("dcoff");
@@ -241,26 +214,13 @@ fn dc_megablast_without_its_strips_path_is_not_taken() {
     let (report, stderr) = blastn(&dir, "dc-megablast", 4, &[SWITCH]);
     assert!(report == expected, "the report differs");
     assert_eq!(stderr, "");
-    let (report, stderr) = blastn(
-        &dir,
-        "dc-megablast",
-        4,
-        &[SWITCH, ("LOSAT_X_PAIRPARSHADOW", "1")],
-    );
-    assert!(report == expected, "the report differs with the shadow");
-    let (_, fold, merges, _) = shadow_fields(
-        &stderr,
-        "[X_PAIRPARSHADOW] blastn:",
-        &["[X_SHADOW] PAIRPAR "],
-        "dc-megablast",
-    );
-    assert_eq!((fold.as_str(), merges), ("part", 0), "{stderr}");
 }
 
 // LOSAT_TIMING: the strips paths' `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` lines end
-// with the partitioned fold's fields (`partitions= merges= merge= helpers_left=`) only with the
-// switch; without it they end with `owner_wait=`, as before the switch existed. (Names and
-// counts only; no duration is compared.)
+// with the partitioned fold's fields (`partitions= merges= merge= helpers_left=`, and `runs=
+// away= units=` of LOSAT_X_PAIRPARHOME, on by default, not with `LOSAT_X_PAIRPARHOME=0`) only
+// with the switch; without it they end with `owner_wait=`, as before the switch existed. (Names
+// and counts only; no duration is compared.)
 #[test]
 fn timing_lines_have_the_fold_fields_only_with_the_switch() {
     let dir = TestDir::new("timing");
@@ -273,13 +233,16 @@ fn timing_lines_have_the_fold_fields_only_with_the_switch() {
             "[TIMING] x_pairpardisc_seed:",
         ),
     ] {
-        for on in [false, true] {
+        for (on, home) in [(false, true), (true, false), (true, true)] {
             let mut switches = extra.to_vec();
             switches.push(timing);
             if on {
                 switches.push(SWITCH);
             }
-            let at = format!("{task} switch {on}");
+            if !home {
+                switches.push(HOME_OFF);
+            }
+            let at = format!("{task} switch {on} home {home}");
             let (_, stderr) = blastn(&dir, task, 4, &switches);
             let line = stderr
                 .lines()
@@ -301,6 +264,9 @@ fn timing_lines_have_the_fold_fields_only_with_the_switch() {
             ];
             if on {
                 expected.extend(["partitions", "merges", "merge", "helpers_left"]);
+                if home {
+                    expected.extend(["runs", "away", "units"]);
+                }
             }
             assert_eq!(names, expected, "{at}: {line}");
             if on {
@@ -313,6 +279,12 @@ fn timing_lines_have_the_fold_fields_only_with_the_switch() {
                 assert_eq!(number("partitions="), 4, "{at}: {line}");
                 assert!(number("chunks=") > 0, "{at}: {line}");
                 assert_eq!(number("merges="), number("chunks="), "{at}: {line}");
+                if home {
+                    // every partition of every stage folds one run or more, and no more strips
+                    // than the stages have are folded away from home
+                    assert!(number("runs=") >= 4 * number("merges="), "{at}: {line}");
+                    assert!(number("units=") >= number("away="), "{at}: {line}");
+                }
             }
         }
     }

@@ -58,8 +58,9 @@ the official oracle and LOSATP then use the BLASTP default of 500 targets. This
 document does not describe the omitted setting as an unlimited target search.
 
 The option-by-option inventory is in
-`GBDRAW_BLASTP_PROFILE_COVERAGE.tsv`. Every BLASTP search option needed by P1,
-P2, or P3 is `COVERED`. gbdraw-owned post-search filters are `OUT_OF_SCOPE`.
+`docs/release/GBDRAW_BLASTP_PROFILE_COVERAGE.tsv`. Every BLASTP search option
+needed by P1, P2, or P3 is `COVERED`. gbdraw-owned post-search filters are
+`OUT_OF_SCOPE`.
 
 ## Parity matrix
 

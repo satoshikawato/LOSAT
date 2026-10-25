@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_MBLUTKEEP; in the strict set since 2026-10-19: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set): the hashtable of `build_mb_lookup` (the megablast table
+//! EXPERIMENT (LOSAT_X_MBLUTKEEP; in the strict set since 2026-10-19: on unless it is `0`)
+//! : the hashtable of `build_mb_lookup` (the megablast table
 //! of the megablast and blastn tasks) kept from one query batch to the next of the batch loop and
 //! zeroed for the next build, instead of a fresh zeroed allocation per batch that is freed at the
 //! end of its batch.
@@ -52,7 +52,7 @@
 //! (`x_qbatch_par::Driver::may_speculate`: no `LOSAT_X_QBATCHPARSLOTS`, and a budget of 0 or one
 //! thread). A slot holds a whole batch while others run, and QBATCHPAR's budget counts one table
 //! per batch in flight, so a table kept between the loop's batches would add to the slots' peak.
-//! The tables of LOSAT_X_PAIRPAR's sub-lookups, of the discontiguous tables
+//! The tables of PAIRPAR's sub-lookups, of the discontiguous tables
 //! (`build_disc_mb_lookup`) and of the tests are not kept.
 //!
 //! Memory. Between two batches the loop holds the longest table built so far, and no build
@@ -62,11 +62,7 @@
 //! batch's (the same table, a full batch's `next_pos` and the rest), so the search's peak is the
 //! full batch's as before.
 //!
-//! Shadow and timing: with `LOSAT_X_MBLUTKEEPSHADOW` every build on a kept table is built again
-//! on a fresh table (`vec![0; cells]`, the same build without the keep) and the arrays and
-//! `longest_chain` are compared (`[X_SHADOW] MBLUTKEEP tables= cells= diffs=0 identical` at exit; a
-//! difference panics); the second builds are counted in `[TIMING] x_mb_lookup_*` with the
-//! search's. With LOSAT_TIMING, `[TIMING] x_mb_lut_keep: kept= fresh= zero=` gives the loop's
+//! Timing: with LOSAT_TIMING, `[TIMING] x_mb_lut_keep: kept= fresh= zero=` gives the loop's
 //! builds on the kept table, its builds on a fresh one, and the time spent zeroing (also inside
 //! `x_mb_lookup_split`'s `alloc=`).
 
@@ -79,12 +75,6 @@ fn on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBLUTKEEP"))
 }
 
-/// No NCBI counterpart: LOSAT_X_MBLUTKEEPSHADOW (read once).
-pub(super) fn shadow() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_MBLUTKEEPSHADOW").is_some())
-}
-
 /// No NCBI counterpart (scheduling only): the elements one job of the pool's zeroing writes at
 /// least (256 KiB).
 const ZERO_CHUNK: usize = 1 << 16;
@@ -92,8 +82,6 @@ const ZERO_CHUNK: usize = 1 << 16;
 static KEPT: AtomicU64 = AtomicU64::new(0);
 static FRESH: AtomicU64 = AtomicU64::new(0);
 static ZERO_NANOS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_TABLES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_CELLS: AtomicU64 = AtomicU64::new(0);
 
 /// The kept table: as long as the largest table built so far; its first `dirty` elements may
 /// hold values of earlier fills (the longest start that builds wrote since it was last zeroed),
@@ -123,7 +111,13 @@ impl Keep {
     /// freed. `on_pool`: the build runs on a pool of two threads or more, which writes the zeros.
     pub(super) fn take(&self, cells: usize, on_pool: bool) -> (Vec<u32>, bool, usize) {
         let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner()).take();
+        // The reference side is a kept table too small for this build (the first build of a loop
+        // has none on either path).
+        let too_small = kept.as_ref().is_some_and(|kept| kept.table.len() < cells);
         let Some(Kept { mut table, dirty }) = kept.filter(|kept| kept.table.len() >= cells) else {
+            if too_small {
+                crate::utils::xreach::x_reach!("LOSAT_X_MBLUTKEEP", false);
+            }
             FRESH.fetch_add(1, Ordering::Relaxed);
             return (vec![0u32; cells], false, cells);
         };
@@ -132,8 +126,17 @@ impl Keep {
         if let Some(start) = start {
             ZERO_NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
+        crate::utils::xreach::x_reach!("LOSAT_X_MBLUTKEEP", true);
         KEPT.fetch_add(1, Ordering::Relaxed);
         (table, true, dirty.max(cells))
+    }
+
+    /// Frees the kept table, if any: a build laid out as CSR (LOSAT_X_BNCSR, `x_bn_csr.rs`) takes
+    /// nothing from the keep, and the loop should not hold a table beside it; the next build
+    /// with chains allocates a fresh table, which the keep takes back as before.
+    pub(super) fn release(&self) {
+        let old = self.kept.lock().unwrap_or_else(|e| e.into_inner()).take();
+        drop(old);
     }
 
     /// Takes back the table of a dropped `MbLookupTable`, whose first `dirty` elements may hold
@@ -170,49 +173,11 @@ fn zero(table: &mut [u32], on_pool: bool) {
     table.fill(0);
 }
 
-/// The shadow: the arrays (`hashtable`, `next_pos`, `pv_array`) and the longest chain (which the
-/// counters of `helper_array` give) of a build on a kept table (`kept`) equal those of the same
-/// build on a fresh table (`fresh`); a difference panics.
-pub(super) fn shadow_check(kept: [&[u32]; 3], fresh: [&[u32]; 3], chains: (usize, usize)) {
-    const NAMES: [&str; 3] = ["hashtable", "next_pos", "pv_array"];
-    let mut cells = 0u64;
-    for ((name, a), b) in NAMES.iter().zip(kept).zip(fresh) {
-        assert_eq!(
-            a.len(),
-            b.len(),
-            "LOSAT_X_MBLUTKEEPSHADOW: {name} has {} elements on the kept table, {} on a fresh one",
-            a.len(),
-            b.len()
-        );
-        if let Some(i) = (0..a.len()).find(|&i| a[i] != b[i]) {
-            panic!(
-                "LOSAT_X_MBLUTKEEPSHADOW: {name}[{i}] is {} on the kept table, {} on a fresh one",
-                a[i], b[i]
-            );
-        }
-        cells += a.len() as u64;
-    }
-    assert_eq!(
-        chains.0, chains.1,
-        "LOSAT_X_MBLUTKEEPSHADOW: longest_chain {} on the kept table, {} on a fresh one",
-        chains.0, chains.1
-    );
-    SHADOW_TABLES.fetch_add(1, Ordering::Relaxed);
-    SHADOW_CELLS.fetch_add(cells, Ordering::Relaxed);
-}
-
-/// No NCBI counterpart: printed by `main` at exit (through `x_mb_lookup_print_summary`): the
-/// shadow line with LOSAT_X_MBLUTKEEPSHADOW, and with LOSAT_TIMING the `[TIMING] x_mb_lut_keep`
-/// line when a loop kept tables. They print counters and change no value NCBI computes.
+/// No NCBI counterpart: printed by `main` at exit (through `x_mb_lookup_print_summary`): with
+/// LOSAT_TIMING the `[TIMING] x_mb_lut_keep` line when a loop kept tables. It prints counters and
+/// changes no value NCBI computes.
 pub(super) fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
-    if shadow() {
-        eprintln!(
-            "[X_SHADOW] MBLUTKEEP tables={} cells={} diffs=0 identical",
-            load(&SHADOW_TABLES),
-            load(&SHADOW_CELLS)
-        );
-    }
     if super::x_mb_lookup_par::timing_on() && load(&KEPT) + load(&FRESH) > 0 {
         eprintln!(
             "[TIMING] x_mb_lut_keep: kept={} fresh={} zero={:.4}s",

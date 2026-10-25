@@ -1,4 +1,3 @@
-//! EXPERIMENT (LOSAT_X_NEWTONEXACT / LOSAT_X_NEWTONEXACTSHADOW):
 //! `Blast_OptimizeTargetFrequencies` for the relative-entropy-constrained
 //! problem, bit for bit.
 //!
@@ -46,9 +45,6 @@
 //!
 //! What this module does **not** change: the libm `ln` (same function, same
 //! arguments), the Euclidean norms, the step bound, the stopping test.
-//!
-//! `LOSAT_X_NEWTONEXACTSHADOW=1` runs both this code and the reference on every
-//! call and aborts on the first value that differs.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:762-768,774-777,781-785
 //! ```c
@@ -120,8 +116,11 @@ pub(crate) static PROF: [AtomicU64; 12] = [
 ];
 // No NCBI counterpart: reads LOSAT_X_NEWTONEXACT_PROF once; it does not change any value NCBI computes.
 pub(crate) fn prof_enabled() -> bool {
+    if !crate::utils::xdiag::ON {
+        return false;
+    }
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_NEWTONEXACT_PROF").is_some())
+    *ON.get_or_init(|| crate::utils::xdiag::var_os("LOSAT_X_NEWTONEXACT_PROF").is_some())
 }
 // No NCBI counterpart: reads the time-stamp counter for the profile output; it does not change any value NCBI computes.
 #[inline(always)]
@@ -177,32 +176,6 @@ const NN: usize = N * N;
 const M: usize = 2 * N;
 /// Lane padding for the 20-row vectors of the trailing block.
 const P: usize = 24;
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
-// ```c
-// int
-// Blast_OptimizeTargetFrequencies(double x[],
-// ...
-//                                 int constrain_rel_entropy,
-//                                 double relative_entropy,
-//                                 double tol,
-//                                 int maxits)
-// ```
-// No NCBI counterpart: reads LOSAT_X_NEWTONEXACT and LOSAT_X_NEWTONEXACTSHADOW once. It chooses
-// between the port of this function (reference), this module, or both with a comparison.
-/// 0 = reference, 1 = this module, 2 = both (checked bit for bit on every call).
-pub(crate) fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_NEWTONEXACTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_NEWTONEXACT") {
-            1
-        } else {
-            0
-        }
-    })
-}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:747-748,635-636
 // ```c

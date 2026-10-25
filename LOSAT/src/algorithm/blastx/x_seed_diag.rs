@@ -1,8 +1,9 @@
 //! EXPERIMENT (LOSAT_X_BXDIAG / LOSAT_X_BXDIAGSHADOW): the BLASTX two-hit seed stage with the
 //! subject scan and the diagonal test in one loop, and the hits of one lookup cell tested in AVX2
-//! batches of eight.
+//! batches of eight (by default the batches cross the cells' borders: see the LOSAT_X_BXCROSS
+//! paragraph below, where they rest on a conflict test instead).
 //!
-//! The reference (`word_finder_plain`, and LOSAT_X_BXSCAN's `x_word_finder_direct`) has the
+//! The reference (`word_finder`, and `x_word_finder_direct` of `x_seed_scan.rs`) has the
 //! scanner copy every word hit into the offset-pair buffer and then reads the buffer back for the
 //! two-hit test (NCBI's `s_BlastAaScanSubject` and `s_BlastAaWordFinder_TwoHit`). With the switch,
 //! blastp's fused scan (`blastp::x_seed_fused::x_scan_two_hit_with`: LOSAT_X_BPSEED's loop with
@@ -18,15 +19,15 @@
 //! the hits are visited in the reference's order (subject offset ascending, a cell's hits in their
 //! stored order). The query offsets of one cell are distinct and the table is at least the six-frame
 //! query's length plus the window (`Diagonals::new`), so the hits of one subject offset fall on
-//! distinct entries, which the batches of eight rest on. The values are those of the bit-field and
+//! distinct entries, which the batches of eight within a cell rest on (the batches that cross cells
+//! rest on the conflict test of LOSAT_X_BXCROSS, below). The values are those of the bit-field and
 //! of the wrapping i32 arithmetic, in both loops. The closure takes a candidate's context from
 //! blastp's `XContextTable` (made once per query batch and thread), which gives the index of the
 //! reference's binary search.
 //!
 //! Where it acts: the two-hit stage (`-window_size` above 0) with the standard lookup table
-//! (`-word_size 3`, the default), when nothing traces the seeds and the diagonal order is the
-//! reference's (LOSAT_X_SEEDBUCKET mode 0); elsewhere the reference runs. `LOSAT_X_BXDIAG` is a
-//! switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. When it
+//! (`-word_size 3`, the default), when nothing traces the seeds; elsewhere the reference runs. `LOSAT_X_BXDIAG` is a
+//! switch of the strict set: on unless it is `0`. When it
 //! is not set (or empty) it acts only where the cell test is the AVX2 batch (an x86-64 CPU with
 //! AVX2), the cell test it was timed with; set to a value, it runs on any CPU. The cell test is the
 //! AVX2 batch on an x86-64 CPU with AVX2 and the per-hit loop elsewhere, as LOSAT_X_BPDIAG chooses;
@@ -34,38 +35,95 @@
 //! (diagnostics; the tests use them). `LOSAT_X_BXDIAGSHADOW` (any value) also runs the reference on
 //! a copy of the diagonal table for every subject and stops (panics) if the hit lists or the tables
 //! differ, and prints a summary at exit. With `LOSAT_TIMING=1` a run prints
-//! `[TIMING] blastx_diag: mode=<avx2|scalar|per-hit> subjects=N cells=N batched_hits=N
-//! candidates=N` (the subjects the fused loop scanned, the cells it tested in batches, their hits,
-//! and the hits passed to the closure; zeros but the subjects with `per-hit`).
+//! `[TIMING] blastx_diag: mode=<avx2-defer-masked|avx2-cross|avx2|scalar|per-hit> subjects=N cells=N
+//! batched_hits=N candidates=N` (the subjects the fused loop scanned, the cells it tested in
+//! batches, their hits, and the hits passed to the closure; zeros but the subjects with `per-hit`).
+//!
+//! EXPERIMENT (LOSAT_X_BXDEFER): the AVX2 batch is `XDiagMode::Avx2DeferMasked`: blastp's
+//! LOSAT_X_BPDEFER (the calls of a cell's candidates after its batches) with the lanes' entry
+//! coordinates from scalar loads and the last batch of fewer than eight hits as a masked AVX2 batch;
+//! the argument that the calls, their order and the table are the AVX2 batch's is in
+//! `x_seed_fused`'s module header. A switch of the strict set: on unless it is `0`;
+//! `LOSAT_X_BXDEFER=0` gives the AVX2 batch (`mode=avx2`).
+//! It acts where LOSAT_X_BXCROSS's cell test (below) does not run (`LOSAT_X_BXCROSS=0`, or a CPU
+//! without POPCNT), on the tables with at least `LOSAT_X_BXDEFERMIN` hits per used backbone cell
+//! (hundredths, built-in 700; `0` every table); a fused table with fewer takes the AVX2 batch, as
+//! there the masked batch and the buffer cost more than they save (the fused loop forced on the
+//! first 1,500 nt of a 2.1-kb fly cDNA x the fly proteome, 4.91 hits per used cell: x1.033
+//! cycles; the whole cDNA, 6.77: x0.996). The choice is made with LOSAT_X_BXDIAGMIN's, once per
+//! thread and table; as LOSAT_X_BXDIAGMIN's built-in value with this cell test (900) is above
+//! 700, no fused table falls under the rule by default (only with LOSAT_X_BXDIAGMIN set below
+//! 700). The timing line then also gives `defer_min_hits_per_cell=` and `tables_avx2=` (the fused
+//! tables that took the AVX2 batch).
+//! `LOSAT_X_BXDIAGSHADOW` compares it with the reference like the other cell tests, on the tables
+//! the rule gives it.
 //!
 //! A query batch whose lookup table has fewer hits per used backbone cell than
-//! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 500; `0` fuses every batch) is scanned by the loop
-//! LOSAT_X_BXSCAN chooses instead: with few hits per cell the fused loop's per-cell work costs more
-//! than the copy it saves (a 300-nt query x the first UniRef50 volume, 1.76 hits per used cell:
-//! x1.20 the time of the direct loop; 4.91: x1.00; 6.77: x0.94; 800 cDNAs x yeast: x0.72). Both
-//! loops give the reference's hits and table, so the choice changes only the speed; it is made once
-//! per thread and table ([`x_fused_pays`]). The timing line then also gives `min_hits_per_cell=`,
-//! `tables_fused=` and `tables_other=` (the choices made) and `hits_per_cell=LEAST-MOST` (hundredths).
+//! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 670 with LOSAT_X_BXCROSS's cell test and 900 with
+//! the others; `0` fuses every batch, a number set is the cutoff of every cell test) is scanned
+//! by the direct loop instead: with few hits per cell the fused loop's per-cell work costs more
+//! than the copy it saves. Since LOSAT_X_BXHITBF made the direct loop faster, the fused loop with
+//! LOSAT_X_BXDEFER's cell test and the direct loop break even
+//! near 9 hits per used cell (about 8.75 against the fly proteome, 10.7 against Swiss-Prot; one
+//! core, user-space cycles of the fused loop with the cell test it takes against the direct loop,
+//! fly cDNAs x the fly proteome: 4.91 hits per used cell x1.20, 6.77 x1.13, 8.38 x1.03, 9.37
+//! x0.98, 13.32 x0.90); the built-in value was 500 before (measured against the direct loop
+//! without LOSAT_X_BXHITBF: 1.76 x1.20, 4.91 x1.00, 6.77 x0.94, 800 cDNAs x yeast x0.72), and
+//! `LOSAT_X_BXDIAGMIN=500` gives that rule. With LOSAT_X_BXCROSS's cell test they break even near
+//! 6.7 (about 6.46 against the fly proteome, 6.95 against Swiss-Prot; the cross test against the
+//! direct loop: 4.05 x1.13, 5.34 x1.06, 6.33 x1.01, 6.63 x0.99, 7.34 x0.95, 8.38 x0.90), hence 670
+//! for it (`LOSAT_X_BXDIAGMIN=900` gives the rule before). Both loops give the reference's hits
+//! and table, so the choice changes only the speed; it is made once per thread and table
+//! ([`x_fused_pays`]), and once for all the threads that search one table's subjects in tasks
+//! ([`x_shared_table_ratio`]). The timing line then also gives `min_hits_per_cell=` (the cutoff of
+//! the cell test that ran), `tables_fused=` and `tables_other=` (the choices made) and
+//! `hits_per_cell=LEAST-MOST` (hundredths).
 //!
-//! EXPERIMENT (LOSAT_X_BXSCANBF, `x_seed_scan.rs`): with that switch the fused loop finds the
-//! cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`'s
-//! `branch_free`, blastp's `x_scan_cells_bf`): the same cells in the same order.
+//! EXPERIMENT (LOSAT_X_BXCROSS): the AVX2 batch is `XCellTest::Cross`:
+//! the subject's hits staged and tested in windows of eight cut across the cells' borders, a
+//! window with a repeated entry in parts cut before each hit that repeats an entry of its part, the
+//! last hits of the subject one after the other; the argument that the calls, their order and the
+//! table are the per-hit loop's is in `x_seed_fused`'s module header (it rests on the closures of
+//! [`x_word_finder_fused`] and [`x_word_finder_fused_sent`] writing only their hit's entry). The
+//! stage keeps no query offset: it is recovered as `(coord + s) & mask`, exact because the table
+//! made by `Diagonals::new` for the query batch has at least its length plus the window entries,
+//! so `mask` is at least every query offset of the batch's lookup
+//! (`x_seed_fused::x_scan_cells_cross` asserts it per subject). A
+//! switch of the strict set (since 2026-10-23): on unless it is `0`; `LOSAT_X_BXCROSS=0` gives
+//! LOSAT_X_BXDEFER's choice above. On, it is the cell test
+//! of every table the fused loop takes where the CPU has AVX2 and POPCNT, in place of
+//! LOSAT_X_BXDEFER's and of LOSAT_X_BXDEFERMIN's rule (`tables_avx2=0`); without POPCNT the fused
+//! loop takes LOSAT_X_BXDEFER's choice. `LOSAT_X_BXDIAGMIN` still chooses the tables (its cutoff
+//! against the direct loop is a rule of its own; with this cell test the two loops break even
+//! lower, and its built-in value is 670 instead of 900: above), and `LOSAT_X_BXDIAGSHADOW`
+//! compares it with the reference like the other cell tests. The batches run at 1,024 staged
+//! hits. The timing line names `mode=avx2-cross` and ends with `cross_splits=N` (the windows of
+//! eight staged hits with a repeated entry, tested in parts; counted per subject scan like the
+//! other counts).
+//!
+//! LOSAT_X_BXSCANBF (`x_seed_scan.rs`; graduated 2026-10-26, no variable, always on): the fused
+//! loop finds the cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`
+//! with `branch_free: true`, blastp's `x_scan_cells_bf`): the same cells in the same order.
+//!
+//! EXPERIMENT (LOSAT_X_BXUNGAPSENT, `x_ungap_sent.rs`): for a subject on that path the closure's
+//! two-hit extension is the sentinel walks, in an instance of its own (`x_word_finder_fused_sent`,
+//! never inlined; the other statements unchanged), so the loop without it keeps its code.
 
-use super::x_seed_scan::x_bxscan_bf;
+use super::x_ungap_sent::XSent;
 use super::*;
 use crate::algorithm::blastp::x_seed_fused::{
-    x_cell_test, x_scan_two_hit_with, XContextTable, XDiagMode,
+    x_cell_test, x_scan_two_hit_with, XCellTest, XContextTable, XDiagMode,
 };
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::OnceLock;
 
 thread_local! {
-    /// EXPERIMENT (LOSAT_X_BXDIAGMIN): the last lookup table this thread chose a loop for (its
-    /// address, its backbone's address and its overflow length) and the choice (see
-    /// [`x_fused_pays`]).
-    static X_CHOICE: std::cell::Cell<(usize, usize, usize, bool)> =
-        const { std::cell::Cell::new((0, 0, 0, false)) };
+    /// EXPERIMENT (LOSAT_X_BXDIAGMIN, LOSAT_X_BXDEFERMIN): the last lookup table this thread chose
+    /// a loop for (its address, its backbone's address and its overflow length) and its hits per
+    /// used cell (see [`x_table_ratio`]).
+    static X_CHOICE: std::cell::Cell<(usize, usize, usize, u64)> =
+        const { std::cell::Cell::new((0, 0, 0, 0)) };
     /// EXPERIMENT (LOSAT_X_BXDIAG): the context table of the query batch this thread searches,
     /// with the frame bases and the span it was made for (see [`x_with_context_table`]).
     static X_CONTEXTS: RefCell<Option<(Vec<i32>, usize, XContextTable)>> =
@@ -121,7 +179,7 @@ fn x_with_context_table<R>(batch: &PreparedQueryBatch, f: impl FnOnce(&XContextT
 // computes.
 /// EXPERIMENT (LOSAT_X_BXDIAG): 0 = off, 1 = the fused loop, 2 = shadow
 /// (`LOSAT_X_BXDIAGSHADOW`: the fused loop and the reference on a copy of the table, compared).
-/// A switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; on
+/// A switch of the strict set: on unless it is `0`; on
 /// by default (not set, or empty) only with the AVX2 batch ([`x_cell_mode`]).
 pub(crate) fn x_bxdiag_mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
@@ -140,32 +198,62 @@ pub(crate) fn x_bxdiag_mode() -> u8 {
 // No NCBI counterpart: chooses LOSAT's code path; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXDIAG): whether the cell test is the AVX2 batch, where the default acts.
 fn x_avx2_batches() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    if matches!(x_cell_mode(), XDiagMode::Avx2) {
-        return true;
+    match x_cell_mode() {
+        #[cfg(target_arch = "x86_64")]
+        XCellTest::Diag(XDiagMode::Avx2 | XDiagMode::Avx2DeferMasked) | XCellTest::Cross => true,
+        _ => false,
     }
-    false
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BXDEFER switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BXDEFER): whether the AVX2 batch is `XDiagMode::Avx2DeferMasked` (module
+/// header); a switch of the strict set, on unless it is `0`.
+fn x_bx_defer() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXDEFER"))
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BXCROSS switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BXCROSS): whether the AVX2 batch is `XCellTest::Cross` where the CPU
+/// has POPCNT (module header); a switch of the strict set, on unless it is `0`.
+fn x_bx_cross() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCROSS"))
 }
 
 // No NCBI counterpart: chooses LOSAT's code path once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXDIAG): the cell test of the fused loop (the switch's value names one).
-fn x_cell_mode() -> XDiagMode {
-    static MODE: OnceLock<XDiagMode> = OnceLock::new();
-    *MODE.get_or_init(|| x_cell_test(std::env::var("LOSAT_X_BXDIAG").unwrap_or_default().as_str()))
+fn x_cell_mode() -> XCellTest {
+    static MODE: OnceLock<XCellTest> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        x_cell_test(
+            std::env::var("LOSAT_X_BXDIAG").unwrap_or_default().as_str(),
+            x_bx_defer(),
+            x_bx_cross(),
+        )
+    })
 }
 
 // No NCBI counterpart: reads LOSAT_X_BXDIAGMIN once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): the fewest hits per used lookup cell, in hundredths, for
-/// which the fused loop scans a query batch's subjects (built-in 500, where the two loops took
-/// the same time); a batch whose table has fewer is scanned by the loop LOSAT_X_BXSCAN chooses.
-/// `0` fuses every batch; a value that is not a number takes the built-in one.
-fn x_min_hits_per_cell() -> u64 {
-    static MIN: OnceLock<u64> = OnceLock::new();
-    *MIN.get_or_init(|| {
+/// which the fused loop with the cell test `mode` scans a query batch's subjects; a batch whose
+/// table has fewer is scanned by the direct loop. Built-in, near where the two loops take the
+/// same time: 670 with LOSAT_X_BXCROSS's cell test, 900 with the others (since LOSAT_X_BXHITBF;
+/// 500 before it). A number set is the cutoff of every cell test, `0` fuses every batch; a value
+/// that is not a number takes the built-in one.
+fn x_min_hits_per_cell(mode: XCellTest) -> u64 {
+    static MIN: OnceLock<Option<u64>> = OnceLock::new();
+    let set = *MIN.get_or_init(|| {
         std::env::var("LOSAT_X_BXDIAGMIN")
             .ok()
             .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(500)
+    });
+    set.unwrap_or(match mode {
+        #[cfg(target_arch = "x86_64")]
+        XCellTest::Cross => 670,
+        XCellTest::Diag(_) => 900,
     })
 }
 
@@ -184,42 +272,143 @@ fn x_hits_per_cell(table: &BlastAaLookupTable) -> u64 {
     (hits * 100).checked_div(used).unwrap_or(0)
 }
 
+// No NCBI counterpart: a property of the lookup table that chooses LOSAT's loop; it does not
+// change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXDIAGMIN, LOSAT_X_BXDEFERMIN): `table`'s hits per used cell
+/// ([`x_hits_per_cell`]), worked out once per table and thread (the table's addresses and overflow
+/// length identify it; a later table that matched all three would reuse the value, which changes
+/// only the speed), and whether this call worked it out.
+fn x_table_ratio(table: &BlastAaLookupTable) -> (u64, bool) {
+    let key = x_table_key(table);
+    X_CHOICE.with(|choice| {
+        let (a, b, c, ratio) = choice.get();
+        if (a, b, c) == key {
+            return (ratio, false);
+        }
+        let ratio = x_hits_per_cell(table);
+        choice.set((key.0, key.1, key.2, ratio));
+        (ratio, true)
+    })
+}
+
 // No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's hits and table.
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): whether the fused loop scans the subjects of `table`'s query
-/// batch: its hits per used cell are at least [`x_min_hits_per_cell`]. Worked out once per table
-/// and thread (the table's addresses and overflow length identify it; a later table that matched
-/// all three would reuse the choice, which changes only the speed).
-fn x_fused_pays(table: &BlastAaLookupTable) -> bool {
-    let key = (
+/// batch: its hits per used cell are at least [`x_min_hits_per_cell`] of `mode`. Counted for the
+/// timing line once per table and thread, with the cell test `mode` would take for it
+/// (LOSAT_X_BXDEFERMIN, [`x_table_mode`]).
+fn x_fused_pays(table: &BlastAaLookupTable, mode: XCellTest) -> bool {
+    let (ratio, first) = x_table_ratio(table);
+    if first {
+        x_count_choice(ratio, mode);
+    }
+    ratio >= x_min_hits_per_cell(mode)
+}
+
+// No NCBI counterpart: counters of the timing line.
+/// EXPERIMENT (LOSAT_X_BXDIAGMIN): counts one choice of the loop for a table of `ratio` hits per
+/// used cell (see [`x_fused_pays`]).
+fn x_count_choice(ratio: u64, mode: XCellTest) {
+    let fused = ratio >= x_min_hits_per_cell(mode);
+    X_TABLES[usize::from(!fused)].fetch_add(1, Relaxed);
+    X_RATIO_MIN.fetch_min(ratio, Relaxed);
+    X_RATIO_MAX.fetch_max(ratio, Relaxed);
+    if fused && x_table_mode(mode, ratio) != mode {
+        X_TABLES_AVX2.fetch_add(1, Relaxed);
+    }
+}
+
+// No NCBI counterpart: identifies a lookup table for the choice of the loop (speed only).
+/// EXPERIMENT (LOSAT_X_BXDIAGMIN): the table's address, its backbone's address and its overflow
+/// length (see [`x_table_ratio`]).
+fn x_table_key(table: &BlastAaLookupTable) -> (usize, usize, usize) {
+    (
         table as *const BlastAaLookupTable as usize,
         table.backbone.as_ptr() as usize,
         table.overflow.len(),
-    );
-    X_CHOICE.with(|choice| {
-        let (a, b, c, fused) = choice.get();
-        if (a, b, c) == key {
-            return fused;
-        }
-        let ratio = x_hits_per_cell(table);
-        let fused = ratio >= x_min_hits_per_cell();
-        X_TABLES[usize::from(!fused)].fetch_add(1, Relaxed);
-        X_RATIO_MIN.fetch_min(ratio, Relaxed);
-        X_RATIO_MAX.fetch_max(ratio, Relaxed);
-        choice.set((key.0, key.1, key.2, fused));
-        fused
+    )
+}
+
+// No NCBI counterpart: chooses LOSAT's loop once for the threads that share a table's subjects
+// (LOSAT_X_BXUNITCAP's tasks and the subject flow, blastx/x_bx_mem.rs); it does not change any
+// value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXDIAGMIN): `lookup`'s hits per used cell where the fused loop may scan its
+/// subjects, worked out (and counted) on this thread, to be given to the threads that search some
+/// of them ([`x_take_table_ratio`]); `None` where [`x_word_finder_diag`] does not ask for it. A
+/// thread that takes tasks of several tables in turn would otherwise work it out again at each
+/// change of table (its cache holds one).
+#[cfg(feature = "parallel")]
+pub(crate) fn x_shared_table_ratio(lookup: &Lookup, options: &ResolvedOptions) -> Option<u64> {
+    let Lookup::Standard(table, _) = lookup else {
+        return None;
+    };
+    if x_bxdiag_mode() == 0 || options.window_size <= 0 {
+        return None;
+    }
+    let (ratio, first) = x_table_ratio(table);
+    if first {
+        x_count_choice(ratio, x_cell_mode());
+    }
+    Some(ratio)
+}
+
+// No NCBI counterpart: see `x_shared_table_ratio` (speed only).
+/// EXPERIMENT (LOSAT_X_BXDIAGMIN): makes `ratio` (from [`x_shared_table_ratio`] for `lookup`) this
+/// thread's choice for `lookup`'s table, so that the thread does not work it out again.
+#[cfg(feature = "parallel")]
+pub(crate) fn x_take_table_ratio(lookup: &Lookup, ratio: Option<u64>) {
+    if let (Lookup::Standard(table, _), Some(ratio)) = (lookup, ratio) {
+        let (a, b, c) = x_table_key(table);
+        X_CHOICE.with(|choice| choice.set((a, b, c, ratio)));
+    }
+}
+
+// No NCBI counterpart: reads LOSAT_X_BXDEFERMIN once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXDEFERMIN): the fewest hits per used lookup cell, in hundredths, for
+/// which the fused loop takes LOSAT_X_BXDEFER's cell test (built-in 700); a table with fewer takes
+/// the AVX2 batch. With few hits per cell the masked last batch and the buffer cost more than they
+/// save (the fused loop on 4.91 hits per used cell x1.033 cycles, 6.77 x0.996). `0` takes it for
+/// every table; a value that is not a number takes the built-in one.
+fn x_min_hits_per_cell_defer() -> u64 {
+    static MIN: OnceLock<u64> = OnceLock::new();
+    *MIN.get_or_init(|| {
+        std::env::var("LOSAT_X_BXDEFERMIN")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(700)
     })
+}
+
+// No NCBI counterpart: chooses LOSAT's cell test; every cell test gives the reference's hits and
+// table.
+/// EXPERIMENT (LOSAT_X_BXDEFERMIN): the cell test for a table of `ratio` hits per used cell:
+/// `mode`, but the AVX2 batch instead of LOSAT_X_BXDEFER's below [`x_min_hits_per_cell_defer`].
+/// LOSAT_X_BXCROSS's cell test is kept on every table (module header).
+fn x_table_mode(mode: XCellTest, ratio: u64) -> XCellTest {
+    #[cfg(target_arch = "x86_64")]
+    if mode == XCellTest::Diag(XDiagMode::Avx2DeferMasked) && ratio < x_min_hits_per_cell_defer() {
+        return XCellTest::Diag(XDiagMode::Avx2);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = ratio;
+    mode
 }
 
 // No NCBI counterpart: counters of the timing line and of the shadow summary.
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): the (thread, table) choices for the fused loop (`[0]`) and
 /// for the other loop (`[1]`), and the least and greatest hits per used cell (hundredths) seen.
 static X_TABLES: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+/// EXPERIMENT (LOSAT_X_BXDEFERMIN): the (thread, table) choices for the fused loop that took the
+/// AVX2 batch instead of LOSAT_X_BXDEFER's cell test.
+static X_TABLES_AVX2: AtomicU64 = AtomicU64::new(0);
 static X_RATIO_MIN: AtomicU64 = AtomicU64::new(u64::MAX);
 static X_RATIO_MAX: AtomicU64 = AtomicU64::new(0);
 static X_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static X_CELLS: AtomicU64 = AtomicU64::new(0);
 static X_HITS: AtomicU64 = AtomicU64::new(0);
 static X_CANDIDATES: AtomicU64 = AtomicU64::new(0);
+/// EXPERIMENT (LOSAT_X_BXCROSS): the windows of eight staged hits with a repeated entry, tested in
+/// parts, added with the other counts once per subject scan ([`x_add_counts`]).
+static X_SPLITS: AtomicU64 = AtomicU64::new(0);
 static X_SHADOW_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static X_SHADOW_SHORT: AtomicU64 = AtomicU64::new(0);
 
@@ -227,20 +416,28 @@ static X_SHADOW_SHORT: AtomicU64 = AtomicU64::new(0);
 /// EXPERIMENT (LOSAT_X_BXDIAG): with the switch on, the `[TIMING] blastx_diag` line of the run.
 pub(crate) fn x_write_timing(out: &mut dyn std::io::Write) -> std::io::Result<()> {
     if x_bxdiag_mode() != 0 {
-        writeln!(
+        write!(
             out,
-            "[TIMING] blastx_diag: mode={} subjects={} cells={} batched_hits={} candidates={} min_hits_per_cell={} tables_fused={} tables_other={} hits_per_cell={}-{}",
+            "[TIMING] blastx_diag: mode={} subjects={} cells={} batched_hits={} candidates={} min_hits_per_cell={} tables_fused={} tables_other={} hits_per_cell={}-{} defer_min_hits_per_cell={} tables_avx2={}",
             x_cell_mode().name(),
             X_SUBJECTS.load(Relaxed),
             X_CELLS.load(Relaxed),
             X_HITS.load(Relaxed),
             X_CANDIDATES.load(Relaxed),
-            x_min_hits_per_cell(),
+            x_min_hits_per_cell(x_cell_mode()),
             X_TABLES[0].load(Relaxed),
             X_TABLES[1].load(Relaxed),
             X_RATIO_MIN.load(Relaxed).min(X_RATIO_MAX.load(Relaxed)),
             X_RATIO_MAX.load(Relaxed),
+            x_min_hits_per_cell_defer(),
+            X_TABLES_AVX2.load(Relaxed),
         )?;
+        // EXPERIMENT (LOSAT_X_BXCROSS): the windows tested in parts.
+        #[cfg(target_arch = "x86_64")]
+        if x_cell_mode() == XCellTest::Cross {
+            write!(out, " cross_splits={}", X_SPLITS.load(Relaxed))?;
+        }
+        writeln!(out)?;
     }
     Ok(())
 }
@@ -290,28 +487,36 @@ pub(crate) fn x_word_finder_diag(
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
+    sent: Option<XSent<'_>>,
 ) -> Result<Option<Vec<InitHsp>>> {
-    let Lookup::Standard(table) = lookup else {
+    let Lookup::Standard(table, _) = lookup else {
+        if x_bxdiag_mode() != 2 {
+            crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", false);
+        }
         return Ok(None);
     };
     if options.window_size <= 0 {
+        if x_bxdiag_mode() != 2 {
+            crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", false);
+        }
         return Ok(None);
     }
     let mode = x_cell_mode();
     if x_bxdiag_mode() != 2 {
         // EXPERIMENT (LOSAT_X_BXDIAGMIN): a batch with few hits per cell goes to the other loop.
-        if !x_fused_pays(table) {
+        let pays = x_fused_pays(table, mode);
+        crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", pays);
+        if !pays {
             return Ok(None);
         }
-        let (hits, counts) = x_word_finder_fused(
-            mode,
-            x_bxscan_bf(),
-            batch,
-            parameters,
-            options,
-            subject,
-            table,
-            diagonals,
+        // EXPERIMENT (LOSAT_X_BXDEFERMIN): BXDEFER's cell test only with enough hits per cell.
+        let table_mode = x_table_mode(mode, x_table_ratio(table).0);
+        #[cfg(target_arch = "x86_64")]
+        if mode == XCellTest::Diag(XDiagMode::Avx2DeferMasked) {
+            crate::utils::xreach::x_reach!("LOSAT_X_BXDEFER", table_mode == mode);
+        }
+        let (hits, counts) = x_word_finder_fused_or_sent(
+            table_mode, batch, parameters, options, subject, table, diagonals, sent,
         )?;
         x_add_counts(counts);
         return Ok(Some(hits));
@@ -321,7 +526,7 @@ pub(crate) fn x_word_finder_diag(
         offset: diagonals.offset,
         window: diagonals.window,
     };
-    let reference = word_finder_plain(
+    let reference = word_finder(
         batch,
         parameters,
         options,
@@ -330,15 +535,15 @@ pub(crate) fn x_word_finder_diag(
         &mut copy,
         |_| {},
     )?;
-    let (fused, counts) = x_word_finder_fused(
-        mode,
-        x_bxscan_bf(),
+    let (fused, counts) = x_word_finder_fused_or_sent(
+        x_table_mode(mode, x_table_ratio(table).0),
         batch,
         parameters,
         options,
         subject,
         table,
         diagonals,
+        sent,
     )?;
     x_add_counts(counts);
     if fused != reference {
@@ -378,19 +583,47 @@ pub(crate) fn x_word_finder_diag(
 }
 
 // No NCBI counterpart: adds one subject's counts to the timing line's totals.
-fn x_add_counts(counts: [u64; 3]) {
+/// EXPERIMENT (LOSAT_X_BXDIAG): one subject's counts of [`x_word_finder_fused`] (the cells, their
+/// hits, the candidates, and LOSAT_X_BXCROSS's windows tested in parts) added to the totals.
+fn x_add_counts(counts: [u64; 4]) {
     X_SUBJECTS.fetch_add(1, Relaxed);
     if counts[0] != 0 {
         X_CELLS.fetch_add(counts[0], Relaxed);
         X_HITS.fetch_add(counts[1], Relaxed);
         X_CANDIDATES.fetch_add(counts[2], Relaxed);
+        if counts[3] != 0 {
+            X_SPLITS.fetch_add(counts[3], Relaxed);
+        }
+    }
+}
+
+// No NCBI counterpart: chooses the instance of the fused loop; both give the reference's hits and
+// table.
+/// EXPERIMENT (LOSAT_X_BXUNGAPSENT): [`x_word_finder_fused`], or with `sent` its instance with the
+/// sentinel walks, [`x_word_finder_fused_sent`].
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_fused_or_sent(
+    mode: XCellTest,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    table: &BlastAaLookupTable,
+    diagonals: &mut Diagonals,
+    sent: Option<XSent<'_>>,
+) -> Result<(Vec<InitHsp>, [u64; 4])> {
+    match sent {
+        Some(sent) => x_word_finder_fused_sent(
+            mode, batch, parameters, options, subject, table, diagonals, sent,
+        ),
+        None => x_word_finder_fused(mode, batch, parameters, options, subject, table, diagonals),
     }
 }
 
 /// EXPERIMENT (LOSAT_X_BXDIAG): `x_word_finder_direct`'s two-hit stage for one subject on the
 /// standard lookup table `table`, with the scan and the diagonal test fused (cell test `mode`;
-/// the branch-free scan with `branch_free`, LOSAT_X_BXSCANBF); also returns the cells tested in
-/// batches, their hits and the candidates.
+/// the branch-free scan, BXSCANBF, graduated); also returns the cells tested in
+/// batches, their hits, the candidates and LOSAT_X_BXCROSS's windows tested in parts.
 /// `subject` starts at the first residue and keeps the sentinel after the last one.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
 // ```c
@@ -411,20 +644,19 @@ fn x_add_counts(counts: [u64; 3]) {
 // ```
 #[allow(clippy::too_many_arguments)]
 fn x_word_finder_fused(
-    mode: XDiagMode,
-    branch_free: bool,
+    mode: XCellTest,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
     table: &BlastAaLookupTable,
     diagonals: &mut Diagonals,
-) -> Result<(Vec<InitHsp>, [u64; 3])> {
+) -> Result<(Vec<InitHsp>, [u64; 4])> {
     let query = &batch.sequence_start[1..];
     let word = options.word_size;
     let offset = diagonals.offset;
     let mask = diagonals.entries.len() as i32 - 1;
-    // Lookup::scan's set-up, with length = subject.len() - 1 as word_finder_plain passes it; the
+    // Lookup::scan's set-up, with length = subject.len() - 1 as word_finder passes it; the
     // fused scan runs from 0 to max(length - word length, 0), the reference's range with a
     // two-hit window.
     let length = subject.len().saturating_sub(1);
@@ -432,7 +664,7 @@ fn x_word_finder_fused(
     let counts = x_with_context_table(batch, |contexts| {
         x_scan_two_hit_with(
             mode,
-            branch_free,
+            true,
             table,
             subject,
             length,
@@ -535,7 +767,111 @@ fn x_word_finder_fused(
             },
         )
     });
-    // The rest of word_finder_plain, unchanged.
+    // The rest of word_finder, unchanged.
+    diagonals.finish_subject(length)?;
+    hits.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then(a.s_start.cmp(&b.s_start))
+            .then(b.length.cmp(&a.length))
+            .then(a.q_start.cmp(&b.q_start))
+    });
+    Ok((hits, counts))
+}
+
+/// EXPERIMENT (LOSAT_X_BXUNGAPSENT): [`x_word_finder_fused`] with the two-hit extension of `sent`
+/// (`x_ungap_sent.rs`), in a function of its own so that the loop without it keeps its code. The
+/// closure's other statements are those of `x_word_finder_fused`'s, in the same order.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-606 (as in
+// `x_word_finder_fused`).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_fused_sent(
+    mode: XCellTest,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    table: &BlastAaLookupTable,
+    diagonals: &mut Diagonals,
+    sent: XSent<'_>,
+) -> Result<(Vec<InitHsp>, [u64; 4])> {
+    let word = options.word_size;
+    let offset = diagonals.offset;
+    let mask = diagonals.entries.len() as i32 - 1;
+    let length = subject.len().saturating_sub(1);
+    let mut hits = Vec::new();
+    let counts = x_with_context_table(batch, |contexts| {
+        // The candidate closure with the extension `two_hit::<$shadow>`.
+        macro_rules! scan {
+            ($shadow:literal) => {
+                x_scan_two_hit_with(
+                    mode,
+                    true,
+                    table,
+                    subject,
+                    length,
+                    &mut diagonals.entries,
+                    mask,
+                    offset,
+                    options.window_size,
+                    word,
+                    |q, s, previous, diff, entry| {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560-573
+                        // (as in `x_word_finder_fused`)
+                        let context = contexts.get(q).unwrap_or_else(|| {
+                            batch
+                                .contexts
+                                .partition_point(|c| c.offset as i32 <= q)
+                                .saturating_sub(1)
+                        });
+                        if q - diff < batch.contexts[context].offset as i32 {
+                            entry.set_last_hit(s.wrapping_add(offset));
+                            return;
+                        }
+                        let p = &parameters[context];
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
+                        // (`x_ungap_sent.rs`)
+                        let Some(result) = sent.two_hit::<$shadow>(
+                            (previous + word) as usize,
+                            s as usize,
+                            q as usize,
+                            p.word_xdrop,
+                        ) else {
+                            return;
+                        };
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-606
+                        // (as in `x_word_finder_fused`)
+                        let u = result.ungapped_data;
+                        if u.score >= p.word_cutoff {
+                            hits.push(InitHsp {
+                                q_seed: q,
+                                s_seed: s,
+                                q_start: u.q_start,
+                                s_start: u.s_start,
+                                length: u.length,
+                                score: u.score,
+                            });
+                        }
+                        if result.right_extend {
+                            entry.set_flag(1);
+                            entry.set_last_hit(
+                                (result.s_last_off - (word - 1)).wrapping_add(offset),
+                            );
+                        } else {
+                            entry.set_last_hit(s.wrapping_add(offset));
+                        }
+                    },
+                )
+            };
+        }
+        if sent.shadow() {
+            scan!(true)
+        } else {
+            scan!(false)
+        }
+    });
+    // The rest of word_finder, unchanged.
     diagonals.finish_subject(length)?;
     hits.sort_by(|a, b| {
         b.score
@@ -552,18 +888,20 @@ mod tests {
     use super::*;
     use crate::algorithm::blastx::{input::parse_fasta, parameters, query_setup::prepare_queries};
 
-    /// The cell tests this machine can run, each with the presence-test scan and with the
-    /// branch-free one (LOSAT_X_BXSCANBF).
-    fn modes() -> Vec<(XDiagMode, bool)> {
-        let mut modes = vec![XDiagMode::PerHit, XDiagMode::Scalar];
-        let auto = x_cell_test("");
-        if auto != XDiagMode::PerHit {
-            modes.push(auto);
+    /// The cell tests this machine can run (the AVX2 batch with LOSAT_X_BXDEFER and without, and
+    /// with LOSAT_X_BXCROSS), each with the branch-free scan (BXSCANBF, graduated).
+    fn modes() -> Vec<XCellTest> {
+        let mut modes = vec![
+            XCellTest::Diag(XDiagMode::PerHit),
+            XCellTest::Diag(XDiagMode::Scalar),
+        ];
+        for (masked, cross) in [(true, false), (false, false), (false, true)] {
+            let auto = x_cell_test("", masked, cross);
+            if auto != XCellTest::Diag(XDiagMode::PerHit) {
+                modes.push(auto);
+            }
         }
         modes
-            .into_iter()
-            .flat_map(|mode| [(mode, false), (mode, true)])
-            .collect()
     }
 
     /// A search of `query` (nucleotide FASTA) with `-window_size window` (default options
@@ -642,7 +980,7 @@ mod tests {
     }
 
     /// Runs every subject through the reference and through the fused loop (cell test `mode`;
-    /// the branch-free scan with `branch_free`), each on its own table starting from
+    /// the branch-free scan), each on its own table starting from
     /// `start(table)`, and compares the hit lists and the tables after each subject; returns the
     /// hits and the counts of the fused loop.
     fn compare(
@@ -653,20 +991,27 @@ mod tests {
             Lookup,
         ),
         subjects: &[Vec<u8>],
-        (mode, branch_free): (XDiagMode, bool),
+        mode: XCellTest,
         start: impl Fn(&mut Diagonals),
-    ) -> (usize, [u64; 3]) {
-        let Lookup::Standard(table) = lookup else {
+    ) -> (usize, [u64; 4]) {
+        let Lookup::Standard(table, _) = lookup else {
             panic!("the standard lookup table")
         };
         let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
         let mut reference = Diagonals::new(length, options.window_size).unwrap();
         let mut fused = Diagonals::new(length, options.window_size).unwrap();
+        // EXPERIMENT (LOSAT_X_BXUNGAPSENT): the instances with the sentinel walks, without and
+        // with the shadow's comparison, each on a table of its own.
+        let mut sent = [
+            Diagonals::new(length, options.window_size).unwrap(),
+            Diagonals::new(length, options.window_size).unwrap(),
+        ];
         start(&mut reference);
         start(&mut fused);
-        let (mut hits, mut counts) = (0, [0u64; 3]);
+        sent.iter_mut().for_each(&start);
+        let (mut hits, mut counts) = (0, [0u64; 4]);
         for (i, subject) in subjects.iter().enumerate() {
-            let expected = word_finder_plain(
+            let expected = word_finder(
                 batch,
                 params,
                 options,
@@ -676,21 +1021,25 @@ mod tests {
                 |_| {},
             )
             .unwrap();
-            let (actual, c) = x_word_finder_fused(
-                mode,
-                branch_free,
-                batch,
-                params,
-                options,
-                subject,
-                table,
-                &mut fused,
-            )
-            .unwrap();
-            let run = format!("{mode:?} branch_free={branch_free} subject {i}");
+            let (actual, c) =
+                x_word_finder_fused(mode, batch, params, options, subject, table, &mut fused)
+                    .unwrap();
+            let run = format!("{mode:?} subject {i}");
             assert_eq!(actual, expected, "{run}");
             assert_eq!(fused.offset, reference.offset, "{run}");
             assert!(fused.entries == reference.entries, "{run}");
+            let lead: Vec<u8> = std::iter::once(0).chain(subject.iter().copied()).collect();
+            for (table_sent, shadow) in sent.iter_mut().zip([false, true]) {
+                let x = XSent::for_test(&batch.sequence_start, &lead, shadow);
+                let (got, c2) = x_word_finder_fused_sent(
+                    mode, batch, params, options, subject, table, table_sent, x,
+                )
+                .unwrap();
+                assert_eq!(got, expected, "{run} sent shadow={shadow}");
+                assert_eq!(c2, c, "{run} sent shadow={shadow}");
+                assert_eq!(table_sent.offset, reference.offset, "{run} sent");
+                assert!(table_sent.entries == reference.entries, "{run} sent");
+            }
             hits += actual.len();
             for (total, n) in counts.iter_mut().zip(c) {
                 *total += n;
@@ -833,15 +1182,15 @@ mod tests {
         for window in [40, 400] {
             let s = search(&query, window, mean);
             // The lookup has cells of a full batch (eight hits) and more.
-            let Lookup::Standard(table) = &s.3 else {
+            let Lookup::Standard(table, _) = &s.3 else {
                 panic!("the standard lookup table")
             };
             assert!(table.backbone.iter().any(|cell| cell.num_used >= 16));
             for mode in modes() {
                 let (hits, counts) = compare(&s, subjects, mode, |_| {});
                 assert!(hits > 0, "window={window} {mode:?}: no hit");
-                if mode.0 == XDiagMode::PerHit {
-                    assert_eq!(counts, [0, 0, 0]);
+                if mode == XCellTest::Diag(XDiagMode::PerHit) {
+                    assert_eq!(counts, [0, 0, 0, 0]);
                 } else {
                     assert!(counts[0] > 0 && counts[2] > 0, "{mode:?} {counts:?}");
                     assert!(counts[1] > counts[0], "{mode:?} {counts:?}");

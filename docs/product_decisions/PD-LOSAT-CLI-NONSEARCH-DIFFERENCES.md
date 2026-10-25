@@ -1,13 +1,16 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.4
+- Version: 1.5
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
-  C++ Toolkit words in an option's value, Session S08+b, plan DW-19)
+  C++ Toolkit words in an option's value, Session S08+b, plan DW-19); 1.5 2026-10-25
+  (exception 7, a failed write to a side file of outfmt 13 or 14, recorded for the v0.2.0 release;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
-  that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, actions `S08` and
+  that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
+  asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
   `OPEN`) left for a maintainer decision. Plan decision DW-13 in
   [`docs/losat_web_gui_plan.md`](../losat_web_gui_plan.md).
 
@@ -71,6 +74,34 @@ BLAST+.
    either way. Evidence `docs/evidence/losat_web_e2b/closed_stdout/`: BLASTN, TBLASTX,
    BLASTP, TBLASTN and BLASTX in outfmt 0, 6 and 7 (LOSAT exit 0 without stderr in all
    15; NCBI exit 6 in the 5 outfmt 0 runs and 134 in the 10 others).
+7. **Write failure in a side file of outfmt 13 or 14** (version 1.5, recorded 2026-10-25;
+   the behaviour is older: it is the decision numbered 35 S2 in the outfmt line's decision
+   record, which is not in this repository, and is quoted in the code comment at
+   `LOSAT/src/report/blast_xml2/framing.rs:104-111`). `-outfmt 13` and `-outfmt 14` write one
+   side file per report (`<base>_<n>.json`, `<base>_<n>.xml`) and a master file at `-out`
+   that lists them (BLASTN, BLASTP, TBLASTN, TBLASTX and BLASTX). When a write to a side file
+   fails after the file was opened (a full disk; `-out` next to a link to `/dev/full`), LOSAT
+   stops the run with the message and the exit status of a failed outfmt 0 write
+   (`BLAST failed to write output`, exit code 6): the side files written before stay and the
+   master file stays empty. NCBI's `BlastXML2_FormatReport(data, file_name)`
+   (`algo/blast/format/blastxml2_format.cpp:767-778`) opens the file and writes the object
+   through `CObjectOStreamXml` without checking the stream afterwards; the NCBI behaviour
+   recorded in the code comment is that it reports the failed flush on the error stream and
+   goes on, writes the remaining side files and the master file, and exits with 0 (TBLASTX:
+   an empty master file, also exit 0). That NCBI behaviour was observed, not derived from the
+   source above, and its observation record is outside the repository. A side file that
+   cannot be opened is not part of this exception: LOSAT gives NCBI's
+   `Command line argument error: Cannot open output file`, exit code 1
+   (`framing.rs:94`, from `blastxml2_format.cpp:773-774`). All five programs make the same
+   error from the same function (`side_file_write_error`, `framing.rs:111`; call sites
+   `framing.rs:353`, `LOSAT/src/algorithm/blastx/blast_xml.rs:428`). The only test in the
+   repository is BLASTX's `a_side_file_write_error_at_the_release_is_the_write_error`
+   (`LOSAT/src/algorithm/blastx/blast_xml.rs:1029`, Linux, `/dev/full`), which checks exit 6,
+   the message and the empty master file. A successful run is identical to NCBI's; this is
+   an error path, so no search result differs. Release-notes sentence: If a side file of
+   `-outfmt 13` or `14` cannot be written, LOSAT stops with `BLAST failed to write output`
+   (exit status 6), where NCBI BLAST+ 2.17.0 reports it on standard error and continues with
+   exit status 0.
 
 ## Decided handling that is not an exception
 

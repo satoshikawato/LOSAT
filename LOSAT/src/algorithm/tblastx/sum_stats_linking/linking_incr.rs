@@ -352,22 +352,38 @@ impl<K: Copy + Ord + Default> MaxTree<K> {
 
     #[inline]
     fn set(&mut self, i: usize, v: [K; 2]) {
-        let mut pos = self.cap + i;
-        self.nodes[pos] = v;
-        while pos > 1 {
-            pos >>= 1;
-            let l = self.nodes[pos * 2];
-            let r = self.nodes[pos * 2 + 1];
-            let m = [l[0].max(r[0]), l[1].max(r[1])];
-            // wasm32 runs the 16-byte array compare as a byte loop over a stack copy of `m`.
-            #[cfg(target_arch = "wasm32")]
-            let same = self.nodes[pos][0] == m[0] && self.nodes[pos][1] == m[1];
-            #[cfg(not(target_arch = "wasm32"))]
-            let same = self.nodes[pos] == m;
-            if same {
-                break;
+        let leaf = self.cap + i;
+        self.nodes[leaf] = v;
+        // On wasm32 (LOSAT Web) each channel walks up on its own, which leaves the same tree (a
+        // parent whose channel does not change leaves its ancestors' channel unchanged). Walking
+        // both channels at once, LLVM made the two maxima of `u64` keys one 64x2 vector, which needs
+        // an unsigned compare that WebAssembly lacks; V8 ran it as lane extracts, scalar compares
+        // and lane inserts.
+        #[cfg(target_arch = "wasm32")]
+        for c in 0..2 {
+            let mut pos = leaf;
+            while pos > 1 {
+                pos >>= 1;
+                let m = self.nodes[pos * 2][c].max(self.nodes[pos * 2 + 1][c]);
+                if self.nodes[pos][c] == m {
+                    break;
+                }
+                self.nodes[pos][c] = m;
             }
-            self.nodes[pos] = m;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut pos = leaf;
+            while pos > 1 {
+                pos >>= 1;
+                let l = self.nodes[pos * 2];
+                let r = self.nodes[pos * 2 + 1];
+                let m = [l[0].max(r[0]), l[1].max(r[1])];
+                if self.nodes[pos] == m {
+                    break;
+                }
+                self.nodes[pos] = m;
+            }
         }
     }
 
@@ -514,7 +530,7 @@ impl IncrOptions {
         static OPTIONS: OnceLock<IncrOptions> = OnceLock::new();
         *OPTIONS.get_or_init(|| IncrOptions {
             verify: std::env::var_os("LOSAT_LINK_FAST_VERIFY").is_some(),
-            wide_keys: std::env::var_os("LOSAT_LINK_WIDE_KEYS").is_some(),
+            wide_keys: crate::utils::xdiag::var_os("LOSAT_LINK_WIDE_KEYS").is_some(),
         })
     }
 }
@@ -667,8 +683,8 @@ pub(super) fn link_hsp_group_incr(
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
 // NCBI links each group as a sublist of the one sorted array. The kernel on the group's records
-// wherever they lie (a Vec of its own, or a sub-slice of the linking call's list for
-// LOSAT_X_LINKSLICES, tblastx/x_link_slices.rs): it wraps link_hsp_group_incr_with_slice, adds
+// wherever they lie (a Vec of its own, or a sub-slice of the linking call's list,
+// tblastx/x_link_slices.rs): it wraps link_hsp_group_incr_with_slice, adds
 // the LOSAT_LINK_STATS line and changes no value of the result.
 /// `link_hsp_group_incr` on the group's records in place.
 #[allow(clippy::too_many_arguments)]
@@ -946,7 +962,7 @@ pub(super) fn link_hsp_group_incr_with_slice(
 // The replacement for the per-group body of s_BlastEvenGapLinkHSPs: same rounds, same selection
 // rule, same removal; a pass after the first computes again only the HSPs described in the
 // module documentation. It takes the group's records as a slice (its own Vec, or a sub-slice of
-// the linking call's list for LOSAT_X_LINKSLICES) and hands the same slice back: the body indexes,
+// the linking call's list, `x_link_slices.rs`) and hands the same slice back: the body indexes,
 // reads and writes fields of the records and never adds, removes or moves one.
 #[allow(clippy::too_many_arguments)]
 fn link_group<'g, K: LinkKey>(

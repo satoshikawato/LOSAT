@@ -86,8 +86,15 @@ def outfmt0_fixtures() -> list[dict]:
         # it joins LOSAT Web ABI v2 in SX (`losat_web2_describe("blastx")` fails).
         if row["program"] not in FORMATS:
             continue
+        # The rows of outfmt 13 and 14 (the `files` column: side files and a master file next to
+        # `-out`) are CLI-only until ABI v2 (DECISIONS 26 Q10): not an ABI case.
+        if row.get("files"):
+            continue
         argv = run_oracle.search_argv(row)
         outfmt = run_oracle.outfmt(row)
+        # SAM (outfmt 17) is not a format of ABI v1 (DECISIONS 10 of the outfmt line).
+        if run_oracle.is_sam_outfmt(outfmt):
+            continue
         assert argv[-2:] == ["-outfmt", outfmt], row["fixture_id"]
         if "-num_descriptions" in argv or "-num_alignments" in argv:
             continue  # CLI-only (LOSAT Web refuses them)
@@ -198,6 +205,11 @@ def quick() -> list[dict]:
     first_blastp = next(search for search in searches if search["program"] == "blastp")
     searches.append({**first_blastp, "argv": first_blastp["argv"] + ["-dbsize", "1000000"],
                      "cases": [case + ".dbsize" for case in first_blastp["cases"]], "frozen": {}})
+    # BLASTP in blocks (LOSAT_X_BPQBLOCKWEB): a query of about 200,000 letters, four blocks of
+    # LOSAT_X_BPQBLOCK's 50,000 letters, with the compressed lookup table of blastp-fast.
+    searches.append({"program": "blastp", "argv": ["blastp", "-task", "blastp-fast",
+                     "-query", "LOSAT/tests/fasta/NZ_CP006932.faa", "-subject", "LOSAT/tests/fasta/SicyWSV.faa"],
+                     "cwd": str(REPO), "cases": ["blastp_fast_query_blocks"], "frozen": {}})
     # BLASTN dc-megablast and blastn-short (Session SD): their default fixtures, with the
     # NCBI-frozen hashes of outfmt 0 and 7.
     searches += [search for search in outfmt0_fixtures()

@@ -73,8 +73,9 @@
 //! 6.7 (about 6.46 against the fly proteome, 6.95 against Swiss-Prot; the cross test against the
 //! direct loop: 4.05 x1.13, 5.34 x1.06, 6.33 x1.01, 6.63 x0.99, 7.34 x0.95, 8.38 x0.90), hence 670
 //! for it (`LOSAT_X_BXDIAGMIN=900` gives the rule before). Both loops give the reference's hits
-//! and table, so the choice changes only the speed; it is made once per thread and table
-//! ([`x_fused_pays`]), and once for all the threads that search one table's subjects in tasks
+//! and table, so the choice changes only the speed; it is made once per thread and table build
+//! ([`x_fused_pays`]; a table built from the pooled vectors of the one before is a new build),
+//! and once for all the threads that search one table's subjects in tasks
 //! ([`x_shared_table_ratio`]). The timing line then also gives `min_hits_per_cell=` (the cutoff of
 //! the cell test that ran), `tables_fused=` and `tables_other=` (the choices made) and
 //! `hits_per_cell=LEAST-MOST` (hundredths).
@@ -121,10 +122,9 @@ use std::sync::OnceLock;
 
 thread_local! {
     /// EXPERIMENT (LOSAT_X_BXDIAGMIN, LOSAT_X_BXDEFERMIN): the last lookup table this thread chose
-    /// a loop for (its address, its backbone's address and its overflow length) and its hits per
-    /// used cell (see [`x_table_ratio`]).
-    static X_CHOICE: std::cell::Cell<(usize, usize, usize, u64)> =
-        const { std::cell::Cell::new((0, 0, 0, 0)) };
+    /// a loop for (its build number, `XKeptPresence::build`) and its hits per used cell (see
+    /// [`x_table_ratio`]).
+    static X_CHOICE: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
     /// EXPERIMENT (LOSAT_X_BXDIAG): the context table of the query batch this thread searches,
     /// with the frame bases and the span it was made for (see [`x_with_context_table`]).
     static X_CONTEXTS: RefCell<Option<(Vec<i32>, usize, XContextTable)>> =
@@ -276,18 +276,16 @@ fn x_hits_per_cell(table: &BlastAaLookupTable) -> u64 {
 // No NCBI counterpart: a property of the lookup table that chooses LOSAT's loop; it does not
 // change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN, LOSAT_X_BXDEFERMIN): `table`'s hits per used cell
-/// ([`x_hits_per_cell`]), worked out once per table and thread (the table's addresses and overflow
-/// length identify it; a later table that matched all three would reuse the value, which changes
-/// only the speed), and whether this call worked it out.
-fn x_table_ratio(table: &BlastAaLookupTable) -> (u64, bool) {
-    let key = x_table_key(table);
+/// ([`x_hits_per_cell`]), worked out once per table and thread (`build` = the table's build number
+/// identifies it), and whether this call worked it out.
+fn x_table_ratio(table: &BlastAaLookupTable, build: u64) -> (u64, bool) {
     X_CHOICE.with(|choice| {
-        let (a, b, c, ratio) = choice.get();
-        if (a, b, c) == key {
+        let (last, ratio) = choice.get();
+        if last == build {
             return (ratio, false);
         }
         let ratio = x_hits_per_cell(table);
-        choice.set((key.0, key.1, key.2, ratio));
+        choice.set((build, ratio));
         (ratio, true)
     })
 }
@@ -297,8 +295,8 @@ fn x_table_ratio(table: &BlastAaLookupTable) -> (u64, bool) {
 /// batch: its hits per used cell are at least [`x_min_hits_per_cell`] of `mode`. Counted for the
 /// timing line once per table and thread, with the cell test `mode` would take for it
 /// (LOSAT_X_BXDEFERMIN, [`x_table_mode`]).
-fn x_fused_pays(table: &BlastAaLookupTable, mode: XCellTest) -> bool {
-    let (ratio, first) = x_table_ratio(table);
+fn x_fused_pays(table: &BlastAaLookupTable, build: u64, mode: XCellTest) -> bool {
+    let (ratio, first) = x_table_ratio(table, build);
     if first {
         x_count_choice(ratio, mode);
     }
@@ -318,17 +316,6 @@ fn x_count_choice(ratio: u64, mode: XCellTest) {
     }
 }
 
-// No NCBI counterpart: identifies a lookup table for the choice of the loop (speed only).
-/// EXPERIMENT (LOSAT_X_BXDIAGMIN): the table's address, its backbone's address and its overflow
-/// length (see [`x_table_ratio`]).
-fn x_table_key(table: &BlastAaLookupTable) -> (usize, usize, usize) {
-    (
-        table as *const BlastAaLookupTable as usize,
-        table.backbone.as_ptr() as usize,
-        table.overflow.len(),
-    )
-}
-
 // No NCBI counterpart: chooses LOSAT's loop once for the threads that share a table's subjects
 // (LOSAT_X_BXUNITCAP's tasks and the subject flow, blastx/x_bx_mem.rs); it does not change any
 // value NCBI computes.
@@ -339,13 +326,13 @@ fn x_table_key(table: &BlastAaLookupTable) -> (usize, usize, usize) {
 /// change of table (its cache holds one).
 #[cfg(feature = "parallel")]
 pub(crate) fn x_shared_table_ratio(lookup: &Lookup, options: &ResolvedOptions) -> Option<u64> {
-    let Lookup::Standard(table, _) = lookup else {
+    let Lookup::Standard(table, kept) = lookup else {
         return None;
     };
     if x_bxdiag_mode() == 0 || options.window_size <= 0 {
         return None;
     }
-    let (ratio, first) = x_table_ratio(table);
+    let (ratio, first) = x_table_ratio(table, kept.build);
     if first {
         x_count_choice(ratio, x_cell_mode());
     }
@@ -357,9 +344,8 @@ pub(crate) fn x_shared_table_ratio(lookup: &Lookup, options: &ResolvedOptions) -
 /// thread's choice for `lookup`'s table, so that the thread does not work it out again.
 #[cfg(feature = "parallel")]
 pub(crate) fn x_take_table_ratio(lookup: &Lookup, ratio: Option<u64>) {
-    if let (Lookup::Standard(table, _), Some(ratio)) = (lookup, ratio) {
-        let (a, b, c) = x_table_key(table);
-        X_CHOICE.with(|choice| choice.set((a, b, c, ratio)));
+    if let (Lookup::Standard(_, kept), Some(ratio)) = (lookup, ratio) {
+        X_CHOICE.with(|choice| choice.set((kept.build, ratio)));
     }
 }
 
@@ -490,7 +476,7 @@ pub(crate) fn x_word_finder_diag(
     diagonals: &mut Diagonals,
     sent: Option<XSent<'_>>,
 ) -> Result<Option<Vec<InitHsp>>> {
-    let Lookup::Standard(table, _) = lookup else {
+    let Lookup::Standard(table, kept) = lookup else {
         if x_bxdiag_mode() != 2 {
             crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", false);
         }
@@ -505,13 +491,13 @@ pub(crate) fn x_word_finder_diag(
     let mode = x_cell_mode();
     if x_bxdiag_mode() != 2 {
         // EXPERIMENT (LOSAT_X_BXDIAGMIN): a batch with few hits per cell goes to the other loop.
-        let pays = x_fused_pays(table, mode);
+        let pays = x_fused_pays(table, kept.build, mode);
         crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", pays);
         if !pays {
             return Ok(None);
         }
         // EXPERIMENT (LOSAT_X_BXDEFERMIN): BXDEFER's cell test only with enough hits per cell.
-        let table_mode = x_table_mode(mode, x_table_ratio(table).0);
+        let table_mode = x_table_mode(mode, x_table_ratio(table, kept.build).0);
         #[cfg(target_arch = "x86_64")]
         if mode == XCellTest::Diag(XDiagMode::Avx2DeferMasked) {
             crate::utils::xreach::x_reach!("LOSAT_X_BXDEFER", table_mode == mode);
@@ -545,7 +531,7 @@ pub(crate) fn x_word_finder_diag(
         |_| {},
     )?;
     let (fused, counts) = x_word_finder_fused_or_sent(
-        x_table_mode(mode, x_table_ratio(table).0),
+        x_table_mode(mode, x_table_ratio(table, kept.build).0),
         x_bxscan_bf(),
         batch,
         parameters,
@@ -1251,5 +1237,25 @@ mod tests {
                 });
             }
         }
+    }
+
+    // No NCBI counterpart (speed only): the choice of the loop names a table by its build number,
+    // so a table at the address and with the vectors of the one before it is worked out again.
+    #[test]
+    fn the_loop_choice_is_worked_out_again_for_each_table_build() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/blastx_f_diagonal");
+        let query = std::fs::read(dir.join("query.fna")).unwrap();
+        let (_, _, _, lookup) = search(&query, 40, 500);
+        let Lookup::Standard(table, kept) = &lookup else {
+            panic!("a standard table");
+        };
+        let next = crate::algorithm::blastx::seed::x_seed_scan::XKeptPresence::new();
+        assert!(kept.build > 0 && next.build > kept.build);
+        let (ratio, first) = x_table_ratio(table, kept.build);
+        assert!(first);
+        assert_eq!(x_table_ratio(table, kept.build), (ratio, false));
+        // The same table under the next build number, as a pooled rebuild would give it.
+        assert_eq!(x_table_ratio(table, next.build), (ratio, true));
+        assert_eq!(x_table_ratio(table, next.build), (ratio, false));
     }
 }

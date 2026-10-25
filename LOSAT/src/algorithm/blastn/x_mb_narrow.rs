@@ -36,6 +36,26 @@ pub(super) fn mode() -> u8 {
     })
 }
 
+/// The scope of LOSAT_X_MBNPKEEP for the 4-byte chains: `plan`'s without a mode.
+pub(super) fn np_scope(
+    words: &Words<'_>,
+    cells: usize,
+    db_word_counts: bool,
+    debug: bool,
+    next_pos_len: usize,
+    helper_len: usize,
+) -> bool {
+    np_keep()
+        && scope(
+            words,
+            cells,
+            db_word_counts,
+            debug,
+            next_pos_len,
+            helper_len,
+        )
+}
+
 /// The probe's scope: 4^12 cells, newest first, no database word counts, no BLEMIR_DEBUG,
 /// `next_pos` of fewer than 2^24 elements, and queries whose offsets ascend without overlap.
 pub(super) fn plan(
@@ -48,7 +68,29 @@ pub(super) fn plan(
 ) -> u8 {
     let m = mode();
     if m == 0
-        || cells != 1 << 24
+        || !scope(
+            words,
+            cells,
+            db_word_counts,
+            debug,
+            next_pos_len,
+            helper_len,
+        )
+    {
+        return 0;
+    }
+    m
+}
+
+fn scope(
+    words: &Words<'_>,
+    cells: usize,
+    db_word_counts: bool,
+    debug: bool,
+    next_pos_len: usize,
+    helper_len: usize,
+) -> bool {
+    if cells != 1 << 24
         || words.kmer_mask != (1u64 << 24) - 1
         || words.lut_word_length != 12
         || words.ascending_cells
@@ -57,17 +99,75 @@ pub(super) fn plan(
         || next_pos_len >= 1 << 24
         || (words.kmer_mask as usize >> 11) >= helper_len
     {
-        return 0;
+        return false;
     }
     let mut end = 0usize;
     for (seq, &offset) in words.queries_blastna.iter().zip(words.query_offsets) {
         let start = offset.max(0) as usize;
         if start < end || start + seq.len() >= next_pos_len {
-            return 0;
+            return false;
         }
         end = start + seq.len();
     }
-    m
+    true
+}
+
+/// LOSAT_X_MBNPKEEP=1: the chains' buffer of a build in this module's scope goes back to a spare
+/// when the table is dropped and the next build takes it without zeroing it: a chain is read only
+/// at the indexes of words (a head, then `next_pos` of each word), which the fill writes, so the
+/// other elements may hold anything.
+pub(super) fn np_keep() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("LOSAT_X_MBNPKEEP").is_ok_and(|v| v == "1"))
+}
+
+static SPARE_NP: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+static SPARE_CHAIN: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
+
+/// A `next_pos` of `len` elements: the spare's first `len` (not zeroed) when it is long enough,
+/// otherwise a zeroed one.
+pub(super) fn take_np(len: usize) -> Vec<u32> {
+    let mut v = SPARE_NP
+        .lock()
+        .map(|mut s| std::mem::take(&mut *s))
+        .unwrap_or_default();
+    if v.len() >= len {
+        v.truncate(len);
+        v
+    } else {
+        drop(v);
+        vec![0u32; len]
+    }
+}
+
+pub(super) fn give_np(v: Vec<u32>) {
+    if let Ok(mut s) = SPARE_NP.lock() {
+        *s = v;
+    }
+}
+
+fn take_chain(len: usize) -> Vec<u8> {
+    if np_keep() {
+        let mut v = SPARE_CHAIN
+            .lock()
+            .map(|mut s| std::mem::take(&mut *s))
+            .unwrap_or_default();
+        if v.len() >= len {
+            v.truncate(len);
+            return v;
+        }
+    }
+    vec![0u8; len]
+}
+
+impl Drop for Narrow {
+    fn drop(&mut self) {
+        if np_keep() {
+            if let Ok(mut s) = SPARE_CHAIN.lock() {
+                *s = std::mem::take(&mut self.chain);
+            }
+        }
+    }
 }
 
 pub(super) struct Narrow {
@@ -115,7 +215,7 @@ pub(super) fn serial(
     } else {
         Vec::new()
     };
-    let mut chain = vec![0u8; 3 * next_pos_len + 1];
+    let mut chain = take_chain(3 * next_pos_len + 1);
     assert!(m == 2 || hashtable.len() == cells);
     assert!((cells - 1) >> pv_array_bts < pv_array.len());
     let raw = Raw {

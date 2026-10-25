@@ -930,6 +930,8 @@ struct MbLookupTable {
     /// PROBE (LOSAT_X_MB24): 3-byte chains (and heads) (`x_mb_narrow.rs`); then `next_pos` (and
     /// `hashtable`) is empty.
     x_narrow: Option<x_mb_narrow::Narrow>,
+    /// PROBE (LOSAT_X_MBNPKEEP): `next_pos` goes back to the spare when dropped.
+    x_np_spare: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1376
@@ -939,6 +941,9 @@ struct MbLookupTable {
 // EXPERIMENT (LOSAT_X_MBLUTKEEP): the hashtable goes back to the batch loop's keep instead.
 impl Drop for MbLookupTable {
     fn drop(&mut self) {
+        if self.x_np_spare {
+            x_mb_narrow::give_np(std::mem::take(&mut self.next_pos));
+        }
         if let Some((keep, dirty)) = self.x_keep.take() {
             keep.give_back(std::mem::take(&mut self.hashtable), dirty);
         }
@@ -2021,8 +2026,23 @@ fn build_mb_lookup(
         None if x_csr_layout || x_rank_layout || x_narrow_mode == 2 => (Vec::new(), false, 0),
         None => (vec![0u32; table_size], false, table_size),
     };
+    // PROBE (LOSAT_X_MBNPKEEP): the 4-byte chains from the spare, not zeroed.
+    let x_np_spare = !x_csr_layout
+        && !x_rank_layout
+        && x_narrow_mode == 0
+        && x_mb_lookup_par::pool_threads().is_none()
+        && x_mb_narrow::np_scope(
+            &x_words,
+            table_size,
+            db_word_counts.is_some(),
+            debug_mode,
+            max_query_offset + 1,
+            ((table_size + 2047) / 2048).max(1),
+        );
     let mut next_pos = if x_csr_layout || x_narrow_mode != 0 {
         Vec::new()
+    } else if x_np_spare {
+        x_mb_narrow::take_np(max_query_offset + 1)
     } else {
         vec![0u32; max_query_offset + 1]
     };
@@ -2244,6 +2264,7 @@ fn build_mb_lookup(
         x_csr,
         x_rank,
         x_narrow,
+        x_np_spare,
     }
 }
 
@@ -2765,6 +2786,7 @@ pub fn build_disc_mb_lookup(
                 x_csr: None,
                 x_rank: None,
                 x_narrow: None,
+                x_np_spare: false,
             },
             lut_word_length,
             word_length: word_size,
@@ -2844,6 +2866,7 @@ pub fn build_disc_mb_lookup(
             x_csr: None,
             x_rank: None,
             x_narrow: None,
+            x_np_spare: false,
         },
         lut_word_length,
         word_length: word_size,

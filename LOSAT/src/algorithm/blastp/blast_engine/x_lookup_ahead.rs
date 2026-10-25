@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BPLKPAHEAD / LOSAT_X_BPLKPAHEADSHADOW): in the blastp block search
+//! EXPERIMENT (LOSAT_X_BPLKPAHEAD): in the blastp block search
 //! (`LOSAT_X_BPQBLOCK`, `x_query_blocks.rs`), the next block's query frames, lookup table and query
 //! contexts are built during the block before it, by a task on the search's pool, instead of at the
 //! start of the next block's own search.
@@ -42,11 +42,10 @@
 //! Where it acts: the block search, with `-subject` or `-db` (the block loop and the lookup region
 //! are the same; `blast_engine/database.rs` only reads the subjects), on a pool of more than one
 //! thread: for blastp-fast (`CompressedAaLookupTable`) where `LOSAT_X_BPLKPFLAT` acts on the flat
-//! table of `LOSAT_X_BPCLUT` (mode 1, `x_query_blocks::x_bp_lookup_spare`), not with
-//! `LOSAT_X_BPCLUTSHADOW` (whose search uses the reference builder's table); for exact blastp
-//! (`AaLookupTable`) where its table is built in place (`LOSAT_X_BPLUT` mode 1,
-//! `x_query_blocks::x_bp_aa_spares`), not with `LOSAT_X_BPLUT=0` or `LOSAT_X_BPLUTSHADOW` (the
-//! reference builder) nor with `LOSAT_DIAGNOSTICS` (whose reference builder prints its phases,
+//! table of `LOSAT_X_BPCLUT` (on, `x_query_blocks::x_bp_lookup_spare`); for exact blastp
+//! (`AaLookupTable`) where its table is built in place (`LOSAT_X_BPLUT` on,
+//! `x_query_blocks::x_bp_aa_spares`), not with `LOSAT_X_BPLUT=0` (the reference builder) nor with
+//! `LOSAT_DIAGNOSTICS` (whose reference builder prints its phases,
 //! which would come earlier). Not at one thread, for the search of all queries, or for the query
 //! chunks of a split batch (each builds its own table inside its block's search). The last block
 //! starts no build.
@@ -98,15 +97,12 @@
 //!
 //! `LOSAT_X_BPLKPAHEAD` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`.
 //!
-//! `LOSAT_X_BPLKPAHEADSHADOW=1` (shadow mode, implies the switch): each block that takes values
-//! built ahead also builds them inline as without the switch (blastp-fast's on the block spare's
-//! vectors, which it gives back) and compares them with the values it takes: the query frames field
-//! for field, the flat tables field for field and slot for slot (exact blastp's tables every field,
-//! cell by cell), and the contexts with their Karlin blocks bit for bit. The first difference
-//! prints the line that is otherwise printed at exit, with `DIFFERENT`, and stops the run (panic):
-//! `[X_SHADOW] BPLKPAHEAD blocks= prebuilt= dropped= compared= identical` (`blocks`: blocks
-//! searched where the switch acts; `prebuilt`: blocks that took values built ahead; `dropped`:
-//! builds ahead that gave no values; `compared`: blocks compared).
+//! With `LOSAT_X_STATS`, `main` prints `[X_STATS] BPLKPAHEAD blocks= prebuilt= dropped=` at exit when a
+//! counter is not zero (`blocks`: blocks searched where the switch acts; `prebuilt`: blocks that took
+//! values built ahead; `dropped`: builds ahead that gave no values). The unit test
+//! `values_built_ahead_are_the_values_the_block_builds_itself` builds a block's values ahead and
+//! inline, for blastp-fast and exact blastp, and compares the query frames, the table and the
+//! contexts (the Karlin blocks bit for bit).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
 //! ```c++
@@ -138,81 +134,41 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use super::{
-    blastp_aa_lookup, blastp_aa_lookup_ahead, blastp_compressed_lookup, blastp_query_frames,
-    BlastpRuntimeLookup,
+    blastp_aa_lookup_ahead, blastp_compressed_lookup, blastp_query_frames, BlastpRuntimeLookup,
 };
 use crate::algorithm::blastp::args::{BlastpLookupTableType, ResolvedBlastpArgs};
 use crate::algorithm::blastp::x_query_blocks::{x_bp_aa_spares, x_bp_lookup_spares, XLookupFor};
-use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_assert_same_flat_tables_as, x_bpclut_mode, XFlatCompressedLookup,
-};
-use crate::algorithm::tblastx::lookup::x_pair_lut::x_assert_same_contexts_as;
+use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_on;
 use crate::algorithm::tblastx::lookup::QueryContext;
-use crate::algorithm::tblastx::lookup::{x_assert_same_table_as, x_same_table};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
 use crate::utils::threading::SearchPool;
 
-/// EXPERIMENT (LOSAT_X_BPLKPAHEAD / LOSAT_X_BPLKPAHEADSHADOW): the mode the variables select.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum XLkpAhead {
-    Off,
-    On,
-    Shadow,
+// No NCBI counterpart: reads the LOSAT_X_BPLKPAHEAD switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): a strict-set switch, on unless it is `0`.
+pub(crate) fn x_bp_lkp_ahead() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLKPAHEAD"))
 }
 
-// No NCBI counterpart: reads the LOSAT_X_BPLKPAHEAD / LOSAT_X_BPLKPAHEADSHADOW switches once; it does
-// not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): a strict-set switch, on unless it is `0`;
-/// `LOSAT_X_BPLKPAHEADSHADOW` (any value) selects the shadow
-/// mode, which implies the switch.
-pub(crate) fn x_bp_lkp_ahead() -> XLkpAhead {
-    static MODE: OnceLock<XLkpAhead> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPLKPAHEADSHADOW").is_some() {
-            XLkpAhead::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_BPLKPAHEAD") {
-            XLkpAhead::On
-        } else {
-            XLkpAhead::Off
-        }
-    })
-}
-
-// No NCBI counterpart: counters of the shadow mode's line; they change no value NCBI computes.
+// No NCBI counterpart: counters of the `[X_STATS] BPLKPAHEAD` line; they change no value NCBI computes.
 static X_BLOCKS: AtomicU64 = AtomicU64::new(0);
 static X_PREBUILT: AtomicU64 = AtomicU64::new(0);
 static X_DROPPED: AtomicU64 = AtomicU64::new(0);
-static X_COMPARED: AtomicU64 = AtomicU64::new(0);
-
-// No NCBI counterpart: formats counters; it changes no value NCBI computes.
-/// The counters' line, ending with `outcome`.
-fn x_summary_line(outcome: &str) -> String {
-    let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
-    format!(
-        "[X_SHADOW] BPLKPAHEAD blocks={} prebuilt={} dropped={} compared={} {outcome}",
-        load(&X_BLOCKS),
-        load(&X_PREBUILT),
-        load(&X_DROPPED),
-        load(&X_COMPARED),
-    )
-}
 
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPAHEADSHADOW): the shadow mode's line at exit (printed by `main`).
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): with `LOSAT_X_STATS`, the counters' line at exit (printed by
+/// `main`) when a counter is not zero: `[X_STATS] BPLKPAHEAD blocks= prebuilt= dropped=`.
 pub(crate) fn x_bp_lkp_ahead_print_summary() {
-    if x_bp_lkp_ahead() == XLkpAhead::Shadow {
-        eprintln!("{}", x_summary_line("identical"));
+    if std::env::var_os("LOSAT_X_STATS").is_some() {
+        let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
+        let (blocks, prebuilt, dropped) = (load(&X_BLOCKS), load(&X_PREBUILT), load(&X_DROPPED));
+        if blocks != 0 || prebuilt != 0 || dropped != 0 {
+            eprintln!("[X_STATS] BPLKPAHEAD blocks={blocks} prebuilt={prebuilt} dropped={dropped}");
+        }
     }
-}
-
-// No NCBI counterpart: the stop of the shadow mode; it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPAHEADSHADOW): prints the counters' line with `DIFFERENT`, then panics with
-/// `what`.
-fn x_shadow_difference(what: &str) -> ! {
-    eprintln!("{}", x_summary_line("DIFFERENT"));
-    panic!("LOSAT_X_BPLKPAHEADSHADOW: {what}");
 }
 
 // No NCBI counterpart: identifies a block's records; it changes no value NCBI computes.
@@ -292,156 +248,14 @@ impl XAheadBlock<'_> {
 //             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
 // ```
 /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the lookup table and contexts of the lookup region from values
-/// built ahead (`prebuilt`, whose query frames the search took as `query_frames`). In the shadow mode
-/// the values are built again inline, as the search builds them without the switch
-/// (`blastp_query_frames` of `query_records`; blastp-fast: `blastp_compressed_lookup` with the
-/// search's `query_batches` and `query_lengths` and the block spare's vectors, given back after;
-/// exact blastp: `blastp_aa_lookup`), and compared with the values taken (module header); the first
-/// difference stops the run.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn x_use_prebuilt(
-    prebuilt: XAheadLookup,
-    args: &ResolvedBlastpArgs,
-    query_records: &[FastaRecord],
-    query_frames: &[Vec<QueryFrame>],
-    query_batches: &[seq_range::RangedBatch],
-    query_lengths: &[usize],
-    pool: &SearchPool<'_>,
-) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
+/// built ahead (`prebuilt`, whose query frames the search took with `take_query_frames`). They are
+/// the values the block's own build gives (module header; the unit test
+/// `values_built_ahead_are_the_values_the_block_builds_itself` compares them).
+pub(super) fn x_use_prebuilt(prebuilt: XAheadLookup) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
     let XAheadLookup {
         table, contexts, ..
     } = prebuilt;
-    if x_bp_lkp_ahead() == XLkpAhead::Shadow {
-        let inline_frames = blastp_query_frames(args, query_records);
-        if let Some(difference) = x_frames_difference(query_frames, &inline_frames) {
-            x_shadow_difference(&difference);
-        }
-        let inline_contexts = match &table {
-            BlastpRuntimeLookup::CompressedFlat(table) => {
-                let (inline_lookup, inline_contexts) = match blastp_compressed_lookup(
-                    args,
-                    &inline_frames,
-                    query_batches,
-                    query_lengths,
-                    pool,
-                    XLookupFor::Search,
-                ) {
-                    Ok(built) => built,
-                    Err(error) => x_shadow_difference(&format!(
-                        "values were built ahead where the block's own build fails: {error:#}"
-                    )),
-                };
-                let BlastpRuntimeLookup::CompressedFlat(inline_table) = inline_lookup else {
-                    x_shadow_difference("the block's own build makes no flat table");
-                };
-                if !x_same_flat_tables(table, &inline_table) {
-                    eprintln!("{}", x_summary_line("DIFFERENT"));
-                    x_assert_same_flat_tables_as("LOSAT_X_BPLKPAHEADSHADOW:", table, &inline_table);
-                    panic!("LOSAT_X_BPLKPAHEADSHADOW: the tables differ");
-                }
-                // The inline table's vectors go back to the block spare, as its search would give
-                // them.
-                if let Some((block, _)) = x_bp_lookup_spares(pool) {
-                    block.give(inline_table);
-                }
-                inline_contexts
-            }
-            BlastpRuntimeLookup::Aa(table) => {
-                let (inline_lookup, inline_contexts) = blastp_aa_lookup(args, &inline_frames);
-                let BlastpRuntimeLookup::Aa(inline_table) = inline_lookup else {
-                    x_shadow_difference("the block's own build makes no exact table");
-                };
-                if !x_same_table(table, &inline_table) {
-                    eprintln!("{}", x_summary_line("DIFFERENT"));
-                    x_assert_same_table_as("LOSAT_X_BPLKPAHEADSHADOW:", table, &inline_table);
-                    panic!("LOSAT_X_BPLKPAHEADSHADOW: the tables differ");
-                }
-                inline_contexts
-            }
-            BlastpRuntimeLookup::Compressed(_) => {
-                x_shadow_difference("values were built ahead with a table it does not build")
-            }
-        };
-        if !x_same_contexts(&contexts, &inline_contexts) {
-            eprintln!("{}", x_summary_line("DIFFERENT"));
-            x_assert_same_contexts_as("LOSAT_X_BPLKPAHEADSHADOW:", &contexts, &inline_contexts);
-            panic!("LOSAT_X_BPLKPAHEADSHADOW: the contexts differ");
-        }
-        X_COMPARED.fetch_add(1, Ordering::Relaxed);
-    }
     (table, contexts)
-}
-
-// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
-/// The first difference between two query frame sets (every field), or `None`.
-fn x_frames_difference(got: &[Vec<QueryFrame>], want: &[Vec<QueryFrame>]) -> Option<String> {
-    if got.len() != want.len() {
-        return Some(format!(
-            "{} queries' frames built ahead, {} inline",
-            got.len(),
-            want.len()
-        ));
-    }
-    for (query, (got, want)) in got.iter().zip(want).enumerate() {
-        let same = got.len() == want.len()
-            && got.iter().zip(want).all(|(a, b)| {
-                a.frame == b.frame
-                    && a.aa_seq == b.aa_seq
-                    && a.aa_seq_nomask == b.aa_seq_nomask
-                    && a.aa_len == b.aa_len
-                    && a.orig_len == b.orig_len
-                    && a.seg_masks == b.seg_masks
-            });
-        if !same {
-            return Some(format!("the frames of query {query} differ"));
-        }
-    }
-    None
-}
-
-// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
-/// Whether two flat tables are equal, field for field and slot for slot
-/// (`x_assert_same_flat_tables_as` names the first difference).
-fn x_same_flat_tables(a: &XFlatCompressedLookup, b: &XFlatCompressedLookup) -> bool {
-    a.word_length == b.word_length
-        && a.compressed_alphabet_size == b.compressed_alphabet_size
-        && a.reciprocal_alphabet_size == b.reciprocal_alphabet_size
-        && a.longest_chain == b.longest_chain
-        && a.used_cells == b.used_cells
-        && a.pv_array_bts == b.pv_array_bts
-        && a.scaled_compress_table_u8 == b.scaled_compress_table_u8
-        && a.pv == b.pv
-        && a.starts == b.starts
-        && a.hits == b.hits
-}
-
-// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
-/// Whether two context sets are equal, every field, the Karlin blocks bit for bit
-/// (`x_assert_same_contexts_as` names the first difference).
-fn x_same_contexts(a: &[QueryContext], b: &[QueryContext]) -> bool {
-    let bits = |context: &QueryContext| {
-        let p = &context.karlin_params;
-        [
-            p.lambda.to_bits(),
-            p.k.to_bits(),
-            p.h.to_bits(),
-            p.alpha.to_bits(),
-            p.beta.to_bits(),
-        ]
-    };
-    a.len() == b.len()
-        && a.iter().zip(b).all(|(a, b)| {
-            a.q_idx == b.q_idx
-                && a.f_idx == b.f_idx
-                && a.frame == b.frame
-                && a.aa_seq == b.aa_seq
-                && a.aa_seq_nomask == b.aa_seq_nomask
-                && a.aa_len == b.aa_len
-                && a.orig_len == b.orig_len
-                && a.frame_base == b.frame_base
-                && a.is_valid == b.is_valid
-                && bits(a) == bits(b)
-        })
 }
 
 /// What the build ahead of a block gave (`V`: its values).
@@ -640,14 +454,14 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
         let acts = cfg!(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )) && x_bp_lkp_ahead() != XLkpAhead::Off
+        )) && x_bp_lkp_ahead()
             && match args.lookup_table_type {
                 BlastpLookupTableType::CompressedAaLookupTable => {
-                    x_bpclut_mode() == 1 && x_bp_lookup_spares(pool).is_some()
+                    x_bpclut_on() && x_bp_lookup_spares(pool).is_some()
                 }
                 BlastpLookupTableType::AaLookupTable => x_bp_aa_spares(pool).is_some(),
             };
-        if x_bp_lkp_ahead() != XLkpAhead::Off {
+        if x_bp_lkp_ahead() {
             crate::utils::xreach::x_reach!("LOSAT_X_BPLKPAHEAD", acts);
         }
         Self {
@@ -734,6 +548,86 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::blastp::args::BlastpArgs;
+    use crate::algorithm::blastp::x_query_blocks::XBlockSubjects;
+    use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
+        x_assert_same_flat_tables_as, XFlatCompressedLookup,
+    };
+    use crate::algorithm::tblastx::lookup::x_pair_lut::x_assert_same_contexts_as;
+    use crate::algorithm::tblastx::lookup::{x_assert_same_table_as, x_same_table};
+    use std::path::PathBuf;
+
+    // No NCBI counterpart: a check of the unit tests; it changes no value NCBI computes.
+    /// The first difference between two query frame sets (every field), or `None`.
+    fn x_frames_difference(got: &[Vec<QueryFrame>], want: &[Vec<QueryFrame>]) -> Option<String> {
+        if got.len() != want.len() {
+            return Some(format!(
+                "{} queries' frames built ahead, {} inline",
+                got.len(),
+                want.len()
+            ));
+        }
+        for (query, (got, want)) in got.iter().zip(want).enumerate() {
+            let same = got.len() == want.len()
+                && got.iter().zip(want).all(|(a, b)| {
+                    a.frame == b.frame
+                        && a.aa_seq == b.aa_seq
+                        && a.aa_seq_nomask == b.aa_seq_nomask
+                        && a.aa_len == b.aa_len
+                        && a.orig_len == b.orig_len
+                        && a.seg_masks == b.seg_masks
+                });
+            if !same {
+                return Some(format!("the frames of query {query} differ"));
+            }
+        }
+        None
+    }
+
+    // No NCBI counterpart: a check of the unit tests; it changes no value NCBI computes.
+    /// Whether two flat tables are equal, field for field and slot for slot
+    /// (`x_assert_same_flat_tables_as` names the first difference).
+    fn x_same_flat_tables(a: &XFlatCompressedLookup, b: &XFlatCompressedLookup) -> bool {
+        a.word_length == b.word_length
+            && a.compressed_alphabet_size == b.compressed_alphabet_size
+            && a.reciprocal_alphabet_size == b.reciprocal_alphabet_size
+            && a.longest_chain == b.longest_chain
+            && a.used_cells == b.used_cells
+            && a.pv_array_bts == b.pv_array_bts
+            && a.scaled_compress_table_u8 == b.scaled_compress_table_u8
+            && a.pv == b.pv
+            && a.starts == b.starts
+            && a.hits == b.hits
+    }
+
+    // No NCBI counterpart: a check of the unit tests; it changes no value NCBI computes.
+    /// Whether two context sets are equal, every field, the Karlin blocks bit for bit
+    /// (`x_assert_same_contexts_as` names the first difference).
+    fn x_same_contexts(a: &[QueryContext], b: &[QueryContext]) -> bool {
+        let bits = |context: &QueryContext| {
+            let p = &context.karlin_params;
+            [
+                p.lambda.to_bits(),
+                p.k.to_bits(),
+                p.h.to_bits(),
+                p.alpha.to_bits(),
+                p.beta.to_bits(),
+            ]
+        };
+        a.len() == b.len()
+            && a.iter().zip(b).all(|(a, b)| {
+                a.q_idx == b.q_idx
+                    && a.f_idx == b.f_idx
+                    && a.frame == b.frame
+                    && a.aa_seq == b.aa_seq
+                    && a.aa_seq_nomask == b.aa_seq_nomask
+                    && a.aa_len == b.aa_len
+                    && a.orig_len == b.orig_len
+                    && a.frame_base == b.frame_base
+                    && a.is_valid == b.is_valid
+                    && bits(a) == bits(b)
+            })
+    }
 
     // Nested parallel work (two levels of `par_iter`) of block `block`, as a block's search and a
     // build run it on the pool.
@@ -1023,10 +917,10 @@ mod tests {
         }
     }
 
-    // The shadow's checks see a difference in one slot of the table's hits, in one bit of a Karlin
+    // The comparisons see a difference in one slot of the table's hits, in one bit of a Karlin
     // block, and in one letter of a frame; equal values pass.
     #[test]
-    fn the_shadow_checks_see_one_slot_one_bit_and_one_letter() {
+    fn the_comparisons_see_one_slot_one_bit_and_one_letter() {
         assert!(x_same_flat_tables(&table(vec![3, 9]), &table(vec![3, 9])));
         assert!(!x_same_flat_tables(&table(vec![3, 9]), &table(vec![3, 8])));
         let lambda = 0.3176;
@@ -1043,6 +937,167 @@ mod tests {
         other.aa_seq[3] ^= 1;
         assert!(x_frames_difference(&[vec![frame.clone()]], &[vec![other]]).is_some());
         assert!(x_frames_difference(&[vec![frame]], &[]).is_some());
+    }
+
+    /// The arguments of `losat blastp -task <task>` (SEG on) as the search resolves them.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    fn test_args(task: &str) -> ResolvedBlastpArgs {
+        BlastpArgs {
+            query: PathBuf::from("query.faa"),
+            subject: Some(PathBuf::from("subject.faa")),
+            db: None,
+            dbsize: None,
+            task: task.to_string(),
+            evalue: None,
+            threshold: None,
+            word_size: None,
+            num_threads: 1,
+            out: None,
+            max_target_seqs: None,
+            num_descriptions: None,
+            num_alignments: None,
+            max_hsps_per_subject: None,
+            qcov_hsp_perc: None,
+            ungapped: false,
+            window_size: None,
+            matrix: None,
+            gap_open: None,
+            gap_extend: None,
+            comp_based_stats: "2".to_string(),
+            seg: Some("yes".to_string()),
+            use_sw_tback: false,
+            query_loc: None,
+            subject_loc: None,
+            outfmt: "6".to_string(),
+            archive: None,
+        }
+        .resolve()
+        .expect("resolved arguments")
+    }
+
+    /// `count` protein records of 40 to 239 residues from a xorshift generator; every third has a
+    /// run of one residue (a SEG mask).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    fn protein_records(seed: u64, count: usize) -> Vec<FastaRecord> {
+        let letters = b"ACDEFGHIKLMNPQRSTVWY";
+        let mut state = seed;
+        let mut below = |n: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % n as u64) as usize
+        };
+        (0..count)
+            .map(|i| {
+                let length = 40 + below(200);
+                let mut sequence: Vec<u8> = (0..length).map(|_| letters[below(20)]).collect();
+                if i % 3 == 0 {
+                    let at = below(length - 30);
+                    let run = letters[below(20)];
+                    sequence[at..at + 24].fill(run);
+                }
+                FastaRecord::new(format!("Query_{}", i + 1), b"q", &sequence)
+            })
+            .collect()
+    }
+
+    /// The table and contexts of a block as its own search builds them (`run_resolved_in_pool`):
+    /// `blastp_aa_lookup` for exact blastp, `blastp_compressed_lookup` with the block's batches and
+    /// lengths for blastp-fast.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    fn own_build(
+        args: &ResolvedBlastpArgs,
+        records: &[FastaRecord],
+        frames: &[Vec<QueryFrame>],
+        batch_size: u32,
+        pool: &SearchPool<'_>,
+    ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
+        match args.lookup_table_type {
+            BlastpLookupTableType::AaLookupTable => super::super::blastp_aa_lookup(args, frames),
+            BlastpLookupTableType::CompressedAaLookupTable => {
+                let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
+                let batches = seq_range::QueryInput::whole(records).batches(batch_size);
+                blastp_compressed_lookup(args, frames, &batches, &lengths, pool, XLookupFor::Search)
+                    .expect("the block's own build")
+            }
+        }
+    }
+
+    // A block's values built ahead (`x_build_ahead` as a task of the pool, on the second spare's
+    // vectors made ready as the block loop makes them, once the block before it has its table) are
+    // the values the block's own search builds: the query frames, the table and the contexts, with
+    // the Karlin blocks bit for bit, for blastp-fast (the flat table) and for exact blastp, on a pool
+    // of three threads, SEG masks included.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn values_built_ahead_are_the_values_the_block_builds_itself() {
+        let batch_size = 3000;
+        for task in ["blastp-fast", "blastp"] {
+            let args = test_args(task);
+            let first = protein_records(0x9e37_79b9_7f4a_7c15, 24);
+            let next = protein_records(0xd1b5_4a32_d192_ed03, 30);
+            crate::utils::threading::with_search_pool(3, "blastp", |pool| {
+                let subjects = XBlockSubjects::new(&[], Vec::new());
+                let pool = pool.x_with_ext(&subjects);
+                // The block loop: the first block's own table is ready, the vectors for the next
+                // block's table are made ready, and its build is spawned.
+                let first_frames = blastp_query_frames(&args, &first);
+                let (first_lookup, _) = own_build(&args, &first, &first_frames, batch_size, &pool);
+                assert!(
+                    x_make_room(&pool, &first_lookup, &Cell::new(0)),
+                    "{task}: the pool's spares"
+                );
+                let (_, built) = x_run_with_build_ahead(
+                    || x_build_ahead(&args, &next, batch_size, &pool),
+                    |spawn| spawn(),
+                );
+                let Some(XBuilt::Values(ahead)) = built else {
+                    panic!("{task}: no values built ahead");
+                };
+                // The next block's own search.
+                let frames = blastp_query_frames(&args, &next);
+                if let Some(difference) = x_frames_difference(&ahead.query_frames, &frames) {
+                    panic!("{task}: {difference}");
+                }
+                let (table, contexts) = own_build(&args, &next, &frames, batch_size, &pool);
+                match (&ahead.table, &table) {
+                    (
+                        BlastpRuntimeLookup::CompressedFlat(got),
+                        BlastpRuntimeLookup::CompressedFlat(want),
+                    ) => {
+                        if !x_same_flat_tables(got, want) {
+                            x_assert_same_flat_tables_as("ahead:", got, want);
+                            panic!("{task}: the tables differ");
+                        }
+                    }
+                    (BlastpRuntimeLookup::Aa(got), BlastpRuntimeLookup::Aa(want)) => {
+                        if !x_same_table(got, want) {
+                            x_assert_same_table_as("ahead:", got, want);
+                            panic!("{task}: the tables differ");
+                        }
+                    }
+                    _ => panic!("{task}: the tables are of different kinds"),
+                }
+                if !x_same_contexts(&ahead.contexts, &contexts) {
+                    x_assert_same_contexts_as("ahead:", &ahead.contexts, &contexts);
+                    panic!("{task}: the contexts differ");
+                }
+                Ok(())
+            })
+            .expect("pool");
+        }
     }
 
     // A block's search takes values built ahead only for its own records (the same slice); others are

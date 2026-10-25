@@ -27,7 +27,7 @@ use crate::algorithm::tblastx::constants::{
     GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
 };
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bp_build_compressed_lookup, x_bpclut_mode, XCompressedLookup, XFlatCompressedLookup,
+    x_bp_build_compressed_lookup, x_bpclut_on, XCompressedLookup, XFlatCompressedLookup,
 };
 use crate::algorithm::tblastx::lookup::compressed::BlastCompressedAaLookupTable;
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
@@ -7628,8 +7628,8 @@ fn blastp_query_frames_marked(
 // ```
 /// The lookup table of exact blastp (`AaLookupTable`) and the query contexts of `query_frames`, as
 /// the lookup region of `run_resolved_in_pool` builds them. The threshold takes the x86-64
-/// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). EXPERIMENT (LOSAT_X_BPLUT /
-/// LOSAT_X_BPLUTSHADOW): the same table filled in place, without the reference builder's chains
+/// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). EXPERIMENT (LOSAT_X_BPLUT):
+/// the same table filled in place, without the reference builder's chains
 /// (lookup/x_lut_direct.rs). The build of the next block's table ahead of that block
 /// (LOSAT_X_BPLKPAHEAD, `x_lookup_ahead.rs`) makes the same call with the same arguments
 /// (`blastp_aa_lookup_ahead`).
@@ -7716,10 +7716,10 @@ fn blastp_compressed_lookup(
         &locations,
         query_chunk,
     )?;
-    // EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW; BPCLUT is a strict-set switch): the same table built
+    // EXPERIMENT (LOSAT_X_BPCLUT; BPCLUT is a strict-set switch): the same table built
     // flat, each cell's hits in one slice in NCBI's scan order, with the same refusal
     // (lookup/x_clut_direct.rs), by the search's pool when it has more than one thread
-    // (lookup/x_clut_par.rs); without the switches `try_build_blosum62_compressed_lookup`.
+    // (lookup/x_clut_par.rs); without the switch `try_build_blosum62_compressed_lookup`.
     let lookup = x_bp_build_compressed_lookup(
         args.word_size,
         crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
@@ -7740,7 +7740,7 @@ fn blastp_compressed_lookup(
     let lookup = match lookup {
         XCompressedLookup::Reference(lookup) => {
             // The flat build declined (a backbone past its stripes): the reference builder ran.
-            if x_bpclut_mode() == 1 {
+            if x_bpclut_on() {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", false);
             }
             BlastpRuntimeLookup::Compressed(lookup)
@@ -7750,7 +7750,7 @@ fn blastp_compressed_lookup(
             BlastpRuntimeLookup::CompressedFlat(lookup)
         }
     };
-    x_flat.finish(&mut contexts, &query, &locations, blastp_parallel_pool);
+    x_flat.finish(&mut contexts);
     Ok((lookup, contexts))
 }
 
@@ -7998,25 +7998,15 @@ fn run_resolved_in_pool(
     //     program == eBlastTypeRpsTblastn);
     // ```
     // Exact blastp (`AaLookupTable`) builds no compressed table: LOSAT_X_BPCLUT does not act.
-    if matches!(args.lookup_table_type, BlastpLookupTableType::AaLookupTable)
-        && x_bpclut_mode() != 0
-    {
+    if matches!(args.lookup_table_type, BlastpLookupTableType::AaLookupTable) && x_bpclut_on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", false);
     }
     let (lookup, mut contexts) = match args.lookup_table_type {
         // `blastp_aa_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built
         // ahead of this block by the same call on the block search's spare vectors
-        // (`blast_engine/x_lookup_ahead.rs`; its shadow builds them again here and compares).
+        // (`blast_engine/x_lookup_ahead.rs`).
         BlastpLookupTableType::AaLookupTable => match x_prebuilt.take() {
-            Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(
-                prebuilt,
-                &args,
-                query_records,
-                &query_frames,
-                &query_batches,
-                &query_lengths,
-                blastp_parallel_pool,
-            ),
+            Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(prebuilt),
             None => blastp_aa_lookup(&args, &query_frames),
         },
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
@@ -8026,18 +8016,9 @@ fn run_resolved_in_pool(
         // s_CompressedLookupFinalize(lookup);
         // ```
         // `blastp_compressed_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built
-        // ahead of this block by the same calls (`blast_engine/x_lookup_ahead.rs`; its shadow builds
-        // them again here and compares).
+        // ahead of this block by the same calls (`blast_engine/x_lookup_ahead.rs`).
         BlastpLookupTableType::CompressedAaLookupTable => match x_prebuilt.take() {
-            Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(
-                prebuilt,
-                &args,
-                query_records,
-                &query_frames,
-                &query_batches,
-                &query_lengths,
-                blastp_parallel_pool,
-            ),
+            Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(prebuilt),
             None => blastp_compressed_lookup(
                 &args,
                 &query_frames,

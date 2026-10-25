@@ -243,8 +243,6 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastx::x_seed_bucket::print_summary();
     LOSAT::algorithm::tblastx::blast_engine::x_pair_par_print_summary();
     LOSAT::algorithm::tblastx::blast_engine::x_seed_release_print_summary();
-    LOSAT::algorithm::tblastx::lookup::x_bplut_print_summary();
-    LOSAT::algorithm::tblastx::lookup::x_tbxlut_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_hsp_inplace_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_link_sort_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_link_slices_print_summary();
@@ -265,7 +263,6 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastn::blast_engine::x_lut_drop_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_query_drop_print_summary();
     LOSAT::algorithm::blastp::x_bp_seed_print_summary();
-    LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();
     LOSAT::algorithm::blastp::x_bp_lkp_ahead_print_summary();
     LOSAT::algorithm::blastp::x_restricted_gap_print_summary();

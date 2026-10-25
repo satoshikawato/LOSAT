@@ -85,7 +85,7 @@
 //!   only slots the fill wrote. `pv` is zeroed as before (the stripes OR their bits into it). The
 //!   build takes and sizes the vectors itself, before the stripes pass, never in a pass's tasks; a
 //!   build that ends `TooLarge` drops the spare's vectors (the reference builder makes that table,
-//!   and they are not kept beside it). In the shadow mode the vectors are filled with `u32::MAX` /
+//!   and they are not kept beside it). The unit tests fill the spare's vectors with `u32::MAX` /
 //!   `i32::MIN` first, so that an entry no stripe writes always differs from the fresh build's.
 //! - extra tasks (`XExtraTasks`: the contexts' Karlin blocks of a blastp block,
 //!   `blastp/x_query_blocks.rs`): the one-latch appends pass runs them after its chunks (the indices
@@ -102,10 +102,7 @@
 //!   builds its table itself.
 //!
 //! On with `LOSAT_X_BPCLUT` (a strict-set switch: on unless `=0`)
-//! where the search's pool has more than one thread; at one thread the serial builder runs. `LOSAT_X_BPCLUTSHADOW` builds this table too (with more than one thread)
-//! and compares it with the serial one. `LOSAT_X_BPLKPFLATSHADOW` builds the table of
-//! `LOSAT_X_BPLKPFLAT` (one-latch passes, recycled vectors, extra tasks) and then again with the
-//! `par_iter` passes on fresh vectors, and compares the outcomes and the tables slot for slot.
+//! where the search's pool has more than one thread; at one thread the serial builder runs.
 
 use super::*;
 use crate::utils::threading::SearchPool;
@@ -155,8 +152,7 @@ struct XChunkAppends {
 // will search builds it, the same table (module header).
 /// EXPERIMENT (LOSAT_X_BPCLUT): `x_try_build_flat_compressed_lookup` on `pool`'s threads; `pool` has
 /// more than one thread. With LOSAT_X_BPLKPFLAT (`x_flat_args.mode`) the one-latch passes on the
-/// spare's vectors, with the extra tasks (module header); its shadow then builds the table again
-/// with the `par_iter` passes on fresh vectors and compares the outcomes and the tables.
+/// spare's vectors, with the extra tasks (module header).
 pub(super) fn x_try_build_flat_in_pool(
     word_size: usize,
     scaled_threshold: i32,
@@ -167,7 +163,7 @@ pub(super) fn x_try_build_flat_in_pool(
     x_flat_args: XFlatArgs<'_>,
 ) -> Option<XFlatBuild> {
     let threads = pool.threads();
-    let build = |passes, spare, poison, x_ahead| {
+    let build = |passes, spare, x_ahead| {
         pool.install(|| {
             x_try_build_flat_parallel_with(
                 word_size,
@@ -183,7 +179,6 @@ pub(super) fn x_try_build_flat_in_pool(
                     stripe_shift: None,
                     passes,
                     spare,
-                    poison,
                     x_ahead,
                 },
             )
@@ -194,53 +189,17 @@ pub(super) fn x_try_build_flat_in_pool(
         if x_flat_args.x_ahead {
             return None;
         }
-        return build(XPasses::Rayon, None, false, false);
+        return build(XPasses::Rayon, None, false);
     }
-    let shadow = x_flat_args.mode == XLkpFlat::Shadow;
     let built = build(
         XPasses::OneLatch(x_flat_args.extra),
         x_flat_args.spare,
-        shadow,
         x_flat_args.x_ahead,
     );
-    // LOSAT_X_BPLKPAHEAD: a build ahead of its block that makes no table is dropped, and its block
-    // builds the table itself, whose outcome the shadow then compares (`XFlatArgs::x_ahead`).
-    let x_dropped = x_flat_args.x_ahead && !matches!(built, Some(XFlatBuild::Table(_)));
-    if shadow && !x_dropped {
-        x_lkpflat_shadow(
-            built.as_ref(),
-            build(XPasses::Rayon, None, false, false).as_ref(),
-        );
+    if matches!(built, Some(XFlatBuild::Table(_))) {
+        X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
     }
     built
-}
-
-// No NCBI counterpart: the check of LOSAT_X_BPLKPFLATSHADOW; it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPFLATSHADOW): panics unless `built` (the one-latch build) and `reference`
-/// (the `par_iter` build on fresh vectors) have the same outcome and, for a table, the same table.
-fn x_lkpflat_shadow(built: Option<&XFlatBuild>, reference: Option<&XFlatBuild>) {
-    let outcome = |build: Option<&XFlatBuild>| match build {
-        None => "none",
-        Some(XFlatBuild::Table(_)) => "table",
-        Some(XFlatBuild::Refused) => "refused",
-        Some(XFlatBuild::TooLarge) => "too large",
-    };
-    match (built, reference) {
-        (Some(XFlatBuild::Table(built)), Some(XFlatBuild::Table(reference))) => {
-            x_assert_same_flat_tables_as("LOSAT_X_BPLKPFLATSHADOW:", built, reference);
-            X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
-        }
-        (None, None)
-        | (Some(XFlatBuild::Refused), Some(XFlatBuild::Refused))
-        | (Some(XFlatBuild::TooLarge), Some(XFlatBuild::TooLarge)) => {
-            X_LKPFLAT_OUTCOMES.fetch_add(1, Ordering::Relaxed);
-        }
-        _ => panic!(
-            "LOSAT_X_BPLKPFLATSHADOW: outcome differs ({} vs {})",
-            outcome(built),
-            outcome(reference)
-        ),
-    }
 }
 
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT): how the build's two passes reach the pool's threads.
@@ -364,9 +323,6 @@ struct XParallelCuts<'a> {
     passes: XPasses<'a>,
     /// LOSAT_X_BPLKPFLAT: the vectors of an earlier table for `starts` and `hits` (else fresh ones).
     spare: Option<&'a XFlatSpare>,
-    /// LOSAT_X_BPLKPFLATSHADOW: `starts` and `hits` filled with `u32::MAX` / `i32::MIN` before the
-    /// stripes write them.
-    poison: bool,
     /// LOSAT_X_BPLKPAHEAD: `starts`, `hits` and `pv` all come from `spare`, and without their room
     /// the build makes no table (`None`); nothing of the table is allocated here
     /// (`XFlatArgs::x_ahead`).
@@ -841,11 +797,6 @@ fn x_try_build_flat_parallel_with(
     let (mut hits, hits_reused) = x_reuse(spare_hits, total);
     X_LKPFLAT_RECYCLED.fetch_add(u64::from(starts_reused), Ordering::Relaxed);
     X_LKPFLAT_RECYCLED_HITS.fetch_add(u64::from(hits_reused), Ordering::Relaxed);
-    if cuts.poison {
-        // LOSAT_X_BPLKPFLATSHADOW: an entry that no stripe writes keeps a value no build makes.
-        starts.fill(u32::MAX);
-        hits.fill(i32::MIN);
-    }
     starts[backbone_size] = total as u32;
 
     // The stripes: count, layout and fill.
@@ -1023,6 +974,9 @@ mod tests {
         passes: XPasses<'_>,
         spare: Option<(&XFlatSpare, bool)>,
     ) -> XFlatBuild {
+        if let Some((spare, true)) = spare {
+            poison(spare);
+        }
         in_pool(threads, || {
             x_try_build_flat_parallel_with(
                 5,
@@ -1038,12 +992,23 @@ mod tests {
                     stripe_shift,
                     passes,
                     spare: spare.map(|(spare, _)| spare),
-                    poison: spare.is_some_and(|(_, poison)| poison),
                     x_ahead: false,
                 },
             )
         })
         .expect("word size 5")
+    }
+
+    /// Fills `spare`'s vectors, to their whole capacity, with `u32::MAX` / `i32::MIN`: an entry that
+    /// no stripe writes then keeps a value that no build makes (the build takes the vectors' values
+    /// as they are, module header).
+    fn poison(spare: &XFlatSpare) {
+        let mut kept = spare.0.lock().unwrap();
+        let (starts, hits) = &mut *kept;
+        starts.resize(starts.capacity(), u32::MAX);
+        starts.fill(u32::MAX);
+        hits.resize(hits.capacity(), i32::MIN);
+        hits.fill(i32::MIN);
     }
 
     // The two pass implementations (LOSAT_X_BPLKPFLAT): `par_iter` and one-latch passes.
@@ -1224,7 +1189,7 @@ mod tests {
     // parallel builder refuses exactly when the reference does, and otherwise builds its table.
     // The bound on the appends: `TooLarge` exactly when the appends pass it. Both pass
     // implementations; the one-latch passes with extra tasks, each of which runs exactly once, also
-    // when the build is refused or `TooLarge`, and on a spare of garbage (filled with the shadow's
+    // when the build is refused or `TooLarge`, and on a spare of garbage (filled with `poison`'s
     // pattern or not), which a refused build consumes and a `TooLarge` build drops; the next build on
     // a spare of garbage is still exact.
     #[test]
@@ -1503,7 +1468,6 @@ mod tests {
         for (threads, mode, runs) in [
             (1, XLkpFlat::On, 0),
             (3, XLkpFlat::On, 1),
-            (3, XLkpFlat::Shadow, 1),
             (3, XLkpFlat::Off, 0),
         ] {
             let extra = Counted::new(9);
@@ -1538,8 +1502,11 @@ mod tests {
         locations: &[(i32, i32)],
         tables: &[std::ops::Range<usize>],
         spare: Option<&XFlatSpare>,
-        poison: bool,
+        poisoned: bool,
     ) -> Option<XFlatBuild> {
+        if let (Some(spare), true) = (spare, poisoned) {
+            poison(spare);
+        }
         in_pool(threads, || {
             x_try_build_flat_parallel_with(
                 5,
@@ -1555,7 +1522,6 @@ mod tests {
                     stripe_shift: None,
                     passes: XPasses::OneLatch(None),
                     spare,
-                    poison,
                     x_ahead: true,
                 },
             )

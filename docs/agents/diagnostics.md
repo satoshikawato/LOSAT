@@ -586,8 +586,8 @@ searches with all of them on (the blocks at 50,000 letters): every output equal 
 every job. They change no value and no order of computation. `LOSAT_X_BPQBLOCK` is a value
 switch whose built-in value is 50,000 query letters: a `-outfmt 6` blastp search of more than
 50,000 query letters in more than one query batch now runs in query blocks. Its shadow
-variables (`LOSAT_X_BPSEEDSHADOW`, `LOSAT_X_BPUNGAPSHADOW`, `LOSAT_X_BPGAPSHADOW`,
-`LOSAT_X_BPLUTSHADOW`) and `LOSAT_X_BPPCOMPACT=shadow` stay outside the set, and so does
+variables (`LOSAT_X_BPSEEDSHADOW`, `LOSAT_X_BPUNGAPSHADOW`, `LOSAT_X_BPGAPSHADOW`)
+and `LOSAT_X_BPPCOMPACT=shadow` stay outside the set, and so does
 `LOSAT_X_BPSEED_PREFETCH`.
 
 `LOSAT_X_BNSTREAM` was added after the default changed, as a switch that was off unless set, and
@@ -639,8 +639,7 @@ merit, put it in"). `blastp -task blastp-fast` builds each query block's compres
 schedules that pool build with one synchronization per pass, reuses the previous block's table
 vectors and makes the contexts' Karlin blocks tasks of the build. `LOSAT_X_BPLKPFLAT` acts only where
 the pool builds the flat table of `LOSAT_X_BPCLUT`, so both joined in one change. Neither changes a
-value: the table and the report are the reference's. Their shadows (`LOSAT_X_BPCLUTSHADOW`,
-`LOSAT_X_BPLKPFLATSHADOW`) stay opt-in. Timings (workstation, 2x Xeon 6338; every output hash equal
+value: the table and the report are the reference's. Timings (workstation, 2x Xeon 6338; every output hash equal
 to the expected one) are in the entries below: with both on, `blastp-fast` of the human proteome
 against the yeast proteome with `-subject` took 0.784 of the time at 16 threads with
 `LOSAT_X_BPSUBJRUN` also on (0.741 with `LOSAT_X_BPQBLOCK=20000`), and `LOSAT_X_BPLKPFLAT` alone,
@@ -1178,9 +1177,7 @@ Rebuilding less:
   filled in place from per-cell counts by BLASTX's (BXLUT's) builder (same append order as
   `s_AddNeighboringWords` and `BlastAaLookupFinalize`; `tblastx/lookup/x_lut_direct.rs`, exactness
   argument in its header), so the per-cell chains of the reference builder, about 1.5 times the
-  finished table, are never held. In diagnostics mode the reference builder runs. Shadow:
-  `LOSAT_X_BPLUTSHADOW=1` (both builders, every table compared field by field, the reference's table
-  used); one line at exit: `[X_SHADOW] BPLUT tables_compared=`.
+  finished table, are never held. In diagnostics mode the reference builder runs.
 - `LOSAT_X_BPREDOFIT=1` (BLASTP, memory; in the strict set since 2026-10-14; `=0` turns it off) the
   composition-based redo builds each redone HSP list with room for
   exactly its alignments, and a list from which HSPs were removed afterwards gives back their room
@@ -1865,12 +1862,6 @@ Rebuilding less:
   at 1 thread and 31.2 -> 5.9 s at 16. At one thread without and with the flat table (`BPSEED` only -> with
   `BPCLUT`; four jobs run at once on four cores): human x yeast 110.9 -> 94.3 s and 103 -> 68 MB,
   Arabidopsis x zebrafish 366.9 -> 352.7 s and 96 -> 88 MB.
-- `LOSAT_X_BPCLUTSHADOW=1` shadow of `LOSAT_X_BPCLUT` (for blastp-fast): both builders run, the refusal and the
-  tables are compared (every cell's hits in the reference's scan order, the PV array, `longest_chain` and the
-  scan's parameters) and the first difference stops the run (panic); the search uses the reference's table.
-  With more than one thread the pool's build runs too and its outcome and table (every field, slot for slot)
-  are compared with the serial flat build's. One line at exit: `[X_SHADOW] BPCLUT tables_compared=
-  refusals_compared= hits= parallel_tables_compared= parallel_refusals_compared= identical`.
 - `LOSAT_X_BPCLUTSCANBF=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that
   added it, 2026-10-23, line v4-G #11; `=0` turns it off; acts in the fused loop, `LOSAT_X_BPSEED`, on the flat
   compressed table of `LOSAT_X_BPCLUT`, on tables with at least `LOSAT_X_BPCLUTSCANBFMIN` used cells per 10,000;
@@ -1940,7 +1931,7 @@ Rebuilding less:
   natively; AGENTS.md "Speed-up switches").
 - `LOSAT_X_BPLKPFLAT=1` (BLASTP `-task blastp-fast`, speed; in the strict set since 2026-10-17, on by default
   together with `LOSAT_X_BPCLUT`; acts only where the search's pool builds the flat table of
-  `LOSAT_X_BPCLUT` or `LOSAT_X_BPCLUTSHADOW`, with more than one thread) changes how that build is scheduled
+  `LOSAT_X_BPCLUT`, with more than one thread) changes how that build is scheduled
   and where its vectors come from, not the table (`tblastx/lookup/x_clut_par.rs`, exactness argument in its
   header): (1) the appends pass and the stripes pass each run in one `rayon::scope` with one task per thread,
   each task taking the next chunk or stripe from one counter and storing its result at its index, instead of
@@ -1967,22 +1958,18 @@ Rebuilding less:
   together vs both off): 0.784 (blocks of 50,000) and 0.741 (20,000) at 16 threads, 0.849 and 0.831 at 8.
   `-db` at 16 threads, both on vs both off: 0.950 (2 rounds). Exact `blastp` 1.012 (2 rounds; no compressed
   table). At one thread the serial build runs and the switch changes nothing.
-- `LOSAT_X_BPLKPFLATSHADOW=1` shadow of `LOSAT_X_BPLKPFLAT` (implies it): after each build of the switch (the
-  table the search uses, on the recycled vectors) the table is built again with the `par_iter` passes on fresh
-  zeroed vectors, and the outcomes (table, refusal, `TooLarge`) and the tables (every field, slot for slot) are
-  compared; the switch's build fills its vectors with `u32::MAX` / `i32::MIN` first, so that an entry no
-  stripe writes always differs from the fresh build's; the contexts set after a build with Karlin tasks are compared with those of
-  `x_query_blocks::x_bp_lookup_query` (the query, the segments, every context field, the Karlin blocks bit for
-  bit). The first difference stops the run (panic). One line at exit: `[X_SHADOW] BPLKPFLAT tables_compared=
-  outcomes_compared= recycled= recycled_hits= context_sets_compared= contexts_compared= contexts_from_tasks=
-  identical` (`recycled` / `recycled_hits`: builds whose `starts` / whose `hits` are the buffer of an earlier
-  table, `hits` only where it had the room; with `LOSAT_X_BPLKPAHEAD` on, also builds ahead on the second
-  spare's vectors, which `x_make_room` allocated or moved there, since the reuse test sees only capacity; `contexts_from_tasks`: contexts computed by the builds' tasks). With `LOSAT_X_BPCLUTSHADOW` the pool's build is the switch's (on the vectors that the
-  previous block's pool build gave back) and is compared with the serial flat build as well.
+  With `LOSAT_X_STATS` one line at exit when the pool built a table:
+  `[X_STATS] BPLKPFLAT tables= recycled= recycled_hits=` (`tables`: flat tables the switch's build made, the
+  block searches', the query chunks' and, with `LOSAT_X_BPLKPAHEAD`, the builds ahead; `recycled` /
+  `recycled_hits`: builds whose `starts` / whose `hits` are the buffer of an earlier table, `hits` only where
+  it had the room; with `LOSAT_X_BPLKPAHEAD` on, also builds ahead on the second spare's vectors, which
+  `x_make_room` allocated or moved there, since the reuse test sees only capacity). The unit tests of
+  `x_clut_par.rs` build on recycled vectors, on vectors of garbage (`u32::MAX`, `i32::MIN`) and with the
+  Karlin tasks, and compare every table and context with the serial build's and the reference's.
 - `LOSAT_X_BPLKPAHEAD=1` (BLASTP `-task blastp-fast`, and exact blastp since 2026-10-20 (perf/bp-lkp-exact), speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`; acts only in the block search of `LOSAT_X_BPQBLOCK`, with `-subject`
   or `-db`, with more than one thread: for blastp-fast where `LOSAT_X_BPLKPFLAT` acts on the pool's flat table
-  of `LOSAT_X_BPCLUT` (not with `LOSAT_X_BPCLUTSHADOW`); for exact blastp where its table is built in place
-  (`LOSAT_X_BPLUT`; not with `LOSAT_X_BPLUT=0`, `LOSAT_X_BPLUTSHADOW` or `LOSAT_DIAGNOSTICS`, whose reference
+  of `LOSAT_X_BPCLUT`; for exact blastp where its table is built in place
+  (`LOSAT_X_BPLUT`; not with `LOSAT_X_BPLUT=0` or `LOSAT_DIAGNOSTICS`, whose reference
   builder prints its phases)) builds the next query block's query frames, lookup
   table and contexts during the block before it, as one task on the search's pool, instead of at the start
   of the next block's own search (`blastp/blast_engine/x_lookup_ahead.rs`, exactness argument in its
@@ -2042,17 +2029,13 @@ Rebuilding less:
   thread, took as long as inline (median 13.9 ms) and ended at least 81 ms (median 145 ms) before the end of
   their block's search, so they did not overlap its report (the binary had #328's `LOSAT_X_PAIRWISEPAR`,
   which writes outfmt 0 on the pool) and the block never waited for one. Not measured: blastp-fast `-db` on a database that `LOSAT_X_BPDBCUT` leaves in 1 MiB blocks (at least 4 MiB per thread); the only pairs near it (the 2.9 MB database with the cut off) read x1.143 and x0.987 (perf-mb `logs/lkpahead_report.md`); a Swiss-Prot blastp-fast pair is in the pending workstation plan (`ws/defbundle_plan2.txt`).
-- `LOSAT_X_BPLKPAHEADSHADOW=1` shadow of `LOSAT_X_BPLKPAHEAD` (implies it): each block that takes values
-  built ahead also builds them inline as without the switch (blastp-fast's on the block spare's vectors,
-  given back after) and compares them: the query frames field for field, the flat tables field for field and
-  slot for slot (exact blastp's tables every field, cell by cell), the contexts with their Karlin blocks bit
-  for bit. The first difference prints the line below with
-  `DIFFERENT` and stops the run (panic). One line at exit: `[X_SHADOW] BPLKPAHEAD blocks= prebuilt= dropped=
-  compared= identical` (`blocks`: blocks searched where the switch acts; `prebuilt`: blocks that took
-  values built ahead; `dropped`: builds ahead that gave none, whose blocks built inline; `compared`: blocks
-  compared; every block but the last starts one build once its own table is ready, if that table is a flat
-  one or (exact blastp) one built in place, as it is unless the reference builder made it, so
-  `prebuilt + dropped = blocks - 1`).
+  With `LOSAT_X_STATS` one line at exit when a counter is not zero: `[X_STATS] BPLKPAHEAD blocks= prebuilt=
+  dropped=` (`blocks`: blocks searched where the switch acts; `prebuilt`: blocks that took values built ahead;
+  `dropped`: builds ahead that gave none, whose blocks built inline; every block but the last starts one build
+  once its own table is ready, if that table is a flat one or (exact blastp) one built in place, as it is
+  unless the reference builder made it, so `prebuilt + dropped = blocks - 1`). A unit test of
+  `x_lookup_ahead.rs` builds a block's values ahead and inline, for exact blastp and blastp-fast, and compares
+  the query frames, the table and the contexts (the Karlin blocks bit for bit).
 - `LOSAT_X_BPDIAG=1` (BLASTP, speed; in the strict set since 2026-10-17; `=0` turns it off; acts only in
   the fused loop of `LOSAT_X_BPSEED` or `LOSAT_X_BPSEEDSHADOW`) the two-hit
   diagonal test of the hits of one lookup cell in batches of eight instead of one after the other
@@ -4963,9 +4946,8 @@ Scheduling (each value computed by one thread with the original function; order 
   the arena blocks the chains left when they doubled (LUTARENA), until the table is complete (NCBI
   frees each chain as it copies it); with `-threshold +inf` (NCBI's INT_MIN: every word) all chains
   grow in step and the dead blocks are never reused. Diagnostics mode keeps the chain builder.
-  Shadow: `LOSAT_X_TBXLUTSHADOW=1` (both builders, every table compared field by field, the chain
-  builder's table used; one `[X_SHADOW] TBXLUT tables_compared=` line at exit).
-  `LOSAT/tests/tblastx_ref_lut.rs` compares reports with and without the switch and its shadow.
+  `LOSAT/tests/tblastx_ref_lut.rs` compares reports with and without the switch (the reach file shows the
+  in-place build); a unit test of `x_lut_direct.rs` compares the table with the chain builder's field by field.
   Measured: 3 kb of the option-sweep query against the sweep subjects at `-threshold +inf` with the
   reference loop (then run with `LOSAT_X_PAIRPAR=0`, a variable that no longer exists), one thread: max RSS 1,069 -> 475 MB, 8.20 -> 7.00 s (NCBI
   589 MB, 9.19 s); the whole sweep input 14.2 -> 3.31 GB (NCBI 5.86 GB). On the batches the gate

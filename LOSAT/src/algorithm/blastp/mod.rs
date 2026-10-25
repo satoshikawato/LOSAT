@@ -72,7 +72,7 @@ pub fn x_bp_seed_print_summary() {
     x_seed_fused::x_bp_seed_print_summary();
 }
 
-/// EXPERIMENT (LOSAT_X_BPLKPAHEADSHADOW): the shadow mode's line at exit.
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the `[X_STATS] BPLKPAHEAD` line at exit.
 // No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_bp_lkp_ahead_print_summary() {
     blast_engine::x_lookup_ahead::x_bp_lkp_ahead_print_summary();

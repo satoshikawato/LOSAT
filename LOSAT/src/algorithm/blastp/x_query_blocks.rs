@@ -403,7 +403,7 @@ use std::sync::Mutex;
 
 use super::encoding::EncodedProtein;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bpclut_mode, x_bplkpflat_mode, x_pool_builds, XFlatArgs, XFlatSpare, XLkpFlat,
+    x_bpclut_on, x_bplkpflat_mode, x_pool_builds, XFlatArgs, XFlatSpare, XLkpFlat,
 };
 use crate::algorithm::tblastx::lookup::{QueryContext, XAaSpares};
 use crate::algorithm::tblastx::translation::QueryFrame;
@@ -416,12 +416,8 @@ use crate::utils::threading::SearchPool;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 use {
-    crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-        x_lkpflat_count_contexts, XExtraTasks,
-    },
-    crate::algorithm::tblastx::lookup::x_pair_lut::x_assert_same_contexts_as,
-    crate::algorithm::tblastx::lookup::XBlosum62LookupQuery,
-    crate::stats::KarlinParams,
+    crate::algorithm::tblastx::lookup::compressed::x_clut_direct::XExtraTasks,
+    crate::algorithm::tblastx::lookup::XBlosum62LookupQuery, crate::stats::KarlinParams,
     std::sync::OnceLock,
 };
 
@@ -1097,10 +1093,10 @@ pub(crate) fn x_bp_lookup_query(
 // No NCBI counterpart: where LOSAT_X_BPLKPFLAT acts; it reads switches and changes no value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT): the switch's mode (`x_bplkpflat_mode`) where `pool` builds
-/// blastp-fast's flat table (`LOSAT_X_BPCLUT` or `LOSAT_X_BPCLUTSHADOW`, and `x_pool_builds`: a pool
+/// blastp-fast's flat table (`LOSAT_X_BPCLUT`, and `x_pool_builds`: a pool
 /// of more than one thread, `lookup/x_clut_par.rs`), else `Off`.
 fn x_lkpflat_mode_for_pool(pool: &SearchPool<'_>) -> XLkpFlat {
-    if x_bpclut_mode() != 0 && x_pool_builds(pool) {
+    if x_bpclut_on() && x_pool_builds(pool) {
         x_bplkpflat_mode()
     } else {
         XLkpFlat::Off
@@ -1138,8 +1134,8 @@ pub(crate) fn x_bp_lookup_spares<'p>(
 /// (`blast_engine/x_lookup_ahead.rs`): the switch is on, the table is built in place
 /// (`XAaSpares::x_applies`), and the pool has more than one thread (`x_pool_builds`).
 pub(crate) fn x_bp_aa_spares<'p>(pool: &SearchPool<'p>) -> Option<&'p XAaSpares> {
-    use super::blast_engine::x_lookup_ahead::{x_bp_lkp_ahead, XLkpAhead};
-    if x_bp_lkp_ahead() == XLkpAhead::Off || !XAaSpares::x_applies() || !x_pool_builds(pool) {
+    use super::blast_engine::x_lookup_ahead::x_bp_lkp_ahead;
+    if !x_bp_lkp_ahead() || !XAaSpares::x_applies() || !x_pool_builds(pool) {
         return None;
     }
     pool.x_ext::<XBlockSubjects>()
@@ -1258,8 +1254,6 @@ impl<'a> XLookupFlat<'a> {
         let (query, locations, contexts) = lookup_query.without_karlin(query_frames, word_size);
         let frames: Vec<&QueryFrame> = query_frames.iter().flatten().collect();
         let karlin = XKarlinTasks {
-            query_frames,
-            word_size,
             done: frames.iter().map(|_| OnceLock::new()).collect(),
             frames,
             lookup_query,
@@ -1308,40 +1302,17 @@ impl<'a> XLookupFlat<'a> {
     /// blocks that the build's tasks computed and computes the others here; the tasks do not run
     /// where the pool's build falls back to the serial builder (a backbone too large for its
     /// stripes, `x_try_build_flat_parallel_with`); a build that fails before its passes ends the search before
-    /// this call. Without Karlin tasks it does nothing. With the shadow mode, compares the query,
-    /// the segments and the contexts with `x_bp_lookup_query`'s, the Karlin blocks bit for bit
-    /// (panics on a difference). Returns the number of contexts the tasks computed (for the tests;
-    /// the shadow counts them as well).
-    pub(crate) fn finish(
-        self,
-        contexts: &mut [QueryContext],
-        query: &[u8],
-        locations: &[(i32, i32)],
-        pool: &SearchPool<'_>,
-    ) -> usize {
+    /// this call. Without Karlin tasks it does nothing. Returns the number of contexts the tasks
+    /// computed (for the tests).
+    pub(crate) fn finish(self, contexts: &mut [QueryContext]) -> usize {
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         if let Some(karlin) = self.karlin {
-            let from_tasks = karlin.fill(contexts);
-            if self.mode == XLkpFlat::Shadow {
-                let (reference_query, reference_locations, reference_contexts) =
-                    x_bp_lookup_query(karlin.query_frames, karlin.word_size, pool);
-                assert!(
-                    reference_query == query && reference_locations == locations,
-                    "LOSAT_X_BPLKPFLATSHADOW: lookup query differs"
-                );
-                x_assert_same_contexts_as(
-                    "LOSAT_X_BPLKPFLATSHADOW:",
-                    contexts,
-                    &reference_contexts,
-                );
-                x_lkpflat_count_contexts(contexts.len(), from_tasks);
-            }
-            return from_tasks;
+            return karlin.fill(contexts);
         }
-        let _ = (contexts, query, locations, pool);
+        let _ = contexts;
         0
     }
 }
@@ -1366,8 +1337,6 @@ impl<'a> XLookupFlat<'a> {
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 struct XKarlinTasks<'a> {
-    query_frames: &'a [Vec<QueryFrame>],
-    word_size: usize,
     /// The frames in the order of the contexts.
     frames: Vec<&'a QueryFrame>,
     lookup_query: XBlosum62LookupQuery,
@@ -1507,33 +1476,30 @@ mod tests {
                 x_assert_same_contexts(&pool_contexts, &contexts);
                 // LOSAT_X_BPLKPFLAT: the Karlin blocks as extra tasks of the pool's build of the
                 // flat table (every one of them at 3 and 7 threads; at one thread the serial builder
-                // runs none and `finish` computes them all), with the shadow's checks too.
-                for mode in [XLkpFlat::On, XLkpFlat::Shadow] {
-                    let from_tasks =
-                        crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
-                            let (flat, flat_query, flat_locations, mut flat_contexts) =
-                                XLookupFlat::with_karlin_tasks(&frames, 5, mode, None);
-                            assert_eq!(flat_query, query);
-                            assert_eq!(flat_locations, locations);
-                            let built = x_build_flat_in_pool(
-                                5,
-                                1100,
-                                &flat_query,
-                                &flat_locations,
-                                &[0..flat_locations.len()],
-                                pool,
-                                flat.build_args(),
-                            );
-                            assert!(matches!(built, Some(XFlatBuild::Table(_))));
-                            let from_tasks =
-                                flat.finish(&mut flat_contexts, &flat_query, &flat_locations, pool);
-                            x_assert_same_contexts(&flat_contexts, &contexts);
-                            Ok(from_tasks)
-                        })
-                        .expect("pool");
-                    let expected = if threads > 1 { contexts.len() } else { 0 };
-                    assert_eq!(from_tasks, expected, "threads {threads}, {mode:?}");
-                }
+                // runs none and `finish` computes them all).
+                let from_tasks =
+                    crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                        let (flat, flat_query, flat_locations, mut flat_contexts) =
+                            XLookupFlat::with_karlin_tasks(&frames, 5, XLkpFlat::On, None);
+                        assert_eq!(flat_query, query);
+                        assert_eq!(flat_locations, locations);
+                        let built = x_build_flat_in_pool(
+                            5,
+                            1100,
+                            &flat_query,
+                            &flat_locations,
+                            &[0..flat_locations.len()],
+                            pool,
+                            flat.build_args(),
+                        );
+                        assert!(matches!(built, Some(XFlatBuild::Table(_))));
+                        let from_tasks = flat.finish(&mut flat_contexts);
+                        x_assert_same_contexts(&flat_contexts, &contexts);
+                        Ok(from_tasks)
+                    })
+                    .expect("pool");
+                let expected = if threads > 1 { contexts.len() } else { 0 };
+                assert_eq!(from_tasks, expected, "threads {threads}");
             }
         }
     }

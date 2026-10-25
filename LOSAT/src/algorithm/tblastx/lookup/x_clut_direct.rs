@@ -1766,6 +1766,109 @@ impl XFlatCompressedLookup {
         }
     }
 
+    /// PROBE (BPF s4, not for merge): the first pass of `for_each_cell::<true, _>` alone: `cells`
+    /// gets the same list of (subject offset, backbone index).
+    #[inline(always)]
+    pub(crate) fn x_probe_list_bf(
+        &self,
+        subject: &[u8],
+        subject_length: usize,
+        cells: &mut Vec<(i32, u32)>,
+    ) {
+        let word_length = usize::try_from(self.word_length)
+            .expect("NCBI BLAST compressed word length must fit usize");
+        let compressed_alphabet_size = usize::try_from(self.compressed_alphabet_size)
+            .expect("NCBI BLAST compressed alphabet size must fit usize");
+        let recip = i64::from(self.reciprocal_alphabet_size);
+        let pv_array_bts = usize::try_from(self.pv_array_bts)
+            .expect("NCBI BLAST compressed PV shift must fit usize");
+        let scaled_compress_table = &self.scaled_compress_table_u8;
+        let pv = &self.pv;
+        cells.clear();
+
+        let mut s_last =
+            i32::try_from(subject_length).expect("subject length must fit Int4") - self.word_length;
+        if s_last < 0 {
+            s_last = 0;
+        }
+        let s_last = s_last as usize;
+        let byte_at = |i: usize| subject.get(i).copied().unwrap_or(0);
+
+        let mut s = 0usize;
+        let mut index = 0i32;
+        let mut padded_word = [0u8; 8];
+        while s <= s_last {
+            let end = s + word_length - 1;
+            let word = match subject.get(s..end) {
+                Some(word) => word,
+                None => {
+                    let available = subject.get(s..).unwrap_or(&[]);
+                    let word = &mut padded_word[..word_length - 1];
+                    word.fill(0);
+                    word[..available.len()].copy_from_slice(available);
+                    &padded_word[..word_length - 1]
+                }
+            };
+            let (computed, skip) = compute_compressed_index_u8(
+                word_length - 1,
+                word,
+                compressed_alphabet_size,
+                scaled_compress_table,
+            );
+            index = computed;
+            if skip == 0 {
+                break;
+            }
+            s += 1;
+        }
+
+        let mut next_char = if s <= s_last {
+            byte_at(s + word_length - 1)
+        } else {
+            0
+        };
+        let mut preshift = compressed_reciprocal_divide(index, recip);
+        cells.reserve(s_last + 1 - s);
+        let list = cells.as_mut_ptr();
+        let mut listed = 0usize;
+        while s <= s_last {
+            let mut compressed_char = scaled_compress_table[usize::from(next_char)];
+            next_char = byte_at(s + word_length);
+
+            if compressed_char < 0 {
+                preshift = 0;
+                s += 1;
+                let mut skip = self.word_length - 1;
+                while skip != 0 && s <= s_last {
+                    compressed_char = scaled_compress_table[usize::from(next_char)];
+                    next_char = byte_at(s + word_length);
+                    if compressed_char < 0 {
+                        skip = self.word_length - 1;
+                        preshift = 0;
+                        s += 1;
+                        continue;
+                    }
+                    index = preshift + compressed_char;
+                    preshift = compressed_reciprocal_divide(index, recip);
+                    skip -= 1;
+                    s += 1;
+                }
+                continue;
+            }
+
+            index = preshift + compressed_char;
+            preshift = compressed_reciprocal_divide(index, recip);
+            let ix = index as usize;
+            let bit = (pv[ix >> pv_array_bts] >> (ix & PV_ARRAY_MASK)) & 1;
+            // SAFETY: as in `for_each_cell`.
+            unsafe { list.add(listed).write((s as i32, index as u32)) };
+            listed += bit as usize;
+            s += 1;
+        }
+        // SAFETY: the first `listed` places were written above, within the reserve.
+        unsafe { cells.set_len(listed) };
+    }
+
     // No NCBI counterpart: chooses LOSAT's list form; both list the same offsets.
     /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): whether blastp-fast lists this table's offsets without a
     /// branch (`for_each_cell::<true, _>`): at least [`x_scan_bf_min`] of every 10,000 backbone

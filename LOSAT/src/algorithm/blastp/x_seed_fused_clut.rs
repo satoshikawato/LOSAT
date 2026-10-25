@@ -119,18 +119,42 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
             .then(|| x_fseed_test(diag_offset, subject_length, window, word_size))
             .flatten()
         {
-            x_scan_flat_fseed(
-                lookup,
-                subject,
-                subject_length,
-                diag_array,
-                diag_mask,
-                diag_offset,
-                window,
-                word_size,
-                bf,
-                &mut candidate,
-            );
+            macro_rules! stage {
+                ($arm:literal) => {
+                    x_scan_flat_stage::<$arm, F>(
+                        lookup,
+                        subject,
+                        subject_length,
+                        diag_array,
+                        diag_mask,
+                        diag_offset,
+                        window,
+                        word_size,
+                        bf,
+                        &mut candidate,
+                    )
+                };
+            }
+            match x_bpf_s4() {
+                1 => stage!(1),
+                2 => stage!(2),
+                3 => stage!(3),
+                4 => stage!(4),
+                5 => stage!(5),
+                7 => stage!(7),
+                _ => x_scan_flat_fseed(
+                    lookup,
+                    subject,
+                    subject_length,
+                    diag_array,
+                    diag_mask,
+                    diag_offset,
+                    window,
+                    word_size,
+                    bf,
+                    &mut candidate,
+                ),
+            }
             return;
         }
         x_scan_flat_bf(
@@ -248,6 +272,176 @@ fn x_scan_flat_fseed<F>(
         }
     });
     X_CELLS.with(|slot| slot.set(Some(cells)));
+}
+
+// PROBE (BPF s4, not for merge): LOSAT_BPF_S4 selects the seed loop of a subject that takes
+// `x_scan_flat_fseed`: 0 that loop; 1 the hits staged as (diagonal, here) in runs of 8 per cell and
+// tested in one loop per 1,024 staged hits; 2 staged as (query offset, subject offset); 3 as 1
+// without the read-ahead of the hits; 4 runs of 16; 5 tested per 256; 7 as 1 without any
+// read-ahead.
+fn x_bpf_s4() -> u32 {
+    use std::sync::OnceLock;
+    static ARM: OnceLock<u32> = OnceLock::new();
+    *ARM.get_or_init(|| {
+        std::env::var("LOSAT_BPF_S4")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+const X_STAGE_CAP: usize = 1024;
+
+// PROBE (BPF s4): the staged hits, two arrays of X_STAGE_CAP + 16.
+struct XStage {
+    a: Vec<u32>,
+    b: Vec<u32>,
+}
+
+thread_local! {
+    static X_STAGE: Cell<Option<Box<XStage>>> = const { Cell::new(None) };
+}
+
+/// PROBE (BPF s4): [`x_scan_flat_fseed`] with each cell's hits staged (copied in fixed runs, so
+/// that no loop ends at a cell's last hit) and the two-hit test run over the staged hits in scan
+/// order: the same hits in the same order, so the same tests, entries and calls.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_scan_flat_stage<const ARM: u32, F>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    bf: XHitBf,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
+    let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
+    lookup.x_probe_list_bf(subject, subject_length, &mut cells);
+    let mut stage = X_STAGE.with(Cell::take).unwrap_or_else(|| {
+        Box::new(XStage {
+            a: vec![0; X_STAGE_CAP + 16],
+            b: vec![0; X_STAGE_CAP + 16],
+        })
+    });
+    let cap = if ARM == 5 { 256 } else { X_STAGE_CAP };
+    const fn step_of(arm: u32) -> usize {
+        if arm == 4 {
+            16
+        } else {
+            8
+        }
+    }
+    let step = step_of(ARM);
+    let mask = diag_mask as u32;
+    let starts = &lookup.starts[..];
+    let hits = &lookup.hits[..];
+    let XStage { a, b } = &mut *stage;
+    let (a, b) = (&mut a[..], &mut b[..]);
+    let mut drain = |w: usize, a: &[u32], b: &[u32]| {
+        for (&x, &y) in a[..w].iter().zip(&b[..w]) {
+            let (coord, here) = if ARM == 2 {
+                let (q, s) = (x as i32, y as i32);
+                ((q.wrapping_sub(s) as u32) & mask, bf.here(s))
+            } else {
+                (x, y)
+            };
+            // SAFETY: coord <= diag_mask < diag_array.len() (asserted above).
+            let entry = unsafe { diag_array.get_unchecked_mut(coord as usize) };
+            if bf.test(entry, here) {
+                continue;
+            }
+            let s = here.wrapping_sub(diag_offset as u32) as i32;
+            if let Some((last_hit, diff)) = x_test_hit(entry, s, diag_offset, window, word_size) {
+                // The diagonal table is longer than the query, so q = (coord + s) & mask.
+                let q = if ARM == 2 {
+                    x as i32
+                } else {
+                    (coord.wrapping_add(s as u32) & mask) as i32
+                };
+                candidate(q, s, last_hit, diff, entry);
+            }
+        }
+    };
+    let mut w = 0usize;
+    for (n, &(s, index)) in cells.iter().enumerate() {
+        if ARM != 7 {
+            if let Some(&(_, later)) = cells.get(n + 16) {
+                x_prefetch_any(starts.as_ptr().wrapping_add(later as usize));
+            }
+        }
+        if ARM != 3 && ARM != 7 {
+            if let Some(&(_, later)) = cells.get(n + 8) {
+                let st = starts[later as usize] as usize;
+                x_prefetch_any(hits.as_ptr().wrapping_add(st));
+            }
+        }
+        // SAFETY: the list's indices are backbone cells, and `starts` has one more entry.
+        let (start, end) = unsafe {
+            (
+                *starts.get_unchecked(index as usize) as usize,
+                *starts.get_unchecked(index as usize + 1) as usize,
+            )
+        };
+        let here = bf.here(s);
+        let mut k = start;
+        loop {
+            if w + step > cap {
+                drain(w, a, b);
+                w = 0;
+            }
+            let take = (end - k).min(step);
+            let da = &mut a[w..w + step];
+            let db = &mut b[w..w + step];
+            if k + step <= hits.len() {
+                let src = &hits[k..k + step];
+                for j in 0..step {
+                    da[j] = if ARM == 2 {
+                        src[j] as u32
+                    } else {
+                        (src[j].wrapping_sub(s) as u32) & mask
+                    };
+                    db[j] = if ARM == 2 { s as u32 } else { here };
+                }
+            } else {
+                for j in 0..take {
+                    let q = hits[k + j];
+                    da[j] = if ARM == 2 {
+                        q as u32
+                    } else {
+                        (q.wrapping_sub(s) as u32) & mask
+                    };
+                    db[j] = if ARM == 2 { s as u32 } else { here };
+                }
+            }
+            w += take;
+            k += take;
+            if k >= end {
+                break;
+            }
+        }
+    }
+    drain(w, a, b);
+    X_STAGE.with(|slot| slot.set(Some(stage)));
+    X_CELLS.with(|slot| slot.set(Some(cells)));
+}
+
+// PROBE (BPF s4): a cache hint.
+#[inline(always)]
+fn x_prefetch_any<T>(ptr: *const T) {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: a prefetch has no effect on program state and does not fault.
+    unsafe {
+        std::arch::x86_64::_mm_prefetch(ptr.cast::<i8>(), std::arch::x86_64::_MM_HINT_T0);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = ptr;
 }
 
 /// The loop of [`x_scan_two_hit_compressed_flat`]; `BRANCH_FREE` is `for_each_cell`'s.
@@ -417,6 +611,7 @@ mod tests {
                 let mut bf_diag = vec![DiagStruct::default(); diag_len];
                 let mut fseed_diag = vec![DiagStruct::default(); diag_len];
                 let mut reference_diag = vec![DiagStruct::default(); diag_len];
+                let mut stage_diags = vec![vec![DiagStruct::default(); diag_len]; 8];
                 let mut diag_offset = window;
                 let mut total = 0usize;
                 for (n, subject) in subjects.iter().enumerate() {
@@ -495,6 +690,45 @@ mod tests {
                                 .all(|(a, b)| a.raw_bits() == b.raw_bits()),
                             "subject {n}: diagonal table ({form})"
                         );
+                    }
+                    // PROBE (BPF s4): the staged arms where the diagonal table is longer than the
+                    // query (as in the engine).
+                    if diag_len > query.len() + window as usize {
+                        macro_rules! arm {
+                            ($arm:literal) => {{
+                                let mut diag = stage_diags[$arm].clone();
+                                let mut log = Vec::new();
+                                x_scan_flat_stage::<$arm, _>(
+                                    &flat,
+                                    subject,
+                                    length,
+                                    &mut diag,
+                                    diag_mask,
+                                    diag_offset,
+                                    window,
+                                    5,
+                                    bf,
+                                    &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
+                                        stand_in(&mut log, diag_offset, q, s, last_hit, diff, entry)
+                                    },
+                                );
+                                assert_eq!(log, reference_log, "subject {n}: stage arm {}", $arm);
+                                assert!(
+                                    diag.iter()
+                                        .zip(&reference_diag)
+                                        .all(|(a, b)| a.raw_bits() == b.raw_bits()),
+                                    "subject {n}: diagonal table (stage arm {})",
+                                    $arm
+                                );
+                                stage_diags[$arm] = diag;
+                            }};
+                        }
+                        arm!(1);
+                        arm!(2);
+                        arm!(3);
+                        arm!(4);
+                        arm!(5);
+                        arm!(7);
                     }
                     total += flat_log.len();
                     diag_offset += length as i32 + window;

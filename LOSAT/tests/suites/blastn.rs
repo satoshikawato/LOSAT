@@ -11,6 +11,8 @@ mod blastn_db_cut;
 mod blastn_db_search;
 #[path = "../blastn_db_stream.rs"]
 mod blastn_db_stream;
+#[path = "../blastn_dc_two_slots.rs"]
+mod blastn_dc_two_slots;
 #[path = "../blastn_diag_lv.rs"]
 mod blastn_diag_lv;
 #[path = "../blastn_disc_lookup_par.rs"]

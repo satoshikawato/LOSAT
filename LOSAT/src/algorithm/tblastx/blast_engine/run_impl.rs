@@ -3951,19 +3951,15 @@ fn search_query_batch(
         //       subject_blk->length, frame, retval->translations[context], gen_code_string);
         // }
         // ```
-        // The letters and the preliminary bases of the subject (`Subjects::with_search_bases`:
-        // a database sequence's are made from its store, D2) live only while it is translated.
-        //
-        // EXPERIMENT (LOSAT_X_TBXFRAMES): only the frames the preliminary stage translates are
-        // made here, in windows (`Subjects::x_preliminary_frames`). For a subject with ambiguous
-        // bases the frames of its letters (`s_frames`) are made after the seed stage, once the
-        // preliminary frames are freed, and only when HSPs are left for the re-evaluation
-        // (`x_letter_frames_later`, below); until then `s_frames` is empty and the HSP lists
-        // index the preliminary frames, which have the same number and lengths
-        // (`s_frames_listed`). For a subject without ambiguous bases both are the same frames.
-        let x_frames_late = crate::algorithm::tblastx::subjects::x_frames_late();
+        // Only the frames the preliminary stage translates are made here, in windows
+        // (`Subjects::x_preliminary_frames`). For a subject with ambiguous bases the frames of
+        // its letters (`s_frames`) are made after the seed stage, once the preliminary frames
+        // are freed, and only when HSPs are left for the re-evaluation (`x_letter_frames_later`,
+        // below); until then `s_frames` is empty and the HSP lists index the preliminary frames,
+        // which have the same number and lengths (`s_frames_listed`). For a subject without
+        // ambiguous bases both are the same frames.
         let mut x_letter_frames_later = false;
-        let (s_frames, s_frames_preliminary_owned) = if x_frames_late {
+        let (s_frames, s_frames_preliminary_owned) = {
             let (frames, of_letters) = subjects.x_preliminary_frames(s_idx, &db_code);
             if of_letters {
                 (frames, None)
@@ -3971,13 +3967,6 @@ fn search_query_batch(
                 x_letter_frames_later = true;
                 (Vec::new(), Some(frames))
             }
-        } else {
-            subjects.with_search_bases(s_idx, |letters, bases| {
-                (
-                    generate_frames(letters, &db_code),
-                    bases.map(|bases| generate_frames(bases, &db_code)),
-                )
-            })
         };
         let s_frames_report = &s_frames;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:772-775
@@ -5726,11 +5715,9 @@ fn search_query_batch(
             // Source: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
             base += f.aa_seq.len() as i32 - 1;
         }
-        // EXPERIMENT (LOSAT_X_TBXFRAMES): nothing below reads the preliminary frames (the seed
-        // stage has ended); they are freed before the linking call, where the heap peaks.
-        if x_frames_late {
-            drop(s_frames_preliminary_owned);
-        }
+        // Nothing below reads the preliminary frames (the seed stage has ended); they are freed
+        // before the linking call, where the heap peaks.
+        drop(s_frames_preliminary_owned);
 
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899
         // ```c
@@ -5817,9 +5804,9 @@ fn search_query_batch(
         // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
         // Perform batch reevaluation on all HSPs after merging all frames
         //
-        // EXPERIMENT (LOSAT_X_TBXFRAMES): a subject with ambiguous bases gets the frames of its
-        // letters here, after its preliminary frames were freed, when HSPs are left for the
-        // re-evaluation (none are read otherwise).
+        // A subject with ambiguous bases gets the frames of its letters here, after its
+        // preliminary frames were freed, when HSPs are left for the re-evaluation (none are read
+        // otherwise).
         let x_letter_frames: Vec<QueryFrame>;
         let (s_frames, s_frames_report): (&[QueryFrame], &[QueryFrame]) = if x_letter_frames_later {
             x_letter_frames = if prelinked_ungapped_hits.is_empty() {

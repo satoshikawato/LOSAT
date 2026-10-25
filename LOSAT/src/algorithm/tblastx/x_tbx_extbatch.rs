@@ -816,7 +816,7 @@ mod tests {
             let cutoff_scores: Vec<i32> = (0..contexts.len())
                 .map(|i| 10 + (i as i32 % 4) * 3)
                 .collect();
-            // X-drops inside and outside LOSAT_X_TBXUNGAP's 1..=127 (its fallback).
+            // X-drops inside and outside the 1..=127 of the two-hit table walks (their fallback).
             let x_dropoff_per_context: Vec<i32> = (0..contexts.len())
                 .map(|i| [7, 16, 30, 200][i % 4])
                 .collect();

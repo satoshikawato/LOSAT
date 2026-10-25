@@ -7612,6 +7612,13 @@ fn blastp_query_frames_marked(
     marked: bool,
 ) -> Vec<Vec<QueryFrame>> {
     let seg_params = args.seg.params();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
+    // ```c
+    //     if (!mask_at_hash) {
+    //         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+    //                              program_number);
+    //     }
+    // ```
     query_records
         .iter()
         .map(|record| {

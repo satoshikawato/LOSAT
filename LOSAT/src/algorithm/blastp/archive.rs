@@ -57,6 +57,13 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     inputs.threshold = args.threshold.map(|threshold| threshold as i32);
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
+    // ```c++
+    //     if (args[kArgLookupTableMaskingOnly]) {
+    //         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
+    //     }
+    // ```
+    // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
     inputs.soft_masking = args.soft_masking;
     inputs.seg = args
         .seg

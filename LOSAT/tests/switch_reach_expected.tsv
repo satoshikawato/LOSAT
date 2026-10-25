@@ -1,6 +1,7 @@
 # One row per switch of STRICT_SET (LOSAT/src/utils/xswitch.rs); see switch_reach_check.py.
 switch	programs	class	new	ref	note
 LOSAT_X_AHEAD	blastn	conditional	required	required	2+ threads (1 thread runs reference loop); megablast traceback also needs GREEDYSPEC
+LOSAT_X_BNCSR	blastn	conditional	required	required	contiguous table of lut 8-11 as CSR when its positions x 4 >= cells (word 11: query batch >= ~524 kb); ref = smaller tables, lut 12, db word counts
 LOSAT_X_BNDBCUT	blastn	conditional	required	required	-db only, 2+ threads; DB below 4 x threads MiB of sequence bytes
 LOSAT_X_BNDBSTREAM	blastn	conditional	required	required	-db only, 2+ threads; memory switch (little change for few long sequences)
 LOSAT_X_BNDCONE	blastn	conditional	required	gap	-task dc-megablast (or megablast with template options) where a chunk in the scope of PAIRPARDISC / PAIRPARDISCARR (a subject searched by itself, unmasked) has no pool of 2+ threads: one thread, or a one-thread QBATCHPAR slot; ref gap: cannot happen: recorded only where a chunk in that scope has no pool, and every such chunk takes the stage while the switch is on

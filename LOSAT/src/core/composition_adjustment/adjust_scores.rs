@@ -2689,6 +2689,7 @@ fn optimize_target_frequencies(
         // No NCBI counterpart: call counter and timer of the xstats report; it does not change any value NCBI computes.
         let x_t0 = crate::utils::xstats::now();
         crate::utils::xstats::add(&crate::utils::xstats::COMPO_ADJ_CALLS, 1);
+        let c8_t0 = std::time::Instant::now();
         let status = super::x_newton_exact::optimize_target_frequencies_exact(
             x,
             q,
@@ -2696,6 +2697,11 @@ fn optimize_target_frequencies(
             col_sums,
             relative_entropy,
         );
+        // EXPERIMENT (line C s7): Newton problem log
+        if super::x_c8newtonlog::on() {
+            let ns = c8_t0.elapsed().as_nanos() as u64;
+            super::x_c8newtonlog::record(q, row_sums, col_sums, relative_entropy, ns, status);
+        }
         // No NCBI counterpart: timer of the xstats report; it does not change any value NCBI computes.
         crate::utils::xstats::add_ns(&crate::utils::xstats::COMPO_NS, x_t0);
         return status;

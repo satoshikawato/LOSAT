@@ -1296,11 +1296,14 @@ impl KappaState {
             "BLASTX Kappa requires one query/OID HSP list"
         );
         let mut output = Vec::new();
+        // EXPERIMENT (line C s7): Newton problem log
+        crate::core::composition_adjustment::x_c8newtonlog::next_match();
 
         for context_index in query_index.unwrap_or(0) * 6..query_index.unwrap_or(0) * 6 + 6 {
             if !input.iter().any(|h| h.context == context_index) {
                 continue;
             }
+            crate::core::composition_adjustment::x_c8newtonlog::set_frame(context_index);
             let result = redo_context_observed(
                 input,
                 context_index,

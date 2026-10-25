@@ -42,3 +42,5 @@ pub(crate) mod x_newton_exact;
 // input has the same bits. The callers that know their coming inputs (BLASTP's redo loops, TBLASTN's
 // window loop) decide whether to prefetch; see the module comment.
 pub(crate) mod x_newton_lanes;
+// EXPERIMENT (line C s7, not for merging): Newton problem log and replay
+pub(crate) mod x_c8newtonlog;

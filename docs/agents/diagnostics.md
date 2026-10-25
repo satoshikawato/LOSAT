@@ -4070,7 +4070,7 @@ Scheduling (each value computed by one thread with the original function; order 
   layout runs (`LOSAT_X_STATS`), with dev's cycles and instructions (x0.996-1.002 / x1.000); `-db`, 1,775 cDNAs and
   megablast are unchanged.
 - `LOSAT_X_BNEIGHTSLOTS=1` (BLASTN, `-task blastn`, `-subject` with LOSAT_X_QBATCHPAR slots, memory and speed; in the
-  strict set since 2026-10-2x (perf/bn-eight-slots, evidence at the end of this entry): on unless it is `0`) where the
+  strict set since 2026-10-26 (perf/bn-eight-slots, evidence at the end of this entry): on unless it is `0`) where the
   slot model of LOSAT_X_QBATCHPAR (`choose_slots`) takes more than eight slots for `-task blastn` on 12 to 64 threads,
   its best layout of at most eight slots runs instead: the least predicted span of 2 to 8 slots, the fewest on a tie
   (`SlotRule::EightSlots`, `eight_slots_apply`, `blastn/blast_engine/x_qbatch_par.rs`; that layout always pays the
@@ -4103,7 +4103,17 @@ Scheduling (each value computed by one thread with the original function; order 
   QBATCHPAR line's `k=` and `m=` are the slots that ran; `rule_k=`, `rule_m=` and `predicted=` stay the model's
   layout. Tests: `the_eight_slot_rule_*` in `x_qbatch_par.rs` (boundaries, the measured cells, random inputs against
   `=0`, whole runs), `LOSAT/tests/blastn_eight_slots.rs` (`the_report_does_not_depend_on_the_rule`,
-  `no_side_without_the_model_s_slots`). Evidence: W2_EVIDENCE
+  `no_side_without_the_model_s_slots`). Evidence: window w2 (dev f24d161f against this code, 3116f486, and its `=0`;
+  ws node 1, 2026-10-25, 8 rounds): 31,168 cDNAs at 12 / 16 / 24 / 32 / 64 threads x0.996 / 0.984 / 0.939 / 0.925 /
+  0.886 of dev, max RSS 544 -> 311, 700 -> 398, 1,042 -> 423, 1,441 -> 524 and 1,546 -> 585 MiB; 4,000-20,800 cDNAs
+  against 3 Mb at 16 threads x0.745-0.971 (4,000: 452 -> 219 MiB) and at 32 threads x0.766-0.964 (4,000's 6 x 5
+  x0.817); 5,000 cDNAs at 16 / 32 threads (7 x 2 / 7 x 4) x0.899 / x0.872; 5,000 cDNAs x 10 Mb at 16 threads x0.911,
+  6,900 x 10 Mb at 32 x0.841, 5,000 x 30 Mb at 32 x0.775; where the rule declines (8 threads, 6,900 cDNAs at 16, 5,000
+  at 12, megablast, dc-megablast, `-db`) x0.982-0.999 with equal instructions; `=0` x0.989-1.013 of dev; one output
+  per input. Window w4 on dev e127613d (after LOSAT_X_BNQPACK) against the merged branch (6fb98bc0), 4-8 rounds:
+  31,168 cDNAs at 16 / 32 threads x0.980 / x0.932, max RSS 703 -> 397 / 1,439 -> 515 MiB; 4,000 cDNAs at 16 threads
+  x0.748 (453 -> 220); 5,000 / 15,600 cDNAs at 16 threads x0.903 / x0.970; 6,900 cDNAs x 10 Mb at 32 threads x0.851;
+  where the rule declines (8 threads, 6,900 cDNAs at 16, megablast) x0.996-1.014 with equal instructions.
 - `LOSAT_X_RPTSTREAM=1` (BLASTN, all tasks, `-subject` and `-db`, memory and speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`) the batch loop of `run_in_pool` writes the
   reports of each query batch right after it has taken the batch (in batch order, also when
   `LOSAT_X_QBATCHPAR` slots finish out of order: the loop's in-order take is unchanged), finished its lists

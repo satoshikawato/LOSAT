@@ -70,6 +70,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ops::{Index, IndexMut};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:725-727
 // ```c
@@ -158,11 +159,12 @@ pub(crate) fn print_stats() {
 //                                         desired_re,
 // ```
 // The arguments of this call that determine its result (`q = mat_b`, `row_probs`, `col_probs`,
-// `desired_re` with `desired_re > 0.0`).
+// `desired_re` with `desired_re > 0.0`). `q` is shared by the inputs whose `q` has the same bits
+// (`x_shared_q`: every input of one composition workspace has the same `q`).
 /// Input of one relative-entropy-constrained problem (alphabet of 20).
 #[derive(Clone)]
 pub(crate) struct NewtonInput {
-    pub(crate) q: [f64; NN],
+    pub(crate) q: Arc<[f64; NN]>,
     pub(crate) row: [f64; N],
     pub(crate) col: [f64; N],
     pub(crate) relative_entropy: f64,
@@ -1397,7 +1399,7 @@ fn solve_batch_with(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], lanes8
         for (input, output) in inputs.iter().zip(outputs.iter_mut()) {
             output.status = optimize_target_frequencies_exact(
                 &mut output.x,
-                &input.q,
+                &input.q[..],
                 &input.row,
                 &input.col,
                 input.relative_entropy,
@@ -1405,28 +1407,39 @@ fn solve_batch_with(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], lanes8
         }
         return;
     }
-    let mut st = new_lane_state();
-    #[cfg(target_arch = "x86_64")]
-    let (rounds, busy) = if super::x_newton_exact::x86_level() >= 1 {
-        // SAFETY: AVX2 was detected at run time (x86_level).
-        unsafe { solve_lanes_avx2(inputs, outputs, &mut st) }
-    } else {
-        solve_lanes_plain(inputs, outputs, &mut st)
-    };
-    #[cfg(not(target_arch = "x86_64"))]
-    let (rounds, busy) = solve_lanes_plain(inputs, outputs, &mut st);
+    let (rounds, busy) = LANE_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let st = states.four.get_or_insert_with(new_lane_state);
+        #[cfg(target_arch = "x86_64")]
+        let counts = if super::x_newton_exact::x86_level() >= 1 {
+            // SAFETY: AVX2 was detected at run time (x86_level).
+            unsafe { solve_lanes_avx2(inputs, outputs, st) }
+        } else {
+            solve_lanes_plain(inputs, outputs, st)
+        };
+        #[cfg(not(target_arch = "x86_64"))]
+        let counts = solve_lanes_plain(inputs, outputs, st);
+        counts
+    });
     BATCHES.fetch_add(1, Ordering::Relaxed);
     LANE_ROUNDS.fetch_add(rounds * LANES as u64, Ordering::Relaxed);
     BUSY_LANE_ROUNDS.fetch_add(busy, Ordering::Relaxed);
 }
 
-// No NCBI counterpart: the working states of the eight-lane batches of this thread, allocated on the
-// first such batch and kept (a fresh zeroed pair per batch would cost about 5 % of the Newton time).
-// Every lane is loaded, moved or mirrored before its values are read, so values left by an earlier
-// batch are never used. It does not change any value NCBI computes.
+// No NCBI counterpart: the working states of the batches of this thread (four lanes, and eight lanes
+// on aarch64, whose tails use the four-lane state), each allocated on the first batch that uses it
+// and kept (a fresh zeroed state per batch would cost about 5 % of the Newton time and leave one
+// state per thread in its heap anyway). Every lane is loaded, moved or mirrored before its values are
+// read, so values left by an earlier batch are never used. It does not change any value NCBI
+// computes.
+struct LaneStates {
+    four: Option<Box<LaneState<F4>>>,
+    eight: Option<Box<LaneState<F8>>>,
+}
+
 thread_local! {
-    static LANES8_STATES: RefCell<Option<(Box<LaneState<F8>>, Box<LaneState<F4>>)>> =
-        const { RefCell::new(None) };
+    static LANE_STATES: RefCell<LaneStates> =
+        const { RefCell::new(LaneStates { four: None, eight: None }) };
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
@@ -1442,9 +1455,11 @@ thread_local! {
 // An eight-lane batch (`solve_lanes8_body`), AVX2 or plain as the four-lane batches.
 /// Solves `inputs[i]` into `outputs[i]` on eight lanes.
 fn solve_batch8(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], hand_over_at: usize) {
-    LANES8_STATES.with(|states| {
+    LANE_STATES.with(|states| {
         let mut states = states.borrow_mut();
-        let (st8, st4) = states.get_or_insert_with(|| (new_lane_state(), new_lane_state()));
+        let LaneStates { four, eight } = &mut *states;
+        let st8 = eight.get_or_insert_with(new_lane_state);
+        let st4 = four.get_or_insert_with(new_lane_state);
         #[cfg(target_arch = "x86_64")]
         let counts = if super::x_newton_exact::x86_level() >= 1 {
             // SAFETY: AVX2 was detected at run time (x86_level).
@@ -1467,29 +1482,73 @@ fn solve_batch8(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], hand_over_
     });
 }
 
-// No NCBI counterpart: one solved problem kept for a later call with the same input; it does not
-// change any value NCBI computes.
-struct StoredResult {
-    input: NewtonInput,
-    x: [f64; NN],
-    status: i32,
+// No NCBI counterpart: the input of one result solved ahead (`q` shared as in its `NewtonInput`) and
+// whether a call took it or the store dropped it; it does not change any value NCBI computes.
+struct StoredKey {
+    q: Arc<[f64; NN]>,
+    row: [f64; N],
+    col: [f64; N],
+    relative_entropy: f64,
+    gone: bool,
 }
 
-// No NCBI counterpart: per-thread store of results computed ahead (bounded; the oldest entry is
-// dropped first); it does not change any value NCBI computes.
+// No NCBI counterpart: the results of one `prefetch` batch, written by `solve_batch` in place, their
+// inputs, and how many of them are not gone; it does not change any value NCBI computes.
+struct StoredBatch {
+    keys: Vec<StoredKey>,
+    outputs: Vec<NewtonOutput>,
+    live: usize,
+}
+
+// No NCBI counterpart: per-thread store of results computed ahead, oldest batch first (bounded: once
+// more than `STORE_CAPACITY` results are kept, the oldest are dropped first; a batch is freed when
+// none of its results is left); it does not change any value NCBI computes.
+struct Store {
+    batches: VecDeque<StoredBatch>,
+    live: usize,
+}
+
 thread_local! {
-    static STORE: RefCell<VecDeque<Box<StoredResult>>> = const { RefCell::new(VecDeque::new()) };
+    static STORE: RefCell<Store> = const {
+        RefCell::new(Store {
+            batches: VecDeque::new(),
+            live: 0,
+        })
+    };
+}
+
+// No NCBI counterpart: the `q` of this thread's last `NewtonInput`, shared by the next ones with the
+// same bits; it does not change any value NCBI computes.
+thread_local! {
+    static SHARED_Q: RefCell<Option<Arc<[f64; NN]>>> = const { RefCell::new(None) };
+}
+
+// No NCBI counterpart: `q` for a `NewtonInput`, shared with this thread's previous input when the bits
+// are the same (every input of one composition workspace has the same `q`); it does not change any
+// value NCBI computes.
+pub(crate) fn x_shared_q(q: &[f64; NN]) -> Arc<[f64; NN]> {
+    SHARED_Q.with(|shared_q| {
+        let mut shared_q = shared_q.borrow_mut();
+        if let Some(shared) = shared_q.as_ref() {
+            if same_bits(&shared[..], q) {
+                return Arc::clone(shared);
+            }
+        }
+        let shared = Arc::new(*q);
+        *shared_q = Some(Arc::clone(&shared));
+        shared
+    })
 }
 
 // No NCBI counterpart: solves a batch of inputs gathered ahead of their calls and keeps the results
 // for `take`; it does not change any value NCBI computes.
 /// Solves `inputs` and keeps the results in this thread's store.
-pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
+pub(crate) fn prefetch(inputs: &[NewtonInput]) {
     if inputs.is_empty() {
         return;
     }
     let mut outputs = vec![NewtonOutput::new(); inputs.len()];
-    solve_batch(&inputs, &mut outputs);
+    solve_batch(inputs, &mut outputs);
     PREFETCHED.fetch_add(inputs.len() as u64, Ordering::Relaxed);
     #[cfg(test)]
     X_TEST_COUNTS.with(|counts| {
@@ -1498,15 +1557,33 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
     });
     STORE.with(|store| {
         let mut store = store.borrow_mut();
-        for (input, output) in inputs.into_iter().zip(outputs) {
-            if store.len() >= STORE_CAPACITY {
-                store.pop_front();
+        let Store { batches, live } = &mut *store;
+        let keys = inputs
+            .iter()
+            .map(|input| StoredKey {
+                q: Arc::clone(&input.q),
+                row: input.row,
+                col: input.col,
+                relative_entropy: input.relative_entropy,
+                gone: false,
+            })
+            .collect();
+        batches.push_back(StoredBatch {
+            keys,
+            outputs,
+            live: inputs.len(),
+        });
+        *live += inputs.len();
+        while *live > STORE_CAPACITY {
+            let front = batches.front_mut().expect("a kept result");
+            if let Some(key) = front.keys.iter_mut().find(|key| !key.gone) {
+                key.gone = true;
             }
-            store.push_back(Box::new(StoredResult {
-                input,
-                x: output.x,
-                status: output.status,
-            }));
+            front.live -= 1;
+            *live -= 1;
+            if front.live == 0 {
+                batches.pop_front();
+            }
         }
     });
 }
@@ -1515,7 +1592,11 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
 // contained HSPs, which its prefetch assumes not contained), so that they neither stay in memory nor
 // lengthen the search of later calls; it does not change any value NCBI computes.
 pub(crate) fn x_drop_unused() {
-    STORE.with(|store| store.borrow_mut().clear());
+    STORE.with(|store| {
+        let mut store = store.borrow_mut();
+        store.batches.clear();
+        store.live = 0;
+    });
 }
 
 // No NCBI counterpart: bitwise equality of two f64 slices.
@@ -1547,11 +1628,19 @@ pub(crate) fn take(
 ) -> Option<i32> {
     STORE.with(|store| {
         let mut store = store.borrow_mut();
-        let position = store.iter().position(|entry| {
-            entry.input.relative_entropy.to_bits() == relative_entropy.to_bits()
-                && same_bits(&entry.input.col, col)
-                && same_bits(&entry.input.row, row)
-                && same_bits(&entry.input.q, q)
+        let Store { batches, live } = &mut *store;
+        let position = batches.iter().enumerate().find_map(|(b, batch)| {
+            batch
+                .keys
+                .iter()
+                .position(|key| {
+                    !key.gone
+                        && key.relative_entropy.to_bits() == relative_entropy.to_bits()
+                        && same_bits(&key.col, col)
+                        && same_bits(&key.row, row)
+                        && same_bits(&key.q[..], q)
+                })
+                .map(|k| (b, k))
         });
         #[cfg(test)]
         X_TEST_COUNTS.with(|counts| {
@@ -1563,11 +1652,18 @@ pub(crate) fn take(
             });
         });
         match position {
-            Some(position) => {
-                let entry = store.remove(position).expect("stored entry");
-                x.copy_from_slice(&entry.x);
+            Some((b, k)) => {
+                let batch = &mut batches[b];
+                batch.keys[k].gone = true;
+                x.copy_from_slice(&batch.outputs[k].x);
+                let status = batch.outputs[k].status;
+                batch.live -= 1;
+                *live -= 1;
+                if batch.live == 0 {
+                    batches.remove(b);
+                }
                 HITS.fetch_add(1, Ordering::Relaxed);
-                Some(entry.status)
+                Some(status)
             }
             None => {
                 MISSES.fetch_add(1, Ordering::Relaxed);
@@ -1588,7 +1684,7 @@ thread_local! {
 // misses) since the last call; for unit tests.
 #[cfg(test)]
 pub(crate) fn x_test_take_counts() -> [u64; 3] {
-    STORE.with(|store| store.borrow_mut().clear());
+    x_drop_unused();
     X_TEST_COUNTS.with(|counts| counts.replace([0; 3]))
 }
 
@@ -1683,21 +1779,22 @@ mod tests {
             "realistic problems: {}",
             problems.len()
         );
-        let blosum_q = problems[0].q;
+        let blosum_q = Arc::clone(&problems[0].q);
         // Random joint distributions, compositions and relative entropies.
         for case in 0..24 {
             let mut input = problems[case % problems.len()].clone();
             if case % 2 == 0 {
                 let mut total = 0.0;
-                for v in input.q.iter_mut() {
+                let q = Arc::make_mut(&mut input.q);
+                for v in q.iter_mut() {
                     *v = 1.0e-4 + xorshift(&mut state).powi(2);
                     total += *v;
                 }
-                for v in input.q.iter_mut() {
+                for v in q.iter_mut() {
                     *v /= total;
                 }
             } else {
-                input.q = blosum_q;
+                input.q = Arc::clone(&blosum_q);
             }
             let (mut sr, mut sc) = (0.0, 0.0);
             for k in 0..N {
@@ -1740,7 +1837,7 @@ mod tests {
                 let mut exact = NewtonOutput::new();
                 exact.status = optimize_target_frequencies_exact(
                     &mut exact.x,
-                    &input.q,
+                    &input.q[..],
                     &input.row,
                     &input.col,
                     input.relative_entropy,
@@ -1748,7 +1845,7 @@ mod tests {
                 let mut reference = NewtonOutput::new();
                 reference.status = x_optimize_reference_for_test(
                     &mut reference.x,
-                    &input.q,
+                    &input.q[..],
                     &input.row,
                     &input.col,
                     input.relative_entropy,
@@ -1932,19 +2029,22 @@ mod tests {
     fn x_newton_lanes_store_returns_only_exact_input_matches() {
         let problems = test_problems();
         let want = expected(&problems[..5]);
-        prefetch(problems[..5].to_vec());
+        prefetch(&problems[..5]);
         let mut x = [0.0f64; NN];
         // A different relative entropy (one ulp) misses.
         let p = &problems[2];
         let re = f64::from_bits(p.relative_entropy.to_bits() + 1);
-        assert_eq!(take(&mut x, &p.q, &p.row, &p.col, re), None);
+        assert_eq!(take(&mut x, &p.q[..], &p.row, &p.col, re), None);
         // Exact inputs hit once each, in any order.
         for i in [3usize, 0, 4, 1, 2] {
             let p = &problems[i];
-            let status = take(&mut x, &p.q, &p.row, &p.col, p.relative_entropy);
+            let status = take(&mut x, &p.q[..], &p.row, &p.col, p.relative_entropy);
             assert_eq!(status, Some(want[i].status));
             assert!(same_bits(&x, &want[i].x));
-            assert_eq!(take(&mut x, &p.q, &p.row, &p.col, p.relative_entropy), None);
+            assert_eq!(
+                take(&mut x, &p.q[..], &p.row, &p.col, p.relative_entropy),
+                None
+            );
         }
     }
 
@@ -1980,7 +2080,7 @@ mod tests {
                     for (input, output) in inputs.iter().zip(exact.iter_mut()) {
                         output.status = optimize_target_frequencies_exact(
                             &mut output.x,
-                            &input.q,
+                            &input.q[..],
                             &input.row,
                             &input.col,
                             input.relative_entropy,

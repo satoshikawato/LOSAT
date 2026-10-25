@@ -3227,7 +3227,7 @@ pub(crate) fn x_newton_input(
         }
     }
     Some(super::x_newton_lanes::NewtonInput {
-        q,
+        q: super::x_newton_lanes::x_shared_q(&q),
         row: row_probs,
         col: col_probs,
         relative_entropy: desired_re,

@@ -249,6 +249,12 @@ struct RedoContext<'a> {
 thread_local! {
     static X_TEST_GET_RANGES: Cell<u64> = const { Cell::new(0) };
 }
+
+// No NCBI counterpart: this thread's resumed BLASTX prefetches, for the unit tests of the Newton lanes.
+#[cfg(test)]
+thread_local! {
+    static X_TEST_RESUMES: Cell<u64> = const { Cell::new(0) };
+}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1677-1709
 // ```c++
 //                    const Uint8* query_words,
@@ -645,9 +651,9 @@ fn incoming_alignments(
 //                                         &LambdaRatio            // local
 //                                 );
 // ```
-// `incoming` is the frame's list (`incoming_alignments`); `x_ranges` the `get_range` results made
+// `incoming` is the frame's list (`incoming_alignments`); `x_frame` the `get_range` results made
 // ahead for this call (EXPERIMENT LOSAT_X_BXNEWTONLANES, `x_bx_newton_lanes_prefetch_frames`; empty
-// when nothing was made ahead).
+// when nothing was made ahead) and the window where the call resumes that prefetch with `x_resume`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn redo_context_observed(
     input: &[PreliminaryHsp],
@@ -660,7 +666,8 @@ pub(crate) fn redo_context_observed(
     scratch: &mut GapAlignScratch,
     workspace: &mut BlastCompositionWorkspace,
     matrix_state: &mut Option<AdjustedProteinMatrix>,
-    x_ranges: XLaneRanges,
+    x_frame: XLaneFrame,
+    x_resume: &mut dyn FnMut(usize, &BlastCompositionWorkspace) -> XLaneFrame,
     trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
 ) -> Result<BlastRedoOneMatchResult> {
     let matching = BlastCompoMatchingSequence::new(0, subject);
@@ -706,7 +713,8 @@ pub(crate) fn redo_context_observed(
         &CALLBACKS,
         workspace,
         matrix_state,
-        x_ranges,
+        x_frame,
+        x_resume,
         trace,
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3641-3647
@@ -1346,9 +1354,10 @@ impl KappaState {
     //                     }
     // ```
     // `redo_list_observed` with the switch given: `x_lanes` (EXPERIMENT LOSAT_X_BXNEWTONLANES) solves
-    // the Newton problems of the coming frame calls ahead (`x_bx_newton_lanes_prefetch_frames`, at
-    // least `X_LANES_PREFETCH_INPUTS` at a time where the match has them) and hands each call the
-    // `get_range` results made for it.
+    // the Newton problems of the coming frame calls ahead (`x_bx_newton_lanes_prefetch_frames`, about
+    // `X_LANES_PREFETCH_INPUTS` at a time where the match has them, from a frame's first window or
+    // from the window where its call resumes it) and hands each call the `get_range` results made for
+    // it.
     pub(crate) fn x_redo_list_observed(
         &mut self,
         input: &[PreliminaryHsp],
@@ -1380,6 +1389,7 @@ impl KappaState {
             if x_lanes && x_ahead.is_empty() {
                 x_ahead.extend(x_bx_newton_lanes_prefetch_frames(
                     &incoming[position..],
+                    0,
                     &self.params,
                     &BlastCompoMatchingSequence::new(0, subject),
                     &self.infos,
@@ -1387,6 +1397,27 @@ impl KappaState {
                     &self.workspace,
                 ));
             }
+            let x_frame = x_ahead.pop_front().unwrap_or_default();
+            // No NCBI counterpart: the prefetch resumed inside this frame (its first entry is this
+            // call's, the others the next frames'); it does not change any value NCBI computes.
+            let (params, infos) = (&self.params, &self.infos);
+            let mut x_resume = |window: usize, workspace: &BlastCompositionWorkspace| {
+                #[cfg(test)]
+                X_TEST_RESUMES.with(|count| count.set(count.get() + 1));
+                let mut frames = x_bx_newton_lanes_prefetch_frames(
+                    &incoming[position..],
+                    window,
+                    params,
+                    &BlastCompoMatchingSequence::new(0, subject),
+                    infos,
+                    &CALLBACKS,
+                    workspace,
+                )
+                .into_iter();
+                let this = frames.next().unwrap_or_default();
+                x_ahead.extend(frames);
+                this
+            };
             let result = redo_context_observed(
                 input,
                 &incoming[position],
@@ -1398,7 +1429,8 @@ impl KappaState {
                 &mut self.scratch,
                 &mut self.workspace,
                 &mut self.matrix,
-                x_ahead.pop_front().unwrap_or_default(),
+                x_frame,
+                &mut x_resume,
                 trace,
             )?;
             for (context, alignments) in result.alignments_by_query.into_iter().enumerate() {
@@ -1757,10 +1789,10 @@ mod x_bx_newton_lanes_tests {
     /// The redo of the cases with and without the prefetch, with the prefetch's stop rules `limits`
     /// (`None`: the built-in ones). Both redos give the same alignments and leave the same matrix;
     /// every `Blast_AdjustScores` Newton problem of the redo without the prefetch is a problem of
-    /// the redo with it, taken from the store or (`partial`: a frame only partly walked ahead)
-    /// solved where it arises; every `get_range` call is made once. Returns the problems taken from
-    /// the store, the most of one match, and the problems solved where they arose.
-    fn compare(limits: Option<[usize; 3]>) -> (u64, u64, u64) {
+    /// the redo with it, taken from the store; every `get_range` call is made once. Returns the
+    /// problems taken from the store, the most of one match, and the prefetches resumed inside a
+    /// frame.
+    fn compare(limits: Option<[usize; 2]>) -> (u64, u64, u64) {
         const SUBJECT_LENGTH: usize = 6_000;
         let (batch, parameters, options) = setup(SUBJECT_LENGTH);
         let mut off = KappaState::new(&batch, &parameters, &options).unwrap();
@@ -1768,7 +1800,8 @@ mod x_bx_newton_lanes_tests {
         let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
         X_TEST_BX_LANES_LIMITS.with(|cell| cell.set(limits));
         x_test_take_counts();
-        let (mut taken, mut largest, mut solved) = (0, 0, 0);
+        X_TEST_RESUMES.with(|count| count.set(0));
+        let (mut taken, mut largest) = (0, 0);
         let cases = [1, 2, 3, 5, 8, 12, 20, 30, 45, 70, 1, 4, 16, 50];
         for (index, pieces) in cases.into_iter().enumerate() {
             let (subject, hsps) = case(&batch, &mut rng, pieces);
@@ -1784,12 +1817,10 @@ mod x_bx_newton_lanes_tests {
                 .unwrap();
             let [prefetched, hits, misses] = x_test_take_counts();
             let ranges_on = X_TEST_GET_RANGES.with(|count| count.replace(0));
-            if limits.is_none() {
-                assert_eq!(
-                    misses, 0,
-                    "case {index}: a Newton problem was not solved ahead"
-                );
-            }
+            assert_eq!(
+                misses, 0,
+                "case {index}: a Newton problem was not solved ahead"
+            );
             assert_eq!(
                 hits + misses,
                 calls,
@@ -1810,10 +1841,13 @@ mod x_bx_newton_lanes_tests {
             off.x_set_matrix(matrix_off);
             taken += hits;
             largest = largest.max(hits);
-            solved += misses;
         }
         X_TEST_BX_LANES_LIMITS.with(|cell| cell.set(None));
-        (taken, largest, solved)
+        (
+            taken,
+            largest,
+            X_TEST_RESUMES.with(|count| count.replace(0)),
+        )
     }
 
     #[test]
@@ -1826,14 +1860,14 @@ mod x_bx_newton_lanes_tests {
         );
     }
 
-    // The stops inside a frame (inputs, then kept bytes) leave the rest of the frame to its call.
+    // The stops inside a frame (inputs, kept bytes, both) are resumed by the frame's call.
     #[test]
     fn stops_inside_a_frame_change_nothing() {
-        for limits in [[1, 2, usize::MAX], [1, usize::MAX, 1], [4, 6, 2_000]] {
-            let (taken, _, solved) = compare(Some(limits));
+        for limits in [[1, usize::MAX], [usize::MAX, 1], [4, 2_000]] {
+            let (taken, _, resumed) = compare(Some(limits));
             assert!(
-                taken > 0 && solved > 0,
-                "{limits:?}: taken {taken}, solved {solved}"
+                taken > 0 && resumed > 0,
+                "{limits:?}: taken {taken}, resumed {resumed}"
             );
         }
     }

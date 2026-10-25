@@ -2241,7 +2241,7 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
             inputs.push(input);
         }
     }
-    crate::core::composition_adjustment::x_newton_lanes::prefetch(inputs);
+    crate::core::composition_adjustment::x_newton_lanes::prefetch(&inputs);
 }
 
 #[cfg(test)]

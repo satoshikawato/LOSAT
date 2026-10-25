@@ -2520,7 +2520,8 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
         callbacks,
         composition_workspace,
         matrix_state,
-        Vec::new(),
+        XLaneFrame::default(),
+        &mut |_, _| XLaneFrame::default(),
         &mut |_| {},
     )
 }
@@ -2591,6 +2592,15 @@ pub(crate) struct XLaneRangeKey {
 // the keys of the calls they answer; it does not change any value NCBI computes.
 pub(crate) type XLaneRanges = Vec<(XLaneRangeKey, BlastRedoRangeResult)>;
 
+// No NCBI counterpart: BLASTX, what a frame call receives from the prefetch: the `get_range` results
+// made ahead for it and the first of its windows not walked ahead, if the prefetch stopped inside the
+// frame (the call resumes the prefetch there); it does not change any value NCBI computes.
+#[derive(Default)]
+pub(crate) struct XLaneFrame {
+    pub(crate) ranges: XLaneRanges,
+    pub(crate) resume_at: Option<usize>,
+}
+
 // No NCBI counterpart: removes and returns the `get_range` result made ahead for this call, if any;
 // it does not change any value NCBI computes.
 fn x_take_lane_range(ranges: &mut XLaneRanges, key: XLaneRangeKey) -> Option<BlastRedoRangeResult> {
@@ -2598,8 +2608,9 @@ fn x_take_lane_range(ranges: &mut XLaneRanges, key: XLaneRangeKey) -> Option<Bla
     Some(ranges.swap_remove(position).1)
 }
 
-// No NCBI counterpart: number of Newton inputs gathered per TBLASTN prefetch (at least); it does not
-// change any value NCBI computes.
+// No NCBI counterpart: number of Newton inputs gathered per prefetch (TBLASTN at least this many; a
+// BLASTX prefetch stops at the first window start that reaches it); it does not change any value
+// NCBI computes.
 const X_LANES_PREFETCH_INPUTS: usize = 32;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1176-1198
@@ -2703,7 +2714,7 @@ fn x_newton_lanes_prefetch_windows<'seq>(
                     subject_maybe_biased,
                     params,
                 ) else {
-                    super::x_newton_lanes::prefetch(inputs);
+                    super::x_newton_lanes::prefetch(&inputs);
                     return windows.len();
                 };
                 subject_maybe_biased = next_range.subject_maybe_biased;
@@ -2737,37 +2748,30 @@ fn x_newton_lanes_prefetch_windows<'seq>(
             hsp_index += 1;
         }
     }
-    super::x_newton_lanes::prefetch(inputs);
+    super::x_newton_lanes::prefetch(&inputs);
     window_index
 }
 
-// No NCBI counterpart: limits of one BLASTX prefetch within a frame call, checked at the start of each
-// window: the inputs (half the results a thread's store keeps; a window adds at most one input per
-// HSP, so a prefetch keeps its own results unless one window holds hundreds of near-identical status
-// changes) and the bytes of the `get_range` results kept (a frame against a long subject with many
-// windows keeps about this much). They do not change any value NCBI computes.
-const X_BX_LANES_MAX_INPUTS: usize = 256;
-const X_BX_LANES_RANGE_BYTES: usize = 1 << 20;
+// No NCBI counterpart: limit of the bytes of the `get_range` results one BLASTX prefetch keeps, checked
+// at the start of each window (each result holds a copy of the subject; against a long subject the
+// prefetch stops before `X_LANES_PREFETCH_INPUTS` inputs). It does not change any value NCBI computes.
+const X_BX_LANES_RANGE_BYTES: usize = 1 << 18;
 
-// No NCBI counterpart: the three stop rules of the BLASTX prefetch (inputs before a frame, inputs and
-// kept bytes inside one), replaced by the unit tests to reach the stops inside a frame.
+// No NCBI counterpart: the two stop rules of the BLASTX prefetch (inputs, kept bytes), replaced by the
+// unit tests to stop inside frames.
 #[cfg(test)]
 thread_local! {
-    pub(crate) static X_TEST_BX_LANES_LIMITS: Cell<Option<[usize; 3]>> = const { Cell::new(None) };
+    pub(crate) static X_TEST_BX_LANES_LIMITS: Cell<Option<[usize; 2]>> = const { Cell::new(None) };
 }
 
 // No NCBI counterpart: the stop rules in force (see above); they do not change any value NCBI
 // computes.
-fn x_bx_lanes_limits() -> [usize; 3] {
+fn x_bx_lanes_limits() -> [usize; 2] {
     #[cfg(test)]
     if let Some(limits) = X_TEST_BX_LANES_LIMITS.with(Cell::get) {
         return limits;
     }
-    [
-        X_LANES_PREFETCH_INPUTS,
-        X_BX_LANES_MAX_INPUTS,
-        X_BX_LANES_RANGE_BYTES,
-    ]
+    [X_LANES_PREFETCH_INPUTS, X_BX_LANES_RANGE_BYTES]
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3590-3596
@@ -2809,40 +2813,43 @@ fn x_bx_lanes_limits() -> [usize; 3] {
 // ```
 // Newton lanes, BLASTX (translated query, protein subject): BLASTX calls `Blast_RedoOneMatch` once per
 // query frame, and one call holds few windows, so this replica walks the frame calls of one match from
-// the first one in `frames` on (each frame's incoming alignments, in call order): per frame the windows
-// of `windows_from_translated_query_aligns`, then the window loop of
+// window `first_window` of the first one in `frames` on (each frame's incoming alignments, in call
+// order): per frame the windows of `windows_from_translated_query_aligns`, then the window loop of
 // `blast_redo_one_match_with_workspace_queries_and_matrix_observed` with the same near-identical test and
-// `get_range` calls with the same arguments (results kept for that frame's call, up to
-// `X_BX_LANES_RANGE_BYTES`), and at each HSP that would call `Blast_AdjustScores` (a protein subject:
-// `hsp_index == 0` or a changed near-identical status) the composition of the HSP's query range, the
-// composition of the whole subject range and `x_newton_input`. Containment is not tested (every HSP is
-// assumed not contained), so the inputs are a superset of those the calls adjust. Stops before a frame
-// once `X_LANES_PREFETCH_INPUTS` inputs are reached (inside a frame at `X_BX_LANES_MAX_INPUTS` or the
-// byte limit; the rest of that frame is solved by its call) and solves the inputs
-// (`x_newton_lanes::prefetch`). Errors end the replica; the calls meet them themselves.
+// `get_range` calls with the same arguments (results kept for that frame's call), and at each HSP that
+// would call `Blast_AdjustScores` (a protein subject: `hsp_index == 0` or a changed near-identical
+// status) the composition of the HSP's query range, the composition of the whole subject range and
+// `x_newton_input`. Containment is not tested (every HSP is assumed not contained), so the inputs are a
+// superset of those the calls adjust. Stops at the start of a window, before a frame or inside one,
+// once `X_LANES_PREFETCH_INPUTS` inputs were gathered or `X_BX_LANES_RANGE_BYTES` are kept (inside a
+// frame the call resumes the replica at that window), and solves the inputs
+// (`x_newton_lanes::prefetch`): a thread holds the results and ranges of about
+// `X_LANES_PREFETCH_INPUTS` inputs. Errors end the replica; the calls meet them themselves.
 // No NCBI counterpart: computes ahead what the frame calls compute; a result is used only by a call
 // with the same input bits, and a kept range only by the `get_range` call with the same window, HSP
 // index and flags. It does not change any value NCBI computes.
 /// One entry per frame covered (at least one when `frames` is not empty and the query is translated
-/// and the subject is not; none otherwise): the ranges kept for that frame's call. Frames after the
-/// last entry are not covered.
+/// and the subject is not; none otherwise): the ranges kept for that frame's call and, for the last
+/// entry, the window where its call resumes the replica. Frames after the last entry are not covered.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn x_bx_newton_lanes_prefetch_frames<'seq>(
     frames: &[Option<Box<BlastCompoAlignment>>],
+    first_window: usize,
     params: &BlastRedoAlignParams,
     matching_seq: &BlastCompoMatchingSequence<'seq>,
     query_infos: &[BlastCompoQueryInfo],
     callbacks: &BlastRedoAlignCallbacks,
     composition_workspace: &BlastCompositionWorkspace,
-) -> Vec<XLaneRanges> {
+) -> Vec<XLaneFrame> {
     if !params.query_is_translated || params.subject_is_translated {
         return Vec::new();
     }
-    let [frame_inputs, max_inputs, range_bytes] = x_bx_lanes_limits();
+    let [max_inputs, range_bytes] = x_bx_lanes_limits();
     let mut inputs = Vec::new();
-    let mut covered: Vec<XLaneRanges> = Vec::new();
+    let mut covered: Vec<XLaneFrame> = Vec::new();
     let mut kept_bytes = 0usize;
-    'frames: for incoming_aligns in frames {
-        if inputs.len() >= frame_inputs {
+    'frames: for (frame_position, incoming_aligns) in frames.iter().enumerate() {
+        if inputs.len() >= max_inputs || kept_bytes >= range_bytes {
             break;
         }
         let mut ranges: XLaneRanges = Vec::new();
@@ -2852,19 +2859,29 @@ pub(crate) fn x_bx_newton_lanes_prefetch_frames<'seq>(
             matching_seq.length,
             WINDOW_BORDER,
         ) else {
-            covered.push(ranges);
+            covered.push(XLaneFrame {
+                ranges,
+                resume_at: None,
+            });
             break;
         };
-        for (window_index, window) in windows.iter().enumerate() {
+        let start = if frame_position == 0 { first_window } else { 0 };
+        for (window_index, window) in windows.iter().enumerate().skip(start) {
             if inputs.len() >= max_inputs || kept_bytes >= range_bytes {
-                covered.push(ranges);
+                covered.push(XLaneFrame {
+                    ranges,
+                    resume_at: Some(window_index),
+                });
                 break 'frames;
             }
             let Some(query_info) = usize::try_from(window.query_range.context)
                 .ok()
                 .and_then(|query_index| query_infos.get(query_index))
             else {
-                covered.push(ranges);
+                covered.push(XLaneFrame {
+                    ranges,
+                    resume_at: None,
+                });
                 break 'frames;
             };
             let Some(window_align_head) = window.align.as_deref() else {
@@ -2905,8 +2922,11 @@ pub(crate) fn x_bx_newton_lanes_prefetch_frames<'seq>(
                         subject_maybe_biased,
                         params,
                     ) else {
-                        covered.push(ranges);
-                        super::x_newton_lanes::prefetch(inputs);
+                        covered.push(XLaneFrame {
+                            ranges,
+                            resume_at: None,
+                        });
+                        super::x_newton_lanes::prefetch(&inputs);
                         return covered;
                     };
                     subject_maybe_biased = next_range.subject_maybe_biased;
@@ -2945,9 +2965,12 @@ pub(crate) fn x_bx_newton_lanes_prefetch_frames<'seq>(
                 ranges.push(done);
             }
         }
-        covered.push(ranges);
+        covered.push(XLaneFrame {
+            ranges,
+            resume_at: None,
+        });
     }
-    super::x_newton_lanes::prefetch(inputs);
+    super::x_newton_lanes::prefetch(&inputs);
     covered
 }
 
@@ -3006,7 +3029,8 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
     callbacks: &BlastRedoAlignCallbacks,
     composition_workspace: &mut BlastCompositionWorkspace,
     matrix_state: &mut Option<AdjustedProteinMatrix>,
-    x_ranges_ahead: XLaneRanges,
+    x_ahead: XLaneFrame,
+    x_resume: &mut dyn FnMut(usize, &BlastCompositionWorkspace) -> XLaneFrame,
     trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
 ) -> Result<BlastRedoOneMatchResult> {
     if params.smith_waterman {
@@ -3103,13 +3127,22 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
         crate::utils::xreach::x_reach!("LOSAT_X_NEWTONLANES", x_lanes_on);
     }
     let mut x_next_prefetch = 0usize;
-    // BLASTX: the ranges made ahead for this frame call (`x_bx_newton_lanes_prefetch_frames`).
-    let mut x_lane_ranges: XLaneRanges = x_ranges_ahead;
-    let x_take_ranges = x_lanes_on || !x_lane_ranges.is_empty();
+    // BLASTX: the ranges made ahead for this frame call (`x_bx_newton_lanes_prefetch_frames`) and the
+    // window where this call resumes that prefetch (`x_resume`).
+    let XLaneFrame {
+        ranges: mut x_lane_ranges,
+        resume_at: mut x_resume_at,
+    } = x_ahead;
+    let x_take_ranges = x_lanes_on || !x_lane_ranges.is_empty() || x_resume_at.is_some();
 
     for (window_index, window) in windows.iter().enumerate() {
         // No NCBI counterpart: Newton lanes prefetch (see above); it does not change any value NCBI
         // computes.
+        if x_resume_at == Some(window_index) {
+            let more = x_resume(window_index, composition_workspace);
+            x_lane_ranges.extend(more.ranges);
+            x_resume_at = more.resume_at;
+        }
         if x_lanes_on && window_index >= x_next_prefetch {
             x_next_prefetch = x_newton_lanes_prefetch_windows(
                 &windows,

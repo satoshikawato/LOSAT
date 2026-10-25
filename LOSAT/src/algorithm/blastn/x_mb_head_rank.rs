@@ -42,8 +42,18 @@ const K_COMPRESSION_FACTOR: usize = 2048;
 const D: usize = 32;
 
 pub(super) fn on() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("LOSAT_X_MBHRANK").is_ok_and(|v| v == "1"))
+    mode() != 0
+}
+
+/// 1: pass 3 in chunks of `CHUNK` (slots first, then the updates); 2: pass 3 as a pipeline with
+/// prefetches of `ranks` and `heads`.
+fn mode() -> u8 {
+    static MODE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| match std::env::var("LOSAT_X_MBHRANK").as_deref() {
+        Ok("1") => 1,
+        Ok("2") => 2,
+        _ => 0,
+    })
 }
 
 pub(super) fn trace() -> bool {
@@ -341,9 +351,53 @@ unsafe fn apply_popcnt(ranks: &[u64], heads: &mut [u32], next_pos: &mut [u32]) {
 
 #[inline(always)]
 unsafe fn apply_any(ranks: &[u64], heads: &mut [u32], next_pos: &mut [u32]) {
-    const A: usize = 2 * D;
-    let n = next_pos.len();
     let (r, hd, np) = (ranks.as_ptr(), heads.as_mut_ptr(), next_pos.as_mut_ptr());
+    // SAFETY: as `apply`'s.
+    unsafe {
+        if mode() == 1 {
+            apply_chunks(r, hd, np, next_pos.len())
+        } else {
+            apply_pipeline(r, hd, np, next_pos.len())
+        }
+    }
+}
+
+const CHUNK: usize = 256;
+
+/// SAFETY: as `apply`'s; `n` is `next_pos.len()`.
+#[inline(always)]
+unsafe fn apply_chunks(r: *const u64, hd: *mut u32, np: *mut u32, n: usize) {
+    let mut q0 = 1usize;
+    // SAFETY (all below): indexes below `n`; slots below `heads.len()`.
+    unsafe {
+        while q0 < n {
+            let q1 = (q0 + CHUNK).min(n);
+            for q in q0..q1 {
+                let c1 = *np.add(q);
+                if c1 != 0 {
+                    let s = slot(r, c1);
+                    *np.add(q) = s as u32 + 1;
+                    prefetch(hd.add(s).cast());
+                }
+            }
+            for q in q0..q1 {
+                let s1 = *np.add(q);
+                if s1 != 0 {
+                    let s = (s1 - 1) as usize;
+                    *np.add(q) = *hd.add(s);
+                    *hd.add(s) = q as u32;
+                }
+            }
+            q0 = q1;
+        }
+    }
+}
+
+/// SAFETY: as `apply_chunks`.
+#[inline(always)]
+unsafe fn apply_pipeline(r: *const u64, hd: *mut u32, np: *mut u32, n: usize) {
+    const A: usize = 2 * D;
+    const P: usize = 3 * D;
     // SAFETY (all below): indexes below `n`; slots below `heads.len()`.
     unsafe {
         for q in 1..(1 + A).min(n) {
@@ -352,8 +406,13 @@ unsafe fn apply_any(ranks: &[u64], heads: &mut [u32], next_pos: &mut [u32]) {
                 *np.add(q) = slot(r, c1) as u32 + 1;
             }
         }
-        let body = n.saturating_sub(A).max(1);
+        let body = n.saturating_sub(P).max(1);
         for q in 1..body {
+            let cp = *np.add(q + P);
+            prefetch(
+                r.add((cp.wrapping_sub(1) as usize >> 5) & ((1 << 19) - 1))
+                    .cast(),
+            );
             let c1 = *np.add(q + A);
             if c1 != 0 {
                 let s = slot(r, c1);
@@ -368,6 +427,12 @@ unsafe fn apply_any(ranks: &[u64], heads: &mut [u32], next_pos: &mut [u32]) {
             }
         }
         for q in body..n {
+            if q + A < n {
+                let c1 = *np.add(q + A);
+                if c1 != 0 {
+                    *np.add(q + A) = slot(r, c1) as u32 + 1;
+                }
+            }
             let s1 = *np.add(q);
             if s1 != 0 {
                 let s = (s1 - 1) as usize;

@@ -390,6 +390,7 @@ export LOSAT_X_PAIRPARDISCARR=1
 export LOSAT_X_PAIRPARFOLD=1
 export LOSAT_X_PAIRPARGATE=1
 export LOSAT_X_PAIRPARHOME=1
+export LOSAT_X_PAIRPARN1=1
 export LOSAT_X_PAIRPARNA=1
 export LOSAT_X_PAIRWISEPAR=1
 export LOSAT_X_QBATCHPAR=1
@@ -2290,8 +2291,9 @@ Rebuilding less:
   117 -> 120 MiB at 8 threads (NCBI 233 MiB at one thread). The switch-off build runs 0.001 % more
   instructions than dev (`perf stat`, one thread).
   The unit test `compact_check` in `x_pair_par.rs` compares the k-merge with the plain merge (both are the unit
-  path); unit path against frame loop is checked only through the frozen NCBI bytes at 1 thread (frame loop)
-  and 4 threads (units).
+  path); unit path against frame loop is checked only through the frozen NCBI bytes of the fast fixtures (at
+  one thread the frame loop for batches under 5,000 letters, `LOSAT_X_PAIRPARN1`, the units above; the units at
+  4 threads).
 - `LOSAT_X_TBXPIPE=1` (TBLASTX, speed; in the strict set since 2026-10-19, on by default; acts only with
   two or more threads in a native build and two or more query batches, and
   not with debugging output (`LOSAT_DEBUG*`, `LOSAT_TRACE_HSP` (diagnostic build), `LOSAT_DIAGNOSTICS`,
@@ -4741,8 +4743,10 @@ Scheduling (each value computed by one thread with the original function; order 
   loop for every subject, the subject's combined HSP list compared field by field, one `[X_SHADOW]
   PAIRPAR` summary line) went with the variable; the unit tests of `x_pair_par.rs` still compare the
   per-unit hits with `masked_reference`, and unit path against frame loop is checked only through the
-  frozen NCBI bytes at 1 thread (frame loop) and 4 threads (units). The tests that need the frame loop reach it at one thread
-  with `LOSAT_X_PAIRPARGATE=1` (the cost rule), with several subjects without a dominant one, or with
+  frozen NCBI bytes of the fast fixtures (at one thread the frame loop for batches under 5,000 letters,
+  `LOSAT_X_PAIRPARN1`, the units above; the units at 4 threads). The tests that need the frame loop reach it at one thread
+  with `LOSAT_X_PAIRPARGATE=1` (the cost rule; batches under 5,000 letters, or any below 2^18 cells with
+  `LOSAT_X_PAIRPARN1=0`), with several subjects without a dominant one, or with
   `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1`, and assert `units=0`.
 - `LOSAT_X_TBXBAND=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` turns it off; acts where the unit path runs) the unit path no longer applies
@@ -4758,8 +4762,8 @@ Scheduling (each value computed by one thread with the original function; order 
   1.8-2.1 Mb, 3.6-4.2 Mb), and multi-query batches whose letters lie just below a power of two,
   each against a subject frame longer than `slack`. Those whose longest subject chunk has at most
   as many letters as the reference table has cells (subjects of up to about six times the query's
-  bases) now go through `LOSAT_X_PAIRPARGATE` like any other batch (small tables keep the reference
-  loop at one thread). The others keep the reference loop without `LOSAT_X_TBXUNITMASK` (with it,
+  bases) now go through `LOSAT_X_PAIRPARGATE` like any other batch (batches under 5,000 letters keep
+  the reference loop at one thread, `LOSAT_X_PAIRPARN1`). The others keep the reference loop without `LOSAT_X_TBXUNITMASK` (with it,
   masked unit tables; next entry): a memory rule (`x_band_fits`), since a
   unit's diagonal table has a cell for every raw diagonal of its query group and subject chunk, one
   table per thread, against the reference's one table of 2^k cells per subject in flight.
@@ -4855,6 +4859,34 @@ Scheduling (each value computed by one thread with the original function; order 
   3,000 cDNAs 0.188 -> 0.122 s at 8; unchanged (x0.99-1.00): 3 transcripts against the fruit fly
   genome database at 8 threads (the guard), 80 kb x 3,000 cDNAs, MelaMJNV x PemoMJNVA at 8 threads,
   AP027131 x AP027133 (code 4) at one thread; max RSS equal or lower in every case.
+- `LOSAT_X_PAIRPARN1=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-10-25; `=0` restores the one-thread line of 2^18 cells) at one thread `LOSAT_X_PAIRPARGATE`
+  keeps the unit path for a query batch of 5,000 letters or more (`query_length`, the translated frames with their
+  sentinels: a nucleotide query of about 2.5 kb; `X_GATE_N1_LETTERS` in `tblastx/x_pair_par.rs`)
+  instead of only from a reference diagonal table of 2^18 cells; several threads keep the rule
+  above. The 2^18 line was measured before the units' branch-free hit loop and masked tables; timed
+  again, the units are the faster path at one thread for every query of 3 kb or more measured, and
+  the reference loop for queries of 2.1 kb or less, where each unit's scan of its subject frame
+  (once per group) outweighs the hits. Both paths give the reference's list, so the report does not
+  change (`LOSAT/tests/tblastx_unit_gate.rs`). Measured on the workstation (dev 313fd4e7, one core of
+  node 1 or of node 0 with its HT sibling idle, warmed 3 s before every run, a warm-up then 4-6
+  rounds in alternating order, every report equal across arms; the units forced with
+  `LOSAT_X_PAIRPARGATE=0` against the default, which is what the switch changes above the line):
+  the first 5 / 20 / 40 kb of MelaMJNV against MG1655 (4.6 Mb) x0.881 / x0.895 / x0.820 (0.444 ->
+  0.391 s, 1.260 -> 1.127 s, 2.398 -> 1.966 s); the same genome cut into 1,000 / 100 / 20 / 5 / 2 kb
+  subjects x0.86-0.93; 3,000 zebrafish cDNAs x0.943 / x0.931 / x0.900 / x0.895 / x0.910 / x0.828
+  (3 / 4 / 5 / 10 / 20 / 40 kb; 3.485 -> 2.886 s at 40 kb); 10 fruit fly transcripts (18,760 nt, two
+  query batches) against the zebrafish cDNA database (57,775 sequences, `-db`) 45.86 -> 41.56 s
+  (x0.906; the search that set the 2^18 line, 61.3 -> 46.6 s, in #255), against 3,000 cDNAs x0.906,
+  against MG1655 x0.856. Below the line: 2 / 2.1 kb x0.989-1.028, 1 kb x1.15-1.28, 300 bases
+  x1.94-1.96. WebAssembly (serial WASI command under Node 26, one process, arms alternating, process
+  CPU): 5 / 20 kb x MG1655 x0.753 / x0.690, 5 kb x 3,000 cDNAs x0.782, 5 kb x MG1655 in 2 kb pieces
+  x0.792, the 10 transcripts x 3,000 cDNAs x0.744; 1 kb x1.158 and 300 bases x2.03 (below the line).
+  Max RSS +2-8 MiB (14-27 -> 17-33 MiB; NCBI BLAST+ 2.17.0 91 MiB on the 5 kb x MG1655 search, which
+  it runs in 0.629 s against LOSAT's 0.444 before and 0.391 s after). At eight threads with the
+  subjects spread over the pool (the rule above sends them to the reference loop) the units used
+  less CPU but lost wall time on many short subjects (3,000 cDNAs x1.02-1.06), so several threads
+  are left as they were.
 - `LOSAT_X_TBXLUT=1` (TBLASTX, memory; in the strict set since 2026-10-18, on by default, with
   `LOSAT_X_PAIRPARGATE`; added off unless set in #262) the full lookup table of a query batch, the table of the
   reference frame loop (the batches the unit path's gate, guard or

@@ -9,12 +9,16 @@
 //! slot budget that NCBI-sized query files get by default (`LOSAT_X_QBATCHPARMEM`, 28 MiB per
 //! thread beyond the first), give the same bytes on standard output and standard error (without
 //! the `[X_STATS]` lines) with the default and with `LOSAT_X_DCTWOSLOTS=0`. The QBATCHPAR line
-//! of `LOSAT_X_STATS` and `LOSAT_X_REACH` show where the cap acted: for 60 queries at 16 threads
-//! the model takes three slots or more for dc-megablast and the default runs 2 x 8 (the switch's
-//! own side); for 3 queries (two batches after the first) at 8 threads it takes 2 x 4 itself (the
-//! reference side); megablast has no cap. That the rows
-//! equal NCBI's is the business of the blastn fixtures; the unit tests in `x_qbatch_par.rs`
-//! compare the capped choice with the model's on random inputs.
+//! of `LOSAT_X_STATS` and `LOSAT_X_REACH` show where the two-slot rule acted: for 40 queries at
+//! 16 threads (28 batch units, even) the model takes 14 one-thread slots for dc-megablast and the
+//! default runs 2 x 8 (the switch's own side); for 60 queries (43 units, odd) it takes 16 x 1 and
+//! the rule declines; for 50 (36 units) it takes 4 x 4, nine full rounds, and the rule declines;
+//! for 3 queries (two batches after the first) at 8 threads it takes 2 x 4 itself (the reference
+//! side in these three cases); megablast has no rule; with `=0` no side is recorded, nor where
+//! the model keeps the loop (3 queries at 16 threads) or `LOSAT_X_QBATCHPARSLOTS` sets the slots.
+//! That the
+//! rows equal NCBI's is the business of the blastn fixtures; the unit tests in `x_qbatch_par.rs`
+//! compare the ruled choice with the model's on random inputs and on the measured cells.
 
 #![cfg(feature = "parallel")]
 
@@ -104,7 +108,10 @@ fn blastn(queries: &Queries, task: &str, threads: u64, switches: &[(&str, &str)]
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
-            || matches!(&*text, "BATCH_SIZE" | "CHUNK_SIZE" | "OVERLAP_CHUNK_SIZE")
+            || matches!(
+                &*text,
+                "BATCH_SIZE" | "CHUNK_SIZE" | "OVERLAP_CHUNK_SIZE" | "RAYON_NUM_THREADS"
+            )
         {
             command.env_remove(name);
         }
@@ -165,18 +172,26 @@ impl Run {
 }
 
 #[test]
-fn the_report_does_not_depend_on_the_cap() {
-    let (many, few) = (Queries::new(60), Queries::new(3));
-    // (task, queries, threads, cap acts)
-    for (task, queries, threads, capped) in [
-        ("dc-megablast", &many, 16, true),
-        ("dc-megablast", &few, 8, false),
-        ("megablast", &many, 16, false),
+fn the_report_does_not_depend_on_the_rule() {
+    let (forty, fifty, sixty, three) = (
+        Queries::new(40),
+        Queries::new(50),
+        Queries::new(60),
+        Queries::new(3),
+    );
+    // (task, queries, threads, the rule's side (None: no rule), the model's (k, units))
+    for (task, queries, threads, side, model) in [
+        ("dc-megablast", &forty, 16, Some(true), (14, 28)),
+        ("dc-megablast", &sixty, 16, Some(false), (16, 43)),
+        ("dc-megablast", &fifty, 16, Some(false), (4, 36)),
+        ("dc-megablast", &three, 8, Some(false), (2, 2)),
+        ("megablast", &forty, 16, None, (14, 28)),
     ] {
         let what = format!("{task} {} queries threads {threads}", queries.1);
         let reach = reach_support::Reach::new(&format!("dctwoslots-{task}-{threads}"));
         let default = blastn(queries, task, threads, &[reach.var()]);
-        let off = blastn(queries, task, threads, &[OFF]);
+        let off_reach = reach_support::Reach::new(&format!("dctwoslots-off-{task}-{threads}"));
+        let off = blastn(queries, task, threads, &[OFF, off_reach.var()]);
         let rows = default
             .stdout
             .split(|&b| b == b'\n')
@@ -199,11 +214,15 @@ fn the_report_does_not_depend_on_the_cap() {
             "{what}: =0 runs the model's layout"
         );
         assert_eq!(
+            (rule_k, off.stat("units")),
+            model,
+            "{what}: the model's slots and the batch units"
+        );
+        assert_eq!(
             off.qbatchpar["predicted"], default.qbatchpar["predicted"],
             "{what}"
         );
-        if capped {
-            assert!(rule_k > 2, "{what}: {:?}", off.qbatchpar);
+        if side == Some(true) {
             assert_eq!(
                 default.layouts(),
                 (2, threads as usize / 2, rule_k, rule_m),
@@ -214,11 +233,62 @@ fn the_report_does_not_depend_on_the_cap() {
             assert_eq!(default.layouts(), off.layouts(), "{what}");
         }
         let sides = reach.sides("LOSAT_X_DCTWOSLOTS");
-        let expected = match (task, capped) {
-            ("dc-megablast", true) => (true, false),
-            ("dc-megablast", false) => (false, true),
-            _ => (false, false),
+        let expected = match side {
+            Some(true) => (true, false),
+            Some(false) => (false, true),
+            None => (false, false),
         };
         assert_eq!(sides, expected, "{what}: sides of LOSAT_X_DCTWOSLOTS");
+        // A switch that is off records no side.
+        assert_eq!(
+            off_reach.sides("LOSAT_X_DCTWOSLOTS"),
+            (false, false),
+            "{what}: sides of LOSAT_X_DCTWOSLOTS=0"
+        );
+    }
+}
+
+// No side where the rule is not consulted: the model keeps the loop (3 queries at 16 threads:
+// `off=model`), or `LOSAT_X_QBATCHPARSLOTS=4` sets the slots (4 x 4 with and without the switch).
+#[test]
+fn no_side_without_the_model_s_slots() {
+    let (forty, three) = (Queries::new(40), Queries::new(3));
+    // (queries, extra variables, the slots that run, off=)
+    for (queries, extra, layout, off) in [
+        (&three, &[][..], (0, 0), "model"),
+        (
+            &forty,
+            &[("LOSAT_X_QBATCHPARSLOTS", "4")][..],
+            (4, 4),
+            "none",
+        ),
+    ] {
+        let what = format!("{} queries {extra:?}", queries.1);
+        let reach = reach_support::Reach::new(&format!("dctwoslots-none-{}", queries.1));
+        let mut on: Vec<(&str, &str)> = extra.to_vec();
+        on.push(reach.var());
+        let default = blastn(queries, "dc-megablast", 16, &on);
+        let mut zero: Vec<(&str, &str)> = extra.to_vec();
+        zero.push(OFF);
+        let off_run = blastn(queries, "dc-megablast", 16, &zero);
+        assert!(
+            default.stdout == off_run.stdout,
+            "{what}: the default's report differs from LOSAT_X_DCTWOSLOTS=0's"
+        );
+        assert_eq!(default.stderr, off_run.stderr, "{what}");
+        for run in [&default, &off_run] {
+            assert_eq!(
+                (run.stat("k"), run.stat("m")),
+                layout,
+                "{what}: {:?}",
+                run.qbatchpar
+            );
+            assert_eq!(run.qbatchpar["off"], off, "{what}: {:?}", run.qbatchpar);
+        }
+        assert_eq!(
+            reach.sides("LOSAT_X_DCTWOSLOTS"),
+            (false, false),
+            "{what}: sides of LOSAT_X_DCTWOSLOTS"
+        );
     }
 }

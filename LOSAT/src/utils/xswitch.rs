@@ -131,8 +131,9 @@ use std::ops::RangeInclusive;
 /// pool while no LOSAT_X_QBATCHPAR slot exists, `blastn/x_tab_par.rs`) joined the set in the pull
 /// request that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_DCTWOSLOTS` (BLASTN's dc-megablast takes two LOSAT_X_QBATCHPAR slots of half the
-/// threads where the slot model takes three or more, `blastn/blast_engine/x_qbatch_par.rs`) joined
-/// the set in the pull request that added it, after it was verified and timed with it on and off.
+/// threads where the slot model takes three or more and the two-slot rule holds,
+/// `blastn/blast_engine/x_qbatch_par.rs`) joined the set in the pull request that added it, after
+/// it was verified and timed with it on and off.
 /// `LOSAT_X_QGROUPPAR` (BLASTN's preliminary gapped loop and traceback of a subject searched on one
 /// thread run per query on the pool, `blastn/blast_engine/x_qgroup_par.rs`) joined the set in the
 /// pull request that added it, after it was verified and timed with it on and off.

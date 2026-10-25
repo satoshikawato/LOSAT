@@ -1,6 +1,6 @@
 //! What blastp holds during its composition-based redo: the search's store of SEG-masked subject
-//! ranges emptied after each window of the redo in windows (`LOSAT_X_BPSEGWIN`,
-//! `src/algorithm/blastp/x_redo_par.rs` `x_bp_seg_win`), and the lookup table dropped before the
+//! ranges emptied after a window of the redo in windows once it holds the switch's number of
+//! entries (`LOSAT_X_BPSEGWIN`, `src/algorithm/blastp/x_redo_par.rs` `x_bp_seg_win`), and the lookup table dropped before the
 //! redo where no later block's build takes its vectors (`LOSAT_X_BPLKDROP`,
 //! `src/algorithm/blastp/blast_engine.rs` `x_lookup_after_prelim`), on whole searches.
 //!
@@ -17,7 +17,9 @@
 //! the messages and the exit code do not depend on them, with subjects read from FASTA (`-subject`)
 //! and from a database (`-db`), at 1 and 2 threads. That reports equal NCBI's is the business of
 //! the BLASTP fixtures. `LOSAT_X_REACH` shows the side each run took: the store is emptied where
-//! the redo runs in windows (`LOSAT_X_BPREDOPAR`: more than one thread), and kept at one thread;
+//! the redo runs in windows (`LOSAT_X_BPREDOPAR`: more than one thread) and the store holds the
+//! switch's number of entries after a window (built in 4,096; these searches hold fewer, and
+//! `LOSAT_X_BPSEGWIN=2` empties it), and kept otherwise;
 //! the table is dropped by a search of all queries and by the last blocks of the block search
 //! (`LOSAT_X_BPQBLOCK`), and kept by a block whose table's vectors a later block's build takes
 //! (more than one thread: the build ahead of the block after the next, `LOSAT_X_BPLKPAHEAD`).
@@ -188,9 +190,10 @@ fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
     }
 }
 
-/// Default and `LOSAT_X_BPSEGWIN=0` give the same report and messages for exact blastp on
-/// `-subject` and `-db` at 1 and 2 threads; the store is emptied after each window at 2 threads
-/// (the redo in windows) and not at 1, and `=0` records nothing.
+/// Default, `LOSAT_X_BPSEGWIN=2` and `=0` give the same report and messages for exact blastp on
+/// `-subject` and `-db` at 1 and 2 threads. The default keeps the store (fewer than 4,096
+/// entries); `=2` empties it after a window at 2 threads (the redo in windows) and not at 1; `=0`
+/// records nothing.
 #[test]
 fn blastp_reports_do_not_depend_on_emptying_the_seg_store_after_each_window() {
     let inputs = Inputs::new();
@@ -215,13 +218,15 @@ fn blastp_reports_do_not_depend_on_emptying_the_seg_store_after_each_window() {
             let on = blastp(&args, &[]);
             assert_eq!(on.code, Some(0), "{case}: {}", on.stderr);
             assert!(!on.stdout.is_empty(), "{case}: no hits");
+            assert_eq!(on.seg_win, (false, true), "{case}: default's side");
             let windows = threads == "2";
-            assert_eq!(on.seg_win, (windows, !windows), "{case}: default's side");
-            let off = blastp(&args, &[(SEG_WIN, "0")]);
-            assert_eq!(off.code, Some(0), "{case} off: {}", off.stderr);
-            assert!(off.stdout == on.stdout, "{case} off: report differs");
-            assert_eq!(off.stderr, on.stderr, "{case} off: messages");
-            assert_eq!(off.seg_win, (false, false), "{case} off: side");
+            for (value, side) in [("2", (windows, !windows)), ("0", (false, false))] {
+                let arm = blastp(&args, &[(SEG_WIN, value)]);
+                assert_eq!(arm.code, Some(0), "{case} ={value}: {}", arm.stderr);
+                assert!(arm.stdout == on.stdout, "{case} ={value}: report differs");
+                assert_eq!(arm.stderr, on.stderr, "{case} ={value}: messages");
+                assert_eq!(arm.seg_win, side, "{case} ={value}: side");
+            }
         }
     }
 }

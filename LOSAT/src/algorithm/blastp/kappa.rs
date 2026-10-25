@@ -365,8 +365,9 @@ impl XSharedSubjectRanges {
         }
     }
 
-    /// The number of entries (tests).
-    #[cfg(test)]
+    // No NCBI counterpart: memory only (LOSAT_X_BPSEGWIN's size rule); it changes no value NCBI
+    // computes.
+    /// The number of entries (LOSAT_X_BPSEGWIN's rule, after a window: the sum of the shards').
     pub(crate) fn x_len(&self) -> usize {
         self.shards
             .iter()

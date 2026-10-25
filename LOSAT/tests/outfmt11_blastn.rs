@@ -92,22 +92,6 @@ const CASES: &[Case] = &[
         outfmt: "11",
         rc: 0,
     },
-    Case {
-        name: "env_xml_upper",
-        env: &[("ARCHIVE_FORMAT", "XML")],
-        query: "arch_q.fna",
-        subject: "arch_s.fna",
-        outfmt: "11",
-        rc: 0,
-    },
-    Case {
-        name: "env_xml_mixed",
-        env: &[("ARCHIVE_FORMAT", "Xml")],
-        query: "arch_q.fna",
-        subject: "arch_s.fna",
-        outfmt: "11",
-        rc: 0,
-    },
     // Titles with bytes from 0x7F up (UTF-8 in a query and a subject title, 0x7F in a query
     // title): NCBI's XML archive writes them raw in the titles and as octal escapes in the
     // DefLine.
@@ -116,14 +100,6 @@ const CASES: &[Case] = &[
         env: &[XML_FORMAT],
         query: "arch_u8_q.fna",
         subject: "arch_u8_s.fna",
-        outfmt: "11",
-        rc: 0,
-    },
-    Case {
-        name: "batches_sub_xml",
-        env: &[XML_FORMAT, BATCH],
-        query: "arch_batches.fna",
-        subject: "arch_s.fna",
         outfmt: "11",
         rc: 0,
     },
@@ -292,6 +268,37 @@ fn archives_equal_ncbis_at_one_and_four_threads() {
     for case in CASES {
         for threads in ["1", "4"] {
             check(case, &[], threads);
+        }
+    }
+}
+
+/// `ARCHIVE_FORMAT` is compared without case (`xml`, `XML`, `Xml`): the same bytes, which are
+/// those of `default_sub_xml` (NCBI's run of the other spellings gave the same file).
+#[test]
+fn xml_is_read_in_any_case() {
+    let query = input("arch_q.fna");
+    let subject = input("arch_s.fna");
+    let want = frozen("default_sub_xml", "out");
+    for spelling in ["XML", "Xml", "xMl"] {
+        for threads in ["1", "4"] {
+            let output = run(
+                &[("ARCHIVE_FORMAT", spelling)],
+                &["-query", &query, "-subject", &subject, "-outfmt", "11"],
+                threads,
+            );
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{spelling} threads {threads}"
+            );
+            assert!(
+                output.stdout == want,
+                "{spelling} threads {threads}: stdout"
+            );
+            assert!(
+                output.stderr.is_empty(),
+                "{spelling} threads {threads}: stderr"
+            );
         }
     }
 }

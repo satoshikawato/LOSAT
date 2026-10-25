@@ -329,6 +329,7 @@ export LOSAT_X_BPCOMPOREUSE=1
 export LOSAT_X_BPDBCUT=1
 export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
+export LOSAT_X_BPFFILL=1
 export LOSAT_X_BPFSEED=1
 export LOSAT_X_BPGAP=1
 export LOSAT_X_BPGAP16=1
@@ -437,6 +438,7 @@ export LOSAT_X_TBXRESOLVE=1
 export LOSAT_X_TBXRPTPAR=1
 export LOSAT_X_TBXSCANBF=1
 export LOSAT_X_TBXSTORE=1
+export LOSAT_X_TBXUNGAPSENT=1
 export LOSAT_X_TBXUNITMASK=256
 ```
 
@@ -1842,6 +1844,48 @@ Rebuilding less:
   proteins of 4,639 residues (31.6 %) 34.27 -> 27.95 s (branch misses 1.18 G -> 0.55 G); 100 proteins of 58,139
   residues at 4 threads (two blocks, 91 % and 23 %) 70.92 -> 66.84 s; max RSS unchanged. In the strict set from
   its first pull request (no measured case slower; AGENTS.md "Speed-up switches").
+- `LOSAT_X_BPFFILL=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
+  2026-10-25, line v4-BPF K2-2; `=0` turns it off; acts where the serial builder makes the flat compressed table of
+  `LOSAT_X_BPCLUT`: one thread, natively and in WebAssembly, and any thread count in builds without threads, such as
+  the serial WebAssembly module; with two or more threads the pool builds the table, `tblastx/lookup/x_clut_par.rs`,
+  already by stripes of cells) fills the table by buckets of 2^10 cells
+  (`tblastx/lookup/x_clut_direct.rs` `x_try_build_flat_by_buckets`, exactness argument in that file's header):
+  the appends are recorded as before but not counted while they are made; they are sorted by bucket, stably,
+  into the slots of `hits` that the bucket's cells will take (each packed as the query offset above the cell's
+  index in its bucket), and each bucket then counts its cells, lays out their starts, PV bits and statistics,
+  places its appends at their cells' cursors and puts the cells of more than 5 offsets in the scan order, within
+  4 KiB of counts and the bucket's slots. The count pass's random updates of 3 MB of counts and the fill pass's
+  random writes into the starts and hits (48 cycles per append, 63 % of them stalls, line v4-BPF K1) become
+  passes within the cache (about 30 cycles per append, of which the partition about 15; floor H about 6). The
+  record of the appends serves as the buckets' scratch and is dropped where the count-and-fill builder drops it,
+  the vectors are allocated in its order and the appends per query offset are dropped after the partition, so max
+  RSS does not change. An append takes at most one overflow cell, so a table whose appends stay within NCBI's
+  overflow capacity cannot be refused and its count is not needed while the appends are made; the bucket fill
+  declines (the count-and-fill builder runs, `LOSAT_X_REACH`) a lookup table whose appends pass the capacity, a
+  query of 2^22 letters or more given to one table (the packed offset; with `LOSAT_X_BPQBLOCK` a table holds one
+  block of about 50,000 letters) and the word sizes other than 5, which `-task blastp-fast` does not take. The
+  table is the count-and-fill builder's slot for slot (the lib test `x_bucket_fill_is_the_count_and_fill_build`
+  compares them on random queries, tables and capacities; `tests/blastp_fast_fill_buckets.rs` the reports with
+  `=0`'s). The function is out of line, so the count-and-fill builder keeps its code. Not taken (line v4-BPF K2-2
+  probes, one core on the workstation): the histogram counted by the appends' sink (17 more instructions per
+  append in the neighbor enumeration, which is no longer vectorized), the scan position computed in the fill with
+  selects instead of the move over the cells of more than 5 offsets (x1.01-1.02 the cycles), and buckets of 2^8,
+  2^12 or 2^14 cells (the same or slower); in WebAssembly (the serial WASI command in Node 26, one process, 3
+  rounds) the probe took x0.88 the time of the 1/10 of the human proteins x the yeast proteome and x0.98-0.99 of the
+  1/10 of the Arabidopsis proteins x the zebrafish proteome, with 2 MiB less linear memory. Timed 2026-10-25 on the
+  workstation (node 0, one physical core, its HT sibling idle, warmed 3 s before every run, 8 rounds of the pairs in
+  alternating order; other lines' gates ran on node 0, load 14-93, so the cycle and instruction counts are the
+  firmer measure; dev 17a08882; every report identical between the arms; medians, `cycles:u`): OrthoFinder's 1/10
+  of the human proteins x the yeast proteome (`-db`, `-evalue 0.001`) x0.865 (instructions x1.037), of the
+  Arabidopsis proteins x the yeast proteome x0.908, of the yeast proteins x the yeast proteome x0.932, of the
+  Arabidopsis proteins x the zebrafish proteome x0.969; once each, the whole human proteome x the yeast proteome
+  68.64 -> 64.19 s (cycles x0.933) and the whole Arabidopsis proteome x the zebrafish proteome 233.20 -> 230.09 s
+  (x0.989), max RSS 83.9 -> 83.9 MiB and 76.9 -> 76.8 MiB. Where a table is small the build is a few milliseconds
+  and the instructions are dev's: UniRef50 volume 00 (`-db`, `-evalue 1e-5`) with 42 residues, 3 proteins and 10
+  proteins x1.0000 (cycles x1.002-1.004), exact blastp (1/10 of the Arabidopsis proteins x the yeast proteome)
+  x1.0000; `=0` runs dev's instructions (x1.0000, cycles x0.992-1.031 of dev's in the same rounds). With two or
+  more threads the pool builds the table and the switch does not act. In the strict set from its first pull
+  request (no measured case slower; AGENTS.md "Speed-up switches").
 - `LOSAT_X_BPFSEED=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
   2026-10-24, line v4-BPF K2-1; `=0` turns it off; acts in the fused loop, `LOSAT_X_BPSEED`, on the flat compressed
   table of `LOSAT_X_BPCLUT` where the scan lists the cells without a branch, `LOSAT_X_BPCLUTSCANBF`, natively; a
@@ -5028,6 +5072,43 @@ Scheduling (each value computed by one thread with the original function; order 
   8 threads extension x0.772 (5/6), whole search x0.916 (5/6); serial reactor x0.807 (5/6), x0.913 (5/6);
   MelaMJNV x PemoMJNVA 8 threads x0.889 (6/6), x0.977 (4/6); serial reactor x0.846 (6/6), x0.957 (6/6);
   every report identical. (The method's noise: the same unchanged code read x0.92-1.02.)
+- `LOSAT_X_TBXUNGAPSENT=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-10-25; `=0` turns it off) the two-hit ungapped extension (TBXUNGAP's table walks, above) with
+  walks that the sentinels stop instead of a bound (`two_hit_sent` in
+  `tblastx/extension/x_two_hit_fast.rs`, exactness argument in its header): a query context's buffer
+  and a subject frame's are `[0, residues.., 0]` (NCBI's NULLB at each end, blast_util.c:438-453), and
+  the table scores code 0 against anything as -128, so a step on a sentinel stops either walk where the
+  reference's bound stops it (the step does not raise the best and makes `best - score >= 128 >
+  x_drop`), with the same best, length and stop position. The word loop and the walks (two steps a
+  loop) are inlined into the callers' extension code (the unit path's `x_hit`, the batched `resolve`,
+  the reference frame loops). Acts in native builds where the batch's query contexts carry both
+  sentinels (checked once per batch) and the unit's subject chunk is its whole frame (frames of at
+  most 5,000,000 residues, `MAX_DBSEQ_LEN`, so subjects up to 15 Mb; a longer frame is searched in
+  chunks whose ends are residues) of at most `i32::MAX / 16` bytes (no score wraps). An X-drop
+  outside 1..=127 or a word that does not fit runs the reference, and so does the debug output. In
+  the unit path the switch acts on the units of the branch-free hit loops (`LOSAT_X_TBXHITBF`): each
+  unit takes one of two instances of the loop's function (`scan_unit_bf`, `scan_unit_batched_bf`,
+  `scan_unit_sliced_bf`, `const SENT`, chosen once per unit), and the instances without the walks
+  are dev's machine code (normalized `objdump`: `scan_unit_bf`, the masked unit scans, `flush`,
+  `resolve_early`; the instances with batched extensions store one field more per unit). The units
+  of the other hit loop (`LOSAT_X_TBXHITBF=0`, the probes of `LOSAT_TIMING` and `LOSAT_X_STATS`) run
+  without it, so timings taken with those variables do not include it; the reference frame loops test
+  at every call. wasm32 (LOSAT Web) keeps TBXUNGAP's walks (plan v4 line W).
+  Measured 2026-10-25 on the workstation against dev f24d161f, the binary before the switch (node 1
+  without other timed runs, CPU 40 at 1 thread and CPUs 40-47 at 8, their HT siblings idle, warmed
+  3 s before every run, arm order reversed every other round, one warm-up round + 8 rounds, medians
+  of the per-round ratios; every report identical between the arms): AP027131 x AP027133 (code 4)
+  1 thread x0.950 (7.56 -> 7.19 s, 8 of 8 rounds below 1; cycles x0.950, instructions x0.924) and
+  8 threads x0.968 (1.524 -> 1.474 s, 8 of 8; cycles x0.957); MelaMJNV x PemoMJNVA 1 thread x0.963
+  (1.030 -> 0.992 s, 8 of 8; instructions x0.936); Sakai x MG1655[0:1 Mb] (code 11, the batched
+  scan in slices) 8 threads x0.979 (11.96 -> 11.71 s, 8 of 8; cycles x0.967, instructions x0.919).
+  With `=0` the instructions equal dev's (x1.0000 in all four) and so does the time (x0.997-1.002).
+  Max RSS equal but for Sakai at 8 threads, 743 MiB with the switch against 884 MiB for dev and
+  `=0` in every round (the switch allocates nothing). On AP027131 x AP027133 at 1 thread the
+  extension (31.9 million calls) took 235 cycles a call in dev (`walk_left`, `two_hit` and
+  `walk_right`, 30.6 % of the cycles in `perf record`) and 38 fewer with the switch (from the cycle
+  totals), about 197; what is left is the latency of the first query loads and the mispredicted
+  exits of the walks (as in TBXUNGAP).
 - `LOSAT_X_TBXHITBF=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` turns it off) the hit loop of the unit scan of the unit path (`scan_unit`, the
   batched scan of `LOSAT_X_TBXEXTBATCH`, and, from the next pull request (2026-10-19), the scan in slices

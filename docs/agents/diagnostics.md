@@ -1698,6 +1698,56 @@ Rebuilding less:
   OrthoFinder. Gates (head 1273374d): `cargo test` (88 binaries, 2,018 passed); ci_fast all programs with the switch,
   with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases, 0 failures each); blastp `-db` fixtures at 1 and 4 threads under
   the shadow (56 rows, 0 differing, the exit line `identical` in every run that ends without an error).
+- `LOSAT_X_BPSEGWIN=<entries>` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-seg-win,
+  evidence at the end of this entry), a value switch: an integer of 2 or more, else 4,096; `=0` turns it off; acts only
+  where the redo runs in windows, `LOSAT_X_BPREDOPAR` (more than one thread and at least two matches)) after a window of
+  the redo is computed, the search's store of SEG-masked subject ranges (`blastp/kappa.rs` `XSharedSubjectRanges`,
+  SEGSHARE) is emptied when it holds that many entries or more (`blastp/x_redo_par.rs` `x_bp_seg_win`,
+  `XSharedSubjectRanges::x_len` / `x_clear`) instead of holding every range the search masked until the redo ends; a
+  smaller store is kept for the next windows, as without the switch. A later window that reaches a range again masks it
+  again and computes its composition again (`LOSAT_X_BPCOMPOREUSE`): an entry is a function of its key (the subject, the
+  range and the SEG parameters), so it gets the same bytes, bias flag and composition, and reports do not change (lib
+  test `windows_with_the_seg_store_emptied_after_each_equal_windows_with_one_store`: windows computed with the store
+  emptied after each and with one store give the same results, every field; `tests/blastp_redo_memory.rs` with the
+  default, `=2` and `=0`: the CI fixtures' stores stay below 4,096 entries, so they reach the emptying only with `=2`).
+  In `blastp -db` q100 x `uniref50.03` at 8 threads the store held 68,795 ranges (12.6 MiB of letters) at the end of the
+  first query block's redo, and emptying it masks 16 % more ranges there (v4-MF REPORT §6.4); with the rule the store
+  there is emptied every few windows (the first block's 40 windows hold about 2,000 entries each: 78,501 SEG calls
+  against 79,963 with `=2`), and its peak RssAnon does not differ from `=2`'s beyond the runs' spread (4,096 entries
+  61.6 MiB, 1,024 entries 62.8, `=2` 63.6; median of 3 runs each, 60.9-64.5). The 177 WSSV proteins x the 86 PajaWSV
+  proteins at 8 threads (2 windows) hold 86 entries, which the rule keeps: emptied after every window (`=2`) they free
+  no memory (26.6 MiB either way, s12) and the SEG calls go from 89 to 174. Why the rule: emptying that store read x1.024
+  wall (x1.012 user) against both switches `=0` on the workstation (v4-D12 s12, node 1, warmed 3 s, 20 rounds, `wait4`;
+  in s12b's run x0.997 wall, x1.006 user against the default, which keeps it), so it is skipped where nothing comes
+  back. Evidence 2026-10-25 (v4-D12 s12b, workstation, head 0bd4f0a4 on dev 51234c2a, every report identical and the
+  same as NCBI's), with `LOSAT_X_BPLKDROP` below; peak RssAnon, untimed, node 0, median of 2 runs (q100) or 3 (WSSV),
+  MiB, dev / both switches / both `=0`: q100 x `uniref50.03` at 8 threads 91.9 / **62.2** (5 runs, 60.9-64.0) / 92.5
+  (NCBI 150), at 16 threads 105.3 / **95.0** / 106.9 (NCBI 155); WSSV x PajaWSV at 8 threads 26.3 / **24.6** / 26.7
+  (NCBI 15.8), at 16 threads 34.1 / **31.0** / 34.1 (NCBI 19.6-20.0). Max RSS (max of `time` %M and VmHWM) q100 x
+  `uniref50.03` 100.0 -> 71.4 MiB at 8 threads, 113.4 -> 103.2 at 16. Each switch alone (v4-D12 s12, head 9380a251 on
+  dev 31f36ab0, the store emptied after every window, median of 2): q100 at 8 threads 71.8 (`LOSAT_X_BPSEGWIN` only) and
+  85.8 (`LOSAT_X_BPLKDROP` only) against dev 92.7, at 16 threads 104.2 and 105.1 against 105.4. One thread does not run
+  the redo in windows, and its peak is not in the redo: WSSV 12.5 MiB in every arm (NCBI 10.3), 3,000 human proteins x
+  yeast (`-evalue 0.001`) 25.1 -> 24.6 (NCBI 12.2); `perf stat` `:u` (s12, node 0, median of 3, against dev):
+  instructions x0.99996 WSSV, x1.00000 human x yeast. Timed (node 1, warmed 3 s, order alternated, against the dev
+  binary): WSSV x PajaWSV at 8 threads x0.997 (0.953-1.096, 10/20 below 1; user x1.005; s12b, `wait4`); s12 (`time` %e,
+  both switches emptying after every window): human x yeast x0.998 (0.992-1.010, 8 pairs) at 8 threads and x0.999
+  (0.986-1.023, 8) at 16, q100 x `uniref50.03` x0.995 (0.993-1.004, 3) at 16, WSSV x PajaWSV x1.000 (0.938-1.000, 16) at
+  16. Gates (s12b, 0bd4f0a4): `cargo test --all-features` (11 binaries, 2,534 passed); ci_fast all programs with the
+  switches and with both `=0` (223 cases, 0 failures each) and blastp with `LOSAT_X_BPSEGWIN=2` (28 cases, 0 failures);
+  blastp `-db` fixtures at 1 and 4 threads (162 rows, 0 differing); `switch_reach_check` 0 failures.
+- `LOSAT_X_BPLKDROP=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-seg-win, evidence
+  in the `LOSAT_X_BPSEGWIN` entry above): on unless it is `0`; acts for every task, with `-subject` and `-db`) the
+  search's lookup table is dropped after the preliminary stage, before the composition-based redo
+  (`blastp/blast_engine.rs` `x_lookup_after_prelim`), instead of at the search's end: nothing reads it after the
+  preliminary stage. It is kept to the end, as without the switch, only where the search gives its vectors to a spare of
+  the block search that a later block's build takes (`LOSAT_X_BPLKPFLAT`, `LOSAT_X_BPLKPAHEAD`,
+  `blast_engine/x_lookup_ahead.rs` `XAheadBlock::x_table_taken_later`): in the block search of `LOSAT_X_BPQBLOCK` with
+  more than one thread, every block but the last two where the build ahead acts (block i's vectors go to the build of
+  block i + 2, which starts when block i + 1's table is ready) and every block but the last where only
+  `LOSAT_X_BPLKPFLAT` acts (the next block's own build takes them). So the builds reuse the vectors as before, and only
+  the tables that nothing reuses leave early. Reports do not change (`tests/blastp_redo_memory.rs`, which also shows by
+  `LOSAT_X_REACH` that a block search of several blocks keeps the tables of its first blocks).
 - `LOSAT_X_BPSEED=1` (BLASTP, speed; in the strict set since 2026-10-14; `=0` turns it off) the two-hit seed
   stage with an amino-acid lookup table
   (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one

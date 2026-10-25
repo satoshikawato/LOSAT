@@ -35,7 +35,7 @@ fn limit(words: &[&str]) -> Result<i32, String> {
     argv.extend(words);
     match try_parse_from::<Cli, _, _>(argv) {
         Ok(cli) => match cli.command {
-            Commands::Tblastn(args) => Ok(args.culling_limit),
+            Commands::Tblastn(args) => Ok(args.culling_limit_value()),
             _ => unreachable!("tblastn"),
         },
         Err(error) => Err(LOSAT::cli::render_message(&error)),

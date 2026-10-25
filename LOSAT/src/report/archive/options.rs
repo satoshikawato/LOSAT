@@ -571,25 +571,25 @@ mod tests {
         inputs.window_masker_db = Some("counts.obinary".to_string());
         inputs.dust = Some(Filter::No);
         let params = algorithm_options(&inputs);
-        let names: Vec<&str> = params.iter().map(|param| param.name).collect();
-        let at = names
+        let listed: Vec<&str> = params.iter().map(|param| param.name).collect();
+        let at = listed
             .iter()
             .position(|&name| name == "WindowMaskerDatabase")
             .unwrap();
-        assert_eq!(&names[at - 2..at], ["MaskAtHash", "DustFiltering"]);
+        assert_eq!(&listed[at - 2..at], ["MaskAtHash", "DustFiltering"]);
         assert_eq!(
             params[at].value,
             ParamValue::Str("counts.obinary".to_string())
         );
         let mut short = OptionInputs::new(Program::Blastn, "blastn-short");
         short.window_masker_db = Some("counts.obinary".to_string());
-        let names = names(&short);
-        let at = names
+        let listed = names(&short);
+        let at = listed
             .iter()
             .position(|name| name == "WindowMaskerDatabase")
             .unwrap();
-        assert_eq!(names[at - 1], "MaskAtHash");
-        assert_eq!(names[at + 1], "UngappedMode");
+        assert_eq!(listed[at - 1], "MaskAtHash");
+        assert_eq!(listed[at + 1], "UngappedMode");
     }
 
     #[test]

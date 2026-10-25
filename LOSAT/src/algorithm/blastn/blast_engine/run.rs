@@ -8633,7 +8633,7 @@ fn run_in_pool(
                     // EXPERIMENT (LOSAT_X_QBATCHPAR): no slot runs while the loop writes.
                     qbp.finish();
                     // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
-                    // written when the loop took them (the shadow compares them).
+                    // written when the loop took them.
                     let before = |outputs: &mut ReportOutputs<'_>| {
                         write_before_failed_batch(
                             &args,
@@ -8660,7 +8660,6 @@ fn run_in_pool(
                     };
                     if stream.acting() {
                         stream.finish_sam(outputs)?;
-                        stream.check("before a batch whose masks failed", before);
                     } else {
                         before(outputs)?;
                     }

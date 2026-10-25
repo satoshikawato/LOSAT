@@ -5465,17 +5465,19 @@ Scheduling (each value computed by one thread with the original function; order 
   reference's (every search, the built-in `LOSAT_X_BXDIAGMIN` and every table fused) and checks the mode the
   timing line names; the unit tests compare both arms with the per-hit test (the chunks of 1,024 and 64,
   random and edge tables, which hold the marker's value) and count the units that met the marker with calls
-  deferred and with none. Measured 2026-10-24 on the workstation (`perf stat` user-space cycles, one physical
-  core of node 0 with its HT sibling idle, warmed 3 s before every run, load 4-21 on the other cores; paired
-  arms, arm order reversed every other round, medians of the per-round ratios), the prototype against `dev`
-  4c9ba700: a 50-kb piece of the fly genome x the fly proteome (`-db`, `-evalue 1e-5`) x0.961 (0.934-0.970, 8
-  rounds), 201 reads x Swiss-Prot (`-db`) x0.979 (6), 50 fly cDNAs x the yeast proteome x0.983 (10), AP027131 x
-  AP027133 proteins (`-subject`, `-query_gencode 4`) x0.994 (10), one 2.1-kb fly cDNA x the fly proteome (6.77
-  hits per used cell, fused by `LOSAT_X_BXDIAGMIN` 670) x0.982 (3), and 300 UniRef50 reads (the direct loop)
-  x0.999 with the same instructions; instructions +3-5 and branch misses -0.08 to -0.15 per batch; every report
-  and every `blastx_diag` count identical between the arms, max RSS unchanged. The record space is 41 KiB per
-  thread (the stage's 8 KiB without it). Design and timings: v4-A14 results/s8c, s8ab1 (a first form with the
-  calls inside the loop: spills, x0.99-1.02) and s8ab2.
+  deferred and with none. Measured 2026-10-25 on the workstation (`perf stat` user-space cycles, one physical
+  core of node 0 with its HT sibling idle, warmed 3 s before every run, load 13-109 on the other cores; paired
+  arms, arm order reversed every other round, medians of the per-round ratios), against `dev` f24d161f: a 50-kb
+  piece of the fly genome x the fly proteome (`-db`, `-evalue 1e-5`) x0.966 (0.956-0.970, 8 rounds), 201 reads x
+  Swiss-Prot (`-db`) x0.968 (0.962-0.974, 6), 50 fly cDNAs x the yeast proteome x0.981 (0.973-0.991, 10), AP027131
+  x AP027133 proteins (`-subject`, `-query_gencode 4`) x0.992 (0.984-0.999, 10), one 2.1-kb fly cDNA x the fly
+  proteome (6.77 hits per used cell, fused by `LOSAT_X_BXDIAGMIN` 670) x0.985 (3), and 300 UniRef50 reads (the
+  direct loop) x1.002 with the same instructions; instructions x1.003-1.009 and branch misses x0.83-0.94. `=0`
+  x0.999-1.004 of `dev` with the same instructions (x1.000): its drain, window and scan functions disassemble as
+  `dev`'s but for rip-relative displacements. Every report and every `blastx_diag` count identical between the
+  arms, max RSS unchanged; the record space is 41 KiB per thread (the stage's 8 KiB without it). The prototype
+  (v4-A14 s8ab2, against `dev` 4c9ba700): x0.961, x0.979, x0.983, x0.994, x0.982. Design and timings: v4-A14
+  results/s8c, s8ab1 (a first form with the calls inside the loop: spills, x0.99-1.02), s8ab2 and s9ab1.
 - BXSCANBF (graduated 2026-10-26; no variable; always on) (BLASTX, speed; in the strict set from 2026-10-17, by
   the Owner's decision of that day (perf-si-20261012 DECISIONS 175) on the timings below; the scan on the
   presence test went with the variable; acts where the standard lookup table is scanned by the

@@ -5855,7 +5855,14 @@ Scheduling (each value computed by one thread with the original function; order 
   Exactness: a unit test (`kept_blocks_equal_score_block_of_the_unsplit_chunk`) compares the kept blocks with
   `score_block` of the chunk field by field, bit for bit, with invalid contexts among valid ones, for a batch of
   several queries and for one long query without gapped; `tests/blastx_unit_cap.rs` compares the reports of
-  several queries with it on and off, at 1 and 4 threads. Measurements pending.
+  several queries with it on and off, at 1 and 4 threads.
+  Measured on ws (2x Xeon 6338, node 1, one binary, default against `=0`, medians of paired rounds, byte-identical
+  outputs): 800 fly cDNAs against 8 / 50 / 200 yeast proteins (`-subject`) at 1 thread x0.771 / 0.800 / 0.875
+  (1.382 -> 1.066 s, 1.579 -> 1.264 s, 2.583 -> 2.261 s; instructions x0.690 / 0.723 / 0.820); against 50 and 200
+  at 16 threads x0.863 / 0.860 (50 with `-seg no` x0.863); against 8 / 50 at 32 threads x0.875 / 0.918; the whole
+  yeast proteome at 16 threads `-subject` / `-db` x0.993 / 0.995; a 660 kb genome (AP027131, split) against 50
+  proteins x0.997 at 1 thread, x0.985 at 16. The gain is largest with many queries and few subjects; a split
+  query saves only the ideal block.
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (diagnostic build; distinct composition-adjustment inputs),

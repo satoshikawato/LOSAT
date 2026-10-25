@@ -1771,9 +1771,11 @@ impl XFlatCompressedLookup {
     /// EXPERIMENT (LOSAT_X_BPFSTAGE): whether [`Self::x_list_pairs`] lists the offsets of `subject`
     /// (`subject_length` residues): the compressed alphabet has 15 letters (NCBI's reciprocal for
     /// 15), the word length is 2 to 6 (the indices stay below 15^6, where the divisions by 15 and
-    /// by 225 are exact), the presence bits and the slice bounds cover every index, and the
-    /// subject keeps a byte past its last word (the sentinel, which a search's subjects of a word or
-    /// more keep), so that the scan reads no letter out of bounds.
+    /// by 225 are exact), the presence bits are one per cell (shift `PV_ARRAY_BTS`, as on every
+    /// table with 1 % of its cells used or more, which the branch-free list needs) and they and the
+    /// slice bounds cover every index, and the subject keeps a byte past its last word (the
+    /// sentinel, which a search's subjects of a word or more keep), so that the scan reads no letter
+    /// out of bounds.
     pub(crate) fn x_pairs_fit(&self, subject: &[u8], subject_length: usize) -> bool {
         let Ok(word_length) = usize::try_from(self.word_length) else {
             return false;
@@ -1787,14 +1789,10 @@ impl XFlatCompressedLookup {
         }
         let s_last = subject_length.saturating_sub(word_length);
         let indices = 15u64.pow(word_length as u32);
-        // `checked_shl` declines only shifts of 64 bits or more; a shift that loses bits can only
-        // make the answer false.
         subject.len() > s_last + word_length
             && self.starts.len() as u64 > indices
-            && u32::try_from(self.pv_array_bts)
-                .ok()
-                .and_then(|bts| (self.pv.len() as u64).checked_shl(bts))
-                .is_some_and(|covered| covered >= indices)
+            && self.pv_array_bts == PV_ARRAY_BTS as i32
+            && (self.pv.len() as u64) << PV_ARRAY_BTS >= indices
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341 (quoted at
@@ -1808,7 +1806,8 @@ impl XFlatCompressedLookup {
     /// (NCBI's step), and the preshift after `s + 1` is `(i0 / 15 + C1) / 15 = i0 / 225 + C1 / 15`
     /// (as `C1` is a multiple of 15), so the chain from preshift to preshift takes one multiply per
     /// two offsets; `C1 / 15` is off the chain. The divisions are NCBI's reciprocal multiply and,
-    /// for 225, `x * 19,088,744 >> 32`, exact below 15^6 (lib test). A letter outside the alphabet
+    /// for 225, `x * 19,088,744 >> 32`, exact below 15^6 (lib test); `C1 / 15`, an exact division,
+    /// is `C1` times the inverse of 15 modulo 2^32. A letter outside the alphabet
     /// takes NCBI's step and its skip, as `for_each_cell` does. `cells` reserves
     /// [`X_STARTS_AHEAD`] places past the list.
     ///
@@ -1828,7 +1827,6 @@ impl XFlatCompressedLookup {
         // below stays under 15^word length.
         let word_length = self.word_length as usize;
         let recip = i64::from(self.reciprocal_alphabet_size);
-        let pv_array_bts = self.pv_array_bts as usize;
         let table = &self.scaled_compress_table_u8;
         let pv = &self.pv;
         cells.clear();
@@ -1840,10 +1838,12 @@ impl XFlatCompressedLookup {
             let ix = index as usize;
             // SAFETY: an index is below 15^word length (the scaled letters, above), which the bits
             // cover (x_pairs_fit, the caller's contract).
-            let word = unsafe { *pv.get_unchecked(ix >> pv_array_bts) };
+            let word = unsafe { *pv.get_unchecked(ix >> PV_ARRAY_BTS) };
             (word >> (ix & PV_ARRAY_MASK)) & 1
         };
         let div225 = |x: i32| ((i64::from(x) * 19_088_744) >> 32) as i32;
+        // 15 * 0xEEEE_EEEF = 1 modulo 2^32.
+        let div15_exact = |x: i32| (x as u32).wrapping_mul(0xEEEE_EEEF) as i32;
 
         let mut s = 0usize;
         let mut index = 0i32;
@@ -1877,7 +1877,7 @@ impl XFlatCompressedLookup {
                 if (scaled0 | scaled1) >= 0 {
                     let i0 = preshift + scaled0;
                     let i1 = compressed_reciprocal_divide(i0, recip) + scaled1;
-                    preshift = div225(i0) + compressed_reciprocal_divide(scaled1, recip);
+                    preshift = div225(i0) + div15_exact(scaled1);
                     next_char = byte_at(s + word_length + 1);
                     let bit0 = bit_of(i0);
                     // SAFETY: each offset adds at most one to `listed`, so `listed` stays below
@@ -2779,8 +2779,9 @@ mod tests {
         }
     }
 
-    // LOSAT_X_BPFSTAGE: `x * 19,088,744 >> 32` is `x / 225` below 15^6, and NCBI's reciprocal
-    // multiply is `x / 15` there (the indices of word lengths up to 6).
+    // LOSAT_X_BPFSTAGE: `x * 19,088,744 >> 32` is `x / 225` below 15^6, NCBI's reciprocal
+    // multiply is `x / 15` there (the indices of word lengths up to 6), and the multiply by the
+    // inverse of 15 is `x / 15` on its multiples.
     #[test]
     fn the_pairs_scan_divisions_are_exact_below_fifteen_to_the_sixth() {
         for x in 0..15i64.pow(6) {
@@ -2790,6 +2791,13 @@ mod tests {
                 x / 15,
                 "x {x}"
             );
+            if x % 15 == 0 {
+                assert_eq!(
+                    i64::from((x as u32).wrapping_mul(0xEEEE_EEEF)),
+                    x / 15,
+                    "x {x}"
+                );
+            }
         }
     }
 
@@ -2803,6 +2811,17 @@ mod tests {
         let mut flat6 = flat_table(x_try_build_flat_compressed_lookup(
             6, 1100, &query, &locations, &tables,
         ));
+        // A table with under 1 % of its cells used takes a coarser shift of its bits (NCBI's
+        // `pv_array_bts`), which the scan declines; this one has one bit per cell.
+        let probe = random_subject(&mut rng, 60, 0);
+        assert_eq!(
+            flat6.pv_array_bts, PV_ARRAY_BTS as i32,
+            "a denser word-6 table"
+        );
+        assert!(flat6.x_pairs_fit(&probe, 60));
+        flat6.pv_array_bts += 2;
+        assert!(!flat6.x_pairs_fit(&probe, 60), "coarse bits");
+        flat6.pv_array_bts -= 2;
         let mut cells = Vec::new();
         let mut found = 0;
         for outside_one_in in [0usize, 6, 2] {

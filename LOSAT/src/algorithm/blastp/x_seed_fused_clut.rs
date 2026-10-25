@@ -391,7 +391,7 @@ unsafe fn x_scan_flat_stage<F>(
     let listed = cells.len();
     cells.extend_from_slice(&[(0, 0); X_STARTS_AHEAD]);
     let mut stage = X_STAGE.with(Cell::take).unwrap_or_else(XStage::new);
-    let XStage { diffs, heres } = &mut *stage;
+    let (diffs, heres) = (&mut stage.diffs[..], &mut stage.heres[..]);
     let starts = &lookup.starts[..];
     let hits = &lookup.hits[..];
     let mask = diag_mask as u32;

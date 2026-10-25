@@ -39,8 +39,7 @@
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF): with this switch (a switch of the strict set: on unless it is
 //! `0`) the scan of the standard lookup table is
-//! tblastn's branch-free scan (`tblastn/x_scan_bf.rs`, `x_scan_one_range_bf`, LOSAT_X_TBNSCANBF's
-//! loop): the presence bits of a block of words advance a candidate list instead of a branch, and
+//! tblastn's branch-free scan (`tblastn/x_scan_bf.rs`, `x_scan_one_range_bf`): the presence bits of a block of words advance a candidate list instead of a branch, and
 //! the listed words' hits are copied in position order with NCBI's stop and resume when the offset
 //! array is full. Its pairs
 //! and `scan_range` values are those of `s_blast_aa_scan_subject_one_range`, so the loop above
@@ -49,7 +48,7 @@
 //! same candidate loop (`x_seed_diag.rs`). The compressed lookup table keeps its scan.
 //!
 //! EXPERIMENT (LOSAT_X_BXHITBF): the direct loop takes the two outcomes most two-hit tests end in,
-//! too far and overlap, without a branch (tblastn's LOSAT_X_TBNHITBF and TBLASTX's
+//! too far and overlap, without a branch (tblastn's branch-free two-hit loop and TBLASTX's
 //! LOSAT_X_TBXHITBF do the same in their loops):
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551

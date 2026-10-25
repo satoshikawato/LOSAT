@@ -413,6 +413,35 @@ const MULTI_BATCH: &[&str] = &[
     "m1_avg",
 ];
 
+/// What the panic of a stdout mismatch says: how many bytes differ, where the first difference is,
+/// and about 100 bytes of both sides around it (control bytes escaped), so that a difference seen
+/// only on one platform can be read from its log. Empty when the bytes are equal.
+pub(crate) fn first_difference(got: &[u8], want: &[u8]) -> String {
+    let offset = got
+        .iter()
+        .zip(want)
+        .position(|(a, b)| a != b)
+        .unwrap_or(got.len().min(want.len()));
+    let differing =
+        got.iter().zip(want).filter(|(a, b)| a != b).count() + got.len().abs_diff(want.len());
+    let context = |bytes: &[u8]| {
+        let from = offset.saturating_sub(50).min(bytes.len());
+        let to = (offset + 50).min(bytes.len());
+        String::from_utf8_lossy(&bytes[from..to])
+            .escape_debug()
+            .to_string()
+    };
+    format!(
+        "{differing} bytes differ, first at offset {offset}\n  LOSAT (bytes {}..{}): {}\n  NCBI  (bytes {}..{}): {}",
+        offset.saturating_sub(50).min(got.len()),
+        (offset + 50).min(got.len()),
+        context(got),
+        offset.saturating_sub(50).min(want.len()),
+        (offset + 50).min(want.len()),
+        context(want),
+    )
+}
+
 fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     let mut env: Vec<(&str, &str)> = case.env.to_vec();
     env.extend_from_slice(extra_env);
@@ -433,15 +462,31 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     let want = frozen(&case.name, "out");
     assert!(
         output.stdout == want,
-        "{label}: stdout differs ({} bytes, NCBI wrote {})",
+        "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
         output.stdout.len(),
-        want.len()
+        want.len(),
+        first_difference(&output.stdout, &want)
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
         String::from_utf8_lossy(&frozen(&case.name, "err")),
         "{label}: stderr"
     );
+}
+
+/// The message of a mismatch: the count of differing bytes, the first offset, and both sides around it.
+#[test]
+fn a_difference_is_described_by_its_first_offset_and_the_bytes_around_it() {
+    let message = first_difference(b"ab\ncdef", b"ab\ncXeY");
+    assert!(
+        message.starts_with("2 bytes differ, first at offset 4"),
+        "{message}"
+    );
+    assert!(
+        message.contains("ab\\ncdef") && message.contains("ab\\ncXeY"),
+        "{message}"
+    );
+    assert!(first_difference(b"abc", b"abcd").starts_with("1 bytes differ, first at offset 3"));
 }
 
 #[test]

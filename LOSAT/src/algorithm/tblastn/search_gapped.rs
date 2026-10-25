@@ -617,8 +617,6 @@ fn x_preliminary_protein_hsps_by_unit(
     }
     // The units end with NCBI's offset step instead of starting on a cleared table, and the
     // sequential path below runs on this thread's kept buffers.
-    // EXPERIMENT (LOSAT_X_TBNHITBF): the two-hit loop of the units (tblastn/x_tbn_hitbf.rs).
-    let x_branch_free = super::x_tbn_hitbf::x_branch_free_loop();
     let state_on = |kept: Option<XUnitBuffers>| {
         let (table, pairs, hits, scratch) = match kept {
             Some(kept) => (Some(kept.diagonals), kept.pairs, kept.hits, kept.scratch),
@@ -685,11 +683,9 @@ fn x_preliminary_protein_hsps_by_unit(
         x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
             #[cfg(test)]
             probe_seeds(unit, frame.frame, chunk_offset, filled);
-            if x_branch_free {
-                two_hit.x_pairs_bf(frame.frame, chunk_offset, subject_sequence, filled, hits)
-            } else {
-                two_hit.pairs(frame.frame, chunk_offset, subject_sequence, filled, hits)
-            }
+            // The two-hit loop of the units without a branch on the common outcomes
+            // (tblastn/x_tbn_hitbf.rs).
+            two_hit.x_pairs_bf(frame.frame, chunk_offset, subject_sequence, filled, hits)
         });
         // NCBI c++/src/algo/blast/core/aa_ungapped.c:608-609:
         // Blast_ExtendWordExit(ewp, subject->length);

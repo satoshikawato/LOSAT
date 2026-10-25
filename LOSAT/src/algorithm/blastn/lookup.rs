@@ -52,13 +52,12 @@ mod x_mb_fill;
 
 /// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): with
 /// LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the megablast table builds; then the
-/// `[X_SHADOW] MBLUTKEEP` line (LOSAT_X_MBLUTKEEPSHADOW) and, with LOSAT_TIMING, the `[TIMING]
-/// x_mb_lut_keep` line (`x_mb_lut_keep::print_summary`); then the `[X_SHADOW] MBFILL` line
-/// (LOSAT_X_MBFILLSHADOW, `x_mb_fill::print_summary`).
+/// `[TIMING] x_mb_lut_keep` line (`x_mb_lut_keep::print_summary`) and the `[TIMING] x_bn_csr`
+/// line (`x_bn_csr::print_summary`).
 pub fn x_mb_lookup_print_summary() {
     x_mb_lookup_par::print_summary();
     x_mb_lut_keep::print_summary();
-    x_mb_fill::print_summary();
+    x_bn_csr::print_summary();
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786,803-804
@@ -78,6 +77,15 @@ pub mod x_disc_lookup_par;
 // as CSR. `pub` only for the summary line that `main` prints at exit.
 #[path = "x_dc_csr.rs"]
 pub mod x_dc_csr;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1090-1091
+// ```c
+//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+//          mb_lt->hashtable[ecode] = index;
+// ```
+// EXPERIMENT (LOSAT_X_BNCSR): the chains of a contiguous blastn table laid out as CSR.
+#[path = "x_bn_csr.rs"]
+mod x_bn_csr;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:37-43
 // ```c
@@ -869,7 +877,7 @@ pub struct DiscTemplates {
     hashtable2: Vec<u32>,
     next_pos2: Vec<u32>,
     /// EXPERIMENT (LOSAT_X_DCCSR): the first template's chains as CSR (`x_dc_csr.rs`); then
-    /// `hashtable` and `next_pos` are empty, unless the shadow kept them to compare.
+    /// `hashtable` and `next_pos` are empty.
     x_csr: Option<x_dc_csr::Csr>,
 }
 
@@ -907,6 +915,9 @@ struct MbLookupTable {
     /// `x_mb_lut_keep.rs`; a kept `hashtable` can be longer than the table, whose cells are its
     /// first ones); `None` frees it, as NCBI's `BlastMBLookupTableDestruct`.
     x_keep: Option<(std::sync::Arc<x_mb_lut_keep::Keep>, usize)>,
+    /// EXPERIMENT (LOSAT_X_BNCSR): the chains of a contiguous table as CSR (`x_bn_csr.rs`); then
+    /// `hashtable` and `next_pos` are empty and `x_keep` is `None`.
+    x_csr: Option<x_dc_csr::Csr>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1376
@@ -945,15 +956,35 @@ impl MbLookupTable {
     //     q_off = lookup->next_pos[q_off];
     // }
     // ```
+    // EXPERIMENT (LOSAT_X_BNCSR): a table laid out as CSR has an empty `hashtable`: the bounds
+    // check of the chain's head, which the walk needs anyway, sends it to `x_csr_each`, so a table
+    // with chains runs the same statements as before.
     #[inline(always)]
     fn for_each_hit(&self, index: u64, mut callback: impl FnMut(u32)) {
         if !self.has_hits(index) {
             return;
         }
-        let mut q_off = self.hashtable[index as usize];
+        let Some(&head) = self.hashtable.get(index as usize) else {
+            return self.x_csr_each(index, callback);
+        };
+        let mut q_off = head;
         while q_off != 0 {
             callback(q_off);
             q_off = self.next_pos[q_off as usize];
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNCSR): `for_each_hit` of a table laid out as CSR: the cell's run, the
+    /// chain's offsets in the chain's order (`x_bn_csr.rs`; none without chains and CSR). The hot
+    /// scans read the runs through `x_dc_csr::Ring` instead.
+    #[cold]
+    #[inline(never)]
+    fn x_csr_each(&self, index: u64, mut callback: impl FnMut(u32)) {
+        debug_assert!(self.x_csr.is_some());
+        if let Some(csr) = self.x_csr.as_ref() {
+            for &q_off_1 in csr.run(index as usize) {
+                callback(q_off_1);
+            }
         }
     }
 
@@ -1016,6 +1047,39 @@ impl TwoStageLookup {
         self.disc.as_ref()
     }
 
+    /// EXPERIMENT (LOSAT_X_BNCSR): the CSR of a contiguous table's chains, which the scans read
+    /// instead of the chains when there is one (`x_bn_csr.rs`).
+    #[inline(always)]
+    pub fn x_mb_csr(&self) -> Option<&x_dc_csr::Csr> {
+        self.mb_lookup.x_csr.as_ref()
+    }
+
+    /// Tests only: the contiguous table's `hashtable` and `next_pos` as the chains' fill makes
+    /// them, also for a table laid out as CSR (LOSAT_X_BNCSR), whose chains are rebuilt from its
+    /// runs (`hashtable[cell]` the run's first offset, `next_pos` of each offset the next one, 0
+    /// after the last) with `next_pos_len` elements of `next_pos` (the fill's: the largest query
+    /// offset plus the query's length, plus 1).
+    #[cfg(test)]
+    pub(crate) fn x_chain_arrays(&self, next_pos_len: usize) -> (Vec<u32>, Vec<u32>) {
+        let mb = &self.mb_lookup;
+        let Some(csr) = mb.x_csr.as_ref() else {
+            return (mb.hashtable.clone(), mb.next_pos.clone());
+        };
+        let cells = 1usize << (2 * self.lut_word_length);
+        let mut hashtable = vec![0u32; cells];
+        let mut next_pos = vec![0u32; next_pos_len];
+        for (cell, head) in hashtable.iter_mut().enumerate() {
+            let run = csr.run(cell);
+            if let Some(&first) = run.first() {
+                *head = first;
+                for w in run.windows(2) {
+                    next_pos[w[0] as usize] = w[1];
+                }
+            }
+        }
+        (hashtable, next_pos)
+    }
+
     /// Visits the second template's query offsets (1-based) of a discontiguous word; the
     /// presence vector is shared by both templates.
     ///
@@ -1065,9 +1129,7 @@ impl TwoStageLookup {
     #[inline(always)]
     pub fn for_each_hit(&self, lut_kmer: u64, callback: impl FnMut(u32)) {
         debug_assert!(
-            self.disc
-                .as_ref()
-                .is_none_or(|d| d.x_csr.is_none() || !self.mb_lookup.hashtable.is_empty()),
+            self.disc.as_ref().is_none_or(|d| d.x_csr.is_none()),
             "a CSR table (LOSAT_X_DCCSR) has no chains"
         );
         self.mb_lookup.for_each_hit(lut_kmer, callback)
@@ -1087,11 +1149,14 @@ impl TwoStageLookup {
             .count_hits(lut_kmer, || self.x_csr_count(lut_kmer))
     }
 
-    /// EXPERIMENT (LOSAT_X_DCCSR): `contains_hit` of a table laid out as CSR (none without chains
-    /// and CSR).
+    /// EXPERIMENT (LOSAT_X_DCCSR, LOSAT_X_BNCSR): `contains_hit` of a table laid out as CSR (none
+    /// without chains and CSR).
     #[cold]
     #[inline(never)]
     fn x_csr_contains(&self, lut_kmer: u64, q_off_1: u32) -> bool {
+        if let Some(csr) = self.mb_lookup.x_csr.as_ref() {
+            return x_bn_csr::contains(csr.run(lut_kmer as usize), q_off_1);
+        }
         debug_assert!(self.disc.as_ref().is_some_and(|d| d.x_csr.is_some()));
         self.disc
             .as_ref()
@@ -1099,10 +1164,13 @@ impl TwoStageLookup {
             .is_some_and(|csr| csr.contains(lut_kmer as usize, q_off_1))
     }
 
-    /// EXPERIMENT (LOSAT_X_DCCSR): `count_hits` of a table laid out as CSR.
+    /// EXPERIMENT (LOSAT_X_DCCSR, LOSAT_X_BNCSR): `count_hits` of a table laid out as CSR.
     #[cold]
     #[inline(never)]
     fn x_csr_count(&self, lut_kmer: u64) -> usize {
+        if let Some(csr) = self.mb_lookup.x_csr.as_ref() {
+            return csr.run(lut_kmer as usize).len();
+        }
         debug_assert!(self.disc.as_ref().is_some_and(|d| d.x_csr.is_some()));
         self.disc
             .as_ref()
@@ -1836,6 +1904,28 @@ fn build_mb_lookup(
         db_word_counts.is_some(),
         lut_word_length,
     );
+    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    let kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
+    let x_words = x_mb_lookup_par::Words {
+        queries_blastna,
+        query_offsets,
+        query_masks,
+        word_length,
+        lut_word_length,
+        kmer_mask,
+        ascending_cells,
+    };
+    // Dispatch point of LOSAT_X_BNCSR: a table laid out as CSR (`x_bn_csr.rs`) has neither
+    // `hashtable` nor `next_pos` and takes nothing from the batch loop's keep; the table the keep
+    // holds is freed, so the loop does not hold it beside this one.
+    let x_csr_layout = x_bn_csr::plan(&x_words, table_size, db_word_counts.is_some(), debug_mode);
+    let x_keep = match x_keep {
+        Some(keep) if x_csr_layout => {
+            keep.release();
+            None
+        }
+        x_keep => x_keep,
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1262
     // ```c
     //    mb_lt->hashtable = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
@@ -1846,6 +1936,7 @@ fn build_mb_lookup(
     // as before (`x_mb_lut_keep.rs`).
     let (mut hashtable, x_resident, x_dirty) = match x_keep {
         Some(keep) => keep.take(table_size, x_mb_lookup_par::pool_threads().is_some()),
+        None if x_csr_layout => (Vec::new(), false, 0),
         None => (vec![0u32; table_size], false, table_size),
     };
     let max_query_offset = queries_blastna
@@ -1854,10 +1945,12 @@ fn build_mb_lookup(
         .map(|(seq, &query_offset)| query_offset.max(0) as usize + seq.len())
         .max()
         .unwrap_or(0);
-    let mut next_pos = vec![0u32; max_query_offset + 1];
+    let mut next_pos = if x_csr_layout {
+        Vec::new()
+    } else {
+        vec![0u32; max_query_offset + 1]
+    };
     let mut pv_array = vec![0u32; pv_size];
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
-    let kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
     const K_COMPRESSION_FACTOR: usize = 2048;
     let mut helper_array =
         vec![0u32; ((table_size + K_COMPRESSION_FACTOR - 1) / K_COMPRESSION_FACTOR).max(1)];
@@ -1912,21 +2005,32 @@ fn build_mb_lookup(
     // Dispatch point of PAIRPAR (first arm): `x_mb_lookup_par::fill` applies the same
     // update to the same words, each cell's words in the same order, on the pool threads (each
     // thread owns whole blocks of cells); see x_mb_lookup_par.rs.
+    // Dispatch point of LOSAT_X_BNCSR (second): the CSR built from the same words instead of the
+    // fill, with the fill's presence vector and helper counters, on the pool where the fill would
+    // be (`x_bn_csr::build`).
     x_clock.fill();
-    let x_on_pool = x_mb_lookup_par::parts(db_word_counts.is_none() && !debug_mode);
+    let mut x_csr = None;
+    let mut x_csr_on_pool = false;
+    let x_on_pool = if x_csr_layout {
+        None
+    } else {
+        x_mb_lookup_par::parts(db_word_counts.is_none() && !debug_mode)
+    };
     let mut x_filled = x_mb_lookup_par::FillStats::default();
-    if let Some(x_parts) = x_on_pool {
+    if x_csr_layout {
+        let (csr, on_pool) = x_bn_csr::build(
+            &x_words,
+            table_size,
+            &mut pv_array,
+            pv_array_bts,
+            &mut helper_array,
+        );
+        x_csr = Some(csr);
+        x_csr_on_pool = on_pool;
+    } else if let Some(x_parts) = x_on_pool {
         x_filled = x_mb_lookup_par::fill(
             x_parts,
-            &x_mb_lookup_par::Words {
-                queries_blastna,
-                query_offsets,
-                query_masks,
-                word_length,
-                lut_word_length,
-                kmer_mask,
-                ascending_cells,
-            },
+            &x_words,
             x_mb_lookup_par::Tables {
                 hashtable: &mut hashtable[..table_size],
                 next_pos: &mut next_pos,
@@ -1950,15 +2054,6 @@ fn build_mb_lookup(
         };
         // Dispatch point of LOSAT_X_MBFILL: the same words and updates in the same order, read run
         // by run (`x_mb_fill.rs`); otherwise, and for the builds it does not take, the queued loop.
-        let x_words = x_mb_lookup_par::Words {
-            queries_blastna,
-            query_offsets,
-            query_masks,
-            word_length,
-            lut_word_length,
-            kmer_mask,
-            ascending_cells,
-        };
         if !x_mb_fill::fill(&x_words, db_word_counts, x_tables) {
             x_fill_mb_queued(
                 x_mb_queue(),
@@ -2001,8 +2096,8 @@ fn build_mb_lookup(
     // append each word to its cell and keep that order, so a cell lists query
     // offsets in the order of indexing; the megablast chain above lists them newest
     // first. Linking the words in reverse order of indexing makes the chain list
-    // them in the order of indexing.
-    if ascending_cells {
+    // them in the order of indexing (the runs of a CSR table list them so already, `x_bn_csr.rs`).
+    if ascending_cells && !x_csr_layout {
         for &(bucket, _) in &words {
             hashtable[bucket as usize] = 0;
         }
@@ -2018,28 +2113,7 @@ fn build_mb_lookup(
         longest_chain = longest_chain.max(value as usize);
     }
     // No NCBI counterpart: the end of the `[TIMING] x_mb_lookup_build` interval.
-    x_clock.record(x_on_pool.is_some(), x_filled);
-    // Dispatch point of LOSAT_X_MBLUTKEEPSHADOW: a build on a kept table is made again on a fresh
-    // table (the same build without the keep) and the arrays are compared.
-    if x_resident && x_mb_lut_keep::shadow() {
-        let fresh = build_mb_lookup(
-            queries_blastna,
-            query_offsets,
-            word_length,
-            lut_word_length,
-            query_masks,
-            db_word_counts,
-            max_db_word_count,
-            approx_table_entries,
-            ascending_cells,
-            None,
-        );
-        x_mb_lut_keep::shadow_check(
-            [&hashtable[..table_size], &next_pos, &pv_array],
-            [&fresh.hashtable, &fresh.next_pos, &fresh.pv_array],
-            (longest_chain, fresh.longest_chain),
-        );
-    }
+    x_clock.record(x_on_pool.is_some() || x_csr_on_pool, x_filled);
 
     if debug_mode {
         let hashtable_bytes = table_size * std::mem::size_of::<u32>();
@@ -2062,6 +2136,7 @@ fn build_mb_lookup(
         pv_array_bts,
         longest_chain,
         x_keep: x_keep.map(|keep| (keep.clone(), x_dirty)),
+        x_csr,
     }
 }
 
@@ -2187,18 +2262,6 @@ struct DiscTables<'a> {
     next_pos2: &'a mut [u32],
     helper_array2: &'a mut [u32],
     pv_array: &'a mut [PvArrayType],
-    pv_array_bts: usize,
-}
-
-/// The same tables, read only (LOSAT_X_DISCLUTPARSHADOW compares them).
-struct DiscTablesRef<'a> {
-    hashtable: &'a [u32],
-    next_pos: &'a [u32],
-    helper_array: &'a [u32],
-    hashtable2: &'a [u32],
-    next_pos2: &'a [u32],
-    helper_array2: &'a [u32],
-    pv_array: &'a [PvArrayType],
     pv_array_bts: usize,
 }
 
@@ -2554,8 +2617,7 @@ pub fn build_disc_mb_lookup(
     // EXPERIMENT (LOSAT_X_DCCSR): a one-template table of at least a quarter as many positions as
     // cells is built as CSR from the same words instead of the chains below (`x_dc_csr.rs`),
     // with the same presence vector, helper counters and longest chain; on the search pool when
-    // LOSAT_X_DISCLUTPAR's fill would run there. With LOSAT_X_DCCSRSHADOW every one-template
-    // table gets both (below).
+    // LOSAT_X_DISCLUTPAR's fill would run there.
     let x_layout = x_dc_csr::plan(&words, hashsize);
     if x_layout == x_dc_csr::Layout::Csr {
         let mut helper_array = vec![0u32; hashsize / K_COMPRESSION_FACTOR];
@@ -2593,6 +2655,7 @@ pub fn build_disc_mb_lookup(
                 pv_array_bts,
                 longest_chain,
                 x_keep: None,
+                x_csr: None,
             },
             lut_word_length,
             word_length: word_size,
@@ -2635,7 +2698,7 @@ pub fn build_disc_mb_lookup(
     // ```
     // Dispatch point: NCBI applies the update of each template to each word as soon as the word
     // is read, as `fill_disc_mb_tables` does (the original LOSAT loop, unchanged). With
-    // LOSAT_X_DISCLUTPAR (or its shadow) and a search pool of two threads or more,
+    // LOSAT_X_DISCLUTPAR and a search pool of two threads or more,
     // `x_disc_lookup_par::fill` applies the same updates to the same words on the pool threads,
     // each thread owning whole blocks of cells of both templates' tables, so each cell gets its
     // words in the same order; see x_disc_lookup_par.rs.
@@ -2658,59 +2721,8 @@ pub fn build_disc_mb_lookup(
 
     x_clock.chain();
     let total_longest_chain = disc_longest_chain(&helper_array, &helper_array2, two_templates);
-    // No NCBI counterpart: the end of the `[TIMING] disc_lookup_build` interval; then, with
-    // LOSAT_X_DISCLUTPARSHADOW, the tables are built again the other way (serially when the pool
-    // built them, otherwise partitioned) and compared element by element.
+    // No NCBI counterpart: the end of the `[TIMING] disc_lookup_build` interval.
     x_clock.record(x_parts.is_some());
-    if x_disc_lookup_par::shadow() {
-        x_disc_lookup_par::shadow_check(
-            &words,
-            x_parts,
-            &DiscTablesRef {
-                hashtable: &hashtable,
-                next_pos: &next_pos,
-                helper_array: &helper_array,
-                hashtable2: &hashtable2,
-                next_pos2: &next_pos2,
-                helper_array2: &helper_array2,
-                pv_array: &pv_array,
-                pv_array_bts,
-            },
-            total_longest_chain,
-        );
-    }
-    // EXPERIMENT (LOSAT_X_DCCSRSHADOW): the CSR built too (into scratch presence-vector words and
-    // counters) and compared with the chains, the fill's presence vector, counters and longest
-    // chain (and the pool's CSR with the serial one); the scans then read the CSR.
-    let x_csr = if x_layout == x_dc_csr::Layout::Shadow {
-        let mut pv = vec![0u32; pv_array.len()];
-        let mut helper = vec![0u32; helper_array.len()];
-        let (csr, on_pool) = match x_parts {
-            Some(parts) => {
-                x_disc_lookup_par::csr(parts, &words, hashsize, &mut pv, pv_array_bts, &mut helper)
-            }
-            None => (
-                x_dc_csr::build(&words, hashsize, &mut pv, pv_array_bts, &mut helper),
-                false,
-            ),
-        };
-        x_dc_csr::shadow_check(
-            &words,
-            &csr,
-            on_pool,
-            &pv,
-            &helper,
-            pv_array_bts,
-            &hashtable,
-            &next_pos,
-            &pv_array,
-            &helper_array,
-            total_longest_chain,
-        );
-        Some(csr)
-    } else {
-        None
-    };
 
     TwoStageLookup {
         mb_lookup: MbLookupTable {
@@ -2720,6 +2732,7 @@ pub fn build_disc_mb_lookup(
             pv_array_bts,
             longest_chain: total_longest_chain,
             x_keep: None,
+            x_csr: None,
         },
         lut_word_length,
         word_length: word_size,
@@ -2730,7 +2743,7 @@ pub fn build_disc_mb_lookup(
             template_length,
             hashtable2,
             next_pos2,
-            x_csr,
+            x_csr: None,
         }),
     }
 }

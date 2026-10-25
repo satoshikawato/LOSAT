@@ -10,9 +10,8 @@
 //! default fields and Seq-aligns: the subjects with an O and those of the HSPs whose query has one;
 //! outfmt 0 and other tabular fields (XML reads the same set): every final subject; the records of
 //! `LOSAT_X_BPLISTEDLEAN=0`: every listed subject; the recount of the HSPs with a pyrrolysine on
-//! proteins made for it), and run its shadow mode (`LOSAT_X_BPREDODBSUBJSHADOW`), which makes the
-//! copy too and compares every read with it; its line at exit shows that the path ran. A
-//! difference stops the run.
+//! proteins made for it). The switch has no rule (class `always`): every `-db` run takes its path
+//! with the switch on, so the equality of the two reports is the check.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385
 //! ```c
@@ -23,7 +22,6 @@
 //!         }
 //! ```
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -37,34 +35,6 @@ fn fixture(name: &str) -> PathBuf {
 struct Run {
     stdout: Vec<u8>,
     stderr: String,
-}
-
-const SHADOW_PREFIX: &str = "[X_SHADOW] BPREDODBSUBJ ";
-
-impl Run {
-    /// The counters of the `[X_SHADOW] BPREDODBSUBJ` line, which must end with `identical`.
-    fn shadow(&self) -> HashMap<String, u64> {
-        let line = self
-            .stderr
-            .lines()
-            .find(|line| line.starts_with(SHADOW_PREFIX))
-            .unwrap_or_else(|| panic!("no {SHADOW_PREFIX}line in {}", self.stderr));
-        assert!(line.ends_with(" identical"), "{line}");
-        line[SHADOW_PREFIX.len()..]
-            .split(' ')
-            .filter_map(|field| field.split_once('='))
-            .map(|(key, value)| (key.to_string(), value.parse().expect("a count")))
-            .collect()
-    }
-
-    /// Standard error without the shadow's line.
-    fn stderr_without_shadow(&self) -> String {
-        self.stderr
-            .lines()
-            .filter(|line| !line.starts_with(SHADOW_PREFIX))
-            .map(|line| format!("{line}\n"))
-            .collect()
-    }
 }
 
 /// A directory of the test `test` (the tests of this file run in parallel).
@@ -222,22 +192,6 @@ fn reports_with_reads_per_match_are_the_copys_reports() {
         );
         assert!(on.stdout == off.stdout, "{what}: report");
         assert_eq!(on.stderr, off.stderr, "{what}: standard error");
-        let shadow = blastp(
-            query,
-            &db,
-            threads,
-            &with(("LOSAT_X_BPREDODBSUBJSHADOW", "1")),
-            outfmt,
-        );
-        assert!(shadow.stdout == off.stdout, "{what}: shadow report");
-        assert_eq!(shadow.stderr_without_shadow(), off.stderr, "{what}");
-        let counts = shadow.shadow();
-        assert!(counts["searches"] > 0, "{what}: {counts:?}");
-        assert!(counts["lengths"] > 0, "{what}: {counts:?}");
-        assert!(
-            counts["reads"] > 0 && counts["residues"] > counts["reads"],
-            "{what}: {counts:?}"
-        );
     }
 }
 
@@ -309,15 +263,5 @@ fn pyrrolysine_recounts_are_the_copys() {
             String::from_utf8_lossy(&off.stdout)
         );
         assert_eq!(on.stderr, off.stderr, "{what}: standard error");
-        let shadow = blastp(
-            &query,
-            &db,
-            threads,
-            &[("LOSAT_X_BPREDODBSUBJSHADOW", "1")],
-            outfmt,
-        );
-        assert!(shadow.stdout == off.stdout, "{what}: shadow report");
-        assert_eq!(shadow.stderr_without_shadow(), off.stderr, "{what}");
-        assert!(shadow.shadow()["reads"] > 0, "{what}");
     }
 }

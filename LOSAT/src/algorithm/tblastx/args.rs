@@ -177,6 +177,17 @@ pub struct TblastxArgs {
         help = "SEG: no, yes, or WINDOW LOCUT HICUT"
     )]
     pub seg: String,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
+    // ```c++
+    //         arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
+    //                         "Apply filtering locations as soft masks",
+    //                         CArgDescriptions::eBoolean,
+    //                         kDfltArgLookupTableMaskingOnlyProt);
+    // ```
+    // (`CFilteringArgs(!kQueryIsProtein)`, tblastx_args.cpp:78, takes this protein branch.) Read
+    // by `soft_masking`.
+    #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
+    pub soft_masking: Option<bool>,
 
     /// Two-hit window size for triggering ungapped extension (default: 40).
     /// Smaller values are more strict, larger values are more sensitive.
@@ -255,6 +266,23 @@ impl TblastxArgs {
     /// errors first).
     pub fn seg_spec(&self) -> anyhow::Result<SegSpec> {
         crate::blastinput::app::parse_seg_option(&self.seg, "TBLASTX")
+    }
+
+    /// `-soft_masking` (`mask_at_hash`): the SEG intervals keep words out of the lookup table but
+    /// the searched frames keep their letters (`x_query_frames.rs` `mask_soft`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
+    /// ```c++
+    /// CFilteringArgs::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
+    /// {
+    ///     if (args[kArgLookupTableMaskingOnly]) {
+    ///         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
+    ///     }
+    /// ```
+    /// The argument always has its default (`kDfltArgLookupTableMaskingOnlyProt`, "false"), and no
+    /// other handler of tblastx sets `mask_at_hash`.
+    pub fn soft_masking(&self) -> bool {
+        self.soft_masking.unwrap_or(false)
     }
 
     /// The `-db` value as NCBI keeps it (white space at its ends removed), `None` for a

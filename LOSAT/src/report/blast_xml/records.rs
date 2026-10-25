@@ -6,6 +6,7 @@
 use crate::common::GapEditOp;
 
 use super::matrix::FormattingMatrix;
+use super::subjects::SubjectNames;
 
 /// What a whole search contributes to every document (`BlastOutput` and `Parameters`).
 pub struct XmlRun<'a> {
@@ -102,6 +103,20 @@ pub struct XmlHit<'a> {
     /// What the taxonomy database said about the taxid (XML2's `HitDescr_sciname`); outfmt 5
     /// does not read it.
     pub taxonomy: &'a HitTaxonomy,
+}
+
+impl<'a> XmlHit<'a> {
+    /// The `Hit` of a subject with the names `names` and the record length `len`.
+    pub(crate) fn of(names: &'a SubjectNames, len: i32) -> Self {
+        XmlHit {
+            id: &names.id,
+            title: &names.title,
+            accession: &names.accession,
+            len,
+            taxid: names.taxid,
+            taxonomy: &names.taxonomy,
+        }
+    }
 }
 
 /// What NCBI's XML2 and JSON formats do with the taxid of a `Hit` once the taxonomy database has

@@ -114,7 +114,7 @@ Initial release candidate for LOSAT as a standalone, pure-Rust reimplementation 
 
 ### Approved Parity Enhancement
 
-- **TBLASTX Subject Genetic Code (`--db-gencode`)**: In local pairwise `-subject` searches, LOSAT explicitly honors non-default `--db-gencode` for translating subject sequences (supporting genetic codes 1–33). This resolves a recognized NCBI BLAST+ limitation where local `-subject` mode defaulted to genetic code 1 regardless of `--db-gencode`. All scoring, statistical calculations, and alignment logic remain strictly identical to NCBI.
+- **TBLASTX Subject Genetic Code (`--db-gencode`)**: In local pairwise `-subject` searches, LOSAT explicitly honors non-default `--db-gencode` for translating subject sequences (supporting the 26 genetic-code IDs of NCBI's `-db_gencode`: 1–6, 9–16, 21–31 and 33). This resolves a recognized NCBI BLAST+ limitation where local `-subject` mode defaulted to genetic code 1 regardless of `--db-gencode`. All scoring, statistical calculations, and alignment logic remain strictly identical to NCBI.
 
 ### Scope & Known Limitations
 

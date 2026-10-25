@@ -736,14 +736,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     let names = subject_cache
                         .get(&list.oid)
                         .context("names of a subject with hits")?;
-                    let hit = XmlHit {
-                        id: &names.id,
-                        title: &names.title,
-                        accession: &names.accession,
-                        len: i32::try_from(subject.sequence.len())?,
-                        taxid: names.taxid,
-                        taxonomy: &names.taxonomy,
-                    };
+                    let hit = XmlHit::of(names, i32::try_from(subject.sequence.len())?);
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time.

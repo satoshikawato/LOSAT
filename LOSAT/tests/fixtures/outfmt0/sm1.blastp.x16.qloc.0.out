@@ -1,0 +1,90 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x16_seg_s.faa).
+           1 sequences; 116 total letters
+
+
+
+Query= qs1 low-complexity run inside the alignment
+
+Length=119
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ss1 subject with the same run                                         112     4e-39
+
+
+> ss1 subject with the same run
+Length=116
+
+ Score = 112 bits (281),  Expect = 4e-39, Method: Compositional matrix adjust.
+ Identities = 75/81 (93%), Positives = 75/81 (93%), Gaps = 3/81 (4%)
+
+Query  20  DDPKIRDGPMAVMKqqqqqqqqqqqqqqqqqqqqqGWENYCWPANMSWKVLMKYEFSSDI  79
+           DDPKIRDGPMAVMKQQQQQQQQQQQQQQQQQQQQQGWENYCWPANMSWKVLMKYEFSSDI
+Sbjct  20  DDPKIRDGPMAVMKQQQQQQQQQQQQQQQQQQQQQGWENYCWPANMSWKVLMKYEFSSDI  79
+
+Query  80  HPCNLWICWIPKEMATPGWWN  100
+           HP   WICWIPKE  TPGWW 
+Sbjct  80  HP---WICWIPKEQQTPGWWK  97
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.128    0.464    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 7526
+
+
+Query= qs2 no hits expected
+
+Length=73
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.280    0.113    0.298    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 5123
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x16_seg_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 116
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

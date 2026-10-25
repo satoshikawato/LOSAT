@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW; BPCLUT is a strict-set switch): the compressed lookup table of
+//! EXPERIMENT (LOSAT_X_BPCLUT; BPCLUT is a strict-set switch): the compressed lookup table of
 //! blastp-fast (`CompressedAaLookupTable`) built flat, in three passes (count, layout, fill): each
 //! cell's hits lie in one contiguous slice, already in the order NCBI's compressed scan copies them,
 //! and the scans read a cell as that slice.
@@ -151,18 +151,13 @@
 //! argument in its header); at one thread the builder above runs.
 //!
 //! A strict-set switch (`utils/xswitch.rs`): on unless `LOSAT_X_BPCLUT=0`.
-//! `LOSAT_X_BPCLUTSHADOW` (not in the set) builds both tables, compares
-//! them (every cell's sequence, the PV array, the header) and the refusal, and searches with the
-//! reference's table; with more than one thread it also builds the pool's table and compares it with
-//! the flat one, slot for slot.
 //!
 //! `LOSAT_X_BPLKPFLAT` (also a strict-set switch, and it acts only where the flat table is built) changes only how the pool's build is
 //! scheduled and where its vectors come from (`x_clut_par.rs`, exactness argument in its header): one
 //! latch per pass, the table's `starts` and `hits` taken from the previous table of a block search
 //! (`XFlatSpare`), and tasks of another computation (the contexts' Karlin blocks of
 //! `blastp/x_query_blocks.rs`) run by the appends pass after its chunks (`XExtraTasks`).
-//! `LOSAT_X_BPLKPFLATSHADOW` builds the table again with the `par_iter` passes on fresh vectors and
-//! compares the two, slot for slot. `LOSAT_X_BPLKPAHEAD` (a strict-set switch since 2026-10-17) runs
+//! `LOSAT_X_BPLKPAHEAD` (a strict-set switch since 2026-10-17) runs
 //! the same build for the next query block ahead of that block, on vectors that the block search's
 //! thread allocated (`XFlatArgs::x_ahead`, `XFlatSpare::x_make_room`).
 
@@ -181,68 +176,31 @@ use std::sync::{Mutex, PoisonError};
 #[path = "x_clut_par.rs"]
 mod x_clut_par;
 
-// No NCBI counterpart: reads the switches once; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW): `LOSAT_X_BPCLUT` is a strict-set switch (on
-/// unless it is `0`); `LOSAT_X_BPCLUTSHADOW` (any value, not
-/// part of the set) selects the shadow mode. 0 = off (the reference builder), 1 = the flat table,
-/// 2 = shadow (both builders, compared; the reference's table used).
-pub(crate) fn x_bpclut_mode() -> u8 {
+// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPCLUT): a strict-set switch, on unless it is `0`: the flat table
+/// (`true`) or the reference builder (`false`).
+pub(crate) fn x_bpclut_on() -> bool {
     use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPCLUTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_BPCLUT") {
-            1
-        } else {
-            0
-        }
-    })
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPCLUT"))
 }
 
-// No NCBI counterpart: counters of the shadow mode, for the line at exit.
-static X_SHADOW_TABLES: AtomicU64 = AtomicU64::new(0);
-static X_SHADOW_REFUSED: AtomicU64 = AtomicU64::new(0);
-static X_SHADOW_HITS: AtomicU64 = AtomicU64::new(0);
-static X_SHADOW_PARALLEL_TABLES: AtomicU64 = AtomicU64::new(0);
-static X_SHADOW_PARALLEL_REFUSED: AtomicU64 = AtomicU64::new(0);
-
-/// EXPERIMENT (LOSAT_X_BPCLUTSHADOW): the shadow mode's line at exit (printed by `main`).
-// No NCBI counterpart: prints counters; it does not change any value NCBI computes.
-pub fn x_bpclut_print_summary() {
-    if x_bpclut_mode() == 2 {
-        let tables = X_SHADOW_TABLES.load(Ordering::Relaxed);
-        let refused = X_SHADOW_REFUSED.load(Ordering::Relaxed);
-        let hits = X_SHADOW_HITS.load(Ordering::Relaxed);
-        let parallel_tables = X_SHADOW_PARALLEL_TABLES.load(Ordering::Relaxed);
-        let parallel_refused = X_SHADOW_PARALLEL_REFUSED.load(Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] BPCLUT tables_compared={tables} refusals_compared={refused} hits={hits} parallel_tables_compared={parallel_tables} parallel_refusals_compared={parallel_refused} identical"
-        );
-    }
-}
-
-/// EXPERIMENT (LOSAT_X_BPLKPFLAT / LOSAT_X_BPLKPFLATSHADOW): the mode the variables select.
+/// EXPERIMENT (LOSAT_X_BPLKPFLAT): the mode the variable selects.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum XLkpFlat {
     #[default]
     Off,
     On,
-    Shadow,
 }
 
-// No NCBI counterpart: reads the LOSAT_X_BPLKPFLAT / LOSAT_X_BPLKPFLATSHADOW switches once; it does
-// not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPFLAT): a strict-set switch (on unless it is `0`);
-/// `LOSAT_X_BPLKPFLATSHADOW` (any value, not part of the set) selects the shadow
-/// mode, which implies the switch.
+// No NCBI counterpart: reads the LOSAT_X_BPLKPFLAT switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPLKPFLAT): a strict-set switch (on unless it is `0`).
 pub(crate) fn x_bplkpflat_mode() -> XLkpFlat {
     use std::sync::OnceLock;
     static MODE: OnceLock<XLkpFlat> = OnceLock::new();
     *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPLKPFLATSHADOW").is_some() {
-            XLkpFlat::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_BPLKPFLAT") {
+        if crate::utils::xswitch::on("LOSAT_X_BPLKPFLAT") {
             XLkpFlat::On
         } else {
             XLkpFlat::Off
@@ -250,46 +208,28 @@ pub(crate) fn x_bplkpflat_mode() -> XLkpFlat {
     })
 }
 
-// No NCBI counterpart: counters of the LOSAT_X_BPLKPFLATSHADOW line at exit.
+// No NCBI counterpart: counters of the `[X_STATS] BPLKPFLAT` line at exit (LOSAT_X_STATS); they do
+// not change any value NCBI computes.
 static X_LKPFLAT_TABLES: AtomicU64 = AtomicU64::new(0);
-static X_LKPFLAT_OUTCOMES: AtomicU64 = AtomicU64::new(0);
 static X_LKPFLAT_RECYCLED: AtomicU64 = AtomicU64::new(0);
 static X_LKPFLAT_RECYCLED_HITS: AtomicU64 = AtomicU64::new(0);
-static X_LKPFLAT_CONTEXT_SETS: AtomicU64 = AtomicU64::new(0);
-static X_LKPFLAT_CONTEXTS: AtomicU64 = AtomicU64::new(0);
-static X_LKPFLAT_CONTEXTS_FROM_TASKS: AtomicU64 = AtomicU64::new(0);
 
-// No NCBI counterpart: a counter of the shadow mode; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPFLATSHADOW): one set of `contexts` contexts compared, `from_tasks` of
-/// them computed by the extra tasks of a build (`blastp/x_query_blocks.rs`).
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-pub(crate) fn x_lkpflat_count_contexts(contexts: usize, from_tasks: usize) {
-    X_LKPFLAT_CONTEXT_SETS.fetch_add(1, Ordering::Relaxed);
-    X_LKPFLAT_CONTEXTS.fetch_add(contexts as u64, Ordering::Relaxed);
-    X_LKPFLAT_CONTEXTS_FROM_TASKS.fetch_add(from_tasks as u64, Ordering::Relaxed);
-}
-
-/// EXPERIMENT (LOSAT_X_BPLKPFLATSHADOW): the shadow mode's line at exit (printed by `main`):
-/// `tables_compared` and `outcomes_compared` (refusals, `TooLarge`) count the pool's builds, which
-/// are all compared; `recycled` and `recycled_hits` the builds whose `starts`, and whose `hits`,
-/// are the buffer of an earlier table (`hits` only where it had the room).
+/// EXPERIMENT (LOSAT_X_BPLKPFLAT): with `LOSAT_X_STATS`, the line at exit (printed by `main`) when
+/// the pool built a table: `tables` the flat tables the switch's build made; `recycled` and
+/// `recycled_hits` the builds whose `starts`, and whose `hits`, are the buffer of an earlier table
+/// (`hits` only where it had the room).
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn x_bplkpflat_print_summary() {
-    if x_bplkpflat_mode() == XLkpFlat::Shadow {
+    if std::env::var_os("LOSAT_X_STATS").is_some() {
         let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] BPLKPFLAT tables_compared={} outcomes_compared={} recycled={} recycled_hits={} context_sets_compared={} contexts_compared={} contexts_from_tasks={} identical",
-            load(&X_LKPFLAT_TABLES),
-            load(&X_LKPFLAT_OUTCOMES),
-            load(&X_LKPFLAT_RECYCLED),
-            load(&X_LKPFLAT_RECYCLED_HITS),
-            load(&X_LKPFLAT_CONTEXT_SETS),
-            load(&X_LKPFLAT_CONTEXTS),
-            load(&X_LKPFLAT_CONTEXTS_FROM_TASKS),
-        );
+        let tables = load(&X_LKPFLAT_TABLES);
+        let recycled = load(&X_LKPFLAT_RECYCLED);
+        let recycled_hits = load(&X_LKPFLAT_RECYCLED_HITS);
+        if tables != 0 || recycled != 0 || recycled_hits != 0 {
+            eprintln!(
+                "[X_STATS] BPLKPFLAT tables={tables} recycled={recycled} recycled_hits={recycled_hits}"
+            );
+        }
     }
 }
 
@@ -1587,14 +1527,11 @@ pub(crate) enum XCompressedLookup {
 //                                     query, locations);
 //     s_CompressedLookupFinalize(lookup);
 // ```
-/// EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW): `try_build_blosum62_compressed_lookup` for
-/// BLASTP. Mode 0 calls it; mode 1 builds the flat table (the reference builder where it declines), on
-/// `pool`'s threads when it has more than one (`x_clut_par.rs`); mode 2 builds both, and the flat table
-/// on `pool`'s threads too when it has more than one, compares the refusals and the tables (panics on a
-/// difference) and returns the reference's. `x_flat_args` goes to the pool's build
-/// (LOSAT_X_BPLKPFLAT); in mode 2 the pool's table then gives its vectors to the spare, so that the
-/// next build reuses them as in mode 1. A build ahead of its block (`XFlatArgs::x_ahead`,
-/// LOSAT_X_BPLKPAHEAD) is only the pool's build of mode 1; elsewhere it returns `None` at once.
+/// EXPERIMENT (LOSAT_X_BPCLUT): `try_build_blosum62_compressed_lookup` for BLASTP. With the switch
+/// off it calls it; on, it builds the flat table (the reference builder where it declines), on
+/// `pool`'s threads when it has more than one (`x_clut_par.rs`). `x_flat_args` goes to the pool's
+/// build (LOSAT_X_BPLKPFLAT). A build ahead of its block (`XFlatArgs::x_ahead`, LOSAT_X_BPLKPAHEAD)
+/// is only the pool's build with the switch on; elsewhere it returns `None` at once.
 pub(crate) fn x_bp_build_compressed_lookup(
     word_size: usize,
     scaled_threshold: i32,
@@ -1604,93 +1541,30 @@ pub(crate) fn x_bp_build_compressed_lookup(
     pool: &SearchPool<'_>,
     x_flat_args: XFlatArgs<'_>,
 ) -> Option<Result<XCompressedLookup, ()>> {
-    if x_flat_args.x_ahead && (x_bpclut_mode() != 1 || !x_pool_builds(pool)) {
+    if x_flat_args.x_ahead && (!x_bpclut_on() || !x_pool_builds(pool)) {
         return None;
     }
     let reference = || {
         try_build_blosum62_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
     };
-    match x_bpclut_mode() {
-        0 => reference().map(|built| built.map(XCompressedLookup::Reference)),
-        1 => {
-            match x_build_flat_in_pool(
-                word_size,
-                scaled_threshold,
-                query,
-                locations,
-                tables,
-                pool,
-                x_flat_args,
-            )? {
-                XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
-                XFlatBuild::Refused => Some(Err(())),
-                // LOSAT_X_BPLKPAHEAD: a build ahead of its block runs no reference builder; the block
-                // builds its table itself (`XFlatArgs::x_ahead`).
-                XFlatBuild::TooLarge if x_flat_args.x_ahead => None,
-                XFlatBuild::TooLarge => {
-                    reference().map(|built| built.map(XCompressedLookup::Reference))
-                }
-            }
-        }
-        _ => {
-            let built = reference()?;
-            let flat = x_try_build_flat_compressed_lookup(
-                word_size,
-                scaled_threshold,
-                query,
-                locations,
-                tables,
-            )?;
-            match (&built, &flat) {
-                (Ok(reference), XFlatBuild::Table(flat)) => {
-                    x_assert_same_compressed_table(flat, reference);
-                    X_SHADOW_TABLES.fetch_add(1, Ordering::Relaxed);
-                    X_SHADOW_HITS.fetch_add(flat.hits.len() as u64, Ordering::Relaxed);
-                }
-                (Err(()), XFlatBuild::Refused) => {
-                    X_SHADOW_REFUSED.fetch_add(1, Ordering::Relaxed);
-                }
-                (_, XFlatBuild::TooLarge) => {}
-                (Ok(_), XFlatBuild::Refused) | (Err(()), XFlatBuild::Table(_)) => panic!(
-                    "LOSAT_X_BPCLUTSHADOW: refusal differs (reference refused: {}, flat refused: {})",
-                    built.is_err(),
-                    matches!(flat, XFlatBuild::Refused)
-                ),
-            }
-            if x_pool_builds(pool) {
-                let parallel = x_build_flat_in_pool(
-                    word_size,
-                    scaled_threshold,
-                    query,
-                    locations,
-                    tables,
-                    pool,
-                    x_flat_args,
-                )?;
-                match (&flat, &parallel) {
-                    (XFlatBuild::Table(flat), XFlatBuild::Table(parallel)) => {
-                        x_assert_same_flat_tables(parallel, flat);
-                        X_SHADOW_PARALLEL_TABLES.fetch_add(1, Ordering::Relaxed);
-                    }
-                    (XFlatBuild::Refused, XFlatBuild::Refused) => {
-                        X_SHADOW_PARALLEL_REFUSED.fetch_add(1, Ordering::Relaxed);
-                    }
-                    (XFlatBuild::TooLarge, _) | (_, XFlatBuild::TooLarge) => {}
-                    (XFlatBuild::Table(_), XFlatBuild::Refused)
-                    | (XFlatBuild::Refused, XFlatBuild::Table(_)) => panic!(
-                        "LOSAT_X_BPCLUTSHADOW: parallel refusal differs (serial refused: {}, parallel refused: {})",
-                        matches!(flat, XFlatBuild::Refused),
-                        matches!(parallel, XFlatBuild::Refused)
-                    ),
-                }
-                // EXPERIMENT (LOSAT_X_BPLKPFLAT): the pool's table is not searched here; its vectors
-                // go to the next build, as the searched table's do in mode 1.
-                if let (Some(spare), XFlatBuild::Table(parallel)) = (x_flat_args.spare, parallel) {
-                    spare.give(parallel);
-                }
-            }
-            Some(built.map(XCompressedLookup::Reference))
-        }
+    if !x_bpclut_on() {
+        return reference().map(|built| built.map(XCompressedLookup::Reference));
+    }
+    match x_build_flat_in_pool(
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        pool,
+        x_flat_args,
+    )? {
+        XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+        XFlatBuild::Refused => Some(Err(())),
+        // LOSAT_X_BPLKPAHEAD: a build ahead of its block runs no reference builder; the block
+        // builds its table itself (`XFlatArgs::x_ahead`).
+        XFlatBuild::TooLarge if x_flat_args.x_ahead => None,
+        XFlatBuild::TooLarge => reference().map(|built| built.map(XCompressedLookup::Reference)),
     }
 }
 
@@ -1745,16 +1619,16 @@ pub(crate) fn x_build_flat_in_pool(
     x_try_build_flat_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
 }
 
-// No NCBI counterpart: compares two of LOSAT's flat tables (the shadow's and the tests' check).
-/// EXPERIMENT (LOSAT_X_BPCLUTSHADOW): panics unless the two flat tables are equal, field by field and
-/// slot by slot.
+// No NCBI counterpart: compares two of LOSAT's flat tables (the tests' check).
+/// Panics unless the two flat tables are equal, field by field and slot by slot.
+#[cfg(test)]
 pub(crate) fn x_assert_same_flat_tables(got: &XFlatCompressedLookup, want: &XFlatCompressedLookup) {
-    x_assert_same_flat_tables_as("LOSAT_X_BPCLUTSHADOW: parallel", got, want);
+    x_assert_same_flat_tables_as("flat tables:", got, want);
 }
 
-// No NCBI counterpart: compares two of LOSAT's flat tables (the shadows' and the tests' check).
-/// EXPERIMENT (LOSAT_X_BPCLUTSHADOW, LOSAT_X_BPLKPFLATSHADOW): `x_assert_same_flat_tables` with the
-/// messages starting with `what`.
+// No NCBI counterpart: compares two of LOSAT's flat tables (the tests' check).
+/// `x_assert_same_flat_tables` with the messages starting with `what`.
+#[cfg(test)]
 pub(crate) fn x_assert_same_flat_tables_as(
     what: &str,
     got: &XFlatCompressedLookup,
@@ -1791,14 +1665,15 @@ pub(crate) fn x_assert_same_flat_tables_as(
     }
 }
 
-/// EXPERIMENT (LOSAT_X_BPCLUTSHADOW): panics unless `flat` is `reference` (every cell's hits in the
-/// reference's scan order, the PV array, the scan's parameters).
+/// Panics unless `flat` is `reference` (every cell's hits in the reference's scan order, the PV
+/// array, the scan's parameters).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:337-348
 // ```c
 //           numhits = backbone_cell->num_used;
 //           ...
 //              dest[0].qs_offsets.q_off = backbone_cell->query_offset;
 // ```
+#[cfg(test)]
 pub(crate) fn x_assert_same_compressed_table(
     flat: &XFlatCompressedLookup,
     reference: &BlastCompressedAaLookupTable,
@@ -1810,19 +1685,19 @@ pub(crate) fn x_assert_same_compressed_table(
             && flat.longest_chain == reference.longest_chain
             && flat.pv_array_bts == reference.pv_array_bts
             && flat.scaled_compress_table_u8 == reference.scaled_compress_table_u8,
-        "LOSAT_X_BPCLUTSHADOW: table header differs"
+        "compressed table: table header differs"
     );
-    assert!(flat.pv == reference.pv, "LOSAT_X_BPCLUTSHADOW: pv differs");
+    assert!(flat.pv == reference.pv, "compressed table: pv differs");
     assert_eq!(
         flat.starts.len(),
         reference.backbone.len() + 1,
-        "LOSAT_X_BPCLUTSHADOW: backbone size differs"
+        "compressed table: backbone size differs"
     );
     for (index, cell) in reference.backbone.iter().enumerate() {
         let hits = flat.cell(index);
         assert!(
             hits.len() == cell.num_used as usize,
-            "LOSAT_X_BPCLUTSHADOW: cell {index} count differs ({} vs {})",
+            "compressed table: cell {index} count differs ({} vs {})",
             hits.len(),
             cell.num_used
         );
@@ -1830,7 +1705,7 @@ pub(crate) fn x_assert_same_compressed_table(
             let order = reference.query_offsets_in_scan_order(index);
             assert!(
                 hits == order.as_slice(),
-                "LOSAT_X_BPCLUTSHADOW: cell {index} differs ({hits:?} vs {order:?})"
+                "compressed table: cell {index} differs ({hits:?} vs {order:?})"
             );
         }
     }

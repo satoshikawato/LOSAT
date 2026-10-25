@@ -3,6 +3,7 @@
 //! Reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/
 
 pub mod adjust_scores;
+pub mod matrix_tables;
 pub mod redo_alignment;
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-758,762-768
 // ```c

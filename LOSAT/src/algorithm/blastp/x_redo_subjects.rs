@@ -1,6 +1,6 @@
-//! EXPERIMENT (LOSAT_X_BPREDODBSUBJ / LOSAT_X_BPREDODBSUBJSHADOW): the composition redo of a `-db`
-//! search reads the subject of each match from the database when it redoes the match, as NCBI
-//! does, instead of a copy of every listed subject made before the redo.
+//! EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the composition redo of a `-db` search reads the subject of
+//! each match from the database when it redoes the match, as NCBI does, instead of a copy of every
+//! listed subject made before the redo.
 //!
 //! Without the switch, `database::ListedSubjects::read` copies the residues of every subject of the
 //! preliminary hit lists (the listed subjects) into an `EncodedProtein` before the redo, and the
@@ -35,8 +35,7 @@
 //! O are set); every subject of the final hit lists when a report renders the alignments (outfmt 0,
 //! XML, tabular fields other than the default ones, the hits of the library API); every listed
 //! subject when the reports make records (`ListedSubjects::read_titles`: `LOSAT_X_BPLISTEDLEAN=0`,
-//! its shadow mode, ABI v1's titles). No report reads the letters of a subject left without
-//! residues.
+//! ABI v1's titles). No report reads the letters of a subject left without residues.
 //!
 //! A reader error of the redo's reads is the error that `ListedSubjects::read` gives for the same
 //! read (`database_error`); it is reached in the redo, where NCBI reaches its own reads, and only
@@ -49,16 +48,8 @@
 //!
 //! `LOSAT_X_BPREDODBSUBJ` is a switch of the strict set: on unless it is `0`.
 //! It acts for every task of BLASTP with `-db`.
-//!
-//! `LOSAT_X_BPREDODBSUBJSHADOW=1` (shadow mode, implies the switch): `ListedSubjects::x_list` makes
-//! the copy of `read` too, first, and compares the lengths with it, and every read of the redo and
-//! of `x_read_shown` is compared with the copy (the length and every residue), and a subject of the
-//! final hit lists left without residues without a read has no O in the copy. The first difference
-//! stops the run (panic) after printing the line that is otherwise printed at exit:
-//! `[X_SHADOW] BPREDODBSUBJ searches= lengths= reads= residues= identical` (`searches`: listings;
-//! `lengths`: lengths compared; `reads`: reads compared; `residues`: residues compared).
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 use anyhow::Result;
@@ -69,33 +60,14 @@ use crate::seqdb::{SeqDb, SequenceBlock};
 /// The stored residue of pyrrolysine (O) (`blast_engine.rs` `STORED_O`).
 const STORED_O: u8 = 26;
 
-/// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): where the redo of a `-db` search reads its subjects.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum XRedoDbSubj {
-    /// The copy of every listed subject (`ListedSubjects::read`).
-    Off,
-    /// The database, per match (`ListedSubjects::x_list`).
-    On,
-    /// `On`, with the copy of `Off` made too and compared.
-    Shadow,
-}
-
-// No NCBI counterpart: reads the LOSAT_X_BPREDODBSUBJ / LOSAT_X_BPREDODBSUBJSHADOW switches once;
-// it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a strict-set switch, on unless it is `0`;
-/// `LOSAT_X_BPREDODBSUBJSHADOW` (any value) selects the
-/// shadow mode.
-pub(crate) fn x_bp_redo_db_subj() -> XRedoDbSubj {
-    static MODE: OnceLock<XRedoDbSubj> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPREDODBSUBJSHADOW").is_some() {
-            XRedoDbSubj::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_BPREDODBSUBJ") {
-            XRedoDbSubj::On
-        } else {
-            XRedoDbSubj::Off
-        }
-    })
+// No NCBI counterpart: reads the LOSAT_X_BPREDODBSUBJ switch once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a strict-set switch, on unless it is `0`: the redo of a
+/// `-db` search reads its subjects from the database per match (`ListedSubjects::x_list`), not
+/// from the copy of every listed subject (`ListedSubjects::read`).
+pub(crate) fn x_bp_redo_db_subj() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPREDODBSUBJ"))
 }
 
 // No NCBI counterpart: how LOSAT's redo reaches its subjects.
@@ -123,8 +95,6 @@ pub(crate) struct XDbSubjects<'a> {
     /// Whether a read found a pyrrolysine (O), by rank (`ListedSubjects::x_has_o`). The redo of a
     /// match reads its subject before it can reach a final hit list.
     pub(crate) has_o: &'a [AtomicBool],
-    /// The shadow mode's copy (`ListedSubjects::read`), by rank.
-    pub(crate) shadow: Option<&'a [EncodedProtein]>,
 }
 
 /// A subject as the redo reads it: its residues, without the sentinels.
@@ -180,8 +150,7 @@ impl<'a> XRedoSubjects<'a> {
 impl XDbSubjects<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385, quoted above
     // `ListedSubjects::read`: the redo fetches each match's sequence from the database.
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): reads the subject of rank `rank` (shadow mode: compared
-    /// with the copy).
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): reads the subject of rank `rank`.
     #[inline(never)]
     fn read(&self, rank: u32) -> Result<SequenceBlock> {
         let ordinal = self.ordinals[rank as usize];
@@ -191,102 +160,7 @@ impl XDbSubjects<'_> {
         if x_has_stored_o(block.protein(0)) {
             self.has_o[rank as usize].store(true, Ordering::Relaxed);
         }
-        if let Some(copy) = self.shadow {
-            x_shadow_compare_residues(
-                rank as usize,
-                ordinal,
-                &copy[rank as usize],
-                block.protein(0),
-            );
-        }
         Ok(block)
-    }
-}
-
-static X_SEARCHES: AtomicU64 = AtomicU64::new(0);
-static X_LENGTHS: AtomicU64 = AtomicU64::new(0);
-static X_READS: AtomicU64 = AtomicU64::new(0);
-static X_RESIDUES: AtomicU64 = AtomicU64::new(0);
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-fn x_shadow_print_line(identical: bool) {
-    eprintln!(
-        "[X_SHADOW] BPREDODBSUBJ searches={} lengths={} reads={} residues={}{}",
-        X_SEARCHES.load(Ordering::Relaxed),
-        X_LENGTHS.load(Ordering::Relaxed),
-        X_READS.load(Ordering::Relaxed),
-        X_RESIDUES.load(Ordering::Relaxed),
-        if identical { " identical" } else { "" }
-    );
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDODBSUBJSHADOW): the shadow mode's line at exit.
-pub(crate) fn x_bp_redo_db_subj_print_summary() {
-    if x_bp_redo_db_subj() == XRedoDbSubj::Shadow {
-        x_shadow_print_line(true);
-    }
-}
-
-// No NCBI counterpart: the shadow mode's check stops the run on a difference.
-fn x_shadow_difference(message: String) -> ! {
-    // The panic ends the run before `main` prints the line at exit: it is printed here.
-    x_shadow_print_line(false);
-    panic!("[X_SHADOW] BPREDODBSUBJ {message}");
-}
-
-// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDODBSUBJSHADOW): the residues read for the subject of rank `rank`
-/// against its copy: the length and every residue.
-pub(crate) fn x_shadow_compare_residues(
-    rank: usize,
-    ordinal: u32,
-    copy: &EncodedProtein,
-    residues: &[u8],
-) {
-    if copy.aa_len != residues.len() || copy.aa_seq[1..=copy.aa_len] != *residues {
-        x_shadow_difference(format!(
-            "rank {rank} (ordinal {ordinal}): {} residues read, {} in the copy, or another residue",
-            residues.len(),
-            copy.aa_len
-        ));
-    }
-    X_READS.fetch_add(1, Ordering::Relaxed);
-    X_RESIDUES.fetch_add(residues.len() as u64, Ordering::Relaxed);
-}
-
-// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDODBSUBJSHADOW): the lengths of `ListedSubjects::x_list` against the
-/// copy, rank by rank.
-pub(crate) fn x_shadow_compare_lengths(ordinals: &[u32], lengths: &[u32], copy: &[EncodedProtein]) {
-    X_SEARCHES.fetch_add(1, Ordering::Relaxed);
-    if lengths.len() != copy.len() || ordinals.len() != copy.len() {
-        x_shadow_difference(format!(
-            "ranks: lengths {} / copy {} / listed {}",
-            lengths.len(),
-            copy.len(),
-            ordinals.len()
-        ));
-    }
-    for (rank, (&length, subject)) in lengths.iter().zip(copy).enumerate() {
-        if length as usize != subject.aa_len {
-            x_shadow_difference(format!(
-                "rank {rank} (ordinal {}): length {length}, {} in the copy",
-                ordinals[rank], subject.aa_len
-            ));
-        }
-    }
-    X_LENGTHS.fetch_add(lengths.len() as u64, Ordering::Relaxed);
-}
-
-// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDODBSUBJSHADOW): a subject of the final hit lists that the reports keep
-/// without its residues because no read found an O has no O in its copy.
-pub(crate) fn x_shadow_check_no_o(rank: usize, ordinal: u32, copy: &EncodedProtein) {
-    if x_has_stored_o(&copy.aa_seq[1..=copy.aa_len]) {
-        x_shadow_difference(format!(
-            "rank {rank} (ordinal {ordinal}): no read found an O, the copy holds one"
-        ));
     }
 }
 

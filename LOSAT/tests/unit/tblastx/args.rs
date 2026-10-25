@@ -131,6 +131,33 @@ fn test_seg_options() {
     assert_eq!((params.window, params.locut, params.hicut), (15, 1.9, 2.3));
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
+// ```c++
+// CFilteringArgs::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
+// {
+//     if (args[kArgLookupTableMaskingOnly]) {
+//         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
+//     }
+// ```
+// `-soft_masking` takes NCBI's boolean spellings (`NStr::StringToBool`); its default is false
+// (`kDfltArgLookupTableMaskingOnlyProt`).
+#[test]
+fn test_soft_masking_sets_mask_at_hash() {
+    let soft = |extra: &[&str]| {
+        let mut argv = vec!["-query", "query.fasta", "-subject", "subject.fasta"];
+        argv.extend_from_slice(extra);
+        parse_args(&argv).soft_masking()
+    };
+    assert!(!soft(&[]));
+    for value in ["true", "T", "1", "YES", "on"] {
+        assert!(soft(&["-soft_masking", value]), "{value}");
+    }
+    for value in ["false", "F", "0", "no", "off"] {
+        assert!(!soft(&["-soft_masking", value]), "{value}");
+    }
+    assert!(soft(&["-seg", "no", "-soft_masking", "true"]));
+}
+
 #[test]
 fn test_output_path() {
     let args = parse_args(&[

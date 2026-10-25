@@ -91,13 +91,6 @@ pub(crate) fn pairwise_hits(
         for list_rows in rows_of_lists {
             hits.append(&mut list_rows?);
         }
-        if crate::report::x_pairwise_par::mode() == 2 {
-            let mut serial = Vec::new();
-            for hsp_list in &lists {
-                rows.list(hsp_list, &mut serial)?;
-            }
-            crate::report::x_pairwise_par::compare_rows(&hits, &serial);
-        }
         return Ok(hits);
     }
     #[cfg(not(all(

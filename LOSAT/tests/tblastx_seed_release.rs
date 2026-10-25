@@ -40,8 +40,9 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 /// The route to the reference frame loop: the cost rule of `LOSAT_X_PAIRPARGATE`, which the helper
-/// switches off first. For the fixture query (696 bases, a diagonal table below 2^18 cells) it
-/// sends a batch to the frame loop at one thread and, at four, a batch whose largest subject is
+/// switches off first. For the fixture query (696 bases: about 1,400 letters, a diagonal table below
+/// 2^18 cells and a batch under the 5,000 letters of `LOSAT_X_PAIRPARN1`) it sends a batch to the
+/// frame loop at one thread and, at four, a batch whose largest subject is
 /// at most 1.5 threads' share of the bases (`2 * longest * threads <= 3 * total`).
 const FRAME_LOOP: (&str, &str) = ("LOSAT_X_PAIRPARGATE", "1");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");

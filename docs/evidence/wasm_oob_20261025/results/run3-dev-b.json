@@ -1,0 +1,21 @@
+{
+  "node": "v24.21.0",
+  "nproc": 4,
+  "threads": 16,
+  "arms": {
+    "default": {
+      "runs": 1000,
+      "fail": 2,
+      "oob": 2,
+      "other": [],
+      "probes": [
+        "{\"tid\":1,\"startArg\":2857096,\"standby\":0,\"before\":{\"length\":1900544},\"after\":{\"length\":2883584,\"stack\":2857088,\"tls\":2857120,\"tidStoreInBounds\":true}}",
+        "{\"tid\":9,\"startArg\":11261832,\"standby\":8,\"before\":{\"length\":10223616},\"after\":{\"length\":12320768,\"stack\":11261824,\"tls\":11261856,\"tidStoreInBounds\":true}}"
+      ],
+      "errors": [
+        "RuntimeError: memory access out of bounds",
+        "RuntimeError: memory access out of bounds"
+      ]
+    }
+  }
+}

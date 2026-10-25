@@ -67,12 +67,12 @@ const RESTRICT_SIZE: usize = 10;
 //                                    gap_align, score_params,
 //                                    init_hsp->offsets.qs_offsets.q_off, TRUE);
 // ```
-// EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): `s_RestrictedGappedAlign` on separate row
+// EXPERIMENT (LOSAT_X_BPGAP): `s_RestrictedGappedAlign` on separate row
 // arrays, eight cells at a time with AVX2. A child module, so that it calls the reference
 // function and its helpers without changing them.
 #[path = "x_restricted_gap.rs"]
 mod x_restricted_gap;
-// No NCBI counterpart: the summary lines `main` prints at exit; they change no value NCBI computes.
+// No NCBI counterpart: the summary line `main` prints at exit; it changes no value NCBI computes.
 pub use x_restricted_gap::print_summary as x_restricted_gap_print_summary;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:399-414
@@ -3020,8 +3020,8 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
             true,
             scratch,
         ),
-        // EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): the reference function unless a
-        // variable is set (x_restricted_gap.rs).
+        // EXPERIMENT (LOSAT_X_BPGAP): the reference function unless the switch is on
+        // (x_restricted_gap.rs).
         BlastpGappedAlignmentMode::Restricted => {
             x_restricted_gap::restricted_gapped_align_protein_x(
                 query,
@@ -3074,7 +3074,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
                     false,
                     scratch,
                 ),
-                // EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): as for the left extension.
+                // EXPERIMENT (LOSAT_X_BPGAP): as for the left extension.
                 BlastpGappedAlignmentMode::Restricted => {
                     x_restricted_gap::restricted_gapped_align_protein_x(
                         query,

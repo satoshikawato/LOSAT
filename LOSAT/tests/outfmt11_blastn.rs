@@ -14,8 +14,7 @@
 //! -num_threads 1 <args> -outfmt 11` run from `LOSAT/` with the case's environment
 //! (S/of8/scripts/freeze_outfmt11_tests.sh of the line OF8 records). Every case runs at 1 and 4
 //! threads, and the batch cases without report streaming (`LOSAT_X_RPTSTREAM=0`, the archives
-//! of every batch written after the search from the batch ranges) and with its shadow
-//! (`LOSAT_X_RPTSTREAMSHADOW=1`, which compares the streamed bytes with those of the old path).
+//! of every batch written after the search from the batch ranges) and with it (`=1`).
 //! A database that does not exist (rc 2) carries the search path in its message, which depends
 //! on where the test runs: only the structure is compared.
 
@@ -200,16 +199,6 @@ const CASES: &[Case] = &[
     },
 ];
 
-/// The standard error without the lines of the report-streaming shadow.
-fn without_shadow(stderr: &[u8]) -> Vec<u8> {
-    stderr
-        .split_inclusive(|&byte| byte == b'\n')
-        .filter(|line| !line.starts_with(b"[X_SHADOW]"))
-        .flatten()
-        .copied()
-        .collect()
-}
-
 fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     let mut env: Vec<(&str, &str)> = case.env.to_vec();
     env.extend_from_slice(extra_env);
@@ -232,15 +221,12 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     let want = frozen(case.name, "out");
     assert!(
         output.stdout == want,
-        "{label}: stdout differs ({} bytes, NCBI wrote {})",
+        "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
         output.stdout.len(),
-        want.len()
+        want.len(),
+        crate::outfmt11_blastx::first_difference(&output.stdout, &want)
     );
-    assert_eq!(
-        without_shadow(&output.stderr),
-        frozen(case.name, "err"),
-        "{label}: stderr"
-    );
+    assert_eq!(output.stderr, frozen(case.name, "err"), "{label}: stderr");
 }
 
 #[test]
@@ -258,7 +244,6 @@ fn batch_cases_do_not_depend_on_report_streaming() {
         for extra in [
             &[("LOSAT_X_RPTSTREAM", "0")][..],
             &[("LOSAT_X_RPTSTREAM", "1")][..],
-            &[("LOSAT_X_RPTSTREAMSHADOW", "1")][..],
         ] {
             for threads in ["1", "4"] {
                 check(case, extra, threads);

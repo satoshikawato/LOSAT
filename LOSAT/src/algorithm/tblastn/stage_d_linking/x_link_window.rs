@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBNLINKWIN): the candidates of a head in tblastn's uneven-gap linking
+//! The candidates of a head in tblastn's uneven-gap linking
 //! chosen by subject position.
 //!
 //! NCBI's loop (c++/src/algo/blast/core/link_hsps.c:1602-1757, `s_BlastUnevenGapLinkHSPs`) tests
@@ -24,26 +24,22 @@
 //! be admissible are left out, and the loop keeps the first best one in that order, so every
 //! link, E-value and number is NCBI's.
 //!
-//! `LOSAT_X_TBNLINKWIN` is in the strict set (`utils/xswitch.rs`): on unless it is `0`.
+//! Every linking call looks the candidates up this way (the former switch `LOSAT_X_TBNLINKWIN`
+//! graduated on 2026-10-26); NCBI's loop over the whole window is the reference of the unit test.
 //! With `LOSAT_X_STATS` set, `main` prints `[X_STATS] TBNLINKWIN heads= window= chosen=` at exit
 //! (the heads, the candidates of their query-offset windows, the candidates tested), when a list
-//! was linked with the switch. blastx keeps its own linking (`blastx/linking.rs`).
+//! was linked. blastx keeps its own linking (`blastx/linking.rs`).
 
 use super::{LocalLinkParameters, WorkHsp};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
 
-// No NCBI counterpart: reads LOSAT_X_TBNLINKWIN once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_TBNLINKWIN): whether the linking loop tests the chosen candidates only; a
-/// switch of the strict set, on unless it is `0`.
-pub(super) fn x_tbn_link_window() -> bool {
-    #[cfg(test)]
-    if let Some(on) = tests::X_FORCE.get() {
-        return on;
-    }
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNLINKWIN"))
+// No NCBI counterpart: the unit test of this file runs the linking call over NCBI's whole window
+// as well; it does not change any value NCBI computes.
+/// Whether the linking loop tests the whole window, as NCBI does (the unit tests' reference, set
+/// per test thread); the search always tests the chosen candidates.
+#[cfg(test)]
+pub(super) fn x_whole_window_forced() -> bool {
+    tests::X_FORCE.get() == Some(false)
 }
 
 // No NCBI counterpart: LOSAT_X_STATS counters; they do not change any value NCBI computes.
@@ -51,7 +47,7 @@ pub(super) fn x_tbn_link_window() -> bool {
 static STATS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
 /// The `[X_STATS] TBNLINKWIN` line (printed by `main` at exit) with `LOSAT_X_STATS`, when a list
-/// was linked with the switch.
+/// was linked.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
     let [heads, window, chosen] = STATS.each_ref().map(|v| v.load(Ordering::Relaxed));
@@ -60,7 +56,7 @@ pub fn print_summary() {
     }
 }
 
-/// EXPERIMENT (LOSAT_X_TBNLINKWIN): the lookup of one subject list's linking call.
+/// The lookup of one subject list's linking call.
 pub(super) struct XLinkWindow {
     /// (context, frame sign, subject start, rank in the query offset order) of every HSP, sorted.
     by_subject: Vec<(usize, i8, i32, usize)>,
@@ -236,7 +232,7 @@ mod tests {
     use std::cell::Cell;
 
     thread_local! {
-        /// The switch for the linking calls of this test thread.
+        /// `Some(false)`: the linking calls of this test thread test NCBI's whole window.
         pub(super) static X_FORCE: Cell<Option<bool>> = const { Cell::new(None) };
         /// Heads of this test thread whose candidates were chosen (`[0]`) and whose whole window
         /// was taken (`[1]`).

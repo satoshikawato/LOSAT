@@ -11,14 +11,15 @@ function runPair(host, program, query, subject, format, args) {
   const api = host.instance.exports;
   const values = [program, query, subject, format, args.join("\0")];
   const allocations = values.map(value => {
-    const bytes = Buffer.from(value), ptr = api.losat_web_alloc(bytes.length);
+    // An i32 result is a signed number in JavaScript; a pointer of 2 GiB or more is negative.
+    const bytes = Buffer.from(value), ptr = api.losat_web_alloc(bytes.length) >>> 0;
     new Uint8Array(host.memory.buffer, ptr, bytes.length).set(bytes);
     return [ptr, bytes.length];
   });
   try {
     const status = api.losat_web_run_pair(...allocations.flat());
-    const result = Buffer.from(new Uint8Array(host.memory.buffer, api.losat_web_result_ptr(), api.losat_web_result_len()));
-    const error = Buffer.from(new Uint8Array(host.memory.buffer, api.losat_web_error_ptr(), api.losat_web_error_len())).toString();
+    const result = Buffer.from(new Uint8Array(host.memory.buffer, api.losat_web_result_ptr() >>> 0, api.losat_web_result_len() >>> 0));
+    const error = Buffer.from(new Uint8Array(host.memory.buffer, api.losat_web_error_ptr() >>> 0, api.losat_web_error_len() >>> 0)).toString();
     return { status, result, error };
   } finally { for (const [ptr, length] of allocations) api.losat_web_dealloc(ptr, length); }
 }

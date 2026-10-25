@@ -166,6 +166,16 @@ pub struct PsiblastArgs {
     // omitted (`CPSIBlastOptionsHandle::SetQueryOptionDefaults`).
     #[arg(long, help = "SEG: no, yes, or \"WINDOW LOCUT HICUT\" [default: no]")]
     pub seg: Option<String>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
+    // ```c++
+    //         arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
+    //                         "Apply filtering locations as soft masks",
+    //                         CArgDescriptions::eBoolean,
+    //                         kDfltArgLookupTableMaskingOnlyProt);
+    // ```
+    // psiblast's filtering handler is blastp's (`CFilteringArgs`, psiblast_args.cpp:70).
+    #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
+    pub soft_masking: Option<bool>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:803-806
     // ```c
     //     arg_desc.AddFlag(kArgUseSWTraceback,
@@ -336,6 +346,7 @@ impl PsiblastArgs {
             gap_extend: self.gap_extend,
             comp_based_stats: self.comp_based_stats,
             seg: self.seg,
+            soft_masking: self.soft_masking,
             use_sw_tback: self.use_sw_tback,
             query_loc: self.query_loc,
             subject_loc: self.subject_loc,

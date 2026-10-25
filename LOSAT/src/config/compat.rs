@@ -61,7 +61,23 @@ impl Default for ProteinScoringSpec {
     }
 }
 
-/// Supported scoring matrices
+/// The nine built-in protein matrices of NCBI BLAST+ (`util/tables/sm_*.c`, each with a
+/// Karlin-Altschul table in `blast_stat.c`).
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2958-2992
+/// ```c
+///    matrix_info = MatrixInfoNew("BLOSUM80", blosum80_values, blosum80_prefs, BLOSUM80_VALUES_MAX);
+/// ...
+///    if (!standard_only) {
+///        matrix_info = MatrixInfoNew("IDENTITY", prot_idenity_values,
+///                                    prot_identity_prefs,
+///                                    PROT_IDENTITY_VALUES_MAX);
+///        ListNodeAddPointer(&retval, 0, matrix_info);
+///    }
+/// ```
+/// (BLOSUM62_20 is compiled only under `BLOSUM62_20_ENABLE`, which the 2.17.0 build does
+/// not define.)
+/// `Identity` is the last variant so that the others keep their discriminants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScoringMatrix {
     Blosum45,
@@ -73,23 +89,58 @@ pub enum ScoringMatrix {
     Pam30,
     Pam70,
     Pam250,
+    Identity,
+}
+
+impl ScoringMatrix {
+    /// Every matrix, in the order of the variants.
+    pub const ALL: [ScoringMatrix; 9] = [
+        ScoringMatrix::Blosum45,
+        ScoringMatrix::Blosum50,
+        ScoringMatrix::Blosum62,
+        ScoringMatrix::Blosum80,
+        ScoringMatrix::Blosum90,
+        ScoringMatrix::Pam30,
+        ScoringMatrix::Pam70,
+        ScoringMatrix::Pam250,
+        ScoringMatrix::Identity,
+    ];
+
+    /// The name of the matrix's table (`MatrixInfo.name`).
+    pub const fn ncbi_name(self) -> &'static str {
+        match self {
+            ScoringMatrix::Blosum45 => "BLOSUM45",
+            ScoringMatrix::Blosum50 => "BLOSUM50",
+            ScoringMatrix::Blosum62 => "BLOSUM62",
+            ScoringMatrix::Blosum80 => "BLOSUM80",
+            ScoringMatrix::Blosum90 => "BLOSUM90",
+            ScoringMatrix::Pam30 => "PAM30",
+            ScoringMatrix::Pam70 => "PAM70",
+            ScoringMatrix::Pam250 => "PAM250",
+            ScoringMatrix::Identity => "IDENTITY",
+        }
+    }
 }
 
 impl std::str::FromStr for ScoringMatrix {
     type Err = String;
 
+    /// The matrix whose table name equals `s` ignoring the case, as NCBI finds a matrix's
+    /// table.
+    ///
+    /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3593-3605
+    /// ```c
+    ///    vnp = head = BlastLoadMatrixValues(standard_only);
+    ///    while (vnp)
+    ///    {
+    ///       matrix_info = vnp->ptr;
+    ///       if (strcasecmp(matrix_info->name, matrix_name) == 0)
+    /// ```
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_uppercase().as_str() {
-            "BLOSUM45" => Ok(ScoringMatrix::Blosum45),
-            "BLOSUM50" => Ok(ScoringMatrix::Blosum50),
-            "BLOSUM62" => Ok(ScoringMatrix::Blosum62),
-            "BLOSUM80" => Ok(ScoringMatrix::Blosum80),
-            "BLOSUM90" => Ok(ScoringMatrix::Blosum90),
-            "PAM30" => Ok(ScoringMatrix::Pam30),
-            "PAM70" => Ok(ScoringMatrix::Pam70),
-            "PAM250" => Ok(ScoringMatrix::Pam250),
-            _ => Err(format!("Unknown scoring matrix: {}", s)),
-        }
+        ScoringMatrix::ALL
+            .into_iter()
+            .find(|matrix| matrix.ncbi_name().eq_ignore_ascii_case(s))
+            .ok_or_else(|| format!("Unknown scoring matrix: {}", s))
     }
 }
 

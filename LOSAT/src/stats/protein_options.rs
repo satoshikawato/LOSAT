@@ -3,6 +3,7 @@
 //! preferred gap costs of a matrix and the suggested word threshold and window.
 
 use super::protein_tables::{ProteinMatrixTable, ProteinTableRow, PROTEIN_MATRIX_TABLES};
+use crate::config::ScoringMatrix;
 
 /// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:437-441
 /// ```c
@@ -45,6 +46,57 @@ pub fn matrix_table(name: &str, standard_only: bool) -> Option<&'static ProteinM
     tables
         .iter()
         .find(|table| table.name.eq_ignore_ascii_case(name))
+}
+
+/// The table of `matrix`: the one whose name is `matrix.ncbi_name()` (`strcasecmp`), found by
+/// its index in `PROTEIN_MATRIX_TABLES` instead of the name.
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2958-2992 (the order of the tables)
+/// ```c
+///    matrix_info = MatrixInfoNew("BLOSUM80", blosum80_values, blosum80_prefs, BLOSUM80_VALUES_MAX);
+///    ListNodeAddPointer(&retval, 0, matrix_info);
+///
+///    matrix_info = MatrixInfoNew("BLOSUM62", blosum62_values, blosum62_prefs, BLOSUM62_VALUES_MAX);
+/// ...
+///    matrix_info = MatrixInfoNew("PAM70", pam70_values, pam70_prefs, PAM70_VALUES_MAX);
+///    ListNodeAddPointer(&retval, 0, matrix_info);
+///
+///    if (!standard_only) {
+///        matrix_info = MatrixInfoNew("IDENTITY", prot_idenity_values,
+/// ```
+pub fn scoring_matrix_table(matrix: ScoringMatrix) -> &'static ProteinMatrixTable {
+    let index = match matrix {
+        ScoringMatrix::Blosum80 => 0,
+        ScoringMatrix::Blosum62 => 1,
+        ScoringMatrix::Blosum50 => 2,
+        ScoringMatrix::Blosum45 => 3,
+        ScoringMatrix::Pam250 => 4,
+        ScoringMatrix::Blosum90 => 5,
+        ScoringMatrix::Pam30 => 6,
+        ScoringMatrix::Pam70 => 7,
+        ScoringMatrix::Identity => 8,
+    };
+    &PROTEIN_MATRIX_TABLES[index]
+}
+
+/// The first row of `table` with the gap costs, the search of the table loaders.
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3612-3616
+/// ```c
+///       for (index=0; index<max_number_values; index++)
+///       {
+///          if (BLAST_Nint(values[index][0]) == gap_open &&
+///             BLAST_Nint(values[index][1]) == gap_extend)
+///          {
+/// ```
+pub fn gap_costs_row(
+    table: &'static ProteinMatrixTable,
+    gap_open: i32,
+    gap_extend: i32,
+) -> Option<&'static ProteinTableRow> {
+    table.values.iter().find(|row| {
+        blast_nint(row.0[0]) == i64::from(gap_open) && blast_nint(row.0[1]) == i64::from(gap_extend)
+    })
 }
 
 /// Why `Blast_KarlinBlkGappedLoadFromTables` fails: 1, the matrix is not in the tables;
@@ -95,14 +147,7 @@ pub fn karlin_blk_gapped_load_from_tables(
     standard_only: bool,
 ) -> Result<&'static ProteinTableRow, TableStatus> {
     let table = matrix_table(name, standard_only).ok_or(TableStatus::UnknownMatrix)?;
-    table
-        .values
-        .iter()
-        .find(|row| {
-            blast_nint(row.0[0]) == i64::from(gap_open)
-                && blast_nint(row.0[1]) == i64::from(gap_extend)
-        })
-        .ok_or(TableStatus::UnknownGapCosts)
+    gap_costs_row(table, gap_open, gap_extend).ok_or(TableStatus::UnknownGapCosts)
 }
 
 /// `snprintf` into what is left of a fixed buffer: at most `size - 1` bytes are written

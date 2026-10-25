@@ -13,6 +13,7 @@ import { OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output';
 import { EngineCallError, ROLE_QUERY, ROLE_SUBJECT } from '../reactor/abi';
 import type { ReactorArtifact } from '../reactor/artifact';
 import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from '../reactor/instance';
+import { createSharedMemory } from '../reactor/shared-memory';
 import { RunOutputWriter } from '../run-output/writer';
 import type { RuntimePath, WorkerRun, WorkerRunResult } from './protocol';
 import { ThreadHost } from './thread-host';
@@ -213,18 +214,9 @@ export class EngineRuntime {
     const unsupported = threadedSupport();
     if (unsupported !== undefined) throw new Error(unsupported);
     const { module, artifact } = await this.options.threads();
-    let memory: WebAssembly.Memory;
-    try {
-      // Exactly the limits that the module declares; the host never enlarges them (plan TD-7).
-      memory = new WebAssembly.Memory({
-        initial: artifact.memory.initial,
-        maximum: artifact.memory.maximum!,
-        shared: true,
-      });
-    } catch (error) {
-      const gib = (artifact.memory.maximum! * 65_536) / 2 ** 30;
-      throw new Error(`the browser could not reserve ${gib} GiB of shared memory (${messageOf(error)})`, { cause: error });
-    }
+    // The maximum that the module declares, or a smaller one where the browser cannot
+    // reserve it; never a larger one (plan TD-7).
+    const { memory } = createSharedMemory(artifact.memory);
     const threads = new ThreadHost({ module, memory, faultChannel: this.options.faultChannel });
     try {
       const instance = await instantiateThreadedMain(module, memory, threads.spawn);

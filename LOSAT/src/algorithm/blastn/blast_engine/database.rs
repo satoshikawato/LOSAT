@@ -67,7 +67,7 @@ const BLOCK_BYTES: u64 = 1 << 20;
 ))]
 const BLOCKS_PER_THREAD: usize = 8;
 
-// EXPERIMENT (LOSAT_X_BNDBCUT / LOSAT_X_BNDBCUTSHADOW): the blocks of the preliminary stage cut
+// EXPERIMENT (LOSAT_X_BNDBCUT): the blocks of the preliminary stage cut
 // by the database size and the thread count (a child module, so that it uses the private
 // driver of this file).
 #[cfg(all(
@@ -380,15 +380,12 @@ fn block_subject(block: &SequenceBlock, i: usize) -> Result<BlastnSubjectRef<'_>
 ///
 /// EXPERIMENT (LOSAT_X_BNDBCUT): with more than one thread the blocks are cut by the
 /// database size and the thread count, and a failed search returns the one-thread order's
-/// error (`x_db_cut.rs`, exactness argument in its header). `x_extends` is the count of
-/// good initial extensions that `search` adds to (it sizes the next query batch); the
-/// shadow mode of the switch, which runs `search` twice, leaves it as one search leaves it.
+/// error (`x_db_cut.rs`, exactness argument in its header).
 ///
 /// EXPERIMENT (LOSAT_X_BNDBSTREAM): with more than one thread there are no rounds: the
 /// threads claim the blocks in ordinal order and one of them hands the results over in that
 /// order while the others search the next blocks, at most a window of blocks ahead
-/// (`x_db_stream.rs`, exactness argument in its header). Its shadow mode leaves `x_extends`
-/// as one search leaves it too.
+/// (`x_db_stream.rs`, exactness argument in its header).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn search_blocks<T, R, I, K, M>(
     database: &BlastnDatabase,
@@ -397,10 +394,9 @@ pub(super) fn search_blocks<T, R, I, K, M>(
     new_scratch: &I,
     search: &K,
     merge: &mut M,
-    x_extends: &std::sync::atomic::AtomicU64,
 ) -> Result<()>
 where
-    R: Send + std::fmt::Debug,
+    R: Send,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,
@@ -415,26 +411,21 @@ where
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let blocks_per_thread = 1;
-    // EXPERIMENT (LOSAT_X_BNDBCUT / LOSAT_X_BNDBCUTSHADOW): `x_db_cut.rs`.
+    // EXPERIMENT (LOSAT_X_BNDBCUT): `x_db_cut.rs`.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    {
-        let mode = x_db_cut::x_bn_db_cut();
-        if mode != x_db_cut::XDbCut::Off {
-            return x_db_cut::x_search_blocks_cut(
-                mode,
-                database,
-                pool,
-                parallel,
-                blocks_per_thread,
-                new_scratch,
-                search,
-                merge,
-                x_extends,
-            );
-        }
+    if x_db_cut::x_bn_db_cut() {
+        return x_db_cut::x_search_blocks_cut(
+            database,
+            pool,
+            parallel,
+            blocks_per_thread,
+            new_scratch,
+            search,
+            merge,
+        );
     }
     search_blocks_of(
         database,
@@ -445,35 +436,14 @@ where
         new_scratch,
         search,
         merge,
-        x_extends,
     )
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BNDBCUTSHADOW): the shadow mode's line at exit.
-pub(super) fn x_db_cut_print_summary() {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    x_db_cut::x_bn_db_cut_print_summary();
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BNDBSTREAMSHADOW): the shadow mode's line at exit.
-pub(super) fn x_db_stream_print_summary() {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    x_db_stream::x_bn_db_stream_print_summary();
 }
 
 // No NCBI counterpart (scheduling only): the rounds of LOSAT's parallel stage; the merges in
 // ordinal order are NCBI's one-thread order (blast_engine.c:1553-1554, quoted above
 // `search_blocks`).
-/// The rounds of `search_blocks_of` with `parallel` (without LOSAT_X_BNDBSTREAM, and the
-/// reference of its shadow): `blocks_per_thread` blocks of at most `block_bytes` per thread
+/// The rounds of `search_blocks_of` with `parallel` (without LOSAT_X_BNDBSTREAM):
+/// `blocks_per_thread` blocks of at most `block_bytes` per thread
 /// searched with a scratch per worker (`map_init`), and the round's results merged in ordinal
 /// order when the whole round is searched.
 #[cfg(all(
@@ -539,7 +509,7 @@ where
 
 /// `search_blocks` with blocks of at most `block_bytes` and rounds of `blocks_per_thread`
 /// blocks per thread (with LOSAT_X_BNDBSTREAM, the window of `x_db_stream.rs` instead of
-/// rounds). `extends`: as `search_blocks`'s `x_extends`.
+/// rounds).
 #[allow(clippy::too_many_arguments)]
 fn search_blocks_of<T, R, I, K, M>(
     database: &BlastnDatabase,
@@ -550,10 +520,9 @@ fn search_blocks_of<T, R, I, K, M>(
     new_scratch: &I,
     search: &K,
     merge: &mut M,
-    extends: &std::sync::atomic::AtomicU64,
 ) -> Result<()>
 where
-    R: Send + std::fmt::Debug,
+    R: Send,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,
@@ -564,20 +533,16 @@ where
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     if parallel {
-        // EXPERIMENT (LOSAT_X_BNDBSTREAM / LOSAT_X_BNDBSTREAMSHADOW): `x_db_stream.rs`.
-        let mode = x_db_stream::x_bn_db_stream();
-        if mode != x_db_stream::XDbStream::Off {
+        // EXPERIMENT (LOSAT_X_BNDBSTREAM): `x_db_stream.rs`.
+        if x_db_stream::x_bn_db_stream() {
             crate::utils::xreach::x_reach!("LOSAT_X_BNDBSTREAM", true);
             return x_db_stream::x_search_blocks_stream(
-                mode,
                 db,
                 pool,
                 block_bytes,
-                blocks_per_thread,
                 new_scratch,
                 search,
                 merge,
-                extends,
             );
         }
         return search_rounds(
@@ -595,14 +560,14 @@ where
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if x_db_stream::x_bn_db_stream() != x_db_stream::XDbStream::Off {
+    if x_db_stream::x_bn_db_stream() {
         crate::utils::xreach::x_reach!("LOSAT_X_BNDBSTREAM", false);
     }
     #[cfg(any(
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
-    let _ = (pool, parallel, blocks_per_thread, extends);
+    let _ = (pool, parallel, blocks_per_thread);
 
     let mut scratch = new_scratch();
     let mut next_ordinal = 0u32;
@@ -728,16 +693,6 @@ where
             let fenced = fenced.into_inner();
             x_tb_range_count(length, &ranges, fenced);
             if !fenced {
-                if x_tb_range_shadow() {
-                    let whole =
-                        x_traceback_whole(&stored, length, scratch, ordinal, kept, traceback)?;
-                    if format!("{whole:?}") != format!("{result:?}") {
-                        eprintln!(
-                            "[X_BNTBRANGE_SHADOW] MISMATCH sequence {ordinal}: ranges {} of {length} bases",
-                            ranges.len()
-                        );
-                    }
-                }
                 x_done_block(stored);
                 return Ok(result);
             }
@@ -886,13 +841,6 @@ fn x_partial_ranges_padded(
         }
     }
     merged
-}
-
-/// EXPERIMENT (LOSAT_X_BNTBRANGESHADOW=1): every sequence decoded in ranges is also traced
-/// whole, and a difference is a stderr line.
-fn x_tb_range_shadow() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BNTBRANGESHADOW").is_some_and(|v| v == "1"))
 }
 
 /// EXPERIMENT (LOSAT_X_BNTBRANGE): sequences decoded in ranges, those traced again whole, their
@@ -1403,7 +1351,6 @@ mod tests {
                     assert_eq!(ordinal, kept);
                     merged.push(ordinal);
                 },
-                &std::sync::atomic::AtomicU64::new(0),
             )
         })
         .unwrap();

@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_MBFILL, shadow LOSAT_X_MBFILLSHADOW): the one-thread word loop of
+//! EXPERIMENT (LOSAT_X_MBFILL): the one-thread word loop of
 //! `build_mb_lookup` (the contiguous megablast table and the two-stage table of blastn) with the
 //! words read run by run and the update of each applied `X_DELAY` words after a prefetch of its
 //! cell, as `x_fill_mb_queued`'s `Delay` queue does (x86_64), or in batches of `X_DELAY` words
@@ -72,17 +72,13 @@
 //! applying each word at once, or batching only the first `X_DELAY` words of a run, was faster on
 //! long runs on a server core but slower than the batch on a client CPU (short runs, long runs).
 //!
-//! The variables are read once. `LOSAT_X_MBFILL` (a switch of the strict set,
-//! `utils/xswitch.rs`: on unless it is `0`) runs this
-//! module. `LOSAT_X_MBFILLSHADOW` (set to any value; not in the strict set; implies it) runs this
-//! module, builds the arrays again with `x_fill_mb_queued` and panics unless every array and
-//! counter is equal; `main` prints one `[X_SHADOW] MBFILL compared=N` line.
+//! The variable is read once. `LOSAT_X_MBFILL` (a switch of the strict set,
+//! `utils/xswitch.rs`: on unless it is `0`) runs this module.
 
 use super::x_mb_lookup_par::Words;
-use super::{
-    build_unmasked_ranges, x_fill_mb_queued, x_mb_queue, XMbTables, BLAST2NA_MASK, PV_ARRAY_MASK,
-};
-use std::sync::atomic::{AtomicU64, Ordering};
+use super::{build_unmasked_ranges, XMbTables, BLAST2NA_MASK, PV_ARRAY_MASK};
+#[cfg(test)]
+use super::{x_fill_mb_queued, x_mb_queue};
 use std::sync::OnceLock;
 
 /// `kCompressionFactor` (2048), the number of cells that share one helper counter, as a shift.
@@ -96,40 +92,12 @@ const X_DELAY: usize = 64;
 /// (`run_words`); `fill` takes x86_64 and wasm32 only.
 const X_BATCH: bool = !cfg!(target_arch = "x86_64");
 
-// No NCBI counterpart: the number of builds the shadow compared (relaxed; it orders nothing).
-static X_SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
-
-/// No NCBI counterpart: reads LOSAT_X_MBFILL / LOSAT_X_MBFILLSHADOW once. 0 = `x_fill_mb_queued`,
-/// 1 = this module, 2 = both and compare; SHADOW wins. It chooses a LOSAT code path and changes no
-/// value NCBI computes.
-fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_MBFILLSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_MBFILL") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-/// The summary line `main` prints at exit with LOSAT_X_MBFILLSHADOW.
-// No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
-pub(super) fn print_summary() {
-    if mode() != 2 {
-        return;
-    }
-    let compared = X_SHADOW_COMPARED.load(Ordering::Relaxed);
-    eprintln!(
-        "[X_SHADOW] MBFILL compared={compared} ({})",
-        if compared == 0 {
-            "nothing compared: no one-thread megablast table was built"
-        } else {
-            "every table identical"
-        }
-    );
+/// No NCBI counterpart: reads LOSAT_X_MBFILL once (a switch of the strict set: on unless it is
+/// `0`; off runs `x_fill_mb_queued`). It chooses a LOSAT code path and changes no value NCBI
+/// computes.
+fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBFILL"))
 }
 
 /// Dispatch of `build_mb_lookup`: fills `t` as `x_fill_mb_queued` would and returns true, or
@@ -139,8 +107,7 @@ pub(super) fn fill(
     db_word_counts: Option<&[u8]>,
     t: &mut XMbTables<'_>,
 ) -> bool {
-    let mode = mode();
-    if mode == 0 {
+    if !on() {
         return false;
     }
     let taken = cfg!(any(target_arch = "x86_64", target_arch = "wasm32"))
@@ -160,9 +127,6 @@ pub(super) fn fill(
     };
     *t.total_positions += n_words;
     *t.ambiguous_skipped += ambiguous;
-    if mode == 2 {
-        shadow_check(words, t);
-    }
     true
 }
 
@@ -473,62 +437,6 @@ fn x_prefetch(hashtable: *mut u32, bucket: usize) {
     }
     #[cfg(not(target_arch = "x86_64"))]
     let _ = (hashtable, bucket);
-}
-
-/// LOSAT_X_MBFILLSHADOW: builds the arrays again with `x_fill_mb_queued` on fresh tables and
-/// panics at the first one that differs from what `fill` built.
-#[cold]
-#[inline(never)]
-fn shadow_check(words: &Words<'_>, t: &XMbTables<'_>) {
-    let mut hashtable = vec![0u32; t.hashtable.len()];
-    let mut next_pos = vec![0u32; t.next_pos.len()];
-    let mut pv_array = vec![0u32; t.pv_array.len()];
-    let mut helper_array = vec![0u32; t.helper_array.len()];
-    let mut ref_words = Vec::new();
-    let (mut total_positions, mut ambiguous_skipped) = (0usize, 0usize);
-    x_fill_mb_queued(
-        x_mb_queue(),
-        words.queries_blastna,
-        words.query_offsets,
-        words.query_masks,
-        words.word_length,
-        words.lut_word_length,
-        words.kmer_mask,
-        None,
-        0,
-        words.ascending_cells,
-        &mut XMbTables {
-            hashtable: &mut hashtable,
-            next_pos: &mut next_pos,
-            pv_array: &mut pv_array,
-            pv_array_bts: t.pv_array_bts,
-            helper_array: &mut helper_array,
-            words: &mut ref_words,
-            total_positions: &mut total_positions,
-            ambiguous_skipped: &mut ambiguous_skipped,
-        },
-    );
-    let first_difference = |a: &[u32], b: &[u32]| a.iter().zip(b).position(|(x, y)| x != y);
-    for (name, new, old) in [
-        ("hashtable", &*t.hashtable, &hashtable[..]),
-        ("next_pos", &*t.next_pos, &next_pos[..]),
-        ("pv_array", &*t.pv_array, &pv_array[..]),
-        ("helper_array", &*t.helper_array, &helper_array[..]),
-    ] {
-        if let Some(i) = first_difference(new, old) {
-            panic!(
-                "[X_SHADOW] MBFILL {name}[{i}] = {} differs from {}",
-                new[i], old[i]
-            );
-        }
-    }
-    assert!(
-        *t.words == ref_words
-            && *t.total_positions == total_positions
-            && *t.ambiguous_skipped == ambiguous_skipped,
-        "[X_SHADOW] MBFILL words or counters differ"
-    );
-    X_SHADOW_COMPARED.fetch_add(1, Ordering::Relaxed);
 }
 
 #[cfg(test)]

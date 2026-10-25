@@ -3,6 +3,7 @@ const fs = require("fs");
 const { WASI } = require("wasi");
 const { performance } = require("perf_hooks");
 const crypto = require("crypto");
+const { unsignedWasiImports } = require("./wasi_artifact");
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:1410-1413:
 // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF)
@@ -29,7 +30,7 @@ const crypto = require("crypto");
       preopens: { "/": "/" }, returnOnExit: true,
     });
     const instance = await WebAssembly.instantiate(module, {
-      wasi_snapshot_preview1: wasi.wasiImport,
+      wasi_snapshot_preview1: unsignedWasiImports(wasi.wasiImport),
     });
     const instanceSeconds = (performance.now() - start) / 1000;
     if (typeof instance.exports._start !== "function") {

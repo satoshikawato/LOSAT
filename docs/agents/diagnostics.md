@@ -371,6 +371,7 @@ export LOSAT_X_BXDIAGKEEP=1
 export LOSAT_X_BXEVALEMPTY=1
 export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
+export LOSAT_X_BXKAONCE=1
 export LOSAT_X_BXLUTPOOL=1
 export LOSAT_X_BXSCANBYTE=1
 export LOSAT_X_BXSUBJFLOW=1
@@ -5994,6 +5995,34 @@ Scheduling (each value computed by one thread with the original function; order 
   `s_last_off`, and the early return) must be equal; any difference panics with the inputs. One line at exit,
   after a subject took the path: `[X_SHADOW] BXUNGAPSENT subjects= compared=` (`subjects=`: the pairs of a
   query batch and a subject made ready for the path).
+- `LOSAT_X_BXKAONCE=1` (BLASTX, speed; in the strict set from the pull request that added it, 2026-10-26; `=0`
+  turns it off): the Karlin blocks of a query batch that is not split are computed once, not twice, and the
+  BLOSUM62 ideal block once per process. `search_core` takes the batch's blocks from `score_block` (in the query
+  setup), runs `effective_lengths` on them and sets each context's `is_valid` to the block's `valid`;
+  `split_queries` then returns, for a batch that is not split (one chunk, also without gapped), a chunk whose
+  `prepared` is a clone of that batch, and the chunk loop called `score_block` on it again: the same compositions,
+  so the same ungapped blocks (`valid` = `is_valid && block`, and `is_valid` is the first block's `valid`), and
+  `effective_lengths` writes only `length_adjustment` and `search_space`, never `valid` or `ungapped` (it reads
+  `ungapped` in ungapped mode). With the switch the serial chunk loop uses the blocks `score_block` gave, kept
+  before `effective_lengths` (`search.rs`, dispatch point); the chunks of a split batch have sequences of their
+  own and keep `score_block`. NCBI computes the score block once in the query setup and creates a chunk's own only
+  for a split query (`prelim_stage.cpp:243-246`). The ideal block (`Blast_ScoreBlkKbpIdealCalc`: the standard
+  composition against itself) takes no input, and `score_block` computed it on each call; with the switch it is a
+  `OnceLock` (`parameters.rs`; a constant because BLASTX accepts only BLOSUM62), which acts on every BLASTX search.
+  Reach: the own side is recorded where a batch that is not split runs through the serial chunk loop; the
+  reference side (`score_block` on a chunk) only where a split query runs through that loop (1 thread, or
+  `LOSAT_X_BXCHUNKFLOW`), not in the chunk waves at 2+ threads (`x_compute_chunk`, which keeps `score_block`).
+  Exactness: a unit test (`kept_blocks_equal_score_block_of_the_unsplit_chunk`) compares the kept blocks with
+  `score_block` of the chunk field by field, bit for bit, with invalid contexts among valid ones, for a batch of
+  several queries and for one long query without gapped; `tests/blastx_unit_cap.rs` compares the reports of
+  several queries with it on and off, at 1 and 4 threads.
+  Measured on ws (2x Xeon 6338, node 1, one binary, default against `=0`, medians of paired rounds, byte-identical
+  outputs): 800 fly cDNAs against 8 / 50 / 200 yeast proteins (`-subject`) at 1 thread x0.771 / 0.800 / 0.875
+  (1.382 -> 1.066 s, 1.579 -> 1.264 s, 2.583 -> 2.261 s; instructions x0.690 / 0.723 / 0.820); against 50 and 200
+  at 16 threads x0.863 / 0.860 (50 with `-seg no` x0.863); against 8 / 50 at 32 threads x0.875 / 0.918; the whole
+  yeast proteome at 16 threads `-subject` / `-db` x0.993 / 0.995; a 660 kb genome (AP027131, split) against 50
+  proteins x0.997 at 1 thread, x0.985 at 16. The gain is largest with many queries and few subjects; a split
+  query saves only the ideal block.
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (diagnostic build; distinct composition-adjustment inputs),

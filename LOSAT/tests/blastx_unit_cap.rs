@@ -138,18 +138,30 @@ fn blastx(query: &Path, args: &[&str], threads: u32, env: &[(&str, &str)]) -> Ve
 
 /// The sides of `LOSAT_X_BXUNITCAP` one search reached (`LOSAT_X_REACH`): (own path, reference).
 fn cap_sides(dir: &Path, query: &Path, args: &[&str], env: &[(&str, &str)]) -> (bool, bool) {
-    let reach = dir.join(format!("reach-{}", env.len()));
+    sides(dir, query, args, 4, env, "LOSAT_X_BXUNITCAP")
+}
+
+/// The sides of `switch` one search at `threads` threads reached: (own path, reference).
+fn sides(
+    dir: &Path,
+    query: &Path,
+    args: &[&str],
+    threads: u32,
+    env: &[(&str, &str)],
+    switch: &str,
+) -> (bool, bool) {
+    let reach = dir.join(format!("reach-{}-{threads}", env.len()));
     let _ = std::fs::remove_dir_all(&reach);
     let mut env = env.to_vec();
     let reach_text = reach.to_str().unwrap().to_string();
     env.push(("LOSAT_X_REACH", &reach_text));
-    blastx(query, args, 4, &env);
+    blastx(query, args, threads, &env);
     let mut sides = (false, false);
     for file in std::fs::read_dir(&reach).unwrap() {
         let text = std::fs::read_to_string(file.unwrap().path()).unwrap();
         for line in text.lines() {
             let fields: Vec<&str> = line.split('\t').collect();
-            if fields[0] == "LOSAT_X_BXUNITCAP" {
+            if fields[0] == switch {
                 sides.0 |= fields[1] == "1";
                 sides.1 |= fields[2] == "1";
             }
@@ -266,6 +278,33 @@ fn a_split_query_gives_the_report_without_the_switches() {
     assert_eq!(
         cap_sides(&dir, &query, &args, &[("LOSAT_X_BXUNITCAP", "2")]),
         (false, true)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `LOSAT_X_BXKAONCE` (a query batch's Karlin blocks computed once, `blastx/search.rs`): the report
+/// equals that without it. The reuse runs in the serial chunk loop for a batch that is not split,
+/// so the search is run at one thread (the loop) and at four (the batch flow).
+#[test]
+fn several_queries_give_the_report_without_ka_once() {
+    let dir = temp_dir("ka-once");
+    let (query, set) = inputs(&dir, 4, 4_000, 595);
+    let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+    let off = [("LOSAT_X_BXKAONCE", "0")];
+    for threads in [1, 4] {
+        let reference = blastx(&query, &args, threads, &off);
+        assert!(
+            reference.iter().filter(|&&b| b == b'\n').count() > 20,
+            "too few hits to test"
+        );
+        assert!(
+            blastx(&query, &args, threads, &[]) == reference,
+            "{threads} threads: report differs"
+        );
+    }
+    assert_eq!(
+        sides(&dir, &query, &args, 1, &[], "LOSAT_X_BXKAONCE"),
+        (true, false)
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

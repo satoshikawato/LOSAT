@@ -41,6 +41,31 @@ pub struct ContextParameters {
     pub hit_cutoff_max: i32,
 }
 
+/// No NCBI counterpart: whether `LOSAT_X_BXKAONCE` is on (a strict-set switch, on unless `=0`):
+/// a query batch's Karlin blocks computed once when the batch is not split (`search.rs`), and the
+/// BLOSUM62 ideal block once per process (`ideal_block`).
+pub(crate) fn ka_once_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXKAONCE"))
+}
+
+/// The BLOSUM62 ideal Karlin block of the standard composition against itself, as `score_block`
+/// computes it for each call without `LOSAT_X_BXKAONCE`.
+fn ideal_block_computed(std: &[f64; crate::utils::matrix::BLASTAA_SIZE]) -> KarlinParams {
+    let ideal_profile =
+        compute_score_freq_profile_for_matrix(std, std, -4, 11, ScoringMatrix::Blosum62);
+    compute_karlin_params_ungapped(&ideal_profile).expect("BLOSUM62 ideal KA block")
+}
+
+/// No NCBI counterpart (`LOSAT_X_BXKAONCE`): the ideal block is a constant of the program (no
+/// input), so it is computed on first use and shared; the value `ideal_block_computed` gives. It
+/// is a constant because BLASTX accepts only BLOSUM62 (`args.rs`, "unsupported BLASTX matrix"); a
+/// port of another BLASTX `-matrix` must key the `OnceLock` by the matrix.
+fn ideal_block() -> KarlinParams {
+    static IDEAL: std::sync::OnceLock<KarlinParams> = std::sync::OnceLock::new();
+    *IDEAL.get_or_init(|| ideal_block_computed(&compute_std_aa_composition()))
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2776-2801
 // ```c++
 //       buffer = &query[context_offset];
@@ -72,9 +97,11 @@ pub struct ContextParameters {
 // ```
 pub fn score_block(batch: &PreparedQueryBatch) -> Vec<ContextParameters> {
     let std = compute_std_aa_composition();
-    let ideal_profile =
-        compute_score_freq_profile_for_matrix(&std, &std, -4, 11, ScoringMatrix::Blosum62);
-    let ideal = compute_karlin_params_ungapped(&ideal_profile).expect("BLOSUM62 ideal KA block");
+    let ideal = if ka_once_on() {
+        ideal_block()
+    } else {
+        ideal_block_computed(&std)
+    };
     batch
         .contexts
         .iter()

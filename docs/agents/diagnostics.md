@@ -422,7 +422,6 @@ export LOSAT_X_TBNUNITXLATE=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXBAND=1
 export LOSAT_X_TBXEXTBATCH=256
-export LOSAT_X_TBXFRAMES=1
 export LOSAT_X_TBXHITBF=1
 export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
@@ -435,7 +434,6 @@ export LOSAT_X_TBXQSLICE=1
 export LOSAT_X_TBXRESOLVE=1
 export LOSAT_X_TBXRPTPAR=1
 export LOSAT_X_TBXSCANBF=1
-export LOSAT_X_TBXUNGAP=1
 export LOSAT_X_TBXUNITMASK=256
 ```
 
@@ -599,7 +597,7 @@ value and not the order in which the hit lists take the subjects; it lowers the 
 on the workstation, the time (0.94 at 8 threads and 0.88 at 16 on 100 16S queries against 28,036
 16S sequences). A database search (`-db`) has its own drivers and is not affected.
 
-`LOSAT_X_TBXNEXT` and `LOSAT_X_TBXFRAMES` were added after the default changed, as switches that
+`LOSAT_X_TBXNEXT` and `LOSAT_X_TBXFRAMES` (graduated 2026-10-26: no variable) were added after the default changed, as switches that
 were off unless set, and joined the set together on 2026-10-17. With two or more threads TBLASTX's
 subject loop gives each thread the next subject when it is free, instead of rayon's pieces of the
 subject range cut before the search (a genome's chromosome arms, listed first, fell into one piece
@@ -2779,14 +2777,16 @@ Rebuilding less:
   (44 MiB), the 200 queries (46 MiB) and AP027131 against 200 contigs (84 MiB) keep the arena and did not change;
   nothing changed at one thread.
 
-- `LOSAT_X_TBXFRAMES=1` (TBLASTX, memory; in the strict set since 2026-10-17, on by default) a
+- TBXFRAMES (graduated 2026-10-26, in the set since 2026-10-17; no variable; always on) (TBLASTX, memory) a
   subject's frames are made when they are read and only as long
   as they are read (`Subjects::x_preliminary_frames` / `x_letter_frames` in `tblastx/subjects.rs`,
-  `x_generate_frames_in_windows` in `tblastx/translation.rs`). Without it `process_subject` makes, before
+  `x_generate_frames_in_windows` in `tblastx/translation.rs`). Before, `process_subject` made, before
   the seed stage, the six frames of the subject's letters and, for a subject with ambiguous bases, the six
   frames of the bases the preliminary stage translates, each from a whole copy of its sequence and of its
-  reverse complement, and keeps both sets to the end of the subject (a stored sequence with ambiguity codes:
-  about 7 bytes per base at once). With it only the preliminary frames are made before the seed stage, in
+  reverse complement, and kept both sets to the end of the subject (a stored sequence with ambiguity codes:
+  about 7 bytes per base at once); that code went with the variable, and `Subjects::with_search_bases` and
+  `preliminary_subject_bases`, which made those whole sequences, stay as the reference of the unit tests
+  (`cfg(test)`). Now only the preliminary frames are made before the seed stage, in
   one pass over windows of 196,608 letters (a record's ambiguous letters resolved window by window from the
   one `CRandom` of its length, in letter order, which draws what `preliminary_subject_bases` draws; a stored
   sequence's 2-bit codes read directly) through a table of the residues of the 4,096 codons of ncbi4na masks
@@ -2804,7 +2804,7 @@ Rebuilding less:
   database 62.74 -> 61.62 s, 46 -> 45 MiB.
 - `LOSAT_X_TBXRESOLVE=1` (TBLASTX, speed; in the strict set from the pull request that added it, 2026-10-24;
   `=0` turns it off) the preliminary frames of a `-subject` (or `run_local`) record with a letter other than A,
-  C, G and T (`Subjects::x_preliminary_frames`, with `LOSAT_X_TBXFRAMES` on) read the base of each letter of one
+  C, G and T (`Subjects::x_preliminary_frames`) read the base of each letter of one
   base (`A`, `C`, `G`, `T`, `U`, either case) from a table (`tblastx/subjects.rs`, `ONE_BASE`), and only the other
   letters go through `ncbi4na_of` and `resolve_ncbi4na_base`. Before, every letter of such a record went through
   both. NCBI draws from `CRandom` only for an ncbi4na value outside `ctable` (not 1, 2, 4 or 8;
@@ -4208,7 +4208,7 @@ Scheduling (each value computed by one thread with the original function; order 
   as one indexed range (`for_each_init`), which rayon cuts into pieces before the search, so the long
   subjects a genome lists first (the chromosome arms) fall into one piece and one thread searches them in
   order. `process_subject` is unchanged and `report::final_hit_order` orders the HSP lists by query and
-  subject index, so the reports are the same. Use it with `LOSAT_X_TBXFRAMES`: alone it holds the frames of
+  subject index, so the reports are the same. It needs the windowed frames (TBXFRAMES, always on since 2026-10-26): without them it held the frames of
   several long subjects at once (3 fruit fly transcripts x the fruit fly genome database at 8 threads: 892
   MiB, NCBI 359 MiB). With both at 8 threads (node 0, CPUs 8-15, medians of 3 alternating pairs, reports
   identical): that search 11.48 -> 2.58 s (NCBI `-db` 2.73 s), max RSS 257 -> 316 MiB; with the genome FASTA
@@ -4816,7 +4816,7 @@ Scheduling (each value computed by one thread with the original function; order 
   save. Both paths give the reference's list (the exactness argument of `tblastx/x_pair_par.rs`), so
   the report does not change; `LOSAT/tests/tblastx_unit_gate.rs` compares reports and reads the
   counters. Measured on the workstation (alternating pairs, every report equal across arms;
-  `LOSAT_X_TBXNEXT` and `LOSAT_X_TBXFRAMES` on in both arms): 10 fruit fly transcripts (two query
+  `LOSAT_X_TBXNEXT` and TBXFRAMES on in both arms): 10 fruit fly transcripts (two query
   batches of 10.8 and 7.9 kb) against the zebrafish cDNA database (57,775 sequences) 61.3 -> 46.6 s
   at one thread (NCBI BLAST+ 2.17.0 `-db` 45.1 s), 15.75 -> 11.87 s at 4 (NCBI 11.70), 8.01 -> 6.00 s
   at 8 (NCBI 6.05), 4.07 -> 3.08 s at 16 (NCBI 3.22), max RSS unchanged (45 MiB); the first 40 kb of
@@ -4881,8 +4881,8 @@ Scheduling (each value computed by one thread with the original function; order 
   sends back (the timings of `LOSAT_X_PAIRPARGATE` above) it takes x0.95-1.00 of the chain
   builder's time; max RSS 23 -> 19 MiB on 40 kb x 3,000 cDNAs, 15 -> 17 MiB on 5 kb x 3,000 cDNAs
   at 8 threads (the default before both: 21 and 19 MiB).
-- `LOSAT_X_TBXUNGAP=1` (TBLASTX, speed; in the strict set from the pull request that added it,
-  2026-10-18; `=0` turns it off; every target, the wasm32 builds (LOSAT Web) since 2026-10-19) the
+- TBXUNGAP (graduated 2026-10-26, in the set since 2026-10-18; no variable; always on, every target, the
+  wasm32 builds (LOSAT Web) since 2026-10-19; the reference walks stay as the fallback below) the
   two-hit ungapped extension (`extend_hit_two_hit`, NCBI `s_BlastAaExtendTwoHit`: the word loop and the
   `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks) reads its scores from one 256 x 256 byte table
   (`q << 8 | s`, the scores of `get_score` for every two bytes, `BLAST_SCORE_MIN` stored as -128) and runs

@@ -249,28 +249,16 @@ mod x_qgroup_par;
 #[path = "x_query_stream.rs"]
 mod x_query_stream;
 
-/// EXPERIMENT (LOSAT_X_QPREPPARSHADOW): the summary line `main` prints at exit. No NCBI
+/// EXPERIMENT (LOSAT_X_QPREPPAR): the summary line `main` prints at exit. No NCBI
 /// counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_query_prep_par_print_summary() {
     x_query_prep_par::print_summary();
 }
 
-/// EXPERIMENT (LOSAT_X_QGROUPPARSHADOW, LOSAT_X_STATS): the summary lines `main` prints at exit.
+/// EXPERIMENT (LOSAT_X_QGROUPPAR, LOSAT_X_STATS): the summary lines `main` prints at exit.
 /// No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_qgroup_par_print_summary() {
     x_qgroup_par::print_summary();
-}
-
-/// EXPERIMENT (LOSAT_X_BNDBCUTSHADOW): the summary line `main` prints at exit. No NCBI
-/// counterpart: it prints counters and changes no value NCBI computes.
-pub fn x_db_cut_print_summary() {
-    database::x_db_cut_print_summary();
-}
-
-/// EXPERIMENT (LOSAT_X_BNDBSTREAMSHADOW): the summary line `main` prints at exit. No NCBI
-/// counterpart: it prints counters and changes no value NCBI computes.
-pub fn x_db_stream_print_summary() {
-    database::x_db_stream_print_summary();
 }
 
 /// EXPERIMENT (LOSAT_X_BNTBRANGELOG): the summary line `main` prints at exit. No NCBI
@@ -942,10 +930,8 @@ struct DiagHashTable {
     window: i32,
     // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): per bucket, an upper bound of the levels of
     // its cells (the largest level `insert` wrote since the table was made or cleared;
-    // `i32::MIN` for none), and whether `LOSAT_X_DIAGLVSHADOW` checks the skipped walks. Empty
-    // and false while the switch is off. No NCBI counterpart.
+    // `i32::MIN` for none). Empty while the switch is off. No NCBI counterpart.
     max_level: Vec<i32>,
-    x_lv_shadow: bool,
     // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): per bucket, the latest insert and an upper
     // bound of the levels of the bucket's other cells. Empty unless the switch and
     // LOSAT_X_DIAGLV are on and the table takes two hits. No NCBI counterpart. It is the memo of
@@ -977,7 +963,7 @@ impl DiagHashTable {
     fn new(window: i32) -> Self {
         let capacity = DIAGHASH_CHAIN_LENGTH as u32;
         // EXPERIMENT (LOSAT_X_DIAGLV): the level bounds when the switch is on.
-        let (max_level, x_lv_shadow) = x_diag_lv::new_levels();
+        let max_level = x_diag_lv::new_levels();
         Self {
             num_buckets: DIAGHASH_NUM_BUCKETS,
             occupancy: 1,
@@ -987,7 +973,6 @@ impl DiagHashTable {
             offset: window,
             window,
             max_level,
-            x_lv_shadow,
             // EXPERIMENT (LOSAT_X_DIAGLV2): the memo when the switch is on.
             x_last: x_diag_lv::new_last(window),
             #[cfg(debug_assertions)]
@@ -1191,7 +1176,7 @@ impl DiagHashTable {
 //     /* hit within the explored area should be rejected*/
 //     if (s_off_pos < last_hit) return 0;
 // ```
-// EXPERIMENT (LOSAT_X_DIAGLV, shadow LOSAT_X_DIAGLVSHADOW): a fold's retrieve skips the walk of
+// EXPERIMENT (LOSAT_X_DIAGLV): a fold's retrieve skips the walk of
 // a bucket whose cells all lie below the level that could change a decision of the seed (a
 // child module, so that it uses the private table of this file).
 #[path = "x_diag_lv.rs"]
@@ -4409,10 +4394,8 @@ struct QueryContextIndex {
     x_total_len: usize,
     // EXPERIMENT (LOSAT_X_CTXO1): what `direct_map` holds, in constant time from the layout of the
     // contexts (`x_ctx_o1.rs`). When it is built it answers the offsets the table covers, the runs
-    // only those of its crowded blocks, and the table is not built. With the shadow it is
-    // `x_o1_shadow` instead, and the table is built to compare with.
+    // only those of its crowded blocks, and the table is not built.
     x_o1: Option<x_ctx_o1::CtxO1>,
-    x_o1_shadow: Option<x_ctx_o1::CtxO1>,
 }
 
 /// No NCBI counterpart: reads the LOSAT_X_CTXO1 switch once (`x_ctx_o1.rs`).
@@ -4478,23 +4461,17 @@ impl QueryContextIndex {
         // only stands in for it when no two runs overlap; context 0 needs no
         // run because the map starts out as zeros.
         // `x_mode` 1: the runs answer and the table is not built; 0: the table answers (overlapping
-        // runs, or the table that `LOSAT_X_CTXO1SHADOW` compares with).
+        // runs).
         let mut x_mode = 1u8;
         // EXPERIMENT (LOSAT_X_CTXO1): the constant-time form, where the layout allows it. It takes
-        // the place of the runs (kept only for the offsets of its crowded blocks) and of the table
-        // (kept only for the shadow `LOSAT_X_CTXO1SHADOW` to compare with).
+        // the place of the runs (kept only for the offsets of its crowded blocks) and of the table.
         let x_o1 = if x_ctx_o1_on() {
             x_ctx_o1::CtxO1::build(contexts, total_len)
         } else {
             None
         };
-        let x_shadow = std::env::var_os("LOSAT_X_CTXO1SHADOW").is_some();
-        if x_o1.is_some() && x_shadow {
-            x_mode = 0;
-        }
-        let (x_o1, x_o1_shadow) = if x_shadow { (None, x_o1) } else { (x_o1, None) };
         // the runs answer what the form leaves (offsets in a crowded block of `x_ctx_o1.rs`)
-        let x_o1_alone = x_o1.as_ref().is_some_and(|o1| !o1.needs_runs()) || x_o1_shadow.is_some();
+        let x_o1_alone = x_o1.as_ref().is_some_and(|o1| !o1.needs_runs());
         let mut x_ranges: Vec<(usize, usize, u32)> = Vec::new();
         if x_mode != 0 && !x_o1_alone {
             for (idx, ctx) in contexts.iter().enumerate() {
@@ -4542,7 +4519,6 @@ impl QueryContextIndex {
                 total_len
             },
             x_o1,
-            x_o1_shadow,
         }
     }
 
@@ -4599,7 +4575,7 @@ impl QueryContextIndex {
     // ...
     // return b;
     // ```
-    // The forms besides LOSAT_X_CTXO1 (and its shadow), out of line as `context_for_offset` was.
+    // The forms besides LOSAT_X_CTXO1, out of line as `context_for_offset` was.
     #[inline(never)]
     fn x_context_for_offset_ref(&self, n: usize) -> usize {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
@@ -4615,17 +4591,6 @@ impl QueryContextIndex {
         //     }
         //     return b;
         // ```
-        // LOSAT_X_CTXO1 with its shadow (LOSAT_X_CTXO1SHADOW): the constant-time
-        // form answers every offset the table covers, and `assert!` compares it with the table.
-        if let Some(o1) = &self.x_o1_shadow {
-            if let Some(context) = o1.get(n) {
-                assert!(
-                    context == self.direct_map[n] as usize,
-                    "LOSAT_X_CTXO1SHADOW: context of offset {n} differs"
-                );
-                return context;
-            }
-        }
         // The code after this block (the table, then `bsearch_context_info`) ports `BSearchContextInfo`.
         // With the runs the same context is found without the table.
         if n < self.x_total_len {
@@ -7721,11 +7686,8 @@ fn search(
             batching,
         )
     });
-    // No NCBI counterpart: the PAIRPAR counters with LOSAT_TIMING (and the lines of the dc and Na
-    // shadows); nothing without those variables.
+    // No NCBI counterpart: the PAIRPAR counters with LOSAT_TIMING; nothing without it.
     x_pair_seed::summary();
-    // No NCBI counterpart: the summary line of LOSAT_X_DIAGLVSHADOW; nothing without it.
-    x_diag_lv::summary();
     x_result
 }
 
@@ -8430,10 +8392,9 @@ fn run_in_pool(
         let mut query_eff_searchsp = Vec::with_capacity(2 * lengths.len());
         // EXPERIMENT (LOSAT_X_QSTREAM, LOSAT_X_BNQDROP): the searched records of the batches taken,
         // kept where a writer reads them after their batch: the reports after the loop and the
-        // error paths that write the reports of the batches before (LOSAT_X_RPTSTREAM not acting),
-        // or the shadow of LOSAT_X_RPTSTREAM, which writes them the off path's way. Without the
-        // switches the records read before the search are those.
-        let keep = queries.per_batch() && (!stream.acting() || stream.shadow());
+        // error paths that write the reports of the batches before (LOSAT_X_RPTSTREAM not acting).
+        // Without the switches the records read before the search are those.
+        let keep = queries.per_batch() && !stream.acting();
         let mut kept: Vec<FastaRecord> = Vec::new();
         // A batch is read from the input records (`input_start..input_end`); its searched
         // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
@@ -8512,7 +8473,7 @@ fn run_in_pool(
                     // EXPERIMENT (LOSAT_X_QBATCHPAR): no slot runs while the loop writes.
                     qbp.finish();
                     // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
-                    // written when the loop took them (the shadow compares them).
+                    // written when the loop took them.
                     let before = |outputs: &mut ReportOutputs<'_>| {
                         write_before_failed_batch(
                             &args,
@@ -8539,7 +8500,6 @@ fn run_in_pool(
                     };
                     if stream.acting() {
                         stream.finish_sam(outputs)?;
-                        stream.check("before a reader error", before);
                     } else {
                         before(outputs)?;
                     }
@@ -8564,7 +8524,7 @@ fn run_in_pool(
                 // EXPERIMENT (LOSAT_X_QBATCHPAR): no slot runs while the loop writes.
                 qbp.finish();
                 // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were written
-                // when the loop took them (the shadow compares them).
+                // when the loop took them.
                 let before = |outputs: &mut ReportOutputs<'_>| {
                     write_before_failed_batch(
                         &args,
@@ -8591,7 +8551,6 @@ fn run_in_pool(
                 };
                 if stream.acting() {
                     stream.finish_sam(outputs)?;
-                    stream.check("before a batch without queries", before);
                 } else {
                     before(outputs)?;
                 }
@@ -8646,7 +8605,7 @@ fn run_in_pool(
                 // EXPERIMENT (LOSAT_X_QBATCHPAR): no slot runs while the loop writes.
                 qbp.finish();
                 // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were written
-                // when the loop took them (the shadow compares them).
+                // when the loop took them.
                 let before = |outputs: &mut ReportOutputs<'_>| {
                     write_before_failed_batch(
                         &args,
@@ -8673,7 +8632,6 @@ fn run_in_pool(
                 };
                 if stream.acting() {
                     stream.finish_sam(outputs)?;
-                    stream.check("before a batch of queries without letters", before);
                 } else {
                     before(outputs)?;
                 }
@@ -8690,23 +8648,21 @@ fn run_in_pool(
             warnings[start].extend(batch_title_warnings);
             // EXPERIMENT (LOSAT_X_QBATCHPAR): the batch's result from a slot that searched the same
             // key ahead of the loop, or the loop's own search (on the whole pool, no slot running).
-            // The shadow searches it here too and compares.
             let key = x_qbatch_par::BatchKey {
                 input_start,
                 input_end,
                 batch_size: batching.batch_size,
             };
-            let precomputed = qbp.take(key);
-            let searched = match precomputed {
-                Some(precomputed) if !qbp.shadow() => precomputed,
-                precomputed => {
+            let searched = match qbp.take(key) {
+                Some(precomputed) => precomputed,
+                None => {
                     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps its megablast table from batch
                     // to batch once no slot can search a batch any more.
                     let x_keep = x_lut_keep.as_ref().filter(|_| !qbp.may_speculate());
                     if x_lut_keep.is_some() && x_keep.is_none() {
                         crate::utils::xreach::x_reach!("LOSAT_X_MBLUTKEEP", false);
                     }
-                    let reference = search_query_batch(
+                    search_query_batch(
                         &args,
                         batch_records.batch_queries(),
                         source,
@@ -8718,11 +8674,7 @@ fn run_in_pool(
                             query_offsets: &query_offsets[start..end],
                         },
                         x_keep,
-                    );
-                    if let Some(precomputed) = precomputed {
-                        qbp.shadow_check(key, &precomputed, &reference, x_qbatch_par_compare);
-                    }
-                    reference
+                    )
                 }
             };
             // EXPERIMENT (LOSAT_X_QBATCHPAR): an error ends the loop here, and what it writes
@@ -8752,7 +8704,7 @@ fn run_in_pool(
                     // skips `PrintEpilog` (the outfmt 0 footer and outfmt 7's last line).
                     Ok(ErrorAfterInvalidBatches(error)) => {
                         // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
-                        // written when the loop took them (the shadow compares them).
+                        // written when the loop took them.
                         let before = |outputs: &mut ReportOutputs<'_>| {
                             write_batch_reports(
                                 &args,
@@ -8781,7 +8733,6 @@ fn run_in_pool(
                         };
                         if stream.acting() {
                             stream.finish_sam(outputs)?;
-                            stream.check("before an error after invalid batches", before);
                         } else {
                             before(outputs)?;
                         }
@@ -8792,21 +8743,10 @@ fn run_in_pool(
                     // The warnings of the batches read so far, in NCBI's order (the outfmt 0
                     // prolog of a Karlin-Altschul error of the first batch is written).
                     // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were written
-                    // with their reports; the off path writes no report here, which the shadow
-                    // checks (the switch acts only where LOSAT's refusals cannot come after the
-                    // first batch, `x_rpt_stream`).
+                    // with their reports; the off path writes no report here (the switch acts only
+                    // where LOSAT's refusals cannot come after the first batch, `x_rpt_stream`).
                     Err(error) => {
-                        let written = if stream.acting() {
-                            stream.check("before an error of LOSAT's", |outputs| {
-                                for query_warnings in &warnings[..start] {
-                                    outputs.diagnostics.write_all(query_warnings)?;
-                                }
-                                Ok(())
-                            });
-                            start
-                        } else {
-                            0
-                        };
+                        let written = if stream.acting() { start } else { 0 };
                         for query_warnings in &warnings[written..=start] {
                             outputs.diagnostics.write_all(query_warnings)?;
                         }
@@ -8864,21 +8804,11 @@ fn run_in_pool(
                         // LOSAT's refusal: the warnings of the batches read so far, as for the
                         // other errors of a batch (below).
                         // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were
-                        // written with their reports; the off path writes no report here, which
-                        // the shadow checks (the switch acts only where every title is read
-                        // before the search, `x_rpt_stream`).
+                        // written with their reports; the off path writes no report here (the
+                        // switch acts only where every title is read before the search,
+                        // `x_rpt_stream`).
                         Err(error) => {
-                            let written = if stream.acting() {
-                                stream.check("before a title refusal", |outputs| {
-                                    for query_warnings in &warnings[..start] {
-                                        outputs.diagnostics.write_all(query_warnings)?;
-                                    }
-                                    Ok(())
-                                });
-                                start
-                            } else {
-                                0
-                            };
+                            let written = if stream.acting() { start } else { 0 };
                             for query_warnings in &warnings[written..=start] {
                                 outputs.diagnostics.write_all(query_warnings)?;
                             }
@@ -8886,7 +8816,7 @@ fn run_in_pool(
                         }
                     };
                     // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
-                    // written when the loop took them (the shadow compares them).
+                    // written when the loop took them.
                     let before = |outputs: &mut ReportOutputs<'_>| {
                         write_before_failed_batch(
                             &args,
@@ -8913,7 +8843,6 @@ fn run_in_pool(
                     };
                     if stream.acting() {
                         stream.finish_sam(outputs)?;
-                        stream.check("before a header read error", before);
                     } else {
                         before(outputs)?;
                     }
@@ -8991,21 +8920,15 @@ fn run_in_pool(
             );
             // EXPERIMENT (LOSAT_X_RPTSTREAM): the batch's reports, written now, after the mixer
             // has its gie, as NCBI's loop prints a batch's result sets (`x_rpt_stream.rs`). The
-            // batch's lists and values are taken back from the end of what the loop keeps (the
-            // shadow keeps a copy), numbered from 0 again, and written with the batch's part of
-            // the query ranges.
+            // batch's lists and values are taken back from the end of what the loop keeps, numbered
+            // from 0 again, and written with the batch's part of the query ranges.
             if stream.acting() {
                 let count = end - start;
                 let at = hit_lists.len() - count;
-                let shadow = stream.shadow();
-                fn take<T: Clone>(kept: &mut Vec<T>, at: usize, shadow: bool) -> Vec<T> {
-                    if shadow {
-                        kept[at..].to_vec()
-                    } else {
-                        kept.drain(at..).collect()
-                    }
+                fn take<T>(kept: &mut Vec<T>, at: usize) -> Vec<T> {
+                    kept.drain(at..).collect()
                 }
-                let mut batch_lists = take(&mut hit_lists, at, shadow);
+                let mut batch_lists = take(&mut hit_lists, at);
                 for hsp_list in batch_lists
                     .iter_mut()
                     .flatten()
@@ -9016,10 +8939,10 @@ fn run_in_pool(
                         hsp.q_idx -= first;
                     }
                 }
-                let batch_unsearched = take(&mut unsearched, at, shadow);
-                let batch_masks = take(&mut query_masks, at, shadow);
-                let batch_karlin = take(&mut context_karlin, 2 * at, shadow);
-                let batch_searchsp = take(&mut query_eff_searchsp, 2 * at, shadow);
+                let batch_unsearched = take(&mut unsearched, at);
+                let batch_masks = take(&mut query_masks, at);
+                let batch_karlin = take(&mut context_karlin, 2 * at);
+                let batch_searchsp = take(&mut query_eff_searchsp, 2 * at);
                 let batch_input = x_rpt_stream::batch_input(query_input, start..end);
                 let batch_ranges = ReportRanges {
                     queries: &batch_input,
@@ -9056,11 +8979,9 @@ fn run_in_pool(
                     )
                 })?;
                 // The written queries' warnings are not read again (the error paths write those
-                // of the current batch; the shadow keeps them all).
-                if !shadow {
-                    for query_warnings in &mut warnings[start..end] {
-                        *query_warnings = Vec::new();
-                    }
+                // of the current batch).
+                for query_warnings in &mut warnings[start..end] {
+                    *query_warnings = Vec::new();
                 }
             }
             // EXPERIMENT (LOSAT_X_QSTREAM, LOSAT_X_BNQDROP): the batch's records are kept for a later
@@ -9112,8 +9033,7 @@ fn run_in_pool(
         }
         // EXPERIMENT (LOSAT_X_RPTSTREAM): every batch's reports are written; the epilogs remain
         // (NCBI's `PrintEpilog` after its loop), written by the report code for no query, with
-        // the queries of every batch counted (outfmt 7's last line). The shadow then writes the
-        // reports the off path's way and compares.
+        // the queries of every batch counted (outfmt 7's last line).
         stream.write(outputs, 0, true, |outputs, written| {
             write_reports(
                 &args,
@@ -9141,7 +9061,6 @@ fn run_in_pool(
                 None,
             )
         })?;
-        stream.check("at the end of the search", reports);
         Ok(())
     })
 }
@@ -9311,104 +9230,6 @@ impl x_qbatch_par::SlotResult for Result<QueryBatch> {
             + std::mem::size_of_val(batch.query_eff_searchsp.as_slice())
             + batch.timing.len();
         (hits + per_query) as u64
-    }
-}
-
-// No NCBI counterpart: LOSAT_X_QBATCHPARSHADOW compares two LOSAT results of one batch.
-/// EXPERIMENT (LOSAT_X_QBATCHPARSHADOW): the first difference between a batch's result from a
-/// slot and the loop's own search of it. Every field is compared: each query's hit list (every
-/// HSP field and edit script, through its `Debug` text, which writes each `f64` exactly), the
-/// gie, whether the batch was searched, the masks, the Karlin-Altschul blocks and the search
-/// spaces; or the two errors (text, kind and exit status).
-fn x_qbatch_par_compare(
-    precomputed: &Result<QueryBatch>,
-    reference: &Result<QueryBatch>,
-) -> std::result::Result<(), String> {
-    fn first_difference(what: &str, slot: &str, own: &str) -> std::result::Result<(), String> {
-        if slot == own {
-            return Ok(());
-        }
-        let at = slot
-            .bytes()
-            .zip(own.bytes())
-            .position(|(left, right)| left != right)
-            .unwrap_or(slot.len().min(own.len()));
-        let around = |text: &str| {
-            text.get(at.saturating_sub(120)..(at + 120).min(text.len()))
-                .unwrap_or(text)
-                .to_string()
-        };
-        Err(format!(
-            "{what} differs at byte {at}: slot ...{}... loop ...{}...",
-            around(slot),
-            around(own)
-        ))
-    }
-    match (precomputed, reference) {
-        (Ok(slot), Ok(own)) => {
-            first_difference(
-                "good_init_extends",
-                &slot.good_init_extends.to_string(),
-                &own.good_init_extends.to_string(),
-            )?;
-            first_difference(
-                "searched",
-                &slot.searched.to_string(),
-                &own.searched.to_string(),
-            )?;
-            first_difference(
-                "number of hit lists",
-                &slot.hit_lists.len().to_string(),
-                &own.hit_lists.len().to_string(),
-            )?;
-            for (query, (slot_list, own_list)) in
-                slot.hit_lists.iter().zip(&own.hit_lists).enumerate()
-            {
-                first_difference(
-                    &format!("the hit list of query {query}"),
-                    &format!("{slot_list:?}"),
-                    &format!("{own_list:?}"),
-                )?;
-            }
-            first_difference(
-                "query_masks",
-                &format!("{:?}", slot.query_masks),
-                &format!("{:?}", own.query_masks),
-            )?;
-            first_difference(
-                "context_karlin",
-                &format!("{:?}", slot.context_karlin),
-                &format!("{:?}", own.context_karlin),
-            )?;
-            first_difference(
-                "query_eff_searchsp",
-                &format!("{:?}", slot.query_eff_searchsp),
-                &format!("{:?}", own.query_eff_searchsp),
-            )?;
-            first_difference(
-                "chunk_prelim_lists",
-                &slot.chunk_prelim_lists.len().to_string(),
-                &own.chunk_prelim_lists.len().to_string(),
-            )
-        }
-        (Err(slot), Err(own)) => {
-            let describe = |error: &anyhow::Error| {
-                format!(
-                    "{error:#} (after invalid batches: {}; native exit: {:?})",
-                    error.is::<ErrorAfterInvalidBatches>(),
-                    error
-                        .downcast_ref::<crate::cli::NativeError>()
-                        .map(|native| native.exit)
-                )
-            };
-            first_difference("the error", &describe(slot), &describe(own))
-        }
-        (Ok(_), Err(own)) => Err(format!(
-            "the slot's search succeeded and the loop's failed: {own:#}"
-        )),
-        (Err(slot), Ok(_)) => Err(format!(
-            "the slot's search failed and the loop's succeeded: {slot:#}"
-        )),
     }
 }
 
@@ -13630,7 +13451,7 @@ fn search_query_batch(
                     // (scan, diagonal hash, ungapped extension; one-hit diagonal-hash scope only)
                     // with the subject scan in strips on the pool threads and the pairs folded in
                     // the scan order; `continue` ends the one-iteration strand loop. Otherwise
-                    // (and with LOSAT_X_PAIRPARNASHADOW) the code below runs.
+                    // the code below runs.
                     if x_pair_seed::run_na(
                         &x_pair_seed::NaInputs {
                             pv_direct_lookup: pv_direct_lookup_ref,
@@ -14582,16 +14403,6 @@ fn search_query_batch(
             // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
             // compare equal keep the order in which they were saved. `sort_by`
             // is stable too.
-            // Dispatch point of the strips shadows (LOSAT_X_PAIRPARDISCSHADOW,
-            // LOSAT_X_PAIRPARNASHADOW and LOSAT_X_PAIRPARDISCARRSHADOW): the hit list and the
-            // diagonal hash (or array) of the code above against those `x_pair_seed::run`
-            // computed for this chunk.
-            x_pair_seed::shadow_check(
-                ungapped_hits,
-                &subject_scratch.diag_hash,
-                &subject_scratch.hit_level_array,
-                &subject_scratch.hit_len_array,
-            );
             // EXPERIMENT (LOSAT_X_QGROUPPAR): with the stage run per query, each query's hits are
             // taken in the order saved above and sorted by the task (the comparator and the sort
             // are those below, so each query's hits come in the relative order the batch's sort
@@ -14602,13 +14413,6 @@ fn search_query_batch(
             let x_order = x_counts
                 .as_deref()
                 .and_then(|counts| x_qgroup_par::plan(counts, x_qgroup_par::Stage::Prelim));
-            let x_shadow = x_order.is_some() && x_qgroup_par::shadow();
-            // The shadow's copy for the owner loop (the per-query form groups the hits in place).
-            let mut x_shadow_hits = if x_shadow {
-                ungapped_hits.clone()
-            } else {
-                Vec::new()
-            };
             match (&x_order, &x_counts) {
                 (Some(_), Some(counts)) => {
                     x_qgroup_par::group_in_place(ungapped_hits, |hit| hit.query_idx, counts)
@@ -14629,7 +14433,6 @@ fn search_query_batch(
                 }
                 _ => ungapped_hits.sort_by(score_compare_ungapped_hits),
             }
-            x_shadow_hits.sort_by(score_compare_ungapped_hits);
 
             // Debug counters for containment analysis
             let mut dbg_containment_skipped = 0usize;
@@ -15340,31 +15143,8 @@ fn search_query_batch(
                     dbg_containment_skipped += skipped;
                     x_hits.extend(hits);
                 }
-                if x_shadow {
-                    // The owner loop on the copy; both lists compared after their purge and
-                    // score sort (the pooled sort included), the loop's kept.
-                    let (calls, skipped) = x_prelim_list(
-                        &x_shadow_hits,
-                        &mut interval_tree,
-                        gap_scratch,
-                        greedy_align_scratch,
-                        Some(&mut subject_scratch.x_ahead_scratch),
-                        prelim_hits,
-                    );
-                    let mut slow = purge_prelim_hits_with_common_endpoints(prelim_hits.clone());
-                    sort_prelim_hits_by_score(&mut slow);
-                    x_qgroup_par::sort_stable(
-                        parallel_pool,
-                        &mut x_hits,
-                        score_compare_prelim_hits,
-                    );
-                    x_qgroup_par::compare(x_qgroup_par::Stage::Prelim, &slow, &x_hits);
-                    dbg_gapped_calls = calls;
-                    dbg_containment_skipped = skipped;
-                } else {
-                    *prelim_hits = x_hits;
-                    x_purged = true;
-                }
+                *prelim_hits = x_hits;
+                x_purged = true;
             } else {
                 let (calls, skipped) = x_prelim_list(
                     ungapped_hits,
@@ -17691,30 +17471,7 @@ fn search_query_batch(
                     traceback_alignment_lengths.extend(alignment_lengths);
                 }
                 x_qgroup_par::sort_stable(parallel_pool, &mut fast, score_compare_hsps);
-                if x_qgroup_par::shadow() {
-                    let mut edit_lengths = Vec::new();
-                    let mut alignment_lengths = Vec::new();
-                    x_trace_list(
-                        x_kept,
-                        &mut interval_tree,
-                        gap_scratch,
-                        &mut subject_scratch.greedy_align_scratch,
-                        Some(&mut subject_scratch.x_ahead_scratch),
-                        hits,
-                        &mut edit_lengths,
-                        &mut alignment_lengths,
-                    );
-                    let (list, s1, s2, s3, s4) = x_post_purge(hits.drain(..).collect());
-                    let (slow, s5) = x_final_list(list, &mut interval_tree);
-                    // EXPERIMENT (LOSAT_X_BNTBRANGE): a subject that met a fence is traced again
-                    // whole (`database::traceback_listed`), and compared there.
-                    if !x_fence::x_fenced(x_fenced) {
-                        x_qgroup_par::compare(x_qgroup_par::Stage::Traceback, &slow, &fast);
-                    }
-                    (slow, [s1, s2, s3, s4, s5])
-                } else {
-                    (fast, steps)
-                }
+                (fast, steps)
             } else {
                 x_trace_list(
                     prelim_hits,
@@ -18021,7 +17778,6 @@ fn search_query_batch(
                             (!prelim_hits.is_empty()).then_some(prelim_hits)
                         },
                         &mut |ordinal, prelim_hits| writer.add(ordinal as usize, prelim_hits),
-                        &good_init_extends,
                     )
                     .map_err(|error| {
                         database_search_error(
@@ -18079,7 +17835,6 @@ fn search_query_batch(
                             (!prelim_hits.is_empty()).then_some(prelim_hits)
                         },
                         &mut |ordinal, prelim_hits| collector.add(ordinal as usize, prelim_hits),
-                        &good_init_extends,
                     )
                     .map_err(|error| {
                         database_search_error(

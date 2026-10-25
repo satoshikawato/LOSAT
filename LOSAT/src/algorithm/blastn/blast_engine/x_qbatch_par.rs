@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_QBATCHPAR, shadow LOSAT_X_QBATCHPARSHADOW): blastn's query batches
+//! EXPERIMENT (LOSAT_X_QBATCHPAR): blastn's query batches
 //! searched side by side, ahead of the batch loop of `run_in_pool`.
 //!
 //! NCBI's blastn reads its queries in batches (`CBatchSizeMixer`, blastn_app.cpp:261-300): the
@@ -44,9 +44,8 @@
 //! batches taken so far; its error paths still call `finish` before they write. The batches still exposed past an
 //! error at batch j: before the error is known, the slots may have searched up to the plan's
 //! window (2k - 1 batches) past j; once it is known, at most k - 1 still run, and they are
-//! cancelled when the loop meets j. Slot panics are counted (`panicked=`), and in the shadow
-//! mode any slot panic, taken or not, is a difference. `LOSAT_TIMING` blocks are text in
-//! the batch's result, printed when the loop takes it.
+//! cancelled when the loop meets j. Slot panics are counted (`panicked=`). `LOSAT_TIMING` blocks
+//! are text in the batch's result, printed when the loop takes it.
 //!
 //! Cancellation: a slot's search gets a flag through its pool (`SearchPool::x_with_ext`,
 //! `Cancel`), which `search_query_batch` reads at its start, between subjects, between subject
@@ -69,8 +68,6 @@
 //! Active threads: the slots use `k x m <= n` threads. The loop's thread waits while a slot
 //! searches its batch. The loop searches a batch on the whole pool only when no slot is running
 //! and none can start (the first batch, and every batch once the search does not speculate).
-//! `LOSAT_X_QBATCHPARSHADOW` searches every batch on the loop as well, on the whole pool, while
-//! the slots run (a test mode; more than n threads are active then).
 //!
 //! Off (the loop as before): switch off; a build without `parallel`, or wasm32; one thread;
 //! a BLAST database (`-db`); `-verbose`, `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`,
@@ -115,10 +112,8 @@
 //! printed to three decimals, the value the 0.97 gate compares (`slots_pay`), `-` when the model
 //! did not run; peak_mib: the most memory admitted at once; off: why the search did not, or stopped to,
 //! speculate, `none` if it never stopped).
-//! Without `LOSAT_X_STATS` the switch writes nothing of its own. With the shadow,
-//! `[X_SHADOW] QBATCHPAR batches= compared= diffs= panicked= mispredicted= wasted=`; the first difference
-//! prints it and panics. `LOSAT_X_QBATCHPARMISS=N` (test only) corrupts every N-th prediction so
-//! that the discard, replan and guard paths run.
+//! Without `LOSAT_X_STATS` the switch writes nothing of its own. `LOSAT_X_QBATCHPARMISS=N` (test
+//! only) corrupts every N-th prediction so that the discard, replan and guard paths run.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-300
 //! ```c++
@@ -171,10 +166,8 @@ const SLOT_STACK_BYTES: usize = 8 << 20;
 /// code path and change no value NCBI computes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Switches {
-    /// `LOSAT_X_QBATCHPAR` (a strict-set switch: on unless it is `0`), or the shadow.
+    /// `LOSAT_X_QBATCHPAR` (a strict-set switch: on unless it is `0`).
     pub on: bool,
-    /// `LOSAT_X_QBATCHPARSHADOW` (any value; implies the switch).
-    pub shadow: bool,
     /// `LOSAT_X_STATS` (any value): the summary line.
     pub stats: bool,
     /// `LOSAT_X_QBATCHPARMEM`: the budget of the batches in flight beyond the loop's, in MiB.
@@ -194,10 +187,8 @@ impl Switches {
                 .ok()
                 .and_then(|value| value.trim().parse::<u64>().ok())
         };
-        let shadow = std::env::var_os("LOSAT_X_QBATCHPARSHADOW").is_some();
         Switches {
-            on: shadow || crate::utils::xswitch::on("LOSAT_X_QBATCHPAR"),
-            shadow,
+            on: crate::utils::xswitch::on("LOSAT_X_QBATCHPAR"),
             stats: std::env::var_os("LOSAT_X_STATS").is_some(),
             mem_mib: number("LOSAT_X_QBATCHPARMEM"),
             slots: number("LOSAT_X_QBATCHPARSLOTS")
@@ -878,9 +869,8 @@ struct State<T> {
     /// Finished or cancelled batches dropped unused, and how many of them were cancelled.
     discarded: u64,
     cancelled: u64,
-    /// Slot batches that panicked (kept for the loop or dropped), and the first one's messages.
+    /// Slot batches that panicked (kept for the loop or dropped).
     panicked: u64,
-    first_panic: Option<String>,
     /// The most slots searching at once, and the most memory admitted at once.
     peak_busy: usize,
     peak_bytes: u64,
@@ -901,7 +891,6 @@ impl<T> State<T> {
             discarded: 0,
             cancelled: 0,
             panicked: 0,
-            first_panic: None,
             peak_busy: 0,
             peak_bytes: 0,
             alive: 0,
@@ -952,8 +941,6 @@ pub(super) struct Stats {
     pub estimate_mib: u64,
     pub waste_bound: u64,
     pub off: Option<Off>,
-    pub compared: u64,
-    pub diffs: u64,
 }
 
 /// What the run's counters were at the end, with the executor's own.
@@ -1072,35 +1059,17 @@ impl<T> Shared<T> {
             stats.off.map_or("none", Off::name)
         )
     }
-
-    /// `[X_SHADOW] QBATCHPAR ...`
-    pub(super) fn shadow_line(&self) -> String {
-        let summary = self.summary();
-        let stats = summary.stats;
-        format!(
-            "[X_SHADOW] QBATCHPAR batches={} compared={} diffs={} panicked={} mispredicted={} wasted={}",
-            stats.batches,
-            stats.compared,
-            stats.diffs,
-            summary.panicked,
-            stats.mispredicted,
-            summary.discarded
-        )
-    }
 }
 
 impl<T> Drop for Shared<T> {
-    // No NCBI counterpart: the summary lines at the end of a search: the counters with
-    // LOSAT_X_STATS (as the other counters of the tree), the shadow's line with the shadow.
+    // No NCBI counterpart: the summary line at the end of a search: the counters with
+    // LOSAT_X_STATS (as the other counters of the tree).
     fn drop(&mut self) {
         if !self.switches.on || std::thread::panicking() {
             return;
         }
         if self.switches.stats {
             eprintln!("{}", self.stats_line());
-        }
-        if self.switches.shadow {
-            eprintln!("{}", self.shadow_line());
         }
     }
 }
@@ -1187,11 +1156,6 @@ where
         }
     }
 
-    /// Whether the loop also searches every batch it takes from a slot, and compares.
-    pub(super) fn shadow(&self) -> bool {
-        self.shared.switches.shadow && self.phase == Phase::Active
-    }
-
     /// Whether a slot may still search a batch of this search: `false` once the driver is off
     /// (nothing starts any more, and `take` has waited for the slots to be idle), and before the
     /// first commit when no slot can start: without `LOSAT_X_QBATCHPARSLOTS`, `choose_slots`
@@ -1275,45 +1239,6 @@ where
         None
     }
 
-    /// The shadow: the loop's own result of a batch taken from a slot equals the slot's
-    /// (`compare` gives the first difference); the first difference prints the shadow line and
-    /// panics.
-    pub(super) fn shadow_check(
-        &mut self,
-        key: BatchKey,
-        precomputed: &T,
-        reference: &T,
-        compare: impl Fn(&T, &T) -> Result<(), String>,
-    ) {
-        self.stats.compared += 1;
-        if let Err(difference) = compare(precomputed, reference) {
-            self.stats.diffs += 1;
-            self.flush();
-            eprintln!("{}", self.shared.shadow_line());
-            panic!("[X_SHADOW] QBATCHPAR batch {key:?}: {difference}");
-        }
-        self.flush();
-    }
-
-    /// The shadow: a slot's batch that panicked, kept for the loop or dropped, is a difference;
-    /// the first one prints the shadow line and panics with the batch's message (in the release
-    /// profile, which aborts on a panic, the slot's panic has already ended the process).
-    fn shadow_panics(&mut self) {
-        if !self.shared.switches.shadow || self.stats.diffs > 0 {
-            return;
-        }
-        let first = {
-            let state = self.shared.lock();
-            (state.panicked > 0).then(|| state.first_panic.clone().unwrap_or_default())
-        };
-        if let Some(message) = first {
-            self.stats.diffs += 1;
-            self.flush();
-            eprintln!("{}", self.shared.shadow_line());
-            panic!("[X_SHADOW] QBATCHPAR a batch searched by a slot panicked: {message}");
-        }
-    }
-
     /// Batch `key` is done in the loop with `gie` successful initial extensions; `mixer` is the
     /// loop's mixer after it (`None` with `BATCH_SIZE`) and `next_size` the next batch's size.
     pub(super) fn commit(
@@ -1325,7 +1250,6 @@ where
     ) {
         self.stats.batches += 1;
         self.commits += 1;
-        self.shadow_panics();
         let searched = self
             .input
             .query_input
@@ -1411,8 +1335,6 @@ where
         }
         if started && !std::thread::panicking() {
             check_no_global_pool();
-            // The shadow: every panic of a slot's batch, taken or not, is a difference.
-            self.shadow_panics();
         }
         self.flush();
     }
@@ -1804,11 +1726,8 @@ fn settle<T: SlotResult>(
     flagged: bool,
 ) -> Option<Outcome<T>> {
     state.running[slot] = None;
-    if let Outcome::Panic(_, messages) = &outcome {
+    if matches!(&outcome, Outcome::Panic(..)) {
         state.panicked += 1;
-        if state.first_panic.is_none() {
-            state.first_panic = Some(messages.concat());
-        }
     }
     let wanted =
         !state.shutdown && state.wanted.contains(&job.key) && !state.done.contains_key(&job.key);
@@ -2695,7 +2614,6 @@ mod tests {
         let panic = Outcome::Panic(Box::new("boom"), vec!["message\n".to_string()]);
         assert!(settle(&mut state, 0, job_at(1), panic, 0, false).is_none());
         assert_eq!(state.panicked, 1);
-        assert_eq!(state.first_panic.as_deref(), Some("message\n"));
         assert!(state.done.contains_key(&key_at(1)));
         assert!(
             state.queue.is_empty(),
@@ -3250,35 +3168,6 @@ mod tests {
                 bounded.line
             );
             assert!(bounded.summary.stats.precomputed > 0, "{}", bounded.line);
-        }
-
-        // Review R3: in the shadow mode a slot's panic is a difference even when its batch is
-        // dropped (here past an error at batch 10): the loop stops with the shadow's panic.
-        #[test]
-        fn the_shadow_fails_on_a_dropped_slot_panic() {
-            let lengths = vec![100; 40];
-            let switches = Switches {
-                shadow: true,
-                slots: Some(4),
-                ..on()
-            };
-            let fakes = Fakes {
-                fail: Some(10),
-                panic: Some(12),
-                fail_waits_for_panic: true,
-                ..Fakes::default()
-            };
-            let caught = std::panic::catch_unwind(|| run(&lengths, Some(100), 4, switches, fakes));
-            let payload = caught.expect_err("the shadow fails on the slot's panic");
-            let message = payload
-                .downcast_ref::<String>()
-                .cloned()
-                .unwrap_or_default();
-            assert!(
-                message.starts_with("[X_SHADOW] QBATCHPAR a batch searched by a slot panicked"),
-                "{message}"
-            );
-            assert!(message.contains("fake batch panic at 12"), "{message}");
         }
 
         // The model keeps the loop where slots would not be 3 % faster: 9 planned batches at 4

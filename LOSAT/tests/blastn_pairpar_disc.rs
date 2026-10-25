@@ -8,10 +8,8 @@
 //! scan and fold of the reference code. So the property under test is that the report does not
 //! depend on it: for every discontiguous template (word size 11 and 12; coding, optimal, and
 //! both templates; lengths 16, 18 and 21) the search with the switch at 1, 2 and 4 threads
-//! gives the bytes of the search without it, and the shadow run
-//! (`LOSAT_X_PAIRPARDISCSHADOW`, which computes the stage on copies and compares the hit list
-//! and the whole diagonal hash with the reference code for every chunk) gives them too and
-//! compares at least one chunk. That those bytes equal NCBI's is the business of the dc-megablast
+//! gives the bytes of the search without it, and the stage took the search's chunks
+//! (`LOSAT_X_REACH`). That those bytes equal NCBI's is the business of the dc-megablast
 //! fixtures (`tests/blastn_regression_fixtures.py`, `dc.*`).
 //!
 //! The input is one subject (the stage takes a search of one subject by the owner of a pool of
@@ -20,6 +18,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod reach_support;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
 /// `0`, the default before, unless the search sets it: every search here runs as it was written,
@@ -42,7 +42,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
 ];
 
 const SWITCH: (&str, &str) = ("LOSAT_X_PAIRPARDISC", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_PAIRPARDISCSHADOW", "1");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -84,8 +83,7 @@ fn blastn(task_args: &[&str], threads: u32, switches: &[(&str, &str)]) -> (Vec<u
 }
 
 /// For one template: the search without the switch at one thread, then with the switch at 1, 2
-/// and 4 threads (the same bytes, nothing on standard error), then the shadow at 4 threads (the
-/// same bytes, and its summary line with at least one chunk compared).
+/// and 4 threads (the same bytes, nothing on standard error, the stage took the search).
 fn check_template(template: &[&str]) {
     let mut task_args = vec!["-task", "dc-megablast"];
     task_args.extend_from_slice(template);
@@ -93,27 +91,18 @@ fn check_template(template: &[&str]) {
     assert!(!expected.is_empty(), "{template:?}: no hits");
     assert_eq!(expected_stderr, "", "{template:?}");
     for threads in [1, 2, 4] {
-        let (report, stderr) = blastn(&task_args, threads, &[SWITCH]);
+        let reach = reach_support::Reach::new("pairpardisc");
+        let (report, stderr) = blastn(&task_args, threads, &[SWITCH, reach.var()]);
         assert!(
             report == expected,
             "{template:?} threads {threads}: the report differs with {SWITCH:?}"
         );
         assert_eq!(stderr, "", "{template:?} threads {threads}");
+        assert!(
+            reach.sides("LOSAT_X_PAIRPARDISC").0,
+            "{template:?} threads {threads}: the stage took no chunk"
+        );
     }
-    let (report, stderr) = blastn(&task_args, 4, &[SHADOW]);
-    assert!(
-        report == expected,
-        "{template:?}: the report differs with {SHADOW:?}"
-    );
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with("[X_PAIRPARDISCSHADOW] blastn: seed chunks equal="))
-        .unwrap_or_else(|| panic!("{template:?}: no summary line:\n{stderr}"));
-    assert!(
-        !line.starts_with("[X_PAIRPARDISCSHADOW] blastn: seed chunks equal=0 "),
-        "{template:?}: {line}"
-    );
-    assert_eq!(stderr.lines().count(), 1, "{template:?}: {stderr}");
 }
 
 /// The `chunks=` count of the stage's `LOSAT_TIMING` line (`[TIMING] x_pairpardisc_seed:
@@ -294,13 +283,12 @@ fn contiguous_tables_are_not_taken() {
     assert!(!output.status.success());
     let task_args = ["-task", "megablast"];
     let (expected, _) = blastn(&task_args, 4, &[]);
-    let (report, stderr) = blastn(&task_args, 4, &[SWITCH]);
+    let reach = reach_support::Reach::new("pairpardisc-contiguous");
+    let (report, stderr) = blastn(&task_args, 4, &[SWITCH, reach.var()]);
     assert!(report == expected, "megablast with {SWITCH:?}");
     assert_eq!(stderr, "");
-    let (report, stderr) = blastn(&task_args, 4, &[SHADOW]);
-    assert!(report == expected, "megablast with {SHADOW:?}");
-    assert_eq!(
-        stderr.trim_end(),
-        "[X_PAIRPARDISCSHADOW] blastn: seed chunks equal=0 (ungapped hits 0, hash cells 0)"
+    assert!(
+        !reach.sides("LOSAT_X_PAIRPARDISC").0,
+        "megablast: the stage took a contiguous table"
     );
 }

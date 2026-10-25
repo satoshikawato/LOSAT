@@ -253,12 +253,9 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastn::x_link_window_print_summary();
     LOSAT::algorithm::blastn::x_subject_store_print_summary();
     LOSAT::algorithm::blastn::x_query_dust_par_print_summary();
-    LOSAT::algorithm::blastn::x_ungap_count_print_summary();
     LOSAT::algorithm::blastn::x_greedy_row_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_query_prep_par_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_qgroup_par_print_summary();
-    LOSAT::algorithm::blastn::blast_engine::x_db_cut_print_summary();
-    LOSAT::algorithm::blastn::blast_engine::x_db_stream_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_tb_range_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_lut_drop_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_query_drop_print_summary();

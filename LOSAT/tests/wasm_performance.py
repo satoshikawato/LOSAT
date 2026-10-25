@@ -406,7 +406,6 @@ def environment(manifest, diagnostic=False):
         {
             "NODE_NO_WARNINGS": "1",
             "LOSAT_WASI_THREAD_CAP": str(manifest["measurement"]["host_cap"]),
-            "LOSAT_WASM_MEMORY_MAXIMUM_PAGES": "16384",
         }
     )
     if diagnostic:

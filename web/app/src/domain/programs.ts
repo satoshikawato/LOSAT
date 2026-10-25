@@ -117,6 +117,7 @@ const compBasedStats: ParameterField = {
 // Filters and Masking.
 const seg: ParameterField = { flag: '-seg', label: 'Low complexity regions filter (SEG)', kind: 'text', suggestions: ['no', 'yes'] };
 const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag' };
+const softMasking: ParameterField = { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean' };
 // Other Parameters: LOSAT's options that NCBI's page does not show.
 const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subject', ...integer };
 const threshold: ParameterField = { flag: '-threshold', label: 'Neighboring words threshold', ...decimal };
@@ -229,7 +230,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       },
       { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats] },
-      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg] },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking] },
       { title: OTHER, placement: 'algorithm', fields: [threshold, windowSize, maxHsps] },
     ],
   },
@@ -262,7 +263,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: 'Filters and Masking',
         placement: 'algorithm',
-        fields: [seg, { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean' }, lcaseMasking],
+        fields: [seg, softMasking, lcaseMasking],
       },
       {
         title: OTHER,
@@ -295,7 +296,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         // NCBI's "Max matches in a query range" (HSP_RANGE_MAX) is BLAST+'s -culling_limit.
         fields: [maxTargetSeqs, evalue, wordSize, { flag: '-culling_limit', label: 'Max matches in a query range', ...integer }],
       },
-      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg] },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking] },
       { title: OTHER, placement: 'algorithm', fields: [threshold, windowSize] },
     ],
   },

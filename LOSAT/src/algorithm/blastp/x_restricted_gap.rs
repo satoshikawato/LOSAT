@@ -262,7 +262,7 @@ fn x_score_tables(score_matrix: BlastpScoreMatrix<'_>) -> Option<&'static XScore
         }
         Some(t)
     }
-    static TABLES: [OnceLock<Option<Box<XScoreTables>>>; 9] = [const { OnceLock::new() }; 9];
+    static TABLES: [OnceLock<Option<Box<XScoreTables>>>; 10] = [const { OnceLock::new() }; 10];
     let slot = match score_matrix {
         BlastpScoreMatrix::Blosum62 => 0,
         BlastpScoreMatrix::Standard(m) => match m {
@@ -274,6 +274,7 @@ fn x_score_tables(score_matrix: BlastpScoreMatrix<'_>) -> Option<&'static XScore
             ScoringMatrix::Pam30 => 6,
             ScoringMatrix::Pam70 => 7,
             ScoringMatrix::Pam250 => 8,
+            ScoringMatrix::Identity => 9,
         },
         // A composition-adjusted matrix belongs to one subject; the preliminary stage does not
         // use one (`BlastpScoreMatrix::standard`).

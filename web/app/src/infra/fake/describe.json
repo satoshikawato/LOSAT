@@ -258,6 +258,11 @@
     "takes_value": true
    },
    {
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks [default: false]",
+    "takes_value": true
+   },
+   {
     "flag": "-use_sw_tback",
     "help": "",
     "takes_value": false,
@@ -547,6 +552,11 @@
     "help": "SEG: no, yes, or WINDOW LOCUT HICUT",
     "takes_value": true,
     "default": "12 2.2 2.5"
+   },
+   {
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks [default: false]",
+    "takes_value": true
    },
    {
     "flag": "-window_size",

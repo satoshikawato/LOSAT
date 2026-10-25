@@ -359,6 +359,7 @@ export LOSAT_X_BPUNGAP=1
 export LOSAT_X_BPUNGAPSENT=1
 export LOSAT_X_BXCHUNKFLOW=1
 export LOSAT_X_BXCROSS=1
+export LOSAT_X_BXCROSSDEFER=1
 export LOSAT_X_BXDBSTREAM=256
 export LOSAT_X_BXDEFER=1
 export LOSAT_X_BXDIAG=1
@@ -5443,6 +5444,38 @@ Scheduling (each value computed by one thread with the original function; order 
   (and results/fab against 32a63700). Design and timings: v4-A14 results/p2 (DESIGN_cross.md), results/p3
   (DESIGN_s3.md: round 2) and results/p4 (DESIGN_s4.md: round 3, r1's loops with a constant chunk, two arrays,
   the windows with a repeated entry out of line).
+- `LOSAT_X_BXCROSSDEFER=1` (BLASTX, speed; in the strict set since 2026-10-25, from the pull request that
+  added it (perf/bx-cross-defer; v4-A14 DECISIONS 26-27): `=0` turns it off; acts where `LOSAT_X_BXCROSS`'s cell
+  test runs, on every table blastx's fused loop takes on an x86-64 CPU with AVX2 and POPCNT) `LOSAT_X_BXCROSS`'s
+  drain defers the candidate calls of each unit (a batch, or a part of a window with a repeated entry) to the
+  unit that next reads one of their entries, or to the end of the drain (`blastp/x_seed_fused.rs`,
+  `x_cross_drain` with `DEFER`, exactness argument in its header). A unit's candidate lanes store a marker
+  (raw `0xFFFFFFFF`: flag 1, last_hit -1) in place of the entry they read, and the unit's entries, first
+  staged hit and candidate lanes go to a record past the stage (written without a branch). A unit that reads the
+  marker stops before it stores, the deferred calls are made in order (each entry first given back the value
+  its unit read) and the unit runs again from the loop's head, so no value of the batch is live across the
+  calls; the calls left are made after the drain's last window, before the last hits are tested or moved. A
+  stored value equal to the marker (a flagged last_hit of -1, which a call writes only near offsets of 2^31)
+  met with no call deferred is taken as a value: the unit runs with its calls at once, so any table gives the
+  same calls. Why it pays: the candidate branch of each batch was the drain's main misprediction (28 of 127
+  issued uops per batch squashed, v4-A14 s7); on dense tables a later unit reads a deferred candidate's entry
+  0.017-0.029 times per batch and 5.5-7.2 candidates are deferred between two such reads (v4-A14 s8 probe,
+  results/s8c). With `LOSAT_TIMING=1` the `blastx_diag` line names `mode=avx2-cross-defer` (`=0`:
+  `mode=avx2-cross`). Tests: `tests/blastx_diag.rs` compares the default's and `=0`'s reports with the
+  reference's (every search, the built-in `LOSAT_X_BXDIAGMIN` and every table fused) and checks the mode the
+  timing line names; the unit tests compare both arms with the per-hit test (the chunks of 1,024 and 64,
+  random and edge tables, which hold the marker's value) and count the units that met the marker with calls
+  deferred and with none. Measured 2026-10-24 on the workstation (`perf stat` user-space cycles, one physical
+  core of node 0 with its HT sibling idle, warmed 3 s before every run, load 4-21 on the other cores; paired
+  arms, arm order reversed every other round, medians of the per-round ratios), the prototype against `dev`
+  4c9ba700: a 50-kb piece of the fly genome x the fly proteome (`-db`, `-evalue 1e-5`) x0.961 (0.934-0.970, 8
+  rounds), 201 reads x Swiss-Prot (`-db`) x0.979 (6), 50 fly cDNAs x the yeast proteome x0.983 (10), AP027131 x
+  AP027133 proteins (`-subject`, `-query_gencode 4`) x0.994 (10), one 2.1-kb fly cDNA x the fly proteome (6.77
+  hits per used cell, fused by `LOSAT_X_BXDIAGMIN` 670) x0.982 (3), and 300 UniRef50 reads (the direct loop)
+  x0.999 with the same instructions; instructions +3-5 and branch misses -0.08 to -0.15 per batch; every report
+  and every `blastx_diag` count identical between the arms, max RSS unchanged. The record space is 41 KiB per
+  thread (the stage's 8 KiB without it). Design and timings: v4-A14 results/s8c, s8ab1 (a first form with the
+  calls inside the loop: spills, x0.99-1.02) and s8ab2.
 - BXSCANBF (graduated 2026-10-26; no variable; always on) (BLASTX, speed; in the strict set from 2026-10-17, by
   the Owner's decision of that day (perf-si-20261012 DECISIONS 175) on the timings below; the scan on the
   presence test went with the variable; acts where the standard lookup table is scanned by the

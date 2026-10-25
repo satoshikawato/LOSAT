@@ -1497,9 +1497,6 @@ struct XHitCtx<'a> {
     cutoff_scores: &'a [i32],
     x_dropoff_per_context: &'a [i32],
     subject: &'a [u8],
-    /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the frame's buffer `[0, subject.., 0]` when the
-    /// extensions take the walks the sentinels stop (`x_tbx_sent_subject`), else empty.
-    subject_sent: &'a [u8],
     s_f_idx: usize,
     s_frame: i8,
     s_idx: usize,
@@ -2419,7 +2416,12 @@ impl XPairPar {
     ) -> Vec<InitHSP> {
         let mut probe = std::mem::take(P::slot(scratch));
         let mut init_hsps: Vec<InitHSP> = Vec::new();
-        self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut init_hsps, &mut probe);
+        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): as in `scan_unit_or_bf`.
+        if self.x_unit_sent(unit, inp) {
+            self.scan_unit_sent::<_, _, PF>(unit, inp, scratch, &mut init_hsps, &mut probe);
+        } else {
+            self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut init_hsps, &mut probe);
+        }
         *P::slot(scratch) = probe;
         init_hsps
     }
@@ -2523,7 +2525,12 @@ impl XPairPar {
         let mut records = std::mem::take(&mut scratch.records);
         records.clear();
         let mapped = self.x_unit_records(unit, scratch, &mut records);
-        self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut records, &mut probe);
+        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): as in `scan_unit_or_bf`.
+        if self.x_unit_sent(unit, inp) {
+            self.scan_unit_sent::<_, _, PF>(unit, inp, scratch, &mut records, &mut probe);
+        } else {
+            self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut records, &mut probe);
+        }
         let exact = x_unit_copy(&records, mapped);
         scratch.records = records;
         *P::slot(scratch) = probe;
@@ -2549,15 +2556,32 @@ impl XPairPar {
         init_hsps: &mut S,
         probe: &mut P,
     ) {
-        self.scan_unit_hits::<S, P, PF, false>(unit, inp, scratch, init_hsps, probe);
+        self.scan_unit_hits::<S, P, PF, false, false>(unit, inp, scratch, init_hsps, probe);
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT, extension/x_two_hit_fast.rs): the units `x_unit_sent`
+    // accepts run this instance, a function of its own, so that the code of `scan_unit` where it
+    // is inlined stays the code before the switch.
+    /// `scan_unit` with the extensions of `extend_hit_two_hit_sent`.
+    #[inline(never)]
+    pub(super) fn scan_unit_sent<S: XInitSink, P: XProbe, const PF: bool>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+        probe: &mut P,
+    ) {
+        self.scan_unit_hits::<S, P, PF, false, true>(unit, inp, scratch, init_hsps, probe);
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
     // `x_hits_bf`, which takes the too-far and overlap outcomes of `x_hit` without a branch and
     // hands the others to `x_hit`; without it this is the loop before the switch. `BF` runs only
     // with `XNoProbe` (the probes count every outcome) and where `x_tbx_hitbf::fits` holds.
-    /// `scan_unit`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF.
-    fn scan_unit_hits<S: XInitSink, P: XProbe, const PF: bool, const BF: bool>(
+    /// `scan_unit`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF and with `SENT` the
+    /// extensions of `extend_hit_two_hit_sent` (LOSAT_X_TBXUNGAPSENT).
+    fn scan_unit_hits<S: XInitSink, P: XProbe, const PF: bool, const BF: bool, const SENT: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -2567,12 +2591,11 @@ impl XPairPar {
     ) {
         // EXPERIMENT (LOSAT_X_TBXUNITMASK): the masked table where the rule holds (module doc).
         match self.x_unit_mask(unit, inp.window) {
-            None => self.scan_unit_cells::<S, P, XUnmasked, PF, BF>(
+            None => self.scan_unit_cells::<S, P, XUnmasked, PF, BF, SENT>(
                 unit, inp, scratch, init_hsps, probe, 0,
             ),
-            Some(mask) => {
-                self.scan_unit_masked::<S, P, PF, BF>(unit, inp, scratch, init_hsps, probe, mask)
-            }
+            Some(mask) => self
+                .scan_unit_masked::<S, P, PF, BF, SENT>(unit, inp, scratch, init_hsps, probe, mask),
         }
     }
 
@@ -2580,7 +2603,13 @@ impl XPairPar {
     // unmasked form inlined into `scan_unit_hits` keeps the code it had before the switch.
     /// `scan_unit_cells` with `XMasked`.
     #[inline(never)]
-    fn scan_unit_masked<S: XInitSink, P: XProbe, const PF: bool, const BF: bool>(
+    fn scan_unit_masked<
+        S: XInitSink,
+        P: XProbe,
+        const PF: bool,
+        const BF: bool,
+        const SENT: bool,
+    >(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -2589,7 +2618,23 @@ impl XPairPar {
         probe: &mut P,
         mask: u32,
     ) {
-        self.scan_unit_cells::<S, P, XMasked, PF, BF>(unit, inp, scratch, init_hsps, probe, mask);
+        self.scan_unit_cells::<S, P, XMasked, PF, BF, SENT>(
+            unit, inp, scratch, init_hsps, probe, mask,
+        );
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): never on wasm32 (line W keeps its walks there).
+    /// Whether the extensions of `unit` take the walks the sentinels stop: the batch's contexts
+    /// allow them (`sent`) and the unit's chunk is its whole subject frame.
+    #[inline(always)]
+    pub(super) fn x_unit_sent(&self, unit: &XUnit, inp: &XSubject<'_>) -> bool {
+        cfg!(not(target_arch = "wasm32"))
+            && x_tbx_sent_subject(
+                self.sent,
+                &inp.s_frames_preliminary[unit.f].aa_seq,
+                unit.chunk.offset,
+                unit.chunk.length,
+            )
     }
 
     // The statements of `scan_unit_hits` for one form of the unit's cells (`XCells`): with
@@ -2597,7 +2642,15 @@ impl XPairPar {
     // `mask + 1` cells and the masked cell of every hit.
     /// `scan_unit_hits` with the cells `C` (`mask`: the masked table's cells minus one).
     #[inline(always)]
-    fn scan_unit_cells<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bool>(
+    #[allow(clippy::too_many_arguments)]
+    fn scan_unit_cells<
+        S: XInitSink,
+        P: XProbe,
+        C: XCells,
+        const PF: bool,
+        const BF: bool,
+        const SENT: bool,
+    >(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -2664,7 +2717,6 @@ impl XPairPar {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
-            subject_sent: x_tbx_sent_subject(self.sent, subject_full, chunk.offset, chunk.length),
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -2691,7 +2743,7 @@ impl XPairPar {
             // [C] while (scan_range[1] <= scan_range[2])
             while scan_range[1] <= scan_range[2] {
                 // One batch per call (`x_unit_batch`: its own function on wasm32 only).
-                if !x_unit_batch::<S, P, C, PF, BF>(
+                if !x_unit_batch::<S, P, C, PF, BF, SENT>(
                     group,
                     subject,
                     &seq_ranges,
@@ -2734,7 +2786,14 @@ impl XPairPar {
 #[cfg_attr(target_arch = "wasm32", inline(never))]
 #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
 #[allow(clippy::too_many_arguments)]
-fn x_unit_batch<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bool>(
+fn x_unit_batch<
+    S: XInitSink,
+    P: XProbe,
+    C: XCells,
+    const PF: bool,
+    const BF: bool,
+    const SENT: bool,
+>(
     group: &XGroup,
     subject: &[u8],
     seq_ranges: &[(i32, i32)],
@@ -2782,7 +2841,7 @@ fn x_unit_batch<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bo
                 h.window,
                 h.wordsize,
                 |cell, query_offset, subject_offset| {
-                    x_hit(
+                    x_hit::<S, P, SENT>(
                         &mut *diag_ptr.add(cell),
                         query_offset,
                         subject_offset,
@@ -2829,7 +2888,7 @@ fn x_unit_batch<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bo
         // a masked one is at most the mask, width - 1.
         let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
         probe.at(diag_coord, subject_offset);
-        let outcome = x_hit(
+        let outcome = x_hit::<S, P, SENT>(
             diag_entry,
             query_offset,
             subject_offset,
@@ -2929,9 +2988,10 @@ fn x_unit_batch<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bo
 // saved (both read only local values, so the order is immaterial). The init HSP goes to the
 // caller's sink (today's `Vec<InitHSP>`, or the records of LOSAT_X_SEEDCOMPACT, section above
 // `XUnitHsp`), by the same push statement.
-/// The two-hit test and extension of one hit on its cell.
+/// The two-hit test and extension of one hit on its cell (`SENT`: LOSAT_X_TBXUNGAPSENT, the
+/// extension of `extend_hit_two_hit_sent`).
 #[inline(always)]
-fn x_hit<S: XInitSink, P: XProbe>(
+fn x_hit<S: XInitSink, P: XProbe, const SENT: bool>(
     diag_entry: &mut DiagStruct,
     query_offset: u32,
     subject_offset: u32,
@@ -2998,33 +3058,32 @@ fn x_hit<S: XInitSink, P: XProbe>(
         // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): the probe around the extension
         // (x_unit_probe.rs; `XNoProbe` does nothing). No NCBI counterpart.
         let mark = probe.ext_begin();
-        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the walks the sentinels stop where the unit's chunk
-        // is the whole frame (`subject_sent`); never on wasm32.
-        let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
-            if cfg!(target_arch = "wasm32") || h.subject_sent.is_empty() {
-                extend_hit_two_hit(
-                    query,
+        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): with `SENT` the walks the sentinels stop.
+        let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) = if !SENT {
+            extend_hit_two_hit(
+                query,
+                h.subject,
+                (last_hit + wordsize) as usize,
+                subject_offset as usize,
+                q_raw,
+                x_dropoff,
+                false,
+            )
+        } else {
+            // SAFETY: `SENT` runs on the units `x_unit_sent` accepts: the batch's contexts
+            // passed `x_tbx_sent_contexts` (XPairPar::sent) and the chunk `h.subject` is the
+            // whole frame of a buffer with its sentinels (`x_tbx_sent_subject`).
+            unsafe {
+                extend_hit_two_hit_sent(
+                    query_full,
                     h.subject,
                     (last_hit + wordsize) as usize,
                     subject_offset as usize,
                     q_raw,
                     x_dropoff,
-                    false,
                 )
-            } else {
-                // SAFETY: the batch's contexts passed `x_tbx_sent_contexts` (XPairPar::sent) and
-                // `subject_sent` is what `x_tbx_sent_subject` returned for this chunk.
-                unsafe {
-                    extend_hit_two_hit_sent(
-                        query_full,
-                        h.subject_sent,
-                        (last_hit + wordsize) as usize,
-                        subject_offset as usize,
-                        q_raw,
-                        x_dropoff,
-                    )
-                }
-            };
+            }
+        };
         probe.ext_end(
             mark,
             query,
@@ -3462,7 +3521,6 @@ mod tests {
                     cutoff_scores,
                     x_dropoff_per_context,
                     subject,
-                    subject_sent: &[],
                     s_f_idx: f,
                     s_frame: s_frame.frame,
                     s_idx: 0,
@@ -3488,7 +3546,7 @@ mod tests {
                         {
                             aliased += 1;
                         }
-                        let outcome = x_hit(
+                        let outcome = x_hit::<_, _, false>(
                             &mut diag_array[cell],
                             pair.q_off,
                             pair.s_off,
@@ -4133,7 +4191,7 @@ mod tests {
                 exact_fits += usize::from(mask as usize + 1 == pp.extents[g] + window as usize);
                 wide_groups += usize::from(group_starts(&contexts).len() < contexts.len());
                 let mut want: Vec<InitHSP> = Vec::new();
-                plain.scan_unit_hits::<_, XNoProbe, false, false>(
+                plain.scan_unit_hits::<_, XNoProbe, false, false, false>(
                     &unit,
                     &inp,
                     &mut scratch,
@@ -4156,28 +4214,28 @@ mod tests {
                 for name in ["scan", "scan pf", "bf", "bf pf"] {
                     let mut got: Vec<InitHSP> = Vec::new();
                     match name {
-                        "scan" => pp.scan_unit_hits::<_, XNoProbe, false, false>(
+                        "scan" => pp.scan_unit_hits::<_, XNoProbe, false, false, false>(
                             &unit,
                             &inp,
                             &mut scratch,
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        "scan pf" => pp.scan_unit_hits::<_, XNoProbe, true, false>(
+                        "scan pf" => pp.scan_unit_hits::<_, XNoProbe, true, false, false>(
                             &unit,
                             &inp,
                             &mut scratch,
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        "bf" => pp.scan_unit_hits::<_, XNoProbe, false, true>(
+                        "bf" => pp.scan_unit_hits::<_, XNoProbe, false, true, false>(
                             &unit,
                             &inp,
                             &mut scratch,
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        _ => pp.scan_unit_hits::<_, XNoProbe, true, true>(
+                        _ => pp.scan_unit_hits::<_, XNoProbe, true, true, false>(
                             &unit,
                             &inp,
                             &mut scratch,
@@ -4190,7 +4248,7 @@ mod tests {
                 }
                 for (name, len) in [("batched", x_tbx_extbatch::BATCH), ("batched 1", 1)] {
                     let mut got: Vec<InitHSP> = Vec::new();
-                    pp.scan_unit_batched_hits::<_, false, false>(
+                    pp.scan_unit_batched_hits::<_, false, false, false>(
                         &unit,
                         &inp,
                         &mut scratch,
@@ -4199,7 +4257,7 @@ mod tests {
                     );
                     lists.push((name, got));
                     let mut got: Vec<InitHSP> = Vec::new();
-                    pp.scan_unit_batched_hits::<_, true, true>(
+                    pp.scan_unit_batched_hits::<_, true, true, false>(
                         &unit,
                         &inp,
                         &mut scratch,
@@ -4218,7 +4276,7 @@ mod tests {
                     == Some((mask as usize + 1) / 2)
                 {
                     let mut got: Vec<InitHSP> = Vec::new();
-                    control.scan_unit_hits::<_, XNoProbe, false, false>(
+                    control.scan_unit_hits::<_, XNoProbe, false, false, false>(
                         &unit,
                         &inp,
                         &mut scratch,

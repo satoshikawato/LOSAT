@@ -4198,10 +4198,10 @@ fn search_query_batch(
                 let mut stats = TblastxChunkScanStats::default();
                 let chunk_end = chunk.offset.saturating_add(chunk.length);
                 let subject = &subject_all[chunk.offset..chunk_end];
-                // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the frame's buffer when the chunk is the
-                // whole frame, else empty.
-                let subject_sent =
-                    x_tbx_sent_subject(tbx_sent, subject_full, chunk.offset, chunk.length);
+                // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the chunk's extensions take the walks the
+                // sentinels stop where it is the whole frame; never on wasm32.
+                let subject_sent = cfg!(not(target_arch = "wasm32"))
+                    && x_tbx_sent_subject(tbx_sent, subject_full, chunk.offset, chunk.length);
 
                 if subject.len() < wordsize as usize {
                     // NCBI still advances the diagonal table offset even when no hits can be found.
@@ -4483,7 +4483,7 @@ fn search_query_batch(
                                     score,
                                     right_extend,
                                     s_last_off_u,
-                                ) = if cfg!(target_arch = "wasm32") || subject_sent.is_empty() {
+                                ) = if !subject_sent {
                                     extend_hit_two_hit(
                                         query,
                                         subject,
@@ -4498,11 +4498,11 @@ fn search_query_batch(
                                     )
                                 } else {
                                     // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent)
-                                    // and `subject_sent` is `x_tbx_sent_subject`'s for this chunk.
+                                    // and `x_tbx_sent_subject` accepted the chunk (`subject_sent`).
                                     unsafe {
                                         extend_hit_two_hit_sent(
                                             query_full,
-                                            subject_sent,
+                                            subject,
                                             (last_hit + wordsize) as usize,
                                             subject_offset as usize,
                                             q_raw as usize,
@@ -4781,10 +4781,10 @@ fn search_query_batch(
                 let mut stats = TblastxChunkScanStats::default();
                 let chunk_end = chunk.offset.saturating_add(chunk.length);
                 let subject = &subject_all[chunk.offset..chunk_end];
-                // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the frame's buffer when the chunk is the
-                // whole frame, else empty.
-                let subject_sent =
-                    x_tbx_sent_subject(tbx_sent, subject_full, chunk.offset, chunk.length);
+                // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the chunk's extensions take the walks the
+                // sentinels stop where it is the whole frame; never on wasm32.
+                let subject_sent = cfg!(not(target_arch = "wasm32"))
+                    && x_tbx_sent_subject(tbx_sent, subject_full, chunk.offset, chunk.length);
 
                 if subject.len() < wordsize as usize {
                     // NCBI still advances the diagonal table offset even when no hits can be found.
@@ -4995,7 +4995,7 @@ fn search_query_batch(
                                     score,
                                     right_extend,
                                     s_last_off_u,
-                                ) = if cfg!(target_arch = "wasm32") || subject_sent.is_empty() {
+                                ) = if !subject_sent {
                                     extend_hit_two_hit(
                                         query,
                                         subject,
@@ -5010,11 +5010,11 @@ fn search_query_batch(
                                     )
                                 } else {
                                     // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent)
-                                    // and `subject_sent` is `x_tbx_sent_subject`'s for this chunk.
+                                    // and `x_tbx_sent_subject` accepted the chunk (`subject_sent`).
                                     unsafe {
                                         extend_hit_two_hit_sent(
                                             query_full,
-                                            subject_sent,
+                                            subject,
                                             (last_hit + wordsize) as usize,
                                             subject_offset as usize,
                                             q_raw as usize,

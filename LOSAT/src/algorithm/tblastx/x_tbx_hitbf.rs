@@ -354,7 +354,9 @@ unsafe fn x_hits_bf_run<C: XCells>(
 
 impl XPairPar {
     // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the units without probes (`run_unit`,
-    // `run_unit_compact`) by the switch and `fits`.
+    // `run_unit_compact`) by the switch and `fits`. EXPERIMENT (LOSAT_X_TBXUNGAPSENT): and by
+    // `x_unit_sent`, between instances in functions of their own, so that the instances without
+    // the switch keep the code they had before it.
     /// `scan_unit` without probes, or its branch-free hit loop.
     #[inline(always)]
     pub(super) fn scan_unit_or_bf<S: XInitSink, const PF: bool>(
@@ -364,8 +366,15 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
+        let sent = self.x_unit_sent(unit, inp);
         if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
-            self.scan_unit_bf::<S, PF>(unit, inp, scratch, init_hsps);
+            if sent {
+                self.scan_unit_bf::<S, PF, true>(unit, inp, scratch, init_hsps);
+            } else {
+                self.scan_unit_bf::<S, PF, false>(unit, inp, scratch, init_hsps);
+            }
+        } else if sent {
+            self.scan_unit_sent::<S, XNoProbe, PF>(unit, inp, scratch, init_hsps, &mut XNoProbe);
         } else {
             self.scan_unit::<S, XNoProbe, PF>(unit, inp, scratch, init_hsps, &mut XNoProbe);
         }
@@ -375,18 +384,25 @@ impl XPairPar {
     // units outside the switch run the instance of `scan_unit` without it.
     /// `scan_unit` with the branch-free hit loop.
     #[inline(never)]
-    fn scan_unit_bf<S: XInitSink, const PF: bool>(
+    fn scan_unit_bf<S: XInitSink, const PF: bool, const SENT: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        self.scan_unit_hits::<S, XNoProbe, PF, true>(unit, inp, scratch, init_hsps, &mut XNoProbe);
+        self.scan_unit_hits::<S, XNoProbe, PF, true, SENT>(
+            unit,
+            inp,
+            scratch,
+            init_hsps,
+            &mut XNoProbe,
+        );
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the batched scan (LOSAT_X_TBXEXTBATCH) by the
-    // switch and `fits`.
+    // switch and `fits`; EXPERIMENT (LOSAT_X_TBXUNGAPSENT): and by `x_unit_sent`, as
+    // `scan_unit_or_bf`.
     /// `scan_unit_batched` with full batches, or its branch-free hit loop.
     #[inline(always)]
     pub(super) fn scan_unit_batched_or_bf<S: XInitSink, const PF: bool>(
@@ -396,8 +412,15 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
+        let sent = self.x_unit_sent(unit, inp);
         if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
-            self.scan_unit_batched_bf::<S, PF>(unit, inp, scratch, init_hsps);
+            if sent {
+                self.scan_unit_batched_bf::<S, PF, true>(unit, inp, scratch, init_hsps);
+            } else {
+                self.scan_unit_batched_bf::<S, PF, false>(unit, inp, scratch, init_hsps);
+            }
+        } else if sent {
+            self.scan_unit_batched_sent::<S, PF>(unit, inp, scratch, init_hsps);
         } else {
             self.scan_unit_batched::<S, PF>(unit, inp, scratch, init_hsps, x_tbx_extbatch::BATCH);
         }
@@ -406,14 +429,14 @@ impl XPairPar {
     // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, as `scan_unit_bf`.
     /// `scan_unit_batched` with full batches and the branch-free hit loop.
     #[inline(never)]
-    fn scan_unit_batched_bf<S: XInitSink, const PF: bool>(
+    fn scan_unit_batched_bf<S: XInitSink, const PF: bool, const SENT: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        self.scan_unit_batched_hits::<S, PF, true>(
+        self.scan_unit_batched_hits::<S, PF, true, SENT>(
             unit,
             inp,
             scratch,
@@ -423,7 +446,8 @@ impl XPairPar {
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the scan in slices (LOSAT_X_TBXQSLICE) by the
-    // switch and `fits`.
+    // switch and `fits`; EXPERIMENT (LOSAT_X_TBXUNGAPSENT): and by `x_unit_sent`, as
+    // `scan_unit_or_bf`.
     /// `scan_unit_sliced` (batched extensions with `B`, the prefetch with `PF`), or its
     /// branch-free hit loop.
     #[inline(always)]
@@ -435,8 +459,15 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
+        let sent = self.x_unit_sent(unit, inp);
         if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
-            self.scan_unit_sliced_bf::<S, B, PF>(group, unit, inp, scratch, init_hsps);
+            if sent {
+                self.scan_unit_sliced_bf::<S, B, PF, true>(group, unit, inp, scratch, init_hsps);
+            } else {
+                self.scan_unit_sliced_bf::<S, B, PF, false>(group, unit, inp, scratch, init_hsps);
+            }
+        } else if sent {
+            self.scan_unit_sliced_sent::<S, B, PF>(group, unit, inp, scratch, init_hsps);
         } else {
             self.scan_unit_sliced::<S, B, PF>(group, unit, inp, scratch, init_hsps);
         }
@@ -445,7 +476,7 @@ impl XPairPar {
     // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, as `scan_unit_bf`.
     /// `scan_unit_sliced` with the branch-free hit loop.
     #[inline(never)]
-    fn scan_unit_sliced_bf<S: XInitSink, const B: bool, const PF: bool>(
+    fn scan_unit_sliced_bf<S: XInitSink, const B: bool, const PF: bool, const SENT: bool>(
         &self,
         group: &XSliced,
         unit: &XUnit,
@@ -453,7 +484,7 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        self.scan_unit_sliced_hits::<S, B, PF, true>(group, unit, inp, scratch, init_hsps);
+        self.scan_unit_sliced_hits::<S, B, PF, true, SENT>(group, unit, inp, scratch, init_hsps);
     }
 }
 
@@ -898,9 +929,9 @@ mod tests {
                     for pf in [false, true] {
                         let mut got: Vec<InitHSP> = Vec::new();
                         if pf {
-                            pp.scan_unit_bf::<_, true>(&unit, &inp, &mut scratch, &mut got);
+                            pp.scan_unit_bf::<_, true, false>(&unit, &inp, &mut scratch, &mut got);
                         } else {
-                            pp.scan_unit_bf::<_, false>(&unit, &inp, &mut scratch, &mut got);
+                            pp.scan_unit_bf::<_, false, false>(&unit, &inp, &mut scratch, &mut got);
                         }
                         assert_eq!(got, reference, "case {case} frame {f} group {g} pf {pf}");
                         assert!(
@@ -917,7 +948,7 @@ mod tests {
                         &mut compact_ref,
                         &mut XNoProbe,
                     );
-                    pp.scan_unit_bf::<_, false>(&unit, &inp, &mut scratch, &mut compact);
+                    pp.scan_unit_bf::<_, false, false>(&unit, &inp, &mut scratch, &mut compact);
                     assert_eq!(
                         compact, compact_ref,
                         "case {case} frame {f} group {g}: compact"
@@ -930,7 +961,7 @@ mod tests {
                     for len in [1, 3, 16] {
                         let mut got: Vec<InitHSP> = Vec::new();
                         if len == 3 {
-                            pp.scan_unit_batched_hits::<_, true, true>(
+                            pp.scan_unit_batched_hits::<_, true, true, false>(
                                 &unit,
                                 &inp,
                                 &mut scratch,
@@ -938,7 +969,7 @@ mod tests {
                                 len,
                             );
                         } else {
-                            pp.scan_unit_batched_hits::<_, false, true>(
+                            pp.scan_unit_batched_hits::<_, false, true, false>(
                                 &unit,
                                 &inp,
                                 &mut scratch,

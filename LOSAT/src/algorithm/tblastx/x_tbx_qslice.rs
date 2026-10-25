@@ -547,20 +547,37 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        self.scan_unit_sliced_hits::<S, B, PF, false>(group, unit, inp, scratch, init_hsps);
+        self.scan_unit_sliced_hits::<S, B, PF, false, false>(group, unit, inp, scratch, init_hsps);
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the instance of the units `x_unit_sent` accepts, a
+    // function of its own (`scan_unit_sent`).
+    /// `scan_unit_sliced` with the extensions of `extend_hit_two_hit_sent`.
+    #[inline(never)]
+    pub(super) fn scan_unit_sliced_sent<S: XInitSink, const B: bool, const PF: bool>(
+        &self,
+        group: &XSliced,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+    ) {
+        self.scan_unit_sliced_hits::<S, B, PF, false, true>(group, unit, inp, scratch, init_hsps);
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
     // `x_hits_bf`, which takes the too-far and overlap outcomes without a branch and hands the
     // others to `x_hit` (or `x_hit_batched` with `B`); without it this is the loop before the
     // switch. `BF` runs only where `x_tbx_hitbf::fits` holds.
-    /// `scan_unit_sliced`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF.
+    /// `scan_unit_sliced`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF and with `SENT` the
+    /// extensions of `extend_hit_two_hit_sent` (LOSAT_X_TBXUNGAPSENT).
     #[inline(always)]
     pub(super) fn scan_unit_sliced_hits<
         S: XInitSink,
         const B: bool,
         const PF: bool,
         const BF: bool,
+        const SENT: bool,
     >(
         &self,
         group: &XSliced,
@@ -604,7 +621,6 @@ impl XPairPar {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
-            subject_sent: x_tbx_sent_subject(self.sent, subject_full, chunk.offset, chunk.length),
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -683,7 +699,7 @@ impl XPairPar {
                                 wordsize,
                                 |cell, query_offset, subject_offset| {
                                     if B {
-                                        x_tbx_extbatch::x_hit_batched(
+                                        x_tbx_extbatch::x_hit_batched::<S, SENT>(
                                             diag_ptr,
                                             cell,
                                             query_offset,
@@ -693,7 +709,7 @@ impl XPairPar {
                                             init_hsps,
                                         );
                                     } else {
-                                        x_hit(
+                                        x_hit::<S, XNoProbe, SENT>(
                                             &mut *diag_ptr.add(cell),
                                             query_offset,
                                             subject_offset,
@@ -736,7 +752,7 @@ impl XPairPar {
                             // and subject_offset < s_len, so diag_coord < width =
                             // scratch.diag.len(); every candidate's cell is such a cell.
                             unsafe {
-                                x_tbx_extbatch::x_hit_batched(
+                                x_tbx_extbatch::x_hit_batched::<S, SENT>(
                                     diag_ptr,
                                     diag_coord,
                                     query_offset,
@@ -749,7 +765,7 @@ impl XPairPar {
                         } else {
                             // SAFETY: as above.
                             let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
-                            x_hit(
+                            x_hit::<S, XNoProbe, SENT>(
                                 diag_entry,
                                 query_offset,
                                 subject_offset,
@@ -764,7 +780,9 @@ impl XPairPar {
         }
         if B && b.pending() > 0 {
             // SAFETY: the candidates' cells are cells of this unit's table.
-            unsafe { x_tbx_extbatch::flush(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps) };
+            unsafe {
+                x_tbx_extbatch::flush::<S, SENT>(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps)
+            };
         }
     }
 }
@@ -929,16 +947,30 @@ mod tests {
         got: &mut S,
     ) {
         match variant {
-            0 => {
-                pp.scan_unit_sliced_hits::<_, false, false, false>(sliced, unit, inp, scratch, got)
-            }
-            1 => pp.scan_unit_sliced_hits::<_, false, true, false>(sliced, unit, inp, scratch, got),
-            2 => pp.scan_unit_sliced_hits::<_, true, false, false>(sliced, unit, inp, scratch, got),
-            3 => pp.scan_unit_sliced_hits::<_, true, true, false>(sliced, unit, inp, scratch, got),
-            4 => pp.scan_unit_sliced_hits::<_, false, false, true>(sliced, unit, inp, scratch, got),
-            5 => pp.scan_unit_sliced_hits::<_, false, true, true>(sliced, unit, inp, scratch, got),
-            6 => pp.scan_unit_sliced_hits::<_, true, false, true>(sliced, unit, inp, scratch, got),
-            _ => pp.scan_unit_sliced_hits::<_, true, true, true>(sliced, unit, inp, scratch, got),
+            0 => pp.scan_unit_sliced_hits::<_, false, false, false, false>(
+                sliced, unit, inp, scratch, got,
+            ),
+            1 => pp.scan_unit_sliced_hits::<_, false, true, false, false>(
+                sliced, unit, inp, scratch, got,
+            ),
+            2 => pp.scan_unit_sliced_hits::<_, true, false, false, false>(
+                sliced, unit, inp, scratch, got,
+            ),
+            3 => pp.scan_unit_sliced_hits::<_, true, true, false, false>(
+                sliced, unit, inp, scratch, got,
+            ),
+            4 => pp.scan_unit_sliced_hits::<_, false, false, true, false>(
+                sliced, unit, inp, scratch, got,
+            ),
+            5 => pp.scan_unit_sliced_hits::<_, false, true, true, false>(
+                sliced, unit, inp, scratch, got,
+            ),
+            6 => pp.scan_unit_sliced_hits::<_, true, false, true, false>(
+                sliced, unit, inp, scratch, got,
+            ),
+            _ => pp.scan_unit_sliced_hits::<_, true, true, true, false>(
+                sliced, unit, inp, scratch, got,
+            ),
         }
     }
 
@@ -1099,7 +1131,7 @@ mod tests {
                         &mut compact,
                     );
                     let mut compact_bf: Vec<XUnitHsp> = Vec::new();
-                    pp.scan_unit_sliced_hits::<_, true, false, true>(
+                    pp.scan_unit_sliced_hits::<_, true, false, true, false>(
                         &pp.sliced.as_ref().unwrap()[g],
                         &unit,
                         &inp,

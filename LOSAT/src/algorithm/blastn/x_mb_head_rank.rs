@@ -34,7 +34,7 @@
 //! present cells as `[X_HRANK] chains words= present= cells=`.
 
 use super::x_mb_lookup_par::Words;
-use super::{PvArrayType, PV_ARRAY_BTS};
+use super::{PvArrayType, BLAST2NA_MASK, PV_ARRAY_BTS};
 
 const K_COMPRESSION_FACTOR: usize = 2048;
 /// The places between the prefetch of a `ranks` element and its read, and between the prefetch
@@ -105,7 +105,8 @@ impl HeadRank {
 }
 
 /// The table's `ranks` and `heads`, `next_pos`, presence vector and helper counters (zeroed, of
-/// the fill's lengths).
+/// the fill's lengths). `ranks` and `heads` reuse the previous build's buffers (`SPARE`), as
+/// LOSAT_X_MBLUTKEEP keeps the chain table's `hashtable` from batch to batch.
 pub(super) fn serial(
     words: &Words<'_>,
     cells: usize,
@@ -114,20 +115,23 @@ pub(super) fn serial(
     pv_array_bts: usize,
     helper_array: &mut [u32],
 ) -> HeadRank {
+    assert!(in_range(words, next_pos.len(), helper_array.len()) && cells == 1 << 24);
     let t0 = std::time::Instant::now();
-    let mut ranks = vec![0u64; cells >> 5];
-    let mut n_words = 0usize;
-    super::x_bn_csr::each_word(words, |cell, q_off_1| {
-        next_pos[q_off_1 as usize] = cell as u32 + 1;
-        ranks[cell >> 5] |= 1u64 << (cell & 31);
-        let h = &mut helper_array[cell / K_COMPRESSION_FACTOR];
-        *h = h.wrapping_add(1);
-        n_words += 1;
-    });
+    let (mut ranks, mut heads) = SPARE
+        .lock()
+        .map(|mut s| s.take())
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    ranks.clear();
+    ranks.resize(cells >> 5, 0);
+    // SAFETY: `in_range` holds (`plan`).
+    let n_words = unsafe { marks(words, &mut ranks, next_pos, helper_array) };
     let t1 = std::time::Instant::now();
     let present = sums(&mut ranks, pv_array, pv_array_bts, helper_array);
     let t2 = std::time::Instant::now();
-    let mut heads = vec![0u32; present];
+    heads.clear();
+    heads.resize(present, 0);
     apply(&ranks, &mut heads, next_pos);
     let t3 = std::time::Instant::now();
     if trace() {
@@ -144,6 +148,134 @@ pub(super) fn serial(
         );
     }
     HeadRank { ranks, heads }
+}
+
+type Spare = Option<(Vec<u64>, Vec<u32>)>;
+static SPARE: std::sync::Mutex<Spare> = std::sync::Mutex::new(None);
+
+impl Drop for HeadRank {
+    fn drop(&mut self) {
+        if let Ok(mut spare) = SPARE.lock() {
+            *spare = Some((
+                std::mem::take(&mut self.ranks),
+                std::mem::take(&mut self.heads),
+            ));
+        }
+    }
+}
+
+/// The bounds `marks` and `apply` rely on: 4^12 cells and every index below `next_pos.len()`.
+pub(super) fn in_range(words: &Words<'_>, next_pos_len: usize, helper_len: usize) -> bool {
+    words.kmer_mask == (1u64 << 24) - 1
+        && words.lut_word_length == 12
+        && (words.kmer_mask as usize >> 11) < helper_len
+        && next_pos_len <= u32::MAX as usize
+        && words
+            .queries_blastna
+            .iter()
+            .zip(words.query_offsets)
+            .all(|(seq, &offset)| (offset.max(0) as usize).saturating_add(seq.len()) < next_pos_len)
+}
+
+static BIT: [u64; 32] = {
+    let mut bits = [0u64; 32];
+    let mut k = 0;
+    while k < 32 {
+        bits[k] = 1 << k;
+        k += 1;
+    }
+    bits
+};
+
+/// Pass 1, run by run as `x_mb_fill::fill_runs` reads the words. Returns the number of words.
+/// SAFETY: `in_range` holds, `ranks.len() == 2^19`.
+unsafe fn marks(
+    words: &Words<'_>,
+    ranks: &mut [u64],
+    next_pos: &mut [u32],
+    helper_array: &mut [u32],
+) -> usize {
+    let (r, np, h) = (
+        ranks.as_mut_ptr(),
+        next_pos.as_mut_ptr(),
+        helper_array.as_mut_ptr(),
+    );
+    let lut_word_length = words.lut_word_length;
+    let mut n_words = 0usize;
+    for (q_idx, seq) in words.queries_blastna.iter().enumerate() {
+        if seq.len() < lut_word_length {
+            continue;
+        }
+        let masks = words
+            .query_masks
+            .get(q_idx)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let query_offset = words.query_offsets[q_idx].max(0) as usize;
+        for (range_start, range_end) in super::build_unmasked_ranges(seq.len(), masks) {
+            if words.word_length > range_end.saturating_sub(range_start) {
+                continue;
+            }
+            let s = &seq[range_start..range_end];
+            let index_base = (query_offset + range_start + 2).wrapping_sub(lut_word_length);
+            let mut i = 0usize;
+            'run: while i < s.len() {
+                let mut code = 0u64;
+                let mut got = 1usize;
+                while got < lut_word_length {
+                    let Some(&base) = s.get(i) else {
+                        break 'run;
+                    };
+                    i += 1;
+                    if (base & BLAST2NA_MASK) != 0 {
+                        code = 0;
+                        got = 1;
+                        continue;
+                    }
+                    code = (code << 2) | base as u64;
+                    got += 1;
+                }
+                let first = i;
+                // SAFETY: as this function's.
+                i = unsafe { run_marks(s, i, code, words.kmer_mask, index_base, r, np, h) };
+                n_words += i - first;
+                if i < s.len() {
+                    i += 1;
+                }
+            }
+        }
+    }
+    n_words
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+unsafe fn run_marks(
+    s: &[u8],
+    mut i: usize,
+    mut code: u64,
+    kmer_mask: u64,
+    index_base: usize,
+    r: *mut u64,
+    np: *mut u32,
+    h: *mut u32,
+) -> usize {
+    while let Some(&base) = s.get(i) {
+        if (base & BLAST2NA_MASK) != 0 {
+            break;
+        }
+        code = ((code << 2) | base as u64) & kmer_mask;
+        let c = code as usize;
+        // SAFETY: `c < 2^24`, the index is a word's (`in_range`).
+        unsafe {
+            *np.add(index_base.wrapping_add(i)) = c as u32 + 1;
+            *r.add(c >> 5) |= BIT[c & 31];
+            let hc = h.add(c >> 11);
+            *hc = (*hc).wrapping_add(1);
+        }
+        i += 1;
+    }
+    i
 }
 
 /// Pass 2: running counts into the high halves, the presence vector and the helper counters.
@@ -171,58 +303,77 @@ fn sums(
     acc as usize
 }
 
+static BELOW: [u32; 32] = {
+    let mut m = [0u32; 32];
+    let mut k = 0;
+    while k < 32 {
+        m[k] = (1u32 << k) - 1;
+        k += 1;
+    }
+    m
+};
+
+/// The slot of the non-empty cell `c1 - 1`.
+/// SAFETY: `c1 - 1 < 2^24` is a non-empty cell, `ranks` has 2^19 elements.
 #[inline(always)]
-fn slot(ranks: &[u64], cell: usize) -> usize {
-    let r = ranks[cell >> 5];
-    let bits = r as u32;
-    (r >> 32) as usize + (bits & ((1u32 << (cell & 31)) - 1)).count_ones() as usize
+unsafe fn slot(ranks: *const u64, c1: u32) -> usize {
+    let c = (c1 - 1) as usize;
+    let r = unsafe { *ranks.add(c >> 5) };
+    (r >> 32) as usize + ((r as u32) & BELOW[c & 31]).count_ones() as usize
 }
 
 /// Pass 3 (module comment).
 fn apply(ranks: &[u64], heads: &mut [u32], next_pos: &mut [u32]) {
     #[cfg(target_arch = "x86_64")]
     if std::arch::is_x86_feature_detected!("popcnt") {
-        // SAFETY: popcnt is available.
+        // SAFETY: popcnt is available; the cells in `next_pos` are `ranks`'s non-empty cells.
         return unsafe { apply_popcnt(ranks, heads, next_pos) };
     }
-    apply_any(ranks, heads, next_pos)
+    // SAFETY: as above.
+    unsafe { apply_any(ranks, heads, next_pos) }
 }
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "popcnt")]
 unsafe fn apply_popcnt(ranks: &[u64], heads: &mut [u32], next_pos: &mut [u32]) {
-    apply_any(ranks, heads, next_pos)
+    unsafe { apply_any(ranks, heads, next_pos) }
 }
 
 #[inline(always)]
-fn apply_any(ranks: &[u64], heads: &mut [u32], next_pos: &mut [u32]) {
+unsafe fn apply_any(ranks: &[u64], heads: &mut [u32], next_pos: &mut [u32]) {
+    const A: usize = 2 * D;
     let n = next_pos.len();
-    for q in 1..(1 + 2 * D).min(n) {
-        let c1 = next_pos[q];
-        if c1 != 0 {
-            next_pos[q] = slot(ranks, (c1 - 1) as usize) as u32 + 1;
-        }
-    }
-    for q in 1..n {
-        if let Some(&c1) = next_pos.get(q + 3 * D) {
+    let (r, hd, np) = (ranks.as_ptr(), heads.as_mut_ptr(), next_pos.as_mut_ptr());
+    // SAFETY (all below): indexes below `n`; slots below `heads.len()`.
+    unsafe {
+        for q in 1..(1 + A).min(n) {
+            let c1 = *np.add(q);
             if c1 != 0 {
-                prefetch(ranks.as_ptr().wrapping_add((c1 - 1) as usize >> 5).cast());
+                *np.add(q) = slot(r, c1) as u32 + 1;
             }
         }
-        let qb = q + 2 * D;
-        if qb < n {
-            let c1 = next_pos[qb];
+        let body = n.saturating_sub(A).max(1);
+        for q in 1..body {
+            let c1 = *np.add(q + A);
             if c1 != 0 {
-                let s = slot(ranks, (c1 - 1) as usize);
-                next_pos[qb] = s as u32 + 1;
-                prefetch(heads.as_ptr().wrapping_add(s).cast());
+                let s = slot(r, c1);
+                *np.add(q + A) = s as u32 + 1;
+                prefetch(hd.add(s).cast());
+            }
+            let s1 = *np.add(q);
+            if s1 != 0 {
+                let s = (s1 - 1) as usize;
+                *np.add(q) = *hd.add(s);
+                *hd.add(s) = q as u32;
             }
         }
-        let s1 = next_pos[q];
-        if s1 != 0 {
-            let s = (s1 - 1) as usize;
-            next_pos[q] = heads[s];
-            heads[s] = q as u32;
+        for q in body..n {
+            let s1 = *np.add(q);
+            if s1 != 0 {
+                let s = (s1 - 1) as usize;
+                *np.add(q) = *hd.add(s);
+                *hd.add(s) = q as u32;
+            }
         }
     }
 }

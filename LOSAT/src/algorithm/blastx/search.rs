@@ -721,7 +721,7 @@ pub(crate) fn search_core(
             let x_cap = x_bx_mem::chunk_unit_cap(pool, options, subjects);
             let mut x_next = 0;
             while x_next < chunks.len() {
-                let x_wave = x_cap.map(|k| x_bx_mem::chunk_wave(pool, k));
+                let x_wave = x_cap.map(|(k, _)| x_bx_mem::chunk_wave(pool, k));
                 let wave = x_wave
                     .as_ref()
                     .map_or(pool.threads().max(2), x_bx_mem::XChunkWave::size);
@@ -741,7 +741,7 @@ pub(crate) fn search_core(
                                 db_count,
                                 min_subject_length,
                                 x_containment,
-                                x_cap.is_some(),
+                                x_cap.map(|(_, per_task)| per_task),
                             )
                         })
                         .collect()
@@ -1276,7 +1276,8 @@ pub(crate) fn search_core(
 // sink: the chunk's scoring parameters, lookup table, diagonal table, subject parameters and the
 // subject loop. The code is the same; it returns the results instead of writing them to the sink.
 /// Everything the chunk loop computes before it talks to the sink, for one chunk; `None` when no
-/// context of the chunk has valid Karlin parameters (the loop then skips the chunk).
+/// context of the chunk has valid Karlin parameters (the loop then skips the chunk). `x_par`: the
+/// chunk's subjects as tasks of that many subjects on the pool (`LOSAT_X_BXUNITCAP`'s waves).
 #[cfg(feature = "parallel")]
 #[allow(clippy::type_complexity)]
 fn x_compute_chunk(
@@ -1288,7 +1289,7 @@ fn x_compute_chunk(
     db_count: i64,
     min_subject_length: usize,
     x_containment: bool,
-    x_par: bool,
+    x_par: Option<usize>,
 ) -> Result<Option<(Vec<ContextParameters>, Vec<(usize, SubjectComputation)>)>> {
     let batch = &chunk.prepared;
     let mut params = score_block(batch);
@@ -1297,7 +1298,7 @@ fn x_compute_chunk(
     }
     let lookup = Lookup::new(batch, &params, options)?;
     let last = batch.contexts.last().expect("BLASTX contexts");
-    if x_par {
+    if let Some(per_task) = x_par {
         let xdrop = subject_parameters(
             batch,
             &mut params,
@@ -1308,6 +1309,7 @@ fn x_compute_chunk(
             Some(fixed_spaces),
         )?;
         let results = x_bx_mem::chunk_subjects_on_pool(
+            per_task,
             subjects,
             batch,
             &params,

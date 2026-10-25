@@ -255,6 +255,25 @@ pub(crate) fn prepare_unit(
     })
 }
 
+/// No NCBI counterpart (scheduling only, `LOSAT_X_BXCAPFILL`, `x_bx_mem.rs`): a reader batch of
+/// one unit prepared ahead of its search, by the statements `search::search_core` runs when the
+/// batch prepares itself (`prepare_queries`, `score_block`). Such a batch has no shape (its unit's
+/// values are the batch's) and no cutoff minima to reduce.
+#[cfg(feature = "parallel")]
+pub(crate) fn prepare_lone_unit(
+    queries: &[FastaRecord],
+    options: &ResolvedOptions,
+) -> Result<UnitPrep> {
+    let prepared = prepare_queries(queries, options)?;
+    let params = score_block(&prepared);
+    Ok(UnitPrep {
+        prepared,
+        params,
+        word_cutoff_min: None,
+        redo_cutoff_min: None,
+    })
+}
+
 /// The end of phase 1 for one unit: the batch's shape replaces the layout.
 pub(crate) fn attach(unit: &mut UnitPrep, shape: &Arc<ReaderBatchShape>) {
     unit.prepared.reader_shape = Some(Arc::clone(shape));

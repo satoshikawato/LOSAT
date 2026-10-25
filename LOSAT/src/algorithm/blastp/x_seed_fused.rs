@@ -4615,8 +4615,8 @@ mod tests {
     // (cells of eight hits) or the next part of the window (cells of four: two cells per window,
     // on the same entries) meets the marker of their deferred calls; and entries that hold the
     // marker's value (flag 1, last_hit -1, as a call near offsets of 2^31 stores) under a drain's
-    // first batch or window, nothing deferred, and under a batch after a cell of candidates (the
-    // calls made, then the batch again, nothing deferred).
+    // first batch or window, nothing deferred, and under a batch or a window's first part after a
+    // cell of candidates (the calls made, then the unit again, nothing deferred).
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn deferred_calls_meet_their_marker_and_a_stored_marker_is_a_value() {
@@ -4682,6 +4682,17 @@ mod tests {
             s0 + 1,
             (0..8).map(|j| (8 + 3 * j + s0 + 1) & mask).collect(),
         ));
+        let (calls, met) = run(&entries, &cells);
+        assert!(calls >= 8, "{calls} calls");
+        assert!(met[0] >= 2 && met[1] >= 2, "{met:?}");
+        // The same with two cells of four on the diagonals 100 + 3 j after the cell of candidates:
+        // one window, whose first part meets the stored marker at entry 100.
+        let mut entries = behind(8, s0);
+        entries[100] = marker;
+        let mut cells = cells_on(1, 8, 5, s0);
+        for s in [s0 + 1, s0 + 6] {
+            cells.push((s, (0..4).map(|j| (100 + 3 * j + s) & mask).collect()));
+        }
         let (calls, met) = run(&entries, &cells);
         assert!(calls >= 8, "{calls} calls");
         assert!(met[0] >= 2 && met[1] >= 2, "{met:?}");

@@ -96,7 +96,13 @@ enum Piece {
 pub const XML2_ROOT_ATTRIBUTES: &str = "\n    xmlns=\"http://www.ncbi.nlm.nih.gov\"\n    xmlns:xs=\"http://www.w3.org/2001/XMLSchema-instance\"\n    xs:schemaLocation=\"http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd\"\n";
 
 /// The XML encoder, appending to `out`.
-pub struct XmlEncoder<'b> {
+///
+/// `OBJECT` is the object mode of the archive (`XmlEncoder::archive`, `Piece::NcbiObject`): a
+/// const parameter, so that the instance of outfmt 5 / 14 / 16 (`OBJECT = false`, the default
+/// of the type) compiles without any test of the object mode and runs the instructions it ran
+/// before the mode existed (the archive's pending element, `value=` attribute and `_E` state
+/// are only read under `OBJECT`).
+pub struct XmlEncoder<'b, const OBJECT: bool = false> {
     out: &'b mut Vec<u8>,
     piece: Piece,
     /// The module of the root type, for the DOCTYPE of a document (`NCBI-BlastOutput`).
@@ -111,8 +117,6 @@ pub struct XmlEncoder<'b> {
     std_xml: bool,
     /// The root tag still to write has the namespace attributes (a 14 side file).
     root_attributes: bool,
-    /// The object mode (`Piece::NcbiObject`).
-    object: bool,
     /// Where this document starts in `out` (what `flush_to` hands over starts here).
     start: usize,
     /// The object mode: for each open `begin_sequence` / `variant`, how many tags it opened
@@ -132,40 +136,11 @@ pub struct XmlEncoder<'b> {
     error: Option<SerialError>,
 }
 
-impl<'b> XmlEncoder<'b> {
-    fn new(out: &'b mut Vec<u8>, piece: Piece, module: &'static str) -> Self {
-        let start = out.len();
-        Self {
-            start,
-            out,
-            piece,
-            module,
-            indent: 0,
-            end_tag: false,
-            skip_indent: piece == Piece::Fragment,
-            std_xml: matches!(piece, Piece::Xml2Document | Piece::Xml2Report),
-            root_attributes: piece == Piece::Xml2Document,
-            object: piece == Piece::NcbiObject,
-            opened: Vec::new(),
-            pending_elem: false,
-            open_e: false,
-            self_closed: false,
-            names: Vec::new(),
-            marks: Vec::new(),
-            error: None,
-        }
-    }
-
+impl<'b> XmlEncoder<'b, false> {
     /// A document of a root type of the ASN.1 module `module`: `begin_document` writes the
     /// declaration and the DOCTYPE.
     pub fn document(out: &'b mut Vec<u8>, module: &'static str) -> Self {
         Self::new(out, Piece::Document, module)
-    }
-
-    /// One `Blast4-archive` document of outfmt 11 with `ARCHIVE_FORMAT=xml`, in NCBI's object
-    /// mode; `Encoder::flush_to` hands its bytes to a sink element by element.
-    pub fn archive(out: &'b mut Vec<u8>) -> Self {
-        Self::new(out, Piece::NcbiObject, "NCBI-Blast4")
     }
 
     /// One object written by `WriteObject`: the root tag follows an end of line.
@@ -193,6 +168,39 @@ impl<'b> XmlEncoder<'b> {
     /// Text of the caller between two calls (the joints of the pieces).
     pub fn raw(&mut self, bytes: &[u8]) {
         self.out.extend_from_slice(bytes);
+    }
+}
+
+impl<'b> XmlEncoder<'b, true> {
+    /// One `Blast4-archive` document of outfmt 11 with `ARCHIVE_FORMAT=xml`, in NCBI's object
+    /// mode; `Encoder::flush_to` hands its bytes to a sink element by element.
+    pub fn archive(out: &'b mut Vec<u8>) -> Self {
+        Self::new(out, Piece::NcbiObject, "NCBI-Blast4")
+    }
+}
+
+impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
+    fn new(out: &'b mut Vec<u8>, piece: Piece, module: &'static str) -> Self {
+        debug_assert_eq!(OBJECT, piece == Piece::NcbiObject);
+        let start = out.len();
+        Self {
+            start,
+            out,
+            piece,
+            module,
+            indent: 0,
+            end_tag: false,
+            skip_indent: piece == Piece::Fragment,
+            std_xml: matches!(piece, Piece::Xml2Document | Piece::Xml2Report),
+            root_attributes: piece == Piece::Xml2Document,
+            opened: Vec::new(),
+            pending_elem: false,
+            open_e: false,
+            self_closed: false,
+            names: Vec::new(),
+            marks: Vec::new(),
+            error: None,
+        }
     }
 
     fn push_name(&mut self, parts: &[&[u8]]) {
@@ -228,7 +236,7 @@ impl<'b> XmlEncoder<'b> {
     fn close_tag(&mut self) {
         let name_start = self.pop_name();
         self.indent -= 2;
-        if self.self_closed {
+        if OBJECT && self.self_closed {
             // The tag was written as `<tag value="x"/>`: nothing closes it, and the next
             // closing tag is on a line of its own (`m_EndTag`).
             self.self_closed = false;
@@ -250,6 +258,7 @@ impl<'b> XmlEncoder<'b> {
 
     /// The tag `Class_name` of a member or a variant (`PrintTagName`): the innermost open
     /// name, an underscore and `name`.
+    #[inline(always)]
     fn child_tag(&mut self, name: &str) {
         let class_start = self.marks.last().copied().unwrap_or(0);
         let class_end = self.names.len();
@@ -285,7 +294,7 @@ impl<'b> XmlEncoder<'b> {
     /// `WriteEnum` and `WriteBool` of the object mode: ` value="x"/>` in place of the `>`
     /// that closes the innermost open tag (NCBI backs over it, `OpenTagEndBack`).
     fn value_attribute(&mut self, value: &str) {
-        if self.pending_elem {
+        if OBJECT && self.pending_elem {
             self.open_element();
         }
         debug_assert_eq!(self.out.last(), Some(&b'>'));
@@ -322,7 +331,7 @@ impl<'b> XmlEncoder<'b> {
     }
 }
 
-impl Encoder for XmlEncoder<'_> {
+impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// `WriteFileHeader`: the declaration and the DOCTYPE of a document.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:232-276
@@ -346,7 +355,7 @@ impl Encoder for XmlEncoder<'_> {
                 .extend_from_slice(b"<?xml version=\"1.0\" encoding=\"US-ASCII\"?>");
             return;
         }
-        if self.piece == Piece::NcbiObject {
+        if OBJECT {
             // `WriteFileHeader` of the stream without an encoding: no `encoding`, and a DOCTYPE
             // whose DTD is the bare file name (the stream has no default DTD prefix).
             self.out
@@ -387,7 +396,7 @@ impl Encoder for XmlEncoder<'_> {
 
     /// `BeginClass`: `<Type>`.
     fn begin_sequence(&mut self, type_name: &str) {
-        if self.object {
+        if OBJECT {
             self.begin_object_sequence(type_name);
             return;
         }
@@ -398,7 +407,7 @@ impl Encoder for XmlEncoder<'_> {
 
     /// `EndClass`: `</Type>`.
     fn end_sequence(&mut self) {
-        if self.object && self.opened.pop() == Some(0) {
+        if OBJECT && self.opened.pop() == Some(0) {
             return;
         }
         self.close_tag();
@@ -424,7 +433,7 @@ impl Encoder for XmlEncoder<'_> {
 
     /// `BeginNamedType`: `<Type>` (the object mode).
     fn begin_named(&mut self, type_name: &str) {
-        if self.object {
+        if OBJECT {
             self.pending_elem = false;
             self.push_name(&[type_name.as_bytes()]);
             let start = *self.marks.last().expect("just pushed");
@@ -434,7 +443,7 @@ impl Encoder for XmlEncoder<'_> {
 
     /// `EndNamedType`: `</Type>`.
     fn end_named(&mut self) {
-        if self.object {
+        if OBJECT {
             self.close_tag();
         }
     }
@@ -447,7 +456,7 @@ impl Encoder for XmlEncoder<'_> {
     /// In the object mode the element's first call decides: a primitive is wrapped in
     /// `<Parent_E>`, which this call (or `end_list`) closes.
     fn element(&mut self) {
-        if self.object {
+        if OBJECT {
             self.close_element();
             self.pending_elem = true;
         }
@@ -455,7 +464,7 @@ impl Encoder for XmlEncoder<'_> {
 
     /// `EndContainer`.
     fn end_list(&mut self) {
-        if self.object {
+        if OBJECT {
             self.close_element();
             self.pending_elem = false;
         }
@@ -465,7 +474,7 @@ impl Encoder for XmlEncoder<'_> {
     /// and the variant's name as a member tag (`<Target><db>`); outside it NCBI's stream
     /// writes an element LOSAT's outfmt 5 never needs.
     fn variant(&mut self, type_name: &str, name: &str, tag: u8) {
-        if self.object {
+        if OBJECT {
             if type_name.contains('_') {
                 // An anonymous CHOICE: the member's tag is already open.
                 debug_assert!(!self.pending_elem);
@@ -494,7 +503,7 @@ impl Encoder for XmlEncoder<'_> {
 
     /// `EndChoiceVariant` and `EndChoice`.
     fn end_variant(&mut self) {
-        if self.object {
+        if OBJECT {
             self.close_tag();
             if self.opened.pop() == Some(2) {
                 self.close_tag();
@@ -528,7 +537,7 @@ impl Encoder for XmlEncoder<'_> {
 
     /// `WriteInt4`: `PutInt4`, the decimal digits.
     fn int(&mut self, value: i32) {
-        if self.pending_elem {
+        if OBJECT && self.pending_elem {
             self.open_element();
         }
         let mut buffer = itoa_i64(i64::from(value));
@@ -537,7 +546,7 @@ impl Encoder for XmlEncoder<'_> {
 
     /// `WriteInt8`: `PutInt8`, the decimal digits.
     fn big_int(&mut self, value: i64) {
-        if self.pending_elem {
+        if OBJECT && self.pending_elem {
             self.open_element();
         }
         let mut buffer = itoa_i64(value);
@@ -561,7 +570,7 @@ impl Encoder for XmlEncoder<'_> {
     ///                 }
     /// ```
     fn enumerated(&mut self, name: &str, _value: i32) {
-        if self.object {
+        if OBJECT {
             self.value_attribute(name);
         } else {
             self.fail(SerialError::XmlUnsupported("ENUMERATED value"));
@@ -570,7 +579,7 @@ impl Encoder for XmlEncoder<'_> {
 
     /// `WriteBool` of the object mode: ` value="true"/>` or ` value="false"/>`.
     fn boolean(&mut self, value: bool) {
-        if self.object {
+        if OBJECT {
             self.value_attribute(if value { "true" } else { "false" });
         } else {
             self.fail(SerialError::XmlUnsupported("BOOLEAN"));
@@ -602,7 +611,7 @@ impl Encoder for XmlEncoder<'_> {
     /// (objostrxml.cpp:559-565) and the byte passes `x_VerifyChar` and is written as it is (the
     /// object mode). A NUL byte is dropped (`if (s != '\0')`).
     fn visible_str(&mut self, value: &[u8]) {
-        if self.pending_elem {
+        if OBJECT && self.pending_elem {
             self.open_element();
         }
         for &byte in value {
@@ -619,7 +628,7 @@ impl Encoder for XmlEncoder<'_> {
                     self.out.push(b';');
                 }
                 0x01..=0x1f => self.fail(SerialError::NonVisibleChar(byte)),
-                0x80..=0xff if self.object => self.out.push(byte),
+                0x80..=0xff if OBJECT => self.out.push(byte),
                 0x80..=0xff => self.fail(SerialError::NonAsciiChar(byte)),
                 _ => self.out.push(byte),
             }
@@ -629,11 +638,11 @@ impl Encoder for XmlEncoder<'_> {
     /// `WriteBytes` of the object mode: the bytes as upper-case hex digits, unwrapped
     /// (`WriteBytes`, objostrxml.cpp:1702-1709); the other pieces write no OCTET STRING.
     fn octets(&mut self, value: &[u8]) {
-        if !self.object {
+        if !OBJECT {
             self.fail(SerialError::OctetString);
             return;
         }
-        if self.pending_elem {
+        if OBJECT && self.pending_elem {
             self.open_element();
         }
         self.out.reserve(2 * value.len());
@@ -646,14 +655,14 @@ impl Encoder for XmlEncoder<'_> {
     /// `WriteDouble`: `WriteDouble2(data, DBL_DIG)`, `NStr::DoubleToStringPosix(data, 15)`
     /// (`real::write_xml_double`).
     fn real(&mut self, value: f64) {
-        if self.pending_elem {
+        if OBJECT && self.pending_elem {
             self.open_element();
         }
         write_xml_double(value, self.out);
     }
 
     fn buffered(&self) -> usize {
-        if self.object {
+        if OBJECT {
             self.out.len() - self.start
         } else {
             0
@@ -663,7 +672,7 @@ impl Encoder for XmlEncoder<'_> {
     /// The object mode keeps the last byte until the document is complete: it may be the `>` of
     /// an open tag that `enumerated` or `boolean` replaces.
     fn flush_to(&mut self, sink: &mut dyn std::io::Write, all: bool) -> std::io::Result<()> {
-        if !self.object {
+        if !OBJECT {
             return Ok(());
         }
         let end = if all {

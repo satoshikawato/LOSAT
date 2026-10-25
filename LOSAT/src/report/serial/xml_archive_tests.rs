@@ -11,7 +11,7 @@ use super::xml::XmlEncoder;
 
 const HEADER: &str = "<?xml version=\"1.0\"?>\n<!DOCTYPE Blast4-archive PUBLIC \"-//NCBI//NCBI Blast4/EN\" \"NCBI_Blast4.dtd\">";
 
-fn archive_text(write: impl FnOnce(&mut XmlEncoder<'_>)) -> String {
+fn archive_text(write: impl FnOnce(&mut XmlEncoder<'_, true>)) -> String {
     let mut buf = Vec::new();
     let mut enc = XmlEncoder::archive(&mut buf);
     write(&mut enc);

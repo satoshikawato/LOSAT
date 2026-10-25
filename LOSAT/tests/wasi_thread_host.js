@@ -716,14 +716,14 @@ if (!isMainThread) {
         //     }
         // ```
         // Host memory only. This instance may be older than the guest's last growth of the
-        // shared memory: a standby or recycled worker instantiated before pthread_create
-        // allocated this thread's stack and TLS (and grew the memory for them). V8 updates
-        // another isolate's view of a grown shared memory later, and an atomic access is
-        // checked against that view (plain accesses are not), so the thread's first atomic
-        // store, to its TLS (`self->tid`), trapped "memory access out of bounds" in about 0.3 %
-        // of 16-thread runs (2026-10-25, Node 24.21.0: 14 of 4,800). memory.grow(0) updates
-        // this isolate's view at once (the header of wasi_shared_memory.js); with it, 0 of
-        // 2,800 (docs/evidence/wasm_oob_20261025/README.md).
+        // shared memory: a standby worker (or a recycled one, not measured) instantiated
+        // before pthread_create allocated this thread's stack and TLS and grew the memory for
+        // them. In 12 of 4,800 runs of one 16-thread check (2026-10-25, Node 24.21.0) this
+        // isolate's view of the memory still ended below those after the thread trapped
+        // "memory access out of bounds" at its first atomic store (`self->tid` in its TLS),
+        // although plain loads of its start arguments there had passed; 2 more failed the
+        // same way with the message hidden. memory.grow(0) updates this isolate's view (the
+        // header of wasi_shared_memory.js): 0 of 2,800 (docs/evidence/wasm_oob_20261025/).
         memory.grow(0);
         instance.exports.wasi_thread_start(tid, startArg);
         debug(`worker done tid=${tid}`);

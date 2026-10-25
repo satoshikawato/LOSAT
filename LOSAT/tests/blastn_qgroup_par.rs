@@ -5,8 +5,9 @@
 //! with the same result: the preliminary gapped loop and the traceback of the subject run on the
 //! owner thread over all queries in one order, or per query on the pool. So the property under
 //! test is that the report does not depend on it: for megablast, blastn, dc-megablast and
-//! blastn-short with several queries (pieces of LC738874 with microsatellites, runs of `N`, lower
-//! case letters, a poly-A query and two very short ones) against LC738868 at 1 and 4 threads, the
+//! blastn-short with several queries (pieces of LC738874, or of LC738868 itself for megablast and
+//! dc-megablast, with microsatellites, runs of `N`, lower case letters, a poly-A query, one of 20
+//! letters and one of 300 `N` followed by 400 letters) against LC738868 at 1 and 4 threads, the
 //! searches with `LOSAT_X_QGROUPPAR=0` and by default give the same bytes. The same holds in
 //! `LOSAT_X_QBATCHPAR` slots of two threads and for batches split into query chunks. With
 //! `LOSAT_X_STATS` the counters show which form ran: per query at 4 threads, the owner loop where
@@ -198,10 +199,10 @@ fn stats_counts(stderr: &str) -> (u64, u64) {
     )
 }
 
-/// For one task: the search with the switch off at one thread, then off, by default and by
-/// default with `LOSAT_X_STATS` at 1 and 4 threads, all with the same bytes; the first three write
-/// nothing to standard error, the last one the counters of the stages that ran per query, none at
-/// one thread. Returns the counts at 4 threads.
+/// For one task: the search with the switch off at one thread, then off at 4 threads, and by
+/// default and by default with `LOSAT_X_STATS` at 1 and 4 threads, all with the same bytes; all but
+/// the runs with `LOSAT_X_STATS` write nothing to standard error, those the counters of the stages
+/// that ran per query, none at one thread. Returns the counts at 4 threads.
 fn check_task(queries: &Queries, task: &str, extra: &[&str], env: &[(&str, &str)]) -> (u64, u64) {
     let mut args = vec!["-task", task];
     args.extend_from_slice(extra);
@@ -213,9 +214,12 @@ fn check_task(queries: &Queries, task: &str, extra: &[&str], env: &[(&str, &str)
     assert_eq!(expected_stderr, "", "{task}");
     let mut counts = (0, 0);
     for threads in [1, 4] {
-        let (report, stderr) = blastn(queries, &args, threads, &with(&[OFF]));
-        assert!(report == expected, "{task} threads {threads}: off differs");
-        assert_eq!(stderr, "", "{task} threads {threads}");
+        // At one thread the search with the switch off is `expected` itself.
+        if threads > 1 {
+            let (report, stderr) = blastn(queries, &args, threads, &with(&[OFF]));
+            assert!(report == expected, "{task} threads {threads}: off differs");
+            assert_eq!(stderr, "", "{task} threads {threads}");
+        }
         let (report, stderr) = blastn(queries, &args, threads, &with(&[]));
         assert!(
             report == expected,
@@ -255,9 +259,16 @@ fn dc_megablast_stages_per_query() {
     assert!(prelim > 0 && traceback > 0, "{prelim} {traceback}");
 }
 
+// blastn-short at `-evalue 10` instead of the task's 1000. At 10 every query keeps its hits and a
+// search writes 53,000 rows in 1.5 CPU s instead of 359,000 in 6-8 s. At 4 threads the second of
+// the two batches runs both stages per query; the first (piece0-2, piece2 with about two thirds of
+// its HSPs) keeps the owner loop. At 1000 the poly-A query holds more than a quarter of the second
+// batch's traceback HSPs, so that traceback keeps the owner loop too.
 #[test]
 fn blastn_short_stages_per_query() {
-    check_task(&Queries::pieces(), "blastn-short", &[], &[]);
+    let (prelim, traceback) =
+        check_task(&Queries::pieces(), "blastn-short", &["-evalue", "10"], &[]);
+    assert!(prelim > 0 && traceback > 0, "{prelim} {traceback}");
 }
 
 // Lower-case masking and other scores (other cutoffs per context).

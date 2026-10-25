@@ -1693,8 +1693,8 @@ pub(crate) fn final_hit_order(
 /// ```
 /// The culling writer replaces the preliminary hit list (the collector): each subject's
 /// HSPs (after the `-evalue` reap, in score order) go into the trees, subject by subject
-/// in OID order, with the merit `culling_max` (+3 above 1, an `Int4` that NCBI's binary
-/// wraps). The trees' HSPs then reach the hit list of the traceback in OID order, where
+/// in OID order, with the merit `culling_max` (+3 above 1; in `i64`, where NCBI's `Int4`
+/// overflows near `INT4_MAX`, NCBI parity DECISIONS 17). The trees' HSPs then reach the hit list of the traceback in OID order, where
 /// the `-max_target_seqs` cut is made (`Blast_HitListUpdate`), and the pipe culls the kept
 /// lists again, sorted by e-value, with the merit `culling_limit`. The rest is
 /// `final_hit_order`'s: the lists sorted by e-value (their HSPs in score order) and each
@@ -1709,6 +1709,7 @@ pub(crate) fn culled_hit_order(
 ) -> Vec<TblastxHsp> {
     use super::hsp_culling::{tblastx_context_lengths, CullingWriter};
     use crate::algorithm::blastn::hsp::{HitList, HitListEntry};
+    use crate::core::hspfilter_culling::CullingForest;
     type Subjects = std::collections::BTreeMap<u32, Vec<TblastxHsp>>;
     let mut lists: std::collections::BTreeMap<u32, Subjects> = std::collections::BTreeMap::new();
     for hsp in hits {
@@ -1719,11 +1720,7 @@ pub(crate) fn culled_hit_order(
             .or_default()
             .push(hsp);
     }
-    let prelim_max = if culling_limit > 1 {
-        culling_limit.wrapping_add(3)
-    } else {
-        culling_limit
-    };
+    let prelim_max = CullingForest::<TblastxHsp>::prelim_max(culling_limit);
     let mut ordered = Vec::new();
     for (q_idx, subjects) in lists {
         let context_lengths = tblastx_context_lengths(query_lengths[q_idx as usize]);
@@ -1754,7 +1751,7 @@ pub(crate) fn culled_hit_order(
         pipe_lists.hsplist_count = kept.len();
         pipe_lists.hsplist_array = kept;
         pipe_lists.sort_by_evalue();
-        let mut pipe = CullingWriter::new(culling_limit, context_lengths);
+        let mut pipe = CullingWriter::new(i64::from(culling_limit), context_lengths);
         for list in pipe_lists.hsplist_array {
             pipe.run(list.hsps, list.oid);
         }

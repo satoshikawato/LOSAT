@@ -308,6 +308,19 @@ pub struct BlastpArgs {
     // NCBI blast_args.cpp:196-201,313-315: no filter when omitted or 0.
     #[arg(long = "qcov_hsp_perc", value_parser = blastp_query_coverage, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
+    // ```c
+    // CHspFilteringArgs::ExtractAlgorithmOptions(const CArgs& args,
+    //                                            CBlastOptions& opts)
+    // {
+    //     if (args[kArgCullingLimit]) {
+    //         opts.SetCullingLimit(args[kArgCullingLimit].AsInteger());
+    //     }
+    // ```
+    /// If the query range of a hit is enveloped by that of at least this many
+    /// higher-scoring hits, delete the hit (default: 0, no culling).
+    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: Option<i32>,
     #[arg(long)]
     pub ungapped: bool,
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
@@ -541,6 +554,8 @@ pub struct ResolvedBlastpArgs {
     pub max_hsps_per_subject: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
+    /// The -culling_limit value (0: no culling, as NCBI's `SetCullingLimit(0)`).
+    pub culling_limit: i32,
     pub ungapped: bool,
     pub window_size: usize,
     /// The matrix as the command line names it (NCBI keeps the spelling); `scoring.matrix`
@@ -563,6 +578,12 @@ pub struct ResolvedBlastpArgs {
 }
 
 impl BlastpArgs {
+    /// `-culling_limit`, 0 (no culling) when it is not given. The BLAST archive records
+    /// whether it was given (`culling_limit`).
+    pub fn culling_limit_value(&self) -> i32 {
+        self.culling_limit.unwrap_or(0)
+    }
+
     /// The options as `check_options` resolves them, without NCBI's warnings.
     pub fn resolve(&self) -> Result<ResolvedBlastpArgs> {
         self.check_options(&mut std::io::sink())
@@ -847,6 +868,7 @@ impl BlastpArgs {
             // NCBI blast_args.cpp:313-315: if (args[kArgQueryCovHspPerc])
             // opt.SetQueryCovHspPerc(args[kArgQueryCovHspPerc].AsDouble());
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
+            culling_limit: self.culling_limit_value(),
             ungapped: self.ungapped,
             window_size: usize::try_from(options.window_size).unwrap_or(0),
             matrix_name: options.matrix_name,

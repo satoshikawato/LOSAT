@@ -22,18 +22,37 @@ struct OtherRun {
     byte: u8,
 }
 
-/// The letters of one record (see the module doc).
+/// The letters of one record (see the module doc); 32 bytes beside its allocations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackedLetters {
     /// 4 bases per byte from the high bits (`A` 0, `C` 1, `G` 2, `T` 3; 0 under an other run),
     /// `length.div_ceil(4)` bytes.
     packed: Box<[u8]>,
     length: u32,
+    /// The other runs and lower-case intervals, where the record has any.
+    rest: Option<Box<Exceptions>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Exceptions {
     others: Box<[OtherRun]>,
     /// `[start, end)` of the lower-case bytes: the runs found while packing, then the reader's mask
     /// (`pack_masked`), which may meet or cover them (lower-casing twice changes nothing).
     lowercase: Box<[(u32, u32)]>,
 }
+
+/// The bytes an allocation of `bytes` takes from the heap: glibc's chunks, 16-byte steps with an
+/// 8-byte header and 32 bytes at least (none for an empty one).
+fn chunk_bytes(bytes: usize) -> usize {
+    if bytes == 0 {
+        0
+    } else {
+        ((bytes + 8 + 15) & !15).max(32)
+    }
+}
+
+/// What a caller holds beside a store: its own size and an index (a list of the packed records).
+const HELD_BESIDE: usize = std::mem::size_of::<PackedLetters>() + std::mem::size_of::<usize>();
 
 /// `0x01` in each byte of a `u64`.
 const ONES: u64 = 0x0101_0101_0101_0101;
@@ -124,8 +143,9 @@ fn pack8(block: u64, case: u64) -> Option<[u8; 2]> {
 }
 
 impl PackedLetters {
-    /// The store of `letters`, or `None` where it would hold no fewer bytes than the letters (many
-    /// other runs or case changes) or the record is longer than a `u32` offset.
+    /// The store of `letters`, or `None` where it and its place in a caller's list would take no
+    /// fewer heap bytes than the letters' own allocation (no letters, a short record, many other
+    /// runs or case changes; `chunk_bytes`) or the record is longer than a `u32` offset.
     pub fn pack(letters: &[u8]) -> Option<Self> {
         Self::pack_masked(letters, &[])
     }
@@ -148,17 +168,28 @@ impl PackedLetters {
             debug_assert!(from <= to && to < length, "a mask out of the record");
             rest.lowercase.push((from, to + 1));
         }
-        let held = packed.len()
-            + std::mem::size_of_val(rest.others.as_slice())
-            + std::mem::size_of_val(rest.lowercase.as_slice());
-        if held >= letters.len() && !letters.is_empty() {
+        let exceptions = !(rest.others.is_empty() && rest.lowercase.is_empty());
+        let held = HELD_BESIDE
+            + chunk_bytes(packed.len())
+            + if exceptions {
+                chunk_bytes(std::mem::size_of::<Exceptions>())
+                    + chunk_bytes(std::mem::size_of_val(rest.others.as_slice()))
+                    + chunk_bytes(std::mem::size_of_val(rest.lowercase.as_slice()))
+            } else {
+                0
+            };
+        if held >= chunk_bytes(letters.len()) {
             return None;
         }
         Some(Self {
             packed: packed.into_boxed_slice(),
             length,
-            others: rest.others.into_boxed_slice(),
-            lowercase: rest.lowercase.into_boxed_slice(),
+            rest: exceptions.then(|| {
+                Box::new(Exceptions {
+                    others: rest.others.into_boxed_slice(),
+                    lowercase: rest.lowercase.into_boxed_slice(),
+                })
+            }),
         })
     }
 
@@ -175,8 +206,9 @@ impl PackedLetters {
     /// The bytes held (packed bases, other runs, intervals), for the memory accounting of a caller.
     pub fn heap_bytes(&self) -> usize {
         self.packed.len()
-            + std::mem::size_of_val(&*self.others)
-            + std::mem::size_of_val(&*self.lowercase)
+            + self.rest.as_ref().map_or(0, |rest| {
+                std::mem::size_of_val(&*rest.others) + std::mem::size_of_val(&*rest.lowercase)
+            })
     }
 
     /// Clears `out` and writes the letters as they were packed.
@@ -192,11 +224,14 @@ impl PackedLetters {
         }
         // SAFETY: `unpack_blocks` wrote the first `done` letters and the loop the others.
         unsafe { out.set_len(length) };
-        for run in self.others.iter() {
+        let Some(rest) = &self.rest else {
+            return;
+        };
+        for run in rest.others.iter() {
             let start = run.offset as usize;
             out[start..start + run.length as usize].fill(run.byte);
         }
-        for &(start, end) in self.lowercase.iter() {
+        for &(start, end) in rest.lowercase.iter() {
             out[start as usize..end as usize].make_ascii_lowercase();
         }
     }
@@ -393,7 +428,7 @@ mod tests {
         let mut cases: Vec<Vec<u8>> = vec![Vec::new(), b"A".to_vec(), b"acgtACGTn".to_vec()];
         let others = b"NnRYKMSWBDHVrykmswbdhvUu-*Xx\x00\xff \x7f";
         for case in 0..3000 {
-            let length = (draws.next() % 200) as usize;
+            let length = (draws.next() % 400) as usize;
             let letters = (0..length)
                 .map(|_| match draws.next() % 8 {
                     0 if case % 4 != 3 => others[(draws.next() % others.len() as u64) as usize],
@@ -418,17 +453,17 @@ mod tests {
 
     #[test]
     fn the_letters_are_made_again_exactly() {
+        let mut packed_records = 0;
         for letters in cases() {
             let mut out = b"left over".to_vec();
-            match PackedLetters::pack(&letters) {
-                Some(packed) => {
-                    assert_eq!(packed.len(), letters.len());
-                    packed.unpack_into(&mut out);
-                    assert_eq!(out, letters);
-                }
-                None => assert!(!letters.is_empty(), "an empty record packs"),
+            if let Some(packed) = PackedLetters::pack(&letters) {
+                assert_eq!(packed.len(), letters.len());
+                packed.unpack_into(&mut out);
+                assert_eq!(out, letters);
+                packed_records += 1;
             }
         }
+        assert!(packed_records > 400, "{packed_records} records packed");
     }
 
     #[test]
@@ -494,10 +529,17 @@ mod tests {
     }
 
     #[test]
-    fn a_record_of_other_bytes_keeps_its_letters() {
+    fn a_record_that_packs_to_no_fewer_bytes_keeps_its_letters() {
         let letters: Vec<u8> = (0..400).map(|index| b"NR"[index % 2]).collect();
         assert_eq!(PackedLetters::pack(&letters), None);
         let store = PackedLetters::pack(&[b'N'; 400]).expect("one run");
         assert_eq!(store.heap_bytes(), 100 + 12);
+        assert_eq!(std::mem::size_of::<PackedLetters>(), 32);
+        // a 32-byte chunk of letters against 40 bytes beside a store and its 32-byte chunk
+        assert_eq!(PackedLetters::pack(&[b'A'; 22]), None);
+        assert_eq!(PackedLetters::pack(&[b'A'; 50]), None);
+        // 80 bytes against 40 + 32: from about 60 letters a record packs
+        assert!(PackedLetters::pack(&[b'A'; 64]).is_some());
+        assert!(PackedLetters::pack(&[b'A'; 150]).is_some());
     }
 }

@@ -54,6 +54,25 @@
 //!
 //! Timing: with LOSAT_TIMING, `[TIMING] x_bn_q_drop: batches= records= letters=` gives the number
 //! of batches and records whose letters were dropped, and their letters.
+//!
+//! EXPERIMENT (LOSAT_X_BNQPACK; in the strict set since 2026-10-25: on unless it is `0`): the letters
+//! of the records that wait in the store packed from the reading on. Dropping a batch's letters after
+//! its encoding frees them late: the letters of every record were touched while the file was read,
+//! and the pages stay with the process (the heap reuses them for later allocations, so the peak
+//! falls by little; plan v4 line A10 session 19, the `RssAnon` trace of 31,168 cDNAs). With the
+//! switch, where the store acts (the rule above) and the query file holds at least two of the task's
+//! largest batches (`packs`: the bytes of the file against `x_query_batch_letters`, as
+//! LOSAT_X_QSTREAM's `Batch`; standard input, without a size, is not packed), the reader packs each
+//! nucleotide record as it assembles it (`FastaInputSource::x_pack_letters`: 2-bit codes, the runs of
+//! other bytes, the lowercase mask as intervals, `sequence::packed_letters`) in place of the copy of
+//! its buffer, which the next record reuses; the store keeps the packed letters beside the records
+//! (`Store::new`), and the loop makes a batch's letters again when it takes the batch (`Store::take`,
+//! by the search pool's threads with two or more), before any reader of them (WindowMasker, DUST, the
+//! encoding). The letters made again are the reader's, byte for byte (`U` read as `T`, the lowercase
+//! mask in lower case); a record whose store would hold no fewer bytes than its letters keeps them.
+//! No search value changes. With LOSAT_TIMING, `[TIMING] x_bn_q_pack: records= letters= bytes=
+//! unpack_s=` gives the records packed, their letters, the bytes held for them and the time spent
+//! making their letters again.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
@@ -115,8 +134,8 @@ impl Rule<'_> {
 /// The query records read before a search, which the batch loop takes out batch by batch, in
 /// order (`x_query_stream::Queries::Taken`).
 pub(super) struct Store {
-    /// The records the loop has not taken, the packed letters of each (LOSAT_X_BNQPACK; empty
-    /// where the records keep their letters), and how many records the loop has taken.
+    /// The records the loop has not taken, the packed letters of those packed (LOSAT_X_BNQPACK),
+    /// and how many records the loop has taken.
     left: Mutex<Left>,
     /// Every record searched whole (no `-query_loc`).
     query_input: QueryInput,
@@ -124,36 +143,29 @@ pub(super) struct Store {
 
 struct Left {
     records: std::vec::IntoIter<FastaRecord>,
-    packed: std::vec::IntoIter<Option<PackedLetters>>,
+    /// The packed letters of the records not taken, with their positions among all records.
+    packed: std::collections::VecDeque<(usize, PackedLetters)>,
     taken: usize,
 }
 
 impl Store {
-    /// The store of `records`, and of their letters packed as they were read (`packed`, one per
-    /// record, `None` for a record that kept its letters; empty when none was packed).
-    pub(super) fn new(records: Vec<FastaRecord>, packed: Vec<Option<PackedLetters>>) -> Self {
-        debug_assert!(packed.is_empty() || packed.len() == records.len());
+    /// The store of `records`, and of the letters of those packed as they were read (`packed`:
+    /// their positions among the records, in order, and their letters; empty when none was).
+    pub(super) fn new(records: Vec<FastaRecord>, packed: Vec<(usize, PackedLetters)>) -> Self {
         let mut query_input = QueryInput::whole(&records);
-        for (length, store) in query_input.input_lengths.iter_mut().zip(&packed) {
-            if let Some(store) = store {
-                *length = store.len();
-            }
+        for (index, store) in &packed {
+            query_input.input_lengths[*index] = store.len();
         }
         if !packed.is_empty() {
-            PACKED.fetch_add(packed.iter().flatten().count() as u64, Ordering::Relaxed);
+            PACKED.fetch_add(packed.len() as u64, Ordering::Relaxed);
             PACKED_LETTERS.fetch_add(
-                packed
-                    .iter()
-                    .flatten()
-                    .map(|store| store.len() as u64)
-                    .sum(),
+                packed.iter().map(|(_, store)| store.len() as u64).sum(),
                 Ordering::Relaxed,
             );
             PACKED_BYTES.fetch_add(
                 packed
                     .iter()
-                    .flatten()
-                    .map(|store| store.heap_bytes() as u64)
+                    .map(|(_, store)| store.heap_bytes() as u64)
                     .sum(),
                 Ordering::Relaxed,
             );
@@ -162,7 +174,7 @@ impl Store {
             query_input,
             left: Mutex::new(Left {
                 records: records.into_iter(),
-                packed: packed.into_iter(),
+                packed: packed.into(),
                 taken: 0,
             }),
         }
@@ -197,7 +209,12 @@ impl Store {
         );
         *taken = range.end;
         let mut batch: Vec<FastaRecord> = records.by_ref().take(range.len()).collect();
-        let stores: Vec<Option<PackedLetters>> = packed.by_ref().take(range.len()).collect();
+        let mut stores: Vec<Option<PackedLetters>> = Vec::new();
+        while packed.front().is_some_and(|(index, _)| *index < range.end) {
+            let (index, store) = packed.pop_front().expect("a front");
+            stores.resize_with(range.len(), || None);
+            stores[index - range.start] = Some(store);
+        }
         drop(left);
         unpack(&mut batch, stores, pool);
         Ok(batch)
@@ -210,9 +227,9 @@ impl Store {
         let left = self.left.lock().unwrap_or_else(PoisonError::into_inner);
         let from = range.start.checked_sub(left.taken)?;
         let mut records = left.records.as_slice()[from..from + range.len()].to_vec();
-        for (record, store) in records.iter_mut().zip(left.packed.as_slice().get(from..)?) {
-            if let Some(store) = store {
-                store.unpack_into(&mut record.sequence);
+        for (index, store) in &left.packed {
+            if range.contains(index) {
+                store.unpack_into(&mut records[index - range.start].sequence);
             }
         }
         Some(records)

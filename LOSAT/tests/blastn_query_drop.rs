@@ -423,8 +423,9 @@ fn standard_input_with_slots_keeps_the_letters() {
 // `U`s, a record without letters and lines of 60 letters come back as the reader gave them. The
 // reports (`-lcase_masking` too) and the messages are those of `LOSAT_X_BNQPACK=0`, against a
 // subject file and a database, for megablast and blastn, at one and four threads (the pool makes
-// a batch's letters again). Five records pack (the one of other letters only keeps its letters);
-// without `BATCH_SIZE` the file is shorter than two batches and none packs.
+// a batch's letters again). Four records pack (the one without letters and the one of other
+// letters only keep theirs); without `BATCH_SIZE` the file is shorter than two batches and none
+// packs.
 #[test]
 fn the_letters_packed_as_read_give_the_same_reports() {
     const PACK_OFF: (&str, &str) = ("LOSAT_X_BNQPACK", "0");
@@ -448,7 +449,7 @@ fn the_letters_packed_as_read_give_the_same_reports() {
                 assert!(!default.is_empty(), "{what}: no report");
                 let packed = timing_counts(&stderr, "x_bn_q_pack")
                     .unwrap_or_else(|| panic!("{what}: nothing packed: {stderr}"));
-                assert_eq!(packed[..2], [5, 7_300], "{what}: records, letters");
+                assert_eq!(packed[..2], [4, 7_300], "{what}: records, letters");
                 let (report, off_messages, _, stderr) = run(1, &[TIMING, PACK_OFF]);
                 assert_eq!(report, default, "{what} {PACK_OFF:?}");
                 assert_eq!(off_messages, messages, "{what} {PACK_OFF:?}");

@@ -806,29 +806,35 @@ pub enum QueryEnd {
 /// The `catch (const exception&)` skips a query whose Seq-id was not found or whose
 /// range does not fit (`seq_range.rs`); LOSAT rejects Seq-id lines.
 pub fn read_queries<R: Read>(source: &mut FastaInputSource<R>) -> QueryRecords {
-    read_queries_with(source, |_| {})
+    read_queries_with(source, |_, _| {})
 }
 
 /// EXPERIMENT (LOSAT_X_BNQPACK): `read_queries` with the letters of each record packed as it is
 /// read (`FastaInputSource::x_pack_letters`), so the letters of the whole input are never held:
-/// the records (a packed one without letters) and the packed letters of each (`None` for one that
-/// keeps its letters).
+/// the records (a packed one without letters) and the packed letters of the packed ones, with
+/// their positions among the records, in order.
 pub fn x_read_queries_packed<R: Read>(
     source: &mut FastaInputSource<R>,
 ) -> (
     QueryRecords,
-    Vec<Option<crate::sequence::packed_letters::PackedLetters>>,
+    Vec<(usize, crate::sequence::packed_letters::PackedLetters)>,
 ) {
     source.x_pack_letters();
     let mut packed = Vec::new();
-    let records = read_queries_with(source, |source| packed.push(source.x_take_packed()));
+    let records = read_queries_with(source, |source, index| {
+        if let Some(letters) = source.x_take_packed() {
+            packed.push((index, letters));
+        }
+    });
+    packed.shrink_to_fit();
     (records, packed)
 }
 
-/// `read_queries`, with `read` called after each record is read, before the next one.
+/// `read_queries`, with `read` called after each record is read (with its position), before the
+/// next one.
 fn read_queries_with<R: Read>(
     source: &mut FastaInputSource<R>,
-    mut read: impl FnMut(&mut FastaInputSource<R>),
+    mut read: impl FnMut(&mut FastaInputSource<R>, usize),
 ) -> QueryRecords {
     let mut records = Vec::new();
     loop {
@@ -845,7 +851,7 @@ fn read_queries_with<R: Read>(
         }) {
             Ok(record) => {
                 records.push(record);
-                read(source);
+                read(source, records.len() - 1);
             }
             Err(ReadError::Parse {
                 code: ParseErrorCode::Eof,

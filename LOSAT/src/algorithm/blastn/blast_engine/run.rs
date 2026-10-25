@@ -7159,7 +7159,7 @@ fn search_cli(
         }
         .acts();
     let x_pack = x_query_drop::packs(x_drop_rule, x_file_bytes, x_batch_letters);
-    if x_drop_rule {
+    if x_drop_rule && x_query_drop::pack_on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BNQPACK", x_pack);
     }
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders)

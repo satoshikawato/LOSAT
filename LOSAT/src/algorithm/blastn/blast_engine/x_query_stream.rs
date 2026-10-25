@@ -98,7 +98,7 @@
 //!   the batch in flight holds most of the file anyway. The file's bytes are compared with the
 //!   batch's letters (titles and line ends make the file a little longer than its letters);
 //! - where the slots of LOSAT_X_QBATCHPAR may run (LOSAT_X_QBATCHPAR on, the conditions of
-//!   `run.rs`'s `x_qbatch_par_off`: `-subject`, two threads or more, fewer subject units than
+//!   `blastn_app.rs`'s `x_qbatch_par_off`: `-subject`, two threads or more, fewer subject units than
 //!   threads; and a budget: LOSAT_X_QBATCHPARMEM when set, else the default one of
 //!   `x_qbatch_par::ncbi_splits_by_queries`, or a slot count set), a file shorter than
 //!   twice what their default budget holds (`Slots`), `SLOT_WINDOW_BYTES_PER_THREAD` bytes per thread
@@ -298,12 +298,12 @@ pub(super) struct Rule {
     /// `-task megablast`.
     pub(super) megablast: bool,
     /// The letters of the largest query batch of the search: `BATCH_SIZE` when it is set, else
-    /// the `CBatchSizeMixer` maximum of the task (`run.rs`, `x_query_batch_letters`).
+    /// the `CBatchSizeMixer` maximum of the task (`blastn_app.rs`, `x_query_batch_letters`).
     pub(super) batch_letters: u64,
     /// `-num_threads`.
     pub(super) threads: usize,
     /// Whether the slots of LOSAT_X_QBATCHPAR may run: the switch on, the conditions of
-    /// `x_qbatch_par_off` (`run.rs`), and a budget (LOSAT_X_QBATCHPARMEM when it is set, else
+    /// `x_qbatch_par_off` (`blastn_app.rs`), and a budget (LOSAT_X_QBATCHPARMEM when it is set, else
     /// `x_qbatch_par::ncbi_splits_by_queries`) or a slot count (LOSAT_X_QBATCHPARSLOTS).
     pub(super) slots_may_run: bool,
 }

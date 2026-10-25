@@ -21,8 +21,9 @@
 //!   reported sequences only (`reported_subjects`).
 //!
 //! The per-subject kernel, the hit lists and the report writers are those of the
-//! `-subject` path (`run.rs`); the opening of the database, the reader's errors and the
-//! rules for the stored titles are shared with BLASTP (`algorithm::common::database`).
+//! `-subject` path (`run.rs`, `blast_format.rs`); the opening of the database, the reader's
+//! errors and the rules for the stored titles are shared with BLASTP
+//! (`algorithm::common::database`).
 
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;

@@ -12,7 +12,9 @@
 //!
 //! # Module Structure
 //!
-//! - `run` - Main run() function for BLASTN search
+//! - `run` - The search of a query batch and the subject chunking
+//! - `../blastn_app.rs` - The application (child of `run`)
+//! - `blast_format.rs` - The reports (child of `run`)
 
 mod run;
 

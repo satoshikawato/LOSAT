@@ -79,7 +79,7 @@ pub struct BlastnArgs {
     // ```c
     // const string kDfltArgQuery("-");
     // ```
-    // `-` is standard input (`blastn/blast_engine/run.rs`).
+    // `-` is standard input (`blastn/blastn_app.rs`).
     #[arg(long, default_value = "-", value_parser = blastn_input_path(), value_name = "PATH")]
     pub query: PathBuf,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2558-2562
@@ -91,7 +91,7 @@ pub struct BlastnArgs {
     //     }
     // ```
     // Optional for the parser: a missing `-subject` is NCBI's error after the parsing
-    // (`blastn/blast_engine/run.rs`).
+    // (`blastn/blastn_app.rs`).
     #[arg(long, value_parser = blastn_input_path(), value_name = "PATH")]
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199

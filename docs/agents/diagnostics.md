@@ -2517,7 +2517,7 @@ Rebuilding less:
   its own by `write_query_header` and `write_hsp_rows` (the two parts of the serial writer's function of one query,
   `write_query_rows`, `blastn/hsp.rs`), and the thread of the batch loop writes the window's buffers in order, each
   query's warnings before its first piece, before the next window is formatted; outfmt 7's last line stays on that
-  thread (`blastn/x_tab_par.rs`, called from `post_process_hits_and_write` in `blastn/blast_engine/run.rs`). Same
+  thread (`blastn/x_tab_par.rs`, called from `post_process_hits_and_write` in `blastn/blast_engine/blast_format.rs`). Same
   bytes: a query's pieces in order are its header and its HSP lists' rows in order, which is the serial call for
   that query, and the serial writer is those calls in query order. Where: the pool that `write_reports` gets while
   no LOSAT_X_QBATCHPAR slot exists (the batch loop: `LOSAT_X_QBATCHPAR=0`, query files below its budget, `-db`);
@@ -3967,7 +3967,7 @@ Scheduling (each value computed by one thread with the original function; order 
   observer, a file sink, or two or more formats, which the library API allows on one stream and the batch
   writes would interleave: the Web adapter; the command line and ABI v1 are streamed), `debug` (`-verbose`,
   `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the blastn trace,
-  `LOSAT_WASI_THREADS_DEBUG`: `run.rs` `x_debug_output`, the list `LOSAT_X_QBATCHPAR` uses too), `scoring`
+  `LOSAT_WASI_THREADS_DEBUG`: `blastn_app.rs` `x_debug_output`, the list `LOSAT_X_QBATCHPAR` uses too), `scoring`
   (no Karlin-Altschul values, or greedy gap costs LOSAT refuses), `chunk_size` (a negative `CHUNK_SIZE`),
   `search_space` (`(db + n (2 q + 1)) (2 q + 1)` above 2^63 - 1, q the longest query: the overflow refusal
   of the effective search space), `subject_ids` (a subject whose tabular id LOSAT refuses), and with

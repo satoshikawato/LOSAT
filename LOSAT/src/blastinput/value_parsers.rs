@@ -740,7 +740,7 @@ pub fn genetic_code(value: &str) -> Result<u8, String> {
 // ```
 /// A BLASTN output file: a name shorter than 256 bytes, as NCBI's constraint; `-` is
 /// standard output, and a file that cannot be created is reported when it is opened
-/// (`blastn/blast_engine/run.rs`).
+/// (`blastn/blastn_app.rs`).
 ///
 /// NCBI reference: c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
 /// ```c
@@ -830,7 +830,7 @@ fn ncbi_file_name_length(path: &[u8]) -> usize {
 }
 
 /// A BLASTN input file: any value, as NCBI's `eInputFile` argument; `-` is standard input
-/// and a file that cannot be opened is reported when it is opened (`blastn/blast_engine/run.rs`).
+/// and a file that cannot be opened is reported when it is opened (`blastn/blastn_app.rs`).
 ///
 /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
 /// ```c

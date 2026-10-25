@@ -3079,7 +3079,20 @@ fn search_query_batch(
         // are masked on the search pool, one task per frame; otherwise, and with the switch off,
         // the frames are masked one after the other as before (tblastx/x_query_frames.rs, which
         // holds the per-frame body `mask_frame`).
-        x_query_frames::mask(&mut query_frames, &seg, parallel_pool);
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
+        // ```c
+        //     if (!mask_at_hash) {
+        //         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+        //                              program_number);
+        //     }
+        // ```
+        // `-soft_masking true` keeps the intervals for the lookup table and the frames' letters.
+        if args.soft_masking() {
+            x_query_frames::mask_soft(&mut query_frames, &seg, parallel_pool);
+        } else {
+            x_query_frames::mask(&mut query_frames, &seg, parallel_pool);
+        }
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     }
 

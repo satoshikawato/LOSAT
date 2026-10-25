@@ -22,9 +22,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: dev-a, ref: '', arms: 'default,prespawn0,refresh', runs: 400 }
-          - { name: dev-b, ref: '', arms: 'default,prespawn0,refresh', runs: 400 }
-          - { name: pre488, ref: a8faa7225659a54a01eccc53c5cbee16ca510323, arms: 'default', runs: 800 }
+          - { name: dev-a, ref: '', arms: 'default', runs: 1000 }
+          - { name: dev-b, ref: '', arms: 'default', runs: 1000 }
     steps:
       - uses: actions/checkout@v4
         with:

@@ -43,6 +43,7 @@ def main():
                 s["fail"] += 1; s["oob"] += oob
                 (a.out / f"fail-{arm}-{i}.txt").write_text(err)
                 s["probes"] += [l[6:] for l in err.splitlines() if l.startswith("PROBE ")]
+                s.setdefault("errors", []).extend(l[10:] for l in err.splitlines() if l.startswith("PROBE-ERR "))
                 if not oob: s["other"].append({"run": i, "exit": code, "head": err[:300]})
             rows.write(f"{arm}\t{i}\t{code}\t{wall:.2f}\t{int(oob)}\n"); rows.flush()
     summary = {"node": subprocess.run([a.node, "--version"], capture_output=True, text=True).stdout.strip(),

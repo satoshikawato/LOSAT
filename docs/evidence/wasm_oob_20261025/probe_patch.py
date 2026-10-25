@@ -16,12 +16,20 @@ new = """        if (process.env.OOB_REFRESH === "1") memory.grow(0);
         try {
           instance.exports.wasi_thread_start(tid, startArg);
         } catch (error) {
-          const buffer = memory.buffer, dv = new DataView(buffer), a = startArg >>> 0;
-          const stack = dv.getUint32(a, true), tls = dv.getUint32(a + 4, true);
-          process.stderr.write(`PROBE ${JSON.stringify({ tid, startArg: a, length: buffer.byteLength,
-            stack, tls, tidStore: tls + 1384, inBounds: tls + 1388 <= buffer.byteLength,
-            startFunc: dv.getUint32(a + 8, true), arg: dv.getUint32(a + 12, true),
-            standby: standby ?? null, error: String(error) })}\\n`);
+          // Print the error first; then what this isolate sees as the memory length before and
+          // after memory.grow(0), and the start arguments where they are readable.
+          process.stderr.write(`PROBE-ERR ${String(error)}\n`);
+          const a = startArg >>> 0, read = buffer => {
+            const length = buffer.byteLength, info = { length };
+            if (a + 16 <= length) {
+              const dv = new DataView(buffer);
+              Object.assign(info, { stack: dv.getUint32(a, true), tls: dv.getUint32(a + 4, true) });
+              info.tidStoreInBounds = info.tls + 1388 <= length;
+            }
+            return info;
+          };
+          const before = read(memory.buffer); memory.grow(0); const after = read(memory.buffer);
+          process.stderr.write(`PROBE ${JSON.stringify({ tid, startArg: a, standby: standby ?? null, before, after })}\n`);
           throw error;
         }
 """

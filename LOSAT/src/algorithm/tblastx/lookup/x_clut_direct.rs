@@ -825,6 +825,17 @@ pub(crate) fn x_try_build_flat_compressed_lookup(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
 ) -> Option<XFlatBuild> {
+    let arm = x_bpf_fill();
+    if arm != 0 {
+        return x_bpf_fill_probe(
+            arm,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+        );
+    }
     x_try_build_flat_with_capacity(
         word_size,
         scaled_threshold,
@@ -834,6 +845,320 @@ pub(crate) fn x_try_build_flat_compressed_lookup(
         NCBI_OVERFLOW_CELL_CAPACITY,
         X_COUNT_CHUNK,
     )
+}
+
+/// PROBE (v4-BPF K2-2, not for merge): the arm of `LOSAT_BPF_FILL` (0 = the current fill).
+/// 1 / 2 / 3 / 4: the partitioned fill with buckets of 2^12 / 2^10 / 2^14 / 2^8 cells;
+/// 8: the current fill through this wrapper (its time with `LOSAT_BPF_FILLT`); 9: arm 1 checked
+/// against the current fill (panics on a difference).
+/// `LOSAT_BPF_FILLT=1` prints each build's phase times to stderr.
+pub(crate) fn x_bpf_fill() -> u8 {
+    use std::sync::OnceLock;
+    static V: OnceLock<u8> = OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("LOSAT_BPF_FILL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+fn x_bpf_fillt() -> bool {
+    use std::sync::OnceLock;
+    static V: OnceLock<bool> = OnceLock::new();
+    *V.get_or_init(|| std::env::var("LOSAT_BPF_FILLT").is_ok_and(|v| v == "1"))
+}
+
+#[inline(never)]
+fn x_bpf_fill_probe(
+    arm: u8,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+) -> Option<XFlatBuild> {
+    let shift = match arm {
+        2 => 10,
+        3 => 14,
+        4 => 8,
+        _ => 12,
+    };
+    let t0 = std::time::Instant::now();
+    let mut phases = [0u64; 3];
+    let mut appends = 0usize;
+    let part = if arm == 8 {
+        None
+    } else {
+        x_try_build_flat_part(
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+            shift,
+            &mut phases,
+            &mut appends,
+        )
+    };
+    let t1 = std::time::Instant::now();
+    let declined = part.is_none();
+    let built = match part {
+        Some(built) => built,
+        None => x_try_build_flat_with_capacity(
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+            X_COUNT_CHUNK,
+        ),
+    };
+    if arm == 9 {
+        let old = x_try_build_flat_with_capacity(
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+            X_COUNT_CHUNK,
+        );
+        x_bpf_same_builds(&built, &old);
+    }
+    let t2 = std::time::Instant::now();
+    if x_bpf_fillt() {
+        eprintln!(
+            "[BPF_FILL] arm={arm} declined={declined} appends={appends} letters={} enum_ns={} part_ns={} fill_ns={} total_ns={} other_ns={}",
+            query.len(),
+            phases[0],
+            phases[1],
+            phases[2],
+            (t1 - t0).as_nanos(),
+            (t2 - t1).as_nanos()
+        );
+    }
+    built
+}
+
+/// PROBE: panics unless the two builds are equal, field by field.
+fn x_bpf_same_builds(got: &Option<XFlatBuild>, want: &Option<XFlatBuild>) {
+    match (got, want) {
+        (None, None) => {}
+        (Some(XFlatBuild::Refused), Some(XFlatBuild::Refused)) => {}
+        (Some(XFlatBuild::TooLarge), Some(XFlatBuild::TooLarge)) => {}
+        (Some(XFlatBuild::Table(a)), Some(XFlatBuild::Table(b))) => {
+            assert_eq!(a.word_length, b.word_length, "BPF_FILL word_length");
+            assert_eq!(a.compressed_alphabet_size, b.compressed_alphabet_size);
+            assert_eq!(a.reciprocal_alphabet_size, b.reciprocal_alphabet_size);
+            assert_eq!(a.longest_chain, b.longest_chain, "BPF_FILL longest_chain");
+            assert_eq!(a.used_cells, b.used_cells, "BPF_FILL used_cells");
+            assert_eq!(a.pv_array_bts, b.pv_array_bts, "BPF_FILL pv_array_bts");
+            assert!(a.pv == b.pv, "BPF_FILL pv");
+            assert!(
+                a.scaled_compress_table_u8 == b.scaled_compress_table_u8,
+                "BPF_FILL scaled"
+            );
+            assert!(a.starts == b.starts, "BPF_FILL starts");
+            assert!(a.hits == b.hits, "BPF_FILL hits");
+        }
+        _ => panic!("BPF_FILL: the builds differ in kind"),
+    }
+}
+
+/// PROBE (v4-BPF K2-2): `x_try_build_flat_with_capacity` with the count deferred and the fill by
+/// buckets of 2^`shift` cells. `None`: declined (a table's appends pass the capacity, so the overflow
+/// test could fire, or the packed appends would not fit 32 bits); the current builder runs.
+///
+/// - appends: the same `for_each_word` calls in the same order, recorded as now; no counts. A
+///   table's appends each take at most one overflow cell, so while a table's appends stay within
+///   the capacity, its cells do too and the current builder's test never refuses.
+/// - partition: the appends sorted by bucket (`index >> shift`), stably, into `hits` itself (bucket
+///   b's appends lie where its cells' hits will), each packed as `offset << shift | index & mask`.
+/// - per bucket: the cells' counts, starts and the fill from a copy of the bucket's packed appends,
+///   then the move to the scan order; the PV array from the starts at the end.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_try_build_flat_part(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+    shift_target: u32,
+    phases: &mut [u64; 3],
+    appends_out: &mut usize,
+) -> Option<Option<XFlatBuild>> {
+    let t0 = std::time::Instant::now();
+    let header = match XHeader::new(word_size) {
+        Some(header) => header,
+        None => return Some(None),
+    };
+    let matrix = match build_blosum62_compressed_score_matrix(header.alphabet) {
+        Some(matrix) => matrix,
+        None => return Some(None),
+    };
+    let info = CompressedNeighborInfo::new(&matrix, header.alphabet);
+    let words = XWords::new(&header, scaled_threshold, &matrix, &info);
+    let backbone_size = header.backbone_size;
+    let max_appends = x_max_appends(backbone_size);
+
+    // Packing: offset bits + cell bits within a bucket fit 32.
+    let offset_bits = usize::BITS - query.len().leading_zeros();
+    let cell_bits = usize::BITS - (backbone_size - 1).leading_zeros();
+    let shift = shift_target.min(cell_bits).min(32u32.checked_sub(offset_bits)?);
+    if cell_bits - shift > 16 {
+        return None;
+    }
+
+    let ranges = x_count_ranges(tables, locations.len());
+    let mut targets: Vec<u32> = Vec::new();
+    let mut per_offset: Vec<(i32, u32)> = Vec::new();
+    for (range, is_table) in ranges {
+        let range_start = targets.len();
+        let mut too_large = false;
+        let mut decline = false;
+        x_for_each_offset(word_size, query, &locations[range], |offset, word| {
+            let before = targets.len();
+            words.for_each_word(word, &mut targets);
+            let appends = targets.len() - before;
+            if appends != 0 {
+                per_offset.push((offset, appends as u32));
+            }
+            if targets.len() > max_appends {
+                too_large = true;
+                return false;
+            }
+            if is_table && targets.len() - range_start > overflow_cell_capacity {
+                decline = true;
+                return false;
+            }
+            true
+        });
+        if too_large {
+            return Some(Some(XFlatBuild::TooLarge));
+        }
+        if decline {
+            return None;
+        }
+    }
+    let n = targets.len();
+    *appends_out = n;
+    let t1 = std::time::Instant::now();
+
+    // Partition by bucket, stably, into `hits`.
+    let buckets = backbone_size.div_ceil(1 << shift);
+    let mask = (1u32 << shift) - 1;
+    let mut bucket_starts = vec![0u32; buckets + 1];
+    for &index in &targets {
+        bucket_starts[(index >> shift) as usize + 1] += 1;
+    }
+    for b in 0..buckets {
+        bucket_starts[b + 1] += bucket_starts[b];
+    }
+    let mut hits = vec![0i32; n];
+    {
+        let mut cursors = bucket_starts[..buckets].to_vec();
+        let mut at = 0usize;
+        for &(query_offset, appends) in &per_offset {
+            let high = (query_offset as u32) << shift;
+            let end = at + appends as usize;
+            for &index in &targets[at..end] {
+                let cursor = &mut cursors[(index >> shift) as usize];
+                hits[*cursor as usize] = (high | (index & mask)) as i32;
+                *cursor += 1;
+            }
+            at = end;
+        }
+    }
+    drop(targets);
+    drop(per_offset);
+    let t2 = std::time::Instant::now();
+
+    // Per bucket: counts, starts, fill, scan order.
+    let mut starts = vec![0u32; backbone_size + 1];
+    let mut cursor = vec![0u32; 1 << shift];
+    let mut scratch: Vec<i32> = Vec::new();
+    let mut appended: Vec<i32> = Vec::new();
+    let mut nonempty_count = 0usize;
+    let mut longest_chain = 0i32;
+    for b in 0..buckets {
+        let first = b << shift;
+        let cells = (backbone_size - first).min(1 << shift);
+        let lo = bucket_starts[b] as usize;
+        let hi = bucket_starts[b + 1] as usize;
+        let counts = &mut cursor[..cells];
+        counts.fill(0);
+        for &packed in &hits[lo..hi] {
+            counts[(packed as u32 & mask) as usize] += 1;
+        }
+        let mut slot = lo as u32;
+        for (start, count) in starts[first..first + cells].iter_mut().zip(counts.iter_mut()) {
+            let c = *count;
+            *start = slot;
+            if c > 0 {
+                nonempty_count += 1;
+                longest_chain = longest_chain.max(c as i32);
+            }
+            *count = slot;
+            slot += c;
+        }
+        scratch.clear();
+        scratch.extend_from_slice(&hits[lo..hi]);
+        for &packed in &scratch {
+            let packed = packed as u32;
+            let at = &mut counts[(packed & mask) as usize];
+            hits[*at as usize] = (packed >> shift) as i32;
+            *at += 1;
+        }
+        // Each cursor now ends at its cell's end.
+        let mut begin = lo;
+        for &end in counts.iter() {
+            let end = end as usize;
+            let k_n = (end - begin) as u32;
+            if k_n > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
+                let cell = &mut hits[begin..end];
+                appended.clear();
+                appended.extend_from_slice(cell);
+                for (k, &query_offset) in appended.iter().enumerate() {
+                    cell[x_emission_position(k as u32, k_n) as usize] = query_offset;
+                }
+            }
+            begin = end;
+        }
+    }
+    starts[backbone_size] = n as u32;
+
+    let mut pv_array_bts = PV_ARRAY_BTS;
+    if (nonempty_count as f64) <= 0.01 * (backbone_size as f64) {
+        pv_array_bts += ilog2(backbone_size / (8 * X_TARGET_PV_BYTES));
+    }
+    let mut pv = vec![0u32; (backbone_size >> pv_array_bts) + 1];
+    for index in 0..backbone_size {
+        if starts[index] < starts[index + 1] {
+            compressed_pv_set(&mut pv, index, pv_array_bts);
+        }
+    }
+    let t3 = std::time::Instant::now();
+    phases[0] += (t1 - t0).as_nanos() as u64;
+    phases[1] += (t2 - t1).as_nanos() as u64;
+    phases[2] += (t3 - t2).as_nanos() as u64;
+
+    Some(Some(XFlatBuild::Table(XFlatCompressedLookup {
+        word_length: header.word_length as i32,
+        compressed_alphabet_size: header.alphabet as i32,
+        reciprocal_alphabet_size: header.reciprocal_alphabet_size,
+        longest_chain,
+        used_cells: nonempty_count,
+        pv,
+        pv_array_bts: pv_array_bts as i32,
+        scaled_compress_table_u8: build_scaled_compress_table_u8(&header.scaled_compress_table),
+        starts,
+        hits,
+    })))
 }
 
 // No NCBI counterpart: how many appends the count pass records before it counts them (and tests NCBI's
@@ -2079,6 +2404,65 @@ mod tests {
     // subjects), the flat `scan_subject` gives the reference's hits and rounds for arrays from the
     // longest cell up, and `for_each_cell` gives the same hits, with the branch-free list too
     // (LOSAT_X_BPCLUTSCANBF); `used_cells` counts the cells with hits.
+    // PROBE (v4-BPF K2-2): the partitioned fill builds the current builder's table (or its refusal,
+    // or declines where a table's appends pass the capacity) on random queries, tables and
+    // capacities, at bucket widths from 2^2 to 2^14 cells.
+    #[test]
+    fn bpf_fill_partitioned_build_is_the_current_build() {
+        let mut rng = XorShift(0x5be0_cd19_137e_2179);
+        let (mut tables_seen, mut declined_seen, mut overflow_seen) = (0usize, 0usize, false);
+        for round in 0..24 {
+            let (letters, threshold): (&[u8], i32) = match round % 5 {
+                0 => (&FEW_LETTERS[..], 1100),
+                1 => (&FEW_LETTERS[..], 1600),
+                2 => (&LETTERS[..], 1100),
+                3 => (&[1u8, 11, 17, 21, 24, 10, 3][..], 2000),
+                _ => (&FEW_LETTERS[..], 0),
+            };
+            let lengths: Vec<usize> = (0..2 + rng.below(5)).map(|_| 1 + rng.below(400)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, letters, round % 3);
+            let mut tables = Vec::new();
+            let mut q = 0;
+            while q < lengths.len() {
+                let end = (q + 1 + rng.below(2)).min(lengths.len());
+                if rng.below(3) != 0 {
+                    tables.push(first[q]..first[end]);
+                }
+                q = end;
+            }
+            for capacity in [1usize, 50, 400, NCBI_OVERFLOW_CELL_CAPACITY] {
+                let want = x_try_build_flat_with_capacity(
+                    5, threshold, &query, &locations, &tables, capacity, X_COUNT_CHUNK,
+                );
+                for shift in [2u32, 4, 8, 12, 14] {
+                    let (mut phases, mut appends) = ([0u64; 3], 0usize);
+                    match x_try_build_flat_part(
+                        5, threshold, &query, &locations, &tables, capacity, shift,
+                        &mut phases, &mut appends,
+                    ) {
+                        Some(got) => {
+                            assert!(shift != 2, "buckets of 2^2 cells");
+                            if let Some(XFlatBuild::Table(table)) = &got {
+                                overflow_seen |= table.longest_chain > 5;
+                                tables_seen += 1;
+                            }
+                            x_bpf_same_builds(&got, &want);
+                        }
+                        // Buckets of 2^2 cells: more than 2^16 buckets, always declined.
+                        None => {
+                            assert!(
+                                capacity < NCBI_OVERFLOW_CELL_CAPACITY || shift == 2,
+                                "declined"
+                            );
+                            declined_seen += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(tables_seen > 0 && declined_seen > 0 && overflow_seen);
+    }
+
     #[test]
     fn flat_scans_give_the_reference_scans_hits() {
         let mut rng = XorShift(0x3c6e_f372_fe94_f82b);

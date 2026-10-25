@@ -29,7 +29,6 @@ use anyhow::{bail, Context, Result};
 ))]
 use rayon::prelude::*;
 
-use crate::algorithm::blastp::x_redo_subjects::XRedoDbSubj;
 use crate::algorithm::common::database as shared;
 pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -44,12 +43,12 @@ use crate::stats::{compute_length_adjustment_ncbi, KarlinParams};
 use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
 
 use super::{
-    ncbistdaa_to_ascii, update_blastp_preliminary_hit_lists, BlastpHitList, BlastpSubjectRef,
-    BlastpSubjectResult, BlastpSubjectScratch, EncodedProtein, XPrelimHsp,
+    ncbistdaa_to_ascii, BlastpHitList, BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch,
+    EncodedProtein, PrelimSink, XPrelimHsp,
 };
 
-// EXPERIMENT (LOSAT_X_BPDBCUT / LOSAT_X_BPDBCUTSHADOW): the blocks of the preliminary stage cut by
-// the database size and the thread count.
+// EXPERIMENT (LOSAT_X_BPDBCUT): the blocks of the preliminary stage cut by the database size and
+// the thread count.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -57,10 +56,9 @@ use super::{
 mod x_db_cut;
 mod x_listed_lean;
 mod x_redo_db_subjects;
-pub(super) use x_listed_lean::{
-    x_bp_listed_lean, x_bp_listed_lean_print_summary,
-    x_shadow_compare as x_listed_lean_shadow_compare, XListedLean,
-};
+#[cfg(test)]
+pub(super) use x_listed_lean::x_assert_same_titles_and_letters;
+pub(super) use x_listed_lean::x_bp_listed_lean;
 pub(super) use x_redo_db_subjects::XShownResidues;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
@@ -133,12 +131,6 @@ impl BlastpDatabase {
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
         })
-    }
-
-    /// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): starts the run's taxonomy database over, for the
-    /// shadow's second search (`TaxdbRun::x_reset`).
-    pub(super) fn x_reset_taxdb(&self) {
-        self.taxdb.x_reset();
     }
 
     /// The `-db` value as NCBI keeps it.
@@ -476,19 +468,18 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
 /// database size and the thread count, and a failed search returns the one-thread order's
 /// error (`database/x_db_cut.rs`, exactness argument in its header).
 #[allow(clippy::too_many_arguments)]
-pub(super) fn search_blocks<S, K>(
+pub(super) fn search_blocks<S, K, P>(
     database: &BlastpDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
     window: i32,
     new_scratch: &S,
     process_subject: &K,
-    preliminary_hit_lists: &mut [Option<BlastpHitList>],
-    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    prelim_hitlist_size: usize,
+    sink: &mut P,
 ) -> Result<()>
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
+    P: PrelimSink,
 {
     #[cfg(all(
         feature = "parallel",
@@ -500,25 +491,21 @@ where
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let blocks_per_thread = 1;
-    // EXPERIMENT (LOSAT_X_BPDBCUT / LOSAT_X_BPDBCUTSHADOW): `database/x_db_cut.rs`.
+    // EXPERIMENT (LOSAT_X_BPDBCUT): `database/x_db_cut.rs`.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     {
-        let mode = x_db_cut::x_bp_db_cut();
-        if mode != x_db_cut::XDbCut::Off {
+        if x_db_cut::x_bp_db_cut() {
             return x_db_cut::x_search_blocks_cut(
-                mode,
                 database,
                 pool,
                 window,
                 blocks_per_thread,
                 new_scratch,
                 process_subject,
-                preliminary_hit_lists,
-                x_compact_hit_lists,
-                prelim_hitlist_size,
+                sink,
             );
         }
     }
@@ -530,26 +517,14 @@ where
         blocks_per_thread,
         new_scratch,
         process_subject,
-        preliminary_hit_lists,
-        x_compact_hit_lists,
-        prelim_hitlist_size,
+        sink,
     )
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPDBCUTSHADOW): the shadow mode's line at exit.
-pub(super) fn x_bp_db_cut_print_summary() {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    x_db_cut::x_bp_db_cut_print_summary();
 }
 
 /// `search_blocks` with blocks of at most `block_bytes` and rounds of `blocks_per_thread`
 /// blocks per thread.
 #[allow(clippy::too_many_arguments)]
-fn search_blocks_of<S, K>(
+fn search_blocks_of<S, K, P>(
     database: &BlastpDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
     window: i32,
@@ -557,13 +532,12 @@ fn search_blocks_of<S, K>(
     blocks_per_thread: usize,
     new_scratch: &S,
     process_subject: &K,
-    preliminary_hit_lists: &mut [Option<BlastpHitList>],
-    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    prelim_hitlist_size: usize,
+    sink: &mut P,
 ) -> Result<()>
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
+    P: PrelimSink,
 {
     let db = &database.db;
     #[cfg(all(
@@ -637,12 +611,7 @@ where
             // updates is the one-thread order.
             for block_results in found {
                 for mut subject_result in block_results? {
-                    update_blastp_preliminary_hit_lists(
-                        preliminary_hit_lists,
-                        x_compact_hit_lists,
-                        &mut subject_result,
-                        prelim_hitlist_size,
-                    );
+                    sink.add(&mut subject_result);
                 }
             }
         }
@@ -666,12 +635,7 @@ where
                 block_subject(&block, i),
                 &mut subject_result,
             );
-            update_blastp_preliminary_hit_lists(
-                preliminary_hit_lists,
-                x_compact_hit_lists,
-                &mut subject_result,
-                prelim_hitlist_size,
-            );
+            sink.add(&mut subject_result);
         }
         next_ordinal = range.end_ordinal();
     }
@@ -698,17 +662,15 @@ pub(super) struct ListedSubjects {
     /// read (`x_read_shown`): a subject whose residues no report reads holds its length only
     /// (`aa_seq` empty).
     pub(super) encoded: Vec<EncodedProtein>,
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): where the redo reads the subjects (`Off`: `encoded`).
-    x_mode: XRedoDbSubj,
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): whether the redo reads the subjects from the database
+    /// (`x_list`; else from `encoded`).
+    x_database: bool,
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the number of residues of each subject, by rank (`x_list`;
     /// empty without the switch).
     x_lengths: Vec<u32>,
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): whether a read of the redo or of the first Newton problems
     /// found a pyrrolysine (O), by rank (`x_list`; empty without the switch).
     x_has_o: Vec<std::sync::atomic::AtomicBool>,
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJSHADOW): the copy that `read` makes, by rank (empty
-    /// without the shadow mode).
-    x_shadow_copy: Vec<EncodedProtein>,
 }
 
 impl ListedSubjects {
@@ -766,10 +728,9 @@ impl ListedSubjects {
         Ok(Self {
             ordinals,
             encoded,
-            x_mode: XRedoDbSubj::Off,
+            x_database: false,
             x_lengths: Vec::new(),
             x_has_o: Vec::new(),
-            x_shadow_copy: Vec::new(),
         })
     }
 
@@ -1800,9 +1761,11 @@ mod tests {
                 2,
                 &|| BlastpSubjectScratch::new(16, 64, window, 21),
                 &recording_kernel(window, &seen),
-                &mut hit_lists,
-                &mut [],
-                500,
+                &mut crate::algorithm::blastp::blast_engine::PrelimCollector {
+                    preliminary_hit_lists: &mut hit_lists,
+                    x_compact_hit_lists: &mut [],
+                    prelim_hitlist_size: 500,
+                },
             )
         })
         .unwrap();
@@ -1906,7 +1869,7 @@ mod tests {
     mod x_db_cut_blocks {
         use super::super::x_db_cut::{
             x_count_blocks, x_cut_block_bytes, x_db_cut_block_bytes, x_search_blocks_cut,
-            x_sequence_bytes, XDbCut,
+            x_sequence_bytes,
         };
         use super::*;
         use std::path::{Path, PathBuf};
@@ -1915,13 +1878,13 @@ mod tests {
 
         /// What the recording kernel saw (sorted by ordinal id) and the listed ordinal ids of a
         /// search of `database` at `threads` threads in rounds of `blocks_per_thread` blocks per
-        /// thread: `search_blocks_of` with blocks of `block_bytes` (`Err`), or the cut's driver
-        /// in a mode (`Ok`).
+        /// thread: `search_blocks_of` with blocks of `block_bytes` (`Some`), or the cut's driver
+        /// (`None`).
         fn search(
             database: &BlastpDatabase,
             threads: usize,
             blocks_per_thread: usize,
-            how: std::result::Result<XDbCut, u64>,
+            block_bytes: Option<u64>,
         ) -> Result<(Seen, Vec<u32>)> {
             let window = 40;
             let seen = std::sync::Mutex::new(Vec::new());
@@ -1930,20 +1893,21 @@ mod tests {
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                 let new_scratch = || BlastpSubjectScratch::new(16, 64, window, 21);
                 let kernel = recording_kernel(window, &seen);
-                match how {
-                    Ok(mode) => x_search_blocks_cut(
-                        mode,
+                match block_bytes {
+                    None => x_search_blocks_cut(
                         database,
                         pool,
                         window,
                         blocks_per_thread,
                         &new_scratch,
                         &kernel,
-                        &mut hit_lists,
-                        &mut compact,
-                        500,
+                        &mut crate::algorithm::blastp::blast_engine::PrelimCollector {
+                            preliminary_hit_lists: &mut hit_lists,
+                            x_compact_hit_lists: &mut compact,
+                            prelim_hitlist_size: 500,
+                        },
                     ),
-                    Err(block_bytes) => search_blocks_of(
+                    Some(block_bytes) => search_blocks_of(
                         database,
                         pool,
                         window,
@@ -1951,9 +1915,11 @@ mod tests {
                         blocks_per_thread,
                         &new_scratch,
                         &kernel,
-                        &mut hit_lists,
-                        &mut compact,
-                        500,
+                        &mut crate::algorithm::blastp::blast_engine::PrelimCollector {
+                            preliminary_hit_lists: &mut hit_lists,
+                            x_compact_hit_lists: &mut compact,
+                            prelim_hitlist_size: 500,
+                        },
                     ),
                 }
             })?;
@@ -2106,7 +2072,7 @@ mod tests {
             assert_eq!(multi.total_letters(), letters as u64);
             assert_eq!(single.db.volumes().len(), 1);
             assert!(multi.db.volumes().len() > 2, "{}", multi.db.volumes().len());
-            let (reference, reference_listed) = search(&single, 1, 2, Err(BLOCK_BYTES)).unwrap();
+            let (reference, reference_listed) = search(&single, 1, 2, Some(BLOCK_BYTES)).unwrap();
             assert_eq!(reference.len(), lengths.len());
             assert_eq!(reference_listed.len(), 100);
             assert_eq!(x_count_blocks(&single.db, BLOCK_BYTES), 1);
@@ -2129,8 +2095,7 @@ mod tests {
                 }
                 for blocks_per_thread in [2, BLOCKS_PER_THREAD] {
                     for (what, db) in [("one volume", &single), ("volumes", &multi)] {
-                        let (seen, listed) =
-                            search(db, threads, blocks_per_thread, Ok(XDbCut::On)).unwrap();
+                        let (seen, listed) = search(db, threads, blocks_per_thread, None).unwrap();
                         let context = format!(
                             "{what}, {threads} threads, {blocks_per_thread} blocks per thread"
                         );
@@ -2138,13 +2103,6 @@ mod tests {
                         assert_eq!(listed, reference_listed, "{context}");
                     }
                 }
-            }
-            // The shadow searches twice (the kernel sees every sequence twice) and finds the
-            // lists equal.
-            for threads in [2usize, 7] {
-                let (seen, listed) = search(&multi, threads, 2, Ok(XDbCut::Shadow)).unwrap();
-                assert_eq!(seen.len(), 2 * lengths.len());
-                assert_eq!(listed, reference_listed);
             }
             let _ = std::fs::remove_dir_all(single_dir);
             let _ = std::fs::remove_dir_all(multi_dir);
@@ -2179,30 +2137,28 @@ mod tests {
                     std::fs::write(&psq, &bytes).unwrap();
                 }
                 let database = open_path(&name);
-                let expected = error_text(search(&database, 1, 2, Err(BLOCK_BYTES)));
+                let expected = error_text(search(&database, 1, 2, Some(BLOCK_BYTES)));
                 assert!(
                     expected.contains("passes the end of the file"),
                     "{expected}"
                 );
                 assert_eq!(
-                    error_text(search(&database, 4, 2, Err(BLOCK_BYTES))),
+                    error_text(search(&database, 4, 2, Some(BLOCK_BYTES))),
                     expected
                 );
                 for threads in [2usize, 4, 7] {
                     let cut = cut_of(&database, threads);
                     // Without the one-thread order's error, the cut's own error differs.
-                    let own = error_text(search(&database, threads, 2, Err(cut)));
+                    let own = error_text(search(&database, threads, 2, Some(cut)));
                     assert_ne!(own, expected, "{threads} threads");
                     if gap {
                         assert!(own.contains("holds a gap character"), "{own}");
                     }
-                    for mode in [XDbCut::On, XDbCut::Shadow] {
-                        assert_eq!(
-                            error_text(search(&database, threads, 2, Ok(mode))),
-                            expected,
-                            "{threads} threads, {mode:?}"
-                        );
-                    }
+                    assert_eq!(
+                        error_text(search(&database, threads, 2, None)),
+                        expected,
+                        "{threads} threads"
+                    );
                 }
             }
             let _ = std::fs::remove_dir_all(dir);
@@ -2234,8 +2190,7 @@ mod tests {
         let mut copied_lists = make();
         let copied = ListedSubjects::read(&database, &mut copied_lists, &mut []).unwrap();
         let mut lists = make();
-        let listed =
-            ListedSubjects::x_list(&database, &mut lists, &mut [], XRedoDbSubj::On).unwrap();
+        let listed = ListedSubjects::x_list(&database, &mut lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [0, 2, 7, 9]);
         assert_eq!(listed.ordinals, copied.ordinals);
         assert!(listed.encoded.is_empty());
@@ -2280,8 +2235,7 @@ mod tests {
             (XShownResidues::Final, &[][..], [false, true, false, true]),
             (XShownResidues::Listed, &[][..], [true; 4]),
         ] {
-            let mut shown =
-                ListedSubjects::x_list(&database, &mut make(), &mut [], XRedoDbSubj::On).unwrap();
+            let mut shown = ListedSubjects::x_list(&database, &mut make(), &mut []).unwrap();
             // The redo reads the subjects of the final lists (and finds the O of p03).
             for rank in [1, 3] {
                 shown.redo_subjects(&database).read(rank).unwrap();
@@ -2439,8 +2393,8 @@ mod tests {
             .unwrap();
         lean.check_reported_titles(&hit_lists).unwrap();
         assert_eq!(lean.stitles(), records.stitles());
-        // The shadow's comparison: titles, flags and every letter.
-        x_listed_lean_shadow_compare(&lean, &records);
+        // Titles, flags and every letter against the stored residues.
+        x_assert_same_titles_and_letters(&lean, &records);
     }
 
     // blast_seqalign.cpp:1569-1582 and seqdbvol.cpp:2302-2310: NCBI opens a volume's

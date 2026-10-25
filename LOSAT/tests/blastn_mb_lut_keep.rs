@@ -10,21 +10,27 @@
 //! builds=`), at 4 threads (zeroing and fill on the pool) and at one thread; the prefault round of
 //! `LOSAT_X_MBLUTPREFAULT` runs only on the fresh tables (`prefault_rounds=` of `[TIMING]
 //! x_mb_lookup_once` equals `fresh=` where every first chunk is dense enough, and the builds
-//! without the switch); with `LOSAT_X_MBLUTKEEPSHADOW` every build on a kept table is compared with
-//! a fresh build (`[X_SHADOW] MBLUTKEEP tables=` = `kept=`, `diffs=0 identical`); no line with
+//! without the switch); no line with
 //! `LOSAT_X_MBLUTKEEP=0`, kept builds with `LOSAT_X_MBLUTONCE=0` and `LOSAT_X_MBFILL=0` (the
 //! original fill loops); and no table is kept while `LOSAT_X_QBATCHPAR`'s slots may search
 //! batches. That the bytes equal NCBI's is the business of the blastn fixtures.
 //!
 //! The query file holds four genomes of 292-306 kb (LC738868 306,008 letters, LC738869 300,002,
 //! LC738870 294,144, LC738873 291,934) and `BATCH_SIZE=4000` puts each in a batch of its own (a
-//! batch holds whole records): four tables of 4^12 cells per search, so the last three builds are
-//! on the kept table. More searches: LC738868 followed by four 100 kb pieces of LC738869 (tables of
-//! 4^11 cells: they use the start of the kept 4^12 table, no second table is allocated), LC738868
-//! split into query chunks by `CHUNK_SIZE` (the chunks' tables go through the keep), and 16 pieces
-//! of 20 kb of LC738868 in batches of one with two slots and corrupted predictions
-//! (`LOSAT_X_QBATCHPARMISS`), where the slots stop partway and the loop keeps its table from then
-//! on. The subject is LC738868.
+//! batch holds whole records): the megablast task builds four tables of 4^12 cells per search, so
+//! the last three builds are on the kept table. blastn searches four pieces of 120,000 letters
+//! instead, one from the middle of each genome: a blastn search of the genomes took 2.5 CPU s at
+//! one thread and 5 at 4, most of it LC738868's alignment with itself; the pieces take 0.8 and 1.2.
+//! Each piece still gets blastn's table of the genomes, 4^11 cells: 211,000-230,000 positions on
+//! its two strands, above the 180,000 from which word size 11 takes 4^11 cells
+//! (`LUT_WIDTH_11_THRESHOLD_10`), filled in two chunks at 4 threads. Four pieces of 5,000 letters
+//! (9,478-9,920 positions, below 12,000) give blastn's two-stage tables (a lookup word of 8, built
+//! in `ascending_cells` order), which go through the keep too. More searches: LC738868 followed by
+//! four 100 kb pieces of LC738869 (tables of 4^11 cells: they use the start of the kept 4^12
+//! table, no second table is allocated), LC738868 split into query chunks by `CHUNK_SIZE` (the
+//! chunks' tables go through the keep), and 16 pieces of 20 kb of LC738868 in batches of one with
+//! two slots and corrupted predictions (`LOSAT_X_QBATCHPARMISS`), where the slots stop partway and
+//! the loop keeps its table from then on. The subject is LC738868.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -35,7 +41,6 @@ const SWITCH: (&str, &str) = ("LOSAT_X_MBLUTKEEP", "1");
 const ONCE_OFF: (&str, &str) = ("LOSAT_X_MBLUTONCE", "0");
 const FILL_OFF: (&str, &str) = ("LOSAT_X_MBFILL", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_MBLUTKEEPSHADOW", "1");
 const BATCH: (&str, &str) = ("BATCH_SIZE", "4000");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const QBATCHPAR: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
@@ -44,7 +49,6 @@ const SLOTS2: (&str, &str) = ("LOSAT_X_QBATCHPARSLOTS", "2");
 const BUILD: &str = "[TIMING] x_mb_lookup_build: ";
 const ONCE: &str = "[TIMING] x_mb_lookup_once: ";
 const KEEP: &str = "[TIMING] x_mb_lut_keep: ";
-const SHADOW_LINE: &str = "[X_SHADOW] MBLUTKEEP ";
 const QBATCHPAR_LINE: &str = "[X_STATS] QBATCHPAR ";
 
 fn fasta(name: &str) -> PathBuf {
@@ -93,6 +97,25 @@ fn genomes() -> &'static Path {
             .collect();
         query_file("genomes", &records)
     })
+}
+
+/// Four pieces of `len` letters, one from the middle of each genome, in one query file.
+fn middles(len: usize) -> PathBuf {
+    let names = ["LC738868", "LC738869", "LC738870", "LC738873"];
+    let seqs: Vec<String> = names
+        .iter()
+        .map(|name| {
+            let genome = letters(&format!("{name}.fasta"));
+            let start = genome.len() / 2 - len / 2;
+            genome[start..start + len].to_string()
+        })
+        .collect();
+    let records: Vec<(String, &str)> = names
+        .iter()
+        .zip(&seqs)
+        .map(|(name, seq)| (format!("{name}_middle"), seq.as_str()))
+        .collect();
+    query_file(&format!("middles{len}"), &records)
 }
 
 /// One search, `-outfmt 6` on standard output, with the given variables as its only `LOSAT_*`
@@ -148,30 +171,27 @@ fn field(stderr: &str, prefix: &str, name: &str) -> u64 {
         .unwrap_or_else(|| panic!("no {name} in: {line}"))
 }
 
-/// For one task: the same report with the switch off, by default, with it, with
-/// `LOSAT_TIMING` and with the shadow at 4 threads and one; the kept
-/// builds counted where they ran.
-fn check(task: &str) {
-    let (reference, stderr) = blastn(task, genomes(), 4, &[OFF, BATCH]);
+/// For one task and four records: the same report with the switch off (at 4 threads with
+/// `LOSAT_TIMING`, which prints no keep line), by default, and with `LOSAT_TIMING` by default, off
+/// (at one thread) and on the original fill loops, at 4 threads and one; the kept builds counted
+/// where they ran. No run sets `LOSAT_X_MBLUTKEEP=1` alone: unset and `1` are the same switch
+/// state.
+fn check(task: &str, query: &Path) {
+    let (reference, stderr) = blastn(task, query, 4, &[OFF, BATCH, TIMING]);
     assert!(!reference.is_empty(), "{task}: no hits");
-    assert_eq!(stderr, "", "{task}");
-    for switches in [&[BATCH][..], &[SWITCH, BATCH]] {
-        let (report, stderr) = blastn(task, genomes(), 4, switches);
-        assert!(
-            report == reference,
-            "{task} {switches:?}: the report differs"
-        );
-        assert_eq!(stderr, "", "{task} {switches:?}: the switch writes nothing");
-    }
+    assert!(!stderr.contains(KEEP), "{task}: {stderr}");
+    let (report, stderr) = blastn(task, query, 4, &[BATCH]);
+    assert!(report == reference, "{task}: the report differs");
+    assert_eq!(stderr, "", "{task}: the switch writes nothing");
 
     for threads in [4, 1] {
-        let (report, stderr) = blastn(task, genomes(), threads, &[BATCH, TIMING]);
+        let (report, stderr) = blastn(task, query, threads, &[BATCH, TIMING]);
         assert!(report == reference, "{task} threads {threads}");
         let builds = field(&stderr, BUILD, "builds=");
         let kept = field(&stderr, KEEP, "kept=");
         assert_eq!(
             builds, 4,
-            "{task} threads {threads}: one table per genome:\n{stderr}"
+            "{task} threads {threads}: one table per record:\n{stderr}"
         );
         assert_eq!(
             kept + field(&stderr, KEEP, "fresh="),
@@ -180,46 +200,26 @@ fn check(task: &str) {
         );
         assert_eq!(kept, 3, "{task} threads {threads}: {stderr}");
 
-        let (report, stderr) = blastn(task, genomes(), threads, &[OFF, BATCH, TIMING]);
-        assert!(report == reference, "{task} threads {threads}");
-        assert!(!stderr.contains(KEEP), "{task}: {stderr}");
+        // At 4 threads the search with the switch off is `reference` itself.
+        if threads == 1 {
+            let (report, stderr) = blastn(task, query, threads, &[OFF, BATCH, TIMING]);
+            assert!(report == reference, "{task} threads {threads}");
+            assert!(!stderr.contains(KEEP), "{task}: {stderr}");
+        }
         // Set, the switch keeps the table on the original fill loops too.
         let (report, stderr) = blastn(
             task,
-            genomes(),
+            query,
             threads,
             &[SWITCH, ONCE_OFF, FILL_OFF, BATCH, TIMING],
         );
         assert!(report == reference, "{task} threads {threads}");
         assert_eq!(field(&stderr, KEEP, "kept="), kept, "{task}: {stderr}");
-
-        let (report, stderr) = blastn(task, genomes(), threads, &[BATCH, SHADOW]);
-        assert!(
-            report == reference,
-            "{task} threads {threads} with the shadow"
-        );
-        let line = stderr
-            .lines()
-            .find(|line| line.starts_with(SHADOW_LINE))
-            .unwrap_or_else(|| panic!("{task}: no shadow line:\n{stderr}"));
-        assert!(line.ends_with(" diffs=0 identical"), "{line}");
-        assert_eq!(field(&stderr, SHADOW_LINE, "tables="), kept, "{line}");
-        assert!(field(&stderr, SHADOW_LINE, "cells=") > 0, "{line}");
-        let (_, stderr) = blastn(task, genomes(), threads, &[OFF, BATCH, SHADOW]);
-        assert!(
-            stderr.contains("[X_SHADOW] MBLUTKEEP tables=0 "),
-            "{task}: nothing compared without the switch:\n{stderr}"
-        );
     }
 
     // With two slots searching the batches after the first, the loop keeps no table: it searches
     // the first batch while the slots may still start, and none after.
-    let (report, stderr) = blastn(
-        task,
-        genomes(),
-        4,
-        &[BATCH, TIMING, STATS, QBATCHPAR, SLOTS2],
-    );
+    let (report, stderr) = blastn(task, query, 4, &[BATCH, TIMING, STATS, QBATCHPAR, SLOTS2]);
     assert!(report == reference, "{task} with slots");
     assert!(
         field(&stderr, QBATCHPAR_LINE, "precomputed=") > 0,
@@ -230,12 +230,19 @@ fn check(task: &str) {
 
 #[test]
 fn megablast_gives_the_same_report_on_a_kept_table() {
-    check("megablast");
+    check("megablast", genomes());
 }
 
 #[test]
 fn blastn_gives_the_same_report_on_a_kept_table() {
-    check("blastn");
+    check("blastn", &middles(120_000));
+}
+
+// blastn's two-stage tables (a lookup word of 8 below the word of 11, built in `ascending_cells`
+// order) on four pieces of 5,000 letters.
+#[test]
+fn blastn_two_stage_tables_go_through_the_keep() {
+    check("blastn", &middles(5_000));
 }
 
 // The prefault round of `LOSAT_X_MBLUTPREFAULT` runs on the fresh table only: at 8 threads every
@@ -255,8 +262,8 @@ fn megablast_runs_the_prefault_round_on_fresh_tables_only() {
     assert_eq!(field(&stderr, ONCE, "prefault_rounds="), fresh, "{stderr}");
 }
 
-/// The same report with the switch off and on, the shadow's tables identical, and the keep's
-/// counts (`kept=`, `fresh=`) as given.
+/// The same report with the switch off and on, and the keep's counts (`kept=`, `fresh=`) as
+/// given.
 fn check_counts(task: &str, query: &Path, env: &[(&str, &str)], kept: u64, fresh: u64) -> String {
     let (reference, _) = blastn(task, query, 4, &[env, &[OFF]].concat());
     assert!(!reference.is_empty(), "{task}: no hits");
@@ -272,10 +279,6 @@ fn check_counts(task: &str, query: &Path, env: &[(&str, &str)], kept: u64, fresh
         fresh,
         "{task} {env:?}:\n{stderr}"
     );
-    let (report, shadow) = blastn(task, query, 4, &[env, &[SHADOW]].concat());
-    assert!(report == reference, "{task} {env:?} with the shadow");
-    assert_eq!(field(&shadow, SHADOW_LINE, "tables="), kept, "{shadow}");
-    assert!(shadow.contains(" diffs=0 identical"), "{shadow}");
     stderr
 }
 

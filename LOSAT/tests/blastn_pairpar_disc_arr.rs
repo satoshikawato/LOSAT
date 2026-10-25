@@ -11,10 +11,8 @@
 //! scan and fold of the reference code. So the property under test is that the report does not
 //! depend on it: for discontiguous templates of both word sizes, one and two templates, the
 //! search with the switch on at 1, 2, 4 and 5 threads gives the bytes of the search with it at
-//! `0`, and the shadow run (`LOSAT_X_PAIRPARDISCARRSHADOW`, which computes the stage on copies
-//! and compares the hit list and both arrays with the reference code for every chunk) gives
-//! them too and compares at least one chunk. That those bytes equal NCBI's is the business of
-//! the dc-megablast fixtures (`tests/blastn_regression_fixtures.py`, `dc.*`).
+//! `0`, and the stage took the search's chunks (`LOSAT_X_REACH`). That those bytes equal NCBI's is
+//! the business of the dc-megablast fixtures (`tests/blastn_regression_fixtures.py`, `dc.*`).
 //!
 //! The inputs are one subject (the stage takes a search of one subject by the owner of a pool
 //! of two threads or more, or with `LOSAT_X_BNDCONE` by a search on one thread) and queries cut
@@ -24,8 +22,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod reach_support;
+
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_PAIRPARDISCARR", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_PAIRPARDISCARRSHADOW", "1");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -123,35 +122,24 @@ fn stage_counts(stderr: &str) -> (u64, u64) {
 }
 
 /// For one template: the search with the switch at `0` at one thread, then by default at 1, 2,
-/// 4 and 5 threads (the same bytes, nothing on standard error), then the shadow at 4 threads
-/// (the same bytes, and its summary line with at least one chunk and one hit compared).
+/// 4 and 5 threads (the same bytes, nothing on standard error, the stage took the search).
 fn check_template(query: &Path, template: &[&str]) {
     let (expected, expected_stderr) = blastn(query, template, 1, &[SWITCH_OFF]);
     assert!(!expected.is_empty(), "{template:?}: no hits");
     assert_eq!(expected_stderr, "", "{template:?}");
     for threads in [1, 2, 4, 5] {
-        let (report, stderr) = blastn(query, template, threads, &[]);
+        let reach = reach_support::Reach::new("pairpardiscarr");
+        let (report, stderr) = blastn(query, template, threads, &[reach.var()]);
         assert!(
             report == expected,
             "{template:?} threads {threads}: the report differs from {SWITCH_OFF:?}"
         );
         assert_eq!(stderr, "", "{template:?} threads {threads}");
+        assert!(
+            reach.sides("LOSAT_X_PAIRPARDISCARR").0,
+            "{template:?} threads {threads}: the stage took no chunk"
+        );
     }
-    let (report, stderr) = blastn(query, template, 4, &[SHADOW]);
-    assert!(
-        report == expected,
-        "{template:?}: the report differs with {SHADOW:?}"
-    );
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with("[X_PAIRPARDISCARRSHADOW] blastn: seed chunks equal="))
-        .unwrap_or_else(|| panic!("{template:?}: no summary line:\n{stderr}"));
-    assert!(
-        !line.starts_with("[X_PAIRPARDISCARRSHADOW] blastn: seed chunks equal=0 ")
-            && !line.contains("(ungapped hits 0,"),
-        "{template:?}: {line}"
-    );
-    assert_eq!(stderr.lines().count(), 1, "{template:?}: {stderr}");
 }
 
 // The byte comparisons above would also pass if the stage silently stopped running: with
@@ -255,13 +243,13 @@ fn two_queries_in_one_array_give_the_same_report() {
 fn the_diagonal_hash_is_not_taken() {
     let query = query_file("hash", &[(180_000, 4100)]);
     let (expected, _) = blastn(&query.0, &[], 1, &[SWITCH_OFF]);
-    let (report, stderr) = blastn(&query.0, &[], 4, &[SHADOW, ("LOSAT_TIMING", "1")]);
+    let reach = reach_support::Reach::new("pairpardiscarr-hash");
+    let (report, stderr) = blastn(&query.0, &[], 4, &[reach.var()]);
     assert!(report == expected);
+    assert_eq!(stderr, "");
     assert!(
-        stderr.contains(
-            "[X_PAIRPARDISCARRSHADOW] blastn: seed chunks equal=0 (ungapped hits 0, array cells 0)"
-        ),
-        "{stderr}"
+        !reach.sides("LOSAT_X_PAIRPARDISCARR").0,
+        "the stage took a chunk of the diagonal hash"
     );
     let (report, stderr) = blastn(&query.0, &[], 4, &[("LOSAT_TIMING", "1")]);
     assert!(report == expected);

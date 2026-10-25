@@ -444,14 +444,7 @@ impl PreparedXml {
                         .as_ref()
                         .context("names of a subject with hits")?;
                     let record_length = self.subject_lengths[oid];
-                    let hit = XmlHit {
-                        id: &names.id,
-                        title: &names.title,
-                        accession: &names.accession,
-                        len: record_length,
-                        taxid: names.taxid,
-                        taxonomy: &names.taxonomy,
-                    };
+                    let hit = XmlHit::of(names, record_length);
                     let subject_seq = subject_letters.nt(oid);
                     let mut translation = TargetTranslation::of(subject_seq, &code);
                     // NCBI's messages about the taxonomy database: opening and the volume's

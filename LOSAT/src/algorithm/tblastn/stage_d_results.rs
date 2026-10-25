@@ -11,6 +11,12 @@ use super::stage_d_linking::{
     compare_preliminary_lists_for_kappa, score_compare, LinkedHsp, LinkedHspList,
 };
 
+// `-culling_limit`: NCBI's culling writer and pipe over these hit lists (a child module for
+// the private fields of `KappaResultHitList`).
+#[path = "culling.rs"]
+mod culling;
+pub(super) use culling::PrelimCulling;
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.h:152-181;
 // core/blast_kappa.c:2494-2515:
 // while (NULL != (hsp_list = BlastCompo_HeapPop(heap)))

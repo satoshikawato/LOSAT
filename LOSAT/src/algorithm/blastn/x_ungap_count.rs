@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BNUNGAPCOUNT, shadow LOSAT_X_BNUNGAPCOUNTSHADOW): the exact ungapped
+//! EXPERIMENT (LOSAT_X_BNUNGAPCOUNT): the exact ungapped
 //! extension (`s_NuclUngappedExtendExact`) with the number of steps of each direction worked out
 //! before its loop.
 //!
@@ -74,97 +74,21 @@
 //! needed, and the query letters are BLASTNA codes (`< 16`), so the matrix cell
 //! `code * 16 + base` is in the 256-cell matrix.
 //!
-//! The variables are read once. `LOSAT_X_BNUNGAPCOUNT` (a switch of the strict set,
-//! `utils/xswitch.rs`: on unless it is `0`) runs this
-//! module. `LOSAT_X_BNUNGAPCOUNTSHADOW` (set to any value; not in the strict set; implies it)
-//! runs this module and the ported loops on every call and panics unless the four results are
-//! equal; `main` prints one `[X_SHADOW] BNUNGAPCOUNT compared=N` line.
+//! The variable is read once. `LOSAT_X_BNUNGAPCOUNT` (a switch of the strict set,
+//! `utils/xswitch.rs`: on unless it is `0`) runs this module.
 
 use super::extension::UngappedData;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// BLASTNA alphabet size (`blast_encoding.h:91-92`).
 const BLASTNA_SIZE: usize = 16;
 
-// No NCBI counterpart: the number of calls the shadow compared (relaxed; it orders nothing).
-static X_SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
-
-/// No NCBI counterpart: reads LOSAT_X_BNUNGAPCOUNT / LOSAT_X_BNUNGAPCOUNTSHADOW once.
-/// `LOSAT_X_BNUNGAPCOUNT` is a strict-set switch: on unless it is `0`.
-/// `LOSAT_X_BNUNGAPCOUNTSHADOW` is not: it counts when set to any value. 0 = the
-/// ported loops, 1 = this module, 2 = both and compare; SHADOW wins. It chooses a LOSAT code path
-/// and changes no value NCBI computes.
+/// No NCBI counterpart: reads LOSAT_X_BNUNGAPCOUNT once. It is a strict-set switch: on unless it
+/// is `0`. It chooses a LOSAT code path and changes no value NCBI computes.
 #[inline(always)]
-pub(crate) fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BNUNGAPCOUNTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_BNUNGAPCOUNT") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-/// The summary line `main` prints at exit with LOSAT_X_BNUNGAPCOUNTSHADOW.
-// No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
-pub fn print_summary() {
-    if mode() != 2 {
-        return;
-    }
-    let compared = X_SHADOW_COMPARED.load(Ordering::Relaxed);
-    eprintln!(
-        "[X_SHADOW] BNUNGAPCOUNT compared={compared} ({})",
-        if compared == 0 {
-            "nothing compared: no exact ungapped extension ran"
-        } else {
-            "every exact ungapped extension identical"
-        }
-    );
-}
-
-/// No NCBI counterpart: the shadow call (mode 2) of `extend_hit_ungapped_exact_ncbi`: both
-/// loops, compared; returns the ported loops' result.
-#[cold]
-#[inline(never)]
-pub(crate) fn shadow(
-    q_seq: &[u8],
-    s_seq_packed: &[u8],
-    q_off: usize,
-    s_off: usize,
-    subject_len: usize,
-    x_dropoff: i32,
-    matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
-) -> UngappedData {
-    let counted = extend_hit_ungapped_exact_counted(
-        q_seq,
-        s_seq_packed,
-        q_off,
-        s_off,
-        subject_len,
-        x_dropoff,
-        matrix,
-    );
-    let ported = super::extension::extend_hit_ungapped_exact_ported(
-        q_seq,
-        s_seq_packed,
-        q_off,
-        s_off,
-        subject_len,
-        x_dropoff,
-        matrix,
-    );
-    let key = |u: &UngappedData| (u.q_start, u.s_start, u.length, u.score);
-    assert_eq!(
-        key(&counted),
-        key(&ported),
-        "LOSAT_X_BNUNGAPCOUNTSHADOW: the counted loops differ at q_off {q_off} s_off {s_off}"
-    );
-    X_SHADOW_COMPARED.fetch_add(1, Ordering::Relaxed);
-    ported
+pub(crate) fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNUNGAPCOUNT"))
 }
 
 /// `matrix[code][base]` of the BLASTNA matrix (`code < 16`, `base < 4`).

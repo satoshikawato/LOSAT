@@ -324,9 +324,10 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     let want = frozen(&case.name, "out");
     assert!(
         output.stdout == want,
-        "{label}: stdout differs ({} bytes, NCBI wrote {})",
+        "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
         output.stdout.len(),
-        want.len()
+        want.len(),
+        crate::outfmt11_blastx::first_difference(&output.stdout, &want)
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
@@ -585,6 +586,41 @@ fn a_batch_size_that_is_not_an_integer_is_refused() {
                 String::from_utf8_lossy(&output.stderr).contains("BATCH_SIZE"),
                 "{value:?} {format}"
             );
+        }
+    }
+}
+
+/// NCBI's `PrintErrorArchive` converts the trimmed `-outfmt` text to an integer and writes
+/// nothing when that throws (`11 qseqid`); `11` with white space around it converts. NCBI 2.17.0
+/// with a missing `-query`: rc 1 and no bytes for `11 qseqid` and ` 11 qseqid`, the error
+/// archive of `noquery_sub` for ` 11 `.
+#[test]
+fn an_outfmt_spec_gets_no_error_archive() {
+    for threads in ["1", "4"] {
+        for (outfmt, written) in [("11 qseqid", false), (" 11 qseqid", false), (" 11 ", true)] {
+            let output = run(
+                &[],
+                &[
+                    "-query",
+                    &input("no_such_query.faa"),
+                    "-subject",
+                    &input("arch_tbn_s.fna"),
+                    "-outfmt",
+                    outfmt,
+                ],
+                threads,
+            );
+            assert_eq!(output.status.code(), Some(1), "{outfmt:?}");
+            if written {
+                assert_eq!(output.stdout, frozen("noquery_sub", "out"), "{outfmt:?}");
+            } else {
+                assert!(
+                    output.stdout.is_empty(),
+                    "{outfmt:?}: {} bytes",
+                    output.stdout.len()
+                );
+            }
+            assert_eq!(output.stderr, frozen("noquery_sub", "err"), "{outfmt:?}");
         }
     }
 }

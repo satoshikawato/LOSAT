@@ -47,12 +47,12 @@
 //! starts from one scratch (`new_state`) and searches the subjects in OID order, so every subject
 //! meets the scratch history it meets at one thread (the diagonal hash, kept across chunks with an
 //! advancing offset, included); only the stages inside a chunk use the pool, each with its own
-//! exactness argument and shadow. `sink` receives the subjects in OID order in both shapes (the
+//! exactness argument. `sink` receives the subjects in OID order in both shapes (the
 //! parallel one hands them over in order: collected, or streamed with LOSAT_X_BNSTREAM). The
 //! chunks of a batch searched in order are the one-thread loop's statements (search with
 //! `reuse_prelim_hits`, merge, `-subject_besthit`, buffer back), and the parallel batch merges its
 //! chunks' lists in the same order. The parts that come on with the shape (strips, per-query
-//! gapped stages, speculative traceback) have their own shadows and gates.
+//! gapped stages, speculative traceback) have their own exactness arguments and gates.
 //!
 //! The rule (scheduling only; no NCBI counterpart): the subject tasks take at least the time of
 //! their longest work unit (a 5 Mb chunk, `MAX_DBSEQ_LEN`, or a shorter subject: the chunks of a

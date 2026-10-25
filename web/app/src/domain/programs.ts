@@ -117,10 +117,16 @@ const compBasedStats: ParameterField = {
 // Filters and Masking.
 const seg: ParameterField = { flag: '-seg', label: 'Low complexity regions filter (SEG)', kind: 'text', suggestions: ['no', 'yes'] };
 const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag' };
+const softMasking: ParameterField = { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean' };
 // Other Parameters: LOSAT's options that NCBI's page does not show.
 const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subject', ...integer };
 const threshold: ParameterField = { flag: '-threshold', label: 'Neighboring words threshold', ...decimal };
 const windowSize: ParameterField = { flag: '-window_size', label: 'Two-hit window size', ...integer };
+
+// BLAST+'s -num_descriptions / -num_alignments (NCBI's page has them as "Descriptions" / "Alignments" of its
+// display settings; they also set the hit list sizes, so a run may search twice, abi_v2.md §7).
+const numDescriptions: ParameterField = { flag: '-num_descriptions', label: 'Number of descriptions', ...integer };
+const numAlignments: ParameterField = { flag: '-num_alignments', label: 'Number of alignments', ...integer };
 
 const OTHER = 'Other Parameters';
 
@@ -194,6 +200,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         title: OTHER,
         placement: 'algorithm',
         fields: [
+          numDescriptions,
+          numAlignments,
           maxHsps,
           { flag: '-perc_identity', label: 'Percent identity', ...decimal },
           { flag: '-subject_besthit', label: 'Subject best hit', kind: 'flag' },
@@ -206,7 +214,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     label: 'BLASTP',
     summary: 'BLASTP searches protein subjects using a protein query.',
     searches: 'protein subjects',
-    taskNotes: { blastp: 'protein-protein BLAST', 'blastp-fast': 'Quick BLASTP', 'blastp-short': 'short queries' },
+    taskNotes: { blastp: 'protein-protein BLAST', 'blastp-fast': 'Quick BLASTP' },
     query: 'protein',
     subject: 'protein',
     fastaParser: 0,
@@ -222,15 +230,14 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
             choiceLabels: {
               blastp: 'blastp (protein-protein BLAST)',
               'blastp-fast': 'Quick BLASTP (blastp-fast)',
-              'blastp-short': 'blastp-short (short queries)',
             },
           },
         ],
       },
       { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats] },
-      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg] },
-      { title: OTHER, placement: 'algorithm', fields: [threshold, windowSize, maxHsps] },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking] },
+      { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize, maxHsps] },
     ],
   },
   {
@@ -262,12 +269,14 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: 'Filters and Masking',
         placement: 'algorithm',
-        fields: [seg, { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean' }, lcaseMasking],
+        fields: [seg, softMasking, lcaseMasking],
       },
       {
         title: OTHER,
         placement: 'algorithm',
         fields: [
+          numDescriptions,
+          numAlignments,
           threshold,
           windowSize,
           { flag: '-xdrop_gap', label: 'X-dropoff, preliminary gapped (bits)', ...decimal },
@@ -295,8 +304,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         // NCBI's "Max matches in a query range" (HSP_RANGE_MAX) is BLAST+'s -culling_limit.
         fields: [maxTargetSeqs, evalue, wordSize, { flag: '-culling_limit', label: 'Max matches in a query range', ...integer }],
       },
-      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg] },
-      { title: OTHER, placement: 'algorithm', fields: [threshold, windowSize] },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking] },
+      { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize] },
     ],
   },
 ] satisfies ProgramDescriptor[]);

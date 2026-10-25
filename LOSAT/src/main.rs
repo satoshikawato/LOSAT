@@ -243,8 +243,6 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastx::x_seed_bucket::print_summary();
     LOSAT::algorithm::tblastx::blast_engine::x_pair_par_print_summary();
     LOSAT::algorithm::tblastx::blast_engine::x_seed_release_print_summary();
-    LOSAT::algorithm::tblastx::lookup::x_bplut_print_summary();
-    LOSAT::algorithm::tblastx::lookup::x_tbxlut_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_hsp_inplace_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_link_sort_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_link_slices_print_summary();
@@ -255,15 +253,13 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastn::x_link_window_print_summary();
     LOSAT::algorithm::blastn::x_subject_store_print_summary();
     LOSAT::algorithm::blastn::x_query_dust_par_print_summary();
-    LOSAT::algorithm::blastn::x_ungap_count_print_summary();
+    LOSAT::algorithm::blastn::x_greedy_row_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_query_prep_par_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_qgroup_par_print_summary();
-    LOSAT::algorithm::blastn::blast_engine::x_db_cut_print_summary();
-    LOSAT::algorithm::blastn::blast_engine::x_db_stream_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_tb_range_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_lut_drop_print_summary();
-    LOSAT::algorithm::blastp::x_bp_seed_print_summary();
-    LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_print_summary();
+    LOSAT::algorithm::blastn::blast_engine::x_query_drop_print_summary();
+    LOSAT::algorithm::blastp::x_bp_hit_bf_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();
     LOSAT::algorithm::blastp::x_bp_lkp_ahead_print_summary();
     LOSAT::algorithm::blastp::x_restricted_gap_print_summary();
@@ -271,15 +267,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastn::lookup::x_dc_csr::print_summary();
     LOSAT::algorithm::blastn::lookup::x_mb_lookup_print_summary();
     LOSAT::algorithm::blastp::x_bp_prelim_compact_print_summary();
-    LOSAT::algorithm::blastp::x_bp_redo_par_print_summary();
-    LOSAT::algorithm::blastp::x_bp_subj_run_print_summary();
-    LOSAT::algorithm::blastp::x_bp_db_cut_print_summary();
-    LOSAT::algorithm::blastp::x_bp_listed_lean_print_summary();
-    LOSAT::algorithm::blastp::x_bp_redo_db_subj_print_summary();
-    LOSAT::algorithm::blastp::x_bp_subj_meta_print_summary();
     LOSAT::algorithm::blastx::seed::x_seed_scan::print_shadow_stats();
-    LOSAT::algorithm::blastp::x_ungapped_fast::print_shadow_stats();
-    LOSAT::algorithm::blastp::x_ungapped_sent::print_shadow_stats();
     LOSAT::utils::x_logclone::print_shadow_stats();
     // Diagnostic (LOSAT_TIMING): the common line, last (utils/xtiming.rs).
     LOSAT::utils::xtiming::print();

@@ -31,7 +31,8 @@ use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
 use crate::report::archive::{
-    write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
+    defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
+    KaBlock,
 };
 #[cfg(test)]
 use crate::report::diag_log::ERROR;
@@ -78,6 +79,7 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
                 linker: linker as u32 as i32,
             },
         });
+    inputs.window_masker_db = args.window_masker_db.clone();
     inputs.culling_limit = args.culling_limit;
     inputs.subject_besthit = args.subject_besthit;
     inputs.hitlist_size = args
@@ -122,10 +124,11 @@ pub(crate) struct ArchiveCall<'a> {
     pub hit_lists: &'a [Option<BlastnHitList>],
     pub query_masks: &'a [Vec<MaskedInterval>],
     /// The DUST-only masks of the call's queries (plus strand, in the searched letters),
-    /// made for every query.
+    /// made for every query; with `-window_masker_db` (`window_masker`) the WindowMasker masks.
     pub dust_masks: &'a [Vec<MaskedInterval>],
     pub unsearched: &'a [bool],
     pub lcase_masking: bool,
+    pub window_masker: bool,
     pub both_strands: bool,
     pub minus_strand: bool,
     /// The queries of each batch of the call, in order; empty for a call that is one batch.
@@ -143,27 +146,6 @@ pub(crate) struct FirstContext {
     pub length_adjustment: i64,
     /// The search space of the batch's context 0 (the option).
     pub context0_space: i64,
-}
-
-fn ka_block(params: &crate::stats::tables::KarlinParams, gapped: bool) -> KaBlock {
-    KaBlock {
-        lambda: params.lambda,
-        k: params.k,
-        h: params.h,
-        gapped,
-    }
-}
-
-/// The defline line of the Bioseq: the line as read, else `>` and the title.
-fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
-    match record.archive_defline() {
-        Some(defline) => Cow::Borrowed(defline),
-        None => {
-            let mut line = vec![b'>'];
-            line.extend_from_slice(&record.title);
-            Cow::Owned(line)
-        }
-    }
 }
 
 /// The Seq-aligns of one batch of a call.
@@ -234,14 +216,40 @@ impl<'a> AlignSource for BlastnAligns<'a> {
 /// (`Merge`) in the order the mapper gave: descending for `-strand minus`. Each interval
 /// is written once for each strand of the mask (twice with a lower-case mask or both
 /// strands).
+///
+/// With `-window_masker_db` (`window_masker`) the query vector's mask is WindowMasker's,
+/// which replaced the others: every interval once for each frame, in the masker's order.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:179-189
+/// ```c++
+///         if (mqr) {
+///             CRef<CSeqLocInfo> info_plus
+///                 (new CSeqLocInfo(&* ival, CSeqLocInfo::eFramePlus1));
+///             mqr->push_back(info_plus);
+///
+///             CRef<CSeqLocInfo> info_minus
+///                 (new CSeqLocInfo(&* ival, CSeqLocInfo::eFrameMinus1));
+///             mqr->push_back(info_minus);
+///         }
+/// ```
 fn lcase_mask_intervals(
     record: &FastaRecord,
     dust: &[MaskedInterval],
     offset: usize,
     lcase_masking: bool,
+    window_masker: bool,
     both_strands: bool,
     minus_strand: bool,
 ) -> Vec<(i32, i32)> {
+    if window_masker {
+        return dust
+            .iter()
+            .flat_map(|mask| {
+                let interval = ((mask.start + offset) as i32, (mask.end + offset) as i32 - 1);
+                [interval, interval]
+            })
+            .collect();
+    }
     let user: Vec<(i32, i32)> = if lcase_masking {
         collect_lowercase_masks(record.archive_letters())
             .iter()
@@ -379,6 +387,7 @@ pub(crate) fn write_blastn_archives(
                 &call.dust_masks[index],
                 offset,
                 call.lcase_masking,
+                call.window_masker,
                 call.both_strands,
                 call.minus_strand,
             );
@@ -542,15 +551,23 @@ mod tests {
             uncut: Some(whole),
         }));
         assert_eq!(
-            lcase_mask_intervals(&record, &[], 29, true, true, false),
+            lcase_mask_intervals(&record, &[], 29, true, false, true, false),
             vec![(0, 19), (0, 19)]
         );
         // Without -lcase_masking there is no user mask.
-        assert!(lcase_mask_intervals(&record, &[], 29, false, true, false).is_empty());
+        assert!(lcase_mask_intervals(&record, &[], 29, false, false, true, false).is_empty());
         // DUST intervals of the range are mapped by the range's start, merged with the lower
         // case when they overlap or abut, and sorted.
         assert_eq!(
-            lcase_mask_intervals(&record, &dust(&[(0, 5), (30, 40)]), 20, true, false, true),
+            lcase_mask_intervals(
+                &record,
+                &dust(&[(0, 5), (30, 40)]),
+                20,
+                true,
+                false,
+                true,
+                false
+            ),
             vec![(0, 24), (0, 24), (50, 59), (50, 59)]
         );
         // A DUST-only mask: ascending once on a single strand, descending with -strand minus,
@@ -558,15 +575,15 @@ mod tests {
         let plain = FastaRecord::new("Query_2", b"q", &[b'A'; 100]);
         let intervals = dust(&[(5, 10), (20, 30)]);
         assert_eq!(
-            lcase_mask_intervals(&plain, &intervals, 0, false, false, false),
+            lcase_mask_intervals(&plain, &intervals, 0, false, false, false, false),
             vec![(5, 9), (20, 29)]
         );
         assert_eq!(
-            lcase_mask_intervals(&plain, &intervals, 0, false, false, true),
+            lcase_mask_intervals(&plain, &intervals, 0, false, false, false, true),
             vec![(20, 29), (5, 9)]
         );
         assert_eq!(
-            lcase_mask_intervals(&plain, &intervals, 0, false, true, false),
+            lcase_mask_intervals(&plain, &intervals, 0, false, false, true, false),
             vec![(5, 9), (5, 9), (20, 29), (20, 29)]
         );
         // A query with lower case is ascending even with -strand minus.
@@ -574,9 +591,18 @@ mod tests {
         lower[50] = b'c';
         let lower = FastaRecord::new("Query_3", b"q", &lower);
         assert_eq!(
-            lcase_mask_intervals(&lower, &intervals, 0, true, false, true),
+            lcase_mask_intervals(&lower, &intervals, 0, true, false, false, true),
             vec![(5, 9), (5, 9), (20, 29), (20, 29), (50, 50), (50, 50)]
         );
+        // WindowMasker's masks replace the others: each interval twice (the plus and minus
+        // frames), in the masker's order, with every strand option (NCBI 2.17.0's archives of
+        // `-window_masker_db`, line NP M2).
+        for (both, minus) in [(true, false), (false, false), (false, true)] {
+            assert_eq!(
+                lcase_mask_intervals(&lower, &intervals, 3, true, true, both, minus),
+                vec![(8, 12), (8, 12), (23, 32), (23, 32)]
+            );
+        }
     }
 
     #[test]

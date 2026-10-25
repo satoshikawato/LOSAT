@@ -35,19 +35,44 @@ pub mod masks;
 pub mod options;
 pub mod writer;
 
+use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::diag_log::{DiagLog, Message, ERROR};
+use crate::stats::tables::KarlinParams;
 use options::OptionInputs;
 
 pub use writer::{
     write_archive, write_error_archive, AlignSource, ArchiveOut, BatchArchive, KaBlock,
     NoAlignments,
 };
+
+/// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes.
+pub(crate) fn ka_block(params: &KarlinParams, gapped: bool) -> KaBlock {
+    KaBlock {
+        lambda: params.lambda,
+        k: params.k,
+        h: params.h,
+        gapped,
+    }
+}
+
+/// The defline line of the Bioseq: the line as read, else `>` and the title.
+pub(crate) fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
+    match record.archive_defline() {
+        Some(defline) => Cow::Borrowed(defline),
+        None => {
+            let mut line = vec![b'>'];
+            line.extend_from_slice(&record.title);
+            Cow::Owned(line)
+        }
+    }
+}
 
 /// How `ARCHIVE_FORMAT` makes NCBI write the archive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +111,47 @@ impl ArchiveEncoding {
     }
 }
 
+/// Whether NCBI's `PrintErrorArchive` writes the error archive for this `-outfmt` text.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:913-929
+/// ```c++
+/// void PrintErrorArchive(const CArgs & a, const list<CRef<CBlast4_error> > & msg)
+/// {
+///     try {
+///         if(NStr::StringToInt(NStr::TruncateSpaces(a[align_format::kArgOutputFormat].AsString())) == CFormattingArgs::eArchiveFormat) {
+///             ...
+///             CBlastFormat::PrintArchive(archive, a[kArgOutput].AsOutputFile());
+///         }
+///     } catch (...) {}
+/// }
+/// ```
+/// The conversion throws (and nothing is written) for text after the number, such as
+/// `11 qseqid`; the batches' archives accept such a text (`-outfmt "11 <spec>"`), only the
+/// error archive does not. `TruncateSpaces` strips `isspace` characters at both ends,
+/// `StringToInt` takes an optional sign and decimal digits (leading zeros allowed) that fit an
+/// `int`.
+pub fn writes_error_archive(outfmt: &str) -> bool {
+    let is_space = |c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r');
+    let text = outfmt.trim_matches(is_space);
+    let (negative, digits) = match text.as_bytes().first() {
+        Some(b'+') => (false, &text[1..]),
+        Some(b'-') => (true, &text[1..]),
+        _ => (false, text),
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    let mut value: i64 = 0;
+    for b in digits.bytes() {
+        value = value * 10 + i64::from(b - b'0');
+        if value > i64::from(i32::MAX) + 1 {
+            return false;
+        }
+    }
+    let value = if negative { -value } else { value };
+    value == i64::from(crate::blastinput::app::output_format::ARCHIVE_FORMAT)
+}
+
 /// The `queue-search` request of a run, as the options handle and the arguments make it.
 #[derive(Clone, Debug)]
 pub struct ArchiveRequest {
@@ -113,29 +179,22 @@ struct RunState {
 #[derive(Default)]
 struct Inner {
     real: RunState,
-    /// The state of a scratch run (`ArchiveHandle::scratch`), used instead of `real`.
-    scratch: Option<RunState>,
 }
 
 impl Inner {
     fn state(&mut self) -> &mut RunState {
-        match self.scratch.as_mut() {
-            Some(scratch) => scratch,
-            None => &mut self.real,
-        }
+        &mut self.real
     }
 }
 
 struct Shared {
     encoding: ArchiveEncoding,
     request: ArchiveRequest,
+    /// Whether the error archives are written (`writes_error_archive` of the `-outfmt` text;
+    /// true when the run has no such text).
+    error_archive: AtomicBool,
     state: Mutex<Inner>,
 }
-
-/// The messages and search space a run carries from one archive to the next, as they are at
-/// some point of the run.
-#[derive(Clone, Debug)]
-pub struct ArchiveSeed(RunState);
 
 /// What an archive-writing run shares between its diagnostics stream and its writer.
 #[derive(Clone)]
@@ -195,12 +254,29 @@ impl ArchiveHandle {
         Self(Arc::new(Shared {
             encoding,
             request,
+            error_archive: AtomicBool::new(true),
             state: Mutex::new(Inner::default()),
         }))
     }
 
     pub fn encoding(&self) -> ArchiveEncoding {
         self.0.encoding
+    }
+
+    /// Ties the error archives to the `-outfmt` text of the command line
+    /// (`writes_error_archive`): NCBI's `PrintErrorArchive` writes none for `11 <spec>`.
+    /// The archives of the batches are not affected.
+    #[must_use]
+    pub fn with_outfmt_text(self, outfmt: &str) -> Self {
+        self.0
+            .error_archive
+            .store(writes_error_archive(outfmt), Ordering::Relaxed);
+        self
+    }
+
+    /// Whether `write_error_archive` writes (see `with_outfmt_text`).
+    pub fn error_archive_enabled(&self) -> bool {
+        self.0.error_archive.load(Ordering::Relaxed)
     }
 
     pub fn request(&self) -> &ArchiveRequest {
@@ -259,33 +335,6 @@ impl ArchiveHandle {
             state.last_search_space
         })
     }
-
-    /// What the run carries now.
-    pub fn seed(&self) -> ArchiveSeed {
-        self.with_state(|state| ArchiveSeed(state.clone()))
-    }
-
-    /// Runs `f` with a scratch state in place of the run's: the report-streaming shadow
-    /// writes the archives of the batches before an error a second time, from `seed` (what
-    /// the run carried when it started streaming).
-    pub fn scratch<R>(&self, seed: &ArchiveSeed, f: impl FnOnce() -> R) -> R {
-        {
-            let mut inner = self
-                .0
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            inner.scratch = Some(seed.0.clone());
-        }
-        let result = f();
-        let mut inner = self
-            .0
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        inner.scratch = None;
-        result
-    }
 }
 
 /// Whether `byte` is one of NCBI's visible characters (`GoodVisibleChar`: `' '` to `'~'`).
@@ -302,13 +351,26 @@ pub fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> anyhow:
         .iter()
         .find(|record| !record.title.iter().all(|&byte| is_visible(byte)))
     {
-        anyhow::bail!(
+        return Err(anyhow::Error::new(TitleRefusal(format!(
             "the title of the {role} {} has a character outside the visible ASCII range, which is not supported by LOSAT's {label} with -outfmt 11",
             record.local_id
-        );
+        ))));
     }
     Ok(())
 }
+
+/// The error of `check_titles`, so that a caller can tell this refusal from the others (to
+/// remove an `-out` file it created for nothing).
+#[derive(Debug)]
+pub struct TitleRefusal(String);
+
+impl std::fmt::Display for TitleRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for TitleRefusal {}
 
 /// The error lines of a run that stopped with `error`, when NCBI writes an error archive for
 /// it (`PrintErrorArchive` after its `CATCH_ALL`): the errors of the application's `Run`,
@@ -318,11 +380,21 @@ pub fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> anyhow:
 /// `-subject` file, whose "Command line argument error" NCBI raises inside `Run`.
 pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Message>> {
     let native = error.downcast_ref::<crate::cli::NativeError>()?;
-    const PREFIXES: [&str; 4] = [
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+    // ```c++
+    //     catch (const CException& e) {                                           \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    // `Error: NCBI C++ Exception:` is that report of an exception of NCBI's C++ Toolkit
+    // (BLASTN's `-window_masker_db` file that cannot be opened).
+    const PREFIXES: [&str; 5] = [
         "BLAST query error:",
         "BLAST Database error:",
         "BLAST engine error:",
         "BLAST query/options error:",
+        "Error: NCBI C++ Exception:",
     ];
     let known = PREFIXES
         .iter()
@@ -439,5 +511,67 @@ mod tests {
             vec![(1, b"Warning: [blastn] a b".to_vec())]
         );
         assert!(handle.take_messages().is_empty());
+    }
+
+    /// NCBI 2.17.0 (`PrintErrorArchive`): each text below was run with a missing `-query` and
+    /// wrote the error archive (`true`) or nothing (`false`).
+    #[test]
+    fn the_error_archive_follows_the_outfmt_text_like_print_error_archive() {
+        for (text, writes) in [
+            ("11", true),
+            (" 11", true),
+            ("11 ", true),
+            ("\t11\n", true),
+            ("\x0b11\x0c", true),
+            ("011", true),
+            ("+11", true),
+            ("00000000000011", true),
+            ("11 qseqid", false),
+            (" 11 qseqid", false),
+            ("11qseqid", false),
+            ("11.0", false),
+            ("1 1", false),
+            ("-11", false),
+            ("0x0B", false),
+            ("1_1", false),
+            ("11,0", false),
+            ("4294967307", false),
+            ("2147483648", false),
+            ("", false),
+            (" ", false),
+            ("+", false),
+            ("6", false),
+        ] {
+            assert_eq!(writes_error_archive(text), writes, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_handle_tied_to_a_spec_writes_no_error_archive() {
+        let make = || {
+            ArchiveHandle::new(
+                ArchiveEncoding::Text,
+                ArchiveRequest {
+                    program: "tblastx",
+                    service: "plain",
+                    algorithm: Vec::new(),
+                    database: None,
+                },
+            )
+        };
+        let lines = vec![(ERROR, b"Error: x".to_vec())];
+        // No text (the API): the error archive is written.
+        let mut sink = Vec::new();
+        write_error_archive(&make(), &lines, &mut sink).unwrap();
+        assert!(!sink.is_empty());
+        // `11`: written; `11 qseqid`: nothing, and the messages stay unread.
+        let mut sink = Vec::new();
+        write_error_archive(&make().with_outfmt_text(" 11 "), &lines, &mut sink).unwrap();
+        assert!(!sink.is_empty());
+        let mut sink = Vec::new();
+        let spec = make().with_outfmt_text("11 qseqid");
+        assert!(!spec.error_archive_enabled());
+        write_error_archive(&spec, &lines, &mut sink).unwrap();
+        assert!(sink.is_empty());
     }
 }

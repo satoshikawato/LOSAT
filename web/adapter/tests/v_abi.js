@@ -29,6 +29,7 @@ const { WASI } = require("node:wasi");
 
 const ROOT = path.resolve(__dirname, "../../..");
 const { createThreadHost } = require(path.join(ROOT, "LOSAT/tests/wasi_thread_host"));
+const { unsignedWasiImports } = require(path.join(ROOT, "LOSAT/tests/wasi_artifact"));
 
 const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7] };
 const WITH_HITS = new Set(["blastp", "tblastn", "blastn", "tblastx"]);
@@ -59,8 +60,10 @@ class Reactor {
     this.streams = new Map();
   }
 
+  // Pointers and lengths are unsigned; JavaScript receives an i32 as a signed number
+  // (docs/web/abi_v2.md §6), so a pointer of 2 GiB or more arrives negative.
   emit(stream, ptr, len) {
-    const chunk = Buffer.from(new Uint8Array(this.memory().buffer, ptr, len));
+    const chunk = Buffer.from(new Uint8Array(this.memory().buffer, ptr >>> 0, len >>> 0));
     if (!this.streams.has(stream)) this.streams.set(stream, []);
     this.streams.get(stream).push(chunk);
   }
@@ -74,7 +77,7 @@ class Reactor {
 
   error() {
     const e = this.exports;
-    return Buffer.from(new Uint8Array(this.memory().buffer, e.losat_web2_last_error_ptr(), e.losat_web2_last_error_len())).toString();
+    return Buffer.from(new Uint8Array(this.memory().buffer, e.losat_web2_last_error_ptr() >>> 0, e.losat_web2_last_error_len() >>> 0)).toString();
   }
 
   // Calls an export; Buffer and string arguments become (ptr, len) pairs.
@@ -83,7 +86,7 @@ class Reactor {
     for (const arg of args) {
       if (typeof arg === "number") { flat.push(arg); continue; }
       const bytes = Buffer.isBuffer(arg) ? arg : Buffer.from(arg);
-      const ptr = e.losat_web2_alloc(bytes.length);
+      const ptr = e.losat_web2_alloc(bytes.length) >>> 0;
       new Uint8Array(this.memory().buffer, ptr, bytes.length).set(bytes);
       allocations.push([ptr, bytes.length]);
       flat.push(ptr, bytes.length);
@@ -101,7 +104,7 @@ async function openSerial(wasmPath) {
   const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env: {} });
   let reactor;
   const imports = {
-    wasi_snapshot_preview1: wasi.wasiImport,
+    wasi_snapshot_preview1: unsignedWasiImports(wasi.wasiImport),
     losat_host: { emit: (stream, ptr, len) => reactor.emit(stream, ptr, len) },
   };
   const { instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), imports);
@@ -131,6 +134,7 @@ function inputPath(search, option) {
 function nativeOutputs(native, search, scratch) {
   const outputs = new Map();
   let stderr = null, status = null;
+  const stderrs = new Map();
   for (const format of FORMATS[search.program]) {
     const out = path.join(scratch, `native.${format}.out`);
     const argv = [...search.argv, "-outfmt", String(format), "-num_threads", "1", "-out", out];
@@ -141,8 +145,22 @@ function nativeOutputs(native, search, scratch) {
     }
     outputs.set(format, fs.existsSync(out) ? fs.readFileSync(out) : Buffer.alloc(0));
     fs.rmSync(out, { force: true });
+    stderrs.set(format, result.stderr);
     if (stderr === null) [stderr, status] = [result.stderr, result.status];
-    else assert.equal(sha256(result.stderr), sha256(stderr), "the CLI writes the same warnings for every format");
+  }
+  // The diagnostics are the CLI's standard error for the tabular formats (abi_v2.md §5):
+  // outfmt 6 and 7 write the same lines, and outfmt 0 the same without the formatting
+  // handler's lines, which -num_descriptions and -num_alignments can make differ.
+  const handler = /^Warning: \[\w+\] (The parameter -num_descriptions is ignored|Examining 5 or more matches)/;
+  const lines = (format) => stderrs.get(format).toString().split("\n");
+  const withoutHandler = (format) => lines(format).filter((line) => !handler.test(line));
+  if (stderrs.has(6)) {
+    stderr = stderrs.get(6);
+    if (stderrs.has(7)) assert.equal(sha256(stderrs.get(7)), sha256(stderr), "outfmt 7 writes the warnings of outfmt 6");
+    for (const format of FORMATS[search.program].filter((f) => f !== 6)) {
+      assert.deepEqual(withoutHandler(format), withoutHandler(6), `outfmt ${format}: the same warnings but the handler's`);
+      for (const line of lines(format)) assert.ok(lines(6).includes(line), `outfmt ${format}: ${line} is in the warnings of outfmt 6`);
+    }
   }
   return { outputs, stderr, status };
 }
@@ -208,6 +226,7 @@ function checkSurface(reactor, native) {
     const flags = description.parameters.map((parameter) => parameter.flag);
     assert.ok(flags.includes("-evalue") && flags.includes("-query"), `${program}: parameters`);
     assert.ok(!flags.includes("-outfmt") && !flags.includes("-out") && !flags.includes("-num_threads"), `${program}: adapter-owned options`);
+    assert.ok(flags.includes("-num_descriptions") && flags.includes("-num_alignments"), `${program}: hit list options`);
     if (program === "tblastn") assert.ok(description.subject_gencodes.includes(32), "tblastn: genetic code 32");
     if (program === "blastn") {
       assert.ok(flags.includes("-template_type") && flags.includes("-template_length"), "blastn: dc-megablast templates");

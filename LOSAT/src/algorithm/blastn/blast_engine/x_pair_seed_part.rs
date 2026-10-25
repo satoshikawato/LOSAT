@@ -136,7 +136,7 @@ fn switch_on() -> bool {
 pub(super) fn partitions(threads: usize) -> Option<usize> {
     if switch_on() {
         // A stage on a pool has two threads or more; one thread in the dc-megablast stages
-        // without a pool (LOSAT_X_BNDCONE) and in the PAIRPARDISCSHADOW and PAIRPARNASHADOW runs.
+        // without a pool (LOSAT_X_BNDCONE).
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARFOLD", threads >= 2);
     }
     (switch_on() && threads >= 2).then(|| threads.min(DIAGHASH_NUM_BUCKETS))
@@ -283,7 +283,6 @@ impl PartState {
                 offset: 0,
                 window: 0,
                 max_level: Vec::new(),
-                x_lv_shadow: false,
                 x_last: Vec::new(),
                 #[cfg(debug_assertions)]
                 x_last_fresh: true,
@@ -1196,7 +1195,6 @@ fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize) {
         t.offset = hash.offset;
         t.window = hash.window;
         t.max_level.clone_from(&hash.max_level);
-        t.x_lv_shadow = hash.x_lv_shadow;
         t.x_last.clone_from(&hash.x_last);
         #[cfg(debug_assertions)]
         {
@@ -1345,21 +1343,6 @@ pub(super) fn record(kind: usize, parts: usize, stats: &PartStats) {
     UNITS[kind].fetch_add(stats.units, Ordering::Relaxed);
 }
 
-/// No NCBI counterpart: the fields the shadow summary lines of `kind` end with when the switch
-/// is on: `fold=part`, the partition count of the stages and the number of partitioned stages
-/// merged. Without the switch the lines are those of the strips paths alone.
-pub(super) fn shadow_fields(kind: usize) -> String {
-    if !switch_on() {
-        return String::new();
-    }
-    let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
-    format!(
-        " fold=part partitions={} merges={}",
-        load(&PARTS[kind]),
-        load(&MERGES[kind])
-    )
-}
-
 /// No NCBI counterpart: the fields the LOSAT_TIMING lines of `kind` end with when the switch is
 /// on: the partition count of the stages, the number of partitioned stages merged, the time in
 /// merges and the number of helpers that left a stalled stage; with LOSAT_X_PAIRPARHOME also the
@@ -1425,7 +1408,7 @@ mod tests {
         Vec<super::super::super::x_diag_lv::LvLast>,
     );
 
-    /// Everything of a table a later seed or the shadow can read: the heads, the cells up to
+    /// Everything of a table a later seed can read: the heads, the cells up to
     /// the occupancy, the occupancy, the capacity, the offset, the level bounds and the memo
     /// (LOSAT_X_DIAGLV2).
     fn hash_state(h: &DiagHashTable) -> HashState {
@@ -1814,7 +1797,7 @@ mod tests {
                     reference_hash.max_level = Vec::new();
                     reference_hash.x_last = Vec::new();
                     if levels {
-                        reference_hash.x_lv_start(false);
+                        reference_hash.x_lv_start();
                         reference_hash.x_lv2_start();
                     }
                     let mut hash = copy_hash(&reference_hash);
@@ -2167,12 +2150,18 @@ mod tests {
     // (`helpers_left`); the owner finishes the stage alone, with LOSAT_X_PAIRPARHOME folding the
     // helpers' home partitions away from home (they have no participant at home any more).
     // Both ways give the reference's hits and table. (On a loaded machine the helper jobs may
-    // start only after the owner's sleep, and then nothing stalls, so each way gets up to five
-    // stages to see a helper leave.)
+    // start only after the owner's sleep, and then nothing stalls, so each way gets up to 40
+    // stages or 20 s, whichever comes first, to see a helper leave; a pool with more threads than
+    // the machine has CPUs is skipped, as the helpers then may not run during the owner's sleep.)
     #[test]
     fn a_stalled_stage_lets_the_helpers_leave() {
         let mut rng = Lcg(0x57A1_1ED0);
+        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
         for threads in [2usize, 4] {
+            if threads > cpus {
+                eprintln!("skipping threads {threads}: the machine has {cpus} CPUs");
+                continue;
+            }
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(threads)
                 .build()
@@ -2184,7 +2173,8 @@ mod tests {
                 let mut s = 50i32;
                 let mut first = 0usize;
                 let mut left = false;
-                for attempt in 0..5 {
+                let started = std::time::Instant::now();
+                for attempt in 0..40 {
                     let at = format!("threads {threads} home {home} attempt {attempt}");
                     let n = 2000;
                     let ops = random_ops(&mut rng, n, &mut s, 300);
@@ -2220,10 +2210,14 @@ mod tests {
                         left = true;
                         break;
                     }
+                    if started.elapsed() > std::time::Duration::from_secs(20) {
+                        break;
+                    }
                 }
                 assert!(
                     left,
-                    "threads {threads} home {home}: no helper left a stalled stage in five stages"
+                    "threads {threads} home {home} ({cpus} CPUs): no helper left a stalled stage in {:?}",
+                    started.elapsed()
                 );
             }
         }
@@ -2286,9 +2280,8 @@ mod tests {
             // the bounds (LOSAT_X_DIAGLV) and the memo (LOSAT_X_DIAGLV2) describe the cells the
             // inserts wrote; made again from the changed cells
             if h.x_lv_on() {
-                let shadow = h.x_lv_shadow;
                 let memo = !h.x_last.is_empty();
-                h.x_lv_start(shadow);
+                h.x_lv_start();
                 if memo {
                     h.x_lv2_start();
                 }

@@ -6,10 +6,9 @@
 //! two LOSAT code paths with the same result: a seed's retrieve of its diagonal walks the chain
 //! of the diagonal's bucket, or returns "no cell" without the walk when every cell of the
 //! bucket lies below the seed's level bound. So the property under test is that the report does
-//! not depend on it: with the switch, and with its shadow (`LOSAT_X_DIAGLVSHADOW`, which walks
-//! every skipped bucket, checks each cell against the bound and checks that the cell the walk
-//! returns gives the seed's decisions of no cell), the searches give the bytes of the search
-//! without it at one thread, and the shadow skips walks. That those bytes equal
+//! not depend on it: with the switch the searches give the bytes of the search without it at one
+//! thread, and the reference fold ran with the bounds (`LOSAT_X_REACH`). That the skipped walks
+//! change no decision is checked by the unit tests of `x_diag_lv.rs`. That those bytes equal
 //! NCBI's is the business of the BLASTN fixtures.
 //!
 //! The query (LC738874, 287 kb) makes a query block longer than 8000 letters, so the searches
@@ -24,6 +23,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod reach_support;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), on
 /// 2026-10-18 `LOSAT_X_MBLUTONCE` (perf/bn-memory-rules), on 2026-10-22 `LOSAT_X_DIAGLV2` and
@@ -51,7 +52,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
 ];
 
 const SWITCH: (&str, &str) = ("LOSAT_X_DIAGLV", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_DIAGLVSHADOW", "1");
 const PAIRPARDISC: (&str, &str) = ("LOSAT_X_PAIRPARDISC", "1");
 
 fn fasta(name: &str) -> PathBuf {
@@ -157,65 +157,32 @@ fn blastn_with(
     (output.stdout, stderr)
 }
 
-/// The counters of the shadow's line (`[X_SHADOW] DIAGLV retrieves= skipped= verified=
-/// decisions= cells= memo= memofound= identical`), which must be the only line of `stderr`
-/// unless `others` lines start with one of the other prefixes: the retrieves and the skipped
-/// ones, after
-/// checking that every skipped walk passed both checks (its bucket's levels and its
-/// decisions).
-fn shadow_counts(stderr: &str, others: &[&str], at: &str) -> (u64, u64) {
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with("[X_SHADOW] DIAGLV "))
-        .unwrap_or_else(|| panic!("{at}: no shadow line:\n{stderr}"));
-    assert!(line.ends_with(" identical"), "{at}: {line}");
-    for other in stderr.lines().filter(|l| *l != line) {
-        assert!(
-            others.iter().any(|prefix| other.starts_with(prefix)),
-            "{at}: unexpected standard error line: {other}"
-        );
-    }
-    let field = |name: &str| -> u64 {
-        line.split_whitespace()
-            .find_map(|word| word.strip_prefix(name))
-            .and_then(|value| value.parse().ok())
-            .unwrap_or_else(|| panic!("{at}: no {name} in: {line}"))
-    };
-    let (retrieves, skipped) = (field("retrieves="), field("skipped="));
-    assert_eq!(field("verified="), skipped, "{at}: {line}");
-    assert_eq!(field("decisions="), skipped, "{at}: {line}");
-    assert!(field("cells=") <= skipped, "{at}: {line}");
-    (retrieves, skipped)
-}
-
 /// For one task, query and subject: the search without the switch at one thread, then with
-/// the switch at 1 and 4 threads (the same bytes, nothing on standard error), the shadow at 1
-/// and 4 threads (the same bytes, walks skipped and every skipped walk checked), and the
-/// search without the switch at 4 threads; `extra` adds variables to every run but the first
-/// (the strips fold of dc-megablast).
+/// the switch at 1 and 4 threads (the same bytes, nothing on standard error; at one thread the
+/// reference fold ran with the bounds), and the search without the switch at 4 threads; `extra`
+/// adds variables to every run but the first (the strips fold of dc-megablast).
 fn check(dir: &Path, query: &Path, subject: &Path, task: &str, extra: &[(&str, &str)]) -> Vec<u8> {
     let (expected, expected_stderr) = blastn(dir, query, subject, task, 1, &[]);
     assert!(!expected.is_empty(), "{task}: no hits");
     assert_eq!(expected_stderr, "", "{task}");
     for threads in [1, 4] {
         let at = format!("{task} {extra:?} threads {threads}");
+        let reach = reach_support::Reach::new("diaglv");
         let mut on = extra.to_vec();
         on.push(SWITCH);
+        on.push(reach.var());
         let (report, stderr) = blastn(dir, query, subject, task, threads, &on);
         assert!(
             report == expected,
             "{at}: the report differs with {SWITCH:?}"
         );
         assert_eq!(stderr, "", "{at}");
-        let mut shadow = extra.to_vec();
-        shadow.push(SHADOW);
-        let (report, stderr) = blastn(dir, query, subject, task, threads, &shadow);
-        assert!(
-            report == expected,
-            "{at}: the report differs with {SHADOW:?}"
-        );
-        let (retrieves, skipped) = shadow_counts(&stderr, &[], &at);
-        assert!(skipped > 0 && skipped <= retrieves, "{at}: {stderr}");
+        if threads == 1 {
+            assert!(
+                reach.sides("LOSAT_X_DIAGLV").0,
+                "{at}: the reference fold did not run with the bounds"
+            );
+        }
     }
     let (report, stderr) = blastn(dir, query, subject, task, 4, extra);
     assert!(
@@ -238,67 +205,13 @@ fn one_subject_gives_the_same_report_with_the_level_bounds() {
     check(&dir, &query, &subject, "dc-megablast", &[PAIRPARDISC]);
 }
 
-// With the strips fold of dc-megablast at 4 threads, its own shadow compares the hit list and the
-// whole diagonal hash of every chunk, the level bounds included, with the reference fold, with
-// the switch.
-#[test]
-fn the_strips_shadows_compare_the_tables_with_the_level_bounds() {
-    let dir = TestDir::new("strips");
-    let query = fasta("LC738874.fasta");
-    let subject = fasta("LC738868.fasta");
-    // (dc-megablast with the memo, LOSAT_X_DIAGLV2, and the lean folds, LOSAT_X_FOLDLEAN: the
-    // strips shadow compares the hits and the tables, not the memo, which the reference fold
-    // does not keep; LOSAT_X_DIAGLVSHADOW, on in this arm, checks every memo answer)
-    let task = "dc-megablast";
-    let strips_shadow = ("LOSAT_X_PAIRPARDISCSHADOW", "1");
-    let prefix = "[X_PAIRPARDISCSHADOW] blastn:";
-    let (expected, _) = blastn(&dir, &query, &subject, task, 1, &[]);
-    let on = [
-        SHADOW,
-        strips_shadow,
-        ("LOSAT_X_DIAGLV2", "1"),
-        ("LOSAT_X_FOLDLEAN", "1"),
-    ];
-    let (report, stderr) = blastn(&dir, &query, &subject, task, 4, &on);
-    assert!(report == expected, "{task}: the report differs");
-    let at = format!("{task} with {strips_shadow:?}");
-    let (_, skipped) = shadow_counts(&stderr, &[prefix], &at);
-    assert!(skipped > 0, "{at}: {stderr}");
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with(prefix))
-        .unwrap_or_else(|| panic!("{at}: no strips shadow line:\n{stderr}"));
-    assert!(
-        !line.contains("seed chunks equal=0 "),
-        "{at}: no chunk compared: {line}"
-    );
-    let (memo, _) = memo_counts(&stderr, &at);
-    assert!(memo > 0, "{at}: the memo answered no retrieve: {stderr}");
-}
-
-/// The `memo=` and `memofound=` counters of the shadow's line (`LOSAT_X_DIAGLV2`).
-fn memo_counts(stderr: &str, at: &str) -> (u64, u64) {
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with("[X_SHADOW] DIAGLV "))
-        .unwrap_or_else(|| panic!("{at}: no shadow line:\n{stderr}"));
-    let field = |name: &str| -> u64 {
-        line.split_whitespace()
-            .find_map(|word| word.strip_prefix(name))
-            .and_then(|value| value.parse().ok())
-            .unwrap_or_else(|| panic!("{at}: no {name} in: {line}"))
-    };
-    (field("memo="), field("memofound="))
-}
-
 // The memo of the latest insert (`LOSAT_X_DIAGLV2`, with the level bounds) and the lean
 // instances of the dc-megablast strips folds (`LOSAT_X_FOLDLEAN`): dc-megablast at one thread
 // (the reference fold) and at four (the strips fold of `LOSAT_X_PAIRPARDISC`) gives the bytes of
 // the search with neither, each switch alone and both, at four threads also with the fold split
-// over partitions (`LOSAT_X_PAIRPARFOLD`); with the shadow, which checks every answer of the memo,
-// the memo answers at four threads, also for the latest insert's diagonal, and never at one (the
-// reference fold does not read it) unless `LOSAT_X_BNDCONE` runs the strips stage there too, which
-// reads it. megablast keeps no memo (a one-hit table).
+// over partitions (`LOSAT_X_PAIRPARFOLD`); the memo exists in the strips stage at four threads
+// (`LOSAT_X_REACH`) and not at one (the reference fold does not read it) unless
+// `LOSAT_X_BNDCONE` runs the strips stage there too. megablast keeps no memo (a one-hit table).
 #[test]
 fn the_memo_and_the_lean_folds_give_the_same_report() {
     let dir = TestDir::new("memo");
@@ -330,30 +243,44 @@ fn the_memo_and_the_lean_folds_give_the_same_report() {
                 assert_eq!(stderr, "", "{at}");
             }
         }
-        let on = [SHADOW, MEMO, LEAN, PAIRPARDISC];
+        let reach = reach_support::Reach::new("diaglv-memo");
+        let on = [SWITCH, MEMO, LEAN, PAIRPARDISC, reach.var()];
         let at = format!("{task} {on:?} threads {threads}");
         let (report, stderr) = blastn(&dir, &query, &subject, task, threads, &on);
         assert!(report == expected, "{at}: the report differs");
-        shadow_counts(&stderr, &[], &at);
-        let (memo, found) = memo_counts(&stderr, &at);
-        if threads == 1 {
-            assert_eq!((memo, found), (0, 0), "{at}: {stderr}");
-        } else {
-            assert!(memo > 0 && found > 0 && found <= memo, "{at}: {stderr}");
-        }
+        assert_eq!(stderr, "", "{at}");
+        assert_eq!(
+            reach.sides("LOSAT_X_DIAGLV2").0,
+            threads > 1,
+            "{at}: the memo of the strips stage"
+        );
     }
-    let on = [SHADOW, MEMO, LEAN, PAIRPARDISC, ("LOSAT_X_BNDCONE", "1")];
+    let reach = reach_support::Reach::new("diaglv-memo-one");
+    let on = [
+        SWITCH,
+        MEMO,
+        LEAN,
+        PAIRPARDISC,
+        ("LOSAT_X_BNDCONE", "1"),
+        reach.var(),
+    ];
     let at = format!("{task} {on:?} threads 1");
     let (report, stderr) = blastn(&dir, &query, &subject, task, 1, &on);
     assert!(report == expected, "{at}: the report differs");
-    shadow_counts(&stderr, &[], &at);
-    let (memo, found) = memo_counts(&stderr, &at);
-    assert!(memo > 0 && found > 0 && found <= memo, "{at}: {stderr}");
-    let on = [SHADOW, MEMO];
-    let (_, stderr) = blastn(&dir, &query, &subject, "megablast", 1, &on);
+    assert_eq!(stderr, "", "{at}");
+    assert!(
+        reach.sides("LOSAT_X_DIAGLV2").0,
+        "{at}: the strips stage at one thread kept no memo"
+    );
+    let reach = reach_support::Reach::new("diaglv-memo-megablast");
+    let on = [SWITCH, MEMO, reach.var()];
     let at = format!("megablast {on:?}");
-    shadow_counts(&stderr, &[], &at);
-    assert_eq!(memo_counts(&stderr, &at), (0, 0), "{at}: {stderr}");
+    let (_, stderr) = blastn(&dir, &query, &subject, "megablast", 1, &on);
+    assert_eq!(stderr, "", "{at}");
+    assert!(
+        !reach.sides("LOSAT_X_DIAGLV2").0,
+        "{at}: a one-hit table kept a memo"
+    );
 }
 
 // blastn-short: a lookup table of the word size (7) without the two-stage word extension, so
@@ -373,9 +300,10 @@ fn blastn_short_gives_the_same_report_with_the_level_bounds() {
 // other at one thread and by the workers at four, so that every worker's diagonal hash keeps
 // its cells and bounds from subject to subject with a growing offset. With `LOSAT_X_BNDCONE` at
 // one thread every subject takes the dc-megablast strips stage in turn on that one table, and
-// the memo (checked answer by answer by the shadow) answers; with `-lcase_masking` and every
+// the memo answers; with `-lcase_masking` and every
 // third piece in lowercase those subjects take the reference fold between the stages, whose
-// memo is made again at each stage's start (the stages' own shadow compares their chunks).
+// memo is made again at each stage's start (`[TIMING] x_pairpardisc_seed:` counts the chunks the
+// stage took).
 #[test]
 fn many_subjects_give_the_same_report_with_the_level_bounds() {
     let dir = TestDir::new("many");
@@ -403,14 +331,18 @@ fn many_subjects_give_the_same_report_with_the_level_bounds() {
         ("LOSAT_X_BNDCONE", "1"),
     ];
     let task = "dc-megablast";
+    let reach = reach_support::Reach::new("diaglv-many");
     let mut on = ONE.to_vec();
-    on.push(SHADOW);
+    on.push(SWITCH);
+    on.push(reach.var());
     let at = format!("{task} {on:?} threads 1");
     let (report, stderr) = blastn(&dir, &query, &subjects, task, 1, &on);
     assert!(report == dc, "{at}: the report differs");
-    shadow_counts(&stderr, &[], &at);
-    let (memo, found) = memo_counts(&stderr, &at);
-    assert!(memo > 0 && found > 0 && found <= memo, "{at}: {stderr}");
+    assert_eq!(stderr, "", "{at}");
+    assert!(
+        reach.sides("LOSAT_X_DIAGLV2").0,
+        "{at}: the strips stage kept no memo"
+    );
 
     let masked = dir.join("masked.fna");
     let mut text = String::new();
@@ -434,22 +366,23 @@ fn many_subjects_give_the_same_report_with_the_level_bounds() {
     let (expected, expected_stderr) = blastn_with(&dir, &query, &masked, task, 1, &[], &lcase);
     assert!(!expected.is_empty(), "{task} {lcase:?}: no hits");
     assert_eq!(expected_stderr, "", "{task} {lcase:?}");
+    let reach = reach_support::Reach::new("diaglv-masked");
+    let mut on = ONE.to_vec();
+    on.push(SWITCH);
+    on.push(("LOSAT_TIMING", "1"));
+    on.push(reach.var());
     let at = format!("{task} {on:?} {lcase:?} threads 1");
     let (report, stderr) = blastn_with(&dir, &query, &masked, task, 1, &on, &lcase);
     assert!(report == expected, "{at}: the report differs");
-    shadow_counts(&stderr, &[], &at);
-    let (memo, _) = memo_counts(&stderr, &at);
-    assert!(memo > 0, "{at}: the memo answered no retrieve: {stderr}");
-    let mut stage = ONE.to_vec();
-    stage.push(("LOSAT_X_PAIRPARDISCSHADOW", "1"));
-    let at = format!("{task} {stage:?} {lcase:?} threads 1");
-    let (report, stderr) = blastn_with(&dir, &query, &masked, task, 1, &stage, &lcase);
-    assert!(report == expected, "{at}: the report differs");
+    assert!(
+        reach.sides("LOSAT_X_DIAGLV2").0,
+        "{at}: the strips stage kept no memo"
+    );
     let line = stderr
         .lines()
-        .find(|line| line.starts_with("[X_PAIRPARDISCSHADOW] blastn: seed chunks equal="))
-        .unwrap_or_else(|| panic!("{at}: no shadow line:\n{stderr}"));
-    let chunks: u64 = line["[X_PAIRPARDISCSHADOW] blastn: seed chunks equal=".len()..]
+        .find(|line| line.starts_with("[TIMING] x_pairpardisc_seed: chunks="))
+        .unwrap_or_else(|| panic!("{at}: no stage line:\n{stderr}"));
+    let chunks: u64 = line["[TIMING] x_pairpardisc_seed: chunks=".len()..]
         .split_whitespace()
         .next()
         .and_then(|value| value.parse().ok())

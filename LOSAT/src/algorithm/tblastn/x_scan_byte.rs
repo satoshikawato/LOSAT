@@ -5,7 +5,7 @@
 //! NCBI's scan (c++/src/algo/blast/core/blast_aascan.c:75-127, `s_BlastAaScanSubject`, kept as
 //! `tblastx/blast_aascan.rs` `s_blast_aa_scan_subject_one_range`) rolls the index of the next word
 //! from the one before (`ComputeTableIndexIncremental`), tests its presence-vector bit and copies
-//! the word's hits when the offset array has room. LOSAT_X_TBNSCANBF (`x_scan_bf.rs`) takes the
+//! the word's hits when the offset array has room. The branch-free scan (`x_scan_bf.rs`) takes the
 //! branch on the bit away, in blocks of `X_BLOCK` words; on a genome searched with one protein
 //! (HsG_p1 x hsap_dna `-db`, n1) the scan was still 55-58 % of the cycles, 5.38 cycles per word,
 //! with the rolling index a chain from word to word (line F probe P3, v4-F/REPORT.md).
@@ -30,7 +30,7 @@
 //! at a time from the overflow array. When a word's hits do not fit, `s_range[1]` is that word's
 //! position and the scan returns, so the next call resumes there. The offset pairs and the
 //! `s_range` values of every call are NCBI's (the words after the stop were looked at but not
-//! used; the next call looks at them again, as with LOSAT_X_TBNSCANBF).
+//! used; the next call looks at them again, as with the branch-free scan).
 //!
 //! The offset array must have `X_SCAN_BYTE_SLACK` entries after `array_size`; the entries past the
 //! returned count are not part of the result. `presence` depends on the lookup table only; each
@@ -42,7 +42,7 @@
 //!
 //! Both stages have an AVX2 form and a plain-loop form (the same values; the plain index loop is
 //! left to the compiler's vectorizer). On the workstation (one core, the scan before this switch =
-//! LOSAT_X_TBNSCANBF) the AVX2 forms take x0.75 of the time of one protein x the human genome and
+//! the branch-free scan) the AVX2 forms take x0.75 of the time of one protein x the human genome and
 //! x0.98-0.99 where most words are candidates (many proteins x a genome, 55 proteins x 16S); the
 //! plain loops take x0.79 and x0.83 (the LOSAT Web serial reactor, one protein x E. coli) of the
 //! time where few words are candidates, but x1.01-1.06 where most are: their copy of a cell's hits
@@ -59,7 +59,7 @@
 //! in WebAssembly, and changes nothing elsewhere (aarch64: not timed). `LOSAT_X_TBNSCANBYTE=2`
 //! takes the plain loops on any CPU for every table, `=3` the plain loops for sparse tables on any
 //! CPU. A table of another shape, and without AVX2 a table that is not sparse, is scanned as before
-//! (LOSAT_X_TBNSCANBF or NCBI's loop). With `LOSAT_X_STATS` set, `main` prints
+//! (the branch-free scan of `x_scan_bf.rs`). With `LOSAT_X_STATS` set, `main` prints
 //! `[X_STATS] TBNSCANBYTE units= calls= avx2=` (the units scanned this way, their scan calls, and
 //! whether the AVX2 forms ran).
 //!
@@ -98,7 +98,7 @@ const X_SPARSE_DEFAULT: bool = cfg!(any(target_arch = "x86_64", target_arch = "w
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): how the unit path scans a table that `fits`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum XScanByte {
-    /// As before the switch (LOSAT_X_TBNSCANBF or NCBI's loop).
+    /// As before the switch (the branch-free scan of `x_scan_bf.rs`).
     Off,
     /// `x_scan_one_range_byte`; `avx2` = the AVX2 forms of both stages.
     On { avx2: bool },

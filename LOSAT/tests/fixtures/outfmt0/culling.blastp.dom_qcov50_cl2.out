@@ -1,0 +1,159 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/culling_dom_s.faa).
+           45 sequences; 20,432 total letters
+
+
+
+Query= dqA domain x5
+
+Length=989
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dd15_copies4                                                          251     5e-74
+dd09_copies4                                                          228     3e-65
+
+
+> dd15_copies4
+Length=750
+
+ Score = 251 bits (641),  Expect = 5e-74, Method: Compositional matrix adjust.
+ Identities = 250/704 (36%), Positives = 308/704 (44%), Gaps = 115/704 (16%)
+
+Query  173  QMTAYFASLEGQPDEFDNADDATSATVLLLMENKCKRTTQIAACNAAFYKALWIRNYALE  232
+            QMTA   S EGQP E DNA D  S  V LL E KCK+ T   A  AAFY A  IRNYA  
+Sbjct  48   QMTAQNDSDEGQPHEMDNAKDHASDKVRLLCELKCKKATFEGADLAAFYLAKKIRNYAAF  107
+
+Query  233  ALGLRPNDKTGGDLYDCASDGVLEEIRIRILKEILHILDDGIFHCFSTCSLFCHQYWDAK  292
+            A G  P  KT      C   G+   ++   L  +  +                  YW   
+Sbjct  108  AQGHYPRTKTVAPNIACFRMGIESGLKDHELTHVPEV-----------------AYW--L  148
+
+Query  293  KVAPPAVKPGSVGYNNLPLERLTPATEVGTTDVLGGMEICNQESKSEGVDEMEEAA-TPV  351
+            ++    ++P SVG+ +LP     P  E+    +  G E      K   VD+++E   +P+
+Sbjct  149  QINQSIIQP-SVGFIHLP--AFLPVNEINLAMLFNG-ESDTTNHKFAAVDDIDEYLDSPL  204
+
+Query  352  ACTVTCEINIFVELEQATRQMTSSFASDEGQPDEDDDADYHASDQVLLLCETKGKHATVL  411
+                               QM +SFASDE Q   D+ A  HASD VL L E K    TV 
+Sbjct  205  -------------------QMGASFASDENQIWWDNLARDHASDMVLCLNENKCARHTVN  245
+
+Query  412  AAVLAAFYLALRIRNYAVFAQGLRPRTKTDDVCQGVRGPFHFLNKACQGNLGMTFTGAPP  471
+             A LA FYLALRI NYA +AQGL PRTKT           H L++  +    +   GA P
+Sbjct  246  TAHLARFYLALRIYNYADYAQGLIPRTKT-----------HLLDEWPKPGSTVDLKGA-P  293
+
+Query  472  GYEIILLRRESGTLTPNIARVFELV--GKDILILKFDKETAAEVKR------LINVLLEQ  523
+               IIL      T    I RV   V  G+    + +DK  A+E         LI V    
+Sbjct  294  AITIIL------TDLAGIFRVHNAVTAGRAAGDVVYDKHFASETHEEYLPAILILVAKAA  347
+
+Query  524  KMPTPDDRGEEVESG---PCTRMTV-IDTSEDSNQGPSAMIMGFAERARVPSRTGCMPTM  579
+            K    D     V      P  R+    DT  DS Q     +  F      PS    +   
+Sbjct  348  KSWYSDKCIGYVSVSLDLPPKRIGYDYDTLTDSIQ-----LYAFFLELGYPSAIKKL---  399
+
+Query  580  VVQMRATLAASEGQPDEDDNADDHASYKVLLLSEDKCKRATKEAACLAAFYLALRIRNYA  639
+              QM A+ A+ EGQPDED  A DHAS KVLLL E+ CK AT    CL AFYLALRI NYA
+Sbjct  400  --QMTASFASDEGQPDEDVGAQDHASDKVLLLPENWCKGATDRWVCLMAFYLALRIANYA  457
+
+Query  640  IFAQGLRPRTKTDSITFTKAEFAMTIWSSQSLAVLLFNSNYFETRNDRTREMVDLIHEFL  699
+            +F  GL  R+KTD      A  +  +  S   +V+        T N +        ++F 
+Sbjct  458  LFQYGLFRRSKTDG-----AALSTLLSDSTGTSVI--------THNQKGLHTAVACNKFP  504
+
+Query  700  RKALRAPAECVGIRAMVLSYPHEASSKEGIEMGFGFL--------NAIAYRENATTIRDK  751
+               LR     +   + V     EAS K   ++             + I        I+ +
+Sbjct  505  AAGLRVKVVLLRASSKVDIAGTEASHKTNFKVVVRITAPLCQVLEDDINTNNILQLIKRR  564
+
+Query  752  ANNILLGC---SEMLTGAYYNTGAPEQAQTLQGTASFASDRGQPDESDNASDHASDLVAQ  808
+              NI   C   +  + G   + G        Q  ASFA D GQPDE DNA  HASD V  
+Sbjct  565  KKNISTKCTFYTVQILGNLISGG--------QMCASFAKDEGQPDEDDNADIHASDRVLL  616
+
+Query  809  FVEADCKRATVEAACHAAFYLALPIRNYALFAQGLRPRTKTVDE  852
+              E   +RA V AAC AAFYL   IRNYAL AQGLRP TKT+D+
+Sbjct  617  LCENKEERAPVMAACLAAFYLKGRIRNYALGAQGLRPMTKTLDK  660
+
+
+> dd09_copies4
+Length=846
+
+ Score = 228 bits (581),  Expect = 3e-65, Method: Compositional matrix adjust.
+ Identities = 195/555 (35%), Positives = 265/555 (48%), Gaps = 72/555 (13%)
+
+Query  345  EEAATPVACTVTCE----INIFVEL--------EQATRQMTSSFASDEGQPDEDDDADYH  392
+            E+ + P+ CT   +    +N+ ++         +Q  R  T SFASD GQPD DD+ D H
+Sbjct  16   EKDSWPITCTAAAQRSEQVNVLIKTFFMVLPPNDQVIR-YTYSFASDWGQPDYDDNVDDH  74
+
+Query  393  ASDQVLLLCETKGKHATVLAAVLAAFYLALRIRNYAVFAQGLRPRTKTDDVCQGVRGPF-  451
+            ASD+V  L     K A V AA  AA Y  L  R  A+FAQG RP   T  +   + G F 
+Sbjct  75   ASDKVNCLNSAVCKAAGVEAACDAALYNFLTQRVAALFAQGHRPYAWTY-LFDSMTGDFN  133
+
+Query  452  HFLNKACQGNLGMTFTGAPPGYEIILLRRESGTLTPNIA-RVF-----ELVGKDILILKF  505
+            H +    +G     +          L++  S  LT   A R+F       VG+   I   
+Sbjct  134  HLVEHPLKGLEATEYPHTSITGTKHLVKTMSTELTFYEALRLFMNDQLHGVGRSYNIHTP  193
+
+Query  506  DKETAAEVKRLINVLLEQKMPTPDDRGEEVESGPCTRMTVIDTS-----EDSNQGPSAMI  560
+            DK  + E +RL   ++++  P  +  G   +  P + + + +       +   +G S  +
+Sbjct  194  DKHLSDEFERLRVEVMKRVTPACEAGGPAKDMQPRSPLEIRNLDGLIPIQADTEGLSIFL  253
+
+Query  561  M-------GFAERARVPSRTGCMPTMVVQMRATLAASEGQPDEDDNADDHASYKVLLLSE  613
+            +       G+AE          +     QM A+ A   G PDEDD ADDHA+ KVL L E
+Sbjct  254  IVEIDVVYGYAE----------IQAWCTQMTASFAKDAGNPDEDDVADDHANDKVLGLKE  303
+
+Query  614  DKCKRATKEAACLAAFYLALRIRNYAIFAQGLRPRTKTDSITFTKAEFAMTIWSSQSLAV  673
+            +KCKRAT EAACLAAF LA+ IRNYA+FA+ LRPRTKT      K +  + +     + +
+Sbjct  304  NKCKRATVEAACLAAFKLAICIRNYALFAESLRPRTKT-----VKEDKLLKV-----VFI  353
+
+Query  674  LLFNSNYFETRNDRTREMV-----DLIHEFLRKALRAPAECVGIRAMVLSYPHEASSKEG  728
+             LF S   +  +D   E V     D I   +++      E      ++ ++     S   
+Sbjct  354  DLFTSKQEQPNDDDNTEKVGEDKKDTIKALIKQLQGVKYEWGEANIIIYAFAQSQISWAM  413
+
+Query  729  IEMGFGFLNAIAYRENATTIRD-KANNIL-------------LGCSEMLTGAYYNTGAPE  774
+                 G ++ I +       ++ K N +L              G    +  A +      
+Sbjct  414  NVPVLGAVDLIQFNYKYLIHKEIKVNTVLDFVVENKNSLDGERGLPREVKQATWKLKFSI  473
+
+Query  775  QAQTLQGTASFASDRGQPDESDNASDHASDLVAQFVEADCKRATVEAACHAAFYLALPIR  834
+            Q++T Q TASFASD  QPDE DNA DHAS+ V    E  CKRATVEAAC AAFYLAL IR
+Sbjct  474  QSRTPQRTASFASDELQPDEDDNADDHASNKVLLLCENKCKRATVEAACLAAFYLALRIR  533
+
+Query  835  NYALFAQGLRPRTKT  849
+            NYA FAQGLRPRTKT
+Sbjct  534  NYARFAQGLRPRTKT  548
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.135    0.400    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 16176468
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/culling_dom_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 20,432
+  Number of sequences in database:  45
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -74,8 +74,10 @@ impl TblastnArgs {
         let format = app::report_format(&choice, app::Program::Tblastn, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot
         // write, before anything is read or written.
+        // The error archives follow the `-outfmt` text (`writes_error_archive`).
         args.archive =
-            super::archive::handle_for(&args, format == Some(app::ReportFormat::ArchiveFormat))?;
+            super::archive::handle_for(&args, format == Some(app::ReportFormat::ArchiveFormat))?
+                .map(|handle| handle.with_outfmt_text(&args.outfmt));
         let archive = args.archive.clone();
         // LOSAT's thread capability is checked before any input or output, as for BLASTN.
         crate::utils::threading::validate_threads(args.num_threads)?;
@@ -1031,6 +1033,7 @@ fn search(
                 query_offsets: &query_offsets[range],
                 subject_set,
                 engine_positives,
+                culling_limit: resolved.culling_limit,
             },
             composition_mode2,
             resolved.sum_stats,
@@ -1076,6 +1079,7 @@ fn search(
                             query_offsets: &query_offsets[range.clone()],
                             subject_set,
                             engine_positives,
+                            culling_limit: resolved.culling_limit,
                         },
                         composition_mode2,
                         resolved.sum_stats,
@@ -1134,13 +1138,25 @@ fn search(
             // context is its searched letters), which the search has sorted by e-value; the
             // sort is a total order (best e-value, first score, OID), so sorting again after
             // the filter gives NCBI's order. A search with hits has subject letters.
-            if resolved.max_hsps > 0 || resolved.query_cov_hsp_perc > 0.0 {
+            // `-culling_limit` runs NCBI's culling pipe first on each query's hit list
+            // (`BlastHSPStreamTBackClose`, before the filters of `s_FilterBlastResults`;
+            // hspfilter_culling.c:699-733); its lists leave in the order of the tree, and the
+            // sort by e-value below is the one NCBI runs unconditionally after the pipes.
+            if resolved.max_hsps > 0
+                || resolved.query_cov_hsp_perc > 0.0
+                || resolved.culling_limit > 0
+            {
                 for (hitlist, query) in batch_results.iter_mut().zip(&query_seqs[range.clone()]) {
-                    hitlist.filter_results(
-                        resolved.max_hsps,
-                        resolved.query_cov_hsp_perc,
-                        query.len(),
-                    );
+                    if resolved.culling_limit > 0 {
+                        hitlist.cull(resolved.culling_limit, query.len())?;
+                    }
+                    if resolved.max_hsps > 0 || resolved.query_cov_hsp_perc > 0.0 {
+                        hitlist.filter_results(
+                            resolved.max_hsps,
+                            resolved.query_cov_hsp_perc,
+                            query.len(),
+                        );
+                    }
                     hitlist.sort_by_evalue_for_positive_totlen();
                 }
             }

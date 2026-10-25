@@ -5,7 +5,8 @@
 //! the ASN.1 modules.
 //!
 //! The documents are made by `write_query`, one per query with alignments, from the report
-//! records of `report::record`. The segment computation is that of `s_CollectSeqAlignData`
+//! records of `report::record`; `write_query_to` and `write_hit_list_seqaligns` are the
+//! per-query write step and hit-list loop the programs' writers share. The segment computation is that of `s_CollectSeqAlignData`
 //! for every program; the forms are NCBI's:
 //! - a gapped search whose rows are not translated (BLASTN, BLASTP): one Seq-align per HSP
 //!   with a Dense-seg (`write_dense_seg`, `s_CreateDenseg`);
@@ -50,9 +51,12 @@
 //! search's own hit list size for these formats, so it keeps every Seq-align of the search's
 //! hit lists (outfmt-20261019 S/DESIGN_OF3.md §2.1).
 
+use std::io::Write;
+
 use crate::blastinput::app::Program;
 use crate::common::GapEditOp;
-use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
+use crate::report::query_warnings::QueryWarnings;
+use crate::report::record::{HspRecord, QueryNames, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::seqid::SeqId;
 
 use super::asn_ber::AsnBinaryEncoder;
@@ -1903,4 +1907,60 @@ pub fn write_query(
         return Err(SeqAlignError::Serial(error));
     }
     Ok(true)
+}
+
+/// Writes the document of one query to `writer` through `buf`, which is cleared first: what
+/// `write_query` makes, or nothing when the query has no Seq-align.
+pub(crate) fn write_query_to(
+    format: SerialFormat,
+    run: &RunRecord<'_>,
+    query: &QueryRecord<'_>,
+    subjects: &[SubjectRecord<'_>],
+    hsps: &[HspRecord<'_>],
+    buf: &mut Vec<u8>,
+    writer: &mut dyn Write,
+) -> anyhow::Result<()> {
+    buf.clear();
+    if write_query(format, run, query, subjects, hsps, buf)? {
+        writer.write_all(buf)?;
+    }
+    Ok(())
+}
+
+/// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
+/// query's warnings before it. `records` fills the subject and HSP records of the hit list of
+/// query `q_idx` (replacing their contents) for `write_query_to`; a query without a hit list
+/// writes nothing but its warnings.
+pub(crate) fn write_hit_list_seqaligns<'a, L>(
+    format: SerialFormat,
+    run: &RunRecord<'_>,
+    hit_lists: &'a [Option<L>],
+    queries: &QueryNames<'_>,
+    writer: &mut dyn Write,
+    mut warnings: Option<&mut QueryWarnings<'_>>,
+    mut records: impl FnMut(usize, &'a L, &mut Vec<SubjectRecord<'a>>, &mut Vec<HspRecord<'a>>),
+) -> anyhow::Result<()> {
+    let mut subject_records: Vec<SubjectRecord<'a>> = Vec::new();
+    let mut hsp_records: Vec<HspRecord<'a>> = Vec::new();
+    let mut buf: Vec<u8> = Vec::new();
+    for (q_idx, hit_list) in hit_lists.iter().enumerate() {
+        // The query's warnings come before its document (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, &mut *writer)?;
+        }
+        let Some(hit_list) = hit_list else {
+            continue;
+        };
+        records(q_idx, hit_list, &mut subject_records, &mut hsp_records);
+        write_query_to(
+            format,
+            run,
+            &queries.record(q_idx),
+            &subject_records,
+            &hsp_records,
+            &mut buf,
+            &mut *writer,
+        )?;
+    }
+    Ok(())
 }

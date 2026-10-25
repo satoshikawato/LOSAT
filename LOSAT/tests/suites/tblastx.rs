@@ -33,6 +33,8 @@ mod tblastx_query_frames;
 mod tblastx_ref_lut;
 #[path = "../tblastx_report_par.rs"]
 mod tblastx_report_par;
+#[path = "../tblastx_resolve.rs"]
+mod tblastx_resolve;
 #[path = "../tblastx_search_timing.rs"]
 mod tblastx_search_timing;
 #[path = "../tblastx_seed_bucket.rs"]
@@ -43,6 +45,8 @@ mod tblastx_seed_compact;
 mod tblastx_seed_release;
 #[path = "../tblastx_seed_unmap.rs"]
 mod tblastx_seed_unmap;
+#[path = "../tblastx_store.rs"]
+mod tblastx_store;
 #[path = "../tblastx_subject_next.rs"]
 mod tblastx_subject_next;
 #[path = "../tblastx_unit_gate.rs"]

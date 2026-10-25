@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_QPREPPAR, shadow LOSAT_X_QPREPPARSHADOW): the BLASTNA encoding of a query
+//! EXPERIMENT (LOSAT_X_QPREPPAR): the BLASTNA encoding of a query
 //! batch and the ungapped Karlin blocks of its contexts made on the search pool, as ordered
 //! parallel maps.
 //!
@@ -63,23 +63,12 @@
 //! `search_query_batch` (every query batch, in the loop or in a LOSAT_X_QBATCHPAR slot; the `-db`
 //! search of BLASTN uses the same function). BLASTP, BLASTX, TBLASTN and TBLASTX do not call it.
 //!
-//! The shadow also encodes and computes the blocks serially and compares them: the encodings
-//! byte for byte, the blocks field by field with the bits of every float. On a difference it
-//! prints `[X_SHADOW] QPREPPAR ... DIFFERENT` and panics with a message that names what differs
-//! (the first differing byte of the buffer, or the context and the field of the block); otherwise
-//! `main` prints
-//! `[X_SHADOW] QPREPPAR batches= queries= contexts= fallbacks= diffs=0 identical` at exit
-//! (`batches=` and `queries=` count the encodings made on a pool, `contexts=` the contexts whose
-//! blocks were made on a pool; `fallbacks=` counts the batches with two or more queries on a pool
-//! whose spans were not in query order and disjoint, which the serial function encoded: they are
-//! not counted in `batches=`/`queries=` and not compared, the layout of `search_query_batch` never
-//! causes one; `diffs=` counts the differences found, also in a batch that a LOSAT_X_QBATCHPAR slot
-//! made and the loop discarded; the line ends in `identical` only when it is 0, else in
-//! `DIFFERENT`). With `LOSAT_X_STATS`, `main` prints
+//! With `LOSAT_X_STATS`, `main` prints
 //! `[X_STATS] QPREPPAR encode_s= karlin_s= fallbacks=`, the summed wall times of the two steps over
 //! every batch (so with LOSAT_X_QBATCHPAR they include the slots' batches, which run concurrently,
-//! and those the loop discards; with the shadow they include the serial reference pass) and the
-//! fallbacks (counted whenever the switch is on), with or without the switch.
+//! and those the loop discards) and the number of batches with two or more queries on a pool whose
+//! spans were not in query order and disjoint, which the serial function encoded (a fallback; the
+//! layout of `search_query_batch` never causes one), with or without the switch.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -98,31 +87,18 @@ use crate::utils::threading::SearchPool;
 ))]
 use rayon::prelude::*;
 
-// No NCBI counterpart: reads the switches once (LOSAT_X_QPREPPAR is a strict-set switch since
-// 2026-10-17: on unless it is `0`; the shadow, off
-// unless set to any value, implies the switch). They choose between two LOSAT code paths with
-// the same result and change no value NCBI computes.
-/// 0 = off, 1 = LOSAT_X_QPREPPAR, 2 = LOSAT_X_QPREPPARSHADOW.
-fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_QPREPPARSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_QPREPPAR") {
-            1
-        } else {
-            0
-        }
-    })
+// No NCBI counterpart: reads the switch once (LOSAT_X_QPREPPAR is a strict-set switch since
+// 2026-10-17: on unless it is `0`). It chooses between two LOSAT code paths with the same result
+// and changes no value NCBI computes.
+/// Whether LOSAT_X_QPREPPAR is on.
+fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_QPREPPAR"))
 }
 
-// No NCBI counterpart: counters of the shadow's summary line and the summed wall times of the two
-// steps (LOSAT_X_STATS); they change no value NCBI computes.
-static BATCHES: AtomicU64 = AtomicU64::new(0);
-static QUERIES: AtomicU64 = AtomicU64::new(0);
-static CONTEXTS: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart: the fallbacks and the summed wall times of the two steps (LOSAT_X_STATS);
+// they change no value NCBI computes.
 static FALLBACKS: AtomicU64 = AtomicU64::new(0);
-static DIFFS: AtomicU64 = AtomicU64::new(0);
 static ENCODE_NANOS: AtomicU64 = AtomicU64::new(0);
 static KARLIN_NANOS: AtomicU64 = AtomicU64::new(0);
 static CALLS: AtomicU64 = AtomicU64::new(0);
@@ -157,7 +133,7 @@ fn serial_blocks(contexts: &[&[u8]], spec: &NuclScoringSpec) -> Vec<Option<Karli
 /// (`None` for a context that is empty or does not end inside the block, which stays sentinels).
 // Copy of the `place` closure in `build_query_blastna_buffer` (run.rs): the serial function stays
 // untouched with the switch off, so a change of its rule must be made here too; the random
-// pool-vs-serial tests and the shadow compare the two.
+// pool-vs-serial tests compare the two.
 fn place(offset: i32, length: usize, query_concat_length: usize) -> Option<std::ops::Range<usize>> {
     let start = offset.max(0) as usize;
     let end = start.saturating_add(length);
@@ -300,6 +276,7 @@ fn parallel_blocks<P: Fn() + Sync>(
 
 /// Whether two blocks are the same bit for bit (`KarlinParams` has no `PartialEq`, and `==` on
 /// floats would equate `0.0` and `-0.0` and differ on a NaN).
+#[cfg(test)]
 fn same_bits(a: &Option<KarlinParams>, b: &Option<KarlinParams>) -> bool {
     match (a, b) {
         (None, None) => true,
@@ -314,132 +291,21 @@ fn same_bits(a: &Option<KarlinParams>, b: &Option<KarlinParams>) -> bool {
     }
 }
 
-/// What differs between the buffer made on the pool and the serial one, or `None` when they are
-/// equal (length and every byte).
-fn first_buffer_diff(fast: &[u8], slow: &[u8]) -> Option<String> {
-    if fast.len() != slow.len() {
-        return Some(format!(
-            "query buffer: lengths {} / {}",
-            fast.len(),
-            slow.len()
-        ));
-    }
-    fast.iter()
-        .zip(slow)
-        .position(|(fast, slow)| fast != slow)
-        .map(|i| {
-            format!(
-                "query buffer: first differing byte at index {i} ({} / {})",
-                fast[i], slow[i]
-            )
-        })
-}
-
-/// The name of the first field in which two blocks differ bit for bit ("none" when `same_bits`).
-fn block_field_diff(fast: &Option<KarlinParams>, slow: &Option<KarlinParams>) -> &'static str {
-    match (fast, slow) {
-        (Some(a), Some(b)) => [
-            ("lambda", a.lambda, b.lambda),
-            ("k", a.k, b.k),
-            ("h", a.h, b.h),
-            ("alpha", a.alpha, b.alpha),
-            ("beta", a.beta, b.beta),
-        ]
-        .into_iter()
-        .find(|(_, x, y)| x.to_bits() != y.to_bits())
-        .map_or("none", |(name, _, _)| name),
-        (Some(_), None) => "Some / None",
-        (None, Some(_)) => "None / Some",
-        (None, None) => "none",
-    }
-}
-
-/// What differs between the blocks made on the pool and the serial ones, or `None` when they are
-/// equal (count and every block, field by field with the bits of the floats).
-fn first_block_diff(
-    fast: &[Option<KarlinParams>],
-    slow: &[Option<KarlinParams>],
-) -> Option<String> {
-    if fast.len() != slow.len() {
-        return Some(format!(
-            "Karlin blocks: counts {} / {}",
-            fast.len(),
-            slow.len()
-        ));
-    }
-    fast.iter()
-        .zip(slow)
-        .position(|(fast, slow)| !same_bits(fast, slow))
-        .map(|i| {
-            format!(
-                "Karlin blocks: context {i}, field {} ({:?} / {:?})",
-                block_field_diff(&fast[i], &slow[i]),
-                fast[i],
-                slow[i]
-            )
-        })
-}
-
-// Test-only hooks for the shadow's tests: the next buffer / block set made on the pool on this
-// thread is perturbed once, after it is made and before the shadow compares it. Not compiled
-// outside tests.
-#[cfg(test)]
-thread_local! {
-    /// The index of the byte of the next pool buffer to change.
-    static TAMPER_BUFFER: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
-    /// The field (0 = lambda .. 4 = beta) of the first block of the next pool block set to change.
-    static TAMPER_FIELD: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
-}
-
-#[cfg(test)]
-fn tamper_buffer(buffer: &mut [u8]) {
-    if let Some(index) = TAMPER_BUFFER.with(|cell| cell.take()) {
-        buffer[index] ^= 1;
-    }
-}
-
-#[cfg(not(test))]
-#[inline(always)]
-fn tamper_buffer(_buffer: &mut [u8]) {}
-
-#[cfg(test)]
-fn tamper_blocks(blocks: &mut [Option<KarlinParams>]) {
-    if let Some(field) = TAMPER_FIELD.with(|cell| cell.take()) {
-        let block = blocks
-            .iter_mut()
-            .flatten()
-            .next()
-            .expect("a block to change");
-        let slot = match field {
-            0 => &mut block.lambda,
-            1 => &mut block.k,
-            2 => &mut block.h,
-            3 => &mut block.alpha,
-            _ => &mut block.beta,
-        };
-        *slot = f64::from_bits(slot.to_bits() ^ 1);
-    }
-}
-
-#[cfg(not(test))]
-#[inline(always)]
-fn tamper_blocks(_blocks: &mut [Option<KarlinParams>]) {}
-
-/// The query buffer as the switch `mode` makes it (0 = off, 1 = on, 2 = on and compared with the
-/// serial buffer). Separate from the environment so that tests choose the mode.
+/// The query buffer as the switch `on` makes it. Separate from the environment so that tests
+/// choose the switch.
 pub(super) fn buffer_with_mode(
     query_letters: &[&[u8]],
     context_offsets: &[i32],
     query_concat_length: usize,
     pool: &SearchPool<'_>,
-    mode: u8,
+    on: bool,
 ) -> Vec<u8> {
     buffer_with_probe(
         query_letters,
         context_offsets,
         query_concat_length,
         pool,
-        mode,
+        on,
         &|| {},
     )
 }
@@ -450,16 +316,16 @@ fn buffer_with_probe<P: Fn() + Sync>(
     context_offsets: &[i32],
     query_concat_length: usize,
     pool: &SearchPool<'_>,
-    mode: u8,
+    on: bool,
     probe: &P,
 ) -> Vec<u8> {
-    if mode != 0 {
+    if on {
         crate::utils::xreach::x_reach!("LOSAT_X_QPREPPAR", on_pool(pool, query_letters.len()));
     }
-    if mode == 0 || !on_pool(pool, query_letters.len()) {
+    if !on || !on_pool(pool, query_letters.len()) {
         return serial_buffer(query_letters, context_offsets, query_concat_length);
     }
-    let (mut buffer, on_the_pool) = parallel_buffer(
+    let (buffer, on_the_pool) = parallel_buffer(
         query_letters,
         context_offsets,
         query_concat_length,
@@ -472,35 +338,17 @@ fn buffer_with_probe<P: Fn() + Sync>(
         FALLBACKS.fetch_add(1, Ordering::Relaxed);
         return buffer;
     }
-    tamper_buffer(&mut buffer);
-    if mode == 2 {
-        let reference = serial_buffer(query_letters, context_offsets, query_concat_length);
-        BATCHES.fetch_add(1, Ordering::Relaxed);
-        QUERIES.fetch_add(query_letters.len() as u64, Ordering::Relaxed);
-        if let Some(what) = first_buffer_diff(&buffer, &reference) {
-            DIFFS.fetch_add(1, Ordering::Relaxed);
-            eprintln!(
-                "[X_SHADOW] QPREPPAR batches={} queries={} contexts={} fallbacks={} diffs={} DIFFERENT ({what})",
-                BATCHES.load(Ordering::Relaxed),
-                QUERIES.load(Ordering::Relaxed),
-                CONTEXTS.load(Ordering::Relaxed),
-                FALLBACKS.load(Ordering::Relaxed),
-                DIFFS.load(Ordering::Relaxed),
-            );
-            panic!("LOSAT_X_QPREPPARSHADOW: the query buffer made on the pool differs from the serial one ({what})");
-        }
-    }
     buffer
 }
 
-/// The ungapped blocks of `contexts` as the switch `mode` makes them (see `buffer_with_mode`).
+/// The ungapped blocks of `contexts` as the switch `on` makes them (see `buffer_with_mode`).
 pub(super) fn blocks_with_mode(
     contexts: &[&[u8]],
     spec: &NuclScoringSpec,
     pool: &SearchPool<'_>,
-    mode: u8,
+    on: bool,
 ) -> Vec<Option<KarlinParams>> {
-    blocks_with_probe(contexts, spec, pool, mode, &|| {})
+    blocks_with_probe(contexts, spec, pool, on, &|| {})
 }
 
 /// `blocks_with_mode` with a `probe` that the parallel map calls once per context.
@@ -508,34 +356,16 @@ fn blocks_with_probe<P: Fn() + Sync>(
     contexts: &[&[u8]],
     spec: &NuclScoringSpec,
     pool: &SearchPool<'_>,
-    mode: u8,
+    on: bool,
     probe: &P,
 ) -> Vec<Option<KarlinParams>> {
-    if mode != 0 {
+    if on {
         crate::utils::xreach::x_reach!("LOSAT_X_QPREPPAR", on_pool(pool, contexts.len()));
     }
-    if mode == 0 || !on_pool(pool, contexts.len()) {
+    if !on || !on_pool(pool, contexts.len()) {
         return serial_blocks(contexts, spec);
     }
-    let mut blocks = parallel_blocks(contexts, spec, pool, probe);
-    tamper_blocks(&mut blocks);
-    if mode == 2 {
-        let reference = serial_blocks(contexts, spec);
-        CONTEXTS.fetch_add(contexts.len() as u64, Ordering::Relaxed);
-        if let Some(what) = first_block_diff(&blocks, &reference) {
-            DIFFS.fetch_add(1, Ordering::Relaxed);
-            eprintln!(
-                "[X_SHADOW] QPREPPAR batches={} queries={} contexts={} fallbacks={} diffs={} DIFFERENT ({what})",
-                BATCHES.load(Ordering::Relaxed),
-                QUERIES.load(Ordering::Relaxed),
-                CONTEXTS.load(Ordering::Relaxed),
-                FALLBACKS.load(Ordering::Relaxed),
-                DIFFS.load(Ordering::Relaxed),
-            );
-            panic!("LOSAT_X_QPREPPARSHADOW: the Karlin blocks made on the pool differ from the serial ones ({what})");
-        }
-    }
-    blocks
+    parallel_blocks(contexts, spec, pool, probe)
 }
 
 /// The BLASTNA buffer of a query batch with its sentinels, as `build_query_blastna_buffer` makes it:
@@ -552,7 +382,7 @@ pub(super) fn query_buffer(
         context_offsets,
         query_concat_length,
         pool,
-        mode(),
+        on(),
     );
     if let Some(start) = start {
         ENCODE_NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -569,16 +399,15 @@ pub(super) fn ungapped_blocks(
     pool: &SearchPool<'_>,
 ) -> Vec<Option<KarlinParams>> {
     let start = timing_on().then(std::time::Instant::now);
-    let blocks = blocks_with_mode(contexts, spec, pool, mode());
+    let blocks = blocks_with_mode(contexts, spec, pool, on());
     if let Some(start) = start {
         KARLIN_NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
     }
     blocks
 }
 
-/// The shadow's summary line (printed by `main` at exit), only with LOSAT_X_QPREPPARSHADOW, and
-/// with LOSAT_X_STATS the summed wall times of the two steps, only when at least one batch was
-/// prepared.
+/// With LOSAT_X_STATS the summed wall times of the two steps (printed by `main` at exit), only when
+/// at least one batch was prepared.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
     if timing_on() && CALLS.load(Ordering::Relaxed) > 0 {
@@ -587,17 +416,6 @@ pub fn print_summary() {
             ENCODE_NANOS.load(Ordering::Relaxed) as f64 / 1e9,
             KARLIN_NANOS.load(Ordering::Relaxed) as f64 / 1e9,
             FALLBACKS.load(Ordering::Relaxed)
-        );
-    }
-    if mode() == 2 {
-        let diffs = DIFFS.load(Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] QPREPPAR batches={} queries={} contexts={} fallbacks={} diffs={diffs} {}",
-            BATCHES.load(Ordering::Relaxed),
-            QUERIES.load(Ordering::Relaxed),
-            CONTEXTS.load(Ordering::Relaxed),
-            FALLBACKS.load(Ordering::Relaxed),
-            if diffs == 0 { "identical" } else { "DIFFERENT" }
         );
     }
 }
@@ -714,18 +532,6 @@ mod tests {
             .collect()
     }
 
-    /// The text of the panic that `work` raises (the test fails when it does not panic).
-    fn panic_text<R>(work: impl FnOnce() -> R) -> String {
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)) {
-            Ok(_) => panic!("expected a panic"),
-            Err(payload) => payload
-                .downcast_ref::<String>()
-                .cloned()
-                .or_else(|| payload.downcast_ref::<&str>().map(|text| text.to_string()))
-                .unwrap_or_default(),
-        }
-    }
-
     fn spec() -> NuclScoringSpec {
         NuclScoringSpec {
             reward: 1,
@@ -800,10 +606,8 @@ mod tests {
                     };
                     let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
                     let want = serial_buffer(&letters, &offsets, total);
-                    for mode in [1u8, 2] {
-                        let got = buffer_with_mode(&letters, &offsets, total, pool, mode);
-                        assert_eq!(got, want, "threads {threads} count {count} gap {gap:?}");
-                    }
+                    let got = buffer_with_mode(&letters, &offsets, total, pool, true);
+                    assert_eq!(got, want, "threads {threads} count {count} gap {gap:?}");
                     if gap.is_none() && count > 1 && pool.threads() > 1 {
                         let (got, on_the_pool) =
                             parallel_buffer(&letters, &offsets, total, pool, &|| {});
@@ -839,7 +643,7 @@ mod tests {
                     _ => offsets[9] = offsets[10] - 1,
                 }
                 let want = serial_buffer(&letters, &offsets, total);
-                let got = buffer_with_mode(&letters, &offsets, total, pool, 2);
+                let got = buffer_with_mode(&letters, &offsets, total, pool, true);
                 assert_eq!(got, want, "mutation {mutate}");
                 // Out of order or overlapping spans are the fallback (the serial function
                 // made the buffer, nothing was encoded on the pool).
@@ -875,15 +679,13 @@ mod tests {
                 with_search_pool(threads, "blastn", |pool| {
                     for take in [contexts.len(), 3, 2, 1, 0] {
                         let part = &contexts[..take];
-                        for mode in [1u8, 2] {
-                            let got = blocks_with_mode(part, &spec, pool, mode);
-                            assert_eq!(got.len(), take);
-                            for (i, (got, want)) in got.iter().zip(&want).enumerate() {
-                                assert!(
-                                    same_bits(got, want),
-                                    "threads {threads} take {take} mode {mode} context {i}: {got:?} / {want:?}"
-                                );
-                            }
+                        let got = blocks_with_mode(part, &spec, pool, true);
+                        assert_eq!(got.len(), take);
+                        for (i, (got, want)) in got.iter().zip(&want).enumerate() {
+                            assert!(
+                                same_bits(got, want),
+                                "threads {threads} take {take} context {i}: {got:?} / {want:?}"
+                            );
                         }
                     }
                     Ok(())
@@ -971,52 +773,41 @@ mod tests {
             })
             .count();
         with_search_pool(3, "blastn", |pool| {
-            for mode in [1u8, 2] {
-                reset();
-                let got = buffer_with_probe(&letters, &offsets, total, pool, mode, &probe);
-                assert_eq!(got, want_buffer, "mode {mode}");
-                assert_eq!(calls.load(Ordering::SeqCst), placed, "mode {mode}");
-                assert_eq!(
-                    in_pool_of_three.load(Ordering::SeqCst),
-                    placed,
-                    "mode {mode}"
-                );
-                {
-                    let workers = workers.lock().unwrap();
-                    assert!(
-                        workers.len() >= 2 && workers.iter().all(|&index| index < 3),
-                        "mode {mode}: workers {workers:?}"
-                    );
-                }
-                reset();
-                let got = blocks_with_probe(&contexts, &spec, pool, mode, &probe);
-                assert!(
-                    got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)),
-                    "mode {mode}"
-                );
-                assert_eq!(calls.load(Ordering::SeqCst), contexts.len(), "mode {mode}");
-                assert_eq!(
-                    in_pool_of_three.load(Ordering::SeqCst),
-                    contexts.len(),
-                    "mode {mode}"
-                );
+            reset();
+            let got = buffer_with_probe(&letters, &offsets, total, pool, true, &probe);
+            assert_eq!(got, want_buffer);
+            assert_eq!(calls.load(Ordering::SeqCst), placed);
+            assert_eq!(in_pool_of_three.load(Ordering::SeqCst), placed);
+            {
                 let workers = workers.lock().unwrap();
                 assert!(
                     workers.len() >= 2 && workers.iter().all(|&index| index < 3),
-                    "mode {mode}: workers {workers:?}"
+                    "workers {workers:?}"
+                );
+            }
+            reset();
+            let got = blocks_with_probe(&contexts, &spec, pool, true, &probe);
+            assert!(got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)));
+            assert_eq!(calls.load(Ordering::SeqCst), contexts.len());
+            assert_eq!(in_pool_of_three.load(Ordering::SeqCst), contexts.len());
+            {
+                let workers = workers.lock().unwrap();
+                assert!(
+                    workers.len() >= 2 && workers.iter().all(|&index| index < 3),
+                    "workers {workers:?}"
                 );
             }
             // Not acted on: switch off, one query, one context.
             reset();
             assert_eq!(
-                buffer_with_probe(&letters, &offsets, total, pool, 0, &probe),
+                buffer_with_probe(&letters, &offsets, total, pool, false, &probe),
                 want_buffer
             );
-            let got = blocks_with_probe(&contexts, &spec, pool, 0, &probe);
+            let got = blocks_with_probe(&contexts, &spec, pool, false, &probe);
             assert!(got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)));
-            let one = buffer_with_probe(&letters[..1], &offsets[..2], total, pool, 1, &probe);
+            let one = buffer_with_probe(&letters[..1], &offsets[..2], total, pool, true, &probe);
             assert_eq!(one, serial_buffer(&letters[..1], &offsets[..2], total));
-            let got = blocks_with_probe(&contexts[..1], &spec, pool, 1, &probe);
+            let got = blocks_with_probe(&contexts[..1], &spec, pool, true, &probe);
             assert!(same_bits(&got[0], &want_blocks[0]));
             assert_eq!(calls.load(Ordering::SeqCst), 0);
             Ok(())
@@ -1025,10 +816,10 @@ mod tests {
         with_search_pool(1, "blastn", |pool| {
             reset();
             assert_eq!(
-                buffer_with_probe(&letters, &offsets, total, pool, 1, &probe),
+                buffer_with_probe(&letters, &offsets, total, pool, true, &probe),
                 want_buffer
             );
-            let got = blocks_with_probe(&contexts, &spec, pool, 1, &probe);
+            let got = blocks_with_probe(&contexts, &spec, pool, true, &probe);
             assert!(got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)));
             assert_eq!(calls.load(Ordering::SeqCst), 0);
             Ok(())
@@ -1057,7 +848,7 @@ mod tests {
     }
 
     /// The production layout (offsets of `search_query_batch`, empty queries first or last,
-    /// bytes 0..=255) on pools of 2, 3, 5 and 16 threads, in modes 1 and 2, with two score pairs:
+    /// bytes 0..=255) on pools of 2, 3, 5 and 16 threads, with two score pairs:
     /// the buffer byte for byte, the blocks bit for bit, and never the fallback.
     #[cfg(feature = "parallel")]
     #[test]
@@ -1093,10 +884,8 @@ mod tests {
                             parallel_buffer(&letters, &offsets, total, pool, &|| {});
                         assert!(on_the_pool, "the production layout took the fallback");
                         assert_eq!(got, want, "threads {threads} count {count}");
-                        for mode in [1u8, 2] {
-                            let got = buffer_with_mode(&letters, &offsets, total, pool, mode);
-                            assert_eq!(got, want, "threads {threads} count {count} mode {mode}");
-                        }
+                        let got = buffer_with_mode(&letters, &offsets, total, pool, true);
+                        assert_eq!(got, want, "threads {threads} count {count}");
                         let contexts = contexts_of(&want[1..total + 1], &queries, &offsets);
                         for (reward, penalty) in [(1, -2), (2, -3)] {
                             let spec = NuclScoringSpec {
@@ -1106,14 +895,12 @@ mod tests {
                                 gap_extend: 0,
                             };
                             let want = serial_blocks(&contexts, &spec);
-                            for mode in [1u8, 2] {
-                                let got = blocks_with_mode(&contexts, &spec, pool, mode);
-                                assert_eq!(got.len(), want.len());
-                                assert!(
-                                    got.iter().zip(&want).all(|(a, b)| same_bits(a, b)),
-                                    "threads {threads} count {count} r {reward} p {penalty}"
-                                );
-                            }
+                            let got = blocks_with_mode(&contexts, &spec, pool, true);
+                            assert_eq!(got.len(), want.len());
+                            assert!(
+                                got.iter().zip(&want).all(|(a, b)| same_bits(a, b)),
+                                "threads {threads} count {count} r {reward} p {penalty}"
+                            );
                         }
                         cases += 1;
                     }
@@ -1153,9 +940,9 @@ mod tests {
                                 wrong.fetch_add(1, Ordering::SeqCst);
                             }
                         };
-                        let got = buffer_with_probe(&letters, &offsets, total, pool, 1, &probe);
+                        let got = buffer_with_probe(&letters, &offsets, total, pool, true, &probe);
                         assert_eq!(got, want);
-                        let got = blocks_with_probe(&contexts, &spec, pool, 1, &probe);
+                        let got = blocks_with_probe(&contexts, &spec, pool, true, &probe);
                         assert_eq!(got.len(), contexts.len());
                         assert_eq!(
                             wrong.load(Ordering::SeqCst),
@@ -1196,9 +983,9 @@ mod tests {
                                 wrong.fetch_add(1, Ordering::SeqCst);
                             }
                         };
-                        let got = buffer_with_probe(&letters, &offsets, total, slot, 2, &probe);
+                        let got = buffer_with_probe(&letters, &offsets, total, slot, true, &probe);
                         assert_eq!(got, want);
-                        let got = blocks_with_probe(&contexts, &spec, slot, 2, &probe);
+                        let got = blocks_with_probe(&contexts, &spec, slot, true, &probe);
                         assert!(got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)));
                         assert_eq!(wrong.load(Ordering::SeqCst), 0);
                         Ok(())
@@ -1207,135 +994,14 @@ mod tests {
                 });
                 outer.install(|| {
                     (0..6).into_par_iter().for_each(|_| {
-                        let got = buffer_with_mode(&letters, &offsets, total, outer, 2);
+                        let got = buffer_with_mode(&letters, &offsets, total, outer, true);
                         assert_eq!(got, want);
-                        let got = blocks_with_mode(&contexts, &spec, outer, 2);
+                        let got = blocks_with_mode(&contexts, &spec, outer, true);
                         assert!(got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)));
                     })
                 });
                 slot_thread.join().unwrap();
             });
-            Ok(())
-        })
-        .unwrap();
-    }
-
-    /// The comparison functions the shadow uses see a length mismatch, one changed byte, and in
-    /// the blocks a count mismatch, `None` against `Some` and a change in each of the five fields.
-    #[test]
-    fn diff_functions_name_what_differs() {
-        assert_eq!(first_buffer_diff(&[1, 2, 3], &[1, 2, 3]), None);
-        assert!(first_buffer_diff(&[1, 2, 3], &[1, 2])
-            .unwrap()
-            .contains("lengths 3 / 2"));
-        let text = first_buffer_diff(&[1, 2, 3], &[1, 7, 3]).unwrap();
-        assert!(text.contains("index 1 (2 / 7)"), "{text}");
-
-        let base = KarlinParams {
-            lambda: 0.625,
-            k: 0.41,
-            h: 0.78,
-            alpha: 1.5,
-            beta: -2.0,
-        };
-        assert_eq!(
-            first_block_diff(&[Some(base), None], &[Some(base), None]),
-            None
-        );
-        assert!(first_block_diff(&[None], &[None, None])
-            .unwrap()
-            .contains("counts 1 / 2"));
-        let text = first_block_diff(&[None, Some(base)], &[None, None]).unwrap();
-        assert!(
-            text.contains("context 1") && text.contains("Some / None"),
-            "{text}"
-        );
-        let text = first_block_diff(&[None], &[Some(base)]).unwrap();
-        assert!(text.contains("None / Some"), "{text}");
-        let variants = [
-            (
-                "lambda",
-                KarlinParams {
-                    lambda: 0.626,
-                    ..base
-                },
-            ),
-            ("k", KarlinParams { k: 0.42, ..base }),
-            ("h", KarlinParams { h: 0.79, ..base }),
-            ("alpha", KarlinParams { alpha: 1.6, ..base }),
-            ("beta", KarlinParams { beta: -2.1, ..base }),
-        ];
-        for (name, variant) in variants {
-            let text = first_block_diff(&[None, Some(variant)], &[None, Some(base)]).unwrap();
-            assert!(
-                text.contains("context 1") && text.contains(&format!("field {name} ")),
-                "{text}"
-            );
-        }
-    }
-
-    /// The shadow panics, naming the first differing byte, when the buffer made on the pool
-    /// differs from the serial one (the test hook changes one encoded byte of the pool's buffer);
-    /// without the hook the same call is silent, and with the switch only (mode 1) nothing is
-    /// compared.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn shadow_panics_on_a_changed_buffer_byte() {
-        let mut rng = Rng(0x0bad_0001_0002_0003);
-        let (queries, offsets, total) = batch(&mut rng, 40);
-        let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-        let want = serial_buffer(&letters, &offsets, total);
-        with_search_pool(3, "blastn", |pool| {
-            assert_eq!(buffer_with_mode(&letters, &offsets, total, pool, 2), want);
-            for index in [0, total / 2, total + 1] {
-                TAMPER_BUFFER.with(|cell| cell.set(Some(index)));
-                let text = panic_text(|| buffer_with_mode(&letters, &offsets, total, pool, 2));
-                assert!(
-                    text.contains("LOSAT_X_QPREPPARSHADOW")
-                        && text.contains("query buffer")
-                        && text.contains(&format!("first differing byte at index {index} (")),
-                    "{text}"
-                );
-            }
-            // Mode 1 compares nothing: the changed byte goes through.
-            TAMPER_BUFFER.with(|cell| cell.set(Some(total / 2)));
-            let got = buffer_with_mode(&letters, &offsets, total, pool, 1);
-            assert_ne!(got, want);
-            assert_eq!(buffer_with_mode(&letters, &offsets, total, pool, 2), want);
-            Ok(())
-        })
-        .unwrap();
-    }
-
-    /// The shadow panics, naming the context and the field, when one field of a block made on the
-    /// pool differs by one bit from the serial one (the test hook changes it), for each of the five
-    /// fields.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn shadow_panics_on_a_changed_karlin_field() {
-        let mut rng = Rng(0x0bad_0004_0005_0006);
-        let (queries, offsets, total) = batch(&mut rng, 40);
-        let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-        let buffer = serial_buffer(&letters, &offsets, total);
-        let contexts = contexts_of(&buffer[1..total + 1], &queries, &offsets);
-        let spec = spec();
-        let want = serial_blocks(&contexts, &spec);
-        let first = want.iter().position(Option::is_some).expect("a block");
-        with_search_pool(3, "blastn", |pool| {
-            let got = blocks_with_mode(&contexts, &spec, pool, 2);
-            assert!(got.iter().zip(&want).all(|(a, b)| same_bits(a, b)));
-            for (field, name) in ["lambda", "k", "h", "alpha", "beta"]
-                .into_iter()
-                .enumerate()
-            {
-                TAMPER_FIELD.with(|cell| cell.set(Some(field)));
-                let text = panic_text(|| blocks_with_mode(&contexts, &spec, pool, 2));
-                assert!(
-                    text.contains("LOSAT_X_QPREPPARSHADOW")
-                        && text.contains(&format!("context {first}, field {name} (")),
-                    "{text}"
-                );
-            }
             Ok(())
         })
         .unwrap();

@@ -1,5 +1,5 @@
-//! tblastn's lookup scan without a branch on the presence vector (`LOSAT_X_TBNSCANBF`, in the
-//! strict set; `src/algorithm/tblastn/x_scan_bf.rs`) on whole searches.
+//! tblastn's lookup scan without a branch on the presence vector (`src/algorithm/tblastn/x_scan_bf.rs`;
+//! the former switch `LOSAT_X_TBNSCANBF` graduated on 2026-10-26) on whole searches.
 //!
 //! NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
 //! ```c
@@ -16,19 +16,18 @@
 //!     }
 //! }
 //! ```
-//! The switch's loop returns NCBI's offset pairs and scan range on every call (the unit test
-//! `x_scan_bf_equals_ncbi_scan_on_random_subjects` compares the calls), so a search with it gives
-//! the report of NCBI's loop (`LOSAT_X_TBNSCANBF=0`) and takes as many scan calls. The switch is
-//! on by default and off with `LOSAT_X_TBNSCANBF=0`;
-//! it acts in the unit path, which every search takes. These tests compare the reports
-//! and read the `[X_STATS] TBNSCANBF units_bf= calls_bf= units_ref= calls_ref=` line
-//! (`LOSAT_X_STATS=1`) to check which loop scanned.
+//! The loop returns NCBI's offset pairs and scan range on every call (the unit test
+//! `x_scan_bf_equals_ncbi_scan_on_random_subjects` compares the calls), so a search gives the
+//! report of NCBI's loop (the frozen NCBI hashes of the fast regressions check that). It acts in
+//! the unit path, which every search takes. These tests compare the reports at one and four
+//! threads and read the `[X_STATS] TBNSCANBF units= calls=` line (`LOSAT_X_STATS=1`) to check that
+//! the loop scanned and that the offset array filled.
 //!
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` (the presence bit is set at
 //! few subject words) and all 115 of them (72,314 residues, four query batches; the offset array
 //! fills, so the scan stops and resumes); the subject is `tests/fasta/MelaMJNV.fasta`. Every run
 //! sets `LOSAT_X_TBNSCANBYTE=0`: that switch (on by default, `tests/tblastn_scan_byte.rs`) scans
-//! tblastn's table in place of both loops compared here.
+//! tblastn's table in place of the loop tested here.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -84,72 +83,44 @@ fn tblastn(query: &Path, threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>
     (output.stdout, stderr)
 }
 
-/// The scan units and calls of the one `[X_STATS] TBNSCANBF` line, by the switch's loop and by
-/// NCBI's: `[units_bf, calls_bf, units_ref, calls_ref]`; `None` without the line (no unit of the
-/// unit path was scanned).
-fn scans(stderr: &str) -> Option<[u64; 4]> {
+/// The scan units and calls of the one `[X_STATS] TBNSCANBF` line: `[units, calls]`; `None`
+/// without the line (no unit of the unit path was scanned).
+fn scans(stderr: &str) -> Option<[u64; 2]> {
     let lines: Vec<_> = stderr
         .lines()
         .filter(|line| line.starts_with("[X_STATS] TBNSCANBF "))
         .collect();
     assert!(lines.len() <= 1, "one line per process:\n{stderr}");
     let line = lines.first()?;
-    Some(
-        ["units_bf", "calls_bf", "units_ref", "calls_ref"].map(|field| {
-            line.split_whitespace()
-                .find_map(|word| word.strip_prefix(field)?.strip_prefix('='))
-                .unwrap_or_else(|| panic!("no {field} in {line}"))
-                .parse()
-                .expect("a number")
-        }),
-    )
+    Some(["units", "calls"].map(|field| {
+        line.split_whitespace()
+            .find_map(|word| word.strip_prefix(field)?.strip_prefix('='))
+            .unwrap_or_else(|| panic!("no {field} in {line}"))
+            .parse()
+            .expect("a number")
+    }))
 }
 
-const OFF: (&str, &str) = ("LOSAT_X_TBNSCANBF", "0");
-
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (above). Each search gives the
-// report of NCBI's loop with the switch on (the default) and off, at one and four threads; the
-// line says which loop scanned, and at one thread both loops took the same number of scan calls.
-// The search of all proteins took more calls than units: the offset array filled.
+// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (above). The report does not
+// depend on the threads, and the line says the loop scanned at one and at four threads. The search
+// of all proteins took more calls than units: the offset array filled.
 #[test]
-fn the_report_and_the_scan_calls_are_those_of_ncbis_loop() {
+fn the_loop_scans_and_the_report_is_the_same_at_every_thread_count() {
     for (query, many) in queries().iter().zip([false, true]) {
-        let (expected, stderr) = tblastn(query, 1, &[OFF]);
+        let (expected, stderr) = tblastn(query, 1, &[]);
         assert!(
             !expected.is_empty(),
             "{query:?}: the search must report hits"
         );
-        let [units_bf, _, units_ref, calls_ref] = scans(&stderr).expect("a line with =0");
-        assert_eq!(units_bf, 0, "{query:?}: =0 scans with NCBI's loop");
-        assert!(units_ref > 0, "{query:?}");
+        let [units, calls] = scans(&stderr).expect("a line");
+        assert!(units > 0, "{query:?}");
         if many {
-            assert!(
-                calls_ref > units_ref,
-                "{query:?}: the offset array never filled"
-            );
+            assert!(calls > units, "{query:?}: the offset array never filled");
         }
 
-        let (report, stderr) = tblastn(query, 1, &[]);
-        assert!(
-            report == expected,
-            "{query:?}: the default changes the report"
-        );
-        let [units_bf, calls_bf, units, _] = scans(&stderr).expect("a line by default");
-        assert_eq!(
-            units, 0,
-            "{query:?}: the default scans with the switch's loop"
-        );
-        assert_eq!([units_bf, calls_bf], [units_ref, calls_ref], "{query:?}");
-
-        for variables in [&[][..], &[OFF]] {
-            let (report, stderr) = tblastn(query, 4, variables);
-            assert!(report == expected, "{query:?} {variables:?}: four threads");
-            let [units_bf, _, units_ref, _] = scans(&stderr).expect("a line at four threads");
-            assert_eq!(
-                [units_bf > 0, units_ref > 0],
-                [variables.is_empty(), !variables.is_empty()],
-                "{query:?} {variables:?}"
-            );
-        }
+        let (report, stderr) = tblastn(query, 4, &[]);
+        assert!(report == expected, "{query:?}: four threads");
+        let [units, _] = scans(&stderr).expect("a line at four threads");
+        assert!(units > 0, "{query:?}: four threads");
     }
 }

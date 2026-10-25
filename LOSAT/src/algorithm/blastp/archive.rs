@@ -32,7 +32,8 @@ use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
 use crate::report::archive::{
-    write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
+    defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
+    KaBlock,
 };
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryNames, RunRecord, SubjectNames, SubjectRecord};
@@ -52,10 +53,19 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     inputs.word_size = args.word_size;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps_per_subject.map(|count| count as i32);
+    inputs.culling_limit = args.culling_limit;
     // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`).
     inputs.threshold = args.threshold.map(|threshold| threshold as i32);
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
+    // ```c++
+    //     if (args[kArgLookupTableMaskingOnly]) {
+    //         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
+    //     }
+    // ```
+    // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
+    inputs.soft_masking = args.soft_masking;
     inputs.seg = args
         .seg
         .as_deref()
@@ -142,27 +152,6 @@ pub(crate) struct FirstContext {
     /// The effective search space and length adjustment of that context (0 without one).
     pub search_space: i64,
     pub length_adjustment: i64,
-}
-
-fn ka_block(params: &KarlinParams, gapped: bool) -> KaBlock {
-    KaBlock {
-        lambda: params.lambda,
-        k: params.k,
-        h: params.h,
-        gapped,
-    }
-}
-
-/// The defline line of the Bioseq: the line as read, else `>` and the title.
-fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
-    match record.archive_defline() {
-        Some(defline) => Cow::Borrowed(defline),
-        None => {
-            let mut line = vec![b'>'];
-            line.extend_from_slice(&record.title);
-            Cow::Owned(line)
-        }
-    }
 }
 
 /// The Seq-aligns of one batch of a call (the elements of outfmt 8, without the Seq-annot).
@@ -382,6 +371,13 @@ mod tests {
         ("segyes", &["-seg", "yes"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:False SegFiltering=boolean:True WordThreshold=integer:11 WindowSize=integer:40 HitlistSize=integer:500 UngappedMode=boolean:False CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
         ("segno", &["-seg", "no"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:False SegFiltering=boolean:False WordThreshold=integer:11 WindowSize=integer:40 HitlistSize=integer:500 UngappedMode=boolean:False CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
         ("segpar", &["-seg", "10 1.8 2.1"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:False SegFilteringWindow=integer:10 SegFilteringLocut=real:1.8 SegFilteringHicut=real:2.1 WordThreshold=integer:11 WindowSize=integer:40 HitlistSize=integer:500 UngappedMode=boolean:False CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
+        // SM-1 probes (ncbi-parity-20261019/SM/probe/arch): `-soft_masking` sets `MaskAtHash` after
+        // the task's `ClearFilterOptions` (blast_args.cpp:387-391).
+        ("opt_soft", &["-soft_masking", "true"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True SegFiltering=boolean:False WordThreshold=integer:11 WindowSize=integer:40 HitlistSize=integer:500 UngappedMode=boolean:False CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
+        ("opt_softf", &["-soft_masking", "false"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:False SegFiltering=boolean:False WordThreshold=integer:11 WindowSize=integer:40 HitlistSize=integer:500 UngappedMode=boolean:False CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
+        ("opt_soft_seg", &["-soft_masking", "true", "-seg", "yes"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True SegFiltering=boolean:True WordThreshold=integer:11 WindowSize=integer:40 HitlistSize=integer:500 UngappedMode=boolean:False CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
+        ("opt_soft_fast", &["-soft_masking", "true", "-task", "blastp-fast"], "EvalueThreshold=cutoff:e-value:10 WordSize=integer:5 WordThreshold=integer:20 MaskAtHash=boolean:True SegFiltering=boolean:False WindowSize=integer:40 HitlistSize=integer:500 UngappedMode=boolean:False CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
+        ("opt_soft_short", &["-soft_masking", "true", "-task", "blastp-short"], "EvalueThreshold=cutoff:e-value:20000 MatrixName=string:PAM30 GapOpeningCost=integer:9 GapExtensionCost=integer:1 WordSize=integer:2 WordThreshold=integer:16 DustFiltering=boolean:False SegFiltering=boolean:False RepeatFiltering=boolean:False MaskAtHash=boolean:True WindowSize=integer:15 HitlistSize=integer:500 UngappedMode=boolean:False CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
         ("segyes_short", &["-seg", "yes", "-task", "blastp-short"], "EvalueThreshold=cutoff:e-value:20000 MatrixName=string:PAM30 GapOpeningCost=integer:9 GapExtensionCost=integer:1 WordSize=integer:2 WordThreshold=integer:16 DustFiltering=boolean:False SegFiltering=boolean:True RepeatFiltering=boolean:False MaskAtHash=boolean:False WindowSize=integer:15 HitlistSize=integer:500 UngappedMode=boolean:False CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
         ("opt1", &["-evalue", "1e-5", "-threshold", "12", "-word_size", "2", "-max_hsps", "1", "-qcov_hsp_perc", "50", "-window_size", "30"], "EvalueThreshold=cutoff:e-value:1e-05 WordSize=integer:2 QueryCovHspPerc=real:50 MaxHspsPerSubject=integer:1 MaskAtHash=boolean:False SegFiltering=boolean:False WordThreshold=integer:12 WindowSize=integer:30 HitlistSize=integer:500 UngappedMode=boolean:False CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
         ("opt_ws5", &["-word_size", "5"], "EvalueThreshold=cutoff:e-value:10 WordThreshold=integer:19 WordSize=integer:5 MaskAtHash=boolean:False SegFiltering=boolean:False WindowSize=integer:40 HitlistSize=integer:500 UngappedMode=boolean:False CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
@@ -445,13 +441,31 @@ mod tests {
             .join(" ")
     }
 
+    /// `-task blastp-short` stops at the command line (LOSAT's BLASTP does not implement
+    /// it); NCBI's probes of it are applied to the arguments by hand.
     fn parse(extra: &[&str]) -> Option<BlastpArgs> {
+        let short = extra
+            .windows(2)
+            .any(|pair| pair == ["-task", "blastp-short"]);
         let mut argv = vec!["losat", "blastp", "-query", "q.fa", "-subject", "s.fa"];
-        argv.extend_from_slice(extra);
+        let mut index = 0;
+        while index < extra.len() {
+            if short && extra[index] == "-task" {
+                index += 2;
+            } else {
+                argv.push(extra[index]);
+                index += 1;
+            }
+        }
         argv.extend_from_slice(&["-outfmt", "11"]);
         let cli: Cli = try_parse_from(argv).ok()?;
         match cli.command {
-            Commands::Blastp(args) => Some(args),
+            Commands::Blastp(mut args) => {
+                if short {
+                    args.task = "blastp-short".into();
+                }
+                Some(args)
+            }
             _ => None,
         }
     }

@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const os = require("node:os");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
-const { inspectArtifact } = require("./wasi_artifact");
+const { inspectArtifact, unsignedWasiImports, createSharedMemory } = require("./wasi_artifact");
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Keep the parallel command's memory operations valid across V8 isolates.
@@ -381,11 +381,12 @@ function blockingStdioWrite(fdWrite) {
 }
 
 function createImports(wasi, memory, spawnThread, extra) {
+  const wasiImport = unsignedWasiImports(wasi.wasiImport);
   return {
     ...extra,
     env: { memory },
     wasi: { "thread-spawn": spawnThread },
-    wasi_snapshot_preview1: { ...wasi.wasiImport, fd_write: blockingStdioWrite(wasi.wasiImport.fd_write) },
+    wasi_snapshot_preview1: { ...wasiImport, fd_write: blockingStdioWrite(wasiImport.fd_write) },
   };
 }
 
@@ -399,8 +400,11 @@ async function instantiateWithMemory(module, memory, args, spawnThread, provided
 
 async function instantiateMain(module, args, spawnThread, limits, provided) {
   const initial = parsePositiveIntEnv("LOSAT_WASM_MEMORY_INITIAL_PAGES", limits.initial);
-  const maximum = parsePositiveIntEnv("LOSAT_WASM_MEMORY_MAXIMUM_PAGES", limits.maximum);
-  const memory = new WebAssembly.Memory({ initial, maximum, shared: true });
+  // A maximum given in the environment is used as it is, without stepping down.
+  const requested = parsePositiveIntEnv("LOSAT_WASM_MEMORY_MAXIMUM_PAGES", limits.maximum);
+  const { memory, maximum } = createSharedMemory(initial, requested,
+    process.env.LOSAT_WASM_MEMORY_MAXIMUM_PAGES === undefined);
+  debug(`shared memory: initial ${initial} pages, maximum ${maximum} pages (module declares ${limits.maximum})`);
   return { ...await instantiateWithMemory(module, memory, args, spawnThread, provided), memory };
 }
 
@@ -705,6 +709,22 @@ if (!isMainThread) {
         markWorkerStart(control, 1);
         if (fault === "trap") throw new WebAssembly.RuntimeError("injected worker trap");
         if (fault === "abnormal-exit") process.exit(23);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
+        // ```c++
+        //     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+        //         (*thread)->Run();
+        //     }
+        // ```
+        // Host memory only. This instance may be older than the guest's last growth of the
+        // shared memory: a standby worker (or a recycled one, not measured) instantiated
+        // before pthread_create allocated this thread's stack and TLS and grew the memory for
+        // them. In 12 of 4,800 runs of one 16-thread check (2026-10-25, Node 24.21.0) this
+        // isolate's view of the memory still ended below those after the thread trapped
+        // "memory access out of bounds" at its first atomic store (`self->tid` in its TLS),
+        // although plain loads of its start arguments there had passed; 2 more failed the
+        // same way with the message hidden. memory.grow(0) updates this isolate's view (the
+        // header of wasi_shared_memory.js): 0 of 2,800 (docs/evidence/wasm_oob_20261025/).
+        memory.grow(0);
         instance.exports.wasi_thread_start(tid, startArg);
         debug(`worker done tid=${tid}`);
         if (!recycle) break;

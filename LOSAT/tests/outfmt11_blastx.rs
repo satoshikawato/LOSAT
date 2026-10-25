@@ -413,6 +413,114 @@ const MULTI_BATCH: &[&str] = &[
     "m1_avg",
 ];
 
+/// What the panic of a stdout mismatch says: how many bytes differ, where the first difference is,
+/// and about 100 bytes of both sides around it (control bytes escaped), so that a difference seen
+/// only on one platform can be read from its log. Empty when the bytes are equal.
+pub(crate) fn first_difference(got: &[u8], want: &[u8]) -> String {
+    let offset = got
+        .iter()
+        .zip(want)
+        .position(|(a, b)| a != b)
+        .unwrap_or(got.len().min(want.len()));
+    let differing =
+        got.iter().zip(want).filter(|(a, b)| a != b).count() + got.len().abs_diff(want.len());
+    let context = |bytes: &[u8]| {
+        let from = offset.saturating_sub(50).min(bytes.len());
+        let to = (offset + 50).min(bytes.len());
+        String::from_utf8_lossy(&bytes[from..to])
+            .escape_debug()
+            .to_string()
+    };
+    format!(
+        "{differing} bytes differ, first at offset {offset}\n  LOSAT (bytes {}..{}): {}\n  NCBI  (bytes {}..{}): {}",
+        offset.saturating_sub(50).min(got.len()),
+        (offset + 50).min(got.len()),
+        context(got),
+        offset.saturating_sub(50).min(want.len()),
+        (offset + 50).min(want.len()),
+        context(want),
+    )
+}
+
+/// A `real { M, 10, E }` token: its mantissa and exponent digits.
+type Real<'a> = (&'a [u8], &'a [u8]);
+
+/// The `real { M, 10, E }` tokens of an ASN.1 text archive (`CObjectOStreamAsn::WriteDouble`, 15
+/// digits): the bytes outside the tokens in order, and for each token its mantissa and exponent.
+fn split_reals(bytes: &[u8]) -> (Vec<u8>, Vec<Real<'_>>) {
+    const HEAD: &[u8] = b"real { ";
+    const MIDDLE: &[u8] = b", 10, ";
+    let digits = |from: usize| {
+        let sign = usize::from(bytes.get(from) == Some(&b'-'));
+        let run = bytes[from + sign..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+        (run > 0).then_some(from + sign + run)
+    };
+    let token = |at: usize| -> Option<(usize, &[u8], &[u8])> {
+        let m_from = at + HEAD.len();
+        let m_to = digits(m_from)?;
+        bytes[m_to..].starts_with(MIDDLE).then_some(())?;
+        let e_from = m_to + MIDDLE.len();
+        let e_to = digits(e_from)?;
+        bytes[e_to..].starts_with(b" }").then_some(())?;
+        Some((e_to + 2, &bytes[m_from..m_to], &bytes[e_from..e_to]))
+    };
+    let (mut rest, mut reals) = (Vec::new(), Vec::new());
+    let mut at = 0;
+    while at < bytes.len() {
+        match bytes[at..].starts_with(HEAD).then(|| token(at)).flatten() {
+            Some((end, mantissa, exponent)) => {
+                rest.extend_from_slice(b"real {}");
+                reals.push((mantissa, exponent));
+                at = end;
+            }
+            None => {
+                rest.push(bytes[at]);
+                at += 1;
+            }
+        }
+    }
+    (rest, reals)
+}
+
+/// Whether `got` is the archive `want`. Always: the same bytes. With `libm_last_digit` (the call
+/// sites pass `cfg!(target_os = "macos")`): also an archive that differs only in `real { M, 10, E }`
+/// tokens whose exponent and digit count are equal and whose mantissas differ by exactly 1. Apple's
+/// libm `exp` and `log` differ from glibc's by 1 ULP in some E values, which moves the last of the
+/// 15 digits (`PD-LOSAT-PLATFORM-LIBM`); NCBI built on macOS has the same property.
+pub(crate) fn archives_match_allowing_libm_last_digit(
+    got: &[u8],
+    want: &[u8],
+    libm_last_digit: bool,
+) -> bool {
+    if got == want {
+        return true;
+    }
+    if !libm_last_digit {
+        return false;
+    }
+    let ((got_rest, got_reals), (want_rest, want_reals)) = (split_reals(got), split_reals(want));
+    got_rest == want_rest
+        && got_reals.len() == want_reals.len()
+        && got_reals
+            .iter()
+            .zip(&want_reals)
+            .all(|((got_m, got_e), (want_m, want_e))| {
+                if (got_m, got_e) == (want_m, want_e) {
+                    return true;
+                }
+                let value = |m: &[u8]| std::str::from_utf8(m).ok()?.parse::<i128>().ok();
+                got_e == want_e
+                    && got_m.len() == want_m.len()
+                    && matches!(
+                        (value(got_m), value(want_m)),
+                        (Some(a), Some(b)) if a.abs_diff(b) == 1
+                    )
+            })
+}
+
 fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     let mut env: Vec<(&str, &str)> = case.env.to_vec();
     env.extend_from_slice(extra_env);
@@ -432,16 +540,68 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     assert_eq!(output.status.code(), Some(case.rc), "{label}: exit status");
     let want = frozen(&case.name, "out");
     assert!(
-        output.stdout == want,
-        "{label}: stdout differs ({} bytes, NCBI wrote {})",
+        archives_match_allowing_libm_last_digit(&output.stdout, &want, cfg!(target_os = "macos")),
+        "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
         output.stdout.len(),
-        want.len()
+        want.len(),
+        first_difference(&output.stdout, &want)
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
         String::from_utf8_lossy(&frozen(&case.name, "err")),
         "{label}: stderr"
     );
+}
+
+/// The message of a mismatch: the count of differing bytes, the first offset, and both sides around it.
+#[test]
+fn a_difference_is_described_by_its_first_offset_and_the_bytes_around_it() {
+    let message = first_difference(b"ab\ncdef", b"ab\ncXeY");
+    assert!(
+        message.starts_with("2 bytes differ, first at offset 4"),
+        "{message}"
+    );
+    assert!(
+        message.contains("ab\\ncdef") && message.contains("ab\\ncXeY"),
+        "{message}"
+    );
+    assert!(first_difference(b"abc", b"abcd").starts_with("1 bytes differ, first at offset 3"));
+}
+
+/// The macOS rule accepts a mantissa that is 1 away in a `real {}` token (and the tokens alone),
+/// and nothing else; on every other OS the comparison is exact.
+#[test]
+fn the_libm_rule_accepts_only_a_last_digit_of_a_real() {
+    let archive = |m: &str, e: &str, tail: &str| {
+        format!("evalue real {{ {m}, 10, {e} }},\nscore 7{tail}").into_bytes()
+    };
+    let want = archive("693693758698357", "-80", "");
+    let same = |got: &[u8], rule: bool| archives_match_allowing_libm_last_digit(got, &want, rule);
+    assert!(same(&want, false) && same(&want, true));
+    for m in ["693693758698358", "693693758698356"] {
+        let got = archive(m, "-80", "");
+        assert!(!same(&got, false), "{m}");
+        assert!(same(&got, true), "{m}");
+    }
+    for got in [
+        archive("693693758698359", "-80", ""),
+        archive("693693758698355", "-80", ""),
+        archive("693693758698358", "-79", ""),
+        archive("69369375869836", "-80", ""),
+        archive("693693758698357", "-80", " "),
+        b"evalue real { 693693758698358, 10, -80 },\nscore 8".to_vec(),
+        b"evalue real { 693693758698358, 10, -80 },\nscore".to_vec(),
+        b"evalue 693693758698358,\nscore 7".to_vec(),
+    ] {
+        assert!(!same(&got, true), "{}", String::from_utf8_lossy(&got));
+    }
+    // Every token is judged on its own; a second, different token fails the whole archive.
+    let two =
+        |a: &str, b: &str| format!("real {{ {a}, 10, -3 }} real {{ {b}, 10, -4 }}").into_bytes();
+    let want_two = two("100000000000001", "200000000000002");
+    let accepts = |got: &[u8]| archives_match_allowing_libm_last_digit(got, &want_two, true);
+    assert!(accepts(&two("100000000000002", "200000000000001")));
+    assert!(!accepts(&two("100000000000002", "200000000000004")));
 }
 
 #[test]
@@ -790,6 +950,41 @@ fn a_batch_size_that_is_not_an_integer_is_refused() {
                 String::from_utf8_lossy(&output.stderr).contains("BATCH_SIZE"),
                 "{value:?} {format}"
             );
+        }
+    }
+}
+
+/// NCBI's `PrintErrorArchive` converts the trimmed `-outfmt` text to an integer and writes
+/// nothing when that throws (`11 qseqid`); `11` with white space around it converts. NCBI 2.17.0
+/// with a missing `-query`: rc 1 and no bytes for `11 qseqid` and ` 11 qseqid`, the error
+/// archive of `noquery_sub` for ` 11 `.
+#[test]
+fn an_outfmt_spec_gets_no_error_archive() {
+    for threads in ["1", "4"] {
+        for (outfmt, written) in [("11 qseqid", false), (" 11 qseqid", false), (" 11 ", true)] {
+            let output = run(
+                &[],
+                &[
+                    "-query",
+                    &input("no_such_query.fna"),
+                    "-subject",
+                    &input("arch_bx_s.faa"),
+                    "-outfmt",
+                    outfmt,
+                ],
+                threads,
+            );
+            assert_eq!(output.status.code(), Some(1), "{outfmt:?}");
+            if written {
+                assert_eq!(output.stdout, frozen("noquery_sub", "out"), "{outfmt:?}");
+            } else {
+                assert!(
+                    output.stdout.is_empty(),
+                    "{outfmt:?}: {} bytes",
+                    output.stdout.len()
+                );
+            }
+            assert_eq!(output.stderr, frozen("noquery_sub", "err"), "{outfmt:?}");
         }
     }
 }

@@ -352,6 +352,33 @@ impl XSharedSubjectRanges {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+
+    // No NCBI counterpart: memory only (LOSAT_X_BPSEGWIN, `x_redo_par::x_bp_seg_win`); it changes
+    // no value NCBI computes.
+    /// Drops every entry and the maps' room. A range looked up afterwards is masked again, into the
+    /// value it had: an entry depends on its key only.
+    pub(crate) fn x_clear(&self) {
+        for shard in &self.shards {
+            *shard
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = HashMap::new();
+        }
+    }
+
+    // No NCBI counterpart: memory only (LOSAT_X_BPSEGWIN's size rule); it changes no value NCBI
+    // computes.
+    /// The number of entries (LOSAT_X_BPSEGWIN's rule, after a window: the sum of the shards').
+    pub(crate) fn x_len(&self) -> usize {
+        self.shards
+            .iter()
+            .map(|shard| {
+                shard
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .len()
+            })
+            .sum()
+    }
 }
 
 impl BlastpKappaSubjectRangeCache {
@@ -1164,7 +1191,7 @@ fn build_subject_range_data(
         //     }
         //     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
         // ```
-        let x_composition = (x_compo_reuse() != 0)
+        let x_composition = x_compo_reuse()
             .then(|| std::sync::Arc::new(XSubjectComposition(read_aa_composition(subject.data()))));
         if let Some(cache) = subject_range_cache.as_mut() {
             cache.insert(
@@ -2789,7 +2816,7 @@ mod tests {
     // ```
     #[test]
     fn x_masked_subject_range_carries_the_composition_of_its_bytes() {
-        if x_compo_reuse() == 0 {
+        if !x_compo_reuse() {
             return;
         }
         let mut matching_residues = vec![1u8; 80];

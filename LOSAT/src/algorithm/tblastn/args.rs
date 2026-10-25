@@ -6,6 +6,10 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use crate::blastinput::value_parsers::*;
+
+/// The message for `-task tblastn-fast`, which the search entrance printed
+/// (`search_settings`) and which is now printed when the arguments are parsed.
+const TBLASTN_FAST_UNSUPPORTED: &str = "-task tblastn-fast (word size 5 with the compressed lookup table) is not supported by LOSAT's TBLASTN";
 use crate::utils::genetic_code::GeneticCode;
 
 use super::stage_d_pipeline::LocalStageDScoring;
@@ -78,14 +82,17 @@ pub struct TblastnArgs {
     // (`stage_d_pipeline::SubjectSetNumbers`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
-    #[arg(long, default_value = "tblastn", value_parser = ["tblastn", "tblastn-fast"])]
+    // `tblastn-fast` (the compressed lookup table) is an NCBI task that LOSAT's TBLASTN does
+    // not implement: it fails when the arguments are parsed, as the search entrance did
+    // (`search_settings`).
+    #[arg(long, default_value = "tblastn", value_parser = task_parser(&["tblastn"], &[("tblastn-fast", TBLASTN_FAST_UNSUPPORTED)]))]
     pub task: String,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
     // An omitted value keeps the default of the task (10).
     #[arg(long, value_parser = tblastn_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
-    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3; 5 for tblastn-fast]")]
+    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3]")]
     pub word_size: Option<i32>,
     // NCBI blast_args.cpp:258-273: when omitted, each cost keeps the selected matrix's
     // BLAST_MATRIX_BEST value.
@@ -109,7 +116,7 @@ pub struct TblastnArgs {
     pub max_intron_length: Option<i32>,
     #[arg(long, help = "Scoring matrix name [default: BLOSUM62]")]
     pub matrix: Option<String>,
-    #[arg(long, value_parser = tblastn_threshold_value, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for tblastn-fast]")]
+    #[arg(long, value_parser = tblastn_threshold_value, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7]")]
     pub threshold: Option<f64>,
     // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:220-229,280-286:
     // arg_desc.AddOptionalKey(kArgGappedXDropoff, "float_value", ...);
@@ -198,6 +205,12 @@ pub struct TblastnArgs {
     pub max_hsps: Option<usize>,
     #[arg(long = "qcov_hsp_perc", value_parser = tblastn_query_coverage, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
+    // NCBI blast_args.cpp:3335-3340 (CHspFilteringArgs::ExtractAlgorithmOptions):
+    // opts.SetCullingLimit(args[kArgCullingLimit].AsInteger());
+    /// If the query range of a hit is enveloped by that of at least this many
+    /// higher-scoring hits, delete the hit (default: 0, no culling).
+    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: Option<i32>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
     #[arg(long)]
@@ -257,6 +270,8 @@ pub struct ResolvedTblastnArgs {
     pub max_hsps: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
+    /// The -culling_limit value (0: no culling).
+    pub culling_limit: i32,
     pub composition_mode: crate::blastinput::app::CompositionMode,
     /// The `-comp_based_stats` value as typed.
     pub comp_based_stats: String,
@@ -266,6 +281,12 @@ pub struct ResolvedTblastnArgs {
 }
 
 impl TblastnArgs {
+    /// `-culling_limit`, 0 (no culling) when it is not given. The BLAST archive records
+    /// whether it was given (`culling_limit`).
+    pub fn culling_limit_value(&self) -> i32 {
+        self.culling_limit.unwrap_or(0)
+    }
+
     /// The `-db` value as NCBI keeps it (white space at its ends removed), `None` for a
     /// search of `-subject`.
     ///
@@ -575,6 +596,7 @@ impl TblastnArgs {
             // NCBI blast_args.cpp:313-319: SetQueryCovHspPerc, SetMaxHspsPerSubject.
             max_hsps: self.max_hsps.unwrap_or(0),
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
+            culling_limit: self.culling_limit_value(),
             composition_mode,
             comp_based_stats: self.comp_based_stats.clone(),
             num_threads: self.num_threads,
@@ -588,14 +610,8 @@ impl TblastnArgs {
 pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
     use crate::blastinput::app::CompositionMode;
     // NCBI's compressed lookup table (blast_aalookup.c, word size 5 and more or
-    // tblastn-fast) is not implemented by LOSAT's TBLASTN.
+    // tblastn-fast, which fails at the parse) is not implemented by LOSAT's TBLASTN.
     if args.compressed_lookup {
-        if args.task == "tblastn-fast" {
-            anyhow::bail!(
-                "-task tblastn-fast (word size {} with the compressed lookup table) is not supported by LOSAT's TBLASTN",
-                args.word_size
-            );
-        }
         anyhow::bail!(
             "-word_size {} (the compressed lookup table) is not supported by LOSAT's TBLASTN",
             args.word_size
@@ -883,7 +899,6 @@ mod tests {
         for extra in [
             &["-matrix", "PAM30"][..],
             &["-word_size", "5"],
-            &["-task", "tblastn-fast"],
             &["-ungapped", "-comp_based_stats", "F"],
             &["-max_intron_length", "100"],
             &["-comp_based_stats", "1"],
@@ -898,11 +913,17 @@ mod tests {
                 "{extra:?}"
             );
         }
-        let resolved = parse(&["-task", "tblastn-fast"])
-            .unwrap()
-            .resolve()
-            .unwrap();
+        // `-task tblastn-fast` stops at the command line (`TBLASTN_FAST_UNSUPPORTED`), so the
+        // task is set by hand: the NCBI defaults of the task, and the compressed lookup
+        // table that `check_options` refuses.
+        let mut fast = parse(&[]).unwrap();
+        fast.task = "tblastn-fast".into();
+        let resolved = fast.resolve().unwrap();
         assert_eq!((resolved.word_size, resolved.threshold), (5, 20.0));
+        assert!(check_options(&fast)
+            .unwrap_err()
+            .to_string()
+            .contains("not supported by LOSAT's TBLASTN"));
         // NCBI blast_args.cpp:834-892: the first character chooses the mode (any other is
         // mode 0); a `u` asks for unified P-values only for blastp.
         for value in ["bogus", "0", "F", "2u", "D", "t"] {

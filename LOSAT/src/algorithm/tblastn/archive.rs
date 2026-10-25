@@ -37,7 +37,8 @@ use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
 use crate::report::archive::{
-    write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
+    defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
+    KaBlock,
 };
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
@@ -61,6 +62,7 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.word_size = args.word_size;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps.map(|count| count as i32);
+    inputs.culling_limit = args.culling_limit;
     inputs.sum_stats = args.sum_stats;
     // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`).
     inputs.threshold = args.threshold.map(|threshold| threshold as i32);
@@ -136,27 +138,6 @@ struct FirstContext {
     /// The effective search space and length adjustment of that context (0 without one).
     search_space: i64,
     length_adjustment: i64,
-}
-
-fn ka_block(params: &KarlinParams, gapped: bool) -> KaBlock {
-    KaBlock {
-        lambda: params.lambda,
-        k: params.k,
-        h: params.h,
-        gapped,
-    }
-}
-
-/// The defline line of the Bioseq: the line as read, else `>` and the title.
-fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
-    match record.archive_defline() {
-        Some(defline) => Cow::Borrowed(defline),
-        None => {
-            let mut line = vec![b'>'];
-            line.extend_from_slice(&record.title);
-            Cow::Owned(line)
-        }
-    }
 }
 
 /// The runs of lower-case letters of a record (inclusive 0-based positions).
@@ -458,9 +439,9 @@ mod tests {
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTN refuses many of these options at the command line or
     // in its limits (`-task tblastn-fast`, other word sizes, matrices, gap costs,
-    // `-comp_based_stats 1` and `3`, `-ungapped`, `-max_intron_length`, `-culling_limit`,
-    // `-subject_besthit`, `-use_sw_tback`): the list that NCBI would record is what the
-    // archive's model knows about them, pinned here.
+    // `-comp_based_stats 1` and `3`, `-ungapped`, `-max_intron_length`, `-subject_besthit`,
+    // `-use_sw_tback`): the list that NCBI would record is what the archive's model knows
+    // about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
         ("def", &[], "EvalueThreshold=cutoff:e-value:10 DbGeneticCode=integer:1 UngappedMode=boolean:False LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
         ("cbs0", &["-comp_based_stats", "0"], "EvalueThreshold=cutoff:e-value:10 DbGeneticCode=integer:1 UngappedMode=boolean:False LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 HitlistSize=integer:500 CompositionBasedStats=integer:0 SmithWatermanMode=boolean:False"),
@@ -566,17 +547,13 @@ mod tests {
     }
 
     /// The recorded inputs of a command line. The options that LOSAT's TBLASTN does not accept
-    /// (they stop at the command line) are applied to the inputs by hand.
+    /// (they stop at the command line; so does `-task tblastn-fast`) are applied to the inputs by hand.
     fn inputs_of(extra: &[&str]) -> Option<OptionInputs> {
         let mut parsed: Vec<&str> = Vec::new();
         let mut by_hand: Vec<(&str, &str)> = Vec::new();
         let mut index = 0;
         while index < extra.len() {
             match extra[index] {
-                "-culling_limit" => {
-                    by_hand.push(("culling_limit", extra[index + 1]));
-                    index += 2;
-                }
                 "-subject_besthit" | "-use_sw_tback" => {
                     by_hand.push((extra[index], ""));
                     index += 1;
@@ -584,6 +561,10 @@ mod tests {
                 // Not recorded (the ungapped X-drop is never set by the application).
                 "-xdrop_ungap" => index += 2,
                 "-parse_deflines" => index += 1,
+                "-task" if extra.get(index + 1) == Some(&"tblastn-fast") => {
+                    by_hand.push(("task", "tblastn-fast"));
+                    index += 2;
+                }
                 other => {
                     parsed.push(other);
                     index += 1;
@@ -594,13 +575,16 @@ mod tests {
         argv.extend_from_slice(&parsed);
         argv.extend_from_slice(&["-outfmt", "11"]);
         let cli: Cli = try_parse_from(argv).ok()?;
-        let Commands::Tblastn(args) = cli.command else {
+        let Commands::Tblastn(mut args) = cli.command else {
             return None;
         };
+        if by_hand.contains(&("task", "tblastn-fast")) {
+            args.task = "tblastn-fast".into();
+        }
         let mut inputs = option_inputs(&args);
         for (name, value) in by_hand {
             match name {
-                "culling_limit" => inputs.culling_limit = value.parse().ok(),
+                "task" => {}
                 "-subject_besthit" => inputs.subject_besthit = true,
                 _ => inputs.use_sw_tback = true,
             }

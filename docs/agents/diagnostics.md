@@ -416,6 +416,7 @@ export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNREDOLPT=1
 export LOSAT_X_TBNSCANBYTE=1
+export LOSAT_X_TBNSTAGEDROP=1
 export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNUNGAP=1
 export LOSAT_X_TBNUNITXLATE=1
@@ -5297,7 +5298,8 @@ Scheduling (each value computed by one thread with the original function; order 
   subject when it makes the subject's plan and drops it once the plan is made (the plans of the short ones are made
   from the bytes of one block of 256 KiB per thread, without a store; a subject whose plan has no residues,
   `LOSAT_X_TBNUNITXLATE`, is read before its plan and held while its units translate it); the composition redo and the traceback of `-comp_based_stats 0` read each subject of their
-  lists when they first align it and hold it until the stage ends; the reports read the sequences they show. A long
+  lists when they first align it and hold it until the stage has done its last match (`LOSAT_X_TBNSTAGEDROP` below;
+  until the stage ends with `=0`); the reports read the sequences they show. A long
   sequence is read once while anything holds it: stages and batches that hold it at the same time share it, and a
   thread that asks for it while another thread reads it waits for that read. With more than one thread it is read
   into a buffer that glibc maps (taken from `utils::x_mapped::X_BYTES` when it holds one) and its store is that
@@ -5318,6 +5320,13 @@ Scheduling (each value computed by one thread with the original function; order 
   7.6k / 276k against 19.0k / 14.9k / 344k; cycles:u x0.9959 / x0.9983 / x0.9852. Timed against dev (node 1, warmed
   3 s, 8 alternated pairs): the C. elegans genome x0.991 / x0.986 (24 pairs at 8), the cDNAs x0.999 / x0.999,
   the human genome x0.790 / x0.673 at 8 / 16 threads.
+- `LOSAT_X_TBNSTAGEDROP=1` (TBLASTN `-db`, memory; in the strict set from the pull request that added it: on unless
+  `=0`): the composition redo and the traceback of `-comp_based_stats 0` of a `-db` stream let a subject's store go
+  once the stage has done the subject's last match (redone, or passed by the early termination), instead of holding
+  every subject they read until the stage ends (`tblastn/x_db_stream.rs` `XStageSubjects::done`; the number of
+  matches of each subject is counted when the stage starts, so no subject is read again). With more than one thread a
+  match redone by a worker is done when the worker ends it. It changes no value and no order of computation. NCBI's
+  redo fetches each match's subject and releases it after the match (`blast_kappa.c`). @@MEASURED@@
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

@@ -7,8 +7,10 @@
 //! them), in one query batch and in several (`BATCH_SIZE`: the plans kept between batches are not
 //! read again), on a database of several volumes with ambiguity codes and a subject long enough to
 //! be split into units across the threads; the shadow mode (`LOSAT_X_TBNDBSTREAMSHADOW=1`) finds
-//! every read identical to the copy, with no more reads at four threads than at one; and a
-//! database that cannot be read fails with the same error.
+//! every read identical to the copy, with no more reads at four threads than at one; the stages
+//! that let a subject go after its last match (`LOSAT_X_TBNSTAGEDROP`) give the reports of those
+//! that hold it to their end, with the same reads; and a database that cannot be read fails with
+//! the same error.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -175,6 +177,43 @@ fn the_shadow_mode_finds_every_read_identical() {
             reads_at[1] <= reads_at[0],
             "{args:?}: reads at 1 / 4 threads {reads_at:?}"
         );
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// EXPERIMENT (LOSAT_X_TBNSTAGEDROP): the redo and the traceback of `-comp_based_stats 0` let a
+/// subject go after its last match; the reports and the number of reads (the shadow mode counts
+/// them) are those of the stages that hold every subject until they end, at one and four threads.
+/// The 27 queries align with the same subjects, so most subjects have several matches.
+#[test]
+fn a_stage_lets_a_subject_go_after_its_last_match_without_reading_it_again() {
+    let dir = temp_dir("stagedrop");
+    let (db, query) = inputs(&dir);
+    let reads = |run: &(Option<i32>, Vec<u8>, String)| {
+        assert_eq!(run.0, Some(0), "{}", run.2);
+        shadow_reads(&run.2).unwrap_or_else(|| panic!("no shadow line: {}", run.2))
+    };
+    for args in [
+        &["-outfmt", "6"][..],
+        &["-outfmt", "6", "-comp_based_stats", "0"][..],
+    ] {
+        for threads in [1, 4] {
+            let shadow = ("LOSAT_X_TBNDBSTREAMSHADOW", "1");
+            let held = tblastn(
+                &query,
+                &db,
+                args,
+                threads,
+                &[shadow, ("LOSAT_X_TBNSTAGEDROP", "0")],
+            );
+            let dropped = tblastn(&query, &db, args, threads, &[shadow]);
+            assert_eq!(
+                reads(&dropped),
+                reads(&held),
+                "{args:?} {threads} threads"
+            );
+            assert!(dropped.1 == held.1, "{args:?} {threads} threads");
+        }
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }

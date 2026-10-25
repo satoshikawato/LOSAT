@@ -1,0 +1,1 @@
+- `tblastn -db` holds less memory in the composition-based redo and the `-comp_based_stats 0` traceback: a database sequence is let go after its last match instead of when the stage ends (@@CL@@) (`LOSAT_X_TBNSTAGEDROP`, a switch of the strict set, so reports do not change; `=0` turns it off) ([`docs/agents/diagnostics.md`](docs/agents/diagnostics.md)).

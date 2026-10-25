@@ -1273,7 +1273,8 @@ fn run_local_search_with_pool(
         );
     }
     // EXPERIMENT (LOSAT_X_TBNDBSTREAM): with a `-db` stream, the subjects of the lists, each read
-    // when first aligned, held until the redo ends.
+    // when first aligned, held until their last match is done (LOSAT_X_TBNSTAGEDROP; with it off
+    // until the redo ends).
     let x_stage = super::x_db_stream::XStageSubjects::new(
         subjects,
         preliminary_lists.iter().map(|(_, oid, _)| *oid),
@@ -1388,8 +1389,11 @@ fn run_local_search_with_pool(
      -> Result<Option<(CompoHeapRecord, KappaResultList)>> {
         // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form: the redo and
         // the translations below read windows of it, as NCBI's do. EXPERIMENT (LOSAT_X_TBNDBSTREAM):
-        // a `-db` sequence is read once for the redo (`x_stage`).
-        let subject = x_stage.nt(oid)?;
+        // a `-db` sequence is read once for the redo (`x_stage`); EXPERIMENT (LOSAT_X_TBNSTAGEDROP):
+        // the stage lets it go after its last match (`_done`, declared before `held`).
+        let _done = x_stage.x_match(oid);
+        let held = x_stage.held(oid)?;
+        let subject = held.nt();
         let incoming: Vec<_> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
         // The matrix that the match's adjustments leave, for the engine positives
         // (`postredo_engine_positives`).
@@ -1655,6 +1659,10 @@ fn run_local_search_with_pool(
                 };
                 for ((context, oid, list), result) in batch.iter().zip(computed) {
                     if compo_early_termination(list.best_evalue, &heaps) {
+                        // A redone match was done in redo_item (LOSAT_X_TBNSTAGEDROP).
+                        if result.is_none() {
+                            x_stage.done(*oid);
+                        }
                         continue;
                     }
                     if let Some(ref mut trace) = observer {
@@ -1692,6 +1700,7 @@ fn run_local_search_with_pool(
             //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }
             // query_index = localMatch->query_index;
             if compo_early_termination(list.best_evalue, &heaps) {
+                x_stage.done(oid);
                 continue;
             }
             if let Some(ref mut trace) = observer {
@@ -2943,7 +2952,8 @@ fn finish_local_mode0_no_sum_stats(
         })
         .collect();
     // EXPERIMENT (LOSAT_X_TBNDBSTREAM): with a `-db` stream, the subjects of the lists, each read
-    // when first aligned, held until the traceback ends.
+    // when first aligned, held until their last list is done (LOSAT_X_TBNSTAGEDROP; with it off
+    // until the traceback ends).
     let x_stage = super::x_db_stream::XStageSubjects::new(
         subjects,
         preliminary_lists.iter().map(|(_, oid, _)| *oid),
@@ -2954,8 +2964,11 @@ fn finish_local_mode0_no_sum_stats(
         // the translations make when they read them (`TargetTranslation`). The whole subject's
         // letters are made only for a list retried after a fence, whose frames NCBI translates
         // whole (one window for all of them). EXPERIMENT (LOSAT_X_TBNDBSTREAM): a `-db` sequence is
-        // read once for the traceback (`x_stage`).
-        let subject = x_stage.nt(oid)?;
+        // read once for the traceback (`x_stage`); EXPERIMENT (LOSAT_X_TBNSTAGEDROP): the stage
+        // lets it go after its last list (`_done`, declared before `held`).
+        let _done = x_stage.x_match(oid);
+        let held = x_stage.held(oid)?;
+        let subject = held.nt();
         let input: Vec<_> = preliminary.hsps.iter().map(|linked| linked.hsp).collect();
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536:
         // traceback uses the selected scoring matrix and gap costs.

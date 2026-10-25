@@ -71,7 +71,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
           >. Its search has a hit list of its own<template v-if="outfmt0.hitList !== undefined">
             ({{ plural(outfmt0.hitList, 'subject') }} per query)</template
           >, because <span class="option-name">-num_descriptions</span> and <span class="option-name">-num_alignments</span> give it another
-          size than outfmt 6 and 7, so an alignment is linked to an HSP only where that search found the same HSP.
+          size than outfmt 6 and 7, so a subject's HSPs are linked only where outfmt 0 shows the alignments of exactly the HSPs that outfmt 6 and 7 keep for it.
         </template>
         <template v-else
           >outfmt 0 shows the alignments of {{ plural(state.outfmt0Subjects, 'subject') }} of this query's {{ formatCount(totals.subjects) }}<template

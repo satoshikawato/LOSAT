@@ -904,7 +904,7 @@ test('-num_alignments 3: the records follow the tabular list, and the texts say 
   const partial = page.locator('[data-testid="results-notice"][data-kind="outfmt0-partial"]');
   await expect(partial).toContainText("outfmt 0's alignments are linked to 2 of this query's 3 subjects (BLAST+'s -num_alignments: 3).");
   await expect(partial).toContainText('Its search has a hit list of its own (500 subjects per query)');
-  await expect(partial).toContainText('an alignment is linked to an HSP only where that search found the same HSP');
+  await expect(partial).toContainText("a subject's HSPs are linked only where outfmt 0 shows the alignments of exactly the HSPs that outfmt 6 and 7 keep for it");
   expect(await text(partial)).not.toMatch(/\bshows the alignments of\b/);
   // The subject-limit notice is the tabular list's: three subjects is -num_alignments.
   expect(await noticeKinds(page)).toEqual(['subject-limit']);
@@ -914,7 +914,7 @@ test('-num_alignments 3: the records follow the tabular list, and the texts say 
   const separate = page.getByTestId('detail-not-in-outfmt0');
   await expect(separate).toContainText('No outfmt 0 alignment is linked to this HSP. Its search has a hit list of its own (500 subjects per query)');
   await expect(separate).toContainText('it shows the alignments of its first 3 subjects (-num_alignments).');
-  await expect(separate).toContainText('Those can be other subjects, or other HSPs of a subject, than outfmt 6 and 7 keep.');
+  await expect(separate).toContainText('Those can be other subjects, or another set of HSPs of a subject (which may include this one), than outfmt 6 and 7 keep.');
   expect(await text(separate)).not.toMatch(/did not find/);
   await expect(page.getByTestId('detail-section')).toHaveCount(0);
 });

@@ -302,8 +302,8 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             >, because <span class="option-name">-num_descriptions</span> and <span class="option-name">-num_alignments</span> give it another size
             than outfmt 6 and 7, and it shows the alignments of its first
             {{ outfmt0.alignments === undefined ? '' : `${outfmt0.alignments} ` }}subjects
-            (<span class="option-name">-num_alignments</span>). Those can be other subjects, or other HSPs of a subject, than outfmt 6 and 7
-            keep. The outfmt 6 row below and outfmt 7 hold the HSP.
+            (<span class="option-name">-num_alignments</span>). Those can be other subjects, or another set of HSPs of a subject (which may
+            include this one), than outfmt 6 and 7 keep. The outfmt 6 row below and outfmt 7 hold the HSP.
           </p>
           <p v-else class="notice" data-testid="detail-not-in-outfmt0">
             outfmt 0 does not show this HSP. It shows the alignments of the first {{ state.outfmt0Subjects }} subjects of this query

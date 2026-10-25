@@ -158,8 +158,12 @@ fn cap_sides(dir: &Path, query: &Path, args: &[&str], env: &[(&str, &str)]) -> (
     sides
 }
 
+/// The three switches off, and `LOSAT_X_BXKAONCE` (a query batch's Karlin blocks computed once,
+/// `blastx/search.rs`), whose reports must equal those without it for batches that are not split
+/// and for the chunks of a split query.
 const ALL_OFF: &[(&str, &str)] = &[
     ("LOSAT_X_BXDIAGKEEP", "0"),
+    ("LOSAT_X_BXKAONCE", "0"),
     ("LOSAT_X_BXLUTPOOL", "0"),
     ("LOSAT_X_BXUNITCAP", "0"),
 ];

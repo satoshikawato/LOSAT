@@ -1,0 +1,1 @@
+- `blastx` computes the Karlin blocks of a query batch that is not split once instead of twice, and the BLOSUM62 ideal block once per process: measurements pending (`LOSAT_X_BXKAONCE`, a switch of the strict set, so reports do not change; `=0` turns it off) ([`docs/agents/diagnostics.md`](docs/agents/diagnostics.md)).

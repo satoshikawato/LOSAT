@@ -89,6 +89,10 @@ pub(crate) use super::diagnostics::{
     diagnostics_enabled, print_summary as print_diagnostics_summary, DiagnosticCounters,
 };
 pub(crate) use super::extension::{convert_coords, extend_hit_two_hit, extend_hit_two_hit_with};
+// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): extension/x_two_hit_fast.rs.
+pub(crate) use super::extension::{
+    extend_hit_two_hit_sent, x_tbx_sent_contexts, x_tbx_sent_subject,
+};
 pub(crate) use super::lookup::{build_ncbi_lookup, QueryContext};
 pub(crate) use super::ncbi_cutoffs::{
     compute_eff_lengths_tblastx, cutoff_score_for_update_tblastx, cutoff_score_max_for_tblastx,

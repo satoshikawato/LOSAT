@@ -792,7 +792,11 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
 
         let row_off = sc.trace.len();
         if TB {
-            sc.x_trace_reserve(bend - first + num_extra + 96);
+            crate::utils::xdrop_simd::x_trace_reserve(
+                &mut sc.trace,
+                &mut sc.rows,
+                bend - first + num_extra + 96,
+            );
         }
         let tr = sc.trace.as_mut_ptr().add(row_off);
 
@@ -1295,7 +1299,11 @@ unsafe fn align8<const TB: bool, const NIB: bool>(
 
         let row_off = sc.trace.len();
         if TB {
-            sc.x_trace_reserve(bend - first + num_extra + 96);
+            crate::utils::xdrop_simd::x_trace_reserve(
+                &mut sc.trace,
+                &mut sc.rows,
+                bend - first + num_extra + 96,
+            );
         }
         let tr = sc.trace.as_mut_ptr().add(row_off);
 

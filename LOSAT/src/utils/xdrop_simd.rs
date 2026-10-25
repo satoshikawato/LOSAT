@@ -845,42 +845,52 @@ fn x_pool_lock() -> std::sync::MutexGuard<'static, Vec<XTracePair>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+thread_local! {
+    // The calling thread's own small trace + rows while it holds a pooled pair (one xdrop_align
+    // call: taken in `x_trace_grow`, put back in `XdropScratch::x_trace_release`).
+    static X_OWN: std::cell::RefCell<Option<XTracePair>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Room for `n` more trace bytes (the kernels' row reserve); only the two buffers escape, as
+/// with `Vec::reserve`.
+#[inline(always)]
+pub(crate) fn x_trace_reserve(trace: &mut Vec<u8>, rows: &mut Vec<(u32, u32, u32)>, n: usize) {
+    if trace.capacity() - trace.len() < n {
+        x_trace_grow(trace, rows, n);
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn x_trace_grow(trace: &mut Vec<u8>, rows: &mut Vec<(u32, u32, u32)>, n: usize) {
+    let from = x_pool_from();
+    if trace.len() + n > from && trace.capacity() <= from {
+        let taken = {
+            let mut pool = x_pool_lock();
+            let best = pool
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, p)| p.0.capacity())
+                .map(|(i, _)| i);
+            best.map(|i| pool.swap_remove(i))
+        };
+        if let Some((mut t, mut r)) = taken {
+            t.clear();
+            t.extend_from_slice(trace);
+            r.clear();
+            r.extend_from_slice(rows);
+            std::mem::swap(trace, &mut t);
+            std::mem::swap(rows, &mut r);
+            X_OWN.with(|own| *own.borrow_mut() = Some((t, r)));
+        }
+    }
+    trace.reserve(n);
+}
+
 impl XdropScratch {
-    /// Room for `n` more trace bytes (the kernels' row reserve).
-    #[inline(always)]
-    pub(crate) fn x_trace_reserve(&mut self, n: usize) {
-        if self.trace.capacity() - self.trace.len() < n {
-            self.x_trace_grow(n);
-        }
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn x_trace_grow(&mut self, n: usize) {
-        let from = x_pool_from();
-        if self.trace.len() + n > from && self.trace.capacity() <= from {
-            let taken = {
-                let mut pool = x_pool_lock();
-                let best = pool
-                    .iter()
-                    .enumerate()
-                    .max_by_key(|(_, p)| p.0.capacity())
-                    .map(|(i, _)| i);
-                best.map(|i| pool.swap_remove(i))
-            };
-            if let Some((mut t, mut r)) = taken {
-                t.clear();
-                t.extend_from_slice(&self.trace);
-                r.clear();
-                r.extend_from_slice(&self.rows);
-                self.trace = t;
-                self.rows = r;
-            }
-        }
-        self.trace.reserve(n);
-    }
-
-    /// After a traceback call: a trace above the pool size goes back to the pool with its rows.
+    /// After a traceback call: a pooled pair goes back (the thread's own buffers return), and a
+    /// trace of a pool thread that grew past the pool size by itself goes to the pool. A
+    /// one-thread search (no pool) keeps its trace: it has nothing to share it with.
     #[inline]
     pub(crate) fn x_trace_release(&mut self) {
         if self.trace.capacity() > x_pool_from() {
@@ -891,7 +901,18 @@ impl XdropScratch {
     #[cold]
     #[inline(never)]
     fn x_trace_give_back(&mut self) {
-        let pair = (std::mem::take(&mut self.trace), std::mem::take(&mut self.rows));
+        let own = X_OWN.with(|own| own.borrow_mut().take());
+        let pair = match own {
+            Some((t, r)) => (
+                std::mem::replace(&mut self.trace, t),
+                std::mem::replace(&mut self.rows, r),
+            ),
+            None if x_in_pool() => (
+                std::mem::take(&mut self.trace),
+                std::mem::take(&mut self.rows),
+            ),
+            None => return,
+        };
         let dropped = {
             let mut pool = x_pool_lock();
             pool.push(pair);
@@ -2068,7 +2089,11 @@ mod kernel {
 
             let row_off = sc.trace.len();
             if TB {
-                sc.x_trace_reserve(bend - first + num_extra + 96);
+                crate::utils::xdrop_simd::x_trace_reserve(
+                    &mut sc.trace,
+                    &mut sc.rows,
+                    bend - first + num_extra + 96,
+                );
             }
             let tr = sc.trace.as_mut_ptr().add(row_off);
             let survw = sc.surv.as_mut_ptr();
@@ -2613,7 +2638,11 @@ mod kernel {
 
             let row_off = sc.trace.len();
             if TB {
-                sc.x_trace_reserve(bend - first + num_extra + 96);
+                crate::utils::xdrop_simd::x_trace_reserve(
+                    &mut sc.trace,
+                    &mut sc.rows,
+                    bend - first + num_extra + 96,
+                );
             }
             let tr = sc.trace.as_mut_ptr().add(row_off);
             let survw = sc.surv.as_mut_ptr();

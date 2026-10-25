@@ -1,6 +1,6 @@
 //! The value of an NCBI Seq-id, every alternative of the CHOICE, as the header of a BLAST
-//! database stores it (`seqid::ber` decodes it), and the serial writer of the formats that
-//! write the Seq-id object (outfmt 8, 9, 11, 12; `report::seqid::SeqId::Db`).
+//! database stores it (`seqid::ber` decodes it). The formats that write the Seq-id object
+//! (outfmt 8, 9, 11, 12) write it through `report::seqid::SeqId::Db`.
 //!
 //! NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-74
 //! ```text
@@ -85,12 +85,11 @@
 //! ```
 //!
 //! An OPTIONAL member is an `Option` (`None`: not set); a member with a DEFAULT (`chain`) is
-//! an `Option` too, `None` when the stored value did not hold it: NCBI writes a member that
-//! was read (its set flag is "yes") even when it equals the default, and reads the default
-//! for one that was not. The INTEGER members are NCBI's `int` (`i32`) except `gi`, an `Int8`
-//! (`TGi`). Strings are the bytes after NCBI's repair of a VisibleString (`seqid::ber`).
-
-use crate::report::serial::encoder::Encoder;
+//! an `Option` too, `None` when the stored value did not hold it: NCBI keeps a set flag for
+//! it, reads the default for one that was not stored, and writes it by its set flag
+//! (`report::seqid` quotes the rule). The INTEGER members are NCBI's `int` (`i32`) except
+//! `gi`, an `Int8` (`TGi`). Strings are the bytes after NCBI's repair of a VisibleString
+//! (`seqid::ber`).
 
 /// `Object-id`: the tag of a local id and of a `Dbtag`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -181,11 +180,13 @@ pub struct PdbSeqId {
     pub chain_id: Option<Vec<u8>>,
 }
 
-/// The default of `PDB-seq-id.chain` (seqloc.asn:64).
+/// The default of `PDB-seq-id.chain` (`chain INTEGER DEFAULT 32`, seqloc.asn:67, quoted
+/// in the module).
 pub const PDB_DEFAULT_CHAIN: i32 = 32;
 
 impl PdbSeqId {
-    /// `CPDB_seq_id::GetChain`: the stored chain, else the default.
+    /// `CPDB_seq_id::GetChain`: the stored chain, else the default (datatool's generated
+    /// getter returns the member, which holds the DEFAULT until a value is read).
     pub fn chain_or_default(&self) -> i32 {
         self.chain.unwrap_or(PDB_DEFAULT_CHAIN)
     }
@@ -315,157 +316,5 @@ impl ParsedSeqId {
             ParsedSeqId::Gi(gi) => Some(gi),
             _ => None,
         }
-    }
-
-    /// Writes the Seq-id object (a CHOICE) through `enc`, in the member order of the ASN.1
-    /// modules quoted above (the same calls as `report::seqid::SeqId::write` for `local` and
-    /// `general`). An absent OPTIONAL member is skipped; `chain` is written when it was stored.
-    pub fn write<E: Encoder>(&self, enc: &mut E) {
-        let alternative = self.alternative();
-        enc.variant("Seq-id", self.alternative_name(), alternative);
-        match self {
-            ParsedSeqId::Local(tag) => write_object_id(enc, tag),
-            ParsedSeqId::Gibbsq(value) | ParsedSeqId::Gibbmt(value) => enc.int(*value),
-            ParsedSeqId::Giim(id) => {
-                enc.begin_sequence("Giimport-id");
-                enc.member("id", 0);
-                enc.int(id.id);
-                enc.end_member();
-                optional_str(enc, "db", 1, id.db.as_deref());
-                optional_str(enc, "release", 2, id.release.as_deref());
-                enc.end_sequence();
-            }
-            ParsedSeqId::Patent(id) => {
-                enc.begin_sequence("Patent-seq-id");
-                enc.member("seqid", 0);
-                enc.int(id.seqid);
-                enc.end_member();
-                enc.member("cit", 1);
-                enc.begin_sequence("Id-pat");
-                enc.member("country", 0);
-                enc.visible_str(&id.cit.country);
-                enc.end_member();
-                enc.member("id", 1);
-                match &id.cit.id {
-                    PatentNumber::Number(number) => {
-                        enc.variant("Id-pat_id", "number", 0);
-                        enc.visible_str(number);
-                    }
-                    PatentNumber::AppNumber(number) => {
-                        enc.variant("Id-pat_id", "app-number", 1);
-                        enc.visible_str(number);
-                    }
-                }
-                enc.end_variant();
-                enc.end_member();
-                optional_str(enc, "doc-type", 2, id.cit.doc_type.as_deref());
-                enc.end_sequence();
-                enc.end_member();
-                enc.end_sequence();
-            }
-            ParsedSeqId::General(dbtag) => {
-                enc.begin_sequence("Dbtag");
-                enc.member("db", 0);
-                enc.visible_str(&dbtag.db);
-                enc.end_member();
-                enc.member("tag", 1);
-                write_object_id(enc, &dbtag.tag);
-                enc.end_member();
-                enc.end_sequence();
-            }
-            ParsedSeqId::Gi(gi) => enc.big_int(*gi),
-            ParsedSeqId::Pdb(id) => {
-                enc.begin_sequence("PDB-seq-id");
-                enc.member("mol", 0);
-                enc.visible_str(&id.mol);
-                enc.end_member();
-                if let Some(chain) = id.chain {
-                    enc.member("chain", 1);
-                    enc.int(chain);
-                    enc.end_member();
-                }
-                if let Some(rel) = &id.rel {
-                    enc.member("rel", 2);
-                    write_date(enc, rel);
-                    enc.end_member();
-                }
-                optional_str(enc, "chain-id", 3, id.chain_id.as_deref());
-                enc.end_sequence();
-            }
-            ParsedSeqId::Genbank(id)
-            | ParsedSeqId::Embl(id)
-            | ParsedSeqId::Pir(id)
-            | ParsedSeqId::Swissprot(id)
-            | ParsedSeqId::Other(id)
-            | ParsedSeqId::Ddbj(id)
-            | ParsedSeqId::Prf(id)
-            | ParsedSeqId::Tpg(id)
-            | ParsedSeqId::Tpe(id)
-            | ParsedSeqId::Tpd(id)
-            | ParsedSeqId::Gpipe(id)
-            | ParsedSeqId::NamedAnnotTrack(id) => {
-                enc.begin_sequence("Textseq-id");
-                optional_str(enc, "name", 0, id.name.as_deref());
-                optional_str(enc, "accession", 1, id.accession.as_deref());
-                optional_str(enc, "release", 2, id.release.as_deref());
-                optional_int(enc, "version", 3, id.version);
-                enc.end_sequence();
-            }
-        }
-        enc.end_variant();
-    }
-}
-
-fn write_object_id<E: Encoder>(enc: &mut E, tag: &ObjectId) {
-    match tag {
-        ObjectId::Id(id) => {
-            enc.variant("Object-id", "id", 0);
-            enc.int(*id);
-        }
-        ObjectId::Str(text) => {
-            enc.variant("Object-id", "str", 1);
-            enc.visible_str(text);
-        }
-    }
-    enc.end_variant();
-}
-
-fn write_date<E: Encoder>(enc: &mut E, date: &Date) {
-    match date {
-        Date::Str(text) => {
-            enc.variant("Date", "str", 0);
-            enc.visible_str(text);
-        }
-        Date::Std(std) => {
-            enc.variant("Date", "std", 1);
-            enc.begin_sequence("Date-std");
-            enc.member("year", 0);
-            enc.int(std.year);
-            enc.end_member();
-            optional_int(enc, "month", 1, std.month);
-            optional_int(enc, "day", 2, std.day);
-            optional_str(enc, "season", 3, std.season.as_deref());
-            optional_int(enc, "hour", 4, std.hour);
-            optional_int(enc, "minute", 5, std.minute);
-            optional_int(enc, "second", 6, std.second);
-            enc.end_sequence();
-        }
-    }
-    enc.end_variant();
-}
-
-fn optional_str<E: Encoder>(enc: &mut E, name: &str, tag: u8, value: Option<&[u8]>) {
-    if let Some(value) = value {
-        enc.member(name, tag);
-        enc.visible_str(value);
-        enc.end_member();
-    }
-}
-
-fn optional_int<E: Encoder>(enc: &mut E, name: &str, tag: u8, value: Option<i32>) {
-    if let Some(value) = value {
-        enc.member(name, tag);
-        enc.int(value);
-        enc.end_member();
     }
 }

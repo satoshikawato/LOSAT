@@ -4,7 +4,7 @@
 //!
 //! - `model`: the Seq-id value of every alternative (`ParsedSeqId`) and its serial writer
 //!   (outfmt 8, 9, 11, 12, through `report::seqid::SeqId::Db`).
-//! - `ber`: the BER decoding of a header record (`decode_defline_set`), whose reader
+//! - `ber`: the BER decoding of a header record (`decode_full_set`), whose reader
 //!   `seqdb::header` shares for the ordinal ids of a database without parsed Seq-ids.
 //! - `label`: the printings (`fasta`, `content`, `format_label`, `bare`,
 //!   `seqid_list_string`, `first_gi`).

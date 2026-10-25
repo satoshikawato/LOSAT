@@ -2,19 +2,25 @@
 //! databases, the definition lines blastdbcmd reads back and the id fields of blastp and
 //! blastn reports in `LOSAT/tests/seqid` (`make_fixtures.py` there).
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
-use super::ber::decode_defline_set;
-use super::defline_set::{alignment_line_id, compare, description_id, tabular_id, Sic, TabularId};
+use super::ber::decode_full_set;
+use super::defline_set::{
+    alignment_line_id, compare, description_id, seq_id_list, tabular_id, Sic, TabularId,
+};
 use super::label::{bare, content, fasta, first_gi, format_label};
 use super::model::{
     Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId, PdbSeqId, TextseqId,
 };
 use super::rank::{best_rank_score, find_best, text_score};
 use super::{BlastDefline, DeflineSet};
+use crate::report::defline::generate_defline;
+use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::Encoder;
+use crate::report::serial::json::JsonEncoder;
 use crate::seqdb::{SeqDb, SeqDbError, SeqType};
 
 fn fixture_dir() -> PathBuf {
@@ -161,7 +167,7 @@ fn sample_18s() -> Vec<(u32, Vec<u8>)> {
 fn the_18s_sample_reads_as_ncbis_blastdbcmd_reads_it() {
     let sets: Vec<(u32, DeflineSet)> = sample_18s()
         .into_iter()
-        .map(|(oid, record)| (oid, decode_defline_set(&record).unwrap()))
+        .map(|(oid, record)| (oid, decode_full_set(&record).unwrap()))
         .collect();
     assert_eq!(sets.len(), 26);
     check_deflines("18S sample", &sets, &read_tsv("18S_sample.deflines.tsv"));
@@ -208,7 +214,7 @@ fn the_whole_distributed_18s_database_reads_as_ncbis_blastdbcmd_reads_it() {
 fn ber(id: &ParsedSeqId) -> Vec<u8> {
     let mut out = Vec::new();
     let mut enc = AsnBinaryEncoder::new(&mut out);
-    id.write(&mut enc);
+    SeqId::Db(id).write(&mut enc);
     assert_eq!(enc.error(), None);
     out
 }
@@ -236,7 +242,7 @@ fn every_seq_id_encodes_as_makeblastdb_stored_it() {
     }
     let mut ids = 0;
     for (what, record) in &records {
-        let set = decode_defline_set(record).unwrap();
+        let set = decode_full_set(record).unwrap();
         for id in set.ids() {
             assert!(contains(record, &ber(id)), "{what}: {id:?}");
             ids += 1;
@@ -245,21 +251,31 @@ fn every_seq_id_encodes_as_makeblastdb_stored_it() {
     assert!(ids > 150, "{ids}");
 }
 
+/// The first word of the subject Bioseq's generated title (`GenerateDefline` of its title;
+/// no fixture record with a `lcl|Subject_` id has a Seq-id that changes the title).
+fn title_word(bioseq: &BlastDefline, protein: bool) -> Vec<u8> {
+    let title = bioseq.title.as_deref().unwrap_or(b"");
+    let defline = generate_defline(title, protein, false).expect("a known encoding");
+    defline.text.split(|&c| c == b' ').next().unwrap().to_vec()
+}
+
 /// The ids and titles that `tabular_id` and the joins give for one sequence, in the column
 /// order `sseqid sallseqid sacc saccver sallacc sgi sallgi stitle salltitles staxid staxids`.
-fn tabular_row(set: &DeflineSet) -> Vec<String> {
+fn tabular_row(set: &DeflineSet, protein: bool) -> Vec<String> {
     let aln = set.alignment_id().expect("an id");
-    let target = &set.deflines[set.bioseq_defline(aln).expect("a target")].ids;
+    let bioseq = &set.deflines[set.bioseq_defline(aln).expect("a target")];
+    let word = title_word(bioseq, protein);
+    let target = seq_id_list(&bioseq.ids, &word);
     let staxid = set.first_taxid();
     let staxids = set.tax_ids();
     vec![
-        with(|out| tabular_id(target, TabularId::Full, out)),
-        with(|out| set.tabular_all(TabularId::Full, out)),
-        with(|out| tabular_id(target, TabularId::Accession, out)),
-        with(|out| tabular_id(target, TabularId::AccessionVersion, out)),
-        with(|out| set.tabular_all(TabularId::Accession, out)),
-        with(|out| tabular_id(target, TabularId::Gi, out)),
-        with(|out| set.tabular_all(TabularId::Gi, out)),
+        with(|out| tabular_id(&target, TabularId::Full, out)),
+        with(|out| set.tabular_all(TabularId::Full, &word, out)),
+        with(|out| tabular_id(&target, TabularId::Accession, out)),
+        with(|out| tabular_id(&target, TabularId::AccessionVersion, out)),
+        with(|out| set.tabular_all(TabularId::Accession, &word, out)),
+        with(|out| tabular_id(&target, TabularId::Gi, out)),
+        with(|out| set.tabular_all(TabularId::Gi, &word, out)),
         with(|out| set.first_title(out)),
         with(|out| set.all_titles(out)),
         if staxid == 0 {
@@ -279,34 +295,64 @@ fn tabular_row(set: &DeflineSet) -> Vec<String> {
     ]
 }
 
-const CASES: [(&str, &str, SeqType); 3] = [
+const CASES: [(&str, &str, SeqType); 4] = [
     ("blastp_prot_ids", "prot_ids", SeqType::Protein),
     ("blastn_nucl_ids", "nucl_ids", SeqType::Nucleotide),
     ("blastp_prot_extra", "prot_extra", SeqType::Protein),
+    ("blastp_variants", "variants", SeqType::Protein),
 ];
 
-/// The index of the sequence whose computed row is `row`.
-fn find_sequence(case: &str, rows: &[Vec<String>], row: &[String]) -> usize {
-    rows.iter()
-        .position(|candidate| candidate == row)
-        .unwrap_or_else(|| panic!("{case}: no sequence gives {row:?}"))
+/// Matches each distinct NCBI row (one per subject: the reports have one HSP per subject,
+/// and the queries repeat subjects) with the sequence whose computed row `computed` gives
+/// it; a sequence matches at most one row.
+fn match_rows<T: PartialEq + std::fmt::Debug>(
+    case: &str,
+    expected: Vec<T>,
+    computed: impl Fn(usize) -> Option<T>,
+    sequences: usize,
+) -> Vec<usize> {
+    let mut distinct: Vec<T> = Vec::new();
+    for row in expected {
+        if !distinct.contains(&row) {
+            distinct.push(row);
+        }
+    }
+    assert!(!distinct.is_empty(), "{case}");
+    let rows: Vec<Option<T>> = (0..sequences).map(computed).collect();
+    let mut matched = HashSet::new();
+    distinct
+        .iter()
+        .map(|row| {
+            let at = rows
+                .iter()
+                .position(|candidate| candidate.as_ref() == Some(row))
+                .unwrap_or_else(|| panic!("{case}: no sequence gives {row:?}"));
+            assert!(matched.insert(at), "{case}: sequence {at} gives two rows");
+            at
+        })
+        .collect()
 }
 
 #[test]
 fn tabular_id_and_title_fields_are_ncbis() {
     for (case, name, seqtype) in CASES {
-        let rows: Vec<Vec<String>> = sets(&open(name, seqtype)).iter().map(tabular_row).collect();
-        let expected = read_tsv(&format!("{case}.fmt6.tsv"));
-        assert!(!expected.is_empty(), "{case}");
-        for mut row in expected {
+        let sets = sets(&open(name, seqtype));
+        let mut expected = read_tsv(&format!("{case}.fmt6.tsv"));
+        for row in &mut expected {
             // Approved difference (line DBID, DECISIONS 5, Q2): NCBI prints the type of the
             // first id registered under the same accession key in the process (`dbj|`, from
             // another sequence); LOSAT prints the definition line's own `gb|`.
             if row[0] == "gi|1515|dbj|AB000015.1|" {
                 row[0] = "gi|1515|gb|AB000015.1|".to_string();
             }
-            find_sequence(case, &rows, &row);
         }
+        let protein = seqtype == SeqType::Protein;
+        match_rows(
+            case,
+            expected,
+            |oid| Some(tabular_row(&sets[oid], protein)),
+            sets.len(),
+        );
     }
 }
 
@@ -326,12 +372,12 @@ fn xml_row(set: &DeflineSet) -> Vec<String> {
     ]
 }
 
-/// The subject Seq-id of outfmt 8 (ASN.1 text) with white space collapsed.
+/// A Seq-id in ASN.1 text (outfmt 8, blastdbcmd `%d`) with white space collapsed.
 fn asn_text(id: &ParsedSeqId) -> String {
     let mut out = Vec::new();
     let mut enc = AsnTextEncoder::new(&mut out);
     enc.begin_document("Seq-id");
-    id.write(&mut enc);
+    SeqId::Db(id).write(&mut enc);
     enc.end_document();
     assert_eq!(enc.error(), None);
     let text = text(&out);
@@ -339,18 +385,79 @@ fn asn_text(id: &ParsedSeqId) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// A Seq-id in JSON (outfmt 12) without the white space outside strings.
+fn json_text(id: &ParsedSeqId) -> String {
+    let mut out = Vec::new();
+    let mut enc = JsonEncoder::new(&mut out);
+    enc.begin_document("Seq-id");
+    SeqId::Db(id).write(&mut enc);
+    enc.end_document();
+    assert_eq!(enc.error(), None);
+    let (mut compact, mut in_string, mut escaped) = (String::new(), false, false);
+    for c in text(&out).chars() {
+        if in_string {
+            in_string = escaped || c != '"';
+            escaped = !escaped && c == '\\';
+        } else if c == '"' {
+            in_string = true;
+        } else if c.is_whitespace() {
+            continue;
+        }
+        compact.push(c);
+    }
+    // `{"Seq_id":<value>}`: the value.
+    let value = &compact[compact.find(':').expect("a key") + 1..];
+    value.strip_suffix('}').expect("a document").to_string()
+}
+
 #[test]
 fn xml_hit_fields_and_alignment_ids_are_ncbis() {
     for (case, name, seqtype) in CASES {
         let sets = sets(&open(name, seqtype));
-        let rows: Vec<Vec<String>> = sets.iter().map(xml_row).collect();
         let hits = read_tsv(&format!("{case}.fmt5.tsv"));
-        let alignment_ids = read_tsv(&format!("{case}.fmt8.tsv"));
-        assert_eq!(hits.len(), alignment_ids.len(), "{case}");
-        for (hit, aln) in hits.iter().zip(&alignment_ids) {
-            let oid = find_sequence(case, &rows, hit);
-            let id = sets[oid].alignment_id().unwrap();
-            assert_eq!(asn_text(id), aln[0], "{case}: sequence {oid}");
+        match_rows(case, hits, |oid| Some(xml_row(&sets[oid])), sets.len());
+        // The Seq-align subject id of each hit in outfmt 8 and 12. NCBI's XML and outfmt 0
+        // put consecutive Seq-aligns whose subject ids `Match` into one hit (`pdb|1ABC|` and
+        // `pdb|1ABC|AA` of `variants`), so the hits are matched apart from the Seq-aligns.
+        let aln_text = |oid: usize| sets[oid].alignment_id().map(|id| vec![asn_text(id)]);
+        let aln_json = |oid: usize| sets[oid].alignment_id().map(|id| vec![json_text(id)]);
+        let by_text = match_rows(
+            case,
+            read_tsv(&format!("{case}.fmt8.tsv")),
+            aln_text,
+            sets.len(),
+        );
+        let by_json = match_rows(
+            case,
+            read_tsv(&format!("{case}.fmt12.tsv")),
+            aln_json,
+            sets.len(),
+        );
+        assert_eq!(
+            by_text, by_json,
+            "{case}: outfmt 8 and 12 name the same sequences"
+        );
+    }
+}
+
+#[test]
+fn every_seq_id_writes_as_ncbis_blastdbcmd_writes_it() {
+    for (name, seqtype) in DATABASES {
+        let sets = sets(&open(name, seqtype));
+        let rows = read_tsv(&format!("{name}.asn.tsv"));
+        let stored: usize = sets.iter().map(|set| set.ids().count()).sum();
+        assert_eq!(rows.len(), stored, "{name}: Seq-ids");
+        for row in rows {
+            let [oid, line, at, expected] = &row[..] else {
+                panic!("{name}: {row:?}");
+            };
+            let (oid, line, at): (usize, usize, usize) = (
+                oid.parse().unwrap(),
+                line.parse().unwrap(),
+                at.parse().unwrap(),
+            );
+            let id = &sets[oid].deflines[line].ids[at];
+            assert_eq!(&asn_text(id), expected, "{name} {oid} {line} {at}");
         }
     }
 }
@@ -386,10 +493,10 @@ fn block(set: &DeflineSet, protein: bool, show_gis: bool) -> String {
     let bioseq_title = set.deflines[set.bioseq_defline(aln).unwrap()]
         .title
         .clone()
-        .unwrap();
+        .unwrap_or_default();
     let mut lines = Vec::new();
     for (i, defline) in set.deflines.iter().enumerate() {
-        let mut title = defline.title.clone().unwrap();
+        let mut title = defline.title.clone().unwrap_or_default();
         if title.is_empty() {
             title = bioseq_title.clone();
         }
@@ -413,11 +520,11 @@ fn outfmt0_id_parts_are_ncbis() {
             let (kind, line) = (&row[0], &row[1]);
             let show_gis = kind.starts_with("show_gis");
             if kind.ends_with("_block") {
-                assert!(
-                    sets.iter()
-                        .any(|set| block(set, protein, show_gis) == *line),
-                    "{case}: no sequence gives the block\n{line}"
-                );
+                let matching = sets
+                    .iter()
+                    .filter(|set| block(set, protein, show_gis) == *line)
+                    .count();
+                assert_eq!(matching, 1, "{case}: sequences that give the block\n{line}");
             } else {
                 // The description: the id of `GetDisplayIds`, two spaces after `gi|N|`, then
                 // the title of the subject Bioseq (truncated, then the scores).
@@ -435,7 +542,7 @@ fn outfmt0_id_parts_are_ncbis() {
                     let mut title = set.deflines[set.bioseq_defline(aln).unwrap()]
                         .title
                         .clone()
-                        .unwrap();
+                        .unwrap_or_default();
                     if title.is_empty() && protein {
                         title = b"unnamed protein product".to_vec();
                     }
@@ -512,6 +619,13 @@ fn printings_of_forms_without_a_fixture() {
     assert_eq!(with(|o| fasta(&pdb(None), o)), "pdb|1XYZ| ");
     assert_eq!(with(|o| content(&pdb(Some(32)), true, o)), "1XYZ");
     assert_eq!(with(|o| content(&pdb(Some(66)), true, o)), "1XYZ_B");
+    // An unset chain: written only by JSON, which writes the defaults (DEFAULT 32).
+    assert_eq!(asn_text(&pdb(None)), r#"pdb { mol "1XYZ" }"#);
+    assert_eq!(
+        json_text(&pdb(None)),
+        r#"{"pdb":{"mol":"1XYZ","chain":32}}"#
+    );
+    assert_eq!(asn_text(&pdb(Some(32))), r#"pdb { mol "1XYZ", chain 32 }"#);
     // The formatter's label of a general id is its tag, of one with an empty tag `db:`.
     let general = |tag: &str| {
         ParsedSeqId::General(Dbtag {
@@ -661,8 +775,8 @@ fn definite_lengths_read_as_indefinite_ones() {
         let definite = to_definite(&record);
         assert_ne!(definite, record);
         assert_eq!(
-            decode_defline_set(&definite).unwrap(),
-            decode_defline_set(&record).unwrap(),
+            decode_full_set(&definite).unwrap(),
+            decode_full_set(&record).unwrap(),
             "18S {oid}"
         );
     }
@@ -671,19 +785,31 @@ fn definite_lengths_read_as_indefinite_ones() {
 #[test]
 fn damaged_records_are_errors() {
     let (_, record) = sample_18s().remove(0);
-    let decoded = decode_defline_set(&record).unwrap();
-    assert_eq!(decode_defline_set(&[]).unwrap(), DeflineSet::default());
-    for cut in [1, 2, 10, record.len() / 2, record.len() - 1] {
-        let error = decode_defline_set(&record[..cut]).expect_err("cut short");
-        assert!(
-            error.to_string().starts_with("header record, byte "),
-            "{cut}: {error}"
-        );
+    let decoded = decode_full_set(&record).unwrap();
+    assert_eq!(decode_full_set(&[]).unwrap(), DeflineSet::default());
+    // Every record cut short is an error; a changed byte gives an error or a value, never
+    // a panic.
+    for (oid, record) in sample_18s() {
+        for cut in 1..record.len() {
+            let error = decode_full_set(&record[..cut]).expect_err("cut short");
+            assert!(
+                error.to_string().starts_with("header record, byte "),
+                "18S {oid} cut at {cut}: {error}"
+            );
+        }
+        let mut changed = record.clone();
+        for at in 0..record.len() {
+            for byte in [0x00, 0x80, 0xff, record[at] ^ 0x01, record[at] ^ 0x20] {
+                changed[at] = byte;
+                let _ = decode_full_set(&changed);
+            }
+            changed[at] = record[at];
+        }
     }
     let mut longer = record.clone();
     longer.push(0);
     assert_eq!(
-        decode_defline_set(&longer).unwrap_err().message,
+        decode_full_set(&longer).unwrap_err().message,
         "unexpected data after Blast-def-line-set"
     );
     // A definition line without its Seq-id list: `30 80 30 80 a0 80 1a 01 x 00 00 00 00 00 00`.
@@ -691,7 +817,7 @@ fn damaged_records_are_errors() {
         0x30, 0x80, 0x30, 0x80, 0xa0, 0x80, 0x1a, 0x01, b'x', 0, 0, 0, 0, 0, 0,
     ];
     assert_eq!(
-        decode_defline_set(&no_seqid).unwrap_err().message,
+        decode_full_set(&no_seqid).unwrap_err().message,
         "a Blast-def-line has no seqid"
     );
     // An alternative 20 of Seq-id does not exist.
@@ -699,7 +825,7 @@ fn damaged_records_are_errors() {
         0x30, 0x80, 0x30, 0x80, 0xa1, 0x80, 0x30, 0x80, 0xb4, 0x80, 0x02, 0x01, 0x01,
     ];
     assert_eq!(
-        decode_defline_set(&id).unwrap_err().message,
+        decode_full_set(&id).unwrap_err().message,
         "tag 0xb4 is not an alternative of Seq-id"
     );
     // A title with bytes outside ' ' ..= '~' reads with '#' for each, and counts them.
@@ -707,7 +833,7 @@ fn damaged_records_are_errors() {
         0x30, 0x80, 0x30, 0x80, 0xa0, 0x80, 0x1a, 0x03, b'a', 0xe9, 0x7f, 0, 0, 0xa1, 0x80, 0x30,
         0x80, 0xa0, 0x80, 0xa1, 0x80, 0x1a, 0x02, b'x', 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ];
-    let set = decode_defline_set(&title).unwrap();
+    let set = decode_full_set(&title).unwrap();
     let defline = &set.deflines[0];
     assert_eq!(defline.title.as_deref(), Some(&b"a##"[..]));
     assert_eq!(

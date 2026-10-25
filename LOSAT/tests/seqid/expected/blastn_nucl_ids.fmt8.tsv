@@ -1,3 +1,5 @@
+local str "Subject_31"
+local str "Subject_30"
 other { accession "NM_000001", version 1 }
 embl { accession "AJ000003", version 1 }
 gi 654321

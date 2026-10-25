@@ -11,7 +11,8 @@ use std::io::Write;
 use super::model::{ObjectId, ParsedSeqId, PatentNumber, PatentSeqId, PdbSeqId, TextseqId};
 use super::rank::{find_best, text_score};
 
-fn number(out: &mut Vec<u8>, value: impl std::fmt::Display) {
+/// Appends `value` in decimal (`NStr::NumericToString`, `operator<<`).
+pub(super) fn number(out: &mut Vec<u8>, value: impl std::fmt::Display) {
     let _ = write!(out, "{value}");
 }
 

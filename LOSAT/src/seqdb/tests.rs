@@ -238,12 +238,42 @@ fn check_deflines_and_single_reads(db: &SeqDb, entries: &[Entry], name: &str) {
             format!("gnl|BL_ORD_ID|{}", entry.ordinal).into_bytes(),
             "{what}: NCBI id"
         );
+        // The full decoder reads the same definition line, with the BL_ORD_ID tag of the
+        // database (the volume start added) and the taxid that `defline_taxids` reads.
+        let set = db.defline_set(entry.ordinal).expect("defline set");
+        let taxids = db.defline_taxids(entry.ordinal).expect("taxids");
+        assert_eq!(set.deflines.len(), 1, "{what}: full decoder");
+        let full = &set.deflines[0];
+        assert_eq!(
+            full.ids,
+            [crate::seqid::ParsedSeqId::General(
+                crate::seqid::model::Dbtag {
+                    db: b"BL_ORD_ID".to_vec(),
+                    tag: crate::seqid::model::ObjectId::Id(deflines[0].bl_ord_id as i32),
+                }
+            )],
+            "{what}: full decoder id"
+        );
+        assert_eq!(
+            full.title.as_deref(),
+            Some(&deflines[0].title[..]),
+            "{what}"
+        );
+        assert_eq!(
+            full.replaced_title_bytes, deflines[0].replaced_title_bytes,
+            "{what}"
+        );
+        assert_eq!(full.taxid.unwrap_or(0), taxids[0], "{what}: taxid");
         let block = db.read_sequence(entry.ordinal).expect("read sequence");
         assert_eq!(block.len(), 1);
         check_sequence(&block, 0, &entry.seq, &what);
     }
     assert!(matches!(
         db.deflines(db.num_seqs()),
+        Err(SeqDbError::Range(_))
+    ));
+    assert!(matches!(
+        db.defline_set(db.num_seqs()),
         Err(SeqDbError::Range(_))
     ));
     assert!(matches!(

@@ -16,3 +16,5 @@
 13	pat|US|1234567|14	US1234567_14	N/A	0	0	patent nucleotide
 14	gb|AB000015.1|	AB000015.1	1515	0	0	
 14	ref|XM_000016.1|	XM_000016.1	1516	0	0	second defline
+15	lcl|Subject_30	Subject_30	N/A	0	0	
+16	lcl|Subject_31	Subject_31	N/A	0	0	nucleotide subject title

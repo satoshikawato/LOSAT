@@ -4,7 +4,10 @@
 //!
 //! The rank of a `gi` id depends on two environment variables of NCBI's
 //! (`SEQ_ID_PREFER_ACCESSION_OVER_GI`, `SEQ_ID_AVOID_GI`, Seq_id.cpp:3393-3413), which make it
-//! the worst; these functions give the ranks with both unset, NCBI's default.
+//! the worst; these functions give the ranks with both unset, NCBI's default. LOSAT does not
+//! refuse the two variables yet: no output reads these ranks before line DBID ID2a, which
+//! adds them to `blastinput::ncbi_environment`'s refused variables with the first one (the
+//! registry spellings are refused already).
 
 use super::model::ParsedSeqId;
 

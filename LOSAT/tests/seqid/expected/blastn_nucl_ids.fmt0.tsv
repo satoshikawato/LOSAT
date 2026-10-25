@@ -1,18 +1,22 @@
+plain_description	nucleotide subject title                                              608     2e-177
+plain_description	                                                                      608     2e-177
 plain_description	NM_000001.1 alpha mRNA [Homo sapiens]                                 608     2e-177
-plain_description	AJ000003.1 emb nucleotide                                             597     4e-174
-plain_description	AB000002.3 gi plus gb nucleotide                                      597     4e-174
-plain_description	NC_000005.11 chromosome-like                                          580     4e-169
-plain_description	AB000004.1 dbj nucleotide                                             580     4e-169
-plain_description	mynuc6 local id nucleotide                                            564     4e-164
+plain_description	AJ000003.1 emb nucleotide                                             597     5e-174
+plain_description	AB000002.3 gi plus gb nucleotide                                      597     5e-174
+plain_description	NC_000005.11 chromosome-like                                          580     5e-169
+plain_description	AB000004.1 dbj nucleotide                                             580     5e-169
+plain_description	mynuc6 local id nucleotide                                            564     5e-164
 plain_description	AB000009 bare genbank accession without version                       542     2e-157
 plain_description	mydb:nuc7 general id nucleotide                                       542     2e-157
-plain_description	BK000012.1 third-party nucleotide                                     536     9e-156
-plain_description	mynuc_10 bare non-accession word                                      531     4e-154
-plain_description	NM_000008.2 bare refseq accession                                     531     4e-154
+plain_description	BK000012.1 third-party nucleotide                                     536     1e-155
+plain_description	mynuc_10 bare non-accession word                                      531     5e-154
+plain_description	NM_000008.2 bare refseq accession                                     531     5e-154
 plain_description	gi|1111 gi only                                                       525     2e-152
 plain_description	AB000013.1 gb with a locus name                                       510     6e-148
-plain_description	US1234567_14 patent nucleotide                                        490     7e-142
-plain_description	AB000015.1                                                            464     4e-134
+plain_description	US1234567_14 patent nucleotide                                        490     8e-142
+plain_description	AB000015.1                                                            464     5e-134
+plain_block	>Subject_31 nucleotide subject title
+plain_block	>Subject_30 
 plain_block	>NM_000001.1 alpha mRNA [Homo sapiens]\n AB000001.1 alpha cDNA\n X00001.2 alpha clone
 plain_block	>AJ000003.1 emb nucleotide
 plain_block	>AB000002.3 gi plus gb nucleotide
@@ -28,21 +32,25 @@ plain_block	>gi|1111 gi only
 plain_block	>AB000013.1 gb with a locus name
 plain_block	>US1234567_14 patent nucleotide
 plain_block	>AB000015.1 \n XM_000016.1 second defline
+show_gis_description	nucleotide subject title                                              608     2e-177
+show_gis_description	                                                                      608     2e-177
 show_gis_description	ref|NM_000001.1|alpha mRNA [Homo sapiens]                             608     2e-177
-show_gis_description	emb|AJ000003.1|emb nucleotide                                         597     4e-174
-show_gis_description	gi|654321|gb|AB000002.3|  gi plus gb nucleotide                       597     4e-174
-show_gis_description	ref|NC_000005.11|chromosome-like                                      580     4e-169
-show_gis_description	dbj|AB000004.1|dbj nucleotide                                         580     4e-169
-show_gis_description	mynuc6local id nucleotide                                             564     4e-164
+show_gis_description	emb|AJ000003.1|emb nucleotide                                         597     5e-174
+show_gis_description	gi|654321|gb|AB000002.3|  gi plus gb nucleotide                       597     5e-174
+show_gis_description	ref|NC_000005.11|chromosome-like                                      580     5e-169
+show_gis_description	dbj|AB000004.1|dbj nucleotide                                         580     5e-169
+show_gis_description	mynuc6local id nucleotide                                             564     5e-164
 show_gis_description	dbj|AB000009|bare genbank accession without version                   542     2e-157
 show_gis_description	gnl|mydb|nuc7general id nucleotide                                    542     2e-157
-show_gis_description	tpg|BK000012.1|third-party nucleotide                                 536     9e-156
-show_gis_description	mynuc_10bare non-accession word                                       531     4e-154
-show_gis_description	ref|NM_000008.2|bare refseq accession                                 531     4e-154
+show_gis_description	tpg|BK000012.1|third-party nucleotide                                 536     1e-155
+show_gis_description	mynuc_10bare non-accession word                                       531     5e-154
+show_gis_description	ref|NM_000008.2|bare refseq accession                                 531     5e-154
 show_gis_description	gi|1111|gi|1111   gi only                                             525     2e-152
 show_gis_description	gb|AB000013.1|LOCUS13gb with a locus name                             510     6e-148
-show_gis_description	pat|US|1234567|14patent nucleotide                                    490     7e-142
-show_gis_description	gi|1515|gb|AB000015.1|                                                464     4e-134
+show_gis_description	pat|US|1234567|14patent nucleotide                                    490     8e-142
+show_gis_description	gi|1515|gb|AB000015.1|                                                464     5e-134
+show_gis_block	>Subject_31 nucleotide subject title
+show_gis_block	>Subject_30 
 show_gis_block	>NM_000001.1 alpha mRNA [Homo sapiens]\n AB000001.1 alpha cDNA\n X00001.2 alpha clone
 show_gis_block	>AJ000003.1 emb nucleotide
 show_gis_block	>gi|654321|gb|AB000002.3| gi plus gb nucleotide

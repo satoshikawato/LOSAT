@@ -122,10 +122,10 @@ pub fn decode_deflines_as(
 }
 
 /// Decodes the `Blast-def-line-set` of one sequence with every member and every Seq-id
-/// (`seqid::ber::decode_defline_set`); the `general` ids `BL_ORD_ID` keep their
+/// (`seqid::ber::decode_full_set`); the `general` ids `BL_ORD_ID` keep their
 /// volume-relative tag.
 pub fn decode_full(record: &[u8], path: &Path) -> Result<DeflineSet, SeqDbError> {
-    crate::seqid::ber::decode_defline_set(record).map_err(|error| format_error(error, path))
+    crate::seqid::ber::decode_full_set(record).map_err(|error| format_error(error, path))
 }
 
 fn decode_ordinal_deflines(record: &[u8], want_taxid: bool) -> Result<Vec<Defline>, HeaderError> {

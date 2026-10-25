@@ -9,29 +9,39 @@ and blastn write the reports whose subject id and title fields the tests compare
 usage: make_fixtures.py --ncbi-bin DIR --work DIR --db-18s BASE [--out LOSAT/tests/seqid]
 
 Inputs (fasta/): prot_ids.fa and nucl_ids.fa (every Seq-id form makeblastdb writes, several
-definition lines joined by Ctrl-A, GIs, a definition line without a title) with their taxid
-maps, prot_extra.fa (a GI in the second definition line only, 12 long titles, an empty
-title), variants.fa (one record per further form: tpe, tpd, gpipe, gibbsq, gibbmt, pdb chains,
-a GI above 2^31, a 320-byte title, integer tags, patents, prf with two fields), qprot.fa and
-qnucl.fa (the queries). BASE is NCBI's distributed database 18S_fungal_sequences (version 5,
--parse_seqids, memberships): a sample of its header records is kept as expected/18S_sample.ber.
+definition lines joined by Ctrl-A, GIs, a definition line without a title, lcl|Subject_ ids)
+with their taxid maps, prot_extra.fa (a GI in the second definition line only, 12 long titles,
+an empty title), variants.fa (one record per further form: tpe, tpd, gpp, gibbsq, gibbmt, pdb
+chains, a GI above 2^31, a 320-byte title, integer tags, patents and a pre-grant patent, nat,
+prf with two fields, lcl|Subject_ ids; the gibbsq, PIG and nat records hold a sequence that no
+query hits: NCBI's formatters cannot fetch their Bioseqs, and blastp's tabular output stops
+with an exception), qprot.fa and qnucl.fa (the queries). BASE is NCBI's
+distributed database 18S_fungal_sequences (version 5, -parse_seqids, memberships): a sample of
+its header records is kept as expected/18S_sample.ber.
+
+--work must not exist, or be a directory that this script made (it holds WORK_MARKER); the
+script deletes it first.
 
 Outputs:
   db/NAME.{pin,phr,psq} / .{nin,nhr,nsq}: the databases.
   expected/NAME.deflines.tsv: blastdbcmd -entry all, one line per definition line: ordinal id,
     %i (FASTA form of the WorstRank-best id), %a (its bare id), %g (first GI or N/A), %T
     (taxid), %e (sum of the memberships), %t (title).
+  expected/NAME.asn.tsv: blastdbcmd -outfmt %d (the Blast-def-line-set in ASN.1 text), one
+    line per Seq-id: ordinal id, definition line, position, the Seq-id (white space collapsed).
   expected/18S_sample.ber: records of the 18S database (u32 ordinal id, u32 length, the
     record; big-endian); expected/18S_sample.deflines.tsv as above for those ordinal ids.
   expected/CASE.fmt6.tsv: outfmt "6 qaccver sseqid sallseqid sacc saccver sallacc sgi sallgi
     stitle salltitles staxid staxids", the subject columns.
   expected/CASE.fmt5.tsv: outfmt 5, Hit_id, Hit_def and Hit_accession of each hit.
   expected/CASE.fmt8.tsv: outfmt 8, the subject Seq-id of each hit (white space collapsed).
+  expected/CASE.fmt12.tsv: outfmt 12, the subject Seq-id of each hit (compact JSON).
   expected/CASE.fmt0.tsv: outfmt 0 with and without -show_gis: the description lines and the
     definition-line block of each alignment (kind, text).
 Fields use backslash escapes (\\, \t, \n).
 """
 import argparse
+import json
 import re
 import shutil
 import struct
@@ -39,7 +49,9 @@ import subprocess
 from pathlib import Path
 
 NCBI_ENV_DROP = ("BLASTDB",)
-SEARCH = ["-num_threads", "1", "-max_target_seqs", "50"]
+# One HSP per subject: each report row belongs to one sequence.
+SEARCH = ["-num_threads", "1", "-max_target_seqs", "50", "-max_hsps", "1"]
+WORK_MARKER = ".losat-seqid-fixtures-work"
 FIELDS6 = ("qaccver sseqid sallseqid sacc saccver sallacc sgi sallgi stitle salltitles "
            "staxid staxids")
 CASES = [
@@ -47,6 +59,7 @@ CASES = [
     ("blastp_prot_ids", "blastp", "qprot.fa", "prot_ids"),
     ("blastn_nucl_ids", "blastn", "qnucl.fa", "nucl_ids"),
     ("blastp_prot_extra", "blastp", "qprot.fa", "prot_extra"),
+    ("blastp_variants", "blastp", "qprot.fa", "variants"),
 ]
 # 18S records kept: the first 20 (ordinal id 9 has two definition lines), the first three
 # whose GI takes five bytes, one more with several definition lines, the one with memberships
@@ -136,6 +149,73 @@ def fmt8(text):
     return rows
 
 
+def fmt12(text):
+    """The second element of each `ids` pair of the Seq-aligns, once per hit (one JSON document
+    per query)."""
+    decoder, pos, rows = json.JSONDecoder(), 0, []
+
+    def walk(value):
+        if isinstance(value, dict):
+            for key, member in value.items():
+                if key == "ids" and isinstance(member, list) and len(member) == 2:
+                    subject = json.dumps(member[1], separators=(",", ":"))
+                    if not rows or rows[-1][0] != subject:
+                        rows.append([subject])
+                else:
+                    walk(member)
+        elif isinstance(value, list):
+            for member in value:
+                walk(member)
+
+    while True:
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+        if pos == len(text):
+            return rows
+        document, pos = decoder.raw_decode(text, pos)
+        walk(document)
+
+
+def split_top(text):
+    """The elements of ASN.1 text `text` separated by commas outside braces and strings."""
+    parts, depth, start, i = [], 0, 0, 0
+    while i < len(text):
+        c = text[i]
+        if c == '"':
+            i = text.index('"', i + 1)
+            while text[i + 1:i + 2] == '"':  # a doubled quote inside the string
+                i = text.index('"', i + 2)
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        elif c == "," and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+        i += 1
+    parts.append(text[start:])
+    return [part.strip() for part in parts if part.strip()]
+
+
+def inside_braces(text):
+    text = text.strip()
+    assert text[0] == "{" and text[-1] == "}", text
+    return text[1:-1]
+
+
+def asn_seqids(text):
+    """The Seq-ids of blastdbcmd -outfmt %d: ordinal id, definition line, position, text."""
+    rows = []
+    for oid, document in enumerate(text.split("Blast-def-line-set ::= ")[1:]):
+        for line, defline in enumerate(split_top(inside_braces(document))):
+            for member in split_top(inside_braces(defline)):
+                if member.startswith("seqid "):
+                    ids = split_top(inside_braces(member[len("seqid "):]))
+                    for at, seqid in enumerate(ids):
+                        rows.append([str(oid), str(line), str(at), " ".join(seqid.split())])
+    return rows
+
+
 def fmt0(text, kind):
     rows = []
     lines = text.split("\n")
@@ -169,8 +249,11 @@ def main():
     args = parser.parse_args()
     bin_dir, work, out = args.ncbi_bin.resolve(), args.work.resolve(), args.out.resolve()
     if work.exists():
+        if any(work.iterdir()) and not (work / WORK_MARKER).exists():
+            parser.error(f"--work {work} is not empty and was not made by this script")
         shutil.rmtree(work)
     work.mkdir(parents=True)
+    (work / WORK_MARKER).touch()
     for f in (out / "fasta").iterdir():
         shutil.copyfile(f, work / f.name)
 
@@ -189,6 +272,9 @@ def main():
         for ext in ("in", "hr", "sq"):
             shutil.copyfile(work / f"{name}.{letter}{ext}", out / "db" / f"{name}.{letter}{ext}")
         write_tsv(out / "expected" / f"{name}.deflines.tsv", deflines(bin_dir, name, dbtype, work))
+        dump = run([bin_dir / "blastdbcmd", "-db", name, "-dbtype", dbtype, "-entry", "all",
+                    "-outfmt", "%d"], work)
+        write_tsv(out / "expected" / f"{name}.asn.tsv", asn_seqids(dump))
 
     db18s = args.db_18s.resolve()
     with open(out / "expected" / "18S_sample.ber", "wb") as f:
@@ -204,6 +290,8 @@ def main():
                   [line.split("\t")[1:] for line in tabular.splitlines()])
         write_tsv(out / "expected" / f"{case}.fmt5.tsv", fmt5(run(search + ["-outfmt", "5"], work)))
         write_tsv(out / "expected" / f"{case}.fmt8.tsv", fmt8(run(search + ["-outfmt", "8"], work)))
+        write_tsv(out / "expected" / f"{case}.fmt12.tsv",
+                  fmt12(run(search + ["-outfmt", "12"], work)))
         write_tsv(out / "expected" / f"{case}.fmt0.tsv",
                   fmt0(run(search + ["-outfmt", "0"], work), "plain")
                   + fmt0(run(search + ["-outfmt", "0", "-show_gis"], work), "show_gis"))

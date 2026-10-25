@@ -1,7 +1,7 @@
 //! BER decoding of the header record of a BLAST database (`.phr` / `.nhr`): the reader of
 //! the encoding (`Reader`, shared with the ordinal-id decoder of `seqdb::header`) and the
 //! decoder of a whole `Blast-def-line-set` with every member and every Seq-id alternative
-//! (`decode_defline_set`).
+//! (`decode_full_set`).
 //!
 //! NCBI writes the record with `MSerial_AsnBinary`: EXPLICIT context tags, indefinite length
 //! (`80 ... 00 00`) on every constructed value, definite length on INTEGER and VisibleString,
@@ -57,8 +57,8 @@ use super::model::{
 //         eIndefiniteLengthByte   = 0x80,
 //         eEndOfContentsByte      = 0,
 // ```
-pub(crate) const TAG_INTEGER: u8 = 2;
-pub(crate) const TAG_VISIBLE_STRING: u8 = 26;
+const TAG_INTEGER: u8 = 2;
+const TAG_VISIBLE_STRING: u8 = 26;
 pub(crate) const TAG_SEQUENCE: u8 = (1 << 5) | 16;
 pub(crate) const TAG_CONTEXT_CONSTRUCTED: u8 = (2 << 6) | (1 << 5);
 pub(crate) const TAG_NUMBER_MASK: u8 = 31;
@@ -74,6 +74,15 @@ const DEFLINE_MEMBERSHIPS: u8 = 3;
 const DEFLINE_LINKS: u8 = 4;
 const DEFLINE_OTHER_INFO: u8 = 5;
 pub(crate) const DEFLINE_LAST_MEMBER: u8 = DEFLINE_OTHER_INFO;
+/// The names of the members of `Blast-def-line`, by tag.
+const DEFLINE_MEMBERS: [&str; 6] = [
+    "title",
+    "seqid",
+    "taxid",
+    "memberships",
+    "links",
+    "other-info",
+];
 
 /// An error of the BER decoding: the record is not a valid encoding of the type. `pos` is the
 /// byte of the record that the reader had reached.
@@ -281,6 +290,9 @@ impl<'a> Reader<'a> {
         Ok(())
     }
 
+    // NCBI's reader also takes a UTF8String (tag 0x0c) where a VisibleString is expected,
+    // with a warning (objistrasnb.cpp:276-312, `SERIAL_READ_ANY_VISIBLESTRING_TAG` 1).
+    // makeblastdb writes only VisibleStrings, so both decoders refuse another tag.
     pub(crate) fn visible_string(&mut self) -> Result<&'a [u8], BerError> {
         self.expect_tag(TAG_VISIBLE_STRING, "a VisibleString")?;
         let first = self.byte()?;
@@ -361,13 +373,14 @@ impl<'a> Reader<'a> {
     }
 
     /// The members of a SEQUENCE whose identifier was read and whose length `end` gives:
-    /// `each(reader, member, replaced)` reads the value of each member present (inside its
-    /// EXPLICIT tag), in order. Member numbers must increase and stay at or below `last`.
+    /// `each(reader, member)` reads the value of each member present (inside its
+    /// EXPLICIT tag), in order. Member numbers must increase and name one of `names`, the
+    /// members of `type_name` in order.
     fn members(
         &mut self,
         end: End,
         type_name: &str,
-        last: u8,
+        names: &[&str],
         mut each: impl FnMut(&mut Self, u8) -> Result<(), BerError>,
     ) -> Result<(), BerError> {
         let mut next_member = 0;
@@ -376,14 +389,17 @@ impl<'a> Reader<'a> {
             let member = tag & TAG_NUMBER_MASK;
             if tag & !TAG_NUMBER_MASK != TAG_CONTEXT_CONSTRUCTED
                 || member < next_member
-                || member > last
+                || usize::from(member) >= names.len()
             {
                 return Err(self.error(format!("tag 0x{tag:02x} is not a member of {type_name}")));
             }
             next_member = member + 1;
             let member_end = self.open()?;
             each(self, member)?;
-            self.close(member_end, type_name)?;
+            if !self.at_end(member_end)? {
+                let name = names[usize::from(member)];
+                return Err(self.error(format!("unexpected data after {type_name}.{name}")));
+            }
         }
         Ok(())
     }
@@ -461,7 +477,7 @@ pub(crate) fn taxid_value(value: i64) -> i32 {
 /// Seq-ids of every alternative, the taxids, memberships, links and other-info. An empty
 /// record gives no definition line, as in NCBI. The `general` ids `BL_ORD_ID` keep the
 /// volume-relative tag that the record stores (`SeqDb::defline_set` adds the volume start).
-pub fn decode_defline_set(record: &[u8]) -> Result<DeflineSet, BerError> {
+pub fn decode_full_set(record: &[u8]) -> Result<DeflineSet, BerError> {
     let mut deflines = Vec::new();
     if record.is_empty() {
         return Ok(DeflineSet { deflines });
@@ -482,7 +498,7 @@ fn decode_defline(ber: &mut Reader<'_>) -> Result<BlastDefline, BerError> {
     let end = ber.open_sequence("Blast-def-line")?;
     let mut defline = BlastDefline::default();
     let mut has_seqid = false;
-    ber.members(end, "Blast-def-line", DEFLINE_LAST_MEMBER, |ber, member| {
+    ber.members(end, "Blast-def-line", &DEFLINE_MEMBERS, |ber, member| {
         match member {
             DEFLINE_TITLE => {
                 let (title, replaced) = ber.fixed_string()?;
@@ -569,7 +585,7 @@ fn decode_object_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Object
 fn decode_dbtag(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Dbtag, BerError> {
     let end = ber.open_sequence("Dbtag")?;
     let (mut db, mut tag) = (None, None);
-    ber.members(end, "Dbtag", 1, |ber, member| {
+    ber.members(end, "Dbtag", &["db", "tag"], |ber, member| {
         match member {
             0 => db = Some(string(ber, replaced)?),
             _ => tag = Some(decode_object_id(ber, replaced)?),
@@ -585,7 +601,8 @@ fn decode_dbtag(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Dbtag, Ber
 fn decode_textseq_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<TextseqId, BerError> {
     let end = ber.open_sequence("Textseq-id")?;
     let mut id = TextseqId::default();
-    ber.members(end, "Textseq-id", 3, |ber, member| {
+    let names = ["name", "accession", "release", "version"];
+    ber.members(end, "Textseq-id", &names, |ber, member| {
         match member {
             0 => id.name = Some(string(ber, replaced)?),
             1 => id.accession = Some(string(ber, replaced)?),
@@ -600,14 +617,19 @@ fn decode_textseq_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Texts
 fn decode_giimport_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<GiimportId, BerError> {
     let end = ber.open_sequence("Giimport-id")?;
     let (mut id, mut db, mut release) = (None, None, None);
-    ber.members(end, "Giimport-id", 2, |ber, member| {
-        match member {
-            0 => id = Some(ber.int("Giimport-id.id")?),
-            1 => db = Some(string(ber, replaced)?),
-            _ => release = Some(string(ber, replaced)?),
-        }
-        Ok(())
-    })?;
+    ber.members(
+        end,
+        "Giimport-id",
+        &["id", "db", "release"],
+        |ber, member| {
+            match member {
+                0 => id = Some(ber.int("Giimport-id.id")?),
+                1 => db = Some(string(ber, replaced)?),
+                _ => release = Some(string(ber, replaced)?),
+            }
+            Ok(())
+        },
+    )?;
     let Some(id) = id else {
         return Err(ber.error("a Giimport-id has no id"));
     };
@@ -620,7 +642,7 @@ fn decode_patent_seq_id(
 ) -> Result<PatentSeqId, BerError> {
     let end = ber.open_sequence("Patent-seq-id")?;
     let (mut seqid, mut cit) = (None, None);
-    ber.members(end, "Patent-seq-id", 1, |ber, member| {
+    ber.members(end, "Patent-seq-id", &["seqid", "cit"], |ber, member| {
         match member {
             0 => seqid = Some(ber.int("Patent-seq-id.seqid")?),
             _ => cit = Some(decode_id_pat(ber, replaced)?),
@@ -636,22 +658,27 @@ fn decode_patent_seq_id(
 fn decode_id_pat(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<IdPat, BerError> {
     let end = ber.open_sequence("Id-pat")?;
     let (mut country, mut id, mut doc_type) = (None, None, None);
-    ber.members(end, "Id-pat", 2, |ber, member| {
-        match member {
-            0 => country = Some(string(ber, replaced)?),
-            1 => {
-                let (alternative, choice_end) = ber.open_alternative("Id-pat.id", 1)?;
-                let number = string(ber, replaced)?;
-                id = Some(match alternative {
-                    0 => PatentNumber::Number(number),
-                    _ => PatentNumber::AppNumber(number),
-                });
-                ber.close(choice_end, "Id-pat.id")?;
+    ber.members(
+        end,
+        "Id-pat",
+        &["country", "id", "doc-type"],
+        |ber, member| {
+            match member {
+                0 => country = Some(string(ber, replaced)?),
+                1 => {
+                    let (alternative, choice_end) = ber.open_alternative("Id-pat.id", 1)?;
+                    let number = string(ber, replaced)?;
+                    id = Some(match alternative {
+                        0 => PatentNumber::Number(number),
+                        _ => PatentNumber::AppNumber(number),
+                    });
+                    ber.close(choice_end, "Id-pat.id")?;
+                }
+                _ => doc_type = Some(string(ber, replaced)?),
             }
-            _ => doc_type = Some(string(ber, replaced)?),
-        }
-        Ok(())
-    })?;
+            Ok(())
+        },
+    )?;
     match (country, id) {
         (Some(country), Some(id)) => Ok(IdPat {
             country,
@@ -665,7 +692,8 @@ fn decode_id_pat(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<IdPat, Be
 fn decode_pdb_seq_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<PdbSeqId, BerError> {
     let end = ber.open_sequence("PDB-seq-id")?;
     let (mut mol, mut chain, mut rel, mut chain_id) = (None, None, None, None);
-    ber.members(end, "PDB-seq-id", 3, |ber, member| {
+    let names = ["mol", "chain", "rel", "chain-id"];
+    ber.members(end, "PDB-seq-id", &names, |ber, member| {
         match member {
             0 => mol = Some(string(ber, replaced)?),
             1 => chain = Some(ber.int("PDB-seq-id.chain")?),
@@ -691,33 +719,33 @@ fn decode_date(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Date, BerEr
         0 => Date::Str(string(ber, replaced)?),
         _ => {
             let std_end = ber.open_sequence("Date-std")?;
-            let mut year = None;
-            let mut std = DateStd {
-                year: 0,
-                month: None,
-                day: None,
-                season: None,
-                hour: None,
-                minute: None,
-                second: None,
-            };
-            ber.members(std_end, "Date-std", 6, |ber, member| {
+            let (mut year, mut month, mut day, mut season) = (None, None, None, None);
+            let (mut hour, mut minute, mut second) = (None, None, None);
+            let names = ["year", "month", "day", "season", "hour", "minute", "second"];
+            ber.members(std_end, "Date-std", &names, |ber, member| {
                 match member {
                     0 => year = Some(ber.int("Date-std.year")?),
-                    1 => std.month = Some(ber.int("Date-std.month")?),
-                    2 => std.day = Some(ber.int("Date-std.day")?),
-                    3 => std.season = Some(string(ber, replaced)?),
-                    4 => std.hour = Some(ber.int("Date-std.hour")?),
-                    5 => std.minute = Some(ber.int("Date-std.minute")?),
-                    _ => std.second = Some(ber.int("Date-std.second")?),
+                    1 => month = Some(ber.int("Date-std.month")?),
+                    2 => day = Some(ber.int("Date-std.day")?),
+                    3 => season = Some(string(ber, replaced)?),
+                    4 => hour = Some(ber.int("Date-std.hour")?),
+                    5 => minute = Some(ber.int("Date-std.minute")?),
+                    _ => second = Some(ber.int("Date-std.second")?),
                 }
                 Ok(())
             })?;
             let Some(year) = year else {
                 return Err(ber.error("a Date-std has no year"));
             };
-            std.year = year;
-            Date::Std(std)
+            Date::Std(DateStd {
+                year,
+                month,
+                day,
+                season,
+                hour,
+                minute,
+                second,
+            })
         }
     };
     ber.close(end, "Date")?;

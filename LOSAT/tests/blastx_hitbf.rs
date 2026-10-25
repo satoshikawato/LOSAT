@@ -39,8 +39,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const DIRECT: (&str, &str) = ("LOSAT_X_BXDIAG", "0");
 const OFF: (&str, &str) = ("LOSAT_X_BXHITBF", "0");
 const ON: (&str, &str) = ("LOSAT_X_BXHITBF", "1");
-/// The branch-free candidate scan off: the switch alone on the scan before it.
-const SCAN_OFF: (&str, &str) = ("LOSAT_X_BXSCANBF", "0");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -230,19 +228,16 @@ fn the_branch_free_test_gives_the_reports_of_the_loop_without_it() {
             assert_eq!(reference.code, Some(0), "{what}: {}", reference.stderr);
             assert!(!reference.stdout.is_empty(), "{what}: no report");
             // The direct loop with the test; the default (the fused loop where it pays, the direct
-            // loop elsewhere); the switch alone, on the scan before `LOSAT_X_BXSCANBF`.
-            let alone = blastx(&args, &[DIRECT, SCAN_OFF, OFF]);
+            // loop elsewhere).
             for (arm, run, against) in [
                 ("on", blastx(&args, &[DIRECT]), &reference),
                 ("named", blastx(&args, &[DIRECT, ON]), &reference),
                 ("default", blastx(&args, &[]), &reference),
-                ("alone", blastx(&args, &[DIRECT, SCAN_OFF, ON]), &alone),
             ] {
                 assert_eq!(run.code, against.code, "{what} {arm}: {}", run.stderr);
                 assert!(run.stdout == against.stdout, "{what} {arm}: report differs");
                 assert_eq!(run.messages(), against.messages(), "{what} {arm}");
             }
-            assert!(alone.stdout == reference.stdout, "{what}: alone differs");
         }
     }
 }

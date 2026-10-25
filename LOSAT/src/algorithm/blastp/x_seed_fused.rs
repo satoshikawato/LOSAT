@@ -149,7 +149,7 @@
 //! the one of 1,024, and the tests also one of 64 (`X_CROSS_TEST_CHUNK`), which drains the stage
 //! every few cells.
 //!
-//! EXPERIMENT (LOSAT_X_BXSCANBF, blastx's switch): `x_scan_two_hit_with(.., branch_free: true, ..)`
+//! LOSAT_X_BXSCANBF (graduated 2026-10-26: blastx always takes it): `x_scan_two_hit_with(.., branch_free: true, ..)`
 //! finds the cells with hits by the candidate loop of LOSAT_X_TBNSCANBF
 //! (`tblastn/x_scan_bf.rs`, `x_block_candidates`): the positions of a block of words are written
 //! to a list whose length advances by the presence bit, without a branch on it, and the listed
@@ -1082,7 +1082,7 @@ fn x_scan_two_hit_hitbf<F>(
 /// [`x_cell_test`], not LOSAT_X_BPDIAG's); returns the cells tested in batches, their hits, the
 /// hits passed to `candidate` (zeros for [`XDiagMode::PerHit`]) and the windows of eight staged
 /// hits that LOSAT_X_BXCROSS's batches tested in parts (zero for the other cell tests). Nothing is
-/// added to the totals of the `[TIMING] x_bpdiag` line. EXPERIMENT (LOSAT_X_BXSCANBF):
+/// added to the totals of the `[TIMING] x_bpdiag` line. Branch-free scan (LOSAT_X_BXSCANBF, graduated 2026-10-26 for blastx):
 /// `branch_free` finds the cells with [`x_scan_cells_bf`] (module header). EXPERIMENT
 /// (LOSAT_X_BXCROSS): [`XCellTest::Cross`] runs here ([`x_scan_cells_cross`]); the other cell
 /// tests run through the choice that blastp's loops share ([`x_scan_two_hit_in_with`]).
@@ -1184,7 +1184,7 @@ where
 }
 
 /// [`x_scan_two_hit_in`], with the cells found by [`x_scan_cells_bf`] when `BRANCH_FREE`
-/// (EXPERIMENT, LOSAT_X_BXSCANBF).
+/// (LOSAT_X_BXSCANBF, graduated 2026-10-26 for blastx).
 fn x_scan_two_hit_in_with<const BRANCH_FREE: bool, F>(
     mode: XDiagMode,
     lookup: &BlastAaLookupTable,
@@ -1555,7 +1555,7 @@ unsafe fn x_scan_cells_avx2_cross<const BRANCH_FREE: bool, const CHUNK: usize, F
     X_CROSS_STAGE.set(stage);
 }
 
-/// EXPERIMENT (LOSAT_X_BXSCANBF): [`x_scan_cells`], or [`x_scan_cells_bf`] when `BRANCH_FREE` (the
+/// Branch-free scan (LOSAT_X_BXSCANBF, graduated 2026-10-26 for blastx): [`x_scan_cells`], or [`x_scan_cells_bf`] when `BRANCH_FREE` (the
 /// same calls). One loop per instantiation, so `on_cell` has one call site and is inlined.
 #[inline(always)]
 fn x_scan_cells_with<const BRANCH_FREE: bool, C>(
@@ -1647,7 +1647,7 @@ fn x_scan_cells<C>(
     }
 }
 
-/// EXPERIMENT (LOSAT_X_BXSCANBF): [`x_scan_cells`] with the cells that have hits found without a
+/// Branch-free scan (LOSAT_X_BXSCANBF, graduated 2026-10-26 for blastx): [`x_scan_cells`] with the cells that have hits found without a
 /// branch on the presence bit: for each block of [`X_BLOCK`] positions [`x_block_candidates`] lists
 /// `position << 32 | index`, the list's length advanced by the bit, and the listed cells then go to
 /// `on_cell` in position order. The positions, indices and presence bits are those of
@@ -3609,7 +3609,7 @@ mod tests {
         for start in [window, (1 << 30) - 2_000, i32::MAX - 3_000] {
             for prefetch in [16, 0, 5] {
                 let mut results = Vec::new();
-                // EXPERIMENT (LOSAT_X_BXSCANBF): every cell test also with the branch-free scan
+                // Branch-free scan (LOSAT_X_BXSCANBF, graduated 2026-10-26 for blastx): every cell test also with the branch-free scan
                 // (LOSAT_X_BXCROSS's with each chunk).
                 let runs = cell_runs()
                     .into_iter()
@@ -3686,7 +3686,7 @@ mod tests {
     }
 
     // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`)
-    // EXPERIMENT (LOSAT_X_BXSCANBF): the branch-free scan calls `on_cell` with the positions and
+    // Branch-free scan (LOSAT_X_BXSCANBF, graduated 2026-10-26 for blastx): the branch-free scan calls `on_cell` with the positions and
     // hit lists of the presence-test loop, on subjects across the block boundaries, with the
     // letters of translated frames (X, stop; all of 1-27) and with the word sizes 2-4 (the general
     // loop).

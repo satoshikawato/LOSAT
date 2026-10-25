@@ -147,6 +147,10 @@ use std::ops::RangeInclusive;
 /// reference loop's full lookup table filled in place from per-cell counts,
 /// `tblastx/lookup/x_lut_direct.rs`) were added after the change as switches that are off unless
 /// set and joined the set together once they were verified and timed with them on and off.
+/// `LOSAT_X_BXSCANBF` (BLASTX's seed scans find the subject words with lookup hits by tblastn's
+/// branch-free candidate loop, `blastx/x_seed_scan.rs`) graduated on 2026-10-26: it left
+/// `STRICT_SET` and the scan on the presence test was deleted (the compressed lookup table keeps
+/// its own scan, a rule of the table and not a switch).
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNDBSTREAM",
@@ -204,7 +208,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXFLOW",
     "LOSAT_X_BXHITBF",
     "LOSAT_X_BXLUTPOOL",
-    "LOSAT_X_BXSCANBF",
     "LOSAT_X_BXSCANBYTE",
     "LOSAT_X_BXSUBJFLOW",
     "LOSAT_X_BXUNGAPSENT",

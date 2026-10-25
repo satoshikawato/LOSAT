@@ -808,6 +808,109 @@ fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
     }
 }
 
+// PROBE (probe/b16e-pool, line B s18; never a PR as is): the trace and rows of a long traceback
+// come from a pool the scratches share. A scratch whose trace passes `x_pool_from()` bytes while
+// it grows takes the largest idle pair (its rows so far are copied over); after the traceback
+// call (`xdrop_align`) a pair above that size goes back, at most `x_pool_idle()` idle (the
+// smallest freed). Placement of memory only. PROBE_B16E3_FROM=bytes (0 = off; default 1 MiB),
+// PROBE_B16E3_IDLE=n (default 4).
+type XTracePair = (Vec<u8>, Vec<(u32, u32, u32)>);
+static X_TRACE_POOL: std::sync::Mutex<Vec<XTracePair>> = std::sync::Mutex::new(Vec::new());
+
+fn x_probe_env(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn x_pool_from() -> usize {
+    use std::sync::OnceLock;
+    static FROM: OnceLock<usize> = OnceLock::new();
+    *FROM.get_or_init(|| match x_probe_env("PROBE_B16E3_FROM", 1 << 20) {
+        0 => usize::MAX,
+        n => n,
+    })
+}
+
+fn x_pool_idle() -> usize {
+    use std::sync::OnceLock;
+    static IDLE: OnceLock<usize> = OnceLock::new();
+    *IDLE.get_or_init(|| x_probe_env("PROBE_B16E3_IDLE", 4))
+}
+
+fn x_pool_lock() -> std::sync::MutexGuard<'static, Vec<XTracePair>> {
+    X_TRACE_POOL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+impl XdropScratch {
+    /// Room for `n` more trace bytes (the kernels' row reserve).
+    #[inline(always)]
+    pub(crate) fn x_trace_reserve(&mut self, n: usize) {
+        if self.trace.capacity() - self.trace.len() < n {
+            self.x_trace_grow(n);
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn x_trace_grow(&mut self, n: usize) {
+        let from = x_pool_from();
+        if self.trace.len() + n > from && self.trace.capacity() <= from {
+            let taken = {
+                let mut pool = x_pool_lock();
+                let best = pool
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|(_, p)| p.0.capacity())
+                    .map(|(i, _)| i);
+                best.map(|i| pool.swap_remove(i))
+            };
+            if let Some((mut t, mut r)) = taken {
+                t.clear();
+                t.extend_from_slice(&self.trace);
+                r.clear();
+                r.extend_from_slice(&self.rows);
+                self.trace = t;
+                self.rows = r;
+            }
+        }
+        self.trace.reserve(n);
+    }
+
+    /// After a traceback call: a trace above the pool size goes back to the pool with its rows.
+    #[inline]
+    pub(crate) fn x_trace_release(&mut self) {
+        if self.trace.capacity() > x_pool_from() {
+            self.x_trace_give_back();
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn x_trace_give_back(&mut self) {
+        let pair = (std::mem::take(&mut self.trace), std::mem::take(&mut self.rows));
+        let dropped = {
+            let mut pool = x_pool_lock();
+            pool.push(pair);
+            if pool.len() > x_pool_idle() {
+                let small = pool
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, p)| p.0.capacity())
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                Some(pool.swap_remove(small))
+            } else {
+                None
+            }
+        };
+        drop(dropped);
+    }
+}
+
 /// No NCBI counterpart: `LOSAT_X_DPWINDOW` (strict set, a value switch): the band start, in
 /// lanes, at which the vector kernels move their rows down (`XdropScratch::x_shift`); built-in
 /// 1024, at least 128. Off: the rows hold every column up to the band's end, as before.
@@ -1965,7 +2068,7 @@ mod kernel {
 
             let row_off = sc.trace.len();
             if TB {
-                sc.trace.reserve(bend - first + num_extra + 96);
+                sc.x_trace_reserve(bend - first + num_extra + 96);
             }
             let tr = sc.trace.as_mut_ptr().add(row_off);
             let survw = sc.surv.as_mut_ptr();
@@ -2510,7 +2613,7 @@ mod kernel {
 
             let row_off = sc.trace.len();
             if TB {
-                sc.trace.reserve(bend - first + num_extra + 96);
+                sc.x_trace_reserve(bend - first + num_extra + 96);
             }
             let tr = sc.trace.as_mut_ptr().add(row_off);
             let survw = sc.surv.as_mut_ptr();

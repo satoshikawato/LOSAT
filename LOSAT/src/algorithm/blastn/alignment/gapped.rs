@@ -2258,7 +2258,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
                 n: BLASTNA_SIZE,
             }
         };
-        if let Some(r) = xdrop_align(
+        let x_r = xdrop_align(
             &rows,
             &cols,
             &scores,
@@ -2270,7 +2270,9 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
             true,
             true,
             &mut gap_scratch.fast,
-        ) {
+        );
+        gap_scratch.fast.x_trace_release();
+        if let Some(r) = x_r {
             crate::utils::xstats::add(&crate::utils::xstats::DP_FAST_CALLS, 1);
             crate::utils::xstats::add(&crate::utils::xstats::NT_TB_CELLS, r.cells);
             let out = if r.fence_hit {
@@ -3027,7 +3029,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
                 n: BLASTNA_SIZE,
             }
         };
-        if let Some(r) = xdrop_align(
+        let x_r = xdrop_align(
             &rows,
             &cols,
             &scores,
@@ -3039,7 +3041,9 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             true,
             true,
             &mut gap_scratch.fast,
-        ) {
+        );
+        gap_scratch.fast.x_trace_release();
+        if let Some(r) = x_r {
             let out = if r.fence_hit {
                 super::x_fence::x_fence_met();
                 (r.a_offset, r.b_offset, r.score, 0, 0, 0, 0, Vec::new())

@@ -58,6 +58,7 @@ use crate::stats::{
 };
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score, BLASTAA_SIZE};
 
+mod culling;
 mod database;
 // EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel `-subject` loop in runs of subjects, one diagonal
 // table fill per run.
@@ -1089,6 +1090,41 @@ fn x_prelim_hsplist_count(
     }
 }
 
+// No NCBI counterpart: NCBI's `BlastHSPStreamWrite` writes into the HSP stream's writer, a
+// collector or a culling writer (`CreateHspWriter`). The database search takes the writer as a
+// type, so the default search is the collector's instance of `database::search_blocks` and
+// `-culling_limit` is a second instance (the choice is made once per call, outside the loops).
+/// Where a subject's preliminary HSP lists go: the order of the calls is the subject (OID) order.
+trait PrelimSink {
+    /// `BlastHSPStreamWrite` of one subject's lists; the subject result is emptied.
+    fn add(&mut self, subject_result: &mut BlastpSubjectResult);
+}
+
+/// The default writer: `hspfilter_collector.c`, a heap of `prelim_hitlist_size` lists per query.
+struct PrelimCollector<'a> {
+    preliminary_hit_lists: &'a mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &'a mut [Option<BlastpHitList<XPrelimHsp>>],
+    prelim_hitlist_size: usize,
+}
+
+impl PrelimSink for PrelimCollector<'_> {
+    #[inline(always)]
+    fn add(&mut self, subject_result: &mut BlastpSubjectResult) {
+        update_blastp_preliminary_hit_lists(
+            self.preliminary_hit_lists,
+            self.x_compact_hit_lists,
+            subject_result,
+            self.prelim_hitlist_size,
+        );
+    }
+}
+
+impl PrelimSink for culling::PrelimCulling {
+    fn add(&mut self, subject_result: &mut BlastpSubjectResult) {
+        culling::PrelimCulling::add(self, subject_result);
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:139-159
 // ```c
 // if (!results->hitlist_array[0]) {
@@ -1154,6 +1190,30 @@ fn merge_blastp_subject_results_in_order(
             &mut subject_result,
             prelim_hitlist_size,
         );
+    }
+}
+
+// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1553-1554
+// ```c
+// /* Save the results. */
+// status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+// ```
+/// `merge_blastp_subject_results_in_order` with the culling writer in place of the collector:
+/// the same order, the subjects by index.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn merge_blastp_subject_results_culled(
+    culling: &mut culling::PrelimCulling,
+    subject_results: Vec<Option<BlastpSubjectResult>>,
+) {
+    for (subject_index, subject_result) in subject_results.into_iter().enumerate() {
+        let Some(mut subject_result) = subject_result else {
+            continue;
+        };
+        debug_assert_eq!(subject_result.subject_index, subject_index);
+        culling.add(&mut subject_result);
     }
 }
 
@@ -5201,10 +5261,12 @@ pub fn run(
     }
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
     // before anything is read or written.
+    // The error archives follow the `-outfmt` text (`writes_error_archive`).
     args.archive = super::archive::handle_for(
         &args,
         format == Some(crate::blastinput::app::ReportFormat::ArchiveFormat),
-    )?;
+    )?
+    .map(|handle| handle.with_outfmt_text(&args.outfmt));
     // LOSAT's thread capability is checked before any input or output, as for BLASTN.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
@@ -6395,7 +6457,8 @@ fn search(
                             .as_mut()
                             .map(|offset| offset as &mut (dyn FormatObserver + Send)),
                     };
-                    x_ahead.run_block(x_next_queries, |x_block| {
+                    let x_later_blocks = blocks.len() - index - 1;
+                    x_ahead.run_block(x_next_queries, x_later_blocks, |x_block| {
                         run_resolved_in_pool(
                             args.clone(),
                             block_queries,
@@ -7511,6 +7574,34 @@ fn blastp_compressed_lookup(
     Ok((lookup, contexts))
 }
 
+// No NCBI counterpart: memory only; it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLKDROP): a strict-set switch, on unless it is `0`. The search's lookup
+/// table after its preliminary stage, which nothing reads any more: kept (`Some`) only where the
+/// search gives its vectors to a spare at its end that a later block's build may take
+/// (`x_query_blocks::x_bp_lookup_spare` / `x_bp_aa_spares` and
+/// `XAheadBlock::x_table_taken_later`), or with the switch off; otherwise dropped here, before the
+/// redo, instead of at the search's end.
+fn x_lookup_after_prelim(
+    lookup: BlastpRuntimeLookup,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    ahead: &x_lookup_ahead::XAheadBlock<'_>,
+) -> Option<BlastpRuntimeLookup> {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLKDROP")) {
+        return Some(lookup);
+    }
+    let taken_later = ahead.x_table_taken_later()
+        && match &lookup {
+            BlastpRuntimeLookup::CompressedFlat(_) => {
+                super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
+            }
+            BlastpRuntimeLookup::Aa(_) => super::x_query_blocks::x_bp_aa_spares(pool).is_some(),
+            BlastpRuntimeLookup::Compressed(_) => false,
+        };
+    crate::utils::xreach::x_reach!("LOSAT_X_BPLKDROP", !taken_later);
+    taken_later.then_some(lookup)
+}
+
 fn run_resolved_in_pool(
     args: ResolvedBlastpArgs,
     query_records: &[FastaRecord],
@@ -8136,6 +8227,11 @@ fn run_resolved_in_pool(
         .ok()
         .filter(|&size| size > 0)
         .context("BLASTP preliminary hit list size is not positive")?;
+    // `-culling_limit`: NCBI's culling writer takes the place of the collector (`CreateHspWriter`,
+    // setup_factory.cpp:318-342). The choice is made once for this call: the whole search, a block
+    // of query batches, or one chunk of a split query, each with its own writer.
+    let mut culling = (args.culling_limit > 0)
+        .then(|| culling::PrelimCulling::new(prelim_hitlist_size, args.culling_limit));
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:1008-1018
     // ```c
     // BLAST_OneSubjectUpdateParameters(..., subject_length, ...);
@@ -9404,23 +9500,31 @@ fn run_resolved_in_pool(
         // The preliminary stage of a database: its sequences are read in blocks and
         // searched in the order of their ordinal ids (`database::search_blocks`).
         let merge_sort_start = blastp_timing_start(timing_enabled);
-        database::search_blocks(
-            database,
-            blastp_parallel_pool,
-            window,
-            &|| {
-                BlastpSubjectScratch::new(
-                    offset_array_size,
-                    diag_array_size,
-                    window,
-                    total_query_span,
-                )
-            },
-            &process_subject,
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-            prelim_hitlist_size,
-        )
+        let new_scratch = || {
+            BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span)
+        };
+        match culling.as_mut() {
+            Some(culling) => database::search_blocks(
+                database,
+                blastp_parallel_pool,
+                window,
+                &new_scratch,
+                &process_subject,
+                culling,
+            ),
+            None => database::search_blocks(
+                database,
+                blastp_parallel_pool,
+                window,
+                &new_scratch,
+                &process_subject,
+                &mut PrelimCollector {
+                    preliminary_hit_lists: &mut preliminary_hit_lists,
+                    x_compact_hit_lists: &mut x_compact_hit_lists,
+                    prelim_hitlist_size,
+                },
+            ),
+        }
         .map_err(|error| {
             // A sequence file that cannot be read: NCBI's error of the batch's
             // preliminary search (`database::PreliminaryReadError`).
@@ -9519,12 +9623,15 @@ fn run_resolved_in_pool(
                 });
             }
             let merge_sort_start = blastp_timing_start(timing_enabled);
-            merge_blastp_subject_results_in_order(
-                &mut preliminary_hit_lists,
-                &mut x_compact_hit_lists,
-                subject_results,
-                prelim_hitlist_size,
-            );
+            match culling.as_mut() {
+                Some(culling) => merge_blastp_subject_results_culled(culling, subject_results),
+                None => merge_blastp_subject_results_in_order(
+                    &mut preliminary_hit_lists,
+                    &mut x_compact_hit_lists,
+                    subject_results,
+                    prelim_hitlist_size,
+                ),
+            }
             if let Some(timing) = timing.as_ref() {
                 BlastpTiming::record_call(
                     &timing.prelim_merge_sort_ns,
@@ -9532,6 +9639,21 @@ fn run_resolved_in_pool(
                     merge_sort_start,
                 );
             }
+        }
+    } else if let Some(culling) = culling.as_mut() {
+        // `-culling_limit`: the serial loop below with the culling writer in place of the
+        // collector, chosen once here so that the default loop is unchanged.
+        let mut scratch =
+            BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span);
+        let mut subject_result = BlastpSubjectResult::new(0);
+        for s_idx in 0..subjects.len() {
+            process_subject(
+                &mut scratch,
+                s_idx,
+                BlastpSubjectRef::of(&subjects[s_idx]),
+                &mut subject_result,
+            );
+            culling.add(&mut subject_result);
         }
     } else {
         #[cfg(all(
@@ -9568,6 +9690,12 @@ fn run_resolved_in_pool(
         }
     }
 
+    // `-culling_limit`: `s_BlastHSPCullingFinal` makes the hit lists of the queries from the
+    // trees (hspfilter_culling.c:516-581; `culling.rs`), where the collector's lists were
+    // updated as the subjects came. A query chunk's lists leave below as the collector's do.
+    if let Some(culling) = culling.take() {
+        culling.finish(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
+    }
     // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:268-271
     // ```c++
     //                 _ASSERT(chunk_data->m_HspStream->GetPointer());
@@ -9702,6 +9830,9 @@ fn run_resolved_in_pool(
     //     );
     // }
     // ```
+    // EXPERIMENT (LOSAT_X_BPLKDROP): nothing reads the lookup table after the preliminary stage;
+    // it is dropped here unless a later block's build may take its vectors (at the end below).
+    let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
     // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
@@ -10044,6 +10175,15 @@ fn run_resolved_in_pool(
         "LOSAT_X_NEWTONLANES",
         x_redo_par_run || !use_parallel_kappa_match_redo
     );
+    // EXPERIMENT (LOSAT_X_BPSEGWIN): a redo not in windows empties no store; the windows record
+    // their side (`x_redo_par::x_redo`).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on {
+        crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", false);
+    }
     if x_redo_par_run {
         #[cfg(all(
             feature = "parallel",
@@ -10752,6 +10892,13 @@ fn run_resolved_in_pool(
     let final_traceback_start = blastp_timing_start(timing_enabled);
     for hit_list_opt in &mut hit_lists {
         if let Some(hit_list) = hit_list_opt.as_mut() {
+            // `-culling_limit`: the culling pipe is the first step after the traceback
+            // (`BlastHSPStreamTBackClose`, blast_traceback.c:1721), before `-max_hsps` and
+            // `-qcov_hsp_perc` (blast_traceback.c:1763-1766), before the e-value sort and the
+            // prune, and before the `-query_loc` shift of the coordinates below.
+            if args.culling_limit > 0 {
+                culling::cull_traceback(hit_list, args.culling_limit);
+            }
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:845-865
             // ```c
             // for (subject_index = 0; subject_index < hit_list->hsplist_count; ++subject_index) {
@@ -11836,19 +11983,20 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
     // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed. EXPERIMENT
     // (LOSAT_X_BPLKPAHEAD): exact blastp's, for the build of a later block's table ahead of it
-    // (`x_query_blocks::x_bp_aa_spares`).
+    // (`x_query_blocks::x_bp_aa_spares`). EXPERIMENT (LOSAT_X_BPLKDROP): `None` when the table was
+    // dropped before the redo.
     match lookup {
-        BlastpRuntimeLookup::CompressedFlat(table) => {
+        Some(BlastpRuntimeLookup::CompressedFlat(table)) => {
             if let Some(spare) = super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool) {
                 spare.give(table);
             }
         }
-        BlastpRuntimeLookup::Aa(table) => {
+        Some(BlastpRuntimeLookup::Aa(table)) => {
             if let Some(spares) = super::x_query_blocks::x_bp_aa_spares(blastp_parallel_pool) {
                 spares.give(table);
             }
         }
-        BlastpRuntimeLookup::Compressed(_) => {}
+        Some(BlastpRuntimeLookup::Compressed(_)) | None => {}
     }
 
     if let Some(timing) = timing.as_ref() {
@@ -12089,6 +12237,7 @@ mod tests {
             num_alignments: None,
             max_hsps_per_subject: None,
             qcov_hsp_perc: None,
+            culling_limit: None,
             ungapped: false,
             window_size: None,
             matrix: None,

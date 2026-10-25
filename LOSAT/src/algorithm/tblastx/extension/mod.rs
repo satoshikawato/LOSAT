@@ -15,7 +15,7 @@
 mod gapped;
 mod two_hit;
 mod ungapped;
-// EXPERIMENT (LOSAT_X_TBXUNGAP): the table walks of the two-hit extension.
+// The table walks of the two-hit extension.
 mod x_two_hit_fast;
 
 // Re-export public functions

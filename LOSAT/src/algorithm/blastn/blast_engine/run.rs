@@ -6657,7 +6657,9 @@ pub fn run(
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot
     // write, before anything is read or written.
     let archive_requested = output_formats.contains(&BlastnOutputFormat::Archive);
-    args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), archive_requested)?;
+    // The error archives follow the `-outfmt` text (`writes_error_archive`).
+    args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), archive_requested)?
+        .map(|handle| handle.with_outfmt_text(&args.outfmt));
     // LOSAT's thread capability is checked before any input or output, as before.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3631-3636
@@ -7108,7 +7110,8 @@ fn search_cli(
     // `x_qbatch_par::Profile::of_search`'s default, none for a query without a file size, such as
     // standard input) or a slot count set by LOSAT_X_QBATCHPARSLOTS. EXPERIMENT (LOSAT_X_BNQDROP)
     // reads it too (`x_query_drop::Rule`).
-    let x_slots_may_run = match (subjects.as_ref(), x_query_file_bytes(&args.query)) {
+    let x_file_bytes = x_query_file_bytes(&args.query);
+    let x_slots_may_run = match (subjects.as_ref(), x_file_bytes) {
         (Some((Subjects::Records(letters), _)), bytes) => {
             let switches = x_qbatch_par::Switches::from_env();
             let lengths = (0..letters.records().len()).map(|index| letters.len(index));
@@ -7128,9 +7131,10 @@ fn search_cli(
         }
         _ => false,
     };
+    let x_batch_letters = x_query_batch_letters(&args.task);
     let x_rule = x_query_stream::Rule {
         megablast: args.task == "megablast",
-        batch_letters: x_query_batch_letters(&args.task),
+        batch_letters: x_batch_letters,
         threads: args.num_threads,
         slots_may_run: x_slots_may_run,
     };
@@ -7144,6 +7148,22 @@ fn search_cli(
         x_rpt_stream::switch_on(),
         x_rule,
     );
+    // EXPERIMENT (LOSAT_X_BNQDROP): whether the records read before the search move into a store
+    // that the batch loop takes them out of (`x_query_drop::Rule`), decided before the reading so
+    // that EXPERIMENT (LOSAT_X_BNQPACK) can pack their letters as they are read.
+    let x_drop_rule = !x_opening.acts()
+        && x_query_drop::on()
+        && x_query_drop::Rule {
+            formats: &output_formats,
+            query_range: query_range.is_some(),
+            slots_may_run: x_slots_may_run,
+            hit_records: outputs.hits.is_some(),
+        }
+        .acts();
+    let x_pack = x_query_drop::packs(x_drop_rule, x_file_bytes, x_batch_letters);
+    if x_drop_rule && x_query_drop::pack_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BNQPACK", x_pack);
+    }
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders)
         .with_defline(args.archive.is_some());
     let mut query_source = FastaInputSource::from_argument(&args.query, query_file, query_config);
@@ -7173,6 +7193,7 @@ fn search_cli(
     let t_read_fasta = crate::utils::xtiming::clock();
     // EXPERIMENT (LOSAT_X_QSTREAM): with the switch acting this reading keeps only each record's
     // length and how the reading ends; the batches read their records again (`x_query_stream`).
+    let mut x_packed = Vec::new();
     let (records, end, x_store) = if x_opening.acts() {
         let (store, end) = x_query_stream::Store::read(
             x_opening,
@@ -7181,6 +7202,11 @@ fn search_cli(
             query_range.as_ref(),
         )?;
         (Vec::new(), end, store)
+    } else if x_pack {
+        let (QueryRecords { records, end }, packed) =
+            crate::blastinput::fasta_reader::x_read_queries_packed(&mut query_source);
+        x_packed = packed;
+        (records, end, x_query_stream::Store::off(x_opening))
     } else {
         let QueryRecords { records, end } = read_queries(&mut query_source);
         (records, end, x_query_stream::Store::off(x_opening))
@@ -7212,21 +7238,14 @@ fn search_cli(
     // before the search move into a store that the batch loop takes them out of, so a batch can drop
     // its letters once it has encoded them (`x_query_drop.rs`).
     let x_taken = !x_store.acts() && x_query_drop::on() && {
-        let acts = x_query_drop::Rule {
-            formats: &output_formats,
-            query_range: query_range.is_some(),
-            slots_may_run: x_slots_may_run,
-            hit_records: outputs.hits.is_some(),
-        }
-        .acts();
-        crate::utils::xreach::x_reach!("LOSAT_X_BNQDROP", acts);
-        acts
+        crate::utils::xreach::x_reach!("LOSAT_X_BNQDROP", x_drop_rule);
+        x_drop_rule
     };
     let x_taken_store;
     let queries = if x_store.acts() {
         SearchQueries::Streamed(&x_store)
     } else if x_taken {
-        x_taken_store = x_query_drop::Store::new(records);
+        x_taken_store = x_query_drop::Store::new(records, x_packed);
         SearchQueries::Taken(&x_taken_store)
     } else {
         SearchQueries::Records(&records)
@@ -8464,13 +8483,14 @@ fn run_in_pool(
             // report of the batch's first query (`QueryWarnings`). Skipped records are read too.
             // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records, read now from the query file when
             // the switch acts (an error here is the file changed between the two readings).
-            let mut batch_records = match queries.batch(input_start..input_end, start..end) {
-                Ok(records) => records,
-                Err(error) => {
-                    qbp.finish();
-                    return Err(error);
-                }
-            };
+            let mut batch_records =
+                match queries.batch_in(input_start..input_end, start..end, parallel_pool) {
+                    Ok(records) => records,
+                    Err(error) => {
+                        qbp.finish();
+                        return Err(error);
+                    }
+                };
             let batch_title_warnings: Vec<u8> = batch_records
                 .input()
                 .iter()
@@ -13505,6 +13525,83 @@ fn search_query_batch(
                                 },
                             );
                         }
+                    } else if let Some(csr) = two_stage.x_mb_csr() {
+                        // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no
+                        // chains; its words with hits (the presence test of `for_each_hit` first)
+                        // go through `x_on_word_csr`, `on_word`'s statements with the cell's run
+                        // (the chain's offsets in the chain's order) instead of the chain walk, in
+                        // the same order, each `RING` words late through the ring that prefetches
+                        // their cells' offsets and runs (`lookup::x_dc_csr`). Every word still
+                        // counts for the debug summary, as in `on_word`. A batch of pairs that
+                        // reached `OFFSET_ARRAY_SIZE` goes before the next word with hits (`on_word`:
+                        // before the next word), with the same pairs, and before that word's warning,
+                        // so the debug output keeps its order. `on_word` keeps its two callers, so its
+                        // code is the one without the switch.
+                        let mut x_on_word_csr =
+                            |(kmer_start, s_range, index): (usize, usize, u64)| {
+                                if offset_pairs_len >= OFFSET_ARRAY_SIZE {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
+                                }
+                                let run: &[u32] = csr.run(index as usize);
+                                if (debug_mode || blastn_debug) && run.len() > 1000 {
+                                    eprintln!(
+                                    "[WARN] Large matches_slice: len={} for kmer at position {}",
+                                    run.len(),
+                                    kmer_start
+                                );
+                                }
+                                for &q_off_1 in run {
+                                    if debug_enabled {
+                                        dbg_seeds_found += 1;
+                                    }
+                                    offset_pairs[offset_pairs_len] = OffsetPair {
+                                        q_off: q_off_1 as usize - 1,
+                                        s_off: kmer_start,
+                                        s_range,
+                                    };
+                                    offset_pairs_len += 1;
+                                }
+                                if offset_pairs_len >= offset_array_size {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
+                                }
+                            };
+                        let mut ring: x_dc_csr::Ring<'_, (usize, usize, u64)> =
+                            x_dc_csr::Ring::new(csr);
+                        let mb_scan_kind =
+                            select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
+                        scan_subject_kmers_with_ranges(
+                            search_seq_packed,
+                            s_len,
+                            word_length,
+                            lut_word_length,
+                            scan_step,
+                            &subject_seq_ranges,
+                            subject_masked,
+                            mb_scan_kind,
+                            |kmer_start, s_range, current_lut_kmer| {
+                                if debug_enabled {
+                                    dbg_total_s_positions += 1;
+                                }
+                                if two_stage.has_hits(current_lut_kmer) {
+                                    ring.push(
+                                        (kmer_start, s_range, current_lut_kmer),
+                                        |w| w.2 as usize,
+                                        &mut x_on_word_csr,
+                                    );
+                                }
+                            },
+                        );
+                        ring.flush(&mut x_on_word_csr);
                     } else {
                         let mb_scan_kind =
                             select_mb_scan_kind(lut_word_length, scan_step, subject_masked);

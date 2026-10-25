@@ -345,14 +345,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 }
                 let subject = cache.get(s_idx as usize, PROGRAM)?;
                 let subject_record_length = subjects.length(s_idx as usize);
-                let hit = XmlHit {
-                    id: &subject.id,
-                    title: &subject.title,
-                    accession: &subject.accession,
-                    len: subject_record_length,
-                    taxid: subject.taxid,
-                    taxonomy: &subject.taxonomy,
-                };
+                let hit = XmlHit::of(subject, subject_record_length);
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time
                 // (nothing for the other formats).
@@ -478,6 +471,7 @@ mod tests {
                 karlin: Some(karlin.clone()),
                 eff_searchsp: lengths.eff_searchsp,
                 aa_len: 130,
+                context0_search_space: 0,
                 seg_masks: Vec::new(),
             };
             let xml = query_stats(&stats, &numbers);

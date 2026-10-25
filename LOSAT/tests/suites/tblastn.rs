@@ -7,12 +7,12 @@
 mod run_local_tblastn;
 #[path = "../tblastn_batch_rule.rs"]
 mod tblastn_batch_rule;
+#[path = "../tblastn_culling.rs"]
+mod tblastn_culling;
 #[path = "../tblastn_db_search.rs"]
 mod tblastn_db_search;
 #[path = "../tblastn_db_stream.rs"]
 mod tblastn_db_stream;
-#[path = "../tblastn_hitbf.rs"]
-mod tblastn_hitbf;
 #[path = "../tblastn_link_window.rs"]
 mod tblastn_link_window;
 #[path = "../tblastn_oid_chunk.rs"]

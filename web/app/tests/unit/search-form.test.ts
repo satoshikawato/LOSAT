@@ -134,6 +134,26 @@ describe('formParameters', () => {
     expect(formParameters(blastn, { '-task': 'blastn', '-evalue': '1' }, options, 'program')).toEqual([['-task', 'blastn']]);
   });
 
+  it('has "Number of descriptions" and "Number of alignments" in Other Parameters of the four programs, writing -num_descriptions N and -num_alignments N', () => {
+    for (const id of ['blastn', 'blastp', 'tblastn', 'tblastx'] as const) {
+      const program = programById(id);
+      const other = program.sections.find((section) => section.title === 'Other Parameters');
+      const fields = other?.fields.filter((field) => field.flag === '-num_descriptions' || field.flag === '-num_alignments');
+      expect(fields?.map((field) => [field.flag, field.label]), id).toEqual([
+        ['-num_descriptions', 'Number of descriptions'],
+        ['-num_alignments', 'Number of alignments'],
+      ]);
+      expect(other?.placement, id).toBe('algorithm');
+      expect(
+        formParameters(program, { '-num_descriptions': '7', '-num_alignments': '3' }, undefined, 'algorithm'),
+        id,
+      ).toEqual([
+        ['-num_descriptions', '7'],
+        ['-num_alignments', '3'],
+      ]);
+    }
+  });
+
   it('omits a TBLASTX value equal to the engine default', () => {
     const tblastx = programById('tblastx');
     const opts: EngineOption[] = [valueOption('-query_gencode', '1'), valueOption('-db_gencode', '1')];

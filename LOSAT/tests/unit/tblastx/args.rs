@@ -27,7 +27,9 @@ fn test_default_values() {
     assert_eq!(args.matrix, None);
     assert_eq!(args.matrix_name(), "BLOSUM62");
     assert_eq!(args.window(), 40);
-    assert_eq!(args.word_size, 3);
+    assert_eq!(args.word_size, None);
+    assert_eq!(args.word_size(), 3);
+    assert_eq!(args.culling_limit, None);
     assert_eq!(args.num_threads, 1);
     assert_eq!(args.query_gencode, 1);
     assert_eq!(args.db_gencode, 1);
@@ -113,7 +115,7 @@ fn test_custom_word_size() {
         "-word_size",
         "3",
     ]);
-    assert_eq!(args.word_size, 3);
+    assert_eq!(args.word_size, Some(3));
 }
 
 #[test]

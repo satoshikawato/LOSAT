@@ -142,6 +142,8 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
     sets["filter"] = [["-qcov_hsp_perc", value] for value in
                       ("0", "10", "50", "50.5", "99", "100", "1e1", "+50", "101", "-1", "nan", "inf", "0x10", "")]
     sets["filter"] += [["-max_hsps", "1", "-qcov_hsp_perc", "30"], ["-max_target_seqs", "1", "-qcov_hsp_perc", "50"]]
+    # -culling_limit (blast_args.cpp:3335-3340, hspfilter_culling.c): every program here (line NP, O3b for BLASTP and TBLASTN).
+    sets["culling"] = [["-culling_limit", value] for value in ("0", "1", "2", "5", "-1", "0x1", "+1")]
     sets["outfmt"] = [["-outfmt", value] for value in
                       ("6", "06", "+6", " 6", "6 ", "6 std", "7 std qseqid", "0x6", "6.0", "5", "13", "18",
                        "abc", "", " ", "0 std", "10", "17", "-1", "7 qseqid")]
@@ -171,7 +173,6 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
                         ["-lcase_masking", "-soft_masking", "false"]]
     if program == "tblastx":
         sets["gencode"] = [[option, code] for option in ("-query_gencode", "-db_gencode") for code in GENCODES]
-        sets["culling"] = [["-culling_limit", value] for value in ("0", "1", "2", "5", "-1", "0x1", "+1")]
         # -soft_masking (blast_args.cpp:387-391): SEG masks only the lookup table (line NP, SM-2).
         sets["mask"] = [["-soft_masking", value] for value in ("true", "false", "T", "F", "1", "x")]
         sets["mask"] += [["-seg", value, "-soft_masking", "true"] for value in ("no", "10 1.8 2.1")]

@@ -815,6 +815,7 @@ mod tests {
                     query_offsets: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
+                    culling_limit: 0,
                 },
                 mode == 2,
                 true,

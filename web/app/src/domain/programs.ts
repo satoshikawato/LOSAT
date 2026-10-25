@@ -123,6 +123,11 @@ const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subjec
 const threshold: ParameterField = { flag: '-threshold', label: 'Neighboring words threshold', ...decimal };
 const windowSize: ParameterField = { flag: '-window_size', label: 'Two-hit window size', ...integer };
 
+// BLAST+'s -num_descriptions / -num_alignments (NCBI's page has them as "Descriptions" / "Alignments" of its
+// display settings; they also set the hit list sizes, so a run may search twice, abi_v2.md §7).
+const numDescriptions: ParameterField = { flag: '-num_descriptions', label: 'Number of descriptions', ...integer };
+const numAlignments: ParameterField = { flag: '-num_alignments', label: 'Number of alignments', ...integer };
+
 const OTHER = 'Other Parameters';
 
 export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
@@ -195,6 +200,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         title: OTHER,
         placement: 'algorithm',
         fields: [
+          numDescriptions,
+          numAlignments,
           maxHsps,
           { flag: '-perc_identity', label: 'Percent identity', ...decimal },
           { flag: '-subject_besthit', label: 'Subject best hit', kind: 'flag' },
@@ -230,7 +237,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats] },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking] },
-      { title: OTHER, placement: 'algorithm', fields: [threshold, windowSize, maxHsps] },
+      { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize, maxHsps] },
     ],
   },
   {
@@ -268,6 +275,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         title: OTHER,
         placement: 'algorithm',
         fields: [
+          numDescriptions,
+          numAlignments,
           threshold,
           windowSize,
           { flag: '-xdrop_gap', label: 'X-dropoff, preliminary gapped (bits)', ...decimal },
@@ -298,7 +307,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       // TBLASTX is ungapped: NCBI's page has the matrix and no gap costs.
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix] },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking] },
-      { title: OTHER, placement: 'algorithm', fields: [threshold, windowSize] },
+      { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize] },
     ],
   },
 ] satisfies ProgramDescriptor[]);

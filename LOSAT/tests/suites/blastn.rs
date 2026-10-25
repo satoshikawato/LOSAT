@@ -3,12 +3,16 @@
 //! LOSAT/tests/ gets its two lines in its program's suite (`tests/suite_layout.rs` checks that
 //! every file is in exactly one test binary).
 
+#[path = "../blastn_bn_csr.rs"]
+mod blastn_bn_csr;
 #[path = "../blastn_db_cut.rs"]
 mod blastn_db_cut;
 #[path = "../blastn_db_search.rs"]
 mod blastn_db_search;
 #[path = "../blastn_db_stream.rs"]
 mod blastn_db_stream;
+#[path = "../blastn_dc_two_slots.rs"]
+mod blastn_dc_two_slots;
 #[path = "../blastn_diag_lv.rs"]
 mod blastn_diag_lv;
 #[path = "../blastn_disc_lookup_par.rs"]

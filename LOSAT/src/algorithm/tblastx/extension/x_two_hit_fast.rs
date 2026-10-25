@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBXUNGAP): TBLASTX's two-hit ungapped extension
+//! TBLASTX's two-hit ungapped extension
 //! (`two_hit.rs::extend_hit_two_hit`: the word loop and the `s_BlastAaExtendLeft` /
 //! `s_BlastAaExtendRight` walks of NCBI `s_BlastAaExtendTwoHit`) with the scores read from one
 //! flat byte table.
@@ -56,13 +56,14 @@
 //!   -128 and a -32768 step to wrap differently, where the reference (and NCBI's `Int4`) overflows
 //!   too.
 //!
-//! The switch acts on every target. Until line W of plan v4 measured it (item W7), wasm32 kept the
-//! 16-residue v128 walks of `two_hit.rs`, which take each lane out of the vector and call
-//! `get_score` for it (scalar steps); with the table the two-hit extension of the LOSAT Web
-//! engine takes 0.77-0.89 of that time (`docs/agents/diagnostics.md`, entry `LOSAT_X_TBXUNGAP`).
+//! The table walks act on every target (the former switch `LOSAT_X_TBXUNGAP` graduated on
+//! 2026-10-26). Until line W of plan v4 measured them (item W7), wasm32 kept the 16-residue v128
+//! walks of `two_hit.rs`, which take each lane out of the vector and call `get_score` for it
+//! (scalar steps); with the table the two-hit extension of the LOSAT Web engine takes 0.77-0.89
+//! of that time (`docs/agents/diagnostics.md`, entry `LOSAT_X_TBXUNGAP`). The calls the table
+//! does not cover (the Why section's bounds and X-drop) run `extend_hit_two_hit_reference`.
 //!
-//! No NCBI counterpart for the switch itself: it chooses between two LOSAT code paths with the
-//! same result.
+//! No NCBI counterpart for the split itself: the two code paths give the same result.
 
 use super::get_score;
 #[cfg(test)]
@@ -98,12 +99,10 @@ unsafe impl Sync for FixedTable {}
 static FIXED_TABLE: FixedTable = FixedTable(std::cell::UnsafeCell::new([0; TABLE_LEN]));
 
 struct State {
-    /// LOSAT_X_TBXUNGAP is on and the table fits.
-    on: bool,
-    /// The table of the walks; `None` (and off) if a score does not fit it.
+    /// The table of the walks; `None` (the reference runs) if a score does not fit it.
     #[cfg(not(target_arch = "wasm32"))]
     table: Option<Box<Table>>,
-    /// The table of the walks (`FIXED_TABLE`); `None` (and off) if a score does not fit it.
+    /// The table of the walks (`FIXED_TABLE`); `None` (the reference runs) if a score does not fit it.
     #[cfg(target_arch = "wasm32")]
     table: Option<&'static Table>,
 }
@@ -176,17 +175,8 @@ fn state() -> &'static State {
             *FIXED_TABLE.0.get() = *t;
             &*FIXED_TABLE.0.get()
         });
-        // `LOSAT_X_TBXUNGAP` is a strict-set switch.
-        let on = table.is_some() && crate::utils::xswitch::on("LOSAT_X_TBXUNGAP");
-        State { on, table }
+        State { table }
     })
-}
-
-/// LOSAT_X_TBXUNGAP is on (and the table fits).
-// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
-#[inline]
-pub(super) fn on() -> bool {
-    state().on
 }
 
 /// `s_BlastAaExtendLeft` ending at `(qp, sp)` over `n` steps: step `i` (1..=n) reads `qp[-i]`,

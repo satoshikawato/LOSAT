@@ -48,9 +48,10 @@ pub enum SerialError {
     /// A NaN or an infinity in the ASN.1 binary stream, which NCBI marks with its own form
     /// byte and LOSAT does not write (no BLAST report has one).
     NonFiniteReal,
-    /// A byte >= 0x80 in a string of the XML stream, whose US-ASCII encoding cannot hold it:
-    /// NCBI's `CUtf8::SymbolToChar` throws (rc 255, or a document cut after the failed
-    /// element); the callers refuse such strings first, so this does not occur.
+    /// A byte >= 0x80 in a string of the XML streams of outfmt 5 / 14 / 16, whose US-ASCII
+    /// encoding cannot hold it: NCBI's `CUtf8::SymbolToChar` throws (rc 255, or a document cut
+    /// after the failed element); the callers refuse such strings first, so this does not
+    /// occur. The archive's stream has no encoding and writes the byte.
     NonAsciiChar(u8),
     /// A call that the XML stream does not write outside the archive's object mode (a BOOLEAN,
     /// an ENUMERATED value or a CHOICE of outfmt 5).

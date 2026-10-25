@@ -291,6 +291,34 @@ fn octets_are_unwrapped_upper_case_hex_and_a_string_store_is_escaped_text() {
     );
 }
 
+#[test]
+fn a_string_byte_from_0x7f_up_is_written_as_it_is_and_a_control_byte_is_an_error() {
+    // The archive's stream has no encoding: `WriteEncodedChar` takes its first branch
+    // (objostrxml.cpp:559-565) and passes the byte on (UTF-8 here, 0x7F, a lone 0xFF).
+    let mut buf = Vec::new();
+    let mut enc = XmlEncoder::archive(&mut buf);
+    enc.begin_sequence("T");
+    enc.member("m", 0);
+    enc.visible_str(b"caf\xc3\xa9 \x7f \xff <&> a\tb");
+    enc.end_member();
+    enc.end_sequence();
+    assert_eq!(enc.error(), None);
+    assert_eq!(
+        buf,
+        b"\n<T>\n  <T_m>caf\xc3\xa9 \x7f \xff &lt;&amp;&gt; a&#x9;b</T_m>\n</T>".to_vec()
+    );
+    // 0x01-0x1F other than TAB, LF and CR: NCBI writes `#` and a diagnostic, LOSAT refuses.
+    let mut buf = Vec::new();
+    let mut enc = XmlEncoder::archive(&mut buf);
+    enc.visible_str(b"a\x01b");
+    assert_eq!(enc.error(), Some(SerialError::NonVisibleChar(1)));
+    // The US-ASCII stream of outfmt 5 still refuses a byte >= 0x80.
+    let mut buf = Vec::new();
+    let mut enc = XmlEncoder::object(&mut buf);
+    enc.visible_str(b"caf\xc3\xa9");
+    assert_eq!(enc.error(), Some(SerialError::NonAsciiChar(0xc3)));
+}
+
 /// A document that uses every kind of call of the object mode.
 fn sample<E: Encoder>(enc: &mut E) {
     enc.begin_document("Blast4-archive");

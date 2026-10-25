@@ -44,8 +44,13 @@ fn input(name: &str) -> String {
 
 /// One run of `losat blastn` from `LOSAT/` in a clean environment plus `env`.
 fn run(env: &[(&str, &str)], args: &[&str], threads: &str) -> Output {
+    run_in(&engine(), env, args, threads)
+}
+
+/// `run` from the directory `cwd`.
+fn run_in(cwd: &std::path::Path, env: &[(&str, &str)], args: &[&str], threads: &str) -> Output {
     let mut command = Command::new(BIN);
-    command.current_dir(engine()).arg("blastn").args(args);
+    command.current_dir(cwd).arg("blastn").args(args);
     command.args(["-num_threads", threads]);
     for (name, _) in std::env::vars() {
         if name.starts_with("LOSAT_X_")
@@ -393,6 +398,115 @@ fn non_ascii_titles_and_database_names_are_refused() {
             String::from_utf8_lossy(&output.stderr).contains("-db name"),
             "{database:?}"
         );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `-window_masker_db` with a directory name of UTF-8 bytes: the archive records the path as
+/// typed (`WindowMaskerDatabase`), and NCBI's XML archive writes the bytes as they are (its
+/// stream has no encoding). The directory is made here, in a temporary directory that is the
+/// working directory of the run, so that the path is the relative one NCBI was frozen with
+/// (`wm\u{e9}/mg1655_u9.obinary`, `wm_utf8_xml.out`).
+#[test]
+fn a_utf8_window_masker_path_is_written_as_it_is_in_xml() {
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_wm_{}", std::process::id()));
+    let masker_dir = dir.join("wm\u{e9}");
+    std::fs::create_dir_all(&masker_dir).unwrap();
+    std::fs::copy(
+        engine().join("tests/winmask/counts/mg1655_u9.obinary"),
+        masker_dir.join("mg1655_u9.obinary"),
+    )
+    .unwrap();
+    let query = engine().join(input("arch_wm_q.fna"));
+    let subject = engine().join(input("arch_wm_s.fna"));
+    let args = [
+        "-query",
+        query.to_str().unwrap(),
+        "-subject",
+        subject.to_str().unwrap(),
+        "-task",
+        "blastn",
+        "-window_masker_db",
+        "wm\u{e9}/mg1655_u9.obinary",
+        "-outfmt",
+        "11",
+    ];
+    for threads in ["1", "4"] {
+        let output = run_in(&dir, &[XML_FORMAT], &args, threads);
+        assert_eq!(output.status.code(), Some(0), "threads {threads}");
+        let want = frozen("wm_utf8_xml", "out");
+        assert!(
+            output.stdout == want,
+            "threads {threads}: stdout differs ({} bytes, NCBI wrote {}): {}",
+            output.stdout.len(),
+            want.len(),
+            crate::outfmt11_blastx::first_difference(&output.stdout, &want)
+        );
+        assert_eq!(
+            output.stderr,
+            frozen("wm_utf8_xml", "err"),
+            "threads {threads}"
+        );
+    }
+    // The text and binary archives cannot hold the bytes (NCBI writes `#` and a diagnostic per
+    // byte): refused before the first byte.
+    for format in ["", "bin"] {
+        let output = run_in(&dir, &[("ARCHIVE_FORMAT", format)], &args, "1");
+        assert_ne!(output.status.code(), Some(0), "{format:?}");
+        assert!(output.stdout.is_empty(), "{format:?}: nothing is written");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("-window_masker_db path"),
+            "{format:?}: {stderr}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A control byte in the `-window_masker_db` path (other than TAB, LF and CR in XML) is
+/// written as `#` by NCBI with a diagnostic in every encoding: refused before the first byte,
+/// with nothing on standard output and an empty `-out` file.
+#[test]
+fn a_window_masker_path_with_a_control_byte_is_refused_before_the_first_byte() {
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_wmctl_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let query = input("arch_wm_q.fna");
+    let subject = input("arch_wm_s.fna");
+    for format in ["", "bin", "xml"] {
+        for path in ["wm\x01/mg.obinary", "wm\x1f", "wm\x0b"] {
+            let file = dir.join("refused.asn");
+            let _ = std::fs::remove_file(&file);
+            let args = [
+                "-query",
+                &query,
+                "-subject",
+                &subject,
+                "-task",
+                "blastn",
+                "-window_masker_db",
+                path,
+                "-outfmt",
+                "11",
+                "-out",
+                file.to_str().unwrap(),
+            ];
+            let output = run(&[("ARCHIVE_FORMAT", format)], &args, "1");
+            let label = format!("ARCHIVE_FORMAT={format:?} {path:?}");
+            assert_ne!(output.status.code(), Some(0), "{label}");
+            assert!(
+                output.stdout.is_empty(),
+                "{label}: nothing on standard output"
+            );
+            assert!(
+                std::fs::read(&file).map_or(true, |bytes| bytes.is_empty()),
+                "{label}: nothing in the -out file"
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains("-window_masker_db path"),
+                "{label}: {stderr}"
+            );
+        }
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

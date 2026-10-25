@@ -595,9 +595,12 @@ impl Encoder for XmlEncoder<'_> {
     ///             ... hi (if not 0) and lo in lower-case hex ... ';'
     /// ```
     /// A byte of 0x01-0x1F other than TAB, LF and CR is replaced by `#` with an error
-    /// message (`x_VerifyChar`, `BAD_CHAR`), and a byte >= 0x80 makes the US-ASCII stream
-    /// throw (`CUtf8::SymbolToChar`, corelib/ncbistr.cpp:6900-6903); both are errors here (the
-    /// callers refuse such strings first). A NUL byte is dropped (`if (s != '\0')`).
+    /// message (`x_VerifyChar`, `BAD_CHAR`), which LOSAT does not write: an error here (the
+    /// callers refuse such strings first). A byte >= 0x80 makes the US-ASCII stream of outfmt 5
+    /// throw (`CUtf8::SymbolToChar`, corelib/ncbistr.cpp:6900-6903), an error here too; the
+    /// archive's stream has no encoding, so `WriteEncodedChar` takes its first branch
+    /// (objostrxml.cpp:559-565) and the byte passes `x_VerifyChar` and is written as it is (the
+    /// object mode). A NUL byte is dropped (`if (s != '\0')`).
     fn visible_str(&mut self, value: &[u8]) {
         if self.pending_elem {
             self.open_element();
@@ -616,6 +619,7 @@ impl Encoder for XmlEncoder<'_> {
                     self.out.push(b';');
                 }
                 0x01..=0x1f => self.fail(SerialError::NonVisibleChar(byte)),
+                0x80..=0xff if self.object => self.out.push(byte),
                 0x80..=0xff => self.fail(SerialError::NonAsciiChar(byte)),
                 _ => self.out.push(byte),
             }

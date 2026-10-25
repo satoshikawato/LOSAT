@@ -1,0 +1,15 @@
+{
+  "node": "v24.21.0",
+  "nproc": 4,
+  "threads": 16,
+  "arms": {
+    "default": {
+      "runs": 1000,
+      "fail": 3,
+      "oob": 3,
+      "other": [],
+      "probes": [],
+      "errors": []
+    }
+  }
+}

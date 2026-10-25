@@ -709,6 +709,22 @@ if (!isMainThread) {
         markWorkerStart(control, 1);
         if (fault === "trap") throw new WebAssembly.RuntimeError("injected worker trap");
         if (fault === "abnormal-exit") process.exit(23);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
+        // ```c++
+        //     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+        //         (*thread)->Run();
+        //     }
+        // ```
+        // Host memory only. This instance may be older than the guest's last growth of the
+        // shared memory: a standby or recycled worker instantiated before pthread_create
+        // allocated this thread's stack and TLS (and grew the memory for them). V8 updates
+        // another isolate's view of a grown shared memory later, and an atomic access is
+        // checked against that view (plain accesses are not), so the thread's first atomic
+        // store, to its TLS (`self->tid`), trapped "memory access out of bounds" in about 0.3 %
+        // of 16-thread runs (2026-10-25, Node 24.21.0: 14 of 4,800). memory.grow(0) updates
+        // this isolate's view at once (the header of wasi_shared_memory.js); with it, 0 of
+        // 2,800 (docs/evidence/wasm_oob_20261025/README.md).
+        memory.grow(0);
         instance.exports.wasi_thread_start(tid, startArg);
         debug(`worker done tid=${tid}`);
         if (!recycle) break;

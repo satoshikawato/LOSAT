@@ -4,10 +4,9 @@
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is
 //! `0`. It chooses between two LOSAT code
 //! paths with the same result, so the property under test is that the report does not depend
-//! on it: the default run, `LOSAT_X_BNUNGAPCOUNT=0` and the shadow run (which
-//! runs both loops on every call and stops on the first difference) give the same bytes, and
-//! the default run prints nothing on standard error (the `[X_SHADOW] BNUNGAPCOUNT` line is
-//! printed only with `LOSAT_X_BNUNGAPCOUNTSHADOW`). Two searches reach the extension: blastn-short
+//! on it: the default run and `LOSAT_X_BNUNGAPCOUNT=0` give the same bytes and print nothing on
+//! standard error (the unit test `every_offset_matches_the_ported_loops` compares the two loops
+//! on 100,000 calls). Two searches reach the extension: blastn-short
 //! (word size 7: every ungapped extension is the exact one) of short reads cut from LC738874,
 //! and blastn (word size 11: the exact pass after the approximate one reaches the reduced cutoff)
 //! of the first 9,000 letters of LC738874, both against LC738868. That those bytes equal NCBI's
@@ -17,7 +16,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BNUNGAPCOUNT", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_BNUNGAPCOUNTSHADOW", "1");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -124,27 +122,5 @@ fn the_report_does_not_depend_on_the_counted_loops() {
             assert_eq!(report, default, "{task} {SWITCH_OFF:?} threads {threads}");
             assert_eq!(stderr, "", "{task} {SWITCH_OFF:?} threads {threads}");
         }
-    }
-}
-
-// The shadow (set to any value, not in the set; it implies the switch) compares the two
-// loops on every call, prints its summary line with a count above 0, and does not change the
-// report.
-#[test]
-fn the_shadow_compares_the_two_loops_and_the_report_is_unchanged() {
-    let dir = TestDir::new("shadow");
-    for (task, query) in queries(&dir) {
-        let (expected, _) = search(task, &query, 1, &[]);
-        let switches = &[SHADOW][..];
-        let (report, stderr) = search(task, &query, 1, switches);
-        assert_eq!(report, expected, "{task} {switches:?}");
-        let line = stderr
-            .lines()
-            .find(|line| line.starts_with("[X_SHADOW] BNUNGAPCOUNT compared="))
-            .unwrap_or_else(|| panic!("{task} {switches:?}: no summary line:\n{stderr}"));
-        assert!(
-            !line.starts_with("[X_SHADOW] BNUNGAPCOUNT compared=0 "),
-            "{task} {switches:?}: {line}"
-        );
     }
 }

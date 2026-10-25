@@ -4,10 +4,9 @@
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is
 //! `0`. It chooses between two LOSAT code
 //! paths that build the same table, so the property under test is that the report does not
-//! depend on it: the default run, `LOSAT_X_MBFILL=0` and the shadow run
-//! (which builds each one-thread table again with the queued loop and stops on the first
-//! difference) give the same bytes, and the default run prints nothing on standard error (the
-//! `[X_SHADOW] MBFILL` line is printed only with `LOSAT_X_MBFILLSHADOW`). Two searches build the
+//! depend on it: the default run and `LOSAT_X_MBFILL=0` give the same bytes and print nothing on
+//! standard error, and the default run takes the run-based fill (`LOSAT_X_REACH`, on the targets
+//! where the fill takes its path: x86_64 and wasm32). Two searches build the
 //! table on one thread: megablast (the contiguous megablast table) and blastn (word size 11 on a
 //! query of 4,000 letters, fewer than 12,000 on both strands: the small table's two-stage form,
 //! with its cells in the order of indexing) of a query cut from LC738874 with runs of N, against
@@ -17,8 +16,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod reach_support;
+
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_MBFILL", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_MBFILLSHADOW", "1");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -107,41 +107,27 @@ fn search(task: &str, query: &Path, threads: u32, switches: &[(&str, &str)]) -> 
 
 // The default one-thread search runs the run-based fill; `LOSAT_X_MBFILL=0`
 // runs the queued loop, and at four threads the pool fills the table. The
-// reports are equal, and no run prints a line on standard error.
+// reports are equal, no run prints a line on standard error, and the default one-thread run takes
+// the run-based fill where the fill takes its path.
 #[test]
 fn the_report_does_not_depend_on_the_run_based_fill() {
     let dir = TestDir::new("report");
     for (task, query) in queries(&dir) {
-        let (default, default_stderr) = search(task, &query, 1, &[]);
+        let reach = reach_support::Reach::new("mbfill");
+        let (default, default_stderr) = search(task, &query, 1, &[reach.var()]);
         assert!(!default.is_empty(), "{task}: no hits");
         assert_eq!(default_stderr, "", "{task}");
+        if cfg!(any(target_arch = "x86_64", target_arch = "wasm32")) {
+            assert!(
+                reach.sides("LOSAT_X_MBFILL").0,
+                "{task}: the run-based fill did not take the table"
+            );
+        }
         let (report, stderr) = search(task, &query, 1, &[SWITCH_OFF]);
         assert_eq!(report, default, "{task} {SWITCH_OFF:?}");
         assert_eq!(stderr, "", "{task} {SWITCH_OFF:?}");
         let (report, stderr) = search(task, &query, 4, &[]);
         assert_eq!(report, default, "{task} threads 4");
         assert_eq!(stderr, "", "{task} threads 4");
-    }
-}
-
-// The shadow (set to any value, not in the set; it implies the switch) builds each
-// one-thread table again with the queued loop and compares every array, prints its summary line
-// with a count above 0, and does not change the report.
-#[test]
-fn the_shadow_compares_the_two_fills_and_the_report_is_unchanged() {
-    let dir = TestDir::new("shadow");
-    for (task, query) in queries(&dir) {
-        let (expected, _) = search(task, &query, 1, &[]);
-        let switches = &[SHADOW][..];
-        let (report, stderr) = search(task, &query, 1, switches);
-        assert_eq!(report, expected, "{task} {switches:?}");
-        let line = stderr
-            .lines()
-            .find(|line| line.starts_with("[X_SHADOW] MBFILL compared="))
-            .unwrap_or_else(|| panic!("{task} {switches:?}: no summary line:\n{stderr}"));
-        assert!(
-            !line.starts_with("[X_SHADOW] MBFILL compared=0 "),
-            "{task} {switches:?}: {line}"
-        );
     }
 }

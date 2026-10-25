@@ -150,6 +150,10 @@ use std::ops::RangeInclusive;
 /// threads where the slot model takes three or more and the two-slot rule holds,
 /// `blastn/blast_engine/x_qbatch_par.rs`) joined the set in the pull request that added it, after
 /// it was verified and timed with it on and off.
+/// `LOSAT_X_BNEIGHTSLOTS` (BLASTN's `-task blastn` runs the slot model's best layout of at most
+/// eight LOSAT_X_QBATCHPAR slots where the model takes more at 12 to 64 threads,
+/// `blastn/blast_engine/x_qbatch_par.rs`) joined the set in the pull request that added it, after
+/// it was verified and timed with it on and off.
 /// `LOSAT_X_BNCSR` (the chains of BLASTN's contiguous lookup tables of word sizes 9 to 11 laid out
 /// as CSR and scanned through a prefetch ring, `blastn/x_bn_csr.rs`) joined the set in the pull
 /// request that added it, after it was verified and timed with it on and off.
@@ -179,6 +183,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNDBSTREAM",
     "LOSAT_X_BNDCONE",
+    "LOSAT_X_BNEIGHTSLOTS",
     "LOSAT_X_BNFEWSUBJ",
     "LOSAT_X_BNLUTDROP",
     "LOSAT_X_BNMAPPED",

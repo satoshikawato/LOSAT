@@ -17,6 +17,8 @@ mod blastn_dc_two_slots;
 mod blastn_diag_lv;
 #[path = "../blastn_disc_lookup_par.rs"]
 mod blastn_disc_lookup_par;
+#[path = "../blastn_eight_slots.rs"]
+mod blastn_eight_slots;
 #[path = "../blastn_few_subj.rs"]
 mod blastn_few_subj;
 #[path = "../blastn_greedy_row_fuse.rs"]

@@ -3,8 +3,8 @@
 //! `x_resolved_record_frames`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`. It acts on each
-//! such record while `LOSAT_X_TBXFRAMES` is on; a record of A, C, G and T only copies its letters,
-//! and a `-db` sequence is read from its stored codes.
+//! such record; a record of A, C, G and T only copies its letters, and a `-db` sequence is read
+//! from its stored codes.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:443-450
 //! ```c

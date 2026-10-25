@@ -101,15 +101,14 @@
 //! eight staged hits with a repeated entry, tested in parts; counted per subject scan like the
 //! other counts).
 //!
-//! EXPERIMENT (LOSAT_X_BXSCANBF, `x_seed_scan.rs`): with that switch the fused loop finds the
-//! cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`'s
-//! `branch_free`, blastp's `x_scan_cells_bf`): the same cells in the same order.
+//! LOSAT_X_BXSCANBF (`x_seed_scan.rs`; graduated 2026-10-26, no variable, always on): the fused
+//! loop finds the cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`
+//! with `branch_free: true`, blastp's `x_scan_cells_bf`): the same cells in the same order.
 //!
 //! EXPERIMENT (LOSAT_X_BXUNGAPSENT, `x_ungap_sent.rs`): for a subject on that path the closure's
 //! two-hit extension is the sentinel walks, in an instance of its own (`x_word_finder_fused_sent`,
 //! never inlined; the other statements unchanged), so the loop without it keeps its code.
 
-use super::x_seed_scan::x_bxscan_bf;
 use super::x_ungap_sent::XSent;
 use super::*;
 use crate::algorithm::blastp::x_seed_fused::{
@@ -517,15 +516,7 @@ pub(crate) fn x_word_finder_diag(
             crate::utils::xreach::x_reach!("LOSAT_X_BXDEFER", table_mode == mode);
         }
         let (hits, counts) = x_word_finder_fused_or_sent(
-            table_mode,
-            x_bxscan_bf(),
-            batch,
-            parameters,
-            options,
-            subject,
-            table,
-            diagonals,
-            sent,
+            table_mode, batch, parameters, options, subject, table, diagonals, sent,
         )?;
         x_add_counts(counts);
         return Ok(Some(hits));
@@ -546,7 +537,6 @@ pub(crate) fn x_word_finder_diag(
     )?;
     let (fused, counts) = x_word_finder_fused_or_sent(
         x_table_mode(mode, x_table_ratio(table).0),
-        x_bxscan_bf(),
         batch,
         parameters,
         options,
@@ -614,7 +604,6 @@ fn x_add_counts(counts: [u64; 4]) {
 #[allow(clippy::too_many_arguments)]
 fn x_word_finder_fused_or_sent(
     mode: XCellTest,
-    branch_free: bool,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -625,32 +614,15 @@ fn x_word_finder_fused_or_sent(
 ) -> Result<(Vec<InitHsp>, [u64; 4])> {
     match sent {
         Some(sent) => x_word_finder_fused_sent(
-            mode,
-            branch_free,
-            batch,
-            parameters,
-            options,
-            subject,
-            table,
-            diagonals,
-            sent,
+            mode, batch, parameters, options, subject, table, diagonals, sent,
         ),
-        None => x_word_finder_fused(
-            mode,
-            branch_free,
-            batch,
-            parameters,
-            options,
-            subject,
-            table,
-            diagonals,
-        ),
+        None => x_word_finder_fused(mode, batch, parameters, options, subject, table, diagonals),
     }
 }
 
 /// EXPERIMENT (LOSAT_X_BXDIAG): `x_word_finder_direct`'s two-hit stage for one subject on the
 /// standard lookup table `table`, with the scan and the diagonal test fused (cell test `mode`;
-/// the branch-free scan with `branch_free`, LOSAT_X_BXSCANBF); also returns the cells tested in
+/// the branch-free scan, BXSCANBF, graduated); also returns the cells tested in
 /// batches, their hits, the candidates and LOSAT_X_BXCROSS's windows tested in parts.
 /// `subject` starts at the first residue and keeps the sentinel after the last one.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
@@ -673,7 +645,6 @@ fn x_word_finder_fused_or_sent(
 #[allow(clippy::too_many_arguments)]
 fn x_word_finder_fused(
     mode: XCellTest,
-    branch_free: bool,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -693,7 +664,7 @@ fn x_word_finder_fused(
     let counts = x_with_context_table(batch, |contexts| {
         x_scan_two_hit_with(
             mode,
-            branch_free,
+            true,
             table,
             subject,
             length,
@@ -817,7 +788,6 @@ fn x_word_finder_fused(
 #[allow(clippy::too_many_arguments)]
 fn x_word_finder_fused_sent(
     mode: XCellTest,
-    branch_free: bool,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -837,7 +807,7 @@ fn x_word_finder_fused_sent(
             ($shadow:literal) => {
                 x_scan_two_hit_with(
                     mode,
-                    branch_free,
+                    true,
                     table,
                     subject,
                     length,
@@ -919,9 +889,8 @@ mod tests {
     use crate::algorithm::blastx::{input::parse_fasta, parameters, query_setup::prepare_queries};
 
     /// The cell tests this machine can run (the AVX2 batch with LOSAT_X_BXDEFER and without, and
-    /// with LOSAT_X_BXCROSS), each with the presence-test scan and with the branch-free one
-    /// (LOSAT_X_BXSCANBF).
-    fn modes() -> Vec<(XCellTest, bool)> {
+    /// with LOSAT_X_BXCROSS), each with the branch-free scan (BXSCANBF, graduated).
+    fn modes() -> Vec<XCellTest> {
         let mut modes = vec![
             XCellTest::Diag(XDiagMode::PerHit),
             XCellTest::Diag(XDiagMode::Scalar),
@@ -933,9 +902,6 @@ mod tests {
             }
         }
         modes
-            .into_iter()
-            .flat_map(|mode| [(mode, false), (mode, true)])
-            .collect()
     }
 
     /// A search of `query` (nucleotide FASTA) with `-window_size window` (default options
@@ -1014,7 +980,7 @@ mod tests {
     }
 
     /// Runs every subject through the reference and through the fused loop (cell test `mode`;
-    /// the branch-free scan with `branch_free`), each on its own table starting from
+    /// the branch-free scan), each on its own table starting from
     /// `start(table)`, and compares the hit lists and the tables after each subject; returns the
     /// hits and the counts of the fused loop.
     fn compare(
@@ -1025,7 +991,7 @@ mod tests {
             Lookup,
         ),
         subjects: &[Vec<u8>],
-        (mode, branch_free): (XCellTest, bool),
+        mode: XCellTest,
         start: impl Fn(&mut Diagonals),
     ) -> (usize, [u64; 4]) {
         let Lookup::Standard(table, _) = lookup else {
@@ -1055,18 +1021,10 @@ mod tests {
                 |_| {},
             )
             .unwrap();
-            let (actual, c) = x_word_finder_fused(
-                mode,
-                branch_free,
-                batch,
-                params,
-                options,
-                subject,
-                table,
-                &mut fused,
-            )
-            .unwrap();
-            let run = format!("{mode:?} branch_free={branch_free} subject {i}");
+            let (actual, c) =
+                x_word_finder_fused(mode, batch, params, options, subject, table, &mut fused)
+                    .unwrap();
+            let run = format!("{mode:?} subject {i}");
             assert_eq!(actual, expected, "{run}");
             assert_eq!(fused.offset, reference.offset, "{run}");
             assert!(fused.entries == reference.entries, "{run}");
@@ -1074,15 +1032,7 @@ mod tests {
             for (table_sent, shadow) in sent.iter_mut().zip([false, true]) {
                 let x = XSent::for_test(&batch.sequence_start, &lead, shadow);
                 let (got, c2) = x_word_finder_fused_sent(
-                    mode,
-                    branch_free,
-                    batch,
-                    params,
-                    options,
-                    subject,
-                    table,
-                    table_sent,
-                    x,
+                    mode, batch, params, options, subject, table, table_sent, x,
                 )
                 .unwrap();
                 assert_eq!(got, expected, "{run} sent shadow={shadow}");
@@ -1239,7 +1189,7 @@ mod tests {
             for mode in modes() {
                 let (hits, counts) = compare(&s, subjects, mode, |_| {});
                 assert!(hits > 0, "window={window} {mode:?}: no hit");
-                if mode.0 == XCellTest::Diag(XDiagMode::PerHit) {
+                if mode == XCellTest::Diag(XDiagMode::PerHit) {
                     assert_eq!(counts, [0, 0, 0, 0]);
                 } else {
                     assert!(counts[0] > 0 && counts[2] > 0, "{mode:?} {counts:?}");

@@ -37,13 +37,12 @@
 //! and the diagonal statements below are those of `word_finder`. The caller uses this
 //! path only when nothing traces the seeds (not in the diagnostic stages).
 //!
-//! EXPERIMENT (LOSAT_X_BXSCANBF): with this switch (a switch of the strict set: on unless it is
-//! `0`) the scan of the standard lookup table is
-//! tblastn's branch-free scan (`tblastn/x_scan_bf.rs`, `x_scan_one_range_bf`): the presence bits of a block of words advance a candidate list instead of a branch, and
-//! the listed words' hits are copied in position order with NCBI's stop and resume when the offset
-//! array is full. Its pairs
-//! and `scan_range` values are those of `s_blast_aa_scan_subject_one_range`, so the loop above
-//! reads the same pairs; it writes up to `X_SCAN_BF_SLACK` pairs past `array_size`, which the
+//! BXSCANBF (graduated 2026-10-26: no variable, always on): the scan of the standard
+//! lookup table is tblastn's branch-free scan (`tblastn/x_scan_bf.rs`, `x_scan_one_range_bf`,
+//! the loop of the former TBNSCANBF): the presence bits of a block of words advance a candidate list
+//! instead of a branch, and the listed words' hits are copied in position order with NCBI's stop
+//! and resume when the offset array is full. Its pairs and `scan_range` values are those of
+//! `s_blast_aa_scan_subject_one_range`, so the loop above reads the same pairs; it writes up to `X_SCAN_BF_SLACK` pairs past `array_size`, which the
 //! per-thread buffer then holds and nothing reads. With LOSAT_X_BXDIAG the fused loop takes the
 //! same candidate loop (`x_seed_diag.rs`). The compressed lookup table keeps its scan.
 //!
@@ -109,7 +108,7 @@
 //! letters at once, the candidates listed from one byte per index, the hits of a block copied with
 //! one capacity test. It returns the pairs and `scan_range` values of
 //! `s_blast_aa_scan_subject_one_range` on every call, so the loop above reads the same pairs; it
-//! writes up to `X_SCAN_BYTE_SLACK` pairs past `array_size` (one more than LOSAT_X_BXSCANBF), which
+//! writes up to `X_SCAN_BYTE_SLACK` pairs past `array_size` (one more than the branch-free scan), which
 //! the per-thread buffer holds and nothing reads. The presence bytes (32 KB) are built the first
 //! time the direct loop scans with the table and kept with it (`XKeptPresence` in
 //! `Lookup::Standard`), so they go with the table and no other table can see them. The switch
@@ -117,8 +116,8 @@
 //! where the CPU has AVX2, the plain loops for sparse tables (at most three tenths of the backbone
 //! cells with hits) on x86-64 without AVX2 and in WebAssembly, nothing on aarch64 (not timed); `=2`
 //! the plain loops for every table, `=3` for sparse tables, on any CPU. Where it does not act the
-//! scans before it run (LOSAT_X_BXSCANBF, NCBI's loop). The fused loop of LOSAT_X_BXDIAG keeps its
-//! candidate loop. On x86-64 with AVX2 the direct loop scans the subjects of batches with few hits
+//! branch-free scan of BXSCANBF (graduated, always on) runs. The fused loop of LOSAT_X_BXDIAG keeps
+//! its candidate loop. On x86-64 with AVX2 the direct loop scans the subjects of batches with few hits
 //! per used cell (BXDIAGMIN: short queries); without AVX2 every batch.
 
 use super::x_ungap_sent::XSent;
@@ -131,17 +130,6 @@ use crate::algorithm::tblastn::x_scan_byte::{
 };
 use std::cell::RefCell;
 use std::sync::{Arc, OnceLock};
-
-// No NCBI counterpart: reads the LOSAT_X_BXSCANBF switch once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BXSCANBF): whether the seed scans (the direct loop and BXDIAG's fused loop)
-/// find the words with hits by the branch-free candidate loop (module header); a switch of the
-/// strict set, on unless it is `0`.
-pub(crate) fn x_bxscan_bf() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXSCANBF"))
-}
 
 // No NCBI counterpart: reads the LOSAT_X_BXHITBF switch once; it does not change any value NCBI
 // computes.
@@ -253,7 +241,6 @@ pub(crate) fn x_word_finder_scan(
             subject,
             lookup,
             diagonals,
-            x_bxscan_bf(),
             x_bxscan_byte(),
             x_bxhitbf(),
             sent,
@@ -266,7 +253,6 @@ pub(crate) fn x_word_finder_scan(
         subject,
         lookup,
         diagonals,
-        x_bxscan_bf(),
         x_bxscan_byte(),
         x_bxhitbf(),
     )
@@ -293,9 +279,10 @@ fn x_hitbf_acts(
 // No NCBI counterpart: chooses the instance of LOSAT's direct loop (`x_word_finder_direct_with`, which
 // ports the NCBI code); both give the reference's hits and table.
 // The direct loop: `Lookup::scan` and `word_finder` in one function (`x_word_finder_direct_with`).
-// EXPERIMENT (LOSAT_X_BXSCANBF): `branch_free` scans the standard table with `x_scan_one_range_bf`.
+// The standard table is scanned with `x_scan_one_range_bf` (module header; LOSAT_X_BXSCANBF
+// graduated).
 // EXPERIMENT (LOSAT_X_BXSCANBYTE): `scan_byte` scans it on presence bytes where that mode acts
-// (`x_scan_one_range_byte`, before `branch_free`).
+// (`x_scan_one_range_byte`, before `x_scan_one_range_bf`).
 // EXPERIMENT (LOSAT_X_BXHITBF): with `hit_bf`, where `XHitBf::fits` holds for the subject, the
 // instance with the branch-free two-hit test, `x_word_finder_direct_bf` (module header).
 #[inline(never)]
@@ -307,7 +294,6 @@ fn x_word_finder_direct(
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
-    branch_free: bool,
     scan_byte: XScanByte,
     hit_bf: bool,
 ) -> Result<Vec<InitHsp>> {
@@ -317,14 +303,7 @@ fn x_word_finder_direct(
     }
     if acts {
         return x_word_finder_direct_bf(
-            batch,
-            parameters,
-            options,
-            subject,
-            lookup,
-            diagonals,
-            branch_free,
-            scan_byte,
+            batch, parameters, options, subject, lookup, diagonals, scan_byte,
         );
     }
     x_word_finder_direct_with::<false, _>(
@@ -334,7 +313,6 @@ fn x_word_finder_direct(
         subject,
         lookup,
         diagonals,
-        branch_free,
         scan_byte,
         extend_two_hit_blosum62,
     )
@@ -353,7 +331,6 @@ fn x_word_finder_direct_sent(
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
-    branch_free: bool,
     scan_byte: XScanByte,
     hit_bf: bool,
     sent: XSent<'_>,
@@ -371,7 +348,6 @@ fn x_word_finder_direct_sent(
                 subject,
                 lookup,
                 diagonals,
-                branch_free,
                 scan_byte,
                 move |_: &[u8], _: &[u8], s_left_off, s_right_off, q_right_off, dropoff, _| {
                     sent.two_hit::<$shadow>(s_left_off, s_right_off, q_right_off, dropoff)
@@ -399,7 +375,6 @@ fn x_word_finder_direct_bf(
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
-    branch_free: bool,
     scan_byte: XScanByte,
 ) -> Result<Vec<InitHsp>> {
     x_word_finder_direct_with::<true, _>(
@@ -409,7 +384,6 @@ fn x_word_finder_direct_bf(
         subject,
         lookup,
         diagonals,
-        branch_free,
         scan_byte,
         extend_two_hit_blosum62,
     )
@@ -437,8 +411,8 @@ fn x_word_finder_direct_bf(
 //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
 // ```
 // `Lookup::scan` (its range set-up and loop) and `word_finder` (the statements per pair)
-// in one function; the pairs are read from the scanner's buffer. EXPERIMENT (LOSAT_X_BXSCANBF):
-// `branch_free` scans the standard table with `x_scan_one_range_bf` (module header).
+// in one function; the pairs are read from the scanner's buffer. The standard table is scanned
+// with `x_scan_one_range_bf` (module header).
 // EXPERIMENT (LOSAT_X_BXSCANBYTE): where `scan_byte` acts for the table (`Lookup::x_scan_presence`)
 // it scans the standard table with `x_scan_one_range_byte` instead (module header).
 // EXPERIMENT (LOSAT_X_BXHITBF): with `HIT_BF` (only where the caller found `XHitBf::fits` to hold)
@@ -455,7 +429,6 @@ fn x_word_finder_direct_with<const HIT_BF: bool, E>(
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
-    branch_free: bool,
     scan_byte: XScanByte,
     extend: E,
 ) -> Result<Vec<InitHsp>>
@@ -490,15 +463,13 @@ where
     if scan_byte.on() && matches!(lookup, Lookup::Standard(..)) {
         crate::utils::xreach::x_reach!("LOSAT_X_BXSCANBYTE", presence.is_some());
     }
-    // EXPERIMENT (LOSAT_X_BXSCANBF, LOSAT_X_BXSCANBYTE): room for the pairs the branch-free scan
-    // or the scan on presence bytes writes past `array_size` (never read).
+    // Room for the pairs the branch-free scan or the scan on presence bytes (LOSAT_X_BXSCANBYTE)
+    // writes past `array_size` (never read).
     let room = capacity
         + if presence.is_some() {
             X_SCAN_BYTE_SLACK
-        } else if branch_free {
-            X_SCAN_BF_SLACK
         } else {
-            0
+            X_SCAN_BF_SLACK
         };
     // EXPERIMENT (LOSAT_X_BXHITBF): the constants of the branch-free test (the caller checked
     // XHitBf::fits).
@@ -518,11 +489,8 @@ where
                 (Lookup::Standard(l, _), Some(presence)) => x_scan_one_range_byte(
                     scan_byte, l, presence, scanned, pairs, array_size, &mut range,
                 ),
-                (Lookup::Standard(l, _), None) if branch_free => {
-                    x_scan_one_range_bf(l, scanned, pairs, array_size, &mut range)
-                }
                 (Lookup::Standard(l, _), None) => {
-                    s_blast_aa_scan_subject_one_range(l, scanned, pairs, array_size, &mut range)
+                    x_scan_one_range_bf(l, scanned, pairs, array_size, &mut range)
                 }
                 (Lookup::Compressed(l), _) => {
                     l.scan_subject(scanned, &ranges, pairs, array_size, &mut range)
@@ -782,24 +750,23 @@ mod tests {
         entry
     }
 
-    /// The direct loop's arms: (the branch-free scan, the scan on presence bytes, the branch-free
-    /// two-hit test). EXPERIMENT (LOSAT_X_BXSCANBYTE): its plain loops for every table and for
-    /// sparse ones, and its AVX2 forms where the CPU has AVX2.
-    fn arms() -> Vec<(bool, XScanByte, bool)> {
+    /// The direct loop's arms: (the scan on presence bytes, the branch-free two-hit test).
+    /// EXPERIMENT (LOSAT_X_BXSCANBYTE): its plain loops for every table and for sparse ones, and
+    /// its AVX2 forms where the CPU has AVX2; the arms with it off scan with the branch-free
+    /// candidate loop.
+    fn arms() -> Vec<(XScanByte, bool)> {
         let plain = XScanByte::On { avx2: false };
         let mut arms = vec![
-            (false, XScanByte::Off, false),
-            (true, XScanByte::Off, false),
-            (false, XScanByte::Off, true),
-            (true, XScanByte::Off, true),
-            (true, plain, false),
-            (false, plain, true),
-            (true, XScanByte::Sparse, true),
+            (XScanByte::Off, false),
+            (XScanByte::Off, true),
+            (plain, false),
+            (plain, true),
+            (XScanByte::Sparse, true),
         ];
         #[cfg(target_arch = "x86_64")]
         if std::is_x86_feature_detected!("avx2") {
-            arms.push((true, XScanByte::On { avx2: true }, false));
-            arms.push((true, XScanByte::On { avx2: true }, true));
+            arms.push((XScanByte::On { avx2: true }, false));
+            arms.push((XScanByte::On { avx2: true }, true));
         }
         arms
     }
@@ -885,9 +852,9 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
             let mut reference = Diagonals::new(length, window).unwrap();
-            // EXPERIMENT (LOSAT_X_BXSCANBF, LOSAT_X_BXSCANBYTE, LOSAT_X_BXHITBF): the direct loop
-            // with and without the branch-free scan, the scan on presence bytes and the
-            // branch-free two-hit test, each on its own table, compared alike. (This fixture
+            // EXPERIMENT (LOSAT_X_BXSCANBYTE, LOSAT_X_BXHITBF): the direct loop with and without
+            // the scan on presence bytes and the branch-free two-hit test (the other arms scan
+            // with the branch-free candidate loop), each on its own table, compared alike. (This fixture
             // never fills the offset array, and its `Sparse` arm scans on presence bytes only if
             // its table is sparse: `x_scan_byte_gives_ncbi_scan_calls_on_blastx_tables` takes the
             // capacity stops, `the_byte_scan_takes_sparse_tables_...` the rule.)
@@ -941,29 +908,21 @@ mod tests {
                 )
                 .unwrap();
                 assert_eq!(plain, initial, "window={window} state={state}");
-                for (&(branch_free, scan_byte, hit_bf), d) in arms.iter().zip(&mut tables) {
+                for (&(scan_byte, hit_bf), d) in arms.iter().zip(&mut tables) {
                     let hits = x_word_finder_direct(
-                        &batch,
-                        &params,
-                        &options,
-                        &subject,
-                        &lookup,
-                        d,
-                        branch_free,
-                        scan_byte,
-                        hit_bf,
+                        &batch, &params, &options, &subject, &lookup, d, scan_byte, hit_bf,
                     )
                     .unwrap();
                     assert_eq!(
                         hits, plain,
-                        "window={window} state={state} scan_bf={branch_free} byte={scan_byte:?} hit_bf={hit_bf}"
+                        "window={window} state={state} byte={scan_byte:?} hit_bf={hit_bf}"
                     );
                     assert!(
                         d.offset == reference.offset && d.entries == reference.entries,
-                        "window={window} state={state} scan_bf={branch_free} byte={scan_byte:?} hit_bf={hit_bf}"
+                        "window={window} state={state} byte={scan_byte:?} hit_bf={hit_bf}"
                     );
                 }
-                for (&(branch_free, scan_byte, hit_bf), pair) in arms.iter().zip(&mut sent_tables) {
+                for (&(scan_byte, hit_bf), pair) in arms.iter().zip(&mut sent_tables) {
                     for (d, shadow) in pair.iter_mut().zip([false, true]) {
                         let hits = x_word_finder_direct_sent(
                             &batch,
@@ -972,14 +931,13 @@ mod tests {
                             &subject,
                             &lookup,
                             d,
-                            branch_free,
                             scan_byte,
                             hit_bf,
                             XSent::for_test(&batch.sequence_start, &lead, shadow),
                         )
                         .unwrap();
                         let arm = format!(
-                            "window={window} state={state} scan_bf={branch_free} \
+                            "window={window} state={state} \
                              byte={scan_byte:?} hit_bf={hit_bf} sent shadow={shadow}"
                         );
                         assert_eq!(hits, plain, "{arm}");
@@ -1017,21 +975,13 @@ mod tests {
                     .unwrap();
                     // Only differences of offsets count below 2^30: the NCBI rows of a new table.
                     assert_eq!(plain, initial, "window={window} offset={offset}");
-                    for (&(branch_free, scan_byte, hit_bf), d) in arms.iter().zip(&mut tables) {
+                    for (&(scan_byte, hit_bf), d) in arms.iter().zip(&mut tables) {
                         let hits = x_word_finder_direct(
-                            &batch,
-                            &params,
-                            &options,
-                            &subject,
-                            &lookup,
-                            d,
-                            branch_free,
-                            scan_byte,
-                            hit_bf,
+                            &batch, &params, &options, &subject, &lookup, d, scan_byte, hit_bf,
                         )
                         .unwrap();
                         let what = format!(
-                            "window={window} offset={offset} scan_bf={branch_free} byte={scan_byte:?} hit_bf={hit_bf}"
+                            "window={window} offset={offset} byte={scan_byte:?} hit_bf={hit_bf}"
                         );
                         assert_eq!(hits, plain, "{what}");
                         assert!(
@@ -1060,27 +1010,19 @@ mod tests {
                 )
                 .unwrap();
                 assert!(plain.is_empty(), "window={window} {n} residues: {plain:?}");
-                for &(branch_free, scan_byte, hit_bf) in &arms {
+                for &(scan_byte, hit_bf) in &arms {
                     let mut d = Diagonals::new(length, window).unwrap();
                     let hits = x_word_finder_direct(
-                        &batch,
-                        &params,
-                        &options,
-                        &short,
-                        &lookup,
-                        &mut d,
-                        branch_free,
-                        scan_byte,
-                        hit_bf,
+                        &batch, &params, &options, &short, &lookup, &mut d, scan_byte, hit_bf,
                     )
                     .unwrap();
                     assert_eq!(
                         hits, plain,
-                        "window={window} {n} residues, scan_bf={branch_free} byte={scan_byte:?} hit_bf={hit_bf}"
+                        "window={window} {n} residues, byte={scan_byte:?} hit_bf={hit_bf}"
                     );
                     assert!(
                         d.offset == reference.offset && d.entries == reference.entries,
-                        "window={window} {n} residues, scan_bf={branch_free} byte={scan_byte:?} hit_bf={hit_bf}"
+                        "window={window} {n} residues, byte={scan_byte:?} hit_bf={hit_bf}"
                     );
                 }
             }
@@ -1112,26 +1054,18 @@ mod tests {
                 |_| {},
             )
             .unwrap();
-            for (&(branch_free, scan_byte, hit_bf), d) in arms.iter().zip(&mut tables) {
+            for (&(scan_byte, hit_bf), d) in arms.iter().zip(&mut tables) {
                 let hits = x_word_finder_direct(
-                    &batch,
-                    &params,
-                    &options,
-                    &subject,
-                    &lookup,
-                    d,
-                    branch_free,
-                    scan_byte,
-                    hit_bf,
+                    &batch, &params, &options, &subject, &lookup, d, scan_byte, hit_bf,
                 )
                 .unwrap();
                 assert_eq!(
                     hits, plain,
-                    "window={window} wrapped, scan_bf={branch_free} byte={scan_byte:?} hit_bf={hit_bf}"
+                    "window={window} wrapped, byte={scan_byte:?} hit_bf={hit_bf}"
                 );
                 assert!(
                     d.offset == reference.offset && d.entries == reference.entries,
-                    "window={window} wrapped, scan_bf={branch_free} byte={scan_byte:?} hit_bf={hit_bf}"
+                    "window={window} wrapped, byte={scan_byte:?} hit_bf={hit_bf}"
                 );
             }
             if !initial.is_empty() {

@@ -26,7 +26,7 @@
 //! scanned by this loop, and the scan calls they took; a call more than the unit's ranges is a stop
 //! and resume), when the search scanned any. blastp keeps the
 //! scan of `tblastx/blast_aascan.rs`; blastx calls this scan and the candidate loop
-//! (`x_block_candidates`) under its own switch, LOSAT_X_BXSCANBF (`blastx/x_seed_scan.rs`); TBLASTX
+//! (`x_block_candidates`) always (LOSAT_X_BXSCANBF graduated 2026-10-26, `blastx/x_seed_scan.rs`); TBLASTX
 //! scans each subject range with this loop under its own switch, LOSAT_X_TBXSCANBF
 //! (`tblastx/x_scan_bf.rs`).
 

@@ -319,6 +319,37 @@ fn a_string_byte_from_0x7f_up_is_written_as_it_is_and_a_control_byte_is_an_error
     assert_eq!(enc.error(), Some(SerialError::NonAsciiChar(0xc3)));
 }
 
+#[test]
+fn a_string_list_variant_is_written_as_the_default_calls_write_it() {
+    let items = ["a&b", "c"];
+    let listed = archive_text(|enc| {
+        enc.begin_sequence("Holder");
+        enc.member("target", 0);
+        enc.variant_string_list("Target", "subjects", 1, items);
+        enc.end_member();
+        enc.end_sequence();
+    });
+    let by_hand = archive_text(|enc| {
+        enc.begin_sequence("Holder");
+        enc.member("target", 0);
+        enc.variant("Target", "subjects", 1);
+        enc.begin_list(false);
+        for item in items {
+            enc.element();
+            enc.visible_str(item.as_bytes());
+        }
+        enc.end_list();
+        enc.end_variant();
+        enc.end_member();
+        enc.end_sequence();
+    });
+    assert_eq!(listed, by_hand);
+    assert!(
+        listed.contains("<Target_subjects_E>a&amp;b</Target_subjects_E>"),
+        "{listed}"
+    );
+}
+
 /// A document that uses every kind of call of the object mode.
 fn sample<E: Encoder>(enc: &mut E) {
     enc.begin_document("Blast4-archive");
@@ -481,6 +512,10 @@ fn the_other_pieces_still_refuse_what_the_archive_needs() {
     assert_eq!(
         refused(&|enc| enc.octets(&[1])),
         Some(SerialError::OctetString)
+    );
+    assert_eq!(
+        refused(&|enc| enc.variant_string_list("Target", "subjects", 1, ["a"])),
+        Some(SerialError::XmlUnsupported("CHOICE"))
     );
     // `begin_named` and `element` write nothing there.
     let mut buf = Vec::new();

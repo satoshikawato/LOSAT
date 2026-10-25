@@ -522,6 +522,18 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         I: IntoIterator,
         I::Item: AsRef<[u8]>,
     {
+        if OBJECT {
+            // The object mode writes a CHOICE and a list as the trait's default calls them.
+            self.variant(type_name, name, tag);
+            self.begin_list(false);
+            for item in items {
+                self.element();
+                self.visible_str(item.as_ref());
+            }
+            self.end_list();
+            self.end_variant();
+            return;
+        }
         if !self.std_xml {
             self.fail(SerialError::XmlUnsupported("CHOICE"));
             return;

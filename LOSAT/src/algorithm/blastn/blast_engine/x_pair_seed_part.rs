@@ -150,6 +150,29 @@ fn home_on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRPARHOME"))
 }
 
+/// No NCBI counterpart: reads LOSAT_X_PAIRPARMERGE once (a strict-set switch: on unless it is
+/// `0`): the merge of a partitioned stage on a pool puts the stage's hits in key order strip by
+/// strip, in ranges of strips on the pool (`hits_by_strips`), instead of with one sort of all of
+/// them. It does not change any value NCBI computes.
+fn merge_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRPARMERGE"))
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_PAIRPARMERGE): the fewest hits of a stage that
+/// `hits_by_strips` orders on the pool (below it the jobs of a scope cost more than the sort),
+/// and the ranges of strips per thread of the pool.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+const MERGE_POOL_MIN_HITS: usize = 4096;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+const MERGE_RANGES_PER_THREAD: usize = 2;
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:368
 /// ```c
 ///     Uint4 bucket = ((Uint4) diag * 0x9E370001) % DIAGHASH_NUM_BUCKETS;
@@ -734,6 +757,7 @@ where
         hits,
         &mut states,
         occ0,
+        n,
         &mut scratch.order,
         &mut scratch.apps,
     );
@@ -1131,6 +1155,7 @@ where
         hits,
         &mut states,
         occ0,
+        n,
         &mut scratch.order,
         &mut scratch.apps,
     );
@@ -1203,6 +1228,157 @@ fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize) {
     }
 }
 
+/// No NCBI counterpart (scheduling only, LOSAT_X_PAIRPARMERGE): the stage's hits appended to
+/// `hits` in the order of their keys, as `merge`'s sort puts them, without that sort: the keys
+/// of a partition ascend (it folds the strips in order, and a strip's seeds of the partition in
+/// their scan order, the counting sort of `produce` being stable; one hit per seed at most), and
+/// a key is (strip, position in the strip's scan order), so the hits of strip i are one run per
+/// partition, after those of the strips before i. Strip by strip, the runs are gathered and the
+/// few hits sorted (`hits_of_strips`); the strips are cut into ranges that the pool orders side
+/// by side, each range writing the slice of the output after the hits of the ranges before it.
+/// Returns `false`, having written nothing, where the switch is off, the stage is not on a pool
+/// of two threads or more, or it has fewer than `MERGE_POOL_MIN_HITS` hits (`merge` sorts them).
+fn hits_by_strips(hits: &mut Vec<UngappedHit>, states: &[PartState], strips: usize) -> bool {
+    if !merge_on() {
+        return false;
+    }
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    {
+        let total: usize = states.iter().map(|st| st.hits.len()).sum();
+        let threads = rayon::current_num_threads();
+        let pool = rayon::current_thread_index().is_some() && threads >= 2;
+        let own = pool && strips >= 2 && total >= MERGE_POOL_MIN_HITS;
+        // (once per stage)
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARMERGE", own);
+        if own {
+            hits_by_strips_on_pool(hits, states, strips, threads * MERGE_RANGES_PER_THREAD);
+        }
+        own
+    }
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    {
+        let _ = (hits, states, strips);
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARMERGE", false);
+        false
+    }
+}
+
+/// No NCBI counterpart (LOSAT_X_PAIRPARMERGE): `hits_by_strips` on the current pool with the
+/// strips cut into `ranges` ranges of equal strip counts (at most one per strip). A range starts
+/// each partition's cursor at its first key of the range's first strip (binary search) and
+/// writes its hits into its own slice of the spare capacity of `hits`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn hits_by_strips_on_pool(
+    hits: &mut Vec<UngappedHit>,
+    states: &[PartState],
+    strips: usize,
+    ranges: usize,
+) {
+    let ranges = ranges.clamp(1, strips.max(1));
+    let bounds: Vec<usize> = (0..=ranges).map(|r| r * strips / ranges).collect();
+    // per range boundary, each partition's first hit at or after it, and the hits before it
+    let starts: Vec<Vec<usize>> = bounds
+        .iter()
+        .map(|&b| {
+            let key = (b as u64) << 32;
+            states
+                .iter()
+                .map(|st| {
+                    debug_assert_eq!(st.hits.len(), st.out.hit_keys.len());
+                    st.out.hit_keys.partition_point(|&k| k < key)
+                })
+                .collect()
+        })
+        .collect();
+    let before: Vec<usize> = starts.iter().map(|c| c.iter().sum()).collect();
+    let total = before[ranges];
+    // every key is of one of the stage's strips
+    assert_eq!(total, states.iter().map(|st| st.hits.len()).sum::<usize>());
+    let len0 = hits.len();
+    hits.reserve(total);
+    let mut rest = &mut hits.spare_capacity_mut()[..total];
+    let mut slices = Vec::with_capacity(ranges);
+    for r in 0..ranges {
+        let (slice, tail) = rest.split_at_mut(before[r + 1] - before[r]);
+        slices.push(slice);
+        rest = tail;
+    }
+    rayon::scope(|scope| {
+        for (r, slice) in slices.into_iter().enumerate() {
+            let (bounds, starts) = (&bounds, &starts);
+            scope.spawn(move |_| {
+                let mut cur = starts[r].clone();
+                let mut runs = Vec::new();
+                let mut k = 0usize;
+                hits_of_strips(
+                    states,
+                    bounds[r]..bounds[r + 1],
+                    &mut cur,
+                    &mut runs,
+                    |hit| {
+                        slice[k].write(hit);
+                        k += 1;
+                    },
+                );
+                // the range wrote every element of its slice, and only those
+                assert!(k == slice.len() && cur == starts[r + 1]);
+            });
+        }
+    });
+    // SAFETY: the slices cover `len0 .. len0 + total` of the allocation (`reserve(total)`), and
+    // every range wrote each element of its slice (the assert above; a range that panics ends
+    // the scope with its panic before this line).
+    unsafe { hits.set_len(len0 + total) };
+}
+
+/// No NCBI counterpart (LOSAT_X_PAIRPARMERGE): the hits of strips `strips` in key order, passed
+/// to `put`: for each strip, every partition's run of keys below the next strip's from `cur[p]`
+/// on (which moves past it) is gathered in `runs` and sorted (`hits_by_strips`).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn hits_of_strips(
+    states: &[PartState],
+    strips: std::ops::Range<usize>,
+    cur: &mut [usize],
+    runs: &mut Vec<(u64, u32, u32)>,
+    mut put: impl FnMut(UngappedHit),
+) {
+    for strip in strips {
+        let end = ((strip as u64) + 1) << 32;
+        runs.clear();
+        for (p, st) in states.iter().enumerate() {
+            let keys = &st.out.hit_keys;
+            let mut j = cur[p];
+            while j < keys.len() && keys[j] < end {
+                debug_assert!(
+                    j == cur[p] || keys[j - 1] < keys[j],
+                    "a partition's keys ascend"
+                );
+                runs.push((keys[j], p as u32, j as u32));
+                j += 1;
+            }
+            cur[p] = j;
+        }
+        if runs.len() > 1 {
+            runs.sort_unstable();
+        }
+        for &(_, p, j) in runs.iter() {
+            put(states[p as usize].hits[j as usize]);
+        }
+    }
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:428-447
 /// ```c
 ///     if (table->occupancy == table->capacity) {
@@ -1219,35 +1395,39 @@ fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize) {
 ///     table->backbone[bucket] = table->occupancy;
 ///     table->occupancy++;
 /// ```
-/// The end of a partitioned stage (module comment): the hits in key order after `hits`; the
-/// appended cells numbered `occ0 + rank` of their keys; the chains of the changed buckets of
-/// every partition written into `hash` with those numbers (each cell at its number, its link
-/// and the bucket's head mapped; the partition tables themselves are left as they are); the
-/// capacity of the reference's doublings.
+/// The end of a partitioned stage of `strips` strips (module comment): the hits in key order
+/// after `hits`; the appended cells numbered `occ0 + rank` of their keys; the chains of the
+/// changed buckets of every partition written into `hash` with those numbers (each cell at its
+/// number, its link and the bucket's head mapped; the partition tables themselves are left as
+/// they are); the capacity of the reference's doublings.
 fn merge(
     hash: &mut DiagHashTable,
     hits: &mut Vec<UngappedHit>,
     states: &mut [PartState],
     occ0: u32,
+    strips: usize,
     order: &mut Vec<(u64, u32, u32)>,
     apps: &mut Vec<(u64, u32, u32)>,
 ) {
     let parts = states.len();
-    order.clear();
-    for (p, st) in states.iter().enumerate() {
-        debug_assert_eq!(st.hits.len(), st.out.hit_keys.len());
-        order.extend(
-            st.out
-                .hit_keys
-                .iter()
-                .enumerate()
-                .map(|(j, &key)| (key, p as u32, j as u32)),
-        );
-    }
-    order.sort_unstable();
-    hits.reserve(order.len());
-    for &(_, p, j) in order.iter() {
-        hits.push(states[p as usize].hits[j as usize]);
+    // EXPERIMENT (LOSAT_X_PAIRPARMERGE): the same order strip by strip on the pool.
+    if !hits_by_strips(hits, states, strips) {
+        order.clear();
+        for (p, st) in states.iter().enumerate() {
+            debug_assert_eq!(st.hits.len(), st.out.hit_keys.len());
+            order.extend(
+                st.out
+                    .hit_keys
+                    .iter()
+                    .enumerate()
+                    .map(|(j, &key)| (key, p as u32, j as u32)),
+            );
+        }
+        order.sort_unstable();
+        hits.reserve(order.len());
+        for &(_, p, j) in order.iter() {
+            hits.push(states[p as usize].hits[j as usize]);
+        }
     }
 
     apps.clear();
@@ -1521,6 +1701,83 @@ mod tests {
             ss: 0,
             se: 0,
             score: 0,
+        }
+    }
+
+    // LOSAT_X_PAIRPARMERGE: `hits_by_strips_on_pool` on pools of 2, 3 and 8 threads, cut into 1,
+    // 2, 7, one per strip and more ranges than strips, puts the hits after those already in the
+    // list in the order of `merge`'s sort of all of them (the same states): random stages of 1 to
+    // 9 partitions whose keys ascend, 1 to 300 strips, strips without hits, an empty partition.
+    #[test]
+    fn hits_by_strips_on_a_pool_is_the_sort_of_merge() {
+        let mut rng = Lcg(0xA15_5EED);
+        let pools: Vec<rayon::ThreadPool> = [2, 3, 8]
+            .iter()
+            .map(|&t| {
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(t)
+                    .build()
+                    .unwrap()
+            })
+            .collect();
+        for round in 0..48u64 {
+            let parts = 1 + (rng.next() % 9) as usize;
+            let strips = 1 + (rng.next() % 300) as usize;
+            let mut states: Vec<PartState> = (0..parts).map(|_| PartState::new()).collect();
+            let mut index = 0usize;
+            for strip in 0..strips {
+                // a strip of `seeds` seeds in scan order, a third of them without a hit
+                let seeds = rng.next() % 40;
+                for pos in 0..seeds {
+                    if rng.next() % 3 == 0 {
+                        continue;
+                    }
+                    let mut p = (rng.next() % parts as u64) as usize;
+                    if parts >= 3 && round % 2 == 0 && p == parts - 1 {
+                        p = 0;
+                    }
+                    states[p].out.hit_keys.push(((strip as u64) << 32) | pos);
+                    states[p].hits.push(hit_of(index));
+                    index += 1;
+                }
+            }
+            let before: Vec<UngappedHit> = (0..(round % 3) as usize)
+                .map(|i| hit_of(1_000_000 + i))
+                .collect();
+            // `merge`'s sort
+            let mut order: Vec<(u64, u32, u32)> = Vec::new();
+            for (p, st) in states.iter().enumerate() {
+                order.extend(
+                    st.out
+                        .hit_keys
+                        .iter()
+                        .enumerate()
+                        .map(|(j, &key)| (key, p as u32, j as u32)),
+                );
+            }
+            order.sort_unstable();
+            let mut want: Vec<usize> = before.iter().map(|h| h.seed_q_off).collect();
+            want.extend(
+                order
+                    .iter()
+                    .map(|&(_, p, j)| states[p as usize].hits[j as usize].seed_q_off),
+            );
+            for pool in &pools {
+                for ranges in [1, 2, 7, strips, 4 * strips] {
+                    let got = pool.install(|| {
+                        let mut hits = before.clone();
+                        hits_by_strips_on_pool(&mut hits, &states, strips, ranges);
+                        hits
+                    });
+                    let got: Vec<usize> = got.iter().map(|h| h.seed_q_off).collect();
+                    assert_eq!(
+                        got,
+                        want,
+                        "round {round}: {parts} partitions, {strips} strips, {ranges} ranges, {} threads",
+                        pool.current_num_threads()
+                    );
+                }
+            }
         }
     }
 

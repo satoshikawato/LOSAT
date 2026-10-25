@@ -553,7 +553,10 @@ impl<'a> XStageSubjects<'a> {
             .binary_search(&oid)
             .expect("every subject of the stage's lists is listed");
         let before = left[at].fetch_sub(1, Ordering::AcqRel);
-        debug_assert!(before > 0, "more matches done than listed for subject {oid}");
+        debug_assert!(
+            before > 0,
+            "more matches done than listed for subject {oid}"
+        );
         if before == 1 {
             let store = stores[at].lock().unwrap_or_else(|e| e.into_inner()).take();
             drop(store);

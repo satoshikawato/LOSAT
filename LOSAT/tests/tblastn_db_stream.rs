@@ -207,11 +207,7 @@ fn a_stage_lets_a_subject_go_after_its_last_match_without_reading_it_again() {
                 &[shadow, ("LOSAT_X_TBNSTAGEDROP", "0")],
             );
             let dropped = tblastn(&query, &db, args, threads, &[shadow]);
-            assert_eq!(
-                reads(&dropped),
-                reads(&held),
-                "{args:?} {threads} threads"
-            );
+            assert_eq!(reads(&dropped), reads(&held), "{args:?} {threads} threads");
             assert!(dropped.1 == held.1, "{args:?} {threads} threads");
         }
     }

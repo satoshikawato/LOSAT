@@ -119,36 +119,54 @@ const ALPHA_CONVERT: [i32; COMPO_LARGEST_ALPHABET] = [
     -1, -1,
 ];
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:383-540
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:383-537
 // ```c
 // static const double BLOSUM62_JOINT_PROBS[COMPO_NUM_TRUE_AA][COMPO_NUM_TRUE_AA] = { ... };
 // static const double BLOSUM62_bg[COMPO_NUM_TRUE_AA] = { ... };
 // ```
+// The values are in the generated `matrix_tables.rs`.
 const BLOSUM62_JOINT_PROBS: [[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA] =
     matrix_tables::BLOSUM62_JOINT_PROBS;
 
 const BLOSUM62_BG: [f64; COMPO_NUM_TRUE_AA] = matrix_tables::BLOSUM62_BG;
 
-/// The composition-based statistics data of `matrix`: its frequency ratios and its joint and
-/// background probabilities. IDENTITY has none; NCBI turns composition-based statistics off for
-/// it before the search (`setup_factory.cpp:143-156`).
-///
-/// NCBI reference: c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1359-1369
-/// ```c
-/// static Compo_FrequencyData *
-/// s_LocateFrequencyData(const char * matrix)
-/// {
-///     int i;
-///     for (i = 0;  i < NUM_SUPPORTED_MATRICES;  i++) {
-///         if (0 == strcasecmp(s_FrequencyData[i].name, matrix)) {
-///             return &s_FrequencyData[i];
-///         }
-///     }
-///     return NULL;
-/// }
-/// ```
-/// `_PSIMatrixFrequencyRatiosNew` (`core/matrix_freq_ratios.c:1643-1739`) has the frequency
-/// ratios of the same eight matrices and returns NULL for the others.
+// The composition-based statistics data of `matrix`: its frequency ratios and its joint and
+// background probabilities.
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1359-1369
+// ```c
+// static Compo_FrequencyData *
+// s_LocateFrequencyData(const char * matrix)
+// {
+//     int i;
+//     for (i = 0;  i < NUM_SUPPORTED_MATRICES;  i++) {
+//         if (0 == strcasecmp(s_FrequencyData[i].name, matrix)) {
+//             return &s_FrequencyData[i];
+//         }
+//     }
+//     return NULL;
+// }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/matrix_freq_ratios.c:1734-1736
+// ```c
+//     } else {
+//         retval = _PSIMatrixFrequencyRatiosFree(retval);
+//     }
+// ```
+// `_PSIMatrixFrequencyRatiosNew` has the frequency ratios of the same eight matrices, and of
+// BLOSUM62_20, 20A and 20B, which the 2.17.0 build has no Karlin table for (`blast_stat.c:435`,
+// `BLOSUM62_20_ENABLE`), so NCBI's option validation refuses them. IDENTITY has none of the data:
+// NCBI turns composition-based statistics off for it before the search.
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/setup_factory.cpp:144-150
+// ```c
+//     // reset composition based statistics for the identity scoring matrix
+//     // (we do not have all necessary data to compute CBS)
+//     if (opts_memento->m_ScoringOpts->matrix &&
+//         strcasecmp("identity", opts_memento->m_ScoringOpts->matrix) == 0 &&
+//         opts_memento->m_ExtnOpts->compositionBasedStats > 0) {
+//
+//         opts_memento->m_ExtnOpts->compositionBasedStats = 0;
+// ```
 pub(crate) fn compo_matrix_data(matrix: ScoringMatrix) -> Option<&'static CompoMatrixData> {
     let index = match matrix {
         ScoringMatrix::Blosum62 => 0,

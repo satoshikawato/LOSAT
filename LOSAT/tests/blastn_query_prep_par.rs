@@ -5,16 +5,15 @@
 //! two LOSAT code paths with the same result: the BLASTNA encoding of a query batch and the
 //! ungapped Karlin blocks of its contexts made one after the other, or as ordered parallel maps on
 //! the search pool. So the property under test is that the report does not depend on it: for
-//! megablast, blastn and dc-megablast with several queries (pieces of LC738874 with
-//! microsatellites, runs of `N`, lower case letters, a poly-A query, a query shorter than a
-//! triplet and one of 300 `N` followed by 400 letters) at 1 and 4 threads, the searches without the
-//! switch and with it give the same bytes. The same holds when the
-//! batches are searched in `LOSAT_X_QBATCHPAR` slots (private pools of two threads) and when a
-//! batch is split into query chunks (`CHUNK_SIZE`). That the steps run on the pool's threads is
-//! checked by the unit test `steps_run_on_the_pool_threads` in `x_query_prep_par.rs`; here the
-//! sides of the switch's decision (`LOSAT_X_REACH`) show that the pool path ran at 4 threads and
-//! not at one. That those bytes equal NCBI's is the business of
-//! the blastn fixtures.
+//! megablast, blastn, dc-megablast and blastn-short (at `-evalue 10`) with several queries
+//! (pieces of LC738874 with microsatellites, runs of `N`, lower case letters, a poly-A query, a
+//! query shorter than a triplet, one of 20 letters and one of 300 `N` followed by 400 letters) at
+//! 1 and 4 threads, the searches without the switch and with it give the same bytes. The same
+//! holds when the batches are searched in `LOSAT_X_QBATCHPAR` slots (private pools of two threads)
+//! and when a batch is split into query chunks (`CHUNK_SIZE`). That the steps run on the pool's
+//! threads is checked by the unit test `steps_run_on_the_pool_threads` in `x_query_prep_par.rs`;
+//! here the sides of the switch's decision (`LOSAT_X_REACH`) show that the pool path ran at 4
+//! threads and not at one. That those bytes equal NCBI's is the business of the blastn fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -171,9 +170,9 @@ fn blastn(
     (output.stdout, stderr)
 }
 
-/// For one task: the search without the switch at one thread, then off and on at 1 and 4 threads,
-/// all with the same bytes and no standard error; the switch's own path runs only at 4 threads
-/// (the sides of its decision).
+/// For one task: the search without the switch at one thread, then off at 4 threads and on at 1
+/// and 4 threads, all with the same bytes and no standard error; the switch's own path runs only at
+/// 4 threads (the sides of its decision).
 fn check_task(task: &str, extra: &[&str]) {
     let queries = Queries::new();
     let mut args = vec!["-task", task];
@@ -182,9 +181,12 @@ fn check_task(task: &str, extra: &[&str]) {
     assert!(!expected.is_empty(), "{task}: no hits");
     assert_eq!(expected_stderr, "", "{task}");
     for threads in [1, 4] {
-        let (report, stderr) = blastn(&queries, &args, threads, &[]);
-        assert!(report == expected, "{task} threads {threads}: off differs");
-        assert_eq!(stderr, "", "{task} threads {threads}");
+        // At one thread the search without the switch is `expected` itself.
+        if threads > 1 {
+            let (report, stderr) = blastn(&queries, &args, threads, &[]);
+            assert!(report == expected, "{task} threads {threads}: off differs");
+            assert_eq!(stderr, "", "{task} threads {threads}");
+        }
         let reach = reach_support::Reach::new("qpreppar");
         let (report, stderr) = blastn(&queries, &args, threads, &[SWITCH, reach.var()]);
         assert!(report == expected, "{task} threads {threads}: on differs");
@@ -256,9 +258,13 @@ fn dc_megablast_batch_prepared_on_the_pool() {
 }
 
 // blastn-short (word size 7, the short-query scores); `check_task` asserts that it finds hits.
+// `-evalue 10` instead of the task's 1000: a search writes 53,000 rows in 1.5 CPU s instead of
+// 359,000 in 6-8 s. Every row still reads its context's ungapped block: blastn-short's gap costs
+// (5/2 at 1/-3) are not in the table, so the gapped block of a context is made from its ungapped
+// block. At 10 every query but `two` (no hits at either E-value) has hits on both strands.
 #[test]
 fn blastn_short_batch_prepared_on_the_pool() {
-    check_task("blastn-short", &[]);
+    check_task("blastn-short", &["-evalue", "10"]);
 }
 
 // Lower-case masking and another DUST window and level do not touch the encoding or the blocks.

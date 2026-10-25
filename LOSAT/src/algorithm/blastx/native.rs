@@ -1382,8 +1382,11 @@ fn run_inner(
                 "BLASTX",
                 |pool| {
                     // The run's counts of LOSAT_X_BXUNITCAP (scheduling only), on its pool.
+                    #[cfg(feature = "parallel")]
                     let x_caps = super::search::x_bx_mem::XCapRun::default();
-                    Ok(x_run_batches(Some(&x_caps.attach(pool))))
+                    #[cfg(feature = "parallel")]
+                    let pool = &x_caps.attach(pool);
+                    Ok(x_run_batches(Some(pool)))
                 },
             ) {
                 Ok(batches) => batches,

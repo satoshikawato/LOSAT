@@ -1407,39 +1407,28 @@ fn solve_batch_with(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], lanes8
         }
         return;
     }
-    let (rounds, busy) = LANE_STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        let st = states.four.get_or_insert_with(new_lane_state);
-        #[cfg(target_arch = "x86_64")]
-        let counts = if super::x_newton_exact::x86_level() >= 1 {
-            // SAFETY: AVX2 was detected at run time (x86_level).
-            unsafe { solve_lanes_avx2(inputs, outputs, st) }
-        } else {
-            solve_lanes_plain(inputs, outputs, st)
-        };
-        #[cfg(not(target_arch = "x86_64"))]
-        let counts = solve_lanes_plain(inputs, outputs, st);
-        counts
-    });
+    let mut st = new_lane_state();
+    #[cfg(target_arch = "x86_64")]
+    let (rounds, busy) = if super::x_newton_exact::x86_level() >= 1 {
+        // SAFETY: AVX2 was detected at run time (x86_level).
+        unsafe { solve_lanes_avx2(inputs, outputs, &mut st) }
+    } else {
+        solve_lanes_plain(inputs, outputs, &mut st)
+    };
+    #[cfg(not(target_arch = "x86_64"))]
+    let (rounds, busy) = solve_lanes_plain(inputs, outputs, &mut st);
     BATCHES.fetch_add(1, Ordering::Relaxed);
     LANE_ROUNDS.fetch_add(rounds * LANES as u64, Ordering::Relaxed);
     BUSY_LANE_ROUNDS.fetch_add(busy, Ordering::Relaxed);
 }
 
-// No NCBI counterpart: the working states of the batches of this thread (four lanes, and eight lanes
-// on aarch64, whose tails use the four-lane state), each allocated on the first batch that uses it
-// and kept (a fresh zeroed state per batch would cost about 5 % of the Newton time and leave one
-// state per thread in its heap anyway). Every lane is loaded, moved or mirrored before its values are
-// read, so values left by an earlier batch are never used. It does not change any value NCBI
-// computes.
-struct LaneStates {
-    four: Option<Box<LaneState<F4>>>,
-    eight: Option<Box<LaneState<F8>>>,
-}
-
+// No NCBI counterpart: the working states of the eight-lane batches of this thread, allocated on the
+// first such batch and kept (a fresh zeroed pair per batch would cost about 5 % of the Newton time).
+// Every lane is loaded, moved or mirrored before its values are read, so values left by an earlier
+// batch are never used. It does not change any value NCBI computes.
 thread_local! {
-    static LANE_STATES: RefCell<LaneStates> =
-        const { RefCell::new(LaneStates { four: None, eight: None }) };
+    static LANES8_STATES: RefCell<Option<(Box<LaneState<F8>>, Box<LaneState<F4>>)>> =
+        const { RefCell::new(None) };
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
@@ -1455,11 +1444,9 @@ thread_local! {
 // An eight-lane batch (`solve_lanes8_body`), AVX2 or plain as the four-lane batches.
 /// Solves `inputs[i]` into `outputs[i]` on eight lanes.
 fn solve_batch8(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], hand_over_at: usize) {
-    LANE_STATES.with(|states| {
+    LANES8_STATES.with(|states| {
         let mut states = states.borrow_mut();
-        let LaneStates { four, eight } = &mut *states;
-        let st8 = eight.get_or_insert_with(new_lane_state);
-        let st4 = four.get_or_insert_with(new_lane_state);
+        let (st8, st4) = states.get_or_insert_with(|| (new_lane_state(), new_lane_state()));
         #[cfg(target_arch = "x86_64")]
         let counts = if super::x_newton_exact::x86_level() >= 1 {
             // SAFETY: AVX2 was detected at run time (x86_level).

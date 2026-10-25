@@ -65,6 +65,16 @@
     "takes_value": true
    },
    {
+    "flag": "-num_descriptions",
+    "help": "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]",
+    "takes_value": true
+   },
+   {
+    "flag": "-num_alignments",
+    "help": "Number of database sequences to show alignments for [default: 250]",
+    "takes_value": true
+   },
+   {
     "flag": "-max_hsps",
     "help": "Maximum number of HSPs per subject (unlimited when omitted) Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270",
     "takes_value": true
@@ -212,6 +222,16 @@
     "takes_value": true
    },
    {
+    "flag": "-num_descriptions",
+    "help": "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]",
+    "takes_value": true
+   },
+   {
+    "flag": "-num_alignments",
+    "help": "Number of database sequences to show alignments for [default: 250]",
+    "takes_value": true
+   },
+   {
     "flag": "-max_hsps",
     "help": "",
     "takes_value": true
@@ -219,6 +239,11 @@
    {
     "flag": "-qcov_hsp_perc",
     "help": "Percent query coverage per hsp",
+    "takes_value": true
+   },
+   {
+    "flag": "-culling_limit",
+    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
     "takes_value": true
    },
    {
@@ -427,6 +452,16 @@
     "takes_value": true
    },
    {
+    "flag": "-num_descriptions",
+    "help": "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]",
+    "takes_value": true
+   },
+   {
+    "flag": "-num_alignments",
+    "help": "Number of database sequences to show alignments for [default: 250]",
+    "takes_value": true
+   },
+   {
     "flag": "-max_hsps",
     "help": "Set maximum number of HSPs per subject sequence to save for each query",
     "takes_value": true
@@ -434,6 +469,11 @@
    {
     "flag": "-qcov_hsp_perc",
     "help": "Percent query coverage per hsp",
+    "takes_value": true
+   },
+   {
+    "flag": "-culling_limit",
+    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
     "takes_value": true
    },
    {
@@ -519,9 +559,8 @@
    },
    {
     "flag": "-word_size",
-    "help": "",
-    "takes_value": true,
-    "default": "3"
+    "help": "Word size for wordfinder algorithm [default: 3]",
+    "takes_value": true
    },
    {
     "flag": "-query_gencode",
@@ -538,6 +577,16 @@
    {
     "flag": "-max_target_seqs",
     "help": "Maximum number of aligned sequences to keep (default: 500)",
+    "takes_value": true
+   },
+   {
+    "flag": "-num_descriptions",
+    "help": "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]",
+    "takes_value": true
+   },
+   {
+    "flag": "-num_alignments",
+    "help": "Number of database sequences to show alignments for [default: 250]",
     "takes_value": true
    },
    {
@@ -570,8 +619,7 @@
    {
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
-    "takes_value": true,
-    "default": "0"
+    "takes_value": true
    },
    {
     "flag": "-query_loc",

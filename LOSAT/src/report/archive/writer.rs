@@ -464,12 +464,16 @@ pub fn write_archive<A: AlignSource>(
 }
 
 /// Writes the error archive (`PrintErrorArchive`): the messages saved since the last
-/// archive and `messages` (the error lines).
+/// archive and `messages` (the error lines). Nothing is written when the command line's
+/// `-outfmt` text is not the integer 11 (`writes_error_archive`).
 pub fn write_error_archive(
     handle: &ArchiveHandle,
     error_lines: &[Message],
     sink: &mut dyn Write,
 ) -> Result<()> {
+    if !handle.error_archive_enabled() {
+        return Ok(());
+    }
     let mut messages = handle.take_messages();
     messages.extend(error_lines.iter().cloned());
     match handle.encoding() {

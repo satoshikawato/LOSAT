@@ -379,7 +379,7 @@ fn parse_tblastx_args(
         dbsize: None,
         evalue: 10.0,
         threshold: 13.0,
-        word_size: 3,
+        word_size: None,
         num_threads: 1,
         out: Some(out),
         query_gencode: 1,
@@ -395,10 +395,11 @@ fn parse_tblastx_args(
         soft_masking: None,
         window_size: 40,
         outfmt: "6".to_string(),
-        culling_limit: 0,
+        culling_limit: None,
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,
         subject_loc: None,
+        archive: None,
     };
 
     let mut index = 0;
@@ -543,6 +544,7 @@ fn parse_blastp_args(
         num_alignments: None,
         max_hsps_per_subject: None,
         qcov_hsp_perc: None,
+        culling_limit: None,
         ungapped: false,
         window_size: None,
         matrix: None,

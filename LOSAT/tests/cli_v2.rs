@@ -1078,11 +1078,10 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, " 5 std", None, Writes(Xml)),
         (ALL, "9", None, Writes(AsnBinary)),
         (ALL, " 9 std", None, Writes(AsnBinary)),
-        // 11 (the BLAST archive, OF8a and OF8b): BLASTN, BLASTP, BLASTX and TBLASTN so far; NCBI
-        // ignores a specification after it.
-        (&["blastn", "blastp", "blastx", "tblastn"], "11", None, Writes(ArchiveFormat)),
-        (&["blastn", "blastp", "blastx", "tblastn"], " 11 qseqid", None, Writes(ArchiveFormat)),
-        (&["tblastx"], "11", None, UNSUPPORTED),
+        // 11 (the BLAST archive, OF8a and OF8b): every program; NCBI ignores a specification
+        // after it.
+        (ALL, "11", None, Writes(ArchiveFormat)),
+        (ALL, " 11 qseqid", None, Writes(ArchiveFormat)),
         // 13 and 14 (BLAST JSON and XML2 as side files and a master file at `-out`): every
         // program (BLASTP and BLASTN: OF5c part 1; BLASTX, TBLASTN and TBLASTX: part 2).
         (ALL, "13", Some("o.json"), Writes(Json)),
@@ -1205,38 +1204,38 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
 //                            NStr::IntToString(kDfltArgCullingLimit));
 //     arg_desc.SetConstraint(kArgCullingLimit, new CArgAllowValuesGreaterThanOrEqual(0));
 // ```
-// BLASTN reads `-culling_limit` as a non-negative integer (a hexadecimal value too, as
-// NCBI's argument parser does); BLASTP and TBLASTN still refuse it.
+// BLASTN, BLASTP and TBLASTN read `-culling_limit` as a non-negative integer (a hexadecimal
+// value too, as NCBI's argument parser does).
 #[test]
-fn blastn_accepts_culling_limit_as_ncbi_does() {
-    let limit = |words: &[&str]| -> Result<i32, String> {
-        match parse("blastn", words) {
-            Ok(cli) => match cli.command {
-                Commands::Blastn(args) => Ok(args.culling_limit_value()),
-                _ => unreachable!("blastn"),
-            },
-            Err(error) => Err(LOSAT::cli::render_message(&error)),
-        }
-    };
-    assert_eq!(limit(&[]), Ok(0));
-    assert_eq!(limit(&["-culling_limit", "0"]), Ok(0));
-    assert_eq!(limit(&["-culling_limit", "1"]), Ok(1));
-    assert_eq!(limit(&["-culling_limit", "0x2"]), Ok(2));
-    assert_eq!(limit(&["-culling_limit", "2147483647"]), Ok(2147483647));
-    for bad in ["-1", "1.5", "abc", "2147483648"] {
-        let error = limit(&["-culling_limit", bad]).unwrap_err();
-        assert!(!error.contains("is not supported by"), "{bad}: {error}");
-    }
-    for program in ["blastp", "tblastn"] {
-        let error =
-            LOSAT::cli::render_message(&parse(program, &["-culling_limit", "2"]).unwrap_err());
-        assert!(
-            error.contains(&format!(
-                "is not supported by LOSAT's {}",
-                program.to_ascii_uppercase()
-            )),
-            "{program}: {error}"
+fn culling_limit_is_read_as_ncbi_does() {
+    for program in ["blastn", "blastp", "tblastn"] {
+        let limit = |words: &[&str]| -> Result<i32, String> {
+            match parse(program, words) {
+                Ok(cli) => match cli.command {
+                    Commands::Blastn(args) => Ok(args.culling_limit_value()),
+                    Commands::Blastp(args) => Ok(args.culling_limit_value()),
+                    Commands::Tblastn(args) => Ok(args.culling_limit_value()),
+                    _ => unreachable!("{program}"),
+                },
+                Err(error) => Err(LOSAT::cli::render_message(&error)),
+            }
+        };
+        assert_eq!(limit(&[]), Ok(0), "{program}");
+        assert_eq!(limit(&["-culling_limit", "0"]), Ok(0), "{program}");
+        assert_eq!(limit(&["-culling_limit", "1"]), Ok(1), "{program}");
+        assert_eq!(limit(&["-culling_limit", "0x2"]), Ok(2), "{program}");
+        assert_eq!(
+            limit(&["-culling_limit", "2147483647"]),
+            Ok(2147483647),
+            "{program}"
         );
+        for bad in ["-1", "1.5", "abc", "2147483648"] {
+            let error = limit(&["-culling_limit", bad]).unwrap_err();
+            assert!(
+                !error.contains("is not supported by"),
+                "{program} {bad}: {error}"
+            );
+        }
     }
 }
 
@@ -1259,7 +1258,6 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
         ("blastp", &["-mt_mode", "1"]),
-        ("blastp", &["-culling_limit", "2"]),
         ("blastp", &["-lcase_masking"]),
         ("blastp", &["-h"]),
         ("blastp", &["-version"]),

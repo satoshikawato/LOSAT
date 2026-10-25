@@ -203,6 +203,9 @@ impl XAheadLookup {
 pub(super) struct XAheadBlock<'a> {
     prebuilt: Option<XAheadLookup>,
     start_next: Option<&'a dyn Fn(&BlastpRuntimeLookup)>,
+    /// EXPERIMENT (LOSAT_X_BPLKDROP): whether a later block's build may take the vectors of this
+    /// block's table from the block search's spares (`x_table_taken_later`).
+    table_taken_later: bool,
 }
 
 impl XAheadBlock<'_> {
@@ -212,6 +215,7 @@ impl XAheadBlock<'_> {
         Self {
             prebuilt: None,
             start_next: None,
+            table_taken_later: true,
         }
     }
 
@@ -238,6 +242,17 @@ impl XAheadBlock<'_> {
         if let Some(start_next) = self.start_next {
             start_next(lookup);
         }
+    }
+
+    // No NCBI counterpart: memory only (LOSAT_X_BPLKDROP); it changes no value NCBI computes.
+    /// Whether a later block's build may take the vectors of this block's lookup table, which the
+    /// search gives to the block search's spares at its end (`x_query_blocks::x_bp_lookup_spare`,
+    /// `x_bp_aa_spares`): the next block's own build where the switch does not act, the build
+    /// ahead of the block after the next where it does (`x_make_room`, called when the next block's
+    /// table is ready). True for `none()` (a search that is not a block of the block loop; outside
+    /// the block search there are no spares).
+    pub(super) fn x_table_taken_later(&self) -> bool {
+        self.table_taken_later
     }
 }
 
@@ -487,10 +502,12 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
     /// (the next block's records) and where the switch acts,
     /// the next block's build is spawned in a `rayon::in_place_scope` around the search when the
     /// block's table is ready, and its outcome kept for the next call. A kept panic of the build for
-    /// this block is resumed here, before its search (module header).
+    /// this block is resumed here, before its search (module header). `later_blocks` is the number
+    /// of blocks after this one (`XAheadBlock::x_table_taken_later`).
     pub(super) fn run_block<R>(
         &mut self,
         next: Option<&[FastaRecord]>,
+        later_blocks: usize,
         run: impl FnOnce(XAheadBlock<'_>) -> anyhow::Result<R>,
     ) -> anyhow::Result<R> {
         let prebuilt = x_take_built(self.next.take());
@@ -498,6 +515,7 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
             return run(XAheadBlock {
                 prebuilt,
                 start_next: None,
+                table_taken_later: later_blocks >= 1,
             });
         }
         X_BLOCKS.fetch_add(1, Ordering::Relaxed);
@@ -532,6 +550,7 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
                     run(XAheadBlock {
                         prebuilt,
                         start_next: Some(&start_next),
+                        table_taken_later: later_blocks >= 2,
                     })
                 },
             );
@@ -542,6 +561,7 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
         run(XAheadBlock {
             prebuilt,
             start_next: None,
+            table_taken_later: later_blocks >= 2,
         })
     }
 }
@@ -962,6 +982,7 @@ mod tests {
             num_alignments: None,
             max_hsps_per_subject: None,
             qcov_hsp_perc: None,
+            culling_limit: None,
             ungapped: false,
             window_size: None,
             matrix: None,
@@ -1135,11 +1156,13 @@ mod tests {
         let mut block = XAheadBlock {
             prebuilt: Some(values(x_key(&records))),
             start_next: None,
+            table_taken_later: true,
         };
         assert!(block.take_prebuilt(&records[..1]).is_none());
         let mut block = XAheadBlock {
             prebuilt: Some(values(x_key(&records))),
             start_next: None,
+            table_taken_later: true,
         };
         assert!(block.take_prebuilt(&records).is_some());
         assert!(block.take_prebuilt(&records).is_none());

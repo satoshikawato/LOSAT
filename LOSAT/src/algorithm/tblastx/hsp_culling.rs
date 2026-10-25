@@ -79,7 +79,7 @@ pub(crate) struct CullingWriter {
 }
 
 impl CullingWriter {
-    pub(crate) fn new(culling_max: i32, context_lengths: [i32; 6]) -> Self {
+    pub(crate) fn new(culling_max: i64, context_lengths: [i32; 6]) -> Self {
         Self {
             context_lengths,
             forest: CullingForest::new(culling_max),
@@ -254,17 +254,17 @@ mod tests {
         assert_eq!(kept(writer), vec![(0, 50), (0, 50)]);
     }
 
-    // The merit is an Int4 that NCBI's binary wraps: a negative merit loses an HSP at its
-    // first dominator, and i32::MIN never reaches 0 after one decrement.
+    // The merit does not wrap as NCBI's Int4 does (NCBI parity DECISIONS 17): the limits at
+    // the top of the range, plus 3, keep a dominated HSP.
     #[test]
-    fn merits_wrap_as_ncbis_int4() {
+    fn merits_near_int4_max_do_not_wrap() {
         let lengths = tblastx_context_lengths(300);
-        let mut writer = CullingWriter::new(2147483646i32.wrapping_add(3), lengths);
-        writer.run(vec![hsp(0, 1, 10, 40, 50), hsp(0, 1, 12, 40, 30)], 0);
-        assert_eq!(kept(writer), vec![(0, 50)]);
-        let mut writer = CullingWriter::new(2147483645i32.wrapping_add(3), lengths);
-        writer.run(vec![hsp(0, 1, 10, 40, 50), hsp(0, 1, 12, 40, 30)], 0);
-        assert_eq!(kept(writer), vec![(0, 50), (0, 30)]);
+        for limit in [2147483645, 2147483646, i32::MAX] {
+            let mut writer =
+                CullingWriter::new(CullingForest::<TblastxHsp>::prelim_max(limit), lengths);
+            writer.run(vec![hsp(0, 1, 10, 40, 50), hsp(0, 1, 12, 40, 30)], 0);
+            assert_eq!(kept(writer), vec![(0, 50), (0, 30)]);
+        }
     }
 
     // NCBI c++/src/algo/blast/core/hspfilter_culling.c:258-299,453-458: a leaf with 20

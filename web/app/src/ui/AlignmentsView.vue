@@ -11,7 +11,7 @@
 // arrive in the same frame are shown together, so that the page is measured once a frame.
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { sameHsp, type HspId, type RangeEntry, type ResultsBrowser, type ResultsState } from '../application/results';
-import { windowAround } from '../domain/result-index';
+import { flagGiven, windowAround } from '../domain/result-index';
 import { formatCount } from './format';
 import HspTable from './HspTable.vue';
 
@@ -29,7 +29,14 @@ const ranges = computed(() => props.state.ranges);
 const selectedAt = computed(() => ranges.value.findIndex((range) => sameHsp(range.id, props.state.hsp)));
 const detail = computed(() => props.state.detail);
 const entry = computed(() => props.state.hsps.find((hsp) => sameHsp(hsp.id, detail.value?.id)));
-const limitGiven = computed(() => props.state.loaded?.run.snapshot.argv.includes('-max_target_seqs') ?? false);
+const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.argv ?? [], '-max_target_seqs'));
+/** What outfmt 0 does with -num_descriptions / -num_alignments; undefined where neither is given. */
+const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
+/** Outfmt 0's own search failed: stream 0 is empty next to the tabular records (its error is in the diagnostics). */
+const outfmt0Failed = computed(() => props.state.loaded?.outfmt0Failed === true);
+const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(count)} ${count === 1 ? one : many}`;
+/** The subjects whose alignments outfmt 0 shows, "3 subjects" or "subjects" where -num_alignments cannot be read. */
+const alignedSubjects = computed(() => (outfmt0.value?.alignments === undefined ? 'subjects' : plural(outfmt0.value.alignments, 'subject')));
 
 /** The subject's heading in outfmt 0, as written: read with the selected HSP, or for the Descriptions. */
 const heading = computed(() => {
@@ -294,10 +301,23 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             <p v-if="detail.state === 'loading'" class="muted">Reading the alignment…</p>
             <pre v-if="detail.section !== undefined" class="output range-text" data-testid="detail-section">{{ detail.section }}</pre>
           </template>
+          <p v-else-if="outfmt0Failed" class="notice" data-testid="detail-not-in-outfmt0">
+            No outfmt 0 alignment is linked to this HSP: the search of outfmt 0 failed, and its error is in the diagnostics. The outfmt 6 row
+            below and outfmt 7 hold the HSP.
+          </p>
+          <p v-else-if="outfmt0?.separate" class="notice" data-testid="detail-not-in-outfmt0">
+            No outfmt 0 alignment is linked to this HSP. Its search has a hit list of its own<template v-if="outfmt0.hitList !== undefined">
+              ({{ plural(outfmt0.hitList, 'subject') }} per query)</template
+            >, because <span class="option-name">-num_descriptions</span> and <span class="option-name">-num_alignments</span> give it another size
+            than outfmt 6 and 7, and it shows the alignments of its first {{ alignedSubjects }}
+            (<span class="option-name">-num_alignments</span>). Those can be other subjects, or another set of HSPs of a subject (which may
+            include this one), than outfmt 6 and 7 keep. The outfmt 6 row below and outfmt 7 hold the HSP.
+          </p>
           <p v-else class="notice" data-testid="detail-not-in-outfmt0">
             outfmt 0 does not show this HSP. It shows the alignments of the first {{ state.outfmt0Subjects }} subjects of this query
-            (BLAST+'s <span class="option-name">-num_alignments</span>: 250<template v-if="limitGiven"
-              >, here <span class="option-name">-max_target_seqs</span></template
+            (BLAST+'s <span class="option-name">-num_alignments</span>: <template v-if="outfmt0?.alignments !== undefined">{{ outfmt0.alignments }}</template
+            ><template v-else>250</template
+            ><template v-if="limitGiven">, here <span class="option-name">-max_target_seqs</span></template
             >), and this subject comes after them. The outfmt 6 row below and outfmt 7 hold the HSP.
           </p>
           <h5 class="row-label">outfmt 6 row</h5>

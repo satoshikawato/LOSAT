@@ -53,6 +53,7 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     inputs.word_size = args.word_size;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps_per_subject.map(|count| count as i32);
+    inputs.culling_limit = args.culling_limit;
     // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`).
     inputs.threshold = args.threshold.map(|threshold| threshold as i32);
     inputs.window_size = args.window_size;

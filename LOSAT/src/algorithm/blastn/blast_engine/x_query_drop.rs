@@ -62,6 +62,7 @@ use crate::algorithm::blastn::hsp::BlastnOutputFormat;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::QueryInput;
 use crate::sequence::packed_letters::PackedLetters;
+use crate::utils::threading::SearchPool;
 
 /// No NCBI counterpart: LOSAT_X_BNQDROP (read once).
 pub(super) fn on() -> bool {
@@ -118,6 +119,41 @@ pub(super) fn x_pack_probe() -> bool {
 fn x_pack_trace() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_QPACKTRACE").is_some_and(|v| v == "1"))
+}
+
+/// PROBE: LOSAT_X_QPACKPAR=0 unpacks a batch on the loop's thread at two threads or more.
+fn x_pack_par() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_QPACKPAR").is_none_or(|v| v != "0"))
+}
+
+/// PROBE: the letters of a batch's packed records made again, by the search pool at two threads or
+/// more.
+fn x_unpack(batch: &mut [FastaRecord], packed: Vec<Option<PackedLetters>>, pool: &SearchPool<'_>) {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() && pool.threads() > 1 && x_pack_par() {
+        use rayon::prelude::*;
+        pool.install(|| {
+            batch
+                .par_iter_mut()
+                .zip(packed.into_par_iter())
+                .for_each(|(record, store)| {
+                    if let Some(store) = store {
+                        store.unpack_into(&mut record.sequence);
+                    }
+                })
+        });
+        return;
+    }
+    let _ = pool;
+    for (record, store) in batch.iter_mut().zip(packed) {
+        if let Some(store) = store {
+            store.unpack_into(&mut record.sequence);
+        }
+    }
 }
 
 /// PROBE: packs a record's letters just read (its letters dropped when they pack).
@@ -180,7 +216,11 @@ impl Store {
 
     /// The records `range`, taken out: the loop takes its batches in order, each starting where
     /// the one before ended.
-    pub(super) fn take(&self, range: std::ops::Range<usize>) -> anyhow::Result<Vec<FastaRecord>> {
+    pub(super) fn take(
+        &self,
+        range: std::ops::Range<usize>,
+        pool: &SearchPool<'_>,
+    ) -> anyhow::Result<Vec<FastaRecord>> {
         let mut left = self.left.lock().unwrap_or_else(PoisonError::into_inner);
         let (records, taken) = &mut *left;
         anyhow::ensure!(
@@ -189,16 +229,24 @@ impl Store {
         );
         *taken = range.end;
         let mut batch: Vec<FastaRecord> = records.by_ref().take(range.len()).collect();
-        let mut packed = self.x_packed.lock().unwrap_or_else(PoisonError::into_inner);
+        let packed: Vec<Option<PackedLetters>> = self
+            .x_packed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .by_ref()
+            .take(range.len())
+            .collect();
+        let letters: u64 = batch
+            .iter()
+            .map(|record| record.sequence.len() as u64)
+            .sum();
+        let bytes: u64 = packed
+            .iter()
+            .flatten()
+            .map(|store| store.heap_bytes() as u64)
+            .sum();
         let t0 = std::time::Instant::now();
-        let (mut letters, mut bytes) = (0u64, 0u64);
-        for record in batch.iter_mut() {
-            letters += record.sequence.len() as u64;
-            if let Some(Some(store)) = packed.next() {
-                bytes += store.heap_bytes() as u64;
-                store.unpack_into(&mut record.sequence);
-            }
-        }
+        x_unpack(&mut batch, packed, pool);
         UNPACK_NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         let mut left_bytes = self
             .x_left_bytes

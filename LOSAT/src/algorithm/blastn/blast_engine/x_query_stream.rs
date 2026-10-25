@@ -841,10 +841,25 @@ impl<'a> Queries<'a> {
 
     /// The records of the loop's batch of input records `input` and searched queries `searched`.
     /// The loop takes its batches in order, each starting where the one before ended.
+    #[cfg(test)]
     pub(super) fn batch(
         &self,
         input: Range<usize>,
         searched: Range<usize>,
+    ) -> Result<BatchRecords<'a>> {
+        self.batch_in(
+            input,
+            searched,
+            &crate::utils::threading::SearchPool::x_serial(),
+        )
+    }
+
+    /// `batch`, a taken batch's packed letters made again by `pool` (EXPERIMENT LOSAT_X_BNQPACK).
+    pub(super) fn batch_in(
+        &self,
+        input: Range<usize>,
+        searched: Range<usize>,
+        pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Result<BatchRecords<'a>> {
         match *self {
             Queries::Records {
@@ -856,7 +871,7 @@ impl<'a> Queries<'a> {
             }),
             Queries::Taken(store) => {
                 debug_assert_eq!(input, searched, "no -query_loc");
-                Ok(BatchRecords::Taken(store.take(input)?))
+                Ok(BatchRecords::Taken(store.take(input, pool)?))
             }
             Queries::Streamed(store) => {
                 let acting = store.acting();

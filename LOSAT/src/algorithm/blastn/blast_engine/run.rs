@@ -8491,13 +8491,14 @@ fn run_in_pool(
             // report of the batch's first query (`QueryWarnings`). Skipped records are read too.
             // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records, read now from the query file when
             // the switch acts (an error here is the file changed between the two readings).
-            let mut batch_records = match queries.batch(input_start..input_end, start..end) {
-                Ok(records) => records,
-                Err(error) => {
-                    qbp.finish();
-                    return Err(error);
-                }
-            };
+            let mut batch_records =
+                match queries.batch_in(input_start..input_end, start..end, parallel_pool) {
+                    Ok(records) => records,
+                    Err(error) => {
+                        qbp.finish();
+                        return Err(error);
+                    }
+                };
             let batch_title_warnings: Vec<u8> = batch_records
                 .input()
                 .iter()

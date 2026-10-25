@@ -296,7 +296,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         // NCBI's "Max matches in a query range" (HSP_RANGE_MAX) is BLAST+'s -culling_limit.
         fields: [maxTargetSeqs, evalue, wordSize, { flag: '-culling_limit', label: 'Max matches in a query range', ...integer }],
       },
-      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg] },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking] },
       { title: OTHER, placement: 'algorithm', fields: [threshold, windowSize] },
     ],
   },

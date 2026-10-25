@@ -392,6 +392,7 @@ fn parse_tblastx_args(
         qcov_hsp_perc: None,
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
         seg: "yes".to_string(),
+        soft_masking: None,
         window_size: 40,
         outfmt: "6".to_string(),
         culling_limit: 0,

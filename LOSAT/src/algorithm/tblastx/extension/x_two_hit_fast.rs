@@ -67,12 +67,13 @@
 //! same extension with walks that the sentinels stop instead of a bound, inlined with the word loop
 //! into the callers' extension code (`extend_hit_two_hit_sent`: the unit path's `x_hit` and the
 //! batched `resolve`, the reference frame loops).
-//! * Instances. The unit path chooses for each unit (`XPairPar::x_unit_sent`, in the dispatches
-//!   `scan_unit_or_bf`, `scan_unit_batched_or_bf` and `scan_unit_sliced_or_bf` of x_tbx_hitbf.rs
-//!   and in the probed units) between two instances of its scan (`const SENT`), each in a function
-//!   of its own (`scan_unit_bf`, `scan_unit_batched_bf`, `scan_unit_sliced_bf`, `scan_unit_sent`,
-//!   `scan_unit_batched_sent`, `scan_unit_sliced_sent`), so that the instances without the walks
-//!   keep the machine code they had before the switch. The reference frame loops (run_impl.rs)
+//! * Instances. The unit path chooses for each unit of its branch-free hit loops
+//!   (LOSAT_X_TBXHITBF; `XPairPar::x_unit_sent`, in the dispatches `scan_unit_or_bf`,
+//!   `scan_unit_batched_or_bf` and `scan_unit_sliced_or_bf` of x_tbx_hitbf.rs) between two
+//!   instances of the loop's function (`const SENT`: `scan_unit_bf`, `scan_unit_batched_bf`,
+//!   `scan_unit_sliced_bf`), so that the instances without the walks keep the machine code they had
+//!   before the switch. The units of the other hit loop (`LOSAT_X_TBXHITBF=0`, the probes of
+//!   `LOSAT_TIMING` and `LOSAT_X_STATS`) take `two_hit`. The reference frame loops (run_impl.rs)
 //!   choose at every call.
 //! * Where. A query context's buffer is `[0, residues.., 0]` and a subject frame's too
 //!   (`translation.rs`, NCBI's NULLB at each end, blast_util.c:438-453); the callers' sequences are
@@ -422,7 +423,10 @@ pub(crate) fn sent_subject(batch: bool, frame: &[u8], offset: usize, len: usize)
 /// length, steps before the stop).
 ///
 /// SAFETY: walking from `qp`, `sp` in the direction, both sequences reach a sentinel (code 0) with
-/// every position up to it readable, and `1 <= x_drop <= 127`.
+/// every position up to it readable; `tab` is the table of `build_table` (code 0 against anything
+/// -128, every other score at most `MAX_WORD_SCORE`); `1 <= x_drop <= 127`; and the score cannot
+/// wrap before the nearer sentinel (`start` plus `MAX_WORD_SCORE` for every step up to it stays
+/// below `i32::MAX`: `two_hit_sent` takes frames of at most `MAX_SENT_LEN` bytes).
 // NCBI reference: aa_ungapped.c:846-866 and 886-921 (module comment).
 #[inline(always)]
 unsafe fn walk_sent<const RIGHT: bool>(
@@ -472,8 +476,8 @@ unsafe fn walk_sent<const RIGHT: bool>(
     (best, len, off.unsigned_abs())
 }
 
-/// LOSAT_X_TBXUNGAPSENT: `two_hit(&q_full[1..q_full.len() - 1], s_seq, s_left_off, s_right_off,
-/// q_right_off, x_drop)` with walks that the sentinels stop instead of a
+/// LOSAT_X_TBXUNGAPSENT: `two_hit(&q_full[1..q_full.len() - 1], &s_full[1..s_full.len() - 1],
+/// s_left_off, s_right_off, q_right_off, x_drop)` with walks that the sentinels stop instead of a
 /// bound, inlined with the word loop into the callers' extension code. `None` where `two_hit`
 /// returns `None`.
 ///
@@ -483,23 +487,23 @@ unsafe fn walk_sent<const RIGHT: bool>(
 /// fewer instructions (workstation, 8 alternating rounds).
 ///
 /// SAFETY: `q_full` is `[0, residues.., 0]` (a context of a batch [`sent_contexts`] accepted) and
-/// `s_seq` the residues of a subject frame [`sent_subject`] accepted, whose buffer is
-/// `[0, s_seq.., 0]`.
+/// `s_full` the buffer of a subject frame [`sent_subject`] accepted (`[0, residues.., 0]`, at most
+/// `MAX_SENT_LEN` bytes).
 // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
 #[inline(always)]
 pub(super) unsafe fn two_hit_sent(
     q_full: &[u8],
-    s_seq: &[u8],
+    s_full: &[u8],
     s_left_off: usize,
     s_right_off: usize,
     q_right_off: usize,
     x_drop: i32,
 ) -> Option<TwoHit> {
     debug_assert!(q_full.len() >= 2 && q_full[0] == 0 && q_full[q_full.len() - 1] == 0);
-    debug_assert!(s_seq.len() + 2 <= MAX_SENT_LEN);
-    debug_assert!(*s_seq.as_ptr().sub(1) == 0 && *s_seq.as_ptr().add(s_seq.len()) == 0);
+    debug_assert!(s_full.len() >= 2 && s_full[0] == 0 && s_full[s_full.len() - 1] == 0);
+    debug_assert!(s_full.len() <= MAX_SENT_LEN);
     let q_len = q_full.len() - 2;
-    let s_len = s_seq.len();
+    let s_len = s_full.len() - 2;
     if !(1..=MAX_X_DROP).contains(&x_drop)
         || q_right_off + WORD > q_len
         || s_right_off + WORD > s_len
@@ -509,7 +513,7 @@ pub(super) unsafe fn two_hit_sent(
     let tab = state().table.as_deref()?.as_ptr();
     // offset 0 of the reference's sequences; one sentinel before each
     let qb = q_full.as_ptr().add(1);
-    let sb = s_seq.as_ptr();
+    let sb = s_full.as_ptr().add(1);
 
     // The best end of the word at R (two_hit.rs, the `k_size` loop; inside both sequences).
     let qw = qb.add(q_right_off);
@@ -729,8 +733,7 @@ mod tests {
         let (sb, sr_range) = with_sentinels(s);
         let expect = extend_hit_two_hit_reference(q, s, sl, sr, qr, d, false);
         // SAFETY: both buffers are [0, residues.., 0] and short.
-        let s_in = &sb[sr_range.start + 1..sr_range.end - 1];
-        let got = unsafe { two_hit_sent(&qb[qr_range], s_in, sl, sr, qr, d) }
+        let got = unsafe { two_hit_sent(&qb[qr_range], &sb[sr_range], sl, sr, qr, d) }
             .expect("the sentinel walks handle the call");
         assert_eq!(got, expect, "sl={sl} sr={sr} qr={qr} d={d}");
     }
@@ -861,7 +864,7 @@ mod tests {
     fn sentinel_walks_refuse_what_the_table_cannot_do() {
         let (qb, qr) = with_sentinels(&[5u8; 50]);
         let (sb, sr) = with_sentinels(&[5u8; 50]);
-        let (q, s) = (&qb[qr], &sb[sr.start + 1..sr.end - 1]);
+        let (q, s) = (&qb[qr.clone()], &sb[sr.clone()]);
         // SAFETY: both buffers are [0, residues.., 0].
         unsafe {
             assert!(two_hit_sent(q, s, 10, 20, 20, 0).is_none());
@@ -871,6 +874,15 @@ mod tests {
         }
         check_sent(&[5u8; 50], &[5u8; 50], 10, 20, 20, 127);
         check_sent(&[5u8; 50], &[5u8; 50], 10, 47, 47, 16);
+        // `extend_hit_two_hit_sent` runs the reference for the X-drops (the callers' words fit).
+        let (qv, sv) = (&qb[qr.start + 1..qr.end - 1], &sb[sr.start + 1..sr.end - 1]);
+        for (sl, srr, qrr, d) in [(10, 20, 20, 0), (10, 20, 20, 128), (10, 47, 47, 0)] {
+            let expect = extend_hit_two_hit_reference(qv, sv, sl, srr, qrr, d, false);
+            // SAFETY: both buffers are [0, residues.., 0].
+            let got =
+                unsafe { super::super::two_hit::extend_hit_two_hit_sent(q, s, sl, srr, qrr, d) };
+            assert_eq!(got, expect, "sl={sl} sr={srr} qr={qrr} d={d}");
+        }
     }
 
     // No NCBI counterpart. A chunk takes the sentinel walks only when the batch does, the chunk

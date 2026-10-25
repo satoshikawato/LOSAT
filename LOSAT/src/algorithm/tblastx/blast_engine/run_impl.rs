@@ -4502,7 +4502,7 @@ fn search_query_batch(
                                     unsafe {
                                         extend_hit_two_hit_sent(
                                             query_full,
-                                            subject,
+                                            subject_full,
                                             (last_hit + wordsize) as usize,
                                             subject_offset as usize,
                                             q_raw as usize,
@@ -5014,7 +5014,7 @@ fn search_query_batch(
                                     unsafe {
                                         extend_hit_two_hit_sent(
                                             query_full,
-                                            subject,
+                                            subject_full,
                                             (last_hit + wordsize) as usize,
                                             subject_offset as usize,
                                             q_raw as usize,

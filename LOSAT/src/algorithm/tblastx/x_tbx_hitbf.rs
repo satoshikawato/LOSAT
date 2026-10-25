@@ -354,9 +354,9 @@ unsafe fn x_hits_bf_run<C: XCells>(
 
 impl XPairPar {
     // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the units without probes (`run_unit`,
-    // `run_unit_compact`) by the switch and `fits`. EXPERIMENT (LOSAT_X_TBXUNGAPSENT): and by
-    // `x_unit_sent`, between instances in functions of their own, so that the instances without
-    // the switch keep the code they had before it.
+    // `run_unit_compact`) by the switch and `fits`. EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the
+    // branch-free loop's units by `x_unit_sent`, between the two instances of `scan_unit_bf`, so
+    // that the instance without the switch keeps the code it had before it.
     /// `scan_unit` without probes, or its branch-free hit loop.
     #[inline(always)]
     pub(super) fn scan_unit_or_bf<S: XInitSink, const PF: bool>(
@@ -366,15 +366,12 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        let sent = self.x_unit_sent(unit, inp);
         if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
-            if sent {
+            if self.x_unit_sent(unit, inp) {
                 self.scan_unit_bf::<S, PF, true>(unit, inp, scratch, init_hsps);
             } else {
                 self.scan_unit_bf::<S, PF, false>(unit, inp, scratch, init_hsps);
             }
-        } else if sent {
-            self.scan_unit_sent::<S, XNoProbe, PF>(unit, inp, scratch, init_hsps, &mut XNoProbe);
         } else {
             self.scan_unit::<S, XNoProbe, PF>(unit, inp, scratch, init_hsps, &mut XNoProbe);
         }
@@ -412,15 +409,12 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        let sent = self.x_unit_sent(unit, inp);
         if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
-            if sent {
+            if self.x_unit_sent(unit, inp) {
                 self.scan_unit_batched_bf::<S, PF, true>(unit, inp, scratch, init_hsps);
             } else {
                 self.scan_unit_batched_bf::<S, PF, false>(unit, inp, scratch, init_hsps);
             }
-        } else if sent {
-            self.scan_unit_batched_sent::<S, PF>(unit, inp, scratch, init_hsps);
         } else {
             self.scan_unit_batched::<S, PF>(unit, inp, scratch, init_hsps, x_tbx_extbatch::BATCH);
         }
@@ -459,15 +453,12 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        let sent = self.x_unit_sent(unit, inp);
         if unit_bf(on(), unit.chunk.length, inp.window, inp.wordsize) {
-            if sent {
+            if self.x_unit_sent(unit, inp) {
                 self.scan_unit_sliced_bf::<S, B, PF, true>(group, unit, inp, scratch, init_hsps);
             } else {
                 self.scan_unit_sliced_bf::<S, B, PF, false>(group, unit, inp, scratch, init_hsps);
             }
-        } else if sent {
-            self.scan_unit_sliced_sent::<S, B, PF>(group, unit, inp, scratch, init_hsps);
         } else {
             self.scan_unit_sliced::<S, B, PF>(group, unit, inp, scratch, init_hsps);
         }

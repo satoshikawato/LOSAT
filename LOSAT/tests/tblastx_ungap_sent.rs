@@ -110,14 +110,14 @@ fn losat(env: &[(&str, &str)]) -> Command {
     command
 }
 
-/// The sides of `SWITCH` that a run with `LOSAT_X_REACH=dir` recorded: (new, ref).
-fn reached(dir: &Path) -> (bool, bool) {
+/// The sides of `switch` that a run with `LOSAT_X_REACH=dir` recorded: (new, ref).
+fn reached(dir: &Path, switch: &str) -> (bool, bool) {
     let (mut new, mut reference) = (false, false);
     for file in std::fs::read_dir(dir).expect("the reach directory") {
         let text = std::fs::read_to_string(file.unwrap().path()).unwrap();
         for row in text.lines().skip(1) {
             let f: Vec<&str> = row.split('\t').collect();
-            if f[0] == SWITCH {
+            if f[0] == switch {
                 new |= f[1] == "1";
                 reference |= f[2] == "1";
             }
@@ -127,8 +127,9 @@ fn reached(dir: &Path) -> (bool, bool) {
 }
 
 /// `tblastx` of the inputs at `threads` with `env` and `LOSAT_X_REACH` set to a directory of its
-/// own: the report and the sides recorded.
-fn tblastx(inputs: &Inputs, threads: u32, env: &[(&str, &str)]) -> (Vec<u8>, (bool, bool)) {
+/// own: the report, the sides of `SWITCH` recorded, and whether the units of the branch-free hit
+/// loops ran (the new side of `LOSAT_X_TBXHITBF`, recorded only by the unit path).
+fn tblastx(inputs: &Inputs, threads: u32, env: &[(&str, &str)]) -> (Vec<u8>, (bool, bool), bool) {
     let dir = temp_path("reach");
     std::fs::create_dir_all(&dir).unwrap();
     let output = losat(env)
@@ -147,9 +148,10 @@ fn tblastx(inputs: &Inputs, threads: u32, env: &[(&str, &str)]) -> (Vec<u8>, (bo
         output.status.success(),
         "{env:?} threads {threads}: {stderr}"
     );
-    let sides = reached(&dir);
+    let sides = reached(&dir, SWITCH);
+    let unit_path = reached(&dir, "LOSAT_X_TBXHITBF").0;
     let _ = std::fs::remove_dir_all(&dir);
-    (output.stdout, sides)
+    (output.stdout, sides, unit_path)
 }
 
 /// The default (the unit path at 1 and 4 threads, the reference frame loop) gives the report of
@@ -157,19 +159,20 @@ fn tblastx(inputs: &Inputs, threads: u32, env: &[(&str, &str)]) -> (Vec<u8>, (bo
 #[test]
 fn reports_do_not_depend_on_the_sentinel_walks() {
     let inputs = Inputs::new();
-    let (expected, sides) = tblastx(&inputs, 1, &[OFF]);
+    let (expected, sides, _) = tblastx(&inputs, 1, &[OFF]);
     assert!(!expected.is_empty(), "no hits");
     assert_eq!(sides, (false, false), "=0 records nothing");
-    for (name, threads, env) in [
-        ("unit path, 1 thread", 1, &[][..]),
-        ("unit path, 4 threads", 4, &[][..]),
-        ("reference frame loop", 1, &[REFERENCE_LOOP][..]),
+    for (name, threads, env, unit) in [
+        ("unit path, 1 thread", 1, &[][..], true),
+        ("unit path, 4 threads", 4, &[][..], true),
+        ("reference frame loop", 1, &[REFERENCE_LOOP][..], false),
     ] {
-        let (report, sides) = tblastx(&inputs, threads, env);
+        let (report, sides, unit_path) = tblastx(&inputs, threads, env);
         assert_eq!(report, expected, "{name}");
         assert_eq!(sides, (true, false), "{name}: the sentinel walks ran");
+        assert_eq!(unit_path, unit, "{name}: the path that ran");
     }
-    let (report, _) = tblastx(&inputs, 1, &[OFF, REFERENCE_LOOP]);
+    let (report, _, _) = tblastx(&inputs, 1, &[OFF, REFERENCE_LOOP]);
     assert_eq!(report, expected, "reference frame loop, =0");
 }
 
@@ -181,15 +184,21 @@ fn reports_do_not_depend_on_the_sentinel_walks() {
 fn chunks_of_a_frame_stay_off_the_path() {
     let inputs = Inputs::new();
     let chunks = ("LOSAT_TBLASTX_TEST_CHUNK_SIZE", "1500");
-    let (expected, _) = tblastx(&inputs, 1, &[chunks, OFF]);
+    let (expected, _, _) = tblastx(&inputs, 1, &[chunks, OFF]);
     assert!(!expected.is_empty(), "no hits with chunks");
-    for (name, threads, env) in [
-        ("unit path, 1 thread", 1, &[chunks][..]),
-        ("unit path, 4 threads", 4, &[chunks][..]),
-        ("reference frame loop", 1, &[chunks, REFERENCE_LOOP][..]),
+    for (name, threads, env, unit) in [
+        ("unit path, 1 thread", 1, &[chunks][..], true),
+        ("unit path, 4 threads", 4, &[chunks][..], true),
+        (
+            "reference frame loop",
+            1,
+            &[chunks, REFERENCE_LOOP][..],
+            false,
+        ),
     ] {
-        let (report, sides) = tblastx(&inputs, threads, env);
+        let (report, sides, unit_path) = tblastx(&inputs, threads, env);
         assert_eq!(report, expected, "{name}");
+        assert_eq!(unit_path, unit, "{name}: the path that ran");
         assert_eq!(
             sides,
             (false, true),

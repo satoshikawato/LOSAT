@@ -209,7 +209,7 @@ unsafe fn resolve<const SENT: bool>(c: &mut XCand, diag_ptr: *mut DiagStruct, h:
         unsafe {
             extend_hit_two_hit_sent(
                 query_full,
-                h.subject,
+                h.subject_sent,
                 c.s_left as usize,
                 c.s_right as usize,
                 c.q_raw as usize,
@@ -516,20 +516,6 @@ impl XPairPar {
         self.scan_unit_batched_hits::<S, PF, false, false>(unit, inp, scratch, init_hsps, len)
     }
 
-    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the instance of the units `x_unit_sent` accepts, a
-    // function of its own (`scan_unit_sent`).
-    /// `scan_unit_batched` with full batches and the extensions of `extend_hit_two_hit_sent`.
-    #[inline(never)]
-    pub(super) fn scan_unit_batched_sent<S: XInitSink, const PF: bool>(
-        &self,
-        unit: &XUnit,
-        inp: &XSubject<'_>,
-        scratch: &mut XScratch,
-        init_hsps: &mut S,
-    ) {
-        self.scan_unit_batched_hits::<S, PF, false, true>(unit, inp, scratch, init_hsps, BATCH);
-    }
-
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
     // `x_hits_bf`, which takes the too-far and overlap outcomes without a branch and hands the
     // others (a flag, which includes a pending mark, or a candidate) to `x_hit_batched`; without
@@ -602,7 +588,7 @@ impl XPairPar {
     ) -> (u64, u64) {
         debug_assert!((1..=BATCH).contains(&len));
         // LOSAT_X_TBXUNGAPSENT: as in `scan_unit_cells`.
-        debug_assert!(!SENT || self.x_unit_sent(unit, inp));
+        assert!(!SENT || self.x_unit_sent(unit, inp));
         let group = &self.groups[unit.g];
         let sub = &group.lookup;
         let wordsize = inp.wordsize;
@@ -654,6 +640,7 @@ impl XPairPar {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
+            subject_sent: if SENT { subject_full } else { &[] },
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -1034,6 +1021,7 @@ mod tests {
                 cutoff_scores: &cutoff_scores,
                 x_dropoff_per_context: &x_dropoff_per_context,
                 subject: &subject,
+                subject_sent: &[],
                 s_f_idx: 2,
                 s_frame: -1,
                 s_idx: 7,

@@ -1497,6 +1497,9 @@ struct XHitCtx<'a> {
     cutoff_scores: &'a [i32],
     x_dropoff_per_context: &'a [i32],
     subject: &'a [u8],
+    /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): with `SENT` (a unit `x_unit_sent` accepted: its chunk is
+    /// the whole frame), the frame's buffer `[0, subject.., 0]`; else empty.
+    subject_sent: &'a [u8],
     s_f_idx: usize,
     s_frame: i8,
     s_idx: usize,
@@ -2416,12 +2419,7 @@ impl XPairPar {
     ) -> Vec<InitHSP> {
         let mut probe = std::mem::take(P::slot(scratch));
         let mut init_hsps: Vec<InitHSP> = Vec::new();
-        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): as in `scan_unit_or_bf`.
-        if self.x_unit_sent(unit, inp) {
-            self.scan_unit_sent::<_, _, PF>(unit, inp, scratch, &mut init_hsps, &mut probe);
-        } else {
-            self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut init_hsps, &mut probe);
-        }
+        self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut init_hsps, &mut probe);
         *P::slot(scratch) = probe;
         init_hsps
     }
@@ -2525,12 +2523,7 @@ impl XPairPar {
         let mut records = std::mem::take(&mut scratch.records);
         records.clear();
         let mapped = self.x_unit_records(unit, scratch, &mut records);
-        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): as in `scan_unit_or_bf`.
-        if self.x_unit_sent(unit, inp) {
-            self.scan_unit_sent::<_, _, PF>(unit, inp, scratch, &mut records, &mut probe);
-        } else {
-            self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut records, &mut probe);
-        }
+        self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut records, &mut probe);
         let exact = x_unit_copy(&records, mapped);
         scratch.records = records;
         *P::slot(scratch) = probe;
@@ -2557,22 +2550,6 @@ impl XPairPar {
         probe: &mut P,
     ) {
         self.scan_unit_hits::<S, P, PF, false, false>(unit, inp, scratch, init_hsps, probe);
-    }
-
-    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT, extension/x_two_hit_fast.rs): the units `x_unit_sent`
-    // accepts run this instance, a function of its own, so that the code of `scan_unit` where it
-    // is inlined stays the code before the switch.
-    /// `scan_unit` with the extensions of `extend_hit_two_hit_sent`.
-    #[inline(never)]
-    pub(super) fn scan_unit_sent<S: XInitSink, P: XProbe, const PF: bool>(
-        &self,
-        unit: &XUnit,
-        inp: &XSubject<'_>,
-        scratch: &mut XScratch,
-        init_hsps: &mut S,
-        probe: &mut P,
-    ) {
-        self.scan_unit_hits::<S, P, PF, false, true>(unit, inp, scratch, init_hsps, probe);
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
@@ -2642,7 +2619,6 @@ impl XPairPar {
     // `mask + 1` cells and the masked cell of every hit.
     /// `scan_unit_hits` with the cells `C` (`mask`: the masked table's cells minus one).
     #[inline(always)]
-    #[allow(clippy::too_many_arguments)]
     fn scan_unit_cells<
         S: XInitSink,
         P: XProbe,
@@ -2659,8 +2635,9 @@ impl XPairPar {
         probe: &mut P,
         mask: u32,
     ) {
-        // LOSAT_X_TBXUNGAPSENT: `SENT` only on the units `x_unit_sent` accepts (`x_hit`'s SAFETY).
-        debug_assert!(!SENT || self.x_unit_sent(unit, inp));
+        // LOSAT_X_TBXUNGAPSENT: `SENT` only on the units `x_unit_sent` accepts (`x_hit`'s SAFETY;
+        // once per unit).
+        assert!(!SENT || self.x_unit_sent(unit, inp));
         let group = &self.groups[unit.g];
         let sub = &group.lookup;
         let wordsize = inp.wordsize;
@@ -2719,6 +2696,7 @@ impl XPairPar {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
+            subject_sent: if SENT { subject_full } else { &[] },
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -3072,13 +3050,13 @@ fn x_hit<S: XInitSink, P: XProbe, const SENT: bool>(
                 false,
             )
         } else {
-            // SAFETY: `SENT` runs on the units `x_unit_sent` accepts: the batch's contexts
-            // passed `x_tbx_sent_contexts` (XPairPar::sent) and the chunk `h.subject` is the
-            // whole frame of a buffer with its sentinels (`x_tbx_sent_subject`).
+            // SAFETY: `SENT` runs on the units `x_unit_sent` accepts (`scan_unit_cells`): the
+            // batch's contexts passed `x_tbx_sent_contexts` (XPairPar::sent), and `h.subject_sent`
+            // is the buffer of a frame `x_tbx_sent_subject` accepted.
             unsafe {
                 extend_hit_two_hit_sent(
                     query_full,
-                    h.subject,
+                    h.subject_sent,
                     (last_hit + wordsize) as usize,
                     subject_offset as usize,
                     q_raw,
@@ -3523,6 +3501,7 @@ mod tests {
                     cutoff_scores,
                     x_dropoff_per_context,
                     subject,
+                    subject_sent: &[],
                     s_f_idx: f,
                     s_frame: s_frame.frame,
                     s_idx: 0,
@@ -4057,6 +4036,8 @@ mod tests {
         let (mut masked_units, mut aliased_cases, mut saved) = (0usize, 0usize, 0usize);
         let (mut exact_fits, mut wide_groups, mut control_differs) = (0usize, 0usize, 0usize);
         let mut sent_units = 0usize;
+        // LOSAT_X_TBXUNGAPSENT is on (the batches' contexts have their sentinels).
+        let on = x_tbx_sent_contexts(std::iter::empty());
         for case_no in 0..300 {
             let alphabet = &alphabets[case_no % alphabets.len()];
             let window = [40, 3 + x_tbx_extbatch::BATCH as i32, 64][case_no % 3];
@@ -4219,7 +4200,15 @@ mod tests {
                 assert_eq!(sent, pp.sent);
                 sent_units += usize::from(sent);
                 let mut lists: Vec<(&str, Vec<InitHSP>)> = Vec::new();
-                for name in ["scan", "scan pf", "bf", "bf pf", "scan sent", "bf pf sent"] {
+                for name in [
+                    "scan",
+                    "scan pf",
+                    "bf",
+                    "bf pf",
+                    "scan sent",
+                    "bf sent",
+                    "bf pf sent",
+                ] {
                     if name.ends_with("sent") && !sent {
                         continue;
                     }
@@ -4254,6 +4243,13 @@ mod tests {
                             &mut XNoProbe,
                         ),
                         "scan sent" => pp.scan_unit_hits::<_, XNoProbe, false, false, true>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            &mut XNoProbe,
+                        ),
+                        "bf sent" => pp.scan_unit_hits::<_, XNoProbe, false, true, true>(
                             &unit,
                             &inp,
                             &mut scratch,
@@ -4300,6 +4296,15 @@ mod tests {
                             len,
                         );
                         lists.push((name, got));
+                        let mut got: Vec<InitHSP> = Vec::new();
+                        pp.scan_unit_batched_hits::<_, false, false, true>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            len,
+                        );
+                        lists.push((name, got));
                     }
                 }
                 for (name, got) in &lists {
@@ -4335,10 +4340,7 @@ mod tests {
             aliased_cases += usize::from(aliased);
         }
         assert!(masked_units > 600, "masked_units {masked_units}");
-        assert!(
-            sent_units == 0 || sent_units == masked_units,
-            "sent_units {sent_units}"
-        );
+        assert_eq!(sent_units, if on { masked_units } else { 0 });
         assert!(aliased_cases > 100, "aliased_cases {aliased_cases}");
         assert!(saved > 10_000, "saved {saved}");
         assert!(exact_fits > 50, "exact_fits {exact_fits}");

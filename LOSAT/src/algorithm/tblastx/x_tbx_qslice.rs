@@ -550,21 +550,6 @@ impl XPairPar {
         self.scan_unit_sliced_hits::<S, B, PF, false, false>(group, unit, inp, scratch, init_hsps);
     }
 
-    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the instance of the units `x_unit_sent` accepts, a
-    // function of its own (`scan_unit_sent`).
-    /// `scan_unit_sliced` with the extensions of `extend_hit_two_hit_sent`.
-    #[inline(never)]
-    pub(super) fn scan_unit_sliced_sent<S: XInitSink, const B: bool, const PF: bool>(
-        &self,
-        group: &XSliced,
-        unit: &XUnit,
-        inp: &XSubject<'_>,
-        scratch: &mut XScratch,
-        init_hsps: &mut S,
-    ) {
-        self.scan_unit_sliced_hits::<S, B, PF, false, true>(group, unit, inp, scratch, init_hsps);
-    }
-
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
     // `x_hits_bf`, which takes the too-far and overlap outcomes without a branch and hands the
     // others to `x_hit` (or `x_hit_batched` with `B`); without it this is the loop before the
@@ -587,7 +572,7 @@ impl XPairPar {
         init_hsps: &mut S,
     ) {
         // LOSAT_X_TBXUNGAPSENT: as in `scan_unit_cells`.
-        debug_assert!(!SENT || self.x_unit_sent(unit, inp));
+        assert!(!SENT || self.x_unit_sent(unit, inp));
         let wordsize = inp.wordsize;
         let window = inp.window;
         let s_frame = &inp.s_frames_preliminary[unit.f];
@@ -623,6 +608,7 @@ impl XPairPar {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
+            subject_sent: if SENT { subject_full } else { &[] },
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -989,6 +975,10 @@ mod tests {
         let mut rng = Rng(0x5eed_51ce_0123_4567);
         let mut records = 0usize;
         let mut cut_groups = 0usize;
+        // LOSAT_X_TBXUNGAPSENT: the units, those whose chunk is the whole frame, and those that took
+        // the sentinel walks.
+        let (mut units, mut whole_units, mut sent_units) = (0usize, 0usize, 0usize);
+        let on = x_tbx_sent_contexts(std::iter::empty());
         for case in 0..12 {
             let abc = if case % 3 == 2 { &narrow } else { &alphabet };
             let q_len = 200 + rng.below(500) as usize;
@@ -1085,6 +1075,9 @@ mod tests {
                         let mut plain: Vec<Vec<InitHSP>> = Vec::new();
                         // 8..16: the same with LOSAT_X_TBXUNGAPSENT, on the units that take it.
                         let sent = pp.x_unit_sent(&unit, &inp);
+                        units += 1;
+                        whole_units += usize::from(chunk.offset == 0);
+                        sent_units += usize::from(sent);
                         for variant in 0..16 {
                             if variant >= 8 && !sent {
                                 continue;
@@ -1173,5 +1166,9 @@ mod tests {
         }
         assert!(cut_groups > 40, "cut groups {cut_groups}");
         assert!(records > 500, "records {records}");
+        // The units of a whole frame take the walks when the switch is on, the others (the odd
+        // cases' chunks start inside the frame) never.
+        assert!(0 < whole_units && whole_units < units);
+        assert_eq!(sent_units, if on { whole_units } else { 0 });
     }
 }

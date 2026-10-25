@@ -1090,7 +1090,9 @@ fn write_dense_seg<E: Encoder>(
     enc.begin_list(false);
     for &strand in &segments.strands {
         enc.element();
+        enc.begin_named("Na-strand");
         enc.enumerated(strand.name(), strand.value());
+        enc.end_named();
     }
     enc.end_list();
     enc.end_member();
@@ -1204,7 +1206,9 @@ fn write_seq_interval<E: Encoder>(enc: &mut E, id: &SeqId<'_>, from: i32, to: i3
     enc.int(to);
     enc.end_member();
     enc.member("strand", 2);
+    enc.begin_named("Na-strand");
     enc.enumerated(strand.name(), strand.value());
+    enc.end_named();
     enc.end_member();
     enc.member("id", 3);
     id.write(enc);

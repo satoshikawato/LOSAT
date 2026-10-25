@@ -286,6 +286,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.end_member();
 
     out.enc.member("algorithm-options", 5);
+    out.enc.begin_named("Blast4-parameters");
     out.enc.begin_list(false);
     let mut written_search_space = false;
     for param in &request.algorithm {
@@ -304,10 +305,12 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
         );
     }
     out.enc.end_list();
+    out.enc.end_named();
     out.enc.end_member();
 
     if batch.required.is_some() || !batch.lcase_masks.is_empty() {
         out.enc.member("program-options", 6);
+        out.enc.begin_named("Blast4-parameters");
         out.enc.begin_list(false);
         if let Some((start, end)) = batch.required {
             for (name, value) in [("RequiredStart", start), ("RequiredEnd", end)] {
@@ -334,6 +337,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
             out.enc.end_sequence();
         }
         out.enc.end_list();
+        out.enc.end_named();
         out.enc.end_member();
     }
     out.enc.end_sequence();
@@ -345,9 +349,11 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.member("results", 1);
     out.enc.begin_sequence("Blast4-get-search-results-reply");
     out.enc.member("alignments", 0);
+    out.enc.begin_named("Seq-align-set");
     out.enc.begin_list(true);
     aligns.write(out)?;
     out.enc.end_list();
+    out.enc.end_named();
     out.enc.end_member();
 
     out.enc.member("masks", 2);

@@ -70,6 +70,7 @@ pub fn write_mask<E: Encoder>(enc: &mut E, mask: &MaskEntry) {
     enc.begin_list(false);
     enc.element();
     enc.variant("Seq-loc", "packed-int", 4);
+    enc.begin_named("Packed-seqint");
     enc.begin_list(false);
     for &(from, to) in &mask.intervals {
         enc.element();
@@ -86,12 +87,15 @@ pub fn write_mask<E: Encoder>(enc: &mut E, mask: &MaskEntry) {
         enc.end_sequence();
     }
     enc.end_list();
+    enc.end_named();
     enc.end_variant();
     enc.end_list();
     enc.end_member();
     enc.member("frame", 1);
     let (name, value) = mask.frame.name_and_value();
+    enc.begin_named("Blast4-frame-type");
     enc.enumerated(name, value);
+    enc.end_named();
     enc.end_member();
     enc.end_sequence();
 }

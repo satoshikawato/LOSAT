@@ -143,6 +143,7 @@ pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
     enc.end_member();
 
     enc.member("descr", 1);
+    enc.begin_named("Seq-descr");
     enc.begin_list(true);
     enc.element();
     enc.variant("Seqdesc", "user", 13);
@@ -178,6 +179,7 @@ pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
         enc.end_variant();
     }
     enc.end_list();
+    enc.end_named();
     enc.end_member();
 
     enc.member("inst", 2);
@@ -209,15 +211,20 @@ pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
                 .iter()
                 .map(|letter| letter.to_ascii_uppercase())
                 .collect();
+            enc.begin_named("NCBIeaa");
             enc.string_store(&upper);
+            enc.end_named();
         } else {
             let (two_bit, packed) = pack_nucleotides(bioseq.letters);
+            let name = if two_bit { "NCBI2na" } else { "NCBI4na" };
             if two_bit {
                 enc.variant("Seq-data", "ncbi2na", 2);
             } else {
                 enc.variant("Seq-data", "ncbi4na", 3);
             }
+            enc.begin_named(name);
             enc.octets(&packed);
+            enc.end_named();
         }
         enc.end_variant();
         enc.end_member();

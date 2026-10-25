@@ -35,6 +35,8 @@ mod blastn_pairpar_disc;
 mod blastn_pairpar_disc_arr;
 #[path = "../blastn_pairpar_fold.rs"]
 mod blastn_pairpar_fold;
+#[path = "../blastn_pairpar_merge.rs"]
+mod blastn_pairpar_merge;
 #[path = "../blastn_pairpar_na.rs"]
 mod blastn_pairpar_na;
 #[path = "../blastn_qbatchpar.rs"]

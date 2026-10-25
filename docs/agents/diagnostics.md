@@ -398,6 +398,7 @@ export LOSAT_X_PAIRPARDISCARR=1
 export LOSAT_X_PAIRPARFOLD=1
 export LOSAT_X_PAIRPARGATE=1
 export LOSAT_X_PAIRPARHOME=1
+export LOSAT_X_PAIRPARMERGE=1
 export LOSAT_X_PAIRPARN1=1
 export LOSAT_X_PAIRPARNA=1
 export LOSAT_X_PAIRWISEPAR=1
@@ -3936,6 +3937,54 @@ Scheduling (each value computed by one thread with the original function; order 
   each with or without the switch; cycles x0.994). The first build of the switch (c7a29e25, every run of a
   non-home partition unbounded, window v4d11-w1) read the same in the same window (9381cc0a / c7a29e25 x0.994-1.001
   in the batch loop). Max RSS unchanged in every cell.
+- `LOSAT_X_PAIRPARMERGE=1` (in the strict set since 2026-10-25 (perf/pairpar-merge, evidence at the end of this entry):
+  on unless it is `0`) blastn, at the end of the partitioned stages of `LOSAT_X_PAIRPARFOLD` (above; the strips paths of
+  PAIRPAR, `LOSAT_X_PAIRPARDISC` and `LOSAT_X_PAIRPARNA` with the diagonal hash): how `merge`
+  (`blastn/blast_engine/x_pair_seed_part.rs`) puts the stage's hits in the order of their keys. Without the switch the
+  owner sorts the (key, partition, index) of every hit of the stage on its thread while the other participants wait
+  (`sort_unstable`; the AB input below: 76,600 hits per stage, 91 stages, 0.30-0.40 s of a 4.7-9.8 s run at 8-32
+  threads, the only serial part of the stage, which otherwise scales in cycles). With the switch (`hits_by_strips`), a
+  stage on a pool of two threads or more with `MERGE_POOL_MIN_HITS` (4,096) hits or more is ordered strip by strip: a
+  partition's keys ascend (it folds the strips in order and a strip's seeds of the partition in their scan order, the
+  counting sort of the strip being stable; one hit per seed at most) and a key is (strip, position in the strip's scan
+  order), so the hits of strip i are one run per partition after those of the strips before i; each strip's runs are
+  gathered and its few hits sorted (`hits_of_strips`). The strips are cut into `MERGE_RANGES_PER_THREAD` (2) ranges per
+  thread of the pool, which the pool orders side by side (`rayon::scope`); a range starts each partition's cursor at its
+  first key of the range (binary search) and writes its hits into its own slice of the list's spare capacity, after the
+  hits of the ranges before it. The order is the sort's (keys are unique), so the hits, and everything made from them,
+  are the same. A stage of fewer hits (the bound is kept above the estimated crossover: starting a scope's jobs takes
+  tens of microseconds, the sort about 50 ns per hit), of one strip, or without a pool keeps the sort (`x_reach!` per
+  stage: the switch's side for a stage it orders; no stage of the ci_fast blastn fixtures has 4,096 hits, so the reach
+  table marks the new side a gap, which the tests below cover). Tests: `hits_by_strips_on_a_pool_is_the_sort_of_merge` (random stages of 1 to 9 partitions and 1 to
+  300 strips, strips without hits, an empty partition, hits already in the list; pools of 2, 3 and 8 threads, 1 to
+  4 x strips ranges) and `LOSAT/tests/blastn_pairpar_merge.rs` (the reports at 2 and 4 threads, and at 4 with
+  `LOSAT_X_PAIRPARHOME=0`, against `=0`, the
+  one-hit fold of `-task blastn` with 17,506 hits in its stage and with 412, the Na fold of `-task blastn-short`, the
+  two-hit fold of `-task dc-megablast`, with the sides of `LOSAT_X_REACH`).
+  Default ON since 2026-10-25 (perf/pairpar-merge; workstation (2x Xeon Gold 6338, node 1 booked through its FIFO, 8 /
+  16 / 32 physical cores with the siblings idle, `numactl --membind 1`, the many-pair driver with the arm order rotated,
+  every output the expected one: the 31,168-cDNA blastn NCBI's daa7e0ac, the dc-megablast NCBI's 5c357f81); a ratio is
+  the median of the per-round with / `=0` of the same binary, 1d2884b1 against origin/dev e41ccb34, v4-A15
+  `results/s12/ms1`): blastn of 31,168 D. melanogaster cDNAs against 3 Mb of chromosome 2L in the batch loop
+  (`LOSAT_X_QBATCHPAR=0`) x0.960 / 0.949 / 0.947 at 8 / 16 / 32 threads (5 / 8 / 8 rounds, none slower; at 32 threads
+  rounds 2-6 of every arm ran with 1.6 times the CPU time, a disturbance outside the run, and rounds 0, 1 and 7 read
+  x0.941-0.948), against a `-db` of the chromosome x0.953 / 0.958 at 16 / 32 threads, with eight QBATCHPAR slots
+  (`LOSAT_X_QBATCHPARSLOTS=8`) x0.988 / 0.981, 1,775 cDNAs (the batch loop by default) x0.940 at 16 threads (20 rounds).
+  Within noise where no stage reaches the bound or none is partitioned (16 threads): the 31,168 cDNAs by default
+  (one-thread QBATCHPAR slots) x1.003, 5,000 cDNAs x1.000, dc-megablast of the 31,168 cDNAs x0.999, of 1,775 x0.999,
+  of 236 x1.001 (100 rounds), megablast x1.004 and in the batch loop x0.985, blastn-short of 236 cDNAs x0.996. CPU time
+  x0.985-1.009, max RSS unchanged (`ru_maxrss`, every cell within 1 % or the arena spread of the arms). One thread (one
+  node 0 core, `perf stat`, the 1,775 cDNAs with blastn and dc-megablast): instructions within 0.0001 % of `=0` and of
+  dev, cycles x0.999 / x0.995 (no stage is partitioned at one thread).
+  Probe (v4-A15 s12, workstation 2x Xeon Gold 6338, node 1 booked through its FIFO, 8 / 16 / 24 / 32 physical cores with
+  the siblings idle, `numactl --membind 1`, dev f24d161f, every output NCBI's): blastn of 31,168 D. melanogaster cDNAs
+  against 3 Mb of chromosome 2L in the batch loop (`LOSAT_X_QBATCHPAR=0`) 9.84 / 6.03 / 5.09 / 4.70 s at 8 / 16 / 24 / 32
+  threads, the seed stage 4.50 / 2.47 / 1.92 / 1.68 s of it, of which the merge 0.40 / 0.36 / 0.29 / 0.30 s (its hit
+  sort 0.354 of 0.360 s at 8 threads; the appended cells 1,300 per stage); the stage's other time scales with the
+  threads in cycles (cycles:u of the run 201 -> 218 G from 8 to 32 threads; its CPU time grows with the clock, 3.06 ->
+  2.40 GHz). The switch's form as a probe (`A15_P3=2`, exp/a15-seedscale 09aa43f4) in the same window, 6 rounds against
+  the probe without it: x0.944 / 0.948 at 16 / 32 threads in the batch loop (x0.942 at 8), `-db` x0.956 / 0.955, eight
+  QBATCHPAR slots (`LOSAT_X_QBATCHPARSLOTS=8`) x0.991 / 0.985.
 - `LOSAT_X_QBATCHPAR=1` (BLASTN, all tasks, `-subject` with two or more threads; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`) NCBI's query batches are searched side by
   side ahead of the batch loop of `run_in_pool` (`blastn/blast_engine/x_qbatch_par.rs`). The size of each
   batch after the first comes from the successful initial extensions of the batch before (NCBI's

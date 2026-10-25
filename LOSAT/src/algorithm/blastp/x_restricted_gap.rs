@@ -1,6 +1,6 @@
-//! EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): the restricted gapped alignment of the blastp
-//! preliminary stage (NCBI `s_RestrictedGappedAlign`) with its score rows in separate arrays,
-//! eight cells of a row at a time (x86_64 with AVX2; elsewhere the reference function runs).
+//! EXPERIMENT (LOSAT_X_BPGAP): the restricted gapped alignment of the blastp preliminary stage
+//! (NCBI `s_RestrictedGappedAlign`) with its score rows in separate arrays, eight cells of a row at
+//! a time (x86_64 with AVX2; elsewhere the reference function runs).
 //!
 //! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1107-1122,1143-1147,1171
 //! ```c
@@ -115,9 +115,9 @@
 //!
 //! The variables are read once. `LOSAT_X_BPGAP` (a strict-set switch, `utils/xswitch.rs`: on
 //! unless it is `0`) runs this module, and
-//! `LOSAT_X_BPGAP16` (another strict-set switch) its sixteen-bit rows first where they fit;
-//! `LOSAT_X_BPGAPSHADOW` runs both for every restricted alignment and panics if they differ, and
-//! `main` prints one `[X_SHADOW] BPGAP` line.
+//! `LOSAT_X_BPGAP16` (another strict-set switch) its sixteen-bit rows first where they fit.
+//! With `LOSAT_X_STATS`, `main` prints `[X_STATS] BPGAP fast= not_taken=`: the restricted
+//! alignments this module computed and those it passed on.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -147,32 +147,12 @@ const TAIL: usize = 24;
 const MAX_GAP_COST: i32 = 1 << 16;
 const MAX_X_DROP: i32 = 1 << 28;
 
-/// EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): which restricted alignment runs.
-// No NCBI counterpart: names the LOSAT code path; it does not change any value NCBI computes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum XBpGap {
-    /// `restricted_gapped_align_protein` (the port of NCBI's loop).
-    Reference,
-    /// This module (the reference when it does not take the problem).
-    Fast,
-    /// Both; panics if they differ.
-    Shadow,
-}
-
-// No NCBI counterpart: reads LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW once (the shadow variable
-// first, set to any value; LOSAT_X_BPGAP is a strict-set switch); it does not change any value NCBI
+// No NCBI counterpart: reads the strict-set switch LOSAT_X_BPGAP once (on: this module runs, the
+// reference function when it does not take the problem); it does not change any value NCBI
 // computes.
-pub(super) fn x_bpgap() -> XBpGap {
-    static MODE: OnceLock<XBpGap> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPGAPSHADOW").is_some() {
-            XBpGap::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_BPGAP") {
-            XBpGap::Fast
-        } else {
-            XBpGap::Reference
-        }
-    })
+pub(super) fn x_bpgap() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPGAP"))
 }
 
 // No NCBI counterpart: reads the strict-set switch LOSAT_X_BPGAP16 once (the 16-bit rows of this
@@ -182,29 +162,18 @@ pub(super) fn x_bpgap16() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPGAP16"))
 }
 
-// No NCBI counterpart: counters of the shadow summary and of LOSAT_X_STATS; they do not change any
-// value NCBI computes.
-/// Restricted alignments computed by this module (in shadow mode, those compared).
+// No NCBI counterpart: counters of LOSAT_X_STATS; they do not change any value NCBI computes.
+/// Restricted alignments computed by this module.
 static FAST_CALLS: AtomicU64 = AtomicU64::new(0);
 /// Restricted alignments this module did not take (the reference ran alone).
 static FALLBACK_CALLS: AtomicU64 = AtomicU64::new(0);
 
-/// The summary lines `main` prints at exit: the shadow summary, and with LOSAT_X_STATS the
-/// number of alignments this module computed and passed on.
+/// The summary line `main` prints at exit with LOSAT_X_STATS: the number of alignments this module
+/// computed and passed on.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
     let fast = FAST_CALLS.load(Ordering::Relaxed);
     let fallback = FALLBACK_CALLS.load(Ordering::Relaxed);
-    if x_bpgap() == XBpGap::Shadow {
-        eprintln!(
-            "[X_SHADOW] BPGAP compared={fast} not_taken={fallback} ({})",
-            if fast == 0 {
-                "nothing compared: no restricted gapped alignment ran"
-            } else {
-                "every restricted gapped alignment identical"
-            }
-        );
-    }
     if std::env::var_os("LOSAT_X_STATS").is_some() {
         eprintln!("[X_STATS] BPGAP fast={fast} not_taken={fallback}");
     }
@@ -339,7 +308,7 @@ fn x_score_tables(score_matrix: BlastpScoreMatrix<'_>) -> Option<&'static XScore
 //                                    subject_length-s_length,
 // ```
 /// Dispatch point of the two `s_RestrictedGappedAlign` calls of `s_BlastProtGappedAlignment`: the
-/// reference function, this module, or both (shadow). The arguments are those of
+/// reference function or this module. The arguments are those of
 /// `restricted_gapped_align_protein`.
 pub(super) fn restricted_gapped_align_protein_x(
     query: &[u8],
@@ -355,8 +324,7 @@ pub(super) fn restricted_gapped_align_protein_x(
     reverse: bool,
     scratch: &mut GapAlignScratch,
 ) -> (usize, usize, i32) {
-    let mode = x_bpgap();
-    if mode != XBpGap::Reference {
+    if x_bpgap() {
         // Without AVX2 the reference function runs: the scalar rows on the same arrays were
         // slower than it (they serve the tests as the cell-by-cell version of the arrays).
         let fast = if cpu_has_avx2() {
@@ -382,31 +350,7 @@ pub(super) fn restricted_gapped_align_protein_x(
         crate::utils::xreach::x_reach!("LOSAT_X_BPGAP", fast.is_some());
         if let Some(fast) = fast {
             FAST_CALLS.fetch_add(1, Ordering::Relaxed);
-            if mode == XBpGap::Fast {
-                return fast;
-            }
-            let reference = restricted_gapped_align_protein(
-                query,
-                query_base,
-                subject,
-                subject_base,
-                len1,
-                len2,
-                score_matrix,
-                gap_open,
-                gap_extend,
-                x_drop,
-                reverse,
-                &mut scratch.dp_mem,
-                &mut scratch.dp_mem_alloc,
-            );
-            assert_eq!(
-                fast, reference,
-                "LOSAT_X_BPGAPSHADOW: the restricted gapped alignment differs from the reference \
-                 (len1={len1} len2={len2} gap_open={gap_open} gap_extend={gap_extend} \
-                 x_drop={x_drop} reverse={reverse} query_base={query_base} subject_base={subject_base})"
-            );
-            return reference;
+            return fast;
         }
         FALLBACK_CALLS.fetch_add(1, Ordering::Relaxed);
     }

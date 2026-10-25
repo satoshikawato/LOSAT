@@ -268,25 +268,13 @@ pub(crate) fn extend_one_hit_blosum62(
             word_size,
         )
     };
-    // LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW (x_ungapped_fast.rs): the same result, the
-    // X-drop walks with a byte score table and no bounds checks; off unless set.
-    match x_ungapped_fast::mode() {
-        0 => reference(),
-        1 => x_ungapped_fast::one_hit(query, subject, q_off, s_off, dropoff, word_size)
-            .unwrap_or_else(reference),
-        _ => {
-            let expected = reference();
-            if let Some(got) =
-                x_ungapped_fast::one_hit(query, subject, q_off, s_off, dropoff, word_size)
-            {
-                assert_eq!(
-                    got, expected,
-                    "[X_SHADOW] BPUNGAP one-hit mismatch: q_off={q_off} s_off={s_off} dropoff={dropoff} word_size={word_size}"
-                );
-                x_ungapped_fast::count_shadow();
-            }
-            expected
-        }
+    // LOSAT_X_BPUNGAP (x_ungapped_fast.rs): the same result, the X-drop walks with a byte score
+    // table and no bounds checks.
+    if x_ungapped_fast::on() {
+        x_ungapped_fast::one_hit(query, subject, q_off, s_off, dropoff, word_size)
+            .unwrap_or_else(reference)
+    } else {
+        reference()
     }
 }
 
@@ -471,11 +459,10 @@ pub(crate) fn extend_two_hit_blosum62(
             word_size,
         )
     };
-    // LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW (x_ungapped_fast.rs): the same result, the
-    // X-drop walks with a byte score table and no bounds checks; off unless set.
-    match x_ungapped_fast::mode() {
-        0 => reference(),
-        1 => x_ungapped_fast::two_hit(
+    // LOSAT_X_BPUNGAP (x_ungapped_fast.rs): the same result, the X-drop walks with a byte score
+    // table and no bounds checks.
+    if x_ungapped_fast::on() {
+        x_ungapped_fast::two_hit(
             query,
             subject,
             s_left_off,
@@ -484,26 +471,9 @@ pub(crate) fn extend_two_hit_blosum62(
             dropoff,
             word_size,
         )
-        .unwrap_or_else(reference),
-        _ => {
-            let expected = reference();
-            if let Some(got) = x_ungapped_fast::two_hit(
-                query,
-                subject,
-                s_left_off,
-                s_right_off,
-                q_right_off,
-                dropoff,
-                word_size,
-            ) {
-                assert_eq!(
-                    got, expected,
-                    "[X_SHADOW] BPUNGAP two-hit mismatch: s_left_off={s_left_off} s_right_off={s_right_off} q_right_off={q_right_off} dropoff={dropoff} word_size={word_size}"
-                );
-                x_ungapped_fast::count_shadow();
-            }
-            expected
-        }
+        .unwrap_or_else(reference)
+    } else {
+        reference()
     }
 }
 

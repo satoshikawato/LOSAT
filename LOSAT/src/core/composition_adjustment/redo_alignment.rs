@@ -518,21 +518,12 @@ impl Eq for XSubjectComposition {}
 //     }
 //     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
 // ```
-// No NCBI counterpart: the switch, read once per process. 0 reads every subject composition,
-// 1 keeps the composition of the bytes blastp's SEG cache holds and reuses it, 2 does so and
-// reads the bytes again to compare (`LOSAT_X_BPCOMPOREUSESHADOW`).
-pub(crate) fn x_compo_reuse() -> u8 {
+// No NCBI counterpart: the switch, read once per process. Off reads every subject composition,
+// on keeps the composition of the bytes blastp's SEG cache holds and reuses it.
+pub(crate) fn x_compo_reuse() -> bool {
     use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if !crate::utils::xswitch::on("LOSAT_X_BPCOMPOREUSE") {
-            0
-        } else if std::env::var_os("LOSAT_X_BPCOMPOREUSESHADOW").is_some() {
-            2
-        } else {
-            1
-        }
-    })
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPCOMPOREUSE"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:934-936
@@ -548,13 +539,6 @@ pub(crate) fn x_whole_subject_composition(
     range: &BlastRedoRangeResult,
 ) -> BlastAminoAcidComposition {
     if let Some(stored) = &range.x_subject_composition {
-        if x_compo_reuse() == 2 {
-            let fresh = XSubjectComposition(read_aa_composition(range.subject.data()));
-            assert!(
-                fresh == **stored,
-                "LOSAT_X_BPCOMPOREUSESHADOW: stored subject composition differs"
-            );
-        }
         return stored.0.clone();
     }
     read_aa_composition(range.subject.data())

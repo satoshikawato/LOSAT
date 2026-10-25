@@ -134,12 +134,22 @@ fn cap_fill() -> Option<usize> {
 /// off; otherwise few enough that the unit has f tasks for each of the `ceil(threads / K)` threads
 /// it is left, at least one subject and at most `most`.
 fn capped_subjects_per_task(threads: usize, k: usize, subjects: usize, most: usize) -> usize {
-    match cap_fill() {
-        Some(f) => subjects
-            .div_ceil(f.saturating_mul(threads.div_ceil(k)))
-            .clamp(1, most.max(1)),
-        None => most,
-    }
+    cap_fill().map_or(most, |f| {
+        filled_subjects_per_task(f, threads, k, subjects, most)
+    })
+}
+
+/// No NCBI counterpart: `capped_subjects_per_task` with f tasks per thread.
+fn filled_subjects_per_task(
+    f: usize,
+    threads: usize,
+    k: usize,
+    subjects: usize,
+    most: usize,
+) -> usize {
+    subjects
+        .div_ceil(f.saturating_mul(threads.div_ceil(k.max(1))).max(1))
+        .clamp(1, most.max(1))
 }
 
 /// No NCBI counterpart: `Some(K)` where `LOSAT_X_BXUNITCAP[=K]` caps the units searched at a time,
@@ -468,6 +478,33 @@ pub(super) fn chunk_subjects_on_pool(
 
 #[cfg(test)]
 mod tests {
+    // No NCBI counterpart (scheduling only): the capped units' task sizes of LOSAT_X_BXCAPFILL.
+    #[test]
+    fn capped_units_have_f_tasks_for_each_thread_they_are_left() {
+        use super::filled_subjects_per_task as size;
+        // 50 subjects, K = 8: 16 threads leave each unit 2, so 8 tasks of 7; 64 threads 8, so 32
+        // tasks of 2; 6,600 subjects keep the size without the cap.
+        assert_eq!(size(4, 16, 8, 50, 64), 7);
+        assert_eq!(size(4, 64, 8, 50, 64), 2);
+        assert_eq!(size(4, 16, 8, 6_600, 64), 64);
+        assert_eq!(size(4, 16, 8, 6_600, 16), 16);
+        // K units then hold a task for every thread (the cap's rule, `unit_cap`) wherever K units
+        // of one subject each would.
+        for threads in [9, 16, 17, 32, 48, 64, 128] {
+            for subjects in [2, 10, 50, 200, 543, 6_600] {
+                let per_task = size(4, threads, 8, subjects, 64);
+                let tasks = subjects.div_ceil(per_task);
+                assert!(
+                    8 * tasks >= threads || 8 * subjects < threads,
+                    "{threads} threads, {subjects} subjects: {per_task} per task"
+                );
+            }
+        }
+        // One subject at least, also for no subjects.
+        assert_eq!(size(4, 16, 8, 0, 64), 1);
+        assert_eq!(size(64, 4_096, 2, 1, 16), 1);
+    }
+
     // No NCBI counterpart (scheduling only). The counts are the run's own (attached to its pool),
     // so other tests searching at the same time do not move them.
     #[test]

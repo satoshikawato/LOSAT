@@ -1,5 +1,6 @@
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
 
+use super::protein_options::{gap_costs_row, scoring_matrix_table};
 use super::tables::KarlinParams;
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:94-112
@@ -35,88 +36,65 @@ pub struct BlastGumbelBlk {
     pub db_length: i64,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:3696-3742
-// ```c
-// if (BLAST_Nint(values[index][0]) == gap_open &&
-//    BLAST_Nint(values[index][1]) == gap_extend) {
-//    gbp->Lambda = values[index][3];
-//    gbp->C = values[index][8];
-//    gbp->G = gap_open + gap_extend;
-//    gbp->a = values[index][6];
-//    gbp->Alpha = values[index][9];
-//    gbp->Sigma = values[index][10];
-//    gbp->a_un  = values[0][6];
-//    gbp->Alpha_un = values[0][9];
-//    gbp->b = 2.0 * gbp->G * (gbp->a_un - gbp->a);
-//    gbp->Beta = 2.0 * gbp->G * (gbp->Alpha_un - gbp->Alpha);
-//    gbp->Tau  = 2.0 * gbp->G * (gbp->Alpha_un - gbp->Sigma);
-// }
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:258-271
-// ```c
-// static array_of_8 blosum62_values[BLOSUM62_VALUES_MAX] = {
-//     {(double) INT2_MAX, ..., 0.3176, ..., 0.7916, -3.2, 0.623757, 4.964660, 4.964660},
-//     ...
-//     {11, 1, (double) INT2_MAX, 0.267, 0.041, 0.14, 1.9, -30, 0.669720, 42.602800, 43.636200},
-// };
-// ```
+/// The Gumbel block of a protein scoring scheme from the matrix's table; `None` when its gap
+/// costs are not in the table (NCBI status 2).
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3724-3749
+/// ```c
+///    if (found_matrix) {
+///       Boolean found_values=FALSE;
+///       Int4 index;
+///       for (index=0; index<max_number_values; index++) {
+///          if (BLAST_Nint(values[index][0]) == gap_open &&
+///             BLAST_Nint(values[index][1]) == gap_extend) {
+///             if (gbp) {
+///                gbp->Lambda = values[index][3];
+///                gbp->C = values[index][8];
+///                gbp->G = gap_open + gap_extend;
+///                gbp->a = values[index][6];
+///                gbp->Alpha = values[index][9];
+///                gbp->Sigma = values[index][10];
+///                gbp->a_un  = values[0][6];
+///                gbp->Alpha_un = values[0][9];
+///                gbp->b = 2.0 * gbp->G * (gbp->a_un - gbp->a);
+///                gbp->Beta = 2.0 * gbp->G * (gbp->Alpha_un - gbp->Alpha);
+///                gbp->Tau  = 2.0 * gbp->G * (gbp->Alpha_un - gbp->Sigma);
+///                gbp->filled = TRUE;
+///             }
+///             found_values = TRUE;
+///             break;
+///          }
+///       }
+///
+///       status = found_values ? 0 : 2;
+/// ```
 pub fn lookup_protein_gumbel_params(
     spec: &ProteinScoringSpec,
     db_length: i64,
 ) -> Option<BlastGumbelBlk> {
-    match (spec.matrix, spec.gap_open, spec.gap_extend) {
-        // NCBI c++/src/algo/blast/core/blast_stat.c:183-192,3696-3742:
-        // {INT2_MAX, INT2_MAX, ..., 0.2291, ..., 0.9113, ..., 9.611060, 9.611060},
-        // {14, 2, ..., 0.195, ..., 1.9, ..., 0.685753, 60.736200, 61.102300};
-        // gbp->b = 2*G*(a_un-a); gbp->Beta = 2*G*(Alpha_un-Alpha);
-        // gbp->Tau = 2*G*(Alpha_un-Sigma);
-        (ScoringMatrix::Blosum45, 14, 2) => {
-            let g = (spec.gap_open + spec.gap_extend) as f64;
-            let a = 1.9;
-            let alpha = 60.736200;
-            let sigma = 61.102300;
-            let a_un = 0.9113;
-            let alpha_un = 9.611060;
-            Some(BlastGumbelBlk {
-                lambda: 0.195,
-                c: 0.685753,
-                g,
-                a,
-                alpha,
-                sigma,
-                a_un,
-                alpha_un,
-                b: 2.0 * g * (a_un - a),
-                beta: 2.0 * g * (alpha_un - alpha),
-                tau: 2.0 * g * (alpha_un - sigma),
-                db_length,
-            })
-        }
-        (ScoringMatrix::Blosum62, 11, 1) => {
-            let g = (spec.gap_open + spec.gap_extend) as f64;
-            let a = 1.9;
-            let alpha = 42.602800;
-            let sigma = 43.636200;
-            let a_un = 0.7916;
-            let alpha_un = 4.964660;
-            Some(BlastGumbelBlk {
-                lambda: 0.267,
-                c: 0.669720,
-                g,
-                a,
-                alpha,
-                sigma,
-                a_un,
-                alpha_un,
-                b: 2.0 * g * (a_un - a),
-                beta: 2.0 * g * (alpha_un - alpha),
-                tau: 2.0 * g * (alpha_un - sigma),
-                db_length,
-            })
-        }
-        _ => None,
-    }
+    let table = scoring_matrix_table(spec.matrix);
+    let row = gap_costs_row(table, spec.gap_open, spec.gap_extend)?;
+    let ungapped = &table.values[0];
+    let g = (spec.gap_open + spec.gap_extend) as f64;
+    let a = row.0[6];
+    let alpha = row.0[9];
+    let sigma = row.0[10];
+    let a_un = ungapped.0[6];
+    let alpha_un = ungapped.0[9];
+    Some(BlastGumbelBlk {
+        lambda: row.0[3],
+        c: row.0[8],
+        g,
+        a,
+        alpha,
+        sigma,
+        a_un,
+        alpha_un,
+        b: 2.0 * g * (a_un - a),
+        beta: 2.0 * g * (alpha_un - alpha),
+        tau: 2.0 * g * (alpha_un - sigma),
+        db_length,
+    })
 }
 
 // NCBI c++/src/algo/blast/core/boost_erf.c:1-35,59-260 is adapted
@@ -147,8 +125,8 @@ pub fn lookup_protein_gumbel_params(
 // NCBI blast_stat.c:5216,5223 calls ErfC, not NCBI_ErfC.
 #[inline]
 fn erfc_ncbi(z: f64) -> f64 {
-    // EXPERIMENT (LOSAT_X_ERFABSORB): for z < -6 the reference's value is 2.0 whatever ErfImpl
-    // returns, so ErfImpl is not called.
+    // LOSAT_X_ERFABSORB (graduated 2026-10-26, always on): for z < -6 the reference's value is
+    // 2.0 whatever ErfImpl returns, so ErfImpl is not called.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59,111,207,224-229,234-235
     // ```c
     //         else if (z < -0.5) {
@@ -174,7 +152,7 @@ fn erfc_ncbi(z: f64) -> f64 {
     // 2^-53. The reference's 2.0 - r then rounds to 2.0: the exact difference lies in
     // [2 - 2^-53, 2], and 2 - 2^-53 is the midpoint between 2 - 2^-52 and 2.0, which rounds to
     // the even 2.0. A NaN fails the comparison and takes the reference path.
-    if z < -6.0 && x_erf_absorb() {
+    if z < -6.0 {
         return 2.0;
     }
     // Memo (was LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
@@ -219,19 +197,6 @@ fn erfc_ncbi(z: f64) -> f64 {
         }
         result
     })
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59
-// ```c
-//         else if (z < -0.5) {
-//             return 2.0 - ErfImpl(-z, invert);
-// ```
-// No NCBI counterpart: the switch is read once per process. Off calls ErfImpl for every argument,
-// on returns the reference's 2.0 for z < -6 without it (the argument in `erfc_ncbi`).
-fn x_erf_absorb() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_ERFABSORB"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5248-5254
@@ -740,8 +705,8 @@ mod tests {
 
     use super::*;
 
-    // EXPERIMENT (LOSAT_X_ERFABSORB): the reference ErfC is 2.0 for every z < -6, and the
-    // switched function has the reference's bits everywhere.
+    // LOSAT_X_ERFABSORB (graduated 2026-10-26): the reference ErfC is 2.0 for every z < -6, and
+    // `erfc_ncbi`, which does not call it there, has the reference's bits everywhere.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59
     // ```c
     //         else if (z < -0.5) {
@@ -749,7 +714,7 @@ mod tests {
     // ```
     // The argument of `erfc_ncbi` bounds ErfImpl(-z, TRUE) below 2.2e-17 for z <= -6; this
     // checks the reference on a grid of [-28.5, -6], on random arguments below -6 (dense next to
-    // -6 and 28) and on the doubles just below -6, and that `erfc_ncbi` (whatever the switches)
+    // -6 and 28) and on the doubles just below -6, and that `erfc_ncbi`
     // equals `erf_impl_ncbi` on random arguments in [-40, 40]. A reference call costs about
     // 5,000 cycles, so the sets are kept to about 100,000 calls.
     #[test]
@@ -887,6 +852,115 @@ mod tests {
         assert!((gbp.alpha - 42.602800).abs() < 1e-12);
         assert!((gbp.sigma - 43.636200).abs() < 1e-12);
         assert_eq!(gbp.db_length, 66738);
+    }
+
+    // The two Gumbel blocks this file built from literals before it read the table (dev
+    // fb8b10ee6), with the same arithmetic.
+    fn literal_gumbel(
+        gap_open: i32,
+        gap_extend: i32,
+        [lambda, c, a, alpha, sigma, a_un, alpha_un]: [f64; 7],
+    ) -> BlastGumbelBlk {
+        let g = (gap_open + gap_extend) as f64;
+        BlastGumbelBlk {
+            lambda,
+            c,
+            g,
+            a,
+            alpha,
+            sigma,
+            a_un,
+            alpha_un,
+            b: 2.0 * g * (a_un - a),
+            beta: 2.0 * g * (alpha_un - alpha),
+            tau: 2.0 * g * (alpha_un - sigma),
+            db_length: 1234,
+        }
+    }
+
+    fn gumbel_bits(g: &BlastGumbelBlk) -> [u64; 11] {
+        [
+            g.lambda, g.c, g.g, g.a, g.alpha, g.sigma, g.a_un, g.alpha_un, g.b, g.beta, g.tau,
+        ]
+        .map(f64::to_bits)
+    }
+
+    #[test]
+    fn gumbel_blocks_from_the_table_equal_the_former_literals_bit_for_bit() {
+        for (matrix, gap_open, gap_extend, literals) in [
+            (
+                ScoringMatrix::Blosum45,
+                14,
+                2,
+                [0.195, 0.685753, 1.9, 60.736200, 61.102300, 0.9113, 9.611060],
+            ),
+            (
+                ScoringMatrix::Blosum62,
+                11,
+                1,
+                [0.267, 0.669720, 1.9, 42.602800, 43.636200, 0.7916, 4.964660],
+            ),
+        ] {
+            let spec = ProteinScoringSpec {
+                matrix,
+                gap_open,
+                gap_extend,
+            };
+            let table = lookup_protein_gumbel_params(&spec, 1234).expect("in the table");
+            let literal = literal_gumbel(gap_open, gap_extend, literals);
+            assert_eq!(gumbel_bits(&table), gumbel_bits(&literal), "{matrix:?}");
+            assert_eq!(table.db_length, 1234);
+        }
+    }
+
+    #[test]
+    fn every_gap_cost_row_has_a_gumbel_block() {
+        // NCBI blast_stat.c:3724-3749 fills the block for any row of the table, e.g. PAM30
+        // 9/1 {9, 1, INT2_MAX, 0.294, 0.11, 0.61, 0.48, -6, 0.492716, 2.463920, 3.186150}
+        // and the ungapped row's a 0.1938 and Alpha 0.161818.
+        let pam30 = lookup_protein_gumbel_params(
+            &ProteinScoringSpec {
+                matrix: ScoringMatrix::Pam30,
+                gap_open: 9,
+                gap_extend: 1,
+            },
+            0,
+        )
+        .expect("PAM30 9/1");
+        assert_eq!(
+            (
+                pam30.lambda,
+                pam30.c,
+                pam30.g,
+                pam30.a,
+                pam30.alpha,
+                pam30.sigma
+            ),
+            (0.294, 0.492716, 10.0, 0.48, 2.463920, 3.186150)
+        );
+        assert_eq!((pam30.a_un, pam30.alpha_un), (0.1938, 0.161818));
+        let mut rows = 0;
+        for matrix in ScoringMatrix::ALL {
+            for row in &crate::stats::protein_options::scoring_matrix_table(matrix).values[1..] {
+                let spec = ProteinScoringSpec {
+                    matrix,
+                    gap_open: row.0[0] as i32,
+                    gap_extend: row.0[1] as i32,
+                };
+                assert!(lookup_protein_gumbel_params(&spec, 0).is_some(), "{spec:?}");
+                rows += 1;
+            }
+        }
+        assert_eq!(rows, 89);
+        assert!(lookup_protein_gumbel_params(
+            &ProteinScoringSpec {
+                matrix: ScoringMatrix::Blosum62,
+                gap_open: 5,
+                gap_extend: 5,
+            },
+            0,
+        )
+        .is_none());
     }
 
     #[test]

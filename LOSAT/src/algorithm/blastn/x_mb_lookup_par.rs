@@ -1419,9 +1419,11 @@ pub(super) mod tests {
             let reference =
                 build_two_stage_lookup(&refs, &offsets, lut + 4, lut, &masks, None, 0, approx, asc);
             let mb = &reference.mb_lookup;
+            // (a table laid out as CSR, LOSAT_X_BNCSR, gives its chains back as the fill's arrays)
+            let (hashtable, next_pos) = reference.x_chain_arrays(queries[0].len() + 1);
             let shape = (
-                mb.hashtable.len(),
-                mb.next_pos.len(),
+                hashtable.len(),
+                next_pos.len(),
                 mb.pv_array.len(),
                 mb.pv_array_bts,
             );
@@ -1434,11 +1436,11 @@ pub(super) mod tests {
                 kmer_mask: (1u64 << (2 * lut)) - 1,
                 ascending_cells: asc,
             };
-            let helper0 = vec![0u32; (mb.hashtable.len() >> 11).max(1)];
+            let helper0 = vec![0u32; (hashtable.len() >> 11).max(1)];
             let pv0 = vec![0 as PvArrayType; mb.pv_array.len()];
             let loop_built = build_with(1, false, &words, shape, &helper0, &pv0);
-            assert_eq!(loop_built.hashtable, mb.hashtable);
-            assert_eq!(loop_built.next_pos, mb.next_pos);
+            assert_eq!(loop_built.hashtable, hashtable);
+            assert_eq!(loop_built.next_pos, next_pos);
             assert_eq!(loop_built.pv_array, mb.pv_array);
             for parts in [64usize, 254, 255, 256, 300] {
                 let b = build_with(parts, false, &words, shape, &helper0, &pv0);

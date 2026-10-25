@@ -117,6 +117,7 @@ const compBasedStats: ParameterField = {
 // Filters and Masking.
 const seg: ParameterField = { flag: '-seg', label: 'Low complexity regions filter (SEG)', kind: 'text', suggestions: ['no', 'yes'] };
 const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag' };
+const softMasking: ParameterField = { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean' };
 // Other Parameters: LOSAT's options that NCBI's page does not show.
 const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subject', ...integer };
 const threshold: ParameterField = { flag: '-threshold', label: 'Neighboring words threshold', ...decimal };
@@ -206,7 +207,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     label: 'BLASTP',
     summary: 'BLASTP searches protein subjects using a protein query.',
     searches: 'protein subjects',
-    taskNotes: { blastp: 'protein-protein BLAST', 'blastp-fast': 'Quick BLASTP', 'blastp-short': 'short queries' },
+    taskNotes: { blastp: 'protein-protein BLAST', 'blastp-fast': 'Quick BLASTP' },
     query: 'protein',
     subject: 'protein',
     fastaParser: 0,
@@ -222,14 +223,13 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
             choiceLabels: {
               blastp: 'blastp (protein-protein BLAST)',
               'blastp-fast': 'Quick BLASTP (blastp-fast)',
-              'blastp-short': 'blastp-short (short queries)',
             },
           },
         ],
       },
       { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats] },
-      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg] },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking] },
       { title: OTHER, placement: 'algorithm', fields: [threshold, windowSize, maxHsps] },
     ],
   },
@@ -262,7 +262,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: 'Filters and Masking',
         placement: 'algorithm',
-        fields: [seg, { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean' }, lcaseMasking],
+        fields: [seg, softMasking, lcaseMasking],
       },
       {
         title: OTHER,
@@ -295,7 +295,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         // NCBI's "Max matches in a query range" (HSP_RANGE_MAX) is BLAST+'s -culling_limit.
         fields: [maxTargetSeqs, evalue, wordSize, { flag: '-culling_limit', label: 'Max matches in a query range', ...integer }],
       },
-      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg] },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking] },
       { title: OTHER, placement: 'algorithm', fields: [threshold, windowSize] },
     ],
   },

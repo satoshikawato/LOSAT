@@ -18,9 +18,7 @@
 //! cells from repeats, related proteins for two-hit extensions) at one and four threads and on the
 //! fixture pair at four, check from the
 //! `[TIMING] x_bpdiag: mode=<m> cells=<n> batched_hits=<h> candidates=<k>` lines that the masked
-//! and the deferred paths ran and tested the same cells, hits and candidates as the batches, and
-//! run the shadow of `LOSAT_X_BPSEEDSHADOW` (the default's loop against the reference for every
-//! subject).
+//! and the deferred paths ran and tested the same cells, hits and candidates as the batches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552
 //! ```c
@@ -324,32 +322,6 @@ fn the_switch_acts_only_on_the_avx2_batches() {
     let (rows, counts, _) = blastp(&query, &subject, 1, vars, &["-outfmt", "6"]);
     assert!(rows == reference, "scalar batch {vars:?}: rows differ");
     assert_eq!(one_line(&counts, "scalar batch").mode, "scalar");
-}
-
-#[test]
-fn the_shadow_compares_the_deferred_loop_with_the_reference() {
-    let (query, subject) = generated_pair("shadow");
-    let (reference, _, _) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
-    // The shadow by default (both switches on: the masked batch).
-    let vars: &[(&str, &str)] = &[("LOSAT_X_BPSEEDSHADOW", "1")];
-    for threads in [1, 4] {
-        let what = format!("{vars:?} threads {threads}");
-        let (rows, counts, stderr) = blastp(&query, &subject, threads, vars, &["-outfmt", "6"]);
-        assert!(rows == reference, "{what}: rows differ");
-        assert!(
-            stderr
-                .lines()
-                .any(|line| line.starts_with("[X_SHADOW] BPSEED subjects=")
-                    && line.contains(" identical")),
-            "{what}: no shadow line: {stderr}"
-        );
-        let expected = if avx2() {
-            "avx2-defer-masked"
-        } else {
-            "per-hit"
-        };
-        assert_eq!(one_line(&counts, &what).mode, expected);
-    }
 }
 
 /// `LOSAT_X_BPMASKEDMIN`'s rule on whole searches: a short query (about one hit per used lookup

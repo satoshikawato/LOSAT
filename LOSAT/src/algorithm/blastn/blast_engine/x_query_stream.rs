@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_QSTREAM, in the strict set since 2026-10-18: on unless it is `0`;
-//! shadow LOSAT_X_QSTREAMSHADOW, off unless set): blastn reads the records of each query batch from the query file when the batch loop of
+//! EXPERIMENT (LOSAT_X_QSTREAM, in the strict set since 2026-10-18: on unless it is `0`): blastn
+//! reads the records of each query batch from the query file when the batch loop of
 //! `run_in_pool` takes the batch (or a LOSAT_X_QBATCHPAR slot searches it ahead of the loop), as
 //! NCBI reads its query batches one at a time, instead of holding the records of the whole query
 //! file for the whole search. It saves memory (the records of the batches not in flight) and costs
@@ -87,7 +87,7 @@
 //! handle cannot be had (`Io`, for example `try_clone` on WASI). LOSAT reads no compressed query
 //! file. `run_local` (the Web adapter and ABI v1) gets its records from its caller.
 //!
-//! The rule (`Rule::off`; not for the shadow): the switch does not act on a regular file where the
+//! The rule (`Rule::off`): the switch does not act on a regular file where the
 //! second reading saves little memory and costs time (v4-D sessions 4 and 5, ws windows w1, w4):
 //! - `-task megablast` (`Megablast`): its searches are fast for their query bytes, so the serial
 //!   first reading is several % of the time (31,168 cDNAs against 3 Mb at 4 and 16 threads: 1.052
@@ -112,31 +112,19 @@
 //! skipped, the input position and placement of each searched query and its searched length
 //! (about 33 bytes per record without `-query_loc`). The records of every batch are kept as well
 //! (cloned when the loop takes them) where a writer reads them after their batch: LOSAT_X_RPTSTREAM
-//! on but not acting for the search (one of its refusals, `x_rpt_stream::check`), or its shadow
-//! (which writes the off path's reports to compare); there the memory is that of the records read
-//! before the search. With LOSAT_X_RPTSTREAM acting without its shadow they are not kept.
+//! on but not acting for the search (one of its refusals, `x_rpt_stream::check`); there the memory
+//! is that of the records read before the search. With LOSAT_X_RPTSTREAM acting they are not kept.
 //!
-//! The shadow (`LOSAT_X_QSTREAMSHADOW`, implies the switch) also reads the whole file the old way
-//! (a third source at the same position: `IsIStreamEmpty`, then `read_queries`) and compares: the
-//! first reading's lengths and end (its kind, the error's text, kind and line, and the warnings)
-//! and the query input made from the lengths (with `cut_queries` or `QueryInput::whole`); then
-//! every batch the loop takes (its input records and its searched records) and every slot's copy
-//! with the old records (`FastaRecord` as a whole: local id, title, letters with their case, and
-//! the reader's warnings). A difference prints `[X_SHADOW] QSTREAM batches= records= DIFFERENT
-//! (...)` and panics; at the end of the search `[X_SHADOW] QSTREAM batches= records= slots=
-//! off= identical` (`DIFFERENT` instead if a difference was found, also one whose panic on a slot's
-//! thread was dropped with a batch the loop never took; batches: the loop's batches compared;
-//! records: the records compared, the
-//! loop's input records and every slot's records; slots: the slots' requests; off: why the switch
-//! did not act, `none` when it did). With `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM
+//! With `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM
 //! records= read= batches= slots= slot_copies= slot_records= kept= stale= scan_s= read_s=
-//! peak_window= off=` (records: the input records; read: the records read again; slots: the
-//! slots' requests, slot_copies of them answered with a copy of slot_records records, the others
-//! with a shared chunk; kept: the searched records the loop kept for a writer after their batch,
-//! 0 where LOSAT_X_RPTSTREAM writes each batch's reports; stale: slot requests for records the loop had passed, answered with QBATCHPAR's
+//! peak_window= off=` (records: the input records; read: the records read again; off: why the
+//! switch did not act, `none` when it did; slots: the slots' requests, slot_copies of them answered
+//! with a copy of slot_records records, the others with a shared chunk; kept: the searched records
+//! the loop kept for a writer after their batch, 0 where LOSAT_X_RPTSTREAM writes each batch's
+//! reports; stale: slot requests for records the loop had passed, answered with QBATCHPAR's
 //! `Cancelled`; scan_s: the first reading; read_s: the second, summed over the threads that read;
-//! peak_window: the most records read ahead of the loop at once).
-//! Both lines are printed for searches of the command line only.
+//! peak_window: the most records read ahead of the loop at once). The line is printed for searches
+//! of the command line only.
 
 use std::collections::VecDeque;
 use std::fs::File;
@@ -157,27 +145,18 @@ use crate::blastinput::seq_range::{
     SequenceRange,
 };
 
-// No NCBI counterpart: reads the switches once (LOSAT_X_QSTREAM is in the strict set; any value
-// turns the shadow on, and the shadow implies the switch). They choose when LOSAT reads the same
-// records.
-/// 0 = off, 1 = LOSAT_X_QSTREAM, 2 = LOSAT_X_QSTREAMSHADOW.
-fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_QSTREAMSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_QSTREAM") {
-            1
-        } else {
-            0
-        }
-    })
+// No NCBI counterpart: reads the switch once (LOSAT_X_QSTREAM is in the strict set). It chooses
+// when LOSAT reads the same records.
+/// Whether LOSAT_X_QSTREAM is on.
+fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_QSTREAM"))
 }
 
 /// Why the records of a search are read before the search (`Opening::new`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Off {
-    /// Neither switch is set.
+    /// The switch is off (`LOSAT_X_QSTREAM=0`).
     NotSet,
     /// The reports are written after the loop (LOSAT_X_RPTSTREAM off), which reads every record.
     Reports,
@@ -214,7 +193,7 @@ impl Off {
 /// Whether the query file of a search can be read a second time: a second handle on the open
 /// file and the position its reading starts at.
 pub(super) struct Opening {
-    mode: u8,
+    on: bool,
     off: Option<Off>,
     again: Option<(File, u64)>,
 }
@@ -232,7 +211,7 @@ impl Opening {
         rule: Rule,
     ) -> Opening {
         Opening::with_mode(
-            mode(),
+            on(),
             path,
             file,
             shared_standard_input,
@@ -241,9 +220,9 @@ impl Opening {
         )
     }
 
-    /// `new` with the switches' value `mode` (`mode()`; the unit tests set it).
+    /// `new` with the switch's value `on` (`on()`; the unit tests set it).
     fn with_mode(
-        mode: u8,
+        on: bool,
         path: &Path,
         file: &File,
         shared_standard_input: bool,
@@ -251,16 +230,16 @@ impl Opening {
         rule: Rule,
     ) -> Opening {
         let off = |off| {
-            if mode != 0 {
+            if on {
                 crate::utils::xreach::x_reach!("LOSAT_X_QSTREAM", false);
             }
             Opening {
-                mode,
+                on,
                 off: Some(off),
                 again: None,
             }
         };
-        if mode == 0 {
+        if !on {
             return off(Off::NotSet);
         }
         if !reports_streamed {
@@ -279,11 +258,8 @@ impl Opening {
             Ok(_) => return off(Off::NotAFile),
             Err(_) => return off(Off::Io),
         };
-        // The rule; the shadow reads the file again wherever it can (a test mode).
-        if mode == 1 {
-            if let Some(why) = rule.off(bytes) {
-                return off(why);
-            }
+        if let Some(why) = rule.off(bytes) {
+            return off(why);
         }
         let mut handle = file;
         let Ok(start) = handle.stream_position() else {
@@ -293,7 +269,7 @@ impl Opening {
             Ok(again) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_QSTREAM", true);
                 Opening {
-                    mode,
+                    on,
                     off: None,
                     again: Some((again, start)),
                 }
@@ -409,7 +385,7 @@ fn scan<R: Read>(
 /// The records of a search's queries read batch by batch, or why they are not (its drop prints
 /// the summary lines).
 pub(super) struct Store {
-    mode: u8,
+    on: bool,
     off: Option<Off>,
     acting: Option<Acting>,
 }
@@ -421,9 +397,6 @@ struct Acting {
     ranged: bool,
     scan: Duration,
     state: Mutex<State>,
-    /// The shadow: the records as `read_queries` reads them, and the searched ones (cut with
-    /// `-query_loc`).
-    old: Option<(Vec<FastaRecord>, Option<Vec<FastaRecord>>)>,
 }
 
 /// The second reading.
@@ -454,11 +427,6 @@ struct Stats {
     kept: u64,
     read: Duration,
     peak_window: usize,
-    shadow_batches: u64,
-    shadow_records: u64,
-    /// The shadow found a difference (its panic, on a slot's thread, may be dropped with a batch
-    /// the loop never takes).
-    differed: bool,
 }
 
 impl Store {
@@ -466,7 +434,7 @@ impl Store {
     pub(super) fn off(opening: Opening) -> Store {
         debug_assert!(!opening.acts());
         Store {
-            mode: opening.mode,
+            on: opening.on,
             off: opening.off,
             acting: None,
         }
@@ -500,53 +468,10 @@ impl Store {
                 .context("LOSAT_X_QSTREAM: the query file cannot be read again")?;
             Ok(handle)
         };
-        let old = if opening.mode == 2 {
-            let mut old_source = FastaInputSource::from_file(reopen(&again)?, config);
-            let empty = old_source.stream_is_empty();
-            let QueryRecords {
-                records,
-                end: old_end,
-            } = read_queries(&mut old_source);
-            drop(old_source);
-            let old_input = match range {
-                Some(range) => cut_queries(&records, range),
-                None => crate::blastinput::seq_range::RangedQueries {
-                    input: QueryInput::whole(&records),
-                    records: Vec::new(),
-                },
-            };
-            let difference = if empty {
-                Some("the old reading finds the file empty".to_string())
-            } else if end_text(&old_end) != end_text(&end) {
-                Some(format!(
-                    "the reading ends with {} where the old one ends with {}",
-                    end_text(&end),
-                    end_text(&old_end)
-                ))
-            } else {
-                same_query_input(&query_input, &old_input.input)
-                    .err()
-                    .or_else(|| {
-                        let old_lengths: Vec<usize> = match range {
-                            Some(_) => old_input.records.iter().map(|r| r.seq().len()).collect(),
-                            None => records.iter().map(|r| r.seq().len()).collect(),
-                        };
-                        (old_lengths != lengths)
-                            .then(|| "the searched lengths differ from the old ones".to_string())
-                    })
-            };
-            if let Some(difference) = difference {
-                eprintln!("[X_SHADOW] QSTREAM batches=0 records=0 DIFFERENT (the first reading: {difference})");
-                panic!("LOSAT_X_QSTREAMSHADOW: the first reading differs from the old reading");
-            }
-            Some((records, range.map(|_| old_input.records)))
-        } else {
-            None
-        };
         let source = FastaInputSource::from_file(reopen(&again)?, config);
         drop(again);
         let store = Store {
-            mode: opening.mode,
+            on: opening.on,
             off: None,
             acting: Some(Acting {
                 ranged: range.is_some(),
@@ -562,7 +487,6 @@ impl Store {
                     failed: None,
                     stats: Stats::default(),
                 }),
-                old,
             }),
         };
         Ok((store, end))
@@ -585,12 +509,12 @@ impl Store {
     }
 }
 
-// No NCBI counterpart: the summary lines of the switch (with LOSAT_X_STATS) and of the shadow;
-// they print counters and change no value NCBI computes.
+// No NCBI counterpart: the summary line of the switch (with LOSAT_X_STATS); it prints counters and
+// changes no value NCBI computes.
 impl Drop for Store {
     fn drop(&mut self) {
-        // After a panic (a shadow's difference) the lines would claim what the run did not finish.
-        if self.mode == 0 || std::thread::panicking() {
+        // After a panic the line would claim what the run did not finish.
+        if !self.on || std::thread::panicking() {
             return;
         }
         let off = self.off.map_or("none", Off::name);
@@ -620,19 +544,6 @@ impl Drop for Store {
                 stats.peak_window,
             );
         }
-        if self.mode == 2 {
-            eprintln!(
-                "[X_SHADOW] QSTREAM batches={} records={} slots={} off={off} {}",
-                stats.shadow_batches,
-                stats.shadow_records,
-                stats.slots,
-                if stats.differed {
-                    "DIFFERENT"
-                } else {
-                    "identical"
-                }
-            );
-        }
     }
 }
 
@@ -650,40 +561,6 @@ impl Acting {
         } else {
             record.clone()
         }
-    }
-
-    /// The shadow: `got` (records `first..` of `what`) are the old reading's.
-    fn compare(&self, state: &mut State, what: &str, got: &[FastaRecord], old: &[FastaRecord]) {
-        let difference = if got.len() != old.len() {
-            Some(format!(
-                "{} records where the old reading has {}",
-                got.len(),
-                old.len()
-            ))
-        } else {
-            got.iter().zip(old).position(|(a, b)| a != b).map(|at| {
-                let (a, b) = (&got[at], &old[at]);
-                let field = if a.local_id != b.local_id {
-                    "local id"
-                } else if a.title != b.title {
-                    "title"
-                } else if a.sequence != b.sequence {
-                    "letters"
-                } else {
-                    "warnings"
-                };
-                format!("record {at} of the batch differs in its {field}")
-            })
-        };
-        if let Some(difference) = difference {
-            state.stats.differed = true;
-            eprintln!(
-                "[X_SHADOW] QSTREAM batches={} records={} DIFFERENT ({what}: {difference})",
-                state.stats.shadow_batches, state.stats.shadow_records
-            );
-            panic!("LOSAT_X_QSTREAMSHADOW: the records read batch by batch differ from those read before the search");
-        }
-        state.stats.shadow_records += got.len() as u64;
     }
 }
 
@@ -826,6 +703,9 @@ pub(super) enum Queries<'a> {
         searched: &'a [FastaRecord],
     },
     Streamed(&'a Store),
+    /// EXPERIMENT (LOSAT_X_BNQDROP): the records read before the search, which the loop takes out
+    /// batch by batch (`x_query_drop.rs`).
+    Taken(&'a super::x_query_drop::Store),
 }
 
 /// The records a LOSAT_X_QBATCHPAR slot searches: those read before the search, a chunk of the
@@ -860,6 +740,9 @@ pub(super) enum BatchRecords<'a> {
         /// The searched records cut with `-query_loc` (`None`: the input records).
         cut: Option<Vec<FastaRecord>>,
     },
+    /// EXPERIMENT (LOSAT_X_BNQDROP): the records taken out of the `Store`, held by the loop alone
+    /// (the input and the searched records: no `-query_loc`).
+    Taken(Vec<FastaRecord>),
 }
 
 impl BatchRecords<'_> {
@@ -867,6 +750,7 @@ impl BatchRecords<'_> {
         match self {
             BatchRecords::Borrowed { input, .. } => input,
             BatchRecords::Read { input, .. } => input,
+            BatchRecords::Taken(records) => records,
         }
     }
 
@@ -874,6 +758,25 @@ impl BatchRecords<'_> {
         match self {
             BatchRecords::Borrowed { searched, .. } => searched,
             BatchRecords::Read { input, cut } => cut.as_deref().unwrap_or(input),
+            BatchRecords::Taken(records) => records,
+        }
+    }
+
+    /// The searched records for the batch's search: EXPERIMENT (LOSAT_X_BNQDROP) held by the loop
+    /// alone when taken out of the `Store`, else shared.
+    pub(super) fn batch_queries(&mut self) -> super::x_query_drop::BatchQueries<'_> {
+        match self {
+            BatchRecords::Taken(records) => super::x_query_drop::BatchQueries::Held(records),
+            other => super::x_query_drop::BatchQueries::Shared(other.searched()),
+        }
+    }
+
+    /// The searched records for a writer after the batch: those taken out of the `Store`, else a
+    /// copy.
+    pub(super) fn into_searched(self) -> Vec<FastaRecord> {
+        match self {
+            BatchRecords::Taken(records) => records,
+            other => other.searched().to_vec(),
         }
     }
 }
@@ -884,11 +787,18 @@ impl<'a> Queries<'a> {
         matches!(self, Queries::Streamed(_))
     }
 
+    /// Whether a batch's records leave the search with the batch (read batch by batch, or taken
+    /// out of a LOSAT_X_BNQDROP `Store`): a writer after the batch reads the loop's kept records.
+    pub(super) fn per_batch(&self) -> bool {
+        matches!(self, Queries::Streamed(_) | Queries::Taken(_))
+    }
+
     /// The number of input records.
     pub(super) fn input_count(&self) -> usize {
         match self {
             Queries::Records { input, .. } => input.len(),
             Queries::Streamed(store) => store.acting().query_input.input_lengths.len(),
+            Queries::Taken(store) => store.lengths().len(),
         }
     }
 
@@ -899,6 +809,7 @@ impl<'a> Queries<'a> {
                 searched.iter().map(|record| record.seq().len()).collect()
             }
             Queries::Streamed(store) => store.acting().lengths.clone(),
+            Queries::Taken(store) => store.lengths().to_vec(),
         }
     }
 
@@ -911,6 +822,7 @@ impl<'a> Queries<'a> {
                     out.write_all(&record.warnings)?;
                 }
             }
+            Queries::Taken(store) => store.write_warnings(out)?,
             Queries::Streamed(store) => {
                 let acting = store.acting();
                 let input_lengths = &acting.query_input.input_lengths;
@@ -918,15 +830,6 @@ impl<'a> Queries<'a> {
                 while state.next < input_lengths.len() {
                     debug_assert!(state.chunks.is_empty() && state.current.is_none());
                     let record = state.read_one(input_lengths)?;
-                    if let Some((old, _)) = &acting.old {
-                        let index = state.next;
-                        acting.compare(
-                            &mut state,
-                            "an input record",
-                            std::slice::from_ref(&record),
-                            &old[index..index + 1],
-                        );
-                    }
                     state.next += 1;
                     state.base = state.next;
                     out.write_all(&record.warnings)?;
@@ -951,6 +854,10 @@ impl<'a> Queries<'a> {
                 input: &input_records[input],
                 searched: &searched_records[searched],
             }),
+            Queries::Taken(store) => {
+                debug_assert_eq!(input, searched, "no -query_loc");
+                Ok(BatchRecords::Taken(store.take(input)?))
+            }
             Queries::Streamed(store) => {
                 let acting = store.acting();
                 let mut state = acting.lock();
@@ -971,23 +878,6 @@ impl<'a> Queries<'a> {
                         })
                         .collect::<Vec<_>>()
                 });
-                if let Some((old, old_searched)) = &acting.old {
-                    acting.compare(
-                        &mut state,
-                        "the input records of a batch of the loop",
-                        &records,
-                        &old[input.clone()],
-                    );
-                    if let (Some(cut), Some(old_searched)) = (&cut, old_searched) {
-                        acting.compare(
-                            &mut state,
-                            "the searched records of a batch of the loop",
-                            cut,
-                            &old_searched[searched],
-                        );
-                    }
-                    state.stats.shadow_batches += 1;
-                }
                 Ok(BatchRecords::Read {
                     input: records,
                     cut,
@@ -1031,6 +921,7 @@ impl<'a> Queries<'a> {
             Queries::Records {
                 searched: records, ..
             } => return Ok(Some(SlotRecords::Borrowed(&records[searched]))),
+            Queries::Taken(store) => return Ok(store.copy(searched).map(SlotRecords::Owned)),
             Queries::Streamed(store) => store,
         };
         if searched.is_empty() {
@@ -1077,15 +968,6 @@ impl<'a> Queries<'a> {
                 SlotRecords::Owned(copy)
             }
         };
-        if let Some((old, old_searched)) = &acting.old {
-            let old_searched = old_searched.as_deref().unwrap_or(old);
-            acting.compare(
-                &mut state,
-                "the records of a batch searched by a slot",
-                &records,
-                &old_searched[searched],
-            );
-        }
         Ok(Some(records))
     }
 
@@ -1095,10 +977,10 @@ impl<'a> Queries<'a> {
     pub(super) fn before<'s>(&'s self, kept: &'s [FastaRecord], start: usize) -> &'s [FastaRecord] {
         match self {
             Queries::Records { searched, .. } => &searched[..start],
-            Queries::Streamed(_) => {
+            Queries::Streamed(_) | Queries::Taken(_) => {
                 assert!(
                     start <= kept.len(),
-                    "LOSAT_X_QSTREAM: a writer reads the records of earlier batches, which were not kept"
+                    "LOSAT_X_QSTREAM or LOSAT_X_BNQDROP: a writer reads the records of earlier batches, which were not kept"
                 );
                 &kept[..start]
             }
@@ -1109,14 +991,14 @@ impl<'a> Queries<'a> {
     pub(super) fn all<'s>(&'s self, kept: &'s [FastaRecord]) -> &'s [FastaRecord] {
         match self {
             Queries::Records { searched, .. } => searched,
-            Queries::Streamed(_) => kept,
+            Queries::Streamed(_) | Queries::Taken(_) => kept,
         }
     }
 }
 
 /// The query input and the searched lengths of a search from its input records' lengths: what
 /// `cut_queries` makes of the records with `-query_loc` (`range`), else `QueryInput::whole`,
-/// without their letters (the shadow compares them; tests below too).
+/// without their letters (the tests below compare them).
 fn query_input_of(
     input_lengths: Vec<usize>,
     range: Option<&SequenceRange>,
@@ -1165,6 +1047,7 @@ fn query_input_of(
 }
 
 /// The first field in which two query inputs differ.
+#[cfg(test)]
 fn same_query_input(got: &QueryInput, old: &QueryInput) -> std::result::Result<(), String> {
     let field = if got.placements.0 != old.placements.0 {
         "placements"
@@ -1186,6 +1069,7 @@ fn same_query_input(got: &QueryInput, old: &QueryInput) -> std::result::Result<(
 
 /// How a reading ended, as text: its kind, and for an error its kind, text, line and the
 /// warnings written before it.
+#[cfg(test)]
 fn end_text(end: &QueryEnd) -> String {
     match end {
         QueryEnd::Input => "the end of the input".to_string(),
@@ -1287,10 +1171,10 @@ mod tests {
     }
 
     /// The store of `path` as `search_cli` makes it (`IsIStreamEmpty`, then the first reading)
-    /// with the switches' value `mode`, and how the first reading ended.
-    fn store(mode: u8, path: &Path, range: Option<&SequenceRange>) -> (Store, QueryEnd) {
+    /// with the switch on, and how the first reading ended.
+    fn store(path: &Path, range: Option<&SequenceRange>) -> (Store, QueryEnd) {
         let file = File::open(path).expect("open the test file");
-        let opening = Opening::with_mode(mode, path, &file, false, true, NO_RULE);
+        let opening = Opening::with_mode(true, path, &file, false, true, NO_RULE);
         assert!(opening.acts());
         let mut source = FastaInputSource::from_file(file, config());
         assert!(!source.stream_is_empty());
@@ -1412,13 +1296,12 @@ mod tests {
     /// The batches of the second reading in `sizes` records (cycled), with the slots' copies of
     /// the next records and a request the loop has passed: every record equals the first's.
     fn read_in_batches(
-        mode: u8,
         path: &Path,
         old: &QueryRecords,
         range: Option<&SequenceRange>,
         sizes: &[usize],
     ) {
-        let (store, end) = store(mode, path, range);
+        let (store, end) = store(path, range);
         assert_eq!(end_text(&end), end_text(&old.end), "{path:?}");
         let cut = range.map(|range| cut_queries(&old.records, range));
         let searched_old: &[FastaRecord] = cut.as_ref().map_or(&old.records, |cut| &cut.records);
@@ -1464,8 +1347,7 @@ mod tests {
 
     /// Texts that exercise the reader's states between records (line ends, buffer windows, long
     /// records, warnings, an error at the end): the second reading reads the records of the
-    /// first, in batches of every size, with and without `-query_loc`, in the switch's mode and in
-    /// the shadow's (which compares inside too).
+    /// first, in batches of every size, with and without `-query_loc`.
     #[test]
     fn the_second_reading_reads_the_records_of_the_first() {
         let range = crate::blastinput::seq_range::parse_sequence_range(
@@ -1482,10 +1364,8 @@ mod tests {
             failed += usize::from(matches!(old.end, QueryEnd::Error { .. }));
             long += usize::from(old.records.iter().any(|r| r.seq().len() > 1 << 20));
             for sizes in [&[1usize][..], &[3, 1, 7], &[usize::MAX]] {
-                for mode in [1, 2] {
-                    read_in_batches(mode, &file.0, &old, None, sizes);
-                    read_in_batches(mode, &file.0, &old, Some(&range), sizes);
-                }
+                read_in_batches(&file.0, &old, None, sizes);
+                read_in_batches(&file.0, &old, Some(&range), sizes);
             }
         }
         assert!(
@@ -1505,7 +1385,7 @@ mod tests {
         }
         let file = TempFile::new("chunks", &bytes);
         let old = old(&file.0);
-        let (store, _) = store(1, &file.0, None);
+        let (store, _) = store(&file.0, None);
         let queries = Queries::Streamed(&store);
         let shared = |records: &SlotRecords<'_>| match records {
             SlotRecords::Shared(chunk) => Arc::clone(chunk),
@@ -1523,7 +1403,7 @@ mod tests {
         let second = queries.batch(3..6, 3..6).unwrap();
         match &second {
             BatchRecords::Read { input, .. } => assert!(Arc::ptr_eq(input, &middle)),
-            BatchRecords::Borrowed { .. } => panic!("records read again"),
+            BatchRecords::Borrowed { .. } | BatchRecords::Taken(_) => panic!("records read again"),
         }
         drop(second);
         queries.done(6);
@@ -1550,14 +1430,12 @@ mod tests {
                 .iter()
                 .flat_map(|record| record.warnings.iter().copied())
                 .collect();
-            for mode in [1, 2] {
-                let (store, _) = store(mode, &file.0, None);
-                let mut written = Vec::new();
-                Queries::Streamed(&store)
-                    .write_input_warnings(&mut written)
-                    .unwrap();
-                assert_eq!(written, expected, "seed {seed}");
-            }
+            let (store, _) = store(&file.0, None);
+            let mut written = Vec::new();
+            Queries::Streamed(&store)
+                .write_input_warnings(&mut written)
+                .unwrap();
+            assert_eq!(written, expected, "seed {seed}");
         }
     }
 
@@ -1565,7 +1443,7 @@ mod tests {
     #[test]
     fn a_file_changed_between_the_readings_is_an_error() {
         let file = TempFile::new("changed", b">a\nACGTACGT\n>b\nACGT\n");
-        let (store, _) = store(1, &file.0, None);
+        let (store, _) = store(&file.0, None);
         std::fs::write(&file.0, b">a\nACGTACG\n>b\nACGT\n").unwrap();
         let error = Queries::Streamed(&store)
             .batch(0..2, 0..2)
@@ -1585,7 +1463,7 @@ mod tests {
             bytes.extend_from_slice(format!(">r{index}\nACGT\n").as_bytes());
         }
         let file = TempFile::new("slot_error", &bytes);
-        let (store, _) = store(1, &file.0, None);
+        let (store, _) = store(&file.0, None);
         let mut changed = Vec::new();
         for index in 0..6 {
             let letters = if index == 3 { "ACG" } else { "ACGT" };
@@ -1620,12 +1498,12 @@ mod tests {
             bytes.extend_from_slice(format!(">r{index}\nACGTACGT\n").as_bytes());
         }
         let file = TempFile::new("release", &bytes);
-        let (store, _) = store(1, &file.0, None);
+        let (store, _) = store(&file.0, None);
         let queries = Queries::Streamed(&store);
         let batch = queries.batch(0..3, 0..3).unwrap();
         let held = match &batch {
             BatchRecords::Read { input, .. } => Arc::clone(input),
-            BatchRecords::Borrowed { .. } => panic!("records read again"),
+            BatchRecords::Borrowed { .. } | BatchRecords::Taken(_) => panic!("records read again"),
         };
         // The batch's handle, `current` and this one.
         assert_eq!(Arc::strong_count(&held), 3);
@@ -1646,33 +1524,31 @@ mod tests {
         let file = TempFile::new("off", b">a\nACGT\n");
         let handle = File::open(&file.0).unwrap();
         assert_eq!(
-            Opening::with_mode(0, &file.0, &handle, false, true, NO_RULE).off,
+            Opening::with_mode(false, &file.0, &handle, false, true, NO_RULE).off,
             Some(Off::NotSet)
         );
         assert_eq!(
-            Opening::with_mode(1, &file.0, &handle, false, false, NO_RULE).off,
+            Opening::with_mode(true, &file.0, &handle, false, false, NO_RULE).off,
             Some(Off::Reports)
         );
         assert_eq!(
-            Opening::with_mode(1, Path::new("-"), &handle, false, true, NO_RULE).off,
+            Opening::with_mode(true, Path::new("-"), &handle, false, true, NO_RULE).off,
             Some(Off::StandardInput)
         );
         assert_eq!(
-            Opening::with_mode(1, &file.0, &handle, true, true, NO_RULE).off,
+            Opening::with_mode(true, &file.0, &handle, true, true, NO_RULE).off,
             Some(Off::StandardInput)
         );
-        assert!(Opening::with_mode(1, &file.0, &handle, false, true, NO_RULE).acts());
-        assert!(Opening::with_mode(2, &file.0, &handle, false, true, NO_RULE).acts());
-        // The rule turns the switch off, not the shadow; it reads the file's length.
+        assert!(Opening::with_mode(true, &file.0, &handle, false, true, NO_RULE).acts());
+        // The rule turns the switch off; it reads the file's length.
         let megablast = Rule {
             megablast: true,
             ..NO_RULE
         };
         assert_eq!(
-            Opening::with_mode(1, &file.0, &handle, false, true, megablast).off,
+            Opening::with_mode(true, &file.0, &handle, false, true, megablast).off,
             Some(Off::Megablast)
         );
-        assert!(Opening::with_mode(2, &file.0, &handle, false, true, megablast).acts());
         // The file is 8 bytes: off for a batch of 5 letters, on for 4.
         for (letters, off) in [(5, Some(Off::Batch)), (4, None)] {
             let rule = Rule {
@@ -1680,7 +1556,7 @@ mod tests {
                 ..NO_RULE
             };
             assert_eq!(
-                Opening::with_mode(1, &file.0, &handle, false, true, rule).off,
+                Opening::with_mode(true, &file.0, &handle, false, true, rule).off,
                 off
             );
         }
@@ -1688,7 +1564,7 @@ mod tests {
         {
             let dir = File::open(std::env::temp_dir()).unwrap();
             assert_eq!(
-                Opening::with_mode(1, &std::env::temp_dir(), &dir, false, true, NO_RULE).off,
+                Opening::with_mode(true, &std::env::temp_dir(), &dir, false, true, NO_RULE).off,
                 Some(Off::NotAFile)
             );
         }

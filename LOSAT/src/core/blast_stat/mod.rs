@@ -6,7 +6,6 @@
 //! - Bit score and E-value calculation
 //! - Length adjustment for effective search space
 //! - Sum statistics for HSP linking
-//! - Statistical parameter lookup tables
 //!
 //! # Organization
 //!
@@ -17,12 +16,10 @@
 //! - `length_adjustment` - Length adjustment algorithm
 //! - `sum_statistics` - Sum statistics for multi-HSP E-values
 //! - `composition` - Karlin parameter calculation from composition
-//! - `lookup_tables` - Parameter lookup tables
 
 pub mod composition;
 pub mod karlin_params;
 pub mod length_adjustment;
-pub mod lookup_tables;
 pub mod score_calc;
 pub mod search_space;
 pub mod sum_statistics;
@@ -36,10 +33,6 @@ pub use composition::{
 pub use karlin_params::KarlinParams;
 pub use length_adjustment::{
     compute_length_adjustment_ncbi, compute_length_adjustment_simple, LengthAdjustmentResult,
-};
-pub use lookup_tables::{
-    lookup_nucl_params, lookup_protein_params, lookup_protein_params_gapped,
-    lookup_protein_params_ungapped, requires_even_scores,
 };
 pub use score_calc::{
     bit_score, calculate_statistics, evalue, evalue_from_raw_score, raw_score_from_bit_score,

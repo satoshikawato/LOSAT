@@ -1191,7 +1191,7 @@ fn build_subject_range_data(
         //     }
         //     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
         // ```
-        let x_composition = (x_compo_reuse() != 0)
+        let x_composition = x_compo_reuse()
             .then(|| std::sync::Arc::new(XSubjectComposition(read_aa_composition(subject.data()))));
         if let Some(cache) = subject_range_cache.as_mut() {
             cache.insert(
@@ -2816,7 +2816,7 @@ mod tests {
     // ```
     #[test]
     fn x_masked_subject_range_carries_the_composition_of_its_bytes() {
-        if x_compo_reuse() == 0 {
+        if !x_compo_reuse() {
             return;
         }
         let mut matching_residues = vec![1u8; 80];

@@ -58,6 +58,143 @@ pub fn discover_stat_type(path: &Path) -> Result<StatFile, WinMaskError> {
     discover(&mut file)
 }
 
+/// [`discover_stat_type`] on an opened file or an in-memory copy of one.
+pub fn discover_stat_type_in<R: Read + Seek>(r: &mut R) -> Result<StatFile, WinMaskError> {
+    discover(r)
+}
+
+/// Where NCBI's counts readers throw the format errors that LOSAT's readers report: the
+/// message, and the place that the `T0` line of NCBI's exception report names
+/// (`WinMaskError::create_report`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatSite {
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:57-63
+    /// ```c
+    /// Uint4 CSeqMaskerIstatOBinary::readWord( CNcbiIstream & is ) const
+    /// {
+    ///     Uint4 result;
+    ///
+    ///     if( !is )
+    ///         NCBI_THROW( Exception, eFormat, "file too short" );
+    /// ```
+    FileTooShort,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:113-115
+    /// ```c
+    ///     if( unit_size == 0 || unit_size > 16 )
+    ///         NCBI_THROW( Exception, eBadParam,
+    ///             "unit size must be in [1,16]" );
+    /// ```
+    UnitSize,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:124-126
+    /// ```c
+    ///     if( k == 0U || k > (Uint4)(2*unit_size - 1) )
+    ///         NCBI_THROW( Exception, eBadHashParam,
+    ///                     "hash key size must be in [1,2*unit_size - 1]" );
+    /// ```
+    HashKeySize,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:128-130
+    /// ```c
+    ///     if( roff > 32 - k )
+    ///         NCBI_THROW( Exception, eBadHashParam,
+    ///                     "offset must by in [0,32 - hash_key_size]" );
+    /// ```
+    HashOffset,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:132-134
+    /// ```c
+    ///     if( bc == 0 || bc > 32 - k )
+    ///         NCBI_THROW( Exception, eBadHashParam,
+    ///                     "shift must be in [1, 32 - hash_key_size]" );
+    /// ```
+    HashShift,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:196-198
+    /// ```c
+    ///     if( !input_stream.read( (char *)ht, ht_size*sizeof( Uint4 ) ) )
+    ///         NCBI_THROW( Exception, eFormat,
+    ///                     "not enough data to fill the hash table" );
+    /// ```
+    HashTable,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:207-209
+    /// ```c
+    ///     if( !input_stream.read( (char *)vt, M*sizeof( Uint2 ) ) )
+    ///         NCBI_THROW( Exception, eFormat,
+    ///                     "not enough data to fill the values table" );
+    /// ```
+    ValuesTable,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_bin.cpp:78-79
+    /// ```c
+    ///         if( iflen < HEADER_LEN + TRAILER_LEN )
+    ///             NCBI_THROW( Exception, eFormat, "wrong file size" );
+    /// ```
+    BinFileSize,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_bin.cpp:98-99
+    /// ```c
+    ///         if( unit_size == 0 || unit_size > 16 )
+    ///             NCBI_THROW( Exception, eFormat, "illegal unit size" );
+    /// ```
+    BinUnitSize,
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_bin.cpp:107-108
+    /// ```c
+    ///         if( datalen%(2*sizeof( Uint4 )) != 0 )
+    ///             NCBI_THROW( Exception, eFormat, "wrong length" );
+    /// ```
+    BinLength,
+}
+
+impl FormatSite {
+    /// NCBI's message.
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::FileTooShort => "file too short",
+            Self::UnitSize => "unit size must be in [1,16]",
+            Self::HashKeySize => "hash key size must be in [1,2*unit_size - 1]",
+            Self::HashOffset => "offset must by in [0,32 - hash_key_size]",
+            Self::HashShift => "shift must be in [1, 32 - hash_key_size]",
+            Self::HashTable => "not enough data to fill the hash table",
+            Self::ValuesTable => "not enough data to fill the values table",
+            Self::BinFileSize => "wrong file size",
+            Self::BinUnitSize => "illegal unit size",
+            Self::BinLength => "wrong length",
+        }
+    }
+
+    /// The file, line, error code text (`GetErrCodeString`) and function that NCBI's report
+    /// prints for the throw. The function of `readWord` is not printed (NCBI 2.17.0's Linux
+    /// build, observed).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:48-52
+    /// ```c
+    ///         case eStreamOpenFail:   return "open failed";
+    ///         case eBadHashParam:     return "bad hash parameter";
+    ///         case eBadParam:         return "bad parameter";
+    ///         case eFormat:           return "format error";
+    ///         case eAlloc:            return "allocation failure";
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_bin.cpp:49-50
+    /// ```c
+    ///         case eStreamOpenFail:   return "open failed";
+    ///         case eFormat:           return "file format error";
+    /// ```
+    pub(super) fn throw_site(self) -> (&'static str, u32, &'static str, Option<&'static str>) {
+        const OBINARY: &str = "seq_masker_istat_obinary.cpp";
+        const OBINARY_NEW: Option<&str> =
+            Some("ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary");
+        const BIN: &str = "seq_masker_istat_bin.cpp";
+        const BIN_NEW: Option<&str> = Some("ncbi::CSeqMaskerIstatBin::CSeqMaskerIstatBin");
+        match self {
+            Self::FileTooShort => (OBINARY, 63, "format error", None),
+            Self::UnitSize => (OBINARY, 114, "bad parameter", OBINARY_NEW),
+            Self::HashKeySize => (OBINARY, 125, "bad hash parameter", OBINARY_NEW),
+            Self::HashOffset => (OBINARY, 129, "bad hash parameter", OBINARY_NEW),
+            Self::HashShift => (OBINARY, 133, "bad hash parameter", OBINARY_NEW),
+            Self::HashTable => (OBINARY, 197, "format error", OBINARY_NEW),
+            Self::ValuesTable => (OBINARY, 208, "format error", OBINARY_NEW),
+            Self::BinFileSize => (BIN, 79, "file format error", BIN_NEW),
+            Self::BinUnitSize => (BIN, 99, "file format error", BIN_NEW),
+            Self::BinLength => (BIN, 108, "file format error", BIN_NEW),
+        }
+    }
+}
+
 /// The body of `DiscoverStatType` on an opened file.
 pub(super) fn discover<R: Read + Seek>(r: &mut R) -> Result<StatFile, WinMaskError> {
     let (metadata, skip) = metadata_lines(r)?;
@@ -413,7 +550,7 @@ impl UnitCounts {
         s.skip(skip);
         let read_word = |s: &mut Stream<'_, R>| -> Result<u32, WinMaskError> {
             if !s.good() {
-                return Err(WinMaskError::format("file too short"));
+                return Err(WinMaskError::format(FormatSite::FileTooShort));
             }
             let mut word = 0u32;
             s.read_into(&mut word);
@@ -422,26 +559,20 @@ impl UnitCounts {
         let use_opt = read_word(&mut s)? != 1;
         let unit_size = read_word(&mut s)? as u8;
         if unit_size == 0 || unit_size > 16 {
-            return Err(WinMaskError::format("unit size must be in [1,16]"));
+            return Err(WinMaskError::format(FormatSite::UnitSize));
         }
         let m = read_word(&mut s)?;
         let k = read_word(&mut s)?;
         let roff = read_word(&mut s)?;
         let bc = read_word(&mut s)?;
         if k == 0 || k > (2 * unit_size as u32 - 1) {
-            return Err(WinMaskError::format(
-                "hash key size must be in [1,2*unit_size - 1]",
-            ));
+            return Err(WinMaskError::format(FormatSite::HashKeySize));
         }
         if roff > 32 - k {
-            return Err(WinMaskError::format(
-                "offset must by in [0,32 - hash_key_size]",
-            ));
+            return Err(WinMaskError::format(FormatSite::HashOffset));
         }
         if bc == 0 || bc > 32 - k {
-            return Err(WinMaskError::format(
-                "shift must be in [1, 32 - hash_key_size]",
-            ));
+            return Err(WinMaskError::format(FormatSite::HashShift));
         }
         let t_low = read_word(&mut s)?;
         let t_extend = read_word(&mut s)?;
@@ -484,11 +615,11 @@ impl UnitCounts {
         }
 
         let ht = s.read_u32s(1u64 << k).ok_or_else(|| WinMaskError::Format {
-            message: "not enough data to fill the hash table".to_string(),
+            site: FormatSite::HashTable,
             warnings: warnings.clone(),
         })?;
         let vt = s.read_u16s(m as u64).ok_or_else(|| WinMaskError::Format {
-            message: "not enough data to fill the values table".to_string(),
+            site: FormatSite::ValuesTable,
             warnings: warnings.clone(),
         })?;
         self.warnings.extend(warnings);
@@ -559,7 +690,7 @@ impl UnitCounts {
         let mut s = Stream::new(r)?;
         let iflen = s.left as i64;
         if iflen < HEADER_LEN + TRAILER_LEN {
-            return Err(WinMaskError::format("wrong file size"));
+            return Err(WinMaskError::format(FormatSite::BinFileSize));
         }
         s.skip(skip);
         let adj = if s.good() { skip as i64 } else { -1 };
@@ -568,17 +699,17 @@ impl UnitCounts {
         s.read_into(&mut data);
         let unit_size = data as u8;
         if unit_size == 0 || unit_size > 16 {
-            return Err(WinMaskError::format("illegal unit size"));
+            return Err(WinMaskError::format(FormatSite::BinUnitSize));
         }
         let datalen = iflen - HEADER_LEN - TRAILER_LEN - adj;
         if (datalen as u64) % 8 != 0 {
-            return Err(WinMaskError::format("wrong length"));
+            return Err(WinMaskError::format(FormatSite::BinLength));
         }
         let mut entries = Vec::new();
         if datalen > 0 {
             let words = s
                 .read_u32s(datalen as u64 / 4)
-                .ok_or_else(|| WinMaskError::format("wrong length"))?;
+                .ok_or_else(|| WinMaskError::format(FormatSite::BinLength))?;
             entries = words.chunks_exact(2).map(|e| (e[0], e[1])).collect();
         }
         s.read_into(&mut data);
@@ -923,7 +1054,7 @@ pub(super) fn hash_code(unit: u32, k: u8, roff: u8) -> (u32, u8) {
 fn seek<R: Seek>(r: &mut R, pos: u64) -> Result<(), WinMaskError> {
     r.seek(SeekFrom::Start(pos))
         .map(|_| ())
-        .map_err(|_| WinMaskError::format("file too short"))
+        .map_err(|_| WinMaskError::format(FormatSite::FileTooShort))
 }
 
 /// Reads as many bytes as the stream has, up to the length of `buf` (`istream::read` that
@@ -958,7 +1089,7 @@ impl<'a, R: Read + Seek> Stream<'a, R> {
     fn new(r: &'a mut R) -> Result<Self, WinMaskError> {
         let len = r
             .seek(SeekFrom::End(0))
-            .map_err(|_| WinMaskError::format("file too short"))?;
+            .map_err(|_| WinMaskError::format(FormatSite::FileTooShort))?;
         seek(r, 0)?;
         Ok(Self {
             r: BufReader::with_capacity(1 << 16, r),

@@ -3,6 +3,8 @@
 //! LOSAT/tests/ gets its two lines in its program's suite (`tests/suite_layout.rs` checks that
 //! every file is in exactly one test binary).
 
+#[path = "../blastn_bn_csr.rs"]
+mod blastn_bn_csr;
 #[path = "../blastn_db_cut.rs"]
 mod blastn_db_cut;
 #[path = "../blastn_db_search.rs"]
@@ -39,6 +41,8 @@ mod blastn_qbatchpar;
 mod blastn_qctx_sentinel;
 #[path = "../blastn_qgroup_par.rs"]
 mod blastn_qgroup_par;
+#[path = "../blastn_query_drop.rs"]
+mod blastn_query_drop;
 #[path = "../blastn_query_dust_par.rs"]
 mod blastn_query_dust_par;
 #[path = "../blastn_query_prep_par.rs"]
@@ -57,6 +61,8 @@ mod blastn_subject_stream;
 mod blastn_tab_par;
 #[path = "../blastn_ungap_count.rs"]
 mod blastn_ungap_count;
+#[path = "../blastn_window_masker.rs"]
+mod blastn_window_masker;
 #[path = "../megablast_xdrop.rs"]
 mod megablast_xdrop;
 #[path = "../run_local_blastn.rs"]

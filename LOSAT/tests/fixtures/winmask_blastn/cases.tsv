@@ -1,0 +1,24 @@
+# blastn -window_masker_db: the cases whose bytes name NCBI's source tree (frozen from the official Linux x64 release of NCBI BLAST+ 2.17.0) or that need a counts file made at run time.
+# Columns: case, env (KEY=VALUE, space-separated), args (space-separated, from LOSAT/; %20 is a space inside an argument, '' an empty argument). Files under target/winmask_blastn/ are made by tests/winmask/make_blastn_error_fixtures.py and tests/blastn_window_masker.rs (the same bytes).
+# Written by make_blastn_error_fixtures.py with <case>.out, .err and .rc; do not edit by hand.
+missing_fmt0		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db nosuch.obinary -outfmt 0
+missing_fmt11		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db nosuch.obinary -outfmt 11
+missing_db		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -db nosuchdb -window_masker_db nosuch.obinary -outfmt 6
+missing_empty_name		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db '' -outfmt 6
+unreadable		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db target/winmask_blastn/unreadable.obinary -outfmt 6
+ascii		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db target/winmask_blastn/ascii.counts -outfmt 0
+empty_file		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db target/winmask_blastn/empty.obinary -outfmt 6
+directory		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db tests/winmask -outfmt 6
+dust_error_first		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -dust 1%202 -window_masker_db nosuch.obinary -outfmt 6
+before_query_loc		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -query_loc 5-1 -window_masker_db nosuch.obinary -outfmt 6
+unit17_fmt0		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db target/winmask_blastn/unit17.obinary -outfmt 0
+unit17_fmt11		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db target/winmask_blastn/unit17.obinary -outfmt 11
+unit17_split	CHUNK_SIZE=600	-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db target/winmask_blastn/unit17.obinary -outfmt 6
+unit17_batch	BATCH_SIZE=3000	-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db target/winmask_blastn/unit17.obinary -outfmt 6
+unit17_mixed		-query tests/fixtures/blastn_regression/inputs/wm_mixed_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db target/winmask_blastn/unit17.obinary -outfmt 6
+short_cba		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db target/winmask_blastn/short_cba.obinary -outfmt 6
+bad_index		-query tests/fixtures/blastn_regression/inputs/wm_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db target/winmask_blastn/bad_index.obinary -outfmt 6
+pct6		-query tests/fixtures/blastn_regression/inputs/q3k.fa -subject tests/fixtures/blastn_regression/inputs/s600.fa -task blastn -window_masker_db target/winmask_blastn/pct6.obinary -outfmt 6
+binary_unit0		-query tests/fixtures/blastn_regression/inputs/q3k.fa -subject tests/fixtures/blastn_regression/inputs/s600.fa -task blastn -window_masker_db target/winmask_blastn/binary_unit0.binary -outfmt 6
+bad_index_second_batch_fmt0	BATCH_SIZE=40	-query tests/fixtures/blastn_regression/inputs/wm_mixed_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db target/winmask_blastn/bad_index_after0.obinary -outfmt 0
+bad_index_second_batch_fmt11	BATCH_SIZE=40	-query tests/fixtures/blastn_regression/inputs/wm_mixed_query.fa -subject tests/fixtures/blastn_regression/inputs/s60k.fa -task blastn -window_masker_db target/winmask_blastn/bad_index_after0.obinary -outfmt 11

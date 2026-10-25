@@ -683,9 +683,9 @@ pub(crate) fn x_assert_same_contexts(direct: &[QueryContext], reference: &[Query
     x_assert_same_contexts_as("", direct, reference);
 }
 
-// No NCBI counterpart: the check of `x_assert_same_contexts` for another shadow.
-/// EXPERIMENT (LOSAT_X_BPLKPFLATSHADOW): `x_assert_same_contexts` with the
-/// messages starting with `what`.
+// No NCBI counterpart: the check of `x_assert_same_contexts` for other unit tests.
+/// `x_assert_same_contexts` with the messages starting with `what`.
+#[cfg(test)]
 pub(crate) fn x_assert_same_contexts_as(
     what: &str,
     direct: &[QueryContext],

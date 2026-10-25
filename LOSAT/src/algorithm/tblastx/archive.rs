@@ -69,6 +69,14 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`); the
     // default (13) is the value the matrix suggests, which the list holds either way.
     inputs.threshold = Some(args.threshold as i32);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
+    // ```c++
+    //     if (args[kArgLookupTableMaskingOnly]) {
+    //         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
+    //     }
+    // ```
+    // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
+    inputs.soft_masking = args.soft_masking;
     inputs.window_size = Some(args.window_size);
     inputs.seg = args.seg_spec().ok().map(|spec| match spec {
         SegSpec::No => Filter::No,
@@ -379,7 +387,7 @@ mod tests {
     // probes; `check_archive_layout.py opts`), without the `EffectiveSearchSpace` that each
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTX refuses some of these options at the command line
-    // (`-matrix`, `-strand`, `-soft_masking`, `-sum_stats`, `-subject_besthit`, `-xdrop_ungap`,
+    // (`-matrix`, `-strand`, `-sum_stats`, `-subject_besthit`, `-xdrop_ungap`,
     // `-parse_deflines`) or in its limits (`-word_size` other than 3): the list that NCBI would
     // record is what the archive's model knows about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
@@ -479,7 +487,7 @@ mod tests {
         let mut index = 0;
         while index < extra.len() {
             match extra[index] {
-                "-matrix" | "-soft_masking" | "-sum_stats" => {
+                "-matrix" | "-sum_stats" => {
                     by_hand.push((extra[index], extra[index + 1]));
                     index += 2;
                 }
@@ -518,7 +526,6 @@ mod tests {
                         inputs.window_size = None;
                     }
                 }
-                "-soft_masking" => inputs.soft_masking = Some(value == "true"),
                 "-sum_stats" => inputs.sum_stats = Some(value == "true"),
                 _ => inputs.subject_besthit = true,
             }

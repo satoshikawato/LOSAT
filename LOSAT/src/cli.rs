@@ -10,7 +10,7 @@ use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 //     arg.Reset(new CProgramDescriptionArgs(kProgram,
 //                                   "Translated Query-Protein Subject BLAST"));
 // ```
-use crate::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
+use crate::algorithm::{blastn, blastp, blastx, psiblast, tblastn, tblastx};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
 // ```c++
@@ -50,6 +50,15 @@ pub enum Commands {
     // static const string kProgram("tblastn"); SetTask("tblastn");
     /// Protein query vs translated nucleotide subject (local tblastn)
     Tblastn(tblastn::TblastnArgs),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
+    // ```c++
+    //     static const string kProgram("psiblast");
+    //     CRef<IBlastCmdLineArgs> arg;
+    //     arg.Reset(new CProgramDescriptionArgs(kProgram,
+    //                                           "Position-Specific Iterated BLAST"));
+    // ```
+    /// Position-Specific Iterated BLAST (psiblast; its first round)
+    Psiblast(psiblast::PsiblastArgs),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
     // ```c++
     //     arg_desc->SetUsageContext(GetArguments().GetProgramBasename(),
@@ -98,7 +107,7 @@ where
         .filter(|program| {
             matches!(
                 program.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx"
+                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast"
             )
         })
     {
@@ -154,7 +163,7 @@ where
             && input.len() == 0
             && matches!(
                 scope.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx" | "makedb"
+                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "makedb"
             )
         {
             continue;
@@ -241,7 +250,7 @@ fn inline_value(token: &std::ffi::OsStr, name: &str) -> OsString {
 fn is_ncbi_search_program(scope: &clap::Command) -> bool {
     matches!(
         scope.get_name(),
-        "blastn" | "blastp" | "tblastn" | "tblastx"
+        "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast"
     )
 }
 
@@ -418,6 +427,40 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 
 // The rejection of an option that a program does not have: NCBI's options that LOSAT
 // has not ported, the NCBI C++ Toolkit options, and the rest (unknown to NCBI too).
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
+// ```c++
+//         // checkpoint file
+//         arg_desc.AddOptionalKey(kArgPSIOutputChkPntFile, "checkpoint_file",
+//
+//                                 "File name to store checkpoint file",
+//                                 CArgDescriptions::eOutputFile);
+//         // ASCII matrix file
+//         arg_desc.AddOptionalKey(kArgAsciiPssmOutputFile, "ascii_mtx_file",
+//                                 "File name to store ASCII version of PSSM",
+//                                 CArgDescriptions::eOutputFile);
+// ```
+/// psiblast's NCBI arguments that LOSAT does not run: the PSSM files and inputs (series PS2 to
+/// PS6), PHI-BLAST (PS8), `-gap_trigger`, `-sum_stats`, and the arguments that blastp's engine
+/// does not run either (`is_unported_blastp_arg`; psiblast has no database masks and no
+/// `-mt_mode`).
+fn is_unported_psiblast_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "gap_trigger"
+            | "ignore_msa_master"
+            | "in_msa"
+            | "in_pssm"
+            | "msa_master_idx"
+            | "out_ascii_pssm"
+            | "out_pssm"
+            | "phi_pattern"
+            | "save_each_pssm"
+            | "save_pssm_after_last_round"
+            | "sum_stats"
+    ) || (is_unported_blastp_arg(name)
+        && !matches!(name, "db_hard_mask" | "db_soft_mask" | "mt_mode"))
+}
+
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
     // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
     // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
@@ -466,7 +509,13 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
             format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTP"),
         );
     }
-    if let Some(program) = ["blastn", "blastp", "tblastn", "tblastx"]
+    if scope.get_name() == "psiblast" && is_unported_psiblast_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's PSIBLAST"),
+        );
+    }
+    if let Some(program) = ["blastn", "blastp", "tblastn", "tblastx", "psiblast"]
         .into_iter()
         .find(|program| scope.get_name() == *program)
         .filter(|_| is_ncbi_toolkit_arg(name))

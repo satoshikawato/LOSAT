@@ -361,6 +361,8 @@ pub struct ProteinOptionsCheck<'a> {
     /// The hit list size (`hit_options->hitlist_size`).
     pub hitlist_size: usize,
     pub evalue: f64,
+    /// The program is psiblast (`eBlastTypePsiBlast`) rather than blastp or tblastn.
+    pub psiblast: bool,
 }
 
 /// NCBI's `BLAST_ValidateOptions` for blastp and tblastn, in its order, with NCBI's
@@ -413,18 +415,21 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
     // 				buffer = BLAST_PrintAllowedValues(options->matrix,
     //                         options->gap_open, options->gap_extend);
     // ```
+    // psiblast is neither blastp nor tblastn: its matrices are the standard ones
+    // (`std_matrix_only`).
+    let std_matrix_only = check.psiblast;
     if check.gapped {
         match karlin_blk_gapped_load_from_tables(
             check.gap_open,
             check.gap_extend,
             check.matrix_name,
-            false,
+            std_matrix_only,
         ) {
             Ok(_) => {}
             Err(TableStatus::UnknownMatrix) => {
                 return Err(options_error(&print_matrix_message(
                     check.matrix_name,
-                    false,
+                    std_matrix_only,
                 )))
             }
             Err(TableStatus::UnknownGapCosts) => {
@@ -476,17 +481,34 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
     if check.word_size <= 0 {
         return Err(options_error("Word-size must be greater than zero"));
     }
-    if check.word_size > 7 {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1350-1357
+    // ```c
+    //         else if (program_number == eBlastTypePsiBlast &&
+    //                  options->word_size > 4) {
+    //                 Blast_MessageWrite(blast_msg, eBlastSevError,
+    //                                kBlastMessageNoContext,
+    //                                "Word-size must be less "
+    //                                "than 5 for psiblast");
+    //                 return BLASTERR_OPTION_VALUE_INVALID;
+    //         }
+    // ```
+    // The checks of the compressed lookup table below are blastp's, tblastn's and blastx's
+    // only (blast_options.c:1376-1378).
+    if check.psiblast {
+        if check.word_size > 4 {
+            return Err(options_error("Word-size must be less than 5 for psiblast"));
+        }
+    } else if check.word_size > 7 {
         return Err(options_error(
             "Word-size must be less than 8 for a tblastn, blastp or blastx search",
         ));
     }
-    if check.word_size > 5 && !check.compressed_lookup {
+    if !check.psiblast && check.word_size > 5 && !check.compressed_lookup {
         return Err(options_error(
             "Blastp, Blastx or Tblastn with word size > 5 requires a compressed alphabet lookup table",
         ));
     }
-    if check.compressed_lookup && !(5..=7).contains(&check.word_size) {
+    if !check.psiblast && check.compressed_lookup && !(5..=7).contains(&check.word_size) {
         return Err(options_error(
             "Compressed alphabet lookup table requires word size 5, 6 or 7",
         ));
@@ -575,6 +597,46 @@ mod tests {
             Err(TableStatus::UnknownGapCosts)
         );
         assert!(karlin_blk_gapped_load_from_tables(32767, 32767, "PAM70", false).is_ok());
+    }
+
+    // blast_options.c:1336-1357 and 913-915: psiblast's word size is below 5 (NCBI 2.17.0
+    // `psiblast -word_size 5`), its matrices are the standard ones, and the compressed lookup
+    // table's checks are blastp's, tblastn's and blastx's.
+    #[test]
+    fn psiblast_takes_word_sizes_below_5_and_the_standard_matrices() {
+        let check = |word_size: i32, compressed_lookup: bool, matrix_name: &str, psiblast: bool| {
+            validate_protein_options(&ProteinOptionsCheck {
+                gapped: true,
+                gap_open: 11,
+                gap_extend: 1,
+                matrix_name,
+                threshold: 11.0,
+                word_size,
+                compressed_lookup,
+                hitlist_size: 500,
+                evalue: 10.0,
+                psiblast,
+            })
+            .map_err(|error| error.to_string())
+        };
+        assert!(check(4, false, "BLOSUM62", true).is_ok());
+        for (word_size, compressed) in [(5, true), (6, true), (8, true), (5, false)] {
+            let error = check(word_size, compressed, "BLOSUM62", true).unwrap_err();
+            assert!(
+                error.contains("Word-size must be less than 5 for psiblast"),
+                "{word_size}: {error}"
+            );
+        }
+        assert!(check(5, true, "BLOSUM62", false).is_ok());
+        assert!(check(8, true, "BLOSUM62", false)
+            .unwrap_err()
+            .contains("Word-size must be less than 8 for a tblastn, blastp or blastx search"));
+        let identity = check(3, false, "IDENTITY", true).unwrap_err();
+        assert!(
+            identity.contains("IDENTITY is not a supported matrix"),
+            "{identity}"
+        );
+        assert!(!identity.contains("\nIDENTITY \n"), "{identity}");
     }
 
     #[test]

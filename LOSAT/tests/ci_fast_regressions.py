@@ -16,7 +16,7 @@ batches, warnings, hit lists, ambiguity, empty inputs, failed writes); for each
 selected program the FASTA-input fixtures of fasta_input_fixtures.py (`check --rows
 <program>`: stdout, stderr, exit code and combined stream against the frozen NCBI
 hashes, and LOSAT's explicit rejections where it rejects an input or option); for BLASTP,
-BLASTN, TBLASTN, BLASTX and TBLASTX the `-db` fixtures of db_search_fixtures.py (`check --program <program>`: stdout,
+BLASTN, TBLASTN, BLASTX, TBLASTX and PSIBLAST the `-db` fixtures of db_search_fixtures.py (`check --program <program>`: stdout,
 stderr and exit status against the frozen NCBI `<program> -db -num_threads 1` bytes, at 1 and
 4 threads).
 
@@ -56,10 +56,12 @@ import capture_outputs  # noqa: E402
 import certify_platform_native_v010 as certify  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
 
-PROGRAMS = capture_outputs.PROGRAMS
+# psiblast (line PS) has no capture case: its fixtures are rows of outfmt0_manifest.tsv and
+# db_search_manifest.tsv.
+PROGRAMS = capture_outputs.PROGRAMS + ("psiblast",)
 FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx")  # the programs of fasta_input_fixtures.py
-OUTFMT0_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx")  # the programs of outfmt0_manifest.tsv
-DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx")  # the programs of db_search_manifest.tsv
+OUTFMT0_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx", "psiblast")  # the programs of outfmt0_manifest.tsv
+DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast")  # the programs of db_search_manifest.tsv
 REGRESSION_FIXTURES = {"blastn": "BLASTN", "tblastx": "TBLASTX"}
 # TBLASTX manifest cases that finish in under 30 s (2026-10-01, native release binary);
 # the other 13 (46 s to over 10 min) run in the nightly workflow.
@@ -70,7 +72,7 @@ FAST_TBLASTX = frozenset({
 # A change to the FASTA-input reader (NCBI's CFastaReader port), its fixture script, manifests or
 # inputs selects all four programs (they share the reader).
 FASTA_INPUT_PATHS = ("LOSAT/src/blastinput/", "LOSAT/tests/fasta_input_fixtures", "LOSAT/tests/fixtures/fasta_input/")
-PROGRAM_DIR = re.compile(r"^LOSAT/src/algorithm/(blastn|blastp|blastx|tblastn|tblastx)/")
+PROGRAM_DIR = re.compile(r"^LOSAT/src/algorithm/(blastn|blastp|blastx|tblastn|tblastx|psiblast)/")
 STAGE_G_PREFIX = "/mnt/c/Users/genom/GitHub/LOSAT/"
 
 
@@ -80,7 +82,7 @@ def program_dependents() -> dict[str, set[str]]:
     for program in PROGRAMS:
         text = "".join(path.read_text(errors="replace")
                        for path in (REPO / "LOSAT/src/algorithm" / program).rglob("*.rs"))
-        imports[program] = set(re.findall(r"crate::algorithm::(blastn|blastp|blastx|tblastn|tblastx)\b", text)) - {program}
+        imports[program] = set(re.findall(r"crate::algorithm::(blastn|blastp|blastx|tblastn|tblastx|psiblast)\b", text)) - {program}
     dependents = {program: {program} for program in PROGRAMS}
     changed = True
     while changed:

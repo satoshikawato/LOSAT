@@ -153,32 +153,19 @@ fn matrix_gaps(matrix: &str) -> (i32, i32) {
     crate::stats::protein_options::protein_gap_existence_extend_params(matrix).unwrap_or((11, 1))
 }
 
-/// The word threshold the matrix suggests (`BLAST_GetSuggestedThreshold`,
-/// blast_options.c:1174-1209).
+/// The word threshold the matrix suggests before the program's addition
+/// (`BLAST_GetSuggestedThreshold`, blast_options.c:1174-1209; `protein_options`).
 fn suggested_threshold(matrix: &str) -> i32 {
-    match matrix.to_ascii_uppercase().as_str() {
-        "BLOSUM62" => 11,
-        "BLOSUM45" => 14,
-        "BLOSUM62_20" => 100,
-        "BLOSUM80" => 12,
-        "PAM30" => 16,
-        "PAM70" => 14,
-        "IDENTITY" => 27,
-        _ => 11,
-    }
+    crate::stats::protein_options::suggested_threshold(
+        crate::stats::protein_options::SuggestionProgram::Protein,
+        matrix,
+    ) as i32
 }
 
 /// The window size the matrix suggests (`BLAST_GetSuggestedWindowSize`,
-/// blast_options.c:1211-1236).
+/// blast_options.c:1211-1236; `protein_options`).
 fn suggested_window(matrix: &str) -> i32 {
-    match matrix.to_ascii_uppercase().as_str() {
-        "BLOSUM62" => 40,
-        "BLOSUM45" => 60,
-        "BLOSUM80" => 25,
-        "PAM30" => 15,
-        "PAM70" => 20,
-        _ => 40,
-    }
+    crate::stats::protein_options::suggested_window_size(matrix)
 }
 
 fn default_threshold(program: Program) -> i32 {

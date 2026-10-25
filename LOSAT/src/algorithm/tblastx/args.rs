@@ -86,8 +86,10 @@ pub struct TblastxArgs {
     // (Int4) value and the report prints the double.
     #[arg(long, default_value_t = 13.0, value_parser = tblastx_threshold)]
     pub threshold: f64,
-    #[arg(long, default_value_t = 3, value_parser = protein_word_size)]
-    pub word_size: i32,
+    // Option, not a value with a default: whether it was given is what a BLAST archive (outfmt 11)
+    // records (`WordSize`, NCBI blast_args.cpp:290-292); the search uses `word_size()` (default 3).
+    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3]")]
+    pub word_size: Option<i32>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
 
@@ -175,6 +177,17 @@ pub struct TblastxArgs {
         help = "SEG: no, yes, or WINDOW LOCUT HICUT"
     )]
     pub seg: String,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
+    // ```c++
+    //         arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
+    //                         "Apply filtering locations as soft masks",
+    //                         CArgDescriptions::eBoolean,
+    //                         kDfltArgLookupTableMaskingOnlyProt);
+    // ```
+    // (`CFilteringArgs(!kQueryIsProtein)`, tblastx_args.cpp:78, takes this protein branch.) Read
+    // by `soft_masking`.
+    #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
+    pub soft_masking: Option<bool>,
 
     /// Two-hit window size for triggering ungapped extension (default: 40).
     /// Smaller values are more strict, larger values are more sensitive.
@@ -198,8 +211,10 @@ pub struct TblastxArgs {
     // ```
     /// If the query range of a hit is enveloped by that of at least this many
     /// higher-scoring hits, delete the hit (default: 0, no culling).
-    #[arg(long, default_value_t = 0, value_parser = nonnegative_ncbi_integer)]
-    pub culling_limit: i32,
+    // Option, not a value with a default: whether it was given (also 0) is what a BLAST archive
+    // (outfmt 11) records (`Culling`); the search uses `culling_limit()`.
+    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: Option<i32>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // ```c++
     //     // query location
@@ -230,13 +245,44 @@ pub struct TblastxArgs {
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
+    /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search
+    /// reads the arguments (`archive::handle_for`).
+    #[arg(skip)]
+    pub archive: Option<crate::report::archive::ArchiveHandle>,
 }
 
 impl TblastxArgs {
+    /// The word size the search uses: the argument, else TBLASTX's default (3).
+    pub fn word_size(&self) -> i32 {
+        self.word_size.unwrap_or(3)
+    }
+
+    /// The culling limit the search uses: the argument, else 0 (no culling).
+    pub fn culling_limit(&self) -> i32 {
+        self.culling_limit.unwrap_or(0)
+    }
+
     /// The -seg value as NCBI's filtering handler reads it (`check_options` reports its
     /// errors first).
     pub fn seg_spec(&self) -> anyhow::Result<SegSpec> {
         crate::blastinput::app::parse_seg_option(&self.seg, "TBLASTX")
+    }
+
+    /// `-soft_masking` (`mask_at_hash`): the SEG intervals keep words out of the lookup table but
+    /// the searched frames keep their letters (`x_query_frames.rs` `mask_soft`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
+    /// ```c++
+    /// CFilteringArgs::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
+    /// {
+    ///     if (args[kArgLookupTableMaskingOnly]) {
+    ///         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
+    ///     }
+    /// ```
+    /// The argument always has its default (`kDfltArgLookupTableMaskingOnlyProt`, "false"), and no
+    /// other handler of tblastx sets `mask_at_hash`.
+    pub fn soft_masking(&self) -> bool {
+        self.soft_masking.unwrap_or(false)
     }
 
     /// The `-db` value as NCBI keeps it (white space at its ends removed), `None` for a

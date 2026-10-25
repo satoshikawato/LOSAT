@@ -362,7 +362,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "ungapped"
             | "use_index"
             | "version"
-            | "window_masker_db"
             | "window_masker_taxid"
             | "window_size"
             | "xdrop_gap"
@@ -388,7 +387,6 @@ fn is_unported_blastp_arg(name: &str) -> bool {
         name,
         "best_hit_overhang"
             | "best_hit_score_edge"
-            | "culling_limit"
             | "db_hard_mask"
             | "db_soft_mask"
             | "entrez_query"
@@ -647,7 +645,6 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
         name,
         "best_hit_overhang"
             | "best_hit_score_edge"
-            | "culling_limit"
             | "db_hard_mask"
             | "db_soft_mask"
             | "entrez_query"
@@ -719,7 +716,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "searchsp"
             | "seqidlist"
             | "show_gis"
-            | "soft_masking"
             | "sorthits"
             | "sorthsps"
             | "strand"

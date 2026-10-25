@@ -222,33 +222,22 @@ pub(crate) fn compute_unmasked_intervals(
 //
 // ```
 pub(crate) use backbone::build_ncbi_lookup_from_prepared;
-// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): BLASTP's table built in place
+// EXPERIMENT (LOSAT_X_BPLUT): BLASTP's table built in place
 // (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export itself.
 pub(crate) use backbone::x_bp_build_ncbi_lookup;
 // EXPERIMENT (LOSAT_X_BPLKPAHEAD): exact blastp's table built ahead of its block
 // (lookup/x_lut_direct.rs `XAaSpares`); no NCBI counterpart for the re-export itself.
-pub(crate) use backbone::{x_assert_same_table_as, x_same_table, XAaSpares};
+pub(crate) use backbone::XAaSpares;
+// The comparison of two tables, for the unit tests (lookup/x_lut_direct.rs).
+#[cfg(test)]
+pub(crate) use backbone::{x_assert_same_table_as, x_same_table};
 // LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build (x_lut_direct.rs).
 pub(crate) use backbone::{x_bx_pooled_builds, x_give_back_pooled};
 
-/// EXPERIMENT (LOSAT_X_BPLUTSHADOW): the shadow mode's line (printed by `main` at exit).
-// No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
-pub fn x_bplut_print_summary() {
-    if let Some(tables) = backbone::x_bplut_shadow_tables() {
-        eprintln!("[X_SHADOW] BPLUT tables_compared={tables} (lookup tables identical)");
-    }
-}
-// EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): TBLASTX's full table built in place
+// EXPERIMENT (LOSAT_X_TBXLUT): TBLASTX's full table built in place
 // (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export itself.
 pub(crate) use backbone::{x_tbx_build_ncbi_lookup, x_tbxlut_reach_stub};
 
-/// EXPERIMENT (LOSAT_X_TBXLUTSHADOW): the shadow mode's line (printed by `main` at exit).
-// No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
-pub fn x_tbxlut_print_summary() {
-    if let Some(tables) = backbone::x_tbxlut_shadow_tables() {
-        eprintln!("[X_SHADOW] TBXLUT tables_compared={tables} (lookup tables identical)");
-    }
-}
 // EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
 // path's group tables (lookup/x_pair_lut.rs); no NCBI counterpart for the re-export itself.
 //

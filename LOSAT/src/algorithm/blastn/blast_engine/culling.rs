@@ -285,7 +285,7 @@ pub(super) fn cull_traceback(
     //                    results->hitlist_array[qid]->hsplist_array[sid]);
     // ```
     let qlen = int4(query_len);
-    let mut forest = CullingForest::new(culling_limit);
+    let mut forest = CullingForest::new(i64::from(culling_limit));
     for list in std::mem::take(&mut hit_list.hsplist_array) {
         let oid = list.oid;
         for hsp in list.hsps {

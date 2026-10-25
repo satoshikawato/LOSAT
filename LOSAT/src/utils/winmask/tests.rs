@@ -508,7 +508,7 @@ fn an_empty_cache_bit_array_fails_only_when_the_boost_reads_it() {
     );
     let counts = read_counts(file).unwrap();
     assert_eq!(counts.cache_bit_array(), Some(&[][..]));
-    let masker = SeqMasker::new(counts, &MaskerParams::default()).unwrap();
+    let masker = SeqMasker::new(Arc::new(counts), &MaskerParams::default()).unwrap();
     assert_eq!(
         masker.mask(b"ACGTACGTAC").unwrap_err(),
         WinMaskError::EmptyCacheBitArray { unit: 2 }
@@ -569,8 +569,8 @@ fn a_file_ending_in_the_last_header_word_fails_at_the_hash_table() {
     let mut short_cba = obinary_file(None, 2, 3, 5, 0, 2, t, Some(&[0, 0]), &[0; 32], &[]);
     short_cba.truncate(4 * 12);
     match err(short_cba) {
-        WinMaskError::Format { message, warnings } => {
-            assert_eq!(message, "not enough data to fill the hash table");
+        WinMaskError::Format { site, warnings } => {
+            assert_eq!(site, FormatSite::HashTable);
             assert_eq!(
                 warnings,
                 vec!["file read failed: bit array optimizations are not used.".to_string()]

@@ -510,6 +510,11 @@ pub(crate) struct FastaReader<R: Read> {
     defline: Vec<u8>,
     /// Bad positions of a data line, reused.
     bad_positions: Vec<u32>,
+    /// EXPERIMENT (LOSAT_X_BNQPACK): a nucleotide record's letters are packed as it is assembled
+    /// (`x_packed`), its `sequence` left empty (`FastaInputSource::x_pack_letters`).
+    x_pack: bool,
+    /// The packed letters of the record assembled last, until the caller takes them.
+    x_packed: Option<crate::sequence::packed_letters::PackedLetters>,
 }
 
 /// Where a reader message goes: `LOG_POST_X(1, Warning << message)` with no listener.
@@ -549,7 +554,22 @@ impl<R: Read> FastaReader<R> {
             local_id: None,
             defline: Vec::new(),
             bad_positions: Vec::new(),
+            x_pack: false,
+            x_packed: None,
         }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNQPACK): pack the letters of the nucleotide records read from now on.
+    pub(crate) fn x_pack_letters(&mut self) {
+        self.x_pack = true;
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNQPACK): the packed letters of the record read last, if it was packed
+    /// (its `sequence` is then empty).
+    pub(crate) fn x_take_packed(
+        &mut self,
+    ) -> Option<crate::sequence::packed_letters::PackedLetters> {
+        self.x_packed.take()
     }
 
     /// `LineNumber()`.
@@ -1826,7 +1846,26 @@ impl<R: Read> FastaReader<R> {
         }
         self.titles = titles;
         let gap_char = if self.config.protein { b'X' } else { b'N' };
-        let mut sequence = if self.total_gap_length > 0 {
+        // EXPERIMENT (LOSAT_X_BNQPACK): the letters the branches below would give, packed from the
+        // buffer (`U` as `T` first, the mask as lower-case intervals) instead of copied out of it.
+        self.x_packed = None;
+        if self.x_pack && self.total_gap_length == 0 && !self.config.protein {
+            for residue in self.seq_data.iter_mut() {
+                *residue = if *residue == b'U' { b'T' } else { *residue };
+            }
+            self.x_packed = crate::sequence::packed_letters::PackedLetters::pack_masked(
+                &self.seq_data,
+                &self.mask,
+            );
+        }
+        let mut sequence = if self.x_packed.is_some() {
+            if self.seq_data.len() < SEQ_DATA_KEPT {
+                self.seq_data.clear();
+            } else {
+                self.seq_data = Vec::new();
+            }
+            Vec::new()
+        } else if self.total_gap_length > 0 {
             let mut new_data =
                 Vec::with_capacity(self.seq_data.len() + self.total_gap_length as usize);
             let mut pos = 0usize;
@@ -1866,9 +1905,12 @@ impl<R: Read> FastaReader<R> {
                 *residue = if *residue == b'U' { b'T' } else { *residue };
             }
         }
-        for &(from, to) in &self.mask {
-            for residue in &mut sequence[from as usize..=to as usize] {
-                *residue = residue.to_ascii_lowercase();
+        // A packed record's mask is in its intervals.
+        if self.x_packed.is_none() {
+            for &(from, to) in &self.mask {
+                for residue in &mut sequence[from as usize..=to as usize] {
+                    *residue = residue.to_ascii_lowercase();
+                }
             }
         }
         Ok(FastaRecord {

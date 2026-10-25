@@ -170,7 +170,20 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     };
     names::check_database_name(PROGRAM, db_name)?;
     let positives = FormattingMatrix::new(MATRIX).context("no formatting matrix for BLOSUM62")?;
-    let filter = filter::filter_string(None, args.seg_spec()?.filter_options(), None, false);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:414-417
+    // ```c
+    //     if (SBlastFilterOptionsMaskAtHash(filtering_options)) {
+    //         if (strlen(retval) != 0) {
+    //             /* Add mask at hash as a modifier for other filtering options */
+    //             if (!s_SafeStrCat(&retval, &retval_size, "m;")) {
+    // ```
+    // `-soft_masking true` (`mask_at_hash`) ends the filter string with `m;`.
+    let filter = filter::filter_string(
+        None,
+        args.seg_spec()?.filter_options(),
+        None,
+        args.soft_masking(),
+    );
     let xml_run = XmlRun {
         program: "tblastx",
         version: "TBLASTX 2.17.0+",
@@ -289,14 +302,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 }
                 let subject = cache.get(s_idx as usize, PROGRAM)?;
                 let subject_record_length = subjects.length(s_idx as usize);
-                let hit = XmlHit {
-                    id: &subject.id,
-                    title: &subject.title,
-                    accession: &subject.accession,
-                    len: subject_record_length,
-                    taxid: subject.taxid,
-                    taxonomy: &subject.taxonomy,
-                };
+                let hit = XmlHit::of(subject, subject_record_length);
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time
                 // (nothing for the other formats).
@@ -422,6 +428,7 @@ mod tests {
                 karlin: Some(karlin.clone()),
                 eff_searchsp: lengths.eff_searchsp,
                 aa_len: 130,
+                context0_search_space: 0,
                 seg_masks: Vec::new(),
             };
             let xml = query_stats(&stats, &numbers);

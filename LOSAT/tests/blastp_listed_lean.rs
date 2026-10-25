@@ -7,12 +7,11 @@
 //! residues, instead of one record (ASCII letters and title) per listed subject. These tests
 //! compare the reports with the switch off and on (one search of all queries and the block search
 //! of `LOSAT_X_BPQBLOCK`; pairwise, tabular with `stitle` and the rendered rows, Seq-align text and
-//! XML)
-//! and run its shadow mode (`LOSAT_X_BPLISTEDLEANSHADOW`), which makes the records too and compares
-//! them with the lean titles rank by rank; its line at exit shows that the path ran. A difference
-//! stops the run. The switch reads the titles search by search (`x_read_titles_lean` once per
-//! search), the same for a block of the block search and for the search of all queries, so three
-//! queries of the fixture are enough; the block search runs them in two blocks (`BLOCKS`).
+//! XML); the reach rows of the run with the switch on (`LOSAT_X_REACH`, `tests/reach_support`)
+//! show that the lean path ran. The switch reads the titles search by search
+//! (`x_read_titles_lean` once per search), the same for a block of the block search and for the
+//! search of all queries, so three queries of the fixture are enough; the block search runs them
+//! in two blocks (`BLOCKS`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1582
 //! ```c++
@@ -27,9 +26,10 @@
 //!         GetSequenceLengthAndId(seqinfo_src, kOid, subject_id, &subj_length);
 //! ```
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod reach_support;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -41,34 +41,6 @@ fn fixture(name: &str) -> PathBuf {
 struct Run {
     stdout: Vec<u8>,
     stderr: String,
-}
-
-const SHADOW_PREFIX: &str = "[X_SHADOW] BPLISTEDLEAN ";
-
-impl Run {
-    /// The counters of the `[X_SHADOW] BPLISTEDLEAN` line, which must end with `identical`.
-    fn shadow(&self) -> HashMap<String, u64> {
-        let line = self
-            .stderr
-            .lines()
-            .find(|line| line.starts_with(SHADOW_PREFIX))
-            .unwrap_or_else(|| panic!("no {SHADOW_PREFIX}line in {}", self.stderr));
-        assert!(line.ends_with(" identical"), "{line}");
-        line[SHADOW_PREFIX.len()..]
-            .split(' ')
-            .filter_map(|field| field.split_once('='))
-            .map(|(key, value)| (key.to_string(), value.parse().expect("a count")))
-            .collect()
-    }
-
-    /// Standard error without the shadow's line.
-    fn stderr_without_shadow(&self) -> String {
-        self.stderr
-            .lines()
-            .filter(|line| !line.starts_with(SHADOW_PREFIX))
-            .map(|line| format!("{line}\n"))
-            .collect()
-    }
 }
 
 /// A protein database of the fixture's subject proteome (`MejoMJNV.faa`, 124 sequences), made with
@@ -99,7 +71,7 @@ fn subject_database() -> PathBuf {
 /// subjects') from BDT62583.1 on, written to `dir`: BDT62583.1 (629 letters), whose preliminary
 /// list's subjects all leave the final one, so that it reports no hits; BDT62584.1 (944) and
 /// BDT62585.1 (918), which report the same five subjects, read once by a search of both. A search
-/// of all three lists 53 subjects and reports 5 (the shadow's counts).
+/// of all three lists 53 subjects and reports 5.
 fn queries(dir: &Path) -> PathBuf {
     let text = std::fs::read_to_string(fixture("MeenMJNV.faa")).unwrap();
     let start = text
@@ -207,31 +179,14 @@ fn lean_reports_are_the_records_reports() {
             outfmt,
         );
         assert!(!off.stdout.is_empty(), "{what}: the queries have rows");
-        let on = blastp(
-            &query,
-            &db,
-            threads,
-            &with(("LOSAT_X_BPLISTEDLEAN", "1")),
-            outfmt,
-        );
+        let reach = reach_support::Reach::new("listed_lean");
+        let mut on_vars: Vec<(&str, &str)> = with(("LOSAT_X_BPLISTEDLEAN", "1"));
+        on_vars.push(reach.var());
+        let on = blastp(&query, &db, threads, &on_vars, outfmt);
         assert!(on.stdout == off.stdout, "{what}: report");
         assert_eq!(on.stderr, off.stderr, "{what}: standard error");
-        let shadow = blastp(
-            &query,
-            &db,
-            threads,
-            &with(("LOSAT_X_BPLISTEDLEANSHADOW", "1")),
-            outfmt,
-        );
-        assert!(shadow.stdout == off.stdout, "{what}: shadow report");
-        assert_eq!(shadow.stderr_without_shadow(), off.stderr, "{what}");
-        let counts = shadow.shadow();
-        assert!(counts["searches"] > 0, "{what}: {counts:?}");
-        assert!(
-            counts["ranks"] > counts["reported"] && counts["reported"] > 0,
-            "{what}: subjects of the preliminary lists leave the final ones: {counts:?}"
-        );
-        assert!(counts["letters"] > 0, "{what}: {counts:?}");
+        let sides = reach.sides("LOSAT_X_BPLISTEDLEAN");
+        assert!(sides.0, "{what}: the lean path did not run: {sides:?}");
         if base == BLOCKS {
             // Outfmt 5 and 7 have rules of their own for blocks: this case runs in two blocks, a
             // `[TIMING] blastp_total` line each.

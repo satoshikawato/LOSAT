@@ -17,13 +17,20 @@
 //!
 //! The query file holds four genomes of 292-306 kb (LC738868 306,008 letters, LC738869 300,002,
 //! LC738870 294,144, LC738873 291,934) and `BATCH_SIZE=4000` puts each in a batch of its own (a
-//! batch holds whole records): four tables of 4^12 cells per search, so the last three builds are
-//! on the kept table. More searches: LC738868 followed by four 100 kb pieces of LC738869 (tables of
-//! 4^11 cells: they use the start of the kept 4^12 table, no second table is allocated), LC738868
-//! split into query chunks by `CHUNK_SIZE` (the chunks' tables go through the keep), and 16 pieces
-//! of 20 kb of LC738868 in batches of one with two slots and corrupted predictions
-//! (`LOSAT_X_QBATCHPARMISS`), where the slots stop partway and the loop keeps its table from then
-//! on. The subject is LC738868.
+//! batch holds whole records): the megablast task builds four tables of 4^12 cells per search, so
+//! the last three builds are on the kept table. blastn searches four pieces of 120,000 letters
+//! instead, one from the middle of each genome: a blastn search of the genomes took 2.5 CPU s at
+//! one thread and 5 at 4, most of it LC738868's alignment with itself; the pieces take 0.8 and 1.2.
+//! Each piece still gets blastn's table of the genomes, 4^11 cells: 211,000-230,000 positions on
+//! its two strands, above the 180,000 from which word size 11 takes 4^11 cells
+//! (`LUT_WIDTH_11_THRESHOLD_10`), filled in two chunks at 4 threads. Four pieces of 5,000 letters
+//! (9,478-9,920 positions, below 12,000) give blastn's two-stage tables (a lookup word of 8, built
+//! in `ascending_cells` order), which go through the keep too. More searches: LC738868 followed by
+//! four 100 kb pieces of LC738869 (tables of 4^11 cells: they use the start of the kept 4^12
+//! table, no second table is allocated), LC738868 split into query chunks by `CHUNK_SIZE` (the
+//! chunks' tables go through the keep), and 16 pieces of 20 kb of LC738868 in batches of one with
+//! two slots and corrupted predictions (`LOSAT_X_QBATCHPARMISS`), where the slots stop partway and
+//! the loop keeps its table from then on. The subject is LC738868.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -92,6 +99,25 @@ fn genomes() -> &'static Path {
     })
 }
 
+/// Four pieces of `len` letters, one from the middle of each genome, in one query file.
+fn middles(len: usize) -> PathBuf {
+    let names = ["LC738868", "LC738869", "LC738870", "LC738873"];
+    let seqs: Vec<String> = names
+        .iter()
+        .map(|name| {
+            let genome = letters(&format!("{name}.fasta"));
+            let start = genome.len() / 2 - len / 2;
+            genome[start..start + len].to_string()
+        })
+        .collect();
+    let records: Vec<(String, &str)> = names
+        .iter()
+        .zip(&seqs)
+        .map(|(name, seq)| (format!("{name}_middle"), seq.as_str()))
+        .collect();
+    query_file(&format!("middles{len}"), &records)
+}
+
 /// One search, `-outfmt 6` on standard output, with the given variables as its only `LOSAT_*`
 /// variables (and batch-size variables). `LOSAT_BLASTX_WORKER_LOG` stays, or is set to a file of
 /// this test when the environment has none: a binary built with the `blastx-worker-probe` feature
@@ -145,29 +171,27 @@ fn field(stderr: &str, prefix: &str, name: &str) -> u64 {
         .unwrap_or_else(|| panic!("no {name} in: {line}"))
 }
 
-/// For one task: the same report with the switch off, by default, with it, with
-/// `LOSAT_TIMING` at 4 threads and one; the kept builds counted where they ran.
-fn check(task: &str) {
-    let (reference, stderr) = blastn(task, genomes(), 4, &[OFF, BATCH]);
+/// For one task and four records: the same report with the switch off (at 4 threads with
+/// `LOSAT_TIMING`, which prints no keep line), by default, and with `LOSAT_TIMING` by default, off
+/// (at one thread) and on the original fill loops, at 4 threads and one; the kept builds counted
+/// where they ran. No run sets `LOSAT_X_MBLUTKEEP=1` alone: unset and `1` are the same switch
+/// state.
+fn check(task: &str, query: &Path) {
+    let (reference, stderr) = blastn(task, query, 4, &[OFF, BATCH, TIMING]);
     assert!(!reference.is_empty(), "{task}: no hits");
-    assert_eq!(stderr, "", "{task}");
-    for switches in [&[BATCH][..], &[SWITCH, BATCH]] {
-        let (report, stderr) = blastn(task, genomes(), 4, switches);
-        assert!(
-            report == reference,
-            "{task} {switches:?}: the report differs"
-        );
-        assert_eq!(stderr, "", "{task} {switches:?}: the switch writes nothing");
-    }
+    assert!(!stderr.contains(KEEP), "{task}: {stderr}");
+    let (report, stderr) = blastn(task, query, 4, &[BATCH]);
+    assert!(report == reference, "{task}: the report differs");
+    assert_eq!(stderr, "", "{task}: the switch writes nothing");
 
     for threads in [4, 1] {
-        let (report, stderr) = blastn(task, genomes(), threads, &[BATCH, TIMING]);
+        let (report, stderr) = blastn(task, query, threads, &[BATCH, TIMING]);
         assert!(report == reference, "{task} threads {threads}");
         let builds = field(&stderr, BUILD, "builds=");
         let kept = field(&stderr, KEEP, "kept=");
         assert_eq!(
             builds, 4,
-            "{task} threads {threads}: one table per genome:\n{stderr}"
+            "{task} threads {threads}: one table per record:\n{stderr}"
         );
         assert_eq!(
             kept + field(&stderr, KEEP, "fresh="),
@@ -176,13 +200,16 @@ fn check(task: &str) {
         );
         assert_eq!(kept, 3, "{task} threads {threads}: {stderr}");
 
-        let (report, stderr) = blastn(task, genomes(), threads, &[OFF, BATCH, TIMING]);
-        assert!(report == reference, "{task} threads {threads}");
-        assert!(!stderr.contains(KEEP), "{task}: {stderr}");
+        // At 4 threads the search with the switch off is `reference` itself.
+        if threads == 1 {
+            let (report, stderr) = blastn(task, query, threads, &[OFF, BATCH, TIMING]);
+            assert!(report == reference, "{task} threads {threads}");
+            assert!(!stderr.contains(KEEP), "{task}: {stderr}");
+        }
         // Set, the switch keeps the table on the original fill loops too.
         let (report, stderr) = blastn(
             task,
-            genomes(),
+            query,
             threads,
             &[SWITCH, ONCE_OFF, FILL_OFF, BATCH, TIMING],
         );
@@ -192,12 +219,7 @@ fn check(task: &str) {
 
     // With two slots searching the batches after the first, the loop keeps no table: it searches
     // the first batch while the slots may still start, and none after.
-    let (report, stderr) = blastn(
-        task,
-        genomes(),
-        4,
-        &[BATCH, TIMING, STATS, QBATCHPAR, SLOTS2],
-    );
+    let (report, stderr) = blastn(task, query, 4, &[BATCH, TIMING, STATS, QBATCHPAR, SLOTS2]);
     assert!(report == reference, "{task} with slots");
     assert!(
         field(&stderr, QBATCHPAR_LINE, "precomputed=") > 0,
@@ -208,12 +230,19 @@ fn check(task: &str) {
 
 #[test]
 fn megablast_gives_the_same_report_on_a_kept_table() {
-    check("megablast");
+    check("megablast", genomes());
 }
 
 #[test]
 fn blastn_gives_the_same_report_on_a_kept_table() {
-    check("blastn");
+    check("blastn", &middles(120_000));
+}
+
+// blastn's two-stage tables (a lookup word of 8 below the word of 11, built in `ascending_cells`
+// order) on four pieces of 5,000 letters.
+#[test]
+fn blastn_two_stage_tables_go_through_the_keep() {
+    check("blastn", &middles(5_000));
 }
 
 // The prefault round of `LOSAT_X_MBLUTPREFAULT` runs on the fresh table only: at 8 threads every

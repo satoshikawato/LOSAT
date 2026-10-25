@@ -53,6 +53,7 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     inputs.word_size = args.word_size;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps_per_subject.map(|count| count as i32);
+    inputs.culling_limit = args.culling_limit;
     // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`).
     inputs.threshold = args.threshold.map(|threshold| threshold as i32);
     inputs.window_size = args.window_size;
@@ -440,13 +441,31 @@ mod tests {
             .join(" ")
     }
 
+    /// `-task blastp-short` stops at the command line (LOSAT's BLASTP does not implement
+    /// it); NCBI's probes of it are applied to the arguments by hand.
     fn parse(extra: &[&str]) -> Option<BlastpArgs> {
+        let short = extra
+            .windows(2)
+            .any(|pair| pair == ["-task", "blastp-short"]);
         let mut argv = vec!["losat", "blastp", "-query", "q.fa", "-subject", "s.fa"];
-        argv.extend_from_slice(extra);
+        let mut index = 0;
+        while index < extra.len() {
+            if short && extra[index] == "-task" {
+                index += 2;
+            } else {
+                argv.push(extra[index]);
+                index += 1;
+            }
+        }
         argv.extend_from_slice(&["-outfmt", "11"]);
         let cli: Cli = try_parse_from(argv).ok()?;
         match cli.command {
-            Commands::Blastp(args) => Some(args),
+            Commands::Blastp(mut args) => {
+                if short {
+                    args.task = "blastp-short".into();
+                }
+                Some(args)
+            }
             _ => None,
         }
     }

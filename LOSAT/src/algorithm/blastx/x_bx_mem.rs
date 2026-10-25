@@ -40,7 +40,9 @@
 //!   `flow_bound` of those, so a slow batch at the head of the output does not stop the others), a
 //!   search that ends starts the next batch itself, and the subject flow's helpers inside a capped
 //!   batch leave once every task of the chunk is claimed (`in_capped_batch`) instead of waiting for
-//!   the batch's thread to finish.
+//!   the batch's thread to finish. These counts are the run's: the native run attaches them to its
+//!   pool (`XCapRun`), so searches side by side in one process (lib tests, an embedding host) do
+//!   not see each other's batches; a search on a pool without them counts process-wide.
 //!
 //! Exactness. A subject's computation depends on the subject and the query chunk alone, not on the
 //! diagonal table it runs on, while no diagonal offset passes 2^30 (`x_subject_flow.rs`, module
@@ -139,68 +141,99 @@ pub(crate) fn chunk_unit_cap(
     unit_cap(pool.threads(), options, subjects, tasks)
 }
 
-// No NCBI counterpart: the batches the capped batch flow is searching now (scheduling only).
-static X_CAPPED_BATCHES: AtomicUsize = AtomicUsize::new(0);
+// No NCBI counterpart: the counts of one run's capped batch flow (scheduling only): the batches it
+// is searching now and the chunks the waves of its split batches hold. The native run attaches one
+// to its pool (`XCapRun::attach`); a search on a pool without one counts in `X_PROCESS_RUN`.
+#[derive(Default)]
+pub(crate) struct XCapRun {
+    batches: AtomicUsize,
+    wave_chunks: AtomicUsize,
+}
+
+// No NCBI counterpart: the counts of the searches whose pool carries no `XCapRun`.
+static X_PROCESS_RUN: XCapRun = XCapRun {
+    batches: AtomicUsize::new(0),
+    wave_chunks: AtomicUsize::new(0),
+};
+
+impl XCapRun {
+    /// No NCBI counterpart: `pool` with `self` attached, so that the run's batches count here and
+    /// not with another search in the process (lib tests in parallel, an embedding host).
+    pub(crate) fn attach<'b>(
+        &'b self,
+        pool: &'b crate::utils::threading::SearchPool<'_>,
+    ) -> crate::utils::threading::SearchPool<'b> {
+        pool.x_with_ext(self)
+    }
+
+    /// No NCBI counterpart: the counts of the run searched on `pool`.
+    fn of<'a>(pool: &crate::utils::threading::SearchPool<'a>) -> &'a XCapRun {
+        pool.x_ext::<XCapRun>().unwrap_or(&X_PROCESS_RUN)
+    }
+}
 
 /// No NCBI counterpart: counts one batch of the capped batch flow while it is searched.
-pub(crate) struct XCappedBatch(());
+pub(crate) struct XCappedBatch<'a>(&'a XCapRun);
 
-impl XCappedBatch {
-    pub(crate) fn enter() -> Self {
-        X_CAPPED_BATCHES.fetch_add(1, Ordering::Relaxed);
-        Self(())
+impl<'a> XCappedBatch<'a> {
+    pub(crate) fn enter(pool: &crate::utils::threading::SearchPool<'a>) -> Self {
+        let run = XCapRun::of(pool);
+        run.batches.fetch_add(1, Ordering::Relaxed);
+        Self(run)
     }
 }
 
-impl Drop for XCappedBatch {
+impl Drop for XCappedBatch<'_> {
     fn drop(&mut self) {
-        X_CAPPED_BATCHES.fetch_sub(1, Ordering::Relaxed);
+        self.0.batches.fetch_sub(1, Ordering::Relaxed);
     }
 }
-
-// No NCBI counterpart: the chunks the waves of split queries hold now (scheduling only).
-static X_WAVE_CHUNKS: AtomicUsize = AtomicUsize::new(0);
 
 /// No NCBI counterpart: the chunks of one wave of a split query, held until the wave ends.
-pub(crate) struct XChunkWave(usize);
+pub(crate) struct XChunkWave<'a>(usize, &'a XCapRun);
 
-impl XChunkWave {
+impl XChunkWave<'_> {
     pub(crate) fn size(&self) -> usize {
         self.0
     }
 }
 
-impl Drop for XChunkWave {
+impl Drop for XChunkWave<'_> {
     fn drop(&mut self) {
-        X_WAVE_CHUNKS.fetch_sub(self.0, Ordering::Relaxed);
+        self.1.wave_chunks.fetch_sub(self.0, Ordering::Relaxed);
     }
 }
 
 /// No NCBI counterpart: the next wave of a split query under the cap K: K + 1 chunks less the capped
 /// batches searched now (the batch itself among them) and the chunks other waves hold, at least
 /// one, at most K. Waves that start at once take their chunks one after another, and a wave keeps
-/// its chunks until it ends, so a batch that starts later does not take K as well.
-pub(crate) fn chunk_wave(k: usize) -> XChunkWave {
-    let batches = X_CAPPED_BATCHES.load(Ordering::Relaxed);
-    let mut held = X_WAVE_CHUNKS.load(Ordering::Relaxed);
+/// its chunks until it ends, so a batch that starts later does not take K as well. The counts are
+/// those of the run searched on `pool`.
+pub(crate) fn chunk_wave<'a>(
+    pool: &crate::utils::threading::SearchPool<'a>,
+    k: usize,
+) -> XChunkWave<'a> {
+    let run = XCapRun::of(pool);
+    let batches = run.batches.load(Ordering::Relaxed);
+    let mut held = run.wave_chunks.load(Ordering::Relaxed);
     loop {
         let size = (k + 1).saturating_sub(batches + held).clamp(1, k);
-        match X_WAVE_CHUNKS.compare_exchange_weak(
+        match run.wave_chunks.compare_exchange_weak(
             held,
             held + size,
             Ordering::Relaxed,
             Ordering::Relaxed,
         ) {
-            Ok(_) => return XChunkWave(size),
+            Ok(_) => return XChunkWave(size, run),
             Err(now) => held = now,
         }
     }
 }
 
-/// No NCBI counterpart: whether a batch of the capped batch flow is being searched now (on this
-/// run's pool, every batch then is one).
-pub(crate) fn in_capped_batch() -> bool {
-    X_CAPPED_BATCHES.load(Ordering::Relaxed) > 0
+/// No NCBI counterpart: whether a batch of the capped batch flow of the run searched on `pool` is
+/// being searched now (every batch of that run then is one).
+pub(crate) fn in_capped_batch(pool: &crate::utils::threading::SearchPool<'_>) -> bool {
+    XCapRun::of(pool).batches.load(Ordering::Relaxed) > 0
 }
 
 /// No NCBI counterpart: batches the capped batch flow may have read and not yet written, under the
@@ -357,14 +390,24 @@ pub(super) fn chunk_subjects_on_pool(
 
 #[cfg(test)]
 mod tests {
-    // No NCBI counterpart (scheduling only). Other tests may hold waves at the same time, so only
-    // the bounds are checked.
+    // No NCBI counterpart (scheduling only). The counts are the run's own (attached to its pool),
+    // so other tests searching at the same time do not move them.
     #[test]
     fn a_wave_holds_its_chunks_until_it_ends() {
-        let first = super::chunk_wave(8);
-        assert!((1..=8).contains(&first.size()));
-        let second = super::chunk_wave(8);
-        assert!(second.size() <= 9usize.saturating_sub(first.size()).max(1));
-        drop((first, second));
+        let run = super::XCapRun::default();
+        let pool = crate::utils::threading::SearchPool::x_serial();
+        let pool = run.attach(&pool);
+        assert!(!super::in_capped_batch(&pool));
+        let batch = super::XCappedBatch::enter(&pool);
+        assert!(super::in_capped_batch(&pool));
+        // K + 1 less the batch itself, then one while the first wave holds its chunks.
+        let first = super::chunk_wave(&pool, 8);
+        assert_eq!(first.size(), 8);
+        let second = super::chunk_wave(&pool, 8);
+        assert_eq!(second.size(), 1);
+        drop(first);
+        assert_eq!(super::chunk_wave(&pool, 8).size(), 7);
+        drop((second, batch));
+        assert!(!super::in_capped_batch(&pool));
     }
 }

@@ -1,8 +1,9 @@
 //! blastp's composition-based redo with `LOSAT_X_BPREDOPAR` (`src/algorithm/blastp/x_redo_par.rs`)
 //! on whole searches.
 //!
-//! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
-//! set. With it on, more than one thread and at least two matches, the matches of the redo run on
+//! The switch is in the strict set (`src/utils/xswitch.rs`; on unless `=0`); the searches here
+//! start from `PREVIOUS_DEFAULT`, which sets it to `0`, and `SWITCH` turns it on. With it on, more
+//! than one thread and at least two matches, the matches of the redo run on
 //! the pool in jobs of up to four consecutive matches of one query, in windows of jobs, and the
 //! early termination test and the heap insertions are replayed in the order of the one-thread
 //! loop. These tests compare the reports with the switch off at one thread (the one-thread loop)
@@ -12,10 +13,9 @@
 //! `-max_target_seqs 1`, where the early termination test ends matches; one query; the release of
 //! the preliminary lists (`LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`) and pairwise output;
 //! small windows (`LOSAT_X_BPREDOPARWINDOW=1`) that end inside queries and leave out the matches
-//! the test has ended before them, at two and eight threads; and the shadow mode
-//! (`LOSAT_X_BPREDOPARSHADOW`), also with small windows, ended matches and released lists; and the
-//! windows that expand the compact lists as they reach them (`LOSAT_X_BPREDOWINEXPAND`, in the
-//! strict set) against `=0` and in their shadow mode. The
+//! the test has ended before them, at two and eight threads, and in one search of all queries with
+//! the jobs largest first at four; and the windows that expand the compact lists as they reach
+//! them (`LOSAT_X_BPREDOWINEXPAND`, in the strict set) against `=0`. The
 //! `[TIMING] x_bpredopar:` lines show that the path ran and what it did, not only that the report
 //! is equal. `LOSAT_X_BPQBLOCK` is in the strict set, on by default with blocks of 50,000 query
 //! letters (two blocks of the fixture's 77,448): the tests that count one search of all queries
@@ -432,130 +432,36 @@ fn small_windows_split_queries_and_leave_out_the_matches_the_test_ended() {
     );
 }
 
-/// The counts of the shadow mode's line at exit.
-fn shadow_counts(stderr: &str) -> [u64; 5] {
-    let line = stderr
-        .lines()
-        .find_map(|line| line.strip_prefix("[X_SHADOW] BPREDOPAR "))
-        .unwrap_or_else(|| panic!("no shadow line: {stderr}"));
-    let mut counts = [0u64; 5];
-    for (count, name) in counts.iter_mut().zip([
-        "searches=",
-        "queries=",
-        "matches_compared=",
-        "lists_compared=",
-        "diffs=",
-    ]) {
-        *count = line
-            .split(' ')
-            .find_map(|field| field.strip_prefix(name))
-            .and_then(|value| value.parse().ok())
-            .unwrap_or_else(|| panic!("{name} in {line}"));
-    }
-    counts
-}
-
+/// Small windows in one search of all queries (the block search of `LOSAT_X_BPQBLOCK` off), with
+/// the jobs largest first: the matches the replay ends (before their window and at their replay),
+/// windows that end inside queries and released lists give the report and the lists freed of the
+/// one-thread loop at 4 threads. The test above runs the default blocks of queries.
 #[test]
-fn the_shadow_mode_compares_every_redone_match_and_hit_list() {
-    let query = fixture("MeenMJNV.faa");
-    let args = ["-evalue", "0.001", "-outfmt", "6"];
-    // One search of all queries and blocks of one batch (the default blocks of 50,000 letters run
-    // in the shadow test of the jobs largest first).
-    for (vars, one_search) in [
-        (vec![ONE_SEARCH], true),
-        (vec![("LOSAT_X_BPQBLOCK", "1")], false),
-    ] {
-        let reference = blastp(&query, 1, &vars, &args);
-        let with_shadow: Vec<(&str, &str)> = vars
-            .iter()
-            .copied()
-            .chain([("LOSAT_X_BPREDOPARSHADOW", "1")])
-            .collect();
-        let shadow = blastp(&query, 4, &with_shadow, &args);
-        assert!(
-            shadow.stdout == reference.stdout,
-            "{vars:?}: the report differs in the shadow mode"
-        );
-        let [searches, queries, matches, lists, diffs] = shadow_counts(&shadow.stderr);
-        assert!(
-            searches > 0 && queries > 0 && matches > 0 && lists > 0 && diffs == 0,
-            "{vars:?}: {}",
-            shadow.stderr
-        );
-        if one_search {
-            assert_eq!(searches, 1, "one search of all queries");
-        } else {
-            assert!(searches > 1, "{vars:?}: one search per block");
-        }
-    }
-}
-
-/// The shadow mode where the replay ends matches (before their window and at their replay), the
-/// windows end inside queries and the one-thread loop releases its lists (the shadow keeps them
-/// for its own path).
-#[test]
-fn the_shadow_mode_compares_with_ended_matches_released_lists_and_small_windows() {
+fn small_windows_in_one_search_of_all_queries_give_the_one_thread_report() {
     let query = fixture("MeenMJNV.faa");
     let one_search: Vec<(&str, &str)> = RELEASE.iter().copied().chain([ONE_SEARCH]).collect();
     let reference = blastp(&query, 1, &one_search, &SMALL_WINDOW_ARGS);
     let vars: Vec<(&str, &str)> = one_search
         .iter()
         .copied()
-        .chain([("LOSAT_X_BPREDOPARSHADOW", "1"), SMALL_WINDOWS])
+        .chain([SWITCH, SMALL_WINDOWS, LPT])
         .collect();
-    let shadow = blastp(&query, 4, &vars, &SMALL_WINDOW_ARGS);
+    let on = blastp(&query, 4, &vars, &SMALL_WINDOW_ARGS);
+    assert!(on.stdout == reference.stdout, "the report differs");
+    let counts = RedoPar::sum(&on.redo_par);
     assert!(
-        shadow.stdout == reference.stdout,
-        "the report differs in the shadow mode"
+        on.redo_par.len() == 1 && counts.split > 0 && counts.skipped > 0,
+        "one search of all queries: {counts:?}"
     );
-    let [searches, queries, matches, lists, diffs] = shadow_counts(&shadow.stderr);
-    assert!(
-        searches == 1 && queries > 0 && matches > 0 && lists > 0 && diffs == 0,
-        "{}",
-        shadow.stderr
-    );
-    // Every match that the replay redoes is compared; the others were ended.
-    let counts = RedoPar::sum(&shadow.redo_par);
-    assert!(
-        counts.split > 0 && counts.skipped > 0,
-        "the shadow's path: {counts:?}"
-    );
-    assert_eq!(
-        counts.matches - counts.ended,
-        matches as usize,
-        "{counts:?}"
-    );
-    assert_eq!(shadow.freed_lists, reference.freed_lists, "lists freed");
+    assert_lpt_ran(&on, "small windows in one search");
+    assert_eq!(on.freed_lists, reference.freed_lists, "lists freed");
 }
 
 /// `LOSAT_X_BPREDOWINEXPAND` (a switch of the strict set, so on in the searches above with the
 /// switch at more than one thread): the windows expand the compact preliminary lists of
 /// `LOSAT_X_BPPCOMPACT` as they reach them instead of every list before the redo
-/// (`src/algorithm/blastp/x_redo_par.rs`, `XExpandAhead`). `=0` expands every list first; the
-/// shadow mode does both and compares each window and the lists of its queries.
+/// (`src/algorithm/blastp/x_redo_par.rs`, `XExpandAhead`). `=0` expands every list first.
 const WIN_EXPAND_OFF: (&str, &str) = ("LOSAT_X_BPREDOWINEXPAND", "0");
-const WIN_EXPAND_SHADOW: (&str, &str) = ("LOSAT_X_BPREDOWINEXPANDSHADOW", "1");
-
-/// The counts of the line at exit of `LOSAT_X_BPREDOWINEXPANDSHADOW`, which ends with `identical`.
-fn win_expand_shadow_counts(stderr: &str) -> [u64; 4] {
-    let line = stderr
-        .lines()
-        .find_map(|line| line.strip_prefix("[X_SHADOW] BPREDOWINEXPAND "))
-        .unwrap_or_else(|| panic!("no shadow line: {stderr}"));
-    assert!(line.ends_with(" identical"), "{line}");
-    let mut counts = [0u64; 4];
-    for (count, name) in counts
-        .iter_mut()
-        .zip(["searches=", "windows=", "lists=", "hsps="])
-    {
-        *count = line
-            .split(' ')
-            .find_map(|field| field.strip_prefix(name))
-            .and_then(|value| value.parse().ok())
-            .unwrap_or_else(|| panic!("{name} in {line}"));
-    }
-    counts
-}
 
 /// The lists `LOSAT_X_BPPCOMPACT` expanded in a run (`[TIMING] x_bppcompact: expanded_lists=`,
 /// summed).
@@ -569,8 +475,7 @@ fn expanded_lists(stderr: &str) -> usize {
 
 /// The reports, the lists expanded and freed and the windows (with the matches the test ended in them) of the
 /// windows that expand the lists as they reach them equal those with every list expanded first,
-/// in small windows that end inside queries and in the default windows of the default blocks; the
-/// shadow mode compares every window.
+/// in small windows that end inside queries and in the default windows of the default blocks.
 #[test]
 fn windows_that_expand_the_compact_lists_as_they_reach_them_give_the_full_expansions_report() {
     let query = fixture("MeenMJNV.faa");
@@ -592,7 +497,6 @@ fn windows_that_expand_the_compact_lists_as_they_reach_them_give_the_full_expans
         let what = format!("{vars:?} threads {threads}");
         let off = blastp(&query, threads, &with(WIN_EXPAND_OFF), args);
         let on = blastp(&query, threads, &vars, args);
-        let shadow = blastp(&query, threads, &with(WIN_EXPAND_SHADOW), args);
         let windows = |run: &Run| {
             let counts = RedoPar::sum(&run.redo_par);
             (
@@ -613,99 +517,20 @@ fn windows_that_expand_the_compact_lists_as_they_reach_them_give_the_full_expans
                 "{what}: {counts:?}"
             );
         }
-        for (name, run) in [("on", &on), ("shadow", &shadow)] {
-            assert!(
-                run.stdout == off.stdout,
-                "{what}: the report differs ({name})"
-            );
-            assert_eq!(
-                run.freed_lists, off.freed_lists,
-                "{what}: lists freed ({name})"
-            );
-            assert_eq!(windows(run), windows(&off), "{what}: windows ({name})");
-        }
-        // Each compact list is expanded once (the shadow mode also expands its reference).
+        assert!(on.stdout == off.stdout, "{what}: the report differs");
+        assert_eq!(on.freed_lists, off.freed_lists, "{what}: lists freed");
+        assert_eq!(windows(&on), windows(&off), "{what}: windows");
+        // Each compact list is expanded once.
         assert_eq!(
             expanded_lists(&on.stderr),
             expanded_lists(&off.stderr),
             "{what}: lists expanded"
         );
         assert!(expanded_lists(&off.stderr) > 0, "{what}: {}", off.stderr);
-        let [searches, compared, lists, hsps] = win_expand_shadow_counts(&shadow.stderr);
-        assert_eq!(
-            (searches, compared),
-            (
-                shadow.redo_par.len() as u64,
-                RedoPar::sum(&shadow.redo_par).windows as u64
-            ),
-            "{what}: every search and window compared"
-        );
-        assert!(lists > 0 && hsps > 0, "{what}: {}", shadow.stderr);
-        assert!(
-            !off.stderr.contains("[X_SHADOW] BPREDOWINEXPAND")
-                && !on.stderr.contains("[X_SHADOW] BPREDOWINEXPAND"),
-            "{what}: a shadow line without the shadow mode"
-        );
     }
 }
 
 /// `LOSAT_X_BPREDOLPT`: each window's jobs in one `rayon::scope` of one task per thread, taken
 /// one at a time, largest first (`src/algorithm/blastp/x_redo_par.rs`, `x_compute_window_lpt`).
-/// It acts only where `LOSAT_X_BPREDOPAR` (or its shadow mode) runs. The tests above run it beside
-/// the switch; the test below runs it in the shadow mode.
+/// It acts only where `LOSAT_X_BPREDOPAR` runs. The tests above run it beside the switch.
 const LPT: (&str, &str) = ("LOSAT_X_BPREDOLPT", "1");
-
-/// The shadow mode checks the windows computed with `LOSAT_X_BPREDOLPT` (every match the replay
-/// redoes against the one-thread computation, every hit list against the one-thread loop's), and
-/// its line ends with `lpt=1`: the default blocks of queries (blocks of one batch run in the
-/// shadow test above), and small windows that end inside queries with matches ended before their
-/// window and at their replay and released lists.
-#[test]
-fn the_shadow_mode_checks_the_windows_computed_largest_first() {
-    let query = fixture("MeenMJNV.faa");
-    let args = ["-evalue", "0.001", "-outfmt", "6"];
-    let shadow_lpt = [("LOSAT_X_BPREDOPARSHADOW", "1"), LPT];
-    for (vars, args, small) in [
-        (vec![], &args[..], false),
-        (RELEASE.to_vec(), &SMALL_WINDOW_ARGS[..], true),
-    ] {
-        let reference = blastp(&query, 1, &vars, args);
-        let mut with_shadow: Vec<(&str, &str)> = vars.iter().copied().chain(shadow_lpt).collect();
-        if small {
-            with_shadow.push(SMALL_WINDOWS);
-        }
-        let shadow = blastp(&query, 4, &with_shadow, args);
-        assert!(
-            shadow.stdout == reference.stdout,
-            "{with_shadow:?}: the report differs in the shadow mode"
-        );
-        let [searches, queries, matches, lists, diffs] = shadow_counts(&shadow.stderr);
-        assert!(
-            searches > 0 && queries > 0 && matches > 0 && lists > 0 && diffs == 0,
-            "{with_shadow:?}: {}",
-            shadow.stderr
-        );
-        assert!(
-            shadow
-                .stderr
-                .lines()
-                .any(|line| line.starts_with("[X_SHADOW] BPREDOPAR ") && line.ends_with(" lpt=1")),
-            "{with_shadow:?}: the shadow line says lpt=1: {}",
-            shadow.stderr
-        );
-        assert_lpt_ran(&shadow, &format!("{with_shadow:?}"));
-        let counts = RedoPar::sum(&shadow.redo_par);
-        assert_eq!(
-            counts.matches - counts.ended,
-            matches as usize,
-            "{with_shadow:?}: every match the replay redoes is compared: {counts:?}"
-        );
-        if small {
-            assert!(
-                counts.split > 0 && counts.skipped > 0,
-                "the shadow's path: {counts:?}"
-            );
-            assert_eq!(shadow.freed_lists, reference.freed_lists, "lists freed");
-        }
-    }
-}

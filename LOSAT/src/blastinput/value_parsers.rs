@@ -1286,3 +1286,59 @@ mod tests {
         }
     }
 }
+
+/// The `-task` of a program: `accepted` names are the choices (help and `describe` list
+/// them), a name in `rejected` is a task LOSAT does not implement and fails at the parse
+/// with the given message, and any other name is clap's invalid-value error.
+///
+/// NCBI's `-task` is a `CArgAllowStringSet` (`blast_args.cpp:3158-3163`); the rejected
+/// names are NCBI tasks outside LOSAT's implementation.
+#[derive(Clone)]
+pub struct TaskParser {
+    accepted: &'static [&'static str],
+    rejected: &'static [(&'static str, &'static str)],
+}
+
+pub fn task_parser(
+    accepted: &'static [&'static str],
+    rejected: &'static [(&'static str, &'static str)],
+) -> TaskParser {
+    TaskParser { accepted, rejected }
+}
+
+impl clap::builder::TypedValueParser for TaskParser {
+    type Value = String;
+
+    fn parse_ref(
+        &self,
+        command: &clap::Command,
+        arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<String, clap::Error> {
+        let inner = clap::builder::PossibleValuesParser::new(self.accepted);
+        if let Some((_, message)) = self
+            .rejected
+            .iter()
+            .find(|(name, _)| value == std::ffi::OsStr::new(name))
+        {
+            let name = arg.map_or_else(|| "--task".to_string(), ToString::to_string);
+            let value = value.to_string_lossy();
+            return Err(clap::Error::raw(
+                clap::error::ErrorKind::ValueValidation,
+                format!("invalid value '{value}' for '{name}': {message}"),
+            )
+            .with_cmd(command));
+        }
+        clap::builder::TypedValueParser::parse_ref(&inner, command, arg, value)
+    }
+
+    fn possible_values(
+        &self,
+    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        Some(Box::new(
+            self.accepted
+                .iter()
+                .map(|name| clap::builder::PossibleValue::new(*name)),
+        ))
+    }
+}

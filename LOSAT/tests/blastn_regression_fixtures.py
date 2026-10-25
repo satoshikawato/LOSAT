@@ -17,7 +17,9 @@ A case may set environment variables (`env`, space-separated KEY=VALUE) for both
 programs; every other variable that changes NCBI's batches or report is unset. A case of
 an approved exception (docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md), where NCBI fails
 with `env`, also sets `oracle_env`: `freeze` runs NCBI with it instead, a configuration
-whose output LOSAT's result with `env` was shown to equal. A case whose id ends in
+whose output LOSAT's result with `env` was shown to equal. An approved exception that is
+an argument (an `Int4` that overflows in NCBI) has its NCBI arguments in `ORACLE_ARGV`
+instead, the nearest value that does not overflow; the manifest keeps LOSAT's. A case whose id ends in
 `.merged` runs with standard error merged into standard output (`2>&1`), which records
 the order of the warnings and the report.
 
@@ -70,6 +72,10 @@ CTR = f"-query {C}/culling_ties_query.fa -subject {I}/culling_ties_subject_rev.f
 CMR = f"-query {C}/culling_multi_query.fa -subject {I}/culling_multi_subject_rev.fa"
 RP = f"-query {I}/rep_query.fa -subject {I}/rep_subject.fa"
 PL = f"-query {I}/pal_query.fa -subject {I}/pal_subject.fa"
+WM = f"-query {I}/wm_query.fa -subject {I}/s60k.fa"
+WM3 = f"-query {I}/wm_query3.fa -subject {I}/s60k.fa"
+WMC = "tests/winmask/counts/mg1655_u9.obinary"
+WMB = "tests/winmask/counts/dm2L_u9.binary"
 AB = f"-query {I}/culling_abricate_query.fa -subject {I}/culling_abricate_genes.fa -task blastn -dust no" \
      " -perc_identity 80 -evalue 1E-20 -max_target_seqs 10000"
 DCQ = f"-query {O}/dc_query.fasta -subject {O}/dc_subject.fasta"
@@ -400,10 +406,15 @@ _CASES = [
     # joined at the edges as without culling; each chunk is culled by itself).
     ("culling.split_mq_blastn_cl2_c2000", f"{B} -task blastn -culling_limit 2 -outfmt 6", "", "CHUNK_SIZE=2000"),
     ("culling.split_mq_megablast_cl1_c2000", f"{B} -culling_limit 1 -outfmt 6", "", "CHUNK_SIZE=2000"),
-    # The value is added to 3 in an Int4: 2147483645 wraps to INT_MIN and culls nothing,
-    # 2147483646 is limit 1, 0x2 is limit 2 (CArg_Int8 reads C-style bases).
-    ("culling.wrap_2147483645", f"{CT} -culling_limit 2147483645 -outfmt 6", ""),
-    ("culling.wrap_2147483646", f"{CT} -culling_limit 2147483646 -outfmt 6", ""),
+    # NCBI adds 3 to a limit above 1 in an Int4 (setup_factory.cpp:338-340), which overflows
+    # from 2147483645 on: its binary wraps 2147483645 to INT_MIN (culls nothing) and
+    # 2147483646 and 2147483647 to negative merits (a limit of 1 in the preliminary stage).
+    # LOSAT adds in i64 (approved exception, PD-LOSAT-NCBI-DEFECTS 1.4), so these limits cull
+    # nothing, as 2147483644 does: the oracle of the last two runs 2147483644 (ORACLE_ARGV).
+    # 0x2 is limit 2 (CArg_Int8 reads C-style bases).
+    ("culling.near_int4_max_2147483645", f"{CT} -culling_limit 2147483645 -outfmt 6", ""),
+    ("culling.near_int4_max_2147483646", f"{CT} -culling_limit 2147483646 -outfmt 6", ""),
+    ("culling.near_int4_max_2147483647", f"{CT} -culling_limit 2147483647 -outfmt 6", ""),
     ("culling.hex_0x2", f"{CT} -culling_limit 0x2 -outfmt 6", ""),
     # -max_target_seqs cuts the traceback hit list before the culling pipe: the preliminary cull
     # removes the other copies first, so -max_target_seqs 1 keeps the first; with 3 and limit 2
@@ -432,8 +443,48 @@ _CASES = [
                                         " -task blastn -strand minus -outfmt 0", ""),
     ("strand.lcase_qloc_plus_fmt0", f"-query {I}/strand_dust_query.fa -subject {I}/strand_dust_subject.fa"
                                     " -task blastn -strand plus -lcase_masking -query_loc 20-700 -outfmt 0", ""),
+    # NP M2 (blastn -window_masker_db, counts tests/winmask/counts/; wm_*.fa made by `generate_wm_inputs`):
+    # WindowMasker's masks replace those of DUST and -lcase_masking (the .lc_dust rows equal the rows
+    # without them), in the four tasks and with the binary counts; -strand minus masks with the intervals
+    # of the reverse complement; -query_loc masks the range's letters; each query chunk and batch masks
+    # its own letters; the reports show the masks (outfmt 0 lower case, XML filter `W -d <file>;`, the
+    # archive's WindowMaskerDatabase and LCaseMask).
+    ("wm.megablast_lc_dust", f"{WM} -window_masker_db {WMC} -lcase_masking -dust yes -outfmt 6", ""),
+    ("wm.blastn", f"{WM} -task blastn -window_masker_db {WMC} -outfmt 6", ""),
+    ("wm.blastn_lc_dust", f"{WM} -task blastn -window_masker_db {WMC} -lcase_masking -dust yes -outfmt 6", ""),
+    ("wm.blastn_nodust", f"{WM} -task blastn -window_masker_db {WMC} -dust no -outfmt 6", ""),
+    ("wm.dc", f"{WM} -task dc-megablast -window_masker_db {WMC} -outfmt 6", ""),
+    ("wm.short", f"{WM3} -task blastn-short -window_masker_db {WMC} -evalue 1 -outfmt 6", ""),
+    ("wm.binary", f"{WM} -task blastn -window_masker_db {WMB} -outfmt 6", ""),
+    ("wm.blastn_lc_fmt0", f"{WM} -task blastn -window_masker_db {WMC} -lcase_masking -max_hsps 2 -outfmt 0", ""),
+    ("wm.plus", f"{WM} -task blastn -window_masker_db {WMC} -strand plus -outfmt 6", ""),
+    ("wm.minus", f"{WM} -task blastn -window_masker_db {WMC} -strand minus -outfmt 6", ""),
+    ("wm.minus_fmt0", f"{WM} -task blastn -window_masker_db {WMC} -strand minus -max_hsps 2 -outfmt 0", ""),
+    ("wm.qloc", f"{P} -task blastn -window_masker_db {WMC} -query_loc 101-2500 -outfmt 6", ""),
+    ("wm.qloc_fmt0", f"{P} -task blastn -window_masker_db {WMC} -query_loc 101-2500 -max_target_seqs 5 -outfmt 0", ""),
+    ("wm.qloc_minus", f"{P} -task blastn -window_masker_db {WMC} -query_loc 101-2500 -strand minus -outfmt 6", ""),
+    # (Chunks of 600 and 400: with the chunks' own masks the hits are NCBI's, with the whole queries'
+    # masks cut to the chunks they are not.)
+    ("wm.split_c600", f"{WM} -task blastn -window_masker_db {WMC} -outfmt 6", "", "CHUNK_SIZE=600"),
+    ("wm.split_minus_c400", f"{WM} -task blastn -window_masker_db {WMC} -strand minus -outfmt 6", "",
+     "CHUNK_SIZE=400"),
+    ("wm.split_c1500o50", f"{WM} -task blastn -window_masker_db {WMC} -outfmt 6", "",
+     "CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=50"),
+    ("wm.batch3000", f"{WM} -task blastn -window_masker_db {WMC} -outfmt 6", "", "BATCH_SIZE=3000"),
+    ("wm.mixed", f"-query {I}/wm_mixed_query.fa -subject {I}/s60k.fa -task blastn -window_masker_db {WMC} -outfmt 6", ""),
+    ("wm.fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 11", ""),
+    ("wm.minus_fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -strand minus -outfmt 11", ""),
+    ("wm.plus_lc_fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -strand plus -lcase_masking -outfmt 11", ""),
+    ("wm.fmt5", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 5", ""),
+    ("wm.fmt16", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 16", ""),
+    ("wm.fmt15", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 15", ""),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
+# NCBI's arguments of the cases of an approved exception that is an argument (see above).
+ORACLE_ARGV = {
+    "culling.near_int4_max_2147483646": f"{CT} -culling_limit 2147483644 -outfmt 6",
+    "culling.near_int4_max_2147483647": f"{CT} -culling_limit 2147483644 -outfmt 6",
+}
 
 
 def genome(name: str) -> str:
@@ -504,6 +555,7 @@ def command_generate(_args) -> int:
         (INPUTS / name).write_bytes((E2C_INPUTS / name).read_bytes())
     generate_e2g_inputs(edl, sakai)
     generate_qctx_inputs()
+    generate_wm_inputs()
     return 0
 
 
@@ -588,6 +640,33 @@ def generate_qctx_inputs() -> None:
         write_fasta(INPUTS / f"{name}_query.fa", [(f"{name} LC738874 {start + 1}-{end}", lc738874[start:end])])
 
 
+def generate_wm_inputs() -> None:
+    """Inputs added for line NP M2 (the wm.* cases, blastn -window_masker_db): records of mq.fa with a run of
+    lowercase letters, a DUST region (AT repeated) and, in one record, N and R letters, so the masks of
+    WindowMasker (counts LOSAT/tests/winmask/counts/), DUST and -lcase_masking lie in different places."""
+    records = []
+    for line in (INPUTS / "mq.fa").read_text().splitlines():
+        if line.startswith(">"):
+            records.append([line[1:], ""])
+        else:
+            records[-1][1] += line
+    out = []
+    for index in (0, 3, 4, 9, 13, 2, 5, 22, 35):
+        name, seq = records[index]
+        n = len(seq)
+        if n >= 600:
+            seq = seq[:n // 3] + seq[n // 3:n // 3 + 150].lower() + seq[n // 3 + 150:2 * n // 3] + "AT" * 32 + seq[2 * n // 3:]
+        if index == 9:
+            seq = seq[:n // 4] + "N" * 30 + seq[n // 4:n // 4 + 40] + "R" + seq[n // 4 + 40:]
+        out.append((f"wm_{name}", seq))
+    write_fasta(INPUTS / "wm_query.fa", out)
+    # Three of them and the record of 77 letters, for the reports that write every query and alignment;
+    # and a record without letters and one of N only around the first (a batch of every kind of query).
+    write_fasta(INPUTS / "wm_query3.fa", [out[0], out[1], out[2], out[5]])
+    (INPUTS / "wm_mixed_query.fa").write_text(
+        ">wm_empty no letters\n>wm_alln only N\n" + "N" * 50 + "\n" + f">{out[0][0]}\n{out[0][1]}\n")
+
+
 def prepare_runtime_inputs() -> None:
     RUNTIME.mkdir(parents=True, exist_ok=True)
     path = RUNTIME / "edl933_2m.fa"
@@ -624,7 +703,7 @@ def command_freeze(args) -> int:
     version = subprocess.run([oracle, "-version"], capture_output=True, text=True).stdout.strip().replace("\n", "; ")
     rows = []
     for case_id, argv, extra, case_env, oracle_env in CASES:
-        result = run_case(oracle, [], case_id, argv, oracle_env or case_env)
+        result = run_case(oracle, [], case_id, ORACLE_ARGV.get(case_id, argv), oracle_env or case_env)
         (FIXTURES / f"{case_id}.out").write_bytes(result.stdout)
         err = FIXTURES / f"{case_id}.err"
         if result.stderr:

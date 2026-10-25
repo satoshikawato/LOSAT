@@ -468,21 +468,60 @@ fn defaults_and_task_overrides_remain_distinct() {
     };
     assert_eq!(a.resolve().unwrap().evalue, 42.0);
     // NCBI api/blast_options_handle.cpp:381-402: blastp-fast (word size 5, threshold 20)
-    // runs; blastp-short (word size 2, PAM30) is rejected where the search starts.
+    // runs; blastp-short (word size 2, PAM30) is rejected when the arguments are parsed.
     let Commands::Blastp(a) = parse("blastp", &["-task", "blastp-fast"]).unwrap().command else {
         panic!()
     };
     let resolved = a.resolve().unwrap();
     assert_eq!((resolved.word_size, resolved.threshold), (5, 20.0));
     LOSAT::algorithm::blastp::blast_engine::check_options(&a).unwrap();
-    let Commands::Blastp(a) = parse("blastp", &["-task", "blastp-short"]).unwrap().command else {
+    let error = parse("blastp", &["-task", "blastp-short"]).unwrap_err();
+    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    assert_eq!(error.exit_code(), 2);
+    let text = LOSAT::cli::render_message(&error);
+    assert!(
+        text.contains("invalid value 'blastp-short' for '-task <TASK>'")
+            && text.contains("-word_size 2 (the lookup table) is not supported by LOSAT's BLASTP"),
+        "{text}"
+    );
+    // The search entrance still refuses the task (a defensive check) when it is set by hand.
+    let Commands::Blastp(mut a) = parse("blastp", &[]).unwrap().command else {
         panic!()
     };
+    a.task = "blastp-short".into();
     assert_eq!(a.resolve().unwrap().evalue, 20000.0);
     assert!(LOSAT::algorithm::blastp::blast_engine::check_options(&a)
         .unwrap_err()
         .to_string()
         .contains("not supported by LOSAT's BLASTP"));
+    // The same for TBLASTN: tblastn-fast (the compressed lookup table) fails at the parse.
+    parse("tblastn", &["-task", "tblastn"]).unwrap();
+    let error = parse("tblastn", &["-task", "tblastn-fast"]).unwrap_err();
+    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    assert_eq!(error.exit_code(), 2);
+    let text = LOSAT::cli::render_message(&error);
+    assert!(
+        text.contains("invalid value 'tblastn-fast' for '-task <TASK>'")
+            && text.contains(
+                "-task tblastn-fast (word size 5 with the compressed lookup table) is not supported by LOSAT's TBLASTN"
+            ),
+        "{text}"
+    );
+    // A task that is not an NCBI task keeps clap's list of the accepted names.
+    for (program, other, listed) in [
+        ("blastp", "blastp-x", "blastp-fast"),
+        ("tblastn", "tblastn-x", "tblastn"),
+    ] {
+        let text = LOSAT::cli::render_message(&parse(program, &["-task", other]).unwrap_err());
+        assert!(
+            text.contains("possible values") && text.contains(listed),
+            "{text}"
+        );
+        assert!(
+            !text.contains("-short") && !text.contains("tblastn-fast"),
+            "{text}"
+        );
+    }
     // blast_args.cpp:3158-3163 (CArgAllowStringSet): the task names are case-sensitive.
     assert!(parse("blastp", &["-task", "BLASTP"]).is_err());
     // NCBI blast_args.cpp:2800-2803: the default -outfmt is 0, which BLASTN and TBLASTX
@@ -1047,11 +1086,10 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, " 5 std", None, Writes(Xml)),
         (ALL, "9", None, Writes(AsnBinary)),
         (ALL, " 9 std", None, Writes(AsnBinary)),
-        // 11 (the BLAST archive, OF8a and OF8b): BLASTN, BLASTP, BLASTX and TBLASTN so far; NCBI
-        // ignores a specification after it.
-        (&["blastn", "blastp", "blastx", "tblastn"], "11", None, Writes(ArchiveFormat)),
-        (&["blastn", "blastp", "blastx", "tblastn"], " 11 qseqid", None, Writes(ArchiveFormat)),
-        (&["tblastx"], "11", None, UNSUPPORTED),
+        // 11 (the BLAST archive, OF8a and OF8b): every program; NCBI ignores a specification
+        // after it.
+        (ALL, "11", None, Writes(ArchiveFormat)),
+        (ALL, " 11 qseqid", None, Writes(ArchiveFormat)),
         // 13 and 14 (BLAST JSON and XML2 as side files and a master file at `-out`): every
         // program (BLASTP and BLASTN: OF5c part 1; BLASTX, TBLASTN and TBLASTX: part 2).
         (ALL, "13", Some("o.json"), Writes(Json)),
@@ -1156,9 +1194,10 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
             assert!(!text.contains("seg_window") && !text.contains("dust_window"));
             // NCBI's BLASTP tasks and flags are options (blast_args.cpp:803-806,3158-3163).
             if program == "blastp" {
-                for option in ["blastp-short", "blastp-fast", "-use_sw_tback"] {
+                for option in ["blastp-fast", "-use_sw_tback"] {
                     assert!(text.contains(option), "{text}");
                 }
+                assert!(!text.contains("blastp-short"), "{text}");
             }
         }
     }
@@ -1173,38 +1212,38 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
 //                            NStr::IntToString(kDfltArgCullingLimit));
 //     arg_desc.SetConstraint(kArgCullingLimit, new CArgAllowValuesGreaterThanOrEqual(0));
 // ```
-// BLASTN reads `-culling_limit` as a non-negative integer (a hexadecimal value too, as
-// NCBI's argument parser does); BLASTP and TBLASTN still refuse it.
+// BLASTN, BLASTP and TBLASTN read `-culling_limit` as a non-negative integer (a hexadecimal
+// value too, as NCBI's argument parser does).
 #[test]
-fn blastn_accepts_culling_limit_as_ncbi_does() {
-    let limit = |words: &[&str]| -> Result<i32, String> {
-        match parse("blastn", words) {
-            Ok(cli) => match cli.command {
-                Commands::Blastn(args) => Ok(args.culling_limit_value()),
-                _ => unreachable!("blastn"),
-            },
-            Err(error) => Err(LOSAT::cli::render_message(&error)),
-        }
-    };
-    assert_eq!(limit(&[]), Ok(0));
-    assert_eq!(limit(&["-culling_limit", "0"]), Ok(0));
-    assert_eq!(limit(&["-culling_limit", "1"]), Ok(1));
-    assert_eq!(limit(&["-culling_limit", "0x2"]), Ok(2));
-    assert_eq!(limit(&["-culling_limit", "2147483647"]), Ok(2147483647));
-    for bad in ["-1", "1.5", "abc", "2147483648"] {
-        let error = limit(&["-culling_limit", bad]).unwrap_err();
-        assert!(!error.contains("is not supported by"), "{bad}: {error}");
-    }
-    for program in ["blastp", "tblastn"] {
-        let error =
-            LOSAT::cli::render_message(&parse(program, &["-culling_limit", "2"]).unwrap_err());
-        assert!(
-            error.contains(&format!(
-                "is not supported by LOSAT's {}",
-                program.to_ascii_uppercase()
-            )),
-            "{program}: {error}"
+fn culling_limit_is_read_as_ncbi_does() {
+    for program in ["blastn", "blastp", "tblastn"] {
+        let limit = |words: &[&str]| -> Result<i32, String> {
+            match parse(program, words) {
+                Ok(cli) => match cli.command {
+                    Commands::Blastn(args) => Ok(args.culling_limit_value()),
+                    Commands::Blastp(args) => Ok(args.culling_limit_value()),
+                    Commands::Tblastn(args) => Ok(args.culling_limit_value()),
+                    _ => unreachable!("{program}"),
+                },
+                Err(error) => Err(LOSAT::cli::render_message(&error)),
+            }
+        };
+        assert_eq!(limit(&[]), Ok(0), "{program}");
+        assert_eq!(limit(&["-culling_limit", "0"]), Ok(0), "{program}");
+        assert_eq!(limit(&["-culling_limit", "1"]), Ok(1), "{program}");
+        assert_eq!(limit(&["-culling_limit", "0x2"]), Ok(2), "{program}");
+        assert_eq!(
+            limit(&["-culling_limit", "2147483647"]),
+            Ok(2147483647),
+            "{program}"
         );
+        for bad in ["-1", "1.5", "abc", "2147483648"] {
+            let error = limit(&["-culling_limit", bad]).unwrap_err();
+            assert!(
+                !error.contains("is not supported by"),
+                "{program} {bad}: {error}"
+            );
+        }
     }
 }
 
@@ -1227,7 +1266,6 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
         ("blastp", &["-mt_mode", "1"]),
-        ("blastp", &["-culling_limit", "2"]),
         ("blastp", &["-lcase_masking"]),
         ("blastp", &["-h"]),
         ("blastp", &["-version"]),

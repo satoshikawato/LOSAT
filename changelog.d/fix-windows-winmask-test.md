@@ -1,0 +1,1 @@
+- A `window_masker` unit test no longer expects the unknown-format error for a directory given as the counts file on Windows, where the open fails first (exit 255, "could not open"). Test only; no output change.

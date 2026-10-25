@@ -10,6 +10,12 @@ use crate::utils::seg::SegParams;
 pub use crate::blastinput::value_parsers::SegSpec as BlastpSegSpec;
 use crate::blastinput::value_parsers::*;
 
+/// The message for `-task blastp-short`, which the search entrance printed for the task's
+/// word size (`blast_engine::check_options`) and which is now printed when the arguments
+/// are parsed.
+const BLASTP_SHORT_UNSUPPORTED: &str =
+    "-word_size 2 (the lookup table) is not supported by LOSAT's BLASTP";
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:825-876
 // ```c
 // switch (comp_stat_string[0]) {
@@ -324,14 +330,17 @@ pub struct BlastpArgs {
     //         retval.insert("blastp-short");
     //         retval.insert("blastp-fast");
     // ```
-    #[arg(long, default_value = "blastp", value_parser = ["blastp", "blastp-fast", "blastp-short"])]
+    // `blastp-short` (word size 2, PAM30 9/1) is an NCBI task that LOSAT's BLASTP does not
+    // implement: it fails when the arguments are parsed, as the search entrance did
+    // (`blast_engine::check_options`).
+    #[arg(long, default_value = "blastp", value_parser = task_parser(&["blastp", "blastp-fast"], &[("blastp-short", BLASTP_SHORT_UNSUPPORTED)]))]
     pub task: String,
-    // An omitted value keeps the default of the task (10; 20000 for blastp-short).
-    #[arg(long, value_parser = blastp_real, help = "Expectation value (E) threshold for saving hits [default: 10; 20000 for blastp-short]")]
+    // An omitted value keeps the default of the task (10).
+    #[arg(long, value_parser = blastp_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
     #[arg(long, value_parser = blastp_threshold, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast]")]
     pub threshold: Option<f64>,
-    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3; 5 for blastp-fast, 2 for blastp-short]")]
+    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3; 5 for blastp-fast]")]
     pub word_size: Option<i32>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
@@ -351,14 +360,24 @@ pub struct BlastpArgs {
     // NCBI blast_args.cpp:196-201,313-315: no filter when omitted or 0.
     #[arg(long = "qcov_hsp_perc", value_parser = blastp_query_coverage, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
+    // ```c
+    // CHspFilteringArgs::ExtractAlgorithmOptions(const CArgs& args,
+    //                                            CBlastOptions& opts)
+    // {
+    //     if (args[kArgCullingLimit]) {
+    //         opts.SetCullingLimit(args[kArgCullingLimit].AsInteger());
+    //     }
+    // ```
+    /// If the query range of a hit is enveloped by that of at least this many
+    /// higher-scoring hits, delete the hit (default: 0, no culling).
+    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: Option<i32>,
     #[arg(long)]
     pub ungapped: bool,
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
     pub window_size: Option<i32>,
-    #[arg(
-        long,
-        help = "Scoring matrix name [default: BLOSUM62; PAM30 for blastp-short]"
-    )]
+    #[arg(long, help = "Scoring matrix name [default: BLOSUM62]")]
     pub matrix: Option<String>,
     #[arg(long = "gapopen", value_parser = ncbi_integer, help = "Cost to open a gap [default: 11, or the matrix's best value]")]
     pub gap_open: Option<i32>,
@@ -547,7 +566,7 @@ impl BlastpTaskOptions {
                 options.lookup_table_type = BlastpLookupTableType::CompressedAaLookupTable;
                 options.chaining = true;
             }
-            _ => bail!("unsupported blastp task '{task}': expected one of blastp, blastp-short, blastp-fast"),
+            _ => bail!("unsupported blastp task '{task}': expected one of blastp, blastp-fast"),
         }
         Ok(options)
     }
@@ -601,6 +620,8 @@ pub struct ResolvedBlastpArgs {
     pub max_hsps_per_subject: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
+    /// The -culling_limit value (0: no culling, as NCBI's `SetCullingLimit(0)`).
+    pub culling_limit: i32,
     pub ungapped: bool,
     pub window_size: usize,
     /// The matrix as the command line names it (NCBI keeps the spelling); `scoring.matrix`
@@ -694,6 +715,12 @@ impl ResolvedBlastpArgs {
 }
 
 impl BlastpArgs {
+    /// `-culling_limit`, 0 (no culling) when it is not given. The BLAST archive records
+    /// whether it was given (`culling_limit`).
+    pub fn culling_limit_value(&self) -> i32 {
+        self.culling_limit.unwrap_or(0)
+    }
+
     /// The options as `check_options` resolves them, without NCBI's warnings.
     pub fn resolve(&self) -> Result<ResolvedBlastpArgs> {
         self.check_options(&mut std::io::sink())
@@ -980,6 +1007,7 @@ impl BlastpArgs {
             // NCBI blast_args.cpp:313-315: if (args[kArgQueryCovHspPerc])
             // opt.SetQueryCovHspPerc(args[kArgQueryCovHspPerc].AsDouble());
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
+            culling_limit: self.culling_limit_value(),
             ungapped: self.ungapped,
             window_size: usize::try_from(options.window_size).unwrap_or(0),
             matrix_name: options.matrix_name,
@@ -1136,7 +1164,20 @@ mod tests {
         for value in ["false", "F", "0", "no", "off"] {
             assert!(!resolve(&["-soft_masking", value]), "{value}");
         }
-        assert!(resolve(&["-task", "blastp-short", "-soft_masking", "true"]));
+        // `-task blastp-short` stops at the command line, so the task is set by hand.
+        let TestCommand::Blastp(mut args) = parse_cli([
+            "losat",
+            "blastp",
+            "-query",
+            "q.faa",
+            "-subject",
+            "s.faa",
+            "-soft_masking",
+            "true",
+        ])
+        .command;
+        args.task = "blastp-short".into();
+        assert!(args.resolve().expect("resolved blastp args").soft_masking);
         assert!(resolve(&[
             "-task",
             "blastp-fast",

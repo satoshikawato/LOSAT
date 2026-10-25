@@ -289,7 +289,9 @@ fn run_inner(
     }
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
     // before anything is read or written.
-    let archive = archive::handle_for(args, format == Some(app::ReportFormat::ArchiveFormat))?;
+    // The error archives follow the `-outfmt` text (`writes_error_archive`).
+    let archive = archive::handle_for(args, format == Some(app::ReportFormat::ArchiveFormat))?
+        .map(|handle| handle.with_outfmt_text(&args.outfmt));
     archive_slot.clone_from(&archive);
     // Preserve explicit product refusals; defer supported semantic failures
     // until subject and standard query/output streams have been extracted.
@@ -1094,8 +1096,8 @@ fn run_inner(
                             let large = x_cap.is_some() || alone || x_large(queries);
                             crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !large);
                             if large {
-                                let _x_live =
-                                    x_cap.map(|_| super::search::x_bx_mem::XCappedBatch::enter());
+                                let _x_live = x_cap
+                                    .map(|_| super::search::x_bx_mem::XCappedBatch::enter(pool));
                                 super::runtime::x_search_unit_in_pool(
                                     queries,
                                     search_subjects,
@@ -1380,7 +1382,14 @@ fn run_inner(
             match crate::utils::threading::x_with_search_pool_local(
                 options.num_threads as usize,
                 "BLASTX",
-                |pool| Ok(x_run_batches(Some(pool))),
+                |pool| {
+                    // The run's counts of LOSAT_X_BXUNITCAP (scheduling only), on its pool.
+                    #[cfg(feature = "parallel")]
+                    let x_caps = super::search::x_bx_mem::XCapRun::default();
+                    #[cfg(feature = "parallel")]
+                    let pool = &x_caps.attach(pool);
+                    Ok(x_run_batches(Some(pool)))
+                },
             ) {
                 Ok(batches) => batches,
                 Err(error) => Err(engine(error)),

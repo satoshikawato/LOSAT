@@ -3,6 +3,8 @@
 //! LOSAT/tests/ gets its two lines in its program's suite (`tests/suite_layout.rs` checks that
 //! every file is in exactly one test binary).
 
+#[path = "../blastp_culling.rs"]
+mod blastp_culling;
 #[path = "../blastp_db_cut.rs"]
 mod blastp_db_cut;
 #[path = "../blastp_diag_batch.rs"]
@@ -35,6 +37,8 @@ mod blastp_query_blocks_fmt;
 mod blastp_redo_db_subjects;
 #[path = "../blastp_redo_fit.rs"]
 mod blastp_redo_fit;
+#[path = "../blastp_redo_memory.rs"]
+mod blastp_redo_memory;
 #[path = "../blastp_redo_par.rs"]
 mod blastp_redo_par;
 #[path = "../blastp_restricted_gapped.rs"]

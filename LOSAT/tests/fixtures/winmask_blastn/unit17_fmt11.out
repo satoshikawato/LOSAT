@@ -1,0 +1,54 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST engine error: Warning: NCBI C++ Exception: T0 ""/home/cor
+emake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18
+.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src
+/algo/winmask/seq_masker_istat_obinary.cpp"", line 114: Error: (Exception::bad
+ parameter) ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary() - unit size
+ must be in [1,16] T0 ""/home/coremake/release_build/build/PrepareRelease_Linu
+x64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_175137
+4548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp"",
+ line 358: Error: (Exception::creation failure)
+ ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts
+ container Warning: NCBI C++ Exception: T0 ""/home/coremake/release_build/buil
+d/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareReleas
+e_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker
+_istat_obinary.cpp"", line 114: Error: (Exception::bad parameter)
+ ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary() - unit size must be in
+ [1,16] T0 ""/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JS
+ID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/co
+mpilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp"", line 358:
+ Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() -
+ could not create a unit counts container Warning: NCBI C++ Exception: T0 ""/h
+ome/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_13
+0.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/..
+/../src/algo/winmask/seq_masker_istat_obinary.cpp"", line 114: Error:
+ (Exception::bad parameter)
+ ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary() - unit size must be in
+ [1,16] T0 ""/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JS
+ID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/co
+mpilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp"", line 358:
+ Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() -
+ could not create a unit counts container Warning: NCBI C++ Exception: T0 ""/h
+ome/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_13
+0.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/..
+/../src/algo/winmask/seq_masker_istat_obinary.cpp"", line 114: Error:
+ (Exception::bad parameter)
+ ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary() - unit size must be in
+ [1,16] T0 ""/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JS
+ID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/co
+mpilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp"", line 358:
+ Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() -
+ could not create a unit counts container"
+    }
+  }
+}

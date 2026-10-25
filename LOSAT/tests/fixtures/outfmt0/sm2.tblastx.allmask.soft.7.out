@@ -1,0 +1,5 @@
+# TBLASTX 2.17.0+
+# Query: q_masked 300 bases of CAG repeats
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/mask_subject.fasta)
+# 0 hits found
+# BLAST processed 1 queries

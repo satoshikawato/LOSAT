@@ -115,7 +115,7 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
     if x_clut_scan_bf(lookup) {
         // EXPERIMENT (LOSAT_X_BPFSEED): the branch-free two-hit test and no read-ahead of the
         // diagonal entries, where the test gives the reference's outcomes (module header).
-        if let Some(bf) = x_fseed_on()
+        if let Some(bf) = (x_fseed_on() || x_bpf_s4() != 0)
             .then(|| x_fseed_test(diag_offset, subject_length, window, word_size))
             .flatten()
         {
@@ -152,6 +152,7 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
                 25 => stage!(25),
                 27 => stage!(27),
                 32 => stage!(32),
+                33 => stage!(33),
                 _ => x_scan_flat_fseed(
                     lookup,
                     subject,
@@ -293,7 +294,8 @@ fn x_scan_flat_fseed<F>(
 // as 21 with the test loop inline; 24 as 21 with the runs copied as arrays (no intrinsics); 31 as
 // 21 with the scan two offsets per step (`x_probe_list_pairs`); 25 as 21 with the read-ahead
 // unchecked (16 entries past the list); 27 as 24 with unchecked unaligned array moves; 32 as 25 with
-// the scan of 31.
+// the scan of 31; 33 as 32 with the copy of 27. On wasm32 the arms act too (the dev loop there is
+// `x_scan_flat_bf`).
 fn x_bpf_s4() -> u32 {
     use std::sync::OnceLock;
     static ARM: OnceLock<u32> = OnceLock::new();
@@ -341,7 +343,7 @@ fn x_scan_flat_stage<const ARM: u32, F>(
     match ARM {
         11 => lookup.x_probe_list_bf_out::<false>(subject, subject_length, &mut cells),
         12 | 21..=27 => lookup.x_probe_list_bf_out::<true>(subject, subject_length, &mut cells),
-        31 | 32 => lookup.x_probe_list_pairs(subject, subject_length, &mut cells),
+        31..=33 => lookup.x_probe_list_pairs(subject, subject_length, &mut cells),
         _ => lookup.x_probe_list_bf(subject, subject_length, &mut cells),
     }
     let mut stage = X_STAGE.with(Cell::take).unwrap_or_else(|| {
@@ -369,7 +371,7 @@ fn x_scan_flat_stage<const ARM: u32, F>(
     let XStage { a, b } = &mut *stage;
     let (a, b) = (&mut a[..], &mut b[..]);
     let mut drain = |w: usize, a: &[u32], b: &[u32]| {
-        if matches!(ARM, 21 | 22 | 24 | 25 | 27 | 31 | 32) {
+        if matches!(ARM, 21 | 22 | 24 | 25 | 27 | 31 | 32 | 33) {
             x_stage_drain(
                 &a[..w],
                 &b[..w],
@@ -410,12 +412,12 @@ fn x_scan_flat_stage<const ARM: u32, F>(
     let mut w = 0usize;
     // Arms 25 and 32: 16 entries of cell 0 past the list, so that the read-ahead needs no test.
     let listed = cells.len();
-    if ARM == 25 || ARM == 32 {
+    if ARM == 25 || ARM == 32 || ARM == 33 {
         cells.extend_from_slice(&[(0, 0); 16]);
     }
     for n in 0..listed {
         let (s, index) = cells[n];
-        if ARM == 25 || ARM == 32 {
+        if ARM == 25 || ARM == 32 || ARM == 33 {
             // SAFETY: n + 16 < cells.len() (the 16 entries above); the indices are backbone cells.
             unsafe {
                 let ahead = cells.get_unchecked(n + 16).1 as usize;
@@ -429,7 +431,7 @@ fn x_scan_flat_stage<const ARM: u32, F>(
                 x_prefetch_any(starts.as_ptr().wrapping_add(later as usize));
             }
         }
-        if ARM != 3 && ARM != 7 && ARM != 25 && ARM != 32 {
+        if ARM != 3 && ARM != 7 && ARM != 25 && ARM != 32 && ARM != 33 {
             if let Some(&(_, later)) = cells.get(n + 8) {
                 let st = starts[later as usize] as usize;
                 x_prefetch_any(hits.as_ptr().wrapping_add(st));
@@ -512,7 +514,7 @@ fn x_copy_run<const ARM: u32>(
 ) {
     debug_assert!(k + 8 <= hits.len() && w + 8 <= a.len() && w + 8 <= b.len());
     #[cfg(target_arch = "x86_64")]
-    if ARM != 24 && ARM != 27 {
+    if ARM != 24 && ARM != 27 && ARM != 33 {
         use std::arch::x86_64::*;
         // SAFETY: SSE2 is in the x86_64 baseline; the reads and writes are in bounds (above).
         unsafe {
@@ -531,7 +533,7 @@ fn x_copy_run<const ARM: u32>(
         }
         return;
     }
-    if ARM == 27 {
+    if ARM == 27 || ARM == 33 {
         // SAFETY: k + 8 <= hits.len() and w + 8 <= a.len(), b.len() (the caller's checks).
         unsafe {
             let src = std::ptr::read_unaligned(hits.as_ptr().add(k).cast::<[i32; 8]>());
@@ -761,7 +763,7 @@ mod tests {
                 let mut bf_diag = vec![DiagStruct::default(); diag_len];
                 let mut fseed_diag = vec![DiagStruct::default(); diag_len];
                 let mut reference_diag = vec![DiagStruct::default(); diag_len];
-                let mut stage_diags = vec![vec![DiagStruct::default(); diag_len]; 33];
+                let mut stage_diags = vec![vec![DiagStruct::default(); diag_len]; 34];
                 let mut diag_offset = window;
                 let mut total = 0usize;
                 for (n, subject) in subjects.iter().enumerate() {
@@ -889,6 +891,7 @@ mod tests {
                         arm!(25);
                         arm!(27);
                         arm!(32);
+                        arm!(33);
                     }
                     total += flat_log.len();
                     diag_offset += length as i32 + window;

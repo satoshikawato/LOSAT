@@ -1841,8 +1841,9 @@ Rebuilding less:
   its first pull request (no measured case slower; AGENTS.md "Speed-up switches").
 - `LOSAT_X_BPFFILL=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
   2026-10-25, line v4-BPF K2-2; `=0` turns it off; acts where the serial builder makes the flat compressed table of
-  `LOSAT_X_BPCLUT`: one thread, natively and in WebAssembly; with two or more threads the pool builds the table,
-  `tblastx/lookup/x_clut_par.rs`, already by stripes of cells) fills the table by buckets of 2^10 cells
+  `LOSAT_X_BPCLUT`: one thread, natively and in WebAssembly, and any thread count in builds without threads, such as
+  the serial WebAssembly module; with two or more threads the pool builds the table, `tblastx/lookup/x_clut_par.rs`,
+  already by stripes of cells) fills the table by buckets of 2^10 cells
   (`tblastx/lookup/x_clut_direct.rs` `x_try_build_flat_by_buckets`, exactness argument in that file's header):
   the appends are recorded as before but not counted while they are made; they are sorted by bucket, stably,
   into the slots of `hits` that the bucket's cells will take (each packed as the query offset above the cell's
@@ -1852,21 +1853,34 @@ Rebuilding less:
   random writes into the starts and hits (48 cycles per append, 63 % of them stalls, line v4-BPF K1) become
   passes within the cache (about 30 cycles per append, of which the partition about 15; floor H about 6). The
   record of the appends serves as the buckets' scratch and is dropped where the count-and-fill builder drops it,
-  and the vectors are allocated in its order, so max RSS does not change. An append takes at most one overflow
-  cell, so a table whose appends stay within NCBI's overflow capacity cannot be refused and its count is not
-  needed while the appends are made; the bucket fill declines (the count-and-fill builder runs) a table whose
-  appends pass the capacity and a query batch of 2^22 letters or more (the packed offset), `LOSAT_X_REACH`. The
+  the vectors are allocated in its order and the appends per query offset are dropped after the partition, so max
+  RSS does not change. An append takes at most one overflow cell, so a table whose appends stay within NCBI's
+  overflow capacity cannot be refused and its count is not needed while the appends are made; the bucket fill
+  declines (the count-and-fill builder runs, `LOSAT_X_REACH`) a lookup table whose appends pass the capacity, a
+  query of 2^22 letters or more given to one table (the packed offset; with `LOSAT_X_BPQBLOCK` a table holds one
+  block of about 50,000 letters) and the word sizes other than 5, which `-task blastp-fast` does not take. The
   table is the count-and-fill builder's slot for slot (the lib test `x_bucket_fill_is_the_count_and_fill_build`
   compares them on random queries, tables and capacities; `tests/blastp_fast_fill_buckets.rs` the reports with
   `=0`'s). The function is out of line, so the count-and-fill builder keeps its code. Not taken (line v4-BPF K2-2
   probes, one core on the workstation): the histogram counted by the appends' sink (17 more instructions per
   append in the neighbor enumeration, which is no longer vectorized), the scan position computed in the fill with
   selects instead of the move over the cells of more than 5 offsets (x1.01-1.02 the cycles), and buckets of 2^8,
-  2^12 or 2^14 cells (the same or slower). Timed (probe round 3, 2026-10-25, workstation node 0, one physical core,
-  its HT sibling idle, warmed 3 s before every run, 3 rounds; dev 51234c2a; every report identical between the
-  arms; medians, `cycles:u`): OrthoFinder's 1/10 of the human proteins x the yeast proteome (`-db`,
-  `-evalue 0.001`) x0.907, of the yeast proteins x the yeast proteome... (A/B to follow). In the strict set from
-  its first pull request (no measured case slower; AGENTS.md "Speed-up switches").
+  2^12 or 2^14 cells (the same or slower); in WebAssembly (the serial WASI command in Node 26, one process, 3
+  rounds) the probe took x0.88 the time of the 1/10 of the human proteins x the yeast proteome and x0.98-0.99 of the
+  1/10 of the Arabidopsis proteins x the zebrafish proteome, with 2 MiB less linear memory. Timed 2026-10-25 on the
+  workstation (node 0, one physical core, its HT sibling idle, warmed 3 s before every run, 8 rounds of the pairs in
+  alternating order; other lines' gates ran on node 0, load 14-93, so the cycle and instruction counts are the
+  firmer measure; dev 17a08882; every report identical between the arms; medians, `cycles:u`): OrthoFinder's 1/10
+  of the human proteins x the yeast proteome (`-db`, `-evalue 0.001`) x0.865 (instructions x1.037), of the
+  Arabidopsis proteins x the yeast proteome x0.908, of the yeast proteins x the yeast proteome x0.932, of the
+  Arabidopsis proteins x the zebrafish proteome x0.969; once each, the whole human proteome x the yeast proteome
+  68.64 -> 64.19 s (cycles x0.933) and the whole Arabidopsis proteome x the zebrafish proteome 233.20 -> 230.09 s
+  (x0.989), max RSS 83.9 -> 83.9 MiB and 76.9 -> 76.8 MiB. Where a table is small the build is a few milliseconds
+  and the instructions are dev's: UniRef50 volume 00 (`-db`, `-evalue 1e-5`) with 42 residues, 3 proteins and 10
+  proteins x1.0000 (cycles x1.002-1.004), exact blastp (1/10 of the Arabidopsis proteins x the yeast proteome)
+  x1.0000; `=0` runs dev's instructions (x1.0000, cycles x0.992-1.031 of dev's in the same rounds). With two or
+  more threads the pool builds the table and the switch does not act. In the strict set from its first pull
+  request (no measured case slower; AGENTS.md "Speed-up switches").
 - `LOSAT_X_BPFSEED=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
   2026-10-24, line v4-BPF K2-1; `=0` turns it off; acts in the fused loop, `LOSAT_X_BPSEED`, on the flat compressed
   table of `LOSAT_X_BPCLUT` where the scan lists the cells without a branch, `LOSAT_X_BPCLUTSCANBF`, natively; a

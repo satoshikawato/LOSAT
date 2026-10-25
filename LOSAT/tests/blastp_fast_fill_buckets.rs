@@ -16,11 +16,12 @@
 //! count-and-fill builder slot for slot (the lib test `x_bucket_fill_is_the_count_and_fill_build`),
 //! so the property under test is that the report does not depend on it, for subjects read from
 //! FASTA (`-subject`) and from a database (`-db`). That reports equal NCBI's is the business of the
-//! BLASTP fixtures. `LOSAT_X_REACH` shows the side each run took: at one thread the serial builder
-//! runs and takes the bucket fill (its other side needs a query batch past 2^22 letters or a table
-//! past NCBI's overflow capacity); at two threads the pool builds the table and no side is recorded,
-//! nor with the reference compressed table (`LOSAT_X_BPCLUT=0`) or with exact blastp, which builds
-//! no compressed table.
+//! BLASTP fixtures. `LOSAT_X_REACH` shows the side each run took: at one thread (and at any thread
+//! count in a build without the `parallel` feature) the serial builder runs and takes the bucket
+//! fill (its other side needs a query of 2^22 letters or more given to one table, or a table past
+//! NCBI's overflow capacity); at two threads the pool builds the table and no side is recorded, nor
+//! with the reference compressed table (`LOSAT_X_BPCLUT=0`) or with exact blastp, which builds no
+//! compressed table.
 //!
 //! The dense query is the first 30 proteins of AP027131 (9,948 residues; its table uses 30.9 % of
 //! the cells, cells of more than 5 offsets among them), the sparse one its first protein (455
@@ -184,8 +185,8 @@ fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
 
 /// Default and `=0` give the same report and messages for blastp-fast on `-subject` and `-db` at 1
 /// and 2 threads, and so does the reference compressed table on one case; the serial builder (one
-/// thread) takes the bucket fill, the pool's build (two threads) and the reference table record no
-/// side, and `=0` records nothing.
+/// thread, or a build without threads) takes the bucket fill, the pool's build (two threads) and the
+/// reference table record no side, and `=0` records nothing.
 #[test]
 fn blastp_fast_reports_do_not_depend_on_the_bucket_fill() {
     let inputs = Inputs::new();
@@ -213,11 +214,8 @@ fn blastp_fast_reports_do_not_depend_on_the_bucket_fill() {
                 let on = blastp(&args, &[]);
                 assert_eq!(on.code, Some(0), "{case}: {}", on.stderr);
                 assert!(!on.stdout.is_empty(), "{case}: no hits");
-                assert_eq!(
-                    on.reached,
-                    (threads == "1", false),
-                    "{case}: default's side"
-                );
+                let serial = threads == "1" || !cfg!(feature = "parallel");
+                assert_eq!(on.reached, (serial, false), "{case}: default's side");
                 let mut arms = vec![("off", OFF)];
                 if dense && source == "-subject" && threads == "1" {
                     arms.push(("reference table", REFERENCE_TABLE));

@@ -1,0 +1,1 @@
+- `blastp -task blastp-fast` stages each cell's word hits before the two-hit test and scans the subject two offsets per step where the table is dense enough for the branch-free cell list (`LOSAT_X_BPFSTAGE`, a new switch of the strict set; natively): reports do not change. PENDING numbers.

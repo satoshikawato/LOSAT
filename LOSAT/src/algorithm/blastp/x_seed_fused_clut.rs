@@ -31,17 +31,42 @@
 //! few positions have hits, and the test gained nothing on the workstation. WebAssembly keeps its
 //! loops (`x_fseed_on`): in Node the loop took x1.06-1.09 the time of 3 proteins x UniRef50. A
 //! switch of the strict set: on unless it is `0`.
+//!
+//! EXPERIMENT (LOSAT_X_BPFSTAGE): a subject that takes the loop of LOSAT_X_BPFSEED, where
+//! `XFlatCompressedLookup::x_pairs_fit` holds, runs `x_scan_flat_stage` instead, which differs in
+//! three ways. The scan is out of line and two offsets per step (`x_list_pairs`), with the same
+//! list. Each cell's hits are staged in scan order, in runs of [`X_RUN`] copied whole (so that no
+//! loop ends at a cell's last hit, a mispredict per cell), as `q - s` and `s + diagonal offset`;
+//! every [`X_STAGE_CAP`] staged hits, and at the end, one loop (`x_stage_test`, out of line) gives
+//! them in order to the test of `x_scan_flat_fseed`: the diagonal is `(q - s) & mask` and the
+//! query offset `(q - s) + s`. So the hits, their order, the tests, the entries and the calls
+//! are those of `x_scan_flat_fseed`; the staged values do not depend on the table's entries. Where
+//! `x_pairs_fit` does not hold the subject takes `x_scan_flat_fseed`. A switch of the strict set:
+//! on unless it is `0`; it acts only where LOSAT_X_BPFSEED's loop runs.
 
 use std::cell::Cell;
 
 use super::x_seed_fused::{x_prefetch, x_prefetch_distance, x_test_hit, XHitBf};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
-use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::XFlatCompressedLookup;
+use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
+    x_prefetch as x_prefetch_ptr, XFlatCompressedLookup, X_HITS_AHEAD, X_STARTS_AHEAD,
+};
 
 thread_local! {
     // No NCBI counterpart: the scan's list of (subject offset, backbone index), reused across
     // subjects.
     static X_CELLS: Cell<Option<Vec<(i32, u32)>>> = const { Cell::new(None) };
+    // No NCBI counterpart: LOSAT_X_BPFSTAGE's staged hits, reused across subjects.
+    static X_STAGE: Cell<Option<Box<XStage>>> = const { Cell::new(None) };
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BPFSTAGE switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPFSTAGE): a strict-set switch, on unless it is `0`.
+pub(crate) fn x_bp_fstage() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPFSTAGE"))
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPFSEED switch once; it does not change any value NCBI
@@ -208,6 +233,58 @@ fn x_fseed_test(
     bf
 }
 
+/// EXPERIMENT (LOSAT_X_BPFSEED, LOSAT_X_BPFSTAGE): the loop of a subject with the test `bf`:
+/// [`x_scan_flat_stage`] where LOSAT_X_BPFSTAGE is on and the subject fits its scan, else
+/// [`x_scan_flat_fseed_loop`]; the side is recorded for `LOSAT_X_REACH`.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_scan_flat_fseed<F>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    bf: XHitBf,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    if x_bp_fstage() {
+        let fits = lookup.x_pairs_fit(subject, subject_length);
+        crate::utils::xreach::x_reach!("LOSAT_X_BPFSTAGE", fits);
+        if fits {
+            x_scan_flat_stage(
+                lookup,
+                subject,
+                subject_length,
+                diag_array,
+                diag_mask,
+                diag_offset,
+                window,
+                word_size,
+                bf,
+                candidate,
+            );
+            return;
+        }
+    }
+    x_scan_flat_fseed_loop(
+        lookup,
+        subject,
+        subject_length,
+        diag_array,
+        diag_mask,
+        diag_offset,
+        window,
+        word_size,
+        bf,
+        candidate,
+    );
+}
+
 /// EXPERIMENT (LOSAT_X_BPFSEED): [`x_scan_flat_bf`] with the branch-free two-hit test `bf` (made
 /// for the subject, [`XHitBf::new`]) first and no read-ahead of the diagonal entries (module
 /// header).
@@ -217,7 +294,7 @@ fn x_fseed_test(
 // `x_seed_fused::x_test_hit`)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_scan_flat_fseed<F>(
+fn x_scan_flat_fseed_loop<F>(
     lookup: &XFlatCompressedLookup,
     subject: &[u8],
     subject_length: usize,
@@ -248,6 +325,177 @@ fn x_scan_flat_fseed<F>(
         }
     });
     X_CELLS.with(|slot| slot.set(Some(cells)));
+}
+
+// No NCBI counterpart: sizes of LOSAT's staging; they do not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPFSTAGE): the hits copied per step of [`x_scan_flat_stage`] (a cell of
+/// more hits takes several steps), and the staged hits tested per call of [`x_stage_test`].
+const X_RUN: usize = 8;
+const X_STAGE_CAP: usize = 1024;
+
+// No NCBI counterpart: LOSAT_X_BPFSTAGE's staged hits.
+/// EXPERIMENT (LOSAT_X_BPFSTAGE): staged hit `i` of [`x_scan_flat_stage`] is `diffs[i] = q - s`
+/// and `heres[i] = s + diagonal offset` (two's complement).
+struct XStage {
+    diffs: Vec<u32>,
+    heres: Vec<u32>,
+}
+
+impl XStage {
+    fn new() -> Box<Self> {
+        Box::new(Self {
+            diffs: vec![0; X_STAGE_CAP],
+            heres: vec![0; X_STAGE_CAP],
+        })
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BPFSTAGE): [`x_scan_flat_fseed_loop`] with the list made by
+/// `x_list_pairs` and each cell's hits staged before the test (module header). The read-ahead of
+/// the slice bounds and of the hits is that of `for_each_cell`, without the tests: the list holds
+/// [`X_STARTS_AHEAD`] entries of cell 0 past its end while the loop runs.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
+// `x_scan_two_hit_compressed_flat`)
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_scan_flat_stage<F>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    bf: XHitBf,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
+    let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
+    lookup.x_list_pairs(subject, subject_length, &mut cells);
+    let listed = cells.len();
+    cells.extend_from_slice(&[(0, 0); X_STARTS_AHEAD]);
+    let mut stage = X_STAGE.with(Cell::take).unwrap_or_else(XStage::new);
+    let XStage { diffs, heres } = &mut *stage;
+    let starts = &lookup.starts[..];
+    let hits = &lookup.hits[..];
+    let mask = diag_mask as u32;
+    let mut staged = 0usize;
+    for n in 0..listed {
+        // SAFETY: n + X_STARTS_AHEAD < cells.len() (the entries above); every index of the list
+        // is a backbone cell, and `starts` has one entry more.
+        let (s, start, end) = unsafe {
+            let (s, index) = *cells.get_unchecked(n);
+            // Cache hints only, as in `for_each_cell`.
+            let ahead = cells.get_unchecked(n + X_STARTS_AHEAD).1 as usize;
+            x_prefetch_ptr(starts.as_ptr().add(ahead));
+            let later = cells.get_unchecked(n + X_HITS_AHEAD).1 as usize;
+            x_prefetch_ptr(
+                hits.as_ptr()
+                    .wrapping_add(*starts.get_unchecked(later) as usize),
+            );
+            (
+                s,
+                *starts.get_unchecked(index as usize) as usize,
+                *starts.get_unchecked(index as usize + 1) as usize,
+            )
+        };
+        let here = bf.here(s);
+        let mut k = start;
+        loop {
+            if staged + X_RUN > X_STAGE_CAP {
+                x_stage_test(
+                    &diffs[..staged],
+                    &heres[..staged],
+                    diag_array,
+                    mask,
+                    diag_offset,
+                    window,
+                    word_size,
+                    bf,
+                    candidate,
+                );
+                staged = 0;
+            }
+            let take = (end - k).min(X_RUN);
+            if k + X_RUN <= hits.len() {
+                // SAFETY: k + X_RUN <= hits.len() (tested) and staged + X_RUN <= X_STAGE_CAP, the
+                // length of both arrays (above). The places past `take` are written and later
+                // overwritten or left unread.
+                unsafe {
+                    let run = std::ptr::read_unaligned(hits.as_ptr().add(k).cast::<[i32; X_RUN]>());
+                    std::ptr::write_unaligned(
+                        diffs.as_mut_ptr().add(staged).cast::<[u32; X_RUN]>(),
+                        run.map(|q| q.wrapping_sub(s) as u32),
+                    );
+                    std::ptr::write_unaligned(
+                        heres.as_mut_ptr().add(staged).cast::<[u32; X_RUN]>(),
+                        [here; X_RUN],
+                    );
+                }
+            } else {
+                for (j, &q) in hits[k..k + take].iter().enumerate() {
+                    diffs[staged + j] = q.wrapping_sub(s) as u32;
+                    heres[staged + j] = here;
+                }
+            }
+            staged += take;
+            k += take;
+            if k >= end {
+                break;
+            }
+        }
+    }
+    x_stage_test(
+        &diffs[..staged],
+        &heres[..staged],
+        diag_array,
+        mask,
+        diag_offset,
+        window,
+        word_size,
+        bf,
+        candidate,
+    );
+    cells.truncate(listed);
+    X_STAGE.with(|slot| slot.set(Some(stage)));
+    X_CELLS.with(|slot| slot.set(Some(cells)));
+}
+
+/// EXPERIMENT (LOSAT_X_BPFSTAGE): the test of [`x_scan_flat_fseed_loop`] on staged hits in
+/// order (`diffs[i] = q - s`, `heres[i] = s + diag_offset`), out of line so that its loop keeps
+/// its own registers.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at
+// `x_seed_fused::x_test_hit`)
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_stage_test<F>(
+    diffs: &[u32],
+    heres: &[u32],
+    diag_array: &mut [DiagStruct],
+    mask: u32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    bf: XHitBf,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    assert!(diag_array.len() > mask as usize);
+    for (&diff, &here) in diffs.iter().zip(heres) {
+        // SAFETY: diff & mask <= mask < diag_array.len() (asserted above).
+        let entry = unsafe { diag_array.get_unchecked_mut((diff & mask) as usize) };
+        if bf.test(entry, here) {
+            continue;
+        }
+        let s = here.wrapping_sub(diag_offset as u32) as i32;
+        if let Some((last_hit, gap)) = x_test_hit(entry, s, diag_offset, window, word_size) {
+            candidate((diff as i32).wrapping_add(s), s, last_hit, gap, entry);
+        }
+    }
 }
 
 /// The loop of [`x_scan_two_hit_compressed_flat`]; `BRANCH_FREE` is `for_each_cell`'s.
@@ -416,6 +664,7 @@ mod tests {
                 let mut flat_diag = vec![DiagStruct::default(); diag_len];
                 let mut bf_diag = vec![DiagStruct::default(); diag_len];
                 let mut fseed_diag = vec![DiagStruct::default(); diag_len];
+                let mut stage_diag = vec![DiagStruct::default(); diag_len];
                 let mut reference_diag = vec![DiagStruct::default(); diag_len];
                 let mut diag_offset = window;
                 let mut total = 0usize;
@@ -453,7 +702,7 @@ mod tests {
                     // LOSAT_X_BPFSEED (the subjects are in XHitBf's range).
                     let bf = XHitBf::new(diag_offset, length, window, 5).expect("in range");
                     let mut fseed_log = Vec::new();
-                    x_scan_flat_fseed(
+                    x_scan_flat_fseed_loop(
                         &flat,
                         subject,
                         length,
@@ -467,6 +716,41 @@ mod tests {
                             stand_in(&mut fseed_log, diag_offset, q, s, last_hit, diff, entry)
                         },
                     );
+                    // LOSAT_X_BPFSTAGE on the subjects of a word or more (they keep their
+                    // sentinel); a shorter one takes the loop without the switch.
+                    assert_eq!(flat.x_pairs_fit(subject, length), length >= 5);
+                    let mut stage_log = Vec::new();
+                    if length >= 5 {
+                        x_scan_flat_stage(
+                            &flat,
+                            subject,
+                            length,
+                            &mut stage_diag,
+                            diag_mask,
+                            diag_offset,
+                            window,
+                            5,
+                            bf,
+                            &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
+                                stand_in(&mut stage_log, diag_offset, q, s, last_hit, diff, entry)
+                            },
+                        );
+                    } else {
+                        x_scan_flat_fseed_loop(
+                            &flat,
+                            subject,
+                            length,
+                            &mut stage_diag,
+                            diag_mask,
+                            diag_offset,
+                            window,
+                            5,
+                            bf,
+                            &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
+                                stand_in(&mut stage_log, diag_offset, q, s, last_hit, diff, entry)
+                            },
+                        );
+                    }
                     let mut reference_log = Vec::new();
                     x_scan_two_hit_compressed(
                         &reference,
@@ -484,10 +768,12 @@ mod tests {
                     assert_eq!(flat_log, reference_log, "subject {n}: candidates");
                     assert_eq!(bf_log, reference_log, "subject {n}: branch-free candidates");
                     assert_eq!(fseed_log, reference_log, "subject {n}: BPFSEED candidates");
+                    assert_eq!(stage_log, reference_log, "subject {n}: BPFSTAGE candidates");
                     for (diag, form) in [
                         (&flat_diag, "branch"),
                         (&bf_diag, "branch-free"),
                         (&fseed_diag, "BPFSEED"),
+                        (&stage_diag, "BPFSTAGE"),
                     ] {
                         assert!(
                             diag.iter()
@@ -534,7 +820,8 @@ mod tests {
         let diag_len = 4096usize;
         let diag_mask = diag_len as i32 - 1;
         let mut total = 0usize;
-        for length in [50usize, 300] {
+        // 3,000 letters stage several times X_STAGE_CAP hits (LOSAT_X_BPFSTAGE's flushes).
+        for length in [50usize, 300, 3000] {
             let mut subject: Vec<u8> = (0..length)
                 .map(|_| LETTERS[rng.below(LETTERS.len())])
                 .collect();

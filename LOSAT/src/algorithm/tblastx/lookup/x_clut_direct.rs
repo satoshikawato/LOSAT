@@ -1766,6 +1766,153 @@ impl XFlatCompressedLookup {
         }
     }
 
+    // No NCBI counterpart: the range of LOSAT's two-offsets-per-step scan; it does not change any
+    // value NCBI computes.
+    /// EXPERIMENT (LOSAT_X_BPFSTAGE): whether [`Self::x_list_pairs`] lists the offsets of `subject`
+    /// (`subject_length` residues): the compressed alphabet has 15 letters (NCBI's reciprocal for
+    /// 15), the word length is 2 to 6 (the indices stay below 15^6, where the divisions by 15 and
+    /// by 225 are exact), the presence bits cover every index, and the subject keeps a byte past
+    /// its last word (the sentinel), so that the scan reads no letter out of bounds.
+    pub(crate) fn x_pairs_fit(&self, subject: &[u8], subject_length: usize) -> bool {
+        let Ok(word_length) = usize::try_from(self.word_length) else {
+            return false;
+        };
+        if self.compressed_alphabet_size != 15
+            || self.reciprocal_alphabet_size != 286_331_154
+            || !(2..=6).contains(&word_length)
+            || subject_length > subject.len()
+        {
+            return false;
+        }
+        let s_last = subject_length.saturating_sub(word_length);
+        let indices = 15u64.pow(word_length as u32);
+        subject.len() > s_last + word_length
+            && u32::try_from(self.pv_array_bts)
+                .ok()
+                .and_then(|bts| (self.pv.len() as u64).checked_shl(bts))
+                .is_some_and(|covered| covered >= indices)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341 (quoted at
+    // `for_each_cell`)
+    /// EXPERIMENT (LOSAT_X_BPFSTAGE): the list of `for_each_cell::<true, _>` (each offset whose
+    /// index has its presence bit, with the index, in order) for a subject where
+    /// [`Self::x_pairs_fit`] holds, made two offsets per step and out of line (the scan inlined in
+    /// a larger loop kept its state on the stack). With both new letters `c0` and `c1` in the
+    /// alphabet (scaled values `C0`, `C1`, multiples of 15^(word length - 1)) and `p` the preshift
+    /// before offset `s`, the index of `s` is `i0 = p + C0`, the index of `s + 1` is `i0 / 15 + C1`
+    /// (NCBI's step), and the preshift after `s + 1` is `(i0 / 15 + C1) / 15 = i0 / 225 + C1 / 15`
+    /// (as `C1` is a multiple of 15), so the chain from preshift to preshift takes one multiply per
+    /// two offsets; `C1 / 15` is off the chain. The divisions are NCBI's reciprocal multiply and,
+    /// for 225, `x * 19,088,744 >> 32`, exact below 15^6 (lib test). A letter outside the alphabet
+    /// takes NCBI's step and its skip, as `for_each_cell` does. `cells` reserves
+    /// [`X_STARTS_AHEAD`] places past the list.
+    #[inline(never)]
+    pub(crate) fn x_list_pairs(
+        &self,
+        subject: &[u8],
+        subject_length: usize,
+        cells: &mut Vec<(i32, u32)>,
+    ) {
+        debug_assert!(self.x_pairs_fit(subject, subject_length));
+        let word_length = self.word_length as usize;
+        let recip = i64::from(self.reciprocal_alphabet_size);
+        let pv_array_bts = self.pv_array_bts as usize;
+        let table = &self.scaled_compress_table_u8;
+        let pv = &self.pv;
+        cells.clear();
+        let s_last = subject_length.saturating_sub(word_length);
+        // SAFETY: the loops read up to s_last + word length, below subject.len() (x_pairs_fit).
+        let byte_at = |i: usize| unsafe { *subject.get_unchecked(i) };
+        let bit_of = |index: i32| {
+            let ix = index as usize;
+            // SAFETY: an index is below 15^word length, which the bits cover (x_pairs_fit).
+            let word = unsafe { *pv.get_unchecked(ix >> pv_array_bts) };
+            (word >> (ix & PV_ARRAY_MASK)) & 1
+        };
+        let div225 = |x: i32| ((i64::from(x) * 19_088_744) >> 32) as i32;
+
+        let mut s = 0usize;
+        let mut index = 0i32;
+        while s <= s_last {
+            let (computed, skip) = compute_compressed_index_u8(
+                word_length - 1,
+                &subject[s..s + word_length - 1],
+                15,
+                table,
+            );
+            index = computed;
+            if skip == 0 {
+                break;
+            }
+            s += 1;
+        }
+        let mut next_char = if s <= s_last {
+            byte_at(s + word_length - 1)
+        } else {
+            0
+        };
+        let mut preshift = compressed_reciprocal_divide(index, recip);
+        cells.reserve(s_last + 1 - s + X_STARTS_AHEAD);
+        let list = cells.as_mut_ptr();
+        let mut listed = 0usize;
+        while s <= s_last {
+            if s < s_last {
+                let c1 = byte_at(s + word_length);
+                let scaled0 = table[usize::from(next_char)];
+                let scaled1 = table[usize::from(c1)];
+                if (scaled0 | scaled1) >= 0 {
+                    let i0 = preshift + scaled0;
+                    let i1 = compressed_reciprocal_divide(i0, recip) + scaled1;
+                    preshift = div225(i0) + compressed_reciprocal_divide(scaled1, recip);
+                    next_char = byte_at(s + word_length + 1);
+                    let bit0 = bit_of(i0);
+                    // SAFETY: each offset adds at most one to `listed`, so `listed` stays below
+                    // the reserve (as in `for_each_cell`).
+                    unsafe { list.add(listed).write((s as i32, i0 as u32)) };
+                    listed += bit0 as usize;
+                    let bit1 = bit_of(i1);
+                    // SAFETY: as above.
+                    unsafe { list.add(listed).write((s as i32 + 1, i1 as u32)) };
+                    listed += bit1 as usize;
+                    s += 2;
+                    continue;
+                }
+            }
+            let mut compressed_char = table[usize::from(next_char)];
+            next_char = byte_at(s + word_length);
+            if compressed_char < 0 {
+                preshift = 0;
+                s += 1;
+                let mut skip = self.word_length - 1;
+                while skip != 0 && s <= s_last {
+                    compressed_char = table[usize::from(next_char)];
+                    next_char = byte_at(s + word_length);
+                    if compressed_char < 0 {
+                        skip = self.word_length - 1;
+                        preshift = 0;
+                        s += 1;
+                        continue;
+                    }
+                    index = preshift + compressed_char;
+                    preshift = compressed_reciprocal_divide(index, recip);
+                    skip -= 1;
+                    s += 1;
+                }
+                continue;
+            }
+            index = preshift + compressed_char;
+            preshift = compressed_reciprocal_divide(index, recip);
+            let bit = bit_of(index);
+            // SAFETY: as above.
+            unsafe { list.add(listed).write((s as i32, index as u32)) };
+            listed += bit as usize;
+            s += 1;
+        }
+        // SAFETY: the first `listed` places were written above, within the reserve.
+        unsafe { cells.set_len(listed) };
+    }
+
     // No NCBI counterpart: chooses LOSAT's list form; both list the same offsets.
     /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): whether blastp-fast lists this table's offsets without a
     /// branch (`for_each_cell::<true, _>`): at least [`x_scan_bf_min`] of every 10,000 backbone
@@ -1808,14 +1955,14 @@ fn x_scan_bf_min() -> u64 {
 }
 
 // No NCBI counterpart: how many cells ahead `for_each_cell` reads the slice bounds and the hits. Tuning
-// only.
-const X_STARTS_AHEAD: usize = 16;
-const X_HITS_AHEAD: usize = 8;
+// only. LOSAT_X_BPFSTAGE's loop (`blastp/x_seed_fused_clut.rs`) reads ahead as far.
+pub(crate) const X_STARTS_AHEAD: usize = 16;
+pub(crate) const X_HITS_AHEAD: usize = 8;
 
 // No NCBI counterpart: a cache hint; it reads nothing and changes no value. `ptr` may point anywhere
 // (a prefetch does not fault).
 #[inline(always)]
-fn x_prefetch<T>(ptr: *const T) {
+pub(crate) fn x_prefetch<T>(ptr: *const T) {
     #[cfg(target_arch = "x86_64")]
     // SAFETY: a prefetch has no effect on program state and does not fault.
     unsafe {
@@ -2582,8 +2729,89 @@ mod tests {
                     );
                     cells = scratch;
                 }
+                // LOSAT_X_BPFSTAGE: the list two offsets per step, on a subject of a word or more
+                // with its sentinel; a shorter one, or one without the sentinel, is declined.
+                assert_eq!(
+                    flat.x_pairs_fit(subject, length),
+                    length >= 5,
+                    "subject {n}: fits"
+                );
+                assert!(
+                    !flat.x_pairs_fit(&subject[..length], length),
+                    "subject {n}: no sentinel"
+                );
+                if length < 5 {
+                    continue;
+                }
+                flat.x_list_pairs(subject, length, &mut cells);
+                assert!(
+                    cells.capacity() >= cells.len() + X_STARTS_AHEAD,
+                    "subject {n}: reserve"
+                );
+                let listed: Vec<(u32, u32)> = cells
+                    .iter()
+                    .flat_map(|&(s, index)| {
+                        flat.cell(index as usize)
+                            .iter()
+                            .map(move |&q| (s as u32, q as u32))
+                    })
+                    .collect();
+                assert_eq!(Some(listed), expected, "subject {n}: x_list_pairs");
             }
         }
+    }
+
+    // LOSAT_X_BPFSTAGE: `x * 19,088,744 >> 32` is `x / 225` below 15^6, and NCBI's reciprocal
+    // multiply is `x / 15` there (the indices of word lengths up to 6).
+    #[test]
+    fn the_pairs_scan_divisions_are_exact_below_fifteen_to_the_sixth() {
+        for x in 0..15i64.pow(6) {
+            assert_eq!((x * 19_088_744) >> 32, x / 225, "x {x}");
+            assert_eq!(
+                i64::from(compressed_reciprocal_divide(x as i32, 286_331_154)),
+                x / 15,
+                "x {x}"
+            );
+        }
+    }
+
+    // LOSAT_X_BPFSTAGE: the list two offsets per step on word length 6 too, and the tables and
+    // subjects it declines.
+    #[test]
+    fn the_pairs_scan_lists_word_length_six_and_declines_outside_its_range() {
+        let mut rng = XorShift(0x6a09_e667_f3bc_c909);
+        let (query, locations, _) = queries(&mut rng, &[200usize, 150], &LETTERS[..], 1);
+        let tables = [0..locations.len()];
+        let mut flat6 = flat_table(x_try_build_flat_compressed_lookup(
+            6, 1100, &query, &locations, &tables,
+        ));
+        let mut cells = Vec::new();
+        for outside_one_in in [0usize, 6, 2] {
+            for length in [1usize, 5, 6, 7, 8, 60, 301] {
+                let subject = random_subject(&mut rng, length, outside_one_in);
+                assert_eq!(flat6.x_pairs_fit(&subject, length), length >= 6);
+                if length < 6 {
+                    continue;
+                }
+                let mut want = Vec::new();
+                flat6.for_each_cell::<true, _>(&subject, length, &mut cells, |s, hits| {
+                    want.extend(hits.iter().map(|&q| (s, q)));
+                });
+                flat6.x_list_pairs(&subject, length, &mut cells);
+                let got: Vec<(i32, i32)> = cells
+                    .iter()
+                    .flat_map(|&(s, index)| flat6.cell(index as usize).iter().map(move |&q| (s, q)))
+                    .collect();
+                assert_eq!(got, want, "length {length}");
+            }
+        }
+        let subject = random_subject(&mut rng, 50, 0);
+        assert!(!flat6.x_pairs_fit(&subject, 51), "length past the buffer");
+        flat6.reciprocal_alphabet_size += 1;
+        assert!(!flat6.x_pairs_fit(&subject, 50), "another reciprocal");
+        flat6.reciprocal_alphabet_size -= 1;
+        flat6.pv.pop();
+        assert!(!flat6.x_pairs_fit(&subject, 50), "bits short of 15^6");
     }
 
     // LOSAT_X_BPCLUTSCANBFMIN: a table takes the branch-free list from `min` used cells per 10,000 up;

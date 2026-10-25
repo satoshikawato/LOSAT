@@ -28,7 +28,7 @@ import { describe, expect, it } from 'vitest';
 import { findReactors } from '../../build/reactors';
 import { hspTable } from '../../src/domain/hsp-table';
 import { splitOutfmt6Row } from '../../src/domain/outfmt6';
-import { buildResultIndex, hitLimits } from '../../src/domain/result-index';
+import { buildResultIndex } from '../../src/domain/result-index';
 import { ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from '../../src/infra/reactor/abi';
 import { instantiateSerial } from '../../src/infra/reactor/instance';
 import type { HspRecord } from '../../src/ports/engine';
@@ -92,15 +92,28 @@ interface Outputs {
   readonly subjectIds: readonly string[];
 }
 
-/** What the engine's describe says of the hit list options (their help texts carry the defaults). */
-const DESCRIBED = [
-  { flag: '-max_target_seqs', help: 'Maximum number of aligned sequences to keep [default: 500]' },
-  { flag: '-num_descriptions', help: 'Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]' },
-  { flag: '-num_alignments', help: 'Number of database sequences to show alignments for [default: 250]' },
-];
+/**
+ * The hit list size that the engine derives for the output format `format` from the options of a run
+ * (NCBI `blast_args.cpp:2894-2973`, the adapter's `hit_list_size`): written out here, not read from the
+ * app's `hitLimits`, which the results screen uses, so that a wrong `separate` there cannot select the
+ * weaker rule below. outfmt 0 (any format up to 4): -max_target_seqs, or the larger of -num_descriptions
+ * (500) and -num_alignments (250) where either is given; the tabular formats: -max_target_seqs, else
+ * -num_alignments, else 500.
+ */
+function hitListSize(words: readonly string[], format: 0 | 6): number {
+  const value = (flag: string): number | undefined => {
+    const at = words.lastIndexOf(flag);
+    return at >= 0 ? Number(words[at + 1]) : undefined;
+  };
+  const [maxTargetSeqs, descriptions, alignments] = [value('-max_target_seqs'), value('-num_descriptions'), value('-num_alignments')];
+  if (format === 0) {
+    return descriptions !== undefined || alignments !== undefined ? Math.max(descriptions ?? 500, alignments ?? 250) : (maxTargetSeqs ?? 500);
+  }
+  return maxTargetSeqs ?? alignments ?? 500;
+}
 
 /** Whether the run searched twice: outfmt 0 has a hit list size of its own (the sizes of the formats differ). */
-const searchedTwice = (fixture: Fixture): boolean => hitLimits(fixture.words, DESCRIBED).outfmt0?.separate === true;
+const searchedTwice = (fixture: Fixture): boolean => hitListSize(fixture.words, 0) !== hitListSize(fixture.words, 6);
 
 function search(abi: ReactorAbi, fixture: Fixture): Outputs {
   const parts = new Map<number, Uint8Array[]>();
@@ -272,8 +285,14 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
     const heading = decoder.decode(out0.subarray(hStart, hEnd));
     expect(heading.startsWith('>'), `${where(record)} heading text`).toBe(true);
     expect(heading, `${where(record)} heading Length=`).toMatch(/\nLength=\d+\n/);
+    // The heading is the record's subject (not another subject with the same coordinates); a record without an ID has
+    // no name in the heading, or NCBI's `unnamed`.
+    const named = heading.slice(1).split('\n')[0]!.trim().split(/\s+/)[0]!;
+    const subjectId = outputs.subjectIds[record.s_idx]!;
+    expect(subjectId === '' ? ['', 'unnamed'] : [subjectId], `${where(record)} heading names the record's subject`).toContain(named);
     const section = decoder.decode(out0.subarray(start, end));
     expect(section.startsWith(' Score ='), `${where(record)} section text`).toBe(true);
+    expect(section, `${where(record)} section raw score`).toContain(`bits (${record.raw_score}),`);
     expect(alignmentEnds(section, 'Query'), `${where(record)} Query lines`).toEqual([record.q_start, record.q_end]);
     expect(alignmentEnds(section, 'Sbjct'), `${where(record)} Sbjct lines`).toEqual([record.s_start, record.s_end]);
     previousEnd = end;

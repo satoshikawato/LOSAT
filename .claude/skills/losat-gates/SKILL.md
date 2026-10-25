@@ -91,7 +91,7 @@ below only when its condition holds:
 | V-PERF (`perf_cases.py run ... --repeat 3`; settle cases over +5% with `--repeat 5`, not 10, Owner 2026-10-01) | 2-3 min, quiet machine | hot loops, threading, or output writers changed (plan §6.2 limits the +5% rule to the S02-S04 and SX refactors) |
 | Independent audit (`losat-reviewer`, one angle per agent, at most two running searches) | first round about 73 min | new NCBI-ported behavior or a release-facing claim; not for a change proven byte-identical by capture |
 | App gate `docs/evidence/losat_web_w3/run_gate.sh` | 19.5 min; `LOSAT_WEB_GATE_STEPS=after-review` 11.8 min after a review fix | end of an app stage |
-| Nightly (`gh workflow run nightly.yml`; do not rerun locally) | about 2 h on GitHub | release candidate, or `LOSAT/src` changed since the last green nightly |
+| Nightly (`gh workflow run nightly.yml`; do not rerun locally) | about 2 h on GitHub | release candidate, or `LOSAT/src` changed since the last green nightly of the branch (the schedule runs `main` and `dev`: `gh run list --workflow nightly.yml --branch dev`) |
 
 ## GitHub CI
 

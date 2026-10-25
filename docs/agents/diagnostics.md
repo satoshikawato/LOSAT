@@ -4712,7 +4712,13 @@ Scheduling (each value computed by one thread with the original function; order 
   linking call whose heads take the lookup (a head's window longer than its lookup) takes this path.
   Cost and floor: the preliminary linking was 902 of the 1,405 thread-s of the preliminary stage (35 proteins at 8
   threads, session 10 of v4-B10); the floor is the lookup, about 1 us per head (298 thread-s of lookup and 631 of
-  tests for 12.47 M heads, loaded). Measured 2026-10-2x on the workstation: NUMBERS PENDING.
+  tests for 12.47 M heads, loaded). Measured 2026-10-26 on the workstation (2x Xeon Gold 6338, cores warmed 3 s
+  before each run, pairs alternating in order, `perf stat` walls; base 9d477f4f; every output of a case the same
+  bytes in every arm; options `-evalue 1e-5 -max_target_seqs 5 -outfmt 6`): the first batch of HsG_b4 (35 human
+  proteins x `-db hsap_dna`) at 8 threads 212.1 -> 90.8 s (x0.433, 3 pairs, node 0 cores 24-31 with their siblings
+  idle, load 15-42; user 1,487 -> 706 s, instructions x0.515, max RSS x0.918; `=0` 211.0 s); at 1 thread 16
+  proteins x E. coli and fly proteins x the fly genome 81.416 / 81.404 / 81.416 G and 127.222 / 127.132 / 127.221 G
+  instructions (base, default, `=0`).
 - `LOSAT_X_TBNXLATESIMD=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule
   of that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns
   it off; `tblastn/x_subject_translate.rs`): a packed subject's six frames (`TBNSTORE`, every `-db`

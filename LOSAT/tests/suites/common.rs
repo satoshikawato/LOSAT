@@ -22,6 +22,8 @@ mod outfmt11_blastp;
 mod outfmt11_blastx;
 #[path = "../outfmt11_tblastn.rs"]
 mod outfmt11_tblastn;
+#[path = "../outfmt11_tblastx.rs"]
+mod outfmt11_tblastx;
 #[path = "../outfmt13_14_files.rs"]
 mod outfmt13_14_files;
 #[path = "../outfmt16_blastn.rs"]
@@ -48,6 +50,8 @@ mod outfmt5_tblastn;
 mod outfmt5_tblastx;
 #[path = "../pairwise_par.rs"]
 mod pairwise_par;
+#[path = "../redo_contain_idx.rs"]
+mod redo_contain_idx;
 #[path = "../report_counts_cli.rs"]
 mod report_counts_cli;
 #[path = "../seqalign_samples.rs"]

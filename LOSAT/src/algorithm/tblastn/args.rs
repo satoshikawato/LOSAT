@@ -813,8 +813,10 @@ impl TblastnArgs {
         let format = app::report_format(&choice, app::Program::Tblastn, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot
         // write, before anything is read or written.
+        // The error archives follow the `-outfmt` text (`writes_error_archive`).
         args.archive =
-            super::archive::handle_for(&args, format == Some(app::ReportFormat::ArchiveFormat))?;
+            super::archive::handle_for(&args, format == Some(app::ReportFormat::ArchiveFormat))?
+                .map(|handle| handle.with_outfmt_text(&args.outfmt));
         let archive = args.archive.clone();
         // LOSAT's thread capability is checked before any input or output, as for BLASTN.
         crate::utils::threading::validate_threads(args.num_threads)?;

@@ -264,7 +264,8 @@ their variables mean
   switches off are a diagnostic aid: `TBNKEEPFEW` only with four or more query batches;
   `TBNBATCHRULE` only where query batches are searched side by side (2 or more threads, four or
   more batches); `TBNOWNPOOLS` only with `TBNBATCHRULE`, natively; `TBNREDOLPT` only where the
-  composition-based redo runs on the pool (2 to 16 threads, 2 or more matches); `TBNXLATESIMD` only
+  composition-based redo runs on the pool (2 to 16 threads, 2 or more matches); `REDOCONTAINIDX` only where
+  one query's list of kept alignments in a composition-based redo reaches 32; `TBNXLATESIMD` only
   on a packed subject (`TBNSTORE`: `-subject`, the plans of `run_local`'s letters; `-db`) and with AVX2; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPSEED` acts on the two-hit seed stage only; `BPDIAG` acts only
   in `BPSEED`'s fused loop and batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
@@ -328,6 +329,7 @@ export LOSAT_X_BPCOMPOREUSE=1
 export LOSAT_X_BPDBCUT=1
 export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
+export LOSAT_X_BPFFILL=1
 export LOSAT_X_BPFSEED=1
 export LOSAT_X_BPGAP=1
 export LOSAT_X_BPGAP16=1
@@ -405,6 +407,7 @@ export LOSAT_X_QDUSTPAR=1
 export LOSAT_X_QGROUPPAR=1
 export LOSAT_X_QPREPPAR=1
 export LOSAT_X_QSTREAM=1
+export LOSAT_X_REDOCONTAINIDX=1
 export LOSAT_X_RPTSTREAM=1
 export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDUNMAP=1
@@ -1841,6 +1844,48 @@ Rebuilding less:
   proteins of 4,639 residues (31.6 %) 34.27 -> 27.95 s (branch misses 1.18 G -> 0.55 G); 100 proteins of 58,139
   residues at 4 threads (two blocks, 91 % and 23 %) 70.92 -> 66.84 s; max RSS unchanged. In the strict set from
   its first pull request (no measured case slower; AGENTS.md "Speed-up switches").
+- `LOSAT_X_BPFFILL=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
+  2026-10-25, line v4-BPF K2-2; `=0` turns it off; acts where the serial builder makes the flat compressed table of
+  `LOSAT_X_BPCLUT`: one thread, natively and in WebAssembly, and any thread count in builds without threads, such as
+  the serial WebAssembly module; with two or more threads the pool builds the table, `tblastx/lookup/x_clut_par.rs`,
+  already by stripes of cells) fills the table by buckets of 2^10 cells
+  (`tblastx/lookup/x_clut_direct.rs` `x_try_build_flat_by_buckets`, exactness argument in that file's header):
+  the appends are recorded as before but not counted while they are made; they are sorted by bucket, stably,
+  into the slots of `hits` that the bucket's cells will take (each packed as the query offset above the cell's
+  index in its bucket), and each bucket then counts its cells, lays out their starts, PV bits and statistics,
+  places its appends at their cells' cursors and puts the cells of more than 5 offsets in the scan order, within
+  4 KiB of counts and the bucket's slots. The count pass's random updates of 3 MB of counts and the fill pass's
+  random writes into the starts and hits (48 cycles per append, 63 % of them stalls, line v4-BPF K1) become
+  passes within the cache (about 30 cycles per append, of which the partition about 15; floor H about 6). The
+  record of the appends serves as the buckets' scratch and is dropped where the count-and-fill builder drops it,
+  the vectors are allocated in its order and the appends per query offset are dropped after the partition, so max
+  RSS does not change. An append takes at most one overflow cell, so a table whose appends stay within NCBI's
+  overflow capacity cannot be refused and its count is not needed while the appends are made; the bucket fill
+  declines (the count-and-fill builder runs, `LOSAT_X_REACH`) a lookup table whose appends pass the capacity, a
+  query of 2^22 letters or more given to one table (the packed offset; with `LOSAT_X_BPQBLOCK` a table holds one
+  block of about 50,000 letters) and the word sizes other than 5, which `-task blastp-fast` does not take. The
+  table is the count-and-fill builder's slot for slot (the lib test `x_bucket_fill_is_the_count_and_fill_build`
+  compares them on random queries, tables and capacities; `tests/blastp_fast_fill_buckets.rs` the reports with
+  `=0`'s). The function is out of line, so the count-and-fill builder keeps its code. Not taken (line v4-BPF K2-2
+  probes, one core on the workstation): the histogram counted by the appends' sink (17 more instructions per
+  append in the neighbor enumeration, which is no longer vectorized), the scan position computed in the fill with
+  selects instead of the move over the cells of more than 5 offsets (x1.01-1.02 the cycles), and buckets of 2^8,
+  2^12 or 2^14 cells (the same or slower); in WebAssembly (the serial WASI command in Node 26, one process, 3
+  rounds) the probe took x0.88 the time of the 1/10 of the human proteins x the yeast proteome and x0.98-0.99 of the
+  1/10 of the Arabidopsis proteins x the zebrafish proteome, with 2 MiB less linear memory. Timed 2026-10-25 on the
+  workstation (node 0, one physical core, its HT sibling idle, warmed 3 s before every run, 8 rounds of the pairs in
+  alternating order; other lines' gates ran on node 0, load 14-93, so the cycle and instruction counts are the
+  firmer measure; dev 17a08882; every report identical between the arms; medians, `cycles:u`): OrthoFinder's 1/10
+  of the human proteins x the yeast proteome (`-db`, `-evalue 0.001`) x0.865 (instructions x1.037), of the
+  Arabidopsis proteins x the yeast proteome x0.908, of the yeast proteins x the yeast proteome x0.932, of the
+  Arabidopsis proteins x the zebrafish proteome x0.969; once each, the whole human proteome x the yeast proteome
+  68.64 -> 64.19 s (cycles x0.933) and the whole Arabidopsis proteome x the zebrafish proteome 233.20 -> 230.09 s
+  (x0.989), max RSS 83.9 -> 83.9 MiB and 76.9 -> 76.8 MiB. Where a table is small the build is a few milliseconds
+  and the instructions are dev's: UniRef50 volume 00 (`-db`, `-evalue 1e-5`) with 42 residues, 3 proteins and 10
+  proteins x1.0000 (cycles x1.002-1.004), exact blastp (1/10 of the Arabidopsis proteins x the yeast proteome)
+  x1.0000; `=0` runs dev's instructions (x1.0000, cycles x0.992-1.031 of dev's in the same rounds). With two or
+  more threads the pool builds the table and the switch does not act. In the strict set from its first pull
+  request (no measured case slower; AGENTS.md "Speed-up switches").
 - `LOSAT_X_BPFSEED=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
   2026-10-24, line v4-BPF K2-1; `=0` turns it off; acts in the fused loop, `LOSAT_X_BPSEED`, on the flat compressed
   table of `LOSAT_X_BPCLUT` where the scan lists the cells without a branch, `LOSAT_X_BPCLUTSCANBF`, natively; a
@@ -4546,6 +4591,51 @@ Scheduling (each value computed by one thread with the original function; order 
   chromosome arm 2L (`-subject`) x0.981 / x0.980, against the fly genome x0.987 / x0.994, one protein against the
   zebrafish genome x1.002 / x1.001. Instructions equal those of the base in every case and arm (x1.0000), `=0`
   included, and at one thread (the same path). Max RSS within 2 % of the base (HsG_b4 2,813 -> 2,775 MiB).
+- `LOSAT_X_REDOCONTAINIDX=1` blastp, blastx and tblastn (speed; in the strict set from the pull request that added
+  it, 2026-10-25; `=0` turns it off; `core/composition_adjustment/x_align_index.rs` `x_contains`, `x_add_distinct`,
+  `x_finish`, used by `redo_alignment.rs` `blast_redo_one_match_with_workspace_queries_and_matrix_observed`): the
+  composition-based redo of one match keeps, for each query, the alignments it has redone so far (NCBI's list
+  `alignments[query_index]` of `Blast_RedoOneMatch`, newest first) and asks two questions of it for every HSP:
+  whether the HSP is contained in an alignment that scores enough more (`s_IsContained`, `redo_alignment.c`
+  965-996) and, for every new alignment, whether one with a shared end scores at least as well, else which ones it
+  replaces (`s_WithDistinctEnds`, 385-450). NCBI walks the whole list each time, so a match with tens of thousands
+  of HSPs costs the square of that: on the human genome the B11g probe (35 proteins of HsG_b4, 8 threads, 396
+  matches, 1.35 M HSPs) counted 63 G list nodes visited, 15 ns each (966 thread-s), 99.5 % of them in the 44
+  matches with lists of 10,000 or more. With the switch a query's list moves, once it holds 32 alignments
+  (`X_INDEX_FROM`), into an `XAlignIndex` of its own: the alignments in slots in the order they were kept plus a
+  `BTreeSet` of (frame, match start, slot), and the two questions look only at the alignments whose match start
+  lies where an alignment that answers them can start (bounded by the largest and smallest `match_end -
+  match_start` added so far; the frames of the same sign, or the same frame, as NCBI tests; `s_IsContained`'s
+  candidates nearest start first): the probe's shadow index visited 133,594 candidates in 1.9 thread-s and agreed
+  on every call and every final list. The answers do not depend on the order the alignments are met in, the
+  removals are the same alignments, and at the end of the match the slots that hold an alignment are linked newest
+  first, which is the order of NCBI's list (the new alignment goes to the head, the others keep their order), so
+  every value and the report stay the same (unit tests `the_index_answers_as_ncbis_list` (600 random runs of 1,200
+  calls on three queries against `is_contained` / `with_distinct_ends`), `coordinates_at_the_ends_of_i32_give_the_same_answers`,
+  `a_list_moves_into_the_index_once_it_reaches_the_threshold`; `tests/redo_contain_idx.rs`: one input per program,
+  the switch on and off at 1 and 2 threads). Shorter lists stay NCBI's lists, the original functions answer, and the
+  vector of indexes is not allocated, so matches with few HSPs (most blastp and blastx matches) cost what they
+  did: a first form that wrapped every query's list in a 128-byte set (built, converted and dropped per redo call)
+  added 0.27 % to the instructions of blastp WSSV x PajaWSV, about 50,000 redo calls (callgrind: the redo function
+  itself, `BTreeSet` drops, `memcpy`, `malloc`); the lists-plus-indexes form is within 0.02 % of the base there,
+  with the switch on and off. Conditional: the new side is a match where some query's list reaches 32 alignments
+  (`x_reach!`, once per match), the reference side one where none does.
+  Measured 2026-10-25 on the workstation (2x Xeon Gold 6338, cores warmed 3 s before each run, pairs alternating
+  in order, `perf stat` walls; base 51234c2a; every output of a case the same bytes in every arm; tblastn options
+  `-evalue 1e-5 -max_target_seqs 5 -outfmt 6`). Round 1, this pull request's first form ca0688e1 (the same index;
+  every query's list wrapped in a 128-byte set): the first batch of HsG_b4 (35 human proteins x `-db hsap_dna`,
+  396 matches) at 8 threads 330.8 -> 204.0 s (x0.619, 3 pairs, node 0 cores 8-15 with their siblings idle, load
+  9-58; user 2,358 -> 1,477 s, instructions x0.934), at 16 threads 278.4 -> 185.4 s (x0.670, 3 pairs, node 1), at
+  32 threads 269.3 -> 173.6 s (x0.650, 3 pairs, node 1); with `TBNREDOLPT` allowed up to 64 threads, 32 threads
+  ran x0.991 against this form (3 pairs), so its limit of 16 stays. Matches with few HSPs (node 1, 8 pairs at 8 /
+  16 threads): 16 proteins x E. coli x0.991 / x1.001, fly proteins x 5,000 16S x1.008 / x1.001, the same around fly
+  2L (`-subject`) x0.998 / x1.006, against the fly genome x1.007 / x1.009, one protein against the zebrafish genome
+  x1.001 / x0.992, instructions x1.0000 in every case. blastx of 50 kb of fly 2L x fly proteins (`-db`) at 8
+  threads x1.000 (8 pairs). Round 2, the head 87dbbb02 (node 0 cores 16-23, load 30-89 while another gate ran):
+  the 35 proteins at 8 threads 359.7 -> 209.4 s (x0.587, 3 pairs); blastp WSSV x PajaWSV at 1 thread x0.997
+  (8 pairs), instructions x1.0001 (`=0` x1.0000; the first form +0.27 %); the blastx case x0.990 (8 pairs),
+  instructions x1.0000; at 1 thread 16 proteins x E. coli and fly proteins x fly genome 81.420 G / 127.235 G
+  instructions in all three arms (base, default, `=0`). Max RSS within 3 % of the base everywhere.
 - `LOSAT_X_TBNKEEPFEW=1` tblastn (memory; in the strict set from the pull request that added it,
   2026-10-19, with `TBNFRAMEREUSE`; `=0` turns it off; `tblastn/search_seed.rs`
   `XSubjectSide::kept_within_threads`, `tblastn/stage_d_pipeline.rs` `x_searched_side_by_side`): a

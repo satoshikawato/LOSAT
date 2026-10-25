@@ -93,6 +93,11 @@ def outfmt0_fixtures() -> list[dict]:
             continue
         argv = run_oracle.search_argv(row)
         outfmt = run_oracle.outfmt(row)
+        # A hit list of 0 (-num_alignments 0) fails the CLI's outfmt 6 and 7 while the Web run
+        # succeeds with the error on stream 3 (abi_v2.md §5, §7), so there is no native output of
+        # those formats to compare: the adapter's tests cover the row (run.rs).
+        if any(argv[k:k + 2] == ["-num_alignments", "0"] for k in range(len(argv) - 1)):
+            continue
         # SAM (outfmt 17) is not a format of ABI v1 (DECISIONS 10 of the outfmt line).
         if run_oracle.is_sam_outfmt(outfmt):
             continue

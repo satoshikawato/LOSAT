@@ -549,6 +549,11 @@
     "default": "12 2.2 2.5"
    },
    {
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks [default: false]",
+    "takes_value": true
+   },
+   {
     "flag": "-window_size",
     "help": "Two-hit window size for triggering ungapped extension (default: 40). Smaller values are more strict, larger values are more sensitive. 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX",
     "takes_value": true,

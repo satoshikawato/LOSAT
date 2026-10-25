@@ -382,7 +382,13 @@ pub fn split_queries(
 ) -> Result<Vec<QueryChunk>> {
     let mut size = CHUNK_SIZE;
     let length = records.iter().map(|r| r.sequence.len()).sum();
-    let mut count = calculate_num_chunks(&mut size, length, records.len());
+    // `num_queries` is the query batch's: with a reader batch of several units it is the reader
+    // batch's (`reader_batch.rs`), and a batch of several queries is not split.
+    let num_queries = full
+        .reader_shape
+        .as_deref()
+        .map_or(records.len(), |shape| shape.query_count);
+    let mut count = calculate_num_chunks(&mut size, length, num_queries);
     if !options.gapped {
         count = 1;
     }

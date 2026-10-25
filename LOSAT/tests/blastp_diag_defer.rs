@@ -14,9 +14,9 @@
 //! reference loop (`LOSAT_X_BPSEED=0 LOSAT_X_BPDIAG=0`), the default (no variable: the masked batch
 //! where the CPU has AVX2), the default with `LOSAT_X_BPMASKED=0` (the deferred calls), and the
 //! default with `LOSAT_X_BPDEFER=0` (the AVX2 batch with the calls per batch). The tests
-//! compare the reports with the reference and with the batches at one and four threads on a
-//! generated pair (long lookup cells from repeats, related proteins for two-hit extensions) and
-//! the fixture pair, check from the
+//! compare the reports with the reference and with the batches on a generated pair (long lookup
+//! cells from repeats, related proteins for two-hit extensions) at one and four threads and on the
+//! fixture pair at four, check from the
 //! `[TIMING] x_bpdiag: mode=<m> cells=<n> batched_hits=<h> candidates=<k>` lines that the masked
 //! and the deferred paths ran and tested the same cells, hits and candidates as the batches, and
 //! run the shadow of `LOSAT_X_BPSEEDSHADOW` (the default's loop against the reference for every
@@ -233,34 +233,50 @@ fn masked_tables(stderr: &str) -> Option<(u64, u64)> {
 #[test]
 fn deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches() {
     let (query, subject) = generated_pair("reports");
+    // The generated pair (0.01 CPU s a search) at one and four threads with tabular rows; the
+    // fixture pair (7-12 CPU s a search) at four threads with the pairwise report (outfmt 0), which
+    // shows the alignments too and, with 124 subjects (under the 250 alignments shown), every HSP
+    // of the rows. `tests/blastp_diag_batch.rs` relies on this test for the fixture pair's run of
+    // `BATCHES` and its pairwise reports of the reference and the default.
     let pairs = [
-        (query, subject),
-        (fixture("MeenMJNV.faa"), fixture("MejoMJNV.faa")),
+        (query, subject, &[1, 4][..], "6"),
+        (
+            fixture("MeenMJNV.faa"),
+            fixture("MejoMJNV.faa"),
+            &[4][..],
+            "0",
+        ),
     ];
-    for (query, subject) in &pairs {
-        for threads in [1, 4] {
+    for (query, subject, thread_counts, outfmt) in &pairs {
+        let extra = ["-outfmt", *outfmt];
+        for &threads in *thread_counts {
             let what = format!("{} threads {threads}", query.display());
             let (reference, reference_counts, _) =
-                blastp(query, subject, threads, REFERENCE, &["-outfmt", "6"]);
-            assert!(!reference.is_empty(), "{what}: the pair has a report");
+                blastp(query, subject, threads, REFERENCE, &extra);
+            // Rows, or a pairwise report with a subject's alignments (it has a header and says
+            // "No hits found" for a query without them).
+            let has_hits = if *outfmt == "0" {
+                reference.windows(2).any(|pair| pair == b"\n>")
+            } else {
+                !reference.is_empty()
+            };
+            assert!(has_hits, "{what}: the pair has a report");
             assert!(
                 reference_counts.is_empty(),
                 "{what}: no line in the reference"
             );
-            let (batched, batched_counts, _) =
-                blastp(query, subject, threads, BATCHES, &["-outfmt", "6"]);
+            let (batched, batched_counts, _) = blastp(query, subject, threads, BATCHES, &extra);
             assert!(batched == reference, "{what}: the batches differ");
             let b = one_line(&batched_counts, &what);
             // The run with the deferred calls (LOSAT_X_BPMASKED=0).
             let what_d = format!("{what} {DEFERRED:?}");
-            let (rows, counts, _) = blastp(query, subject, threads, DEFERRED, &["-outfmt", "6"]);
-            assert!(rows == reference, "{what_d}: the report differs");
+            let (report, counts, _) = blastp(query, subject, threads, DEFERRED, &extra);
+            assert!(report == reference, "{what_d}: the report differs");
             let d = one_line(&counts, &what_d);
             // The run with the masked batch, by default.
             let what = format!("{what} {DEFAULT:?}");
-            let (rows, counts, stderr) =
-                blastp(query, subject, threads, DEFAULT, &["-outfmt", "6"]);
-            assert!(rows == reference, "{what}: the report differs");
+            let (report, counts, stderr) = blastp(query, subject, threads, DEFAULT, &extra);
+            assert!(report == reference, "{what}: the report differs");
             let m = one_line(&counts, &what);
             if avx2() {
                 assert_eq!(b.mode, "avx2", "{what}");
@@ -289,19 +305,15 @@ fn deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches() {
             }
         }
     }
-    // The pairwise report too, on the fixture pair, by default and with LOSAT_X_BPMASKED=0.
-    let (query, subject) = &pairs[1];
-    let (reference, _, _) = blastp(query, subject, 1, REFERENCE, &["-outfmt", "0"]);
-    for vars in [DEFAULT, DEFERRED] {
-        let (report, _, _) = blastp(query, subject, 1, vars, &["-outfmt", "0"]);
-        assert!(report == reference, "outfmt 0 {vars:?}: the report differs");
-    }
 }
 
 #[test]
 fn the_switch_acts_only_on_the_avx2_batches() {
-    let (query, subject) = (fixture("MeenMJNV.faa"), fixture("MejoMJNV.faa"));
+    // These runs' cell tests (the per-hit loop, the scalar batch) are chosen once per run from the
+    // variables and the CPU (`x_diag_mode`), not from the input: the generated pair.
+    let (query, subject) = generated_pair("only_avx2");
     let (reference, _, _) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
+    assert!(!reference.is_empty(), "the pair has a report");
     // Without LOSAT_X_BPDIAG: the per-hit fused loop, no line.
     let vars: &[(&str, &str)] = &[("LOSAT_X_BPDIAG", "0")];
     let (rows, counts, _) = blastp(&query, &subject, 1, vars, &["-outfmt", "6"]);

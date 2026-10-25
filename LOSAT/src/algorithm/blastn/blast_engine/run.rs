@@ -69,7 +69,7 @@ use super::super::blast_extend::DiagStruct;
 use super::super::coordination::{
     build_lookup_tables, chunk_query_masks, collect_lowercase_masks, configure_task,
     finalize_task_config, prepare_sequence_data, query_masks, reverse_mask_intervals,
-    subject_metadata_from_records, subject_trace_id, LookupTables, SubjectMetadata,
+    subject_metadata_from_records, subject_trace_id, LookupTables, SequenceData, SubjectMetadata,
 };
 use super::super::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use super::super::extension::{
@@ -83,9 +83,8 @@ use super::super::filtering::{
 };
 use super::super::hsp::{
     evalue_comp, get_prelim_hitlist_size, score_compare_hsps, sort_hsplist_by_evalue,
-    sort_hsps_by_score, trim_by_max_hsps, update_best_evalue,
-    write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp, BlastnHspList,
-    BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
+    sort_hsps_by_score, trim_by_max_hsps, update_best_evalue, BlastnHitList, BlastnHsp,
+    BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{
@@ -159,6 +158,16 @@ mod x_few_subj;
 // OID order with a bounded window of results that the owner hands over in OID order.
 #[path = "x_bnstream.rs"]
 mod x_bnstream;
+
+// EXPERIMENT (LOSAT_X_BNLUTDROP): a query batch's lookup tables dropped when its preliminary stage
+// ends, before its traceback, as NCBI's traceback stage drops its table.
+#[path = "x_lut_drop.rs"]
+mod x_lut_drop;
+
+// EXPERIMENT (LOSAT_X_BNQDROP): the letters of a query batch's records dropped once the batch has
+// encoded them, where no report reads them.
+#[path = "x_query_drop.rs"]
+mod x_query_drop;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-318
 // ```c++
@@ -256,6 +265,18 @@ pub fn x_qgroup_par_print_summary() {
 /// counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_tb_range_print_summary() {
     database::x_tb_range_print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BNLUTDROP): the summary line `main` prints at exit (LOSAT_TIMING). No NCBI
+/// counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_lut_drop_print_summary() {
+    x_lut_drop::print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BNQDROP): the summary line `main` prints at exit (LOSAT_TIMING). No NCBI
+/// counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_query_drop_print_summary() {
+    x_query_drop::print_summary();
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:160-161
@@ -5400,6 +5421,9 @@ struct BlastnReportInputs<'a> {
     /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool that formats the outfmt 0 rows and text
     /// (`report::x_pairwise_par`); `None`: the serial writer.
     x_pairwise_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
+    /// EXPERIMENT (LOSAT_X_BNTABPAR): the pool that formats the outfmt 6 / 7 rows
+    /// (`algorithm::blastn::x_tab_par`); `None`: the serial writer.
+    x_tab_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
     /// `-out`: the base of the side files of outfmt 13 and 14 and of the names their master
     /// file lists.
     out: Option<&'a std::path::Path>,
@@ -6523,7 +6547,8 @@ fn post_process_hits_and_write(
                 }
             }
         } else {
-            write_output_blastn_hitlists_to_writer(
+            crate::algorithm::blastn::x_tab_par::write_output(
+                report.x_tab_pool,
                 &hit_lists,
                 &mut writer,
                 query_ids,
@@ -7071,9 +7096,11 @@ fn search_cli(
     // largest query batch, and whether LOSAT_X_QBATCHPAR's slots may run: the switch on, the
     // conditions of `x_qbatch_par_off` (`-subject`, two threads or more, the build, the output, fewer
     // subject units than threads), and a budget (LOSAT_X_QBATCHPARMEM when it is set, else
-    // `x_qbatch_par::Profile::of_search`'s default) or a slot count set by LOSAT_X_QBATCHPARSLOTS.
+    // `x_qbatch_par::Profile::of_search`'s default, none for a query without a file size, such as
+    // standard input) or a slot count set by LOSAT_X_QBATCHPARSLOTS. EXPERIMENT (LOSAT_X_BNQDROP)
+    // reads it too (`x_query_drop::Rule`).
     let x_slots_may_run = match (subjects.as_ref(), x_query_file_bytes(&args.query)) {
-        (Some((Subjects::Records(letters), _)), Some(bytes)) => {
+        (Some((Subjects::Records(letters), _)), bytes) => {
             let switches = x_qbatch_par::Switches::from_env();
             let lengths = (0..letters.records().len()).map(|index| letters.len(index));
             let subject_letters = lengths.clone().map(|length| length as u64).sum();
@@ -7082,7 +7109,7 @@ fn search_cli(
                     Some(mib) => mib > 0,
                     None => x_qbatch_par::ncbi_splits_by_queries(
                         super::super::coordination::determine_effective_word_size(&args),
-                        Some(bytes),
+                        bytes,
                         subject_letters,
                     ),
                 };
@@ -7172,13 +7199,32 @@ fn search_cli(
         ),
         (None, None) => unreachable!("`run` reads the subjects of a search without -db"),
     };
+    // EXPERIMENT (LOSAT_X_BNQDROP): where no report reads the queries' letters, the records read
+    // before the search move into a store that the batch loop takes them out of, so a batch can drop
+    // its letters once it has encoded them (`x_query_drop.rs`).
+    let x_taken = !x_store.acts() && x_query_drop::on() && {
+        let acts = x_query_drop::Rule {
+            formats: &output_formats,
+            query_range: query_range.is_some(),
+            slots_may_run: x_slots_may_run,
+            hit_records: outputs.hits.is_some(),
+        }
+        .acts();
+        crate::utils::xreach::x_reach!("LOSAT_X_BNQDROP", acts);
+        acts
+    };
+    let x_taken_store;
+    let queries = if x_store.acts() {
+        SearchQueries::Streamed(&x_store)
+    } else if x_taken {
+        x_taken_store = x_query_drop::Store::new(records);
+        SearchQueries::Taken(&x_taken_store)
+    } else {
+        SearchQueries::Records(&records)
+    };
     search(
         args,
-        if x_store.acts() {
-            SearchQueries::Streamed(&x_store)
-        } else {
-            SearchQueries::Records(&records)
-        },
+        queries,
         reading,
         Ranges {
             query: query_range,
@@ -7475,6 +7521,9 @@ fn run_local_formats(
 enum SearchQueries<'a> {
     Records(&'a [FastaRecord]),
     Streamed(&'a x_query_stream::Store),
+    /// EXPERIMENT (LOSAT_X_BNQDROP): records read before the search that the batch loop takes out
+    /// of their store (`x_query_drop.rs`).
+    Taken(&'a x_query_drop::Store),
 }
 
 fn search(
@@ -7487,10 +7536,11 @@ fn search(
     output_formats: Vec<BlastnOutputFormat>,
 ) -> Result<()> {
     // EXPERIMENT (LOSAT_X_QSTREAM): a streamed search has no records here (its reading is never
-    // `Records`), and its query input comes from the lengths of the first reading.
+    // `Records`), and its query input comes from the lengths of the first reading; EXPERIMENT
+    // (LOSAT_X_BNQDROP) a taken one has its records in its store, with its query input.
     let query_records: &[FastaRecord] = match queries {
         SearchQueries::Records(records) => records,
-        SearchQueries::Streamed(_) => &[],
+        SearchQueries::Streamed(_) | SearchQueries::Taken(_) => &[],
     };
     // NCBI reads the subjects before the queries (`run`); the records are those of NCBI's
     // reader (`fasta_reader`; `run_local`'s callers read them so). The CLI has already
@@ -7585,6 +7635,10 @@ fn search(
             std::borrow::Cow::Borrowed(query_records),
             std::borrow::Cow::Borrowed(store.query_input()),
         ),
+        (None, SearchQueries::Taken(store)) => (
+            std::borrow::Cow::Borrowed(query_records),
+            std::borrow::Cow::Borrowed(store.query_input()),
+        ),
     };
     let queries = match queries {
         SearchQueries::Records(_) => x_query_stream::Queries::Records {
@@ -7592,6 +7646,7 @@ fn search(
             searched: &query_records,
         },
         SearchQueries::Streamed(store) => x_query_stream::Queries::Streamed(store),
+        SearchQueries::Taken(store) => x_query_stream::Queries::Taken(store),
     };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-138
     // ```c
@@ -8264,7 +8319,7 @@ fn run_in_pool(
         };
         search_query_batch(
             &args,
-            &records,
+            x_query_drop::BatchQueries::Shared(&records),
             source,
             None,
             pool,
@@ -8325,6 +8380,11 @@ fn run_in_pool(
             }),
             qbp_off,
         );
+        // EXPERIMENT (LOSAT_X_BNQDROP): no slot searches the records that the loop takes out of
+        // their store (`search_cli`'s rule moved them there where it found that no slot may run).
+        if matches!(queries, x_query_stream::Queries::Taken(_)) {
+            qbp.x_refuse_taken();
+        }
         // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
         // (`lookup::x_mb_lut_keep`), freed when the loop ends.
         let x_lut_keep = x_mb_lut_keep::Keep::for_loop();
@@ -8336,11 +8396,11 @@ fn run_in_pool(
         // The warnings written before each query's report (`QueryWarnings`).
         let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); lengths.len()];
         let mut query_eff_searchsp = Vec::with_capacity(2 * lengths.len());
-        // EXPERIMENT (LOSAT_X_QSTREAM): the searched records of the batches taken, kept where a
-        // writer reads them after their batch: the reports after the loop and the error paths that
-        // write the reports of the batches before (LOSAT_X_RPTSTREAM not acting). Without the
-        // switch the records read before the search are those.
-        let keep = queries.streamed() && !stream.acting();
+        // EXPERIMENT (LOSAT_X_QSTREAM, LOSAT_X_BNQDROP): the searched records of the batches taken,
+        // kept where a writer reads them after their batch: the reports after the loop and the
+        // error paths that write the reports of the batches before (LOSAT_X_RPTSTREAM not acting).
+        // Without the switches the records read before the search are those.
+        let keep = queries.per_batch() && !stream.acting();
         let mut kept: Vec<FastaRecord> = Vec::new();
         // A batch is read from the input records (`input_start..input_end`); its searched
         // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
@@ -8383,7 +8443,7 @@ fn run_in_pool(
             // report of the batch's first query (`QueryWarnings`). Skipped records are read too.
             // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records, read now from the query file when
             // the switch acts (an error here is the file changed between the two readings).
-            let batch_records = match queries.batch(input_start..input_end, start..end) {
+            let mut batch_records = match queries.batch(input_start..input_end, start..end) {
                 Ok(records) => records,
                 Err(error) => {
                     qbp.finish();
@@ -8610,7 +8670,7 @@ fn run_in_pool(
                     }
                     search_query_batch(
                         &args,
-                        batch_records.searched(),
+                        batch_records.batch_queries(),
                         source,
                         Some((&mut *outputs, &output_formats)),
                         parallel_pool,
@@ -8842,7 +8902,7 @@ fn run_in_pool(
                 if karlin.is_none() && result_warnings {
                     let query = &batch_records.searched()[index];
                     let ordinal = query_input.ordinal(start + index);
-                    warnings[start + index].extend(if query.seq().is_empty() {
+                    warnings[start + index].extend(if lengths[start + index] == 0 {
                         query_warning("blastn", ordinal, query, &[NO_DATA_MESSAGE.to_string()])
                     } else {
                         invalid_query_warning("blastn", ordinal, query)
@@ -8930,13 +8990,16 @@ fn run_in_pool(
                     *query_warnings = Vec::new();
                 }
             }
-            // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records are kept for a later writer, or
-            // dropped (the batch is committed: the slots now search batches after it).
+            // EXPERIMENT (LOSAT_X_QSTREAM, LOSAT_X_BNQDROP): the batch's records are kept for a later
+            // writer (moved when the loop took them out of their store), or dropped (the batch is
+            // committed: the slots now search batches after it).
             if keep {
-                kept.extend_from_slice(batch_records.searched());
-                queries.note_kept(batch_records.searched().len());
+                let searched = batch_records.into_searched();
+                queries.note_kept(searched.len());
+                kept.extend(searched);
+            } else {
+                drop(batch_records);
             }
-            drop(batch_records);
             queries.done(input_end);
             input_start = input_end;
         }
@@ -9533,6 +9596,7 @@ fn write_reports_untimed(
         queries_before: written.queries,
         subject_cache: written.subjects,
         x_pairwise_pool: x_pool.and_then(crate::report::x_pairwise_par::pool),
+        x_tab_pool: x_pool.and_then(crate::algorithm::blastn::x_tab_par::pool),
         out: args.out.as_deref(),
         expect: super::super::coordination::determine_evalue(args),
         dust: args.dust.params().map(|(level, window, linker)| {
@@ -9664,7 +9728,7 @@ fn context_lengths(
 /// megablast table is built on and goes back to (`lookup::x_mb_lut_keep`).
 fn search_query_batch(
     args: &BlastnArgs,
-    query_records: &[FastaRecord],
+    mut query_records: x_query_drop::BatchQueries<'_>,
     subjects: SubjectSource<'_>,
     mut outputs: BatchOutputs<'_, '_>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
@@ -9846,7 +9910,7 @@ fn search_query_batch(
     //                  ...)
     // ```
     // The search reads the query records of its caller (`prepare_sequence_data`).
-    let queries = query_records;
+    let queries = query_records.records();
     let query_ids = queries
         .iter()
         .map(|record| String::from_utf8_lossy(record.shown_id()).into_owned())
@@ -10675,6 +10739,24 @@ fn search_query_batch(
         )?,
         _ => None,
     };
+    // EXPERIMENT (LOSAT_X_BNQDROP): the encoding and the query chunks were the last readers of the
+    // batch's letters; records held by the caller alone drop them here, before the lookup tables
+    // are built (`x_query_drop.rs`). The search reads only the records' count from here on.
+    let SequenceData {
+        queries: _,
+        query_ids,
+        query_masks,
+        db_len_total,
+        db_num_seqs,
+    } = seq_data;
+    query_records.after_encoding();
+    let seq_data = SequenceData {
+        queries: query_records.records(),
+        query_ids,
+        query_masks,
+        db_len_total,
+        db_num_seqs,
+    };
 
     // Build lookup tables
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1270-1306
@@ -10886,16 +10968,9 @@ fn search_query_batch(
         }
     }
 
-    // Pass lookup tables and queries for use in the closure
+    // Pass queries for use in the closure (the lookup tables are passed by the preliminary
+    // stage's calls, `process_subject`'s `lookups`)
     let two_stage_lookup_ref = lookup_tables.two_stage_lookup.as_ref();
-    let pv_direct_lookup_ref = lookup_tables.pv_direct_lookup.as_ref();
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
-    // ```c
-    // typedef struct BlastNaLookupTable {
-    //     ...
-    // } BlastNaLookupTable;
-    // ```
-    let na_lookup_ref = lookup_tables.na_lookup.as_ref();
     let queries_ref = &seq_data.queries;
     let query_contexts_ref = &query_contexts;
     let query_base_offsets_ref = &query_base_offsets;
@@ -11101,9 +11176,21 @@ fn search_query_batch(
                            subject: BlastnSubjectRef<'_>,
                            gap_scratch: &mut GapAlignScratch,
                            subject_scratch: &mut SubjectScratch,
+                           lookups: Option<&LookupTables>,
                            prelim_source: Option<&Vec<PrelimHit>>,
                            subject_hits: &mut Option<Vec<BlastnHsp>>,
                            prelim_out: &mut Vec<PrelimHit>| {
+        // The batch's lookup tables: the preliminary stage's calls pass them, the traceback's
+        // (`prelim_source` set) pass `None` and do not scan (LOSAT_X_BNLUTDROP, `x_lut_drop.rs`).
+        let two_stage_lookup_ref = lookups.and_then(|tables| tables.two_stage_lookup.as_ref());
+        let pv_direct_lookup_ref = lookups.and_then(|tables| tables.pv_direct_lookup.as_ref());
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
+        // ```c
+        // typedef struct BlastNaLookupTable {
+        //     ...
+        // } BlastNaLookupTable;
+        // ```
+        let na_lookup_ref = lookups.and_then(|tables| tables.na_lookup.as_ref());
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
         // ```c
         //     int status = m_PrelimSearch->CheckInternalData();
@@ -16725,7 +16812,7 @@ fn search_query_batch(
                                 0.0
                             };
 
-                            let query_length = queries[prelim.query_idx as usize].seq().len();
+                            let query_length = query_lengths[prelim.query_idx as usize];
                             let (hit_q_start, hit_q_end, hit_s_start, hit_s_end) =
                                 adjust_blastn_offsets(
                                     final_qs,
@@ -17524,6 +17611,7 @@ fn search_query_batch(
     // threads search all subjects of the batch and then hand them over, or, with
     // `LOSAT_X_BNSTREAM`, hand each subject over in OID order while they search the next ones.
     let search_subjects = |kept: Option<&[Vec<PrelimHit>]>,
+                           lookups: Option<&LookupTables>,
                            sink: &mut (dyn FnMut(usize, Option<Vec<BlastnHsp>>, Vec<PrelimHit>)
                                      + Send)| {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
@@ -17551,6 +17639,7 @@ fn search_query_batch(
                 prepared_subject(s_idx),
                 gap_scratch,
                 subject_scratch,
+                lookups,
                 kept.map(|kept| &kept[s_idx]),
                 &mut subject_hits,
                 &mut prelim_hits,
@@ -17667,7 +17756,9 @@ fn search_query_batch(
                     prelim_hitlist_size,
                     args.culling_limit_value(),
                 );
-                search_subjects(None, &mut |oid, _, prelim| writer.add(oid, prelim));
+                search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
+                    writer.add(oid, prelim)
+                });
                 writer.finish()
             }
             SubjectSource::Database(database) if args.culling_limit_value() > 0 => {
@@ -17695,6 +17786,7 @@ fn search_query_batch(
                                 subject,
                                 gap_scratch,
                                 subject_scratch,
+                                Some(&lookup_tables),
                                 None,
                                 &mut subject_hits,
                                 &mut prelim_hits,
@@ -17717,7 +17809,9 @@ fn search_query_batch(
             }
             SubjectSource::Prepared(_) => {
                 let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
-                search_subjects(None, &mut |oid, _, prelim| collector.add(oid, prelim));
+                search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
+                    collector.add(oid, prelim)
+                });
                 collector.hit_lists
             }
             SubjectSource::Database(database) => {
@@ -17749,6 +17843,7 @@ fn search_query_batch(
                                 subject,
                                 gap_scratch,
                                 subject_scratch,
+                                Some(&lookup_tables),
                                 None,
                                 &mut subject_hits,
                                 &mut prelim_hits,
@@ -17777,12 +17872,16 @@ fn search_query_batch(
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
+    // Dispatch point of LOSAT_X_BNLUTDROP: the traceback reads the kept HSPs only, so the tables
+    // are dropped here (NCBI's traceback stage, traceback_stage.cpp:208-211); with `=0` they are
+    // held until the batch returns (`x_lut_drop.rs`).
+    let _x_kept_lookup_tables = x_lut_drop::after_prelim(lookup_tables);
     let hit_lists = match subjects {
         SubjectSource::Prepared(_) => {
             let kept = prelim_hits_by_subject(prelim_lists, subject_records_ref.len());
             let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
             hit_lists.resize_with(queries_ref.len(), || None);
-            search_subjects(Some(&kept), &mut |_, hits, _| {
+            search_subjects(Some(&kept), None, &mut |_, hits, _| {
                 if let Some(hits) = hits {
                     update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
                 }
@@ -17809,6 +17908,7 @@ fn search_query_batch(
                         subject,
                         gap_scratch,
                         subject_scratch,
+                        None,
                         Some(kept),
                         &mut subject_hits,
                         &mut prelim_hits,
@@ -17958,7 +18058,7 @@ fn search_query_chunks(
         let part_masks = chunk_query_masks(args, &parts, restricted, parallel_pool);
         let batch = search_query_batch(
             args,
-            &parts,
+            x_query_drop::BatchQueries::Shared(&parts),
             subjects,
             reborrow_outputs(&mut outputs),
             parallel_pool,

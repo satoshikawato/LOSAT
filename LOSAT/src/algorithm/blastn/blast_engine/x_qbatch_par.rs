@@ -232,6 +232,8 @@ pub(super) enum Off {
     Waste,
     /// The loop's next key was not planned (not expected to happen).
     Unplanned,
+    /// EXPERIMENT (LOSAT_X_BNQDROP): the loop takes its batches' records out of their store.
+    Taken,
 }
 
 impl Off {
@@ -251,6 +253,7 @@ impl Off {
             Off::Guard => "guard",
             Off::Waste => "waste",
             Off::Unplanned => "unplanned",
+            Off::Taken => "taken",
         }
     }
 }
@@ -1166,6 +1169,16 @@ where
             Phase::Pending => {
                 self.shared.switches.slots.is_some() || (self.budget_mib() > 0 && self.threads > 1)
             }
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNQDROP): the loop takes its batches' records out of their store, which
+    /// no slot can read: a search whose slots could start does not speculate (`Off::Taken`; the rule
+    /// of `x_query_drop` acts only where `search_cli` found that none could).
+    pub(super) fn x_refuse_taken(&mut self) {
+        if self.may_speculate() {
+            crate::utils::xreach::x_reach!("LOSAT_X_QBATCHPAR", false);
+            self.stop(Off::Taken);
         }
     }
 

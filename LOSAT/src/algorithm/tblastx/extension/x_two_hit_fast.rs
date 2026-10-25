@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBXUNGAP / LOSAT_X_TBXUNGAPSHADOW): TBLASTX's two-hit ungapped extension
+//! EXPERIMENT (LOSAT_X_TBXUNGAP): TBLASTX's two-hit ungapped extension
 //! (`two_hit.rs::extend_hit_two_hit`: the word loop and the `s_BlastAaExtendLeft` /
 //! `s_BlastAaExtendRight` walks of NCBI `s_BlastAaExtendTwoHit`) with the scores read from one
 //! flat byte table.
@@ -65,9 +65,9 @@
 //! same result.
 
 use super::get_score;
+#[cfg(test)]
 use super::two_hit::extend_hit_two_hit_reference;
 use crate::utils::matrix::BLAST_SCORE_MIN;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// The seven values of `extend_hit_two_hit`: (q_start, q_end, s_start, s_end, score,
@@ -98,12 +98,12 @@ unsafe impl Sync for FixedTable {}
 static FIXED_TABLE: FixedTable = FixedTable(std::cell::UnsafeCell::new([0; TABLE_LEN]));
 
 struct State {
-    /// 0 = off, 1 = LOSAT_X_TBXUNGAP, 2 = LOSAT_X_TBXUNGAPSHADOW (both paths, compared).
-    mode: u8,
-    /// The table of the walks; `None` (and mode 0) if a score does not fit it.
+    /// LOSAT_X_TBXUNGAP is on and the table fits.
+    on: bool,
+    /// The table of the walks; `None` (and off) if a score does not fit it.
     #[cfg(not(target_arch = "wasm32"))]
     table: Option<Box<Table>>,
-    /// The table of the walks (`FIXED_TABLE`); `None` (and mode 0) if a score does not fit it.
+    /// The table of the walks (`FIXED_TABLE`); `None` (and off) if a score does not fit it.
     #[cfg(target_arch = "wasm32")]
     table: Option<&'static Table>,
 }
@@ -169,8 +169,6 @@ static STATE: OnceLock<State> = OnceLock::new();
 
 fn state() -> &'static State {
     STATE.get_or_init(|| {
-        // `LOSAT_X_TBXUNGAP` is a strict-set switch; the shadow variable is read first, as "set to
-        // any value".
         let table = build_table();
         // SAFETY: the only write to FIXED_TABLE (FixedTable).
         #[cfg(target_arch = "wasm32")]
@@ -178,38 +176,17 @@ fn state() -> &'static State {
             *FIXED_TABLE.0.get() = *t;
             &*FIXED_TABLE.0.get()
         });
-        let mode = if table.is_none() {
-            0
-        } else if std::env::var_os("LOSAT_X_TBXUNGAPSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_TBXUNGAP") {
-            1
-        } else {
-            0
-        };
-        State { mode, table }
+        // `LOSAT_X_TBXUNGAP` is a strict-set switch.
+        let on = table.is_some() && crate::utils::xswitch::on("LOSAT_X_TBXUNGAP");
+        State { on, table }
     })
 }
 
-/// 0 = off, 1 = LOSAT_X_TBXUNGAP, 2 = LOSAT_X_TBXUNGAPSHADOW.
+/// LOSAT_X_TBXUNGAP is on (and the table fits).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 #[inline]
-pub(super) fn mode() -> u8 {
-    state().mode
-}
-
-static SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
-
-/// The summary line (printed by `main` at exit), only in shadow mode.
-// No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
-pub fn print_shadow_stats() {
-    // `STATE.get`: a run that never extended (every other program) does not build the table here.
-    if STATE.get().is_some_and(|s| s.mode == 2) {
-        eprintln!(
-            "[X_SHADOW] TBXUNGAP compared={} (two-hit extensions identical)",
-            SHADOW_COMPARED.load(Ordering::Relaxed)
-        );
-    }
+pub(super) fn on() -> bool {
+    state().on
 }
 
 /// `s_BlastAaExtendLeft` ending at `(qp, sp)` over `n` steps: step `i` (1..=n) reads `qp[-i]`,
@@ -368,40 +345,6 @@ pub(super) fn two_hit(
         reached_first_hit,
         s_last_off,
     ))
-}
-
-/// LOSAT_X_TBXUNGAPSHADOW: both paths; any difference panics with the inputs.
-// No NCBI counterpart: a comparison of two LOSAT code paths.
-#[inline(never)]
-pub(super) fn shadow(
-    q_seq: &[u8],
-    s_seq: &[u8],
-    s_left_off: usize,
-    s_right_off: usize,
-    q_right_off: usize,
-    x_drop: i32,
-) -> TwoHit {
-    let expect = extend_hit_two_hit_reference(
-        q_seq,
-        s_seq,
-        s_left_off,
-        s_right_off,
-        q_right_off,
-        x_drop,
-        false,
-    );
-    if let Some(got) = two_hit(q_seq, s_seq, s_left_off, s_right_off, q_right_off, x_drop) {
-        assert_eq!(
-            got,
-            expect,
-            "[X_SHADOW] TBXUNGAP mismatch: s_left_off={s_left_off} s_right_off={s_right_off} \
-             q_right_off={q_right_off} x_drop={x_drop} q_len={} s_len={}",
-            q_seq.len(),
-            s_seq.len()
-        );
-        SHADOW_COMPARED.fetch_add(1, Ordering::Relaxed);
-    }
-    expect
 }
 
 #[cfg(test)]

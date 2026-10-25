@@ -1,0 +1,26 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 1,
+      message "Warning: [blastx] The parameter -num_descriptions is ignored
+ for output formats > 4 . Use -max_target_seqs to control output"
+    },
+    {
+      code 2,
+      message "BLAST query/options error: Composition-adjusted searched are
+ not supported with an ungapped search, please add -comp_based_stats F or do a
+ gapped search"
+    },
+    {
+      code 2,
+      message "Please refer to the BLAST+ user manual."
+    }
+  }
+}

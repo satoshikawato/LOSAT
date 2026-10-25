@@ -12,11 +12,10 @@ pub mod report;
 pub mod seed;
 pub mod stats;
 
-// New NCBI-style modules (matching NCBI BLAST structure)
+// NCBI api/, blastinput/ and core/ layers.
 pub mod api;
 pub mod blastinput;
 pub mod core;
-pub mod format;
 // NCBI objtools/blast/seqdb_reader (CSeqDB): reader of BLAST database volumes.
 pub mod seqdb;
 // NCBI objtools/blast/seqdb_writer (CWriteDB) and app/blastdb/makeblastdb.cpp:

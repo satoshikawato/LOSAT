@@ -48,7 +48,7 @@ use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::seqid::SeqId;
-use crate::report::serial::{write_query, SerialFormat};
+use crate::report::serial::{write_query_to, SerialFormat};
 
 /// Writes the documents of every query of `hitlists` (indexed by query) to `writer`, each
 /// query's warnings before it. `subject_records` and `subject_letters` are indexed by the hit
@@ -78,56 +78,77 @@ pub(super) fn write_tblastn_seqalign(
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
         }
-        subjects.clear();
-        hsps.clear();
-        for list in hitlist.lists() {
-            if list.hsps.hsps.is_empty() {
-                continue;
-            }
-            let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
-            let subject = subjects.len() as u32;
-            subjects.push(SubjectRecord {
-                id: match shown.ordinal(oid) {
-                    Some(ordinal) => SeqId::BlOrdId(ordinal),
-                    None => SeqId::Local(&subject_records[oid].local_id),
-                },
-                searched_length: i32::try_from(subject_letters.length(oid))?,
-                // A database's sequences have no subject remap (`RunRecord::remaps_subjects`).
-                offset: i32::try_from(ranges.subjects.offset(oid))?,
-            });
-            for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
-                let hsp = &linked.hsp;
-                hsps.push(HspRecord {
-                    subject,
-                    q_offset: hsp.q_start,
-                    q_end: hsp.q_end,
-                    s_offset: hsp.s_start,
-                    s_end: hsp.s_end,
-                    q_frame: 0,
-                    s_frame: hsp.frame,
-                    score: hsp.score,
-                    num: linked.num,
-                    evalue: linked.evalue,
-                    bit_score: payload.bit_score,
-                    num_ident: payload.num_ident,
-                    num_positives: i32::try_from(payload.num_positives)?,
-                    comp_adjust: match payload.matrix_adjust_rule {
-                        EMatrixAdjustRule::DontAdjustMatrix => 0,
-                        EMatrixAdjustRule::CompoScaleOldMatrix => 1,
-                        _ => 2,
-                    },
-                    ops: &payload.edit_script,
-                });
-            }
-        }
+        query_records_of(
+            hitlist,
+            subject_records,
+            subject_letters,
+            shown,
+            ranges,
+            &mut subjects,
+            &mut hsps,
+        )?;
         let query = QueryRecord {
             id: SeqId::Local(&query.local_id),
             searched_length: i32::try_from(query.seq().len())?,
             offset: i32::try_from(ranges.queries.offset(q_idx))?,
         };
-        buf.clear();
-        if write_query(format, &run, &query, &subjects, &hsps, &mut buf)? {
-            writer.write_all(&buf)?;
+        write_query_to(format, &run, &query, &subjects, &hsps, &mut buf, writer)?;
+    }
+    Ok(())
+}
+
+/// The subject and HSP records of one query's final hit list (the elements of its Seq-annot in
+/// outfmt 8, and of the `alignments` of the archive of outfmt 11), appended to the cleared
+/// `subjects` and `hsps`.
+pub(super) fn query_records_of<'a>(
+    hitlist: &'a KappaResultHitList,
+    subject_records: &'a [FastaRecord],
+    subject_letters: SubjectLetters<'_>,
+    shown: &ShownSubjects<'_>,
+    ranges: &ReportRanges<'_>,
+    subjects: &mut Vec<SubjectRecord<'a>>,
+    hsps: &mut Vec<HspRecord<'a>>,
+) -> Result<()> {
+    subjects.clear();
+    hsps.clear();
+    for list in hitlist.lists() {
+        if list.hsps.hsps.is_empty() {
+            continue;
+        }
+        let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
+        let subject = subjects.len() as u32;
+        subjects.push(SubjectRecord {
+            id: match shown.ordinal(oid) {
+                Some(ordinal) => SeqId::BlOrdId(ordinal),
+                None => SeqId::Local(&subject_records[oid].local_id),
+            },
+            searched_length: i32::try_from(subject_letters.length(oid))?,
+            // A database's sequences have no subject remap (`RunRecord::remaps_subjects`).
+            offset: i32::try_from(ranges.subjects.offset(oid))?,
+        });
+        for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+            let hsp = &linked.hsp;
+            hsps.push(HspRecord {
+                subject,
+                q_offset: hsp.q_start,
+                q_end: hsp.q_end,
+                s_offset: hsp.s_start,
+                s_end: hsp.s_end,
+                q_frame: 0,
+                s_frame: hsp.frame,
+                score: hsp.score,
+                num: linked.num,
+                evalue: linked.evalue,
+                bit_score: payload.bit_score,
+                num_ident: payload.num_ident,
+                num_positives: i32::try_from(payload.num_positives)?,
+                comp_adjust: match payload.matrix_adjust_rule {
+                    EMatrixAdjustRule::DontAdjustMatrix => 0,
+                    EMatrixAdjustRule::CompoScaleOldMatrix => 1,
+                    _ => 2,
+                },
+                ops: &payload.edit_script,
+            });
         }
     }
     Ok(())

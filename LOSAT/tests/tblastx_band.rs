@@ -8,8 +8,9 @@
 //! table of 4,096 cells, a slack of about 290); the subject is MjeNMV's first 9,000 bases (frames of
 //! about 3,000 letters: the band) or the PemoMJNVA genome (frames of about 99,000 letters: the
 //! memory rule keeps the guard without `LOSAT_X_TBXUNITMASK`, masked units with it).
-//! `LOSAT_X_PAIRPARGATE` still decides after the guards: at one thread the batch keeps the reference
-//! loop ("fallback: cost"), at several the units split the one subject over the pool.
+//! `LOSAT_X_PAIRPARGATE` still decides after the guards: at one thread the batch (about 3,800
+//! letters, under the 5,000 of `LOSAT_X_PAIRPARN1`) keeps the reference loop ("fallback: cost"), at
+//! several the units split the one subject over the pool.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
 //! ```c
@@ -153,8 +154,8 @@ fn a_band_batch_takes_the_units_at_several_threads_with_the_same_report() {
     }
 }
 
-// At one thread `LOSAT_X_PAIRPARGATE` keeps the reference loop for this small table, with the switch
-// as without it.
+// At one thread `LOSAT_X_PAIRPARGATE` keeps the reference loop for this batch (under the 5,000
+// letters of `LOSAT_X_PAIRPARN1`), with the switch as without it.
 #[test]
 fn the_cost_gate_still_decides_at_one_thread() {
     let q = query("MjeNMV.fasta", 1_900);

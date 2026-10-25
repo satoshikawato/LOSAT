@@ -52,6 +52,9 @@ pub(crate) mod x_ungap_count;
 pub mod hsp;
 pub(crate) mod sam;
 pub(crate) mod seqalign;
+// NCBI c++/src/algo/blast/format/blast_format.cpp:828-832: the tabular rows of each alignment, one
+// query after another. EXPERIMENT (LOSAT_X_BNTABPAR): a report's queries formatted on the search pool.
+pub(crate) mod x_tab_par;
 
 pub use args::BlastnArgs;
 pub use blast_engine::run;
@@ -64,3 +67,7 @@ pub use x_query_dust_par::print_summary as x_query_dust_par_print_summary;
 // EXPERIMENT (LOSAT_X_BNUNGAPCOUNTSHADOW): the summary line `main` prints at exit. No NCBI
 // counterpart: it prints a counter and changes no value NCBI computes.
 pub use x_ungap_count::print_summary as x_ungap_count_print_summary;
+// EXPERIMENT (LOSAT_X_GREEDYROWFUSE): the summary line `main` prints at exit with LOSAT_X_STATS. No
+// NCBI counterpart: it prints which build of the greedy row code ran and changes no value NCBI
+// computes.
+pub use alignment::greedy::x_greedy_row_print_summary;

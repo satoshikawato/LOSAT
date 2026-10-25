@@ -47,7 +47,7 @@ use crate::blastinput::app::Program;
 use crate::blastinput::seq_range::Placements;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryNames, RunRecord, SubjectNames, SubjectRecord};
-use crate::report::serial::{write_query, SerialFormat};
+use crate::report::serial::{write_hit_list_seqaligns, SerialFormat};
 
 /// Where an HSP lies in the final hit lists: (query, HSP list, HSP).
 type HspKey = (u32, u32, u32);
@@ -88,47 +88,33 @@ pub(crate) fn write_blastp_seqalign(
     subject_placements: &Placements,
     engine_counts: &EngineCounts,
     writer: &mut dyn Write,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastp,
         db_title: subjects.db_title(),
         gapped: true,
     };
-    let mut subject_records: Vec<SubjectRecord<'_>> = Vec::new();
-    let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();
-    let mut buf: Vec<u8> = Vec::new();
-    for (q_idx, hit_list) in hit_lists.iter().enumerate() {
-        // The query's warnings come before its document (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, &mut *writer)?;
-        }
-        let Some(hit_list) = hit_list else {
-            continue;
-        };
-        query_records(
-            hit_list,
-            q_idx,
-            &subjects,
-            subject_placements,
-            engine_counts,
-            queries.placements.offset(q_idx) as i32,
-            &mut subject_records,
-            &mut hsp_records,
-        );
-        buf.clear();
-        if write_query(
-            format,
-            &run,
-            &queries.record(q_idx),
-            &subject_records,
-            &hsp_records,
-            &mut buf,
-        )? {
-            writer.write_all(&buf)?;
-        }
-    }
-    Ok(())
+    write_hit_list_seqaligns(
+        format,
+        &run,
+        hit_lists,
+        queries,
+        writer,
+        warnings,
+        |q_idx, hit_list, subject_records, hsp_records| {
+            query_records(
+                hit_list,
+                q_idx,
+                &subjects,
+                subject_placements,
+                engine_counts,
+                queries.placements.offset(q_idx) as i32,
+                subject_records,
+                hsp_records,
+            );
+        },
+    )
 }
 
 /// The subject and HSP records of query `q_idx`'s hit list (what `write_query` and the archive

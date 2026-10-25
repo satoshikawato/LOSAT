@@ -605,10 +605,14 @@ thread_local! {
 /// whose other bytes the caller writes, every one of them. With the switch, a frame of at most
 /// `X_REUSED_FRAME` bytes is one this thread kept (`x_reuse_frame`), its bytes not cleared, which
 /// saves the allocation and the zero fill of a new one; otherwise a new zeroed frame of
-/// `x_frame_capacity`.
+/// `x_frame_capacity`. EXPERIMENT (LOSAT_X_TBNDBSTREAM): while a `-db` stream is open, a frame of
+/// `X_MAPPED_FRAME` bytes or more is an idle buffer of `utils::x_mapped::X_BYTES` that touched at
+/// most twice its bytes, if it holds one (its pages resident), zeroed to `length`.
 fn x_frame_buffer(length: usize) -> Vec<u8> {
     let kept = if length <= X_REUSED_FRAME && x_frame_reuse() {
         X_FRAMES.with(|frames| frames.borrow_mut().pop())
+    } else if length >= X_MAPPED_FRAME && super::x_db_stream::x_frames_pooled() {
+        crate::utils::x_mapped::X_BYTES.x_take_near(length)
     } else {
         None
     };
@@ -637,8 +641,14 @@ fn x_frame_buffer(length: usize) -> Vec<u8> {
 /// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): keeps `frame`, a frame of a dropped subject plan, for
 /// this thread's next `x_frame_buffer`, if the switch is on, its capacity is at most
 /// `X_REUSED_FRAME` and the thread keeps fewer than `X_REUSED_FRAMES`; drops it otherwise.
-pub(super) fn x_reuse_frame(frame: Vec<u8>) {
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): while a `-db` stream is open, a frame of a capacity of
+/// `X_MAPPED_FRAME` bytes or more goes to `utils::x_mapped::X_BYTES` instead (which frees the idle
+/// buffers beyond its bound).
+pub(super) fn x_reuse_frame(mut frame: Vec<u8>) {
     if frame.capacity() == 0 || frame.capacity() > X_REUSED_FRAME || !x_frame_reuse() {
+        if frame.capacity() >= X_MAPPED_FRAME && super::x_db_stream::x_frames_pooled() {
+            crate::utils::x_mapped::X_BYTES.give(&mut frame);
+        }
         return;
     }
     // A thread that is ending keeps nothing.
@@ -671,22 +681,20 @@ pub(super) fn x_reuse_frame(frame: Vec<u8>) {
 // `seq[..length - i]` counted from its end). So the codons of one phase (`p % 3`) fill one plus
 // frame forward and one minus frame backward, and every residue is the one `x_generate_frames`
 // puts there.
-/// EXPERIMENT (LOSAT_X_TBNSTORE): `x_generate_frames` of a packed subject's codes.
-fn x_packed_frames(
-    store: &crate::sequence::packed_subject::PackedNucleotide,
-    tables: &XCodonTables,
-) -> Vec<QueryFrame> {
-    x_packed_frames_with(store, tables, x_xlate_simd())
+/// EXPERIMENT (LOSAT_X_TBNSTORE): `x_generate_frames` of a packed subject's codes, from its packed
+/// bytes (`PackedNucleotide::packed`) and its length `seq_len`.
+fn x_packed_frames(packed: &[u8], seq_len: usize, tables: &XCodonTables) -> Vec<QueryFrame> {
+    x_packed_frames_with(packed, seq_len, tables, x_xlate_simd())
 }
 
 /// EXPERIMENT (LOSAT_X_TBNSTORE / LOSAT_X_TBNXLATESIMD): [`x_packed_frames`], with the vector
 /// loop when `simd` (and the CPU has it).
 fn x_packed_frames_with(
-    store: &crate::sequence::packed_subject::PackedNucleotide,
+    packed: &[u8],
+    seq_len: usize,
     tables: &XCodonTables,
     simd: bool,
 ) -> Vec<QueryFrame> {
-    let seq_len = store.len();
     let frame_count = (0..3).filter(|&i| i + 3 <= seq_len).count();
     // x_phase_residues writes every residue (positions 1 to aa_len) of the frames.
     let empty_frame = |i: usize| x_frame_buffer((seq_len - i) / 3 + 2);
@@ -699,10 +707,10 @@ fn x_packed_frames_with(
         // from the last one down, of minus frame `-(r + 1)`, which has as many
         let codons = (seq_len - phase) / 3;
         let minus = &mut reverse[(seq_len - phase) % 3];
-        vector += x_phase_residues(store.packed(), phase, codons, tables, plus, minus, simd);
+        vector += x_phase_residues(packed, phase, codons, tables, plus, minus, simd);
         all += codons;
     }
-    if all > 0 && std::env::var_os("LOSAT_X_STATS").is_some() {
+    if all > 0 && x_stats() {
         PACKED_CODONS[0].fetch_add(vector as u64, Ordering::Relaxed);
         PACKED_CODONS[1].fetch_add((all - vector) as u64, Ordering::Relaxed);
     }
@@ -958,8 +966,13 @@ fn x_packed_plan(
     store: &crate::sequence::packed_subject::PackedNucleotide,
     db_gencode: u8,
 ) -> Result<XSubjectPlan> {
+    x_bytes_plan(store.packed(), store.len(), db_gencode)
+}
+
+/// EXPERIMENT (LOSAT_X_TBNSTORE): [`x_packed_plan`] of a subject's packed bytes and length.
+fn x_bytes_plan(packed: &[u8], length: usize, db_gencode: u8) -> Result<XSubjectPlan> {
     let tables = x_codon_tables(db_gencode)?;
-    let frames = x_packed_frames(store, tables);
+    let frames = x_packed_frames(packed, length, tables);
     let negative_first_length = frames
         .iter()
         .find(|frame| frame.frame == -1)
@@ -996,6 +1009,17 @@ pub(super) fn x_packed_subject_plan(
     db_gencode: u8,
 ) -> Result<Arc<XSubjectPlan>> {
     x_packed_plan(store, db_gencode).map(Arc::new)
+}
+
+/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): [`x_packed_subject_plan`] of a database sequence's packed
+/// bytes and length, read in a block of the sequence file (`XDbStream::plan_with`), without its
+/// store: the plan reads nothing else of a packed subject.
+pub(super) fn x_packed_bytes_plan(
+    packed: &[u8],
+    length: usize,
+    db_gencode: u8,
+) -> Result<Arc<XSubjectPlan>> {
+    x_bytes_plan(packed, length, db_gencode).map(Arc::new)
 }
 
 // No NCBI counterpart: reads LOSAT_X_TBNUNITXLATE once; it does not change any value NCBI
@@ -1689,7 +1713,7 @@ mod tests {
                         // The plan `x_scan_plan` makes is the reference's too.
                         let scan = x_scan_plan(
                             &[query],
-                            crate::sequence::packed_subject::SubjectNt::Letters(&subject),
+                            crate::sequence::packed_subject::SubjectNt::Letters(&subject).into(),
                             db_gencode,
                             None,
                             11,
@@ -1769,7 +1793,7 @@ mod tests {
             let query: &[u8] = b"MKVLAAGIVGLLLAQWSTRE";
             let scan = x_scan_plan(
                 &[query],
-                crate::sequence::packed_subject::SubjectNt::Letters(&subject),
+                crate::sequence::packed_subject::SubjectNt::Letters(&subject).into(),
                 db_gencode,
                 None,
                 11,
@@ -1904,7 +1928,7 @@ mod tests {
                     }
                     let scan = x_scan_plan(
                         &[query],
-                        SubjectNt::Packed(&store),
+                        SubjectNt::Packed(&store).into(),
                         db_gencode,
                         None,
                         11,
@@ -1931,7 +1955,7 @@ mod tests {
         let scan = |store: &PackedNucleotide, mask_lowercase: bool| {
             x_scan_plan(
                 &[query],
-                SubjectNt::Packed(store),
+                SubjectNt::Packed(store).into(),
                 1,
                 None,
                 11,
@@ -1974,7 +1998,7 @@ mod tests {
                 let tables = x_codon_tables(db_gencode).unwrap();
                 let expected = x_generate_frames(&codes, tables);
                 for simd in [false, true] {
-                    let frames = x_packed_frames_with(&store, tables, simd);
+                    let frames = x_packed_frames_with(store.packed(), length, tables, simd);
                     assert_eq!(frames.len(), expected.len(), "{length} bases, simd {simd}");
                     for (frame, reference) in frames.iter().zip(&expected) {
                         assert_eq!(
@@ -2139,7 +2163,7 @@ mod tests {
             };
             for db_gencode in codes {
                 let tables = x_codon_tables(db_gencode).unwrap();
-                for frame in x_packed_frames_with(&store, tables, false) {
+                for frame in x_packed_frames_with(store.packed(), store.len(), tables, false) {
                     let aa_len = frame.aa_len;
                     let points: Vec<usize> = if aa_len <= 14 {
                         (1..=aa_len + 2).collect()

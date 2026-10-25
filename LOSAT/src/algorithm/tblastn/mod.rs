@@ -7,8 +7,9 @@ mod args;
 mod search_seed;
 // EXPERIMENT (LOSAT_X_TBNSCANBF): the lookup scan without a branch on the presence vector.
 pub(crate) mod x_scan_bf;
-// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once.
-mod x_scan_byte;
+// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once
+// (blastx's direct loop takes it too, LOSAT_X_BXSCANBYTE).
+pub(crate) mod x_scan_byte;
 // NCBI c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
 // translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
 // length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);
@@ -16,6 +17,8 @@ mod x_scan_byte;
 mod x_subject_translate;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects held packed, their letters made when read.
 mod x_subject_store;
+// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `-db` sequences read where they are searched.
+mod x_db_stream;
 // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
 // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
 // Blast_InitHitListSortByScore(init_hitlist);
@@ -60,6 +63,9 @@ mod x_oid_flow;
 mod stage_e_report;
 // TBLASTN's BLAST XML (outfmt 5), once per run, from the final hit lists.
 mod blast_xml;
+// NCBI c++/src/app/blast/tblastn_app.cpp:295 (`WriteArchive`): TBLASTN's BLAST archive (outfmt 11),
+// one Blast4-archive per query batch.
+mod archive;
 // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod seqalign;

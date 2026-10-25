@@ -339,7 +339,7 @@ fn x_table_key(table: &BlastAaLookupTable) -> (usize, usize, usize) {
 /// change of table (its cache holds one).
 #[cfg(feature = "parallel")]
 pub(crate) fn x_shared_table_ratio(lookup: &Lookup, options: &ResolvedOptions) -> Option<u64> {
-    let Lookup::Standard(table) = lookup else {
+    let Lookup::Standard(table, _) = lookup else {
         return None;
     };
     if x_bxdiag_mode() == 0 || options.window_size <= 0 {
@@ -357,7 +357,7 @@ pub(crate) fn x_shared_table_ratio(lookup: &Lookup, options: &ResolvedOptions) -
 /// thread's choice for `lookup`'s table, so that the thread does not work it out again.
 #[cfg(feature = "parallel")]
 pub(crate) fn x_take_table_ratio(lookup: &Lookup, ratio: Option<u64>) {
-    if let (Lookup::Standard(table), Some(ratio)) = (lookup, ratio) {
+    if let (Lookup::Standard(table, _), Some(ratio)) = (lookup, ratio) {
         let (a, b, c) = x_table_key(table);
         X_CHOICE.with(|choice| choice.set((a, b, c, ratio)));
     }
@@ -490,7 +490,7 @@ pub(crate) fn x_word_finder_diag(
     diagonals: &mut Diagonals,
     sent: Option<XSent<'_>>,
 ) -> Result<Option<Vec<InitHsp>>> {
-    let Lookup::Standard(table) = lookup else {
+    let Lookup::Standard(table, _) = lookup else {
         if x_bxdiag_mode() != 2 {
             crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", false);
         }
@@ -1028,7 +1028,7 @@ mod tests {
         (mode, branch_free): (XCellTest, bool),
         start: impl Fn(&mut Diagonals),
     ) -> (usize, [u64; 4]) {
-        let Lookup::Standard(table) = lookup else {
+        let Lookup::Standard(table, _) = lookup else {
             panic!("the standard lookup table")
         };
         let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
@@ -1232,7 +1232,7 @@ mod tests {
         for window in [40, 400] {
             let s = search(&query, window, mean);
             // The lookup has cells of a full batch (eight hits) and more.
-            let Lookup::Standard(table) = &s.3 else {
+            let Lookup::Standard(table, _) = &s.3 else {
                 panic!("the standard lookup table")
             };
             assert!(table.backbone.iter().any(|cell| cell.num_used >= 16));

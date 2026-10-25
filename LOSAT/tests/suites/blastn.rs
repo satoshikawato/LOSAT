@@ -15,6 +15,10 @@ mod blastn_diag_lv;
 mod blastn_disc_lookup_par;
 #[path = "../blastn_few_subj.rs"]
 mod blastn_few_subj;
+#[path = "../blastn_greedy_row_fuse.rs"]
+mod blastn_greedy_row_fuse;
+#[path = "../blastn_lut_drop.rs"]
+mod blastn_lut_drop;
 #[path = "../blastn_mb_fill.rs"]
 mod blastn_mb_fill;
 #[path = "../blastn_mb_lookup_once.rs"]
@@ -35,6 +39,8 @@ mod blastn_qbatchpar;
 mod blastn_qctx_sentinel;
 #[path = "../blastn_qgroup_par.rs"]
 mod blastn_qgroup_par;
+#[path = "../blastn_query_drop.rs"]
+mod blastn_query_drop;
 #[path = "../blastn_query_dust_par.rs"]
 mod blastn_query_dust_par;
 #[path = "../blastn_query_prep_par.rs"]
@@ -49,6 +55,8 @@ mod blastn_strand;
 mod blastn_subject_store;
 #[path = "../blastn_subject_stream.rs"]
 mod blastn_subject_stream;
+#[path = "../blastn_tab_par.rs"]
+mod blastn_tab_par;
 #[path = "../blastn_ungap_count.rs"]
 mod blastn_ungap_count;
 #[path = "../megablast_xdrop.rs"]

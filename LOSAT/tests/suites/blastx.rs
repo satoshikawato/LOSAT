@@ -15,6 +15,8 @@ mod blastx_diag_bitfield;
 mod blastx_flow;
 #[path = "../blastx_hitbf.rs"]
 mod blastx_hitbf;
+#[path = "../blastx_scan_byte.rs"]
+mod blastx_scan_byte;
 #[path = "../blastx_subject_flow.rs"]
 mod blastx_subject_flow;
 #[path = "../blastx_ungap_sent.rs"]

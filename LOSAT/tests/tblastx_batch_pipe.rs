@@ -5,8 +5,7 @@
 //! `0`. With it on and two or more threads, the next query
 //! batch starts when the batch before has ended its seed stage, and the batch loop takes the
 //! results in its order. `[X_STATS] TBXPIPE` counts the planned and taken batches and how each was
-//! started; `LOSAT_X_TBXPIPESHADOW=1` searches every taken batch again on the loop and compares the
-//! two results; `LOSAT_X_TBXPIPEHSPS=0` admits no early start.
+//! started; `LOSAT_X_TBXPIPEHSPS=0` admits no early start.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-195
 //! ```c
@@ -25,7 +24,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 const PIPE_OFF: (&str, &str) = ("LOSAT_X_TBXPIPE", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBXPIPESHADOW", "1");
 const NO_EARLY: (&str, &str) = ("LOSAT_X_TBXPIPEHSPS", "0");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const THREADS: [u32; 5] = [1, 2, 4, 8, 16];
@@ -144,13 +142,6 @@ fn the_report_does_not_depend_on_the_pipe_at_any_thread_count() {
         let on = tblastx(&query, threads, "6", &[STATS]);
         assert!(on.status.success(), "threads {threads}: {}", stderr(&on));
         assert_eq!(on.stdout, off.stdout, "threads {threads}");
-        let shadow = tblastx(&query, threads, "6", &[SHADOW, STATS]);
-        assert!(
-            shadow.status.success(),
-            "threads {threads}: {}",
-            stderr(&shadow)
-        );
-        assert_eq!(shadow.stdout, off.stdout, "threads {threads}, shadow");
         if threads == 1 {
             // One thread: the loop searches every batch itself, as before.
             assert!(!stderr(&on).contains("TBXPIPE"), "{}", stderr(&on));
@@ -165,11 +156,6 @@ fn the_report_does_not_depend_on_the_pipe_at_any_thread_count() {
         );
         assert_eq!(early + loop_searched, 4, "threads {threads}");
         assert!(early >= 1, "threads {threads}: no batch started early");
-        assert!(
-            stderr(&shadow).contains("[X_SHADOW] TBXPIPE batches=4 compared=4 diffs=0"),
-            "threads {threads}: {}",
-            stderr(&shadow)
-        );
     }
 }
 

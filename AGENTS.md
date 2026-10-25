@@ -300,6 +300,11 @@ authoritative, current guidance for agent behavior in LOSAT.
 
 The `LOSAT_TRACE_*`, `LOSAT_DEBUG_*`, `LOSAT_TIMING`, `LOSAT_DIAGNOSTICS` and related
 variables are listed in [`docs/agents/diagnostics.md`](docs/agents/diagnostics.md).
+A new diagnostic variable that no test, script or CI step sets is read through `utils/xdiag.rs` (the
+`diagnostics` feature) and listed in `xdiag::NAMES` and in the "Diagnostic build" block of
+docs/agents/diagnostics.md; one that
+tests or scripts set is read directly, once per process when it sits on a per-subject or per-hit path,
+unless a test changes it in its own process.
 
 ---
 
@@ -375,10 +380,10 @@ LOSAT/                     # Rust crate root
 │   ├── stats/             # Karlin-Altschul and sum statistics
 │   ├── align/             # Alignment utilities/traceback
 │   ├── report/            # Output formatting (outfmt 0/6/7)
-│   ├── format/            # Format helpers
 │   ├── post/              # Post-processing (chaining/filtering)
-│   ├── api/               # Options and API layer
-│   ├── blastinput/        # CLI argument parsing
+│   ├── api/               # Local search entry (`local_blast`)
+│   ├── blastinput/        # Application layer, FASTA input, shared value parsers;
+│   │                      # per-program args in `algorithm/<program>/args.rs`
 │   ├── config/            # Compatibility/config helpers
 │   ├── seed/              # Word finding
 │   ├── sequence/          # Sequence storage/encoding

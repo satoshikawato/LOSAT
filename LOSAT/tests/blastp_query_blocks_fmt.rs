@@ -1819,7 +1819,8 @@ fn an_unopenable_side_file_stops_the_blocks_where_it_stops_the_search_of_all_que
 // output" and status 6 (DECISIONS 35: NCBI ignores the error); the blocks do the same at the same
 // report with the same files. Outfmt 14 only, at one thread, in the second block (the first block's
 // stop is that of the test above, and outfmt 13 writes through the same `FsSideFiles`).
-#[cfg(unix)]
+// Linux only: macOS has no `/dev/full`, so the link cannot be opened and the run ends with status 1.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_side_file_that_cannot_be_written_stops_the_blocks_where_it_stops_the_search_of_all_queries() {
     let dir = test_dir("full");

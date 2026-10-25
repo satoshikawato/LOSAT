@@ -150,7 +150,7 @@
 //! every few cells.
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBF, blastx's switch): `x_scan_two_hit_with(.., branch_free: true, ..)`
-//! finds the cells with hits by the candidate loop of LOSAT_X_TBNSCANBF
+//! finds the cells with hits by the candidate loop of tblastn's branch-free scan
 //! (`tblastn/x_scan_bf.rs`, `x_block_candidates`): the positions of a block of words are written
 //! to a list whose length advances by the presence bit, without a branch on it, and the listed
 //! cells then go to the cell test in position order. The cells, their order and their hit lists
@@ -162,7 +162,7 @@
 //! EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loop (`x_cell_per_hit`: the fused loop without
 //! LOSAT_X_BPDIAG's batches, the default where the CPU has no AVX2, i.e. aarch64 and WebAssembly)
 //! takes the two outcomes most two-hit tests end in, too far and overlap, without a branch (tblastn's
-//! LOSAT_X_TBNHITBF and TBLASTX's LOSAT_X_TBXHITBF do the same in their loops, on tables whose entries
+//! tblastn's branch-free two-hit loop and TBLASTX's LOSAT_X_TBXHITBF do the same in their loops, on tables whose entries
 //! need no sign extension):
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551

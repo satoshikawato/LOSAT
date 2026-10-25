@@ -99,6 +99,13 @@ use std::ops::RangeInclusive;
 /// made when they are read and freed when they are no longer read, `tblastx/subjects.rs`) were
 /// added after the change as switches that are off unless set and joined the set together once
 /// they were verified and timed with it on.
+/// `LOSAT_X_TBNHITBF` (the branch-free two-hit loop of TBLASTN's unit path,
+/// `tblastn/x_tbn_hitbf.rs`), `LOSAT_X_TBNLINKWIN` (the linking candidates of a head chosen by
+/// subject position, `tblastn/stage_d_linking/x_link_window.rs`) and `LOSAT_X_TBNSCANBF` (the
+/// lookup scan without a branch on the presence vector, `tblastn/x_scan_bf.rs`) graduated on
+/// 2026-10-26: they left `STRICT_SET` and their previous code was deleted (NCBI's whole-window
+/// loop of the linking call stays as the reference of a unit test, and `XTwoHit::pairs` stays as
+/// the body that the branch-free loop hands the other hits to).
 /// `LOSAT_X_BPDIAG` (the two-hit diagonal test of a lookup cell eight hits at a time,
 /// `blastp/x_seed_fused.rs`) joined after a second run of the same jobs with it on as well.
 /// `LOSAT_X_SEEDCOMPACT` (TBLASTX's unit path keeps the saved init HSPs of a unit as 28-byte
@@ -253,12 +260,9 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNDBSTREAM",
     "LOSAT_X_TBNFLOWHELP",
     "LOSAT_X_TBNFRAMEREUSE",
-    "LOSAT_X_TBNHITBF",
     "LOSAT_X_TBNKEEPFEW",
-    "LOSAT_X_TBNLINKWIN",
     "LOSAT_X_TBNOWNPOOLS",
     "LOSAT_X_TBNREDOLPT",
-    "LOSAT_X_TBNSCANBF",
     "LOSAT_X_TBNSCANBYTE",
     "LOSAT_X_TBNSTORE",
     "LOSAT_X_TBNUNGAP",

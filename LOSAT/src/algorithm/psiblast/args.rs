@@ -339,6 +339,8 @@ impl PsiblastArgs {
             num_alignments: self.num_alignments,
             max_hsps_per_subject: self.max_hsps_per_subject,
             qcov_hsp_perc: self.qcov_hsp_perc,
+            // psiblast has no -culling_limit (rejected above).
+            culling_limit: None,
             ungapped: false,
             window_size: self.window_size,
             matrix: self.matrix,

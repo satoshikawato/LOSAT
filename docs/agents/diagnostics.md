@@ -338,6 +338,7 @@ export LOSAT_X_BPLISTEDLEAN=1
 export LOSAT_X_BPLKDROP=1
 export LOSAT_X_BPLKPAHEAD=1
 export LOSAT_X_BPLKPFLAT=1
+export LOSAT_X_BPLKREUSE=1
 export LOSAT_X_BPLUT=1
 export LOSAT_X_BPMASKED=1
 export LOSAT_X_BPPCOMPACT=1
@@ -1754,6 +1755,31 @@ Rebuilding less:
   `LOSAT_X_BPLKPFLAT` acts (the next block's own build takes them). So the builds reuse the vectors as before, and only
   the tables that nothing reuses leave early. Reports do not change (`tests/blastp_redo_memory.rs`, which also shows by
   `LOSAT_X_REACH` that a block search of several blocks keeps the tables of its first blocks).
+- `LOSAT_X_BPLKREUSE=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-n1-lkreuse):
+  on unless it is `0`; exact blastp (`-task blastp`, the table built in place, `LOSAT_X_BPLUT`), `-subject` and `-db`)
+  in the block search of `LOSAT_X_BPQBLOCK` where no table is built ahead of its block (`LOSAT_X_BPLKPAHEAD` acts with
+  more than one thread; so: one thread, Wasm without threads, or `LOSAT_X_BPLKPAHEAD=0`), each block's search gives its
+  table's backbone, overflow and pv vectors back to the block search (`x_query_blocks::x_bp_aa_block_spare`) at its
+  end, and the next block's build takes them (`lookup/x_lut_direct.rs` `XAaSpares::x_build_on_block_spare`): cleared
+  and zero-filled to the new table's sizes, and a vector short of its size grows by a reallocation of its own
+  allocation (`reserve_exact`), never by a new allocation and a free. Without the switch each block allocated its table
+  and `LOSAT_X_BPLKDROP` freed it before the redo; glibc raises its dynamic mmap threshold to the size of a freed mapped
+  allocation, so the next block's table (up to that size) went to the main heap, and the heap's free space stayed
+  resident below what was allocated after it (`GLIBC_TUNABLES=glibc.malloc.mmap_threshold=131072`, which keeps the
+  threshold fixed, gave about the same peak as the switch: 17.5 MiB below). A reallocation does not move the threshold
+  (glibc grows a mapped allocation with `mremap`). With the switch the table of every block but the last is kept until
+  its search's end, as where the build ahead takes it (`LOSAT_X_BPLKDROP`); the last block's is dropped before the redo.
+  Reports do not change: the vectors taken are cleared and zero-filled to the new table's sizes before the build writes
+  them, as a new table is (lib test `aa_block_spare_builds_each_block_on_the_vectors_given_back` compares each table
+  with a fresh build; `tests/blastp_redo_memory.rs` compares reports with `=0` at 1 and 2 threads). Evidence 2026-10-26
+  (v4-D12 s14, workstation, node 0, head 591e4fc4 on dev 70d75af5, every report identical and the same as NCBI's):
+  peak RssAnon at one thread, MiB, switch / `=0`, 2 runs each (Swiss-Prot 1): 3,000 human proteins x yeast
+  (`-evalue 0.001`, 23 blocks) **17.6, 18.6** / 25.1, 25.1 (NCBI 12.2; `=0` with the threshold held fixed 17.5); WSSV x
+  PajaWSV (2 blocks) 12.5, 12.5 / 12.5, 12.5 (NCBI 10.3); Swiss-Prot q100 (2 blocks) 73.6 / 73.4. `perf stat` `:u`
+  against `=0`, rounds rotated with an A/A arm (`=0` again), load 8-39: human x yeast 12 rounds instructions x1.000006
+  (the zero fill), cycles x1.000 (0.961-1.060) where the A/A arm read x1.001 (0.939-1.034), x0.999-1.002 in the 4
+  quietest rounds (load 8-16); WSSV 8 rounds instructions x0.999998, cycles x1.002 (0.986-1.008), A/A x0.999
+  (0.985-1.010); minor faults 13.2k -> 5.2k (human x yeast).
 - `LOSAT_X_BPSEED=1` (BLASTP, speed; in the strict set since 2026-10-14; `=0` turns it off) the two-hit seed
   stage with an amino-acid lookup table
   (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one

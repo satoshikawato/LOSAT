@@ -7662,6 +7662,27 @@ fn blastp_aa_lookup_ahead(
     Some((BlastpRuntimeLookup::Aa(lookup), contexts))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:245
+// ```c
+//     lookup->threshold = (Int4)opt->threshold;
+// ```
+/// EXPERIMENT (LOSAT_X_BPLKREUSE): `blastp_aa_lookup`'s table and contexts (the same arguments),
+/// built on the vectors of the block before that `spare` keeps
+/// (`XAaSpares::x_build_on_block_spare`).
+fn blastp_aa_lookup_on_block_spare(
+    args: &ResolvedBlastpArgs,
+    query_frames: &[Vec<QueryFrame>],
+    spare: &crate::algorithm::tblastx::lookup::XAaSpares,
+) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
+    let (lookup, contexts) = spare.x_build_on_block_spare(
+        query_frames,
+        crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+        &lookup_protein_params_ungapped(args.scoring.matrix),
+        false,
+    );
+    (BlastpRuntimeLookup::Aa(lookup), contexts)
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
 // ```c
 // s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
@@ -7752,7 +7773,7 @@ fn blastp_compressed_lookup(
 /// EXPERIMENT (LOSAT_X_BPLKDROP): a strict-set switch, on unless it is `0`. The search's lookup
 /// table after its preliminary stage, which nothing reads any more: kept (`Some`) only where the
 /// search gives its vectors to a spare at its end that a later block's build may take
-/// (`x_query_blocks::x_bp_lookup_spare` / `x_bp_aa_spares` and
+/// (`x_query_blocks::x_bp_lookup_spare` / `x_bp_aa_spares` / `x_bp_aa_block_spare` and
 /// `XAheadBlock::x_table_taken_later`), or with the switch off; otherwise dropped here, before the
 /// redo, instead of at the search's end.
 fn x_lookup_after_prelim(
@@ -7769,7 +7790,10 @@ fn x_lookup_after_prelim(
             BlastpRuntimeLookup::CompressedFlat(_) => {
                 super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
             }
-            BlastpRuntimeLookup::Aa(_) => super::x_query_blocks::x_bp_aa_spares(pool).is_some(),
+            BlastpRuntimeLookup::Aa(_) => {
+                super::x_query_blocks::x_bp_aa_spares(pool).is_some()
+                    || super::x_query_blocks::x_bp_aa_block_spare(pool).is_some()
+            }
             BlastpRuntimeLookup::Compressed(_) => false,
         };
     crate::utils::xreach::x_reach!("LOSAT_X_BPLKDROP", !taken_later);
@@ -8026,10 +8050,15 @@ fn run_resolved_in_pool(
     let (lookup, mut contexts) = match args.lookup_table_type {
         // `blastp_aa_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built
         // ahead of this block by the same call on the block search's spare vectors
-        // (`blast_engine/x_lookup_ahead.rs`).
+        // (`blast_engine/x_lookup_ahead.rs`). EXPERIMENT (LOSAT_X_BPLKREUSE): or, where nothing is
+        // built ahead, built here on the vectors of the block before
+        // (`x_query_blocks::x_bp_aa_block_spare`).
         BlastpLookupTableType::AaLookupTable => match x_prebuilt.take() {
             Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(prebuilt),
-            None => blastp_aa_lookup(&args, &query_frames),
+            None => match super::x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool) {
+                Some(spare) => blastp_aa_lookup_on_block_spare(&args, &query_frames, spare),
+                None => blastp_aa_lookup(&args, &query_frames),
+            },
         },
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
         // ```c
@@ -12211,8 +12240,9 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
     // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed. EXPERIMENT
     // (LOSAT_X_BPLKPAHEAD): exact blastp's, for the build of a later block's table ahead of it
-    // (`x_query_blocks::x_bp_aa_spares`). EXPERIMENT (LOSAT_X_BPLKDROP): `None` when the table was
-    // dropped before the redo.
+    // (`x_query_blocks::x_bp_aa_spares`); EXPERIMENT (LOSAT_X_BPLKREUSE): or for the next block's own
+    // build (`x_query_blocks::x_bp_aa_block_spare`). EXPERIMENT (LOSAT_X_BPLKDROP): `None` when the
+    // table was dropped before the redo.
     match lookup {
         Some(BlastpRuntimeLookup::CompressedFlat(table)) => {
             if let Some(spare) = super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool) {
@@ -12220,7 +12250,9 @@ fn run_resolved_in_pool(
             }
         }
         Some(BlastpRuntimeLookup::Aa(table)) => {
-            if let Some(spares) = super::x_query_blocks::x_bp_aa_spares(blastp_parallel_pool) {
+            if let Some(spares) = super::x_query_blocks::x_bp_aa_spares(blastp_parallel_pool)
+                .or_else(|| super::x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool))
+            {
                 spares.give(table);
             }
         }

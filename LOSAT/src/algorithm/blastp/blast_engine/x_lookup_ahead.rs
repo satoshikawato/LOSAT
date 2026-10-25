@@ -137,9 +137,11 @@ use super::{
     blastp_aa_lookup_ahead, blastp_compressed_lookup, blastp_query_frames, BlastpRuntimeLookup,
 };
 use crate::algorithm::blastp::args::{BlastpLookupTableType, ResolvedBlastpArgs};
-use crate::algorithm::blastp::x_query_blocks::{x_bp_aa_spares, x_bp_lookup_spares, XLookupFor};
+use crate::algorithm::blastp::x_query_blocks::{
+    x_bp_aa_block_spare, x_bp_aa_spares, x_bp_lkreuse, x_bp_lookup_spares, XLookupFor,
+};
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_on;
-use crate::algorithm::tblastx::lookup::QueryContext;
+use crate::algorithm::tblastx::lookup::{QueryContext, XAaSpares};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
@@ -479,6 +481,17 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
             };
         if x_bp_lkp_ahead() {
             crate::utils::xreach::x_reach!("LOSAT_X_BPLKPAHEAD", acts);
+        }
+        // EXPERIMENT (LOSAT_X_BPLKREUSE): where exact blastp's tables are not built ahead, each
+        // block's build takes the vectors of the block before (`x_bp_aa_block_spare`).
+        if x_bp_lkreuse()
+            && matches!(args.lookup_table_type, BlastpLookupTableType::AaLookupTable)
+            && XAaSpares::x_applies()
+        {
+            crate::utils::xreach::x_reach!(
+                "LOSAT_X_BPLKREUSE",
+                x_bp_aa_block_spare(pool).is_some()
+            );
         }
         Self {
             args,

@@ -153,7 +153,19 @@
 //! `-subject`, one thread: 630 MiB), 8 x 2 x0.981 (400 MiB), 4 x 4 x1.022 (232), 2 x 8 x1.184
 //! (149), the loop x1.274 (107); at 32 threads, model 32 x 1 (1,439 MiB), 8 x 4 x0.932 (515), 4 x 8
 //! x0.994 (350); 5,000 cDNAs at 16 / 32 threads, model 14 x 1 / 14 x 2 (560 / 619 MiB), 8 slots
-//! x0.891 / x0.878 (363 / 380), 4 x0.883 / x0.872 (225 / 240). W1_EVIDENCE
+//! x0.891 / x0.878 (363 / 380), 4 x0.883 / x0.872 (225 / 240). Windows w1 and w3 (the same binary,
+//! session 16, 4-6 rounds) added 6 / 10 / 12 / 16 slots, 12 / 24 / 64 threads, 4,000 / 6,900 /
+//! 15,600 cDNAs and 10 / 30 Mb subjects (chromosome 2L, then 2R): 31,168 cDNAs at 12 threads 6 x 2
+//! x0.991 of the model's 12 x 1 (307 / 542 MiB), at 24 threads 8 x 3 x0.946 (427 / 1,041), at 64
+//! threads 8 x 8 x0.874 of 32 x 2 (575 / 1,563); slots that leave threads idle lose (16 threads: 6
+//! x 2 x1.237, 10 x 1 x1.448). In the 18 measured cells where the rule applies (4,000-31,168 cDNAs,
+//! 3-30 Mb, 12-64 threads) its layout ran in x0.755-0.991 of the model's time and within x1.054 of
+//! the best measured count, e.g. 4,000 cDNAs (12 units) at 16 threads 4 x 4 x0.755 (214 / 452 MiB),
+//! 5,000 cDNAs x 30 Mb at 32 threads 7 x 4 x0.768 (1,048 / 1,164). Refits of the E(m) points (with
+//! contention, Amdahl's serial share, or a loop-thread cost per batch) to these 145 cells missed
+//! the best count by up to x1.06-1.25, so the points stay and the rule caps the slots. Where the
+//! model takes eight slots or fewer it can still miss (5,000 cDNAs x 30 Mb at 16 threads: 7 x 2 at
+//! x1.320 of 2 x 8's time); the rule leaves those layouts as they are.
 //! With the rule `rule_k`, `rule_m` and `predicted` of the summary line still state the model's
 //! layout, and `k`, `m` the slots that ran.
 //!

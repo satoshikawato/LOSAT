@@ -825,7 +825,7 @@ pub(crate) fn x_dp_trace_pool() -> bool {
 // (`LOSAT_X_DPTRACEPOOL`); below it a scratch keeps its own trace.
 const X_POOL_FROM: usize = 1 << 20;
 // No NCBI counterpart: how many idle trace + rows pairs the pool keeps (`LOSAT_X_DPTRACEPOOL`).
-const X_POOL_IDLE: usize = 4;
+const X_POOL_IDLE: usize = 2;
 
 // No NCBI counterpart: one trace + rows pair of the pool (`XdropScratch::trace`, `rows`).
 type XTracePair = (Vec<u8>, Vec<(u32, u32, u32)>);

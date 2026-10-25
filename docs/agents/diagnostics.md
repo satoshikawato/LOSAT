@@ -784,8 +784,8 @@ Same values, faster computation:
   the traceback stage of a genome pair holding a long trace (Sakai x EDL933: 130 dc-megablast calls of
   1 MiB or more, spread over the whole stage). Now a trace that passes 1 MiB while it grows takes the
   largest idle pair of a pool the scratches share (the rows so far are copied over; the thread's own small
-  buffers wait in a thread-local) and gives it back after the traceback call; the pool keeps at most four
-  idle pairs and frees the smallest. The kernels write and the walk reads the same rows, so every script,
+  buffers wait in a thread-local) and gives it back after the traceback call; the pool keeps at most two
+  idle pairs and frees the smallest (two left less memory than four at the same time). The kernels write and the walk reads the same rows, so every script,
   edit operation, score and offset is the same; the 1 MiB test runs at the kernels' row reserve, which takes
   only the two buffers (`x_trace_reserve`), so the kernels' machine code is unchanged (one thread at dev's
   instructions, x1.0000). The rule (conditional): a trace that grew past 1 MiB by itself goes to the pool on

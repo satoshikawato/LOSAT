@@ -196,7 +196,6 @@ pub(super) fn x_search_blocks_cut<S, K>(
     blocks_per_thread: usize,
     new_scratch: &S,
     process_subject: &K,
-    preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     prelim_hitlist_size: usize,
 ) -> Result<()>
@@ -215,7 +214,6 @@ where
         blocks_per_thread,
         new_scratch,
         process_subject,
-        preliminary_hit_lists,
         x_compact_hit_lists,
         prelim_hitlist_size,
     )

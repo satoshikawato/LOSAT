@@ -339,11 +339,10 @@ fn x_locked<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 impl XAaSpares {
     // No NCBI counterpart: where the build ahead applies; it reads switches and changes no value
     // NCBI computes.
-    /// Whether exact blastp's table is built by [`x_build_direct`] (`LOSAT_X_BPLUT` on,
-    /// outside diagnostics mode, whose reference builder prints its phases), the build
-    /// [`Self::x_build_ahead`] makes.
+    /// Whether exact blastp's table is built by [`x_build_direct`] (outside diagnostics mode,
+    /// whose reference builder prints its phases), the build [`Self::x_build_ahead`] makes.
     pub(crate) fn x_applies() -> bool {
-        x_bplut_on() && !diagnostics_enabled()
+        !diagnostics_enabled()
     }
 
     // No NCBI counterpart: buffer reuse only (`XAaSpares`).
@@ -430,7 +429,7 @@ impl XAaSpares {
     //             s_AddWordHits(lookup, matrix, query->sequence,
     //                           exact_backbone[i], query_bias, row_max);
     // ```
-    /// `x_bp_build_lookup(true, queries, threshold, karlin_params, check_ideal)` (where
+    /// `x_bp_build_lookup(queries, threshold, check_ideal)` (where
     /// [`Self::x_applies`]), the table built on the vectors `x_make_room` kept and with the
     /// neighbour lists kept here (both taken while it builds and given back after, the vectors only
     /// where no table was made). `None` where no table was made: the vectors lack the room, or the
@@ -916,39 +915,19 @@ fn x_build_direct_in(
 //         }
 //     }
 // ```
-/// EXPERIMENT (LOSAT_X_BPLUT): `true` = BLASTP's table built in place by [`x_build_direct`],
-/// `false` = off (`build_ncbi_lookup`).
-// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
-// `LOSAT_X_BPLUT` is a strict-set switch.
-pub(super) fn x_bplut_on() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLUT"))
-}
-
 // No NCBI counterpart: the BLASTP choice between the reference builder and the in-place builder
 // (`build_ncbi_lookup_from_prepared` in backbone.rs carries the NCBI code); it changes no value
 // NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLUT): `build_ncbi_lookup` for BLASTP. With `direct` false it calls it;
-/// with `direct` true it prepares the query as `build_ncbi_lookup_for_profile(.., Blosum62,
-/// LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`] (the same table without
-/// the chains, so without the chains' memory while it is built), falling back to the reference
-/// builder where that declines.
+/// `build_ncbi_lookup` for BLASTP: prepares the query as `build_ncbi_lookup_for_profile(..,
+/// Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`] (the same
+/// table without the chains, so without the chains' memory while it is built), falling back to
+/// the reference builder where that declines.
 pub(super) fn x_bp_build_lookup(
-    direct: bool,
     queries: &[Vec<QueryFrame>],
     threshold: i32,
-    karlin_params: &KarlinParams,
     check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    x_build_ncbi_lookup_with(
-        direct,
-        queries,
-        threshold,
-        karlin_params,
-        check_ideal,
-        |_| {},
-    )
+    x_build_direct_or_reference(queries, threshold, check_ideal, |_| {})
 }
 
 /// EXPERIMENT (LOSAT_X_TBXLUT): `true` = TBLASTX's full table built in place by [`x_build_direct`],
@@ -990,7 +969,7 @@ pub(super) fn x_tbx_build_lookup(
 }
 
 /// The query of `queries` prepared as `build_ncbi_lookup_for_profile(.., Blosum62,
-/// LOOKUP_WORD_LENGTH)` prepares it ([`x_build_ncbi_lookup_with`] with the switch on, and
+/// LOOKUP_WORD_LENGTH)` prepares it ([`x_build_direct_or_reference`] and
 /// [`XAaSpares::x_build_ahead`]).
 fn x_bp_prepared_query(queries: &[Vec<QueryFrame>], check_ideal: bool) -> PreparedLookupQuery {
     let matrix = ScoringMatrix::Blosum62;
@@ -1007,11 +986,9 @@ fn x_bp_prepared_query(queries: &[Vec<QueryFrame>], check_ideal: bool) -> Prepar
     )
 }
 
-/// The body of [`x_bp_build_lookup`] and [`x_tbx_build_lookup`]: with `direct` false it calls
-/// `build_ncbi_lookup`; with `direct` true it prepares the query as
-/// `build_ncbi_lookup_for_profile(.., Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with
-/// [`x_build_direct`], falling back to the reference builder where that declines. `reach` is called
-/// with `direct` true with whether the direct builder built the table (`LOSAT_X_REACH`).
+/// The body of [`x_tbx_build_lookup`]: with `direct` false it calls `build_ncbi_lookup`; with
+/// `direct` true it is [`x_build_direct_or_reference`]. `reach` is called with `direct` true with
+/// whether the direct builder built the table (`LOSAT_X_REACH`).
 fn x_build_ncbi_lookup_with(
     direct: bool,
     queries: &[Vec<QueryFrame>],
@@ -1023,6 +1000,19 @@ fn x_build_ncbi_lookup_with(
     if !direct {
         return build_ncbi_lookup(queries, threshold, karlin_params, check_ideal);
     }
+    x_build_direct_or_reference(queries, threshold, check_ideal, reach)
+}
+
+/// The table of [`x_bp_build_lookup`] and of [`x_build_ncbi_lookup_with`] with `direct` true: the
+/// query is prepared as `build_ncbi_lookup_for_profile(.., Blosum62, LOOKUP_WORD_LENGTH)` prepares
+/// it and the table is built with [`x_build_direct`], falling back to the reference builder where
+/// that declines. `reach` is called with whether the direct builder built the table.
+fn x_build_direct_or_reference(
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    check_ideal: bool,
+    reach: fn(bool),
+) -> (BlastAaLookupTable, Vec<QueryContext>) {
     let matrix = ScoringMatrix::Blosum62;
     let prepared = x_bp_prepared_query(queries, check_ideal);
     // build_lookup_from_prepared returns the prepared contexts unchanged.
@@ -1299,17 +1289,12 @@ mod tests {
         assert_eq!(table.longest_chain, 0);
     }
 
-    /// BLASTP's builder (in place with `direct`) against `build_ncbi_lookup`: every table field and
-    /// every context field. Returns the overflow length.
-    fn same_bp(
-        direct: bool,
-        queries: &[Vec<QueryFrame>],
-        threshold: i32,
-        check_ideal: bool,
-    ) -> usize {
+    /// BLASTP's builder against `build_ncbi_lookup`: every table field and every context field.
+    /// Returns the overflow length.
+    fn same_bp(queries: &[Vec<QueryFrame>], threshold: i32, check_ideal: bool) -> usize {
         let params = blosum62_ideal_karlin_params();
         let (reference, ref_contexts) = build_ncbi_lookup(queries, threshold, &params, check_ideal);
-        let (got, contexts) = x_bp_build_lookup(direct, queries, threshold, &params, check_ideal);
+        let (got, contexts) = x_bp_build_lookup(queries, threshold, check_ideal);
         x_assert_same_table(&got, &reference);
         assert_eq!(contexts.len(), ref_contexts.len());
         for (a, b) in contexts.iter().zip(&ref_contexts) {
@@ -1367,7 +1352,7 @@ mod tests {
         let mut overflow_seen = false;
         for check_ideal in [false, true] {
             for threshold in [0, 11, 12, 13, 21] {
-                overflow_seen |= same_bp(true, &queries, threshold, check_ideal) > 0;
+                overflow_seen |= same_bp(&queries, threshold, check_ideal) > 0;
             }
         }
         assert!(overflow_seen, "the fixture must reach the overflow array");
@@ -1375,9 +1360,7 @@ mod tests {
         let short: Vec<Vec<QueryFrame>> = (0..3)
             .map(|_| bp_query(residues(&mut seed, 15), vec![], false))
             .collect();
-        same_bp(true, &short, i32::MIN, false);
-        // With the switch off the builder is the reference itself.
-        same_bp(false, &queries, 11, false);
+        same_bp(&short, i32::MIN, false);
     }
 
     /// The query offsets of every cell of `table`, as the scan reads them.
@@ -1435,7 +1418,11 @@ mod tests {
                 (&short, 1),
                 (&short, i32::MIN),
             ] {
-                let (table, _) = x_bp_build_lookup(direct, set, threshold, &params, false);
+                let (table, _) = if direct {
+                    x_bp_build_lookup(set, threshold, false)
+                } else {
+                    build_ncbi_lookup(set, threshold, &params, false)
+                };
                 for hits in cell_lists(&table) {
                     let mut sorted = hits.to_vec();
                     sorted.sort_unstable();
@@ -1464,11 +1451,11 @@ mod tests {
         ]
     }
 
-    /// `x_bp_build_lookup(true, ..)`'s table and contexts are those of `got`: every table field,
+    /// `x_bp_build_lookup(..)`'s table and contexts are those of `got`: every table field,
     /// and every context field (the Karlin blocks by their bits).
     fn assert_same_bp(got: &(BlastAaLookupTable, Vec<QueryContext>), queries: &[Vec<QueryFrame>]) {
         let params = blosum62_ideal_karlin_params();
-        let (want, want_contexts) = x_bp_build_lookup(true, queries, 11, &params, false);
+        let (want, want_contexts) = x_bp_build_lookup(queries, 11, false);
         x_assert_same_table_as("ahead:", &got.0, &want);
         assert!(x_same_table(&got.0, &want));
         assert_eq!(got.1.len(), want_contexts.len());
@@ -1502,7 +1489,7 @@ mod tests {
         let mut seed = 41u64;
         let queries = bp_queries(&mut seed);
         let params = blosum62_ideal_karlin_params();
-        let (first, _) = x_bp_build_lookup(true, &queries, 11, &params, false);
+        let (first, _) = x_bp_build_lookup(&queries, 11, false);
         let (backbone, pv, overflow) = (first.backbone.len(), first.pv.len(), first.overflow.len());
         assert!(overflow > 0, "the fixture must reach the overflow array");
         assert!(X_MEMO.with(|memo| memo.borrow().is_some()));
@@ -1554,7 +1541,7 @@ mod tests {
         assert!(x_locked(&spares.block).is_empty());
         // Its own vectors are kept (those given back meanwhile are dropped); only a vector short of
         // its room is replaced.
-        let (other_table, _) = x_bp_build_lookup(true, &queries, 11, &params, false);
+        let (other_table, _) = x_bp_build_lookup(&queries, 11, false);
         spares.give(other_table);
         assert_eq!(spares.x_make_room(backbone, pv, overflow, overflow), 0);
         assert_eq!(addresses(&x_locked(&spares.ahead)), given);
@@ -1588,7 +1575,7 @@ mod tests {
         let mut seed = 43u64;
         let queries = bp_queries(&mut seed);
         let params = blosum62_ideal_karlin_params();
-        let (table, _) = x_bp_build_lookup(true, &queries, 11, &params, false);
+        let (table, _) = x_bp_build_lookup(&queries, 11, false);
         let (backbone, pv, overflow) = (table.backbone.len(), table.pv.len(), table.overflow.len());
         for (b, p, o) in [
             (backbone, pv, overflow - 1),
@@ -1623,7 +1610,7 @@ mod tests {
         let mut seed = 47u64;
         let queries = bp_queries(&mut seed);
         let params = blosum62_ideal_karlin_params();
-        let build = || x_bp_build_lookup(true, &queries, 11, &params, false).0;
+        let build = || x_bp_build_lookup(&queries, 11, false).0;
         let want = build();
         assert!(x_same_table(&build(), &want));
         let cell = want

@@ -103,7 +103,7 @@ pub(super) struct XTwoHit<'a> {
     pub matrix: ScoringMatrix,
     pub window: i32,
     pub word_size: usize,
-    /// EXPERIMENT (LOSAT_X_TBNUNGAP): the extension takes LOSAT_X_BPUNGAP's walks
+    /// EXPERIMENT (LOSAT_X_TBNUNGAP): the extension takes BLASTP's byte-table walks
     /// ([`x_tbn_ungap`]).
     x_ungap_fast: bool,
 }
@@ -121,19 +121,18 @@ pub(super) struct XTwoHit<'a> {
 //                       Boolean * right_extend, Int4 * s_last_off)
 // ```
 // EXPERIMENT (LOSAT_X_TBNUNGAP): the two-hit extension of tblastn's word finder (`XTwoHit::pairs`)
-// with BLASTP's byte-table walks (`blastp/x_ungapped_fast.rs`, LOSAT_X_BPUNGAP, whose module doc
+// with BLASTP's byte-table walks (`blastp/x_ungapped_fast.rs`, whose module doc
 // gives why the result is the reference's): the same statements in the same order, a residue pair
 // scored from one signed byte (`q << 5 | s`) instead of the matrix row, and the bounds of each walk
 // computed from the slice lengths as the reference computes them, so the walks stop where the
 // reference's do on every unit, also on a chunk that ends inside a frame. An extension whose codes
 // or X-drop the byte table does not cover (a code >= 32, an X-drop outside 1..=127, a word of more
 // than 11 residues) runs the reference. The table holds BLOSUM62's scores, the matrix of every
-// default tblastn search; another matrix keeps the reference. The walks read the table whatever
-// LOSAT_X_BPUNGAP says, so the path is taken only where `build_table` gives one (every BLOSUM62
-// score fits a byte; were it not so, the table the walks read would be the zeros of
-// `x_ungapped_fast::state`'s fallback). A strict-set switch (`utils/xswitch.rs`): on unless
+// default tblastn search; another matrix keeps the reference. The path is taken only where
+// `build_table` gives a table (every BLOSUM62 score fits a byte; were it not so, the walks hand
+// every call to the reference). A strict-set switch (`utils/xswitch.rs`): on unless
 // `LOSAT_X_TBNUNGAP=0`.
-/// Whether a word finder with `matrix` takes LOSAT_X_BPUNGAP's walks (BLOSUM62, switch on).
+/// Whether a word finder with `matrix` takes BLASTP's byte-table walks (BLOSUM62, switch on).
 fn x_tbn_ungap(matrix: ScoringMatrix) -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if !*ON.get_or_init(|| {

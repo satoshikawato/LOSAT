@@ -6,7 +6,7 @@
 //! The reference (`word_finder`, and `x_word_finder_direct` of `x_seed_scan.rs`) has the
 //! scanner copy every word hit into the offset-pair buffer and then reads the buffer back for the
 //! two-hit test (NCBI's `s_BlastAaScanSubject` and `s_BlastAaWordFinder_TwoHit`). With the switch,
-//! blastp's fused scan (`blastp::x_seed_fused::x_scan_two_hit_with`: LOSAT_X_BPSEED's loop with
+//! blastp's fused scan (`blastp::x_seed_fused::x_scan_two_hit_with`: blastp's fused loop with
 //! LOSAT_X_BPDIAG's cell test) reads the hits of each lookup cell in place, in the same order, and
 //! applies the outcomes of the test that touch only the hit's diagonal entry; a hit that passes the
 //! test goes to the closure of [`x_word_finder_fused`], which runs the rest of the reference's
@@ -465,8 +465,8 @@ pub(crate) fn x_print_shadow_summary() {
 /// fused scan reads it as a sentinel (`x_seed_fused::x_scan_cells`). With one scan position no
 /// hit is extended, and the entry such a hit leaves lies a window and the subject's length behind
 /// the next subject's offsets, where every later hit reads it as no previous hit; so the hit lists
-/// are compared and the tables, which may differ in that entry, are not (as LOSAT_X_BPSEEDSHADOW
-/// does for blastp).
+/// are compared and the tables, which may differ in that entry, are not (as blastp's
+/// fused loop does for the tables of subjects shorter than a word).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
 // ```c
 //             diag_coord = (query_offset - subject_offset) & diag_mask;

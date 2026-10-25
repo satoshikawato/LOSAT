@@ -9,7 +9,7 @@
 //! | `0` | off |
 //! | not set, empty, or any other value | on (for a value switch, the number given or the built-in value) |
 //!
-//! White space around a value is ignored (`set LOSAT_X_BPSEED=0 && ...` in cmd.exe stores `0 `),
+//! White space around a value is ignored (`set LOSAT_X_BPSUBJRUN=0 && ...` in cmd.exe stores `0 `),
 //! so a value of spaces only counts as empty. Only `0` means off: `00`, `false` or `off` are "any
 //! other value".
 //!
@@ -66,6 +66,10 @@ use std::ops::RangeInclusive;
 /// after them. `LOSAT_X_TBNOIDCHUNK`,
 /// `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`,
 /// `LOSAT_X_SEGSHARE` and `LOSAT_X_DEKKER` graduated on 2026-10-22 (see `GRADUATED`).
+/// `LOSAT_X_BPCOMPOREUSE`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPCOMPACT`, `LOSAT_X_BPPFREE`,
+/// `LOSAT_X_BPREDOFIT`, `LOSAT_X_BPSCANBF`, `LOSAT_X_BPSEED` and `LOSAT_X_BPUNGAP` (all always on)
+/// graduated on 2026-10-26: they left `STRICT_SET` and their old code was deleted; nothing
+/// chooses any more, so they are not in `GRADUATED`.
 /// `LOSAT_X_LINKSLICES` (the groups of the TBLASTX linking call linked as slices of its one list,
 /// `tblastx/x_link_slices.rs`) was added after the change as a switch that is off unless set and
 /// joined the set once it was verified with it on.
@@ -162,7 +166,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNUNGAPCOUNT",
     "LOSAT_X_BPCLUT",
     "LOSAT_X_BPCLUTSCANBF",
-    "LOSAT_X_BPCOMPOREUSE",
     "LOSAT_X_BPDBCUT",
     "LOSAT_X_BPDEFER",
     "LOSAT_X_BPDIAG",
@@ -173,10 +176,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPLISTEDLEAN",
     "LOSAT_X_BPLKPAHEAD",
     "LOSAT_X_BPLKPFLAT",
-    "LOSAT_X_BPLUT",
     "LOSAT_X_BPMASKED",
-    "LOSAT_X_BPPCOMPACT",
-    "LOSAT_X_BPPFREE",
     "LOSAT_X_BPQBLOCK",
     "LOSAT_X_BPQBLOCKFMT",
     "LOSAT_X_BPQBLOCKSA",
@@ -184,15 +184,11 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPQBLOCKXML",
     "LOSAT_X_BPQBLOCKXML2",
     "LOSAT_X_BPREDODBSUBJ",
-    "LOSAT_X_BPREDOFIT",
     "LOSAT_X_BPREDOLPT",
     "LOSAT_X_BPREDOPAR",
     "LOSAT_X_BPREDOWINEXPAND",
-    "LOSAT_X_BPSCANBF",
-    "LOSAT_X_BPSEED",
     "LOSAT_X_BPSUBJMETA",
     "LOSAT_X_BPSUBJRUN",
-    "LOSAT_X_BPUNGAP",
     "LOSAT_X_BPUNGAPSENT",
     "LOSAT_X_BXCHUNKFLOW",
     "LOSAT_X_BXCROSS",

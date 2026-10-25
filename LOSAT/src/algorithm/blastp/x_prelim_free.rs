@@ -1,5 +1,6 @@
-//! EXPERIMENT (LOSAT_X_BPPFREE): blastp's preliminary hit lists hold no more memory than their
-//! HSPs need, and each query's list is freed once its composition-based redo is done.
+//! blastp's preliminary hit lists hold no more memory than their HSPs need, and each query's list
+//! is freed once its composition-based redo is done. This module holds the description only; the
+//! code is in `blast_engine.rs` and `x_redo_par.rs`.
 //!
 //! The preliminary stage keeps, for every query of a search, the HSP lists of up to the
 //! preliminary hit list size of subjects (`BlastpHitList`), and the redo of the traceback stage
@@ -13,7 +14,7 @@
 //!   end of the redo, where the preliminary lists of all queries and the redone alignments of
 //!   all queries are held together.
 //!
-//! With the switch on, the vector of a reaped list gives back its spare room
+//! The vector of a reaped list gives back its spare room
 //! (`Vec::shrink_to_fit`), and the serial redo frees a query's preliminary list after its last
 //! match has been redone. Neither changes a value: the reaped list keeps the same HSPs in the
 //! same order, and nothing reads a query's preliminary list after its redo (the redo of a query
@@ -21,9 +22,8 @@
 //! `redone_matches`, not the preliminary lists). The parallel redo paths are unchanged (they read
 //! the lists again when they replay the kept matches).
 //!
-//! `LOSAT_X_BPPFREE` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`.
-//! With `LOSAT_TIMING=1` a search
-//! with the switch prints `[TIMING] x_bppfree: freed_lists=<n>` (the lists the serial redo freed).
+//! With `LOSAT_TIMING=1` a search prints `[TIMING] x_bppfree: freed_lists=<n>` (the lists the
+//! redo freed).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399
 //! ```c
@@ -37,12 +37,3 @@
 //!                     localMatch = Blast_HSPListFree(localMatch);
 //!                 } else {
 //! ```
-
-// No NCBI counterpart: reads the LOSAT_X_BPPFREE switch once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPPFREE): a strict-set switch, on unless it is `0`.
-pub(crate) fn x_bp_prelim_free() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPPFREE"))
-}

@@ -4,7 +4,7 @@
 //! instead of a bound.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883 (the walks) and
-//! 1089-1155 (`s_BlastAaExtendTwoHit`), as in `x_ungapped_fast.rs` (LOSAT_X_BPUNGAP), whose byte
+//! 1089-1155 (`s_BlastAaExtendTwoHit`), as in `x_ungapped_fast.rs`, whose byte
 //! table this path scores with and whose statements it keeps in the same order. What changes:
 //! * The checks the fast path makes on every call are made once: residue codes below 32 and the
 //!   X-drops of every context in `1..=127` for a query block ([`XSentQuery::new`]), codes below 32

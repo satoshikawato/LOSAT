@@ -442,7 +442,7 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
 // ```
 /// The preliminary stage of a database search: every sequence, in the order of its
 /// ordinal id, through the per-subject kernel `process_subject`, with its HSP lists put
-/// into `preliminary_hit_lists` in that order (NCBI's loop with one thread).
+/// into `x_compact_hit_lists` in that order (NCBI's loop with one thread).
 ///
 /// One thread: the blocks in order, one scratch (one diagonal table) for the whole
 /// database, the hit lists updated after every subject, as the one-thread loop of the
@@ -462,8 +462,7 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
 /// `ListedSubjects` holds the sequences of the listed subjects). A block that cannot be
 /// read or searched does not stop the other blocks of its round; the round's first
 /// error in ordinal order is returned, the error of the one-thread order (the blocks
-/// are cut alike). EXPERIMENT (LOSAT_X_BPPCOMPACT): the compact lists
-/// (`x_compact_hit_lists`) are updated with the hit lists, in the same order.
+/// are cut alike). The hit lists hold the compact element (`x_prelim_compact.rs`).
 /// EXPERIMENT (LOSAT_X_BPDBCUT): with more than one thread the blocks are cut by the
 /// database size and the thread count, and a failed search returns the one-thread order's
 /// error (`database/x_db_cut.rs`, exactness argument in its header).
@@ -474,7 +473,6 @@ pub(super) fn search_blocks<S, K>(
     window: i32,
     new_scratch: &S,
     process_subject: &K,
-    preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     prelim_hitlist_size: usize,
 ) -> Result<()>
@@ -506,7 +504,6 @@ where
                 blocks_per_thread,
                 new_scratch,
                 process_subject,
-                preliminary_hit_lists,
                 x_compact_hit_lists,
                 prelim_hitlist_size,
             );
@@ -520,7 +517,6 @@ where
         blocks_per_thread,
         new_scratch,
         process_subject,
-        preliminary_hit_lists,
         x_compact_hit_lists,
         prelim_hitlist_size,
     )
@@ -537,7 +533,6 @@ fn search_blocks_of<S, K>(
     blocks_per_thread: usize,
     new_scratch: &S,
     process_subject: &K,
-    preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     prelim_hitlist_size: usize,
 ) -> Result<()>
@@ -597,11 +592,7 @@ where
                                     block_subject(&block, i),
                                     &mut subject_result,
                                 );
-                                // (EXPERIMENT LOSAT_X_BPPCOMPACT: the HSP lists may all
-                                // be compact ones.)
-                                if !subject_result.query_hsp_lists.is_empty()
-                                    || !subject_result.x_compact_hsp_lists.is_empty()
-                                {
+                                if !subject_result.x_compact_hsp_lists.is_empty() {
                                     with_hits.push(std::mem::replace(
                                         &mut subject_result,
                                         BlastpSubjectResult::new(0),
@@ -618,7 +609,6 @@ where
             for block_results in found {
                 for mut subject_result in block_results? {
                     update_blastp_preliminary_hit_lists(
-                        preliminary_hit_lists,
                         x_compact_hit_lists,
                         &mut subject_result,
                         prelim_hitlist_size,
@@ -647,7 +637,6 @@ where
                 &mut subject_result,
             );
             update_blastp_preliminary_hit_lists(
-                preliminary_hit_lists,
                 x_compact_hit_lists,
                 &mut subject_result,
                 prelim_hitlist_size,
@@ -731,7 +720,7 @@ impl ListedSubjects {
     // (`adjust_scores.rs`, composition_adjustment.c:681-703). The preliminary stage uses
     // scores only, which are the same for O and X (`prepare_search_block`).
     /// Reads the sequences of the ordinal ids in `hit_lists` and `x_compact_hit_lists`
-    /// (EXPERIMENT LOSAT_X_BPPCOMPACT: the lists not expanded yet, `x_prelim_compact.rs`) and
+    /// (the lists not expanded yet, `x_prelim_compact.rs`) and
     /// renames the subjects of both to their ranks.
     pub(super) fn read(
         database: &BlastpDatabase,
@@ -1719,16 +1708,38 @@ mod tests {
                 .push((s_idx, scratch.diag_offset, subject.aa_seq.to_vec()));
             scratch.finish_subject(subject.aa_len, window);
             if s_idx % 3 == 0 {
-                result.query_hsp_lists.push((
+                result.x_compact_hsp_lists.push((
                     0,
                     BlastpHspList {
                         oid: s_idx as u32,
                         query_index: 0,
-                        hsps: vec![test_hsp(s_idx as u32, 50 + (s_idx as i32 % 2))],
+                        hsps: vec![test_prelim_hsp(s_idx as u32, 50 + (s_idx as i32 % 2))],
                         best_evalue: 1e-5,
                     },
                 ));
             }
+        }
+    }
+
+    fn test_prelim_hsp(s_idx: u32, raw_score: i32) -> XPrelimHsp {
+        use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
+        XPrelimHsp {
+            hsp: BlastpPreliminaryHsp {
+                query_start: 0,
+                query_end: 10,
+                subject_start: 0,
+                subject_end: 10,
+                gapped_query_start: 1,
+                gapped_subject_start: 1,
+                raw_score,
+                query_context: 0,
+                query_frame: 0,
+                subject_frame: 0,
+                query_length: 20,
+                q_idx: 0,
+                s_idx,
+            },
+            e_value: 1e-5,
         }
     }
 
@@ -1767,7 +1778,7 @@ mod tests {
         window: i32,
     ) -> (Vec<(usize, i32, Vec<u8>)>, Vec<u32>) {
         let seen = std::sync::Mutex::new(Vec::new());
-        let mut hit_lists: Vec<Option<BlastpHitList>> = vec![None];
+        let mut hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>> = vec![None];
         crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
             search_blocks_of(
                 database,
@@ -1778,7 +1789,6 @@ mod tests {
                 &|| BlastpSubjectScratch::new(16, 64, window, 21),
                 &recording_kernel(window, &seen),
                 &mut hit_lists,
-                &mut [],
                 500,
             )
         })
@@ -1902,8 +1912,7 @@ mod tests {
         ) -> Result<(Seen, Vec<u32>)> {
             let window = 40;
             let seen = std::sync::Mutex::new(Vec::new());
-            let mut hit_lists: Vec<Option<BlastpHitList>> = vec![None];
-            let mut compact: Vec<Option<BlastpHitList<XPrelimHsp>>> = vec![None];
+            let mut hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>> = vec![None];
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                 let new_scratch = || BlastpSubjectScratch::new(16, 64, window, 21);
                 let kernel = recording_kernel(window, &seen);
@@ -1916,7 +1925,6 @@ mod tests {
                         &new_scratch,
                         &kernel,
                         &mut hit_lists,
-                        &mut compact,
                         500,
                     ),
                     Some(block_bytes) => search_blocks_of(
@@ -1928,7 +1936,6 @@ mod tests {
                         &new_scratch,
                         &kernel,
                         &mut hit_lists,
-                        &mut compact,
                         500,
                     ),
                 }
@@ -2578,8 +2585,8 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the compact preliminary lists (`x_prelim_compact.rs`) are
-    // listed and renamed to ranks with the off path's lists, before they are expanded.
+    // The compact preliminary lists (`x_prelim_compact.rs`) are listed and renamed to ranks with
+    // the lists of full HSPs, before they are expanded.
     #[test]
     fn compact_lists_are_listed_and_renamed_with_the_others() {
         use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;

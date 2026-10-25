@@ -1,12 +1,13 @@
 //! NCBI's Seq-id of the sequences that LOSAT reports, and its printings.
 //!
-//! LOSAT reads queries and `-subject` subjects without `-parse_deflines` (refused), and
-//! BLAST databases without parsed Seq-ids (`seqdb/header.rs`), so a reported sequence has one
-//! of two Seq-ids: the local ID that NCBI's FASTA reader generates (`Query_N`, `Subject_N`),
-//! or the ordinal ID of a database sequence (`gnl|BL_ORD_ID|<oid>`). The serial formats
-//! (outfmt 8, 9, 11, 12) write the Seq-id object itself (`SeqId::write`); the other printings
-//! (the title's first word, `gnl|BL_ORD_ID|0`, `BL_ORD_ID:0`, ...) join this type with the
-//! formats that use them.
+//! LOSAT reads queries and `-subject` subjects without `-parse_deflines` (refused), so a
+//! reported sequence has one of three Seq-ids: the local ID that NCBI's FASTA reader
+//! generates (`Query_N`, `Subject_N`), the ordinal ID of a sequence of a database without
+//! parsed Seq-ids (`gnl|BL_ORD_ID|<oid>`), or a Seq-id that a database built with
+//! `-parse_seqids` stores (`SeqId::Db`, chosen and printed by `crate::seqid`). The serial
+//! formats (outfmt 8, 9, 11, 12) write the Seq-id object itself (`SeqId::write`); the other
+//! printings (the title's first word, `gnl|BL_ORD_ID|0`, `BL_ORD_ID:0`, ...) join this type
+//! with the formats that use them.
 //!
 //! NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-36
 //! ```text
@@ -27,6 +28,7 @@
 //! ```
 
 use crate::report::serial::encoder::Encoder;
+use crate::seqid::ParsedSeqId;
 
 /// The Seq-id of a reported sequence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,12 +76,18 @@ pub enum SeqId<'a> {
     /// The tag is the sequence's ordinal ID in the opened database (its volume's start plus
     /// its position in the volume).
     BlOrdId(u32),
+    /// A Seq-id of a database sequence with parsed Seq-ids: the Seq-align id that
+    /// `seqid::DeflineSet::alignment_id` chooses (or the id a format shows).
+    Db(&'a ParsedSeqId),
 }
 
 impl SeqId<'_> {
     /// Appends the Seq-id as the SAM formatter prints it: `GetSeqIdString(true)` of the
     /// `fSAM_PlainSeqIds` flag (the local string, or `BL_ORD_ID:<oid>` for a database
-    /// sequence). `AdjustSeqIdType` finds no accession for either id, so it keeps them.
+    /// sequence). `AdjustSeqIdType` finds no accession for either id, so it keeps them. A
+    /// parsed Seq-id prints `GetSeqIdString(true)` (`seqid::label::content`) of the id it
+    /// holds: the caller passes the id that NCBI's `GetId(eGetId_ForceAcc)` and
+    /// `AdjustSeqIdType` give.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:111-115
     /// ```c++
@@ -96,13 +104,14 @@ impl SeqId<'_> {
                 out.extend_from_slice(b"BL_ORD_ID:");
                 out.extend_from_slice(oid.to_string().as_bytes());
             }
+            SeqId::Db(id) => crate::seqid::label::content(id, true, out),
         }
     }
 
     /// Writes the Seq-id object (a CHOICE) through `enc`, in the member order of the ASN.1
     /// modules quoted above: `local` (variant 0) holds an Object-id `str` (variant 1);
     /// `general` (variant 10) holds a Dbtag (`db` member 0, `tag` member 1 = Object-id `id`,
-    /// variant 0).
+    /// variant 0). A parsed Seq-id writes itself (`seqid::model::ParsedSeqId::write`).
     pub fn write<E: Encoder>(&self, enc: &mut E) {
         match *self {
             SeqId::Local(id) => {
@@ -128,6 +137,7 @@ impl SeqId<'_> {
                 enc.end_sequence();
                 enc.end_variant();
             }
+            SeqId::Db(id) => id.write(enc),
         }
     }
 }

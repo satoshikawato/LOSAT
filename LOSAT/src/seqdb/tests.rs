@@ -535,13 +535,28 @@ fn open_error(name: &str, seqtype: SeqType) -> SeqDbError {
 
 #[test]
 fn databases_that_need_unread_data_are_rejected() {
+    // A database with parsed Seq-ids opens; the check of the search programs
+    // that read ordinal ids only refuses it, as the reader's open did before.
     for name in ["prot_ids_v4", "prot_ids_v5"] {
-        let error = open_error(name, SeqType::Protein);
+        let db =
+            SeqDb::open(&db_name(name), SeqType::Protein).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let error = db.check_ordinal_ids().expect_err("parsed Seq-ids");
         assert!(
             matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("parsed Seq-ids")),
             "{name}: {error}"
         );
+        assert!(
+            error.to_string().ends_with(&format!(
+                "{name}.phr: unsupported database: the database stores parsed Seq-ids \
+                 (makeblastdb -parse_seqids, or a database distributed by NCBI); LOSAT reads \
+                 databases built without -parse_seqids only"
+            )),
+            "{name}: {error}"
+        );
+        assert_eq!(db.defline_set(0).unwrap().deflines.len(), 1, "{name}");
     }
+    let db = SeqDb::open(&db_name("prot_v4"), SeqType::Protein).unwrap();
+    db.check_ordinal_ids().unwrap();
     for (name, key) in [("alias_gilist", "GILIST")] {
         let error = open_error(name, SeqType::Protein);
         assert!(
@@ -1578,9 +1593,12 @@ fn check_search_path_row(
 ) {
     let (ncbi, title, sequences, volumes, error, status) =
         (&row[0], &row[1], &row[2], &row[3], &row[4], &row[5]);
-    // The tables hold the value of blastp's `-db`, which the program trims.
+    // The tables hold the value of blastp's `-db`, which the program trims. A
+    // search program checks the ordinal ids right after it opens the database
+    // (`algorithm::common::database::refuse_parsed_seqids`).
     let name = db_argument_name(name);
-    let opened = SeqDb::open_in(name, SeqType::Protein, search);
+    let opened = SeqDb::open_in(name, SeqType::Protein, search)
+        .and_then(|db| db.check_ordinal_ids().map(|()| db));
 
     // A volume without its sequence file: NCBI's search fails when it reads
     // the first sequence, with the search stage's own text and exit status.

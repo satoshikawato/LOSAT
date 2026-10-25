@@ -1,0 +1,18 @@
+0	ref|NM_000001.1|	NM_000001.1	N/A	9606	0	alpha mRNA [Homo sapiens]
+0	gb|AB000001.1|	AB000001.1	N/A	10090	0	alpha cDNA
+0	emb|X00001.2|	X00001.2	N/A	9606	0	alpha clone
+1	gb|AB000002.3|	AB000002.3	654321	7227	0	gi plus gb nucleotide
+2	emb|AJ000003.1|	AJ000003.1	N/A	0	0	emb nucleotide
+3	dbj|AB000004.1|	AB000004.1	N/A	0	0	dbj nucleotide
+4	ref|NC_000005.11|	NC_000005.11	N/A	0	0	chromosome-like
+5	lcl|mynuc6	mynuc6	N/A	0	0	local id nucleotide
+6	gnl|mydb|nuc7	mydb:nuc7	N/A	0	0	general id nucleotide
+7	ref|NM_000008.2|	NM_000008.2	N/A	0	0	bare refseq accession
+8	dbj|AB000009|	AB000009	N/A	0	0	bare genbank accession without version
+9	lcl|mynuc_10	mynuc_10	N/A	0	0	bare non-accession word
+10	gi|1111	gi|1111	1111	0	0	gi only
+11	tpg|BK000012.1|	BK000012.1	N/A	0	0	third-party nucleotide
+12	gb|AB000013.1|LOCUS13	AB000013.1	N/A	0	0	gb with a locus name
+13	pat|US|1234567|14	US1234567_14	N/A	0	0	patent nucleotide
+14	gb|AB000015.1|	AB000015.1	1515	0	0	
+14	ref|XM_000016.1|	XM_000016.1	1516	0	0	second defline

@@ -1,0 +1,12 @@
+>ref|XP_900001.1| first defline without a gigi|9002|emb|CAA90002.1| second defline with a gisp|P90003.1|NAME3_HUMAN third defline swissprot
+MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+WICWIPKEQQTPGWWKTDTQHMAEAGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEK
+LKILHHMVGHGRTASEG
+>ref|XP_910001.1| long title number 01 with many words so that it is longer than sixty characters in totalref|XP_910002.1| long title number 02 with many words so that it is longer than sixty characters in totalref|XP_910003.1| long title number 03 with many words so that it is longer than sixty characters in totalref|XP_910004.1| long title number 04 with many words so that it is longer than sixty characters in totalref|XP_910005.1| long title number 05 with many words so that it is longer than sixty characters in totalref|XP_910006.1| long title number 06 with many words so that it is longer than sixty characters in totalref|XP_910007.1| long title number 07 with many words so that it is longer than sixty characters in totalref|XP_910008.1| long title number 08 with many words so that it is longer than sixty characters in totalref|XP_910009.1| long title number 09 with many words so that it is longer than sixty characters in totalref|XP_910010.1| long title number 10 with many words so that it is longer than sixty characters in totalref|XP_910011.1| long title number 11 with many words so that it is longer than sixty characters in totalref|XP_910012.1| long title number 12 with many words so that it is longer than sixty characters in total
+MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMIYEFSSDIQP
+WACWIPKEQQTQGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEK
+LKILHHMVGHGRTASEG
+>ref|XP_920001.1| has a titleemb|CAA92002.1|dbj|BAA92003.1| third has a title
+MWMEHSVLKAVFDVRRKVMDDPKIRSGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+WIEWIPKEQQTPGWWKTDTLHMAEMGLWMHCYPKCMCYMVRYTDQSLRHWEINTDANFEK
+LKILHHIVGHGRTASEG

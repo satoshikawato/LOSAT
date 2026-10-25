@@ -1,0 +1,18 @@
+0	ref|XP_900001.1|	XP_900001.1	N/A	0	0	first defline without a gi
+0	emb|CAA90002.1|	CAA90002.1	9002	0	0	second defline with a gi
+0	sp|P90003.1|NAME3_HUMAN	P90003.1	N/A	0	0	third defline swissprot
+1	ref|XP_910001.1|	XP_910001.1	N/A	0	0	long title number 01 with many words so that it is longer than sixty characters in total
+1	ref|XP_910002.1|	XP_910002.1	N/A	0	0	long title number 02 with many words so that it is longer than sixty characters in total
+1	ref|XP_910003.1|	XP_910003.1	N/A	0	0	long title number 03 with many words so that it is longer than sixty characters in total
+1	ref|XP_910004.1|	XP_910004.1	N/A	0	0	long title number 04 with many words so that it is longer than sixty characters in total
+1	ref|XP_910005.1|	XP_910005.1	N/A	0	0	long title number 05 with many words so that it is longer than sixty characters in total
+1	ref|XP_910006.1|	XP_910006.1	N/A	0	0	long title number 06 with many words so that it is longer than sixty characters in total
+1	ref|XP_910007.1|	XP_910007.1	N/A	0	0	long title number 07 with many words so that it is longer than sixty characters in total
+1	ref|XP_910008.1|	XP_910008.1	N/A	0	0	long title number 08 with many words so that it is longer than sixty characters in total
+1	ref|XP_910009.1|	XP_910009.1	N/A	0	0	long title number 09 with many words so that it is longer than sixty characters in total
+1	ref|XP_910010.1|	XP_910010.1	N/A	0	0	long title number 10 with many words so that it is longer than sixty characters in total
+1	ref|XP_910011.1|	XP_910011.1	N/A	0	0	long title number 11 with many words so that it is longer than sixty characters in total
+1	ref|XP_910012.1|	XP_910012.1	N/A	0	0	long title number 12 with many words so that it is longer than sixty characters in total
+2	ref|XP_920001.1|	XP_920001.1	N/A	0	0	has a title
+2	emb|CAA92002.1|	CAA92002.1	N/A	0	0	
+2	dbj|BAA92003.1|	BAA92003.1	N/A	0	0	third has a title

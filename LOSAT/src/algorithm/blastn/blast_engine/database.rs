@@ -235,6 +235,8 @@ impl BlastnDatabase {
     /// engine cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         let db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
+        // A database with parsed Seq-ids is refused (line DBID: ID2b opens it).
+        shared::refuse_parsed_seqids(&db, PROGRAM)?;
         let total = db.total_length();
         let db_len_total = usize::try_from(total)
             .ok()

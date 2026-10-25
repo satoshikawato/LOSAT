@@ -1,0 +1,17 @@
+0	tpe|BK000012.1|	BK000012.1	N/A	0	0	third party embl
+1	tpd|BK000013.1|	BK000013.1	N/A	0	0	third party ddbj
+2	lcl|gpipe|GPP123|	gpipe|GPP123|	N/A	0	0	genome pipeline
+3	bbs|123	123	N/A	0	0	gibbsq
+4	bbm|123	123	N/A	0	0	gibbmt
+5	pdb|1ABC|AA	1ABC_AA	N/A	0	0	two char chain
+6	pdb|1ABC| 	1ABC	N/A	0	0	no chain
+7	sp|P99999|	P99999	N/A	0	0	swiss no name
+8	gb|AAA00100.1|	AAA00100.1	3000000000	0	0	big gi
+9	lcl|long1	long1	N/A	0	0	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 
+10	gnl|ti|123	ti:123	N/A	0	0	trace id
+11	gnl|PIG|123	PIG:123	N/A	0	0	pig id
+12	pat|US|RE33188|1	USRE33188_1	N/A	0	0	patent reissue
+13	pat|EP|0123456A1|7	EP0123456A1_7	N/A	0	0	patent with letters
+14	ref|NP_000002|	NP_000002	N/A	0	0	ref without version
+15	prf|ABC|DEF	prf|ABC|DEF	N/A	0	0	prf two fields
+16	lcl|123	123	N/A	0	0	numeric local

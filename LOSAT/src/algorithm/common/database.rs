@@ -133,6 +133,14 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
     }
 }
 
+/// LOSAT's refusal of a database with parsed Seq-ids (`SeqDb::check_ordinal_ids`), which
+/// `program` does not search yet: each search program calls it right after it opens its
+/// database (`open_database`), so the refusal comes where the reader gave it before.
+pub(crate) fn refuse_parsed_seqids(db: &SeqDb, program: &str) -> Result<()> {
+    db.check_ordinal_ids()
+        .map_err(|error| database_error(error, program))
+}
+
 /// LOSAT's refusal of a database that `program` does not search as NCBI does.
 pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
     anyhow::anyhow!("{reason}; this database is not supported by LOSAT's {program}")

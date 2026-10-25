@@ -558,6 +558,7 @@ pub(super) unsafe fn two_hit_sent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::tblastx::scoring::Blosum62Score;
 
     struct Rng(u64);
     impl Rng {
@@ -594,7 +595,7 @@ mod tests {
 
     /// One call both ways; the fast path must handle it.
     fn check_call(q: &[u8], s: &[u8], sl: usize, sr: usize, qr: usize, d: i32) {
-        let expect = extend_hit_two_hit_reference(q, s, sl, sr, qr, d, false);
+        let expect = extend_hit_two_hit_reference(Blosum62Score, q, s, sl, sr, qr, d, false);
         let got = two_hit(q, s, sl, sr, qr, d).expect("the fast path handles the call");
         assert_eq!(got, expect, "sl={sl} sr={sr} qr={qr} d={d}");
     }
@@ -731,7 +732,7 @@ mod tests {
     fn check_sent(q: &[u8], s: &[u8], sl: usize, sr: usize, qr: usize, d: i32) {
         let (qb, qr_range) = with_sentinels(q);
         let (sb, sr_range) = with_sentinels(s);
-        let expect = extend_hit_two_hit_reference(q, s, sl, sr, qr, d, false);
+        let expect = extend_hit_two_hit_reference(Blosum62Score, q, s, sl, sr, qr, d, false);
         // SAFETY: both buffers are [0, residues.., 0] and short.
         let got = unsafe { two_hit_sent(&qb[qr_range], &sb[sr_range], sl, sr, qr, d) }
             .expect("the sentinel walks handle the call");
@@ -877,7 +878,8 @@ mod tests {
         // `extend_hit_two_hit_sent` runs the reference for the X-drops (the callers' words fit).
         let (qv, sv) = (&qb[qr.start + 1..qr.end - 1], &sb[sr.start + 1..sr.end - 1]);
         for (sl, srr, qrr, d) in [(10, 20, 20, 0), (10, 20, 20, 128), (10, 47, 47, 0)] {
-            let expect = extend_hit_two_hit_reference(qv, sv, sl, srr, qrr, d, false);
+            let expect =
+                extend_hit_two_hit_reference(Blosum62Score, qv, sv, sl, srr, qrr, d, false);
             // SAFETY: both buffers are [0, residues.., 0].
             let got =
                 unsafe { super::super::two_hit::extend_hit_two_hit_sent(q, s, sl, srr, qrr, d) };

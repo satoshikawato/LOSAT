@@ -569,6 +569,7 @@ impl TblastnArgs {
             compressed_lookup,
             hitlist_size: counts.hitlist_size,
             evalue,
+            psiblast: false,
         })?;
         Ok(ResolvedTblastnArgs {
             task: self.task.clone(),

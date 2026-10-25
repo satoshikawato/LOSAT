@@ -53,6 +53,7 @@ use crate::utils::threading::SearchPool;
 
 use super::blast_engine::TblastxHsp;
 use super::report::{self, PairwiseRows, SubjectLetters};
+use super::scoring::TbxScore;
 
 #[cfg(all(
     feature = "parallel",
@@ -169,17 +170,18 @@ fn format_chunk(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-pub(crate) fn set_displayed_identities(
+pub(crate) fn set_displayed_identities<S: TbxScore>(
     pool: &SearchPool<'_>,
     hits: &mut [TblastxHsp],
     queries: &[FastaRecord],
     subjects: SubjectLetters<'_>,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    sc: S,
 ) {
     pool.install(|| {
         hits.par_chunks_mut(CHUNK).for_each(|chunk| {
-            report::set_displayed_identities(chunk, queries, subjects, query_code, db_code)
+            report::set_displayed_identities(chunk, queries, subjects, query_code, db_code, sc)
         })
     })
 }
@@ -188,15 +190,16 @@ pub(crate) fn set_displayed_identities(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 )))]
-pub(crate) fn set_displayed_identities(
+pub(crate) fn set_displayed_identities<S: TbxScore>(
     _pool: &SearchPool<'_>,
     hits: &mut [TblastxHsp],
     queries: &[FastaRecord],
     subjects: SubjectLetters<'_>,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    sc: S,
 ) {
-    report::set_displayed_identities(hits, queries, subjects, query_code, db_code)
+    report::set_displayed_identities(hits, queries, subjects, query_code, db_code, sc)
 }
 
 /// `report::engine_counts` (the Seq-aligns' engine counts, outfmt 8 and 12 only) over chunks of
@@ -206,17 +209,18 @@ pub(crate) fn set_displayed_identities(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-pub(crate) fn engine_counts(
+pub(crate) fn engine_counts<S: TbxScore>(
     pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
     queries: &[FastaRecord],
     subjects: SubjectLetters<'_>,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    sc: S,
 ) -> Vec<(u32, u32)> {
     let chunks: Vec<Vec<(u32, u32)>> = pool.install(|| {
         hits.par_chunks(CHUNK)
-            .map(|chunk| report::engine_counts(chunk, queries, subjects, query_code, db_code))
+            .map(|chunk| report::engine_counts(chunk, queries, subjects, query_code, db_code, sc))
             .collect()
     });
     chunks.concat()
@@ -226,15 +230,16 @@ pub(crate) fn engine_counts(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 )))]
-pub(crate) fn engine_counts(
+pub(crate) fn engine_counts<S: TbxScore>(
     _pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
     queries: &[FastaRecord],
     subjects: SubjectLetters<'_>,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    sc: S,
 ) -> Vec<(u32, u32)> {
-    report::engine_counts(hits, queries, subjects, query_code, db_code)
+    report::engine_counts(hits, queries, subjects, query_code, db_code, sc)
 }
 
 /// The outfmt 0 rows of `hits` (`report::pairwise_hits`) as an indexed map on `pool` (item 2).

@@ -569,7 +569,7 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::algorithm::blastp::args::BlastpArgs;
+    use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs};
     use crate::algorithm::blastp::x_query_blocks::XBlockSubjects;
     use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
         x_assert_same_flat_tables_as, XFlatCompressedLookup,
@@ -996,6 +996,8 @@ mod tests {
             subject_loc: None,
             outfmt: "6".to_string(),
             archive: None,
+            app: BlastpApp::Blastp,
+            inclusion_ethresh: None,
         }
         .resolve()
         .expect("resolved arguments")

@@ -646,8 +646,8 @@ pub(crate) fn sort_hsplist_by_evalue<H: HitListHsp>(list: &mut BlastpHspList<H>)
 // afterwards (blast_kappa.c:108-114), so two HSPs whose scaled scores round to the same score
 // and whose E-values are both below 1.0e-180 (s_EvalueComp, blast_hits.c:1390-1395) are put in
 // ScoreCompareHSPs order here, the smaller subject offset first. An HSP of score 0 (kept by a
-// very large -evalue) is in no report, and a subject with only such HSPs has none (the hit
-// list was already cut to -max_target_seqs).
+// very large -evalue) is in no report, and a subject with only such HSPs has none (blastp's hit
+// list was already cut to -max_target_seqs; psiblast's is cut afterwards, `psiblast_hits_found`).
 pub(crate) fn hit_list_to_seqalign_order(hit_list: &mut BlastpHitList) {
     let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
     let mut kept: Vec<_> = hit_list

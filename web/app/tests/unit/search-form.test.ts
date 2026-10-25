@@ -103,13 +103,23 @@ describe('formParameters', () => {
 
   it('works for TBLASTX with its sections in the order of the page: the genetic codes, then the algorithm parameters', () => {
     const tblastx = programById('tblastx');
-    const values: FormValues = { '-db_gencode': '11', '-query_gencode': '4', '-seg': 'yes', '-culling_limit': '2', '-evalue': '1' };
+    const values: FormValues = {
+      '-db_gencode': '11',
+      '-query_gencode': '4',
+      '-seg': 'yes',
+      '-soft_masking': 'true',
+      '-matrix': 'PAM30',
+      '-culling_limit': '2',
+      '-evalue': '1',
+    };
     expect(formParameters(tblastx, values, undefined)).toEqual([
       ['-query_gencode', '4'],
       ['-db_gencode', '11'],
       ['-evalue', '1'],
       ['-culling_limit', '2'],
+      ['-matrix', 'PAM30'],
       ['-seg', 'yes'],
+      ['-soft_masking', 'true'],
     ]);
   });
 

@@ -57,7 +57,7 @@ use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
 /// always sets it (`S/DESIGN_OF8.md` 2.2). TBLASTX has one task, and the options it does not
-/// accept (`-matrix`, `-strand`, `-lcase_masking`, ...) are never recorded.
+/// accept (`-strand`, `-lcase_masking`, ...) are never recorded.
 pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Tblastx, "tblastx");
     inputs.dbsize = args.dbsize;
@@ -66,9 +66,11 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     inputs.word_size = args.word_size;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps.map(|count| count as i32);
-    // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`); the
-    // default (13) is the value the matrix suggests, which the list holds either way.
-    inputs.threshold = Some(args.threshold as i32);
+    // `-matrix` is recorded as typed when given; `-threshold` is read as a double and recorded as
+    // an `int` (`static_cast<int>`). Without `-threshold` and `-window_size` the list holds the
+    // matrix's suggestions (`report::archive::options`).
+    inputs.matrix = args.matrix.clone();
+    inputs.threshold = args.threshold.map(|threshold| threshold as i32);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
     // ```c++
     //     if (args[kArgLookupTableMaskingOnly]) {
@@ -77,7 +79,7 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     // ```
     // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
     inputs.soft_masking = args.soft_masking;
-    inputs.window_size = Some(args.window_size);
+    inputs.window_size = args.window_size;
     inputs.seg = args.seg_spec().ok().map(|spec| match spec {
         SegSpec::No => Filter::No,
         SegSpec::Yes => Filter::Yes,
@@ -387,7 +389,7 @@ mod tests {
     // probes; `check_archive_layout.py opts`), without the `EffectiveSearchSpace` that each
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTX refuses some of these options at the command line
-    // (`-matrix`, `-strand`, `-sum_stats`, `-subject_besthit`, `-xdrop_ungap`,
+    // (`-sum_stats`, `-strand`, `-subject_besthit`, `-xdrop_ungap`,
     // `-parse_deflines`) or in its limits (`-word_size` other than 3): the list that NCBI would
     // record is what the archive's model knows about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
@@ -487,7 +489,7 @@ mod tests {
         let mut index = 0;
         while index < extra.len() {
             match extra[index] {
-                "-matrix" | "-sum_stats" => {
+                "-sum_stats" => {
                     by_hand.push((extra[index], extra[index + 1]));
                     index += 2;
                 }
@@ -515,17 +517,6 @@ mod tests {
         let mut inputs = option_inputs(&args);
         for (name, value) in by_hand {
             match name {
-                // With a matrix the threshold and the window size that are not given are the
-                // matrix's suggestions (the defaults of BLOSUM62 are what the arguments hold).
-                "-matrix" => {
-                    inputs.matrix = Some(value.to_string());
-                    if !extra.contains(&"-threshold") {
-                        inputs.threshold = None;
-                    }
-                    if !extra.contains(&"-window_size") {
-                        inputs.window_size = None;
-                    }
-                }
                 "-sum_stats" => inputs.sum_stats = Some(value == "true"),
                 _ => inputs.subject_besthit = true,
             }

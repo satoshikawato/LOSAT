@@ -82,13 +82,13 @@ pub(crate) use crate::stats::{lookup_protein_params_ungapped, KarlinParams};
 pub(crate) use crate::utils::genetic_code::GeneticCode;
 pub(crate) use crate::utils::seg::SegMasker;
 
-pub(crate) use super::args::TblastxArgs;
+pub(crate) use super::args::{TblastxArgs, TblastxMatrix};
 pub(crate) use super::chaining::UngappedHit;
 pub(crate) use super::constants::{GAP_TRIGGER_BIT_SCORE, X_DROP_UNGAPPED_BITS};
 pub(crate) use super::diagnostics::{
     diagnostics_enabled, print_summary as print_diagnostics_summary, DiagnosticCounters,
 };
-pub(crate) use super::extension::{convert_coords, extend_hit_two_hit};
+pub(crate) use super::extension::{convert_coords, extend_hit_two_hit, extend_hit_two_hit_with};
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): extension/x_two_hit_fast.rs.
 pub(crate) use super::extension::{
     extend_hit_two_hit_sent, x_tbx_sent_contexts, x_tbx_sent_subject,
@@ -100,8 +100,10 @@ pub(crate) use super::ncbi_cutoffs::{
 };
 pub(crate) use super::reevaluate::{
     get_num_identities_and_positives_ungapped, hsp_test, reevaluate_ungapped_hit_ncbi_translated,
+    reevaluate_ungapped_hit_ncbi_translated_with,
 };
 pub(crate) use super::report;
+pub(crate) use super::scoring::{Blosum62Score, MatrixScores, TbxScore};
 pub(crate) use super::stage_dump;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
 // ```c
@@ -228,7 +230,7 @@ pub(crate) struct TblastxBatch {
     pub x_timing: Vec<String>,
 }
 
-pub(crate) struct WorkerState {
+pub(crate) struct WorkerState<S> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
     // ```c
     // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
@@ -242,6 +244,9 @@ pub(crate) struct WorkerState {
     pub offset_pairs: Vec<OffsetPair>,
     pub diag_array: Vec<DiagStruct>,
     pub diag_offset: i32,
+    /// The scores of the search's matrix (`scoring.rs`), which the subject's closures take as an
+    /// argument.
+    pub sc: S,
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +316,8 @@ pub(crate) fn atomic_max_i32(dst: &AtomicI32, val: i32) {
 /// This function performs batch reevaluation on all HSPs in the list,
 /// updating scores and trimming boundaries. HSPs that fail reevaluation
 /// or subsequent tests are removed from the list.
-pub(crate) fn reevaluate_ungapped_hsp_list(
+pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
+    sc: S,
     ungapped_hits: Vec<UngappedHit>,
     contexts: &[QueryContext],
     s_frames_scoring: &[QueryFrame],
@@ -364,7 +370,7 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
             None
         };
         let (new_qs, new_ss, new_len, new_score) = if let Some(result) =
-            reevaluate_ungapped_hit_ncbi_translated(query, subject, qs, ss, len_u, cutoff)
+            reevaluate_ungapped_hit_ncbi_translated_with(sc, query, subject, qs, ss, len_u, cutoff)
         {
             result
         } else {

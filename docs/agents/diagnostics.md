@@ -3296,9 +3296,14 @@ Scheduling (each value computed by one thread with the original function; order 
   counts them. The unit tests compare every cell's run with the loop's chain, in both orders and for `lut_word_length`
   8 to 11, the presence vector, the counters and the longest chain, a pool build in both orders (chunks of 1, 97
   and 5,000 positions and the default size, 2 to 40 threads) with the serial one, and a table above the rule built by
-  `build_two_stage_lookup` with its chains;
-  `LOSAT/tests/blastn_bn_csr.rs` compares whole reports of the default with `=0`.
-  EVIDENCE (filled after the workstation A/B).
+  `build_two_stage_lookup` with its chains; `LOSAT/tests/blastn_bn_csr.rs` compares whole reports of the default with
+  `=0`. Evidence (workstation, 2026-10-25, tree c14f064f on dev 105e4a60, medians of per-round ratios to `=0`, every
+  output equal and AB's equal to NCBI's): 16 threads on node 1, 31,168 dmel cDNAs × dmel 3 Mb `-task blastn`
+  `-subject` ×0.854 (0/10 rounds slower, CPU ×0.844), 5,000 cDNAs ×0.877 (CPU ×0.845), 1,775 cDNAs ×0.966 (3/30),
+  at `-word_size 9` ×0.768 and 10 ×0.921, the 31,168 against a `-db` ×0.958 and with `LOSAT_X_QBATCHPAR=0` ×0.952,
+  megablast (no CSR) ×0.979 (7/16, noise); one thread on one node 0 core (perf stat, user cycles) ×0.80 to ×0.88 at
+  1.005 to 1.03 times the instructions; max RSS (time %M with a 2 ms sampler, three runs per arm) not above `=0`'s
+  except the 1,775 cDNAs' 82 → 85 MiB (dev 84): 31,168 cDNAs 721 → 712, word size 9 329 → 322 MiB.
 - `LOSAT_X_PAIRPARDISC=1` (in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`; it does not depend on PAIRPAR) blastn `-task dc-megablast`, one query-subject pair
   on a pool of 2+ threads (or on one thread: `LOSAT_X_BNDCONE`): the two-hit seed stage of a subject chunk with a discontiguous megablast
   table (one or two templates) and the diagonal hash (query block over 8000 letters, `scan_range`

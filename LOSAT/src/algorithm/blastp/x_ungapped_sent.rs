@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BPUNGAPSENT / LOSAT_X_BPUNGAPSENTSHADOW): blastp's two-hit ungapped
+//! EXPERIMENT (LOSAT_X_BPUNGAPSENT): blastp's two-hit ungapped
 //! extension (`s_BlastAaExtendTwoHit` with the `s_BlastAaExtendLeft` / `s_BlastAaExtendRight`
 //! walks) for word size 3, inlined into the candidate closure of the fused seed loop
 //! (`blast_engine.rs`), with walks that the sentinels stop instead of a bound.
@@ -36,7 +36,6 @@
 
 use super::extension::{BlastpTwoHitUngappedResult, BlastpUngappedData};
 use super::x_ungapped_fast::{build_table, Table};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// Codes below this index the table (`q << 5 | s`).
@@ -50,59 +49,24 @@ const MAX_BLOCK_LEN: usize = (i32::MAX / 16) as usize;
 const _: () = assert!(11 * (MAX_BLOCK_LEN as i64 + 3) < i32::MAX as i64);
 
 struct State {
-    /// 0 = off, 1 = LOSAT_X_BPUNGAPSENT, 2 = LOSAT_X_BPUNGAPSENTSHADOW (both, compared).
-    mode: u8,
+    /// `LOSAT_X_BPUNGAPSENT`.
+    on: bool,
     table: Option<Box<Table>>,
 }
 
 fn state() -> &'static State {
     static STATE: OnceLock<State> = OnceLock::new();
-    STATE.get_or_init(|| {
-        // `LOSAT_X_BPUNGAPSENT` is a strict-set switch; the shadow variable is read first, as
-        // "set to any value", and implies the switch.
-        let mode = if std::env::var_os("LOSAT_X_BPUNGAPSENTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_BPUNGAPSENT") {
-            1
-        } else {
-            0
-        };
-        State {
-            mode,
-            table: build_table(),
-        }
+    STATE.get_or_init(|| State {
+        // `LOSAT_X_BPUNGAPSENT` is a strict-set switch.
+        on: crate::utils::xswitch::on("LOSAT_X_BPUNGAPSENT"),
+        table: build_table(),
     })
 }
 
-/// Whether the switch (or its shadow) is on.
+/// Whether the switch is on.
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 pub(crate) fn on() -> bool {
-    state().mode != 0
-}
-
-static SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
-/// Query blocks that passed the checks in shadow mode (the summary line is printed only after
-/// one did, so that other programs' runs with the variable print nothing).
-static SHADOW_BLOCKS: AtomicU64 = AtomicU64::new(0);
-
-/// Counts one compared extension (shadow mode).
-// No NCBI counterpart: a counter.
-#[inline]
-pub(crate) fn count_shadow() {
-    SHADOW_COMPARED.fetch_add(1, Ordering::Relaxed);
-}
-
-/// The summary line (printed by `main` at exit), only in shadow mode and after a blastp query
-/// block passed the checks.
-// No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
-pub fn print_shadow_stats() {
-    let blocks = SHADOW_BLOCKS.load(Ordering::Relaxed);
-    if state().mode == 2 && blocks > 0 {
-        eprintln!(
-            "[X_SHADOW] BPUNGAPSENT blocks={blocks} compared={} (two-hit ungapped extensions identical)",
-            SHADOW_COMPARED.load(Ordering::Relaxed)
-        );
-    }
+    state().on
 }
 
 /// A query block made ready for [`two_hit`]: a copy with a sentinel added at each end.
@@ -110,7 +74,6 @@ pub(crate) struct XSentQuery {
     /// `[0, query.., 0]`.
     padded: Vec<u8>,
     table: &'static Table,
-    shadow: bool,
 }
 
 impl XSentQuery {
@@ -126,7 +89,7 @@ impl XSentQuery {
         extension_word_size: usize,
     ) -> Option<Self> {
         let state = state();
-        if state.mode == 0 {
+        if !state.on {
             return None;
         }
         let table = state.table.as_deref()?;
@@ -138,24 +101,11 @@ impl XSentQuery {
         if !fits {
             return None;
         }
-        if state.mode == 2 {
-            SHADOW_BLOCKS.fetch_add(1, Ordering::Relaxed);
-        }
         let mut padded = Vec::with_capacity(query.len() + 2);
         padded.push(0);
         padded.extend_from_slice(query);
         padded.push(0);
-        Some(Self {
-            padded,
-            table,
-            shadow: state.mode == 2,
-        })
-    }
-
-    /// LOSAT_X_BPUNGAPSENTSHADOW: run the reference extension too and compare.
-    #[inline]
-    pub(crate) fn shadow(&self) -> bool {
-        self.shadow
+        Some(Self { padded, table })
     }
 }
 
@@ -423,7 +373,6 @@ mod tests {
         Some(XSentQuery {
             padded,
             table: state().table.as_deref().expect("BLOSUM62 fits bytes"),
-            shadow: false,
         })
     }
 
@@ -632,10 +581,10 @@ mod tests {
     fn checks_refuse_inputs_outside_the_path() {
         let block: Vec<u8> = (1..=20).chain([0]).collect();
         let x_drops = [16, 127, 1];
-        if state().mode != 0 {
+        if state().on {
             assert!(XSentQuery::new(&block, &x_drops, 3, 3).is_some());
         }
-        // X-drops outside 1..=127, other word sizes, a code >= 32: refused in every mode
+        // X-drops outside 1..=127, other word sizes, a code >= 32: refused whatever the switch says
         for d in [i32::MIN, -5, 0, 128, 8193, i32::MAX] {
             assert!(XSentQuery::new(&block, &[16, d], 3, 3).is_none(), "d={d}");
         }

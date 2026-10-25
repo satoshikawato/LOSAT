@@ -4024,18 +4024,9 @@ fn build_pairwise_hits(
     ))]
     if let Some(pool) = x_pool {
         use rayon::prelude::*;
-        let reference = (crate::report::x_pairwise_par::mode() == 2).then(|| hits.clone());
         let rows: Vec<Result<PairwiseHit>> =
             pool.install(|| hits.into_par_iter().map(&row).collect());
-        let rows = rows.into_iter().collect::<Result<Vec<_>>>()?;
-        if let Some(reference) = reference {
-            let serial = reference
-                .into_iter()
-                .map(&row)
-                .collect::<Result<Vec<_>>>()?;
-            crate::report::x_pairwise_par::compare_rows(&rows, &serial);
-        }
-        return Ok(rows);
+        return rows.into_iter().collect::<Result<Vec<_>>>();
     }
     #[cfg(not(all(
         feature = "parallel",
@@ -6211,7 +6202,7 @@ fn search(
             x_queries_before: 0,
             x_xml2_carry: None,
         };
-        let result = run_resolved_in_pool(
+        run_resolved_in_pool(
             args,
             &searched_queries[..searched_done],
             subject_source,
@@ -6223,10 +6214,7 @@ fn search(
             &ranges,
             &reports,
             x_lookup_ahead::XAheadBlock::none(),
-        );
-        // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
-        super::x_bp_redo_par_shadow_error(&result);
-        result
+        )
     };
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries in blocks of whole batches, each block a search
     // of its own whose report is written before the next block is searched
@@ -6406,7 +6394,7 @@ fn search(
                             .as_mut()
                             .map(|offset| offset as &mut (dyn FormatObserver + Send)),
                     };
-                    let result = x_ahead.run_block(x_next_queries, |x_block| {
+                    x_ahead.run_block(x_next_queries, |x_block| {
                         run_resolved_in_pool(
                             args.clone(),
                             block_queries,
@@ -6434,10 +6422,7 @@ fn search(
                             },
                             x_block,
                         )
-                    });
-                    // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
-                    super::x_bp_redo_par_shadow_error(&result);
-                    result?;
+                    })?;
                     drop(block_outputs);
                     x_hsps_before += x_records.as_ref().map_or(0, Vec::len) - records_before;
                 }
@@ -7801,7 +7786,7 @@ fn run_resolved_in_pool(
     // branch on the presence bit: on the flat compressed table when enough of its cells are used,
     // on the reference compressed table never (the standard table has LOSAT_X_BPSCANBF's scan).
     if args.window_size != 0
-        && (super::x_seed_fused::x_bp_seed() || super::x_seed_fused::x_bp_seed_shadow())
+        && super::x_seed_fused::x_bp_seed()
         && super::x_seed_fused_clut::x_bp_clut_scan_bf()
     {
         match &lookup {
@@ -7819,7 +7804,7 @@ fn run_resolved_in_pool(
     // branch-free list and every table on wasm32 keep their loops; on a flat table with the list
     // the loop records its side per subject (`x_seed_fused_clut.rs`).
     if args.window_size != 0
-        && (super::x_seed_fused::x_bp_seed() || super::x_seed_fused::x_bp_seed_shadow())
+        && super::x_seed_fused::x_bp_seed()
         && super::x_seed_fused_clut::x_bp_fseed()
     {
         match &lookup {
@@ -8290,10 +8275,7 @@ fn run_resolved_in_pool(
         // for the compressed table of blastp-fast) and this closure takes the hits that need the
         // context check and the extension, with the same body as the reference closure below.
         // EXPERIMENT (LOSAT_X_BPDIAG): inside it the hits of a cell are tested in batches.
-        // EXPERIMENT (LOSAT_X_BPSEEDSHADOW): both loops from the same diagonal table, compared.
-        let x_shadow = args.window_size != 0 && super::x_seed_fused::x_bp_seed_shadow();
-        let x_fused = args.window_size != 0 && (super::x_seed_fused::x_bp_seed() || x_shadow);
-        let x_snapshot = x_shadow.then(|| (scratch.diag_array.clone(), init_hsps.len()));
+        let x_fused = args.window_size != 0 && super::x_seed_fused::x_bp_seed();
         if x_fused {
             let x_candidate = |query_offset: i32,
                                subject_offset: i32,
@@ -8397,14 +8379,13 @@ fn run_resolved_in_pool(
             //         lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
             //     }
             // ```
-            // EXPERIMENT (LOSAT_X_BPUNGAPSENT / LOSAT_X_BPUNGAPSENTSHADOW): the closure above with the
-            // two-hit extension of `x_ungapped_sent.rs` inlined (word size 3, walks stopped by the
-            // sentinels), for the table of single letters, on a block and a subject that pass the
-            // path's checks; with the shadow variable the closure above's extension runs as well and
-            // the two results are compared. Each use of the macro is a closure type of its own, so the
-            // loops of the closure above keep their own instances.
+            // EXPERIMENT (LOSAT_X_BPUNGAPSENT): the closure above with the two-hit extension of
+            // `x_ungapped_sent.rs` inlined (word size 3, walks stopped by the sentinels), for the
+            // table of single letters, on a block and a subject that pass the path's checks. Each
+            // use of the macro is a closure type of its own, so the loops of the closure above
+            // keep their own instances.
             macro_rules! x_candidate_sent {
-                ($sent_query:expr, $sent_subject:expr, $shadow:literal) => {
+                ($sent_query:expr, $sent_subject:expr) => {
                     |query_offset: i32,
                      subject_offset: i32,
                      last_hit: i32,
@@ -8448,22 +8429,6 @@ fn run_resolved_in_pool(
                                 x_drop,
                             )
                         };
-                        if $shadow {
-                            let expected = extend_two_hit_blosum62(
-                                &concatenated_query,
-                                subject_raw,
-                                s_left_off,
-                                s_right_off,
-                                q_right_off,
-                                x_drop,
-                                args.word_size,
-                            );
-                            assert_eq!(
-                                extended, expected,
-                                "[X_SHADOW] BPUNGAPSENT two-hit mismatch: s_left_off={s_left_off} s_right_off={s_right_off} q_right_off={q_right_off} dropoff={x_drop}"
-                            );
-                            super::x_ungapped_sent::count_shadow();
-                        }
                         let Some(ungapped_hit) = extended else {
                             return;
                         };
@@ -8504,31 +8469,17 @@ fn run_resolved_in_pool(
                 (None, _) => None,
             };
             if let Some((sent_query, sent_subject, aa_lookup)) = x_sent {
-                if sent_query.shadow() {
-                    super::x_seed_fused::x_scan_two_hit(
-                        aa_lookup,
-                        subject_sequence,
-                        subject.aa_len,
-                        &mut scratch.diag_array,
-                        diag_mask,
-                        subject_diag_offset,
-                        window,
-                        word_size,
-                        x_candidate_sent!(sent_query, sent_subject, true),
-                    );
-                } else {
-                    super::x_seed_fused::x_scan_two_hit(
-                        aa_lookup,
-                        subject_sequence,
-                        subject.aa_len,
-                        &mut scratch.diag_array,
-                        diag_mask,
-                        subject_diag_offset,
-                        window,
-                        word_size,
-                        x_candidate_sent!(sent_query, sent_subject, false),
-                    );
-                }
+                super::x_seed_fused::x_scan_two_hit(
+                    aa_lookup,
+                    subject_sequence,
+                    subject.aa_len,
+                    &mut scratch.diag_array,
+                    diag_mask,
+                    subject_diag_offset,
+                    window,
+                    word_size,
+                    x_candidate_sent!(sent_query, sent_subject),
+                );
             } else {
                 match &lookup {
                     BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
@@ -8573,18 +8524,7 @@ fn run_resolved_in_pool(
                 }
             }
         }
-        // EXPERIMENT (LOSAT_X_BPSEEDSHADOW): put the table back as it was before the fused loop and keep
-        // the fused loop's results for the comparison below.
-        let x_fused_results = x_snapshot.map(|(diag_before, hsps_before)| {
-            let fused_diag = std::mem::replace(&mut scratch.diag_array, diag_before);
-            let fused_hsps: Vec<String> = init_hsps[hsps_before..]
-                .iter()
-                .map(|hsp| format!("{hsp:?}"))
-                .collect();
-            init_hsps.truncate(hsps_before);
-            (fused_diag, fused_hsps, hsps_before)
-        });
-        if !x_fused || x_fused_results.is_some() {
+        if !x_fused {
             blastp_for_each_offset_pair(
                 &lookup,
                 subject_sequence,
@@ -8838,26 +8778,6 @@ fn run_resolved_in_pool(
                         diag_entry.set_last_hit(subject_offset + subject_diag_offset);
                     }
                 },
-            );
-        }
-        if let Some((fused_diag, fused_hsps, hsps_before)) = x_fused_results {
-            let reference_hsps: Vec<String> = init_hsps[hsps_before..]
-                .iter()
-                .map(|hsp| format!("{hsp:?}"))
-                .collect();
-            // The reference's words stay in the subject's buffer (its residues and the
-            // sentinel after them) unless the subject is shorter than a word less one letter.
-            // The compressed scan reads a letter past the buffer as NULLB in both loops
-            // (`scan_subject`), so its tables are always compared.
-            super::x_seed_fused::x_shadow_compare(
-                &fused_hsps,
-                &reference_hsps,
-                &fused_diag,
-                &scratch.diag_array,
-                matches!(
-                    &lookup,
-                    BlastpRuntimeLookup::Compressed(_) | BlastpRuntimeLookup::CompressedFlat(_)
-                ) || subject.aa_len + 1 >= word_size as usize,
             );
         }
 
@@ -9745,8 +9665,8 @@ fn run_resolved_in_pool(
     ))]
     let x_win_expand = x_compact_expand_all
         && x_prelim_compact == XPrelimCompact::On
-        && super::x_redo_par::x_bp_redo_par() == super::x_redo_par::XRedoPar::On
-        && super::x_redo_par::x_bp_redo_win_expand() != super::x_redo_par::XWinExpand::Off;
+        && super::x_redo_par::x_bp_redo_par()
+        && super::x_redo_par::x_bp_redo_win_expand();
     #[cfg(any(
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
@@ -10021,14 +9941,12 @@ fn run_resolved_in_pool(
     // #pragma omp for schedule(static)
     //         for (b = 0; b < numMatches; ++b) {
     // ```
-    // EXPERIMENT (LOSAT_X_BPREDOPAR, a strict-set switch / LOSAT_X_BPREDOPARSHADOW): NCBI splits one
-    // loop over the matches of all queries between its threads. With the switch, more than one
-    // thread and at least two matches, the matches run on the pool in jobs of up to four matches
-    // of one query, and the early termination test, the heap insertions and the error that ends
-    // the redo are replayed in the order of the one-thread loop below; it replaces both parallel
-    // paths (`x_redo_par.rs`). The shadow mode runs it into separate heaps first, then the
-    // one-thread loop for the output, and compares the hit lists (or the errors, at the callers of
-    // this function).
+    // EXPERIMENT (LOSAT_X_BPREDOPAR, a strict-set switch): NCBI splits one loop over the matches
+    // of all queries between its threads. With the switch, more than one thread and at least two
+    // matches, the matches run on the pool in jobs of up to four matches of one query, and the
+    // early termination test, the heap insertions and the error that ends the redo are replayed
+    // in the order of the one-thread loop below; it replaces both parallel paths
+    // (`x_redo_par.rs`).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -10053,12 +9971,12 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let x_redo_par_mode = super::x_redo_par::x_bp_redo_par();
+    let x_redo_par_switch = super::x_redo_par::x_bp_redo_par();
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let x_redo_par_on = x_redo_par_mode != super::x_redo_par::XRedoPar::Off
+    let x_redo_par_on = x_redo_par_switch
         && blastp_should_parallelize_stage(
             "kappa-redo-par",
             args.num_threads,
@@ -10079,27 +9997,14 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if x_redo_par_mode != super::x_redo_par::XRedoPar::Off {
+    if x_redo_par_switch {
         crate::utils::xreach::x_reach!("LOSAT_X_BPREDOPAR", x_redo_par_on);
     }
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let x_redo_par_shadow =
-        (x_redo_par_on && x_redo_par_mode == super::x_redo_par::XRedoPar::Shadow).then(|| {
-            super::x_redo_par::x_redo_par_shadow_run(
-                &x_redo_par_search,
-                &mut preliminary_hit_lists,
-                &redone_matches,
-                args.max_target_seqs,
-            )
-        });
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let x_redo_par_run = x_redo_par_on && x_redo_par_shadow.is_none();
+    let x_redo_par_run = x_redo_par_on;
     #[cfg(any(
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
@@ -10114,16 +10019,6 @@ fn run_resolved_in_pool(
             &x_split_queries,
         );
     }
-    // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): the shadow's reference is the one-thread loop.
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let (use_parallel_kappa_match_redo, use_parallel_kappa_redo) = if x_redo_par_shadow.is_some() {
-        (false, false)
-    } else {
-        (use_parallel_kappa_match_redo, use_parallel_kappa_redo)
-    };
 
     // Graduated 2026-10-22 (was `LOSAT_X_SEGSHARE`): the query-parallel redo and the windows of
     // `x_redo_par` share the masked ranges; the match-parallel redo shares none, and the
@@ -10823,14 +10718,6 @@ fn run_resolved_in_pool(
                 preliminary_hit_lists[q_idx] = None;
             }
         }
-    }
-    // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): the new path's hit lists against the one-thread loop's.
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    if let Some(shadow) = x_redo_par_shadow {
-        shadow.compare(&redone_matches);
     }
 
     if x_prelim_free && timing_enabled {

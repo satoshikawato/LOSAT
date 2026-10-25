@@ -15,14 +15,12 @@ pub(crate) mod encoding;
 // status = s_BlastAaWordFinder_TwoHit(subject, query, ..., matrix, ...);
 // The same protein two-hit extension primitive is used by BLASTP and TBLASTN.
 pub(crate) mod extension;
-// EXPERIMENT (LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW): the ungapped X-drop
-// walks of aa_ungapped.c:804-883 with a byte score table, same results (`pub` for the summary line
-// of `main`).
-pub mod x_ungapped_fast;
-// EXPERIMENT (LOSAT_X_BPUNGAPSENT / LOSAT_X_BPUNGAPSENTSHADOW): blastp's two-hit extension for word
-// size 3 inlined into the fused loop's candidate closure, walks stopped by the sentinels, same
-// results (`pub` for the summary line of `main`).
-pub mod x_ungapped_sent;
+// EXPERIMENT (LOSAT_X_BPUNGAP): the ungapped X-drop walks of aa_ungapped.c:804-883 with a byte
+// score table, same results.
+pub(crate) mod x_ungapped_fast;
+// EXPERIMENT (LOSAT_X_BPUNGAPSENT): blastp's two-hit extension for word size 3 inlined into the
+// fused loop's candidate closure, walks stopped by the sentinels, same results.
+pub(crate) mod x_ungapped_sent;
 // NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
 // max_offset = BlastGetStartForGappedAlignment(...);
 // status = s_BlastProtGappedAlignment(...);
@@ -36,7 +34,7 @@ mod seqalign;
 mod x_query_blocks;
 // EXPERIMENT (LOSAT_X_BPREDOFIT): redone HSP lists without spare room.
 mod x_redo_fit;
-// EXPERIMENT (LOSAT_X_BPREDOPAR / LOSAT_X_BPREDOPARSHADOW): the composition-based redo with jobs
+// EXPERIMENT (LOSAT_X_BPREDOPAR): the composition-based redo with jobs
 // of up to four matches on the pool, replayed in stream order. Built where the parallel redo paths
 // are.
 #[cfg(all(
@@ -67,9 +65,10 @@ mod x_prelim_free;
 // EXPERIMENT (LOSAT_X_BPPCOMPACT): preliminary hit lists with a 64-byte element until the redo.
 mod x_prelim_compact;
 
-/// EXPERIMENT (LOSAT_X_BPSEEDSHADOW): the shadow mode's line at exit.
-pub fn x_bp_seed_print_summary() {
-    x_seed_fused::x_bp_seed_print_summary();
+/// EXPERIMENT (LOSAT_X_BPHITBF): the `[X_STATS] BPHITBF` line at exit.
+// No NCBI counterpart: it prints a counter and changes no value NCBI computes.
+pub fn x_bp_hit_bf_print_summary() {
+    x_seed_fused::x_bp_hit_bf_print_summary();
 }
 
 /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the `[X_STATS] BPLKPAHEAD` line at exit.
@@ -78,36 +77,9 @@ pub fn x_bp_lkp_ahead_print_summary() {
     blast_engine::x_lookup_ahead::x_bp_lkp_ahead_print_summary();
 }
 
-/// EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): the shadow mode's line at exit.
-// No NCBI counterpart: it prints counters and changes no value NCBI computes.
-pub fn x_bp_redo_par_print_summary() {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    x_redo_par::x_bp_redo_par_print_summary();
-}
-
-/// EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): a search's result against the new path's when the
-/// one-thread redo of the search ended with an error (it returns before the shadow compares the
-/// hit lists).
-// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
-fn x_bp_redo_par_shadow_error(result: &anyhow::Result<()>) {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    x_redo_par::x_redo_par_shadow_error(result);
-    #[cfg(any(
-        not(feature = "parallel"),
-        all(target_arch = "wasm32", not(feature = "wasm-threads"))
-    ))]
-    let _ = result;
-}
-
 pub use args::BlastpArgs;
 pub use blast_engine::run;
-// EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): the summary lines `main` prints at exit.
+// EXPERIMENT (LOSAT_X_BPGAP): the summary line `main` prints at exit.
 // No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub use gapalign::x_restricted_gap_print_summary;
 // EXPERIMENT (LOSAT_X_BPPCOMPACT=shadow): the summary line `main` prints at exit.

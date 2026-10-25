@@ -24,11 +24,12 @@
 //! extension (the module's argument), so the property under test is that the report does not
 //! depend on it. That reports equal NCBI's is the business of the BLASTP fixtures. The searches set
 //! `LOSAT_X_BPDIAG=0`, so that the fused loop tests the hits one after the other (the default where
-//! the CPU has no AVX2: aarch64, WebAssembly), besides the default. The shadow
-//! (`LOSAT_X_BPSEEDSHADOW`) compares the fused loop with the reference on every subject and counts
-//! the subjects the branch-free loop scanned: all of them at a two-hit window above the word size,
-//! none at a window equal to the word size, where the loop keeps its statements, and none of
-//! blastp-fast's (its loops on the compressed table keep their tests).
+//! the CPU has no AVX2: aarch64, WebAssembly), besides the default. With `LOSAT_X_STATS` the
+//! `[X_STATS] BPHITBF subjects=` line counts the subjects the branch-free loop scanned (with the
+//! `xstats` feature, as in `cargo test --all-features`): all 150 of them at a two-hit window above
+//! the word size, none at a window equal to the word size, where the loop keeps its statements,
+//! and none of blastp-fast's (its loops on the compressed table keep their tests); the line is
+//! absent with `LOSAT_X_BPHITBF=0`.
 //!
 //! The queries are the first 30 proteins of AP027131, the subjects the first 150 proteins of the
 //! related AP027133, so there are extensions, flag-1 entries and HSPs.
@@ -41,7 +42,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const PER_HIT: (&str, &str) = ("LOSAT_X_BPDIAG", "0");
 const OFF: (&str, &str) = ("LOSAT_X_BPHITBF", "0");
 const ON: (&str, &str) = ("LOSAT_X_BPHITBF", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_BPSEEDSHADOW", "1");
+const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -153,18 +154,18 @@ struct Run {
 }
 
 impl Run {
-    /// Standard error without the diagnostic lines (`[TIMING]`, `[X_SHADOW]`).
+    /// Standard error without the diagnostic lines (`[TIMING]`, `[X_STATS]`).
     fn messages(&self) -> String {
         self.stderr
             .lines()
-            .filter(|line| !line.starts_with("[TIMING]") && !line.starts_with("[X_SHADOW]"))
+            .filter(|line| !line.starts_with("[TIMING]") && !line.starts_with("[X_STATS]"))
             .map(|line| format!("{line}\n"))
             .collect()
     }
 
-    /// The number after `name=` in the `[X_SHADOW] <switch>` line, or `None` without that line.
-    fn shadow(&self, switch: &str, name: &str) -> Option<u64> {
-        let prefix = format!("[X_SHADOW] {switch} ");
+    /// The number after `name=` in the `[X_STATS] <counter>` line, or `None` without that line.
+    fn stats(&self, counter: &str, name: &str) -> Option<u64> {
+        let prefix = format!("[X_STATS] {counter} ");
         let line = self.stderr.lines().find(|line| line.starts_with(&prefix))?;
         let key = format!(" {name}=");
         let at = line
@@ -261,8 +262,10 @@ fn the_branch_free_test_gives_the_reports_of_the_loop_without_it() {
 }
 
 #[test]
-fn the_shadow_compares_the_branch_free_loop_on_every_subject_in_its_range() {
+fn the_branch_free_loop_scans_every_subject_in_its_range() {
     let inputs = Inputs::new();
+    // The `xstats` feature counts the subjects; a build without it prints no line.
+    let counted = cfg!(feature = "xstats");
     // A two-hit window above the word size (3): every subject; a window equal to the word size, and
     // blastp-fast (the compressed table's loops): none.
     for (task, window, all) in [
@@ -274,23 +277,23 @@ fn the_shadow_compares_the_branch_free_loop_on_every_subject_in_its_range() {
         let args = search(&inputs, false, task, "6", "1", window);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let reference = blastp(&args, &[PER_HIT, OFF]);
-        let run = blastp(&args, &[PER_HIT, SHADOW]);
+        let run = blastp(&args, &[PER_HIT, STATS]);
         assert_eq!(run.code, Some(0), "{what}: {}", run.stderr);
         assert!(run.stdout == reference.stdout, "{what}: report differs");
-        let compared = run
-            .shadow("BPSEED", "subjects")
-            .unwrap_or_else(|| panic!("{what}: no BPSEED line: {}", run.stderr));
-        let branch_free = run
-            .shadow("BPHITBF", "subjects_compared")
-            .unwrap_or_else(|| panic!("{what}: no BPHITBF line: {}", run.stderr));
-        assert!(compared >= 150, "{what}: {compared} subjects");
-        assert_eq!(branch_free, if all { compared } else { 0 }, "{what}");
-        // Without the switch the shadow compares the loop without the test and has no BPHITBF
-        // line.
-        let off = blastp(&args, &[PER_HIT, SHADOW, OFF]);
+        let subjects = run.stats("BPHITBF", "subjects");
+        if counted && all {
+            assert!(
+                subjects.is_some_and(|subjects| subjects >= 150),
+                "{what}: {subjects:?} subjects in {}",
+                run.stderr
+            );
+        } else {
+            assert_eq!(subjects, None, "{what}: {}", run.stderr);
+        }
+        // Without the switch the loop with the test does not run and there is no BPHITBF line.
+        let off = blastp(&args, &[PER_HIT, STATS, OFF]);
         assert_eq!(off.code, Some(0), "{what}: {}", off.stderr);
         assert!(off.stdout == reference.stdout, "{what}: off differs");
-        assert_eq!(off.shadow("BPSEED", "subjects"), Some(compared));
-        assert_eq!(off.shadow("BPHITBF", "subjects_compared"), None);
+        assert_eq!(off.stats("BPHITBF", "subjects"), None, "{what}");
     }
 }

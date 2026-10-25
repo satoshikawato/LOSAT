@@ -262,7 +262,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastn::blast_engine::x_tb_range_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_lut_drop_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_query_drop_print_summary();
-    LOSAT::algorithm::blastp::x_bp_seed_print_summary();
+    LOSAT::algorithm::blastp::x_bp_hit_bf_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();
     LOSAT::algorithm::blastp::x_bp_lkp_ahead_print_summary();
     LOSAT::algorithm::blastp::x_restricted_gap_print_summary();
@@ -270,10 +270,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastn::lookup::x_dc_csr::print_summary();
     LOSAT::algorithm::blastn::lookup::x_mb_lookup_print_summary();
     LOSAT::algorithm::blastp::x_bp_prelim_compact_print_summary();
-    LOSAT::algorithm::blastp::x_bp_redo_par_print_summary();
     LOSAT::algorithm::blastx::seed::x_seed_scan::print_shadow_stats();
-    LOSAT::algorithm::blastp::x_ungapped_fast::print_shadow_stats();
-    LOSAT::algorithm::blastp::x_ungapped_sent::print_shadow_stats();
     LOSAT::utils::x_logclone::print_shadow_stats();
     // Diagnostic (LOSAT_TIMING): the common line, last (utils/xtiming.rs).
     LOSAT::utils::xtiming::print();

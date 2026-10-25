@@ -15,3 +15,16 @@
   block-search switches on. Outputs do not change. The checks that ran only under a shadow are now unit tests
   (the lean titles and letters against the records, the diagonal offset and table state of a run's later subjects)
   or are dropped where the reports are compared with the `=0` path and the reach rows show that the path ran.
+- The SHADOW modes of `LOSAT_X_BPGAP`, `LOSAT_X_BPREDOPAR`, `LOSAT_X_BPREDOWINEXPAND`, `LOSAT_X_BPSEED`,
+  `LOSAT_X_BPUNGAPSENT`, `LOSAT_X_BPUNGAP`, `LOSAT_X_PAIRWISEPAR` and `LOSAT_X_BPCOMPOREUSE` are removed
+  (`LOSAT_X_BPGAPSHADOW`, `LOSAT_X_BPREDOPARSHADOW`, `LOSAT_X_BPREDOWINEXPANDSHADOW`, `LOSAT_X_BPSEEDSHADOW`,
+  `LOSAT_X_BPUNGAPSENTSHADOW`, `LOSAT_X_BPUNGAPSHADOW`, `LOSAT_X_PAIRWISEPARSHADOW` and
+  `LOSAT_X_BPCOMPOREUSESHADOW` are ignored, and the `[X_SHADOW]` lines of these switches are no longer
+  printed). The switches stay in the strict set with their `=0` paths; a shadow variable no longer turns its
+  switch on, and `LOSAT_X_BPSEEDSHADOW` no longer turns the fused loop on for `LOSAT_X_BPDIAG` and the
+  switches that act in it. With `LOSAT_X_STATS`, `[X_STATS] BPHITBF subjects=` counts the subjects the
+  branch-free loop scanned (with the `xstats` feature, only when not zero); `[X_STATS] BPGAP` stays. Outputs do
+  not change. The comparisons that ran only under a shadow are now unit tests (the redo windows computed
+  largest first against the `par_iter` windows, the windows that expand compact lists ahead against the full
+  expansion) or are dropped where the reports are compared with the `=0` path and the reach rows or
+  `[TIMING]` lines show that the path ran.

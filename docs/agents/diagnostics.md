@@ -3974,17 +3974,19 @@ Scheduling (each value computed by one thread with the original function; order 
   Windows w1 and w3 (the same binary, session 16, 4-6 rounds) added 6 / 10 / 12 / 16 slots, 12 / 24 / 64 threads,
   4,000 / 6,900 / 15,600 cDNAs and 10 / 30 Mb subjects (chromosome 2L, then 2R): 31,168 cDNAs at 12 threads 6 x 2
   x0.991 of the model's 12 x 1 (307 / 542 MiB), at 24 threads 8 x 3 x0.946 (427 / 1,041), at 64 threads 8 x 8 x0.874
-  of 32 x 2 (575 / 1,563); slots that leave threads idle lose (16 threads: 6 x 2 x1.237, 10 x 1 x1.448). In the 18
-  measured cells where the rule applies (4,000-31,168 cDNAs, 3-30 Mb, 12-64 threads) its layout ran in x0.755-0.991 of
-  the model's time and within x1.054 of the best measured count, e.g. 4,000 cDNAs (12 units) at 16 threads 4 x 4
-  x0.755 (214 / 452 MiB), 5,000 cDNAs x 30 Mb at 32 threads 7 x 4 x0.768 (1,048 / 1,164). Refits of the E(m) points
-  (with contention, Amdahl's serial share, or a loop-thread cost per batch) to these 145 cells missed the best count
-  by up to x1.06-1.25, so the points stay and the rule caps the slots. Where the model takes eight slots or fewer it
-  can still miss (5,000 cDNAs x 30 Mb at 16 threads: 7 x 2 at x1.320 of 2 x 8's time); the rule leaves those layouts
-  as they are. Same bytes: the slots change no output (LOSAT_X_QBATCHPAR above), this chooses only `k` and `m`. With
-  `LOSAT_X_STATS` the QBATCHPAR line's `k=` and `m=` are the slots that ran; `rule_k=`, `rule_m=` and `predicted=`
-  stay the model's layout. Tests: `the_eight_slot_rule_*` in `x_qbatch_par.rs` (boundaries, the measured cells, random
-  inputs against `=0`, whole runs), `LOSAT/tests/blastn_eight_slots.rs` (`the_report_does_not_depend_on_the_rule`,
+  of 32 x 2 (575 / 1,563); slots that leave threads idle lose (16 threads: 6 x 2 x1.237, 10 x 1 x1.448). Of the 16
+  inputs and thread counts where the rule applies (4,000-31,168 cDNAs, 3-30 Mb, 12-64 threads), 10 were measured with
+  the rule's own layout: x0.755-0.991 of the model's time, within x1.054 of the best measured count (4,000 cDNAs (12
+  units) at 16 threads 4 x 4 x0.755, 214 / 452 MiB; 6,900 cDNAs x 10 Mb at 32 threads 8 x 4 x0.841, 661 / 686); for 14
+  units the rule runs 7 x m (a tie with 8 x m, the fewest slots), measured there through 8 x m (x0.768-0.901); 4,000
+  cDNAs at 32 threads (6 x 5) was not measured. Refits of the E(m) points (with contention, Amdahl's serial share, or
+  a loop-thread cost per batch) to these 145 cells missed the best count by up to x1.07 (the best form) to x1.36, so
+  the points stay and the rule caps the slots. Where the model takes eight slots or fewer it can still miss (5,000
+  cDNAs x 30 Mb at 16 threads: 7 x 2 at x1.320 of 2 x 8's time); the rule leaves those layouts as they are. Same
+  bytes: the slots change no output (LOSAT_X_QBATCHPAR above), this chooses only `k` and `m`. With `LOSAT_X_STATS` the
+  QBATCHPAR line's `k=` and `m=` are the slots that ran; `rule_k=`, `rule_m=` and `predicted=` stay the model's
+  layout. Tests: `the_eight_slot_rule_*` in `x_qbatch_par.rs` (boundaries, the measured cells, random inputs against
+  `=0`, whole runs), `LOSAT/tests/blastn_eight_slots.rs` (`the_report_does_not_depend_on_the_rule`,
   `no_side_without_the_model_s_slots`). Evidence: W2_EVIDENCE
 - `LOSAT_X_RPTSTREAM=1` (BLASTN, all tasks, `-subject` and `-db`, memory and speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`) the batch loop of `run_in_pool` writes the
   reports of each query batch right after it has taken the batch (in batch order, also when

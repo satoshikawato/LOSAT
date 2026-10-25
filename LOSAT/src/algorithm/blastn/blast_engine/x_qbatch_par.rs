@@ -158,14 +158,17 @@
 //! 15,600 cDNAs and 10 / 30 Mb subjects (chromosome 2L, then 2R): 31,168 cDNAs at 12 threads 6 x 2
 //! x0.991 of the model's 12 x 1 (307 / 542 MiB), at 24 threads 8 x 3 x0.946 (427 / 1,041), at 64
 //! threads 8 x 8 x0.874 of 32 x 2 (575 / 1,563); slots that leave threads idle lose (16 threads: 6
-//! x 2 x1.237, 10 x 1 x1.448). In the 18 measured cells where the rule applies (4,000-31,168 cDNAs,
-//! 3-30 Mb, 12-64 threads) its layout ran in x0.755-0.991 of the model's time and within x1.054 of
-//! the best measured count, e.g. 4,000 cDNAs (12 units) at 16 threads 4 x 4 x0.755 (214 / 452 MiB),
-//! 5,000 cDNAs x 30 Mb at 32 threads 7 x 4 x0.768 (1,048 / 1,164). Refits of the E(m) points (with
-//! contention, Amdahl's serial share, or a loop-thread cost per batch) to these 145 cells missed
-//! the best count by up to x1.06-1.25, so the points stay and the rule caps the slots. Where the
-//! model takes eight slots or fewer it can still miss (5,000 cDNAs x 30 Mb at 16 threads: 7 x 2 at
-//! x1.320 of 2 x 8's time); the rule leaves those layouts as they are.
+//! x 2 x1.237, 10 x 1 x1.448). Of the 16 inputs and thread counts where the rule applies
+//! (4,000-31,168 cDNAs, 3-30 Mb, 12-64 threads), 10 were measured with the rule's own layout:
+//! x0.755-0.991 of the model's time, within x1.054 of the best measured count (4,000 cDNAs (12
+//! units) at 16 threads 4 x 4 x0.755, 214 / 452 MiB; 6,900 cDNAs x 10 Mb at 32 threads 8 x 4
+//! x0.841, 661 / 686); for 14 units the rule runs 7 x m (a tie with 8 x m, the fewest slots),
+//! measured there through 8 x m (x0.768-0.901); 4,000 cDNAs at 32 threads (6 x 5) was not measured.
+//! Refits of the E(m) points (with contention, Amdahl's serial share, or a loop-thread cost per
+//! batch) to these 145 cells missed the best count by up to x1.07 (the best form) to x1.36, so the
+//! points stay and the rule caps the slots. Where the model takes eight slots or fewer it can still
+//! miss (5,000 cDNAs x 30 Mb at 16 threads: 7 x 2 at x1.320 of 2 x 8's time); the rule leaves those
+//! layouts as they are.
 //! With the rule `rule_k`, `rule_m` and `predicted` of the summary line still state the model's
 //! layout, and `k`, `m` the slots that ran.
 //!
@@ -2935,7 +2938,8 @@ mod tests {
     // (89 units, Ab's batches) and of 5,000 (14 units of about 1.1 Mb) against 3 Mb. Where the
     // model takes more than eight slots on 12 to 64 threads the rule runs its best layout of at
     // most eight (8 x 2 / 8 x 4 for 89 units at 16 / 32 threads, 6 x 2 at 12, 8 x 3 at 24, 8 x 8
-    // at 64; 7 x 2 / 7 x 4 for 14 units at 16 / 32 threads, a tie with 8 slots: the fewest);
+    // at 64; 7 x 2 / 7 x 4 / 7 x 9 for 14 units at 16 / 32 / 64 threads, a tie with 8 slots: the
+    // fewest);
     // where it takes at most eight (8 and 12 threads for 14 units, 8 for 89) or on 128 threads,
     // the model's layout runs. The judged layout is the model's either way.
     #[test]
@@ -2980,8 +2984,9 @@ mod tests {
     // edge inputs: the judged layout is the same; the choice is the same wherever the model
     // keeps the loop, does not run, takes at most eight slots, the tuning variable sets the
     // slots, or the threads are fewer than 12 or more than 64; elsewhere it is the least
-    // predicted span of two to eight slots (the fewest on a tie), which also pays. Each clause
-    // decides some cases.
+    // predicted span of two to eight slots (the fewest on a tie), which also pays. Each of the
+    // four outcomes (kept, fewer than 12 threads, more than 64, the rule's layout) decides at
+    // least 30 cases.
     #[test]
     fn the_eight_slot_rule_changes_only_layouts_of_more_than_eight_slots_where_it_holds() {
         let mut state = 0x2545_f491_4f6c_dd1du64;
@@ -2996,7 +3001,7 @@ mod tests {
         // kept, fewer than 12 threads, more than 64, the rule's layout
         let mut hits = [0usize; 4];
         for case in 0..20_000 {
-            // Half the cases lie about the rule's range (8 to 71 threads, at most 100 units).
+            // Half the cases lie around the rule's range (8 to 71 threads, at most 100 units).
             let threads = match case % 4 {
                 0 => [1, 2, 11, 12, 16, 64, 65, 128][next(8) as usize],
                 1 => 1 + next(130) as usize,
@@ -4031,8 +4036,8 @@ mod tests {
                 "{}",
                 kept.line
             );
-            // The dc-megablast profile does not take this rule: 31 batches keep its model's
-            // layout with the switch.
+            // The dc-megablast profile does not take this rule: 31 batches keep the same layout
+            // with the switch on and off, LOSAT_X_DCTWOSLOTS on in both arms.
             let dc = Fakes {
                 profile: Some(Profile {
                     allowance_mib: 1024,
@@ -4040,8 +4045,21 @@ mod tests {
                 }),
                 ..Fakes::default()
             };
-            let dc_model = run(&many, Some(400), 16, on(), dc);
-            let dc_ruled = run(&many, Some(400), 16, ruled, dc);
+            let dc_two = Switches {
+                dc_two: true,
+                ..on()
+            };
+            let dc_model = run(&many, Some(400), 16, dc_two, dc);
+            let dc_ruled = run(
+                &many,
+                Some(400),
+                16,
+                Switches {
+                    bn_eight: true,
+                    ..dc_two
+                },
+                dc,
+            );
             let (a, b) = (dc_model.summary.stats, dc_ruled.summary.stats);
             assert_eq!((a.k, a.m), (b.k, b.m), "{}", dc_ruled.line);
         }

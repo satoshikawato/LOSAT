@@ -35,7 +35,7 @@
 //! (diagnostics; the tests use them). `LOSAT_X_BXDIAGSHADOW` (any value) also runs the reference on
 //! a copy of the diagonal table for every subject and stops (panics) if the hit lists or the tables
 //! differ, and prints a summary at exit. With `LOSAT_TIMING=1` a run prints
-//! `[TIMING] blastx_diag: mode=<avx2-defer-masked|avx2-cross|avx2|scalar|per-hit> subjects=N cells=N
+//! `[TIMING] blastx_diag: mode=<avx2-defer-masked|avx2-cross-defer|avx2-cross|avx2|scalar|per-hit> subjects=N cells=N
 //! batched_hits=N candidates=N` (the subjects the fused loop scanned, the cells it tested in
 //! batches, their hits, and the hits passed to the closure; zeros but the subjects with `per-hit`).
 //!
@@ -101,6 +101,13 @@
 //! hits. The timing line names `mode=avx2-cross` and ends with `cross_splits=N` (the windows of
 //! eight staged hits with a repeated entry, tested in parts; counted per subject scan like the
 //! other counts).
+//!
+//! EXPERIMENT (LOSAT_X_BXCROSSDEFER): `XCellTest::Cross { defer: true }`: LOSAT_X_BXCROSS's drain
+//! defers each batch's calls to the batch that next reads one of their entries, or to the end of
+//! the drain (`x_seed_fused`'s module header has the form and why the calls, their order and the
+//! table are unchanged). A switch of the strict set (since 2026-10-25): on unless it is `0`;
+//! `LOSAT_X_BXCROSSDEFER=0` gives LOSAT_X_BXCROSS's drain with the calls at once. It acts only
+//! where LOSAT_X_BXCROSS's cell test runs; the timing line then names `mode=avx2-cross-defer`.
 //!
 //! LOSAT_X_BXSCANBF (`x_seed_scan.rs`; graduated 2026-10-26, no variable, always on): the fused
 //! loop finds the cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`
@@ -200,7 +207,9 @@ pub(crate) fn x_bxdiag_mode() -> u8 {
 fn x_avx2_batches() -> bool {
     match x_cell_mode() {
         #[cfg(target_arch = "x86_64")]
-        XCellTest::Diag(XDiagMode::Avx2 | XDiagMode::Avx2DeferMasked) | XCellTest::Cross => true,
+        XCellTest::Diag(XDiagMode::Avx2 | XDiagMode::Avx2DeferMasked) | XCellTest::Cross { .. } => {
+            true
+        }
         _ => false,
     }
 }
@@ -223,6 +232,15 @@ fn x_bx_cross() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCROSS"))
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BXCROSSDEFER switch once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXCROSSDEFER): whether `XCellTest::Cross` defers its calls (module
+/// header); a switch of the strict set, on unless it is `0`.
+fn x_bx_cross_defer() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCROSSDEFER"))
+}
+
 // No NCBI counterpart: chooses LOSAT's code path once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXDIAG): the cell test of the fused loop (the switch's value names one).
 fn x_cell_mode() -> XCellTest {
@@ -232,6 +250,7 @@ fn x_cell_mode() -> XCellTest {
             std::env::var("LOSAT_X_BXDIAG").unwrap_or_default().as_str(),
             x_bx_defer(),
             x_bx_cross(),
+            x_bx_cross_defer(),
         )
     })
 }
@@ -252,7 +271,7 @@ fn x_min_hits_per_cell(mode: XCellTest) -> u64 {
     });
     set.unwrap_or(match mode {
         #[cfg(target_arch = "x86_64")]
-        XCellTest::Cross => 670,
+        XCellTest::Cross { .. } => 670,
         XCellTest::Diag(_) => 900,
     })
 }
@@ -420,7 +439,7 @@ pub(crate) fn x_write_timing(out: &mut dyn std::io::Write) -> std::io::Result<()
         )?;
         // EXPERIMENT (LOSAT_X_BXCROSS): the windows tested in parts.
         #[cfg(target_arch = "x86_64")]
-        if x_cell_mode() == XCellTest::Cross {
+        if matches!(x_cell_mode(), XCellTest::Cross { .. }) {
             write!(out, " cross_splits={}", X_SPLITS.load(Relaxed))?;
         }
         writeln!(out)?;
@@ -875,14 +894,20 @@ mod tests {
     use crate::algorithm::blastx::{input::parse_fasta, parameters, query_setup::prepare_queries};
 
     /// The cell tests this machine can run (the AVX2 batch with LOSAT_X_BXDEFER and without, and
-    /// with LOSAT_X_BXCROSS), each with the branch-free scan (BXSCANBF, graduated).
+    /// with LOSAT_X_BXCROSS, its calls deferred with LOSAT_X_BXCROSSDEFER and not), each with the
+    /// branch-free scan (BXSCANBF, graduated).
     fn modes() -> Vec<XCellTest> {
         let mut modes = vec![
             XCellTest::Diag(XDiagMode::PerHit),
             XCellTest::Diag(XDiagMode::Scalar),
         ];
-        for (masked, cross) in [(true, false), (false, false), (false, true)] {
-            let auto = x_cell_test("", masked, cross);
+        for (masked, cross, defer) in [
+            (true, false, false),
+            (false, false, false),
+            (false, true, false),
+            (false, true, true),
+        ] {
+            let auto = x_cell_test("", masked, cross, defer);
             if auto != XCellTest::Diag(XDiagMode::PerHit) {
                 modes.push(auto);
             }

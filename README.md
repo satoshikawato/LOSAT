@@ -131,6 +131,8 @@ The compiled binary will be located at `target/release/losat`.
 | WASI threads (`wasm32-wasip1-threads`) | **Supported**: tested in CI, not certified |
 | [Web GUI](#web-gui-preview) (browser) | **Preview**: no NCBI certification is claimed |
 
+On macOS, an E value printed with full precision (`-outfmt 11`, `-outfmt 8`) can differ from other platforms by 1 in its last (15th) digit because of Apple's libm, as in NCBI BLAST+ built on macOS; see [PD-LOSAT-PLATFORM-LIBM](docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md).
+
 ---
 
 ## Quick Start

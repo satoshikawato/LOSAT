@@ -11,6 +11,7 @@ import { splitOutfmt6Row } from '../../src/domain/outfmt6';
 import {
   buildResultIndex,
   filterQuery,
+  flagGiven,
   hitLimits,
   orientation,
   sortHsps,
@@ -199,6 +200,46 @@ describe('hitLimits', () => {
     expect(hitLimits(['blastp', '-query', 'q', '-subject', 's'], described)).toEqual({ maxTargetSeqs: 500 });
     expect(hitLimits(['blastp', '-max_target_seqs', '5', '-max_hsps', '2'], described)).toEqual({ maxTargetSeqs: 5, maxHsps: 2 });
     expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs', help: 'x', defaultValue: '100' }])).toEqual({ maxTargetSeqs: 100 });
+  });
+
+  // The tabular formats keep -max_target_seqs, else -num_alignments, else the default of -max_target_seqs;
+  // outfmt 0 the larger of -num_descriptions (500) and -num_alignments (250) where either is given
+  // (BLAST+ blast_args.cpp:2894-2973), and the run searches twice when the sizes differ (abi_v2.md §7).
+  it('reads the hit list sizes of -num_descriptions and -num_alignments', () => {
+    const sized = [
+      ...described,
+      { flag: '-num_descriptions', help: 'Number of descriptions [default: 500]' },
+      { flag: '-num_alignments', help: 'Number of alignments [default: 250]' },
+    ];
+    const limits = (...words: string[]) => hitLimits(['blastp', '-query', 'q', '-subject', 's', ...words], sized);
+    // -num_alignments is the tabular formats' hit list; outfmt 0 keeps 500 (the larger of 500 and 3).
+    expect(limits('-num_alignments', '3')).toEqual({
+      maxTargetSeqs: 3,
+      subjectFlag: '-num_alignments',
+      outfmt0: { alignments: 3, hitList: 500, separate: true },
+    });
+    // -num_descriptions 3 alone: outfmt 0 keeps 250 and the tabular formats 500.
+    expect(limits('-num_descriptions', '3')).toEqual({ maxTargetSeqs: 500, outfmt0: { alignments: 250, hitList: 250, separate: true } });
+    // The numbers that make the sizes equal are one search.
+    expect(limits('-num_descriptions', '2', '-num_alignments', '4')).toEqual({
+      maxTargetSeqs: 4,
+      subjectFlag: '-num_alignments',
+      outfmt0: { alignments: 4, hitList: 4, separate: false },
+    });
+    expect(limits('-num_descriptions', '500').outfmt0).toEqual({ alignments: 250, hitList: 500, separate: false });
+    expect(limits('-num_alignments', '600').outfmt0).toEqual({ alignments: 600, hitList: 600, separate: false });
+    expect(limits('-num_descriptions', '4', '-num_alignments', '2').outfmt0).toEqual({ alignments: 2, hitList: 4, separate: true });
+    // The adapter accepts `-flag=value` as the CLI does: the same limits as the two words, and flagGiven sees it.
+    expect(limits('-num_alignments=3')).toEqual(limits('-num_alignments', '3'));
+    expect(limits('-num_descriptions=4', '-num_alignments=2').outfmt0).toEqual({ alignments: 2, hitList: 4, separate: true });
+    expect(limits('-max_target_seqs=7')).toEqual({ maxTargetSeqs: 7 });
+    expect(flagGiven(['blastp', '-num_alignments=3'], '-num_alignments')).toBe(true);
+    expect(flagGiven(['blastp', '-num_alignments=3'], '-num_descriptions')).toBe(false);
+    expect(flagGiven(['blastp', '-num_alignments', '3'], '-num_alignments')).toBe(true);
+    // -max_target_seqs excludes both options: the same hit list in every format, no outfmt 0 entry.
+    expect(limits('-max_target_seqs', '7')).toEqual({ maxTargetSeqs: 7 });
+    // Without the described defaults, outfmt 0's size is not claimed (and a separate search is assumed).
+    expect(hitLimits(['blastp', '-num_descriptions', '3'], described).outfmt0).toEqual({ separate: true });
   });
 
   it('claims no limit that it cannot read', () => {

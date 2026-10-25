@@ -91,6 +91,46 @@ fn inputs(dir: &TestDir) -> (PathBuf, PathBuf) {
     (query, db)
 }
 
+/// The queries of the packing test in `dir`, written 60 letters a line as a FASTA file is: a record
+/// with a lower-case stretch, one with runs of `N`, IUPAC letters and `U`s (read as `T`), one without
+/// letters, one of other letters only (`NR` repeated, which keeps its letters), one all lower case
+/// and a plain one; 7,700 letters, so `BATCH_SIZE=3000` makes several batches of a file of more
+/// than two.
+fn packing_queries(dir: &TestDir) -> PathBuf {
+    let genome = letters(&fasta("LC738874.fasta"));
+    let lines = |letters: &str| -> String {
+        let bytes = letters.as_bytes();
+        bytes
+            .chunks(60)
+            .map(|line| format!("{}\n", std::str::from_utf8(line).expect("ASCII")))
+            .collect()
+    };
+    let soft = format!(
+        "{}{}{}",
+        &genome[..500],
+        genome[500..800].to_ascii_lowercase(),
+        &genome[800..2_000]
+    );
+    let mut ambiguous = genome[2_000..3_500].to_string();
+    ambiguous.replace_range(300..310, "NNNNNNNNNN");
+    ambiguous.replace_range(900..904, "RYKM");
+    let ambiguous = ambiguous.replacen('T', "U", 40);
+    let query = dir.0.join("packing.fna");
+    std::fs::write(
+        &query,
+        format!(
+            ">soft lower case\n{}>ambiguous\n{}>empty\n>nr\n{}>lower\n{}>plain\n{}",
+            lines(&soft),
+            lines(&ambiguous),
+            lines(&"NR".repeat(200)),
+            lines(&genome[4_000..6_000].to_ascii_lowercase()),
+            lines(&genome[6_000..7_800])
+        ),
+    )
+    .expect("write the queries");
+    query
+}
+
 /// One search of `query` against `subjects` (`-subject` or `-db`, the report on standard output)
 /// with the given variables as its only `LOSAT_*` variables (and `BATCH_SIZE`, `CHUNK_SIZE`
 /// among `variables`). `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
@@ -106,6 +146,20 @@ fn search(
     threads: u32,
     variables: &[(&str, &str)],
 ) -> (Vec<u8>, String, Option<[u64; 3]>) {
+    let (report, messages, counts, _) =
+        search_raw(task, query, subjects, words, threads, variables);
+    (report, messages, counts)
+}
+
+/// `search`, with the whole standard error too.
+fn search_raw(
+    task: &str,
+    query: &Path,
+    subjects: (&str, &Path),
+    words: &[&str],
+    threads: u32,
+    variables: &[(&str, &str)],
+) -> (Vec<u8>, String, Option<[u64; 3]>, String) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy();
@@ -135,8 +189,19 @@ fn search(
         "{task} {} {words:?} {variables:?} threads {threads}: {stderr}",
         subjects.0
     );
-    let counts = stderr.lines().find_map(|line| {
-        let counts = line.strip_prefix("[TIMING] x_bn_q_drop: ")?;
+    let counts = timing_counts(&stderr, "x_bn_q_drop");
+    let messages = stderr
+        .lines()
+        .filter(|line| !line.starts_with("[TIMING]"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    (output.stdout, messages, counts, stderr)
+}
+
+/// The first three counts of the `[TIMING] <name>:` line of `stderr` (`None` without the line).
+fn timing_counts(stderr: &str, name: &str) -> Option<[u64; 3]> {
+    stderr.lines().find_map(|line| {
+        let counts = line.strip_prefix(&format!("[TIMING] {name}: "))?;
         let mut values = counts.split(' ').map(|field| {
             field
                 .split_once('=')
@@ -144,13 +209,7 @@ fn search(
                 .expect("a count")
         });
         Some([(); 3].map(|_| values.next().expect("three counts")))
-    });
-    let messages = stderr
-        .lines()
-        .filter(|line| !line.starts_with("[TIMING]"))
-        .map(|line| format!("{line}\n"))
-        .collect();
-    (output.stdout, messages, counts)
+    })
 }
 
 // Every format that shows no query letter drops the letters of all five records (two batches),
@@ -356,4 +415,70 @@ fn standard_input_with_slots_keeps_the_letters() {
     );
     let (report, _) = run(&[SWITCH_OFF]);
     assert_eq!(report, default, "{SWITCH_OFF:?}");
+}
+
+// The letters of the records read before the search packed as they are read (`LOSAT_X_BNQPACK`,
+// `src/sequence/packed_letters.rs`), where the drop's store holds them and the file holds two of the
+// largest batches or more (`BATCH_SIZE=3000`): lower-case stretches, runs of `N`, IUPAC letters,
+// `U`s, a record without letters and lines of 60 letters come back as the reader gave them. The
+// reports (`-lcase_masking` too) and the messages are those of `LOSAT_X_BNQPACK=0`, against a
+// subject file and a database, for megablast and blastn, at one and four threads (the pool makes
+// a batch's letters again). Four records pack (the one without letters and the one of other
+// letters only keep theirs); without `BATCH_SIZE` the file is shorter than two batches and none
+// packs.
+#[test]
+fn the_letters_packed_as_read_give_the_same_reports() {
+    const PACK_OFF: (&str, &str) = ("LOSAT_X_BNQPACK", "0");
+    let dir = TestDir::new("packing");
+    let (_, db) = inputs(&dir);
+    let query = packing_queries(&dir);
+    let subject = fasta("LC738868.fasta");
+    for task in ["megablast", "blastn"] {
+        let mut base = vec![("BATCH_SIZE", "3000")];
+        if task == "blastn" {
+            base.push(("LOSAT_X_QSTREAM", "0"));
+        }
+        for subjects in [("-subject", subject.as_path()), ("-db", db.as_path())] {
+            for words in [&["-outfmt", "6"][..], &["-outfmt", "7", "-lcase_masking"]] {
+                let what = format!("{task} {} {words:?}", subjects.0);
+                let run = |threads: u32, extra: &[(&'static str, &'static str)]| {
+                    let variables: Vec<(&str, &str)> = base.iter().chain(extra).copied().collect();
+                    search_raw(task, &query, subjects, words, threads, &variables)
+                };
+                let (default, messages, _, stderr) = run(1, &[TIMING]);
+                assert!(!default.is_empty(), "{what}: no report");
+                let packed = timing_counts(&stderr, "x_bn_q_pack")
+                    .unwrap_or_else(|| panic!("{what}: nothing packed: {stderr}"));
+                assert_eq!(packed[..2], [4, 7_300], "{what}: records, letters");
+                let (report, off_messages, _, stderr) = run(1, &[TIMING, PACK_OFF]);
+                assert_eq!(report, default, "{what} {PACK_OFF:?}");
+                assert_eq!(off_messages, messages, "{what} {PACK_OFF:?}");
+                assert_eq!(
+                    timing_counts(&stderr, "x_bn_q_pack"),
+                    None,
+                    "{what} {PACK_OFF:?}"
+                );
+                let (report, threads_messages, _, stderr) = run(4, &[TIMING]);
+                assert_eq!(report, default, "{what} threads 4");
+                assert_eq!(threads_messages, messages, "{what} threads 4");
+                assert!(
+                    timing_counts(&stderr, "x_bn_q_pack").is_some(),
+                    "{what} threads 4"
+                );
+            }
+        }
+        let (_, _, _, stderr) = search_raw(
+            task,
+            &query,
+            ("-subject", subject.as_path()),
+            &["-outfmt", "6"],
+            1,
+            &[TIMING, ("LOSAT_X_QSTREAM", "0")],
+        );
+        assert_eq!(
+            timing_counts(&stderr, "x_bn_q_pack"),
+            None,
+            "{task}: one batch packed"
+        );
+    }
 }

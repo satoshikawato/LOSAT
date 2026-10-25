@@ -10,7 +10,7 @@ import { sha256Hex } from '../../../src/infra/browser/platform';
 import { ThreadHost } from '../../../src/infra/engine-worker/thread-host';
 import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../../src/infra/reactor/abi';
 import type { MemoryLimits } from '../../../src/infra/reactor/artifact';
-import { compileReactor, fetchReactor } from '../../../src/infra/reactor/instance';
+import { loadReactor } from '../../../src/infra/reactor/instance';
 import { createSharedMemory } from '../../../src/infra/reactor/shared-memory';
 import { createWasi } from '../../../src/infra/reactor/wasi';
 import type { HighMemoryCase, HighMemoryMode, HighMemoryRequest, HighMemoryResult } from './protocol';
@@ -98,7 +98,7 @@ async function runMode(
 
 async function run(request: HighMemoryRequest): Promise<HighMemoryResult> {
   if (ENGINE_ASSETS === null) throw new Error('the harness was built without the engine (LOSAT_WEB_REACTORS)');
-  const { module, artifact } = await compileReactor(await fetchReactor(ENGINE_ASSETS.threads));
+  const { module, artifact } = await loadReactor(ENGINE_ASSETS.threads);
   const declaredPages = artifact.memory.maximum!;
   const normal = await runMode(module, artifact.memory, request);
   const high = await runMode(module, { ...artifact.memory, initial: HIGH_INITIAL_PAGES }, request);

@@ -1,20 +1,18 @@
 // The engine's memory above 2 GiB and the maximum of the shared memory (plan TD-7,
 // docs/web/abi_v2.md §3 and §6): the shared memory steps down to a maximum that the
 // browser provides; the ABI binding and the WASI imports take pointers as unsigned values.
-// With LOSAT_WEB_REACTORS, the serial reactor also runs the self-test searches with its
-// heap above 2 GiB and gives the bytes of the self-test table.
+// With LOSAT_WEB_REACTORS, the serial reactor also runs one search per program with its
+// heap above 2 GiB and gives the bytes of an ordinary instance.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { findReactors } from '../../build/reactors';
-import { parseSelfTestTable } from '../../src/domain/examples';
 import { OUTPUT_FORMATS } from '../../src/domain/output-format';
-import { programById } from '../../src/domain/programs';
 import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../src/infra/reactor/abi';
+import { instantiateSerial } from '../../src/infra/reactor/instance';
 import { candidateMaximums, createSharedMemory, STEP_DOWN_PAGES } from '../../src/infra/reactor/shared-memory';
 import { createWasi, unsignedImports } from '../../src/infra/reactor/wasi';
-import TABLE from '../../src/examples/self-test.json';
 
 const PAGE = 65_536;
 const TWO_GIB = 2 ** 31;
@@ -198,12 +196,11 @@ describe('pointers of 2 GiB or more', () => {
 // --- the built reactors (LOSAT_WEB_REACTORS) ---------------------------------------------------
 
 const reactors = findReactors();
-const EXAMPLES = resolve(import.meta.dirname, '../../src/examples');
+const LOSAT = resolve(import.meta.dirname, '../../../../LOSAT');
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
 describe.skipIf(reactors === undefined)('the serial reactor with its heap above 2 GiB', () => {
   const module = reactors === undefined ? undefined : new WebAssembly.Module(reactors.serial.bytes as BufferSource);
-  const table = parseSelfTestTable(TABLE);
 
   /**
    * An instance as instantiateSerial makes it, whose memory then grows past 2 GiB and whose
@@ -234,28 +231,40 @@ describe.skipIf(reactors === undefined)('the serial reactor with its heap above 
     return { abi, exports };
   }
 
-  for (const testCase of table.cases.filter((c) => programById(c.program).unavailable === undefined)) {
-    it(`${testCase.program}: outfmt 0, 6 and 7 are the self-test table's`, async () => {
+  /** One search per program of LOSAT Web: V-BR cells of LOSAT/tests/outfmt0_manifest.tsv (run from LOSAT/). */
+  const CASES = [
+    { id: 'compact.blastn', argv: ['blastn', '-task', 'blastn'], query: 'tests/fasta/blastn_parity_compact.fasta', subject: 'tests/fasta/blastn_parity_compact.fasta' },
+    { id: 'width.blastp', argv: ['blastp'], query: 'tests/fasta/outfmt0/pwidth_q.faa', subject: 'tests/fasta/outfmt0/pwidth_s.faa' },
+    { id: 'width.tblastn', argv: ['tblastn'], query: 'tests/fasta/outfmt0/twidth_q.faa', subject: 'tests/fasta/outfmt0/twidth_s.fna' },
+    { id: 'tblastx.multi', argv: ['tblastx'], query: 'tests/fasta/outfmt0/tblastx_multi_query.fasta', subject: 'tests/fasta/outfmt0/tblastx_multi_subject.fasta' },
+  ] as const;
+
+  /** SHA-256 and length of every stream of one search. */
+  function search(abi: ReactorAbi, testCase: (typeof CASES)[number]): Record<number, { sha256: string; bytes: number }> {
+    const [program, ...options] = testCase.argv;
+    const query = abi.register(program, ROLE_QUERY, readFileSync(resolve(LOSAT, testCase.query)));
+    const subject = abi.register(program, ROLE_SUBJECT, readFileSync(resolve(LOSAT, testCase.subject)));
+    const streams = new Map<number, Uint8Array[]>();
+    const argv = [program, '-query', testCase.query, '-subject', testCase.subject, ...options, '-num_threads', '1'];
+    abi.run(argv, query.handle, subject.handle, (stream, bytes) => streams.set(stream, [...(streams.get(stream) ?? []), bytes.slice()]));
+    abi.release(query.handle);
+    abi.release(subject.handle);
+    const out: Record<number, { sha256: string; bytes: number }> = {};
+    for (const [stream, chunks] of streams) {
+      const joined = Buffer.concat(chunks);
+      out[stream] = { sha256: sha256(joined), bytes: joined.length };
+    }
+    return out;
+  }
+
+  for (const testCase of CASES) {
+    it(`${testCase.id}: every stream is the ordinary instance's`, async () => {
+      const ordinary = search((await instantiateSerial(module!)).abi, testCase);
       const { abi, exports } = await highInstance();
       expect(exports.losat_web2_alloc(16) >>> 0).toBeGreaterThanOrEqual(TWO_GIB);
-      const read = (role: 'query' | 'subject') => readFileSync(resolve(EXAMPLES, testCase.inputs[role].file));
-      const query = abi.register(testCase.program, ROLE_QUERY, read('query'));
-      const subject = abi.register(testCase.program, ROLE_SUBJECT, read('subject'));
-      const streams = new Map<number, Uint8Array[]>();
-      abi.run([...testCase.argv, '-num_threads', '1'], query.handle, subject.handle, (stream, bytes) =>
-        streams.set(stream, [...(streams.get(stream) ?? []), bytes.slice()]),
-      );
-      abi.release(query.handle);
-      abi.release(subject.handle);
-      for (const format of OUTPUT_FORMATS) {
-        const bytes = Buffer.concat(streams.get(format) ?? []);
-        const expected = testCase.outputs[format];
-        expect({ format, bytes: bytes.length, sha256: sha256(bytes) }, `${testCase.program} outfmt ${format}`).toEqual({
-          format,
-          bytes: expected.bytes,
-          sha256: expected.sha256,
-        });
-      }
+      const high = search(abi, testCase);
+      for (const format of OUTPUT_FORMATS) expect(ordinary[format]?.bytes, `${testCase.id} outfmt ${format}`).toBeGreaterThan(0);
+      expect(high).toEqual(ordinary);
       expect(abi.memoryBytes()).toBeGreaterThan(TWO_GIB);
     }, 60_000);
   }

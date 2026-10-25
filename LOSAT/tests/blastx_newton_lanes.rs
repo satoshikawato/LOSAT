@@ -20,9 +20,8 @@
 //! ```
 //! The switch is in the strict set (on unless it is `0`). A `Blast_AdjustScores` call uses a result
 //! solved ahead only when its Newton input has the same bits, so the property under test is that
-//! the report does not depend on the switch, at one thread and at four (where matches are redone
-//! speculatively on the pool's threads), and that the default run solved problems ahead and used
-//! them (`[X_STATS] NEWTONLANES prefetched= hits=`). That reports equal NCBI's is the business of the
+//! the report does not depend on the switch, at one thread and at four, and that the default run
+//! solved problems ahead and used them (`[X_STATS] NEWTONLANES prefetched= hits=`). That reports equal NCBI's is the business of the
 //! BLASTX fixtures, which run the default.
 //!
 //! The query is the first 60,000 bases of AP027131 (genetic code 4), the subjects the first 200

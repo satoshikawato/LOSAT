@@ -244,6 +244,11 @@ struct RedoContext<'a> {
     input: &'a [PreliminaryHsp],
     scratch: NonNull<GapAlignScratch>,
 }
+// No NCBI counterpart: this thread's `get_range` calls, for the unit tests of the Newton lanes.
+#[cfg(test)]
+thread_local! {
+    static X_TEST_GET_RANGES: Cell<u64> = const { Cell::new(0) };
+}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1677-1709
 // ```c++
 //                    const Uint8* query_words,
@@ -304,11 +309,6 @@ struct RedoContext<'a> {
 //     if (status != 0) {
 //         free(seqData->buffer);
 // ```
-// No NCBI counterpart: this thread's `get_range` calls, for the unit tests of the Newton lanes.
-#[cfg(test)]
-thread_local! {
-    static X_TEST_GET_RANGES: Cell<u64> = const { Cell::new(0) };
-}
 fn get_range<'a>(
     matching: &BlastCompoMatchingSequence<'a>,
     subject_range: &BlastCompoSequenceRange,
@@ -542,6 +542,34 @@ const CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
 //             return -1;
 //         if (tail[frame_index] == NULL) { /* if the list aligns is empty; */
 // ```
+fn incoming_alignments(
+    input: &[PreliminaryHsp],
+    context_index: usize,
+    params: &BlastRedoAlignParams,
+) -> Option<Box<BlastCompoAlignment>> {
+    let mut incoming = None;
+    let mut tail = &mut incoming;
+    for (index, h) in input
+        .iter()
+        .enumerate()
+        .filter(|(_, h)| h.context == context_index)
+    {
+        let node = blast_compo_alignment_new(
+            (h.score as f64 * params.score_divisor) as i32,
+            EMatrixAdjustRule::DontAdjustMatrix,
+            h.q_start,
+            h.q_end,
+            h.context as i32,
+            h.s_start,
+            h.s_end,
+            0,
+            Some(BlastCompoAlignmentContext::PreliminaryHspIndex(index)),
+        );
+        *tail = Some(node);
+        tail = &mut tail.as_mut().expect("incoming inserted").next;
+    }
+    incoming
+}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3590-3641
 // ```c++
 //                 hsp_list = Blast_HSPListNew(0);
@@ -597,54 +625,6 @@ const CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
 //                                         &LambdaRatio            // local
 //                                 );
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3641
-// ```c++
-//                                 Blast_RedoOneMatch(
-//                                         alignments,             // thread-local
-//                                         redo_align_params,      // thread-local
-//                                         incoming_aligns,        // thread-local
-//                                         numAligns[frame_index], // local
-//                                         kbp->Lambda,            // thread-local
-//                                         &matchingSeq,           // thread-local
-//                                         -1,                     // const
-//                                         query_info,             // thread-local
-//                                         numContexts,            // thread-local
-//                                         matrix,                 // thread-local
-//                                         BLASTAA_SIZE,           // const
-//                                         NRrecord,               // thread-local
-//                                         &pvalueForThisPair,     // local
-//                                         compositionTestIndex,   // thread-local
-//                                         &LambdaRatio            // local
-//                                 );
-// ```
-fn incoming_alignments(
-    input: &[PreliminaryHsp],
-    context_index: usize,
-    params: &BlastRedoAlignParams,
-) -> Option<Box<BlastCompoAlignment>> {
-    let mut incoming = None;
-    let mut tail = &mut incoming;
-    for (index, h) in input
-        .iter()
-        .enumerate()
-        .filter(|(_, h)| h.context == context_index)
-    {
-        let node = blast_compo_alignment_new(
-            (h.score as f64 * params.score_divisor) as i32,
-            EMatrixAdjustRule::DontAdjustMatrix,
-            h.q_start,
-            h.q_end,
-            h.context as i32,
-            h.s_start,
-            h.s_end,
-            0,
-            Some(BlastCompoAlignmentContext::PreliminaryHspIndex(index)),
-        );
-        *tail = Some(node);
-        tail = &mut tail.as_mut().expect("incoming inserted").next;
-    }
-    incoming
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3641
 // ```c++
 //                                 Blast_RedoOneMatch(
@@ -1454,6 +1434,12 @@ impl KappaState {
             }
             output.sort_by(|a, b| super::preliminary::compare_score(&a.hsp, &b.hsp));
         }
+        // No NCBI counterpart: the results solved ahead that no call of this match took (contained
+        // HSPs) are dropped (`x_newton_lanes::x_drop_unused`); it does not change any value NCBI
+        // computes.
+        if x_lanes {
+            crate::core::composition_adjustment::x_newton_lanes::x_drop_unused();
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:238-266
         // ```c++
         //         for (ireadBack = 0;  ireadBack < iread && hsp1 != NULL;  ireadBack++) {
@@ -1640,7 +1626,9 @@ mod x_bx_newton_lanes_tests {
         query_setup::prepare_queries,
     };
     use super::*;
-    use crate::core::composition_adjustment::x_newton_lanes::x_test_take_counts;
+    use crate::core::composition_adjustment::{
+        redo_alignment::X_TEST_BX_LANES_LIMITS, x_newton_lanes::x_test_take_counts,
+    };
 
     /// The 20 standard residues in NCBIstdaa.
     const STANDARD: [u8; 20] = [
@@ -1766,20 +1754,23 @@ mod x_bx_newton_lanes_tests {
         (subject, hsps)
     }
 
-    #[test]
-    fn prefetched_problems_cover_the_redo_and_change_nothing() {
+    /// The redo of the cases with and without the prefetch, with the prefetch's stop rules `limits`
+    /// (`None`: the built-in ones). Both redos give the same alignments and leave the same matrix;
+    /// every `Blast_AdjustScores` Newton problem of the redo without the prefetch is a problem of
+    /// the redo with it, taken from the store or (`partial`: a frame only partly walked ahead)
+    /// solved where it arises; every `get_range` call is made once. Returns the problems taken from
+    /// the store, the most of one match, and the problems solved where they arose.
+    fn compare(limits: Option<[usize; 3]>) -> (u64, u64, u64) {
         const SUBJECT_LENGTH: usize = 6_000;
         let (batch, parameters, options) = setup(SUBJECT_LENGTH);
         let mut off = KappaState::new(&batch, &parameters, &options).unwrap();
         let mut on = KappaState::new(&batch, &parameters, &options).unwrap();
         let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+        X_TEST_BX_LANES_LIMITS.with(|cell| cell.set(limits));
         x_test_take_counts();
-        let mut solved = 0;
-        let mut largest = 0;
-        for (index, pieces) in [1, 2, 3, 5, 8, 12, 20, 30, 45, 70, 1, 4, 16, 50]
-            .into_iter()
-            .enumerate()
-        {
+        let (mut taken, mut largest, mut solved) = (0, 0, 0);
+        let cases = [1, 2, 3, 5, 8, 12, 20, 30, 45, 70, 1, 4, 16, 50];
+        for (index, pieces) in cases.into_iter().enumerate() {
             let (subject, hsps) = case(&batch, &mut rng, pieces);
             X_TEST_GET_RANGES.with(|count| count.set(0));
             let expected = off
@@ -1793,16 +1784,19 @@ mod x_bx_newton_lanes_tests {
                 .unwrap();
             let [prefetched, hits, misses] = x_test_take_counts();
             let ranges_on = X_TEST_GET_RANGES.with(|count| count.replace(0));
+            if limits.is_none() {
+                assert_eq!(
+                    misses, 0,
+                    "case {index}: a Newton problem was not solved ahead"
+                );
+            }
             assert_eq!(
-                misses, 0,
-                "case {index}: a Newton problem of the redo was not solved ahead"
+                hits + misses,
+                calls,
+                "case {index}: the same Newton problems"
             );
-            assert_eq!(hits, calls, "case {index}: the same Newton problems");
             assert!(prefetched >= hits, "case {index}");
-            assert_eq!(
-                ranges_on, ranges_off,
-                "case {index}: every range made ahead is used"
-            );
+            assert_eq!(ranges_on, ranges_off, "case {index}: one call per range");
             assert_eq!(actual.len(), expected.len(), "case {index}");
             for (a, e) in actual.iter().zip(&expected) {
                 assert_eq!(a.hsp, e.hsp, "case {index}");
@@ -1810,13 +1804,37 @@ mod x_bx_newton_lanes_tests {
                 assert_eq!(a.composition_method, e.composition_method, "case {index}");
                 assert_eq!(a.identity_matrix, e.identity_matrix, "case {index}");
             }
-            solved += hits;
+            let (matrix_on, matrix_off) = (on.x_take_matrix(), off.x_take_matrix());
+            assert_eq!(matrix_on, matrix_off, "case {index}: the matrix left");
+            on.x_set_matrix(matrix_on);
+            off.x_set_matrix(matrix_off);
+            taken += hits;
             largest = largest.max(hits);
+            solved += misses;
         }
+        X_TEST_BX_LANES_LIMITS.with(|cell| cell.set(None));
+        (taken, largest, solved)
+    }
+
+    #[test]
+    fn prefetched_problems_cover_the_redo_and_change_nothing() {
+        let (taken, largest, _) = compare(None);
         // The cases reach the prefetch with several batches per match (more than 32 problems).
         assert!(
-            solved > 0 && largest > 32,
-            "solved {solved}, largest {largest}"
+            taken > 0 && largest > 32,
+            "taken {taken}, largest {largest}"
         );
+    }
+
+    // The stops inside a frame (inputs, then kept bytes) leave the rest of the frame to its call.
+    #[test]
+    fn stops_inside_a_frame_change_nothing() {
+        for limits in [[1, 2, usize::MAX], [1, usize::MAX, 1], [4, 6, 2_000]] {
+            let (taken, _, solved) = compare(Some(limits));
+            assert!(
+                taken > 0 && solved > 0,
+                "{limits:?}: taken {taken}, solved {solved}"
+            );
+        }
     }
 }

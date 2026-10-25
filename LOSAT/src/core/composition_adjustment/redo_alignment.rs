@@ -2737,12 +2737,34 @@ fn x_newton_lanes_prefetch_windows<'seq>(
     window_index
 }
 
-// No NCBI counterpart: limits of one BLASTX prefetch within a frame call: the inputs (half the
-// results a thread's store keeps, so that a prefetch never drops its own results) and the bytes of
-// the `get_range` results kept (a frame against a long subject with many windows keeps at most
-// this much). They do not change any value NCBI computes.
+// No NCBI counterpart: limits of one BLASTX prefetch within a frame call, checked at the start of each
+// window: the inputs (half the results a thread's store keeps; a window adds at most one input per
+// HSP, so a prefetch keeps its own results unless one window holds hundreds of near-identical status
+// changes) and the bytes of the `get_range` results kept (a frame against a long subject with many
+// windows keeps about this much). They do not change any value NCBI computes.
 const X_BX_LANES_MAX_INPUTS: usize = 256;
 const X_BX_LANES_RANGE_BYTES: usize = 1 << 20;
+
+// No NCBI counterpart: the three stop rules of the BLASTX prefetch (inputs before a frame, inputs and
+// kept bytes inside one), replaced by the unit tests to reach the stops inside a frame.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static X_TEST_BX_LANES_LIMITS: Cell<Option<[usize; 3]>> = const { Cell::new(None) };
+}
+
+// No NCBI counterpart: the stop rules in force (see above); they do not change any value NCBI
+// computes.
+fn x_bx_lanes_limits() -> [usize; 3] {
+    #[cfg(test)]
+    if let Some(limits) = X_TEST_BX_LANES_LIMITS.with(Cell::get) {
+        return limits;
+    }
+    [
+        X_LANES_PREFETCH_INPUTS,
+        X_BX_LANES_MAX_INPUTS,
+        X_BX_LANES_RANGE_BYTES,
+    ]
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3590-3596
 // ```c
@@ -2792,13 +2814,14 @@ const X_BX_LANES_RANGE_BYTES: usize = 1 << 20;
 // composition of the whole subject range and `x_newton_input`. Containment is not tested (every HSP is
 // assumed not contained), so the inputs are a superset of those the calls adjust. Stops before a frame
 // once `X_LANES_PREFETCH_INPUTS` inputs are reached (inside a frame at `X_BX_LANES_MAX_INPUTS` or the
-// byte limit) and solves the inputs (`x_newton_lanes::prefetch`). Errors end the replica; the calls
-// meet them themselves.
+// byte limit; the rest of that frame is solved by its call) and solves the inputs
+// (`x_newton_lanes::prefetch`). Errors end the replica; the calls meet them themselves.
 // No NCBI counterpart: computes ahead what the frame calls compute; a result is used only by a call
 // with the same input bits, and a kept range only by the `get_range` call with the same window, HSP
 // index and flags. It does not change any value NCBI computes.
-/// One entry per frame covered (at least one when `frames` is not empty): the ranges kept for that
-/// frame's call. Frames after the last entry are not covered.
+/// One entry per frame covered (at least one when `frames` is not empty and the query is translated
+/// and the subject is not; none otherwise): the ranges kept for that frame's call. Frames after the
+/// last entry are not covered.
 pub(crate) fn x_bx_newton_lanes_prefetch_frames<'seq>(
     frames: &[Option<Box<BlastCompoAlignment>>],
     params: &BlastRedoAlignParams,
@@ -2807,11 +2830,15 @@ pub(crate) fn x_bx_newton_lanes_prefetch_frames<'seq>(
     callbacks: &BlastRedoAlignCallbacks,
     composition_workspace: &BlastCompositionWorkspace,
 ) -> Vec<XLaneRanges> {
+    if !params.query_is_translated || params.subject_is_translated {
+        return Vec::new();
+    }
+    let [frame_inputs, max_inputs, range_bytes] = x_bx_lanes_limits();
     let mut inputs = Vec::new();
     let mut covered: Vec<XLaneRanges> = Vec::new();
     let mut kept_bytes = 0usize;
     'frames: for incoming_aligns in frames {
-        if inputs.len() >= X_LANES_PREFETCH_INPUTS {
+        if inputs.len() >= frame_inputs {
             break;
         }
         let mut ranges: XLaneRanges = Vec::new();
@@ -2825,7 +2852,7 @@ pub(crate) fn x_bx_newton_lanes_prefetch_frames<'seq>(
             break;
         };
         for (window_index, window) in windows.iter().enumerate() {
-            if inputs.len() >= X_BX_LANES_MAX_INPUTS || kept_bytes >= X_BX_LANES_RANGE_BYTES {
+            if inputs.len() >= max_inputs || kept_bytes >= range_bytes {
                 covered.push(ranges);
                 break 'frames;
             }

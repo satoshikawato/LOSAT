@@ -1511,6 +1511,13 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
     });
 }
 
+// No NCBI counterpart: drops the results of this thread's store that no call took (BLASTX: those of
+// contained HSPs, which its prefetch assumes not contained), so that they neither stay in memory nor
+// lengthen the search of later calls; it does not change any value NCBI computes.
+pub(crate) fn x_drop_unused() {
+    STORE.with(|store| store.borrow_mut().clear());
+}
+
 // No NCBI counterpart: bitwise equality of two f64 slices.
 #[inline]
 fn same_bits(a: &[f64], b: &[f64]) -> bool {

@@ -10,6 +10,7 @@
 //! readers.
 
 mod istat;
+mod ncbi_report;
 mod score;
 mod window;
 
@@ -18,8 +19,12 @@ mod tests;
 
 use std::fmt;
 use std::path::Path;
+use std::sync::Arc;
 
-pub use istat::{discover_stat_type, StatFile, StatType, UnitCounts};
+pub use istat::{
+    discover_stat_type, discover_stat_type_in, FormatSite, StatFile, StatType, UnitCounts,
+};
+pub use ncbi_report::NCBI_BUILD_ROOT;
 
 use score::ScoreMean;
 use window::Window;
@@ -64,12 +69,12 @@ pub enum WinMaskError {
     /// `CSeqMaskerIstatFactory::eOpen`: "could not open <name>"
     /// (`seq_masker_istat_factory.cpp:171`).
     Open { name: String },
-    /// An exception of a reader (`eFormat`, `eBadParam`, `eBadHashParam`); the factory
-    /// rethrows it as "could not create a unit counts container"
+    /// An exception of a reader (`eFormat`, `eBadParam`, `eBadHashParam`) at `site`; the
+    /// factory rethrows it as "could not create a unit counts container"
     /// (`seq_masker_istat_factory.cpp:358-359`). `warnings` are the warnings NCBI posted
     /// before it.
     Format {
-        message: String,
+        site: FormatSite,
         warnings: Vec<String>,
     },
     /// The factory's own `eCreateFail`: "unrecognized unit counts format"
@@ -87,9 +92,9 @@ pub enum WinMaskError {
 }
 
 impl WinMaskError {
-    pub(crate) fn format(message: &str) -> Self {
+    pub(crate) fn format(site: FormatSite) -> Self {
         Self::Format {
-            message: message.to_string(),
+            site,
             warnings: Vec::new(),
         }
     }
@@ -99,7 +104,7 @@ impl fmt::Display for WinMaskError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Open { name } => write!(f, "could not open {name}"),
-            Self::Format { message, .. } => f.write_str(message),
+            Self::Format { site, .. } => f.write_str(site.message()),
             Self::CreateFail { message } => f.write_str(message),
             Self::UnsupportedFormat(t) => write!(
                 f,
@@ -138,9 +143,35 @@ impl fmt::Display for WinMaskError {
 
 impl std::error::Error for WinMaskError {}
 
-/// The masker (`CSeqMasker`) with the "mean" trigger and no merge pass.
+/// Where the counts files that the callers name are read from: NCBI's checks of the format
+/// (`DiscoverStatType`) and its readers (`CSeqMaskerIstatFactory::create`) open the file by
+/// name; LOSAT opens it through a source, so that LOSAT Web can give counts it holds in memory
+/// under the name of the command line. [`FileCounts`] is the file system.
+pub trait CountsSource: Send + Sync + fmt::Debug {
+    /// `CSeqMaskerIstatFactory::DiscoverStatType( name )`.
+    fn discover(&self, name: &str) -> Result<StatFile, WinMaskError>;
+    /// `CSeqMaskerIstatFactory::create( name, ... )` with `params`.
+    fn counts(&self, name: &str, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError>;
+}
+
+/// The counts files of the file system, by path.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FileCounts;
+
+impl CountsSource for FileCounts {
+    fn discover(&self, name: &str) -> Result<StatFile, WinMaskError> {
+        discover_stat_type(Path::new(name))
+    }
+
+    fn counts(&self, name: &str, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError> {
+        UnitCounts::open(Path::new(name), params).map(Arc::new)
+    }
+}
+
+/// The masker (`CSeqMasker`) with the "mean" trigger and no merge pass. The counts are shared:
+/// a caller that keeps them for several runs (LOSAT Web) makes a masker per run without a copy.
 pub struct SeqMasker {
-    ustat: UnitCounts,
+    ustat: Arc<UnitCounts>,
     window_size: u8,
 }
 
@@ -152,7 +183,7 @@ const UNIT_STEP: u8 = 1;
 impl SeqMasker {
     /// `s_BuildSeqMasker( lstat )` with `params` in place of its zeros.
     pub fn open(path: &Path, params: &MaskerParams) -> Result<Self, WinMaskError> {
-        Self::new(UnitCounts::open(path, params)?, params)
+        Self::new(Arc::new(UnitCounts::open(path, params)?), params)
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:119-129
@@ -170,7 +201,7 @@ impl SeqMasker {
     ///     trigger_score = score = new CSeqMaskerScoreMean( ustat );
     /// ```
     /// `ustat` must have been read with the same `params` (the thresholds are set there).
-    pub fn new(ustat: UnitCounts, params: &MaskerParams) -> Result<Self, WinMaskError> {
+    pub fn new(ustat: Arc<UnitCounts>, params: &MaskerParams) -> Result<Self, WinMaskError> {
         let unit = ustat.unit_size();
         let window_size = if params.window_size == 0 {
             unit + 4

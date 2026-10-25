@@ -342,11 +342,15 @@ pub fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> anyhow:
 /// `-subject` file, whose "Command line argument error" NCBI raises inside `Run`.
 pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Message>> {
     let native = error.downcast_ref::<crate::cli::NativeError>()?;
-    const PREFIXES: [&str; 4] = [
+    // `Error: NCBI C++ Exception:` is `CATCH_ALL`'s report of an exception of NCBI's C++
+    // Toolkit that reaches the application (`blast_app_util.hpp:248-251`; BLASTN's
+    // `-window_masker_db` file that cannot be opened).
+    const PREFIXES: [&str; 5] = [
         "BLAST query error:",
         "BLAST Database error:",
         "BLAST engine error:",
         "BLAST query/options error:",
+        "Error: NCBI C++ Exception:",
     ];
     let known = PREFIXES
         .iter()

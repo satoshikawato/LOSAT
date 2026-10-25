@@ -1199,12 +1199,19 @@ pub fn build_lookup_tables<R: InputRecord>(
 }
 
 /// The masks of the queries: their DUST masks and, with `-lcase_masking`, their lower-case
-/// letters.
+/// letters; with `-window_masker_db` the masks of WindowMasker, which replace both
+/// (`window_masker`). The error is that of the counts file or of the masker.
 pub fn query_masks<R: InputRecord>(
     args: &BlastnArgs,
     queries: &[R],
     pool: &SearchPool<'_>,
-) -> Vec<Vec<MaskedInterval>> {
+) -> Result<Vec<Vec<MaskedInterval>>, crate::utils::winmask::WinMaskError> {
+    if let Some(window_masker) = &args.window_masker {
+        return window_masker.batch_masks(
+            queries.iter().map(|record| record.seq()),
+            QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
+        );
+    }
     let mut query_masks = apply_dust_masking(args, queries, pool);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
     // ```c
@@ -1226,7 +1233,7 @@ pub fn query_masks<R: InputRecord>(
             }
         }
     }
-    query_masks
+    Ok(query_masks)
 }
 
 /// The masks of the query parts of a query chunk: the DUST masks of each part added to the
@@ -1256,21 +1263,36 @@ pub fn query_masks<R: InputRecord>(
 ///     }
 /// ```
 /// The part's own masks are only merged when DUST finds a region; the lookup table and the
-/// search use the masked residues, which merging does not change.
+/// search use the masked residues, which merging does not change. With `-window_masker_db`
+/// the chunk's `x_CalculateMasks` ends with WindowMasker on the part's letters, which
+/// replaces every mask the part had (`query_masks`).
 pub fn chunk_query_masks<R: InputRecord>(
     args: &BlastnArgs,
     parts: &[R],
     restricted: Vec<Vec<MaskedInterval>>,
     pool: &SearchPool<'_>,
-) -> Vec<Vec<MaskedInterval>> {
-    apply_dust_masking(args, parts, pool)
+) -> Result<Vec<Vec<MaskedInterval>>, crate::utils::winmask::WinMaskError> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:874-879
+    // ```c++
+    //         for (size_t chunk_num = 0; chunk_num < m_NumChunks; chunk_num++) {
+    //             CRef<IQueryFactory> qf
+    //                 (new CObjMgr_QueryFactory(*m_SplitQueriesInChunk[chunk_num]));
+    //             m_QueryChunkFactories.push_back(qf);
+    //         }
+    // ```
+    // A chunk's query data is made with the options (`MakeLocalQueryData(m_Options)`), so its
+    // query source calculates the masks of the chunk's parts again, WindowMasker last.
+    if args.window_masker.is_some() {
+        return query_masks(args, parts, pool);
+    }
+    Ok(apply_dust_masking(args, parts, pool)
         .into_iter()
         .zip(restricted)
         .map(|(mut masks, restricted)| {
             masks.extend(restricted);
             merge_mask_intervals(masks)
         })
-        .collect()
+        .collect())
 }
 
 /// Prepare all sequence data and configuration

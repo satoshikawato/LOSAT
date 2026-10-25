@@ -16,6 +16,8 @@ pub(crate) mod pairwise;
 pub mod query_split;
 pub mod scoring;
 pub mod sequence_compare;
+// NCBI c++/src/algo/blast/api/winmask_filter.cpp:280-313: the query masks of `-window_masker_db`.
+pub(crate) mod window_masker;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:633-692
 // ```c
 // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., FALSE);

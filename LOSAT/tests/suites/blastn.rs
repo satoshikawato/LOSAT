@@ -59,6 +59,8 @@ mod blastn_subject_stream;
 mod blastn_tab_par;
 #[path = "../blastn_ungap_count.rs"]
 mod blastn_ungap_count;
+#[path = "../blastn_window_masker.rs"]
+mod blastn_window_masker;
 #[path = "../megablast_xdrop.rs"]
 mod megablast_xdrop;
 #[path = "../run_local_blastn.rs"]

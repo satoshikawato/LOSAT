@@ -144,6 +144,10 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
                 7 => stage!(7),
                 11 => stage!(11),
                 12 => stage!(12),
+                21 => stage!(21),
+                22 => stage!(22),
+                23 => stage!(23),
+                24 => stage!(24),
                 _ => x_scan_flat_fseed(
                     lookup,
                     subject,
@@ -280,7 +284,9 @@ fn x_scan_flat_fseed<F>(
 // `x_scan_flat_fseed`: 0 that loop; 1 the hits staged as (diagonal, here) in runs of 8 per cell and
 // tested in one loop per 1,024 staged hits; 2 staged as (query offset, subject offset); 3 as 1
 // without the read-ahead of the hits; 4 runs of 16; 5 tested per 256; 7 as 1 without any
-// read-ahead; 11 as 1 with the scan out of line; 12 as 11 without bounds checks in the scan.
+// read-ahead; 11 as 1 with the scan out of line; 12 as 11 without bounds checks in the scan; 21 as 12
+// with the runs copied in SSE2 registers and the test loop out of line; 22 as 21 tested per 256; 23
+// as 21 with the test loop inline; 24 as 21 with the runs copied as arrays (no intrinsics).
 fn x_bpf_s4() -> u32 {
     use std::sync::OnceLock;
     static ARM: OnceLock<u32> = OnceLock::new();
@@ -327,7 +333,7 @@ fn x_scan_flat_stage<const ARM: u32, F>(
     let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
     match ARM {
         11 => lookup.x_probe_list_bf_out::<false>(subject, subject_length, &mut cells),
-        12 => lookup.x_probe_list_bf_out::<true>(subject, subject_length, &mut cells),
+        12 | 21..=24 => lookup.x_probe_list_bf_out::<true>(subject, subject_length, &mut cells),
         _ => lookup.x_probe_list_bf(subject, subject_length, &mut cells),
     }
     let mut stage = X_STAGE.with(Cell::take).unwrap_or_else(|| {
@@ -336,7 +342,11 @@ fn x_scan_flat_stage<const ARM: u32, F>(
             b: vec![0; X_STAGE_CAP + 16],
         })
     });
-    let cap = if ARM == 5 { 256 } else { X_STAGE_CAP };
+    let cap = if ARM == 5 || ARM == 22 {
+        256
+    } else {
+        X_STAGE_CAP
+    };
     const fn step_of(arm: u32) -> usize {
         if arm == 4 {
             16
@@ -351,6 +361,20 @@ fn x_scan_flat_stage<const ARM: u32, F>(
     let XStage { a, b } = &mut *stage;
     let (a, b) = (&mut a[..], &mut b[..]);
     let mut drain = |w: usize, a: &[u32], b: &[u32]| {
+        if matches!(ARM, 21 | 22 | 24) {
+            x_stage_drain(
+                &a[..w],
+                &b[..w],
+                diag_array,
+                mask,
+                diag_offset,
+                window,
+                word_size,
+                bf,
+                candidate,
+            );
+            return;
+        }
         for (&x, &y) in a[..w].iter().zip(&b[..w]) {
             let (coord, here) = if ARM == 2 {
                 let (q, s) = (x as i32, y as i32);
@@ -403,6 +427,16 @@ fn x_scan_flat_stage<const ARM: u32, F>(
                 w = 0;
             }
             let take = (end - k).min(step);
+            if ARM >= 21 && k + 8 <= hits.len() {
+                // w + 8 <= cap < a.len(), b.len(); k + 8 <= hits.len() (tested).
+                x_copy_run::<ARM>(hits, k, s, here, mask, a, b, w);
+                w += take;
+                k += take;
+                if k >= end {
+                    break;
+                }
+                continue;
+            }
             let da = &mut a[w..w + step];
             let db = &mut b[w..w + step];
             if k + step <= hits.len() {
@@ -436,6 +470,82 @@ fn x_scan_flat_stage<const ARM: u32, F>(
     drain(w, a, b);
     X_STAGE.with(|slot| slot.set(Some(stage)));
     X_CELLS.with(|slot| slot.set(Some(cells)));
+}
+
+// PROBE (BPF s4): copies hits[k..k + 8] to a[w..w + 8] as diagonals (q - s) & mask and here to
+// b[w..w + 8]. The caller checked k + 8 <= hits.len() and w + 8 <= a.len(), b.len().
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn x_copy_run<const ARM: u32>(
+    hits: &[i32],
+    k: usize,
+    s: i32,
+    here: u32,
+    mask: u32,
+    a: &mut [u32],
+    b: &mut [u32],
+    w: usize,
+) {
+    debug_assert!(k + 8 <= hits.len() && w + 8 <= a.len() && w + 8 <= b.len());
+    #[cfg(target_arch = "x86_64")]
+    if ARM != 24 {
+        use std::arch::x86_64::*;
+        // SAFETY: SSE2 is in the x86_64 baseline; the reads and writes are in bounds (above).
+        unsafe {
+            let src = hits.as_ptr().add(k).cast::<__m128i>();
+            let vs = _mm_set1_epi32(s);
+            let vm = _mm_set1_epi32(mask as i32);
+            let vh = _mm_set1_epi32(here as i32);
+            let c0 = _mm_and_si128(_mm_sub_epi32(_mm_loadu_si128(src), vs), vm);
+            let c1 = _mm_and_si128(_mm_sub_epi32(_mm_loadu_si128(src.add(1)), vs), vm);
+            let pa = a.as_mut_ptr().add(w).cast::<__m128i>();
+            _mm_storeu_si128(pa, c0);
+            _mm_storeu_si128(pa.add(1), c1);
+            let pb = b.as_mut_ptr().add(w).cast::<__m128i>();
+            _mm_storeu_si128(pb, vh);
+            _mm_storeu_si128(pb.add(1), vh);
+        }
+        return;
+    }
+    let src: &[i32; 8] = hits[k..k + 8].try_into().unwrap();
+    let out: [u32; 8] = src.map(|q| (q.wrapping_sub(s) as u32) & mask);
+    let da: &mut [u32; 8] = (&mut a[w..w + 8]).try_into().unwrap();
+    *da = out;
+    let db: &mut [u32; 8] = (&mut b[w..w + 8]).try_into().unwrap();
+    *db = [here; 8];
+}
+
+/// PROBE (BPF s4): the two-hit test of the staged hits (diagonal `a[i]`, here `b[i]`) in order,
+/// out of line so that its loop keeps its own registers.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_stage_drain<F>(
+    a: &[u32],
+    b: &[u32],
+    diag_array: &mut [DiagStruct],
+    mask: u32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    bf: XHitBf,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    assert!(diag_array.len() > mask as usize);
+    for (&coord, &here) in a.iter().zip(b) {
+        // SAFETY: coord <= mask < diag_array.len() (asserted above).
+        let entry = unsafe { diag_array.get_unchecked_mut(coord as usize) };
+        if bf.test(entry, here) {
+            continue;
+        }
+        let s = here.wrapping_sub(diag_offset as u32) as i32;
+        if let Some((last_hit, diff)) = x_test_hit(entry, s, diag_offset, window, word_size) {
+            // The diagonal table is longer than the query, so q = (coord + s) & mask.
+            let q = (coord.wrapping_add(s as u32) & mask) as i32;
+            candidate(q, s, last_hit, diff, entry);
+        }
+    }
 }
 
 // PROBE (BPF s4): a cache hint.
@@ -617,7 +727,7 @@ mod tests {
                 let mut bf_diag = vec![DiagStruct::default(); diag_len];
                 let mut fseed_diag = vec![DiagStruct::default(); diag_len];
                 let mut reference_diag = vec![DiagStruct::default(); diag_len];
-                let mut stage_diags = vec![vec![DiagStruct::default(); diag_len]; 13];
+                let mut stage_diags = vec![vec![DiagStruct::default(); diag_len]; 25];
                 let mut diag_offset = window;
                 let mut total = 0usize;
                 for (n, subject) in subjects.iter().enumerate() {
@@ -737,6 +847,10 @@ mod tests {
                         arm!(7);
                         arm!(11);
                         arm!(12);
+                        arm!(21);
+                        arm!(22);
+                        arm!(23);
+                        arm!(24);
                     }
                     total += flat_log.len();
                     diag_offset += length as i32 + window;

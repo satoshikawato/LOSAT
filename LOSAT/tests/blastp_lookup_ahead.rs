@@ -16,6 +16,13 @@
 //! itself, so that the tests do not depend on the defaults of the strict set. Each test writes its
 //! files to a directory of its own.
 //!
+//! The queries are records of `MeenMJNV.faa`, not all 101 (one run on all 101 queries costs 2-8
+//! CPU s, one on `four_queries` 0.05-0.45 s, one on `drop_queries` 0.4-0.7 s): `four_queries` for
+//! every path that needs blocks, `drop_queries` for the one rule that reads the tables' sizes (the
+//! room of a build ahead). The other rules depend on the letters only through counts that the four
+//! queries keep: a block search needs more than one block, and a split batch at least two chunks
+//! (`CHUNK_SIZE` 400).
+//!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
 //! ```c++
 //!     // 5. Create the lookup table
@@ -59,6 +66,64 @@ fn test_dir(tag: &str) -> PathBuf {
     std::fs::remove_dir_all(&dir).ok();
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// The queries of a search (a file of records of `MeenMJNV.faa`) and its `BATCH_SIZE`.
+struct Queries {
+    file: PathBuf,
+    batch_size: &'static str,
+}
+
+/// The records of `MeenMJNV.faa` from accession `first` to `last`, in the file `name` of `dir`.
+fn records(dir: &Path, name: &str, first: &str, last: &str) -> PathBuf {
+    let text = std::fs::read_to_string(fixture("MeenMJNV.faa")).unwrap();
+    let records: Vec<String> = text
+        .split('>')
+        .filter(|record| !record.is_empty())
+        .map(|record| format!(">{record}"))
+        .collect();
+    let position = |accession: &str| {
+        records
+            .iter()
+            .position(|record| record.starts_with(&format!(">{accession} ")))
+            .expect("the record is in the fixture")
+    };
+    let path = dir.join(name);
+    std::fs::write(&path, records[position(first)..=position(last)].concat()).unwrap();
+    path
+}
+
+/// The queries of most searches: four consecutive records, BDT62581.1 (698 letters, one subject),
+/// BDT62582.1 (268, another), BDT62583.1 (629, no hits) and BDT62584.1 (944, five subjects), each a
+/// batch of its own at `BATCH_SIZE` 250 (a batch takes records while it holds fewer letters): four
+/// blocks of one batch at `LOSAT_X_BPQBLOCK=1`, two of two batches at `TWO_BATCH_BLOCKS`. No build
+/// ahead lacks the room (the vectors made ready for it hold at least 2^18 entries, more than any of
+/// their tables needs).
+fn four_queries(dir: &Path) -> Queries {
+    Queries {
+        file: records(dir, "four.faa", "BDT62581.1", "BDT62584.1"),
+        batch_size: "250",
+    }
+}
+
+/// `LOSAT_X_BPQBLOCK` for `four_queries` in blocks of two batches (a block takes batches while it
+/// holds fewer letters): {BDT62581.1, BDT62582.1} (966 letters) and {BDT62583.1, BDT62584.1}
+/// (1,573), the second built ahead.
+const TWO_BATCH_BLOCKS: &str = "900";
+
+/// The queries where a build ahead lacks the room: BDT62535.1 to BDT62547.1, the fixture's third to
+/// fifth query batches at `BATCH_SIZE` 3000 (3,183, 9,157 and 3,131 letters), three blocks of one
+/// batch at `LOSAT_X_BPQBLOCK=1`. The second batch's table (it holds BDT62546.1, 6,458 letters) has
+/// more hits (exact blastp: overflow entries) than the vectors made ready for it during the first
+/// block hold (`x_lookup_ahead.rs` `x_make_room`: new ones of twice the largest table so far, at
+/// least 2^18 entries), so that block builds its table itself; the third takes the values built
+/// ahead on the vectors the second made ready. With all 101 queries in blocks of one batch the same
+/// batch (the fourth block) is the one dropped.
+fn drop_queries(dir: &Path) -> Queries {
+    Queries {
+        file: records(dir, "drop.faa", "BDT62535.1", "BDT62547.1"),
+        batch_size: "3000",
+    }
 }
 
 /// What one run printed and how it ended.
@@ -110,9 +175,9 @@ impl Run {
     }
 }
 
-/// One blastp run (`task`) of the fixture pair (two related nimavirus proteomes) against `subject`
-/// (`-subject FILE` or `-db NAME`) with `vars` as its only `LOSAT_*` variables that choose a code
-/// path, `BATCH_SIZE` 3000 (several query batches), `LOSAT_TIMING` and the arguments `extra`
+/// One blastp run (`task`) of `queries` against `subject` (`-subject FILE` or `-db NAME`; the
+/// fixture pair is two related nimavirus proteomes) with `vars` as its only `LOSAT_*` variables
+/// that choose a code path, the queries' `BATCH_SIZE`, `LOSAT_TIMING` and the arguments `extra`
 /// (`-outfmt 6` unless they name another).
 /// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
@@ -120,6 +185,7 @@ impl Run {
 fn blastp(
     dir: &Path,
     task: &str,
+    queries: &Queries,
     subject: &[&OsStr],
     threads: u32,
     vars: &[(&str, &str)],
@@ -143,7 +209,7 @@ fn blastp(
         .arg("blastp")
         .args(["-task", task])
         .arg("-query")
-        .arg(fixture("MeenMJNV.faa"))
+        .arg(&queries.file)
         .args(subject)
         .args(["-evalue", "0.001"])
         .args(["-num_threads", &threads.to_string()])
@@ -152,7 +218,7 @@ fn blastp(
         command.args(["-outfmt", "6"]);
     }
     let output = command
-        .env("BATCH_SIZE", "3000")
+        .env("BATCH_SIZE", queries.batch_size)
         .env("LOSAT_TIMING", "1")
         .envs(PREVIOUS_DEFAULT.iter().copied())
         .envs(vars.iter().copied())
@@ -187,15 +253,24 @@ const REDOPAR: (&str, &str) = ("LOSAT_X_BPREDOPAR", "1");
 fn same_runs(
     dir: &Path,
     task: &str,
+    queries: &Queries,
     subject: &[&OsStr],
     threads: u32,
     base: &[(&str, &str)],
     extra: &[&str],
 ) -> (Run, Run) {
-    let off = blastp(dir, task, subject, threads, base, extra);
+    let off = blastp(dir, task, queries, subject, threads, base, extra);
     let what = format!("{task} {base:?} {extra:?} threads {threads}");
     for switch in [ON, SHADOW] {
-        let run = blastp(dir, task, subject, threads, &with(base, &[switch]), extra);
+        let run = blastp(
+            dir,
+            task,
+            queries,
+            subject,
+            threads,
+            &with(base, &[switch]),
+            extra,
+        );
         assert!(run.stdout == off.stdout, "{what} {switch:?}: the report");
         assert_eq!(
             run.stderr_compared(),
@@ -225,38 +300,42 @@ fn assert_built_ahead(counts: &HashMap<String, u64>, searches: u64, what: &str) 
     assert_eq!(counts["compared"], counts["prebuilt"], "{what}: {counts:?}");
 }
 
-// The block search with blocks of one batch and of 20,000 letters: each block after the first
-// takes the values built ahead during the block before it, and the shadow finds them equal to its
-// own build. Both tasks: blastp-fast's flat table and exact blastp's table. One case per path (each
-// search of the fixture pair costs CI seconds): four threads (every gate is `threads() > 1`; two
-// threads, where the build ahead has the block's one helper: the `-db` test and the `/dev/full`
-// test); the build beside the redo windows of `LOSAT_X_BPREDOPAR`: the `-db` test.
+// The block search with blocks of one batch and of two: each block after the first takes the values
+// built ahead during the block before it where they fit (below), and the shadow finds them equal to
+// its own build. Both tasks: blastp-fast's flat table and exact blastp's table. Blocks of one batch
+// with `drop_queries`, whose second block's build ahead lacks the room; blocks of two batches with
+// `four_queries` (blastp-fast's build ahead makes its table of the block's query batches). One
+// case per path: four threads (every gate is `threads() > 1`; two threads, where the build ahead
+// has the block's one helper: the `-db` test and the `/dev/full` test); the build beside the redo
+// windows of `LOSAT_X_BPREDOPAR`: the `-db` test.
 #[test]
 fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     let dir = test_dir("blocks");
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    let (four, drop) = (four_queries(&dir), drop_queries(&dir));
     for (task, acts) in TASKS {
-        for letters in ["1", "20000"] {
+        for (queries, letters, blocks, dropped) in
+            [(&drop, "1", 3, 1), (&four, TWO_BATCH_BLOCKS, 2, 0)]
+        {
             let base = with(acts, &[("LOSAT_X_BPQBLOCK", letters)]);
-            let (off, shadow) = same_runs(&dir, task, &subject, 4, &base, &[]);
+            let (off, shadow) = same_runs(&dir, task, queries, &subject, 4, &base, &[]);
             assert!(!off.stdout.is_empty(), "the fixture pair has rows");
             let what = format!("{task}, threads 4, blocks of {letters}");
+            assert_eq!(off.searches(), blocks, "{what}");
             let counts = shadow.shadow("BPLKPAHEAD");
             assert_built_ahead(&counts, off.searches(), &what);
-            // Exact blastp in blocks of one batch: a block whose table's overflow exceeds the
-            // room (the largest so far plus a half) builds its table itself, after its
-            // thread took the neighbour lists back.
-            if task == "blastp" && letters == "1" {
-                assert!(counts["dropped"] > 0, "{what}: {counts:?}");
-            }
+            // `drop_queries`: the second block, whose table's hits (exact blastp: overflow) do not
+            // fit the vectors made ready, builds its table itself (exact blastp: after its thread
+            // took the neighbour lists back); the third takes the values built ahead.
+            assert_eq!(counts["dropped"], dropped, "{what}: {counts:?}");
         }
     }
     // Exact blastp's pairwise report written in blocks (`LOSAT_X_BPQBLOCKFMT`): the build ahead
     // beside the block's report.
     let base = with(&EXACT_ACTS, &[("LOSAT_X_BPQBLOCK", "1")]);
-    let (off, shadow) = same_runs(&dir, "blastp", &subject, 4, &base, &["-outfmt", "0"]);
-    assert!(off.searches() > 1, "{} blocks", off.searches());
+    let (off, shadow) = same_runs(&dir, "blastp", &four, &subject, 4, &base, &["-outfmt", "0"]);
+    assert_eq!(off.searches(), 4, "blastp -outfmt 0");
     assert_built_ahead(
         &shadow.shadow("BPLKPAHEAD"),
         off.searches(),
@@ -267,9 +346,10 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
 
 // `-db`: the database search in blocks runs the same block loop and lookup region. With
 // `LOSAT_X_BPREDOPAR`: the build ahead beside the redo windows' nested scopes of the block's search
-// (the hang of a waiting helper would show here), blastp-fast at two threads (the block's one
-// helper; its build ahead waits for its own nested passes, exact blastp's is a leaf task) and exact
-// blastp at four.
+// (the hang of a waiting helper would show here; every block of `four_queries` redoes its 8-58
+// matches on the pool, one `[TIMING] x_bpredopar` line each), blastp-fast at two threads (the
+// block's one helper; its build ahead waits for its own nested passes, exact blastp's is a leaf
+// task) and exact blastp at four.
 #[test]
 fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
     let dir = test_dir("db");
@@ -289,11 +369,23 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
         String::from_utf8_lossy(&output.stderr)
     );
     let subject = [OsStr::new("-db"), name.as_os_str()];
+    let queries = four_queries(&dir);
     for ((task, acts), threads) in TASKS.into_iter().zip([2, 4]) {
         let base = with(acts, &[("LOSAT_X_BPQBLOCK", "1"), REDOPAR]);
-        let (off, shadow) = same_runs(&dir, task, &subject, threads, &base, &[]);
+        let (off, shadow) = same_runs(&dir, task, &queries, &subject, threads, &base, &[]);
         assert!(!off.stdout.is_empty(), "the fixture pair has rows");
         let what = format!("{task} -db, threads {threads}");
+        assert_eq!(off.searches(), 4, "{what}");
+        let redone = off
+            .stderr
+            .lines()
+            .filter(|line| line.starts_with("[TIMING] x_bpredopar:"))
+            .count() as u64;
+        assert_eq!(
+            redone,
+            off.searches(),
+            "{what}: every block's redo on the pool"
+        );
         assert_built_ahead(&shadow.shadow("BPLKPAHEAD"), off.searches(), &what);
     }
     std::fs::remove_dir_all(&dir).ok();
@@ -311,6 +403,7 @@ fn one_block_and_the_search_of_all_queries_build_nothing_ahead() {
     let dir = test_dir("one");
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    let queries = four_queries(&dir);
     let [(fast, fast_acts), (exact, exact_acts)] = TASKS;
     for (task, acts, blocks, extra) in [
         (
@@ -328,7 +421,7 @@ fn one_block_and_the_search_of_all_queries_build_nothing_ahead() {
         ),
     ] {
         let base = with(acts, blocks);
-        let (off, shadow) = same_runs(&dir, task, &subject, 4, &base, extra);
+        let (off, shadow) = same_runs(&dir, task, &queries, &subject, 4, &base, extra);
         assert_eq!(off.searches(), 1, "{task} {blocks:?} {extra:?}");
         let counts = shadow.shadow("BPLKPAHEAD");
         assert!(
@@ -347,6 +440,7 @@ fn the_switch_does_not_act_without_the_pools_flat_table() {
     let dir = test_dir("off");
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    let queries = four_queries(&dir);
     let block = ("LOSAT_X_BPQBLOCK", "1");
     let clut = ("LOSAT_X_BPCLUT", "1");
     let flat = ("LOSAT_X_BPLKPFLAT", "1");
@@ -360,12 +454,8 @@ fn the_switch_does_not_act_without_the_pools_flat_table() {
         ("blastp-fast", 4, vec![block, clut_off, flat]),
         ("blastp-fast", 4, vec![block, clut_shadow, flat]),
     ] {
-        let (off, shadow) = same_runs(&dir, task, &subject, threads, &base, &[]);
-        assert!(
-            off.searches() > 1,
-            "{task} {base:?}: {} blocks",
-            off.searches()
-        );
+        let (off, shadow) = same_runs(&dir, task, &queries, &subject, threads, &base, &[]);
+        assert_eq!(off.searches(), 4, "{task} {base:?}");
         let counts = shadow.shadow("BPLKPAHEAD");
         assert!(
             counts.values().all(|&count| count == 0),
@@ -385,6 +475,7 @@ fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
     let dir = test_dir("exact-off");
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    let queries = four_queries(&dir);
     let block = ("LOSAT_X_BPQBLOCK", "1");
     let lut = ("LOSAT_X_BPLUT", "1");
     for (threads, base) in [
@@ -392,8 +483,8 @@ fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
         (4, vec![block, ("LOSAT_X_BPLUTSHADOW", "1")]),
         (4, vec![block, lut, ("LOSAT_DIAGNOSTICS", "1")]),
     ] {
-        let (off, shadow) = same_runs(&dir, "blastp", &subject, threads, &base, &[]);
-        assert!(off.searches() > 1, "{base:?}: {} blocks", off.searches());
+        let (off, shadow) = same_runs(&dir, "blastp", &queries, &subject, threads, &base, &[]);
+        assert_eq!(off.searches(), 4, "{base:?}");
         let counts = shadow.shadow("BPLKPAHEAD");
         assert!(
             counts.values().all(|&count| count == 0),
@@ -407,7 +498,7 @@ fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
         ("LOSAT_X_BPCLUT", "0"),
         ("LOSAT_X_BPLKPFLAT", "0"),
     ];
-    let (off, shadow) = same_runs(&dir, "blastp", &subject, 4, &base, &[]);
+    let (off, shadow) = same_runs(&dir, "blastp", &queries, &subject, 4, &base, &[]);
     assert_built_ahead(
         &shadow.shadow("BPLKPAHEAD"),
         off.searches(),
@@ -416,19 +507,26 @@ fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// Split query batches inside the blocks (`CHUNK_SIZE` 1000, `OVERLAP_CHUNK_SIZE` 100): each query
+// Split query batches inside the blocks (`CHUNK_SIZE` 400, `OVERLAP_CHUNK_SIZE` 100: a batch is
+// split into letters / 300 chunks where that is two or more, `calculate_num_chunks`): each query
 // chunk builds its own table inside its block's search (nothing ahead) while the next block's table
 // is built ahead; for blastp-fast with the shadow of `LOSAT_X_BPLKPFLAT` too, which then also
 // checks the builds ahead (one-latch passes on the second spare's vectors, poisoned first), and for
-// exact blastp.
+// exact blastp. `four_queries` at `BATCH_SIZE` 500: three blocks of one batch, {BDT62581.1} into 2
+// chunks, {BDT62582.1, BDT62583.1} (897 letters) into 2, the first holding parts of both queries,
+// and {BDT62584.1} into 3.
 #[test]
 fn query_chunks_of_split_batches_build_their_own_tables() {
     let dir = test_dir("chunks");
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    let queries = Queries {
+        batch_size: "500",
+        ..four_queries(&dir)
+    };
     let chunks = [
         ("LOSAT_X_BPQBLOCK", "1"),
-        ("CHUNK_SIZE", "1000"),
+        ("CHUNK_SIZE", "400"),
         ("OVERLAP_CHUNK_SIZE", "100"),
     ];
     for (task, flat_shadow) in [
@@ -441,9 +539,10 @@ fn query_chunks_of_split_batches_build_their_own_tables() {
         if flat_shadow {
             base.push(("LOSAT_X_BPLKPFLATSHADOW", "1"));
         }
-        let (off, shadow) = same_runs(&dir, task, &subject, 4, &base, &[]);
+        let (off, shadow) = same_runs(&dir, task, &queries, &subject, 4, &base, &[]);
         assert!(!off.stdout.is_empty(), "the fixture pair has rows");
         let what = format!("{task} split batches, BPLKPFLATSHADOW {flat_shadow}");
+        assert_eq!(off.searches(), 3, "{what}");
         let counts = shadow.shadow("BPLKPAHEAD");
         assert_built_ahead(&counts, off.searches(), &what);
         if flat_shadow {
@@ -458,17 +557,27 @@ fn query_chunks_of_split_batches_build_their_own_tables() {
 }
 
 // A block that fails after the next block's build has started (the report written to `/dev/full`
-// fails at the first block's flush): the run ends with that block's error, standard error and exit
-// code as without the switch; the values built ahead are dropped and no shadow line is printed.
+// fails at the first block's flush; BDT62581.1, the first block of `four_queries`, has a row): the
+// run ends with that block's error, standard error and exit code as without the switch; the values
+// built ahead are dropped and no shadow line is printed.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_block_that_fails_after_the_next_build_started_ends_the_run_alike() {
     let dir = test_dir("full");
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    let queries = four_queries(&dir);
     for ((task, acts), threads) in TASKS.into_iter().flat_map(|t| [(t, 2), (t, 4)]) {
         let base = with(acts, &[("LOSAT_X_BPQBLOCK", "1")]);
-        let (off, shadow) = same_runs(&dir, task, &subject, threads, &base, &["-out", "/dev/full"]);
+        let (off, shadow) = same_runs(
+            &dir,
+            task,
+            &queries,
+            &subject,
+            threads,
+            &base,
+            &["-out", "/dev/full"],
+        );
         assert_ne!(
             off.code,
             Some(0),

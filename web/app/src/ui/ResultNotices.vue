@@ -4,6 +4,7 @@
 // it is not said that they do), and subjects whose alignments outfmt 0 does not show.
 import { computed } from 'vue';
 import type { ResultsState } from '../application/results';
+import { flagGiven } from '../domain/result-index';
 import { formatCount } from './format';
 
 const props = defineProps<{ state: ResultsState }>();
@@ -13,7 +14,7 @@ const totals = computed(() => props.state.queryTotals);
 const limit = computed(() => props.state.loaded?.limits.maxTargetSeqs);
 /** The option that sets the hit list of the tabular formats, which the HSP records and these lists follow. */
 const limitFlag = computed(() => props.state.loaded?.limits.subjectFlag ?? '-max_target_seqs');
-const limitGiven = computed(() => props.state.loaded?.run.snapshot.argv.includes(limitFlag.value) ?? false);
+const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.argv ?? [], limitFlag.value));
 /** What outfmt 0 does with -num_descriptions / -num_alignments; undefined where neither is given. */
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
 const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(count)} ${count === 1 ? one : many}`;
@@ -62,15 +63,22 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
         data-testid="results-notice"
         data-kind="outfmt0-partial"
       >
-        outfmt 0 shows the alignments of {{ plural(state.outfmt0Subjects, 'subject') }} of this query's {{ formatCount(totals.subjects) }}
-        <template v-if="outfmt0.alignments !== undefined"
-          >(BLAST+'s <span class="option-name">-num_alignments</span>: {{ formatCount(outfmt0.alignments) }})</template
-        >.
         <template v-if="outfmt0.separate"
-          >It is searched with a hit list of its own<template v-if="outfmt0.hitList !== undefined">
+          >outfmt 0's alignments are linked to {{ formatCount(state.outfmt0Subjects) }} of this query's {{ plural(totals.subjects, 'subject') }}<template
+            v-if="outfmt0.alignments !== undefined"
+          >
+            (BLAST+'s <span class="option-name">-num_alignments</span>: {{ formatCount(outfmt0.alignments) }})</template
+          >. Its search has a hit list of its own<template v-if="outfmt0.hitList !== undefined">
             ({{ plural(outfmt0.hitList, 'subject') }} per query)</template
           >, because <span class="option-name">-num_descriptions</span> and <span class="option-name">-num_alignments</span> give it another
-          size than outfmt 6 and 7, so its alignments are linked to an HSP only where that search found the same HSP.
+          size than outfmt 6 and 7, so an alignment is linked to an HSP only where that search found the same HSP.
+        </template>
+        <template v-else
+          >outfmt 0 shows the alignments of {{ plural(state.outfmt0Subjects, 'subject') }} of this query's {{ formatCount(totals.subjects) }}<template
+            v-if="outfmt0.alignments !== undefined"
+          >
+            (BLAST+'s <span class="option-name">-num_alignments</span>: {{ formatCount(outfmt0.alignments) }})</template
+          >.
         </template>
         The other subjects' HSPs are in outfmt 6 and 7.
       </p>

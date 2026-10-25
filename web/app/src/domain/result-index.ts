@@ -219,6 +219,10 @@ const describedDefaultOf = (described: readonly DescribedOption[], flag: string)
   return countOf(option?.defaultValue ?? option?.help.match(/default:\s*(\d+)/i)?.[1]);
 };
 
+/** Whether the argv gives `flag`, as `-flag value` or `-flag=value`. */
+export const flagGiven = (argv: readonly string[], flag: string): boolean =>
+  argv.some((word) => word === flag || word.startsWith(`${flag}=`));
+
 /**
  * The hit limits of a run from its argv; where the argv does not set -max_target_seqs,
  * from the default that the engine describes (its `default`, or the "default: N" of its
@@ -231,12 +235,17 @@ const describedDefaultOf = (described: readonly DescribedOption[], flag: string)
  * -num_descriptions (500) and -num_alignments (250) where either is given, and shows the
  * alignments of the first -num_alignments subjects.
  */
-export function hitLimits(argv: readonly string[], described: readonly DescribedOption[]): HitLimits {
+export function hitLimits(words: readonly string[], described: readonly DescribedOption[]): HitLimits {
+  // The adapter accepts `-flag=value` as the CLI does (the app writes `-flag value`).
+  const argv = words.flatMap((word) => {
+    const joined = /^(-[A-Za-z_][A-Za-z0-9_]*)=(.*)$/s.exec(word);
+    return joined === null ? [word] : [joined[1]!, joined[2]!];
+  });
   const given = (flag: string): string | undefined => {
     const at = argv.lastIndexOf(flag);
     return at >= 0 ? argv[at + 1] : undefined;
   };
-  const alignmentsGiven = argv.includes('-num_alignments') || argv.includes('-num_descriptions');
+  const alignmentsGiven = flagGiven(argv, '-num_alignments') || flagGiven(argv, '-num_descriptions');
   const maxTargetSeqs = countOf(given('-max_target_seqs'));
   const numAlignments = countOf(given('-num_alignments'));
   const numDescriptions = countOf(given('-num_descriptions'));

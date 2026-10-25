@@ -11,7 +11,7 @@
 // arrive in the same frame are shown together, so that the page is measured once a frame.
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { sameHsp, type HspId, type RangeEntry, type ResultsBrowser, type ResultsState } from '../application/results';
-import { windowAround } from '../domain/result-index';
+import { flagGiven, windowAround } from '../domain/result-index';
 import { formatCount } from './format';
 import HspTable from './HspTable.vue';
 
@@ -29,7 +29,7 @@ const ranges = computed(() => props.state.ranges);
 const selectedAt = computed(() => ranges.value.findIndex((range) => sameHsp(range.id, props.state.hsp)));
 const detail = computed(() => props.state.detail);
 const entry = computed(() => props.state.hsps.find((hsp) => sameHsp(hsp.id, detail.value?.id)));
-const limitGiven = computed(() => props.state.loaded?.run.snapshot.argv.includes('-max_target_seqs') ?? false);
+const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.argv ?? [], '-max_target_seqs'));
 /** What outfmt 0 does with -num_descriptions / -num_alignments; undefined where neither is given. */
 const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
 
@@ -297,11 +297,13 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             <pre v-if="detail.section !== undefined" class="output range-text" data-testid="detail-section">{{ detail.section }}</pre>
           </template>
           <p v-else-if="outfmt0?.separate" class="notice" data-testid="detail-not-in-outfmt0">
-            outfmt 0 does not show this HSP. Its search has a hit list of its own<template v-if="outfmt0.hitList !== undefined">
+            No outfmt 0 alignment is linked to this HSP. Its search has a hit list of its own<template v-if="outfmt0.hitList !== undefined">
               ({{ outfmt0.hitList }} subjects per query)</template
             >, because <span class="option-name">-num_descriptions</span> and <span class="option-name">-num_alignments</span> give it another size
-            than outfmt 6 and 7, and that search did not find this HSP as outfmt 6 and 7 did (it may have kept another subject, or other HSPs of
-            this subject). The outfmt 6 row below and outfmt 7 hold the HSP.
+            than outfmt 6 and 7, and it shows the alignments of its first
+            {{ outfmt0.alignments === undefined ? '' : `${outfmt0.alignments} ` }}subjects
+            (<span class="option-name">-num_alignments</span>). Those can be other subjects, or other HSPs of a subject, than outfmt 6 and 7
+            keep. The outfmt 6 row below and outfmt 7 hold the HSP.
           </p>
           <p v-else class="notice" data-testid="detail-not-in-outfmt0">
             outfmt 0 does not show this HSP. It shows the alignments of the first {{ state.outfmt0Subjects }} subjects of this query

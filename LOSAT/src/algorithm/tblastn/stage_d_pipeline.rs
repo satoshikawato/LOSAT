@@ -455,7 +455,10 @@ fn x_side_by_side_batches(
     threads: usize,
     allowed: bool,
 ) -> usize {
-    if !allowed {
+    // PROBE (line ST s1, never a PR): LOSAT_PROBE_TBNSIDE0=1 searches no batch side by side.
+    static SIDE0: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let side0 = *SIDE0.get_or_init(|| std::env::var_os("LOSAT_PROBE_TBNSIDE0").is_some());
+    if !allowed || side0 {
         0
     } else if x_tbn_batch_rule() {
         x_batches_side_by_side(subject_bases, subjects, batches, threads)

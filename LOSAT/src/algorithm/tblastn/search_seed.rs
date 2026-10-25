@@ -856,7 +856,22 @@ pub(super) fn x_scan_plan(
     // NCBI builds the lookup table once per query batch: the first subject builds it and the
     // others read it.
     let lookup = std::sync::Arc::clone(x_lookup.get_or_init(x_build_lookup));
-    let pair_capacity = (lookup.longest_chain.max(1) as usize) * 1024;
+    // PROBE (line ST s1, never a PR): LOSAT_PROBE_TBNPAIRCAP=1 sizes the offset array as NCBI's
+    // GetOffsetArraySize (lookup_wrap.c:255-266: OFFSET_ARRAY_SIZE 4096 + longest_chain).
+    static PAIRCAP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let ncbi_cap = *PAIRCAP.get_or_init(|| std::env::var_os("LOSAT_PROBE_TBNPAIRCAP").is_some());
+    let pair_capacity = if ncbi_cap {
+        4096 + lookup.longest_chain.max(1) as usize
+    } else {
+        (lookup.longest_chain.max(1) as usize) * 1024
+    };
+    // PROBE: LOSAT_PROBE_TBNPAIRLOG=1 prints the table's longest chain and the capacity once per table.
+    static PAIRLOGS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    if std::env::var_os("LOSAT_PROBE_TBNPAIRLOG").is_some()
+        && PAIRLOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 64
+    {
+        eprintln!("[ST_PROBE] tblastn longest_chain {} pair_capacity {} ({} KiB)", lookup.longest_chain, pair_capacity, pair_capacity * 8 / 1024);
+    }
     i32::try_from(pair_capacity).expect("NCBI offset array fits Int4");
     Ok(Some(XScanPlan {
         lookup,

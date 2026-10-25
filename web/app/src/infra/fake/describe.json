@@ -224,8 +224,7 @@
    {
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
-    "takes_value": true,
-    "default": "0"
+    "takes_value": true
    },
    {
     "flag": "-ungapped",
@@ -445,8 +444,7 @@
    {
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
-    "takes_value": true,
-    "default": "0"
+    "takes_value": true
    },
    {
     "flag": "-ungapped",

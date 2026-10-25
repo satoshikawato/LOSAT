@@ -343,13 +343,20 @@ pub(crate) fn report_counts_of(
 /// tables, without the queries: the checks that a host can run before a search. A table
 /// error is reported as for a batch of one query.
 pub fn check_scoring(args: &BlastnArgs) -> anyhow::Result<()> {
+    check_scoring_for_formats(args, &[0])
+}
+
+/// `check_scoring` for a search that writes the output formats `outfmts` (formats of one
+/// hit list size): the hit list size is the one that the run of these formats derives. A
+/// host that runs one search per hit list size checks each of them.
+pub fn check_scoring_for_formats(args: &BlastnArgs, outfmts: &[i32]) -> anyhow::Result<()> {
     // The host has no database files (`run_local`).
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
     }
     // `args.report_counts` is set by `process_options` of a run; a host that has not run
-    // it derives the counts the same way, for the output format 0.
-    let (counts, _) = report_counts_of(args, &[0])?;
+    // it derives the counts the same way, for the output formats of the search.
+    let (counts, _) = report_counts_of(args, outfmts)?;
     check_scoring_options_with(args, &counts)?;
     check_losat_limits_with(args, &counts)?;
     let spec = scoring_spec(args);

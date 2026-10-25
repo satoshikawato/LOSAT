@@ -183,6 +183,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNLUTDROP",
     "LOSAT_X_BNMAPPED",
     "LOSAT_X_BNQDROP",
+    "LOSAT_X_BNQPACK",
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
     "LOSAT_X_BNTABPAR",
@@ -226,6 +227,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPUNGAPSENT",
     "LOSAT_X_BXCHUNKFLOW",
     "LOSAT_X_BXCROSS",
+    "LOSAT_X_BXCROSSDEFER",
     "LOSAT_X_BXDBSTREAM",
     "LOSAT_X_BXDEFER",
     "LOSAT_X_BXDIAG",
@@ -299,6 +301,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXRESOLVE",
     "LOSAT_X_TBXRPTPAR",
     "LOSAT_X_TBXSCANBF",
+    "LOSAT_X_TBXSTORE",
     "LOSAT_X_TBXUNGAPSENT",
     "LOSAT_X_TBXUNITMASK",
 ];

@@ -316,6 +316,7 @@ export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNQDROP=1
+export LOSAT_X_BNQPACK=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTABPAR=1
@@ -359,6 +360,7 @@ export LOSAT_X_BPUNGAP=1
 export LOSAT_X_BPUNGAPSENT=1
 export LOSAT_X_BXCHUNKFLOW=1
 export LOSAT_X_BXCROSS=1
+export LOSAT_X_BXCROSSDEFER=1
 export LOSAT_X_BXDBSTREAM=256
 export LOSAT_X_BXDEFER=1
 export LOSAT_X_BXDIAG=1
@@ -432,6 +434,7 @@ export LOSAT_X_TBXQSLICE=1
 export LOSAT_X_TBXRESOLVE=1
 export LOSAT_X_TBXRPTPAR=1
 export LOSAT_X_TBXSCANBF=1
+export LOSAT_X_TBXSTORE=1
 export LOSAT_X_TBXUNGAPSENT=1
 export LOSAT_X_TBXUNITMASK=256
 ```
@@ -2754,7 +2757,39 @@ Rebuilding less:
   9.72 -> 8.31 s (cycles x0.855, instructions x0.948), 8 threads 1.52 -> 1.28 s (cycles x0.835); the genome as
   `-db` 8.22 -> 8.15 s (cycles x0.992, instructions x1.000). With `=0`: cycles x1.000-1.001 of the dev binary.
   WebAssembly (serial WASI command, one Node process, CPU 20, 3 rounds, against `=0`): the fruit fly genome FASTA
-  as `-subject` 13.17 -> 11.38 s (x0.864), linear memory equal (206 MiB).
+  as `-subject` 13.17 -> 11.38 s (x0.864), linear memory equal (206 MiB). Since `LOSAT_X_TBXSTORE`
+  (2026-10-25) the command line searches its records packed: the switch acts on `run_local`'s records (LOSAT Web,
+  the library) and with `LOSAT_X_TBXSTORE=0`.
+- `LOSAT_X_TBXSTORE=1` (TBLASTX, memory; in the strict set from the pull request that added it, 2026-10-25;
+  `=0` turns it off) the records of `-subject` are packed as they are read (`blastinput/x_packed_subjects.rs`,
+  `x_read_packed_subjects`, shared with `LOSAT_X_TBNSTORE`: a record is cut to `-subject_loc` first; at two or
+  more threads a second thread packs while the reader reads, natively), the records keep their deflines and no
+  letters, and the search reads the stores as it reads a database's sequences (`Subjects::Stored`): the
+  preliminary frames from the packed bases (NCBI's compressed subject: an ambiguous base resolved by
+  `CRandom(length)`, the bases `x_resolved_record_frames` gives a record), the letter frames and the report rows
+  from the stored letters (`report::SubjectLetters::Stored`, ordinals `0..n`); the numbers of the subject set, the
+  warnings of records without letters and the outfmt 0 prolog read the stores' lengths. Before, the letters of
+  the whole set (one byte per base) were held for the whole run. Conditional: `run_local` (LOSAT Web, the
+  library) keeps its records, and a set with a byte without an ncbi4na code keeps every record's letters (the
+  CLI reader gives none, it reads `U` as `T`: the reference side is a gap of the reach table). The same pull
+  request made the packing and the stored windows faster for every caller, with no switch (the switch alone
+  cost time, below, and a fix that costs time lands only with its recovery): `PackedNucleotide::
+  from_subject_letters` packs blocks of 32 letters of one case at a time (the check vectorized, four letters by
+  one multiplication), and `bases_into` / `letters_to` make a window's letters with one table read per packed
+  byte. The lib tests `every_form_is_the_one_made_from_the_letters` (the packed bytes against
+  `encode_subject_ncbi2na_packed`, `bases_into` against `codes_into`, letters and intervals, with block-shaped
+  cases: one case per block, case changes and other letters inside and between blocks, N runs across blocks,
+  every length around a block) pin them. Measured on the workstation (node 0 CPUs 16-23, HT siblings idle, cores warmed 3 s, one warm-up round +
+  3 rounds, arm order rotating, medians of the per-round ratios against `=0` of the same binary; reports
+  identical; load 21-35): 3 fruit fly transcripts x the fruit fly genome FASTA (`-subject`, 1,870 records) 1
+  thread max RSS 218 -> 114 MiB (the genome as `-db`: 107 MiB), cycles x0.990, wall x0.984; 8 threads 409 ->
+  316 MiB, cycles x0.992, wall x0.992; x the fruit fly cDNA FASTA (31,168 records) 1 thread 105 -> 43 MiB,
+  cycles x0.985; 8 threads 106 -> 46 MiB, cycles x0.992; the genome as `-db` against the dev binary cycles
+  x0.985 (the stored windows). Without the faster packing the switch cost cycles x1.016 (1 thread) and x1.019
+  (8 threads, wall up to x1.13: the packing thread was slower than the reader) for the same memory. With
+  `LOSAT_TIMING` the packing is in `read_fasta`. WebAssembly (serial WASI command, one Node process, a fresh
+  instance per search, CPU 20, one warm-up round + 3 rounds against `=0`; output identical): the fruit fly
+  genome FASTA as `-subject` 11.01 -> 10.82 s (x0.981), linear memory 206 -> 128 MiB.
 
 Scheduling (each value computed by one thread with the original function; order of output kept):
 
@@ -3052,6 +3087,40 @@ Scheduling (each value computed by one thread with the original function; order 
   wall x0.981-0.999, cycles:u x0.990-1.001, instructions:u x0.998-1.000. Dropping the query chunks' copies before their
   chunk's scan (an earlier form) saved nothing measurable: blastn of Sakai, whose records `LOSAT_X_QSTREAM` reads,
   read the same max RSS at one thread.
+- `LOSAT_X_BNQPACK=1` (BLASTN, every task, `-subject` and `-db`; in the strict set since 2026-10-25
+  (perf/mb-query-pack, evidence at the end of this entry): on unless it is `0`) the reader packs the letters of the
+  query records read before the search as it reads them (`sequence/packed_letters.rs`: 2-bit codes, the runs of other
+  bytes, the lowercase mask as intervals), where they go into the `LOSAT_X_BNQDROP` store and the query file holds at
+  least two of the task's largest batches; with `=0` every record keeps its letters until its batch drops them. NCBI
+  reads its batches one at a time (`GetNextSeqBatch`); LOSAT reads all records first (it needs every length before
+  the first batch), so their letters, touched while the file was read, stayed with the process to the end of the
+  search: dropping each batch's letters after its encoding (`LOSAT_X_BNQDROP`) freed pages the heap kept for later
+  allocations. Memory only; no NCBI counterpart. The reader packs each nucleotide record in place of the copy of its
+  buffer (`FastaInputSource::x_pack_letters`; `U` read as `T` first, the mask kept as intervals), so no record's
+  letters are held after its reading; a record keeps its letters where the store and its place in the list would take
+  no fewer heap bytes than they do (a short record, many other runs; glibc's chunk sizes), and records with gap lines
+  or of proteins are never packed. The batch loop makes a batch's letters again when it takes the batch
+  (`Store::take`, by the search pool's threads with two threads or more), before any reader of them (WindowMasker,
+  DUST, the encoding): the letters are the reader's, byte for byte. Packing reads 32 letters at a time with AVX2
+  where the CPU has it (checked at run time) and 8 in a `u64` elsewhere; the letters are made 32 at a time with AVX2,
+  else 4 from a table per packed byte. The rule (class conditional, recorded where `search_cli` decides, before the
+  reading): the store acts (`LOSAT_X_BNQDROP`'s rule) and the query file's bytes are at least twice the largest batch
+  (`x_query_batch_letters`, as `LOSAT_X_QSTREAM`'s `Batch`: with fewer the first batch holds most letters anyway);
+  standard input, without a size, is not packed. With `LOSAT_TIMING`
+  `[TIMING] x_bn_q_pack: records= letters= bytes= unpack_s=` gives the records packed, their letters, the bytes held
+  for them and the time spent making their letters again. Evidence (workstation, outputs identical; peak `RssAnon` of
+  a 10 ms sample, max RSS = max(%M, VmHWM)): megablast of 31,168 D. melanogaster cDNAs (89.3 Mb, 37 batches) against
+  3 Mb, `-subject` at one thread (node 0 core 28 with its sibling idle, 8 pairs against dev 83b9673b, alternating
+  order, load 9-11): `RssAnon` 215.3 -> 156.7 MiB, max RSS 221.9 -> 163.5, wall x0.997 (7 of 8 faster), `cycles:u`
+  x1.002, `instructions:u` x1.005, minor faults -15.0k (the reading takes 0.152 s against 0.163); again after the
+  review's change (records that save no heap bytes keep their letters), under a load of 93-106: 215.3 -> 156.2 MiB,
+  wall x1.002 (3 of 8), `cycles:u` x1.003, `instructions:u` x1.005; `-db` at 16 threads (node 1, CPUs 32-47, 8 pairs,
+  load 20): `RssAnon` 234.4 -> 175.3 MiB, max RSS 235.5 -> 177.8, wall median x1.001 (geometric mean x0.995, 4 of 8
+  faster, every pair within 0.96-1.03), `instructions:u` x1.004, `cycles:u` x1.009 (the pool's threads woken to make
+  each batch's letters again: 13 ms on the loop's thread at one thread); megablast of the 5.5 Mb Sakai genome (one
+  batch, not packed): `instructions:u` x1.000. The 22.3 MB of packed letters replace 89.3 MB. Before the reader
+  packed in place of its copy, packing after it with `PackedNucleotide` cost x1.020 (one thread) and x1.098 (`-db`,
+  16 threads) of the time (plan v4 line A10 session 19).
 - `LOSAT_X_GREEDYROWFUSE=1` (BLASTN megablast, the distances of the non-affine greedy alignment that `x_greedy_row` runs:
   every traceback, and the score-only calls the fused loop GREEDYFUSE declines; speed; in the strict set from the pull
   request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per
@@ -4621,7 +4690,8 @@ Scheduling (each value computed by one thread with the original function; order 
   With `-subject_loc` a record is first cut in place to its interval, into the record
   `seq_range::cut_subjects` makes, whose length seeds the resolution of ambiguous bases as NCBI's
   subject set-up does; the records keep their deflines. With two or more threads a second
-  thread packs the records while the reader reads the next ones (`x_packed_while_read`: batches of
+  thread packs the records while the reader reads the next ones (`x_packed_while_read`, since
+  2026-10-25 in `blastinput/x_packed_subjects.rs`, shared with `LOSAT_X_TBXSTORE`: batches of
   up to 1,024 records or 4 MiB of letters, handed over one at a time), so the packing does not add
   to the read; the records and their stores are those of the one-thread read, in the same order.
   A WebAssembly build packs on the reader at every thread count (since 2026-10-18): there the
@@ -5481,6 +5551,40 @@ Scheduling (each value computed by one thread with the original function; order 
   (and results/fab against 32a63700). Design and timings: v4-A14 results/p2 (DESIGN_cross.md), results/p3
   (DESIGN_s3.md: round 2) and results/p4 (DESIGN_s4.md: round 3, r1's loops with a constant chunk, two arrays,
   the windows with a repeated entry out of line).
+- `LOSAT_X_BXCROSSDEFER=1` (BLASTX, speed; in the strict set since 2026-10-25, from the pull request that
+  added it (perf/bx-cross-defer; v4-A14 DECISIONS 26-27): `=0` turns it off; acts where `LOSAT_X_BXCROSS`'s cell
+  test runs, on every table blastx's fused loop takes on an x86-64 CPU with AVX2 and POPCNT) `LOSAT_X_BXCROSS`'s
+  drain defers the candidate calls of each unit (a batch, or a part of a window with a repeated entry) to the
+  unit that next reads one of their entries, or to the end of the drain (`blastp/x_seed_fused.rs`,
+  `x_cross_drain` with `DEFER`, exactness argument in its header). A unit's candidate lanes store a marker
+  (raw `0xFFFFFFFF`: flag 1, last_hit -1) in place of the entry they read, and the unit's entries, first
+  staged hit and candidate lanes go to a record past the stage (written without a branch). A unit that reads the
+  marker stops before it stores, the deferred calls are made in order (each entry first given back the value
+  its unit read) and the unit runs again from the loop's head, so no value of the batch is live across the
+  calls; the calls left are made after the drain's last window, before the last hits are tested or moved. A
+  stored value equal to the marker (a flagged last_hit of -1, which a call writes only near offsets of 2^31)
+  met with no call deferred is taken as a value: the unit runs with its calls at once, so any table gives the
+  same calls. Why it pays: the candidate branch of each batch was the drain's main misprediction (28 of 127
+  issued uops per batch squashed, v4-A14 s7); on dense tables a later unit reads a deferred candidate's entry
+  0.017-0.029 times per batch and 5.5-7.2 candidates are deferred between two such reads (v4-A14 s8 probe,
+  results/s8c). With `LOSAT_TIMING=1` the `blastx_diag` line names `mode=avx2-cross-defer` (`=0`:
+  `mode=avx2-cross`). Tests: `tests/blastx_diag.rs` compares the default's and `=0`'s reports with the
+  reference's (every search, the built-in `LOSAT_X_BXDIAGMIN` and every table fused) and checks the mode the
+  timing line names; the unit tests compare both arms with the per-hit test (the chunks of 1,024 and 64,
+  random and edge tables, which hold the marker's value) and count the units that met the marker with calls
+  deferred and with none. Measured 2026-10-25 on the workstation (`perf stat` user-space cycles, one physical
+  core of node 0 with its HT sibling idle, warmed 3 s before every run, load 13-109 on the other cores; paired
+  arms, arm order reversed every other round, medians of the per-round ratios), against `dev` f24d161f: a 50-kb
+  piece of the fly genome x the fly proteome (`-db`, `-evalue 1e-5`) x0.966 (0.956-0.970, 8 rounds), 201 reads x
+  Swiss-Prot (`-db`) x0.968 (0.962-0.974, 6), 50 fly cDNAs x the yeast proteome x0.981 (0.973-0.991, 10), AP027131
+  x AP027133 proteins (`-subject`, `-query_gencode 4`) x0.992 (0.984-0.999, 10), one 2.1-kb fly cDNA x the fly
+  proteome (6.77 hits per used cell, fused by `LOSAT_X_BXDIAGMIN` 670) x0.985 (3), and 300 UniRef50 reads (the
+  direct loop) x1.002 with the same instructions; instructions x1.003-1.009 and branch misses x0.83-0.94. `=0`
+  x0.999-1.004 of `dev` with the same instructions (x1.000): its drain, window and scan functions disassemble as
+  `dev`'s but for rip-relative displacements. Every report and every `blastx_diag` count identical between the
+  arms, max RSS unchanged; the record space is 41 KiB per thread (the stage's 8 KiB without it). The prototype
+  (v4-A14 s8ab2, against `dev` 4c9ba700): x0.961, x0.979, x0.983, x0.994, x0.982. Design and timings: v4-A14
+  results/s8c, s8ab1 (a first form with the calls inside the loop: spills, x0.99-1.02), s8ab2 and s9ab1.
 - BXSCANBF (graduated 2026-10-26; no variable; always on) (BLASTX, speed; in the strict set from 2026-10-17, by
   the Owner's decision of that day (perf-si-20261012 DECISIONS 175) on the timings below; the scan on the
   presence test went with the variable; acts where the standard lookup table is scanned by the

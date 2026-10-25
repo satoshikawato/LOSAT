@@ -62,6 +62,7 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.word_size = args.word_size;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps.map(|count| count as i32);
+    inputs.culling_limit = args.culling_limit;
     inputs.sum_stats = args.sum_stats;
     // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`).
     inputs.threshold = args.threshold.map(|threshold| threshold as i32);
@@ -438,9 +439,9 @@ mod tests {
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTN refuses many of these options at the command line or
     // in its limits (`-task tblastn-fast`, other word sizes, matrices, gap costs,
-    // `-comp_based_stats 1` and `3`, `-ungapped`, `-max_intron_length`, `-culling_limit`,
-    // `-subject_besthit`, `-use_sw_tback`): the list that NCBI would record is what the
-    // archive's model knows about them, pinned here.
+    // `-comp_based_stats 1` and `3`, `-ungapped`, `-max_intron_length`, `-subject_besthit`,
+    // `-use_sw_tback`): the list that NCBI would record is what the archive's model knows
+    // about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
         ("def", &[], "EvalueThreshold=cutoff:e-value:10 DbGeneticCode=integer:1 UngappedMode=boolean:False LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
         ("cbs0", &["-comp_based_stats", "0"], "EvalueThreshold=cutoff:e-value:10 DbGeneticCode=integer:1 UngappedMode=boolean:False LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 HitlistSize=integer:500 CompositionBasedStats=integer:0 SmithWatermanMode=boolean:False"),
@@ -553,10 +554,6 @@ mod tests {
         let mut index = 0;
         while index < extra.len() {
             match extra[index] {
-                "-culling_limit" => {
-                    by_hand.push(("culling_limit", extra[index + 1]));
-                    index += 2;
-                }
                 "-subject_besthit" | "-use_sw_tback" => {
                     by_hand.push((extra[index], ""));
                     index += 1;
@@ -588,7 +585,6 @@ mod tests {
         for (name, value) in by_hand {
             match name {
                 "task" => {}
-                "culling_limit" => inputs.culling_limit = value.parse().ok(),
                 "-subject_besthit" => inputs.subject_besthit = true,
                 _ => inputs.use_sw_tback = true,
             }

@@ -48,8 +48,22 @@ pub fn matrix_table(name: &str, standard_only: bool) -> Option<&'static ProteinM
         .find(|table| table.name.eq_ignore_ascii_case(name))
 }
 
-/// The table of `matrix`: the one whose name is `matrix.ncbi_name()`, found by its index in
-/// `PROTEIN_MATRIX_TABLES` (the order of `BlastLoadMatrixValues`) instead of the name.
+/// The table of `matrix`: the one whose name is `matrix.ncbi_name()` (`strcasecmp`), found by
+/// its index in `PROTEIN_MATRIX_TABLES` instead of the name.
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2958-2992 (the order of the tables)
+/// ```c
+///    matrix_info = MatrixInfoNew("BLOSUM80", blosum80_values, blosum80_prefs, BLOSUM80_VALUES_MAX);
+///    ListNodeAddPointer(&retval, 0, matrix_info);
+///
+///    matrix_info = MatrixInfoNew("BLOSUM62", blosum62_values, blosum62_prefs, BLOSUM62_VALUES_MAX);
+/// ...
+///    matrix_info = MatrixInfoNew("PAM70", pam70_values, pam70_prefs, PAM70_VALUES_MAX);
+///    ListNodeAddPointer(&retval, 0, matrix_info);
+///
+///    if (!standard_only) {
+///        matrix_info = MatrixInfoNew("IDENTITY", prot_idenity_values,
+/// ```
 pub fn scoring_matrix_table(matrix: ScoringMatrix) -> &'static ProteinMatrixTable {
     let index = match matrix {
         ScoringMatrix::Blosum80 => 0,

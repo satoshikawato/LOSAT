@@ -521,9 +521,15 @@ fn protein_row_params(row: &ProteinTableRow) -> KarlinParams {
 /// gap costs (`Blast_KarlinBlkGappedLoadFromTables` for Lambda, K and H, `BLAST_GetAlphaBeta`
 /// for alpha and beta).
 ///
-/// Every program checks the gap costs against the table before it searches
-/// (`BLAST_ValidateOptions`, `protein_options::validate_protein_options`), so a scheme that is
-/// not in the table is a LOSAT defect, not an input: it panics instead of reading another row.
+/// A gapped search checks the gap costs against the table before it starts
+/// (`BLAST_ValidateOptions`, `protein_options::validate_protein_options`; blastx accepts 11/1
+/// only), so costs outside the table are a LOSAT defect here: it panics instead of reading
+/// another row. NCBI does not check them for an ungapped search, which no LOSAT protein program
+/// runs yet; a change that opens `-ungapped` must not call this with unchecked costs.
+///
+/// `BLAST_GetAlphaBeta` searches from row 1, so the ungapped row's costs (32767/32767, which
+/// the validation accepts) get Lambda, K and H from row 0 and the alpha and beta that
+/// `BLAST_CalcEffLengths` starts with, 0 and 0.
 ///
 /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3117-3126
 /// ```c
@@ -538,6 +544,10 @@ fn protein_row_params(row: &ProteinTableRow) -> KarlinParams {
 ///        }
 ///      }
 /// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:705
+/// ```c
+///    double alpha=0, beta=0; /*alpha and beta for new scoring system */
+/// ```
 pub fn lookup_protein_params(spec: &ProteinScoringSpec) -> KarlinParams {
     let table = scoring_matrix_table(spec.matrix);
     let row = gap_costs_row(table, spec.gap_open, spec.gap_extend).unwrap_or_else(|| {
@@ -546,7 +556,14 @@ pub fn lookup_protein_params(spec: &ProteinScoringSpec) -> KarlinParams {
             spec.gap_open, spec.gap_extend, table.name
         )
     });
-    protein_row_params(row)
+    let mut params = protein_row_params(row);
+    // Gapped rows never carry the ungapped row's costs, so only row 0 misses the search from
+    // row 1.
+    if std::ptr::eq(row, &table.values[0]) {
+        params.alpha = 0.0;
+        params.beta = 0.0;
+    }
+    params
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_options.c:908-936
@@ -932,6 +949,31 @@ mod tests {
             gap_open: 5,
             gap_extend: 5,
         }));
+    }
+
+    #[test]
+    fn the_ungapped_rows_costs_get_no_alpha_and_beta() {
+        // BLAST_GetAlphaBeta (blast_stat.c:3117-3126) searches from row 1; BLAST_CalcEffLengths
+        // starts alpha and beta at 0 (blast_setup.c:705). Lambda, K and H are row 0's
+        // (Blast_KarlinBlkGappedLoadFromTables searches from row 0).
+        for matrix in ScoringMatrix::ALL {
+            let spec = ProteinScoringSpec {
+                matrix,
+                gap_open: 32767,
+                gap_extend: 32767,
+            };
+            assert!(protein_scoring_supported(&spec));
+            let params = lookup_protein_params(&spec);
+            let ungapped = lookup_protein_params_ungapped(matrix);
+            assert_eq!(
+                [params.lambda, params.k, params.h, params.alpha, params.beta],
+                [ungapped.lambda, ungapped.k, ungapped.h, 0.0, 0.0],
+                "{matrix:?}"
+            );
+            for row in &scoring_matrix_table(matrix).values[1..] {
+                assert!(row.0[0] != 32767.0 && row.0[1] != 32767.0);
+            }
+        }
     }
 
     #[test]

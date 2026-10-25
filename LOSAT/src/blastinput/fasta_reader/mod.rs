@@ -556,6 +556,17 @@ impl<R: Read> FastaInputSource<R> {
     /// counter unchanged, so a further call reads from the next line, as NCBI's next
     /// `ReadOneSeq` does. The programs stop at the rejection (`read_all`, `read_queries`),
     /// where NCBI skips a query it cannot fetch and fails on such a subject.
+    /// EXPERIMENT (LOSAT_X_BNQPACK): pack the letters of the nucleotide records read from now on;
+    /// a record whose letters packed has an empty `sequence`, and `x_take_packed` gives them.
+    pub fn x_pack_letters(&mut self) {
+        self.reader.x_pack_letters();
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNQPACK): the packed letters of the record read last, if it was packed.
+    pub fn x_take_packed(&mut self) -> Option<crate::sequence::packed_letters::PackedLetters> {
+        self.reader.x_take_packed()
+    }
+
     pub fn next_sequence(
         &mut self,
         warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
@@ -795,6 +806,30 @@ pub enum QueryEnd {
 /// The `catch (const exception&)` skips a query whose Seq-id was not found or whose
 /// range does not fit (`seq_range.rs`); LOSAT rejects Seq-id lines.
 pub fn read_queries<R: Read>(source: &mut FastaInputSource<R>) -> QueryRecords {
+    read_queries_with(source, |_| {})
+}
+
+/// EXPERIMENT (LOSAT_X_BNQPACK): `read_queries` with the letters of each record packed as it is
+/// read (`FastaInputSource::x_pack_letters`), so the letters of the whole input are never held:
+/// the records (a packed one without letters) and the packed letters of each (`None` for one that
+/// keeps its letters).
+pub fn x_read_queries_packed<R: Read>(
+    source: &mut FastaInputSource<R>,
+) -> (
+    QueryRecords,
+    Vec<Option<crate::sequence::packed_letters::PackedLetters>>,
+) {
+    source.x_pack_letters();
+    let mut packed = Vec::new();
+    let records = read_queries_with(source, |source| packed.push(source.x_take_packed()));
+    (records, packed)
+}
+
+/// `read_queries`, with `read` called after each record is read, before the next one.
+fn read_queries_with<R: Read>(
+    source: &mut FastaInputSource<R>,
+    mut read: impl FnMut(&mut FastaInputSource<R>),
+) -> QueryRecords {
     let mut records = Vec::new();
     loop {
         if source.end() {
@@ -808,7 +843,10 @@ pub fn read_queries<R: Read>(source: &mut FastaInputSource<R>) -> QueryRecords {
             warnings.extend_from_slice(message);
             Ok(())
         }) {
-            Ok(record) => records.push(record),
+            Ok(record) => {
+                records.push(record);
+                read(source);
+            }
             Err(ReadError::Parse {
                 code: ParseErrorCode::Eof,
                 ..

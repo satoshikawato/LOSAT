@@ -61,11 +61,30 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 use crate::algorithm::blastn::hsp::BlastnOutputFormat;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::QueryInput;
+use crate::sequence::packed_letters::PackedLetters;
+use crate::utils::threading::SearchPool;
 
 /// No NCBI counterpart: LOSAT_X_BNQDROP (read once).
 pub(super) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNQDROP"))
+}
+
+/// No NCBI counterpart: LOSAT_X_BNQPACK (read once).
+pub(super) fn pack_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNQPACK"))
+}
+
+/// No NCBI counterpart: whether `search_cli` packs the letters of the records it reads before the
+/// search (LOSAT_X_BNQPACK): where they go into a `Store` (`Rule::acts`, LOSAT_X_BNQDROP on) and the
+/// query file holds at least two of the task's largest batches (`file_bytes` against
+/// `batch_letters`, as LOSAT_X_QSTREAM's `Batch`): with fewer, the first batch holds most letters
+/// anyway, and packing them would only cost time. Standard input (no size) is not packed.
+pub(super) fn packs(store_acts: bool, file_bytes: Option<u64>, batch_letters: u64) -> bool {
+    store_acts
+        && pack_on()
+        && file_bytes.is_some_and(|bytes| bytes >= batch_letters.saturating_mul(2))
 }
 
 /// No NCBI counterpart: what `search_cli` knows of a search when it decides whether the switch
@@ -96,17 +115,56 @@ impl Rule<'_> {
 /// The query records read before a search, which the batch loop takes out batch by batch, in
 /// order (`x_query_stream::Queries::Taken`).
 pub(super) struct Store {
-    /// The records the loop has not taken, and how many it has taken.
-    left: Mutex<(std::vec::IntoIter<FastaRecord>, usize)>,
+    /// The records the loop has not taken, the packed letters of each (LOSAT_X_BNQPACK; empty
+    /// where the records keep their letters), and how many records the loop has taken.
+    left: Mutex<Left>,
     /// Every record searched whole (no `-query_loc`).
     query_input: QueryInput,
 }
 
+struct Left {
+    records: std::vec::IntoIter<FastaRecord>,
+    packed: std::vec::IntoIter<Option<PackedLetters>>,
+    taken: usize,
+}
+
 impl Store {
-    pub(super) fn new(records: Vec<FastaRecord>) -> Self {
+    /// The store of `records`, and of their letters packed as they were read (`packed`, one per
+    /// record, `None` for a record that kept its letters; empty when none was packed).
+    pub(super) fn new(records: Vec<FastaRecord>, packed: Vec<Option<PackedLetters>>) -> Self {
+        debug_assert!(packed.is_empty() || packed.len() == records.len());
+        let mut query_input = QueryInput::whole(&records);
+        for (length, store) in query_input.input_lengths.iter_mut().zip(&packed) {
+            if let Some(store) = store {
+                *length = store.len();
+            }
+        }
+        if !packed.is_empty() {
+            PACKED.fetch_add(packed.iter().flatten().count() as u64, Ordering::Relaxed);
+            PACKED_LETTERS.fetch_add(
+                packed
+                    .iter()
+                    .flatten()
+                    .map(|store| store.len() as u64)
+                    .sum(),
+                Ordering::Relaxed,
+            );
+            PACKED_BYTES.fetch_add(
+                packed
+                    .iter()
+                    .flatten()
+                    .map(|store| store.heap_bytes() as u64)
+                    .sum(),
+                Ordering::Relaxed,
+            );
+        }
         Self {
-            query_input: QueryInput::whole(&records),
-            left: Mutex::new((records.into_iter(), 0)),
+            query_input,
+            left: Mutex::new(Left {
+                records: records.into_iter(),
+                packed: packed.into_iter(),
+                taken: 0,
+            }),
         }
     }
 
@@ -121,16 +179,28 @@ impl Store {
     }
 
     /// The records `range`, taken out: the loop takes its batches in order, each starting where
-    /// the one before ended.
-    pub(super) fn take(&self, range: std::ops::Range<usize>) -> anyhow::Result<Vec<FastaRecord>> {
+    /// the one before ended. Packed letters are made again (by `pool`'s threads with two or more).
+    pub(super) fn take(
+        &self,
+        range: std::ops::Range<usize>,
+        pool: &SearchPool<'_>,
+    ) -> anyhow::Result<Vec<FastaRecord>> {
         let mut left = self.left.lock().unwrap_or_else(PoisonError::into_inner);
-        let (records, taken) = &mut *left;
+        let Left {
+            records,
+            packed,
+            taken,
+        } = &mut *left;
         anyhow::ensure!(
             range.start == *taken && range.len() <= records.len(),
             "LOSAT_X_BNQDROP: the batch of the records {range:?} after those up to {taken}"
         );
         *taken = range.end;
-        Ok(records.by_ref().take(range.len()).collect())
+        let mut batch: Vec<FastaRecord> = records.by_ref().take(range.len()).collect();
+        let stores: Vec<Option<PackedLetters>> = packed.by_ref().take(range.len()).collect();
+        drop(left);
+        unpack(&mut batch, stores, pool);
+        Ok(batch)
     }
 
     /// A copy of the records `range` for a LOSAT_X_QBATCHPAR slot; `None` once the loop has taken
@@ -138,9 +208,14 @@ impl Store {
     /// the rule acts where none may run), so a slot never waits on the loop's current batch.
     pub(super) fn copy(&self, range: std::ops::Range<usize>) -> Option<Vec<FastaRecord>> {
         let left = self.left.lock().unwrap_or_else(PoisonError::into_inner);
-        let (records, taken) = &*left;
-        let from = range.start.checked_sub(*taken)?;
-        Some(records.as_slice()[from..from + range.len()].to_vec())
+        let from = range.start.checked_sub(left.taken)?;
+        let mut records = left.records.as_slice()[from..from + range.len()].to_vec();
+        for (record, store) in records.iter_mut().zip(left.packed.as_slice().get(from..)?) {
+            if let Some(store) = store {
+                store.unpack_into(&mut record.sequence);
+            }
+        }
+        Some(records)
     }
 
     /// Writes the reader's messages of every record (none taken yet).
@@ -149,10 +224,51 @@ impl Store {
         out: &mut (dyn std::io::Write + Send),
     ) -> anyhow::Result<()> {
         let left = self.left.lock().unwrap_or_else(PoisonError::into_inner);
-        for record in left.0.as_slice() {
+        for record in left.records.as_slice() {
             out.write_all(&record.warnings)?;
         }
         Ok(())
+    }
+}
+
+/// No NCBI counterpart: the letters of a batch's packed records made again (LOSAT_X_BNQPACK), by the
+/// search pool where it has two threads or more (each record by one thread).
+fn unpack(batch: &mut [FastaRecord], stores: Vec<Option<PackedLetters>>, pool: &SearchPool<'_>) {
+    if stores.is_empty() {
+        return;
+    }
+    let t0 = crate::utils::xtiming::clock();
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() && pool.threads() > 1 {
+        use rayon::prelude::*;
+        pool.install(|| {
+            batch
+                .par_iter_mut()
+                .zip(stores.into_par_iter())
+                .for_each(|(record, store)| {
+                    if let Some(store) = store {
+                        store.unpack_into(&mut record.sequence);
+                    }
+                })
+        });
+        add_unpack_time(t0);
+        return;
+    }
+    let _ = pool;
+    for (record, store) in batch.iter_mut().zip(stores) {
+        if let Some(store) = store {
+            store.unpack_into(&mut record.sequence);
+        }
+    }
+    add_unpack_time(t0);
+}
+
+fn add_unpack_time(t0: Option<std::time::Instant>) {
+    if let Some(t0) = t0 {
+        UNPACK_NANOS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
     }
 }
 
@@ -196,6 +312,12 @@ impl BatchQueries<'_> {
 static BATCHES: AtomicU64 = AtomicU64::new(0);
 static RECORDS: AtomicU64 = AtomicU64::new(0);
 static LETTERS: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart (LOSAT_X_BNQPACK): the records packed as they were read, their letters and
+// the bytes held for them, and the time spent making their letters again (with LOSAT_TIMING).
+static PACKED: AtomicU64 = AtomicU64::new(0);
+static PACKED_LETTERS: AtomicU64 = AtomicU64::new(0);
+static PACKED_BYTES: AtomicU64 = AtomicU64::new(0);
+static UNPACK_NANOS: AtomicU64 = AtomicU64::new(0);
 
 /// No NCBI counterpart: with LOSAT_TIMING, the `[TIMING] x_bn_q_drop` line `main` prints at exit
 /// (when a batch dropped its letters).
@@ -206,6 +328,15 @@ pub(super) fn print_summary() {
             "[TIMING] x_bn_q_drop: batches={batches} records={} letters={}",
             RECORDS.load(Ordering::Relaxed),
             LETTERS.load(Ordering::Relaxed)
+        );
+    }
+    let packed = PACKED.load(Ordering::Relaxed);
+    if crate::utils::xtiming::on() && packed > 0 {
+        eprintln!(
+            "[TIMING] x_bn_q_pack: records={packed} letters={} bytes={} unpack_s={:.3}",
+            PACKED_LETTERS.load(Ordering::Relaxed),
+            PACKED_BYTES.load(Ordering::Relaxed),
+            UNPACK_NANOS.load(Ordering::Relaxed) as f64 / 1e9
         );
     }
 }

@@ -21,6 +21,7 @@ mod x_two_hit_fast;
 // Re-export public functions
 pub use gapped::extend_gapped_protein;
 pub use two_hit::extend_hit_two_hit;
+pub(crate) use two_hit::extend_hit_two_hit_with;
 // Diagnostic (LOSAT_X_STATS): the cells of one extension (tblastx/x_unit_probe.rs).
 pub(crate) use two_hit::x_two_hit_cells;
 pub use ungapped::extend_hit_ungapped;

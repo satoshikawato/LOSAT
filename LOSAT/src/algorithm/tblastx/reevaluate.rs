@@ -8,6 +8,7 @@
 //! Reference:
 //! - ncbi-blast/c++/src/algo/blast/core/blast_hits.c:675-733
 
+use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 use crate::utils::matrix::blosum62_score;
 use std::sync::OnceLock;
 
@@ -227,6 +228,48 @@ pub fn reevaluate_ungapped_hit_ncbi_translated(
     }
 
     reevaluate_ungapped_hit_ncbi_translated_scalar(
+        Blosum62Score,
+        query_raw,
+        subject_raw,
+        q_off_raw,
+        s_off_raw,
+        hsp_len,
+        cutoff_score,
+    )
+}
+
+/// `reevaluate_ungapped_hit_ncbi_translated` with the scores of `sc`: BLOSUM62's instance is
+/// that function, another matrix's runs the scalar loop with its table (the AVX2 gather reads
+/// BLOSUM62's table).
+#[inline]
+pub(crate) fn reevaluate_ungapped_hit_ncbi_translated_with<S: TbxScore>(
+    sc: S,
+    query_raw: &[u8],
+    subject_raw: &[u8],
+    q_off_raw: usize,
+    s_off_raw: usize,
+    hsp_len: usize,
+    cutoff_score: i32,
+) -> Option<(usize, usize, usize, i32)> {
+    if S::BLOSUM62 {
+        return reevaluate_ungapped_hit_ncbi_translated(
+            query_raw,
+            subject_raw,
+            q_off_raw,
+            s_off_raw,
+            hsp_len,
+            cutoff_score,
+        );
+    }
+    // The bounds of `reevaluate_ungapped_hit_ncbi_translated`.
+    if hsp_len == 0
+        || q_off_raw + hsp_len > query_raw.len()
+        || s_off_raw + hsp_len > subject_raw.len()
+    {
+        return None;
+    }
+    reevaluate_ungapped_hit_ncbi_translated_scalar(
+        sc,
         query_raw,
         subject_raw,
         q_off_raw,
@@ -238,7 +281,8 @@ pub fn reevaluate_ungapped_hit_ncbi_translated(
 
 /// Scalar implementation of reevaluation (fallback and reference).
 #[inline(always)]
-fn reevaluate_ungapped_hit_ncbi_translated_scalar(
+fn reevaluate_ungapped_hit_ncbi_translated_scalar<S: TbxScore>(
+    sc: S,
     query_raw: &[u8],
     subject_raw: &[u8],
     q_off_raw: usize,
@@ -276,7 +320,7 @@ fn reevaluate_ungapped_hit_ncbi_translated_scalar(
         let q = unsafe { *q_ptr.add(idx) };
         let s = unsafe { *s_ptr.add(idx) };
         // NCBI: matrix[*query & 0xff][*subject]
-        sum += blosum62_score(q, s);
+        sum += sc.score(q, s);
 
         if sum < 0 {
             // Start from new offset (NCBI lines 703-707)

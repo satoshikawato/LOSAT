@@ -4,13 +4,15 @@
 
 use super::get_score;
 use super::ungapped::extend_hit_ungapped;
+use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 // EXPERIMENT (LOSAT_X_TBXUNGAP): x_two_hit_fast.rs.
 use super::x_two_hit_fast;
 
 // Import the internal extension functions from ungapped module
 // These are used for left/right extension
 #[inline(always)]
-fn extend_left_ungapped_scalar(
+fn extend_left_ungapped_scalar<S: TbxScore>(
+    sc: S,
     q_seq: &[u8],
     s_seq: &[u8],
     q_off: usize,
@@ -31,7 +33,7 @@ fn extend_left_ungapped_scalar(
         let q_char = unsafe { *q_seq.get_unchecked(q_off - 1 - i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_off - 1 - i) };
 
-        score += get_score(q_char, s_char);
+        score += sc.score(q_char, s_char);
 
         if score > max_score {
             max_score = score;
@@ -69,7 +71,8 @@ fn extend_left_ungapped_scalar(
     not(feature = "tblastx-wasm-scalar")
 ))]
 #[target_feature(enable = "simd128")]
-unsafe fn extend_left_ungapped_simd128(
+unsafe fn extend_left_ungapped_simd128<S: TbxScore>(
+    sc: S,
     q_seq: &[u8],
     s_seq: &[u8],
     q_off: usize,
@@ -97,7 +100,7 @@ unsafe fn extend_left_ungapped_simd128(
             ($lane:expr, $qv:ident, $sv:ident, $pos:ident) => {{
                 let q = i8x16_extract_lane::<$lane>($qv) as u8;
                 let s = i8x16_extract_lane::<$lane>($sv) as u8;
-                score += get_score(q, s);
+                score += sc.score(q, s);
                 let ext_len = $pos + 1;
                 if score > max_score {
                     max_score = score;
@@ -132,7 +135,7 @@ unsafe fn extend_left_ungapped_simd128(
         let q_char = *q_seq.get_unchecked(q_off - 1 - i);
         let s_char = *s_seq.get_unchecked(s_off - 1 - i);
 
-        score += get_score(q_char, s_char);
+        score += sc.score(q_char, s_char);
         let ext_len = i + 1;
 
         if score > max_score {
@@ -150,7 +153,8 @@ unsafe fn extend_left_ungapped_simd128(
 }
 
 #[inline(always)]
-fn extend_left_ungapped(
+fn extend_left_ungapped<S: TbxScore>(
+    sc: S,
     q_seq: &[u8],
     s_seq: &[u8],
     q_off: usize,
@@ -176,14 +180,23 @@ fn extend_left_ungapped(
         // exact scalar NCBI control flow available for native-vs-Wasm parity
         // isolation while leaving production SIMD builds unchanged.
         unsafe {
-            return extend_left_ungapped_simd128(q_seq, s_seq, q_off, s_off, initial_score, x_drop);
+            return extend_left_ungapped_simd128(
+                sc,
+                q_seq,
+                s_seq,
+                q_off,
+                s_off,
+                initial_score,
+                x_drop,
+            );
         }
     }
-    extend_left_ungapped_scalar(q_seq, s_seq, q_off, s_off, initial_score, x_drop)
+    extend_left_ungapped_scalar(sc, q_seq, s_seq, q_off, s_off, initial_score, x_drop)
 }
 
 #[inline(always)]
-fn extend_right_ungapped_scalar(
+fn extend_right_ungapped_scalar<S: TbxScore>(
+    sc: S,
     q_seq: &[u8],
     s_seq: &[u8],
     q_start: usize,
@@ -203,7 +216,7 @@ fn extend_right_ungapped_scalar(
         let q_char = unsafe { *q_seq.get_unchecked(q_start + j) };
         let s_char = unsafe { *s_seq.get_unchecked(s_start + j) };
 
-        score += get_score(q_char, s_char);
+        score += sc.score(q_char, s_char);
 
         if score > max_score {
             max_score = score;
@@ -237,7 +250,8 @@ fn extend_right_ungapped_scalar(
     not(feature = "tblastx-wasm-scalar")
 ))]
 #[target_feature(enable = "simd128")]
-unsafe fn extend_right_ungapped_simd128(
+unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
+    sc: S,
     q_seq: &[u8],
     s_seq: &[u8],
     q_start: usize,
@@ -268,7 +282,7 @@ unsafe fn extend_right_ungapped_simd128(
             ($lane:expr, $qv:ident, $sv:ident, $pos:ident) => {{
                 let q = i8x16_extract_lane::<$lane>($qv) as u8;
                 let s = i8x16_extract_lane::<$lane>($sv) as u8;
-                score += get_score(q, s);
+                score += sc.score(q, s);
                 if score > max_score {
                     max_score = score;
                     right_disp = $pos + 1;
@@ -302,7 +316,7 @@ unsafe fn extend_right_ungapped_simd128(
         let q_char = *q_seq.get_unchecked(q_start + j);
         let s_char = *s_seq.get_unchecked(s_start + j);
 
-        score += get_score(q_char, s_char);
+        score += sc.score(q_char, s_char);
 
         if score > max_score {
             max_score = score;
@@ -319,7 +333,8 @@ unsafe fn extend_right_ungapped_simd128(
 }
 
 #[inline(always)]
-fn extend_right_ungapped(
+fn extend_right_ungapped<S: TbxScore>(
+    sc: S,
     q_seq: &[u8],
     s_seq: &[u8],
     q_start: usize,
@@ -346,6 +361,7 @@ fn extend_right_ungapped(
         // isolation while leaving production SIMD builds unchanged.
         unsafe {
             return extend_right_ungapped_simd128(
+                sc,
                 q_seq,
                 s_seq,
                 q_start,
@@ -355,7 +371,7 @@ fn extend_right_ungapped(
             );
         }
     }
-    extend_right_ungapped_scalar(q_seq, s_seq, q_start, s_start, initial_score, x_drop)
+    extend_right_ungapped_scalar(sc, q_seq, s_seq, q_start, s_start, initial_score, x_drop)
 }
 
 /// Two-hit ungapped extension: NCBI BLAST style.
@@ -391,6 +407,44 @@ pub fn extend_hit_two_hit(
         }
     }
     extend_hit_two_hit_reference(
+        Blosum62Score,
+        q_seq,
+        s_seq,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        x_drop,
+        debug_ext,
+    )
+}
+
+/// `extend_hit_two_hit` with the scores of `sc`: BLOSUM62's instance is `extend_hit_two_hit`,
+/// another matrix's runs the reference walks with its table (the table walks of TBXUNGAP hold
+/// BLOSUM62's scores and bounds).
+#[inline(always)]
+pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
+    sc: S,
+    q_seq: &[u8],
+    s_seq: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    x_drop: i32,
+    debug_ext: bool,
+) -> (usize, usize, usize, usize, i32, bool, usize) {
+    if S::BLOSUM62 {
+        return extend_hit_two_hit(
+            q_seq,
+            s_seq,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            x_drop,
+            debug_ext,
+        );
+    }
+    extend_hit_two_hit_reference(
+        sc,
         q_seq,
         s_seq,
         s_left_off,
@@ -402,8 +456,9 @@ pub fn extend_hit_two_hit(
 }
 
 /// `extend_hit_two_hit` as written before LOSAT_X_TBXUNGAP (the path with the switch off, and
-/// the debug output).
-pub(super) fn extend_hit_two_hit_reference(
+/// the debug output), with the scores of `sc`.
+pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
+    sc: S,
     q_seq: &[u8],
     s_seq: &[u8],
     s_left_off: usize,  // Position of first hit (L) in subject
@@ -434,7 +489,7 @@ pub(super) fn extend_hit_two_hit_reference(
         // SAFETY: Lookup table guarantees q_right_off and s_right_off have at least k_size valid positions
         let q_char = unsafe { *q_seq.get_unchecked(q_right_off + i) };
         let s_char = unsafe { *s_seq.get_unchecked(s_right_off + i) };
-        score += get_score(q_char, s_char);
+        score += sc.score(q_char, s_char);
 
         if score > seed_score {
             seed_score = score;
@@ -450,7 +505,7 @@ pub(super) fn extend_hit_two_hit_reference(
     // Stop codons have very negative scores in BLOSUM62 (-4 to -5), so X-drop handles them.
     // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:886-921
     let (left_score, left_disp) =
-        extend_left_ungapped(q_seq, s_seq, q_right_off, s_right_off, 0, x_drop);
+        extend_left_ungapped(sc, q_seq, s_seq, q_right_off, s_right_off, 0, x_drop);
 
     // Check if left extension reached the first hit
     // The distance from R to L is (s_right_off - s_left_off)
@@ -471,8 +526,15 @@ pub(super) fn extend_hit_two_hit_reference(
         right_extended = true;
 
         // NCBI BLAST extends right starting from left_score as initial score
-        let (new_max_score, new_right_disp, j) =
-            extend_right_ungapped(q_seq, s_seq, q_right_off, s_right_off, left_score, x_drop);
+        let (new_max_score, new_right_disp, j) = extend_right_ungapped(
+            sc,
+            q_seq,
+            s_seq,
+            q_right_off,
+            s_right_off,
+            left_score,
+            x_drop,
+        );
         right_score = new_max_score;
         right_disp = new_right_disp;
         // s_last_off is the rightmost subject position scanned (NCBI BLAST style)
@@ -512,12 +574,12 @@ pub(super) fn extend_hit_two_hit_reference(
         for i in 0..align_len.min(100) {
             let q_char = q_seq[q_start + i];
             let s_char = s_seq[s_start + i];
-            let sc = get_score(q_char, s_char);
-            total += sc;
+            let cell = sc.score(q_char, s_char);
+            total += cell;
             if i < 10 || i >= align_len - 5 {
                 eprintln!(
                     "[DEBUG_EXT] pos={:2} q={:2} s={:2} score={:3} cumul={:4}",
-                    i, q_char, s_char, sc, total
+                    i, q_char, s_char, cell, total
                 );
             }
         }

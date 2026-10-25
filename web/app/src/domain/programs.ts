@@ -91,7 +91,7 @@ export interface ProgramDescriptor {
 const integer = { kind: 'text', inputMode: 'numeric' } as const;
 const decimal = { kind: 'text', inputMode: 'decimal' } as const;
 /** Matrix names of NCBI BLAST+; the engine says which ones it searches with. */
-const MATRICES = ['BLOSUM45', 'BLOSUM50', 'BLOSUM62', 'BLOSUM80', 'BLOSUM90', 'PAM30', 'PAM70', 'PAM250'];
+const MATRICES = ['BLOSUM45', 'BLOSUM50', 'BLOSUM62', 'BLOSUM80', 'BLOSUM90', 'PAM30', 'PAM70', 'PAM250', 'IDENTITY'];
 
 // General Parameters.
 const maxTargetSeqs: ParameterField = { flag: '-max_target_seqs', label: 'Max target sequences', ...integer };
@@ -296,6 +296,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         // NCBI's "Max matches in a query range" (HSP_RANGE_MAX) is BLAST+'s -culling_limit.
         fields: [maxTargetSeqs, evalue, wordSize, { flag: '-culling_limit', label: 'Max matches in a query range', ...integer }],
       },
+      // TBLASTX is ungapped: NCBI's page has the matrix and no gap costs.
+      { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix] },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg] },
       { title: OTHER, placement: 'algorithm', fields: [threshold, windowSize] },
     ],

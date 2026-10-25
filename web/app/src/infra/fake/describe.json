@@ -510,9 +510,13 @@
    },
    {
     "flag": "-threshold",
-    "help": "",
-    "takes_value": true,
-    "default": "13"
+    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion]",
+    "takes_value": true
+   },
+   {
+    "flag": "-matrix",
+    "help": "Scoring matrix name [default: BLOSUM62]",
+    "takes_value": true
    },
    {
     "flag": "-word_size",
@@ -555,9 +559,8 @@
    },
    {
     "flag": "-window_size",
-    "help": "Two-hit window size for triggering ungapped extension (default: 40). Smaller values are more strict, larger values are more sensitive. 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX",
-    "takes_value": true,
-    "default": "40"
+    "help": "Two-hit window size for triggering ungapped extension (default: 40, or the matrix's suggestion; `window`). Smaller values are more strict, larger values are more sensitive. 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX",
+    "takes_value": true
    },
    {
     "flag": "-culling_limit",

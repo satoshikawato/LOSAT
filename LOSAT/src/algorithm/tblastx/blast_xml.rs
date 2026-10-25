@@ -62,11 +62,35 @@ use crate::utils::genetic_code::GeneticCode;
 
 const PROGRAM: &str = "TBLASTX";
 
-/// `BLOSUM62`, `-gapopen 11 -gapextend 1`: TBLASTX has no options for them, and NCBI's XML prints
-/// its option defaults (blastxml_format.cpp:602-607; DECISIONS 19, Q7).
-const MATRIX: &str = "BLOSUM62";
+/// `-gapopen 11 -gapextend 1`: TBLASTX has no options for them, and NCBI's XML prints its option
+/// defaults (blastxml_format.cpp:602-607; DECISIONS 19, Q7), or the best costs of `-matrix`
+/// (`gap_costs`).
 const GAP_OPEN: i32 = 11;
 const GAP_EXTEND: i32 = 1;
+
+/// The gap costs of the XML's parameters: with `-matrix`, the matrix's best costs.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:257-273
+/// ```c
+///     int gap_open=0, gap_extend=0;
+///     if (args.Exist(kArgMatrixName) && args[kArgMatrixName])
+///          BLAST_GetProteinGapExistenceExtendParams
+///              (args[kArgMatrixName].AsString().c_str(), &gap_open, &gap_extend);
+///
+///     if (args.Exist(kArgGapOpen) && args[kArgGapOpen]) {
+///         opt.SetGapOpeningCost(args[kArgGapOpen].AsInteger());
+///     }
+///     else if (args.Exist(kArgMatrixName) && args[kArgMatrixName]) {
+///         opt.SetGapOpeningCost(gap_open);
+///     }
+/// ```
+fn gap_costs(matrix: Option<&str>) -> (i32, i32) {
+    match matrix {
+        Some(name) => crate::stats::protein_options::protein_gap_existence_extend_params(name)
+            .unwrap_or((0, 0)),
+        None => (GAP_OPEN, GAP_EXTEND),
+    }
+}
 
 /// The messages of a query's result (the warnings the other formats write to standard error,
 /// `report::query_warning`): the Karlin-Altschul message of a batch NCBI did not search (a
@@ -169,17 +193,21 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         None => ("", 0, 0),
     };
     names::check_database_name(PROGRAM, db_name)?;
-    let positives = FormattingMatrix::new(MATRIX).context("no formatting matrix for BLOSUM62")?;
+    // The batch loop refused a name that the formatting table does not know (`run_batch_loop`).
+    let matrix = args.matrix_name();
+    let positives = FormattingMatrix::new(matrix)
+        .with_context(|| format!("no formatting matrix for {matrix}"))?;
+    let (gap_open, gap_extend) = gap_costs(args.matrix.as_deref());
     let filter = filter::filter_string(None, args.seg_spec()?.filter_options(), None, false);
     let xml_run = XmlRun {
         program: "tblastx",
         version: "TBLASTX 2.17.0+",
         reference: REFERENCE_GAPPED_BLAST,
         db_name: db_name.as_bytes(),
-        matrix: Some(MATRIX),
+        matrix: Some(matrix),
         expect: args.evalue,
-        gap_open: GAP_OPEN,
-        gap_extend: GAP_EXTEND,
+        gap_open,
+        gap_extend,
         reward_penalty: None,
         filter: &filter,
         db_num,

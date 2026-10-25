@@ -25,6 +25,8 @@ pub(crate) mod report;
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod scan;
 pub(crate) mod seqalign;
+// The scores of the search's matrix (`-matrix`).
+pub(crate) mod scoring;
 pub mod stage_dump;
 pub(crate) mod subjects;
 pub mod sum_stats_linking;

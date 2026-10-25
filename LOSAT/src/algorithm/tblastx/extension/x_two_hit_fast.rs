@@ -350,6 +350,7 @@ pub(super) fn two_hit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::tblastx::scoring::Blosum62Score;
 
     struct Rng(u64);
     impl Rng {
@@ -386,7 +387,7 @@ mod tests {
 
     /// One call both ways; the fast path must handle it.
     fn check_call(q: &[u8], s: &[u8], sl: usize, sr: usize, qr: usize, d: i32) {
-        let expect = extend_hit_two_hit_reference(q, s, sl, sr, qr, d, false);
+        let expect = extend_hit_two_hit_reference(Blosum62Score, q, s, sl, sr, qr, d, false);
         let got = two_hit(q, s, sl, sr, qr, d).expect("the fast path handles the call");
         assert_eq!(got, expect, "sl={sl} sr={sr} qr={qr} d={d}");
     }

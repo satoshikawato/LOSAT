@@ -623,6 +623,7 @@ impl XdropScratch {
             sc.x_nib = x_dp_nibble_here();
             return sc;
         }
+        X_SCRATCHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self {
             ha: Rows::new(0),
             hb: Rows::new(0),
@@ -657,6 +658,7 @@ impl XdropScratch {
     // ```
     // The initial allocation, like the first `dp_mem` allocation.
     pub(crate) fn new() -> Self {
+        X_SCRATCHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self {
             ha: Rows::new(1024),
             hb: Rows::new(1024),
@@ -813,8 +815,9 @@ fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
 /// each scratch keeping the largest trace it ever held. A scratch whose trace passes the size while
 /// it grows takes the largest idle pair (its rows so far are copied over) and gives it back after
 /// the traceback call (`XdropScratch::x_trace_release`); the pool keeps at most `X_POOL_IDLE` idle
-/// pairs (the smallest is freed). Off: every scratch keeps its own trace, as before. Placement of
-/// memory only: the kernels write and the walk reads the same rows either way.
+/// pairs (the smallest is freed), and frees them when the last scratch goes (`X_SCRATCHES`). Off:
+/// every scratch keeps its own trace, as before. Placement of memory only: the kernels write and
+/// the walk reads the same rows either way.
 pub(crate) fn x_dp_trace_pool() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
@@ -831,6 +834,10 @@ const X_POOL_IDLE: usize = 2;
 type XTracePair = (Vec<u8>, Vec<(u32, u32, u32)>);
 // No NCBI counterpart: the idle pairs (`LOSAT_X_DPTRACEPOOL`).
 static X_TRACE_POOL: std::sync::Mutex<Vec<XTracePair>> = std::sync::Mutex::new(Vec::new());
+// No NCBI counterpart: the scratches alive (`LOSAT_X_DPTRACEPOOL`). The last one to go (the end of
+// a search's traceback stage) frees the pool's idle pairs, as the scratches' own traces were freed
+// with them before the pool.
+static X_SCRATCHES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 #[cfg(test)]
 thread_local! {
@@ -908,6 +915,16 @@ fn x_trace_grow(trace: &mut Vec<u8>, rows: &mut Vec<(u32, u32, u32)>, n: usize) 
         }
     }
     trace.reserve(n);
+}
+
+impl Drop for XdropScratch {
+    // No NCBI counterpart: the last scratch alive frees the pool's idle pairs (`X_SCRATCHES`).
+    fn drop(&mut self) {
+        if X_SCRATCHES.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
+            let idle = std::mem::take(&mut *x_pool_lock());
+            drop(idle);
+        }
+    }
 }
 
 impl XdropScratch {

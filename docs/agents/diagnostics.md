@@ -785,10 +785,11 @@ Same values, faster computation:
   1 MiB or more, spread over the whole stage). Now a trace that passes 1 MiB while it grows takes the
   largest idle pair of a pool the scratches share (the rows so far are copied over; the thread's own small
   buffers wait in a thread-local) and gives it back after the traceback call; the pool keeps at most two
-  idle pairs and frees the smallest (two left less memory than four at the same time). The kernels write and the walk reads the same rows, so every script,
-  edit operation, score and offset is the same; the 1 MiB test runs at the kernels' row reserve, which takes
-  only the two buffers (`x_trace_reserve`), so the kernels' machine code is unchanged (one thread at dev's
-  instructions, x1.0000). The rule (conditional): a trace that grew past 1 MiB by itself goes to the pool on
+  idle pairs and frees the smallest (two left less memory than four at the same time), and the last scratch
+  to go (the end of a search's traceback stage) frees them, as the scratches' own traces went with them
+  before. The kernels write and the walk reads the same rows, so every script, edit operation, score and
+  offset is the same; the 1 MiB test runs at the kernels' row reserve, which takes only the two buffers
+  (`x_trace_reserve`), so the kernels run the same instructions (one thread x1.0000 against dev). The rule (conditional): a trace that grew past 1 MiB by itself goes to the pool on
   a thread of a Rayon pool (searches on two threads or more); a one-thread search keeps its one trace, as
   it has nothing to share it with. `trace_pool_keeps_every_result` runs long problems through the pool on
   a two-thread pool. Workstation, node 1 (per-pair median wall, max RSS MiB, `v4-B/results/b16e2/`, same

@@ -19,8 +19,11 @@
 //! ```
 //! The walk gives the letter-by-letter walk's frames for every record (the unit test of
 //! `subjects.rs` compares them in one process), so the property under test is that the report does
-//! not depend on the switch; that reports equal NCBI's is the business of the fixture comparisons
-//! (`tblastx_regression_fixtures.py`'s `ambig.*` and `input.rna_*`, outfmt0's `tblastx.ambig.*`).
+//! not depend on the switch. Since `LOSAT_X_TBXSTORE` the command line reads its records packed, so
+//! these runs set `LOSAT_X_TBXSTORE=0` (the other way to this switch is `run_local`); the record path
+//! gives the stored path's reports (`tests/tblastx_store.rs`, `tests/run_local_tblastx.rs`), and the
+//! stored path gives NCBI's (`tblastx_regression_fixtures.py`'s `ambig.*` and `input.rna_*`, outfmt0's
+//! `tblastx.ambig.*`).
 //! `LOSAT_X_REACH` shows the side each run took. The input (the first 6 kb of MjeNMV against the
 //! MelaMJNV genome with IUPAC codes, lower-case letters and N blocks, one across a translation
 //! window, and the PemoMJNVA genome as it is) gives HSPs in both records.

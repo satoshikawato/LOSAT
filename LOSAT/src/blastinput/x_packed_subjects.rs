@@ -6,13 +6,25 @@
 
 use crate::sequence::packed_subject::PackedNucleotide;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
+// ```c
+//     virtual SBlastSequence GetCompressedPlusStrand() {
+//         SBlastSequence retval(size());
+//         string ncbi4na = kEmptyStr;
+//         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
+//         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
+// ```
+// The records are read as `fasta_reader::read_subjects` reads them (NCBI's `GetAllSeqs`,
+// blast_input.cpp:198-219); NCBI packs a subject when its search needs it. No NCBI counterpart for
+// packing each record as it is read: only where the letters are held.
 /// EXPERIMENT (LOSAT_X_TBNSTORE, LOSAT_X_TBXSTORE): the subject records (`read_subjects`), each one's
 /// letters packed as soon as it has been read, so the letters of the whole set are never held at
 /// once. With a subject range (`-subject_loc`) each record is first cut to its interval, in place,
 /// into the record `seq_range::cut_subjects` makes, and the placements are returned (empty without
 /// a range). The records keep their deflines and no letters. If a record holds a byte without an
-/// ncbi4na code (`iupacna_to_ncbi4na`: `U` among them), every record keeps its letters and no store
-/// is returned: the search then reads the letters as without the switch. With `threads` above one
+/// ncbi4na code (`iupacna_to_ncbi4na`; the FASTA reader gives none, it reads `U` as `T`, so only a
+/// caller's own records can) or is longer than a store holds (`u32::MAX` bases), every record keeps
+/// its letters and no store is returned: the search then reads the letters as without the switch. With `threads` above one
 /// a second thread packs each record while the reader reads the next one (`x_packed_while_read`),
 /// except in WebAssembly, where the reader packs each record itself as at one thread: there a thread
 /// started outside the search pool is one more host worker than `-num_threads` asks for.
@@ -109,7 +121,7 @@ fn x_packed(
 // the packing adds to the time the search waits for its subjects (about 0.5 s for the 1.37 Gb
 // zebrafish genome). With two or more search threads a second thread packs the records while the
 // reader reads the next ones (natively; a WebAssembly build packs on the reader, see
-// `x_read_subject_stores`). The reader hands them over in batches (up to `X_PACK_BATCH`
+// `x_read_packed_subjects`). The reader hands them over in batches (up to `X_PACK_BATCH`
 // records or `X_PACK_BATCH_LETTERS` letters, so that a set of many short records costs few
 // hand-overs) and only when that thread takes a batch (a channel without a buffer), so at most
 // two batches' letters are held; the records come back in reading order. Packing is a function

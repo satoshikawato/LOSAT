@@ -172,9 +172,9 @@ thread_local! {
 
 /// EXPERIMENT (LOSAT_X_TBNSTORE): the subject records, each one's letters packed as soon as it has
 /// been read (`blastinput::x_packed_subjects::x_read_packed_subjects`: cut to `-subject_loc` first,
-/// packed on a second thread at two or more threads). The records keep their deflines and no
-/// letters; a set with a byte without an ncbi4na code keeps every record's letters and gives no
-/// stores.
+/// packed on a second thread at two or more threads natively, on the reader in WebAssembly). The
+/// records keep their deflines and no letters; a set with a byte without an ncbi4na code keeps
+/// every record's letters and gives no stores.
 pub(super) fn x_read_subject_stores<R: std::io::Read>(
     source: &mut crate::blastinput::fasta_reader::FastaInputSource<R>,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,

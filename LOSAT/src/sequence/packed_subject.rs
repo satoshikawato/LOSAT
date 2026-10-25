@@ -54,6 +54,7 @@ const fn bases_of(letters: [u8; 4]) -> [u8; 256] {
     bases
 }
 
+// No NCBI counterpart: LOSAT's speed (`bases_into`); the letters of the four 2-bit codes.
 /// Packed byte -> its four bases as letters, the first base's (the high bits) first.
 const BASES_OF_BYTE: [[u8; 4]; 256] = {
     let mut table = [[0u8; 4]; 256];
@@ -90,7 +91,8 @@ fn pack_block(block: &[u8], lower: bool, out: &mut [u8]) -> bool {
     // The 2-bit code of A, C, G or T in either case is bits 1-2 of the letter xor its bits 2-3
     // (0x41 0, 0x43 1, 0x47 2, 0x54 3; 0x61 0, 0x63 1, 0x67 2, 0x74 3). The multiplication moves
     // the four codes of a little-endian word to its high byte, the first letter's in the high bits
-    // (the other products land below bit 24 without overlapping).
+    // (the other products land below bit 24, or past bit 31 where the wrapping multiplication drops
+    // them, without overlapping).
     for (byte, four) in out.iter_mut().zip(block.chunks_exact(4)) {
         let word = u32::from_le_bytes([four[0], four[1], four[2], four[3]]);
         let codes = ((word >> 1) ^ (word >> 2)) & 0x0303_0303;
@@ -141,9 +143,9 @@ impl PackedNucleotide {
     /// `None` when a byte has no ncbi4na code (only records built by an API caller can hold one;
     /// such a search keeps the letters) or the record is longer than a run offset can hold.
     ///
-    /// One pass over the letters: the packed bytes are those of `encode_subject_ncbi2na_packed`
-    /// (the random draws of the ambiguous bases in the same order), made without its two
-    /// intermediate arrays of one byte per base.
+    /// The letters in order, 32 or 4 at a time: the packed bytes are those of
+    /// `encode_subject_ncbi2na_packed` (the random draws of the ambiguous bases in the same order),
+    /// made without its two intermediate arrays of one byte per base.
     pub fn from_subject_letters(seq: &[u8]) -> Option<Self> {
         let length = seq.len();
         u32::try_from(length).ok()?;
@@ -428,6 +430,7 @@ impl PackedNucleotide {
         self.letters_to(from, out);
     }
 
+    // No NCBI counterpart: LOSAT's speed (no buffer of its own); the letters of `letters_into`.
     /// `letters_into` of the letters `[from, from + out.len())`, into `out`.
     pub fn letters_to(&self, from: usize, out: &mut [u8]) {
         let to = from + out.len();

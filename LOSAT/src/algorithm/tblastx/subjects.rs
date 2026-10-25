@@ -25,13 +25,16 @@ use crate::utils::genetic_code::GeneticCode;
 // The preliminary stage translates a subject's 2-bit bases, the ungapped re-evaluation its
 // ncbi4na codes. A record of `-subject` gives its letters and the bases its ambiguous letters
 // resolve to (`preliminary_subject_bases`); a database sequence gives the letters of its stored
-// codes and the bases makeblastdb stored (D2).
+// codes and the bases makeblastdb stored (D2); a record packed as read (LOSAT_X_TBXSTORE) gives
+// the letters of its codes and the bases its ambiguous letters were resolved to when it was packed
+// (`CRandom` of its length, as `preliminary_subject_bases`).
 /// The subjects of one search, by OID (`-db`: the ordinal).
 #[derive(Clone, Copy)]
 pub(crate) enum Subjects<'a> {
     /// The records of `-subject` (after `-subject_loc`).
     Fasta(&'a [FastaRecord]),
-    /// The sequences of a `-db` database, read whole.
+    /// The sequences of a `-db` database, read whole, or (LOSAT_X_TBXSTORE) the records of
+    /// `-subject` (after `-subject_loc`), packed as read.
     Stored(&'a [PackedNucleotide]),
     /// A `-db` database whose sequences could not be read: no subject is searched, and the
     /// first batch with a valid context raises the read error (`SubjectsUnreadable`).
@@ -115,7 +118,7 @@ impl<'a> Subjects<'a> {
     // complement in a buffer of the subject's length: a record's ambiguous letters are resolved
     // window by window in letter order from one `CRandom` seeded with the record's length, which
     // draws what `preliminary_subject_bases` draws; a stored sequence gives the bases of its
-    // 2-bit codes (`resolved_letters_into`).
+    // 2-bit codes (`bases_into`).
     /// The frames the preliminary stage of subject `oid` translates, and whether they are the
     /// frames of its letters as well (true when it has no ambiguous base).
     pub(crate) fn x_preliminary_frames(
@@ -162,9 +165,8 @@ impl<'a> Subjects<'a> {
     //        	  (kTranslateSubject ? eBlastEncodingNcbi4na : eBlastEncodingNucleotide);
     // ```
     // The frames of the letters `with_search_bases` gives (`s_frames`), made in windows: a
-    // record's letters, or a stored sequence's letters of its codes (`letters_into`, the
-    // upper-case letters of `ascii_into`: a stored sequence has no lower-case interval, and the
-    // translation reads both cases alike).
+    // record's letters, or a stored sequence's letters of its codes (`letters_to`, the
+    // upper-case letters of `ascii_into`; the translation reads both cases alike).
     /// The frames of the letters of subject `oid` (the ungapped re-evaluation's).
     pub(crate) fn x_letter_frames(&self, oid: usize, table: &GeneticCode) -> Vec<QueryFrame> {
         match self {
@@ -595,7 +597,7 @@ mod tests {
     }
 
     /// LOSAT_X_TBXSTORE: a record searched from its store (`PackedNucleotide::from_subject_letters`,
-    /// as `x_read_subject_stores` packs it) has the record's length, the frames the record's
+    /// as `x_read_packed_subjects` packs it) has the record's length, the frames the record's
     /// preliminary stage translates (its letters, or the bases its ambiguous letters resolve to
     /// from `CRandom` of its length) and the frames of its letters, for every IUPAC letter in both
     /// cases and gaps, with one ambiguous letter, and with an N block across a window border. A

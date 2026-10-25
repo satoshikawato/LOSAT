@@ -873,11 +873,12 @@ fn read_subject_set(
     let t_read_fasta = crate::utils::xtiming::clock();
     // EXPERIMENT (LOSAT_X_TBXSTORE): each record's letters packed as it is read
     // (`x_read_packed_subjects`, cut to `-subject_loc` first); the search reads the stores as
-    // a database's (`Subjects::Stored`), the reports by record. A record with a byte without an
-    // ncbi4na code (`U` among them) keeps every record's letters.
+    // a database's (`Subjects::Stored`), the reports by record. A set with a byte without an
+    // ncbi4na code (the FASTA reader gives none: it reads `U` as `T`) or a record over `u32::MAX`
+    // bases keeps every record's letters.
     let mut stderr = std::io::stderr();
     let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
-    if super::super::subjects::x_tbx_store() {
+    let (subjects, subject_placements, stores) = if super::super::subjects::x_tbx_store() {
         let (subjects, stores, placements) =
             crate::blastinput::x_packed_subjects::x_read_packed_subjects(
                 &mut subject_source,
@@ -887,21 +888,19 @@ fn read_subject_set(
                 "TBLASTX",
             )?;
         crate::utils::xreach::x_reach!("LOSAT_X_TBXSTORE", stores.is_some());
-        crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
-        check_subjects_not_empty(&subjects)?;
-        return Ok((subjects, placements, stores));
-    }
-    let read_subject_records =
-        read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?;
+        (subjects, placements, stores)
+    } else {
+        let read_subject_records =
+            read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?;
+        match cut_subjects(&read_subject_records, subject_range.as_ref())? {
+            Some((cut, placements)) => (cut, placements, None),
+            None => (read_subject_records, Placements::default(), None),
+        }
+    };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(subject_source);
-    let (subjects, subject_placements) =
-        match cut_subjects(&read_subject_records, subject_range.as_ref())? {
-            Some((cut, placements)) => (cut, placements),
-            None => (read_subject_records, Placements::default()),
-        };
     check_subjects_not_empty(&subjects)?;
-    Ok((subjects, subject_placements, None))
+    Ok((subjects, subject_placements, stores))
 }
 
 /// NCBI's error for a subject file without records, raised when it reads the subjects.
@@ -1591,7 +1590,8 @@ pub(crate) struct TblastxReportRun<'a> {
     pub queries: &'a [FastaRecord],
     pub subjects: &'a [FastaRecord],
     /// The subjects' letters that the displayed rows read (`-db`: the stored codes of the
-    /// reported sequences; their records hold none).
+    /// reported sequences; `-subject` with LOSAT_X_TBXSTORE: the stores of the records; their
+    /// records hold none).
     pub subject_letters: report::SubjectLetters<'a>,
     /// `-db`: the database and its reported sequences (`subjects` are their records, by rank).
     pub database: Option<ReportDatabase<'a>>,

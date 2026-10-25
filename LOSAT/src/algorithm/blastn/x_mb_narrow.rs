@@ -171,8 +171,8 @@ impl Drop for Narrow {
 }
 
 pub(super) struct Narrow {
-    /// 3-byte heads (=2), empty with =1 (the table's `hashtable` holds them).
-    heads: Vec<u8>,
+    /// =2: the 3-byte heads are the first bytes of the table's `hashtable` (=1: its u32 cells).
+    heads_in_table: bool,
     chain: Vec<u8>,
 }
 
@@ -185,10 +185,14 @@ fn read3(v: &[u8], i: usize) -> u32 {
 impl Narrow {
     #[inline(always)]
     pub(super) fn head(&self, hashtable: &[u32], cell: usize) -> u32 {
-        if self.heads.is_empty() {
-            hashtable[cell]
+        if self.heads_in_table {
+            // SAFETY: a u32 slice read as its bytes.
+            let bytes = unsafe {
+                std::slice::from_raw_parts(hashtable.as_ptr().cast::<u8>(), hashtable.len() * 4)
+            };
+            read3(bytes, cell)
         } else {
-            read3(&self.heads, cell)
+            hashtable[cell]
         }
     }
 
@@ -210,16 +214,15 @@ pub(super) fn serial(
     pv_array_bts: usize,
     helper_array: &mut [u32],
 ) -> Narrow {
-    let mut heads = if m == 2 {
-        vec![0u8; 3 * cells + 1]
-    } else {
-        Vec::new()
-    };
     let mut chain = take_chain(3 * next_pos_len + 1);
-    assert!(m == 2 || hashtable.len() == cells);
+    assert!(if m == 2 {
+        hashtable.len() * 4 > 3 * cells
+    } else {
+        hashtable.len() == cells
+    });
     assert!((cells - 1) >> pv_array_bts < pv_array.len());
     let raw = Raw {
-        heads: heads.as_mut_ptr(),
+        heads: hashtable.as_mut_ptr().cast::<u8>(),
         hashtable: hashtable.as_mut_ptr(),
         chain: chain.as_mut_ptr(),
         pv_array: pv_array.as_mut_ptr(),
@@ -234,7 +237,10 @@ pub(super) fn serial(
             fill::<false>(words, raw)
         }
     };
-    Narrow { heads, chain }
+    Narrow {
+        heads_in_table: m == 2,
+        chain,
+    }
 }
 
 #[derive(Clone, Copy)]

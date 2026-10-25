@@ -2006,8 +2006,14 @@ fn build_mb_lookup(
                 ((table_size + 2047) / 2048).max(1),
             )
         };
+    // PROBE (LOSAT_X_MB24=2): the 3-byte heads in the first bytes of a u32 table (from the keep).
+    let x_table_words = if x_narrow_mode == 2 {
+        (3 * table_size + 4) / 4
+    } else {
+        table_size
+    };
     let x_keep = match x_keep {
-        Some(keep) if x_csr_layout || x_rank_layout || x_narrow_mode == 2 => {
+        Some(keep) if x_csr_layout || x_rank_layout => {
             keep.release();
             None
         }
@@ -2022,9 +2028,9 @@ fn build_mb_lookup(
     // first `table_size` cells, `hashtable[..table_size]` below), otherwise a fresh zeroed table
     // as before (`x_mb_lut_keep.rs`).
     let (mut hashtable, x_resident, x_dirty) = match x_keep {
-        Some(keep) => keep.take(table_size, x_mb_lookup_par::pool_threads().is_some()),
-        None if x_csr_layout || x_rank_layout || x_narrow_mode == 2 => (Vec::new(), false, 0),
-        None => (vec![0u32; table_size], false, table_size),
+        Some(keep) => keep.take(x_table_words, x_mb_lookup_par::pool_threads().is_some()),
+        None if x_csr_layout || x_rank_layout => (Vec::new(), false, 0),
+        None => (vec![0u32; x_table_words], false, x_table_words),
     };
     // PROBE (LOSAT_X_MBNPKEEP): the 4-byte chains from the spare, not zeroed.
     let x_np_spare = !x_csr_layout
@@ -2139,11 +2145,7 @@ fn build_mb_lookup(
             x_narrow_mode,
             &x_words,
             table_size,
-            if x_narrow_mode == 2 {
-                &mut []
-            } else {
-                &mut hashtable[..table_size]
-            },
+            &mut hashtable[..x_table_words],
             max_query_offset + 1,
             &mut pv_array,
             pv_array_bts,

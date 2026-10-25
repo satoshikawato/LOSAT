@@ -18,7 +18,7 @@
 //! (`utils/xswitch.rs`): on unless it is `0`.
 //!
 //! EXPERIMENT (LOSAT_X_BPFSEED): on a table that takes the branch-free list, a subject where
-//! `XHitBf::fits` holds runs the loop of `x_scan_flat_fseed`, which differs in two ways: each hit
+//! `XHitBf::fits` holds runs the loop of `x_scan_flat_fseed_loop`, which differs in two ways: each hit
 //! goes first through blastp's branch-free two-hit test (`XHitBf::test`, the test of
 //! LOSAT_X_BPHITBF, which does not act here; its argument in `x_seed_fused.rs` holds here, as the
 //! diagonal table, its offsets and the extension's stores are those of blastp's loop), and a
@@ -37,12 +37,14 @@
 //! three ways. The scan is out of line and two offsets per step (`x_list_pairs`), with the same
 //! list. Each cell's hits are staged in scan order, in runs of [`X_RUN`] copied whole (so that no
 //! loop ends at a cell's last hit, a mispredict per cell), as `q - s` and `s + diagonal offset`;
-//! every [`X_STAGE_CAP`] staged hits, and at the end, one loop (`x_stage_test`, out of line) gives
-//! them in order to the test of `x_scan_flat_fseed`: the diagonal is `(q - s) & mask` and the
-//! query offset `(q - s) + s`. So the hits, their order, the tests, the entries and the calls
-//! are those of `x_scan_flat_fseed`; the staged values do not depend on the table's entries. Where
-//! `x_pairs_fit` does not hold the subject takes `x_scan_flat_fseed`. A switch of the strict set:
-//! on unless it is `0`; it acts only where LOSAT_X_BPFSEED's loop runs.
+//! when fewer than [`X_RUN`] of the [`X_STAGE_CAP`] places are left, and at the end, one loop
+//! (`x_stage_test`, out of line) gives the staged hits in order to the test of
+//! `x_scan_flat_fseed_loop`: the diagonal is `(q - s) & mask` and the query offset `(q - s) + s`.
+//! So the hits, their order, the tests, the entries and the calls are those of
+//! `x_scan_flat_fseed_loop` (which makes its whole list before any test, too); the staged values do
+//! not depend on the table's entries. Where `x_pairs_fit` does not hold (a subject shorter than a
+//! word) the subject takes `x_scan_flat_fseed_loop`; the chooser is `x_scan_flat_fseed`. A switch
+//! of the strict set: on unless it is `0`; it acts only where LOSAT_X_BPFSEED's loop runs.
 
 use std::cell::Cell;
 
@@ -256,18 +258,21 @@ fn x_scan_flat_fseed<F>(
         let fits = lookup.x_pairs_fit(subject, subject_length);
         crate::utils::xreach::x_reach!("LOSAT_X_BPFSTAGE", fits);
         if fits {
-            x_scan_flat_stage(
-                lookup,
-                subject,
-                subject_length,
-                diag_array,
-                diag_mask,
-                diag_offset,
-                window,
-                word_size,
-                bf,
-                candidate,
-            );
+            // SAFETY: x_pairs_fit holds (tested above).
+            unsafe {
+                x_scan_flat_stage(
+                    lookup,
+                    subject,
+                    subject_length,
+                    diag_array,
+                    diag_mask,
+                    diag_offset,
+                    window,
+                    word_size,
+                    bf,
+                    candidate,
+                )
+            };
             return;
         }
     }
@@ -332,6 +337,8 @@ fn x_scan_flat_fseed_loop<F>(
 /// more hits takes several steps), and the staged hits tested per call of [`x_stage_test`].
 const X_RUN: usize = 8;
 const X_STAGE_CAP: usize = 1024;
+// The copy of a run after a flush writes X_RUN places of the stage.
+const _: () = assert!(X_RUN <= X_STAGE_CAP);
 
 // No NCBI counterpart: LOSAT_X_BPFSTAGE's staged hits.
 /// EXPERIMENT (LOSAT_X_BPFSTAGE): staged hit `i` of [`x_scan_flat_stage`] is `diffs[i] = q - s`
@@ -354,11 +361,16 @@ impl XStage {
 /// `x_list_pairs` and each cell's hits staged before the test (module header). The read-ahead of
 /// the slice bounds and of the hits is that of `for_each_cell`, without the tests: the list holds
 /// [`X_STARTS_AHEAD`] entries of cell 0 past its end while the loop runs.
+///
+/// # Safety
+///
+/// `lookup.x_pairs_fit(subject, subject_length)` holds (the scan reads without bounds checks, and
+/// the slice bounds of every listed index exist).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
 // `x_scan_two_hit_compressed_flat`)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_scan_flat_stage<F>(
+unsafe fn x_scan_flat_stage<F>(
     lookup: &XFlatCompressedLookup,
     subject: &[u8],
     subject_length: usize,
@@ -374,7 +386,8 @@ fn x_scan_flat_stage<F>(
 {
     assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
     let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
-    lookup.x_list_pairs(subject, subject_length, &mut cells);
+    // SAFETY: x_pairs_fit holds (this function's contract).
+    unsafe { lookup.x_list_pairs(subject, subject_length, &mut cells) };
     let listed = cells.len();
     cells.extend_from_slice(&[(0, 0); X_STARTS_AHEAD]);
     let mut stage = X_STAGE.with(Cell::take).unwrap_or_else(XStage::new);
@@ -384,8 +397,9 @@ fn x_scan_flat_stage<F>(
     let mask = diag_mask as u32;
     let mut staged = 0usize;
     for n in 0..listed {
-        // SAFETY: n + X_STARTS_AHEAD < cells.len() (the entries above); every index of the list
-        // is a backbone cell, and `starts` has one entry more.
+        // SAFETY: n + X_STARTS_AHEAD < cells.len() (the entries above, and X_HITS_AHEAD <=
+        // X_STARTS_AHEAD); every index of the list is below 15^word length < starts.len() - 1
+        // (x_pairs_fit).
         let (s, start, end) = unsafe {
             let (s, index) = *cells.get_unchecked(n);
             // Cache hints only, as in `for_each_cell`.
@@ -721,20 +735,31 @@ mod tests {
                     assert_eq!(flat.x_pairs_fit(subject, length), length >= 5);
                     let mut stage_log = Vec::new();
                     if length >= 5 {
-                        x_scan_flat_stage(
-                            &flat,
-                            subject,
-                            length,
-                            &mut stage_diag,
-                            diag_mask,
-                            diag_offset,
-                            window,
-                            5,
-                            bf,
-                            &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
-                                stand_in(&mut stage_log, diag_offset, q, s, last_hit, diff, entry)
-                            },
-                        );
+                        // SAFETY: x_pairs_fit holds (asserted above).
+                        unsafe {
+                            x_scan_flat_stage(
+                                &flat,
+                                subject,
+                                length,
+                                &mut stage_diag,
+                                diag_mask,
+                                diag_offset,
+                                window,
+                                5,
+                                bf,
+                                &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
+                                    stand_in(
+                                        &mut stage_log,
+                                        diag_offset,
+                                        q,
+                                        s,
+                                        last_hit,
+                                        diff,
+                                        entry,
+                                    )
+                                },
+                            )
+                        };
                     } else {
                         x_scan_flat_fseed_loop(
                             &flat,
@@ -790,6 +815,107 @@ mod tests {
         }
     }
 
+    // LOSAT_X_BPFSTAGE: the cell whose slice ends the hits array is copied hit by hit (no run of
+    // X_RUN reads past the array), with the outcomes of the loop without the switch.
+    #[test]
+    fn the_staged_loop_copies_the_last_cell_of_the_hits() {
+        let mut rng = XorShift(0x1f83_d9ab_fb41_bd6b);
+        let mut query = Vec::new();
+        let mut locations = Vec::new();
+        for length in [400usize, 300] {
+            let left = query.len() as i32;
+            query.extend((0..length).map(|_| LETTERS[rng.below(LETTERS.len())]));
+            locations.push((left, left + length as i32 - 1));
+            query.push(0);
+        }
+        let flat = match x_try_build_flat_compressed_lookup(
+            5,
+            1100,
+            &query,
+            &locations,
+            &[0..locations.len()],
+        ) {
+            Some(XFlatBuild::Table(table)) => table,
+            _ => panic!("flat table"),
+        };
+        // The last cell with hits, its slice at the end of `hits`, and a word that reaches it: the
+        // letter of digit k (index = sum of digit k * 15^k) sits k letters into the word.
+        let last = (0..flat.starts.len() - 1)
+            .rev()
+            .find(|&i| flat.starts[i + 1] > flat.starts[i])
+            .expect("a used cell");
+        assert_eq!(flat.starts[last + 1] as usize, flat.hits.len());
+        let scale = 15i32.pow(4);
+        let letter = |digit: i32| {
+            (0u8..=255)
+                .find(|&b| flat.scaled_compress_table_u8[usize::from(b)] == digit * scale)
+                .expect("a letter for every digit")
+        };
+        let word: Vec<u8> = (0..5)
+            .map(|k| letter(last as i32 / 15i32.pow(k) % 15))
+            .collect();
+        let mut subject = Vec::new();
+        for _ in 0..6 {
+            subject.extend((0..7).map(|_| LETTERS[rng.below(LETTERS.len())]));
+            subject.extend_from_slice(&word);
+        }
+        let length = subject.len();
+        subject.push(0);
+        assert!(flat.x_pairs_fit(&subject, length));
+        let mut cells = Vec::new();
+        // SAFETY: x_pairs_fit holds (asserted above).
+        unsafe { flat.x_list_pairs(&subject, length, &mut cells) };
+        assert!(
+            cells.iter().any(|&(_, index)| index as usize == last),
+            "the subject reaches it"
+        );
+        let (window, diag_len, diag_offset) = (40, 4096usize, 40);
+        let diag_mask = diag_len as i32 - 1;
+        let bf = XHitBf::new(diag_offset, length, window, 5).expect("in range");
+        let mut got_diag = vec![DiagStruct::default(); diag_len];
+        let mut want_diag = got_diag.clone();
+        let (mut got, mut want) = (Vec::new(), Vec::new());
+        // SAFETY: x_pairs_fit holds (asserted above).
+        unsafe {
+            x_scan_flat_stage(
+                &flat,
+                &subject,
+                length,
+                &mut got_diag,
+                diag_mask,
+                diag_offset,
+                window,
+                5,
+                bf,
+                &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
+                    stand_in(&mut got, diag_offset, q, s, last_hit, diff, entry)
+                },
+            )
+        };
+        x_scan_flat_fseed_loop(
+            &flat,
+            &subject,
+            length,
+            &mut want_diag,
+            diag_mask,
+            diag_offset,
+            window,
+            5,
+            bf,
+            &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
+                stand_in(&mut want, diag_offset, q, s, last_hit, diff, entry)
+            },
+        );
+        assert_eq!(got, want, "candidates");
+        assert!(
+            got_diag
+                .iter()
+                .zip(&want_diag)
+                .all(|(a, b)| a.raw_bits() == b.raw_bits()),
+            "diagonal table"
+        );
+    }
+
     // LOSAT_X_BPFSEED's choice: on a table with the branch-free list the fused loop
     // (`x_scan_two_hit_compressed_flat`) gives the candidates and the diagonal table of
     // `x_scan_flat_bf`, on subjects where `XHitBf::fits` holds (the loop of `x_scan_flat_fseed`) and
@@ -828,6 +954,14 @@ mod tests {
             let from = rng.below(query.len() - 50);
             subject[..40].copy_from_slice(&query[from..from + 40]);
             subject.push(0);
+            if length == 3000 {
+                let mut staged = 0;
+                let mut cells = Vec::new();
+                flat.for_each_cell::<true, _>(&subject, length, &mut cells, |_, hits| {
+                    staged += hits.len();
+                });
+                assert!(staged > 3 * X_STAGE_CAP, "{staged} hits: several flushes");
+            }
             let edge = (1 << 30) - 2 * window - length as i32;
             for (diag_offset, fits) in [(window, true), (edge - 1, true), (edge, false)] {
                 assert_eq!(XHitBf::fits(diag_offset, length, window, 5), fits);

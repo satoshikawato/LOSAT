@@ -1926,8 +1926,9 @@ Rebuilding less:
   natively; AGENTS.md "Speed-up switches").
 - `LOSAT_X_BPFSTAGE=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
   2026-10-26, line v4-BPF s4; `=0` turns it off; acts where `LOSAT_X_BPFSEED`'s loop runs, natively, on the subjects
-  that fit its scan: compressed alphabet of 15 letters, word length 2 to 6, a byte past the last word, which every
-  subject of a search keeps, `LOSAT_X_REACH`) changes that loop (`blastp/x_seed_fused_clut.rs` `x_scan_flat_stage`,
+  that fit its scan: compressed alphabet of 15 letters, word length 2 to 6, a byte past the last word, which a
+  search's subjects of a word or more keep, `LOSAT_X_REACH`; wasm32, where `LOSAT_X_BPFSEED`'s loop does not run,
+  keeps its loops) changes that loop (`blastp/x_seed_fused_clut.rs` `x_scan_flat_stage`,
   exactness argument in that file's header) in three ways. The scan is out of line and takes two offsets per step
   (`tblastx/lookup/x_clut_direct.rs` `x_list_pairs`): with both new letters in the alphabet the index of `s + 1` is
   NCBI's step from the index of `s`, and the preshift after `s + 1` is the index of `s` over 225 plus the second
@@ -1935,19 +1936,25 @@ Rebuilding less:
   7 cycles per offset at 26-36 instructions, inlined in the larger loop with its state on the stack), takes one
   multiply per two offsets; the divisions are exact below 15^6 (lib test). Each cell's hits are staged, in scan
   order, in runs of 8 copied whole as `q - s` and `s + diagonal offset`, so that no loop ends at a cell's last hit
-  (about one mispredicted branch per cell, half of the search's mispredicts on a dense table); every 1,024 staged
-  hits one loop, out of line, gives them in order to the loop's test: the diagonal is `(q - s) & mask` and the query
-  offset `(q - s) + s`. The read-ahead of the slice bounds and of the hits is that of `for_each_cell`, without its
+  (about one mispredicted branch per cell, half of the search's mispredicts on a dense table); when fewer than 8 of
+  the 1,024 places are left, and at the end, one loop, out of line, gives the staged hits in order to the loop's
+  test: the diagonal is `(q - s) & mask` and the query offset `(q - s) + s`. The read-ahead of the slice bounds and of the hits is that of `for_each_cell`, without its
   bound tests (the list holds 16 entries of cell 0 past its end). The hits, their order, the tests, the entries and
-  the calls are those of the loop without the switch, so the report is the same (the lib tests
-  `the_flat_loop_is_the_fused_loop_on_the_reference_table` and
-  `the_fused_loop_takes_either_loop_with_the_same_outcomes` compare the loop with the reference table's loop,
-  `flat_scans_give_the_reference_scans_hits` and `the_pairs_scan_lists_word_length_six_and_declines_outside_its_range`
-  the list with `for_each_cell`'s; `tests/blastp_fast_stage.rs` the reports with `=0`'s). The loops are out of line,
+  the calls are those of the loop without the switch, so the report is the same (the lib test
+  `the_flat_loop_is_the_fused_loop_on_the_reference_table` compares the loop with the reference table's loop,
+  `the_fused_loop_takes_either_loop_with_the_same_outcomes` the choice with `x_scan_flat_bf` on subjects of up to
+  3,000 letters, several flushes, and `the_staged_loop_copies_the_last_cell_of_the_hits` the copy at the end of the
+  hits array with the loop without the switch; `flat_scans_give_the_reference_scans_hits` and
+  `the_pairs_scan_lists_word_length_six_and_declines_outside_its_range` the list with `for_each_cell`'s, and
+  `the_pairs_scan_divisions_are_exact_below_fifteen_to_the_sixth` the divisions; `tests/blastp_fast_stage.rs` the
+  reports with `=0`'s). The loops are out of line,
   so the loops without the switch keep their code. Not taken (line v4-BPF s4 probes, one core on the workstation):
   the staged loop inlined with the scan (its copies were not vectorized and its state went to the stack: +18
   instructions per hit, no gain although the mispredicts halved), runs of 16 hits, the test per 256 staged hits, no
-  read-ahead of the hits. In WebAssembly (the serial WASI command in Node 26) PENDING. Timed PENDING.
+  read-ahead of the hits. In WebAssembly (probe, the serial WASI command in Node 26, one process, 3 rounds, in place
+  of `x_scan_flat_bf`, which every wasm32 table takes) the loop took x0.867 and x0.892 the CPU time of the 1/10 of
+  the Arabidopsis and human proteins x the zebrafish and yeast proteomes, but x1.131 of 3 proteins and x1.182 of 42
+  residues x UniRef50 volume 00 (x0.982 for 10 proteins), so wasm32 keeps its loops. Timed PENDING.
 - `LOSAT_X_BPLKPFLAT=1` (BLASTP `-task blastp-fast`, speed; in the strict set since 2026-10-17, on by default
   together with `LOSAT_X_BPCLUT`; acts only where the search's pool builds the flat table of
   `LOSAT_X_BPCLUT`, with more than one thread) changes how that build is scheduled

@@ -1771,8 +1771,9 @@ impl XFlatCompressedLookup {
     /// EXPERIMENT (LOSAT_X_BPFSTAGE): whether [`Self::x_list_pairs`] lists the offsets of `subject`
     /// (`subject_length` residues): the compressed alphabet has 15 letters (NCBI's reciprocal for
     /// 15), the word length is 2 to 6 (the indices stay below 15^6, where the divisions by 15 and
-    /// by 225 are exact), the presence bits cover every index, and the subject keeps a byte past
-    /// its last word (the sentinel), so that the scan reads no letter out of bounds.
+    /// by 225 are exact), the presence bits and the slice bounds cover every index, and the
+    /// subject keeps a byte past its last word (the sentinel, which a search's subjects of a word or
+    /// more keep), so that the scan reads no letter out of bounds.
     pub(crate) fn x_pairs_fit(&self, subject: &[u8], subject_length: usize) -> bool {
         let Ok(word_length) = usize::try_from(self.word_length) else {
             return false;
@@ -1786,7 +1787,10 @@ impl XFlatCompressedLookup {
         }
         let s_last = subject_length.saturating_sub(word_length);
         let indices = 15u64.pow(word_length as u32);
+        // `checked_shl` declines only shifts of 64 bits or more; a shift that loses bits can only
+        // make the answer false.
         subject.len() > s_last + word_length
+            && self.starts.len() as u64 > indices
             && u32::try_from(self.pv_array_bts)
                 .ok()
                 .and_then(|bts| (self.pv.len() as u64).checked_shl(bts))
@@ -1807,14 +1811,21 @@ impl XFlatCompressedLookup {
     /// for 225, `x * 19,088,744 >> 32`, exact below 15^6 (lib test). A letter outside the alphabet
     /// takes NCBI's step and its skip, as `for_each_cell` does. `cells` reserves
     /// [`X_STARTS_AHEAD`] places past the list.
+    ///
+    /// # Safety
+    ///
+    /// [`Self::x_pairs_fit`]`(subject, subject_length)` holds: the scan reads the subject's bytes
+    /// and the presence bits without bounds checks.
     #[inline(never)]
-    pub(crate) fn x_list_pairs(
+    pub(crate) unsafe fn x_list_pairs(
         &self,
         subject: &[u8],
         subject_length: usize,
         cells: &mut Vec<(i32, u32)>,
     ) {
         debug_assert!(self.x_pairs_fit(subject, subject_length));
+        // The scaled letters are at most 14 * 15^(word length - 1), so every index and preshift
+        // below stays under 15^word length.
         let word_length = self.word_length as usize;
         let recip = i64::from(self.reciprocal_alphabet_size);
         let pv_array_bts = self.pv_array_bts as usize;
@@ -1822,11 +1833,13 @@ impl XFlatCompressedLookup {
         let pv = &self.pv;
         cells.clear();
         let s_last = subject_length.saturating_sub(word_length);
-        // SAFETY: the loops read up to s_last + word length, below subject.len() (x_pairs_fit).
+        // SAFETY: the loops read up to s_last + word length, below subject.len() (x_pairs_fit, the
+        // caller's contract).
         let byte_at = |i: usize| unsafe { *subject.get_unchecked(i) };
         let bit_of = |index: i32| {
             let ix = index as usize;
-            // SAFETY: an index is below 15^word length, which the bits cover (x_pairs_fit).
+            // SAFETY: an index is below 15^word length (the scaled letters, above), which the bits
+            // cover (x_pairs_fit, the caller's contract).
             let word = unsafe { *pv.get_unchecked(ix >> pv_array_bts) };
             (word >> (ix & PV_ARRAY_MASK)) & 1
         };
@@ -1955,9 +1968,11 @@ fn x_scan_bf_min() -> u64 {
 }
 
 // No NCBI counterpart: how many cells ahead `for_each_cell` reads the slice bounds and the hits. Tuning
-// only. LOSAT_X_BPFSTAGE's loop (`blastp/x_seed_fused_clut.rs`) reads ahead as far.
+// only. LOSAT_X_BPFSTAGE's loop (`blastp/x_seed_fused_clut.rs`) reads ahead as far, over X_STARTS_AHEAD
+// entries past its list, so the hits must not be read further ahead than the bounds.
 pub(crate) const X_STARTS_AHEAD: usize = 16;
 pub(crate) const X_HITS_AHEAD: usize = 8;
+const _: () = assert!(X_HITS_AHEAD <= X_STARTS_AHEAD);
 
 // No NCBI counterpart: a cache hint; it reads nothing and changes no value. `ptr` may point anywhere
 // (a prefetch does not fault).
@@ -2743,7 +2758,10 @@ mod tests {
                 if length < 5 {
                     continue;
                 }
-                flat.x_list_pairs(subject, length, &mut cells);
+                let want_list = cells.clone();
+                // SAFETY: x_pairs_fit holds (asserted above).
+                unsafe { flat.x_list_pairs(subject, length, &mut cells) };
+                assert_eq!(cells, want_list, "subject {n}: x_list_pairs's list");
                 assert!(
                     cells.capacity() >= cells.len() + X_STARTS_AHEAD,
                     "subject {n}: reserve"
@@ -2786,6 +2804,7 @@ mod tests {
             6, 1100, &query, &locations, &tables,
         ));
         let mut cells = Vec::new();
+        let mut found = 0;
         for outside_one_in in [0usize, 6, 2] {
             for length in [1usize, 5, 6, 7, 8, 60, 301] {
                 let subject = random_subject(&mut rng, length, outside_one_in);
@@ -2797,7 +2816,11 @@ mod tests {
                 flat6.for_each_cell::<true, _>(&subject, length, &mut cells, |s, hits| {
                     want.extend(hits.iter().map(|&q| (s, q)));
                 });
-                flat6.x_list_pairs(&subject, length, &mut cells);
+                let want_list = cells.clone();
+                // SAFETY: x_pairs_fit holds (asserted above).
+                unsafe { flat6.x_list_pairs(&subject, length, &mut cells) };
+                assert_eq!(cells, want_list, "length {length}: list");
+                found += want.len();
                 let got: Vec<(i32, i32)> = cells
                     .iter()
                     .flat_map(|&(s, index)| flat6.cell(index as usize).iter().map(move |&q| (s, q)))
@@ -2805,8 +2828,13 @@ mod tests {
                 assert_eq!(got, want, "length {length}");
             }
         }
+        assert!(found > 0, "word length 6 finds hits");
         let subject = random_subject(&mut rng, 50, 0);
-        assert!(!flat6.x_pairs_fit(&subject, 51), "length past the buffer");
+        assert!(
+            !flat6.x_pairs_fit(&subject, 51),
+            "no byte past the last word"
+        );
+        assert!(!flat6.x_pairs_fit(&subject, 52), "length past the buffer");
         flat6.reciprocal_alphabet_size += 1;
         assert!(!flat6.x_pairs_fit(&subject, 50), "another reciprocal");
         flat6.reciprocal_alphabet_size -= 1;

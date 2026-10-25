@@ -7,9 +7,9 @@
 //! bytes per thread (at least 4 KiB, at most the 1 MiB of the search without it), and the results
 //! are merged in ordinal order. These tests compare the reports with the switch off and on
 //! (megablast, blastn and dc-megablast, tabular and pairwise) with the report at one thread, and
-//! run its shadow mode (`LOSAT_X_BNDBCUTSHADOW`), which searches the database again with blocks of
-//! 1 MiB and compares every result handed to the hit lists; its line at exit shows that the path
-//! ran. A difference stops the run.
+//! read the sides of the switch's decision (`LOSAT_X_REACH`) to show that the cut ran where it
+//! should: blocks other than the 1 MiB of the search without it at 2 threads and more, and not at
+//! one thread.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413,1553-1554
 //! ```c
@@ -21,11 +21,12 @@
 //!          status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
 //! ```
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use LOSAT::seqdb::{SeqDb, SeqType};
+
+mod reach_support;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -51,34 +52,6 @@ struct Run {
     code: Option<i32>,
     stdout: Vec<u8>,
     stderr: String,
-}
-
-const SHADOW_PREFIX: &str = "[X_SHADOW] BNDBCUT ";
-
-impl Run {
-    /// The counters of the `[X_SHADOW] BNDBCUT` line, which must end with `identical`.
-    fn shadow(&self) -> HashMap<String, u64> {
-        let line = self
-            .stderr
-            .lines()
-            .find(|line| line.starts_with(SHADOW_PREFIX))
-            .unwrap_or_else(|| panic!("no {SHADOW_PREFIX}line in {}", self.stderr));
-        assert!(line.ends_with(" identical"), "{line}");
-        line[SHADOW_PREFIX.len()..]
-            .split(' ')
-            .filter_map(|field| field.split_once('='))
-            .map(|(key, value)| (key.to_string(), value.parse().expect("a count")))
-            .collect()
-    }
-
-    /// Standard error without the shadow's line.
-    fn stderr_without_shadow(&self) -> String {
-        self.stderr
-            .lines()
-            .filter(|line| !line.starts_with(SHADOW_PREFIX))
-            .map(|line| format!("{line}\n"))
-            .collect()
-    }
 }
 
 /// A directory of the test (`label`, which no other test uses), empty.
@@ -227,18 +200,17 @@ fn blastn(task: &str, db: &Path, threads: u32, vars: &[(&str, &str)], outfmt: &s
 }
 
 const OFF: (&str, &str) = ("LOSAT_X_BNDBCUT", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_BNDBCUTSHADOW", "1");
 
-/// The switch off, on (the default) and in its shadow mode give the same report and standard
-/// error, the report of `one_thread` (the same search at one thread); returns the shadow's
-/// counters.
+/// The switch off and on (the default) give the same report and standard error, the report of
+/// `one_thread` (the same search at one thread); returns the sides of the switch's decision in the
+/// default run, `(new, ref)`: `new` when the search cut its blocks.
 fn same_reports(
     task: &str,
     db: &Path,
     threads: u32,
     outfmt: &str,
     one_thread: &Run,
-) -> HashMap<String, u64> {
+) -> (bool, bool) {
     let what = format!("{task} threads {threads} outfmt {outfmt}");
     assert!(
         !one_thread.stdout.is_empty(),
@@ -249,23 +221,14 @@ fn same_reports(
         off.stdout == one_thread.stdout,
         "{what}: the report differs from one thread's without the switch"
     );
-    let on = blastn(task, db, threads, &[], outfmt);
+    let reach = reach_support::Reach::new("bndbcut");
+    let on = blastn(task, db, threads, &[reach.var()], outfmt);
     assert!(
         on.stdout == one_thread.stdout,
         "{what}: the report differs with the switch"
     );
     assert_eq!(on.stderr, off.stderr, "{what}: standard error differs");
-    let shadow = blastn(task, db, threads, &[SHADOW], outfmt);
-    assert!(
-        shadow.stdout == one_thread.stdout,
-        "{what}: the report differs in the shadow mode"
-    );
-    assert_eq!(
-        shadow.stderr_without_shadow(),
-        off.stderr,
-        "{what}: standard error differs in the shadow mode"
-    );
-    shadow.shadow()
+    reach.sides("LOSAT_X_BNDBCUT")
 }
 
 /// The blocks of the cut of the database `db` at `threads` threads: its 2-bit bytes and one byte
@@ -282,20 +245,6 @@ fn blocks_of_the_cut(db: &Path, threads: u64) -> u64 {
     blocks
 }
 
-/// The counters of a shadow run where the cut acted in `searches` searches of a database of one
-/// block of 1 MiB: `blocks_per_search` blocks per search, and results compared.
-fn assert_engaged(counts: &HashMap<String, u64>, blocks_per_search: u64, what: &str) {
-    let searches = counts["searches"];
-    assert!(searches >= 1, "{what}: {counts:?}");
-    assert_eq!(counts["blocks_ref"], searches, "{what}: {counts:?}");
-    assert_eq!(
-        counts["blocks"],
-        blocks_per_search * searches,
-        "{what}: {counts:?}"
-    );
-    assert!(counts["merged"] > 0, "{what}: {counts:?}");
-}
-
 // megablast, blastn and dc-megablast at 2 and 4 threads, tabular; megablast pairwise at 4.
 #[test]
 fn reports_with_the_cut_are_the_reports_without_it() {
@@ -307,32 +256,27 @@ fn reports_with_the_cut_are_the_reports_without_it() {
     for task in ["megablast", "blastn", "dc-megablast"] {
         let one_thread = blastn(task, &db, 1, &[], "6");
         for threads in [2u64, 4] {
-            let counts = same_reports(task, &db, threads as u32, "6", &one_thread);
-            assert_engaged(
-                &counts,
-                blocks_of_the_cut(&db, threads),
-                &format!("{task} threads {threads}"),
-            );
+            let sides = same_reports(task, &db, threads as u32, "6", &one_thread);
+            assert!(sides.0, "{task} threads {threads}: sides {sides:?}");
         }
     }
     let one_thread = blastn("megablast", &db, 1, &[], "0");
-    let counts = same_reports("megablast", &db, 4, "0", &one_thread);
-    assert_engaged(&counts, blocks_of_the_cut(&db, 4), "pairwise report");
+    let sides = same_reports("megablast", &db, 4, "0", &one_thread);
+    assert!(sides.0, "pairwise report: sides {sides:?}");
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
 // At one thread the blocks keep 1 MiB, and a database below 4 KiB x 4 x threads of sequence bytes
-// is one block of the cut too: the shadow compares the same blocks.
+// is one block of the cut too.
 #[test]
 fn the_cut_does_not_act_at_one_thread_or_on_a_database_of_one_block() {
     let db = database("one", 0, 10_000, &[]);
-    let run = blastn("megablast", &db, 1, &[SHADOW], "6");
-    let counts = run.shadow();
-    assert!(counts["searches"] >= 1, "{counts:?}");
-    assert_eq!(counts["blocks"], counts["searches"], "{counts:?}");
-    assert_eq!(counts["blocks_ref"], counts["searches"], "{counts:?}");
+    let reach = reach_support::Reach::new("bndbcut-one");
+    let run = blastn("megablast", &db, 1, &[reach.var()], "6");
+    let sides = reach.sides("LOSAT_X_BNDBCUT");
+    assert_eq!(sides, (false, true), "one thread: the blocks keep 1 MiB");
     assert!(
-        run.stdout == blastn("megablast", &db, 1, &[], "6").stdout,
+        run.stdout == blastn("megablast", &db, 1, &[OFF], "6").stdout,
         "the report differs"
     );
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
@@ -342,14 +286,14 @@ fn the_cut_does_not_act_at_one_thread_or_on_a_database_of_one_block() {
     let small = database("small", 196, 12, &[]);
     assert_eq!(blocks_of_the_cut(&small, 4), 1);
     let one_thread = blastn("megablast", &small, 1, &[], "6");
-    let counts = same_reports("megablast", &small, 4, "6", &one_thread);
-    assert_engaged(&counts, 1, "one block");
+    let sides = same_reports("megablast", &small, 4, "6", &one_thread);
+    assert!(sides.0, "one block of the 4 KiB floor: sides {sides:?}");
     let _ = std::fs::remove_dir_all(small.parent().unwrap());
 }
 
 // A damaged database (its `.nsq` cut short by 500 bytes) through the command line: the search
 // fails with the error of the one-thread order, so standard error and the exit code are the same at
-// one thread and, with the switch off, on and in its shadow mode, at 4 threads.
+// one thread and, with the switch off and on, at 4 threads.
 #[test]
 fn a_damaged_database_fails_with_the_same_error_with_the_cut() {
     let db = database("damaged", 0, 10_000, &[]);
@@ -364,12 +308,11 @@ fn a_damaged_database_fails_with_the_same_error_with_the_cut() {
         one_thread.stderr
     );
     assert!(!one_thread.stderr.is_empty());
-    for (what, vars) in [("off", vec![OFF]), ("on", vec![]), ("shadow", vec![SHADOW])] {
+    for (what, vars) in [("off", vec![OFF]), ("on", vec![])] {
         let run = blastn_any_exit("megablast", &db, 4, &vars, "6");
         assert_eq!(run.code, one_thread.code, "{what}: exit code differs");
         assert_eq!(
-            run.stderr_without_shadow(),
-            one_thread.stderr_without_shadow(),
+            run.stderr, one_thread.stderr,
             "{what}: standard error differs from one thread's"
         );
         assert!(run.stdout == one_thread.stdout, "{what}: report differs");
@@ -378,7 +321,7 @@ fn a_damaged_database_fails_with_the_same_error_with_the_cut() {
 }
 
 // A database of several volumes (`-max_file_sz 60000`): the cut ends blocks at volume ends, and 4
-// threads with the switch on and in its shadow mode give one thread's report.
+// threads with the switch on give one thread's report.
 #[test]
 fn a_database_of_volumes_reports_with_the_cut_are_the_reports_without_it() {
     let db = database("volumes", 0, 10_000, &["-max_file_sz", "60000"]);
@@ -391,23 +334,13 @@ fn a_database_of_volumes_reports_with_the_cut_are_the_reports_without_it() {
     assert!(volumes >= 3, "{volumes} volumes");
     let one_thread = blastn("megablast", &db, 1, &[], "6");
     assert!(!one_thread.stdout.is_empty());
-    let on = blastn("megablast", &db, 4, &[], "6");
+    let reach = reach_support::Reach::new("bndbcut-volumes");
+    let on = blastn("megablast", &db, 4, &[reach.var()], "6");
     assert!(
         on.stdout == one_thread.stdout,
         "the report differs with the switch"
     );
-    let shadow = blastn("megablast", &db, 4, &[SHADOW], "6");
-    assert!(
-        shadow.stdout == one_thread.stdout,
-        "the report differs in the shadow mode"
-    );
-    let counts = shadow.shadow();
-    assert!(counts["searches"] >= 1, "{counts:?}");
-    assert!(
-        counts["blocks_ref"] >= volumes as u64 * counts["searches"],
-        "{counts:?}"
-    );
-    assert!(counts["blocks"] > counts["blocks_ref"], "{counts:?}");
-    assert!(counts["merged"] > 0, "{counts:?}");
+    let sides = reach.sides("LOSAT_X_BNDBCUT");
+    assert!(sides.0, "volumes: sides {sides:?}");
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }

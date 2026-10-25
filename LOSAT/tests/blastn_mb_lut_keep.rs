@@ -10,8 +10,7 @@
 //! builds=`), at 4 threads (zeroing and fill on the pool) and at one thread; the prefault round of
 //! `LOSAT_X_MBLUTPREFAULT` runs only on the fresh tables (`prefault_rounds=` of `[TIMING]
 //! x_mb_lookup_once` equals `fresh=` where every first chunk is dense enough, and the builds
-//! without the switch); with `LOSAT_X_MBLUTKEEPSHADOW` every build on a kept table is compared with
-//! a fresh build (`[X_SHADOW] MBLUTKEEP tables=` = `kept=`, `diffs=0 identical`); no line with
+//! without the switch); no line with
 //! `LOSAT_X_MBLUTKEEP=0`, kept builds with `LOSAT_X_MBLUTONCE=0` and `LOSAT_X_MBFILL=0` (the
 //! original fill loops); and no table is kept while `LOSAT_X_QBATCHPAR`'s slots may search
 //! batches. That the bytes equal NCBI's is the business of the blastn fixtures.
@@ -35,7 +34,6 @@ const SWITCH: (&str, &str) = ("LOSAT_X_MBLUTKEEP", "1");
 const ONCE_OFF: (&str, &str) = ("LOSAT_X_MBLUTONCE", "0");
 const FILL_OFF: (&str, &str) = ("LOSAT_X_MBFILL", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_MBLUTKEEPSHADOW", "1");
 const BATCH: (&str, &str) = ("BATCH_SIZE", "4000");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const QBATCHPAR: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
@@ -44,7 +42,6 @@ const SLOTS2: (&str, &str) = ("LOSAT_X_QBATCHPARSLOTS", "2");
 const BUILD: &str = "[TIMING] x_mb_lookup_build: ";
 const ONCE: &str = "[TIMING] x_mb_lookup_once: ";
 const KEEP: &str = "[TIMING] x_mb_lut_keep: ";
-const SHADOW_LINE: &str = "[X_SHADOW] MBLUTKEEP ";
 const QBATCHPAR_LINE: &str = "[X_STATS] QBATCHPAR ";
 
 fn fasta(name: &str) -> PathBuf {
@@ -149,8 +146,7 @@ fn field(stderr: &str, prefix: &str, name: &str) -> u64 {
 }
 
 /// For one task: the same report with the switch off, by default, with it, with
-/// `LOSAT_TIMING` and with the shadow at 4 threads and one; the kept
-/// builds counted where they ran.
+/// `LOSAT_TIMING` at 4 threads and one; the kept builds counted where they ran.
 fn check(task: &str) {
     let (reference, stderr) = blastn(task, genomes(), 4, &[OFF, BATCH]);
     assert!(!reference.is_empty(), "{task}: no hits");
@@ -192,24 +188,6 @@ fn check(task: &str) {
         );
         assert!(report == reference, "{task} threads {threads}");
         assert_eq!(field(&stderr, KEEP, "kept="), kept, "{task}: {stderr}");
-
-        let (report, stderr) = blastn(task, genomes(), threads, &[BATCH, SHADOW]);
-        assert!(
-            report == reference,
-            "{task} threads {threads} with the shadow"
-        );
-        let line = stderr
-            .lines()
-            .find(|line| line.starts_with(SHADOW_LINE))
-            .unwrap_or_else(|| panic!("{task}: no shadow line:\n{stderr}"));
-        assert!(line.ends_with(" diffs=0 identical"), "{line}");
-        assert_eq!(field(&stderr, SHADOW_LINE, "tables="), kept, "{line}");
-        assert!(field(&stderr, SHADOW_LINE, "cells=") > 0, "{line}");
-        let (_, stderr) = blastn(task, genomes(), threads, &[OFF, BATCH, SHADOW]);
-        assert!(
-            stderr.contains("[X_SHADOW] MBLUTKEEP tables=0 "),
-            "{task}: nothing compared without the switch:\n{stderr}"
-        );
     }
 
     // With two slots searching the batches after the first, the loop keeps no table: it searches
@@ -255,8 +233,8 @@ fn megablast_runs_the_prefault_round_on_fresh_tables_only() {
     assert_eq!(field(&stderr, ONCE, "prefault_rounds="), fresh, "{stderr}");
 }
 
-/// The same report with the switch off and on, the shadow's tables identical, and the keep's
-/// counts (`kept=`, `fresh=`) as given.
+/// The same report with the switch off and on, and the keep's counts (`kept=`, `fresh=`) as
+/// given.
 fn check_counts(task: &str, query: &Path, env: &[(&str, &str)], kept: u64, fresh: u64) -> String {
     let (reference, _) = blastn(task, query, 4, &[env, &[OFF]].concat());
     assert!(!reference.is_empty(), "{task}: no hits");
@@ -272,10 +250,6 @@ fn check_counts(task: &str, query: &Path, env: &[(&str, &str)], kept: u64, fresh
         fresh,
         "{task} {env:?}:\n{stderr}"
     );
-    let (report, shadow) = blastn(task, query, 4, &[env, &[SHADOW]].concat());
-    assert!(report == reference, "{task} {env:?} with the shadow");
-    assert_eq!(field(&shadow, SHADOW_LINE, "tables="), kept, "{shadow}");
-    assert!(shadow.contains(" diffs=0 identical"), "{shadow}");
     stderr
 }
 

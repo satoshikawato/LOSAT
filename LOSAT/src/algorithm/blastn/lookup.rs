@@ -52,13 +52,10 @@ mod x_mb_fill;
 
 /// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): with
 /// LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the megablast table builds; then the
-/// `[X_SHADOW] MBLUTKEEP` line (LOSAT_X_MBLUTKEEPSHADOW) and, with LOSAT_TIMING, the `[TIMING]
-/// x_mb_lut_keep` line (`x_mb_lut_keep::print_summary`); then the `[X_SHADOW] MBFILL` line
-/// (LOSAT_X_MBFILLSHADOW, `x_mb_fill::print_summary`).
+/// `[TIMING] x_mb_lut_keep` line (`x_mb_lut_keep::print_summary`).
 pub fn x_mb_lookup_print_summary() {
     x_mb_lookup_par::print_summary();
     x_mb_lut_keep::print_summary();
-    x_mb_fill::print_summary();
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786,803-804
@@ -869,7 +866,7 @@ pub struct DiscTemplates {
     hashtable2: Vec<u32>,
     next_pos2: Vec<u32>,
     /// EXPERIMENT (LOSAT_X_DCCSR): the first template's chains as CSR (`x_dc_csr.rs`); then
-    /// `hashtable` and `next_pos` are empty, unless the shadow kept them to compare.
+    /// `hashtable` and `next_pos` are empty.
     x_csr: Option<x_dc_csr::Csr>,
 }
 
@@ -1065,9 +1062,7 @@ impl TwoStageLookup {
     #[inline(always)]
     pub fn for_each_hit(&self, lut_kmer: u64, callback: impl FnMut(u32)) {
         debug_assert!(
-            self.disc
-                .as_ref()
-                .is_none_or(|d| d.x_csr.is_none() || !self.mb_lookup.hashtable.is_empty()),
+            self.disc.as_ref().is_none_or(|d| d.x_csr.is_none()),
             "a CSR table (LOSAT_X_DCCSR) has no chains"
         );
         self.mb_lookup.for_each_hit(lut_kmer, callback)
@@ -2019,27 +2014,6 @@ fn build_mb_lookup(
     }
     // No NCBI counterpart: the end of the `[TIMING] x_mb_lookup_build` interval.
     x_clock.record(x_on_pool.is_some(), x_filled);
-    // Dispatch point of LOSAT_X_MBLUTKEEPSHADOW: a build on a kept table is made again on a fresh
-    // table (the same build without the keep) and the arrays are compared.
-    if x_resident && x_mb_lut_keep::shadow() {
-        let fresh = build_mb_lookup(
-            queries_blastna,
-            query_offsets,
-            word_length,
-            lut_word_length,
-            query_masks,
-            db_word_counts,
-            max_db_word_count,
-            approx_table_entries,
-            ascending_cells,
-            None,
-        );
-        x_mb_lut_keep::shadow_check(
-            [&hashtable[..table_size], &next_pos, &pv_array],
-            [&fresh.hashtable, &fresh.next_pos, &fresh.pv_array],
-            (longest_chain, fresh.longest_chain),
-        );
-    }
 
     if debug_mode {
         let hashtable_bytes = table_size * std::mem::size_of::<u32>();
@@ -2187,18 +2161,6 @@ struct DiscTables<'a> {
     next_pos2: &'a mut [u32],
     helper_array2: &'a mut [u32],
     pv_array: &'a mut [PvArrayType],
-    pv_array_bts: usize,
-}
-
-/// The same tables, read only (LOSAT_X_DISCLUTPARSHADOW compares them).
-struct DiscTablesRef<'a> {
-    hashtable: &'a [u32],
-    next_pos: &'a [u32],
-    helper_array: &'a [u32],
-    hashtable2: &'a [u32],
-    next_pos2: &'a [u32],
-    helper_array2: &'a [u32],
-    pv_array: &'a [PvArrayType],
     pv_array_bts: usize,
 }
 
@@ -2554,8 +2516,7 @@ pub fn build_disc_mb_lookup(
     // EXPERIMENT (LOSAT_X_DCCSR): a one-template table of at least a quarter as many positions as
     // cells is built as CSR from the same words instead of the chains below (`x_dc_csr.rs`),
     // with the same presence vector, helper counters and longest chain; on the search pool when
-    // LOSAT_X_DISCLUTPAR's fill would run there. With LOSAT_X_DCCSRSHADOW every one-template
-    // table gets both (below).
+    // LOSAT_X_DISCLUTPAR's fill would run there.
     let x_layout = x_dc_csr::plan(&words, hashsize);
     if x_layout == x_dc_csr::Layout::Csr {
         let mut helper_array = vec![0u32; hashsize / K_COMPRESSION_FACTOR];
@@ -2635,7 +2596,7 @@ pub fn build_disc_mb_lookup(
     // ```
     // Dispatch point: NCBI applies the update of each template to each word as soon as the word
     // is read, as `fill_disc_mb_tables` does (the original LOSAT loop, unchanged). With
-    // LOSAT_X_DISCLUTPAR (or its shadow) and a search pool of two threads or more,
+    // LOSAT_X_DISCLUTPAR and a search pool of two threads or more,
     // `x_disc_lookup_par::fill` applies the same updates to the same words on the pool threads,
     // each thread owning whole blocks of cells of both templates' tables, so each cell gets its
     // words in the same order; see x_disc_lookup_par.rs.
@@ -2658,59 +2619,8 @@ pub fn build_disc_mb_lookup(
 
     x_clock.chain();
     let total_longest_chain = disc_longest_chain(&helper_array, &helper_array2, two_templates);
-    // No NCBI counterpart: the end of the `[TIMING] disc_lookup_build` interval; then, with
-    // LOSAT_X_DISCLUTPARSHADOW, the tables are built again the other way (serially when the pool
-    // built them, otherwise partitioned) and compared element by element.
+    // No NCBI counterpart: the end of the `[TIMING] disc_lookup_build` interval.
     x_clock.record(x_parts.is_some());
-    if x_disc_lookup_par::shadow() {
-        x_disc_lookup_par::shadow_check(
-            &words,
-            x_parts,
-            &DiscTablesRef {
-                hashtable: &hashtable,
-                next_pos: &next_pos,
-                helper_array: &helper_array,
-                hashtable2: &hashtable2,
-                next_pos2: &next_pos2,
-                helper_array2: &helper_array2,
-                pv_array: &pv_array,
-                pv_array_bts,
-            },
-            total_longest_chain,
-        );
-    }
-    // EXPERIMENT (LOSAT_X_DCCSRSHADOW): the CSR built too (into scratch presence-vector words and
-    // counters) and compared with the chains, the fill's presence vector, counters and longest
-    // chain (and the pool's CSR with the serial one); the scans then read the CSR.
-    let x_csr = if x_layout == x_dc_csr::Layout::Shadow {
-        let mut pv = vec![0u32; pv_array.len()];
-        let mut helper = vec![0u32; helper_array.len()];
-        let (csr, on_pool) = match x_parts {
-            Some(parts) => {
-                x_disc_lookup_par::csr(parts, &words, hashsize, &mut pv, pv_array_bts, &mut helper)
-            }
-            None => (
-                x_dc_csr::build(&words, hashsize, &mut pv, pv_array_bts, &mut helper),
-                false,
-            ),
-        };
-        x_dc_csr::shadow_check(
-            &words,
-            &csr,
-            on_pool,
-            &pv,
-            &helper,
-            pv_array_bts,
-            &hashtable,
-            &next_pos,
-            &pv_array,
-            &helper_array,
-            total_longest_chain,
-        );
-        Some(csr)
-    } else {
-        None
-    };
 
     TwoStageLookup {
         mb_lookup: MbLookupTable {
@@ -2730,7 +2640,7 @@ pub fn build_disc_mb_lookup(
             template_length,
             hashtable2,
             next_pos2,
-            x_csr,
+            x_csr: None,
         }),
     }
 }

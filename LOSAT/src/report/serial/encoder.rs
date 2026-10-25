@@ -143,7 +143,8 @@ pub trait Encoder {
     /// `WriteBytes` of an OCTET STRING (`Seq-data` `ncbi2na` and `ncbi4na`): in ASN.1 text
     /// `'` then two upper-case hex digits per byte, an end of line without indentation before
     /// a digit pair whenever the line holds 78 bytes or more, then `'H`; in ASN.1 binary the
-    /// tag 0x04, the length and the bytes.
+    /// tag 0x04, the length and the bytes; in the XML object stream of the archive two upper-case
+    /// hex digits per byte, unwrapped.
     fn octets(&mut self, value: &[u8]);
     /// `WriteStringStore` of a StringStore (`Seq-data` `ncbieaa`): a VisibleString in ASN.1
     /// text; the application tag 0x41, the length and the bytes in ASN.1 binary.

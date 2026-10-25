@@ -5,8 +5,8 @@
 //! batch, `EffectiveSearchSpace` per batch, an unsearched batch repeating the last value, a
 //! batch whose first query has no valid context 0, queries of different lengths in a batch, the
 //! batch's own SEG masks), a reader error in the second batch (the archive of the first batch,
-//! then an error archive, rc 1), `ARCHIVE_FORMAT` (`bin...` in any case: ASN.1 binary; any other
-//! value that is not empty: nothing is written, rc 0), `-outfmt "11 qseqid"` (the specification
+//! then an error archive, rc 1), `ARCHIVE_FORMAT` (`bin...` in any case: ASN.1 binary; `xml`:
+//! NCBI's XML archive; any other value that is not empty: nothing is written, rc 0), `-outfmt "11 qseqid"` (the specification
 //! is ignored), the errors NCBI turns into an error archive (a `-subject` or `-query` file that
 //! does not exist, a `-subject_loc` past the end of a subject, a `-query_loc` past the end of
 //! every query, a subject file with no letters), a query file with no letters (rc 3), an empty
@@ -84,6 +84,7 @@ struct Case {
 
 const BATCH: (&str, &str) = ("BATCH_SIZE", "200");
 const BIN_FORMAT: (&str, &str) = ("ARCHIVE_FORMAT", "bin");
+const XML_FORMAT: (&str, &str) = ("ARCHIVE_FORMAT", "xml");
 
 fn case(
     name: &str,
@@ -106,6 +107,7 @@ fn case(
 
 fn cases() -> Vec<Case> {
     vec![
+        case("default_sub_xml", &[XML_FORMAT], "arch_tbx_q.fna", &[], 0),
         case("batches_sub", &[BATCH], "arch_tbx_batches.fna", &[], 0),
         case(
             "batches_sub_bin",
@@ -457,28 +459,6 @@ fn the_out_file_receives_the_archive() {
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// `ARCHIVE_FORMAT=xml` is NCBI's XML archive, which LOSAT does not write yet: it stops
-/// before the first byte and says so.
-#[test]
-fn xml_archives_are_refused_before_the_first_byte() {
-    let query = input("arch_tbx_q.fna");
-    let subject = input("arch_tbx_s.fna");
-    for value in ["xml", "XML", "Xml"] {
-        let output = run(
-            &[("ARCHIVE_FORMAT", value)],
-            &["-query", &query, "-subject", &subject, "-outfmt", "11"],
-            "1",
-        );
-        assert_ne!(output.status.code(), Some(0), "{value}");
-        assert!(output.stdout.is_empty(), "{value}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("ARCHIVE_FORMAT=xml with -outfmt 11 is not supported by LOSAT"),
-            "{value}: {stderr}"
-        );
-    }
 }
 
 /// A title with a byte outside `0x20..=0x7E` (0x80 and above, and 0x7F) is written as `#` by

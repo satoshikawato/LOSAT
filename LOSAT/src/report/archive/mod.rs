@@ -81,7 +81,7 @@ pub enum ArchiveEncoding {
     Text,
     /// ASN.1 binary (a value that starts with `bin`, in any case).
     Binary,
-    /// XML (the value `xml` in any case): not yet written by LOSAT.
+    /// XML (the value `xml` in any case): NCBI's XML object stream (`XmlEncoder::archive`).
     Xml,
     /// Any other value: NCBI writes nothing.
     Nothing,
@@ -212,19 +212,14 @@ impl ArchiveHandle {
     /// The handle of a run of `inputs.program` that writes the archive (`-outfmt 11`): the
     /// request from the recorded options, `ARCHIVE_FORMAT` read once. `database` is the
     /// `-db` argument as typed (`None` for `-subject`); `label` names the program in a refusal.
-    /// Refuses, before anything is written, what LOSAT cannot write: `ARCHIVE_FORMAT=xml`
-    /// (line OF8c) and a `-db` name with a byte outside `0x20..=0x7E`.
+    /// Refuses, before anything is written, what LOSAT cannot write: a `-db` name with a byte
+    /// outside `0x20..=0x7E` (NCBI writes `#`).
     pub fn for_program(
         inputs: &OptionInputs,
         database: Option<&str>,
         label: &str,
     ) -> anyhow::Result<Self> {
         let encoding = ArchiveEncoding::from_env();
-        if encoding == ArchiveEncoding::Xml {
-            anyhow::bail!(
-                "ARCHIVE_FORMAT=xml with -outfmt 11 is not supported by LOSAT's {label} yet (it writes ASN.1 text and ASN.1 binary)"
-            );
-        }
         if let Some(name) = database {
             if !name.bytes().all(is_visible) {
                 anyhow::bail!(

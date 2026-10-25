@@ -4,7 +4,8 @@
 //! `db.sa.arch.bn.*` rows of `db_search_manifest.tsv`): `BATCH_SIZE` (one archive per query
 //! batch, `EffectiveSearchSpace` per batch), a reader error in the second batch (the archive of
 //! the first batch, then an error archive, rc 1), `ARCHIVE_FORMAT` (`bin...` in any case:
-//! ASN.1 binary; any value except `xml` that is not empty: nothing is written, rc 0), `-outfmt
+//! ASN.1 binary; `xml` in any case: NCBI's XML archive; any other value that is not empty: nothing
+//! is written, rc 0), `-outfmt
 //! "11 qseqid"` (the specification is ignored), a `-subject` file that does not exist (an error
 //! archive, rc 1), a `-query` file that does not exist (an error archive, rc 1, with `-subject` and with
 //! `-db`), a run that ends with messages no archive carried (an empty pipe as the query with `-max_target_seqs 1`:
@@ -75,8 +76,49 @@ struct Case {
 
 const BATCH: (&str, &str) = ("BATCH_SIZE", "500");
 const BIN_FORMAT: (&str, &str) = ("ARCHIVE_FORMAT", "bin");
+const XML_FORMAT: (&str, &str) = ("ARCHIVE_FORMAT", "xml");
 
 const CASES: &[Case] = &[
+    Case {
+        name: "default_sub_xml",
+        env: &[XML_FORMAT],
+        query: "arch_q.fna",
+        subject: "arch_s.fna",
+        outfmt: "11",
+        rc: 0,
+    },
+    Case {
+        name: "env_xml_upper",
+        env: &[("ARCHIVE_FORMAT", "XML")],
+        query: "arch_q.fna",
+        subject: "arch_s.fna",
+        outfmt: "11",
+        rc: 0,
+    },
+    Case {
+        name: "env_xml_mixed",
+        env: &[("ARCHIVE_FORMAT", "Xml")],
+        query: "arch_q.fna",
+        subject: "arch_s.fna",
+        outfmt: "11",
+        rc: 0,
+    },
+    Case {
+        name: "batches_sub_xml",
+        env: &[XML_FORMAT, BATCH],
+        query: "arch_batches.fna",
+        subject: "arch_s.fna",
+        outfmt: "11",
+        rc: 0,
+    },
+    Case {
+        name: "bad_sub_xml",
+        env: &[XML_FORMAT, BATCH],
+        query: "arch_bad.fna",
+        subject: "arch_s.fna",
+        outfmt: "11",
+        rc: 1,
+    },
     Case {
         name: "batches_sub",
         env: &[BATCH],
@@ -264,6 +306,7 @@ fn the_out_file_receives_the_archive() {
         ("", frozen("env_empty", "out")),
         ("foo", Vec::new()),
         ("bin", frozen("env_bin_upper", "out")),
+        ("xml", frozen("default_sub_xml", "out")),
     ] {
         let file = dir.join(format!("out_{format}.asn"));
         let _ = std::fs::remove_file(&file);
@@ -293,28 +336,6 @@ fn the_out_file_receives_the_archive() {
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// `ARCHIVE_FORMAT=xml` is NCBI's XML archive, which LOSAT does not write yet: it stops
-/// before the first byte and says so.
-#[test]
-fn xml_archives_are_refused_before_the_first_byte() {
-    let query = input("arch_q.fna");
-    let subject = input("arch_s.fna");
-    for value in ["xml", "XML", "Xml"] {
-        let output = run(
-            &[("ARCHIVE_FORMAT", value)],
-            &["-query", &query, "-subject", &subject, "-outfmt", "11"],
-            "1",
-        );
-        assert_ne!(output.status.code(), Some(0), "{value}");
-        assert!(output.stdout.is_empty(), "{value}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("ARCHIVE_FORMAT=xml with -outfmt 11 is not supported by LOSAT"),
-            "{value}: {stderr}"
-        );
-    }
 }
 
 /// A title with a byte outside `0x20..=0x7E` (0x80 and above, and 0x7F) is written as `#` by

@@ -5594,6 +5594,40 @@ kernel tests).
 
 X-drop DP capture and replay (diagnostics, not part of the strict set):
 
+- `LOSAT_X_BXNEWTONLANES=1` (BLASTX, the composition-based redo (`-comp_based_stats 2`, the default); speed; in the
+  strict set from the pull request that added it, 2026-10-25; `=0` solves every Newton problem where it arises) solves
+  the Newton problems of a match's frame calls ahead, four per vector (eight on aarch64; the lanes of the graduated
+  NEWTONLANES, `x_newton_lanes.rs`), across frames. BLASTX calls `Blast_RedoOneMatch` once per query frame and one call
+  holds few windows (AP027131 x AP027133: 5.3 problems per call, 978 calls of one or two, which the lanes leave to the
+  exact module), so the TBLASTN prefetch (per call) would batch little. `x_bx_newton_lanes_prefetch_frames`
+  (`core/composition_adjustment/redo_alignment.rs`) walks the coming frame calls of the match from the first one not
+  covered: per frame the windows of `windows_from_translated_query_aligns`, the near-identical tests and `get_range`
+  calls of the redo loop, and at each HSP that would call `Blast_AdjustScores` (a protein subject: `hsp_index == 0` or a
+  changed near-identical status) the composition of the HSP's query range, the whole subject's and `x_newton_input`.
+  Containment is not tested, so the problems are a superset of those the calls solve. It stops before a frame once 32
+  problems are gathered (inside a frame at 256 problems or 1 MiB of kept ranges; the rest of that frame is solved by its
+  call). Each frame's call gets the `get_range` results made for it (keyed by window, HSP index and the two flags) and
+  takes a stored Newton result only for an input with the same bits; results no call took are dropped at the end of the
+  match. The mark (`x_reach!`) sits where a query batch's Kappa state is made: own side with `-comp_based_stats 2`,
+  reference side with `0` (no redo). Unit tests (`blastx/kappa.rs` `x_bx_newton_lanes_tests`): 14 synthetic matches on
+  36 kb of AP027131 (windows with near-identical status changes, SEG-masked stretches, up to 100 problems per match)
+  redone with and without the prefetch on two states: equal alignments, edit scripts, methods and identity matrices,
+  the same matrix left after each match, every Newton problem of the redo found in the store with the same bits, every
+  `get_range` call made once; again with the stop rules shrunk so that frames are only partly walked ahead. With
+  `LOSAT_X_STATS`, `[X_STATS] NEWTONLANES prefetched= hits= misses=` counts the problems (AP027131 x AP027133 at one
+  thread: prefetched = hits = 14,519, misses 0; `=0`: misses 14,519). Measured 2026-10-25 on the workstation against
+  `dev` f24d161f (outputs identical in every arm; `perf stat` counts `:u`; one-thread cells on one pinned node-0 core, HT
+  sibling idle, warmed 3 s, 3 rounds, the arm order reversed every other round; eight-thread cells on node 1, 16 or 8
+  rounds): blastx AP027131 x AP027133 (`-query_gencode 4`) at one thread cycles x0.946 (0.945-0.949), instructions
+  x0.914, wall 3.66 -> 3.46 s; at eight threads cycles x0.946 (quartiles 0.945-0.947), wall 0.740 -> 0.708 s; 800 fly
+  2L cDNAs x the yeast proteome at eight threads x0.999 (few Newton problems); the controls tblastn AP027131 proteins x
+  AP027133 x1.001 and blastp WSSV x PajaWSV x0.994 at one thread (their redo loops changed only by the new argument).
+  `=0` read x1.000-1.007 of `dev` (cycles; instructions x1.000). Max RSS: equal at one thread (35.4 MB); AP027131 x
+  AP027133 at 8 threads 64.2 -> 69.5 MiB and at 16 threads 72.2 -> 80.8 MiB (NCBI 95): each thread holds the inputs,
+  outputs and stored results of its largest prefetch (WIP, line C s9). Wasm (the serial WASI command
+  built with simd128, so the plain four-wide lanes; one Node 26 process, a new instance per search, default / `=0` /
+  `=1` alternating, warm-up + 6 rounds, one booked workstation core): AP027131 x AP027133 x0.970 (5.74 -> 5.67 s CPU, 5 of
+  6 rounds below 1; A/A `=1` x1.001), 50 fly cDNAs x the yeast proteome x0.996 (A/A x0.993), the same output bytes.
 - `LOSAT_X_DPCAPTURE=<dir>` (diagnostic build) records every Nth call of each thread that reaches the vector X-drop
   DP as a self-contained problem (residues, matrix, gap costs, x_drop, result
   and edit script) in `<dir>/xdp-<pid>-t<k>.xdp`, one file per thread, appended

@@ -308,6 +308,7 @@ and on what evidence in its own entry below; it adds no paragraph after this blo
 count of the set anywhere, so that two pull requests that each add a switch do not conflict:
 
 ```bash
+export LOSAT_X_BNCSR=1
 export LOSAT_X_BNDBCUT=1
 export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNDCONE=1
@@ -3265,6 +3266,39 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms) x1.003. `=0` is dev's (x0.998); instructions of megablast and blastn at one thread move by at most
   0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
   115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
+- `LOSAT_X_BNCSR=1` (BLASTN `-task blastn` and every task with word size 9, 10 or 11 that builds the contiguous
+  two-stage table of `build_mb_lookup`, `-subject` and `-db`, any thread count, speed; in the strict set from the pull
+  request that added it, 2026-10-25 (perf/bn-csr, evidence at the end of this entry): on unless it is `0`) lays out the
+  chains of that table as CSR, as `LOSAT_X_DCCSR` does for a discontiguous table (`blastn/x_bn_csr.rs`, argument in
+  its header): `offsets[cell] .. offsets[cell + 1]` of `qs` holds the cell's 1-based query offsets in the chain's
+  order, newest first for the megablast-type table (word size 11's) and in reading order for the table that stands
+  for NCBI's small table (`ascending_cells`, its count kept two elements later so that the place pass moves each
+  cell's cursor up from the run's start), built from the fill's own words by a count pass, a running sum (which also
+  makes the fill's presence vector and longest-chain counters) and a place pass, instead of NCBI's `hashtable` /
+  `next_pos`, which are then not allocated (`qs` has one element per word where `next_pos` had one per query
+  position). Only tables of `lut_word_length` 8 to 11 without database word counts and without `BLEMIR_DEBUG` whose
+  word loop reads at least a quarter as many positions as the table has cells get it: with NCBI's choice of table, a
+  query batch of 1,048,576 positions or more (about 524 kb, both strands) at word size 11, 262,144 at 10, 65,536
+  (and 16,384 for the reading-order table of 4^8 cells) at 9; word sizes 12 and above build 4^11-cell tables only
+  below that size and keep their chains, and so do megablast's 4^12-cell tables. Such a table takes nothing from the
+  batch loop's keep (`LOSAT_X_MBLUTKEEP`): its `offsets` is allocated per build and freed with the table (before the
+  traceback with `LOSAT_X_BNLUTDROP`), and a build laid out as CSR frees the table the keep holds. With a search pool
+  of two threads or more (where PAIRPAR's fill would run) the table is built on the pool
+  (`x_mb_lookup_once::csr`): the readers of `LOSAT_X_MBLUTONCE` put each chunk's words into the owners' sub-ranges of
+  its arena, once to count and once to place (so the build holds one chunk's words, the fill's arena, not the whole
+  query's), each thread owns a contiguous run of cell blocks, and the whole build is one `rayon::broadcast` whose
+  threads pass a spin barrier between the reading and the owners' work of each chunk. The scans read a word's run
+  instead of walking its chain: the strip scan of PAIRPAR (`scan_strip_csr`) and the reference scan of
+  `search_query_batch` put the words with hits (after the presence test) through the FIFO of `LOSAT_X_DCCSR`; the
+  words, pairs and their order are the chain walk's. `for_each_hit`, `count_hits` and the masked-word test of
+  `s_TypeOfWord` (`contains_hit`) read the run where the table has no chains. The `[TIMING] x_mb_lookup_build`
+  interval includes the CSR builds (in `loop` or `pool_fill`), and `[TIMING] x_bn_csr: builds= parallel= words=`
+  counts them. The unit tests compare every cell's run with the loop's chain, in both orders and for `lut_word_length`
+  8 to 11, the presence vector, the counters and the longest chain, a pool build in both orders (chunks of 1, 97
+  and 5,000 positions and the default size, 2 to 40 threads) with the serial one, and a table above the rule built by
+  `build_two_stage_lookup` with its chains;
+  `LOSAT/tests/blastn_bn_csr.rs` compares whole reports of the default with `=0`.
+  EVIDENCE (filled after the workstation A/B).
 - `LOSAT_X_PAIRPARDISC=1` (in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`; it does not depend on PAIRPAR) blastn `-task dc-megablast`, one query-subject pair
   on a pool of 2+ threads (or on one thread: `LOSAT_X_BNDCONE`): the two-hit seed stage of a subject chunk with a discontiguous megablast
   table (one or two templates) and the diagonal hash (query block over 8000 letters, `scan_range`

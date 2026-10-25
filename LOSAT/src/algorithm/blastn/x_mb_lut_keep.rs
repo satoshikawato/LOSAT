@@ -131,6 +131,14 @@ impl Keep {
         (table, true, dirty.max(cells))
     }
 
+    /// Frees the kept table, if any: a build laid out as CSR (LOSAT_X_BNCSR, `x_bn_csr.rs`) takes
+    /// nothing from the keep, and the loop should not hold a table beside it; the next build
+    /// with chains allocates a fresh table, which the keep takes back as before.
+    pub(super) fn release(&self) {
+        let old = self.kept.lock().unwrap_or_else(|e| e.into_inner()).take();
+        drop(old);
+    }
+
     /// Takes back the table of a dropped `MbLookupTable`, whose first `dirty` elements may hold
     /// values (`take`'s third value): kept when nothing is kept or the kept one is shorter, else
     /// freed.

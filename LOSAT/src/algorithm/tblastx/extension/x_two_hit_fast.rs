@@ -67,11 +67,13 @@
 //! same extension with walks that the sentinels stop instead of a bound, inlined with the word loop
 //! into the callers' extension code (`extend_hit_two_hit_sent`: the unit path's `x_hit` and the
 //! batched `resolve`, the reference frame loops).
-//! * Instances. The unit scans (x_pair_par.rs `scan_unit_cells`, x_tbx_extbatch.rs
-//!   `scan_unit_batched_cells`, x_tbx_qslice.rs `scan_unit_sliced_hits`) choose for each unit
-//!   between two instances of their code (`const SENT`): with the walks, a function of its own,
-//!   and without them, the code as it was before the switch (inlined where it was). The reference
-//!   frame loops (run_impl.rs) choose at every call.
+//! * Instances. The unit path chooses for each unit (`XPairPar::x_unit_sent`, in the dispatches
+//!   `scan_unit_or_bf`, `scan_unit_batched_or_bf` and `scan_unit_sliced_or_bf` of x_tbx_hitbf.rs
+//!   and in the probed units) between two instances of its scan (`const SENT`), each in a function
+//!   of its own (`scan_unit_bf`, `scan_unit_batched_bf`, `scan_unit_sliced_bf`, `scan_unit_sent`,
+//!   `scan_unit_batched_sent`, `scan_unit_sliced_sent`), so that the instances without the walks
+//!   keep the machine code they had before the switch. The reference frame loops (run_impl.rs)
+//!   choose at every call.
 //! * Where. A query context's buffer is `[0, residues.., 0]` and a subject frame's too
 //!   (`translation.rs`, NCBI's NULLB at each end, blast_util.c:438-453); the callers' sequences are
 //!   the residues. A subject frame of more than `MAX_DBSEQ_LEN` (5,000,000) residues is searched in

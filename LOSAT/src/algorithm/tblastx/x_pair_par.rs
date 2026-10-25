@@ -2659,6 +2659,8 @@ impl XPairPar {
         probe: &mut P,
         mask: u32,
     ) {
+        // LOSAT_X_TBXUNGAPSENT: `SENT` only on the units `x_unit_sent` accepts (`x_hit`'s SAFETY).
+        debug_assert!(!SENT || self.x_unit_sent(unit, inp));
         let group = &self.groups[unit.g];
         let sub = &group.lookup;
         let wordsize = inp.wordsize;
@@ -4054,6 +4056,7 @@ mod tests {
         let frame_numbers = [1i8, 2, 3, -1, -2, -3];
         let (mut masked_units, mut aliased_cases, mut saved) = (0usize, 0usize, 0usize);
         let (mut exact_fits, mut wide_groups, mut control_differs) = (0usize, 0usize, 0usize);
+        let mut sent_units = 0usize;
         for case_no in 0..300 {
             let alphabet = &alphabets[case_no % alphabets.len()];
             let window = [40, 3 + x_tbx_extbatch::BATCH as i32, 64][case_no % 3];
@@ -4210,8 +4213,16 @@ mod tests {
                         .iter()
                         .any(|&b| a != b && (a - b).rem_euclid(cells) == 0)
                 });
+                // LOSAT_X_TBXUNGAPSENT: the subject is one whole frame with its sentinels, so its
+                // units take the sentinel walks whenever the batch does.
+                let sent = pp.x_unit_sent(&unit, &inp);
+                assert_eq!(sent, pp.sent);
+                sent_units += usize::from(sent);
                 let mut lists: Vec<(&str, Vec<InitHSP>)> = Vec::new();
-                for name in ["scan", "scan pf", "bf", "bf pf"] {
+                for name in ["scan", "scan pf", "bf", "bf pf", "scan sent", "bf pf sent"] {
+                    if name.ends_with("sent") && !sent {
+                        continue;
+                    }
                     let mut got: Vec<InitHSP> = Vec::new();
                     match name {
                         "scan" => pp.scan_unit_hits::<_, XNoProbe, false, false, false>(
@@ -4235,7 +4246,21 @@ mod tests {
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        _ => pp.scan_unit_hits::<_, XNoProbe, true, true, false>(
+                        "bf pf" => pp.scan_unit_hits::<_, XNoProbe, true, true, false>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            &mut XNoProbe,
+                        ),
+                        "scan sent" => pp.scan_unit_hits::<_, XNoProbe, false, false, true>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            &mut XNoProbe,
+                        ),
+                        _ => pp.scan_unit_hits::<_, XNoProbe, true, true, true>(
                             &unit,
                             &inp,
                             &mut scratch,
@@ -4265,6 +4290,17 @@ mod tests {
                         len,
                     );
                     lists.push((name, got));
+                    if sent {
+                        let mut got: Vec<InitHSP> = Vec::new();
+                        pp.scan_unit_batched_hits::<_, true, true, true>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            len,
+                        );
+                        lists.push((name, got));
+                    }
                 }
                 for (name, got) in &lists {
                     assert_eq!(
@@ -4299,6 +4335,10 @@ mod tests {
             aliased_cases += usize::from(aliased);
         }
         assert!(masked_units > 600, "masked_units {masked_units}");
+        assert!(
+            sent_units == 0 || sent_units == masked_units,
+            "sent_units {sent_units}"
+        );
         assert!(aliased_cases > 100, "aliased_cases {aliased_cases}");
         assert!(saved > 10_000, "saved {saved}");
         assert!(exact_fits > 50, "exact_fits {exact_fits}");

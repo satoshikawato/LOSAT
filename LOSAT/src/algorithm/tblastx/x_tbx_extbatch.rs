@@ -601,6 +601,8 @@ impl XPairPar {
         mask: u32,
     ) -> (u64, u64) {
         debug_assert!((1..=BATCH).contains(&len));
+        // LOSAT_X_TBXUNGAPSENT: as in `scan_unit_cells`.
+        debug_assert!(!SENT || self.x_unit_sent(unit, inp));
         let group = &self.groups[unit.g];
         let sub = &group.lookup;
         let wordsize = inp.wordsize;

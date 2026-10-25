@@ -586,6 +586,8 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
+        // LOSAT_X_TBXUNGAPSENT: as in `scan_unit_cells`.
+        debug_assert!(!SENT || self.x_unit_sent(unit, inp));
         let wordsize = inp.wordsize;
         let window = inp.window;
         let s_frame = &inp.s_frames_preliminary[unit.f];
@@ -936,8 +938,9 @@ mod tests {
     }
 
     // No NCBI counterpart: one instance of the scan in slices by the bits of `variant`: batched
-    // extensions (2), the prefetch (1), the branch-free hit loop of LOSAT_X_TBXHITBF (4).
-    fn scan_sliced_variant<S: XInitSink>(
+    // extensions (2), the prefetch (1), the branch-free hit loop of LOSAT_X_TBXHITBF (4); `SENT`:
+    // the extensions of LOSAT_X_TBXUNGAPSENT (for a unit `x_unit_sent` accepts).
+    fn scan_sliced_variant<S: XInitSink, const SENT: bool>(
         pp: &XPairPar,
         variant: usize,
         sliced: &XSliced,
@@ -947,28 +950,28 @@ mod tests {
         got: &mut S,
     ) {
         match variant {
-            0 => pp.scan_unit_sliced_hits::<_, false, false, false, false>(
+            0 => pp.scan_unit_sliced_hits::<_, false, false, false, SENT>(
                 sliced, unit, inp, scratch, got,
             ),
-            1 => pp.scan_unit_sliced_hits::<_, false, true, false, false>(
+            1 => pp.scan_unit_sliced_hits::<_, false, true, false, SENT>(
                 sliced, unit, inp, scratch, got,
             ),
-            2 => pp.scan_unit_sliced_hits::<_, true, false, false, false>(
+            2 => pp.scan_unit_sliced_hits::<_, true, false, false, SENT>(
                 sliced, unit, inp, scratch, got,
             ),
-            3 => pp.scan_unit_sliced_hits::<_, true, true, false, false>(
+            3 => pp.scan_unit_sliced_hits::<_, true, true, false, SENT>(
                 sliced, unit, inp, scratch, got,
             ),
-            4 => pp.scan_unit_sliced_hits::<_, false, false, true, false>(
+            4 => pp.scan_unit_sliced_hits::<_, false, false, true, SENT>(
                 sliced, unit, inp, scratch, got,
             ),
-            5 => pp.scan_unit_sliced_hits::<_, false, true, true, false>(
+            5 => pp.scan_unit_sliced_hits::<_, false, true, true, SENT>(
                 sliced, unit, inp, scratch, got,
             ),
-            6 => pp.scan_unit_sliced_hits::<_, true, false, true, false>(
+            6 => pp.scan_unit_sliced_hits::<_, true, false, true, SENT>(
                 sliced, unit, inp, scratch, got,
             ),
-            _ => pp.scan_unit_sliced_hits::<_, true, true, true, false>(
+            _ => pp.scan_unit_sliced_hits::<_, true, true, true, SENT>(
                 sliced, unit, inp, scratch, got,
             ),
         }
@@ -1080,17 +1083,34 @@ mod tests {
                     reference.x_sort();
                     for sliced in [&pp.sliced.as_ref().unwrap()[g], &filtered[g]] {
                         let mut plain: Vec<Vec<InitHSP>> = Vec::new();
-                        for variant in 0..8 {
+                        // 8..16: the same with LOSAT_X_TBXUNGAPSENT, on the units that take it.
+                        let sent = pp.x_unit_sent(&unit, &inp);
+                        for variant in 0..16 {
+                            if variant >= 8 && !sent {
+                                continue;
+                            }
                             let mut got: Vec<InitHSP> = Vec::new();
-                            scan_sliced_variant(
-                                &pp,
-                                variant,
-                                sliced,
-                                &unit,
-                                &inp,
-                                &mut scratch,
-                                &mut got,
-                            );
+                            if variant < 8 {
+                                scan_sliced_variant::<_, false>(
+                                    &pp,
+                                    variant,
+                                    sliced,
+                                    &unit,
+                                    &inp,
+                                    &mut scratch,
+                                    &mut got,
+                                );
+                            } else {
+                                scan_sliced_variant::<_, true>(
+                                    &pp,
+                                    variant & 7,
+                                    sliced,
+                                    &unit,
+                                    &inp,
+                                    &mut scratch,
+                                    &mut got,
+                                );
+                            }
                             assert!(
                                 scratch.diag == reference_diag,
                                 "case {case} frame {f} group {g} variant {variant}: table"
@@ -1101,7 +1121,7 @@ mod tests {
                                 // LOSAT_X_TBXHITBF: the same records in the same order.
                                 assert_eq!(
                                     got,
-                                    plain[variant - 4],
+                                    plain[variant & 3],
                                     "case {case} frame {f} group {g} variant {variant}: order"
                                 );
                             }

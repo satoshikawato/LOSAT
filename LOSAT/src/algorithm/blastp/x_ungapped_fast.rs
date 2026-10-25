@@ -1,6 +1,6 @@
-//! EXPERIMENT (LOSAT_X_BPUNGAP): the BLOSUM62 protein
-//! ungapped extension (`s_BlastAaExtendOneHit`, `s_BlastAaExtendTwoHit` and the
-//! `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks they share) with a tighter inner loop.
+//! EXPERIMENT (LOSAT_X_BPUNGAP): the BLOSUM62 protein ungapped extension (`s_BlastAaExtendOneHit`,
+//! `s_BlastAaExtendTwoHit` and the `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks they share)
+//! with a tighter inner loop.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883
 //! ```c

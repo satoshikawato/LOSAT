@@ -235,10 +235,11 @@
 //!         	incremental_struct->m_IterationNum++;
 //! ```
 //!
-//! LOSAT_X_BPQBLOCKWEB (strict set, `x_bp_qblock_web`; acts only with `LOSAT_X_BPQBLOCK`) takes a `run_local` call with several outputs, the hit records or an observer
-//! (ABI v2 of the Web build asks for outfmt 0, 6 and 7, the records and the byte ranges of each HSP
-//! in each output), when every output of several is a writer of the caller, no `-db` is searched and
-//! an observer comes with the records. Each block's call writes all the outputs, in the order asked:
+//! LOSAT_X_BPQBLOCKWEB (strict set, `x_bp_qblock_web`; acts only with `LOSAT_X_BPQBLOCK`) takes a
+//! `run_local` call with several outputs, the hit records or an observer (ABI v2 of the Web build
+//! asks for outfmt 0, 6 and 7, the records and the byte ranges of each HSP in each output), when
+//! every output of several is a writer of the caller, no `-db` is searched and an observer comes
+//! with the records. Each block's call writes all the outputs, in the order asked:
 //! - each output's bytes are those of the one-output case above: what is not per query (the prolog,
 //!   the epilog, the counts of outfmt 7 and 5) is set per block for every output alike
 //!   (`BlastpReports`), each output's writer writes only to its own sink, and with several outputs

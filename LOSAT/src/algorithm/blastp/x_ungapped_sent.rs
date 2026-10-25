@@ -1,7 +1,7 @@
-//! EXPERIMENT (LOSAT_X_BPUNGAPSENT): blastp's two-hit ungapped
-//! extension (`s_BlastAaExtendTwoHit` with the `s_BlastAaExtendLeft` / `s_BlastAaExtendRight`
-//! walks) for word size 3, inlined into the candidate closure of the fused seed loop
-//! (`blast_engine.rs`), with walks that the sentinels stop instead of a bound.
+//! EXPERIMENT (LOSAT_X_BPUNGAPSENT): blastp's two-hit ungapped extension (`s_BlastAaExtendTwoHit`
+//! with the `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks) for word size 3, inlined into the
+//! candidate closure of the fused seed loop (`blast_engine.rs`), with walks that the sentinels stop
+//! instead of a bound.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883 (the walks) and
 //! 1089-1155 (`s_BlastAaExtendTwoHit`), as in `x_ungapped_fast.rs` (LOSAT_X_BPUNGAP), whose byte

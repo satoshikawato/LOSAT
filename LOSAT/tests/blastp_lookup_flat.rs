@@ -7,12 +7,12 @@
 //! well, `LOSAT_X_BPCLUT=0` turns it off), with more than one thread. With it on, the build's two passes run with one latch
 //! each, a block search's table takes the vectors of the previous block's table, and with
 //! `LOSAT_X_BPQBLOCK` the contexts' Karlin blocks are tasks of the build. These tests compare the
-//! reports with the switch off (`LOSAT_X_BPLKPFLAT=0`) and on, with `-subject` and `-db`, and read the
-//! `[X_STATS] BPLKPFLAT tables= recycled= recycled_hits=` line of the run with the switch on (printed
-//! with `LOSAT_X_STATS`, when the pool built a table), which shows that the path ran: the tables built
-//! and the builds that took the vectors of an earlier table.
-//! Every run but the default-set test states `LOSAT_X_BPQBLOCK` and `LOSAT_X_BPCLUT` itself, so that
-//! the tests do not depend on the defaults of the strict set.
+//! reports with the switch off (`LOSAT_X_BPLKPFLAT=0`) and on, with `-subject` and `-db`, and read
+//! the `[X_STATS] BPLKPFLAT tables= recycled= recycled_hits=` line of the run with the switch on
+//! (printed with `LOSAT_X_STATS`, when the pool built a table), which shows that the path ran: the
+//! tables built and the builds that took the vectors of an earlier table. Every run but the
+//! default-set test states `LOSAT_X_BPQBLOCK` and `LOSAT_X_BPCLUT` itself, so that the tests do not
+//! depend on the defaults of the strict set.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
 //! ```c
@@ -51,6 +51,17 @@ impl Run {
             .filter_map(|field| field.split_once('='))
             .map(|(key, value)| (key.to_string(), value.parse().expect("a count")))
             .collect()
+    }
+
+    /// `stats(name)` where the line is expected: fails with the run's stderr when it is missing.
+    fn printed(&self, name: &str) -> HashMap<String, u64> {
+        let counts = self.stats(name);
+        assert!(
+            !counts.is_empty(),
+            "no [X_STATS] {name} line; stderr:\n{}",
+            self.stderr
+        );
+        counts
     }
 
     /// The searches of query sets that ran to their reports (`[TIMING] blastp_total` lines, with
@@ -156,14 +167,10 @@ const ON: (&str, &str) = ("LOSAT_X_BPLKPFLAT", "1");
 const OFF: (&str, &str) = ("LOSAT_X_BPLKPFLAT", "0");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 
-/// The switch off and on give the same report; returns the counters of the run with the switch on
-/// (`[X_STATS] BPLKPFLAT`; empty where it printed none).
-fn same_reports(
-    subject: &[&OsStr],
-    threads: u32,
-    base: &[(&str, &str)],
-    outfmt: &str,
-) -> HashMap<String, u64> {
+/// The switch off and on give the same report; returns the run with the switch on (the callers read
+/// its `[X_STATS] BPLKPFLAT` line: `printed` where it is expected, `stats` where it may be
+/// missing).
+fn same_reports(subject: &[&OsStr], threads: u32, base: &[(&str, &str)], outfmt: &str) -> Run {
     let off = blastp_fast(subject, threads, &with(base, &[OFF]), outfmt);
     assert!(!off.stdout.is_empty(), "the fixture pair has rows");
     let on = blastp_fast(subject, threads, &with(base, &[ON, STATS]), outfmt);
@@ -171,7 +178,7 @@ fn same_reports(
         on.stdout == off.stdout,
         "{base:?} threads {threads} outfmt {outfmt}: the report differs with the switch"
     );
-    on.stats("BPLKPFLAT")
+    on
 }
 
 // The block search (every block a search with its own table) at 2 threads, with blocks of one
@@ -185,7 +192,7 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let base = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPQBLOCK", "1")];
-    let counts = same_reports(&subject, 2, &base, "6");
+    let counts = same_reports(&subject, 2, &base, "6").printed("BPLKPFLAT");
     let what = format!("{counts:?}");
     assert!(counts["tables"] > 1, "{what}");
     assert_eq!(counts["recycled"], counts["tables"] - 1, "{what}");
@@ -204,7 +211,7 @@ fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
             ("LOSAT_X_BPQBLOCK", letters),
             ("LOSAT_X_BPQBLOCKFMT", "0"),
         ];
-        let counts = same_reports(&subject, 4, &base, "0");
+        let counts = same_reports(&subject, 4, &base, "0").printed("BPLKPFLAT");
         let what = format!("blocks {letters}: {counts:?}");
         assert_eq!(counts["tables"], 1, "{what}");
         assert_eq!(counts["recycled"], 0, "{what}");
@@ -221,7 +228,7 @@ fn the_switch_does_not_act_without_the_pools_build() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let base = [("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPCLUT", "1")];
-    let counts = same_reports(&subject, 1, &base, "6");
+    let counts = same_reports(&subject, 1, &base, "6").stats("BPLKPFLAT");
     assert!(counts.is_empty(), "one thread: {counts:?}");
 }
 
@@ -251,7 +258,7 @@ fn query_chunks_of_split_batches_take_no_spare() {
     let run = blastp_fast(&subject, 4, &with(&base, &extra), "6");
     assert!(run.stdout == off.stdout, "{extra:?}: the report differs");
     assert_eq!(run.searches(), blocks, "{extra:?}");
-    let counts = run.stats("BPLKPFLAT");
+    let counts = run.printed("BPLKPFLAT");
     let what = format!("{extra:?}: {blocks} blocks, {counts:?}");
     assert!(counts["tables"] > blocks, "{what}");
     assert_eq!(counts["recycled"], blocks - 1, "{what}");
@@ -265,7 +272,7 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
     let db = subject_database();
     let subject = [OsStr::new("-db"), db.as_os_str()];
     let base = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPQBLOCK", "20000")];
-    let counts = same_reports(&subject, 4, &base, "6");
+    let counts = same_reports(&subject, 4, &base, "6").printed("BPLKPFLAT");
     assert!(counts["tables"] > 1, "{counts:?}");
     assert_eq!(counts["recycled"], counts["tables"] - 1, "{counts:?}");
     assert_hits_recycled(&counts, "-db");
@@ -274,8 +281,9 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
 
 // Both switches are on by default: the report with no variable, with either `=0` and with both
 // `=0` is one report, in blocks of one batch at 4 threads. `LOSAT_X_BPLKPFLAT` acts only where the
-// pool builds the flat table of `LOSAT_X_BPCLUT` and the switch is on, so with no other variable the
-// run counts tables exactly when both are on by default, and counts nothing with `LOSAT_X_BPCLUT=0`.
+// pool builds the flat table of `LOSAT_X_BPCLUT` and the switch is on, so with no other variable
+// the run counts tables exactly when both are on by default, and counts nothing with
+// `LOSAT_X_BPCLUT=0`.
 #[test]
 fn the_default_and_the_switches_off_give_one_report() {
     let subject = subject_file();
@@ -296,7 +304,7 @@ fn the_default_and_the_switches_off_give_one_report() {
     }
     let on = blastp_fast(&subject, 4, &[block, STATS], "6");
     assert!(on.stdout == default.stdout, "the run with LOSAT_X_STATS");
-    let counts = on.stats("BPLKPFLAT");
+    let counts = on.printed("BPLKPFLAT");
     assert!(
         counts["tables"] > 1,
         "no variable: the default builds the flat table on the pool: {counts:?}"

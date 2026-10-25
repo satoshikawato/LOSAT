@@ -1892,13 +1892,13 @@ mod tests {
 
         /// What the recording kernel saw (sorted by ordinal id) and the listed ordinal ids of a
         /// search of `database` at `threads` threads in rounds of `blocks_per_thread` blocks per
-        /// thread: `search_blocks_of` with blocks of `block_bytes` (`Err`), or the cut's driver
-        /// (`Ok`).
+        /// thread: `search_blocks_of` with blocks of `block_bytes` (`Some`), or the cut's driver
+        /// (`None`).
         fn search(
             database: &BlastpDatabase,
             threads: usize,
             blocks_per_thread: usize,
-            how: std::result::Result<(), u64>,
+            block_bytes: Option<u64>,
         ) -> Result<(Seen, Vec<u32>)> {
             let window = 40;
             let seen = std::sync::Mutex::new(Vec::new());
@@ -1907,8 +1907,8 @@ mod tests {
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                 let new_scratch = || BlastpSubjectScratch::new(16, 64, window, 21);
                 let kernel = recording_kernel(window, &seen);
-                match how {
-                    Ok(()) => x_search_blocks_cut(
+                match block_bytes {
+                    None => x_search_blocks_cut(
                         database,
                         pool,
                         window,
@@ -1919,7 +1919,7 @@ mod tests {
                         &mut compact,
                         500,
                     ),
-                    Err(block_bytes) => search_blocks_of(
+                    Some(block_bytes) => search_blocks_of(
                         database,
                         pool,
                         window,
@@ -2082,7 +2082,7 @@ mod tests {
             assert_eq!(multi.total_letters(), letters as u64);
             assert_eq!(single.db.volumes().len(), 1);
             assert!(multi.db.volumes().len() > 2, "{}", multi.db.volumes().len());
-            let (reference, reference_listed) = search(&single, 1, 2, Err(BLOCK_BYTES)).unwrap();
+            let (reference, reference_listed) = search(&single, 1, 2, Some(BLOCK_BYTES)).unwrap();
             assert_eq!(reference.len(), lengths.len());
             assert_eq!(reference_listed.len(), 100);
             assert_eq!(x_count_blocks(&single.db, BLOCK_BYTES), 1);
@@ -2105,8 +2105,7 @@ mod tests {
                 }
                 for blocks_per_thread in [2, BLOCKS_PER_THREAD] {
                     for (what, db) in [("one volume", &single), ("volumes", &multi)] {
-                        let (seen, listed) =
-                            search(db, threads, blocks_per_thread, Ok(())).unwrap();
+                        let (seen, listed) = search(db, threads, blocks_per_thread, None).unwrap();
                         let context = format!(
                             "{what}, {threads} threads, {blocks_per_thread} blocks per thread"
                         );
@@ -2148,25 +2147,25 @@ mod tests {
                     std::fs::write(&psq, &bytes).unwrap();
                 }
                 let database = open_path(&name);
-                let expected = error_text(search(&database, 1, 2, Err(BLOCK_BYTES)));
+                let expected = error_text(search(&database, 1, 2, Some(BLOCK_BYTES)));
                 assert!(
                     expected.contains("passes the end of the file"),
                     "{expected}"
                 );
                 assert_eq!(
-                    error_text(search(&database, 4, 2, Err(BLOCK_BYTES))),
+                    error_text(search(&database, 4, 2, Some(BLOCK_BYTES))),
                     expected
                 );
                 for threads in [2usize, 4, 7] {
                     let cut = cut_of(&database, threads);
                     // Without the one-thread order's error, the cut's own error differs.
-                    let own = error_text(search(&database, threads, 2, Err(cut)));
+                    let own = error_text(search(&database, threads, 2, Some(cut)));
                     assert_ne!(own, expected, "{threads} threads");
                     if gap {
                         assert!(own.contains("holds a gap character"), "{own}");
                     }
                     assert_eq!(
-                        error_text(search(&database, threads, 2, Ok(()))),
+                        error_text(search(&database, threads, 2, None)),
                         expected,
                         "{threads} threads"
                     );

@@ -1,6 +1,6 @@
-//! EXPERIMENT (LOSAT_X_BPGAP): the restricted gapped alignment of the blastp
-//! preliminary stage (NCBI `s_RestrictedGappedAlign`) with its score rows in separate arrays,
-//! eight cells of a row at a time (x86_64 with AVX2; elsewhere the reference function runs).
+//! EXPERIMENT (LOSAT_X_BPGAP): the restricted gapped alignment of the blastp preliminary stage
+//! (NCBI `s_RestrictedGappedAlign`) with its score rows in separate arrays, eight cells of a row at
+//! a time (x86_64 with AVX2; elsewhere the reference function runs).
 //!
 //! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1107-1122,1143-1147,1171
 //! ```c

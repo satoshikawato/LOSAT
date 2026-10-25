@@ -1396,8 +1396,9 @@ fn queries_of_an_unsearched_batch_are_written_by_the_block_that_holds_them() {
 // two archives) and `db.sa.arch.bp.pajab.11` (`BATCH_SIZE=3000`, several). With `LOSAT_X_BPQBLOCK=80`
 // every NCBI batch is a block of its own: the blocks' bytes equal the search of all queries
 // (`LOSAT_X_BPQBLOCK=0`) and NCBI's frozen bytes (standard error included, the option warning of
-// `-max_target_seqs 2` in the first archive), `LOSAT_X_BPQBLOCKSA=0` keeps the search of all queries, and `ARCHIVE_FORMAT=bin` gives the same documents as ASN.1
-// binary in blocks and out of them.
+// `-max_target_seqs 2` in the first archive), `LOSAT_X_BPQBLOCKSA=0` keeps the search of all
+// queries, and `ARCHIVE_FORMAT=bin` gives the same documents as ASN.1 binary in blocks and out of
+// them.
 #[test]
 fn the_archive_of_two_or_more_batches_is_written_by_blocks_as_by_the_search_of_all_queries() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1613,9 +1614,9 @@ fn outfmt_13_and_14_blocks_write_the_side_files_and_master_of_the_search_of_all_
 
 // Outfmt 14 with `-subject` (a FASTA subject file): the last report of a block is held until the
 // next report arrives, which is in the next block, and is written as the next number. The default
-// run writes the blocks' files, which are compared with the reference's. Outfmt 13 holds a report through
-// the same `Xml2Document`, `Xml2Carry` and `FsSideFiles` (the db test above and the cases below run
-// both), and the search runs at one thread (the reports are written serially).
+// run writes the blocks' files, which are compared with the reference's. Outfmt 13 holds a report
+// through the same `Xml2Document`, `Xml2Carry` and `FsSideFiles` (the db test above and the cases
+// below run both), and the search runs at one thread (the reports are written serially).
 #[test]
 fn outfmt_13_and_14_with_subject_hold_a_report_across_blocks() {
     let fasta = fixture("MejoMJNV.faa");

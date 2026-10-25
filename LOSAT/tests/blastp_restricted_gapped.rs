@@ -21,9 +21,9 @@
 //!                gap_align->score >= restricted_cutoff) {
 //! ```
 //! The blastp fixtures of `ci_fast_regressions.py` and `check_losat.py` never reach this path
-//! (`[X_STATS] BPGAP` counted no restricted alignment on any of them): it needs a query whose best ungapped
-//! alignment scores below 0.68 of the cutoff, and the cutoff grows with the search space. The
-//! inputs here are generated:
+//! (`[X_STATS] BPGAP` counted no restricted alignment on any of them): it needs a query whose best
+//! ungapped alignment scores below 0.68 of the cutoff, and the cutoff grows with the search space.
+//! The inputs here are generated:
 //! - four random queries;
 //! - 1,500 random subjects of 400 letters (0.6 Mb);
 //! - at subjects 0, 375, 750 and 1,125, a copy of each query with 60 % of its letters replaced

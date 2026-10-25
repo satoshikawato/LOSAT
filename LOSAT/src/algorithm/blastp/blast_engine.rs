@@ -8381,9 +8381,9 @@ fn run_resolved_in_pool(
             // ```
             // EXPERIMENT (LOSAT_X_BPUNGAPSENT): the closure above with the two-hit extension of
             // `x_ungapped_sent.rs` inlined (word size 3, walks stopped by the sentinels), for the
-            // table of single letters, on a block and a subject that pass the path's checks. Each
-            // use of the macro is a closure type of its own, so the loops of the closure above
-            // keep their own instances.
+            // table of single letters, on a block and a subject that pass the path's checks. The
+            // macro's closure is a type of its own, so the loops of the closure above keep their
+            // own instances.
             macro_rules! x_candidate_sent {
                 ($sent_query:expr, $sent_subject:expr) => {
                     |query_offset: i32,

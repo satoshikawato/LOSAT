@@ -178,7 +178,8 @@ const ON: (&str, &str) = ("LOSAT_X_BPDBCUT", "1");
 
 /// The switch off and on give the same report and standard error, the report of `one_thread` (the
 /// same search at one thread without the switch). Returns the reach sides of the run with the
-/// switch on (`LOSAT_X_BPDBCUT`: `(the cut ran, the blocks of 1 MiB ran)`) and of `LOSAT_X_BPQBLOCK`.
+/// switch on (`LOSAT_X_BPDBCUT`: `(the cut ran, the blocks of 1 MiB ran)`) and of
+/// `LOSAT_X_BPQBLOCK`.
 fn same_reports(
     task: &str,
     db: &Path,

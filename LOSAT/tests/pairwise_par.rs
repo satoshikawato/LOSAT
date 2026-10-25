@@ -11,9 +11,10 @@
 //! The property under test is that the reports, the messages and the exit status do not depend on
 //! the switch or on the thread count: each search is compared with the same LOSAT search with the
 //! switch off at one thread. `LOSAT_X_REACH` shows that the pool's writer ran at two threads or
-//! more (new side) and not at one thread. The inputs have a record without letters between queries (a warning
-//! before its report), queries with hits and without, several subjects, a query whose alignments
-//! are cut into several pieces, and (BLASTN at two threads) more than one window of queries.
+//! more (new side) and not at one thread. The inputs have a record without letters between queries
+//! (a warning before its report), queries with hits and without, several subjects, a query whose
+//! alignments are cut into several pieces, and (BLASTN at two threads) more than one window of
+//! queries.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -176,13 +177,21 @@ fn check_with(name: &str, args: &[&str], extra: &[(&str, &str)], thread_counts: 
         );
         assert_eq!(on.stdout, off.stdout, "{name}, threads {threads}");
         assert_eq!(stderr(&on), stderr(&off), "{name}, threads {threads}");
-        // The pool's writer needs two threads: at one thread the serial writer runs.
-        let (new, _) = reach.sides("LOSAT_X_PAIRWISEPAR");
-        assert_eq!(
-            new,
-            threads > 1,
-            "{name}, threads {threads}: the pool's writer"
-        );
+        // The pool's writer needs two threads: at one thread the serial writer runs, which marks
+        // the reference side whenever the switch is on.
+        let sides = reach.sides("LOSAT_X_PAIRWISEPAR");
+        if threads == 1 {
+            assert_eq!(
+                sides,
+                (false, true),
+                "{name}, threads {threads}: the serial writer"
+            );
+        } else {
+            assert!(
+                sides.0,
+                "{name}, threads {threads}: the pool's writer: {sides:?}"
+            );
+        }
     }
     let mut off_at_four_vars = extra.to_vec();
     off_at_four_vars.push(OFF);

@@ -94,6 +94,17 @@ impl Run {
             .collect()
     }
 
+    /// `stats(name)` where the line is expected: fails with the run's stderr when it is missing.
+    fn printed(&self, name: &str) -> HashMap<String, u64> {
+        let counts = self.stats(name);
+        assert!(
+            !counts.is_empty(),
+            "no [X_STATS] {name} line; stderr:\n{}",
+            self.stderr
+        );
+        counts
+    }
+
     /// The searches of query sets that ran to their reports (`[TIMING] blastp_total` lines, with
     /// `LOSAT_TIMING`): the blocks of a block search.
     fn searches(&self) -> u64 {
@@ -221,10 +232,11 @@ fn assert_built_ahead(counts: &HashMap<String, u64>, searches: u64, what: &str) 
 }
 
 // The block search with blocks of one batch and of 20,000 letters: each block after the first
-// takes the values built ahead during the block before it. Both tasks: blastp-fast's flat table and exact blastp's table. One case per path (each
-// search of the fixture pair costs CI seconds): four threads (every gate is `threads() > 1`; two
-// threads, where the build ahead has the block's one helper: the `-db` test and the `/dev/full`
-// test); the build beside the redo windows of `LOSAT_X_BPREDOPAR`: the `-db` test.
+// takes the values built ahead during the block before it. Both tasks: blastp-fast's flat table and
+// exact blastp's table. One case per path (each search of the fixture pair costs CI seconds): four
+// threads (every gate is `threads() > 1`; two threads, where the build ahead has the block's one
+// helper: the `-db` test and the `/dev/full` test); the build beside the redo windows of
+// `LOSAT_X_BPREDOPAR`: the `-db` test.
 #[test]
 fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     let dir = test_dir("blocks");
@@ -236,7 +248,7 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
             let (off, on) = same_runs(&dir, task, &subject, 4, &base, &[]);
             assert!(!off.stdout.is_empty(), "the fixture pair has rows");
             let what = format!("{task}, threads 4, blocks of {letters}");
-            let counts = on.stats("BPLKPAHEAD");
+            let counts = on.printed("BPLKPAHEAD");
             assert_built_ahead(&counts, off.searches(), &what);
             // Exact blastp in blocks of one batch: a block whose table's overflow exceeds the
             // room (the largest so far plus a half) builds its table itself, after its
@@ -252,7 +264,7 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     let (off, on) = same_runs(&dir, "blastp", &subject, 4, &base, &["-outfmt", "0"]);
     assert!(off.searches() > 1, "{} blocks", off.searches());
     assert_built_ahead(
-        &on.stats("BPLKPAHEAD"),
+        &on.printed("BPLKPAHEAD"),
         off.searches(),
         "blastp -outfmt 0, threads 4",
     );
@@ -288,7 +300,7 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
         let (off, on) = same_runs(&dir, task, &subject, threads, &base, &[]);
         assert!(!off.stdout.is_empty(), "the fixture pair has rows");
         let what = format!("{task} -db, threads {threads}");
-        assert_built_ahead(&on.stats("BPLKPAHEAD"), off.searches(), &what);
+        assert_built_ahead(&on.printed("BPLKPAHEAD"), off.searches(), &what);
     }
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -401,7 +413,7 @@ fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
     ];
     let (off, on) = same_runs(&dir, "blastp", &subject, 4, &base, &[]);
     assert_built_ahead(
-        &on.stats("BPLKPAHEAD"),
+        &on.printed("BPLKPAHEAD"),
         off.searches(),
         "exact, BPCLUT=0 BPLKPFLAT=0",
     );
@@ -410,8 +422,8 @@ fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
 
 // Split query batches inside the blocks (`CHUNK_SIZE` 1000, `OVERLAP_CHUNK_SIZE` 100): each query
 // chunk builds its own table inside its block's search (nothing ahead) while the next block's table
-// is built ahead; for blastp-fast the pool's builds counted by `[X_STATS] BPLKPFLAT` then include the
-// builds ahead (one-latch passes on the second spare's vectors), and for exact blastp.
+// is built ahead; for blastp-fast the pool's builds counted by `[X_STATS] BPLKPFLAT` then include
+// the builds ahead (one-latch passes on the second spare's vectors), and for exact blastp.
 #[test]
 fn query_chunks_of_split_batches_build_their_own_tables() {
     let dir = test_dir("chunks");
@@ -428,10 +440,10 @@ fn query_chunks_of_split_batches_build_their_own_tables() {
         let (off, on) = same_runs(&dir, task, &subject, 4, &base, &[]);
         assert!(!off.stdout.is_empty(), "the fixture pair has rows");
         let what = format!("{task} split batches");
-        let counts = on.stats("BPLKPAHEAD");
+        let counts = on.printed("BPLKPAHEAD");
         assert_built_ahead(&counts, off.searches(), &what);
         if task == "blastp-fast" {
-            let flat = on.stats("BPLKPFLAT");
+            let flat = on.printed("BPLKPFLAT");
             assert!(
                 flat["tables"] > off.searches() + counts["prebuilt"],
                 "{what}: {flat:?}"

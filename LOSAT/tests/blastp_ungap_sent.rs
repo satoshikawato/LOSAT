@@ -224,6 +224,10 @@ fn blastp_fast_keeps_the_closure_without_the_path() {
     let off = blastp(&args, &[OFF]);
     assert_eq!(off.code, Some(0), "{}", off.stderr);
     assert!(off.stdout == on.stdout, "report differs");
-    let (new, _) = reach.sides("LOSAT_X_BPUNGAPSENT");
-    assert!(!new, "the path was taken on blastp-fast");
+    // The word size of blastp-fast refuses the path: the search marks the reference side.
+    assert_eq!(
+        reach.sides("LOSAT_X_BPUNGAPSENT"),
+        (false, true),
+        "the path was taken on blastp-fast, or the search never reached the switch"
+    );
 }

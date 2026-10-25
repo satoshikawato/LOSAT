@@ -35,8 +35,7 @@
 //! O are set); every subject of the final hit lists when a report renders the alignments (outfmt 0,
 //! XML, tabular fields other than the default ones, the hits of the library API); every listed
 //! subject when the reports make records (`ListedSubjects::read_titles`: `LOSAT_X_BPLISTEDLEAN=0`,
-//! ABI v1's titles). No report reads the letters of a subject left without
-//! residues.
+//! ABI v1's titles). No report reads the letters of a subject left without residues.
 //!
 //! A reader error of the redo's reads is the error that `ListedSubjects::read` gives for the same
 //! read (`database_error`); it is reached in the redo, where NCBI reaches its own reads, and only

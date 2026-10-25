@@ -97,9 +97,9 @@
 //!
 //! `LOSAT_X_BPLKPAHEAD` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`.
 //!
-//! With `LOSAT_X_STATS`, `main` prints `[X_STATS] BPLKPAHEAD blocks= prebuilt= dropped=` at exit when a
-//! counter is not zero (`blocks`: blocks searched where the switch acts; `prebuilt`: blocks that took
-//! values built ahead; `dropped`: builds ahead that gave no values). The unit test
+//! With `LOSAT_X_STATS`, `main` prints `[X_STATS] BPLKPAHEAD blocks= prebuilt= dropped=` at exit
+//! when a counter is not zero (`blocks`: blocks searched where the switch acts; `prebuilt`: blocks
+//! that took values built ahead; `dropped`: builds ahead that gave no values). The unit test
 //! `values_built_ahead_are_the_values_the_block_builds_itself` builds a block's values ahead and
 //! inline, for blastp-fast and exact blastp, and compares the query frames, the table and the
 //! contexts (the Karlin blocks bit for bit).
@@ -153,7 +153,8 @@ pub(crate) fn x_bp_lkp_ahead() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLKPAHEAD"))
 }
 
-// No NCBI counterpart: counters of the `[X_STATS] BPLKPAHEAD` line; they change no value NCBI computes.
+// No NCBI counterpart: counters of the `[X_STATS] BPLKPAHEAD` line; they change no value NCBI
+// computes.
 static X_BLOCKS: AtomicU64 = AtomicU64::new(0);
 static X_PREBUILT: AtomicU64 = AtomicU64::new(0);
 static X_DROPPED: AtomicU64 = AtomicU64::new(0);
@@ -1035,8 +1036,8 @@ mod tests {
     // A block's values built ahead (`x_build_ahead` as a task of the pool, on the second spare's
     // vectors made ready as the block loop makes them, once the block before it has its table) are
     // the values the block's own search builds: the query frames, the table and the contexts, with
-    // the Karlin blocks bit for bit, for blastp-fast (the flat table) and for exact blastp, on a pool
-    // of three threads, SEG masks included.
+    // the Karlin blocks bit for bit, for blastp-fast (the flat table) and for exact blastp, on a
+    // pool of three threads, SEG masks included.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1057,32 +1058,50 @@ mod tests {
                 let (first_lookup, _) = own_build(&args, &first, &first_frames, batch_size, &pool);
                 assert!(
                     x_make_room(&pool, &first_lookup, &Cell::new(0)),
-                    "{task}: the pool's spares"
+                    "{task}: no spares in the pool (LOSAT_X_BPCLUT, LOSAT_X_BPLKPFLAT or \
+                     LOSAT_X_BPLUT is set to 0)"
                 );
                 let (_, built) = x_run_with_build_ahead(
                     || x_build_ahead(&args, &next, batch_size, &pool),
                     |spawn| spawn(),
                 );
                 let Some(XBuilt::Values(ahead)) = built else {
-                    panic!("{task}: no values built ahead");
+                    panic!(
+                        "{task}: no values built ahead (LOSAT_X_BPLKPAHEAD is 0, LOSAT_X_BPQBLOCK \
+                         is changed or LOSAT_DIAGNOSTICS is set)"
+                    );
                 };
                 // The next block's own search.
                 let frames = blastp_query_frames(&args, &next);
+                assert!(
+                    frames
+                        .iter()
+                        .flatten()
+                        .any(|frame| !frame.seg_masks.is_empty()),
+                    "{task}: no SEG mask in the fixture"
+                );
                 if let Some(difference) = x_frames_difference(&ahead.query_frames, &frames) {
                     panic!("{task}: {difference}");
                 }
                 let (table, contexts) = own_build(&args, &next, &frames, batch_size, &pool);
+                assert!(!contexts.is_empty(), "{task}: no contexts");
                 match (&ahead.table, &table) {
                     (
                         BlastpRuntimeLookup::CompressedFlat(got),
                         BlastpRuntimeLookup::CompressedFlat(want),
                     ) => {
+                        assert!(!want.hits.is_empty(), "{task}: the flat table has no hits");
                         if !x_same_flat_tables(got, want) {
                             x_assert_same_flat_tables_as("ahead:", got, want);
                             panic!("{task}: the tables differ");
                         }
                     }
                     (BlastpRuntimeLookup::Aa(got), BlastpRuntimeLookup::Aa(want)) => {
+                        assert!(
+                            want.backbone.iter().any(|cell| cell.num_used > 0)
+                                || !want.overflow.is_empty(),
+                            "{task}: the table has no hits"
+                        );
                         if !x_same_table(got, want) {
                             x_assert_same_table_as("ahead:", got, want);
                             panic!("{task}: the tables differ");

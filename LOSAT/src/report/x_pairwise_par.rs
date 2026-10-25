@@ -1,7 +1,7 @@
-//! EXPERIMENT (LOSAT_X_PAIRWISEPAR): the per-query parts of the
-//! pairwise reports (outfmt 0) of BLASTN, TBLASTX and BLASTP formatted on the search's pool, and
-//! BLASTN's and BLASTP's outfmt 0 rows (`algorithm/blastn/pairwise.rs`, `pairwise_hits`;
-//! `algorithm/blastp/blast_engine.rs`, `build_pairwise_hits`) made on it.
+//! EXPERIMENT (LOSAT_X_PAIRWISEPAR): the per-query parts of the pairwise reports (outfmt 0) of
+//! BLASTN, TBLASTX and BLASTP formatted on the search's pool, and BLASTN's and BLASTP's outfmt 0
+//! rows (`algorithm/blastn/pairwise.rs`, `pairwise_hits`; `algorithm/blastp/blast_engine.rs`,
+//! `build_pairwise_hits`) made on it.
 //!
 //! The writers (`write_blastn_pairwise_report`, `write_tblastx_pairwise_report`,
 //! `write_blastp_pairwise_report` in `pairwise.rs`) run on the thread of the search's loop while

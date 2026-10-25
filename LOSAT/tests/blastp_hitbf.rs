@@ -154,11 +154,11 @@ struct Run {
 }
 
 impl Run {
-    /// Standard error without the diagnostic lines (`[TIMING]`, `[X_STATS]`).
+    /// Standard error without the `[TIMING]` lines.
     fn messages(&self) -> String {
         self.stderr
             .lines()
-            .filter(|line| !line.starts_with("[TIMING]") && !line.starts_with("[X_STATS]"))
+            .filter(|line| !line.starts_with("[TIMING]"))
             .map(|line| format!("{line}\n"))
             .collect()
     }

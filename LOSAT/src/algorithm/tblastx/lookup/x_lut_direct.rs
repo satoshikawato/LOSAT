@@ -916,8 +916,8 @@ fn x_build_direct_in(
 //         }
 //     }
 // ```
-/// EXPERIMENT (LOSAT_X_BPLUT): `true` = BLASTP's table built in place by [`x_build_direct`], `false` =
-/// off (`build_ncbi_lookup`).
+/// EXPERIMENT (LOSAT_X_BPLUT): `true` = BLASTP's table built in place by [`x_build_direct`],
+/// `false` = off (`build_ncbi_lookup`).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
 // `LOSAT_X_BPLUT` is a strict-set switch.
 pub(super) fn x_bplut_on() -> bool {
@@ -1008,10 +1008,10 @@ fn x_bp_prepared_query(queries: &[Vec<QueryFrame>], check_ideal: bool) -> Prepar
 }
 
 /// The body of [`x_bp_build_lookup`] and [`x_tbx_build_lookup`]: with `direct` false it calls
-/// `build_ncbi_lookup`; with `direct` true it prepares the query as `build_ncbi_lookup_for_profile(..,
-/// Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`], falling back
-/// to the reference builder where that declines. `reach` is called with `direct` true with whether
-/// the direct builder built the table (`LOSAT_X_REACH`).
+/// `build_ncbi_lookup`; with `direct` true it prepares the query as
+/// `build_ncbi_lookup_for_profile(.., Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with
+/// [`x_build_direct`], falling back to the reference builder where that declines. `reach` is called
+/// with `direct` true with whether the direct builder built the table (`LOSAT_X_REACH`).
 fn x_build_ncbi_lookup_with(
     direct: bool,
     queries: &[Vec<QueryFrame>],
@@ -1464,8 +1464,8 @@ mod tests {
         ]
     }
 
-    /// `x_bp_build_lookup(true, ..)`'s table and contexts are those of `got`: every table field, and
-    /// every context field (the Karlin blocks by their bits).
+    /// `x_bp_build_lookup(true, ..)`'s table and contexts are those of `got`: every table field,
+    /// and every context field (the Karlin blocks by their bits).
     fn assert_same_bp(got: &(BlastAaLookupTable, Vec<QueryContext>), queries: &[Vec<QueryFrame>]) {
         let params = blosum62_ideal_karlin_params();
         let (want, want_contexts) = x_bp_build_lookup(true, queries, 11, &params, false);

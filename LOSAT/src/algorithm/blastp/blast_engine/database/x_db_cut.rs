@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_BPDBCUT): the blocks of a `-db` search's
-//! preliminary stage cut by the size of the database and the thread count.
+//! EXPERIMENT (LOSAT_X_BPDBCUT): the blocks of a `-db` search's preliminary stage cut by the size
+//! of the database and the thread count.
 //!
 //! Without the switch, `search_blocks` reads the database in blocks of at most `BLOCK_BYTES`
 //! (1 MiB) of its sequence file, and with more than one thread searches rounds of up to

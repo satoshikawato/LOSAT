@@ -1071,12 +1071,11 @@ Rebuilding less:
   made, and the composition-based redo and its Newton prefetch take it instead of reading the
   same bytes again for every query (`read_aa_composition` on the same bytes gives the same
   bits). A range SEG does not mask (near-identical or not biased) is read as before; a masked
-  range whose window the redo skips has its composition read once anyway. On WSSV x PajaWSV (one thread)
-  the subject composition was read 9,434 times from 86 different byte strings, all of them cache
-  entries (line C, v4-C DECISIONS 25). Each entry holds a pointer and, when the switch is on,
-  232 bytes on the heap. Workstation, one core, 8 rounds (2026-10-19): WSSV x PajaWSV n1 0.978
-  of the time with this switch alone (0.943 with `LOSAT_X_ERFABSORB` as well); max RSS
-  unchanged.
+  range whose window the redo skips has its composition read once anyway. On WSSV x PajaWSV (one
+  thread) the subject composition was read 9,434 times from 86 different byte strings, all of them
+  cache entries (line C, v4-C DECISIONS 25). Each entry holds a pointer and, when the switch is
+  on, 232 bytes on the heap. Workstation, one core, 8 rounds (2026-10-19): WSSV x PajaWSV n1 0.978
+  of the time with this switch alone (0.943 with `LOSAT_X_ERFABSORB` as well); max RSS unchanged.
 - TBNQSIDE (graduated 2026-10-22; no variable; always on) tblastn: query SEG and lookup table
   once per query set (`XQuerySide`); the per-subject build is gone.
 - TBNSSIDE (graduated 2026-10-22; no variable; conditional: its rule stays) tblastn: subject
@@ -1713,23 +1712,22 @@ Rebuilding less:
   counted from the compact lists. Where the path does not run after all (fewer than two matches), every list is expanded before
   the other paths, as without the switch. The expanded lists held at a time are those of the queries of about one
   window, and each query's compact list is freed when it is expanded.
-  Evidence 2026-10-20 (v4-D12 s3 probe, workstation): in
-  `blastp -db` UniRef50 q100 at 32 threads the expansion of all 91 lists of the first query batch (194,347 HSPs of
-  168 bytes) added 31 MiB to the main heap before the redo, which ran in 10 windows. Measured (head 6ef84094,
-  workstation, on / off in one job): that run (node 1, the branch merged with `LOSAT_X_BPLISTEDLEAN`'s pull request)
-  peak RssAnon 268.0 / 286.2 MiB (max RSS 258.1 / 276.2 MiB; NCBI 195 MiB), wall 539.7 / 539.9 s, the same output (= NCBI),
-  the same 10 windows; the end-stage rise 67.9 / 86.6 MB. Less than the 31 MiB of the full expansion: with it, the
-  allocations after the redo fitted into the memory that the released lists left in the main heap. Swiss-Prot q100 at
-  8 threads, max RSS (median of 3 pairs): 119.6 / 123.6 MiB merged as above, 139.6 / 139.6 MiB with outfmt 0, and
-  166.4 / 165.4 MiB on the branch alone (without the lean titles the ASCII records made after the redo reused the
-  released lists' memory). Instructions (`perf stat` `:u`, 8 threads, on / off) x1.000011 OrthoFinder blastp-fast
-  Species4 x BlastDBSpecies6, x0.999987 Swiss-Prot q100 outfmt 6, x0.999980 the same with outfmt 0, x0.999998
-  `uniref50.04` q100. Timed (same binary on / off, 8 cores of node 0 with their siblings idle, warmed, order
-  alternated): median ratio of wall time x1.001 (0.958-1.048, 8 pairs) `uniref50.04` q100 (max RSS 49 / 53 MiB),
-  x1.000 (0.986-1.010, 10) Swiss-Prot q100, x1.000 (0.995-1.003, 8) OrthoFinder. Gates (head 1273374d): `cargo test`
-  (88 binaries, 2,018 passed); ci_fast all programs with the switch, with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases,
-  0 failures each); blastp `-db` fixtures at 1 and 4 threads under the shadow (56 rows, 0 differing, the exit line
-  `identical` in every run that ends without an error).
+  Evidence 2026-10-20 (v4-D12 s3 probe, workstation): in `blastp -db` UniRef50 q100 at 32 threads the expansion of all
+  91 lists of the first query batch (194,347 HSPs of 168 bytes) added 31 MiB to the main heap before the redo, which
+  ran in 10 windows. Measured (head 6ef84094, workstation, on / off in one job): that run (node 1, the branch merged
+  with `LOSAT_X_BPLISTEDLEAN`'s pull request) peak RssAnon 268.0 / 286.2 MiB (max RSS 258.1 / 276.2 MiB; NCBI 195
+  MiB), wall 539.7 / 539.9 s, the same output (= NCBI), the same 10 windows; the end-stage rise 67.9 / 86.6 MB. Less
+  than the 31 MiB of the full expansion: with it, the allocations after the redo fitted into the memory that the
+  released lists left in the main heap. Swiss-Prot q100 at 8 threads, max RSS (median of 3 pairs): 119.6 / 123.6 MiB
+  merged as above, 139.6 / 139.6 MiB with outfmt 0, and 166.4 / 165.4 MiB on the branch alone (without the lean titles
+  the ASCII records made after the redo reused the released lists' memory). Instructions (`perf stat` `:u`, 8 threads,
+  on / off) x1.000011 OrthoFinder blastp-fast Species4 x BlastDBSpecies6, x0.999987 Swiss-Prot q100 outfmt 6,
+  x0.999980 the same with outfmt 0, x0.999998 `uniref50.04` q100. Timed (same binary on / off, 8 cores of node 0 with
+  their siblings idle, warmed, order alternated): median ratio of wall time x1.001 (0.958-1.048, 8 pairs)
+  `uniref50.04` q100 (max RSS 49 / 53 MiB), x1.000 (0.986-1.010, 10) Swiss-Prot q100, x1.000 (0.995-1.003, 8)
+  OrthoFinder. Gates (head 1273374d): `cargo test` (88 binaries, 2,018 passed); ci_fast all programs with the switch,
+  with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases, 0 failures each); blastp `-db` fixtures at 1 and 4 threads under
+  the shadow (56 rows, 0 differing, the exit line `identical` in every run that ends without an error).
 - `LOSAT_X_BPSEED=1` (BLASTP, speed; in the strict set since 2026-10-14; `=0` turns it off) the two-hit seed
   stage with an amino-acid lookup table
   (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one
@@ -1887,13 +1885,14 @@ Rebuilding less:
   `-db` at 16 threads, both on vs both off: 0.950 (2 rounds). Exact `blastp` 1.012 (2 rounds; no compressed
   table). At one thread the serial build runs and the switch changes nothing.
   With `LOSAT_X_STATS` one line at exit when the pool built a table:
-  `[X_STATS] BPLKPFLAT tables= recycled= recycled_hits=` (`tables`: flat tables the switch's build made, the
-  block searches', the query chunks' and, with `LOSAT_X_BPLKPAHEAD`, the builds ahead; `recycled` /
+  `[X_STATS] BPLKPFLAT tables= recycled= recycled_hits=` (`tables`: flat tables the switch's pool build made
+  (each search's, each query chunk's and, with `LOSAT_X_BPLKPAHEAD`, each build ahead); `recycled` /
   `recycled_hits`: builds whose `starts` / whose `hits` are the buffer of an earlier table, `hits` only where
   it had the room; with `LOSAT_X_BPLKPAHEAD` on, also builds ahead on the second spare's vectors, which
   `x_make_room` allocated or moved there, since the reuse test sees only capacity). The unit tests of
-  `x_clut_par.rs` build on recycled vectors, on vectors of garbage (`u32::MAX`, `i32::MIN`) and with the
-  Karlin tasks, and compare every table and context with the serial build's and the reference's.
+  `x_clut_par.rs` build on recycled vectors and on vectors of garbage (`u32::MAX`, `i32::MIN`) and compare
+  every table with the serial build's and the reference's; those of `x_query_blocks.rs` and
+  `x_lookup_ahead.rs` compare the contexts made with the Karlin tasks.
 - `LOSAT_X_BPLKPAHEAD=1` (BLASTP `-task blastp-fast`, and exact blastp since 2026-10-20 (perf/bp-lkp-exact), speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`; acts only in the block search of `LOSAT_X_BPQBLOCK`, with `-subject`
   or `-db`, with more than one thread: for blastp-fast where `LOSAT_X_BPLKPFLAT` acts on the pool's flat table
   of `LOSAT_X_BPCLUT`; for exact blastp where its table is built in place
@@ -1999,13 +1998,14 @@ Rebuilding less:
   lie on distinct entries and a call reads and writes only its candidate's entry and the HSP list, so the later
   batches of the cell touch nothing a call reads or writes, and the calls keep their order. With
   `LOSAT_TIMING=1` the `x_bpdiag` line names `mode=avx2-defer` (with `LOSAT_X_BPMASKED=0`; by default
-  `avx2-defer-masked`, see that entry), with the counts of the AVX2 batch. Measured 2026-10-16 on the workstation (perf stat, user-space cycles; the other nine blastp switches
-  and `LOSAT_X_BPQBLOCK=50000` in both arms, x the subject proteome by `-subject`, one thread, outputs identical
-  in every arm): on stage7's 49 OrthoFinder jobs (every 10th query protein of each species x the whole subject
-  proteome, 28 jobs side by side, both arms in one run) the summed cycles were 0.938 of the run without it (per
-  job 0.925-0.965, median 0.936) and the instructions 0.985; on one core in alternated pairs Blast0_6 0.920
-  (`blastp_scan_ungapped` 45.0 -> 40.2 s), human block 1 0.950 and C. elegans block 5 0.963 (its gapped
-  stages are over half of the job), with 13-18 % fewer branch mispredicts.
+  `avx2-defer-masked`, see that entry), with the counts of the AVX2 batch. Measured 2026-10-16 on the
+  workstation (perf stat, user-space cycles; the other nine blastp switches and `LOSAT_X_BPQBLOCK=50000` in
+  both arms, x the subject proteome by `-subject`, one thread, outputs identical in every arm): on stage7's 49
+  OrthoFinder jobs (every 10th query protein of each species x the whole subject proteome, 28 jobs side by
+  side, both arms in one run) the summed cycles were 0.938 of the run without it (per job 0.925-0.965, median
+  0.936) and the instructions 0.985; on one core in alternated pairs Blast0_6 0.920 (`blastp_scan_ungapped`
+  45.0 -> 40.2 s), human block 1 0.950 and C. elegans block 5 0.963 (its gapped stages are over half of the
+  job), with 13-18 % fewer branch mispredicts.
 - `LOSAT_X_BPMASKED=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-24;
   `=0` turns it off; acts only where `LOSAT_X_BPDEFER`'s deferred calls run: not with `LOSAT_X_BPDEFER=0` or
   `LOSAT_X_BPDIAG_SIMD=0`, not without AVX2 (aarch64, WebAssembly), not with `LOSAT_X_BPSEED=0` or
@@ -4659,14 +4659,13 @@ Scheduling (each value computed by one thread with the original function; order 
   most 32,767 - largest entry - 16 x `gap_extend` - 1 (32,739 for BLOSUM62 with 11/1), and past that
   the 32-bit rows compute the alignment again from row 0. x86_64 with AVX2, BMI1 and LZCNT only:
   aarch64 and WebAssembly keep the reference function (no AVX-512 on the default path).
-  Measured 2026-10-23
-  on the workstation (node 1, CPU 40 for one thread and CPUs 40-47 for eight, their HT siblings
-  idle, warmed 3 s before every run, arm order reversed every other round, medians of the per-round
-  ratios against dev 7cfec941, the binary before the switch; every report identical between the arms
-  and equal to NCBI BLAST+ 2.17.0's). OrthoFinder jobs of 7 species at one thread (`-subject`,
-  `-evalue 0.001`, 4 rounds): Blast0_6 x0.959 (54.56 -> 52.35 s, 4 of 4 rounds below 1; cycles
-  x0.959, instructions x0.974), Blast6_6 x0.957 (18.32 -> 17.55 s). With the prototype of the same
-  rows (8 rounds at one thread, 2 at eight): Blast0_6 x0.957, Blast6_6 x0.956, 5,000 x 5,000
+  Measured 2026-10-23 on the workstation (node 1, CPU 40 for one thread and CPUs 40-47 for eight,
+  their HT siblings idle, warmed 3 s before every run, arm order reversed every other round, medians
+  of the per-round ratios against dev 7cfec941, the binary before the switch; every report identical
+  between the arms and equal to NCBI BLAST+ 2.17.0's). OrthoFinder jobs of 7 species at one thread
+  (`-subject`, `-evalue 0.001`, 4 rounds): Blast0_6 x0.959 (54.56 -> 52.35 s, 4 of 4 rounds below 1;
+  cycles x0.959, instructions x0.974), Blast6_6 x0.957 (18.32 -> 17.55 s). With the prototype of the
+  same rows (8 rounds at one thread, 2 at eight): Blast0_6 x0.957, Blast6_6 x0.956, 5,000 x 5,000
   UniRef50 proteins (`-db`, `-evalue 0.001`, 8 threads) x0.962, a 42-letter UniRef50 query against
   the first UniRef50 volume (`-evalue 1e-5`, one thread, few restricted alignments) x1.001. In
   Blast0_6 the restricted rows went from 20.1 to 13.3 G cycles (11.6 % of dev's cycles in `perf

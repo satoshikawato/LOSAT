@@ -48,10 +48,10 @@ struct Run {
 /// against `subject` (`-subject FILE` or `-db NAME`), with `vars` as its only `LOSAT_*` variables
 /// that choose a code path, `BATCH_SIZE` 3000 (several query batches), `extra` arguments and
 /// `-outfmt outfmt`. `LOSAT_X_BPQBLOCK` is 0 (one search of all queries) unless `vars` sets it, so
-/// that the searches do not depend on the strict set's default. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
-/// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
-/// soon as a search has more than one thread, and it selects nothing; without the caller's value
-/// a file of the tests is named. The run must exit with 0.
+/// that the searches do not depend on the strict set's default. `LOSAT_BLASTX_WORKER_LOG` stays: a
+/// binary built with the `blastx-worker-probe` feature (`cargo test --all-features`, as in CI)
+/// needs that file name as soon as a search has more than one thread, and it selects nothing;
+/// without the caller's value a file of the tests is named. The run must exit with 0.
 fn blastp(
     task: &str,
     subject: &[&OsStr],
@@ -278,7 +278,8 @@ fn subject_database() -> PathBuf {
 
 // Where the subjects are not searched on the pool (one thread; a database, whose blocks are
 // searched with one table each already), the switch does not act: the run with the switch on
-// takes no new side (`LOSAT_X_REACH`).
+// takes no new side (`LOSAT_X_REACH`). The one-thread `-subject` loop marks the reference side
+// (the run went through the switch's decision); the `-db` search marks none.
 #[test]
 fn the_switch_does_not_act_at_one_thread_or_on_a_database() {
     let subject = subject_file();
@@ -293,10 +294,12 @@ fn the_switch_does_not_act_at_one_thread_or_on_a_database() {
             "threads {threads}: the fixture pair has rows"
         );
         let sides = reach.sides("LOSAT_X_BPSUBJRUN");
-        assert!(
-            !sides.0,
-            "threads {threads}: the runs were searched: {sides:?}"
-        );
+        let want = if threads == 1 {
+            (false, true)
+        } else {
+            (false, false)
+        };
+        assert_eq!(sides, want, "threads {threads}: the runs were searched?");
     }
     let _ = std::fs::remove_dir_all(database.parent().unwrap());
 }

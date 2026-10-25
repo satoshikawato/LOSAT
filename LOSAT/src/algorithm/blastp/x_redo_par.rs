@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_BPREDOPAR): blastp's composition-based redo with
-//! jobs of a few matches on the search's pool.
+//! EXPERIMENT (LOSAT_X_BPREDOPAR): blastp's composition-based redo with jobs of a few matches on
+//! the search's pool.
 //!
 //! NCBI's redo (`Blast_RedoAlignmentCore_MT`, below) reads the matches of all queries from the
 //! preliminary stream into one array, in the stream's order (the queries in order, and the HSP
@@ -96,13 +96,13 @@
 //! those computed and dropped).
 //!
 //! `LOSAT_X_BPREDOLPT` (a switch of the strict set, on by default since 2026-10-17; it acts only
-//! where this path runs) computes a window of two or more jobs in one `rayon::scope` of `min(threads, jobs)`
-//! tasks instead of a `par_iter` over its jobs: each task holds one set of scratch and takes the
-//! window's jobs one at a time from one counter, in the order of their estimated cost (the sum
-//! over a job's computed matches of query letters times subject letters, largest first, ties by
-//! job index), and stores each job's results in the job's slot (`x_compute_window_lpt`). The
-//! window's results are read by job index as without it. With it on, the `[TIMING] x_bpredopar:`
-//! line ends with `lpt_windows=<windows computed so>`.
+//! where this path runs) computes a window of two or more jobs in one `rayon::scope` of
+//! `min(threads, jobs)` tasks instead of a `par_iter` over its jobs: each task holds one set of
+//! scratch and takes the window's jobs one at a time from one counter, in the order of their
+//! estimated cost (the sum over a job's computed matches of query letters times subject letters,
+//! largest first, ties by job index), and stores each job's results in the job's slot
+//! (`x_compute_window_lpt`). The window's results are read by job index as without it. With it on,
+//! the `[TIMING] x_bpredopar:` line ends with `lpt_windows=<windows computed so>`.
 //!
 //! `LOSAT_X_BPREDOWINEXPAND` (a switch of the strict set, on by default from the pull request that
 //! added it; it acts only where this path runs, with the compact lists of
@@ -2030,8 +2030,8 @@ mod tests {
     }
 
     /// The driver on `lists` expanded before the windows and on their compact lists expanded ahead
-    /// of the windows: the same windows, counts, matches computed and heaps. Returns, per window of the second run, which lists were there, and its
-    /// counts.
+    /// of the windows: the same windows, counts, matches computed and heaps. Returns, per window of
+    /// the second run, which lists were there, and its counts.
     fn same_windows_expanding_ahead(
         lists: &[Option<BlastpHitList>],
         heap_threshold: usize,

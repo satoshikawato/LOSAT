@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel preliminary loop of a
-//! `-subject` search in runs of consecutive subjects, one diagonal table fill per run.
+//! EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel preliminary loop of a `-subject` search in runs of
+//! consecutive subjects, one diagonal table fill per run.
 //!
 //! Without the switch, the parallel loop of `run_resolved_in_pool` searches each subject on its own:
 //! `for_each_init` makes a new `BlastpSubjectScratch` for every piece rayon splits the subjects into
@@ -254,7 +254,8 @@ fn x_search_run<K>(
 }
 
 /// The runs `runs` searched by `workers` tasks of the current rayon pool (one `rayon::scope`),
-/// each with one scratch made by `new_scratch` when it takes its first run, into `subject_results` (one slot per subject, every slot of a run written by its task).
+/// each with one scratch made by `new_scratch` when it takes its first run, into `subject_results`
+/// (one slot per subject, every slot of a run written by its task).
 fn x_search_runs<S, K>(
     workers: usize,
     runs: &[Range<usize>],

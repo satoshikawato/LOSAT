@@ -240,9 +240,10 @@ fn the_switch_does_not_act_without_the_subject_block_search() {
         "6",
     );
     let sides = reach.sides("LOSAT_X_BPSUBJMETA");
-    assert!(
-        !sides.0,
-        "the search of all queries made stored IDs: {sides:?}"
+    assert_eq!(
+        sides,
+        (false, false),
+        "the search of all queries made stored IDs"
     );
     // A database made with `losat makedb`; its block search reads the definition lines per block.
     let name = dir.join("MejoMJNV");
@@ -264,8 +265,13 @@ fn the_switch_does_not_act_without_the_subject_block_search() {
     let (off, reach) = same_runs(&dir, "blastp-fast", &db, 4, &base, "6");
     assert_eq!(off.code, Some(0), "{}", off.stderr);
     assert!(!off.stdout.is_empty());
+    assert!(
+        reach.sides("LOSAT_X_BPQBLOCK").0,
+        "the -db block search did not run"
+    );
+    // The block search builds its (empty) subject records, so it marks the reference side only.
     let sides = reach.sides("LOSAT_X_BPSUBJMETA");
-    assert!(!sides.0, "a database search made stored IDs: {sides:?}");
+    assert_eq!(sides, (false, true), "a database search made stored IDs?");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -295,9 +301,9 @@ fn subject_file_with_an_undecodable_reported_title(dir: &Path, first_row: &[u8])
 // A reported subject whose tabular ID cannot be written: the run is refused with the same message,
 // exit code and rows (none: LOSAT rejects it before any format is written) with the switch off and
 // on. The block search is not taken for such a subject set (`x_query_block_plan`), so the switch
-// is not reached; this test shows that the switch does not change the refusal. The check of the stored values with such
-// records is tested in `x_subject_meta.rs`. One search setting: the plan refuses such a subject set
-// whatever the block size, before any block runs, at any thread count.
+// is not reached; this test shows that the switch does not change the refusal. The check of the
+// stored values with such records is tested in `x_subject_meta.rs`. One search setting: the plan
+// refuses such a subject set whatever the block size, before any block runs, at any thread count.
 #[test]
 fn a_reported_subject_without_a_tabular_id_is_refused_alike_with_the_switch() {
     let dir = test_dir("undecodable");

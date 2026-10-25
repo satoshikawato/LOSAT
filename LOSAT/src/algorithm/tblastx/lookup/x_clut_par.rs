@@ -86,7 +86,8 @@
 //!   build takes and sizes the vectors itself, before the stripes pass, never in a pass's tasks; a
 //!   build that ends `TooLarge` drops the spare's vectors (the reference builder makes that table,
 //!   and they are not kept beside it). The unit tests fill the spare's vectors with `u32::MAX` /
-//!   `i32::MIN` first, so that an entry no stripe writes always differs from the fresh build's.
+//!   `i32::MIN` first (a spare of garbage first gets room for a word-size-5 table), so that an
+//!   entry no stripe writes differs from the fresh build's where the spare has the room.
 //! - extra tasks (`XExtraTasks`: the contexts' Karlin blocks of a blastp block,
 //!   `blastp/x_query_blocks.rs`): the one-latch appends pass runs them after its chunks (the indices
 //!   past the chunks), each once, also when the build then ends `TooLarge` or refused. They read
@@ -999,9 +1000,9 @@ mod tests {
         .expect("word size 5")
     }
 
-    /// Fills `spare`'s vectors, to their whole capacity, with `u32::MAX` / `i32::MIN`: an entry that
-    /// no stripe writes then keeps a value that no build makes (the build takes the vectors' values
-    /// as they are, module header).
+    /// Fills `spare`'s vectors, to their whole capacity, with `u32::MAX` / `i32::MIN`: an entry
+    /// that no stripe writes then keeps a value that no build makes (the build takes the vectors'
+    /// values as they are, module header).
     fn poison(spare: &XFlatSpare) {
         let mut kept = spare.0.lock().unwrap();
         let (starts, hits) = &mut *kept;
@@ -1052,6 +1053,16 @@ mod tests {
             vec![i32::MIN + 1; rng.below(4000)],
         );
         spare
+    }
+
+    /// Reserves room in a spare of garbage for a word-size-5 table's `starts` and for 65,536 hits,
+    /// so that `poison` fills whole vectors and the build never allocates a fresh (zeroed) vector
+    /// where a spare is poisoned.
+    fn give_room(spare: &XFlatSpare) {
+        let mut kept = spare.0.lock().unwrap();
+        let (starts, hits) = &mut *kept;
+        starts.reserve(759_377);
+        hits.reserve(1 << 16);
     }
 
     /// The capacities of the spare's vectors.
@@ -1236,6 +1247,9 @@ mod tests {
                         };
                         let spare = garbage_spare(&mut rng);
                         let poison = rng.below(2) == 0;
+                        if poison {
+                            give_room(&spare);
+                        }
                         match (
                             &reference,
                             parallel(
@@ -1289,6 +1303,9 @@ mod tests {
                     };
                     let spare = garbage_spare(&mut rng);
                     let poison = rng.below(2) == 0;
+                    if poison {
+                        give_room(&spare);
+                    }
                     let built = parallel(
                         3,
                         threshold,

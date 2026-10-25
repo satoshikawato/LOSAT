@@ -670,7 +670,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "searchsp"
             | "seqidlist"
             | "show_gis"
-            | "soft_masking"
             | "sorthits"
             | "sorthsps"
             | "strand"

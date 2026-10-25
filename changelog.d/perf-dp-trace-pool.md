@@ -1,0 +1,1 @@
+- Long gapped alignments on two threads or more keep less memory: the X-drop traceback rows of a long alignment come from a pool the workers share instead of every worker keeping the largest it ever held. @@CHANGELOG@@; same results (`LOSAT_X_DPTRACEPOOL`, one of the switches above; `=0` turns it off).

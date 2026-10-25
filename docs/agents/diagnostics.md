@@ -765,7 +765,26 @@ Same values, faster computation:
   for 140 -> 123 and 137 -> 121 MiB, hence the rule. D. melanogaster cDNAs x genome `-db` dc-megablast 16
   threads x1.014 (6 pairs, 0.985-1.045; user x0.996, cycles x0.994: steps of `time %e`), blastp sp4
   `-subject` 16 threads x1.002, 1,000 proteins 1 thread x1.002, yeast `-db` x0.997, blastx 50 kb x dmel
-  proteome `-db` x1.000. NCBI `-subject` (one thread) 164-177 MiB.
+  proteome `-db` x1.000. NCBI `-subject` (one thread) 164-177 MiB. Against dev aa8281a7 (the merged form:
+  the kernels' script codes in `const` blocks keep a one-byte kernel's register allocation, one thread at
+  dev's instructions, x0.998 / x0.999): dc-megablast 16 threads x0.984 (8 pairs), 633 -> 476; blastn 16
+  threads x0.986 (8), 535 -> 379; 4 threads x0.993 / x1.000 (6), 217 -> 189 / 257 -> 197.
+- `LOSAT_X_DPTRACEPOOL=1` (every program's vector X-drop traceback, memory; in the strict set from the
+  pull request that added it, @@DATE@@; `=0` returns to one trace per scratch) each scratch of a search
+  (`XdropScratch`, one per worker and look-ahead helper) kept the largest traceback rows it ever held
+  (`trace` and `rows`, NCBI's `edit_script` and `edit_start_offset`), so on 16 threads every worker ended
+  the traceback stage of a genome pair holding a long trace (Sakai x EDL933: 130 dc-megablast calls of
+  1 MiB or more, spread over the whole stage). Now a trace that passes 1 MiB while it grows takes the
+  largest idle pair of a pool the scratches share (the rows so far are copied over; the thread's own small
+  buffers wait in a thread-local) and gives it back after the traceback call; the pool keeps at most four
+  idle pairs and frees the smallest. The kernels write and the walk reads the same rows, so every script,
+  edit operation, score and offset is the same; the 1 MiB test runs at the kernels' row reserve, which takes
+  only the two buffers (`x_trace_reserve`), so the kernels' machine code is unchanged (one thread at dev's
+  instructions, x1.0000). The rule (conditional): a trace that grew past 1 MiB by itself goes to the pool on
+  a thread of a Rayon pool (searches on two threads or more); a one-thread search keeps its one trace, as
+  it has nothing to share it with. `trace_pool_keeps_every_result` runs long problems through the pool on
+  a two-thread pool. Workstation, node 1 (per-pair median wall, max RSS MiB, `v4-B/results/b16e2/`, same
+  output): @@NUMBERS@@
 - DPW128 (graduated 2026-10-22; no variable; class platform, the name stays in `GRADUATED`) the
   128-bit X-drop DP kernels with the per-row savings of the 256-bit AVX2 kernels (first and last
   survivor kept while the row runs,

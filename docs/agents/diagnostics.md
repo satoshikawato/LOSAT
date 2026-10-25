@@ -4716,9 +4716,13 @@ Scheduling (each value computed by one thread with the original function; order 
   before each run, pairs alternating in order, `perf stat` walls; base 9d477f4f; every output of a case the same
   bytes in every arm; options `-evalue 1e-5 -max_target_seqs 5 -outfmt 6`): the first batch of HsG_b4 (35 human
   proteins x `-db hsap_dna`) at 8 threads 212.1 -> 90.8 s (x0.433, 3 pairs, node 0 cores 24-31 with their siblings
-  idle, load 15-42; user 1,487 -> 706 s, instructions x0.515, max RSS x0.918; `=0` 211.0 s); at 1 thread 16
-  proteins x E. coli and fly proteins x the fly genome 81.416 / 81.404 / 81.416 G and 127.222 / 127.132 / 127.221 G
-  instructions (base, default, `=0`).
+  idle, load 15-42; user 1,487 -> 706 s, instructions x0.515, max RSS x0.918; `=0` 211.0 s), at 16 threads 186.3 ->
+  48.3 s (x0.259) and at 32 threads 176.1 -> 42.9 s (x0.243; 3 pairs each, node 1; max RSS x1.00-1.01); at 1 thread
+  16 proteins x E. coli and fly proteins x the fly genome 81.416 / 81.404 / 81.416 G and 127.222 / 127.132 / 127.221 G
+  instructions (base, default, `=0`). Light cases (node 1, 8 pairs at 8 / 16 threads, instructions x0.9985-0.9999,
+  max RSS within 2 %): 16 proteins x E. coli x0.992 / x0.995, fly proteins x 5,000 16S x1.006 / x1.016 (0.10-0.15 s
+  runs; per-round ratios 0.92-1.09), the same around fly 2L (`-subject`) x0.999 / x0.979, against the fly genome
+  x0.995 / x0.991, one protein against the zebrafish genome x0.996 / x1.002.
 - `LOSAT_X_TBNXLATESIMD=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule
   of that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns
   it off; `tblastn/x_subject_translate.rs`): a packed subject's six frames (`TBNSTORE`, every `-db`

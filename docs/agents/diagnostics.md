@@ -313,6 +313,7 @@ export LOSAT_X_BNCSR=1
 export LOSAT_X_BNDBCUT=1
 export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNDCONE=1
+export LOSAT_X_BNEIGHTSLOTS=1
 export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
@@ -4146,6 +4147,51 @@ Scheduling (each value computed by one thread with the original function; order 
   x0.985-1.001. Where the rule declines (5,000, 15,600 and 20,800 cDNAs at 16 threads, 31,168 at 24) the model's
   layout runs (`LOSAT_X_STATS`), with dev's cycles and instructions (x0.996-1.002 / x1.000); `-db`, 1,775 cDNAs and
   megablast are unchanged.
+- `LOSAT_X_BNEIGHTSLOTS=1` (BLASTN, `-task blastn`, `-subject` with LOSAT_X_QBATCHPAR slots, memory and speed; in the
+  strict set since 2026-10-26 (perf/bn-eight-slots, evidence at the end of this entry): on unless it is `0`) where the
+  slot model of LOSAT_X_QBATCHPAR (`choose_slots`) takes more than eight slots for `-task blastn` on 12 to 64 threads,
+  its best layout of at most eight slots runs instead: the least predicted span of 2 to 8 slots, the fewest on a tie
+  (`SlotRule::EightSlots`, `eight_slots_apply`, `blastn/blast_engine/x_qbatch_par.rs`; that layout always pays the
+  model's 0.97 gate there). Where the model takes eight slots or fewer or keeps the loop, on fewer than 12 or more
+  than 64 threads, and with `LOSAT_X_QBATCHPARSLOTS`, nothing changes; blastn-short (not measured), megablast and
+  dc-megablast (LOSAT_X_DCTWOSLOTS) have no such rule. Why: each slot holds a batch's lookup table, query copies and
+  hits (about 38 MiB for a 1 Mb blastn batch: 702 -> 400 MiB from 16 to 8 slots below), and for `-subject` searches of
+  many cDNAs NCBI's max RSS stays that of one thread (630 MiB for 31,168 D. melanogaster cDNAs against 3 Mb), while
+  the model's 16 one-thread slots at 16 threads held LOSAT at 702 MiB; the model's E(m) points underrate large slots
+  on blastn since LOSAT_X_BNCSR and the per-query stages (it predicted 16 x 1 at 0.379 of the loop there, measured
+  0.785), so fewer, wider slots lose no time. On slot counts of `LOSAT_X_QBATCHPARSLOTS` against the model (dev
+  51234c2a, ws, 2026-10-25, line D session 15 window w6: blastn of the first 31,168 cDNAs (89 batch units) and of
+  5,000 (14 units) against 3 Mb of chromosome 2L, `-subject`, 8 / 16 / 32 threads, 4-6 rounds): 31,168 cDNAs at 16
+  threads, model 16 x 1 (702 MiB), 8 x 2 x0.981 (400 MiB), 4 x 4 x1.022 (232), 2 x 8 x1.184 (149), the loop x1.274
+  (107); at 32 threads, model 32 x 1 (1,439 MiB), 8 x 4 x0.932 (515), 4 x 8 x0.994 (350); 5,000 cDNAs at 16 / 32
+  threads, model 14 x 1 / 14 x 2 (560 / 619 MiB), 8 slots x0.891 / x0.878 (363 / 380), 4 x0.883 / x0.872 (225 / 240).
+  Windows w1 and w3 (the same binary, session 16, 4-6 rounds) added 6 / 10 / 12 / 16 slots, 12 / 24 / 64 threads,
+  4,000 / 6,900 / 15,600 cDNAs and 10 / 30 Mb subjects (chromosome 2L, then 2R): 31,168 cDNAs at 12 threads 6 x 2
+  x0.991 of the model's 12 x 1 (307 / 542 MiB), at 24 threads 8 x 3 x0.946 (427 / 1,041), at 64 threads 8 x 8 x0.874
+  of 32 x 2 (575 / 1,563); slots that leave threads idle lose (16 threads: 6 x 2 x1.237, 10 x 1 x1.448). Of the 16
+  inputs and thread counts where the rule applies (4,000-31,168 cDNAs, 3-30 Mb, 12-64 threads), 10 were measured with
+  the rule's own layout: x0.755-0.991 of the model's time, within x1.054 of the best measured count (4,000 cDNAs (12
+  units) at 16 threads 4 x 4 x0.755, 214 / 452 MiB; 6,900 cDNAs x 10 Mb at 32 threads 8 x 4 x0.841, 661 / 686); for 14
+  units the rule runs 7 x m (a tie with 8 x m, the fewest slots), measured there through 8 x m (x0.768-0.901); 4,000
+  cDNAs at 32 threads (6 x 5) was not measured. Refits of the E(m) points (with contention, Amdahl's serial share, or
+  a loop-thread cost per batch) to these 145 cells missed the best count by up to x1.07 (the best form) to x1.36, so
+  the points stay and the rule caps the slots. Where the model takes eight slots or fewer it can still miss (5,000
+  cDNAs x 30 Mb at 16 threads: 7 x 2 at x1.320 of 2 x 8's time); the rule leaves those layouts as they are. Same
+  bytes: the slots change no output (LOSAT_X_QBATCHPAR above), this chooses only `k` and `m`. With `LOSAT_X_STATS` the
+  QBATCHPAR line's `k=` and `m=` are the slots that ran; `rule_k=`, `rule_m=` and `predicted=` stay the model's
+  layout. Tests: `the_eight_slot_rule_*` in `x_qbatch_par.rs` (boundaries, the measured cells, random inputs against
+  `=0`, whole runs), `LOSAT/tests/blastn_eight_slots.rs` (`the_report_does_not_depend_on_the_rule`,
+  `no_side_without_the_model_s_slots`). Evidence: window w2 (dev f24d161f against this code, 3116f486, and its `=0`;
+  ws node 1, 2026-10-25, 8 rounds): 31,168 cDNAs at 12 / 16 / 24 / 32 / 64 threads x0.996 / 0.984 / 0.939 / 0.925 /
+  0.886 of dev, max RSS 544 -> 311, 700 -> 398, 1,042 -> 423, 1,441 -> 524 and 1,546 -> 585 MiB; 4,000-20,800 cDNAs
+  against 3 Mb at 16 threads x0.745-0.971 (4,000: 452 -> 219 MiB) and at 32 threads x0.766-0.964 (4,000's 6 x 5
+  x0.817); 5,000 cDNAs at 16 / 32 threads (7 x 2 / 7 x 4) x0.899 / x0.872; 5,000 cDNAs x 10 Mb at 16 threads x0.911,
+  6,900 x 10 Mb at 32 x0.841, 5,000 x 30 Mb at 32 x0.775; where the rule declines (8 threads, 6,900 cDNAs at 16, 5,000
+  at 12, megablast, dc-megablast, `-db`) x0.982-0.999 with equal instructions; `=0` x0.989-1.013 of dev; one output
+  per input. Window w4 on dev e127613d (after LOSAT_X_BNQPACK) against the merged branch (6fb98bc0), 4-8 rounds:
+  31,168 cDNAs at 16 / 32 threads x0.980 / x0.932, max RSS 703 -> 397 / 1,439 -> 515 MiB; 4,000 cDNAs at 16 threads
+  x0.748 (453 -> 220); 5,000 / 15,600 cDNAs at 16 threads x0.903 / x0.970; 6,900 cDNAs x 10 Mb at 32 threads x0.851;
+  where the rule declines (8 threads, 6,900 cDNAs at 16, megablast) x0.996-1.014 with equal instructions.
 - `LOSAT_X_RPTSTREAM=1` (BLASTN, all tasks, `-subject` and `-db`, memory and speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`) the batch loop of `run_in_pool` writes the
   reports of each query batch right after it has taken the batch (in batch order, also when
   `LOSAT_X_QBATCHPAR` slots finish out of order: the loop's in-order take is unchanged), finished its lists

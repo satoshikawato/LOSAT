@@ -118,6 +118,9 @@ impl Inputs {
     fn tblastx(&self, threads: u32, switches: &[(&str, &str)]) -> (Vec<u8>, (bool, bool)) {
         let reach = reach_support::Reach::new("tblastx_resolve");
         let mut variables = switches.to_vec();
+        // The command line searches its records packed (`LOSAT_X_TBXSTORE`); `=0` keeps them, as
+        // `run_local` does, and their frames are the ones this switch makes.
+        variables.push(("LOSAT_X_TBXSTORE", "0"));
         variables.push(reach.var());
         let output = losat(&variables)
             .arg("tblastx")

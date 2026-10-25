@@ -146,12 +146,7 @@ impl<'a> Subjects<'a> {
                 let store = &stores[oid];
                 let frames = x_generate_frames_in_windows(
                     store.len(),
-                    &mut |from, out| {
-                        store.codes_into(from, out);
-                        for base in out.iter_mut() {
-                            *base = b"ACGT"[usize::from(*base)];
-                        }
-                    },
+                    &mut |from, out| store.bases_into(from, out),
                     table,
                 );
                 (frames, store.ambiguity_runs().is_empty())
@@ -183,13 +178,9 @@ impl<'a> Subjects<'a> {
             }
             Self::Stored(stores) => {
                 let store = &stores[oid];
-                let mut window: Vec<u8> = Vec::new();
                 x_generate_frames_in_windows(
                     store.len(),
-                    &mut |from, out| {
-                        store.letters_into(from, from + out.len(), &mut window);
-                        out.copy_from_slice(&window);
-                    },
+                    &mut |from, out| store.letters_to(from, out),
                     table,
                 )
             }
@@ -204,6 +195,14 @@ impl<'a> Subjects<'a> {
 pub(crate) fn x_resolve_by_table() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXRESOLVE"))
+}
+
+// No NCBI counterpart: the variable is read once per process; it chooses where LOSAT holds the
+// letters of `-subject`, not a value NCBI computes.
+/// LOSAT_X_TBXSTORE: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
+pub(crate) fn x_tbx_store() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXSTORE"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:424-425,441-450
@@ -593,6 +592,63 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// LOSAT_X_TBXSTORE: a record searched from its store (`PackedNucleotide::from_subject_letters`,
+    /// as `x_read_subject_stores` packs it) has the record's length, the frames the record's
+    /// preliminary stage translates (its letters, or the bases its ambiguous letters resolve to
+    /// from `CRandom` of its length) and the frames of its letters, for every IUPAC letter in both
+    /// cases and gaps, with one ambiguous letter, and with an N block across a window border. A
+    /// record with `U` has no store (`ncbi4na_of` reads it as `T`, the store would not).
+    #[test]
+    fn stored_records_give_the_frames_of_their_records() {
+        let mut records = Vec::new();
+        for (i, len) in [0usize, 1, 2, 3, 4, 7, 50, 1000, 200_003]
+            .into_iter()
+            .enumerate()
+        {
+            records.push(FastaRecord::new(
+                format!("a{i}"),
+                b"",
+                &letters(i as u64, len, b"ACGTacgt"),
+            ));
+            records.push(FastaRecord::new(
+                format!("n{i}"),
+                b"",
+                &letters(i as u64 + 41, len, b"ACGTacgtNnRrYyKkMmSsWwBbDdHhVv-"),
+            ));
+            let mut one = letters(i as u64 + 61, len, b"ACGTacgt");
+            if len > 0 {
+                one[len / 2] = b'r';
+            }
+            records.push(FastaRecord::new(format!("o{i}"), b"", &one));
+        }
+        let mut block = letters(17, 400_000, b"ACGTacgt");
+        block[196_000..197_000].fill(b'N');
+        records.push(FastaRecord::new("block", b"", &block));
+        let stores: Vec<PackedNucleotide> = records
+            .iter()
+            .map(|record| PackedNucleotide::from_subject_letters(record.seq()).expect("IUPAC"))
+            .collect();
+        let (fasta, stored) = (Subjects::Fasta(&records), Subjects::Stored(&stores));
+        for id in [1, 4, 11] {
+            let table = GeneticCode::from_id(id);
+            for oid in 0..records.len() {
+                let what = format!("record {oid} code {id}");
+                assert_eq!(stored.length(oid), fasta.length(oid), "{what}");
+                let (frames, of_letters) = fasta.x_preliminary_frames(oid, &table);
+                let (got, got_of_letters) = stored.x_preliminary_frames(oid, &table);
+                assert_eq!(got_of_letters, of_letters, "{what}");
+                assert_same(&got, &frames, &what);
+                assert_same(
+                    &stored.x_letter_frames(oid, &table),
+                    &fasta.x_letter_frames(oid, &table),
+                    &what,
+                );
+            }
+        }
+        assert!(PackedNucleotide::from_subject_letters(b"ACGU").is_none());
+        assert!(PackedNucleotide::from_subject_letters(b"ACGu").is_none());
     }
 
     #[test]

@@ -54,6 +54,51 @@ const fn bases_of(letters: [u8; 4]) -> [u8; 256] {
     bases
 }
 
+/// Packed byte -> its four bases as letters, the first base's (the high bits) first.
+const BASES_OF_BYTE: [[u8; 4]; 256] = {
+    let mut table = [[0u8; 4]; 256];
+    let mut byte = 0;
+    while byte < 256 {
+        let mut slot = 0;
+        while slot < 4 {
+            table[byte][slot] = b"ACGT"[(byte >> (6 - 2 * slot)) & 3];
+            slot += 1;
+        }
+        byte += 1;
+    }
+    table
+};
+
+/// The letters of one block of `PackedNucleotide::from_subject_letters`'s fast path.
+const BLOCK: usize = 32;
+
+// No NCBI counterpart: LOSAT's speed (the check of a block's letters is vectorized, and four
+// letters take one multiplication instead of four table reads); the bytes are those of the
+// letter-by-letter packing.
+/// The packed bytes of the `BLOCK` letters of `block` into `out` (`BLOCK / 4` bytes) when every
+/// letter is `A`, `C`, `G` or `T`, all upper case or (`lower`) all lower case; false, with `out`
+/// unchanged, otherwise.
+#[inline]
+fn pack_block(block: &[u8], lower: bool, out: &mut [u8]) -> bool {
+    let [a, c, g, t] = if lower { *b"acgt" } else { *b"ACGT" };
+    let other = block.iter().fold(0u8, |other, &letter| {
+        other | u8::from((letter != a) & (letter != c) & (letter != g) & (letter != t))
+    });
+    if other != 0 {
+        return false;
+    }
+    // The 2-bit code of A, C, G or T in either case is bits 1-2 of the letter xor its bits 2-3
+    // (0x41 0, 0x43 1, 0x47 2, 0x54 3; 0x61 0, 0x63 1, 0x67 2, 0x74 3). The multiplication moves
+    // the four codes of a little-endian word to its high byte, the first letter's in the high bits
+    // (the other products land below bit 24 without overlapping).
+    for (byte, four) in out.iter_mut().zip(block.chunks_exact(4)) {
+        let word = u32::from_le_bytes([four[0], four[1], four[2], four[3]]);
+        let codes = ((word >> 1) ^ (word >> 2)) & 0x0303_0303;
+        *byte = (codes.wrapping_mul(0x4010_0401) >> 24) as u8;
+    }
+    true
+}
+
 /// `NCBI4NA_TO_BASE` of an ambiguous code.
 const AMBIGUOUS: u8 = 0xFF;
 /// ncbi4na code -> ncbi2na base for `A`, `C`, `G`, `T`; `AMBIGUOUS` for the others.
@@ -109,7 +154,27 @@ impl PackedNucleotide {
         let mut lower_start: Option<usize> = None;
         // drawn from only by ambiguous bases, so made at the first one
         let mut random: Option<NcbiRandom> = None;
-        for (group, letters) in seq.chunks(4).enumerate() {
+        let groups = length.div_ceil(4);
+        let mut group = 0;
+        // the group before which no block is tried (one tried block per `BLOCK` letters that are
+        // not all A, C, G, T in one case, such as a run of N)
+        let mut no_block_before = 0;
+        while group < groups {
+            let letters = &seq[group * 4..(group * 4 + 4).min(length)];
+            // `BLOCK` bases A, C, G, T in the case of the letters before them: no run, no interval
+            if group >= no_block_before {
+                if let Some(block) = seq.get(group * 4..group * 4 + BLOCK) {
+                    if pack_block(
+                        block,
+                        lower_start.is_some(),
+                        &mut packed[group..group + BLOCK / 4],
+                    ) {
+                        group += BLOCK / 4;
+                        continue;
+                    }
+                    no_block_before = group + BLOCK / 4;
+                }
+            }
             // four bases A, C, G, T in the case of the letters before them: no run, no interval
             if let [first, second, third, fourth] = *letters {
                 let bases = if lower_start.is_none() {
@@ -121,6 +186,7 @@ impl PackedNucleotide {
                     [first, second, third, fourth].map(|letter| bases[usize::from(letter)]);
                 if first | second | third | fourth < 4 {
                     packed[group] = first << 6 | second << 4 | third << 2 | fourth;
+                    group += 1;
                     continue;
                 }
             }
@@ -161,6 +227,7 @@ impl PackedNucleotide {
                 }
             }
             packed[group] = byte;
+            group += 1;
         }
         if let Some(last) = packed.last_mut() {
             *last |= (length % 4) as u8;
@@ -358,10 +425,13 @@ impl PackedNucleotide {
         );
         out.clear();
         out.resize(to - from, 0);
-        self.codes_into(from, out);
-        for code in out.iter_mut() {
-            *code = b"ACGT"[usize::from(*code)];
-        }
+        self.letters_to(from, out);
+    }
+
+    /// `letters_into` of the letters `[from, from + out.len())`, into `out`.
+    pub fn letters_to(&self, from: usize, out: &mut [u8]) {
+        let to = from + out.len();
+        self.bases_into(from, out);
         // the runs are in order and do not overlap: the first that ends after `from` on
         let first = self
             .ambiguity
@@ -396,6 +466,31 @@ impl PackedNucleotide {
         let tail_from = to - tail.len();
         for (slot, code) in tail.iter_mut().enumerate() {
             *code = self.code(tail_from + slot);
+        }
+    }
+
+    // No NCBI counterpart: LOSAT's speed (one table read per packed byte); the letters are those of
+    // `codes_into`'s codes.
+    /// The bases `[from, from + out.len())` as packed, one `A`, `C`, `G` or `T` each (an ambiguous
+    /// base as resolved): the letters of `codes_into`'s codes.
+    pub fn bases_into(&self, from: usize, out: &mut [u8]) {
+        assert!(from + out.len() <= self.length, "bases out of the subject");
+        // the bases before the first whole byte, the whole bytes, the bases after them
+        let to = from + out.len();
+        let head = ((4 - from % 4) % 4).min(out.len());
+        let (head_out, rest) = out.split_at_mut(head);
+        for (slot, base) in head_out.iter_mut().enumerate() {
+            *base = b"ACGT"[usize::from(self.code(from + slot))];
+        }
+        let whole = from + head;
+        let mut bytes = rest.chunks_exact_mut(4);
+        for (four, &byte) in (&mut bytes).zip(&self.packed[whole / 4..]) {
+            four.copy_from_slice(&BASES_OF_BYTE[usize::from(byte)]);
+        }
+        let tail = bytes.into_remainder();
+        let tail_from = to - tail.len();
+        for (slot, base) in tail.iter_mut().enumerate() {
+            *base = b"ACGT"[usize::from(self.code(tail_from + slot))];
         }
     }
 
@@ -507,6 +602,19 @@ mod tests {
         out
     }
 
+    /// `length` upper-case bases A, C, G, T.
+    fn random_bases(length: usize, seed: u64) -> Vec<u8> {
+        let mut state = seed;
+        (0..length)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                b"ACGT"[(state >> 33) as usize % 4]
+            })
+            .collect()
+    }
+
     fn cases() -> Vec<Vec<u8>> {
         let mut cases: Vec<Vec<u8>> = vec![
             Vec::new(),
@@ -533,6 +641,26 @@ mod tests {
         for (seed, share) in [(1, 0), (2, 5), (3, 50), (4, 100)] {
             for length in [1, 2, 3, 4, 5, 63, 64, 65, 1000, 4099] {
                 cases.push(random_letters(length, seed * 10_000 + length as u64, share));
+            }
+        }
+        // blocks of `BLOCK` letters of one case (the fast path), with case changes and other
+        // letters inside a block, at its first or last letter and between blocks, a run of N
+        // across blocks, and every length around a block
+        for length in [31, 32, 33, 35, 36, 63, 64, 65, 67, 68, 96, 97, 4099] {
+            for (seed, every) in [(5u64, 0usize), (6, 29), (7, 32), (8, 61)] {
+                let mut seq = random_bases(length, seed * 10_000 + length as u64);
+                if every > 0 {
+                    for (n, at) in (0..length).step_by(every).enumerate() {
+                        match n % 4 {
+                            0 => seq[at] = b'N',
+                            1 => seq[at..(at + 40).min(length)].make_ascii_lowercase(),
+                            2 => seq[at] = seq[at].to_ascii_lowercase(),
+                            _ => seq[at..(at + 70).min(length)].fill(b'N'),
+                        }
+                    }
+                }
+                cases.push(seq.clone());
+                cases.push(seq.to_ascii_lowercase());
             }
         }
         cases
@@ -606,6 +734,9 @@ mod tests {
                     .map(|&code| b"ACGT"[usize::from(code)])
                     .collect();
                 assert_eq!(as_letters, &resolved[from..to], "codes [{from}, {to})");
+                let mut bases = vec![0u8; to - from];
+                store.bases_into(from, &mut bases);
+                assert_eq!(bases, as_letters, "bases [{from}, {to})");
             }
             let lower: Vec<_> =
                 crate::algorithm::blastn::coordination::collect_lowercase_masks(&seq)

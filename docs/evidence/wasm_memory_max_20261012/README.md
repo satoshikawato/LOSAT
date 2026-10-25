@@ -4,6 +4,7 @@
 - ブランチ：エンジン側 `feature/wasm-mem-max`（`feature/losat-web-gui` の `141615ec` から。変更は `a6b49721`・`95c1a7f7`・`fe2ca26b`・`dcf9d591`、検証した tree は `dcf9d591`）。アプリ側 `feature/wasm-mem-max-app`（`feature/losat-web-gui-app` の `81dbeec9` から。変更は `7172aaa0`。記録は同じ名前のフォルダの `app/README.md`）
 - 作業：2026-10-12、2 セッション。環境は WSL2（x64、32 スレッド、31 GiB）、Rust 1.92.0、Node v26.8.2
 - 状態：実装と検証は終わった。PR #136（アプリ側）と PR #137（エンジン側）が保守者の merge を待つ（#136 を先に。下の「残件」）。実機（iOS、Android など）での確認は残件
+- dev：2026-10-25 に線 NP の項目 WW0 で dev に持ち込んだ（ブランチ `feature/np-ww0`、dev との衝突、試験の直し、dev での検証は [`dev_ww0/README.md`](dev_ww0/README.md)）
 
 ## 結論
 
@@ -85,4 +86,5 @@ A は変更前（`141615ec`、最大 16,384 ページ）の build（`out-base`�
 | `wasm32_4g_study.md`、`memory64_study.md` | 調査の報告（英語、出典付き） |
 | `scripts/` | build（`build_variant.sh`、`build_probe.sh`）、`memprobe/`、`run_probe_matrix.sh`、`wasm_sections.py`、`verify_engine.sh`、`ab_time.py`、`run_ab_timing.sh`、`wasm64_probe.sh`。パスはこの機械のもの |
 | `results/` | 上の表の要約（小さいファイルだけ。実行ごとの出力は `$BUILD_ROOT/wasm-mem/` と作業フォルダに置き、commit していない） |
+| `dev_ww0/` | dev への持ち込み（2026-10-25、WW0）の記録：衝突と直し、dev での検証、3 ブラウザの memory の記録（ファイルの SHA-256 は `dev_ww0/evidence.sha256`） |
 | `evidence.sha256` | このフォルダのファイルの SHA-256 |

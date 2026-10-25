@@ -155,9 +155,35 @@ pub(crate) fn x_bxscan_byte() -> XScanByte {
 // change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXSCANBYTE): a standard table's presence bytes and whether the table is
 /// sparse (`tblastn/x_scan_byte.rs` `x_table_presence`), built the first time the direct loop scans
-/// with the table on presence bytes; `None` inside for a table they do not fit.
-#[derive(Default)]
-pub struct XKeptPresence(OnceLock<Option<(Arc<[u8]>, bool)>>);
+/// with the table on presence bytes; `None` inside for a table they do not fit. It also carries the
+/// table's build number (`build`), which names the table for the choice of the loop
+/// (LOSAT_X_BXDIAGMIN, `x_seed_diag.rs`): a table built from pooled vectors (LOSAT_X_BXLUTPOOL)
+/// can sit at the address of the one dropped before it, with the same backbone vector.
+pub struct XKeptPresence {
+    presence: OnceLock<Option<(Arc<[u8]>, bool)>>,
+    pub(crate) build: u64,
+}
+
+// No NCBI counterpart: numbers LOSAT's tables (speed only).
+/// The next build number (from 1; 0 names no table).
+static X_BUILDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+impl XKeptPresence {
+    // No NCBI counterpart (see the struct).
+    /// The companion of a table built now: no presence bytes yet and a new build number.
+    pub fn new() -> Self {
+        Self {
+            presence: OnceLock::new(),
+            build: X_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        }
+    }
+}
+
+impl Default for XKeptPresence {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Lookup {
     // No NCBI counterpart: chooses LOSAT's scan; both give NCBI's pairs and scan ranges.
@@ -167,7 +193,7 @@ impl Lookup {
     fn x_scan_presence(&self, mode: XScanByte) -> Option<&[u8]> {
         match self {
             Self::Standard(table, kept) if mode.on() => {
-                x_kept_presence(mode, kept.0.get_or_init(|| x_table_presence(table)))
+                x_kept_presence(mode, kept.presence.get_or_init(|| x_table_presence(table)))
             }
             _ => None,
         }
@@ -1362,7 +1388,7 @@ mod tests {
                 unreachable!()
             };
             assert!(lookup.x_scan_presence(XScanByte::Off).is_none());
-            assert!(kept.0.get().is_none(), "built before a scan asked");
+            assert!(kept.presence.get().is_none(), "built before a scan asked");
             let bytes = lookup
                 .x_scan_presence(plain)
                 .expect("every blastx table fits");

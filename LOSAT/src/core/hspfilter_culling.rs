@@ -37,7 +37,10 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 /// ```
 /// `hsp` is the index of the payload in the forest's arena; `next` is the order of the
 /// node's list (`CTreeNode::hsplist`). `score` and `subject_offset` are those of
-/// `hsp->score` and `hsp->subject.offset`, which `s_DominateTest` reads.
+/// `hsp->score` and `hsp->subject.offset`, which `s_DominateTest` reads. `merit` is an
+/// `i64`, not NCBI's `Int4`: a culling limit near `INT4_MAX` (plus 3 in the preliminary
+/// stage) overflows an `Int4`, which is undefined behaviour in C and wraps in the shipped
+/// binary; LOSAT does not reproduce that overflow (see `prelim_max`).
 #[derive(Clone, Copy)]
 struct LinkedHsp {
     hsp: usize,
@@ -46,7 +49,7 @@ struct LinkedHsp {
     end: i32,
     score: i32,
     subject_offset: i64,
-    merit: i32,
+    merit: i64,
 }
 
 /// What `s_BlastHSPCullingRun` makes of an HSP for the tree: its range on the plus strand of
@@ -100,7 +103,7 @@ pub(crate) type CulledQuery<H> = Vec<(u32, Vec<H>)>;
 /// offered. The index values are never compared except `r != y` between live entries, and
 /// the lists keep their order, so the reuse changes no output.
 pub(crate) struct CullingForest<H> {
-    culling_max: i32,
+    culling_max: i64,
     hsps: Vec<Option<H>>,
     entries: Vec<LinkedHsp>,
     nodes: Vec<CTreeNode>,
@@ -121,7 +124,7 @@ impl<H> CullingForest<H> {
     ///     return 0;
     /// }
     /// ```
-    pub(crate) fn new(culling_max: i32) -> Self {
+    pub(crate) fn new(culling_max: i64) -> Self {
         Self {
             culling_max,
             hsps: Vec::new(),
@@ -152,7 +155,10 @@ impl<H> CullingForest<H> {
     }
 
     /// The `culling_max` of the preliminary writer: three more than the option when it is
-    /// above 1. The sum is an `Int4`, which wraps for a limit of 2147483645 or more.
+    /// above 1. NCBI's sum is an `Int4`, which overflows for a limit of 2147483645 or more
+    /// (the shipped binary wraps: 2147483645 culls nothing, 2147483646 and 2147483647 act as
+    /// a limit of 1). LOSAT adds in `i64` (Owner 2026-10-22, NCBI parity DECISIONS 17: no
+    /// reproduction of NCBI's undefined behaviour), so every limit above 1 is three more.
     ///
     /// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:338-340
     /// ```c
@@ -160,9 +166,10 @@ impl<H> CullingForest<H> {
     ///             	params->culling_max += 3;
     ///             }
     /// ```
-    pub(crate) fn prelim_max(limit: i32) -> i32 {
+    pub(crate) fn prelim_max(limit: i32) -> i64 {
+        let limit = i64::from(limit);
         if limit > 1 {
-            limit.wrapping_add(3)
+            limit + 3
         } else {
             limit
         }
@@ -382,12 +389,11 @@ impl<H> CullingForest<H> {
     ///     return TRUE;
     /// }
     /// ```
-    /// `merit` is an `Int4`; the shipped NCBI binary wraps it (a culling limit near
-    /// `INT4_MAX`, plus 3 in the preliminary stage, starts negative).
+    /// `merit` is an `i64` (see `LinkedHsp`).
     fn full_pass(&self, node: usize, y: &mut LinkedHsp) -> bool {
         for &p in &self.nodes[node].hsplist {
             if self.dominate_test(&self.entries[p], y) {
-                y.merit = y.merit.wrapping_sub(1);
+                y.merit -= 1;
                 if y.merit <= 0 {
                     return false;
                 }
@@ -432,7 +438,7 @@ impl<H> CullingForest<H> {
             let r = *r;
             num += 1;
             if r != y && self.dominate_test(&y_entry, &self.entries[r]) {
-                let merit = self.entries[r].merit.wrapping_sub(1);
+                let merit = self.entries[r].merit - 1;
                 self.entries[r].merit = merit;
                 if merit <= 0 {
                     num -= 1;
@@ -474,7 +480,7 @@ impl<H> CullingForest<H> {
         list.retain_mut(|r| {
             let r = *r;
             num += 1;
-            let merit = self.entries[r].merit.wrapping_sub(1);
+            let merit = self.entries[r].merit - 1;
             self.entries[r].merit = merit;
             if merit <= 0 {
                 num -= 1;
@@ -888,7 +894,7 @@ mod tests {
     /// The payload of a test HSP is its score and its position in the input.
     type Payload = (i32, usize);
 
-    fn forest(limit: i32) -> CullingForest<Payload> {
+    fn forest(limit: i64) -> CullingForest<Payload> {
         CullingForest::new(limit)
     }
 
@@ -906,15 +912,15 @@ mod tests {
     }
 
     // NCBI c++/src/algo/blast/api/setup_factory.cpp:338-340: the preliminary writer adds
-    // 3 to a limit above 1, an Int4 sum that wraps.
+    // 3 to a limit above 1. NCBI's Int4 sum overflows near INT4_MAX; LOSAT's does not.
     #[test]
-    fn the_preliminary_limit_adds_three_above_one_and_wraps() {
+    fn the_preliminary_limit_adds_three_above_one_without_overflow() {
         assert_eq!(CullingForest::<()>::prelim_max(0), 0);
         assert_eq!(CullingForest::<()>::prelim_max(1), 1);
         assert_eq!(CullingForest::<()>::prelim_max(2), 5);
         assert_eq!(CullingForest::<()>::prelim_max(2147483644), 2147483647);
-        assert_eq!(CullingForest::<()>::prelim_max(2147483645), i32::MIN);
-        assert_eq!(CullingForest::<()>::prelim_max(2147483647), -2147483646);
+        assert_eq!(CullingForest::<()>::prelim_max(2147483645), 2147483648);
+        assert_eq!(CullingForest::<()>::prelim_max(i32::MAX), 2147483650);
     }
 
     // NCBI frees a culled HSP at once (`s_HSPFree`): slots, entries and nodes are reused, so
@@ -993,18 +999,17 @@ mod tests {
         assert_eq!(lists[0].1, vec![(0, vec![(50, 0)])]);
     }
 
-    // The merit is an Int4 that NCBI's binary wraps: a negative merit loses an HSP at its
-    // first dominator, and i32::MIN never reaches 0 after one decrement.
+    // The merit does not wrap (NCBI's Int4 does: there 2147483646 and 2147483647 act as a
+    // limit of 1 in the preliminary stage): the limits at the top of the range keep both
+    // HSPs, as any limit above the number of dominating HSPs does.
     #[test]
-    fn merits_wrap_as_ncbis_int4() {
-        let mut f = forest(CullingForest::<()>::prelim_max(2147483646));
-        f.save(0, 300, 0, key(10, 40, 50), (50, 0));
-        f.save(0, 300, 0, key(12, 40, 30), (30, 1));
-        assert_eq!(kept(f), vec![(0, vec![50])]);
-        let mut f = forest(CullingForest::<()>::prelim_max(2147483645));
-        f.save(0, 300, 0, key(10, 40, 50), (50, 0));
-        f.save(0, 300, 0, key(12, 40, 30), (30, 1));
-        assert_eq!(kept(f), vec![(0, vec![50, 30])]);
+    fn merits_near_int4_max_do_not_wrap() {
+        for limit in [2147483645, 2147483646, i32::MAX] {
+            let mut f = forest(CullingForest::<()>::prelim_max(limit));
+            f.save(0, 300, 0, key(10, 40, 50), (50, 0));
+            f.save(0, 300, 0, key(12, 40, 30), (30, 1));
+            assert_eq!(kept(f), vec![(0, vec![50, 30])]);
+        }
     }
 
     // NCBI c++/src/algo/blast/core/hspfilter_culling.c:258-299,453-458: a leaf with 20

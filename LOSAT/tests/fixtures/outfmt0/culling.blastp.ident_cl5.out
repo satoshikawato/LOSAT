@@ -1,0 +1,155 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/culling_ident_s.faa).
+           44 sequences; 6,600 total letters
+
+
+
+Query= iq 150 aa
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t004                                                                  307     6e-113
+t003                                                                  307     6e-113
+t002                                                                  307     6e-113
+t001                                                                  307     6e-113
+t000                                                                  307     6e-113
+
+
+> t004
+Length=150
+
+ Score = 307 bits (787),  Expect = 6e-113, Method: Compositional matrix adjust.
+ Identities = 150/150 (100%), Positives = 150/150 (100%), Gaps = 0/150 (0%)
+
+Query  1    HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP  60
+            HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP
+Sbjct  1    HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP  60
+
+Query  61   VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE  120
+            VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE
+Sbjct  61   VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE  120
+
+Query  121  LDVALFGVLLTSVAEGIIAEGRVPTRMAGH  150
+            LDVALFGVLLTSVAEGIIAEGRVPTRMAGH
+Sbjct  121  LDVALFGVLLTSVAEGIIAEGRVPTRMAGH  150
+
+
+> t003
+Length=150
+
+ Score = 307 bits (787),  Expect = 6e-113, Method: Compositional matrix adjust.
+ Identities = 150/150 (100%), Positives = 150/150 (100%), Gaps = 0/150 (0%)
+
+Query  1    HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP  60
+            HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP
+Sbjct  1    HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP  60
+
+Query  61   VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE  120
+            VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE
+Sbjct  61   VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE  120
+
+Query  121  LDVALFGVLLTSVAEGIIAEGRVPTRMAGH  150
+            LDVALFGVLLTSVAEGIIAEGRVPTRMAGH
+Sbjct  121  LDVALFGVLLTSVAEGIIAEGRVPTRMAGH  150
+
+
+> t002
+Length=150
+
+ Score = 307 bits (787),  Expect = 6e-113, Method: Compositional matrix adjust.
+ Identities = 150/150 (100%), Positives = 150/150 (100%), Gaps = 0/150 (0%)
+
+Query  1    HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP  60
+            HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP
+Sbjct  1    HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP  60
+
+Query  61   VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE  120
+            VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE
+Sbjct  61   VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE  120
+
+Query  121  LDVALFGVLLTSVAEGIIAEGRVPTRMAGH  150
+            LDVALFGVLLTSVAEGIIAEGRVPTRMAGH
+Sbjct  121  LDVALFGVLLTSVAEGIIAEGRVPTRMAGH  150
+
+
+> t001
+Length=150
+
+ Score = 307 bits (787),  Expect = 6e-113, Method: Compositional matrix adjust.
+ Identities = 150/150 (100%), Positives = 150/150 (100%), Gaps = 0/150 (0%)
+
+Query  1    HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP  60
+            HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP
+Sbjct  1    HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP  60
+
+Query  61   VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE  120
+            VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE
+Sbjct  61   VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE  120
+
+Query  121  LDVALFGVLLTSVAEGIIAEGRVPTRMAGH  150
+            LDVALFGVLLTSVAEGIIAEGRVPTRMAGH
+Sbjct  121  LDVALFGVLLTSVAEGIIAEGRVPTRMAGH  150
+
+
+> t000
+Length=150
+
+ Score = 307 bits (787),  Expect = 6e-113, Method: Compositional matrix adjust.
+ Identities = 150/150 (100%), Positives = 150/150 (100%), Gaps = 0/150 (0%)
+
+Query  1    HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP  60
+            HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP
+Sbjct  1    HCAYPGAGNVLKNQHTKQSAYDALGLKKFPRHGLGGEMAFNGGTLIDNNRAFDCIVTILP  60
+
+Query  61   VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE  120
+            VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE
+Sbjct  61   VDFVPAEKRVDERNGEVARGRFLAVAYGFDQKSRALMPYKIIANQVALDAGPVHAICLVE  120
+
+Query  121  LDVALFGVLLTSVAEGIIAEGRVPTRMAGH  150
+            LDVALFGVLLTSVAEGIIAEGRVPTRMAGH
+Sbjct  121  LDVALFGVLLTSVAEGIIAEGRVPTRMAGH  150
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.140    0.421    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 532400
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/culling_ident_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 6,600
+  Number of sequences in database:  44
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

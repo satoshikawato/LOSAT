@@ -369,7 +369,7 @@ impl Lookup {
                 contexts,
                 options.threshold as i32,
             ),
-            x_seed_scan::XKeptPresence::default(),
+            x_seed_scan::XKeptPresence::new(),
         ))
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288

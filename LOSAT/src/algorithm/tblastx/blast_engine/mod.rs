@@ -89,6 +89,10 @@ pub(crate) use super::diagnostics::{
     diagnostics_enabled, print_summary as print_diagnostics_summary, DiagnosticCounters,
 };
 pub(crate) use super::extension::{convert_coords, extend_hit_two_hit};
+// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): extension/x_two_hit_fast.rs.
+pub(crate) use super::extension::{
+    extend_hit_two_hit_sent, x_tbx_sent_contexts, x_tbx_sent_subject,
+};
 pub(crate) use super::lookup::{build_ncbi_lookup, QueryContext};
 pub(crate) use super::ncbi_cutoffs::{
     compute_eff_lengths_tblastx, cutoff_score_for_update_tblastx, cutoff_score_max_for_tblastx,
@@ -191,6 +195,10 @@ pub(crate) struct TblastxQueryStats {
     /// computes the context's length adjustment again from it at report time
     /// (`blast_xml::query_stats`), so that no search path keeps the adjustment.
     pub aa_len: usize,
+    /// The effective search space of the query's context 0 (frame +1), 0 when that context is
+    /// not valid: the `EffectiveSearchSpace` option of a BLAST archive (outfmt 11) takes the
+    /// first context of the batch's first query, not its first valid one.
+    pub context0_search_space: i64,
     /// The SEG intervals (residues of the frame, end exclusive) of each translated frame.
     pub seg_masks: Vec<(i8, Vec<(usize, usize)>)>,
 }

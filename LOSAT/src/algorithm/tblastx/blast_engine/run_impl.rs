@@ -126,7 +126,16 @@ struct RunSubjects<'a> {
 /// The subject set as the reports show it.
 enum ShownSubjects<'a> {
     /// `-subject`: `User specified sequence set (Input: PATH)`; the records are the whole set.
-    Fasta(&'a [FastaRecord]),
+    /// EXPERIMENT (LOSAT_X_TBXSTORE): with `x_stored`, the records hold no letters; the stores
+    /// hold them, by record (the ordinals `0..n`, which the reports' `SubjectLetters::Stored`
+    /// reads).
+    Fasta {
+        records: &'a [FastaRecord],
+        x_stored: Option<(
+            &'a [crate::sequence::packed_subject::PackedNucleotide],
+            &'a [u32],
+        )>,
+    },
     /// `-db`: the `-db` value (outfmt 7's `# Database:` line), the database's `Database:` lines
     /// (outfmt 0), and the sequences by ordinal id, whose reported ones the reports show by
     /// rank (`database::reported_subjects`).
@@ -143,6 +152,9 @@ enum SubjectSource<'a> {
     Fasta {
         records: &'a [FastaRecord],
         placements: &'a Placements,
+        /// EXPERIMENT (LOSAT_X_TBXSTORE): the records' letters, packed as read (the records
+        /// hold none).
+        x_stores: Option<&'a [crate::sequence::packed_subject::PackedNucleotide]>,
     },
     /// A `-db` database (`tblastx/database.rs`).
     Database(&'a super::super::database::TblastxDatabase),
@@ -681,7 +693,7 @@ fn adjust_tblastx_chunk_subject_offsets(hits: &mut [UngappedHit], offset: usize)
 ///     }
 /// ```
 pub fn run(
-    args: TblastxArgs,
+    mut args: TblastxArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:106-111
@@ -714,14 +726,43 @@ pub fn run(
         crate::blastinput::app::Program::Tblastx,
         args.out.as_deref(),
     )?;
+    // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
+    // before anything is read or written.
+    // The error archives follow the `-outfmt` text (`writes_error_archive`).
+    args.archive = super::super::archive::handle_for(
+        &args,
+        format == Some(crate::blastinput::app::ReportFormat::ArchiveFormat),
+    )?
+    .map(|handle| handle.with_outfmt_text(&args.outfmt));
+    let archive = args.archive.clone();
     crate::utils::threading::validate_threads(args.num_threads)?;
     use crate::blastinput::input_files;
+    // The diagnostics stream: with the archive it also saves what it writes as the messages of
+    // the next archive.
+    let mut stderr = std::io::stderr();
+    let mut archive_tee;
+    let diagnostics: &mut (dyn std::io::Write + Send) = match &archive {
+        Some(handle) => {
+            archive_tee = crate::report::archive::DiagTee::new(&mut stderr, handle.clone());
+            &mut archive_tee
+        }
+        None => &mut stderr,
+    };
     // `-db`: no subject file; the database is opened after the options are processed
     // (`search_cli`), where NCBI's `InitializeSubject` opens it (tblastx_app.cpp:113-119).
-    let (subjects, subject_placements) = if args.db.is_some() {
-        (Vec::new(), Placements::default())
+    let subjects_read = if args.db.is_some() {
+        Ok((Vec::new(), Placements::default(), None))
     } else {
-        read_subject_set(&args, settings.clone())?
+        read_subject_set(&args, settings.clone(), &mut *diagnostics)
+    };
+    // NCBI reads the `-subject` file inside `Run`, after the diagnostics handler that saves the
+    // messages is set: an error archive follows the error.
+    let (subjects, subject_placements, x_stores) = match subjects_read {
+        Ok(read) => read,
+        Err(error) => {
+            write_run_error_archive(&args, archive.as_ref(), &error);
+            return Err(error);
+        }
     };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
@@ -740,41 +781,74 @@ pub fn run(
     // The query is opened, then the output file is created (`-` is standard output); the
     // query is read after both, so an output file that is the query file reads empty.
     input_files::check_utf8_file_name(&args.query, "query", "TBLASTX")?;
-    let query_file = input_files::open_input(&args.query, "query", "TBLASTX")?;
-    if let Some(path) = args.out.as_deref() {
-        input_files::check_utf8_file_name(path, "out", "TBLASTX")?;
-    }
-    let out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
-        Some(path) => Some(std::io::BufWriter::new(
-            std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
-        )),
-        None => None,
+    // NCBI opens the query file inside `Run` too: its error is saved and an error archive
+    // follows.
+    let query_file = match input_files::open_input(&args.query, "query", "TBLASTX") {
+        Ok(file) => file,
+        Err(error) => {
+            write_run_error_archive(&args, archive.as_ref(), &error);
+            return Err(error);
+        }
     };
+    // Whether this run creates `-out` (a Q3 refusal removes a file it created for nothing).
+    let out_is_new = args
+        .out
+        .as_deref()
+        .is_some_and(|path| path.as_os_str() != "-" && !path.exists());
+    let out_file = open_out_file(&args)?;
+    let out_path = args.out.clone();
     let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
     // LOSAT's reports read the format number that NCBI reads.
     let outfmt = choice.normalized();
-    let mut stderr = std::io::stderr();
-    let mut stream = crate::cli::ReportStream {
-        inner: match out_file {
-            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
-            None => crate::cli::report_standard_output(),
-        },
-        failed: false,
-    };
+    let mut stream = cli_report_stream(out_file);
     let result = {
         let mut outputs =
-            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut stderr);
+            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
         search_cli(
             args,
             query_file,
             &subjects,
             &subject_placements,
+            x_stores.as_deref(),
             &mut outputs,
             settings,
         )
     };
+    // NCBI writes an error archive after the archives of the batches before when the
+    // application stops with one of its own errors, and when the run ends with messages that
+    // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status).
+    if let Some(handle) = &archive {
+        match &result {
+            Err(error) => {
+                if let Some(lines) = super::super::archive::error_lines(error, false) {
+                    let _ =
+                        crate::report::archive::write_error_archive(handle, &lines, &mut stream);
+                }
+            }
+            Ok(()) => {
+                if handle.has_messages() {
+                    let _ = crate::report::archive::write_error_archive(handle, &[], &mut stream);
+                }
+            }
+        }
+    }
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
     let flushed = std::io::Write::flush(&mut stream);
+    // A title that the archive cannot hold is refused where NCBI would write its Bioseq, which
+    // is known only after the search. BLASTX/TBLASTN refuse before they create `-out`, and so
+    // does this run when the file was not there and nothing was written to it: no empty file is
+    // left behind.
+    let write_failed = stream.failed;
+    drop(stream);
+    if out_is_new
+        && matches!(&result, Err(error) if error.downcast_ref::<crate::report::archive::TitleRefusal>().is_some())
+    {
+        if let Some(path) = out_path.as_deref() {
+            if std::fs::metadata(path).is_ok_and(|meta| meta.len() == 0) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
     // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
     // ```c
     //     catch (const std::ios::failure&) {                                      \
@@ -785,7 +859,7 @@ pub fn run(
     // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119).
     // For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if stream.failed && pairwise {
+    if write_failed && pairwise {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),
@@ -796,12 +870,66 @@ pub fn run(
     flushed.context("failed to write the output")
 }
 
+/// The error archive of a run that stopped in `Run` with `error` before its search wrote
+/// anything, when NCBI writes one (`PrintErrorArchive`): into `-out`, or nothing when that
+/// cannot be opened (NCBI's call swallows that).
+fn write_run_error_archive(
+    args: &TblastxArgs,
+    archive: Option<&crate::report::archive::ArchiveHandle>,
+    error: &anyhow::Error,
+) {
+    let Some(handle) = archive else {
+        return;
+    };
+    let Some(lines) = super::super::archive::error_lines(error, true) else {
+        return;
+    };
+    if let Ok(out_file) = open_out_file(args) {
+        let mut report = cli_report_stream(out_file);
+        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
+        let _ = std::io::Write::flush(&mut report);
+    }
+}
+
+/// The `-out` file, created (`-`: standard output).
+fn open_out_file(args: &TblastxArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
+    if let Some(path) = args.out.as_deref() {
+        crate::blastinput::input_files::check_utf8_file_name(path, "out", "TBLASTX")?;
+    }
+    Ok(
+        match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
+            Some(path) => Some(std::io::BufWriter::new(
+                std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
+            )),
+            None => None,
+        },
+    )
+}
+
+/// The report stream of the command line: the `-out` file, or standard output.
+fn cli_report_stream(
+    out_file: Option<std::io::BufWriter<std::fs::File>>,
+) -> crate::cli::ReportStream {
+    crate::cli::ReportStream {
+        inner: match out_file {
+            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
+            None => crate::cli::report_standard_output(),
+        },
+        failed: false,
+    }
+}
+
 /// The subjects of `-subject` (after `-subject_loc`) as NCBI's option handlers read them, with
 /// their messages.
 fn read_subject_set(
     args: &TblastxArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-) -> Result<(Vec<FastaRecord>, Placements)> {
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<(
+    Vec<FastaRecord>,
+    Placements,
+    Option<Vec<crate::sequence::packed_subject::PackedNucleotide>>,
+)> {
     use crate::blastinput::input_files;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2553-2557
     // ```c
@@ -849,28 +977,45 @@ fn read_subject_set(
     let mut subject_source = FastaInputSource::from_argument(
         &subject_path,
         subject_file,
-        ReaderConfig::subject("TBLASTX", false, settings.data_loaders),
+        ReaderConfig::subject("TBLASTX", false, settings.data_loaders)
+            .with_defline(args.archive.is_some()),
     );
-    // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
-    // counterpart.
+    // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs); with
+    // LOSAT_X_TBXSTORE the packing of each record is in this interval too. No NCBI counterpart.
     let t_read_fasta = crate::utils::xtiming::clock();
-    let read_subject_records = {
-        let mut stderr = std::io::stderr();
-        read_subjects(
-            &mut subject_source,
-            subject_range.as_ref(),
-            &mut |message: &[u8]| std::io::Write::write_all(&mut stderr, message),
-        )?
-    };
+    // EXPERIMENT (LOSAT_X_TBXSTORE): each record's letters packed as it is read
+    // (`x_read_packed_subjects`, cut to `-subject_loc` first); the search reads the stores as
+    // a database's (`Subjects::Stored`), the reports by record. A set with a byte without an
+    // ncbi4na code (the FASTA reader gives none: it reads `U` as `T`) or a record over `u32::MAX`
+    // bases keeps every record's letters. The archive of `-subject` writes every subject's whole
+    // letters (and its deflines) in every batch, which the packed stores do not keep (they hold
+    // the interval of a `-subject_loc` and no letters), so a run that writes it reads the records
+    // as the switch's `=0` side does (as TBLASTN's `x_tbn_store`).
+    let mut warn = |message: &[u8]| std::io::Write::write_all(&mut *diagnostics, message);
+    let (subjects, subject_placements, stores) =
+        if super::super::subjects::x_tbx_store() && args.archive.is_none() {
+            let (subjects, stores, placements) =
+                crate::blastinput::x_packed_subjects::x_read_packed_subjects(
+                    &mut subject_source,
+                    subject_range.as_ref(),
+                    &mut warn,
+                    args.num_threads,
+                    "TBLASTX",
+                )?;
+            crate::utils::xreach::x_reach!("LOSAT_X_TBXSTORE", stores.is_some());
+            (subjects, placements, stores)
+        } else {
+            let read_subject_records =
+                read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?;
+            match cut_subjects(&read_subject_records, subject_range.as_ref())? {
+                Some((cut, placements)) => (cut, placements, None),
+                None => (read_subject_records, Placements::default(), None),
+            }
+        };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(subject_source);
-    let (subjects, subject_placements) =
-        match cut_subjects(&read_subject_records, subject_range.as_ref())? {
-            Some((cut, placements)) => (cut, placements),
-            None => (read_subject_records, Placements::default()),
-        };
     check_subjects_not_empty(&subjects)?;
-    Ok((subjects, subject_placements))
+    Ok((subjects, subject_placements, stores))
 }
 
 /// NCBI's error for a subject file without records, raised when it reads the subjects.
@@ -978,7 +1123,7 @@ fn check_ncbi_options(
     if args.threshold <= 0.0 {
         return Err(options_error("Non-zero threshold required"));
     }
-    if args.word_size > 4 {
+    if args.word_size() > 4 {
         return Err(options_error(
             "Word-size must be less than 6 for protein comparison",
         ));
@@ -1020,10 +1165,10 @@ pub(crate) fn check_losat_limits(args: &TblastxArgs) -> Result<()> {
     //     lookup->word_length = opt->word_size;
     // ```
     // LOSAT's TBLASTX builds and scans 3-residue words only.
-    if args.word_size != 3 {
+    if args.word_size() != 3 {
         anyhow::bail!(
             "-word_size {} is not supported by LOSAT's TBLASTX (it implements word size 3)",
-            args.word_size
+            args.word_size()
         );
     }
     Ok(())
@@ -1049,6 +1194,7 @@ fn search_cli(
     query_file: std::fs::File,
     subjects: &[FastaRecord],
     subject_placements: &Placements,
+    x_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
     outputs: &mut ReportOutputs<'_>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
@@ -1104,6 +1250,7 @@ fn search_cli(
         None => SubjectSource::Fasta {
             records: subjects,
             placements: subject_placements,
+            x_stores,
         },
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:125-135
@@ -1142,12 +1289,18 @@ fn search_cli(
     let mut query_source = FastaInputSource::from_argument(
         &args.query,
         query_file,
-        ReaderConfig::query("TBLASTX", false, settings.data_loaders),
+        ReaderConfig::query("TBLASTX", false, settings.data_loaders)
+            .with_defline(args.archive.is_some()),
     );
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
             .diagnostics
             .write_all(b"Warning: [tblastx] Query is Empty!\n")?;
+        // NCBI returns from `Run` here, before its `PrintErrorArchive`: the message is not an
+        // archive's.
+        if let Some(handle) = &args.archive {
+            handle.take_messages();
+        }
         return Ok(());
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-178
@@ -1227,9 +1380,24 @@ pub(crate) fn run_local_with(
     if v1.is_some() {
         for format in &outputs.formats {
             let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
-            if matches!(number, 8 | 9 | 12) {
+            if matches!(number, 8 | 9 | 11 | 12) {
                 anyhow::bail!("output format {number} is not supported by LOSAT's TBLASTX");
             }
+        }
+    }
+    // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
+    // cannot write, and a diagnostics stream that saves the messages. The records' deflines are
+    // those the caller's reader kept; records without one get `>` and their title.
+    let archive_requested = outputs
+        .formats
+        .iter()
+        .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Archive);
+    if archive_requested && args.archive.is_none() {
+        args.archive = super::super::archive::handle_for(&args, true)?;
+        if let Some(handle) = args.archive.clone() {
+            return outputs.with_archive_diagnostics(handle, |view| {
+                run_local_with(args, query_records, subject_records, view, v1)
+            });
         }
     }
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
@@ -1260,6 +1428,7 @@ pub(crate) fn run_local_with(
         SubjectSource::Fasta {
             records: searched_subjects,
             placements: subject_placements,
+            x_stores: None,
         },
         outputs,
         v1,
@@ -1347,12 +1516,25 @@ fn search(
     // stays in the database statistics with no letters, and is never searched
     // (`process_subject` skips subjects shorter than a word).
     // A database has no such warnings (its sequences are not set up by the formatter).
-    if let SubjectSource::Fasta { records, .. } = &source {
-        crate::blastinput::input_files::write_empty_subject_warnings(
+    match &source {
+        SubjectSource::Fasta {
             records,
+            x_stores: Some(stores),
+            ..
+        } => crate::blastinput::input_files::write_empty_subject_warnings_by_length(
+            records,
+            |index| stores[index].len(),
             "tblastx",
             outputs.diagnostics,
-        )?;
+        )?,
+        SubjectSource::Fasta { records, .. } => {
+            crate::blastinput::input_files::write_empty_subject_warnings(
+                records,
+                "tblastx",
+                outputs.diagnostics,
+            )?
+        }
+        SubjectSource::Database(_) => {}
     }
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:170-173
     // ```c
@@ -1417,15 +1599,46 @@ fn search(
         }
         SubjectSource::Fasta { .. } => (Vec::new(), None),
     };
+    // EXPERIMENT (LOSAT_X_TBXSTORE): the reports read the stores by record.
+    let x_ordinals: Vec<u32> = match &source {
+        SubjectSource::Fasta {
+            x_stores: Some(stores),
+            ..
+        } => (0..stores.len() as u32).collect(),
+        _ => Vec::new(),
+    };
     let (run_subjects, subject_placements) = match source {
         SubjectSource::Fasta {
             records,
             placements,
+            x_stores: Some(stores),
+        } => (
+            RunSubjects {
+                subjects: Subjects::Stored(stores),
+                numbers: SubjectSetNumbers {
+                    total: stores.iter().map(|store| store.len() as i64).sum(),
+                    count: records.len() as i64,
+                    dbsize: args.dbsize,
+                },
+                shown: ShownSubjects::Fasta {
+                    records,
+                    x_stored: Some((stores, &x_ordinals)),
+                },
+            },
+            placements,
+        ),
+        SubjectSource::Fasta {
+            records,
+            placements,
+            x_stores: None,
         } => (
             RunSubjects {
                 subjects: Subjects::Fasta(records),
                 numbers: SubjectSetNumbers::of_records(records, args.dbsize),
-                shown: ShownSubjects::Fasta(records),
+                shown: ShownSubjects::Fasta {
+                    records,
+                    x_stored: None,
+                },
             },
             placements,
         ),
@@ -1513,7 +1726,8 @@ pub(crate) struct TblastxReportRun<'a> {
     pub queries: &'a [FastaRecord],
     pub subjects: &'a [FastaRecord],
     /// The subjects' letters that the displayed rows read (`-db`: the stored codes of the
-    /// reported sequences; their records hold none).
+    /// reported sequences; `-subject` with LOSAT_X_TBXSTORE: the stores of the records; their
+    /// records hold none).
     pub subject_letters: report::SubjectLetters<'a>,
     /// `-db`: the database and its reported sequences (`subjects` are their records, by rank).
     pub database: Option<ReportDatabase<'a>>,
@@ -1537,6 +1751,8 @@ pub(crate) struct TblastxReportRun<'a> {
     pub xml_taxa: &'a super::super::database::XmlTaxa,
     /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Checks`).
     pub v1_titles: bool,
+    /// The queries of each batch searched, in order (the documents of the BLAST archive).
+    pub archive_spans: &'a [std::ops::Range<usize>],
     /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the pool the report stage runs on (tblastx/x_rpt_par.rs),
     /// `None` for the serial stage.
     pub x_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
@@ -1605,7 +1821,7 @@ fn report_order(
     //     }
     // ```
     let query_cov_hsp_perc = args.qcov_hsp_perc.unwrap_or(0.0);
-    let query_lengths: Vec<usize> = if args.culling_limit > 0 || query_cov_hsp_perc > 0.0 {
+    let query_lengths: Vec<usize> = if args.culling_limit() > 0 || query_cov_hsp_perc > 0.0 {
         queries.iter().map(|query| query.seq().len()).collect()
     } else {
         Vec::new()
@@ -1615,11 +1831,11 @@ fn report_order(
         query_cov_hsp_perc,
         query_lengths: &query_lengths,
     };
-    if args.culling_limit > 0 {
+    if args.culling_limit() > 0 {
         report::culled_hit_order(
             hits,
             hitlist_size,
-            args.culling_limit,
+            args.culling_limit(),
             &query_lengths,
             &filters,
         )
@@ -1679,13 +1895,16 @@ fn write_pairwise_prologs(
         {
             let mut writer = format.sink.open()?;
             match subjects {
-                ShownSubjects::Fasta(records) => {
+                ShownSubjects::Fasta { records, x_stored } => {
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
                         report::NCBI_TBLASTX_VERSION,
                         &tblastx_database_name(args),
                         records.len(),
-                        records.iter().map(|r| r.seq().len()).sum(),
+                        match x_stored {
+                            Some((stores, _)) => stores.iter().map(|store| store.len()).sum(),
+                            None => records.iter().map(|r| r.seq().len()).sum(),
+                        },
                         None,
                     )?
                 }
@@ -1756,9 +1975,13 @@ fn write_tblastx_outputs(
     // ```
     // The Seq-aligns (outfmt 8, 12) show the engine's identities and positives
     // (`report::engine_counts`), read before the display counts replace the identities.
-    let seqalign = output_formats
-        .iter()
-        .any(|format| matches!(format, report::TblastxOutputFormat::Seqalign(_)));
+    // The BLAST archive (outfmt 11) writes the same Seq-aligns.
+    let seqalign = output_formats.iter().any(|format| {
+        matches!(
+            format,
+            report::TblastxOutputFormat::Seqalign(_) | report::TblastxOutputFormat::Archive
+        )
+    });
     let engine_counts = if seqalign {
         // EXPERIMENT (LOSAT_X_TBXRPTPAR): the counts over chunks of the list on the pool.
         match run.x_pool {
@@ -1899,6 +2122,11 @@ fn write_tblastx_outputs(
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(&output_formats).enumerate()
     {
+        // The warnings that a format other than the archive writes are not the archive's
+        // messages (a call with several formats, `run_local`).
+        if let Some(handle) = &run.args.archive {
+            handle.set_muted(output_format != report::TblastxOutputFormat::Archive);
+        }
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
@@ -1960,7 +2188,9 @@ fn write_tblastx_outputs(
                     },
                     database_total_letters: match &run.database {
                         Some(database) => database.pairwise.total_letters as usize,
-                        None => run.subjects.iter().map(|r| r.seq().len()).sum(),
+                        None => (0..run.subjects.len())
+                            .map(|s_idx| run.subject_letters.length(s_idx))
+                            .sum(),
                     },
                     word_threshold: args.threshold,
                     window_size: args.window_size as usize,
@@ -2023,6 +2253,53 @@ fn write_tblastx_outputs(
                     },
                     run.subject_letters,
                     warnings.as_mut(),
+                )?
+            }
+            // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
+            // ```c++
+            //                 if (fmt_args->ArchiveFormatRequested(args)) {
+            //                     formatter.WriteArchive(*queries, *opts_hndl, *results, 0, m_Bah.GetMessages());
+            //                     m_Bah.ResetMessages();
+            // ```
+            // One BLAST archive per query batch (`archive`), from the Seq-aligns of outfmt 8.
+            report::TblastxOutputFormat::Archive => {
+                let handle = run
+                    .args
+                    .archive
+                    .as_ref()
+                    .expect("a BLAST archive request has its handle");
+                let subjects = match &run.database {
+                    Some(database) => {
+                        crate::algorithm::tblastx::seqalign::SeqalignSubjects::Database {
+                            ordinals: &database.reported.ordinals,
+                            title: &database.pairwise.definition,
+                        }
+                    }
+                    None => crate::algorithm::tblastx::seqalign::SeqalignSubjects::Records {
+                        records: run.subjects,
+                        placements: run.ranges.subject_placements,
+                    },
+                };
+                crate::algorithm::tblastx::archive::write_tblastx_archives(
+                    handle,
+                    &crate::algorithm::tblastx::archive::ArchiveData {
+                        queries: run.queries,
+                        query_stats: run.query_stats,
+                        searched: run.searched,
+                        subject_records: match &run.database {
+                            Some(_) => &[],
+                            None => run.subjects,
+                        },
+                        hits: &hits,
+                        engine: &engine_counts,
+                        subjects: &subjects,
+                        subject_letters: run.subject_letters,
+                        query_placements: &run.ranges.input.placements,
+                        numbers: run.numbers,
+                        spans: run.archive_spans,
+                    },
+                    warnings.as_mut(),
+                    &mut writer,
                 )?
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-744
@@ -2092,6 +2369,9 @@ fn write_tblastx_outputs(
             },
         }
         writer.flush()?;
+    }
+    if let Some(handle) = &run.args.archive {
+        handle.set_muted(false);
     }
     // Without an output format the warnings are written all at once.
     if let Some(lines) = warning_lines {
@@ -2706,6 +2986,7 @@ fn run_batch_loop(
         done.query_stats.extend(batch.queries);
         done.searched
             .extend(std::iter::repeat_n(batch.searched, end - start));
+        done.spans.push(start..end);
         input_start = input_end;
     }
     reports.write(outputs, done, &warnings, true)
@@ -2727,6 +3008,8 @@ struct SearchedBatches {
     hits: Vec<TblastxHsp>,
     query_stats: Vec<TblastxQueryStats>,
     searched: Vec<bool>,
+    /// The queries of each batch searched, in order: the batches of the BLAST archive (outfmt 11).
+    spans: Vec<std::ops::Range<usize>>,
 }
 
 /// What the reports of the batches searched so far need besides their results.
@@ -2760,14 +3043,29 @@ impl BatchReports<'_> {
         let t_output = crate::utils::xtiming::clock();
         let reported = done.searched.len();
         let queries = &self.query_runs.records[..reported];
+        // The BLAST archive (outfmt 11) writes the Bioseq of every query of the batches NCBI
+        // completes and, with `-subject`, of every subject in each archive: a title it cannot
+        // write is refused before the first byte, exactly where NCBI would write that Bioseq.
+        // NCBI writes none of them when no batch is completed (an error archive or nothing).
+        if self.args.archive.is_some() && reported > 0 {
+            super::super::archive::check_titles(queries, "query")?;
+            if let ShownSubjects::Fasta { records, .. } = self.subjects {
+                super::super::archive::check_titles(records, "subject")?;
+            }
+        }
         let mut hits = report_order(self.args, queries, done.hits);
         // `-db`: the reported sequences by rank (their records hold the stored titles, their
         // letters are read from the stored codes).
         let reported_subjects;
         let (subjects, subject_letters, database) = match self.subjects {
-            ShownSubjects::Fasta(records) => {
-                (*records, report::SubjectLetters::Records(records), None)
-            }
+            ShownSubjects::Fasta { records, x_stored } => (
+                *records,
+                match x_stored {
+                    Some((stores, ordinals)) => report::SubjectLetters::Stored { stores, ordinals },
+                    None => report::SubjectLetters::Records(records),
+                },
+                None,
+            ),
             ShownSubjects::Database {
                 database,
                 pairwise,
@@ -2825,6 +3123,7 @@ impl BatchReports<'_> {
                 numbers: self.numbers,
                 xml_taxa: &xml_taxa,
                 v1_titles: self.v1_titles,
+                archive_spans: &done.spans,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
                 x_pairwise_pool: crate::report::x_pairwise_par::pool(self.x_search_pool),
             },
@@ -3472,6 +3771,10 @@ fn search_query_batch(
     let x_worker_diag_cells = x_seed_batch.worker_table_cells(diag_array_size as usize);
 
     let contexts_ref = &contexts;
+    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the reference frame loops' extensions may take the walks
+    // the sentinels stop (not with the debug output of `extend_hit_two_hit`).
+    let tbx_sent = !extension_debug_enabled
+        && x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice()));
     let _gapped_params_ref = &gapped_params; // Unused - tblastx uses ungapped params
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
@@ -3815,6 +4118,7 @@ fn search_query_batch(
             karlin: None,
             eff_searchsp: 0,
             aa_len: 0,
+            context0_search_space: 0,
             seg_masks: frames
                 .iter()
                 .map(|frame| (frame.frame, frame.seg_masks.clone()))
@@ -3823,6 +4127,10 @@ fn search_query_batch(
         .collect();
     for (ctx_idx, ctx) in contexts_ref.iter().enumerate() {
         let stats = &mut query_stats[ctx.q_idx as usize];
+        // Context 0 is the query's frame +1 (invalid contexts hold search space 0).
+        if ctx.frame == 1 {
+            stats.context0_search_space = eff_searchsp_per_context[ctx_idx];
+        }
         if ctx.is_valid && stats.karlin.is_none() {
             stats.karlin = Some(ctx.karlin_params);
             stats.eff_searchsp = eff_searchsp_per_context[ctx_idx];
@@ -4194,6 +4502,10 @@ fn search_query_batch(
                 let mut stats = TblastxChunkScanStats::default();
                 let chunk_end = chunk.offset.saturating_add(chunk.length);
                 let subject = &subject_all[chunk.offset..chunk_end];
+                // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the chunk's extensions take the walks the
+                // sentinels stop where it is the whole frame; never on wasm32.
+                let subject_sent = cfg!(not(target_arch = "wasm32"))
+                    && x_tbx_sent_subject(tbx_sent, subject_full, chunk.offset, chunk.length);
 
                 if subject.len() < wordsize as usize {
                     // NCBI still advances the diagonal table offset even when no hits can be found.
@@ -4475,18 +4787,33 @@ fn search_query_batch(
                                     score,
                                     right_extend,
                                     s_last_off_u,
-                                ) = extend_hit_two_hit(
-                                    query,
-                                    subject,
-                                    (last_hit + wordsize) as usize,
-                                    subject_offset as usize,
-                                    q_raw as usize,
-                                    x_dropoff,
-                                    // NCBI aa_ungapped.c:576-582 (call above):
-                                    // score = s_BlastAaExtendTwoHit(...);
-                                    // Search-local LOSAT diagnostic flag only.
-                                    extension_debug_enabled,
-                                );
+                                ) = if !subject_sent {
+                                    extend_hit_two_hit(
+                                        query,
+                                        subject,
+                                        (last_hit + wordsize) as usize,
+                                        subject_offset as usize,
+                                        q_raw as usize,
+                                        x_dropoff,
+                                        // NCBI aa_ungapped.c:576-582 (call above):
+                                        // score = s_BlastAaExtendTwoHit(...);
+                                        // Search-local LOSAT diagnostic flag only.
+                                        extension_debug_enabled,
+                                    )
+                                } else {
+                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent)
+                                    // and `x_tbx_sent_subject` accepted the chunk (`subject_sent`).
+                                    unsafe {
+                                        extend_hit_two_hit_sent(
+                                            query_full,
+                                            subject_full,
+                                            (last_hit + wordsize) as usize,
+                                            subject_offset as usize,
+                                            q_raw as usize,
+                                            x_dropoff,
+                                        )
+                                    }
+                                };
                                 if let Some(t0) = t0 {
                                     ungapped_ns.fetch_add(
                                         t0.elapsed().as_nanos() as u64,
@@ -4758,6 +5085,10 @@ fn search_query_batch(
                 let mut stats = TblastxChunkScanStats::default();
                 let chunk_end = chunk.offset.saturating_add(chunk.length);
                 let subject = &subject_all[chunk.offset..chunk_end];
+                // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the chunk's extensions take the walks the
+                // sentinels stop where it is the whole frame; never on wasm32.
+                let subject_sent = cfg!(not(target_arch = "wasm32"))
+                    && x_tbx_sent_subject(tbx_sent, subject_full, chunk.offset, chunk.length);
 
                 if subject.len() < wordsize as usize {
                     // NCBI still advances the diagonal table offset even when no hits can be found.
@@ -4968,18 +5299,33 @@ fn search_query_batch(
                                     score,
                                     right_extend,
                                     s_last_off_u,
-                                ) = extend_hit_two_hit(
-                                    query,
-                                    subject,
-                                    (last_hit + wordsize) as usize,
-                                    subject_offset as usize,
-                                    q_raw as usize,
-                                    x_dropoff,
-                                    // NCBI aa_ungapped.c:576-582 (call above):
-                                    // score = s_BlastAaExtendTwoHit(...);
-                                    // Search-local LOSAT diagnostic flag only.
-                                    extension_debug_enabled,
-                                );
+                                ) = if !subject_sent {
+                                    extend_hit_two_hit(
+                                        query,
+                                        subject,
+                                        (last_hit + wordsize) as usize,
+                                        subject_offset as usize,
+                                        q_raw as usize,
+                                        x_dropoff,
+                                        // NCBI aa_ungapped.c:576-582 (call above):
+                                        // score = s_BlastAaExtendTwoHit(...);
+                                        // Search-local LOSAT diagnostic flag only.
+                                        extension_debug_enabled,
+                                    )
+                                } else {
+                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent)
+                                    // and `x_tbx_sent_subject` accepted the chunk (`subject_sent`).
+                                    unsafe {
+                                        extend_hit_two_hit_sent(
+                                            query_full,
+                                            subject_full,
+                                            (last_hit + wordsize) as usize,
+                                            subject_offset as usize,
+                                            q_raw as usize,
+                                            x_dropoff,
+                                        )
+                                    }
+                                };
                                 if let Some(t0) = t0 {
                                     ungapped_ns.fetch_add(
                                         t0.elapsed().as_nanos() as u64,

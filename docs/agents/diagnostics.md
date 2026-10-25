@@ -4671,13 +4671,15 @@ Scheduling (each value computed by one thread with the original function; order 
   increasing subject starts, each at most `longest_intron` after the end before it, so a set whose
   subject range lies more than `longest_intron` from the head set's cannot be admissible. The HSPs
   alone in their set are looked up by context, frame sign and subject start, the HSPs of linked sets
-  are always kept (their ranks sorted, so a head takes those in its window by two binary searches),
+  are always kept (their ranks sorted, so a head takes those in its window by two binary searches;
+  since `TBNLINKSETS`, 2026-10-26, only the sets the lookup meets, unless `LOSAT_X_TBNLINKSETS=0`),
   and the candidates are tested in NCBI's order with NCBI's tests; a window with no more HSPs than
   the subject starts looked up is tested whole, as NCBI does, so every link, number and E-value is
   NCBI's (unit test `x_chosen_candidates_give_the_links_of_the_whole_window` against the whole
   window on random lists; the whole-window loop stays in `link_preliminary_hsps` for that test only).
-  With `LOSAT_X_STATS=1` a line `[X_STATS] TBNLINKWIN heads= window= chosen=` gives the heads, the
-  candidates of their windows and the candidates tested. blastx keeps its own linking.
+  With `LOSAT_X_STATS=1` a line `[X_STATS] TBNLINKWIN heads= window= chosen= sets=` gives the heads, the
+  candidates of their windows, the candidates tested and the sets the lookup brought in. blastx
+  keeps its own linking.
   Timed on the workstation (perf-si-20261012 session 21, node 1, NCBI BLAST+ 2.17.0 `-db` and LOSAT
   with TBNSCANBF (then a switch) without and with the switch in turn, three rounds, one hash per case;
   time with the switch / without): zebrafish genome x one protein 0.60 at one thread (24.8 -> 14.8
@@ -4687,7 +4689,7 @@ Scheduling (each value computed by one thread with the original function; order 
   tblastn switches of 2026-10-17 against `=0` in rotating rounds, 3-8 rounds, one hash per case):
   zebrafish 0.58 (23.2 -> 13.5 s), human 0.82 at one thread and 0.84 at 8 threads, fly 0.81, MG1655
   0.98.
-- `LOSAT_X_TBNLINKSETS=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-25;
+- `LOSAT_X_TBNLINKSETS=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-26;
   `=0` turns it off; `tblastn/stage_d_linking/x_link_window.rs` `XLinkWindow::candidates`): the linking candidates
   of a head whose query-offset window holds more HSPs than its subject lookup (TBNLINKWIN, graduated) take a set of
   two or more only when the lookup meets one of the set's HSPs, and then every HSP of that set in the window. Before,

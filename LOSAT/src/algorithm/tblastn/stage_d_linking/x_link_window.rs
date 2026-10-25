@@ -33,7 +33,7 @@
 //!
 //! Every linking call looks the candidates up this way (the former switch `LOSAT_X_TBNLINKWIN`
 //! graduated on 2026-10-26). The sets come from the lookup since `LOSAT_X_TBNLINKSETS`
-//! (2026-10-25, in `STRICT_SET`); with `LOSAT_X_TBNLINKSETS=0` every HSP of a set of two or more
+//! (2026-10-26, in `STRICT_SET`); with `LOSAT_X_TBNLINKSETS=0` every HSP of a set of two or more
 //! in the window is a candidate, as before (repeat-family queries form thousands of small sets,
 //! and each head tested all of them again). NCBI's loop over the whole window is the reference of
 //! the unit test. With `LOSAT_X_STATS` set, `main` prints
@@ -183,10 +183,10 @@ impl XLinkWindow {
             high = high.max(work[id].value.hsp.s_end as i64);
             member = work[id].next;
         }
-        // An HSP can be admissible, or meet the range of an admissible set, only with a start in
-        // [from, to]: one that starts after `to` begins more than `intron` after the head set's
-        // highest end, and one that starts before `from` ends more than `intron` before its
-        // lowest start.
+        // An HSP can be admissible, or meet [low - intron, high + intron] (as one HSP of every
+        // admissible set does), only with a start in [from, to]: one that starts after `to`
+        // begins more than `intron` after the head set's highest end, and one that starts before
+        // `from` ends more than `intron` before its lowest start.
         let (from, to) = (low - self.intron - self.span, high + self.intron);
         let first = self
             .by_subject
@@ -215,8 +215,8 @@ impl XLinkWindow {
         if self.sets {
             // The HSPs met alone in their set, and every HSP in the window of each set met. The
             // starts of a set increase along its chain (the admissibility checks), so the set is
-            // brought in once, by its first HSP met: the one whose predecessor starts before
-            // `from`. The head's own set cannot be admissible with itself.
+            // brought in once, by its first HSP met: the one that has no predecessor, or one that
+            // starts before `from`. The head's own set cannot be admissible with itself.
             for &(_, _, _, rank) in &self.by_subject[first..last] {
                 let id = offset_order[rank];
                 match work[id].prev {
@@ -236,6 +236,10 @@ impl XLinkWindow {
                         tests::X_PATHS.set({
                             let mut paths = tests::X_PATHS.get();
                             paths[2] += 1;
+                            // The set's first HSP is in the window but not met: only the walk
+                            // from the head of the set brings it in.
+                            let start = work[set].value.hsp.s_start as i64;
+                            paths[3] += u64::from(start < from && window.contains(&self.rank[set]));
                             paths
                         });
                         let mut member = Some(set);
@@ -314,8 +318,9 @@ mod tests {
         /// `Some(on)`: `LOSAT_X_TBNLINKSETS` of the linking calls of this test thread.
         pub(super) static X_SETS: Cell<Option<bool>> = const { Cell::new(None) };
         /// Heads of this test thread whose candidates were chosen (`[0]`) and whose whole window
-        /// was taken (`[1]`), and sets brought in by the lookup (`[2]`).
-        pub(super) static X_PATHS: Cell<[u64; 3]> = const { Cell::new([0; 3]) };
+        /// was taken (`[1]`), sets brought in by the lookup (`[2]`), and those of them whose first
+        /// HSP lies in the window, not met by the lookup (`[3]`).
+        pub(super) static X_PATHS: Cell<[u64; 4]> = const { Cell::new([0; 4]) };
     }
 
     /// xorshift64*: the test's own random numbers.
@@ -533,7 +538,7 @@ mod tests {
     fn x_chosen_candidates_give_the_links_of_the_whole_window() {
         let mut random = Random(0x9E37_79B9_7F4A_7C15);
         let mut links = 0;
-        X_PATHS.set([0; 3]);
+        X_PATHS.set([0; 4]);
         for (count, contexts, intron) in [
             (2, 1, 122),
             (7, 1, 40),
@@ -597,6 +602,10 @@ mod tests {
         assert!(
             random_paths[2] > 0 && paths[2] - random_paths[2] > 1_000,
             "the lookup must bring sets in, on both kinds of lists: {random_paths:?} {paths:?}"
+        );
+        assert!(
+            paths[3] - random_paths[3] > 100,
+            "the repeats must bring in sets whose first HSP the lookup did not meet: {paths:?}"
         );
     }
 }

@@ -28,6 +28,9 @@ fn canonical_options_for_every_program() {
         ("blastx", "3"),
         ("tblastx", "3"),
         ("tblastn", "3"),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:58-116
+        // psiblast's options are blastp's search options without -task and -ungapped.
+        ("psiblast", "3"),
     ] {
         let cli = parse(
             program,
@@ -74,6 +77,11 @@ fn canonical_options_for_every_program() {
             // NCBI tblastn_args.cpp:55-62: SetTask(kDefaultTask);
             // blast_args.cpp:2726-2731: AddOptionalKey(kArgMaxTargetSequences, ...);
             Commands::Tblastn(a) => {
+                assert_eq!(a.num_threads, 4);
+                assert_eq!(a.evalue, Some(0.001));
+                assert_eq!(a.max_target_seqs, Some(9));
+            }
+            Commands::Psiblast(a) => {
                 assert_eq!(a.num_threads, 4);
                 assert_eq!(a.evalue, Some(0.001));
                 assert_eq!(a.max_target_seqs, Some(9));

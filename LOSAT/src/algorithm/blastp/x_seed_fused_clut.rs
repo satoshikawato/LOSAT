@@ -617,7 +617,7 @@ mod tests {
                 let mut bf_diag = vec![DiagStruct::default(); diag_len];
                 let mut fseed_diag = vec![DiagStruct::default(); diag_len];
                 let mut reference_diag = vec![DiagStruct::default(); diag_len];
-                let mut stage_diags = vec![vec![DiagStruct::default(); diag_len]; 8];
+                let mut stage_diags = vec![vec![DiagStruct::default(); diag_len]; 13];
                 let mut diag_offset = window;
                 let mut total = 0usize;
                 for (n, subject) in subjects.iter().enumerate() {

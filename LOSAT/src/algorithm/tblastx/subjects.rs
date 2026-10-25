@@ -1,6 +1,7 @@
 //! The subjects of a TBLASTX search: the records of `-subject`, or the stored sequences of a
 //! `-db` database (DB-5, dbsearch-20261012 DESIGN_db5_tblastx_db.md).
 
+#[cfg(test)]
 use std::cell::Cell;
 use std::sync::OnceLock;
 
@@ -61,11 +62,13 @@ impl<'a> Subjects<'a> {
         (0..self.count()).map(|oid| self.length(oid))
     }
 
-    /// `f` of the letters of subject `oid` and, when it has ambiguous bases, of the bases its
-    /// preliminary stage translates (`A`, `C`, `G` or `T` for every base). A stored sequence's
-    /// letters and bases are made in buffers that the thread keeps between subjects (one above
-    /// `KEPT_BUFFER` is freed after use); a nested call (a pool thread that takes another
-    /// subject while it waits) gets buffers of its own.
+    /// The reference of the unit tests: `f` of the letters of subject `oid` and, when it has
+    /// ambiguous bases, of the bases its preliminary stage translates (`A`, `C`, `G` or `T` for
+    /// every base), whole, as the search made them before its frames were made in windows
+    /// (`x_preliminary_frames`, `x_letter_frames`). A stored sequence's letters and bases are made
+    /// in buffers that the thread keeps between subjects (one above `KEPT_BUFFER` is freed after
+    /// use); a nested call gets buffers of its own.
+    #[cfg(test)]
     pub(crate) fn with_search_bases<R>(
         &self,
         oid: usize,
@@ -106,13 +109,13 @@ impl<'a> Subjects<'a> {
     //                                      subject->gen_code_string, &translation_buffer,
     //                                      &frame_offsets, NULL);
     // ```
-    // EXPERIMENT (LOSAT_X_TBXFRAMES): the frames of the bases `with_search_bases` gives the
-    // preliminary stage (its `bases`, or its letters when the subject has no ambiguous base),
-    // made in windows (`x_generate_frames_in_windows`) without the subject's letters, its bases
-    // or their reverse complement in a buffer of the subject's length: a record's ambiguous
-    // letters are resolved window by window in letter order from one `CRandom` seeded with the
-    // record's length, which draws what `preliminary_subject_bases` draws; a stored sequence
-    // gives the bases of its 2-bit codes (`resolved_letters_into`).
+    // The frames of the bases `with_search_bases` gives the preliminary stage (its `bases`, or
+    // its letters when the subject has no ambiguous base), made in windows
+    // (`x_generate_frames_in_windows`) without the subject's letters, its bases or their reverse
+    // complement in a buffer of the subject's length: a record's ambiguous letters are resolved
+    // window by window in letter order from one `CRandom` seeded with the record's length, which
+    // draws what `preliminary_subject_bases` draws; a stored sequence gives the bases of its
+    // 2-bit codes (`resolved_letters_into`).
     /// The frames the preliminary stage of subject `oid` translates, and whether they are the
     /// frames of its letters as well (true when it has no ambiguous base).
     pub(crate) fn x_preliminary_frames(
@@ -163,10 +166,10 @@ impl<'a> Subjects<'a> {
     //       	seq_arg.encoding =
     //        	  (kTranslateSubject ? eBlastEncodingNcbi4na : eBlastEncodingNucleotide);
     // ```
-    // EXPERIMENT (LOSAT_X_TBXFRAMES): the frames of the letters `with_search_bases` gives
-    // (`s_frames`), made in windows: a record's letters, or a stored sequence's letters of its
-    // codes (`letters_into`, the upper-case letters of `ascii_into`: a stored sequence has no
-    // lower-case interval, and the translation reads both cases alike).
+    // The frames of the letters `with_search_bases` gives (`s_frames`), made in windows: a
+    // record's letters, or a stored sequence's letters of its codes (`letters_into`, the
+    // upper-case letters of `ascii_into`: a stored sequence has no lower-case interval, and the
+    // translation reads both cases alike).
     /// The frames of the letters of subject `oid` (the ungapped re-evaluation's).
     pub(crate) fn x_letter_frames(&self, oid: usize, table: &GeneticCode) -> Vec<QueryFrame> {
         match self {
@@ -193,14 +196,6 @@ impl<'a> Subjects<'a> {
             Self::Unreadable => unreachable!("an unreadable database has no subject to search"),
         }
     }
-}
-
-// No NCBI counterpart: the variable is read once per process; it chooses when LOSAT translates
-// a subject's frames, not a value NCBI computes.
-/// LOSAT_X_TBXFRAMES: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
-pub(crate) fn x_frames_late() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXFRAMES"))
 }
 
 // No NCBI counterpart: the variable is read once per process; it chooses how LOSAT resolves a
@@ -320,6 +315,7 @@ fn ncbi4na_of(letter: u8) -> u8 {
 /// ```
 /// The ncbi4na code of a letter is that of `GeneticCode::get` (both cases, `U` as `T`);
 /// another byte is a gap (0).
+#[cfg(test)]
 pub(crate) fn preliminary_subject_bases(subject: &[u8]) -> Option<Vec<u8>> {
     if is_unambiguous(subject) {
         return None;
@@ -334,6 +330,7 @@ pub(crate) fn preliminary_subject_bases(subject: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// `f` of the bytes `make` writes in this thread's buffer `cell` (see `with_search_bases`).
+#[cfg(test)]
 fn with_buffer<R>(
     cell: &'static std::thread::LocalKey<Cell<Vec<u8>>>,
     make: impl FnOnce(&mut Vec<u8>),
@@ -349,8 +346,10 @@ fn with_buffer<R>(
 }
 
 /// The largest buffer a thread keeps between subjects.
+#[cfg(test)]
 const KEPT_BUFFER: usize = 8 << 20;
 
+#[cfg(test)]
 thread_local! {
     /// This thread's letters of a stored subject.
     static LETTERS: Cell<Vec<u8>> = const { Cell::new(Vec::new()) };
@@ -480,8 +479,8 @@ mod tests {
         }
     }
 
-    /// LOSAT_X_TBXFRAMES: the two methods against the frames of `with_search_bases` (the frames
-    /// `process_subject` makes without the switch), for the subjects of both arms.
+    /// The two methods against the frames of `with_search_bases` (the frames `process_subject`
+    /// made before its frames were made in windows), for the subjects of both arms.
     fn check(subjects: Subjects<'_>, table: &GeneticCode) {
         for oid in 0..subjects.count() {
             let (letters, preliminary) = subjects.with_search_bases(oid, |letters, bases| {

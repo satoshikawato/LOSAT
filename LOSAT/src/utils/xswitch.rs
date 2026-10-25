@@ -104,6 +104,10 @@ use std::ops::RangeInclusive;
 /// made when they are read and freed when they are no longer read, `tblastx/subjects.rs`) were
 /// added after the change as switches that are off unless set and joined the set together once
 /// they were verified and timed with it on.
+/// `LOSAT_X_TBXFRAMES` and `LOSAT_X_TBXUNGAP` (the byte table of TBLASTX's two-hit ungapped
+/// extension, `tblastx/extension/x_two_hit_fast.rs`) graduated on 2026-10-26: they left
+/// `STRICT_SET` and their previous code was deleted (the calls the byte table does not cover
+/// still run `extend_hit_two_hit_reference`, a rule of the table walks and not a switch).
 /// `LOSAT_X_TBNHITBF` (the branch-free two-hit loop of TBLASTN's unit path,
 /// `tblastn/x_tbn_hitbf.rs`), `LOSAT_X_TBNLINKWIN` (the linking candidates of a head chosen by
 /// subject position, `tblastn/stage_d_linking/x_link_window.rs`) and `LOSAT_X_TBNSCANBF` (the
@@ -278,7 +282,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXBAND",
     "LOSAT_X_TBXEXTBATCH",
-    "LOSAT_X_TBXFRAMES",
     "LOSAT_X_TBXHITBF",
     "LOSAT_X_TBXKMERGE",
     "LOSAT_X_TBXLUT",
@@ -291,7 +294,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXRESOLVE",
     "LOSAT_X_TBXRPTPAR",
     "LOSAT_X_TBXSCANBF",
-    "LOSAT_X_TBXUNGAP",
     "LOSAT_X_TBXUNITMASK",
 ];
 

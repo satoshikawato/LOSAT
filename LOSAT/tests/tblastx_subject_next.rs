@@ -1,9 +1,9 @@
-//! Two TBLASTX switches of the strict set on whole runs of the binary: `LOSAT_X_TBXNEXT` (each
-//! thread of the pool takes the next subject when it is free,
-//! `src/algorithm/tblastx/x_subject_next.rs`) and `LOSAT_X_TBXFRAMES` (a subject's preliminary
-//! frames made in windows and freed after the seed stage, the frames of its letters made only when
-//! HSPs reach the re-evaluation, `Subjects::x_preliminary_frames` / `x_letter_frames`). Both are on
-//! by default (`src/utils/xswitch.rs`); `LOSAT_X_<NAME>=0` turns one off.
+//! `LOSAT_X_TBXNEXT` (each thread of the pool takes the next subject when it is free,
+//! `src/algorithm/tblastx/x_subject_next.rs`) on whole runs of the binary, on a set whose subjects
+//! have their frames made in windows and freed after the seed stage, the frames of a subject's
+//! letters made only when HSPs reach the re-evaluation (`Subjects::x_preliminary_frames` /
+//! `x_letter_frames`; the former switch `LOSAT_X_TBXFRAMES` graduated on 2026-10-26). The switch
+//! is on by default (`src/utils/xswitch.rs`); `LOSAT_X_TBXNEXT=0` turns it off.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
 //! ```c
@@ -11,10 +11,9 @@
 //!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //!            != BLAST_SEQSRC_EOF) {
 //! ```
-//! Neither switch may change a report: the tests compare the reports by default (both on), with
-//! each one off and with both off, at one and several threads, against the one-thread search with
-//! both off, on a set laid out as a genome database is (two long records first, then many short
-//! ones), with ambiguity codes in the long records (N blocks, single IUPAC codes, one of them in a
+//! The switch may not change a report: the tests compare the reports by default (on) and with it
+//! off, at one and several threads, against the one-thread search with it off, on a set laid out
+//! as a genome database is (two long records first, then many short ones), with ambiguity codes in the long records (N blocks, single IUPAC codes, one of them in a
 //! run across a translation window), through `-subject` and through a database of the same records
 //! (`losat makedb`).
 
@@ -146,11 +145,10 @@ fn tblastx(
 }
 
 const NEXT_OFF: (&str, &str) = ("LOSAT_X_TBXNEXT", "0");
-const FRAMES_OFF: (&str, &str) = ("LOSAT_X_TBXFRAMES", "0");
 
 fn same_reports(subjects: &[&str], query: &Path) {
     for outfmt in ["6", "0"] {
-        let reference = tblastx(query, subjects, outfmt, 1, &[NEXT_OFF, FRAMES_OFF]);
+        let reference = tblastx(query, subjects, outfmt, 1, &[NEXT_OFF]);
         assert!(
             reference.iter().filter(|&&b| b == b'\n').count() > 20,
             "the search finds hits"
@@ -162,11 +160,7 @@ fn same_reports(subjects: &[&str], query: &Path) {
                 (4, &[]),
                 (8, &[]),
                 (4, &[NEXT_OFF]),
-                (8, &[FRAMES_OFF]),
-                (1, &[FRAMES_OFF]),
-                (2, &[NEXT_OFF, FRAMES_OFF]),
-                (2, &[FRAMES_OFF]),
-                (1, &[NEXT_OFF]),
+                (2, &[NEXT_OFF]),
                 (3, &[]),
             ]
         } else {

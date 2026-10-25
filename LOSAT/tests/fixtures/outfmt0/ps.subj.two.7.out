@@ -1,0 +1,30 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+YP_009220601.1	BDT63550.1	42.021	188	100	3	10	191	4	188	3.49e-39	132
+YP_009220601.1	BDT63500.1	28.378	74	35	4	177	244	374	435	2.2	23.1
+YP_009220601.1	BDT63566.1	40.909	22	13	0	227	248	273	294	3.6	22.3
+YP_009220601.1	BDT63556.1	24.242	66	49	1	55	119	1808	1873	4.3	22.3
+YP_009220601.1	BDT63523.1	44.828	29	11	1	201	224	484	512	5.1	21.9
+YP_009220601.1	BDT63528.1	66.667	12	4	0	305	316	100	111	5.3	21.9
+YP_009220601.1	BDT63554.1	30.000	40	28	0	15	54	173	212	6.2	21.6
+YP_009220601.1	BDT63529.1	31.429	35	20	1	264	298	291	321	8.7	21.2
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: YP_009220615.1 putative protein kinase [White spot syndrome virus]
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 9 hits found
+YP_009220615.1	BDT63551.1	42.410	639	338	7	99	722	189	812	5.07e-170	503
+YP_009220615.1	BDT63577.1	40.625	32	17	1	100	131	69	98	5.1	23.1
+YP_009220615.1	BDT63580.1	33.333	30	20	0	491	520	316	345	6.0	22.7
+YP_009220615.1	BDT63569.1	30.357	56	38	1	308	363	18	72	6.5	22.7
+YP_009220615.1	BDT63573.1	30.000	50	30	2	45	89	7	56	6.7	22.7
+YP_009220615.1	BDT63503.1	38.889	18	11	0	468	485	1277	1294	8.3	22.3
+YP_009220615.1	BDT63519.1	50.000	16	8	0	324	339	77	92	8.4	22.3
+YP_009220615.1	BDT63543.1	36.364	33	20	1	259	291	52	83	9.0	21.2
+YP_009220615.1	BDT63508.1	38.889	18	11	0	407	424	1238	1255	9.2	22.3
+# BLAST processed 2 queries

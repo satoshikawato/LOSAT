@@ -559,6 +559,8 @@ fn parse_blastp_args(
         subject_loc: None,
         outfmt: "6".to_string(),
         archive: None,
+        app: blastp::args::BlastpApp::Blastp,
+        inclusion_ethresh: None,
     };
 
     let mut index = 0;

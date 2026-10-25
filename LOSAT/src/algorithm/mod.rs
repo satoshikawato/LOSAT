@@ -10,6 +10,10 @@
 pub mod blastn;
 pub mod blastp;
 pub mod common;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
+// static const string kProgram("psiblast");
+// arg.Reset(new CProgramDescriptionArgs(kProgram, "Position-Specific Iterated BLAST"));
+pub mod psiblast;
 // NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:45-62
 // static const string kProgram("tblastn");
 // static const char kDefaultTask[] = "tblastn";

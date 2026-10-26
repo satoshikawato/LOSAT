@@ -1163,6 +1163,24 @@ impl<T> Shared<T> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// PROBE (LOSAT_PROBE_BNAHEAD): the loop's thread is thread 0 of the pool the slots search
+    /// on; it runs the pool's jobs while it waits for them.
+    fn x_wait_loop<'g>(&'g self, guard: MutexGuard<'g, State<T>>) -> MutexGuard<'g, State<T>> {
+        if !super::x_probe_ahead::on() {
+            return self.wait(guard);
+        }
+        drop(guard);
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        if rayon::yield_now() == Some(rayon::Yield::Executed) {
+            return self.lock();
+        }
+        let guard = self.lock();
+        self.wake
+            .wait_timeout(guard, std::time::Duration::from_micros(200))
+            .unwrap_or_else(PoisonError::into_inner)
+            .0
+    }
+
     fn wait<'g>(&self, guard: MutexGuard<'g, State<T>>) -> MutexGuard<'g, State<T>> {
         self.wake
             .wait(guard)
@@ -1396,7 +1414,7 @@ where
                 if state.alive == 0 {
                     break Off::Spawn;
                 }
-                state = self.shared.wait(state);
+                state = self.shared.x_wait_loop(state);
             };
             drop(state);
             self.stop(off);
@@ -1583,6 +1601,8 @@ where
                 return;
             }
         };
+        // PROBE (LOSAT_PROBE_BNAHEAD): one-thread set-up slots.
+        let m = if super::x_probe_ahead::on() { 1 } else { m };
         self.stats.k = k;
         self.stats.m = m;
         self.stats.idle = self.threads.saturating_sub(k * m);
@@ -1738,7 +1758,7 @@ where
     fn wait_idle(&self) {
         let mut state = self.shared.lock();
         while state.running.iter().any(Option::is_some) {
-            state = self.shared.wait(state);
+            state = self.shared.x_wait_loop(state);
         }
     }
 }

@@ -222,6 +222,9 @@ mod x_qbatch_par;
 // PROBE (line ST s2, never a PR): step clocks of the batch loop.
 #[path = "x_probe_gaps.rs"]
 pub(crate) mod x_probe_gaps;
+// PROBE (line ST s2, never a PR): LOSAT_PROBE_BNAHEAD, batches set up ahead of the loop's search.
+#[path = "x_probe_ahead.rs"]
+pub(crate) mod x_probe_ahead;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603 (the query buffer
 // of a batch) and c++/src/algo/blast/core/blast_stat.c:2754-2784 (the ungapped Karlin block of
@@ -8350,6 +8353,8 @@ fn run_in_pool(
         Some(x_qbatch_par::Off::NotSet)
     };
     let qbp_batching = batching;
+    // PROBE (LOSAT_PROBE_BNAHEAD): the gate of the slots' searches on this pool.
+    let x_gate = x_probe_ahead::Gate::default();
     let qbp_search = |job: &x_qbatch_par::Job, pool: &crate::utils::threading::SearchPool<'_>| {
         // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records read again (a chunk shared with the
         // window, or a copy); none for a batch the loop has passed, which the loop never takes
@@ -8359,7 +8364,7 @@ fn run_in_pool(
             Ok(None) => return Err(x_qbatch_par::Cancelled.into()),
             Err(error) => return Err(error),
         };
-        search_query_batch(
+        let x_search = || search_query_batch(
             &args,
             x_query_drop::BatchQueries::Shared(&records),
             source,
@@ -8375,7 +8380,18 @@ fn run_in_pool(
                 query_masks: None,
             },
             None,
-        )
+        );
+        // PROBE (LOSAT_PROBE_BNAHEAD): set up here, searched on the loop's pool behind the gate.
+        if x_probe_ahead::on() {
+            let ctx = x_probe_ahead::Ctx {
+                main: parallel_pool,
+                gate: &x_gate,
+                start: job.key.input_start,
+            };
+            x_probe_ahead::with(&ctx, x_search)
+        } else {
+            x_search()
+        }
     };
     let qbp_input = x_qbatch_par::PlanInput {
         query_input,
@@ -9933,6 +9949,21 @@ fn search_query_batch(
     // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
     // TBlastThreads the_threads(GetNumberOfThreads());
     // (*thread)->Run(); (*thread)->Join(&result);
+    // PROBE (LOSAT_PROBE_BNAHEAD): a slot's batch is set up on the slot's one-thread pool
+    // (`x_prep_pool`) and searched on the loop's pool, with the slot's cancellation flag.
+    let x_ahead = x_probe_ahead::current();
+    let x_prep_pool = parallel_pool;
+    let x_main_pool;
+    let parallel_pool = match x_ahead {
+        Some(ctx) => {
+            x_main_pool = match x_prep_pool.x_ext::<x_qbatch_par::Cancel>() {
+                Some(cancel) => ctx.main.x_with_ext(cancel),
+                None => ctx.main.x_with_ext(&()),
+            };
+            &x_main_pool
+        }
+        None => parallel_pool,
+    };
     let num_threads = parallel_pool.threads();
     // EXPERIMENT (LOSAT_X_QBATCHPAR): a slot's search ends early once its batch is cancelled
     // (the flag of its pool; the loop's own searches have none), here, between subjects and
@@ -10194,7 +10225,7 @@ fn search_query_batch(
             query_masks: Some(masks),
             ..
         } => masks.to_vec(),
-        BatchStage::Search { .. } => query_masks(args, queries, parallel_pool)
+        BatchStage::Search { .. } => query_masks(args, queries, x_prep_pool)
             .map_err(|error| window_masker_rejection(args, &error))?,
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
@@ -10408,7 +10439,7 @@ fn search_query_batch(
             &query_letters,
             &query_context_offsets,
             query_concat_length,
-            parallel_pool,
+            x_prep_pool,
         )
     } else {
         build_strand_query_blastna_buffer(
@@ -10474,7 +10505,7 @@ fn search_query_batch(
     // the contexts' blocks are computed by the pool, in context order; the blocks are the same
     // (`x_query_prep_par.rs`).
     let context_ungapped =
-        x_query_prep_par::ungapped_blocks(&encoded_queries_blastna, &scoring_spec, parallel_pool);
+        x_query_prep_par::ungapped_blocks(&encoded_queries_blastna, &scoring_spec, x_prep_pool);
     let (approx_table_entries, max_q_off) =
         compute_lookup_query_stats(&query_contexts, &query_context_masks);
     let max_query_length = max_q_off.saturating_add(1).max(1);
@@ -10921,7 +10952,7 @@ fn search_query_batch(
             &query_context_offsets,
             subjects,
             reborrow_outputs(&mut outputs),
-            parallel_pool,
+            x_prep_pool,
             batching,
             first_batch,
             x_keep,
@@ -11049,6 +11080,9 @@ fn search_query_batch(
     //     ...
     // }
     // ```
+    // PROBE (LOSAT_PROBE_BNAHEAD): the search proper, run on the loop's pool for a slot.
+    let x_held: std::sync::Mutex<Option<x_probe_ahead::Held<'_>>> = std::sync::Mutex::new(None);
+    let x_rest = || -> Result<QueryBatch> {
     x_probe_gaps::mark("S7_search0");
     let t_search_start = if timing_enabled {
         Some(std::time::Instant::now())
@@ -18126,6 +18160,11 @@ fn search_query_batch(
         },
     };
     x_probe_gaps::mark("S8_prelim1");
+    if x_probe_ahead::mode() == 2 {
+        if let Some(held) = x_held.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            held.release();
+        }
+    }
     if x_cancelled() {
         return Err(x_qbatch_par::Cancelled.into());
     }
@@ -18214,6 +18253,24 @@ fn search_query_batch(
         batch.timing = blastn_timing_text(timing.as_ref(), t_search_start, t_total);
     }
     Ok(batch)
+    };
+    match x_ahead {
+        None => x_rest(),
+        Some(ctx) => {
+            let x_cancelled_main = || x_qbatch_par::cancelled(parallel_pool);
+            let Some(held) = ctx.gate.acquire(ctx.start, &x_cancelled_main) else {
+                return Err(x_qbatch_par::Cancelled.into());
+            };
+            *x_held.lock().unwrap_or_else(|e| e.into_inner()) = Some(held);
+            let job = x_probe_ahead::AssertSend(x_rest);
+            let result = parallel_pool.install(move || {
+                let job = job;
+                (job.0)()
+            });
+            drop(x_held.lock().unwrap_or_else(|e| e.into_inner()).take());
+            result
+        }
+    }
 }
 
 /// NCBI's preliminary search of a split query batch: each query chunk is searched as a batch

@@ -876,7 +876,16 @@ pub(super) fn x_scan_plan(
     // The size only decides where a scan call stops; the next call resumes there, so the pairs
     // reach the caller in the same order at any size.
     let longest_chain = lookup.longest_chain.max(1) as usize;
-    let pair_capacity = if x_pair_cap_ncbi() {
+    // PROBE (line D14 s1, never a PR): LOSAT_PROBE_TBNPAIRCAPN=<n> sizes the array n + longest_chain.
+    static X_PROBE_CAPN: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    let x_capn = *X_PROBE_CAPN.get_or_init(|| {
+        std::env::var("LOSAT_PROBE_TBNPAIRCAPN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+    });
+    let pair_capacity = if let Some(n) = x_capn {
+        n + longest_chain
+    } else if x_pair_cap_ncbi() {
         4096 + longest_chain
     } else {
         longest_chain * 1024

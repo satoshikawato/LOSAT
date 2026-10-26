@@ -8144,6 +8144,26 @@ fn run_resolved_in_pool(
             }
         }
     }
+    // EXPERIMENT (LOSAT_X_BPFLEAN): it acts only where LOSAT_X_BPFSTAGE's loop runs, and records
+    // its sides where that switch records its own.
+    if args.window_size != 0
+        && super::x_seed_fused::x_bp_seed()
+        && super::x_seed_fused_clut::x_bp_fseed()
+        && super::x_seed_fused_clut::x_bp_fstage()
+        && super::x_seed_fused_clut::x_bp_flean()
+    {
+        match &lookup {
+            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Compressed(_) => {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPFLEAN", false)
+            }
+            BlastpRuntimeLookup::CompressedFlat(table) => {
+                if !super::x_seed_fused_clut::x_fseed_table(table) {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPFLEAN", false)
+                }
+            }
+        }
+    }
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
     let concatenated_query = build_blastp_concatenated_query(&contexts);
     // EXPERIMENT (LOSAT_X_BPSEED): the context of every query offset, for the candidates of the

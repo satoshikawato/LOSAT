@@ -1,6 +1,7 @@
 //! blastp-fast's fused loop on the flat compressed table with each cell's hits staged before the
 //! two-hit test and the scan two offsets per step (`LOSAT_X_BPFSTAGE`,
-//! `src/algorithm/blastp/x_seed_fused_clut.rs` `x_scan_flat_stage`) on whole searches.
+//! `src/algorithm/blastp/x_seed_fused_clut.rs` `x_scan_flat_stage`) on whole searches, and its
+//! form with the scan's steps and the copy out of line (`LOSAT_X_BPFLEAN`, `x_scan_flat_lean`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518
 //! ```c
@@ -8,17 +9,18 @@
 //!             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
 //!             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
 //! ```
-//! The switch is in the strict set (on unless it is `0`). The loop makes the candidates of the loop
-//! without it and leaves the same diagonal table (the lib test
+//! Both switches are in the strict set (on unless they are `0`). The loops make the candidates of
+//! the loop without them and leave the same diagonal table (the lib test
 //! `the_flat_loop_is_the_fused_loop_on_the_reference_table`), so the property under test is that
-//! the report does not depend on it, for subjects read from FASTA (`-subject`) and from a database
+//! the report does not depend on them, for subjects read from FASTA (`-subject`) and from a database
 //! (`-db`), at 1 and 2 threads. That reports equal NCBI's is the business of the BLASTP fixtures.
 //! `LOSAT_X_REACH` shows the side each run took: the loop runs where LOSAT_X_BPFSEED's loop runs
 //! (the dense query's table, and every table with `LOSAT_X_BPCLUTSCANBFMIN=0`; every subject here
 //! keeps its sentinel); the sparse query's table, every table with `LOSAT_X_BPCLUTSCANBF=0`, and
 //! the reference compressed table (`LOSAT_X_BPCLUT=0`) keep their loops, and with
-//! `LOSAT_X_BPFSEED=0` the switch does not act. Exact blastp builds no compressed table and records
-//! no side.
+//! `LOSAT_X_BPFSEED=0` the switch does not act. `LOSAT_X_BPFLEAN` takes the sides of
+//! `LOSAT_X_BPFSTAGE` and does not act with `LOSAT_X_BPFSTAGE=0`; with `LOSAT_X_BPFLEAN=0` the
+//! staged loop runs. Exact blastp builds no compressed table and records no side.
 //!
 //! The dense query is the first 30 proteins of AP027131 (9,948 residues; its table uses 30.9 % of
 //! the cells), the sparse one its first protein (455 residues; 1.66 %); the subjects are the first
@@ -30,6 +32,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const SWITCH: &str = "LOSAT_X_BPFSTAGE";
 const OFF: (&str, &str) = ("LOSAT_X_BPFSTAGE", "0");
+const LEAN: &str = "LOSAT_X_BPFLEAN";
+const LEAN_OFF: (&str, &str) = ("LOSAT_X_BPFLEAN", "0");
 const SEED_OFF: (&str, &str) = ("LOSAT_X_BPFSEED", "0");
 const BRANCH_LIST: (&str, &str) = ("LOSAT_X_BPCLUTSCANBF", "0");
 const EVERY_TABLE: (&str, &str) = ("LOSAT_X_BPCLUTSCANBFMIN", "0");
@@ -147,6 +151,8 @@ struct Run {
     code: Option<i32>,
     /// The sides of the switch the run recorded: (new, ref).
     reached: (bool, bool),
+    /// The sides of `LOSAT_X_BPFLEAN` the run recorded.
+    lean: (bool, bool),
 }
 
 /// `blastp` with `env` and `LOSAT_X_REACH` set to a directory of its own (removed after the run,
@@ -163,6 +169,7 @@ fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
         .output()
         .expect("run LOSAT");
     let (mut new, mut reference) = (false, false);
+    let mut lean = (false, false);
     for file in std::fs::read_dir(&dir).expect("the reach directory") {
         let text = std::fs::read_to_string(file.unwrap().path()).unwrap();
         for row in text.lines().skip(1) {
@@ -170,6 +177,10 @@ fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
             if f[0] == SWITCH {
                 new |= f[1] == "1";
                 reference |= f[2] == "1";
+            }
+            if f[0] == LEAN {
+                lean.0 |= f[1] == "1";
+                lean.1 |= f[2] == "1";
             }
         }
     }
@@ -180,13 +191,15 @@ fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         code: output.status.code(),
         reached: (new, reference),
+        lean,
     }
 }
 
-/// Default and `=0` give the same report and messages for blastp-fast on `-subject` and `-db` at 1
-/// and 2 threads, and so do the other lists of the scan, the reference compressed table and
-/// `LOSAT_X_BPFSEED=0` on one case each; a flat table with the branch-free list takes the loop, the
-/// other tables keep theirs, and `=0` records nothing.
+/// Default, `=0` and `LOSAT_X_BPFLEAN=0` give the same report and messages for blastp-fast on
+/// `-subject` and `-db` at 1 and 2 threads, and so do the other lists of the scan, the reference
+/// compressed table and `LOSAT_X_BPFSEED=0` on one case each; a flat table with the branch-free
+/// list takes the loop (the lean one by default), the other tables keep theirs, and `=0` records
+/// nothing.
 #[test]
 fn blastp_fast_reports_do_not_depend_on_the_staged_loop() {
     let inputs = Inputs::new();
@@ -215,24 +228,35 @@ fn blastp_fast_reports_do_not_depend_on_the_staged_loop() {
                 assert_eq!(on.code, Some(0), "{case}: {}", on.stderr);
                 assert!(!on.stdout.is_empty(), "{case}: no hits");
                 assert_eq!(on.reached, (dense, !dense), "{case}: default's side");
+                assert_eq!(on.lean, (dense, !dense), "{case}: default's BPFLEAN side");
                 // The tables' other choices on one case each: the sparse table with the branch-free
                 // list, the dense one with the list with the branch and the reference table.
+                // (label, variable, the sides of LOSAT_X_BPFSTAGE and of LOSAT_X_BPFLEAN)
                 let first = source == "-subject" && threads == "1";
-                let mut arms = vec![("off", OFF, (false, false))];
+                let mut arms = vec![
+                    ("off", OFF, (false, false), (false, false)),
+                    ("lean off", LEAN_OFF, (dense, !dense), (false, false)),
+                ];
                 if first && !dense {
-                    arms.push(("every table", EVERY_TABLE, (true, false)));
+                    arms.push(("every table", EVERY_TABLE, (true, false), (true, false)));
                 }
                 if first && dense {
-                    arms.push(("branch list", BRANCH_LIST, (false, true)));
-                    arms.push(("reference table", REFERENCE_TABLE, (false, true)));
-                    arms.push(("BPFSEED off", SEED_OFF, (false, false)));
+                    arms.push(("branch list", BRANCH_LIST, (false, true), (false, true)));
+                    arms.push((
+                        "reference table",
+                        REFERENCE_TABLE,
+                        (false, true),
+                        (false, true),
+                    ));
+                    arms.push(("BPFSEED off", SEED_OFF, (false, false), (false, false)));
                 }
-                for (label, env, reached) in arms {
+                for (label, env, reached, lean) in arms {
                     let run = blastp(&args, &[env]);
                     assert_eq!(run.code, Some(0), "{case} {label}: {}", run.stderr);
                     assert!(run.stdout == on.stdout, "{case} {label}: report differs");
                     assert_eq!(run.stderr, on.stderr, "{case} {label}: messages");
                     assert_eq!(run.reached, reached, "{case} {label}: side");
+                    assert_eq!(run.lean, lean, "{case} {label}: BPFLEAN side");
                 }
             }
         }
@@ -255,8 +279,10 @@ fn exact_blastp_records_no_side() {
     assert_eq!(on.code, Some(0), "{}", on.stderr);
     assert!(!on.stdout.is_empty(), "no hits");
     assert_eq!(on.reached, (false, false), "default's side");
+    assert_eq!(on.lean, (false, false), "default's BPFLEAN side");
     let off = blastp(&args, &[OFF]);
     assert_eq!(off.code, Some(0), "{}", off.stderr);
     assert!(off.stdout == on.stdout, "report differs");
     assert_eq!(off.reached, (false, false), "=0 records a side");
+    assert_eq!(off.lean, (false, false), "=0 records a BPFLEAN side");
 }
